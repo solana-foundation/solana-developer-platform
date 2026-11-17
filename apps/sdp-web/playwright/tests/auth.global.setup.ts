@@ -6,7 +6,7 @@ import { recordClerkSession } from "@/playwright/support/clerk-sessions";
 import { routeVercelBypass, test as setup } from "@/playwright/support/vercel-bypass";
 import { getE2EEnv } from "../env";
 import { authStatePath } from "../support/auth-state";
-import { CLERK_ORGANIZATION_ACTIVATION_TIMEOUT_MS } from "../support/clerk-activation";
+import { activateClerkOrganization } from "../support/clerk-activation";
 import { resolveClerkTestIdentity, withTransientClerkRetry } from "../support/clerk-admin";
 
 setup("authenticate admin test user and save auth state", async ({ page, browser }) => {
@@ -65,42 +65,7 @@ setup("authenticate admin test user and save auth state", async ({ page, browser
   // still has its session revoked at teardown.
   await recordClerkSession(target);
 
-  await target.evaluate(
-    async ({ organizationId }) => {
-      const clerkClient = (
-        window as unknown as {
-          Clerk?: {
-            session?: { id?: string };
-            setActive: (params: { session?: string; organization?: string }) => Promise<void>;
-          };
-        }
-      ).Clerk;
-
-      if (!clerkClient?.session?.id) {
-        throw new Error("Clerk session not established in Playwright global setup");
-      }
-
-      await clerkClient.setActive({
-        session: clerkClient.session.id,
-        organization: organizationId,
-      });
-    },
-    { organizationId: identity.organizationId }
-  );
-
-  await expect
-    .poll(
-      () =>
-        target.evaluate(() => {
-          return (
-            window as unknown as {
-              Clerk?: { organization?: { id?: string } };
-            }
-          ).Clerk?.organization?.id;
-        }),
-      { timeout: CLERK_ORGANIZATION_ACTIVATION_TIMEOUT_MS }
-    )
-    .toBe(identity.organizationId);
+  await activateClerkOrganization(target, identity.organizationId);
 
   await target.goto("/dashboard");
   // Local suites seed the SDP organization in beforeAll, after this auth-only

@@ -24,6 +24,7 @@ import {
   type OrganizationProviderAvailabilityResponse,
   type OrganizationProviderFamily,
   type OrganizationProviderOverrides,
+  PROVIDER_FAMILY_DEFAULT_ENTITLEMENT,
   type ProjectProviderAvailability,
   type ProjectProviderAvailabilityEntry,
   type ProjectProviderRefusalReason,
@@ -552,31 +553,24 @@ export async function getProviderAvailability(
   options: ProviderAvailabilityOptions
 ): Promise<OrganizationProviderAvailabilityResponse> {
   const organization = await getOrganizationTierState(db, organizationId);
-  const resolved = resolveOrganizationProviderEntitlements({
-    tier: organization.tier,
-    providerOverrides: organization.settings?.providerOverrides,
-  });
+  const entitlements = resolveOrganizationProviderEntitlements(
+    organization.settings?.providerOverrides
+  );
   const configured = getConfiguredProviders(env);
 
   return {
-    tier: resolved.tier,
+    tier: organization.tier,
     providers: {
-      custody: buildAvailabilityEntries(
-        resolved.providers.custody,
-        configured.custody,
-        (provider) => isCustodyProviderOffered(env, provider)
+      custody: buildAvailabilityEntries(entitlements.custody, configured.custody, (provider) =>
+        isCustodyProviderOffered(env, provider)
       ),
-      compliance: buildAvailabilityEntries(
-        resolved.providers.compliance,
-        configured.compliance,
-        () => isModuleAvailable(env, "compliance", options.rampProviderMaturity)
+      compliance: buildAvailabilityEntries(entitlements.compliance, configured.compliance, () =>
+        isModuleAvailable(env, "compliance", options.rampProviderMaturity)
       ),
-      ramps: buildAvailabilityEntries(resolved.providers.ramps, configured.ramps, (provider) =>
+      ramps: buildAvailabilityEntries(entitlements.ramps, configured.ramps, (provider) =>
         isRampProviderAvailable(env, provider, options.rampProviderMaturity)
       ),
-      earn: buildAvailabilityEntries(resolved.providers.earn, configured.earn, () =>
-        isEarnEnabled(env)
-      ),
+      earn: buildAvailabilityEntries(entitlements.earn, configured.earn, () => isEarnEnabled(env)),
     },
   };
 }
@@ -613,16 +607,9 @@ export async function assertCustodyProviderEntitled(
       provider,
       reason: "provider_not_entitled",
     });
-    throw new AppError(
-      "FORBIDDEN",
-      getAvailabilityMessage(
-        availability.tier,
-        "custody",
-        provider,
-        entry ?? { entitled: false, configured: false, enabled: false }
-      ),
-      { reason: "provider_not_entitled" }
-    );
+    throw forbidden(getAvailabilityMessage("custody", provider, entry), {
+      reason: "provider_not_entitled",
+    });
   }
 }
 
@@ -866,7 +853,7 @@ function decideCustodySetup(
   if (!entry.entitled) {
     return refuse(
       new CustodySetupRefusedError(
-        getAvailabilityMessage(facts.availability.tier, "custody", provider, entry),
+        getAvailabilityMessage("custody", provider, entry),
         "provider_not_entitled"
       )
     );
@@ -1020,16 +1007,9 @@ function decideStagedProvider(
       facts,
       request,
       "provider_not_entitled",
-      new AppError(
-        "FORBIDDEN",
-        getAvailabilityMessage(
-          facts.availability.tier,
-          request.family,
-          request.provider,
-          checks.entry
-        ),
-        { reason: "provider_not_entitled" }
-      )
+      forbidden(getAvailabilityMessage(request.family, request.provider, checks.entry), {
+        reason: "provider_not_entitled",
+      })
     );
   }
   if (!checks.configured) {
@@ -1449,7 +1429,6 @@ export async function assertManagedCustodyUseAllowed(
 }
 
 function getAvailabilityMessage(
-  _tier: OrganizationTier,
   family: OrganizationProviderFamily,
   providerId: string,
   entry: ProviderAvailabilityEntry
@@ -1457,7 +1436,10 @@ function getAvailabilityMessage(
   const label = getProviderLabel(family, providerId);
 
   if (!entry.entitled) {
-    return `${label} requires manual activation for this organization.`;
+    // A family that is on by default is only unentitled when an override turned it off.
+    return PROVIDER_FAMILY_DEFAULT_ENTITLEMENT[family]
+      ? `${label} is turned off for this organization.`
+      : `${label} requires manual activation for this organization.`;
   }
 
   if (!entry.configured) {
@@ -1488,10 +1470,7 @@ export async function assertCustodyProviderEnabled(
   const access = await getProviderAvailability(env, db, organizationId, MANIFEST_RAMP_MATURITY);
   const entry = access.providers.custody[provider];
   if (!entry.enabled) {
-    throw new AppError(
-      "FORBIDDEN",
-      getAvailabilityMessage(access.tier, "custody", provider, entry)
-    );
+    throw forbidden(getAvailabilityMessage("custody", provider, entry));
   }
 }
 

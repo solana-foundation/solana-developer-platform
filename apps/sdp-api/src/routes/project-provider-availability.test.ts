@@ -102,10 +102,6 @@ const DEPLOYMENT_CREDENTIALS = {
   STRIPE_SANDBOX_PUBLISHABLE_KEY: "pk_test_project_provider_availability",
   STRIPE_SANDBOX_WEBHOOK_SECRET: "whsec_project_provider_availability",
 } as const satisfies Partial<Env>;
-const SANDBOX_UNENTITLED_CUSTODY_MODES: CustodyUnavailableModes = [
-  { mode: "managed", reason: "provider_not_entitled" },
-  { mode: "byok", reason: "custody_provider_not_in_release_channel" },
-];
 const SANDBOX_UNCONFIGURED_CUSTODY_MODES: CustodyUnavailableModes = [
   { mode: "managed", reason: "provider_not_configured" },
   { mode: "byok", reason: "custody_provider_not_in_release_channel" },
@@ -144,16 +140,13 @@ const SANDBOX_AVAILABILITY: ProjectProviderAvailability = {
       family: "custody",
       provider: "local",
       modes: [],
-      unavailableModes: SANDBOX_UNENTITLED_CUSTODY_MODES,
+      unavailableModes: SANDBOX_UNCONFIGURED_CUSTODY_MODES,
     },
     {
       family: "custody",
       provider: "fireblocks",
-      modes: [],
-      unavailableModes: [
-        { mode: "managed", reason: "provider_not_entitled" },
-        { mode: "byok", reason: "provider_not_entitled" },
-      ],
+      modes: ["byok"],
+      unavailableModes: [{ mode: "managed", reason: "provider_not_configured" }],
     },
     { family: "custody", provider: "privy", modes: ["managed", "byok"], unavailableModes: [] },
     {
@@ -178,25 +171,25 @@ const SANDBOX_AVAILABILITY: ProjectProviderAvailability = {
       family: "custody",
       provider: "dfns",
       modes: [],
-      unavailableModes: SANDBOX_UNENTITLED_CUSTODY_MODES,
+      unavailableModes: SANDBOX_UNCONFIGURED_CUSTODY_MODES,
     },
     {
       family: "custody",
       provider: "ibm_haven",
       modes: [],
-      unavailableModes: SANDBOX_UNENTITLED_CUSTODY_MODES,
+      unavailableModes: SANDBOX_UNCONFIGURED_CUSTODY_MODES,
     },
     {
       family: "custody",
       provider: "anchorage",
       modes: [],
-      unavailableModes: SANDBOX_UNENTITLED_CUSTODY_MODES,
+      unavailableModes: SANDBOX_UNCONFIGURED_CUSTODY_MODES,
     },
     {
       family: "custody",
       provider: "utila",
       modes: [],
-      unavailableModes: SANDBOX_UNENTITLED_CUSTODY_MODES,
+      unavailableModes: SANDBOX_UNCONFIGURED_CUSTODY_MODES,
     },
     ...COMPLIANCE_AVAILABILITY,
     { family: "ramps", provider: "moonpay", available: true },
@@ -217,11 +210,8 @@ const PRODUCTION_AVAILABILITY: ProjectProviderAvailability = {
     {
       family: "custody",
       provider: "fireblocks",
-      modes: [],
-      unavailableModes: [
-        { mode: "managed", reason: "custody_mode_not_allowed" },
-        { mode: "byok", reason: "provider_not_entitled" },
-      ],
+      modes: ["byok"],
+      unavailableModes: [{ mode: "managed", reason: "custody_mode_not_allowed" }],
     },
     {
       family: "custody",

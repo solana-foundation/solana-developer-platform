@@ -35,6 +35,7 @@ export function dashboardFlagsAt(releaseChannel: SdpReleaseChannel): DashboardFl
     privateChannels: inChannel(releaseChannel, "private_channels"),
     // `isRampsEnabled`: Payments is on and the channel runs at least one provider.
     ramps: payments && rampProvidersInReleaseChannel(releaseChannel).length > 0,
+    sandboxOnBeta: false,
     releaseChannel,
   };
 }

@@ -14,6 +14,8 @@ const fetchMock = vi.spyOn(globalThis, "fetch");
 const PENDING = {
   state: "pending",
   available: true,
+  sandboxOnly: false,
+  mainnetOnly: false,
   countryCode: "SG",
   request: {
     requestedAt: "2026-10-30T00:00:00.000Z",

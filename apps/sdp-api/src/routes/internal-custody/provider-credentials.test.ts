@@ -884,7 +884,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     expect(await deniedNewIntent.json()).toEqual({
       error: {
         code: "FORBIDDEN",
-        message: "Privy requires manual activation for this organization.",
+        message: "Privy is turned off for this organization.",
         details: { reason: "provider_not_entitled" },
       },
       meta: { requestId: "req_provider_credential_submit" },

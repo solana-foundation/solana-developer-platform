@@ -41,6 +41,10 @@ const TEST_SEEDED_API_KEY: SeededApiKey = {
 
 const LOCAL_CUSTODY_PRIVATE_KEY = "local-custody-test-private-key";
 
+interface RefusalBody {
+  error: { code: string; message: string; details: { reason: string } };
+}
+
 let originalDeploymentMode: "managed" | "self_hosted" | undefined;
 let originalCustodyPrivateKey: string | undefined;
 let originalManagedProviderEnv: Record<string, string | undefined>;
@@ -139,7 +143,7 @@ describe("Custody routes — self-hosted deployment mode", () => {
     await clearKVStores(env);
   });
 
-  it("POST /v1/wallets/initialize with a non-configured provider returns 403", async () => {
+  it("POST /v1/wallets/initialize with a non-configured provider returns 503 provider_not_configured", async () => {
     await seedAuth("individual");
 
     const res = await app.request(
@@ -159,11 +163,13 @@ describe("Custody routes — self-hosted deployment mode", () => {
       env
     );
 
-    expect(res.status).toBe(403);
-    const body = (await res.json()) as { error: { message: string } };
-    // In self-hosted mode the message must NOT mention "enterprise tier"
-    expect(body.error.message).not.toContain("enterprise tier");
-    expect(body.error.message.toLowerCase()).toMatch(/dfns|not configured|disabled/);
+    expect(res.status).toBe(503);
+    const body: RefusalBody = await res.json();
+    expect(body.error).toMatchObject({
+      code: "PROVIDER_NOT_CONFIGURED",
+      message: "DFNS is not configured for sandbox projects in this deployment.",
+      details: { reason: "provider_not_configured" },
+    });
   });
 });
 
@@ -186,7 +192,7 @@ describe("Custody routes — managed-mode regression", () => {
     await clearKVStores(env);
   });
 
-  it("requires manual activation for local custody in managed mode", async () => {
+  it("refuses local custody as not configured outside a self-hosted deployment", async () => {
     await seedAuth("individual");
 
     const res = await app.request(
@@ -206,8 +212,12 @@ describe("Custody routes — managed-mode regression", () => {
       env
     );
 
-    expect(res.status).toBe(403);
-    const body = (await res.json()) as { error: { message: string } };
-    expect(body.error.message).toContain("manual activation");
+    expect(res.status).toBe(503);
+    const body: RefusalBody = await res.json();
+    expect(body.error).toMatchObject({
+      code: "PROVIDER_NOT_CONFIGURED",
+      message: "Local is not configured for sandbox projects in this deployment.",
+      details: { reason: "provider_not_configured" },
+    });
   });
 });

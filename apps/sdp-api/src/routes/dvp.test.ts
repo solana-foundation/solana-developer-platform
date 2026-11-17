@@ -26,6 +26,7 @@ import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { setOrganizationProviderOverrides } from "@/test/helpers/provider-overrides";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedRateLimit } from "@/test/mocks/kv";
 import { deriveDvpTradeKind } from "./dvp/handlers";
@@ -1102,6 +1103,9 @@ describe("DvP routes", () => {
     });
 
     it("projects the oldest execution wallet even when runtime is disabled, without changing discovery", async () => {
+      await setOrganizationProviderOverrides(getDb(env), TEST_ORG.id, {
+        custody: { local: false },
+      });
       await getDb(env)
         .prepare(`INSERT INTO custody_wallets
           (id, custody_config_id, wallet_id, public_key, label, status, created_at)
@@ -1220,7 +1224,7 @@ describe("DvP routes", () => {
               address: PARTY_A_ADDRESS,
               counterparty: { id: accountId, label: "Acme Desk" },
               wallet: { id: BOUND_WALLET.id, name: null },
-              actionWallet: { id: BOUND_WALLET.id, name: null, isRuntimeExecutionAllowed: false },
+              actionWallet: { id: BOUND_WALLET.id, name: null, isRuntimeExecutionAllowed: true },
             },
             mint: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
             tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
@@ -1329,7 +1333,7 @@ describe("DvP routes", () => {
               address: PARTY_A_ADDRESS,
               counterparty: null,
               wallet: { id: "cwlt_dvp_party", name: null },
-              actionWallet: { id: "cwlt_dvp_party", name: null, isRuntimeExecutionAllowed: false },
+              actionWallet: { id: "cwlt_dvp_party", name: null, isRuntimeExecutionAllowed: true },
             },
             mint: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
             tokenProgram: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",

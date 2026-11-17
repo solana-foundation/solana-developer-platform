@@ -33,6 +33,7 @@ import {
   createLocalApiClient,
   type LocalApiClient,
 } from "./local-api-client";
+import { waitForRateLimitBudget } from "./rate-limit-budget";
 
 const PLAYWRIGHT_LOCAL_ORG_ID_PREFIX = "org_e2e_dashboard";
 const PLAYWRIGHT_LOCAL_ORG_NAME_PREFIX = "E2E Dashboard Org";
@@ -354,6 +355,8 @@ export async function provisionWithAdminSession<T>(
   browser: Browser,
   provision: (session: PlaywrightAdminSession) => Promise<T>
 ): Promise<T> {
+  // A suite's beforeAll runs outside the per-test pause, and seeding is API-heavy.
+  await waitForRateLimitBudget("provision fixtures");
   const session = await getPlaywrightAdminSession(browser);
 
   try {

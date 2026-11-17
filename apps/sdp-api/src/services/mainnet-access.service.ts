@@ -15,6 +15,7 @@ import {
   type MainnetAccessRow,
 } from "@/db/repositories/mainnet-access.repository";
 import { conflict } from "@/lib/errors";
+import { productionProjectsAllowed, sandboxProjectsAllowed } from "@/lib/production-entitlement";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import { createSystemAuditService } from "@/services/audit.service";
 import {
@@ -42,9 +43,12 @@ export function toMainnetAccess(
   row: MainnetAccessRow | null,
   entitled: boolean
 ): MainnetAccess {
+  const sandboxOnly = !productionProjectsAllowed(env);
   return {
     state: mainnetAccessState(row, entitled),
-    available: mainnetAccessEmailConfig(env) !== null,
+    available: !sandboxOnly && mainnetAccessEmailConfig(env) !== null,
+    sandboxOnly,
+    mainnetOnly: !sandboxProjectsAllowed(env),
     countryCode: row ? row.country_code : null,
     request: row
       ? {
@@ -151,6 +155,8 @@ function requestEmail(
     countryName: countryByCode(row.country_code).name,
     termsVersion: row.terms_version,
     requestedAt: row.requested_at,
+    foundationContactEmail: row.foundation_contact_email,
+    useCase: row.use_case,
   };
 }
 
@@ -215,6 +221,9 @@ export async function correctMainnetAccess(
         requestedAt: before.requested_at,
         requestedByUserId: before.requested_by_user_id,
         notifiedAt: before.notified_at,
+        // The address itself is personal data the audit scrubber redacts; whether one was named is not.
+        foundationContactStated: before.foundation_contact_email !== null,
+        useCase: before.use_case,
       },
       operator: input.operator,
       reason: input.reason,

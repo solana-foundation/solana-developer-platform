@@ -290,8 +290,14 @@ export const requestMainnetAccessRequestSchema = requestMainnetAccessSchemaBase.
   "RequestMainnetAccessRequest",
   {
     description:
-      "The organization's self-declared jurisdiction (its primary registered geography for business) and the SDP Terms and Conditions version the admin read and accepted.",
-    example: { countryCode: "US", termsVersion: "2026-10-placeholder", acceptTerms: true },
+      "The organization's self-declared jurisdiction (its primary registered geography for business) and the SDP Terms and Conditions version the admin read and accepted. Optionally, the requester's contact at the Solana Foundation (`foundationContactEmail`, an `@solana.org` address, stored lowercased) and up to 150 characters on what the organization is building (`useCase`); omit either, or send null, when there is none. Both go to the reviewer with the request and grant nothing.",
+    example: {
+      countryCode: "US",
+      termsVersion: "2026-10-placeholder",
+      acceptTerms: true,
+      foundationContactEmail: "jo.bd@solana.org",
+      useCase: "Stablecoin payouts for freelancers in Southeast Asia",
+    },
   }
 );
 
@@ -303,7 +309,15 @@ export const mainnetAccessSchema = z
     }),
     available: z.boolean().openapi({
       description:
-        "Whether this deployment takes requests. While false, a request or resend is refused with 503.",
+        "Whether this deployment takes requests. While false, a request or resend is refused: with 403 when `sandboxOnly`, otherwise with 503.",
+    }),
+    sandboxOnly: z.boolean().openapi({
+      description:
+        "True on a deployment that admits no production project (the sandbox). Mainnet access is requested on the production deployment instead.",
+    }),
+    mainnetOnly: z.boolean().openapi({
+      description:
+        "True on a deployment that admits no sandbox project. Until `state` is `approved`, the organization can only read its organization, projects and members, and request mainnet access.",
     }),
     countryCode: z.enum(COUNTRY_CODES).nullable(),
     request: z

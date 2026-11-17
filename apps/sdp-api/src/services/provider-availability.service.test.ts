@@ -46,7 +46,7 @@ const TEST_USER_ID = "usr_provider_availability_test";
 const NOT_ENTITLED_REFUSAL = {
   code: "FORBIDDEN",
   statusCode: 403,
-  message: "Privy requires manual activation for this organization.",
+  message: "Privy is turned off for this organization.",
   details: { reason: "provider_not_entitled" },
 };
 
@@ -127,9 +127,9 @@ function setBaseProviderEnv(): void {
   });
 }
 
-async function disablePrivyEntitlement(): Promise<void> {
+async function disableCustodyEntitlement(provider: CustodyProvider): Promise<void> {
   await getDb(env).execute("UPDATE organizations SET settings = ? WHERE id = ?", [
-    JSON.stringify({ providerOverrides: { custody: { privy: false } } }),
+    JSON.stringify({ providerOverrides: { custody: { [provider]: false } } }),
     TEST_ORG_ID,
   ]);
 }
@@ -194,17 +194,10 @@ describe("provider-availability.service", () => {
     ).resolves.toBeUndefined();
     expect(warn).not.toHaveBeenCalled();
 
-    await getDb(env).execute("UPDATE organizations SET settings = ? WHERE id = ?", [
-      JSON.stringify({ providerOverrides: { custody: { privy: false } } }),
-      TEST_ORG_ID,
-    ]);
+    await disableCustodyEntitlement("privy");
     await expect(
       assertCustodyProviderEntitled(env, getDb(env), TEST_ORG_ID, "privy")
-    ).rejects.toMatchObject({
-      code: "FORBIDDEN",
-      statusCode: 403,
-      details: { reason: "provider_not_entitled" },
-    });
+    ).rejects.toMatchObject(NOT_ENTITLED_REFUSAL);
     expect(warn).toHaveBeenCalledExactlyOnceWith(
       {
         event: "sdp_api_custody_entitlement_denied",
@@ -222,30 +215,43 @@ describe("provider-availability.service", () => {
     ).rejects.toMatchObject({ code: "FORBIDDEN", statusCode: 403 });
   });
 
-  it("resolves general defaults independently of the legacy tier value", () => {
+  it("entitles every custody provider and no compliance provider without overrides", () => {
+    const resolved = resolveOrganizationProviderEntitlements(undefined);
+
+    // Exhaustive on purpose: a new custody provider must show up here as a failing
+    // assertion, so its default entitlement is a decision rather than an accident.
+    expect(resolved.custody).toEqual({
+      local: true,
+      fireblocks: true,
+      privy: true,
+      coinbase_cdp: true,
+      para: true,
+      turnkey: true,
+      dfns: true,
+      ibm_haven: true,
+      anchorage: true,
+      utila: true,
+    });
+    expect(resolved.compliance).toEqual({
+      range: false,
+      elliptic: false,
+      trm: false,
+      chainalysis: false,
+    });
+  });
+
+  it("applies an organization's overrides over each family's default", () => {
     const resolved = resolveOrganizationProviderEntitlements({
-      tier: "individual",
-      providerOverrides: {
-        custody: {
-          local: true,
-        },
-        compliance: {
-          range: true,
-        },
-        ramps: {
-          moonpay: true,
-        },
-      },
+      custody: { dfns: false },
+      compliance: { range: true },
+      ramps: { moonpay: false },
     });
 
-    expect(resolved.tier).toBe("individual");
-    expect(resolved.providers.custody.privy).toBe(true);
-    expect(resolved.providers.custody.coinbase_cdp).toBe(true);
-    expect(resolved.providers.custody.turnkey).toBe(true);
-    expect(resolved.providers.custody.local).toBe(true);
-    expect(resolved.providers.custody.para).toBe(true);
-    expect(resolved.providers.compliance.range).toBe(true);
-    expect(resolved.providers.ramps.moonpay).toBe(true);
+    expect(resolved.custody.dfns).toBe(false);
+    expect(resolved.custody.privy).toBe(true);
+    expect(resolved.compliance.range).toBe(true);
+    expect(resolved.compliance.elliptic).toBe(false);
+    expect(resolved.ramps).toEqual({ moonpay: false, stripe: true });
   });
 
   it("marks providers available only when the organization is entitled and the environment is configured", async () => {
@@ -284,14 +290,14 @@ describe("provider-availability.service", () => {
   });
 
   it("explains when a configured custody provider is not entitled for the organization", async () => {
-    await disablePrivyEntitlement();
+    await disableCustodyEntitlement("privy");
 
     await expect(
       assertCustodyProviderEnabled(env, getDb(env), TEST_ORG_ID, "privy")
     ).rejects.toMatchObject({
       code: "FORBIDDEN",
       statusCode: 403,
-      message: "Privy requires manual activation for this organization.",
+      message: "Privy is turned off for this organization.",
     });
   });
 
@@ -376,25 +382,7 @@ describe("provider-availability.service", () => {
     expect(availability.providers.ramps.moonpay?.enabled).toBe(true);
   });
 
-  it("treats local custody as override-only and configurable only in a self-hosted deployment", async () => {
-    await syncProviderAccessFromClerk(getDb(env), {
-      productionProjectsAllowed: true,
-      organizationId: TEST_ORG_ID,
-      clerkOrganization: {
-        id: "org_clerk_provider_availability_local_test",
-        private_metadata: {
-          sdp: {
-            tier: "individual",
-            providerOverrides: {
-              custody: {
-                local: true,
-              },
-            },
-          },
-        },
-      },
-    });
-
+  it("treats local custody as configurable only in a self-hosted deployment", async () => {
     const withoutKey = await getProviderAvailability(
       env,
       getDb(env),
@@ -472,7 +460,7 @@ describe("provider-availability.service", () => {
     });
   });
 
-  it("applies general defaults and metadata overrides uniformly to self-hosted orgs", async () => {
+  it("applies the family defaults to self-hosted orgs", async () => {
     env.SDP_DEPLOYMENT_MODE = "self_hosted";
     env.CUSTODY_PRIVATE_KEY =
       "3QpWV8xk4hs7vmQhSLAQWNi2KskuSVSpmR75QGqSuxaKcdA9XJkq8VBihspJddBWVfEybTWLKqHJ19N64DNuwSNd";
@@ -486,17 +474,17 @@ describe("provider-availability.service", () => {
 
     expect(availability.tier).toBe("individual");
     expect(availability.providers.custody.local).toEqual({
-      entitled: false,
+      entitled: true,
       configured: true,
-      enabled: false,
+      enabled: true,
     });
     expect(availability.providers.custody.dfns).toEqual({
-      entitled: false,
+      entitled: true,
       configured: false,
       enabled: false,
     });
     expect(availability.providers.custody.ibm_haven).toEqual({
-      entitled: false,
+      entitled: true,
       configured: false,
       enabled: false,
     });
@@ -536,7 +524,7 @@ describe("provider-availability.service", () => {
     expect(availability.providers.custody.privy.entitled).toBe(true);
   });
 
-  it("applies general defaults when SDP_DEPLOYMENT_MODE is unset", async () => {
+  it("applies the family defaults when SDP_DEPLOYMENT_MODE is unset", async () => {
     env.SDP_DEPLOYMENT_MODE = undefined;
     env.CUSTODY_PRIVATE_KEY =
       "3QpWV8xk4hs7vmQhSLAQWNi2KskuSVSpmR75QGqSuxaKcdA9XJkq8VBihspJddBWVfEybTWLKqHJ19N64DNuwSNd";
@@ -550,7 +538,7 @@ describe("provider-availability.service", () => {
 
     expect(availability.tier).toBe("individual");
     expect(availability.providers.custody.local).toEqual({
-      entitled: false,
+      entitled: true,
       configured: false,
       enabled: false,
     });
@@ -703,22 +691,18 @@ describe("provider-availability.service", () => {
     });
   });
 
-  it("resolves earn entitlements as override-only, regardless of tier", () => {
-    // Earn providers require manual activation: no tier grants them by default.
-    const individual = resolveOrganizationProviderEntitlements({
-      tier: "individual",
-      providerOverrides: { earn: { veda: true } },
-    });
-    expect(individual.providers.earn.veda).toBe(true);
-    expect(individual.providers.earn.upshift).toBe(false);
+  it("resolves earn entitlements as override-only", () => {
+    const overridden = resolveOrganizationProviderEntitlements({ earn: { veda: true } });
+    expect(overridden.earn.veda).toBe(true);
+    expect(overridden.earn.upshift).toBe(false);
 
-    const enterprise = resolveOrganizationProviderEntitlements({ tier: "enterprise" });
+    const defaults = resolveOrganizationProviderEntitlements(undefined);
     // Exhaustive on purpose: a new earn provider must show up here as a failing
-    // assertion, so nobody adds one that a tier silently entitles. `kamino`
+    // assertion, so nobody adds one that is silently entitled by default. `kamino`
     // defaults false like the rest even though it needs no credential —
     // entitlement and configuration are separate gates, and only money-in
     // consults entitlement (a catalogue-only provider never reaches it).
-    expect(enterprise.providers.earn).toEqual({
+    expect(defaults.earn).toEqual({
       veda: false,
       upshift: false,
       perena: false,
@@ -967,7 +951,7 @@ describe("provider-availability.service", () => {
     });
 
     it("refuses an unentitled provider after the Production mode check", async () => {
-      await disablePrivyEntitlement();
+      await disableCustodyEntitlement("privy");
 
       await expect(admitCustodySetup(projects.sandbox, "privy", "managed")).rejects.toMatchObject(
         NOT_ENTITLED_REFUSAL
@@ -981,6 +965,22 @@ describe("provider-availability.service", () => {
         code: "FORBIDDEN",
         details: { reason: "custody_mode_not_allowed" },
       });
+    });
+
+    it("admits a custody provider by default and refuses it as turned off once an override disables it", async () => {
+      await expect(
+        admitCustodySetup(projects.sandbox, "fireblocks", "byok")
+      ).resolves.toBeUndefined();
+
+      await disableCustodyEntitlement("fireblocks");
+      await expect(admitCustodySetup(projects.sandbox, "fireblocks", "byok")).rejects.toMatchObject(
+        {
+          code: "FORBIDDEN",
+          statusCode: 403,
+          message: "Fireblocks is turned off for this organization.",
+          details: { reason: "provider_not_entitled" },
+        }
+      );
     });
 
     it("refuses Managed custody whose credentials the deployment lacks and admits BYOK without them", async () => {
@@ -1029,7 +1029,7 @@ describe("provider-availability.service", () => {
       });
       expect(notInChannel).toMatchObject({ error: expect.any(CustodySetupRefusedError) });
 
-      await disablePrivyEntitlement();
+      await disableCustodyEntitlement("privy");
       await expect(admitByokCustodySetup(env, getDb(env), project, "privy")).resolves.toMatchObject(
         {
           admitted: false,

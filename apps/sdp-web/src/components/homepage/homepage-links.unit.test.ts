@@ -9,6 +9,7 @@ import {
 } from "./homepage-links";
 
 const labels = {
+  trySandboxLabel: "Try the sandbox",
   createAccountLabel: "Create account",
   joinWaitlistLabel: "Join the waitlist",
   dashboardLabel: "Dashboard",
@@ -69,5 +70,20 @@ describe("externalLinkProps", () => {
   it("opens off-site links in a new tab and leaves the rest alone", () => {
     expect(externalLinkProps(true)).toEqual({ target: "_blank", rel: "noreferrer" });
     expect(externalLinkProps(false)).toEqual({ target: undefined, rel: undefined });
+  });
+
+  it("sends the sandbox links to the hosted sandbox when the deployment serves mainnet only", () => {
+    const links = resolveHomepageLinks({ openSignup: true, hostedSandbox: true, ...labels });
+    expect(links.signup).toEqual({ href: "/sign-up", label: "Create account", external: false });
+    expect(links.sandbox).toEqual({
+      href: "https://platform-beta.solana.com/sign-up",
+      label: "Try the sandbox",
+      external: true,
+    });
+  });
+
+  it("keeps the sandbox links on the account entry otherwise", () => {
+    const links = resolveHomepageLinks({ openSignup: true, ...labels });
+    expect(links.sandbox).toEqual(links.signup);
   });
 });

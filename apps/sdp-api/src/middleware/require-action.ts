@@ -2,6 +2,7 @@ import { type Action, isApiKeyGrantableAction } from "@sdp/types/actions";
 import type { Context, MiddlewareHandler } from "hono";
 import { authMayPerform, getOptionalAuth } from "@/lib/auth";
 import { AppError, missingAction } from "@/lib/errors";
+import { isOrganizationAdmitted, organizationNotAdmitted } from "@/lib/production-entitlement";
 import type { Env } from "@/types/env";
 
 /**
@@ -56,6 +57,39 @@ function named(
 }
 
 /**
+ * What an organization a mainnet-only deployment does not admit may still do: read its own
+ * organization, projects (it has none it can see) and members. Two routes go further, each
+ * marking itself exempt (`organizationAdmissionExempt`): requesting mainnet access, and the Earn
+ * exits and reads a production project keeps after losing the entitlement. Everything else,
+ * changing the organization's settings and inviting members included, waits for approval.
+ */
+const NOT_ADMITTED_ACTIONS: ReadonlySet<Action> = new Set<Action>([
+  "organizations.read",
+  "projects.read",
+  "members.read",
+]);
+
+/**
+ * Refuses an action a mainnet-only deployment keeps from an organization without mainnet access.
+ * Runs after the caller is known to hold the action, so a missing grant is still named as such.
+ */
+function assertOrganizationAdmittedFor(c: Context<{ Bindings: Env }>, action: Action): void {
+  if (NOT_ADMITTED_ACTIONS.has(action) || c.get("organizationAdmissionExempt")) return;
+  if (!isOrganizationAdmitted(c)) throw organizationNotAdmitted();
+}
+
+/**
+ * Lets an organization a mainnet-only deployment does not admit through the next
+ * {@link requireAction}: for the mainnet-access request, which is how it gets admitted.
+ */
+export function admitWhileNotApproved(): MiddlewareHandler<{ Bindings: Env }> {
+  return async (c, next) => {
+    c.set("organizationAdmissionExempt", true);
+    await next();
+  };
+}
+
+/**
  * The route's action. Mount it after authentication and before body
  * validation or any handler work, so a refused caller learns nothing about
  * the request and nothing is written.
@@ -63,6 +97,7 @@ function named(
 export function requireAction(action: Action): MiddlewareHandler<{ Bindings: Env }> {
   return named(`requireAction(${action})`, async (c, next) => {
     assertCallerMayPerform(c, action);
+    assertOrganizationAdmittedFor(c, action);
     await next();
   });
 }

@@ -23,6 +23,7 @@ export function admittedMoneyFacts(
     projectEnvironment: "sandbox",
     rawSettings: null,
     productionProjectsAllowed: true,
+    sandboxProjectsAllowed: true,
     disabledMovements: [],
     principal: LIVE_KEY_PRINCIPAL_FACTS,
     readAt: Date.now(),

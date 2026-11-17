@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { type BrowserContext, expect, type Page, type Route, test } from "@playwright/test";
+import { type BrowserContext, expect, type Page, type Route } from "@playwright/test";
 import { projectHref } from "@/lib/dashboard-project-path";
+import { test } from "@/playwright/support/test";
 import { createClerkBearerTokenProvider } from "../support/auth-session";
 import { authStatePath } from "../support/auth-state";
 import { createLocalApiClient, type LocalApiClient } from "../support/local-api-client";

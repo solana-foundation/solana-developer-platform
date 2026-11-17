@@ -97,8 +97,8 @@ _Avoid_: Hard-coded job interval, Sentry schedule, self-hosted cron cadence
 > **Dev:** "MoonPay is configured in the environment, so is it available for every organization?"
 > **Domain expert:** "Only if MoonPay is generally available. A manually onboarded provider also needs an activation for that organization."
 
-> **Dev:** "Should we make this organization enterprise so it can use Fireblocks?"
-> **Domain expert:** "No. Activate Fireblocks for that organization; provider access is independent of customer tiers."
+> **Dev:** "Should we make this organization enterprise so it can use Range?"
+> **Domain expert:** "No. Activate Range for that organization; provider access is independent of customer tiers."
 
 > **Dev:** "This key has `transfers.execute`. Can it request an off-ramp quote?"
 > **Domain expert:** "No. The quote route declares `offramp.execute`, so the key needs that grant too. Each route names one action, and the key either holds it or is refused."

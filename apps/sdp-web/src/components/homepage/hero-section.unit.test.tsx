@@ -20,6 +20,7 @@ import type { HomepageLinks } from "./homepage-links";
 
 const signupLinks: HomepageLinks = {
   signup: { href: "/sign-up", label: "Create account", external: false },
+  sandbox: { href: "/sign-up", label: "Create account", external: false },
   signIn: "/sign-in",
   docs: "https://docs.example.test",
   openapi: "https://docs.example/docs/reference/api",
@@ -28,6 +29,7 @@ const signupLinks: HomepageLinks = {
 const waitlistLinks: HomepageLinks = {
   ...signupLinks,
   signup: { href: "https://waitlist.example.test", label: "Join waitlist", external: true },
+  sandbox: { href: "https://waitlist.example.test", label: "Join waitlist", external: true },
 };
 
 async function renderHero(links: HomepageLinks) {

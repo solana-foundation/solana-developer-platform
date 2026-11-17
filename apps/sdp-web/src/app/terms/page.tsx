@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { SdpProductLockup } from "@/components/auth-page-shell";
 import { SdpTermsContent } from "@/components/sdp-terms-content";
+import { betaLabel } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 
 export const metadata: Metadata = { title: SDP_TERMS.title };
@@ -12,7 +13,7 @@ export const metadata: Metadata = { title: SDP_TERMS.title };
  * organization to accept, so the page and the acceptance never disagree.
  */
 export default async function TermsPage() {
-  const t = await getTranslations();
+  const [t, beta] = await Promise.all([getTranslations(), betaLabel()]);
 
   return (
     <main className="min-h-dvh bg-surface px-4 pb-24 sm:px-6">
@@ -23,7 +24,10 @@ export default async function TermsPage() {
             aria-label={t("Shared.termsPage.home")}
             className="rounded-control focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-strong"
           >
-            <SdpProductLockup productName={t("Shared.authShell.productName")} />
+            <SdpProductLockup
+              productName={t("Shared.authShell.productName")}
+              betaLabel={beta ? t("Shared.authShell.beta") : null}
+            />
           </Link>
         </header>
         <article className="pt-10 text-body leading-7 text-secondary sm:pt-16">

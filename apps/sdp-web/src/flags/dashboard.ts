@@ -1,5 +1,14 @@
 import type { SdpReleaseChannel } from "@sdp/types/release-channels";
-import { assetProfiles, dvp, earn, heliusRings, issuance, markets, privateChannels } from "@/flags";
+import {
+  assetProfiles,
+  dvp,
+  earn,
+  heliusRings,
+  issuance,
+  markets,
+  privateChannels,
+  sandboxOnBeta,
+} from "@/flags";
 import {
   deploymentReleaseChannel,
   isModuleInDeploymentReleaseChannel,
@@ -19,6 +28,8 @@ export type DashboardFlags = {
   payments: boolean;
   privateChannels: boolean;
   ramps: boolean;
+  /** The workspace switcher links to the hosted sandbox (the `sandbox-on-beta` flag). */
+  sandboxOnBeta: boolean;
   /** This deployment's release channel; the API playground offers only its modules. */
   releaseChannel: SdpReleaseChannel;
 };
@@ -43,6 +54,7 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     marketsEnabled,
     privateChannelsEnabled,
     rampsEnabled,
+    sandboxOnBetaEnabled,
   ] = await Promise.all([
     assetProfiles(),
     dvp(),
@@ -52,6 +64,7 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     markets(),
     privateChannels(),
     isRampsEnabled(),
+    sandboxOnBeta(),
   ]);
 
   return {
@@ -67,6 +80,7 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     payments: isModuleInDeploymentReleaseChannel("payments"),
     privateChannels: privateChannelsEnabled,
     ramps: rampsEnabled,
+    sandboxOnBeta: sandboxOnBetaEnabled,
     releaseChannel: deploymentReleaseChannel(),
   };
 }

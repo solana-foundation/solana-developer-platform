@@ -79,20 +79,14 @@ export type CustodyConnectionsContext =
   | null;
 
 /**
- * Who sets the provider up: the tenant from the Dashboard, the SDP team by
- * arrangement, or the deployment's operator. The hint says how.
+ * Who sets the provider up: the tenant from the Dashboard, or the deployment's
+ * operator. The hint says how.
  */
 function setUpBy(entry: CustodyProviderCatalogEntry, t: Translate) {
   if (entry.storedCredentialSetup.mode === "self_service") {
     return {
       value: t("Shared.integrations.setUpBySelf", { provider: entry.label }),
       hint: t("Shared.integrations.connectSelfServe"),
-    };
-  }
-  if (entry.availability === "manual") {
-    return {
-      value: t("Shared.integrations.setUpBySdpTeam"),
-      hint: t("Shared.integrations.connectByArrangement"),
     };
   }
   return {

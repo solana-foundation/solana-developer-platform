@@ -12,9 +12,9 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { adminDatabaseUrl } from "@/test/helpers/env";
 
 const directory = path.join(path.dirname(fileURLToPath(import.meta.url)), "postgres");
-const migrationSql = readFileSync(path.join(directory, "0227_custody_proposals.sql"), "utf8");
+const migrationSql = readFileSync(path.join(directory, "0229_custody_proposals.sql"), "utf8");
 const validateSql = readFileSync(
-  path.join(directory, "0228_custody_proposals_validate.sql"),
+  path.join(directory, "0230_custody_proposals_validate.sql"),
   "utf8"
 );
 let client: Client;
@@ -89,7 +89,7 @@ async function expectRejected(operation: () => Promise<void>, code: string): Pro
   }
 }
 
-describe("0227 custody proposals", () => {
+describe("0229 custody proposals", () => {
   it("keeps previous payment writers compatible without adding queue columns", async () => {
     await client.query(
       "INSERT INTO payment_transfers VALUES ('old_writer', 'org', 'project', 'processing')"

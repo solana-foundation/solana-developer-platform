@@ -70,6 +70,11 @@ export interface Env extends ManagedRpcEnv {
   // entitlement says (a devnet-only deployment).
   SDP_ALLOW_PRODUCTION_PROJECTS?: string;
 
+  // Whether this deployment may admit a sandbox project. Unset allows; "false"
+  // makes the deployment mainnet-only: no sandbox projects, and only
+  // organizations with the production entitlement are admitted.
+  SDP_ALLOW_SANDBOX_PROJECTS?: string;
+
   // One extra origin the CORS allowlist admits, as an exact https origin, for a
   // deployment whose docs site is not the canonical one.
   CORS_EXTRA_ORIGIN?: string;
@@ -314,6 +319,9 @@ declare module "hono" {
     projectEnvironment?: ApiKeyEnvironment;
     // Loaded once by authentication for every actor; see lib/production-entitlement.ts
     organizationEntitlements: OrganizationEntitlements;
+    // Set by the one check that may let an organization a mainnet-only deployment does not admit
+    // through (an Earn exit or read, a mainnet-access request); requireAction reads it
+    organizationAdmissionExempt?: true;
     // Set by requestGate middleware for gated routes
     requestGate?: RequestGateContext;
     // Set by authorize(): what the route's access check loaded (middleware/authorize.ts)

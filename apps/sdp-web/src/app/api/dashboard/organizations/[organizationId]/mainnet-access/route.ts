@@ -7,6 +7,8 @@ export async function POST(request: Request, context: RouteContext) {
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.organizations.mainnet-access.request",
+    // The mainnet request page of an organization that lists no project sends none.
+    organizationScoped: true,
     path: `/v1/organizations/${encodeURIComponent(organizationId)}/mainnet-access`,
   });
 }

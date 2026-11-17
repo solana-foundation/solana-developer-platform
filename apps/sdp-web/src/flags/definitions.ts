@@ -103,6 +103,32 @@ export function defineDashboardFlags({
     ],
   });
 
+  const sandboxOnBeta = flag<boolean, DashboardFlagEntities>({
+    key: "sandbox-on-beta",
+    adapter: vercel(),
+    identify,
+    defaultValue: flagDefault("SDP_FLAG_SANDBOX_ON_BETA", false),
+    description:
+      "Link to the hosted sandbox (platform-beta) from the homepage, sign-in, the workspace switcher and the mainnet request page. Turn on where the deployment serves mainnet only.",
+    options: [
+      { value: false, label: "No sandbox link" },
+      { value: true, label: "Link to the sandbox" },
+    ],
+  });
+
+  const betaLabel = flag<boolean, DashboardFlagEntities>({
+    key: "beta-label",
+    adapter: vercel(),
+    identify,
+    defaultValue: flagDefault("SDP_FLAG_BETA_LABEL", false),
+    description:
+      "Show a Beta badge beside the product name on the homepage and the sign-in, sign-up, terms and mainnet request pages. Turn on for the hosted sandbox (platform-beta).",
+    options: [
+      { value: false, label: "No badge" },
+      { value: true, label: "Beta badge" },
+    ],
+  });
+
   const issuance = flag<boolean, DashboardFlagEntities>({
     key: "issuance",
     adapter: moduleAdapter("issuance"),
@@ -199,6 +225,8 @@ export function defineDashboardFlags({
 
   return {
     homepageOpenSignup,
+    sandboxOnBeta,
+    betaLabel,
     issuance,
     assetProfiles,
     privateChannels,

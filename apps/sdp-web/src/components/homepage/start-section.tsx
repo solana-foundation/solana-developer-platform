@@ -33,12 +33,12 @@ export async function StartSection({ links }: { links: HomepageLinks }) {
           {/* the note promises devnet keys, which the waitlist cannot give */}
           <StartDoor
             signup={
-              links.signup.external
-                ? links.signup
-                : { ...links.signup, label: t("Homepage.start.openSandbox") }
+              links.sandbox.external
+                ? links.sandbox
+                : { ...links.sandbox, label: t("Homepage.start.openSandbox") }
             }
             note={
-              links.signup.external || links.signedIn ? undefined : t("Homepage.start.doorNote")
+              links.sandbox.external || links.signedIn ? undefined : t("Homepage.start.doorNote")
             }
           />
         </Rise>

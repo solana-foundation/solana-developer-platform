@@ -238,18 +238,19 @@ The script prints `PUBLIC_KEY=…`, `CUSTODY_PRIVATE_KEY=…`, and
 `CUSTODY_ENCRYPTION_KEY=…` lines you can paste straight into `.env.local`. Add
 `--quiet` to print only the custody secret (useful for piping into `pbcopy`).
 
-Provider access is organization-scoped in every deployment mode. Configured,
-generally available providers work for every organization. Manual providers,
-including the local signer, need an override in the Clerk organization's
-private metadata:
+Provider access is organization-scoped in every deployment mode. Every
+configured custody provider, the local signer included, works for every
+organization. To turn one off for a single organization, set its override to
+`false` in the Clerk organization's private metadata:
 
 ```json
-{ "sdp": { "providerOverrides": { "custody": { "local": true } } } }
+{ "sdp": { "providerOverrides": { "custody": { "local": false } } } }
 ```
 
 Set it in the Clerk dashboard (Organizations → your org → Metadata → Private;
 the `organization.updated` webhook syncs it).
-Without it, choosing the local signer returns `403 Local requires manual activation`.
+Choosing that provider then returns `403 Local is turned off for this organization.`
+Compliance providers stay off until an override sets them to `true`.
 
 For the Clerk side of self-hosting (account creation, session token customization, webhook
 relay via an ngrok tunnel), follow [`docs/self-hosting/clerk-setup.md`](docs/self-hosting/clerk-setup.md).

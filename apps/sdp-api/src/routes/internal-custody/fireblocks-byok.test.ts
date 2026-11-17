@@ -17,6 +17,7 @@ import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { inSandboxScope } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { setOrganizationProviderOverrides } from "@/test/helpers/provider-overrides";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -623,9 +624,9 @@ describe("Fireblocks CSR security", () => {
     await newRegistration();
     await newRegistration();
     expect((await request("/fireblocks/csr", {})).status).toBe(429);
-    await getDb(env).execute("UPDATE organizations SET settings = '{}' WHERE id = ?", [
-      ORGANIZATION_ID,
-    ]);
+    await setOrganizationProviderOverrides(getDb(env), ORGANIZATION_ID, {
+      custody: { fireblocks: false },
+    });
     expect((await request("/fireblocks/csr")).status).toBe(403);
   });
 });

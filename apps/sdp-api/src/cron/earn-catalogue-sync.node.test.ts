@@ -505,6 +505,26 @@ describe("runEarnCatalogueSyncIfDue", () => {
     });
   });
 
+  it("reads and writes no sandbox shelf on a deployment that serves mainnet only", async () => {
+    const listStrategies = vi.fn(async (ctx: { environment: string }) => [
+      makeSnapshot(`vault-${ctx.environment}`),
+    ]);
+    installProviders({ upshift: makeProvider("upshift", listStrategies) });
+
+    const outcome = await runEarnCatalogueSyncIfDue({
+      ...env,
+      SDP_ALLOW_SANDBOX_PROJECTS: "false",
+    });
+
+    expect(outcome).toBe("synced");
+    expect(listStrategies.mock.calls.map(([ctx]) => ctx.environment)).toEqual(["production"]);
+    const written = mocks.upsertStrategies.mock.calls
+      .flat(2)
+      .map((row: { environment: string }) => row.environment);
+    expect(written).toContain("production");
+    expect(written).not.toContain("sandbox");
+  });
+
   it("deprecates rows the provider no longer lists, per provider, environment and lane", async () => {
     // The keep set is what the provider still lists; the repository decides
     // what that leaves behind. This is what makes a tightened catalogue gate

@@ -1,7 +1,6 @@
 import {
   CUSTODY_PROVIDER_USE_CASE_LABEL_KEYS,
   type CustodyProvider,
-  type CustodyProviderAvailabilityClass,
   type CustodyProviderCapabilities,
   type CustodyProviderCategory,
   type CustodyProviderSetupField,
@@ -33,7 +32,6 @@ export interface CustodyProviderCatalogEntry {
   label: string;
   descriptionKey: MessageKey;
   category: WalletProviderCategory;
-  availability: CustodyProviderAvailabilityClass;
   visible: boolean;
   technicalCapabilities: CustodyProviderCapabilities;
   useCases: readonly CustodyProviderUseCase[];

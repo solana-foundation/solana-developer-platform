@@ -7,7 +7,7 @@ import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { getAuth } from "@/lib/auth";
 import { notFound } from "@/lib/errors";
-import { productionProjectsAllowed } from "@/lib/production-entitlement";
+import { environmentAllowed, productionProjectsAllowed } from "@/lib/production-entitlement";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import type { updateProjectSchema } from "@/routes/projects/schemas";
@@ -31,7 +31,7 @@ function isReadableProject(
   return (
     project !== null &&
     project.organizationId === organizationId &&
-    (project.environment !== "production" || productionProjectsAllowed(c.env))
+    environmentAllowed(c.env, project.environment)
   );
 }
 
@@ -65,9 +65,11 @@ export const listProjects = async (c: AppContext) => {
   const orgState = await getOrganizationTierState(db, auth.organizationId);
   const productionEnabled =
     productionProjectsAllowed(c.env) && orgState.settings?.enableProductionProject === true;
-  const projects = productionEnabled
-    ? projectList
-    : projectList.filter((project) => project.environment !== "production");
+  const projects = projectList.filter(
+    (project) =>
+      environmentAllowed(c.env, project.environment) &&
+      (project.environment !== "production" || productionEnabled)
+  );
 
   const response: ListProjectsResponse = { projects };
   return success(c, response);

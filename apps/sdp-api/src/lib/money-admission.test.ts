@@ -39,6 +39,7 @@ function facts(overrides: Partial<MoneyAdmissionFacts> = {}): MoneyAdmissionFact
     projectEnvironment: "production",
     rawSettings: ENTITLED,
     productionProjectsAllowed: true,
+    sandboxProjectsAllowed: true,
     disabledMovements: [],
     principal: LIVE_KEY_PRINCIPAL_FACTS,
     readAt: Date.now(),
@@ -78,6 +79,15 @@ describe("decideMoneyStart", () => {
     expect(
       decideMoneyStart(facts({ productionProjectsAllowed: false, projectEnvironment: "sandbox" }))
     ).toEqual({ admitted: true });
+  });
+
+  it("refuses a sandbox project on a mainnet-only deployment, and still admits its entitled production one", () => {
+    expect(
+      decideMoneyStart(
+        facts({ sandboxProjectsAllowed: false, projectEnvironment: "sandbox", rawSettings: null })
+      )
+    ).toEqual({ admitted: false, reason: "sandbox_not_available" });
+    expect(decideMoneyStart(facts({ sandboxProjectsAllowed: false }))).toEqual({ admitted: true });
   });
 
   it.each(

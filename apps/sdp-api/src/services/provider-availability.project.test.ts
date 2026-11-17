@@ -150,7 +150,7 @@ describe("assertProjectProviderAdmitted", () => {
       )
     );
     await expect(admit(projects.production, deploymentEnv({}), MOONPAY)).rejects.toMatchObject(
-      refusal("MoonPay requires manual activation for this organization.", "provider_not_entitled")
+      refusal("MoonPay is turned off for this organization.", "provider_not_entitled")
     );
     await setProviderOverrides({});
     // Sandbox keys never serve a Production project, which needs MoonPay's production keys.
@@ -274,7 +274,7 @@ describe("assertProjectProviderAdmitted", () => {
       )
     );
     await expect(admit(projects.sandbox, deploymentEnv({}), MANAGED_PRIVY)).rejects.toMatchObject(
-      refusal("Privy requires manual activation for this organization.", "provider_not_entitled")
+      refusal("Privy is turned off for this organization.", "provider_not_entitled")
     );
     await setProviderOverrides({});
     await expect(admit(projects.sandbox, deploymentEnv({}), MANAGED_PRIVY)).rejects.toMatchObject(
@@ -290,7 +290,7 @@ describe("assertProjectProviderAdmitted", () => {
     await setProviderOverrides({ custody: { privy: false } });
 
     await expect(admit(projects.production, deploymentEnv({}), BYOK_PRIVY)).rejects.toMatchObject(
-      refusal("Privy requires manual activation for this organization.", "provider_not_entitled")
+      refusal("Privy is turned off for this organization.", "provider_not_entitled")
     );
     await setProviderOverrides({});
     await expect(

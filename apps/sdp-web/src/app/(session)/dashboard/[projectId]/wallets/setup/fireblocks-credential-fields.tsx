@@ -3,12 +3,11 @@
 import { Button } from "@sdp/ui/button";
 import { DownloadIcon, ExternalLinkIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import useSWR from "swr";
+import { custodyQueryKeys } from "@/app/(session)/dashboard/[projectId]/wallets/custody-query-key";
 import { useTranslations } from "@/i18n/provider";
-import {
-  type FireblocksCsr,
-  generateFireblocksCsrAction,
-  loadFireblocksCsrAction,
-} from "./fireblocks-csr-actions";
+import { fetchPendingFireblocksCsr } from "./fireblocks-csr.data";
+import { type FireblocksCsr, generateFireblocksCsrAction } from "./fireblocks-csr-actions";
 import { FireblocksVaultPicker } from "./fireblocks-vault-picker";
 
 function downloadCsr(csr: FireblocksCsr) {
@@ -29,48 +28,44 @@ interface RegistrationProps {
 }
 function useRegistration({ onReadyChange, onPendingChange }: RegistrationProps) {
   const t = useTranslations();
-  const [csr, setCsr] = useState<FireblocksCsr | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [expiredCsrId, setExpiredCsrId] = useState<string | null>(null);
+  const {
+    data,
+    error: readError,
+    isValidating: loading,
+    mutate,
+  } = useSWR(custodyQueryKeys.pendingFireblocksCsr(), fetchPendingFireblocksCsr, {
+    revalidateOnFocus: false,
+    revalidateOnReconnect: false,
+    shouldRetryOnError: false,
+    // Every mount reads again: a rejected attempt remounts these fields, and the registration
+    // it used is claimed by then, so a cached answer would offer a registration that cannot connect.
+    dedupingInterval: 0,
+  });
+  // A failed read leaves the previous answer in the cache, and a rejected attempt may have
+  // claimed that registration: only a read that succeeded names the one to use.
+  const csr = data === undefined || readError !== undefined ? null : data.csr;
   const [generating, setGenerating] = useState(false);
   const [vaultsPending, setVaultsPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [readFailureCleared, setReadFailureCleared] = useState(false);
   const requestKey = useRef<string | null>(null);
-  const [now, setNow] = useState(() => Date.now());
-  const expired = csr !== null && Date.parse(csr.expiresAt) <= now;
+  const expired = csr !== null && csr.id === expiredCsrId;
   const ready = csr !== null && !expired && !loading && !generating;
   useEffect(() => {
-    let active = true;
-    async function load() {
-      onPendingChange?.(true);
-      onReadyChange?.(false);
-      try {
-        const result = await loadFireblocksCsrAction();
-        if (!active) return;
-        if (result.status === "success") {
-          setCsr(result.csr);
-          setNow(Date.now());
-        } else setError(result.message);
-      } catch {
-        if (active) setError(t("DashboardCustody.fireblocksCsrFailed"));
-      } finally {
-        if (active) {
-          setLoading(false);
-          onPendingChange?.(false);
-        }
-      }
-    }
-    void load();
-    return () => {
-      active = false;
-      onPendingChange?.(false);
-    };
-  }, [onPendingChange, onReadyChange, t]);
+    onReadyChange?.(false);
+  }, [onReadyChange]);
+  useEffect(() => {
+    if (!loading) return;
+    onPendingChange?.(true);
+    return () => onPendingChange?.(false);
+  }, [loading, onPendingChange]);
   useEffect(() => {
     if (!csr) return;
     const remaining = Date.parse(csr.expiresAt) - Date.now();
     const timeout = setTimeout(
       () => {
-        setNow(Date.now());
+        setExpiredCsrId(csr.id);
         onReadyChange?.(false);
       },
       Math.max(0, remaining)
@@ -95,6 +90,7 @@ function useRegistration({ onReadyChange, onPendingChange }: RegistrationProps) 
     onPendingChange?.(true);
     onReadyChange?.(false);
     setError(null);
+    setReadFailureCleared(true);
     try {
       requestKey.current ??= crypto.randomUUID();
       const result = await generateFireblocksCsrAction(requestKey.current);
@@ -104,8 +100,7 @@ function useRegistration({ onReadyChange, onPendingChange }: RegistrationProps) 
         );
         return;
       }
-      setCsr(result.csr);
-      setNow(Date.now());
+      await mutate({ csr: result.csr }, { revalidate: false });
       requestKey.current = crypto.randomUUID();
       downloadCsr(result.csr);
     } catch {
@@ -121,7 +116,11 @@ function useRegistration({ onReadyChange, onPendingChange }: RegistrationProps) 
     loading,
     generating,
     vaultsPending,
-    error,
+    error:
+      error ??
+      (readError !== undefined && !readFailureCleared
+        ? t("DashboardCustody.fireblocksCsrFailed")
+        : null),
     expired,
     generate,
     vaultPendingChanged,

@@ -1,13 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { createClerkClient } from "@clerk/backend";
 import { clerk, clerkSetup } from "@clerk/testing/playwright";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { Client } from "pg";
 import { projectHref } from "@/lib/dashboard-project-path";
 import { getE2EEnv } from "@/playwright/env";
+import { activateClerkOrganization } from "@/playwright/support/clerk-activation";
 import { resolveClerkTestIdentity } from "@/playwright/support/clerk-admin";
 import { recordClerkSession } from "@/playwright/support/clerk-sessions";
 import { provisionLinkedOrgProjects } from "@/playwright/support/local-dashboard-bootstrap";
+import { test } from "@/playwright/support/test";
 
 declare global {
   interface Window {
@@ -19,7 +21,14 @@ const env = getE2EEnv();
 const clerkAdmin = createClerkClient({ secretKey: env.clerkSecretKey });
 const contactA = "Session isolation contact A";
 const contactB = "Session isolation contact B";
-const secondName = `Session isolation ${randomUUID().slice(0, 8)}`;
+const SECOND_ORG_PREFIX = "Session isolation ";
+const secondName = `${SECOND_ORG_PREFIX}${randomUUID().slice(0, 8)}`;
+/**
+ * A fixture organization older than this belongs to no live run: a whole CI
+ * job takes well under it. A run killed before `afterAll` leaves its
+ * organization in the shared test user's list, so each run sweeps those.
+ */
+const STALE_FIXTURE_ORG_MS = 60 * 60 * 1000;
 let primaryName: string;
 let primaryProject: string;
 let primaryOrgId: string;
@@ -40,6 +49,20 @@ async function switchOrganization(page: Page, from: string, to: string, projectI
   await page.getByRole("menuitem", { name: new RegExp(to) }).click();
   await expect(page).toHaveURL(new RegExp(`/dashboard/${projectId}(?:[/?]|$)`));
   await expect(page.getByRole("button", { name: to, exact: true })).toBeVisible();
+}
+
+/**
+ * Deletes fixture organizations that runs killed before `afterAll` left on the
+ * shared Clerk test user. Younger ones may belong to a concurrent run and stay.
+ */
+async function sweepStaleFixtureOrganizations(userId: string) {
+  const memberships = await clerkAdmin.users.getOrganizationMembershipList({ userId, limit: 100 });
+  const cutoff = Date.now() - STALE_FIXTURE_ORG_MS;
+  for (const { organization } of memberships.data) {
+    if (organization.name.startsWith(SECOND_ORG_PREFIX) && organization.createdAt < cutoff) {
+      await clerkAdmin.organizations.deleteOrganization(organization.id);
+    }
+  }
 }
 
 async function signOut(page: Page) {
@@ -68,6 +91,7 @@ test.describe
       productionProject = projects.production;
       const identity = await resolveClerkTestIdentity();
       primaryOrgId = identity.organizationId;
+      await sweepStaleFixtureOrganizations(identity.userId);
       primaryName = (
         await clerkAdmin.organizations.getOrganization({ organizationId: identity.organizationId })
       ).name;
@@ -165,6 +189,7 @@ test.describe
         await page.goto(`${env.baseURL}/sign-in`);
         await clerk.signIn({ page, emailAddress: env.clerkTestEmail });
         await recordClerkSession(page);
+        await activateClerkOrganization(page, primaryOrgId);
         await page.goto(`${env.baseURL}/dashboard`);
         await expect(page.getByRole("button", { name: "Account menu" })).toBeVisible();
         await expectContacts(page, primaryProject, contactA, contactB);
@@ -315,6 +340,7 @@ test.describe
       await page.goto("/sign-in");
       await clerk.signIn({ page, emailAddress: env.clerkTestEmail });
       await recordClerkSession(page);
+      await activateClerkOrganization(page, primaryOrgId);
       await page.goto("/dashboard");
       await expectContacts(page, primaryProject, contactA, contactB);
       await testInfo.attach("signed-back-in", {

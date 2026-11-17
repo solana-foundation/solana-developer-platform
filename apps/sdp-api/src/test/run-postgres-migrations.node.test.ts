@@ -57,12 +57,25 @@ function readMigration(migrationFile: string) {
 /** Legacy migrations through 0125 already share numbers; never renumber them. */
 const LAST_SHARED_MIGRATION_NUMBER = 125;
 
-// Both files merged before their collision was noticed. Their full filenames
-// are deployed migration identities; this exception must never accept a third.
-const MERGED_0226_MIGRATION_PAIR = [
-  "0226_payment_transfer_batches_drop_options.sql",
-  "0226_payment_transfer_principal.sql",
-] as const;
+/**
+ * Later pairs of merged files that share a number. Both files have run wherever their revision
+ * deployed, and renaming either would run it again, so a pair stays once it ships. Each pair here
+ * touches different tables, so the suffix order between them changes nothing. Only these exact
+ * files share the number: a third file with it still fails.
+ * - 226: #2849 and #2864.
+ */
+const SHIPPED_SHARED_MIGRATIONS: ReadonlyMap<number, readonly string[]> = new Map([
+  [226, ["0226_payment_transfer_batches_drop_options.sql", "0226_payment_transfer_principal.sql"]],
+]);
+
+function isShippedPair(number: number, names: readonly string[]): boolean {
+  const shipped = SHIPPED_SHARED_MIGRATIONS.get(number);
+  return (
+    shipped !== undefined &&
+    names.length === shipped.length &&
+    [...names].sort().every((name, index) => name === shipped[index])
+  );
+}
 
 function invalidSharedMigrationNumbers(files: readonly string[]): string[][] {
   const byNumber = new Map<number, string[]>();
@@ -73,13 +86,11 @@ function invalidSharedMigrationNumbers(files: readonly string[]): string[][] {
     byNumber.set(number, [...(byNumber.get(number) ?? []), file]);
   }
   return [...byNumber]
-    .filter(([number, names]) => number > LAST_SHARED_MIGRATION_NUMBER && names.length > 1)
-    .map(([, names]) => names.sort())
     .filter(
-      (names) =>
-        names.length !== MERGED_0226_MIGRATION_PAIR.length ||
-        names.some((name, index) => name !== MERGED_0226_MIGRATION_PAIR[index])
-    );
+      ([number, names]) =>
+        number > LAST_SHARED_MIGRATION_NUMBER && !isShippedPair(number, names) && names.length > 1
+    )
+    .map(([, names]) => names.sort());
 }
 
 describe("Postgres migration numbering", () => {
@@ -92,10 +103,14 @@ describe("Postgres migration numbering", () => {
   });
 
   it("grandfathers only the exact merged 0226 pair", () => {
-    expect(invalidSharedMigrationNumbers(MERGED_0226_MIGRATION_PAIR)).toEqual([]);
-    const third = [...MERGED_0226_MIGRATION_PAIR, "0226_another_migration.sql"].sort();
+    const mergedPair = [
+      "0226_payment_transfer_batches_drop_options.sql",
+      "0226_payment_transfer_principal.sql",
+    ] as const;
+    expect(invalidSharedMigrationNumbers(mergedPair)).toEqual([]);
+    const third = [...mergedPair, "0226_another_migration.sql"].sort();
     expect(invalidSharedMigrationNumbers(third)).toEqual([third]);
-    const replacement = [MERGED_0226_MIGRATION_PAIR[0], "0226_another_migration.sql"].sort();
+    const replacement = [mergedPair[0], "0226_another_migration.sql"].sort();
     expect(invalidSharedMigrationNumbers(replacement)).toEqual([replacement]);
     const newCollision = ["0227_first.sql", "0227_second.sql"];
     expect(invalidSharedMigrationNumbers(newCollision)).toEqual([newCollision]);

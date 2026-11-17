@@ -5,7 +5,7 @@ import { z } from "zod";
 import { type DatabaseClient, getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { conflict, internalError } from "@/lib/errors";
-import { productionProjectsAllowed } from "@/lib/production-entitlement";
+import { environmentAllowed } from "@/lib/production-entitlement";
 import { created } from "@/lib/response";
 import { requireClerkSignup } from "@/middleware/clerk-auth";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -287,10 +287,11 @@ async function activateOrganization(
       )
       .bind(`mem_${crypto.randomUUID()}`, params.organizationId, params.creatorUserId)
       .run();
-    // A deployment that admits no production project creates the sandbox one only.
-    const defaultProjects = productionProjectsAllowed(c.env)
-      ? DEFAULT_PROJECTS
-      : DEFAULT_PROJECTS.filter((project) => project.environment !== "production");
+    // Only the environments this deployment admits: the sandbox one alone on a devnet-only
+    // deployment, the production one alone on a mainnet-only one.
+    const defaultProjects = DEFAULT_PROJECTS.filter((project) =>
+      environmentAllowed(c.env, project.environment)
+    );
     await tx
       .prepare(
         `INSERT INTO projects (id, organization_id, name, slug, description, environment, status, created_by)

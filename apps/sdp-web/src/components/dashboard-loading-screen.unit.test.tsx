@@ -24,6 +24,7 @@ const FLAGS: DashboardFlags = {
   privateChannels: false,
   releaseChannel: "experimental",
   ramps: true,
+  sandboxOnBeta: false,
 };
 
 function renderLoadingScreen(pathname: string): string {

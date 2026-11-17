@@ -30,6 +30,7 @@ import { InterfacesSection } from "./interfaces-section";
 
 const links = {
   signup: { href: "/sign-up", label: "Create account", external: false },
+  sandbox: { href: "/sign-up", label: "Create account", external: false },
   signIn: "/sign-in",
   docs: "https://platform.solana.com/docs",
   openapi: "https://platform.solana.com/docs/reference/api",

@@ -11,25 +11,24 @@ describe("custody provider catalog", () => {
     expect(CUSTODY_PROVIDER_DISPLAY_STATUSES).toEqual(["available", "active"]);
   });
 
-  it("publishes every provider with its launch classification and setup mode", () => {
+  it("publishes every provider with its visibility and setup mode", () => {
     expect(
       CUSTODY_PROVIDER_CATALOG.map((provider) => ({
         id: provider.id,
         visible: provider.visible,
-        availability: provider.availability,
         mode: provider.storedCredentialSetup.mode,
       }))
     ).toEqual([
-      { id: "local", visible: true, availability: "general", mode: "none" },
-      { id: "privy", visible: true, availability: "general", mode: "self_service" },
-      { id: "fireblocks", visible: true, availability: "manual", mode: "self_service" },
-      { id: "coinbase_cdp", visible: true, availability: "general", mode: "none" },
-      { id: "para", visible: true, availability: "general", mode: "none" },
-      { id: "turnkey", visible: true, availability: "general", mode: "none" },
-      { id: "dfns", visible: true, availability: "manual", mode: "none" },
-      { id: "ibm_haven", visible: true, availability: "manual", mode: "none" },
-      { id: "anchorage", visible: true, availability: "manual", mode: "none" },
-      { id: "utila", visible: true, availability: "manual", mode: "none" },
+      { id: "local", visible: true, mode: "none" },
+      { id: "privy", visible: true, mode: "self_service" },
+      { id: "fireblocks", visible: true, mode: "self_service" },
+      { id: "coinbase_cdp", visible: true, mode: "none" },
+      { id: "para", visible: true, mode: "none" },
+      { id: "turnkey", visible: true, mode: "none" },
+      { id: "dfns", visible: true, mode: "none" },
+      { id: "ibm_haven", visible: true, mode: "none" },
+      { id: "anchorage", visible: true, mode: "none" },
+      { id: "utila", visible: true, mode: "none" },
     ]);
   });
 

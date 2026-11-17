@@ -19,7 +19,7 @@ Run each co-signer on a managed container service, such as Google Cloud Run or y
 
 ## Utila
 
-SDP signs with Utila directly: select `utila` in the configurator and fill in its `UTILA_*` credentials. SDP submits each transaction to Utila and polls until it's signed, up to `UTILA_MAX_POLL_ATTEMPTS` times every `UTILA_POLL_INTERVAL_MS` (60 tries, a second apart, by default). Like the local signer, Utila needs a per-organization activation.
+SDP signs with Utila directly: select `utila` in the configurator and fill in its `UTILA_*` credentials. SDP submits each transaction to Utila and polls until it's signed, up to `UTILA_MAX_POLL_ATTEMPTS` times every `UTILA_POLL_INTERVAL_MS` (60 tries, a second apart, by default).
 
 `UTILA_DESIGNATED_SIGNERS` lists the Utila users asked to sign each transaction. Left empty, it's the service account itself.
 

@@ -1,5 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
 import { projectHref } from "@/lib/dashboard-project-path";
+import { test } from "@/playwright/support/test";
 import {
   type PlaywrightProjects,
   provisionLinkedOrgProjects,

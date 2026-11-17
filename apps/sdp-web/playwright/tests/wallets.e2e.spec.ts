@@ -1,8 +1,9 @@
-import { type Browser, expect, type Page, test } from "@playwright/test";
+import { type Browser, expect, type Page } from "@playwright/test";
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import type { Token, TokenTransaction } from "@sdp/types/tokens";
 import { projectHref } from "@/lib/dashboard-project-path";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
+import { test } from "@/playwright/support/test";
 import { createLocalApiClient, type LocalApiClient } from "../support/local-api-client";
 import {
   bootstrapLocalWalletFixtures,

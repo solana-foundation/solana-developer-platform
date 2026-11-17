@@ -33,3 +33,25 @@ test("docs link to the matching dashboard deployment", () => {
     /VERCEL_RELATED_PROJECTS must be valid JSON/
   );
 });
+
+test("a production build links to its configured dashboard over sdp-web's production alias", () => {
+  const production: NodeJS.ProcessEnv = {
+    NODE_ENV: "production",
+    VERCEL_ENV: "production",
+    VERCEL_RELATED_PROJECTS: JSON.stringify([
+      {
+        project: { name: "sdp-web" },
+        preview: {},
+        production: { alias: "platform.solana.com" },
+      },
+    ]),
+  };
+  assert.equal(
+    resolveDashboardUrl({
+      ...production,
+      NEXT_PUBLIC_SDP_WEB_URL: "https://platform-beta.solana.com",
+    }),
+    "https://platform-beta.solana.com/"
+  );
+  assert.equal(resolveDashboardUrl(production), "https://platform.solana.com/");
+});

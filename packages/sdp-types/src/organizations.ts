@@ -70,6 +70,13 @@ export function memberStatusMayMoveMoney(status: string): boolean {
  */
 export const ORGANIZATION_SUSPENDED_REASON = "organization_suspended";
 
+/**
+ * The `reason` of the 403 a mainnet-only deployment (one that admits no sandbox project) gives an
+ * organization without mainnet access, for every action but reading its own organization,
+ * projects and members, and requesting mainnet access. The dashboard shows its lock screen on it.
+ */
+export const ORGANIZATION_NOT_ADMITTED_REASON = "organization_not_admitted";
+
 export const INVITATION_STATUSES = ["pending", "accepted", "expired", "revoked", "failed"] as const;
 export type InvitationStatus = (typeof INVITATION_STATUSES)[number];
 /**

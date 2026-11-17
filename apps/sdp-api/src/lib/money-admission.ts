@@ -30,6 +30,7 @@ import { parseDisabledMovements } from "@/lib/movement-control";
 import {
   parseOrganizationEntitlements,
   productionProjectsAllowed,
+  sandboxProjectsAllowed,
 } from "@/lib/production-entitlement";
 import { logEvent } from "@/runtime/money-path-events";
 import { parseGrantsColumn } from "@/services/api-key.service";
@@ -77,6 +78,7 @@ export type MoneyAdmissionRefusal =
   | "movement_disabled"
   | "organization_inactive"
   | "production_not_enabled"
+  | "sandbox_not_available"
   | "principal_missing"
   | "principal_not_live"
   | "action_not_held"
@@ -125,6 +127,8 @@ export interface MoneyAdmissionFacts {
   rawSettings: string | null;
   /** Whether this deployment admits production projects at all (`SDP_ALLOW_PRODUCTION_PROJECTS`). */
   productionProjectsAllowed: boolean;
+  /** Whether this deployment admits sandbox projects at all (`SDP_ALLOW_SANDBOX_PROJECTS`). */
+  sandboxProjectsAllowed: boolean;
   /** Operator-only project controls, read live for starts. */
   disabledMovements: readonly MovementId[];
   principal: MoneyPrincipalFacts;
@@ -133,12 +137,16 @@ export interface MoneyAdmissionFacts {
 }
 
 /** What the admission read takes from the process environment. */
-type AdmissionEnv = Pick<Env, "SDP_ALLOW_PRODUCTION_PROJECTS">;
+type AdmissionEnv = Pick<Env, "SDP_ALLOW_PRODUCTION_PROJECTS" | "SDP_ALLOW_SANDBOX_PROJECTS">;
 
 /** The organization half of {@link MoneyAdmissionFacts}. */
 export type OrganizationAdmissionFacts = Pick<
   MoneyAdmissionFacts,
-  "organizationStatus" | "projectEnvironment" | "rawSettings" | "productionProjectsAllowed"
+  | "organizationStatus"
+  | "projectEnvironment"
+  | "rawSettings"
+  | "productionProjectsAllowed"
+  | "sandboxProjectsAllowed"
 >;
 
 /**
@@ -176,6 +184,8 @@ const REFUSAL_MESSAGES: Record<Exclude<MoneyAdmissionRefusal, "action_not_held">
   organization_inactive: "Organization is not active",
   // Matches `productionNotEnabled()`, the edge refusal for the same reason.
   production_not_enabled: "Production is not enabled for this organization",
+  // Matches `sandboxNotAvailable()`, the edge refusal for the same reason.
+  sandbox_not_available: "Sandbox projects are not available on this deployment",
   principal_missing: "No authenticated principal may move money here",
   principal_not_live: "The credential moving money is no longer active",
   wallet_out_of_scope: "The credential may not sign with this wallet",
@@ -332,6 +342,9 @@ export function decideMoneyStart(facts: OrganizationAdmissionFacts | null): Mone
       .enableProductionProject !== true
   ) {
     return { admitted: false, reason: "production_not_enabled" };
+  }
+  if (facts.projectEnvironment === "sandbox" && !facts.sandboxProjectsAllowed) {
+    return { admitted: false, reason: "sandbox_not_available" };
   }
   return { admitted: true };
 }
@@ -748,6 +761,7 @@ async function readMoneyAdmissionFactsWith(
         projectEnvironment: row.environment,
         rawSettings: row.settings,
         productionProjectsAllowed: productionProjectsAllowed(env),
+        sandboxProjectsAllowed: sandboxProjectsAllowed(env),
         // A malformed control fails starts closed. Exits never consult it,
         // including when their credential still requires a live read.
         disabledMovements:

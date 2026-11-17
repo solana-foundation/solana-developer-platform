@@ -120,6 +120,11 @@ const SANDBOX_PARA_NOT_CONFIGURED: CustodyIntegration = {
   category: "server",
   state: { status: "not_configured", modes: ["managed"] },
 };
+const FIREBLOCKS_NOT_CONFIGURED: CustodyIntegration = {
+  provider: "fireblocks",
+  category: "institutional",
+  state: { status: "not_configured", modes: ["byok"] },
+};
 
 const PRIVATE_CHANNELS_NOT_CONFIGURED = privateChannelsFamily({
   status: "not_configured",
@@ -127,6 +132,7 @@ const PRIVATE_CHANNELS_NOT_CONFIGURED = privateChannelsFamily({
 });
 const SANDBOX_UNSET_CUSTODY = custodyFamily([
   SANDBOX_PRIVY_NOT_CONFIGURED,
+  FIREBLOCKS_NOT_CONFIGURED,
   SANDBOX_PARA_NOT_CONFIGURED,
 ]);
 
@@ -276,6 +282,7 @@ describe("GET /v1/integrations", () => {
                 category: "server",
                 state: { status: "connected", mode: "byok" },
               },
+              FIREBLOCKS_NOT_CONFIGURED,
             ],
           },
           {
@@ -296,11 +303,18 @@ describe("GET /v1/integrations", () => {
   it.each<{ environment: SdpEnvironment; integrations: CustodyIntegration[] }>([
     {
       environment: "sandbox",
-      integrations: [SANDBOX_PRIVY_NOT_CONFIGURED, SANDBOX_PARA_NOT_CONFIGURED],
+      integrations: [
+        SANDBOX_PRIVY_NOT_CONFIGURED,
+        FIREBLOCKS_NOT_CONFIGURED,
+        SANDBOX_PARA_NOT_CONFIGURED,
+      ],
     },
     {
       environment: "production",
-      integrations: [privyIn({ status: "not_configured", modes: ["byok"] })],
+      integrations: [
+        privyIn({ status: "not_configured", modes: ["byok"] }),
+        FIREBLOCKS_NOT_CONFIGURED,
+      ],
     },
   ])(
     "lists unset custody providers with the modes a $environment project allows",
@@ -318,6 +332,7 @@ describe("GET /v1/integrations", () => {
     expect(await readFamilies("sandbox", DEPLOYMENT)).toEqual([
       custodyFamily([
         privyIn({ status: "connected", mode: "managed" }),
+        FIREBLOCKS_NOT_CONFIGURED,
         SANDBOX_PARA_NOT_CONFIGURED,
       ]),
       PRIVATE_CHANNELS_NOT_CONFIGURED,
@@ -329,7 +344,11 @@ describe("GET /v1/integrations", () => {
     await seedActivePrivyConnection("sandbox");
 
     expect(await readFamilies("sandbox", DEPLOYMENT)).toEqual([
-      custodyFamily([privyIn({ status: "connected", mode: "byok" }), SANDBOX_PARA_NOT_CONFIGURED]),
+      custodyFamily([
+        privyIn({ status: "connected", mode: "byok" }),
+        FIREBLOCKS_NOT_CONFIGURED,
+        SANDBOX_PARA_NOT_CONFIGURED,
+      ]),
       PRIVATE_CHANNELS_NOT_CONFIGURED,
     ]);
   });
@@ -416,6 +435,7 @@ describe("GET /v1/integrations", () => {
     ).toEqual([
       custodyFamily([
         privyIn({ status: "not_configured", modes: ["byok"] }),
+        FIREBLOCKS_NOT_CONFIGURED,
         SANDBOX_PARA_NOT_CONFIGURED,
       ]),
       PRIVATE_CHANNELS_NOT_CONFIGURED,
@@ -429,7 +449,7 @@ describe("GET /v1/integrations", () => {
     });
 
     expect(await readFamilies("sandbox", DEPLOYMENT)).toEqual([
-      custodyFamily([SANDBOX_PARA_NOT_CONFIGURED]),
+      custodyFamily([FIREBLOCKS_NOT_CONFIGURED, SANDBOX_PARA_NOT_CONFIGURED]),
       PRIVATE_CHANNELS_NOT_CONFIGURED,
     ]);
   });

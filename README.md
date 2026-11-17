@@ -10,7 +10,7 @@ This codebase has not been audited. Do not use it to custody production funds, r
 
 Full self-hosting is a work in progress. The repository includes local development and infrastructure helpers, but the primary supported path today is the hosted platform and devnet-oriented development.
 
-The hosted platform is available at https://platform.solana.com and the public docs are at https://platform.solana.com/docs.
+The hosted platform is available at https://platform.solana.com for mainnet, and the hosted sandbox (devnet) at https://platform-beta.solana.com. The public docs are at https://platform.solana.com/docs.
 
 ## What is in this repo?
 

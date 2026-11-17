@@ -27,6 +27,7 @@ export function NavShell({
   signInHref,
   signup,
   signedIn = false,
+  brandBadge = null,
 }: NavShellProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const burgerRef = useRef<HTMLButtonElement>(null);
@@ -47,7 +48,11 @@ export function NavShell({
       </a>
       <header id="nav" className={cn(styles.bar, scrolled && styles.scrolled)}>
         <div className={styles.inner}>
-          <Link className={styles.brand} href="/" aria-label={copy.home}>
+          <Link
+            className={cn(styles.brand, brandBadge && styles.brandWithBadge)}
+            href="/"
+            aria-label={copy.home}
+          >
             <Image
               className={styles.onLight}
               src="/homepage/v6/logo-sdp-wordmark-on-light.svg"
@@ -63,6 +68,7 @@ export function NavShell({
               width={332}
               height={30}
             />
+            {brandBadge ? <span className={styles.brandBadge}>{brandBadge}</span> : null}
           </Link>
           <NavPanels
             groups={groups}
