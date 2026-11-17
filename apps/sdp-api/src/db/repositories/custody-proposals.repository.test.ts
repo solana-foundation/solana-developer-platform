@@ -316,6 +316,7 @@ describe("CustodyProposalsRepository", () => {
       event: { type: "cancel_requested", at: NOW },
     });
     assert(requested);
+    expect(requested.proposal.state.cancelAttempt).toBe(1);
     expect(
       await repo.transition({
         ...identity("cancel_retry"),
@@ -339,8 +340,31 @@ describe("CustodyProposalsRepository", () => {
     expect(retries.filter(Boolean)).toHaveLength(1);
     expect(await repo.getForTransfer(identity("cancel_retry"))).toMatchObject({
       version: requested.proposal.version + 1,
-      state: { cancelRequestedAt: retryAt },
+      state: { cancelRequestedAt: retryAt, cancelAttempt: 2 },
     });
+  });
+
+  it("rolls back a cancellation attempt identity with its audit transaction", async () => {
+    const { proposal } = await seedProposal("attempt_rollback");
+    const refused = await repo.transition({
+      ...identity("attempt_rollback"),
+      expectedVersion: proposal.version,
+      event: { type: "admission_refused", at: NOW, reason: "revoked", message: "Revoked" },
+    });
+    assert(refused);
+    await expect(
+      getDb(env).transaction(async (tx) => {
+        const transactional = createPostgresCustodyProposalsRepository(tx);
+        const requested = await transactional.transition({
+          ...identity("attempt_rollback"),
+          expectedVersion: refused.proposal.version,
+          event: { type: "cancel_requested", at: NOW },
+        });
+        expect(requested?.proposal.state.cancelAttempt).toBe(1);
+        throw new Error("audit write failed");
+      })
+    ).rejects.toThrow("audit write failed");
+    expect(await repo.getForTransfer(identity("attempt_rollback"))).toEqual(refused.proposal);
   });
 
   it("rolls back the lifecycle CAS with the surrounding payment/audit transaction", async () => {
@@ -531,7 +555,10 @@ describe("CustodyProposalsRepository", () => {
       expectedVersion: proposal.version,
       event: { type: "alert_delivered", at: NOW },
     });
-    expect(delivered?.proposal.state.alertedAt).toBe(NOW);
+    expect(delivered?.proposal.state).toMatchObject({
+      authorizationState: "refusal_alerted",
+      alertedAt: NOW,
+    });
     expect(await repo.listUnalerted({ environment: "sandbox", limit: 10 })).toEqual([]);
   });
 

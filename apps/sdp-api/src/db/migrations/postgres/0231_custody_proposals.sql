@@ -10,7 +10,7 @@ CREATE TABLE custody_proposals (
   binding JSONB NOT NULL CHECK (jsonb_typeof(binding) = 'object'),
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived')),
   provider_phase TEXT NOT NULL CHECK (provider_phase IN ('unsent','submitting','absent','pending','executing','completed','failed','cancelled','not_sent','never_accepted')),
-  authorization_state TEXT NOT NULL CHECK (authorization_state IN ('authorized','refused','cancel_requested','cancel_acknowledged','committed_after_refusal')),
+  authorization_state TEXT NOT NULL CHECK (authorization_state IN ('authorized','refused','cancel_requested','cancel_ambiguous','cancel_declined','cancel_retry_requested','cancel_retry_ambiguous','cancel_acknowledged','committed_after_refusal','refusal_alerted')),
   provider_transaction_id TEXT,
   provider_status TEXT,
   provider_sub_status TEXT,
@@ -20,6 +20,7 @@ CREATE TABLE custody_proposals (
   refusal_reason TEXT,
   refusal_message TEXT,
   cancel_requested_at TEXT,
+  cancel_attempt INTEGER NOT NULL DEFAULT 0 CHECK (cancel_attempt >= 0),
   cancel_declined_at TEXT,
   cancel_acknowledged_at TEXT,
   alerted_at TEXT,
@@ -33,11 +34,30 @@ CREATE TABLE custody_proposals (
   CHECK ((refused_at IS NULL AND refusal_reason IS NULL AND refusal_message IS NULL)
       OR (refused_at IS NOT NULL AND refusal_reason IS NOT NULL AND refusal_message IS NOT NULL)),
   CHECK ((authorization_state = 'authorized') = (refused_at IS NULL)),
-  CHECK (authorization_state <> 'committed_after_refusal' OR provider_phase = 'completed'),
-  CHECK (alerted_at IS NULL OR authorization_state = 'committed_after_refusal'),
-  CHECK (cancel_declined_at IS NULL OR cancel_requested_at IS NOT NULL),
-  CHECK (cancel_acknowledged_at IS NULL OR cancel_requested_at IS NOT NULL),
-  CHECK (provider_phase <> 'completed' OR provider_transaction_id IS NOT NULL)
+  CHECK (
+    (provider_phase IN ('unsent','submitting','absent','not_sent','never_accepted')
+      AND authorization_state IN ('authorized','refused'))
+    OR (provider_phase IN ('pending','executing','failed','cancelled')
+      AND authorization_state IN ('authorized','refused','cancel_requested','cancel_ambiguous',
+        'cancel_declined','cancel_retry_requested','cancel_retry_ambiguous','cancel_acknowledged'))
+    OR (provider_phase = 'completed'
+      AND authorization_state IN ('authorized','committed_after_refusal','refusal_alerted'))
+  ),
+  CHECK ((authorization_state = 'refusal_alerted') = (alerted_at IS NOT NULL)),
+  CHECK ((cancel_attempt = 0) = (cancel_requested_at IS NULL)),
+  CHECK (cancel_declined_at IS NULL OR cancel_attempt > 0),
+  CHECK (cancel_acknowledged_at IS NULL OR cancel_attempt > 0),
+  CHECK (authorization_state NOT IN ('cancel_requested','cancel_ambiguous','cancel_declined',
+      'cancel_retry_requested','cancel_retry_ambiguous','cancel_acknowledged') OR cancel_attempt > 0),
+  CHECK (authorization_state NOT IN ('cancel_requested','cancel_ambiguous')
+      OR cancel_declined_at IS NULL),
+  CHECK (authorization_state NOT IN ('cancel_declined','cancel_retry_requested','cancel_retry_ambiguous')
+      OR cancel_declined_at IS NOT NULL),
+  CHECK (authorization_state <> 'cancel_acknowledged' OR cancel_acknowledged_at IS NOT NULL),
+  CHECK (provider_phase <> 'absent' OR first_missing_at IS NOT NULL),
+  CHECK (provider_phase NOT IN ('pending','executing','completed') OR provider_transaction_id IS NOT NULL),
+  CHECK (provider_phase NOT IN ('unsent','submitting','absent','not_sent','never_accepted')
+      OR provider_transaction_id IS NULL)
 );
 CREATE INDEX custody_proposals_due_idx ON custody_proposals (next_check_at, id)
   WHERE status = 'active' AND provider_phase IN ('unsent','submitting','absent','pending','executing');
@@ -48,7 +68,7 @@ CREATE INDEX custody_proposals_requested_idx ON custody_proposals (recheck_reque
 CREATE INDEX custody_proposals_legacy_unsent_idx ON custody_proposals (payment_transfer_id)
   WHERE status = 'active' AND provider_phase = 'unsent' AND authorization_state = 'authorized';
 CREATE INDEX custody_proposals_unalerted_idx ON custody_proposals (refused_at, id)
-  WHERE status = 'active' AND authorization_state = 'committed_after_refusal' AND alerted_at IS NULL;
+  WHERE status = 'active' AND authorization_state = 'committed_after_refusal';
 
 -- NOT VALID avoids a blocking parent-table scan while the prior revision serves.
 ALTER TABLE custody_proposals ADD CONSTRAINT custody_proposals_payment_fk

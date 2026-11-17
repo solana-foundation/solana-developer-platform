@@ -318,6 +318,7 @@ describe("reconcilePendingProposals", () => {
     h.recovery.cancel.mockImplementation(async () => {
       expect(h.state().state).toMatchObject({
         authorizationState: "cancel_requested",
+        cancelAttempt: 1,
         refusal: { reason: "principal_not_live" },
         cancelRequestedAt: expect.any(String),
       });
@@ -350,7 +351,7 @@ describe("reconcilePendingProposals", () => {
       expect(h.recovery.cancel).toHaveBeenCalledOnce();
       expect(h.state().state).toMatchObject({
         providerPhase: phase,
-        authorizationState: accepted ? "cancel_acknowledged" : "refused",
+        authorizationState: accepted ? "cancel_acknowledged" : "cancel_declined",
       });
       expect(h.entries.map((entry) => entry.metadata?.eventType)).toEqual([
         "proposal_refused",
@@ -411,6 +412,7 @@ describe("reconcilePendingProposals", () => {
       await runRecovery();
       expect(h.state().state).toMatchObject({
         authorizationState: "cancel_requested",
+        cancelAttempt: 2,
         cancelRequestedAt: newerAttemptAt,
         cancelAcknowledgedAt: null,
         cancelDeclinedAt: null,
@@ -446,6 +448,116 @@ describe("reconcilePendingProposals", () => {
     }
   );
 
+  it.each([true, false, new Error("Ambiguous cancellation timeout")])(
+    "keeps attempt identity independent of an identical request timestamp (result: %s)",
+    async (result) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(NOW);
+      const h = harness();
+      h.recovery.admit.mockRejectedValue(revoke());
+      h.recovery.cancel.mockImplementation(async () => {
+        const row = h.state();
+        h.states.set(row.payment_transfer_id, {
+          ...row,
+          version: row.version + 1,
+          state: { ...row.state, cancelAttempt: row.state.cancelAttempt + 1 },
+        });
+        if (result instanceof Error) throw result;
+        return result;
+      });
+      if (result instanceof Error) await expect(runRecovery()).rejects.toBe(result);
+      else await runRecovery();
+      expect(h.state().state).toMatchObject({
+        authorizationState: "cancel_requested",
+        cancelAttempt: 2,
+        cancelRequestedAt: NOW,
+        cancelAcknowledgedAt: null,
+        cancelDeclinedAt: null,
+      });
+      expect(h.recovery.cancel).toHaveBeenCalledOnce();
+      expect(h.entries.map((entry) => entry.metadata?.eventType)).toEqual([
+        "proposal_refused",
+        "proposal_cancellation_requested",
+      ]);
+    }
+  );
+
+  it.each(["pending", "executing"] as const)(
+    "persists ambiguous cancellation after a competing %s observation, preserving the error",
+    async (phase) => {
+      const h = harness();
+      const unavailable = new Error("Ambiguous cancellation timeout");
+      h.recovery.admit.mockRejectedValue(revoke());
+      h.recovery.cancel.mockImplementation(async () => {
+        expect(observeDuringCancellation(h, phase)).not.toBeNull();
+        throw unavailable;
+      });
+      await expect(runRecovery()).rejects.toBe(unavailable);
+      expect(h.recovery.cancel).toHaveBeenCalledOnce();
+      expect(h.state().state).toMatchObject({
+        providerPhase: phase,
+        authorizationState: "cancel_ambiguous",
+        cancelAttempt: 1,
+        cancelAcknowledgedAt: null,
+        cancelDeclinedAt: null,
+      });
+      expect(h.entries.map((entry) => entry.metadata?.eventType)).toEqual([
+        "proposal_refused",
+        "proposal_cancellation_requested",
+      ]);
+    }
+  );
+
+  it.each([true, false])(
+    "records cancellation accepted=%s after a same-attempt ambiguous writer",
+    async (accepted) => {
+      const h = harness();
+      h.recovery.admit.mockRejectedValue(revoke());
+      h.recovery.cancel.mockImplementation(async () => {
+        const row = h.state();
+        expect(
+          h.apply({
+            transferId: row.payment_transfer_id,
+            organizationId: row.organization_id,
+            projectId: row.project_id,
+            expectedVersion: row.version,
+            event: { type: "cancel_ambiguous", at: NOW },
+          })
+        ).not.toBeNull();
+        return accepted;
+      });
+      await runRecovery();
+      expect(h.state().state).toMatchObject({
+        authorizationState: accepted ? "cancel_acknowledged" : "cancel_declined",
+        cancelAttempt: 1,
+      });
+      expect(h.recovery.cancel).toHaveBeenCalledOnce();
+      expect(h.entries.map((entry) => entry.metadata?.eventType)).toEqual([
+        "proposal_refused",
+        "proposal_cancellation_requested",
+        accepted ? "proposal_cancellation_accepted" : "proposal_cancellation_declined",
+      ]);
+    }
+  );
+
+  it("reports both an ambiguous provider result and its failed persistence", async () => {
+    const h = harness();
+    const unavailable = new Error("Ambiguous cancellation timeout");
+    const persistenceError = new Error("Cancellation state database unavailable");
+    h.recovery.admit.mockRejectedValue(revoke());
+    h.recovery.cancel.mockRejectedValue(unavailable);
+    h.transition.mockImplementation(async (input) => {
+      if (input.event.type === "cancel_ambiguous") throw persistenceError;
+      return h.apply(input);
+    });
+    await expect(runRecovery()).rejects.toMatchObject({
+      errors: [unavailable, persistenceError],
+    });
+    expect(h.recovery.cancel).toHaveBeenCalledOnce();
+    expect(h.state().state.authorizationState).toBe("cancel_requested");
+    expect(h.entries).toHaveLength(2);
+  });
+
   it.each([true, false])(
     "preserves an already recorded cancellation accepted=%s",
     async (accepted) => {
@@ -465,7 +577,9 @@ describe("reconcilePendingProposals", () => {
         return !accepted;
       });
       await runRecovery();
-      expect(h.state().state.authorizationState).toBe(accepted ? "cancel_acknowledged" : "refused");
+      expect(h.state().state.authorizationState).toBe(
+        accepted ? "cancel_acknowledged" : "cancel_declined"
+      );
       expect(h.entries).toHaveLength(2);
       expect(h.recovery.cancel).toHaveBeenCalledOnce();
     }
@@ -508,7 +622,8 @@ describe("reconcilePendingProposals", () => {
     h.recovery.cancel.mockRejectedValueOnce(new Error("Ambiguous cancellation timeout"));
     await expect(runRecovery()).rejects.toThrow("Ambiguous cancellation timeout");
     const first = h.state().state;
-    expect(first.authorizationState).toBe("cancel_requested");
+    expect(first.authorizationState).toBe("cancel_ambiguous");
+    expect(first.cancelAttempt).toBe(1);
     vi.setSystemTime("2026-11-12T00:01:00.000Z");
     await runRecovery();
     expect(h.recovery.cancel).toHaveBeenCalledOnce();
@@ -520,6 +635,7 @@ describe("reconcilePendingProposals", () => {
     expect(h.recovery.read).toHaveBeenCalledTimes(3);
     expect(h.state().state.refusal).toEqual(first.refusal);
     expect(h.state().state.cancelRequestedAt).toBe("2026-11-12T00:05:00.000Z");
+    expect(h.state().state.cancelAttempt).toBe(2);
     expect(h.payment().status).toBe("processing");
   });
 
@@ -530,7 +646,7 @@ describe("reconcilePendingProposals", () => {
     h.recovery.admit.mockRejectedValueOnce(revoke());
     h.recovery.cancel.mockResolvedValue(false);
     await runRecovery();
-    expect(h.state().state.authorizationState).toBe("refused");
+    expect(h.state().state.authorizationState).toBe("cancel_declined");
     for (let minute = 1; minute < 5; minute += 1) {
       vi.setSystemTime(`2026-11-12T00:0${minute}:00.000Z`);
       await runRecovery();
@@ -547,7 +663,7 @@ describe("reconcilePendingProposals", () => {
     await runRecovery();
     expect(h.recovery.cancel).toHaveBeenCalledTimes(2);
     expect(h.recovery.admit).toHaveBeenCalledOnce();
-    expect(h.state().state.authorizationState).toBe("refused");
+    expect(h.state().state.authorizationState).toBe("cancel_declined");
     expect(h.payment().status).toBe("processing");
   });
 
@@ -621,7 +737,7 @@ describe("reconcilePendingProposals", () => {
     expect(h.recovery.read).not.toHaveBeenCalled();
     expect(h.state().state).toMatchObject({
       providerPhase: "completed",
-      authorizationState: "committed_after_refusal",
+      authorizationState: "refusal_alerted",
       alertedAt: expect.any(String),
     });
     expect(h.alert).toHaveBeenCalledOnce();

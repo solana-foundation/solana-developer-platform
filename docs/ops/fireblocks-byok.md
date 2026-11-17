@@ -515,7 +515,12 @@ terminal provider outcome closes the payment. The first cancellation attempt is
 immediate; a timeout or rejected cancel keeps the durable refusal and retries no
 sooner than five minutes after the last attempt. Observations continue every
 minute during that cooldown, including completion-after-refusal alerts.
-An acknowledged cancel is polled to outcome.
+An acknowledged cancel is polled to outcome. Cancellation stages are explicit:
+`cancel_requested` is in flight, `cancel_ambiguous` records an uncertain result,
+and `cancel_declined` records a definitive decline. Retries after that decline use
+`cancel_retry_requested` and `cancel_retry_ambiguous` to preserve the first-decline
+audit. A committed integer `cancelAttempt` identifies each attempt independently
+of its timestamp; timestamps record timing and enforce the cooldown.
 Signed, broadcasting, cancelling and unfamiliar states are observation-only.
 
 The first refusal, first cancellation request, first definitive decline,
@@ -531,9 +536,12 @@ close the original payment audit intent; only terminal settlement does.
 
 A payment that completes after a recorded refusal emits the CRITICAL structured
 event `fireblocks_transfer_committed_after_refusal`. The row remains an alert
-outbox until emission is acknowledged, including completions first observed by a
-viewer. The event requires an already-recorded refusal. Transfers first observed
-outside the cancellable window remain observation-only; without a prior refusal,
+outbox in `committed_after_refusal` until emission is acknowledged, including
+completions first observed by a viewer. Acknowledgment moves it to
+`refusal_alerted`; the query and partial index select by state, while `alertedAt`
+records delivery time. The event requires an already-recorded refusal. Transfers
+first observed outside the cancellable window remain observation-only; without a
+prior refusal,
 their completion raises no critical event even if the initiating principal was
 revoked. Delivery is at least once: deduplicate on transfer ID. Configure on-call
 routing for this event before rollout; this repository does not deploy that rule.

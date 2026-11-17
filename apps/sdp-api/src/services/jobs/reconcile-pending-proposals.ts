@@ -1,8 +1,10 @@
 import { currentClusterScope } from "@sdp/rpc/scope";
 import {
+  type CustodyProposalEvent,
   canRequestCustodyProposalCancellation,
   hasUnalertedCustodyProposalRefusal,
   isCancellableCustodyProposalPhase,
+  isCustodyProposalCancellationInFlight,
   isTerminalCustodyProposalPhase,
 } from "@sdp/types/custody-proposals";
 import type {
@@ -21,7 +23,10 @@ import {
   transferProposalIntentSchema,
 } from "@/services/domain/signing/admitted-proposer";
 import { systemProposalLedger } from "@/services/jobs/proposal-recovery-ledger";
-import type { ProposalLedger } from "@/services/payments/custody-proposal-ledger";
+import type {
+  ProposalEventResult,
+  ProposalLedger,
+} from "@/services/payments/custody-proposal-ledger";
 import { applyProposalEvent } from "@/services/payments/custody-proposal-ledger";
 import {
   applyProposalObservation,
@@ -77,7 +82,7 @@ async function recoverProposal(env: Env, ledger: ProposalLedger, snapshot: Custo
     !isCancellableCustodyProposalPhase(current.proposal.state.providerPhase)
   )
     return;
-  if (current.proposal.state.refusal === null) {
+  if (current.proposal.state.authorizationState === "authorized") {
     let refusal: { reason: string; message: string };
     if (current.transfer.initiated_by_principal === null) {
       refusal = {
@@ -110,21 +115,48 @@ async function recoverProposal(env: Env, ledger: ProposalLedger, snapshot: Custo
   if (!current.written) return;
   // Only the durable CAS winner calls cancel. A timeout retains retry work; acknowledgment
   // does not settle the payment.
-  const cancellationProposalId = current.proposal.id;
-  const accepted = await recovery.cancel(current.transfer.id);
-  const event = {
+  let accepted: boolean;
+  try {
+    accepted = await recovery.cancel(current.transfer.id);
+  } catch (error) {
+    try {
+      await recordCancellationResult(ledger, current, {
+        type: "cancel_ambiguous",
+        at: new Date().toISOString(),
+      });
+    } catch (persistenceError) {
+      throw new AggregateError(
+        [error, persistenceError],
+        "Custody proposal cancellation and result recording failed"
+      );
+    }
+    throw error;
+  }
+  await recordCancellationResult(ledger, current, {
     type: accepted ? "cancel_accepted" : "cancel_declined",
     at: new Date().toISOString(),
-  } as const;
+  });
+}
+
+async function recordCancellationResult(
+  ledger: ProposalLedger,
+  current: ProposalEventResult,
+  event: Extract<
+    CustodyProposalEvent,
+    { type: "cancel_accepted" | "cancel_declined" | "cancel_ambiguous" }
+  >
+): Promise<void> {
+  const proposalId = current.proposal.id;
+  const cancellationAttempt = current.proposal.state.cancelAttempt;
   // Observations may advance the version during cancel. Retry only this attempt's
   // result, without repeating provider I/O or overwriting a newer decision.
   for (let attempt = 0; attempt < CANCELLATION_RESULT_WRITE_ATTEMPTS; attempt += 1) {
     current = await applyProposalEvent(ledger, current.transfer, current.proposal, event);
     if (current.written) return;
     if (
-      current.proposal.id !== cancellationProposalId ||
-      current.proposal.state.cancelRequestedAt !== cancellationAt ||
-      current.proposal.state.authorizationState !== "cancel_requested" ||
+      current.proposal.id !== proposalId ||
+      current.proposal.state.cancelAttempt !== cancellationAttempt ||
+      !isCustodyProposalCancellationInFlight(current.proposal.state) ||
       isTerminalCustodyProposalPhase(current.proposal.state.providerPhase)
     )
       return;

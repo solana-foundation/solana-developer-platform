@@ -42,7 +42,7 @@ describe("legacy Fireblocks proposal compatibility", () => {
         )
       ).toEqual({
         providerPhase: "completed",
-        authorizationState: "committed_after_refusal",
+        authorizationState: "refusal_alerted",
         providerTransactionId: "fb-transaction",
         providerStatus: "FAILED",
         providerSubStatus: "PROVIDER_FAILURE",
@@ -50,6 +50,7 @@ describe("legacy Fireblocks proposal compatibility", () => {
         firstMissingAt: MISSING,
         refusal: REFUSAL,
         cancelRequestedAt: ACKNOWLEDGED,
+        cancelAttempt: 1,
         cancelDeclinedAt: null,
         cancelAcknowledgedAt: ACKNOWLEDGED,
         alertedAt: ALERTED,
@@ -165,6 +166,7 @@ describe("legacy Fireblocks proposal compatibility", () => {
     expect(state.authorizationState).toBe("authorized");
     expect(state.refusal).toBeNull();
     expect(state.cancelRequestedAt).toBe(ACKNOWLEDGED);
+    expect(state.cancelAttempt).toBe(1);
   });
 
   it("preserves a recorded refusal without inventing a cancellation acknowledgment", () => {
@@ -190,7 +192,45 @@ describe("legacy Fireblocks proposal compatibility", () => {
     expect(state.providerPhase).toBe("failed");
     expect(state.authorizationState).toBe("cancel_acknowledged");
     expect(state.cancelRequestedAt).toBe(ACKNOWLEDGED);
+    expect(state.cancelAttempt).toBe(1);
     expect(state.cancelAcknowledgedAt).toBe(ACKNOWLEDGED);
+  });
+
+  it.each([
+    { phase: "unsent", facts: {} },
+    { phase: "submitting", facts: { fireblocksSubmissionStartedAt: STARTED } },
+    { phase: "absent", facts: { fireblocksFirstMissingAt: MISSING } },
+  ] as const)(
+    "preserves $phase refusal evidence before provider acceptance",
+    ({ phase, facts }) => {
+      const state = legacyFireblocksProposalState(
+        payment("processing", null, { ...facts, proposalRefusal: REFUSAL })
+      );
+      expect(state).toMatchObject({
+        providerPhase: phase,
+        authorizationState: "refused",
+        refusal: REFUSAL,
+        cancelAttempt: 0,
+      });
+    }
+  );
+
+  it("retains old acknowledgment evidence without inventing provider acceptance", () => {
+    const state = legacyFireblocksProposalState(
+      payment("processing", null, {
+        proposalRefusal: REFUSAL,
+        proposalCancellationAcceptedAt: ACKNOWLEDGED,
+      })
+    );
+    expect(state).toMatchObject({
+      providerPhase: "unsent",
+      authorizationState: "refused",
+      providerTransactionId: null,
+      refusal: REFUSAL,
+      cancelAttempt: 1,
+      cancelRequestedAt: ACKNOWLEDGED,
+      cancelAcknowledgedAt: ACKNOWLEDGED,
+    });
   });
 
   it("continues to reject malformed durable refusal and timestamp facts", () => {

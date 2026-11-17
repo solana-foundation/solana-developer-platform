@@ -366,6 +366,7 @@ describe("custody proposal event ledger", () => {
     const staged = await apply({ type: "cancel_requested", at: LATER });
     expect(staged.proposal.state).toMatchObject({
       authorizationState: "cancel_requested",
+      cancelAttempt: 1,
       cancelRequestedAt: LATER,
       cancelAcknowledgedAt: null,
     });
@@ -373,6 +374,7 @@ describe("custody proposal event ledger", () => {
     const retryAt = "2026-11-12T10:06:00.000Z";
     const retried = await apply({ type: "cancel_requested", at: retryAt });
     expect(retried.proposal.state.cancelRequestedAt).toBe(retryAt);
+    expect(retried.proposal.state.cancelAttempt).toBe(2);
     const accepted = await apply({ type: "cancel_accepted", at: retryAt });
     expect(accepted.transfer).toMatchObject({
       status: "processing",
@@ -394,7 +396,9 @@ describe("custody proposal event ledger", () => {
   it("audits only the winning first decline, including after ambiguous retries", async () => {
     await apply(REFUSAL);
     await apply({ type: "cancel_requested", at: LATER });
-    // No response was recorded for that call. A later definitive decline is still the first.
+    await apply({ type: "cancel_ambiguous", at: LAST });
+    expect((await proposal()).state.authorizationState).toBe("cancel_ambiguous");
+    // An ambiguous call does not consume the first definitive-decline audit.
     const retryAt = "2026-11-12T10:06:00.000Z";
     await apply({ type: "cancel_requested", at: retryAt });
     const payment = await transfer();
@@ -405,7 +409,8 @@ describe("custody proposal event ledger", () => {
     ]);
     expect(results.filter((result) => result.written)).toHaveLength(1);
     expect((await proposal()).state).toMatchObject({
-      authorizationState: "refused",
+      authorizationState: "cancel_declined",
+      cancelAttempt: 2,
       cancelRequestedAt: retryAt,
       cancelDeclinedAt: retryAt,
       refusal: { at: REFUSAL.at, reason: REFUSAL.reason },
@@ -413,10 +418,14 @@ describe("custody proposal event ledger", () => {
     expect((await apply({ type: "cancel_requested", at: retryAt })).written).toBe(false);
     const laterAt = "2026-11-12T10:11:00.000Z";
     await apply({ type: "cancel_requested", at: laterAt });
+    expect((await proposal()).state.authorizationState).toBe("cancel_retry_requested");
+    await apply({ type: "cancel_ambiguous", at: laterAt });
+    expect((await proposal()).state.authorizationState).toBe("cancel_retry_ambiguous");
     const declinedAgain = await apply({ type: "cancel_declined", at: laterAt });
     expect(declinedAgain.written).toBe(true);
     expect((await proposal()).state).toMatchObject({
-      authorizationState: "refused",
+      authorizationState: "cancel_declined",
+      cancelAttempt: 3,
       cancelRequestedAt: laterAt,
       cancelDeclinedAt: retryAt,
       refusal: { at: REFUSAL.at, reason: REFUSAL.reason },
@@ -539,6 +548,7 @@ describe("custody proposal event ledger", () => {
       completed,
     ]);
     await apply({ type: "alert_delivered", at: LAST });
+    expect((await proposal()).state.authorizationState).toBe("refusal_alerted");
     expect(await ledger.proposals.listUnalerted({ environment: "sandbox", limit: 10 })).toEqual([]);
     await apply({ type: "alert_delivered", at: LAST });
     expect((await auditEvents()).map((entry) => entry.metadata.eventType)).toEqual([

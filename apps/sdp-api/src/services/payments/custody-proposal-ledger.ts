@@ -72,7 +72,9 @@ export async function applyProposalEventInTransaction(
     return { entry: null, result: { transfer: current, proposal: latest, written: false } };
   }
   // The legacy claim participates in this transaction so an overlapping older
-  // revision cannot submit the same intent. Remove with the contract migration.
+  // revision cannot submit the same intent. PRO-2520 removes it after serving and
+  // rollback images no longer read the compatibility projection:
+  // https://linear.app/solana-fndn/issue/PRO-2520
   if (
     event.type === "submission_claimed" &&
     !(await claimLegacyProposalSubmission(repo, latest, event.at))
@@ -194,7 +196,7 @@ function projectionError(
   return observation.error === null ? null : undefined;
 }
 
-/** Legacy writers do not bump proposal versions; their immutable facts still win. */
+/** Legacy payment guards remain until PRO-2520 drains serving and rollback images. */
 function assertPaymentProjection(
   current: PaymentTransferRow,
   proposal: CustodyProposalRow,
@@ -215,6 +217,7 @@ function assertPaymentProjection(
   }
 }
 
+/** PRO-2520 removes this payment-status gate with the old-writer bridge. */
 function assertPendingDecision(current: PaymentTransferRow, event: CustodyProposalEvent): void {
   switch (event.type) {
     case "admission_refused":
@@ -228,6 +231,7 @@ function assertPendingDecision(current: PaymentTransferRow, event: CustodyPropos
     case "observed_absent":
     case "cancel_accepted":
     case "cancel_declined":
+    case "cancel_ambiguous":
     case "alert_delivered":
       break;
     default: {

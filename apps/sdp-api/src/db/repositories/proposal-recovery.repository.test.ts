@@ -238,6 +238,73 @@ describe("requestPendingProposalRecovery", () => {
     expect(await getDb(env).queryMany("SELECT id FROM custody_proposals")).toEqual([]);
   });
 
+  it.each([
+    { id: "acknowledgment_only", refused: false, authorization: "authorized" },
+    { id: "refused_acknowledgment", refused: true, authorization: "cancel_acknowledged" },
+  ] as const)("adopts historical $id as one recorded cancellation attempt", async (entry) => {
+    await seedTransfer({ id: entry.id, principal: KEY });
+    const refusal = { at: NOW, reason: "principal_revoked", message: "Revoked" };
+    const acknowledgment = { proposalCancellationAcceptedAt: NOW };
+    const facts = entry.refused ? { ...acknowledgment, proposalRefusal: refusal } : acknowledgment;
+    await getDb(env).execute(
+      `UPDATE payment_transfers SET provider_reference = 'historical_provider_id',
+         provider_data = provider_data || ?::jsonb WHERE id = ?`,
+      [JSON.stringify(facts), entry.id]
+    );
+    expect(
+      await adoptLegacyCustodyProposals(getDb(env), { environment: "sandbox", now: NOW, limit: 50 })
+    ).toBe(1);
+    expect(
+      await getDb(env).queryOne(
+        `SELECT authorization_state, cancel_attempt, cancel_requested_at, cancel_acknowledged_at
+           FROM custody_proposals WHERE payment_transfer_id = ?`,
+        [entry.id]
+      )
+    ).toEqual({
+      authorization_state: entry.authorization,
+      cancel_attempt: 1,
+      cancel_requested_at: NOW,
+      cancel_acknowledged_at: NOW,
+    });
+  });
+
+  it("retains delivered refusal alerts when an old writer completes an adopted unsent payment", async () => {
+    await seedTransfer({ id: "historical_alert", principal: KEY });
+    const db = getDb(env);
+    expect(
+      await adoptLegacyCustodyProposals(db, {
+        organizationId: ORGANIZATION.id,
+        now: NOW,
+        limit: 50,
+      })
+    ).toBe(1);
+    await db.execute(
+      `UPDATE payment_transfers SET status = 'confirmed', provider_reference = 'completed_provider_id',
+         provider_data = provider_data || ?::jsonb WHERE id = 'historical_alert'`,
+      [
+        JSON.stringify({
+          proposalRefusal: { at: NOW, reason: "principal_revoked", message: "Revoked" },
+          proposalCancellationAcceptedAt: NOW,
+          proposalRefusalAlertedAt: NOW,
+        }),
+      ]
+    );
+    expect(
+      await adoptLegacyCustodyProposals(db, { environment: "sandbox", now: NOW, limit: 50 })
+    ).toBe(1);
+    expect(
+      await db.queryOne(
+        `SELECT provider_phase, authorization_state, cancel_attempt, alerted_at
+           FROM custody_proposals WHERE payment_transfer_id = 'historical_alert'`
+      )
+    ).toEqual({
+      provider_phase: "completed",
+      authorization_state: "refusal_alerted",
+      cancel_attempt: 1,
+      alerted_at: NOW,
+    });
+  });
+
   it("rolls the enqueue back with its authority transaction", async () => {
     await seedTransfer({ id: "transaction", principal: KEY });
     await expect(

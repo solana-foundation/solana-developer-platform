@@ -2,7 +2,10 @@ import { CUSTODY_PROVIDERS } from "@sdp/types/custody";
 import {
   CUSTODY_PROPOSAL_ACTIVE_PHASES,
   CUSTODY_PROPOSAL_AUTHORIZATION_STATES,
+  CUSTODY_PROPOSAL_MAX_CANCEL_ATTEMPT,
   CUSTODY_PROPOSAL_PROVIDER_PHASES,
+  CUSTODY_PROPOSAL_UNALERTED_AUTHORIZATION_STATES,
+  createCustodyProposalState,
   custodyProposalStateSchema,
   transitionCustodyProposal,
 } from "@sdp/types/custody-proposals";
@@ -43,6 +46,7 @@ const proposalColumnsSchema = z.object({
   refusal_reason: z.string().min(1).nullable(),
   refusal_message: z.string().min(1).nullable(),
   cancel_requested_at: nullableTimestampSchema,
+  cancel_attempt: z.number().int().min(0).max(CUSTODY_PROPOSAL_MAX_CANCEL_ATTEMPT),
   cancel_declined_at: nullableTimestampSchema,
   cancel_acknowledged_at: nullableTimestampSchema,
   alerted_at: nullableTimestampSchema,
@@ -70,6 +74,7 @@ function mapProposal(value: Record<string, unknown>): CustodyProposalRow {
         ? null
         : { at: row.refused_at, reason: row.refusal_reason, message: row.refusal_message },
     cancelRequestedAt: row.cancel_requested_at,
+    cancelAttempt: row.cancel_attempt,
     cancelDeclinedAt: row.cancel_declined_at,
     cancelAcknowledgedAt: row.cancel_acknowledged_at,
     alertedAt: row.alerted_at,
@@ -106,6 +111,7 @@ function stateValues(state: CustodyProposalRow["state"]): readonly unknown[] {
     state.refusal?.reason ?? null,
     state.refusal?.message ?? null,
     state.cancelRequestedAt,
+    state.cancelAttempt,
     state.cancelDeclinedAt,
     state.cancelAcknowledgedAt,
     state.alertedAt,
@@ -124,15 +130,20 @@ const STATE_COLUMNS = [
   "refusal_reason",
   "refusal_message",
   "cancel_requested_at",
+  "cancel_attempt",
   "cancel_declined_at",
   "cancel_acknowledged_at",
   "alerted_at",
 ];
 const ACTIVE_PHASES_SQL = CUSTODY_PROPOSAL_ACTIVE_PHASES.map((phase) => `'${phase}'`).join(", ");
+const INITIAL_STATE = createCustodyProposalState();
+const UNALERTED_STATES_SQL = CUSTODY_PROPOSAL_UNALERTED_AUTHORIZATION_STATES.map(
+  (state) => `'${state}'`
+).join(", ");
 const WORKER_INTERVAL_MS = 60_000;
 // A status read or authority wake may adopt a payment before its creator has
 // claimed submission. Only recovery waits; the create transition stays immediate.
-const SUBMISSION_GRACE_SQL = "(cp.provider_phase <> 'unsent' OR pt.created_at <= ?)";
+const SUBMISSION_GRACE_SQL = `(cp.provider_phase <> '${INITIAL_STATE.providerPhase}' OR pt.created_at <= ?)`;
 
 function recoveryScopeWhere(input: CustodyProposalRecoveryScope): {
   clauses: string[];
@@ -248,7 +259,7 @@ export function createPostgresCustodyProposalsRepository(
                   version = version + 1, updated_at = ?
             WHERE cp.payment_transfer_id = ? AND cp.organization_id = ? AND cp.project_id = ?
               AND cp.version = ? AND cp.status = 'active'
-              AND cp.provider_phase = 'unsent' AND cp.authorization_state = 'authorized'
+              AND cp.provider_phase = '${INITIAL_STATE.providerPhase}' AND cp.authorization_state = '${INITIAL_STATE.authorizationState}'
               AND EXISTS (SELECT 1 FROM payment_transfers pt WHERE pt.id = cp.payment_transfer_id
                 AND (pt.provider_reference IS NOT NULL
                   OR pt.provider_data->>'fireblocksSubmissionStartedAt' IS NOT NULL
@@ -395,8 +406,8 @@ export function createPostgresCustodyProposalsRepository(
         `SELECT cp.* FROM custody_proposals cp
           JOIN payment_transfers pt ON pt.id = cp.payment_transfer_id
           JOIN projects p ON p.id = cp.project_id
-         WHERE p.environment = ? AND cp.status = 'active' AND cp.authorization_state = 'committed_after_refusal'
-           AND cp.alerted_at IS NULL ${scope.clauses.map((clause) => `AND ${clause}`).join(" ")}
+         WHERE p.environment = ? AND cp.status = 'active' AND cp.authorization_state IN (${UNALERTED_STATES_SQL})
+            ${scope.clauses.map((clause) => `AND ${clause}`).join(" ")}
          ORDER BY cp.refused_at, cp.id LIMIT ?`,
         [
           input.environment,

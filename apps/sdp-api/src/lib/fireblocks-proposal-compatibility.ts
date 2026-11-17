@@ -2,6 +2,7 @@ import {
   type CustodyProposalState,
   createCustodyProposalState,
   custodyProposalRefusalSchema,
+  custodyProposalStateSchema,
 } from "@sdp/types/custody-proposals";
 import {
   isFireblocksTransactionCancellable,
@@ -36,10 +37,12 @@ export function legacyFireblocksProposalState(
   state.refusal = facts.proposalRefusal ?? null;
   state.cancelAcknowledgedAt = facts.proposalCancellationAcceptedAt ?? null;
   state.cancelRequestedAt = state.cancelAcknowledgedAt;
+  // Old writers recorded only acknowledgment, which proves at least one attempt.
+  state.cancelAttempt = state.cancelAcknowledgedAt === null ? 0 : 1;
   state.alertedAt = facts.proposalRefusalAlertedAt ?? null;
   state.providerPhase = legacyPaymentPhase(row.status, legacyProviderPhase(state));
   state.authorizationState = legacyAuthorizationState(state);
-  return state;
+  return custodyProposalStateSchema.parse(state);
 }
 
 /** The payment's recorded outcome takes precedence over provider progress. */
@@ -91,16 +94,18 @@ function legacyAuthorizationState(
   if (state.refusal === null) return "authorized";
   switch (state.providerPhase) {
     case "completed":
-      return "committed_after_refusal";
+      return state.alertedAt === null ? "committed_after_refusal" : "refusal_alerted";
     case "unsent":
     case "submitting":
     case "absent":
+    case "not_sent":
+    case "never_accepted":
+      // Historical evidence cannot invent an accepted provider transaction.
+      return "refused";
     case "pending":
     case "executing":
     case "failed":
     case "cancelled":
-    case "not_sent":
-    case "never_accepted":
       return state.cancelAcknowledgedAt !== null ? "cancel_acknowledged" : "refused";
     default: {
       const exhaustive: never = state.providerPhase;

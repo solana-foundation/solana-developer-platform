@@ -1,8 +1,5 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
-import {
-  createCustodyProposalState,
-  custodyProposalStateSchema,
-} from "@sdp/types/custody-proposals";
+import { createCustodyProposalState } from "@sdp/types/custody-proposals";
 import {
   PAYMENT_TRANSFER_STATUSES,
   SUCCESSFUL_PAYMENT_TRANSFER_STATUSES,
@@ -127,7 +124,7 @@ export async function adoptLegacyCustodyProposals(
   // one lifecycle mapping; malformed legacy evidence never imports partially.
   const legacy = rows.map((value) => {
     const payment = legacyPaymentSchema.parse(value);
-    const state = custodyProposalStateSchema.parse(legacyFireblocksProposalState(payment));
+    const state = legacyFireblocksProposalState(payment);
     return {
       payment_transfer_id: payment.id,
       organization_id: payment.organization_id,
@@ -150,6 +147,7 @@ export async function adoptLegacyCustodyProposals(
       refusal_reason: state.refusal?.reason ?? null,
       refusal_message: state.refusal?.message ?? null,
       cancel_requested_at: state.cancelRequestedAt,
+      cancel_attempt: state.cancelAttempt,
       cancel_declined_at: state.cancelDeclinedAt,
       cancel_acknowledged_at: state.cancelAcknowledgedAt,
       alerted_at: state.alertedAt,
@@ -165,7 +163,7 @@ export async function adoptLegacyCustodyProposals(
          payment_updated_at text, binding jsonb, provider_phase text, authorization_state text,
          provider_transaction_id text, provider_status text, provider_sub_status text,
          submission_started_at text, first_missing_at text, refused_at text, refusal_reason text,
-         refusal_message text, cancel_requested_at text,
+         refusal_message text, cancel_requested_at text, cancel_attempt integer,
          cancel_declined_at text, cancel_acknowledged_at text, alerted_at text, created_at text
        )
      ), legacy AS MATERIALIZED (
@@ -183,7 +181,7 @@ export async function adoptLegacyCustodyProposals(
        id, organization_id, project_id, custody_wallet_id, payment_transfer_id, provider,
        binding, provider_phase, authorization_state, provider_transaction_id,
        provider_status, provider_sub_status, submission_started_at, first_missing_at,
-       refused_at, refusal_reason, refusal_message, cancel_requested_at,
+       refused_at, refusal_reason, refusal_message, cancel_requested_at, cancel_attempt,
        cancel_declined_at, cancel_acknowledged_at, alerted_at, next_check_at, created_at, updated_at
      ) SELECT
        'cproposal_legacy_' || gen_random_uuid()::text, legacy.organization_id,
@@ -191,7 +189,7 @@ export async function adoptLegacyCustodyProposals(
        legacy.binding, legacy.provider_phase, legacy.authorization_state, legacy.provider_transaction_id,
        legacy.provider_status, legacy.provider_sub_status, legacy.submission_started_at, legacy.first_missing_at,
        legacy.refused_at, legacy.refusal_reason, legacy.refusal_message, legacy.cancel_requested_at,
-       legacy.cancel_declined_at, legacy.cancel_acknowledged_at, legacy.alerted_at,
+       legacy.cancel_attempt, legacy.cancel_declined_at, legacy.cancel_acknowledged_at, legacy.alerted_at,
        clock.now, legacy.created_at, clock.now FROM legacy CROSS JOIN clock
        ON CONFLICT (payment_transfer_id) DO UPDATE SET
          provider_phase = EXCLUDED.provider_phase,
@@ -205,6 +203,7 @@ export async function adoptLegacyCustodyProposals(
          refusal_reason = EXCLUDED.refusal_reason,
          refusal_message = EXCLUDED.refusal_message,
          cancel_requested_at = EXCLUDED.cancel_requested_at,
+         cancel_attempt = EXCLUDED.cancel_attempt,
          cancel_declined_at = EXCLUDED.cancel_declined_at,
          cancel_acknowledged_at = EXCLUDED.cancel_acknowledged_at,
          alerted_at = EXCLUDED.alerted_at,
