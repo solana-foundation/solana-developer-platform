@@ -129,7 +129,7 @@ export function mainnetAccessRequestEmailContent(request: MainnetAccessRequestEm
       { label: "Terms", value: `Version ${request.termsVersion}, accepted with the request` },
     ],
     action: { label: "Open Clerk", url: "https://dashboard.clerk.com" },
-    note: "To approve, set enableProductionProject in the organization's Clerk private metadata.",
+    note: 'To approve, set {"sdp": {"enableProductionProject": true}} in the organization\'s Clerk private metadata. A top-level enableProductionProject is ignored.',
   };
 }
 
