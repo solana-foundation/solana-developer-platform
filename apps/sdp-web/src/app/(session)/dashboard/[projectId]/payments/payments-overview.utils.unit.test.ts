@@ -1,5 +1,6 @@
 import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
-import { PAYMENT_TRANSFER_STATUS_TONE, PAYMENT_TRANSFER_STATUSES } from "@sdp/types/payments";
+import type { PaymentTransferStatus } from "@sdp/types/payments";
+import { PAYMENT_TRANSFER_STATUSES } from "@sdp/types/payments";
 import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import type { BadgeVariant } from "@sdp/ui/badge";
 import { describe, expect, it } from "vitest";
@@ -160,18 +161,25 @@ describe("statusMessageKey", () => {
 });
 
 describe("statusVariant", () => {
-  const expectedVariantByTone = {
-    success: "success",
+  // Pinned by status, not derived through PAYMENT_TRANSFER_STATUS_TONE: the spec is that a
+  // settled transfer reads as success, a still-moving one as warning, a failed one as danger,
+  // and a lapsed-without-loss one as neutral — whatever tone label happens to carry it. A
+  // remap of a status's tone in production must fail here.
+  const expectedVariantByStatus = {
     pending: "warning",
-    danger: "danger",
-    neutral: "default",
-  } satisfies Record<
-    (typeof PAYMENT_TRANSFER_STATUS_TONE)[keyof typeof PAYMENT_TRANSFER_STATUS_TONE],
-    BadgeVariant
-  >;
+    processing: "warning",
+    confirmed: "success",
+    finalized: "success",
+    failed: "danger",
+    awaiting_payment: "warning",
+    settling: "warning",
+    completed: "success",
+    canceled: "default",
+    expired: "default",
+  } as const satisfies Record<PaymentTransferStatus, BadgeVariant>;
 
-  it.each(PAYMENT_TRANSFER_STATUSES)("maps %s through its status tone", (status) => {
-    expect(statusVariant(status)).toBe(expectedVariantByTone[PAYMENT_TRANSFER_STATUS_TONE[status]]);
+  it.each(PAYMENT_TRANSFER_STATUSES)("maps %s to the badge its state reads as", (status) => {
+    expect(statusVariant(status)).toBe(expectedVariantByStatus[status]);
   });
 });
 
