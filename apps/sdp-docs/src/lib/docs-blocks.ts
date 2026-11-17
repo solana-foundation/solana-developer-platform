@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import type { ApiMethod } from "@sdp/api-catalog/reference";
+import type { ManagedCustodyProvider } from "@sdp/types/custody";
 import { embedSource } from "fumadocs-core/mdx-plugins/stringifier";
 import type { Parent, Root, RootContent } from "mdast";
 import remarkGfm from "remark-gfm";
@@ -70,20 +71,23 @@ const publishedModules = (surface: PublicSurface): ModuleEntry[] =>
     (entry) => entry.module === "core" || isModulePublished(entry.module, surface)
   );
 
-const publishedCustodyProviderEntries = (
-  surface: PublicSurface
-): [string, CustodyProviderEntry][] =>
-  Object.entries(DOCS_CUSTODY_PROVIDERS).filter(([provider]) =>
-    surface.custodyProviders.some((id) => id === provider)
-  );
+type CustodyCatalogRow = [ManagedCustodyProvider, CustodyProviderEntry];
+
+// Object.entries widens the catalog's keys to string; matching each against the
+// manifest's typed providers keeps the catalog's display order and the type.
+const publishedCustodyProviderEntries = (surface: PublicSurface): CustodyCatalogRow[] =>
+  Object.entries(DOCS_CUSTODY_PROVIDERS).flatMap(([key, entry]): CustodyCatalogRow[] => {
+    const provider = surface.custodyProviders.find((id) => id === key);
+    return provider && provider !== "local" ? [[provider, entry]] : [];
+  });
 
 /** A provider's guide when this build publishes it: a BYOK-only guide needs the channel's BYOK setup. */
 const publishedGuide = (
-  provider: string,
+  provider: ManagedCustodyProvider,
   { guide }: CustodyProviderEntry,
   surface: PublicSurface
 ): CustodyProviderEntry["guide"] =>
-  guide && (guide.mode !== "byok" || surface.byokCustodyProviders.some((id) => id === provider))
+  guide && (guide.mode !== "byok" || surface.byokCustodyProviders.includes(provider))
     ? guide
     : undefined;
 
