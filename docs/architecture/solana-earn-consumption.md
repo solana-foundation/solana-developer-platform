@@ -24,7 +24,7 @@ the project's environment only: a strategy row from the other environment is
 ## Contract ownership
 
 The public source of truth is `apps/sdp-api/src/openapi/**`. The Embedded Yield
-guide describes the supported integration flow. Generated API reference and AI
+and Treasury guides describe the supported integration flows. Generated API reference and AI
 discovery resources must be regenerated from those sources rather than edited
 by hand.
 

@@ -1,0 +1,1137 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      '@solana/kit':
+        specifier: 8.6.0
+        version: 8.6.0
+    devDependencies:
+      tsx:
+        specifier: 4.23.15
+        version: 4.23.15
+
+packages:
+
+  '@esbuild/aix-ppc64@0.28.2':
+    resolution: {integrity: sha512-XExcO+dvLKvVtNTibSTBej1NCAbaGhWn9Ww1ZPx80qsahhPFe/8jgWP0IchNe0F3HwkU7n8ejhH8bjonqht8mQ==}
+    engines: {node: '>=18'}
+    cpu: [ppc64]
+    os: [aix]
+
+  '@esbuild/android-arm64@0.28.2':
+    resolution: {integrity: sha512-5YfKeeI8qWfBZIX+u2xZC3Zlb3Os/gLS2sbEKM+I4ZOcsWmHS2WLysCcQZDAFRslDUU5Oiq44gf6PYN1vGwG5A==}
+    engines: {node: '>=18'}
+    cpu: [arm64]
+    os: [android]
+
+  '@esbuild/android-arm@0.28.2':
+    resolution: {integrity: sha512-kXXoiPVVGQcnIYGOeaovwOURpniDBpSq4A03qkQ+BMQqtGG6HYap3xne9C1O1yo4TR3qxlCX5IqqmX6fFo2Lqg==}
+    engines: {node: '>=18'}
+    cpu: [arm]
+    os: [android]
+
+  '@esbuild/android-x64@0.28.2':
+    resolution: {integrity: sha512-O387ite7SzUyCcy3JQX4P4bLtEA7bLLkx+esve5JHnyYfNTxcVpXZo9jhdB0lTKN44gztELTdU7nS8Nr16Fs1Q==}
+    engines: {node: '>=18'}
+    cpu: [x64]
+    os: [android]
+
+  '@esbuild/darwin-arm64@0.28.2':
+    resolution: {integrity: sha512-n4KqkOQrraxHJcgjM1RvwbigfQKIKJVpM7xp+KsxiyUSrRdIXnt73VhrPAx0fV44hgfmIVKjxMN9J1t5jySVkw==}
+    engines: {node: '>=18'}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@esbuild/darwin-x64@0.28.2':
+    resolution: {integrity: sha512-uq6suIWYP37qzGddBKPw5QEQPi6HiLGsO7UmkpfyaYNQ3D+rN6w6WfwH+nuqcGXWvawGwxOEroO4YGnFh95azw==}
+    engines: {node: '>=18'}
+    cpu: [x64]
+    os: [darwin]
+
+  '@esbuild/freebsd-arm64@0.28.2':
+    resolution: {integrity: sha512-n+I0BTSRIoy+d6RPKnEVwql5UwBJolytvY4mAOIEJorKlqgPII8ix6slVVrfZ5Tnj7glIZvloylbB/EJPMWEXw==}
+    engines: {node: '>=18'}
+    cpu: [arm64]
+    os: [freebsd]
+
+  '@esbuild/freebsd-x64@0.28.2':
+    resolution: {integrity: sha512-78XJTJkvPs0kz2w61301PJjXl4g7q3JqiYMZ/M/yVI73EHBrCRTgkhu9oqG7vPqq+a/yadEW8aD+agKlk5xrmg==}
+    engines: {node: '>=18'}
+    cpu: [x64]
+    os: [freebsd]
+
+  '@esbuild/linux-arm64@0.28.2':
+    resolution: {integrity: sha512-pW4AC0P3it8c7do9MVM4p51FzHzdM/TZrerurgRcHJ2WTa1VQ1CIq18xncfpBJw4ojkiZZrKW2yIBWBP92j6Ug==}
+    engines: {node: '>=18'}
+    cpu: [arm64]
+    os: [linux]
+
+  '@esbuild/linux-arm@0.28.2':
+    resolution: {integrity: sha512-XlDnu2q5yoqems+xay6wSAcg9DDD7K9RLKZEBOMZm3ckNpJBvOX20tSfby8KfrrhINDyv9V2YVZKY/SpoGJI8w==}
+    engines: {node: '>=18'}
+    cpu: [arm]
+    os: [linux]
+
+  '@esbuild/linux-ia32@0.28.2':
+    resolution: {integrity: sha512-CYbnj78HsIeA+DhgUKgFCfvNsTHFhMMrinUrMZpDXJXKN8T3XViTZ/+wtHeVxEWY8ewSzTFN+nRmSwO2tZaLUQ==}
+    engines: {node: '>=18'}
+    cpu: [ia32]
+    os: [linux]
+
+  '@esbuild/linux-loong64@0.28.2':
+    resolution: {integrity: sha512-buwkd8nsph4R+ajRvw0qM5Hja/TXQow3ptzWO2EbG/cqcIkHloRrdlBtQlshyYGTNFvfkfJ5tpPLVkY4DtsPfQ==}
+    engines: {node: '>=18'}
+    cpu: [loong64]
+    os: [linux]
+
+  '@esbuild/linux-mips64el@0.28.2':
+    resolution: {integrity: sha512-ZVykbDyk7519VwiNb9Lcj9m8XM6v5V9uKPvrEMkkEedVewf+0itkhahp4HDpgERXhwLRpWFypsGbG/J8s0QjJA==}
+    engines: {node: '>=18'}
+    cpu: [mips64el]
+    os: [linux]
+
+  '@esbuild/linux-ppc64@0.28.2':
+    resolution: {integrity: sha512-CAXl+Dtd9UUuJd8pKKdwh6MLm3MUMiqMPmhZ3tTSXPqfyQ3vDl6R5hZdZ/kYojK4ofXtdfSv1tFq8XzWx3heNQ==}
+    engines: {node: '>=18'}
+    cpu: [ppc64]
+    os: [linux]
+
+  '@esbuild/linux-riscv64@0.28.2':
+    resolution: {integrity: sha512-GeXCej4IQtU1B+QlDV8W/RRvbzI3O/Stss+/bCXv4lZls5WGRtu2a+3JkA3i4qIUlMXpcHebWpF8AkJhATowuA==}
+    engines: {node: '>=18'}
+    cpu: [riscv64]
+    os: [linux]
+
+  '@esbuild/linux-s390x@0.28.2':
+    resolution: {integrity: sha512-3H1weTYZPxt/WOhByszQZybS9w5lKzUn1FDMsgEChbHWQwHYQQRfBxgCcZvPhjHfKyJjIievvMmEUawJrdY9Dg==}
+    engines: {node: '>=18'}
+    cpu: [s390x]
+    os: [linux]
+
+  '@esbuild/linux-x64@0.28.2':
+    resolution: {integrity: sha512-4xTZr1FUmSoQW4XIWmit3tzQrUTZM+N3P0XV8xROKYF50XfI7xeO90+1bZvNwxIufQ9hDQVRJH5YhgPVF8A/HQ==}
+    engines: {node: '>=18'}
+    cpu: [x64]
+    os: [linux]
+
+  '@esbuild/netbsd-arm64@0.28.2':
+    resolution: {integrity: sha512-sSATRjPeDBg3pdgHoQfoYBob11Kk1FGa9lui5RIHZCoCkJa9QKlvl3/vKz2usCmYYjs7ymJR/2Nnsqe+Hjt5nw==}
+    engines: {node: '>=18'}
+    cpu: [arm64]
+    os: [netbsd]
+
+  '@esbuild/netbsd-x64@0.28.2':
+    resolution: {integrity: sha512-lqnzCV+mM0gIADaKihiCg6ifgfU2L3h5E33rNQBN1Y4MaVGnzryzmvvf7UHxprpQdE8hpqLolJ9Rl+SkIRDpyw==}
+    engines: {node: '>=18'}
+    cpu: [x64]
+    os: [netbsd]
+
+  '@esbuild/openbsd-arm64@0.28.2':
+    resolution: {integrity: sha512-AL2qJILH7lNjrDmCQDvdxMfAUIv8KMNZOvrwAQ8i8//ntL9FflhOyMJ8OZSMBb8/AWXe3/5v5S20y3zCoZWKoQ==}
+    engines: {node: '>=18'}
+    cpu: [arm64]
+    os: [openbsd]
+
+  '@esbuild/openbsd-x64@0.28.2':
+    resolution: {integrity: sha512-QtiuPytchRyC4rwUKhexJdQKvDuZ6hWloi3igqPQNUJCS1/v9EiO3UTOXR6A3FoMo4fnAKbWJdqaIwhOzh8qEw==}
+    engines: {node: '>=18'}
+    cpu: [x64]
+    os: [openbsd]
+
+  '@esbuild/openharmony-arm64@0.28.2':
+    resolution: {integrity: sha512-WkhYDmpTjLvGlScA1rwjRUmhl4k8oXR3cIbtqWmELgU/dFeHHlEllxDvdWcNJV9rbzCexB5vz8gtNewWLgCT7Q==}
+    engines: {node: '>=18'}
+    cpu: [arm64]
+    os: [openharmony]
+
+  '@esbuild/sunos-x64@0.28.2':
+    resolution: {integrity: sha512-GPMSkTOtMnv2U2F8gxe4Io6qmVs+YKyp832Etqqxr0hFngmXQ3rzwytelm3GIn7T4VviRUlf3sOgBOiTdvaf7g==}
+    engines: {node: '>=18'}
+    cpu: [x64]
+    os: [sunos]
+
+  '@esbuild/win32-arm64@0.28.2':
+    resolution: {integrity: sha512-PIhhEkE9uPBleRBrQEJpUn7MBnibZzbGzYWPmY3x+YoVg/95zbjB4CxPPOQ8l5tYYM4mMaCthF8/1DIfBQQyWQ==}
+    engines: {node: '>=18'}
+    cpu: [arm64]
+    os: [win32]
+
+  '@esbuild/win32-ia32@0.28.2':
+    resolution: {integrity: sha512-YmJbfTlvU7Sdn9BB+4PRES4oB6pxgS37MAONj+hBr/cpXS1aBPKXxNnDbu+QCWPj0o9dgyxeq79g6c5P8KeuYA==}
+    engines: {node: '>=18'}
+    cpu: [ia32]
+    os: [win32]
+
+  '@esbuild/win32-x64@0.28.2':
+    resolution: {integrity: sha512-5ebpxr3nWMzrL/rnUI755Jkuee0bHL/Gq0WTF9lvcpv73wAp5eu8MfBUgWK9bhWvZjj7yX8etf/8tI8Ney695g==}
+    engines: {node: '>=18'}
+    cpu: [x64]
+    os: [win32]
+
+  '@solana/accounts@8.6.0':
+    resolution: {integrity: sha512-yIcrKjbUXzs1K6KkcRJfAHFOsn8Jpp9AeczcHOHQoBv11AxHM5KmdCTv8rnv7OObq696sd3gpbamVxtqnL0meQ==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/addresses@8.6.0':
+    resolution: {integrity: sha512-V30spa+zKsY7i4elEEOZQB/1xpRc0CzbSypI/yTZwj/Bg1o09T6A+pflMDTBoIWH3sglmigdK1jApEOOA7Bypg==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/assertions@8.6.0':
+    resolution: {integrity: sha512-zQFbZoPFE3GqBw/7JyZxaH5t/Ibm7eHOmOfRI542/zz0BHWSnMkR0N5aSndPJd9creMUP+mFtX8hAr6bZ6rDBg==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/codecs-core@8.6.0':
+    resolution: {integrity: sha512-1N2XZ1yCJGmdTE3g5Fh6/UOE6y46qing+7CZpxfrgB4Q+1l+R/d0z4G15IpQUNl3vzqML8CFF791f/A1XSVmJA==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/codecs-data-structures@8.6.0':
+    resolution: {integrity: sha512-BLwclFSLVqugUktXucjGfpUFSaX4V7payjSi6x0DDdLs6PaFfjiH3ykQPV5QRkTeOlf0xC6dOMUUntDhYzVyGw==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/codecs-numbers@8.6.0':
+    resolution: {integrity: sha512-GRIArvWJiYxH5w1RMKn7IOCLy0uYB/WRT2kFW/uyXHzL1VNFyud2BIzG0D3iM+AxTd85SdS/x93aV7NEw0mTOQ==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/codecs-strings@8.6.0':
+    resolution: {integrity: sha512-bLS/o5NdCRb9xj23zLACPjxYvDhdjvSDH4XoBAmQ1CPn3cDvVqVvAz0T41Bs/LMykhamkmpqTcWLoTOVqjTz3w==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      fastestsmallesttextencoderdecoder: ^1.0.22
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      fastestsmallesttextencoderdecoder:
+        optional: true
+      typescript:
+        optional: true
+
+  '@solana/codecs@8.6.0':
+    resolution: {integrity: sha512-7vUVLdYlTay3rsijiBPN4g992V8RXbgY2DNAXrsE6eHFnwaX8gzdDNASgF4Z0mbgNC026qdLG6LTY4l16tvE8g==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/errors@8.6.0':
+    resolution: {integrity: sha512-viHL51ymR1HZB7ZTp0ESkLOyHCa4bPfok9dvRYbMmYokY5ys1xinISKHUhcOHsg9zbuAWBRJUOnZRWAPbb4+yA==}
+    engines: {node: '>=20.18.0'}
+    hasBin: true
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/fast-stable-stringify@8.6.0':
+    resolution: {integrity: sha512-PVuzLesqjvuW1qeg0brkUtpRnQYCLS0mB7SsFu+iio+dxFzbrrHzkSYVoUBEEbjXysCq1L350Frs1+v7CEsXGQ==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/fixed-points@8.6.0':
+    resolution: {integrity: sha512-yS0XIHwWETtTjAgUHPhpQpcigPvC6phba3vW7rvVPSvVz1FhxNki82ojyl1pISglK7IkUTYcGhaXDhsY/oz8rQ==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/functional@8.6.0':
+    resolution: {integrity: sha512-greLf2tiMJ5oWaSdp3zkAcUF3sIG3CU1UssxoMYNHy/xywbZifKnOl5syQjKY1XdYPZZmLAWJBFYCkzVns5bxA==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/instruction-plans@8.6.0':
+    resolution: {integrity: sha512-hq1bLZStauHKmwHWheCoF9UxcFlJsYm9X4saUj4llkJl6GmTrDTmeiE93mJngz4GO6cAkm65D/AjYRcp69jUVw==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/instructions@8.6.0':
+    resolution: {integrity: sha512-1mXhgf5XaIJir02TgkUwzNRJs8mCCRRRsW45ZwqCp66bnIxmxEy3a91twgGXvBfE6dvzzg3TNSjcfqGQ/ADBog==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/keys@8.6.0':
+    resolution: {integrity: sha512-vxj3zmcHfY0EqDSJR8nn7w/qQAdCG3uSyGGcIfLgf/ZhVUgVDYDUyUqrxSL5DxAs64czhSu+ufRh7B5AKwMtaQ==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/kit@8.6.0':
+    resolution: {integrity: sha512-UaigU+LiTzkU237FxfiJhxufvEfb1J02djJOnGpSz1GAjZtbZ8oc4EkQ1bS4sHewSRyR9RUk6yhBb5bLHG0w4w==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/nominal-types@8.6.0':
+    resolution: {integrity: sha512-uuRReiuEWfTTwtlJNvTSStuHrDF45Itl2k3BGg/4kHWxqUdtS5u4PK4bMgzoPWoyPorDj5y6TEMa+MydM5D7Sg==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/offchain-messages@8.6.0':
+    resolution: {integrity: sha512-VFic3fotmL9fIjs7Amk402CMWLeWwhNQvAF9cyZO++x42oU2FNeTe27rxfgFLYPaIHaRonlII+5pmsHQHA240Q==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/options@8.6.0':
+    resolution: {integrity: sha512-WFsTtIQukNGGHRImcmn8Se8o6A4vu4wY0fuLSeB/L7C45FPoQI2fTIud6hf9g2fum0dR3U0pFNIciwQjlVq2LA==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/plugin-core@8.6.0':
+    resolution: {integrity: sha512-wvjpR66FreDxDXfF5RrIay7aXW+JfcmSj1TiDu+rUyWaV1Xu390E/KKL3dM6OfkIOtP66H9M9w1XihB8syMkfg==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/plugin-interfaces@8.6.0':
+    resolution: {integrity: sha512-ta+JYsKD7GMUoBLbeE1nYKDPN9nOwQN1y04xR4tbyfDbNsGLPz3fTKH8Y48bOs552sW4OcUB8F3pGVZefqPyWg==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/program-client-core@8.6.0':
+    resolution: {integrity: sha512-e6Wx2Y2UrQ0dPB6hndVcyUXQwBt9/DLr8k2P7tRgW0JNVhHNylZQ6aYQAqxZzS8Z92gGz7l3XL+r9tCLKBkIVw==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/programs@8.6.0':
+    resolution: {integrity: sha512-JKGtqXtiT4zon7xZkmys2G1/HchwbNjzbP+E+0Rp/Cko+svB9w9SE2PROEVJZS8UH98lbi1epjsHYAgESamwvg==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/promises@8.6.0':
+    resolution: {integrity: sha512-HLlAMwXnEyhg9HxVJGDlWgFlM4QUt/Qq0nL69bbC7COCHhUQFRcKLq5uIbaXPy7FNJlNBSTTCBZwI0IK9up0SQ==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/rpc-api@8.6.0':
+    resolution: {integrity: sha512-NFHtOB9z4HyV8frN84o+d9jKj5luRzrySZJLgwMgcG/Q2fWahTDrP+ZqRKLmqibvFBg/fwhcxl77+TfKZjpvhA==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/rpc-parsed-types@8.6.0':
+    resolution: {integrity: sha512-wZKtQOS3RdHZqJ3ycpdibup31tfbY6lHYGUKjmzeF6N2E2y7WEpB7qiEr9AMBB00mDUtorcqBMpOli6PyT4Gog==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/rpc-spec-types@8.6.0':
+    resolution: {integrity: sha512-6+2F2BN2CXp4g7cnvLp2mRo/XwdN5At7f3HbdEablxNe1UvI5S8WIEY3l/Y+nh2NQIaEVz9fLjmTYV+UfZNzEg==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/rpc-spec@8.6.0':
+    resolution: {integrity: sha512-V1c+r6HXTb/nCEl5SHKLPzzb6aMEbr0lFOcgjEX8TQ8fE6ZlLzNz3tKvcgbBlOJCeyVXSrcNl3tv8i8xNp+n/g==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/rpc-subscriptions-api@8.6.0':
+    resolution: {integrity: sha512-Cbyi0ZpwNCcxRgjjc1vKVWBdwNOAKGT1VjryfQU/FDySUo2Lg8u5LUsJb6d53QD5dhEU+0nooxfBmRUUyebZug==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/rpc-subscriptions-channel-websocket@8.6.0':
+    resolution: {integrity: sha512-k1UmMiIJFeo7wAUTiqg7Ni6gdsJAd65D3Wxqdtf5iBX9TjkvWGrL3KXdJq2ZzS1c9eqd220W0v7fkFTA8tfX5Q==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/rpc-subscriptions-spec@8.6.0':
+    resolution: {integrity: sha512-m7lBQS9hgzWN1ZI+JUy5rV8ctG7oy0WbGHoj4vevB4esK2SYUyI0eQB4GrQhVwGnkyTxATS/R91ZZzWYDKGXlg==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/rpc-subscriptions@8.6.0':
+    resolution: {integrity: sha512-ZaoFtiKg25KqYykBslB8TDWqfm7S162FyTJvFI0HL0U94K1O675IG2h913mes3voatigpqLneFxkNrVs5yE7tA==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/rpc-transformers@8.6.0':
+    resolution: {integrity: sha512-aSfctQeLTszEQdNGDrPWbi/7voJYrYo/rvIZRDbokYQRDwMuphw7kENGdwaQB7A9XSX0tsPe+dKkbxjWf0Druw==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/rpc-transport-http@8.6.0':
+    resolution: {integrity: sha512-jr7ef/UOIO7bRjI7DEXji3J7nCFO3jIYPGw3L0fyF7VEJox9Bh8TNHsn9G9jv1kqdwkUnFrPPWVMvmAWQwSmvg==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/rpc-types@8.6.0':
+    resolution: {integrity: sha512-gg05ZjZq8sFcf0JKO6/MQ1oYSFQuT5SU51dhirGjfl8UCxX/Q6ocsUgzb9a/zPNrRsXJkduaZF1bARah7MrrYw==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/rpc@8.6.0':
+    resolution: {integrity: sha512-u5dg96ThDVAeklC9vtVpuYL7wRqkyolm++qYKd6yL7tPRdKZNxdGHbFHQR2qIcMQ0oVfEA9tGnQhplj+6Yt/0g==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/signers@8.6.0':
+    resolution: {integrity: sha512-q8FNQfGnMsHc7VLBhh+TwsMfodiYtYhoTqNj6lDIP2bz93l173rzcZWSRH/hg/7ksFdhHuV4nEkWj0L65N0S0Q==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/subscribable@8.6.0':
+    resolution: {integrity: sha512-z6qRloUTxoI459dUV2K/HQZO1HYuP5f6NQxXxd25TtM2TDpnjOzoO3pJAlOZP3cwXGgtGk6UWmMEY1a4j0TILw==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/sysvars@8.6.0':
+    resolution: {integrity: sha512-oAIVThVcZr2qDwdvc3Fx+CKCbG1d4VwwRDXbu/tDKVDUIZXDWoTP//BX0u1FimkuirMHHW9Sl+AsSGFba0KPew==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/transaction-confirmation@8.6.0':
+    resolution: {integrity: sha512-kd7LwN1k6L+k9jXMjzm6KqGDuUsETZ1pWMnWY7ZT+1bDjRPbki/RylQc+2CIF7YYphT5GIloTmUziAAmhyw4eQ==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/transaction-introspection@8.6.0':
+    resolution: {integrity: sha512-/7MYRLnM7AF0983oaicjhvWWQEdeFgknBiKG5LVFd8WT68m5vL18d7/fZHkvsA41zWkIIrRVuh0PM4COeENNlQ==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/transaction-messages@8.6.0':
+    resolution: {integrity: sha512-Zb7mB8Xu+AXaNiSmgghsyliGNoi7HO4hKdyQC0Qth4hW9QOBMdjSJ687KIUwsAzDSVXwdIbsnkUPpwCl1fcMdw==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@solana/transactions@8.6.0':
+    resolution: {integrity: sha512-m2i0dxDtB9mGqhJd714OQpKzGFp9cQbU80kwIBFflOrHdZ2cJzZ61xjGe+vegz/WGsqPec604pUbHKXXIFkNjg==}
+    engines: {node: '>=20.18.0'}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  chalk@5.6.2:
+    resolution: {integrity: sha512-7NzBL0rN6fMUW+f7A6Io4h40qQlG+xGmtMxfbnH/K7TAtt8JQWVQK+6g0UXKMeVJoyV5EkkNsErQ8pVD3bLHbA==}
+    engines: {node: ^12.17.0 || ^14.13 || >=16.0.0}
+
+  commander@15.0.0:
+    resolution: {integrity: sha512-z67u4ZhzCL/Tydu1lJARtEZYWbWaN7oYLHbsuzocr6y4N6WZAagG3RQ4FW61V1/0+jImpj293XfrcYnd1qxtPg==}
+    engines: {node: '>=22.12.0'}
+
+  esbuild@0.28.2:
+    resolution: {integrity: sha512-HKVLS8dvII+xoKW9kmqxbRKrnWEXfJJr/FZhhJmiqIB0e053QNYFqOBouTMO/k5sID4MvCiUCvv8b9M4h32wIA==}
+    engines: {node: '>=18'}
+    hasBin: true
+
+  fsevents@2.3.3:
+    resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
+    engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
+    os: [darwin]
+
+  tsx@4.23.15:
+    resolution: {integrity: sha512-Yiex1Ovn8z2xPpOWckIiysV1SSyRMY9BkLF++q0yKiDxCqRhosKfMg3janKkiLBwZ5c/YryloKwGZcrEmtwxKw==}
+    engines: {node: '>=18.0.0'}
+    hasBin: true
+
+  undici-types@8.12.4:
+    resolution: {integrity: sha512-GNCQH3MbVGB8OAVAoTiLH8pu4wx5Ni3DWKpnBzGj3WDsi8EwmK0aOVBooNEt+g5YL1eHPxcS9XUTouwFU6j1kQ==}
+
+  ws@8.22.1:
+    resolution: {integrity: sha512-oyL6OPYme/CmiFvNuGzeoxCJ4nOrZE2O1FwM9MWM1AsGri6nLXB2pg+lNA8aLeXMSav0J6eIVS1j6vUPzUtK9g==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
+snapshots:
+
+  '@esbuild/aix-ppc64@0.28.2':
+    optional: true
+
+  '@esbuild/android-arm64@0.28.2':
+    optional: true
+
+  '@esbuild/android-arm@0.28.2':
+    optional: true
+
+  '@esbuild/android-x64@0.28.2':
+    optional: true
+
+  '@esbuild/darwin-arm64@0.28.2':
+    optional: true
+
+  '@esbuild/darwin-x64@0.28.2':
+    optional: true
+
+  '@esbuild/freebsd-arm64@0.28.2':
+    optional: true
+
+  '@esbuild/freebsd-x64@0.28.2':
+    optional: true
+
+  '@esbuild/linux-arm64@0.28.2':
+    optional: true
+
+  '@esbuild/linux-arm@0.28.2':
+    optional: true
+
+  '@esbuild/linux-ia32@0.28.2':
+    optional: true
+
+  '@esbuild/linux-loong64@0.28.2':
+    optional: true
+
+  '@esbuild/linux-mips64el@0.28.2':
+    optional: true
+
+  '@esbuild/linux-ppc64@0.28.2':
+    optional: true
+
+  '@esbuild/linux-riscv64@0.28.2':
+    optional: true
+
+  '@esbuild/linux-s390x@0.28.2':
+    optional: true
+
+  '@esbuild/linux-x64@0.28.2':
+    optional: true
+
+  '@esbuild/netbsd-arm64@0.28.2':
+    optional: true
+
+  '@esbuild/netbsd-x64@0.28.2':
+    optional: true
+
+  '@esbuild/openbsd-arm64@0.28.2':
+    optional: true
+
+  '@esbuild/openbsd-x64@0.28.2':
+    optional: true
+
+  '@esbuild/openharmony-arm64@0.28.2':
+    optional: true
+
+  '@esbuild/sunos-x64@0.28.2':
+    optional: true
+
+  '@esbuild/win32-arm64@0.28.2':
+    optional: true
+
+  '@esbuild/win32-ia32@0.28.2':
+    optional: true
+
+  '@esbuild/win32-x64@0.28.2':
+    optional: true
+
+  '@solana/accounts@8.6.0':
+    dependencies:
+      '@solana/addresses': 8.6.0
+      '@solana/codecs-core': 8.6.0
+      '@solana/codecs-strings': 8.6.0
+      '@solana/errors': 8.6.0
+      '@solana/rpc-spec': 8.6.0
+      '@solana/rpc-types': 8.6.0
+    transitivePeerDependencies:
+      - fastestsmallesttextencoderdecoder
+
+  '@solana/addresses@8.6.0':
+    dependencies:
+      '@solana/assertions': 8.6.0
+      '@solana/codecs-core': 8.6.0
+      '@solana/codecs-strings': 8.6.0
+      '@solana/errors': 8.6.0
+      '@solana/nominal-types': 8.6.0
+    transitivePeerDependencies:
+      - fastestsmallesttextencoderdecoder
+
+  '@solana/assertions@8.6.0':
+    dependencies:
+      '@solana/errors': 8.6.0
+
+  '@solana/codecs-core@8.6.0':
+    dependencies:
+      '@solana/errors': 8.6.0
+
+  '@solana/codecs-data-structures@8.6.0':
+    dependencies:
+      '@solana/codecs-core': 8.6.0
+      '@solana/codecs-numbers': 8.6.0
+      '@solana/errors': 8.6.0
+
+  '@solana/codecs-numbers@8.6.0':
+    dependencies:
+      '@solana/codecs-core': 8.6.0
+      '@solana/errors': 8.6.0
+
+  '@solana/codecs-strings@8.6.0':
+    dependencies:
+      '@solana/codecs-core': 8.6.0
+      '@solana/codecs-numbers': 8.6.0
+      '@solana/errors': 8.6.0
+
+  '@solana/codecs@8.6.0':
+    dependencies:
+      '@solana/codecs-core': 8.6.0
+      '@solana/codecs-data-structures': 8.6.0
+      '@solana/codecs-numbers': 8.6.0
+      '@solana/codecs-strings': 8.6.0
+      '@solana/fixed-points': 8.6.0
+      '@solana/options': 8.6.0
+    transitivePeerDependencies:
+      - fastestsmallesttextencoderdecoder
+
+  '@solana/errors@8.6.0':
+    dependencies:
+      chalk: 5.6.2
+      commander: 15.0.0
+
+  '@solana/fast-stable-stringify@8.6.0': {}
+
+  '@solana/fixed-points@8.6.0':
+    dependencies:
+      '@solana/codecs-core': 8.6.0
+      '@solana/errors': 8.6.0
+
+  '@solana/functional@8.6.0': {}
+
+  '@solana/instruction-plans@8.6.0':
+    dependencies:
+      '@solana/errors': 8.6.0
+      '@solana/instructions': 8.6.0
+      '@solana/keys': 8.6.0
+      '@solana/promises': 8.6.0
+      '@solana/transaction-messages': 8.6.0
+      '@solana/transactions': 8.6.0
+    transitivePeerDependencies:
+      - fastestsmallesttextencoderdecoder
+
+  '@solana/instructions@8.6.0':
+    dependencies:
+      '@solana/codecs-core': 8.6.0
+      '@solana/errors': 8.6.0
+
+  '@solana/keys@8.6.0':
+    dependencies:
+      '@solana/assertions': 8.6.0
+      '@solana/codecs-core': 8.6.0
+      '@solana/codecs-strings': 8.6.0
+      '@solana/errors': 8.6.0
+      '@solana/nominal-types': 8.6.0
+      '@solana/promises': 8.6.0
+    transitivePeerDependencies:
+      - fastestsmallesttextencoderdecoder
+
+  '@solana/kit@8.6.0':
+    dependencies:
+      '@solana/accounts': 8.6.0
+      '@solana/addresses': 8.6.0
+      '@solana/codecs': 8.6.0
+      '@solana/errors': 8.6.0
+      '@solana/functional': 8.6.0
+      '@solana/instruction-plans': 8.6.0
+      '@solana/instructions': 8.6.0
+      '@solana/keys': 8.6.0
+      '@solana/offchain-messages': 8.6.0
+      '@solana/plugin-core': 8.6.0
+      '@solana/plugin-interfaces': 8.6.0
+      '@solana/program-client-core': 8.6.0
+      '@solana/programs': 8.6.0
+      '@solana/promises': 8.6.0
+      '@solana/rpc': 8.6.0
+      '@solana/rpc-api': 8.6.0
+      '@solana/rpc-parsed-types': 8.6.0
+      '@solana/rpc-spec-types': 8.6.0
+      '@solana/rpc-subscriptions': 8.6.0
+      '@solana/rpc-types': 8.6.0
+      '@solana/signers': 8.6.0
+      '@solana/subscribable': 8.6.0
+      '@solana/sysvars': 8.6.0
+      '@solana/transaction-confirmation': 8.6.0
+      '@solana/transaction-introspection': 8.6.0
+      '@solana/transaction-messages': 8.6.0
+      '@solana/transactions': 8.6.0
+    transitivePeerDependencies:
+      - bufferutil
+      - fastestsmallesttextencoderdecoder
+      - utf-8-validate
+
+  '@solana/nominal-types@8.6.0': {}
+
+  '@solana/offchain-messages@8.6.0':
+    dependencies:
+      '@solana/addresses': 8.6.0
+      '@solana/codecs-core': 8.6.0
+      '@solana/codecs-data-structures': 8.6.0
+      '@solana/codecs-numbers': 8.6.0
+      '@solana/codecs-strings': 8.6.0
+      '@solana/errors': 8.6.0
+      '@solana/keys': 8.6.0
+      '@solana/nominal-types': 8.6.0
+    transitivePeerDependencies:
+      - fastestsmallesttextencoderdecoder
+
+  '@solana/options@8.6.0':
+    dependencies:
+      '@solana/codecs-core': 8.6.0
+      '@solana/codecs-data-structures': 8.6.0
+      '@solana/codecs-numbers': 8.6.0
+      '@solana/codecs-strings': 8.6.0
+      '@solana/errors': 8.6.0
+    transitivePeerDependencies:
+      - fastestsmallesttextencoderdecoder
+
+  '@solana/plugin-core@8.6.0': {}
+
+  '@solana/plugin-interfaces@8.6.0':
+    dependencies:
+      '@solana/accounts': 8.6.0
+      '@solana/addresses': 8.6.0
+      '@solana/instruction-plans': 8.6.0
+      '@solana/keys': 8.6.0
+      '@solana/rpc-spec': 8.6.0
+      '@solana/rpc-subscriptions-spec': 8.6.0
+      '@solana/rpc-types': 8.6.0
+      '@solana/signers': 8.6.0
+      '@solana/transactions': 8.6.0
+    transitivePeerDependencies:
+      - fastestsmallesttextencoderdecoder
+
+  '@solana/program-client-core@8.6.0':
+    dependencies:
+      '@solana/accounts': 8.6.0
+      '@solana/addresses': 8.6.0
+      '@solana/codecs-core': 8.6.0
+      '@solana/errors': 8.6.0
+      '@solana/instruction-plans': 8.6.0
+      '@solana/instructions': 8.6.0
+      '@solana/plugin-interfaces': 8.6.0
+      '@solana/rpc-api': 8.6.0
+      '@solana/signers': 8.6.0
+    transitivePeerDependencies:
+      - fastestsmallesttextencoderdecoder
+
+  '@solana/programs@8.6.0':
+    dependencies:
+      '@solana/addresses': 8.6.0
+      '@solana/errors': 8.6.0
+    transitivePeerDependencies:
+      - fastestsmallesttextencoderdecoder
+
+  '@solana/promises@8.6.0': {}
+
+  '@solana/rpc-api@8.6.0':
+    dependencies:
+      '@solana/addresses': 8.6.0
+      '@solana/codecs-core': 8.6.0
+      '@solana/codecs-strings': 8.6.0
+      '@solana/errors': 8.6.0
+      '@solana/keys': 8.6.0
+      '@solana/rpc-parsed-types': 8.6.0
+      '@solana/rpc-spec': 8.6.0
+      '@solana/rpc-transformers': 8.6.0
+      '@solana/rpc-types': 8.6.0
+      '@solana/transaction-messages': 8.6.0
+      '@solana/transactions': 8.6.0
+    transitivePeerDependencies:
+      - fastestsmallesttextencoderdecoder
+
+  '@solana/rpc-parsed-types@8.6.0': {}
+
+  '@solana/rpc-spec-types@8.6.0':
+    dependencies:
+      '@solana/errors': 8.6.0
+
+  '@solana/rpc-spec@8.6.0':
+    dependencies:
+      '@solana/errors': 8.6.0
+      '@solana/rpc-spec-types': 8.6.0
+      '@solana/subscribable': 8.6.0
+
+  '@solana/rpc-subscriptions-api@8.6.0':
+    dependencies:
+      '@solana/addresses': 8.6.0
+      '@solana/keys': 8.6.0
+      '@solana/rpc-subscriptions-spec': 8.6.0
+      '@solana/rpc-transformers': 8.6.0
+      '@solana/rpc-types': 8.6.0
+      '@solana/transaction-messages': 8.6.0
+      '@solana/transactions': 8.6.0
+    transitivePeerDependencies:
+      - fastestsmallesttextencoderdecoder
+
+  '@solana/rpc-subscriptions-channel-websocket@8.6.0':
+    dependencies:
+      '@solana/errors': 8.6.0
+      '@solana/functional': 8.6.0
+      '@solana/rpc-subscriptions-spec': 8.6.0
+      '@solana/subscribable': 8.6.0
+      ws: 8.22.1
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
+
+  '@solana/rpc-subscriptions-spec@8.6.0':
+    dependencies:
+      '@solana/errors': 8.6.0
+      '@solana/promises': 8.6.0
+      '@solana/rpc-spec-types': 8.6.0
+      '@solana/subscribable': 8.6.0
+
+  '@solana/rpc-subscriptions@8.6.0':
+    dependencies:
+      '@solana/errors': 8.6.0
+      '@solana/fast-stable-stringify': 8.6.0
+      '@solana/functional': 8.6.0
+      '@solana/promises': 8.6.0
+      '@solana/rpc-spec-types': 8.6.0
+      '@solana/rpc-subscriptions-api': 8.6.0
+      '@solana/rpc-subscriptions-channel-websocket': 8.6.0
+      '@solana/rpc-subscriptions-spec': 8.6.0
+      '@solana/rpc-transformers': 8.6.0
+      '@solana/rpc-types': 8.6.0
+      '@solana/subscribable': 8.6.0
+    transitivePeerDependencies:
+      - bufferutil
+      - fastestsmallesttextencoderdecoder
+      - utf-8-validate
+
+  '@solana/rpc-transformers@8.6.0':
+    dependencies:
+      '@solana/errors': 8.6.0
+      '@solana/functional': 8.6.0
+      '@solana/nominal-types': 8.6.0
+      '@solana/rpc-spec-types': 8.6.0
+      '@solana/rpc-types': 8.6.0
+    transitivePeerDependencies:
+      - fastestsmallesttextencoderdecoder
+
+  '@solana/rpc-transport-http@8.6.0':
+    dependencies:
+      '@solana/errors': 8.6.0
+      '@solana/rpc-spec': 8.6.0
+      '@solana/rpc-spec-types': 8.6.0
+      undici-types: 8.12.4
+
+  '@solana/rpc-types@8.6.0':
+    dependencies:
+      '@solana/addresses': 8.6.0
+      '@solana/codecs-core': 8.6.0
+      '@solana/codecs-numbers': 8.6.0
+      '@solana/codecs-strings': 8.6.0
+      '@solana/errors': 8.6.0
+      '@solana/fixed-points': 8.6.0
+      '@solana/nominal-types': 8.6.0
+    transitivePeerDependencies:
+      - fastestsmallesttextencoderdecoder
+
+  '@solana/rpc@8.6.0':
+    dependencies:
+      '@solana/errors': 8.6.0
+      '@solana/fast-stable-stringify': 8.6.0
+      '@solana/functional': 8.6.0
+      '@solana/rpc-api': 8.6.0
+      '@solana/rpc-spec': 8.6.0
+      '@solana/rpc-spec-types': 8.6.0
+      '@solana/rpc-transformers': 8.6.0
+      '@solana/rpc-transport-http': 8.6.0
+      '@solana/rpc-types': 8.6.0
+    transitivePeerDependencies:
+      - fastestsmallesttextencoderdecoder
+
+  '@solana/signers@8.6.0':
+    dependencies:
+      '@solana/addresses': 8.6.0
+      '@solana/codecs-core': 8.6.0
+      '@solana/errors': 8.6.0
+      '@solana/instruction-plans': 8.6.0
+      '@solana/instructions': 8.6.0
+      '@solana/keys': 8.6.0
+      '@solana/nominal-types': 8.6.0
+      '@solana/offchain-messages': 8.6.0
+      '@solana/transaction-messages': 8.6.0
+      '@solana/transactions': 8.6.0
+    transitivePeerDependencies:
+      - fastestsmallesttextencoderdecoder
+
+  '@solana/subscribable@8.6.0':
+    dependencies:
+      '@solana/errors': 8.6.0
+      '@solana/promises': 8.6.0
+
+  '@solana/sysvars@8.6.0':
+    dependencies:
+      '@solana/accounts': 8.6.0
+      '@solana/codecs-core': 8.6.0
+      '@solana/codecs-data-structures': 8.6.0
+      '@solana/codecs-numbers': 8.6.0
+      '@solana/errors': 8.6.0
+      '@solana/rpc-types': 8.6.0
+    transitivePeerDependencies:
+      - fastestsmallesttextencoderdecoder
+
+  '@solana/transaction-confirmation@8.6.0':
+    dependencies:
+      '@solana/addresses': 8.6.0
+      '@solana/codecs-strings': 8.6.0
+      '@solana/errors': 8.6.0
+      '@solana/keys': 8.6.0
+      '@solana/promises': 8.6.0
+      '@solana/rpc': 8.6.0
+      '@solana/rpc-subscriptions': 8.6.0
+      '@solana/rpc-types': 8.6.0
+      '@solana/transaction-messages': 8.6.0
+      '@solana/transactions': 8.6.0
+    transitivePeerDependencies:
+      - bufferutil
+      - fastestsmallesttextencoderdecoder
+      - utf-8-validate
+
+  '@solana/transaction-introspection@8.6.0':
+    dependencies:
+      '@solana/addresses': 8.6.0
+      '@solana/codecs-core': 8.6.0
+      '@solana/codecs-strings': 8.6.0
+      '@solana/errors': 8.6.0
+      '@solana/instructions': 8.6.0
+      '@solana/rpc-types': 8.6.0
+      '@solana/transaction-messages': 8.6.0
+      '@solana/transactions': 8.6.0
+    transitivePeerDependencies:
+      - fastestsmallesttextencoderdecoder
+
+  '@solana/transaction-messages@8.6.0':
+    dependencies:
+      '@solana/addresses': 8.6.0
+      '@solana/codecs-core': 8.6.0
+      '@solana/codecs-data-structures': 8.6.0
+      '@solana/codecs-numbers': 8.6.0
+      '@solana/errors': 8.6.0
+      '@solana/functional': 8.6.0
+      '@solana/instructions': 8.6.0
+      '@solana/nominal-types': 8.6.0
+      '@solana/rpc-types': 8.6.0
+    transitivePeerDependencies:
+      - fastestsmallesttextencoderdecoder
+
+  '@solana/transactions@8.6.0':
+    dependencies:
+      '@solana/addresses': 8.6.0
+      '@solana/codecs-core': 8.6.0
+      '@solana/codecs-data-structures': 8.6.0
+      '@solana/codecs-numbers': 8.6.0
+      '@solana/codecs-strings': 8.6.0
+      '@solana/errors': 8.6.0
+      '@solana/functional': 8.6.0
+      '@solana/instructions': 8.6.0
+      '@solana/keys': 8.6.0
+      '@solana/nominal-types': 8.6.0
+      '@solana/rpc-types': 8.6.0
+      '@solana/transaction-messages': 8.6.0
+    transitivePeerDependencies:
+      - fastestsmallesttextencoderdecoder
+
+  chalk@5.6.2: {}
+
+  commander@15.0.0: {}
+
+  esbuild@0.28.2:
+    optionalDependencies:
+      '@esbuild/aix-ppc64': 0.28.2
+      '@esbuild/android-arm': 0.28.2
+      '@esbuild/android-arm64': 0.28.2
+      '@esbuild/android-x64': 0.28.2
+      '@esbuild/darwin-arm64': 0.28.2
+      '@esbuild/darwin-x64': 0.28.2
+      '@esbuild/freebsd-arm64': 0.28.2
+      '@esbuild/freebsd-x64': 0.28.2
+      '@esbuild/linux-arm': 0.28.2
+      '@esbuild/linux-arm64': 0.28.2
+      '@esbuild/linux-ia32': 0.28.2
+      '@esbuild/linux-loong64': 0.28.2
+      '@esbuild/linux-mips64el': 0.28.2
+      '@esbuild/linux-ppc64': 0.28.2
+      '@esbuild/linux-riscv64': 0.28.2
+      '@esbuild/linux-s390x': 0.28.2
+      '@esbuild/linux-x64': 0.28.2
+      '@esbuild/netbsd-arm64': 0.28.2
+      '@esbuild/netbsd-x64': 0.28.2
+      '@esbuild/openbsd-arm64': 0.28.2
+      '@esbuild/openbsd-x64': 0.28.2
+      '@esbuild/openharmony-arm64': 0.28.2
+      '@esbuild/sunos-x64': 0.28.2
+      '@esbuild/win32-arm64': 0.28.2
+      '@esbuild/win32-ia32': 0.28.2
+      '@esbuild/win32-x64': 0.28.2
+
+  fsevents@2.3.3:
+    optional: true
+
+  tsx@4.23.15:
+    dependencies:
+      esbuild: 0.28.2
+    optionalDependencies:
+      fsevents: 2.3.3
+
+  undici-types@8.12.4: {}
+
+  ws@8.22.1: {}

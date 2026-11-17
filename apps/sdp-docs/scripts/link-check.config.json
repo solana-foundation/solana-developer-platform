@@ -4,6 +4,8 @@
     "https://api.solana.com/llms.txt",
     "https://api.solana.com/openapi.json",
     "https://dashboard.ngrok.com/domains",
+    "https://github.com/solana-foundation/solana-developer-platform/tree/main/examples/embedded-yield-quickstart",
+    "https://github.com/solana-foundation/solana-developer-platform/tree/main/examples/treasury-quickstart",
     "https://www.anchorage.com/platform/stablecoin-issuance",
     "https://www.sec.gov/newsroom/speeches-statements/corp-fin-statement-tokenized-securities-012826-statement-tokenized-securities"
   ]

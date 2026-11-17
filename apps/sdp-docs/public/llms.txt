@@ -15,7 +15,7 @@
 - API key management and projects
 - Payments, transfers, and recurring payments
 - Fiat on-ramps and off-ramps
-- DeFi and RWA strategies, customer-signed transactions, and positions
+- DeFi and RWA strategies, from customer wallets or custody wallets
 - Compliance screening
 - Asset profiles and public token metadata
 
@@ -57,11 +57,13 @@
 - [Compliance](https://platform.solana.com/docs/reference/api/compliance): Risk and compliance screening endpoints.
 - [Counterparties](https://platform.solana.com/docs/reference/api/counterparties): A counterparty is a person or business you pay or get paid by. You save their details and payment accounts once, then reuse them in payments.
 - [Asset Profiles](https://platform.solana.com/docs/reference/api/asset-profiles): Issued-asset identity and metadata profiles, plus the public token metadata URI.
-- [Earn](https://platform.solana.com/docs/reference/api/earn): Strategy reads, previews, withdrawal-route discovery, unsigned builds, submission, queued actions, and tenant tracking. Availability follows the deployment's release channel.
-- [Earn](https://platform.solana.com/docs/earn): Offer stablecoin yield in your app, from your customers' own wallets, through one API.
-- [Quickstart](https://platform.solana.com/docs/earn/quickstart): Deposit test USDC into a strategy from a sandbox wallet, then read the position, in about ten minutes.
-- [How Earn works](https://platform.solana.com/docs/earn/concepts): Strategies, positions and shares, who signs, and how each deposit and withdrawal settles.
-- [Embedded Yield](https://platform.solana.com/docs/guides/embedded-yield): Build customer-signed deposits, balances, and withdrawals into your app, from first request to go-live.
+- [Earn](https://platform.solana.com/docs/reference/api/earn): Yield strategies, from a customer's wallet (Embedded Yield) or your custody wallet (Treasury): strategy reads, previews, deposits, withdrawals, withdrawal requests, and tracking. Availability follows the deployment's release channel.
+- [Earn](https://platform.solana.com/docs/earn): Put stablecoins to work in yield strategies, from your customers' wallets or your own, through one API.
+- [Embedded Yield quickstart](https://platform.solana.com/docs/earn/quickstart): Make a sandbox deposit from a customer's wallet with three API requests and one signature.
+- [Treasury quickstart](https://platform.solana.com/docs/earn/treasury-quickstart): Deposit your organization's own funds from a custody wallet with two API requests and no signature.
+- [How Earn works](https://platform.solana.com/docs/earn/concepts): Who signs, where funds go, what it costs, and how movements settle, for Embedded Yield and Treasury.
+- [Embedded Yield guide](https://platform.solana.com/docs/guides/embedded-yield): Let your customers earn from their own wallets, with deposits, balances, and withdrawals each customer signs.
+- [Treasury guide](https://platform.solana.com/docs/earn/treasury): Earn on your organization's own funds from a custody wallet, with deposits, positions, and withdrawals SDP signs.
 
 ## AI guide
 - [Docs for AI](https://platform.solana.com/docs/reference/docs-for-ai): Human-readable landing page for machine-readable SDP docs resources, usage guidance, and public AI scope.

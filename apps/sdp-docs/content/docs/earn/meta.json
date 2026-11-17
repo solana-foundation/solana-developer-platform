@@ -1,14 +1,18 @@
 {
   "title": "Earn",
   "pages": [
+    "---Embedded Yield---",
     "quickstart",
-    "concepts",
-    "strategies",
     "deposits",
     "balances",
     "withdrawals",
-    "---Integrate---",
     "../guides/embedded-yield",
+    "---Treasury---",
+    "treasury-quickstart",
+    "treasury",
+    "---Concepts---",
+    "concepts",
+    "strategies",
     "integration-details"
   ]
 }

@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { llmsForDeployment } from "./deployment-api";
 
 type AiResourceName = "llms" | "llmsFull";
 
@@ -31,7 +32,8 @@ export async function readAiResourceResponse(resourceName: AiResourceName) {
   const resource = aiResourceMap[resourceName];
 
   try {
-    const body = await readFile(getAiResourcePath(resourceName), "utf8");
+    // The generated file is canonical; this deployment serves its own docs and API URLs.
+    const body = llmsForDeployment(await readFile(getAiResourcePath(resourceName), "utf8"));
 
     return new Response(body, {
       headers: {

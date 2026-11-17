@@ -111,7 +111,7 @@ balance with a live one.
   changing its published `security` declaration changes partner-facing scope,
   which is why it needs a human gate. The
   pinned operation list in `../../openapi/spec.test.ts` ("publishes the
-  caller-signed money routes") is that gate: growing it requires a security
+  Embedded Yield and Treasury routes") is that gate: growing it requires a security
   sign-off named in the PR (who reviewed, and the threat-model row the route
   lands under), and the threat model's revisit trigger fires. Never widen the
   list just to make the test pass.
@@ -124,11 +124,22 @@ balance with a live one.
   Public OpenAPI declares API-key auth on every operation; the internal
   document additionally accepts Clerk and session auth.
 
+  Two kinds of money route are published. The `external-wallet` routes are
+  caller-signed (Embedded Yield): SDP holds no key. The `vault-*` routes and
+  the movements feed are Treasury: SDP signs from the organization's custody
+  wallet, the key's wallet scope bounds every signature at
+  `createOrgSignerForCustodyWallet`, and reads are project-scoped. Programs,
+  provider actions, onboarding and `vault-share-reconciliation` stay internal.
+
   Internal route parity is checked by `../../openapi/earn-contracts.test.ts`
-  against the mounted router. Treasury registrations live in
-  `../../openapi/paths/earn-treasury.ts` and reuse runtime request schemas.
-  Deposit, deposit-history and direct-withdrawal response schemas come from
-  `@sdp/types/earn-wire`, shared with the dashboard parsers.
+  against the mounted router. `../../openapi/paths/earn-treasury.ts` holds
+  two registrars: `registerEarnTreasuryPaths` (both documents, so adding a
+  route there publishes it) and `registerEarnProgramPaths` (internal only).
+  Treasury requests are documented in `../../openapi/schemas/earn-treasury.ts`
+  with the Embedded Yield field schemas; `../../openapi/earn-treasury.test.ts`
+  pins their fields to the runtime schemas. Deposit, deposit-history and
+  direct-withdrawal response schemas come from `@sdp/types/earn-wire`, shared
+  with the dashboard parsers, and carry the reference's field descriptions.
 
 ### Asynchronous vault withdrawals (Veda queue and Hastra par redemption)
 
@@ -248,7 +259,7 @@ results newest first; the bound protects RPC capacity and the ordered inspection
 preserves the former serial decision and error semantics.
 
 The external-wallet queue routes are part of the supported Embedded Yield public
-contract; custody queue routes remain internal. Any future route or
+contract, and the custody queue routes of the Treasury one. Any future route or
 security-declaration change remains an EARN-027 security-scope change and
 requires named security sign-off plus the pinned public-operation update; do not
 widen the surface just to make a test pass.

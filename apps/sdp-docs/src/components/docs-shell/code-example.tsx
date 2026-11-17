@@ -314,7 +314,7 @@ function LanguageGroup({
         saveLanguage(groupId, choice.label.toLowerCase(), persist);
         onValueChange?.(next);
       }}
-      className={[styles.group, className].filter(Boolean).join(" ")}
+      className={[styles.group, !singleCode && styles.mixed, className].filter(Boolean).join(" ")}
       data-code-example=""
     >
       <div className={styles.header}>

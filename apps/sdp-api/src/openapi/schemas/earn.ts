@@ -258,48 +258,53 @@ const earnSolanaMintSchema = z
     example: "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
   });
 
+/** A deposit's amount, floor and swap funding: the same fields from a customer's wallet or a custody wallet. */
+export const earnDepositFundingFields = {
+  amount: earnDecimalAmountSchema.openapi({
+    description:
+      "The deposit amount as a decimal string, in deposit-token units. For a " +
+      "swap-funded deposit (`sourceTokenMint`), it is in source-token units " +
+      "instead: the swap spends all of it, and the deposit is sized to the " +
+      "swap's guaranteed output.",
+    example: "25",
+  }),
+  minSharesOut: earnDecimalAmountSchema.optional().openapi({
+    description:
+      "Slippage floor in share units. Required exactly when the selected strategy's " +
+      "`depositSlippage` is non-null. Derive it " +
+      "from `POST /v1/earn/vault-deposit-previews`, never from the deposit amount.",
+    example: "24.9",
+  }),
+  sourceTokenMint: earnSolanaMintSchema.optional().openapi({
+    description:
+      "Fund the deposit in a different supported stablecoin (USDC, USDG, PYUSD or USDT on " +
+      "the environment's cluster): a Jupiter swap to the vault's own token is prepended " +
+      "inside the same transaction, so both legs land atomically or not at all. Equal to " +
+      "the strategy's deposit mint it is a no-op, so pickers may always send their " +
+      "selection.",
+  }),
+  swapSlippageBps: z
+    .number()
+    .int()
+    .min(1)
+    .max(500)
+    .optional()
+    .openapi({
+      description:
+        "Swap slippage tolerance in basis points (default 2, accepted 1-500). " +
+        "Valid only with `sourceTokenMint`. The deposit is sized to the swap's " +
+        "worst-case output, so a wider tolerance can leave more of the deposit " +
+        "token in the depositing wallet instead of failing the transaction.",
+      example: 2,
+    }),
+} as const;
+
 export const earnExternalWalletDepositTransactionRequest = z
   .object({
     strategyId: z.string().min(1).openapi({ example: EARN_EXAMPLE_IDS.strategy }),
     ownerAddress: earnOwnerAddressSchema,
     feePayer: earnFeePayerRequestSchema.optional(),
-    amount: earnDecimalAmountSchema.openapi({
-      description:
-        "The deposit amount as a decimal string, in deposit-token units. For a " +
-        "swap-funded build (`sourceTokenMint`), it is in source-token units " +
-        "instead: the swap spends all of it, and the deposit is sized to the " +
-        "swap's guaranteed output.",
-      example: "25",
-    }),
-    minSharesOut: earnDecimalAmountSchema.optional().openapi({
-      description:
-        "Slippage floor in share units. Required exactly when the selected strategy's " +
-        "`depositSlippage` is non-null. Derive it " +
-        "from `POST /v1/earn/vault-deposit-previews`, never from the deposit amount.",
-      example: "24.9",
-    }),
-    sourceTokenMint: earnSolanaMintSchema.optional().openapi({
-      description:
-        "Fund the deposit in a different supported stablecoin (USDC, USDG, PYUSD or USDT on " +
-        "the environment's cluster): a Jupiter swap to the vault's own token is prepended " +
-        "inside the same transaction, so both legs land atomically or not at all. Equal to " +
-        "the strategy's deposit mint it is a no-op, so pickers may always send their " +
-        "selection.",
-    }),
-    swapSlippageBps: z
-      .number()
-      .int()
-      .min(1)
-      .max(500)
-      .optional()
-      .openapi({
-        description:
-          "Swap slippage tolerance in basis points (default 2, accepted 1-500). " +
-          "Valid only with `sourceTokenMint`. The deposit is sized to the swap's " +
-          "worst-case output, so a wider tolerance can leave more of the deposit " +
-          "token in the customer's account instead of failing the transaction.",
-        example: 2,
-      }),
+    ...earnDepositFundingFields,
   })
   .openapi({ description: "Build one unsigned deposit transaction for an external wallet." })
   .openapi({ example: EARN_DEPOSIT_TRANSACTION_REQUEST_EXAMPLE });
@@ -335,19 +340,15 @@ const earnDepositSwapSchema = z
     description: "The Jupiter swap leg attached to (or split out of) a swap-funded deposit.",
   });
 
-const earnExternalWalletPositionLocatorSchema = z.object({
-  positionId: z
-    .string()
-    .min(1)
-    .max(128)
-    .openapi({
-      description:
-        "The position's ID, from the positions list or the deposit submit " + "response.",
-      example: EARN_EXAMPLE_IDS.position,
-    }),
+/** Names one position: the same field for a customer's wallet and a custody wallet. */
+export const earnExternalWalletPositionLocatorSchema = z.object({
+  positionId: z.string().min(1).max(128).openapi({
+    description: "The position's ID, from the positions list or the deposit's response.",
+    example: EARN_EXAMPLE_IDS.position,
+  }),
 });
 
-const earnExternalWalletWithdrawalFields = {
+export const earnExternalWalletWithdrawalFields = {
   redemptionMode: z
     .enum(EARN_PROVIDER_REDEMPTION_MODES)
     .optional()
@@ -878,7 +879,10 @@ const earnAsyncWithdrawalRequestCommonFields = {
   positionId: z.string().openapi({ example: EARN_EXAMPLE_IDS.position }),
   provider: z.string().openapi({ example: "veda" }),
   providerReference: z.string().openapi({ description: "The strategy's onchain address." }),
-  ownerAddress: earnOwnerAddressFieldSchema,
+  ownerAddress: z.string().openapi({
+    description: "Address of the wallet that owns the position and receives the payout.",
+    example: EARN_OWNER_ADDRESS_EXAMPLE,
+  }),
   requestAddress: z.string().openapi({ description: "Provider request account address." }),
   status: earnQueuedWithdrawalStatusSchema,
   assetMint: earnSolanaMintSchema,

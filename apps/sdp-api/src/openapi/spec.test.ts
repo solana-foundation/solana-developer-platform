@@ -297,7 +297,7 @@ describe("OpenAPI spec", () => {
         );
       const manifest = createPublicSurfaceManifest(releaseChannel);
 
-      expect(operations.length).toBe(runsEarn ? 21 : 0);
+      expect(operations.length).toBe(runsEarn ? 36 : 0);
       expect(document.tags?.some((tag) => tag.name === "Earn")).toBe(runsEarn);
       expect(/earn/i.test(JSON.stringify(document))).toBe(runsEarn);
       expect(manifest.modules.includes("earn")).toBe(runsEarn);
@@ -305,7 +305,7 @@ describe("OpenAPI spec", () => {
     }
   );
 
-  it("publishes the caller-signed money routes and keeps retired button-configuration paths out", () => {
+  it("publishes the Embedded Yield and Treasury routes and keeps internal and retired paths out", () => {
     const internal = createOpenApiDocument();
     const publicDocument = createPublicOpenApiDocument(EXPERIMENTAL);
 
@@ -328,6 +328,11 @@ describe("OpenAPI spec", () => {
     // threat-model revisit trigger. This list is the route-publication gate: a PR that grows it must
     // carry security sign-off (routes/earn/CLAUDE.md, "Public OpenAPI
     // promotion"). Do not widen the list to make a red test pass.
+    //
+    // Two kinds of money route are published. The `external-wallet` routes are caller-signed:
+    // SDP holds no key. The `vault-*` routes are Treasury: SDP signs from the organization's
+    // custody wallet, so the key's wallet scope bounds them at the signer. Programs, provider
+    // actions, onboarding and the share reconciliation report stay internal.
     const publicEarnOperations = Object.entries(publicDocument.paths ?? {})
       .filter(([path]) => path.startsWith("/v1/earn"))
       .flatMap(([path, item]) =>
@@ -359,8 +364,37 @@ describe("OpenAPI spec", () => {
         "GET /v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}",
         "POST /v1/earn/external-wallet/withdrawal-request-cancel-transactions",
         "POST /v1/earn/external-wallet/withdrawal-request-cancellations",
+        "GET /v1/earn/movements",
+        "POST /v1/earn/vault-deposits",
+        "GET /v1/earn/vault-deposits",
+        "GET /v1/earn/vault-deposits/{movementId}",
+        "GET /v1/earn/vault-positions",
+        "POST /v1/earn/vault-withdrawals",
+        "GET /v1/earn/vault-withdrawals",
+        "GET /v1/earn/vault-withdrawals/{movementId}",
+        "POST /v1/earn/vault-withdrawal-previews",
+        "POST /v1/earn/vault-withdrawal-options",
+        "POST /v1/earn/vault-queued-withdrawal-previews",
+        "POST /v1/earn/vault-withdrawal-requests",
+        "GET /v1/earn/vault-withdrawal-requests",
+        "GET /v1/earn/vault-withdrawal-requests/{withdrawalRequestId}",
+        "POST /v1/earn/vault-withdrawal-requests/{withdrawalRequestId}/cancel",
       ].sort()
     );
+    // Named so a regression reads as what it is: none of these families is ever public.
+    for (const internalOnly of [
+      "/v1/earn/programs",
+      "/v1/earn/provider-actions",
+      "/v1/earn/onboarding",
+      "/v1/earn/vault-share-reconciliation",
+    ]) {
+      expect(
+        publicEarnOperations.filter((operation) =>
+          operation.split(" ")[1]?.startsWith(internalOnly)
+        )
+      ).toEqual([]);
+      expect(Object.keys(internal.paths).some((path) => path.startsWith(internalOnly))).toBe(true);
+    }
     expect(Object.keys(publicDocument.paths["/v1/transactions"])).toEqual(["get"]);
     // Coverage parity across the boundary: every published operation is the
     // same registered route as its internal twin (same operationId), so the

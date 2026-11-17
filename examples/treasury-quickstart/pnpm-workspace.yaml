@@ -1,0 +1,9 @@
+packages:
+  - .
+
+# tsx runs without esbuild's install script, so no dependency script runs here.
+ignoredBuiltDependencies:
+  - esbuild
+
+# 7-day cooldown on new releases, as in the repository root.
+minimumReleaseAge: 10080

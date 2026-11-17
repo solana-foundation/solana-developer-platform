@@ -1,0 +1,4 @@
+node_modules
+
+# The response deposit.sh saves.
+deposit.json

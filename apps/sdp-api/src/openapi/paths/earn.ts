@@ -58,7 +58,7 @@ import { earnErrorResponses } from "./earn-errors";
 import { EARN_GROUPS } from "./earn-groups";
 import { registerEarnOnboardingPaths } from "./earn-onboarding";
 import { registerEarnProviderActionPaths } from "./earn-provider-actions";
-import { registerEarnTreasuryPaths } from "./earn-treasury";
+import { registerEarnProgramPaths, registerEarnTreasuryPaths } from "./earn-treasury";
 import {
   DOCS_GROUP,
   jsonContent,
@@ -77,18 +77,22 @@ export function registerEarnPaths(registry: OpenAPIRegistry) {
   registerEarnDepositPreviewPath(registry, earnConfigurationSecurity);
   registerEarnExternalWalletPaths(registry, earnConfigurationSecurity);
   registerEarnTreasuryPaths(registry, earnConfigurationSecurity);
+  registerEarnProgramPaths(registry, earnConfigurationSecurity);
   registerEarnProviderActionPaths(registry, earnConfigurationSecurity);
   registerEarnOnboardingPaths(registry);
-  // Treasury-facing, so the internal document only: partners hold no custody
-  // wallets for this read to reconcile.
+  // An operator's report on custody share balances, so the internal document only.
   registerEarnVaultShareReconciliationPath(registry, earnConfigurationSecurity);
 }
 
-/** The partner-facing surface: the strategy catalogue plus the caller-signed money routes. */
+/**
+ * The public surface: the strategy catalogue, the caller-signed Embedded Yield routes, and the
+ * custody-wallet Treasury routes. Provider programs, provider actions and onboarding stay internal.
+ */
 export function registerPublicEarnPaths(registry: OpenAPIRegistry) {
   registerEarnStrategyPaths(registry, earnPublicSecurity);
   registerEarnDepositPreviewPath(registry, earnPublicSecurity);
   registerEarnExternalWalletPaths(registry, earnPublicSecurity);
+  registerEarnTreasuryPaths(registry, earnPublicSecurity);
 }
 
 function registerEarnStrategyPaths(

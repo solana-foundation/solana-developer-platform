@@ -58,8 +58,8 @@ export const DOCS_MODULES: readonly ModuleEntry[] = [
   {
     module: "earn",
     name: "Earn",
-    summary: "Discover DeFi and RWA strategies for customer-wallet deposits and withdrawals",
-    capability: "DeFi and RWA strategies, customer-signed transactions, and positions",
+    summary: "Earn yield in DeFi and RWA strategies, from customer wallets or your custody wallets",
+    capability: "DeFi and RWA strategies, from customer wallets or custody wallets",
   },
   {
     module: "compliance",

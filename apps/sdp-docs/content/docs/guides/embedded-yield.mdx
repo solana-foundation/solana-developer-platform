@@ -1,17 +1,17 @@
 ---
 module: earn
-title: Embedded Yield
-description: Build customer-signed deposits, balances, and withdrawals into your app, from first request to go-live.
+title: Embedded Yield guide
+description: Let your customers earn from their own wallets, with deposits, balances, and withdrawals each customer signs.
 breadcrumbParent: /docs/earn
 ---
 
 Embedded Yield lets your customers earn from their own wallets inside your
-app. Your backend calls SDP with your API key, your app asks the customer's
-wallet to sign, and SDP verifies, broadcasts, and tracks every movement. SDP
-never holds the customer's key.
+app. SDP builds each transaction, your customer's wallet signs it, and that
+wallet holds the shares. Run the
+[Embedded Yield quickstart](/docs/earn/quickstart) first.
 
-New to Earn? Run the [Quickstart](/docs/earn/quickstart) first, then come
-back to build the full integration.
+To earn on your organization's own funds, use the
+[Treasury guide](/docs/earn/treasury) instead.
 
 ## How the pieces fit
 
@@ -20,11 +20,7 @@ back to build the full integration.
 | Your backend | Holds the API key. Previews, builds, submits, and reads. Decides which customer may use which wallet. | Sends the API key to a browser or mobile app. |
 | Your app | Shows quotes and status. Asks the customer's wallet to sign. | Broadcasts the transaction. |
 | The customer's wallet | Signs the exact transaction SDP built. Owns the position and receives payouts. | Shares its private key. |
-| SDP | Builds each transaction, verifies the signatures, records the movement, broadcasts it, and tracks it to finality. | Holds the customer's key or pools their funds. |
-
-A deposit then runs: your backend builds, your app collects the signature,
-your backend submits, and your app shows the result as your backend tracks
-it.
+| SDP | Builds each transaction, verifies the signatures, records the movement, broadcasts it, and tracks it to finality. | Holds the customer's key or funds. |
 
 ## Authenticate on your backend
 
@@ -36,20 +32,20 @@ Create an API key in each project with the grants your integration uses:
 | `earn.execute` | Builds and submits for deposits, withdrawals, and withdrawal requests. Includes `earn.read`. |
 | `earn.manage` | Building and submitting a withdrawal request cancellation. Includes `earn.read`. |
 
-`earn.execute` and `earn.manage` do not include each other. The backend
-module reads one `SDP_API_KEY`, so give that key every grant you call through
-it. See [Manage API keys](/docs/developing-with-sdp/manage-api-keys).
+`earn.execute` and `earn.manage` do not include each other, so give the key
+every grant you call through it. See
+[Manage API keys](/docs/developing-with-sdp/manage-api-keys).
 
-Withdrawals and cancellations stay available after production access is
-removed or new deposits are disabled. A suspended organization still cannot
-authenticate, and Earn runs only on deployments whose release channel
-includes it.
-
-Your API key can read every customer wallet your project has recorded. Before
-any request, check that the signed-in customer owns the `ownerAddress` you
-send, for example by verifying a message the wallet signed when the customer
-linked it. Custody-wallet scopes on the API key do not apply to customer wallets:
-the customer's signature authorizes each transaction.
+- **One key serves every customer wallet,** and can read every wallet your
+  project has recorded. Before any request, check that the signed-in customer
+  owns the `ownerAddress` you send, for example by verifying a message the
+  wallet signed when the customer linked it. See
+  [One integration, many customers](/docs/earn/concepts#one-integration-many-customers).
+- **The key's custody-wallet scope does not apply** to customer wallets: the
+  customer's signature authorizes each transaction.
+- **Exits stay open.** Withdrawals and cancellations stay available after
+  production access is removed or new deposits are disabled. A suspended
+  organization still cannot authenticate.
 
 ## Get the backend module
 
@@ -65,93 +61,45 @@ The module holds the strategy ID and the API URL for the project you
 generated it in, so generate it again for production. It needs Node.js 20.18
 or later, and `@solana/kit` only for its fee sponsor signer.
 
-| Task | Module function |
+| Task | Module functions |
 | --- | --- |
 | List the catalog | `listEarnStrategies` |
-| Quote a deposit | `previewEarnDeposit` |
-| Build a deposit | `buildEarnDepositTransaction` |
+| Deposit | `previewEarnDeposit`, `buildEarnDepositTransaction`, `submitEarnDeposit` |
 | Collect signatures | `signEarnTransaction`, `createSponsorSigner` |
-| Submit a deposit | `submitEarnDeposit` |
 | Track a movement | `waitForEarnMovement`, `getEarnMovement` |
 | Read balances | `listEarnPositions` (every page), `getEarnEarnings`, `listEarnMovements` (one page per call) |
+| Choose a withdrawal route | `getEarnWithdrawalOptions` |
 | Withdraw instantly | `previewEarnWithdrawal`, `buildEarnWithdrawalTransaction`, `submitEarnWithdrawal` |
-| Choose a route | `getEarnWithdrawalOptions` |
 | Request a withdrawal | `previewEarnQueuedWithdrawal`, `previewEarnParRedemption`, `buildEarnQueuedWithdrawalRequest`, `buildEarnParRedemptionRequest`, `submitEarnWithdrawalRequest` |
 | Track requests | `getEarnWithdrawalRequest`, `waitForEarnQueuedWithdrawal`, `listPendingEarnQueuedWithdrawals` |
 | Cancel a request | `buildEarnWithdrawalRequestCancellation`, `submitEarnWithdrawalRequestCancellation` |
 
-When SDP refuses a request, a module function throws an `EarnApiError` with
-`status`, `code`, `details`, and `retryAfter`. Branch on those, never on the
-message.
-
-Prefer raw requests? Every function maps to one endpoint in
-[Deposit funds](/docs/earn/deposits) and
+A refused request throws an `EarnApiError` with `status`, `code`, `details`,
+and `retryAfter`. Branch on those, never on the message. Prefer raw requests?
+Every function maps to one request in [Deposit funds](/docs/earn/deposits) and
 [Withdraw funds](/docs/earn/withdrawals).
 
-## Make a deposit
+## Use the module
 
-| Step | Module function | Endpoint |
-| --- | --- | --- |
-| 1. Quote | `previewEarnDeposit` | [`POST /v1/earn/vault-deposit-previews`](/docs/reference/api/earn/create-earn-vault-deposit-preview) |
-| 2. Build | `buildEarnDepositTransaction` | [`POST /v1/earn/external-wallet/deposit-transactions`](/docs/reference/api/earn/create-earn-external-wallet-deposit-transaction) |
-| 3. Sign | `signEarnTransaction` | In the customer's wallet |
-| 4. Submit | `submitEarnDeposit` | [`POST /v1/earn/external-wallet/deposits`](/docs/reference/api/earn/create-earn-external-wallet-deposit) |
-| 5. Track | `waitForEarnMovement` | [`GET /v1/earn/external-wallet/movements/{movementId}`](/docs/reference/api/earn/get-earn-external-wallet-movement) |
+Each flow follows the same pages as raw requests:
+[deposits](/docs/earn/deposits), [balances](/docs/earn/balances), and
+[withdrawals](/docs/earn/withdrawals). The module adds:
 
-`buildEarnDepositTransaction` previews the deposit itself when the strategy
-needs a floor; call `previewEarnDeposit` too when you want to show your
-customer a quote first.
-
-`signEarnTransaction(built, customerSigner, sponsorSigner?)` passes the
-base64 transaction to your signer, checks that the signed message is
-unchanged, and adds your sponsor's signature when the build named a
-`feePayer`. `createSponsorSigner(secretKey, feePayerAddress)` makes that
-sponsor signer from your fee payer's 64-byte secret key, the array a Solana
-CLI keypair file holds. The Quickstart shows a
-[customer signer for a browser wallet](/docs/earn/quickstart#sign-in-your-customers-wallet).
-
-Three rules keep deposits safe:
-
-- **Sign exactly what SDP built.** The wallet must not change or broadcast
-  the transaction. SDP refuses a changed one with `400`.
-- **Save before you submit.** Store the idempotency key with the signed
-  transaction, then submit. After an uncertain response, retry with both
-  unchanged; see [Retry safely](/docs/earn/integration-details#retry-safely).
-- **Track to the end.** Save `movementId` and track it until `finalized` or
-  `failed`.
-
-## Show balances
-
-Read positions for withdrawals, earnings for the totals your customer sees,
-and movements for their history. [Balances and earnings](/docs/earn/balances)
-covers every field. Two rules matter most:
-
-- Show a missing live value as unavailable, never as zero.
-- Read every page of a list. A short list hides money.
-
-## Withdraw
-
-1. Read the position's live `withdrawableShares` with `listEarnPositions`,
-   then its routes with `getEarnWithdrawalOptions`.
-2. For an instant withdrawal, preview, build, sign, submit, and track, as for
-   a deposit.
-3. For a solver queue or operator redemption, create a withdrawal request and
-   track it to `fulfilled`, `cancelled`, or `failed`.
-4. On startup, restore every open request with
-   `listPendingEarnQueuedWithdrawals`.
-
-| Step | Module function | Endpoint |
-| --- | --- | --- |
-| Choose a route | `getEarnWithdrawalOptions` | [`POST /v1/earn/external-wallet/withdrawal-options`](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-options) |
-| Withdraw instantly | `buildEarnWithdrawalTransaction`, `submitEarnWithdrawal` | [`POST /v1/earn/external-wallet/withdrawal-transactions`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-transaction), [`POST /v1/earn/external-wallet/withdrawals`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal) |
-| Preview a request | `previewEarnQueuedWithdrawal` | [`POST /v1/earn/external-wallet/queued-withdrawal-previews`](/docs/reference/api/earn/create-earn-external-wallet-queued-withdrawal-preview) |
-| Build a request | `buildEarnQueuedWithdrawalRequest` | [`POST /v1/earn/external-wallet/withdrawal-request-transactions`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-transaction) |
-| Submit a request | `submitEarnWithdrawalRequest` | [`POST /v1/earn/external-wallet/withdrawal-requests`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request) |
-| Track a request | `getEarnWithdrawalRequest` | [`GET /v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}`](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-request) |
-| Cancel a request | `buildEarnWithdrawalRequestCancellation`, `submitEarnWithdrawalRequestCancellation` | [`POST /v1/earn/external-wallet/withdrawal-request-cancel-transactions`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancel-transaction), [`POST /v1/earn/external-wallet/withdrawal-request-cancellations`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancellation) |
-
-A withdrawal spends shares, not a dollar amount, and a request transaction
-is not a payout. [Withdraw funds](/docs/earn/withdrawals) covers each route.
+- **`buildEarnDepositTransaction` previews for you** when the strategy needs
+  a floor. Call `previewEarnDeposit` to show your customer a quote first.
+- **`signEarnTransaction(built, customerSigner, sponsorSigner?)`** checks
+  that the signed message is unchanged, and adds your sponsor's signature
+  when the build named a `feePayer`.
+  [Deposit funds](/docs/earn/deposits#sign-in-your-customers-wallet) shows a
+  customer signer for a browser wallet.
+- **`createSponsorSigner(secretKey, feePayerAddress)`** makes the sponsor
+  signer from your fee payer's 64-byte secret key, the array a Solana CLI
+  keypair file holds.
+- **`listEarnPositions` reads every page.** Read a position's live
+  `withdrawableShares` with it before a withdrawal, then its routes with
+  `getEarnWithdrawalOptions`.
+- **`listPendingEarnQueuedWithdrawals` restores open requests.** Call it on
+  startup, and track each request to `fulfilled`, `cancelled`, or `failed`.
 
 ## Go live
 

@@ -159,6 +159,20 @@
   border-radius: 0;
 }
 
+/* A panel that holds prose or several blocks sets them in from the group's edge, in line with
+   the header's label (the header's 12px padding plus the label's 6px). */
+.mixed .panel {
+  padding: 16px 18px 18px;
+}
+
+.mixed .panel > :first-child {
+  margin-top: 0;
+}
+
+.mixed .panel > :last-child {
+  margin-bottom: 0;
+}
+
 .viewport {
   max-width: 100%;
   padding: 16px 0;

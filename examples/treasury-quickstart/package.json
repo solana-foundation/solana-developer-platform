@@ -1,0 +1,17 @@
+{
+  "name": "treasury-quickstart",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Earn's Treasury quickstart: a sandbox deposit from your organization's custody wallet.",
+  "packageManager": "pnpm@10.16.0",
+  "engines": {
+    "node": ">=20.18.0"
+  },
+  "type": "module",
+  "scripts": {
+    "deposit": "tsx deposit.mts"
+  },
+  "devDependencies": {
+    "tsx": "4.23.15"
+  }
+}

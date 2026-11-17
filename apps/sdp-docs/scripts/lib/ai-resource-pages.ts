@@ -5,8 +5,10 @@ import { docsPageSlugOf, isDocsFolderGroup } from "@/lib/site";
 export const EARN_KEY_PAGE_SLUGS = [
   "earn/index",
   "earn/quickstart",
+  "earn/treasury-quickstart",
   "earn/concepts",
   "guides/embedded-yield",
+  "earn/treasury",
 ] as const;
 
 /** Navigation metadata, with paths relative to its containing folder. */

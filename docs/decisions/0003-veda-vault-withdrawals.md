@@ -32,6 +32,8 @@ The EARN-027 publication gate completed in
 `cutbow7` approved exact head `b2d313803` before merge. External-wallet route
 discovery, queued previews, request/cancellation builds, submits, and history
 all require an API key. Custody queue routes remain internal.
+(2026-11-13: the custody queue routes are proposed for publication with the
+Treasury routes; see ADR 0002's addendum of that date.)
 Production remains fail-closed until Veda names approved mainnet vaults for SDP
 rather than the shared Test Vault.
 

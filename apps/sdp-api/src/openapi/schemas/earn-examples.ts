@@ -10,9 +10,14 @@ import type {
   EarnExternalWalletWithdrawalRequestTransactionResponse,
   EarnExternalWalletWithdrawalResponse,
   EarnExternalWalletWithdrawalTransactionResponse,
+  EarnMovementRecord,
   EarnStrategy,
   EarnVaultAsyncWithdrawalTermsRequest,
+  EarnVaultDeposit,
+  EarnVaultDepositsPage,
+  EarnVaultPosition,
   EarnVaultQueuedWithdrawalPreview,
+  EarnVaultWithdrawal,
   EarnVaultWithdrawalOptions,
   EarnVaultWithdrawalRequestRecord,
   EarnVaultWithdrawalRequestResponse,
@@ -58,6 +63,7 @@ export const EARN_EXAMPLE_IDS = {
   position: "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
   vedaPosition: "earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc",
   withdrawalRequest: "earn_vault_withdrawal_request_3c905ad2-c92c-4258-9675-1899c41569b9",
+  custodyWallet: "cwlt_5d0c2c0e-8f3a-4c59-9b1e-2a7f4e6d8c31",
 } as const satisfies Record<string, string>;
 
 const IDS = EARN_EXAMPLE_IDS;
@@ -464,3 +470,153 @@ export const EARN_WITHDRAWAL_REQUESTS_EXAMPLE = {
   hasMore: false,
   nextCursor: null,
 } satisfies EarnVaultWithdrawalRequestsPage;
+
+// ---------------------------------------------------------------------------
+// Treasury: the same story from a custody wallet. SDP signs, so one request
+// deposits and one withdraws; there is no build to sign or submit.
+// ---------------------------------------------------------------------------
+
+const CUSTODY_WALLET_ADDRESS = "55bQ7Rb12kewp7veLgggx2scVs5Xa5dq7pQQqDCdk43t";
+
+export const EARN_VAULT_DEPOSIT_REQUEST_EXAMPLE = {
+  strategyId: IDS.strategy,
+  custodyWalletId: IDS.custodyWallet,
+  amount: "25",
+};
+
+/** A custody deposit's answer: signed and broadcast, not yet confirmed. */
+export const EARN_VAULT_DEPOSIT_EXAMPLE = {
+  positionId: IDS.position,
+  movementId: IDS.depositMovement,
+  status: "submitted",
+  signature: SIGNATURE,
+  failureReason: null,
+  replayed: false,
+  strategy: {
+    id: IDS.strategy,
+    name: "Kamino Vault USDC",
+    provider: "kamino",
+    providerReference: VAULT,
+    hostCluster: "devnet",
+  },
+} satisfies EarnVaultDeposit;
+
+/** The same deposit read back after the network confirmed it. */
+export const EARN_VAULT_DEPOSIT_RECORD_EXAMPLE = {
+  movementId: IDS.depositMovement,
+  positionId: IDS.position,
+  provider: "kamino",
+  providerReference: VAULT,
+  status: "confirmed",
+  signature: SIGNATURE,
+  amount: "25",
+  failureReason: null,
+  createdAt: "2026-11-06T17:57:30.817Z",
+  confirmedAt: "2026-11-06T17:57:32.517Z",
+} satisfies EarnVaultDepositsPage["deposits"][number];
+
+export const EARN_VAULT_DEPOSITS_EXAMPLE = {
+  deposits: [EARN_VAULT_DEPOSIT_RECORD_EXAMPLE],
+  hasMore: false,
+  nextCursor: null,
+} satisfies EarnVaultDepositsPage;
+
+const { ownerAddress: _customerWallet, ...CUSTODY_POSITION } = POSITION;
+
+export const EARN_VAULT_POSITIONS_EXAMPLE = {
+  positions: [
+    { ...CUSTODY_POSITION, custodyWalletId: IDS.custodyWallet, feeSponsored: true },
+  ] satisfies EarnVaultPosition[],
+  hasMore: false,
+  nextCursor: null,
+};
+
+export const EARN_VAULT_WITHDRAWAL_PREVIEW_EXAMPLE = {
+  ...EARN_WITHDRAWAL_PREVIEW_EXAMPLE,
+  feeSponsored: true,
+};
+
+const CUSTODY_WITHDRAWAL = {
+  movementId: IDS.withdrawalMovement,
+  positionId: IDS.position,
+  provider: "kamino",
+  providerReference: VAULT,
+  ownerAddress: CUSTODY_WALLET_ADDRESS,
+  signature: SIGNATURE,
+  shares: "10",
+  shareMint: SHARE_MINT,
+  failureReason: null,
+  createdAt: "2026-11-06T18:21:04.120Z",
+} satisfies Partial<EarnVaultWithdrawal>;
+
+/** A custody withdrawal's answer: `shares` is what was asked for; no payout is observed yet. */
+export const EARN_VAULT_WITHDRAWAL_EXAMPLE = {
+  ...CUSTODY_WITHDRAWAL,
+  status: "submitted",
+  confirmedAt: null,
+  settledAt: null,
+  replayed: false,
+} satisfies EarnVaultWithdrawal;
+
+/** The same withdrawal once it is final. */
+export const EARN_VAULT_WITHDRAWAL_FINALIZED_EXAMPLE = {
+  ...CUSTODY_WITHDRAWAL,
+  status: "finalized",
+  confirmedAt: "2026-11-06T18:21:06.342Z",
+  settledAt: "2026-11-06T18:21:08.561Z",
+} satisfies EarnVaultWithdrawal;
+
+export const EARN_VAULT_WITHDRAWALS_EXAMPLE = {
+  withdrawals: [EARN_VAULT_WITHDRAWAL_FINALIZED_EXAMPLE],
+  hasMore: false,
+  nextCursor: null,
+};
+
+/** The Treasury feed, newest first: the withdrawal with its observed payout, then the deposit. */
+export const EARN_TREASURY_MOVEMENTS_EXAMPLE = {
+  movements: [
+    {
+      id: IDS.withdrawalMovement,
+      provider: "kamino",
+      executionModel: "vault_direct",
+      direction: "withdrawal",
+      status: "finalized",
+      positionId: IDS.position,
+      denomination: SHARE_MINT,
+      amountRequested: "10",
+      amountSettled: "10",
+      tokenAmount: "10.0224",
+      tokenMint: USDC_DEVNET,
+      vaultAddress: VAULT,
+      sourceAddress: VAULT,
+      destinationAddress: CUSTODY_WALLET_ADDRESS,
+      signature: SIGNATURE,
+      createdAt: "2026-11-06T18:21:04.120Z",
+      updatedAt: "2026-11-06T18:21:08.561Z",
+      confirmedAt: "2026-11-06T18:21:06.342Z",
+      settledAt: "2026-11-06T18:21:08.561Z",
+    },
+    {
+      id: IDS.depositMovement,
+      provider: "kamino",
+      executionModel: "vault_direct",
+      direction: "deposit",
+      status: "finalized",
+      positionId: IDS.position,
+      denomination: USDC_DEVNET,
+      amountRequested: "25",
+      amountSettled: "25",
+      sharesOut: "24.975",
+      vaultAddress: VAULT,
+      sourceAddress: CUSTODY_WALLET_ADDRESS,
+      destinationAddress: VAULT,
+      signature: SIGNATURE,
+      createdAt: "2026-11-06T17:57:30.817Z",
+      updatedAt: "2026-11-06T17:57:35.623Z",
+      confirmedAt: "2026-11-06T17:57:32.517Z",
+      settledAt: "2026-11-06T17:57:35.623Z",
+    },
+  ] satisfies EarnMovementRecord[],
+  hasMore: false,
+  nextCursor: null,
+};

@@ -22,9 +22,10 @@ integrator's SDP API key.
 Earn guides live in `apps/sdp-docs/content/docs/earn` and
 `apps/sdp-docs/content/docs/guides/embedded-yield.mdx`. The normal docs generators render the
 public contract for the deployment's release channel: Earn appears on `beta`
-and `experimental`, and stays hidden on `stable`. Treasury, Programs and
-provider-action routes remain internal; promoting another route requires
-named security sign-off.
+and `experimental`, and stays hidden on `stable`. The public contract covers
+the strategy catalog, Embedded Yield and the custody-wallet Treasury routes.
+Programs and provider-action routes remain internal; promoting another route
+requires named security sign-off.
 
 ## Local development — the whole Earn stack
 
