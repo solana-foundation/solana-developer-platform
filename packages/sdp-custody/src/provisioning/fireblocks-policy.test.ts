@@ -94,7 +94,8 @@ describe("Fireblocks policy presence", () => {
 });
 
 describe("Fireblocks rule scope", () => {
-  const scope = (rules: unknown[]) => hasFireblocksRuleOutsideAssets({ policy: { rules } }, "42", ["SOL"]);
+  const scope = (rules: unknown[]) =>
+    hasFireblocksRuleOutsideAssets({ policy: { rules } }, "42", ["SOL"]);
   it("does not need the token catalogue for native, wildcard, unreadable or foreign-vault rules", () => {
     expect(scope([rule([["42", "VAULT"]]), rule([["42", "VAULT"]], "*")])).toBe(false);
     expect(scope([rule([["42", "VAULT"]], "SOL", { action: "MAYBE" })])).toBe(false);
