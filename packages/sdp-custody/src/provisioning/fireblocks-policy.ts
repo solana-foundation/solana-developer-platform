@@ -63,30 +63,45 @@ function sourceMatchesVault(
 }
 
 /**
- * Whether the vault has a Transfer rule that names an asset outside `assets`.
- * Only parseable rules with a recognised action count: any other rule reads as
- * unknown whatever asset it names, so the answer cannot depend on the token
- * catalogue. This is what tells a caller whether resolving a canonical token's
- * asset id could still change the wallet's result.
+ * What a wallet's Transfer rules depend on, judged without the token catalogue:
+ * - `native`: every rule names `assets` (or `*`), another vault, or is plainly
+ *   absent, so inspecting the native asset alone already decides the wallet.
+ * - `outside`: a matching rule with a recognised action names an asset outside
+ *   `assets`, so resolving a canonical token's asset id can still change the answer.
+ * - `unknown`: a rule that might match the vault names an asset outside `assets`
+ *   but cannot be read (unrecognised action or selector), so an absent reading is
+ *   not proven and the wallet must not be reported as missing coverage.
  */
-export function hasFireblocksRuleOutsideAssets(
+export type FireblocksRuleScope = "native" | "outside" | "unknown";
+
+export function fireblocksRuleScope(
   value: unknown,
   vaultId: string,
   assets: string[]
-): boolean {
+): FireblocksRuleScope {
   const parsed = policySchema.safeParse(value);
-  if (!parsed.success) return false;
+  if (!parsed.success) return "native";
+  let unknown = false;
   for (const rule of parsed.data.policy.rules) {
     if (rule.type !== "TRANSFER") continue;
     const transfer = transferRuleSchema.safeParse(rule);
-    if (!transfer.success) continue;
+    if (!transfer.success) {
+      unknown = true;
+      continue;
+    }
     if (transfer.data.asset === "*" || assets.includes(transfer.data.asset)) continue;
     const src = z.object({ ids: z.array(sourceSchema) }).safeParse(transfer.data.src);
-    if (!src.success) continue;
-    if (!sourceMatchesVault(src.data.ids, vaultId).matches) continue;
-    if (ruleRequiresApproval(transfer.data) !== null) return true;
+    if (!src.success) {
+      unknown = true;
+      continue;
+    }
+    const source = sourceMatchesVault(src.data.ids, vaultId);
+    if (!source.interpretable) unknown = true;
+    if (!source.matches) continue;
+    if (ruleRequiresApproval(transfer.data) !== null) return "outside";
+    unknown = true;
   }
-  return false;
+  return unknown ? "unknown" : "native";
 }
 
 /**
@@ -94,8 +109,10 @@ export function hasFireblocksRuleOutsideAssets(
  * Source tuples are [id, type, subtype], not [type, id]. Unrecognised selectors stay unknown.
  * A matching rule proves coverage only when it stops SDP's credential from moving funds
  * alone: it must require approval (a `2-TIER` action or configured approvers) or block the
- * transfer. An `ALLOW` rule without approvers is missing. Presence says nothing about
- * initiators, limits, destinations or rule order.
+ * transfer. An `ALLOW` rule without approvers is missing. A null `assets` list judges every
+ * readable rule whatever asset it names, keeping proven findings while refusing to report
+ * absence past an unreadable rule. Presence says nothing about initiators, limits,
+ * destinations or rule order.
  */
 export function inspectFireblocksPolicy(
   value: unknown,
