@@ -77,8 +77,15 @@ const publishedCustodyProviderEntries = (
     surface.custodyProviders.some((id) => id === provider)
   );
 
-const publishedCustodyProviders = (surface: PublicSurface): CustodyProviderEntry[] =>
-  publishedCustodyProviderEntries(surface).map(([, entry]) => entry);
+/** A provider's guide when this build publishes it: a BYOK-only guide needs the channel's BYOK setup. */
+const publishedGuide = (
+  provider: string,
+  { guide }: CustodyProviderEntry,
+  surface: PublicSurface
+): CustodyProviderEntry["guide"] =>
+  guide && (guide.mode !== "byok" || surface.byokCustodyProviders.some((id) => id === provider))
+    ? guide
+    : undefined;
 
 const BLOCKS = {
   ModuleTable: (surface) =>
@@ -114,19 +121,20 @@ const BLOCKS = {
   CustodyProviderTable: (surface) =>
     table(
       ["Provider", "Description"],
-      publishedCustodyProviders(surface).map((entry) => [
-        entry.guide ? `**[${entry.name}](${entry.guide.href})**` : `**${entry.name}**`,
-        entry.description,
-      ])
+      publishedCustodyProviderEntries(surface).map(([provider, entry]) => {
+        const guide = publishedGuide(provider, entry, surface);
+        return [
+          guide ? `**[${entry.name}](${guide.href})**` : `**${entry.name}**`,
+          entry.description,
+        ];
+      })
     ),
   CustodyProviderGuides: (surface) =>
     publishedCustodyProviderEntries(surface)
-      .flatMap(([provider, { guide }]) =>
-        guide &&
-        (guide.mode !== "byok" || surface.byokCustodyProviders.some((id) => id === provider))
-          ? [`- [${guide.title}](${guide.href}): ${guide.description}`]
-          : []
-      )
+      .flatMap(([provider, entry]) => {
+        const guide = publishedGuide(provider, entry, surface);
+        return guide ? [`- [${guide.title}](${guide.href}): ${guide.description}`] : [];
+      })
       .join("\n"),
   WalletCreateRetryTable: ({ walletCreateDedupe }) =>
     table(

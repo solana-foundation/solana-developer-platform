@@ -237,6 +237,13 @@ describe("docs follow the release channel", () => {
     );
     assert.match(experimental, /\| \*\*Turnkey\*\* \|/);
     assert.doesNotMatch(experimental, /Anchorage/);
+
+    // Beta lists Managed Fireblocks without linking its hidden BYOK-only guide.
+    const beta = expandDocsBlocks("<CustodyProviderTable />\n", "wallets.mdx", {
+      surface: { ...EXPERIMENTAL, releaseChannel: "beta", byokCustodyProviders: ["privy"] },
+    });
+    assert.match(beta, /\| \*\*Fireblocks\*\* \|/);
+    assert.doesNotMatch(beta, /wallet-operations\/fireblocks/);
   });
 
   it("keeps custody setup links consistent in Markdown, compiled pages and search", () => {
