@@ -1,5 +1,5 @@
 import { ACTIONS, actionOwnerOf, actionsInModule, HIDDEN_ACTION_MODULES } from "@sdp/types/actions";
-import { CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/types/custody";
+import { CUSTODY_MODES, CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/types/custody";
 import { RAMP_ONLY_TRANSFER_STATUSES, RAMP_TRANSFER_TYPES } from "@sdp/types/payments";
 import {
   ORGANIZATION_PROVIDER_FAMILIES,
@@ -8,6 +8,7 @@ import {
   RETIRED_RAMP_PROVIDERS,
 } from "@sdp/types/provider-access";
 import {
+  isCustodyProviderInReleaseChannel,
   isCustodyProviderPublished,
   isRampProviderInReleaseChannel,
   SDP_RAMP_PROVIDER_MATURITY,
@@ -193,6 +194,7 @@ function pruneExample(value: Json, published: Published): Json | undefined {
 type Context = {
   published: Published;
   inResponse: boolean;
+  releaseChannel: SdpReleaseChannel;
   modules: ReadonlySet<SdpModule>;
 };
 
@@ -204,13 +206,17 @@ export const TRANSFER_STATUS_GATE = "x-sdp-transfer-status";
 export const DESCRIPTION_GATE = "x-sdp-description-without-module";
 /** Schema ownership by one custody provider, such as its own tracking fields on a transfer. */
 export const CUSTODY_PROVIDER_GATE = "x-sdp-custody-provider";
+/** Restricts provider values to one custody mode instead of either mode. */
+export const CUSTODY_MODE_GATE = "x-sdp-custody-mode";
 
 const GATE_KEYS: ReadonlySet<string> = new Set([
   MODULE_GATE,
   TRANSFER_STATUS_GATE,
   DESCRIPTION_GATE,
   CUSTODY_PROVIDER_GATE,
+  CUSTODY_MODE_GATE,
 ]);
+const custodyModeGateSchema = z.enum(CUSTODY_MODES).optional();
 const custodyProviderGateSchema = z.enum(CUSTODY_PROVIDERS).optional();
 
 const moduleNameSchema = z.enum(SDP_RELEASE_CHANNELS.experimental);
@@ -295,6 +301,23 @@ function pruneNode(node: Json, context: Context): Json | typeof EMPTY {
 
   const module = moduleGateSchema.parse(node[MODULE_GATE]);
   if (module !== undefined && !context.modules.has(module)) return EMPTY;
+  const custodyMode = custodyModeGateSchema.parse(node[CUSTODY_MODE_GATE]);
+  if (custodyMode !== undefined) {
+    const published = context.published;
+    const { releaseChannel } = context;
+    context = {
+      ...context,
+      published: (value) => {
+        const owner = typeof value === "string" ? VALUE_OWNERS.get(value) : undefined;
+        return (
+          published(value) &&
+          (!owner ||
+            !("custodyProvider" in owner) ||
+            isCustodyProviderInReleaseChannel(releaseChannel, owner.custodyProvider, custodyMode))
+        );
+      },
+    };
+  }
   const custodyProvider = custodyProviderGateSchema.parse(node[CUSTODY_PROVIDER_GATE]);
   if (custodyProvider !== undefined && !context.published(custodyProvider)) return EMPTY;
   if (node[TRANSFER_STATUS_GATE] === true && !context.modules.has("ramps")) {
@@ -384,6 +407,7 @@ export function pruneUnpublishedValues(
     published: (value) =>
       typeof value !== "string" || isValuePublished(value, modules, releaseChannel),
     inResponse: false,
+    releaseChannel,
     modules,
   });
   if (pruned === EMPTY) throw new Error("The public OpenAPI document pruned to nothing");

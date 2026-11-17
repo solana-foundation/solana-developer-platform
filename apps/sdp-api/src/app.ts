@@ -171,7 +171,7 @@ function getFireblocksBlockedError(err: Error): AppError | null {
 
   return new AppError(
     "SIGNING_BLOCKED",
-    "Fireblocks blocked this signing request. Confirm raw signing is enabled for this workspace and that the raw-signing policy allows this API user and vault."
+    "Fireblocks blocked this signing request. Confirm this signing operation is enabled for this workspace and its policy allows this API user and vault."
   );
 }
 

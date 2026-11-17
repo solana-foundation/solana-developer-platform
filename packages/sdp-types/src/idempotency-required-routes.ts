@@ -23,7 +23,8 @@ export const IDEMPOTENCY_REQUIRED_ROUTES = [
 
 export type IdempotencyRequiredRoute = (typeof IDEMPOTENCY_REQUIRED_ROUTES)[number];
 
-/** Dashboard-only key generation; deliberately absent from public API surfaces. */
+/** Dashboard-only key generation and proposal cancellation; deliberately absent from public API surfaces. */
 export const INTERNAL_IDEMPOTENCY_REQUIRED_ROUTES = [
   "POST /internal/dashboard/custody/fireblocks/csr",
+  "POST /internal/dashboard/custody/fireblocks/proposals/:kind/:proposalId/cancel",
 ] as const;

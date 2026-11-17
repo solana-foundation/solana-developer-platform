@@ -34,7 +34,7 @@ const optionalAmount = z
   .transform((value) => value ?? undefined);
 const transferResultSchema = z.object({
   id: z.string().min(1).max(256),
-  status: z.string().regex(/^[A-Z_]{1,100}$/),
+  status: z.string().regex(/^[A-Z0-9_]{1,100}$/),
   subStatus: optionalText,
   txHash: optionalText,
   externalTxId: optionalText,
@@ -167,4 +167,19 @@ export async function readFireblocksTransfer(
     if (error instanceof FireblocksApiError && error.status === 404) return null;
     throw error;
   }
+}
+
+/** Acknowledgement only: cancellation can race signing/broadcast and is not a final status. */
+export async function cancelFireblocksTransaction(
+  runtime: CustodyProvisioningRuntime,
+  access: FireblocksTransferAccess,
+  transactionId: string
+): Promise<boolean> {
+  const response = await fireblocksRequest<unknown>(runtime, {
+    ...config(access),
+    method: "POST",
+    uri: `/v1/transactions/${encodeURIComponent(transactionId)}/cancel`,
+  });
+  const parsed = z.object({ success: z.boolean() }).safeParse(response);
+  return parsed.success ? parsed.data.success : invalid();
 }

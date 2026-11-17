@@ -38,6 +38,10 @@ const parameterizedKeys: [key: readonly unknown[], params: unknown[]][] = [
   [paymentsQueryKeys.batchEstimate({ serializedRequest: '{"a":1}' }), ['{"a":1}']],
   [paymentsQueryKeys.transactionFilterOptions({ projectId: "prj_1" }), ["prj_1"]],
   [custodyQueryKeys.walletActivity({ walletId: "wal_1" }), ["wal_1"]],
+  [
+    custodyQueryKeys.fireblocksProposals({ walletId: "wal_4", kind: "signing", offset: 20 }),
+    ["wal_4", "signing", 20],
+  ],
   [membersQueryKeys.memberApiKeys({ memberId: "mem_1" }), ["mem_1"]],
   [custodyQueryKeys.walletBalances({ walletId: "wal_3", readAt: 1 }), ["wal_3", 1]],
   [issuanceQueryKeys.tokens({ query: DEFAULT_ISSUANCE_LIST_QUERY }), [DEFAULT_ISSUANCE_LIST_QUERY]],

@@ -73,16 +73,27 @@ export function warnIfCustodySigningBudgetCapped(env: SigningBudgetEnv): void {
   }
 }
 
-function withSigningTimeout<T>(signing: Promise<T>, timeoutMs: number): Promise<T> {
+function withSigningTimeout<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+  timeoutMs: number,
+  signal?: AbortSignal
+): Promise<T> {
+  const controller = new AbortController();
+  const combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timedOut = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(
-      () =>
-        reject(new SigningError(`Custody signing timed out after ${timeoutMs}ms`, "NETWORK_ERROR")),
-      timeoutMs
-    );
+    timer = setTimeout(() => {
+      const error = new SigningError(
+        `Custody signing timed out after ${timeoutMs}ms`,
+        "NETWORK_ERROR"
+      );
+      reject(error);
+      controller.abort(error);
+    }, timeoutMs);
   });
-  return Promise.race([signing, timedOut]).finally(() => clearTimeout(timer));
+  return Promise.race([Promise.resolve().then(() => operation(combined)), timedOut]).finally(() =>
+    clearTimeout(timer)
+  );
 }
 
 /**
@@ -102,7 +113,12 @@ export function boundSigningTime(
   if ("signTransactions" in signer && typeof signer.signTransactions === "function") {
     const sign = signer.signTransactions.bind(signer);
     overrides.signTransactions = {
-      value: (...args: Parameters<typeof sign>) => withSigningTimeout(sign(...args), timeoutMs),
+      value: (transactions: Parameters<typeof sign>[0], config?: Parameters<typeof sign>[1]) =>
+        withSigningTimeout(
+          (abortSignal) => sign(transactions, { ...config, abortSignal }),
+          timeoutMs,
+          config?.abortSignal
+        ),
     };
   }
   if (
@@ -111,7 +127,12 @@ export function boundSigningTime(
   ) {
     const modify = signer.modifyAndSignTransactions.bind(signer);
     overrides.modifyAndSignTransactions = {
-      value: (...args: Parameters<typeof modify>) => withSigningTimeout(modify(...args), timeoutMs),
+      value: (transactions: Parameters<typeof modify>[0], config?: Parameters<typeof modify>[1]) =>
+        withSigningTimeout(
+          (abortSignal) => modify(transactions, { ...config, abortSignal }),
+          timeoutMs,
+          config?.abortSignal
+        ),
     };
   }
   // SAFETY: Object.create returns an object whose prototype is the signer, so
