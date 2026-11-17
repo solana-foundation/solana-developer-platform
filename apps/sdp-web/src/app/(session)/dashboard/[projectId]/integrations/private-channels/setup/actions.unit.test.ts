@@ -115,7 +115,7 @@ describe("connectPrivateChannelAction", () => {
     const result = await updatePrivateChannelAction({ ...input, instanceId: existingInstance.id });
 
     expect(result).toEqual({ ok: true, instance: { ...existingInstance, isActive: true } });
-    expect(fetchMock).toHaveBeenCalledWith("/v1/private-channels/instance", {
+    expect(fetchMock).toHaveBeenCalledWith("/v1/private-channels/instance-connection", {
       method: "PATCH",
       body: expect.stringContaining(`"instanceId":"${existingInstance.id}"`),
     });

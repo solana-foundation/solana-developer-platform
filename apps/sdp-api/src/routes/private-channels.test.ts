@@ -151,12 +151,20 @@ describe("Private Channels routes", () => {
 
   it("returns 403 when the feature flag is off", async () => {
     env.PRIVATE_CHANNELS_ENABLED = undefined;
-    const res = await app.request("/v1/private-channels/instance", { headers: authHeaders() }, env);
+    const res = await app.request(
+      "/v1/private-channels/instance-connection",
+      { headers: authHeaders() },
+      env
+    );
     expect(res.status).toBe(403);
   });
 
   it("GET /instance returns { instance: null } when no row exists", async () => {
-    const res = await app.request("/v1/private-channels/instance", { headers: authHeaders() }, env);
+    const res = await app.request(
+      "/v1/private-channels/instance-connection",
+      { headers: authHeaders() },
+      env
+    );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: PrivateChannelInstanceEnvelope };
     expect(body.data.instance).toBeNull();
@@ -166,7 +174,7 @@ describe("Private Channels routes", () => {
     probeConnectionMock.mockResolvedValueOnce(successProbe());
 
     const res = await app.request(
-      "/v1/private-channels/instance",
+      "/v1/private-channels/instance-connection/connect",
       {
         method: "POST",
         headers: adminHeaders,
@@ -193,7 +201,7 @@ describe("Private Channels routes", () => {
     expect(instance.isActive).toBe(true);
 
     const getRes = await app.request(
-      "/v1/private-channels/instance",
+      "/v1/private-channels/instance-connection",
       { headers: authHeaders() },
       env
     );
@@ -205,14 +213,14 @@ describe("Private Channels routes", () => {
   it("POST /instance returns 409 when an active instance already exists", async () => {
     probeConnectionMock.mockResolvedValueOnce(successProbe());
     const first = await app.request(
-      "/v1/private-channels/instance",
+      "/v1/private-channels/instance-connection/connect",
       { method: "POST", headers: adminHeaders, body: JSON.stringify(SANDBOX_DEFAULTS) },
       env
     );
     expect(first.status).toBe(200);
 
     const res = await app.request(
-      "/v1/private-channels/instance",
+      "/v1/private-channels/instance-connection/connect",
       { method: "POST", headers: adminHeaders, body: JSON.stringify(SANDBOX_DEFAULTS) },
       env
     );
@@ -228,7 +236,7 @@ describe("Private Channels routes", () => {
   it("PATCH /instance re-probes and updates the active instance in place", async () => {
     probeConnectionMock.mockResolvedValue(successProbe());
     const created = await app.request(
-      "/v1/private-channels/instance",
+      "/v1/private-channels/instance-connection/connect",
       { method: "POST", headers: adminHeaders, body: JSON.stringify(SANDBOX_DEFAULTS) },
       env
     );
@@ -240,7 +248,7 @@ describe("Private Channels routes", () => {
     env.PRIVATE_CHANNEL_EGRESS_ALLOWLIST = gatewayUrl;
 
     const updated = await app.request(
-      "/v1/private-channels/instance",
+      "/v1/private-channels/instance-connection",
       {
         method: "PATCH",
         headers: adminHeaders,
@@ -268,7 +276,7 @@ describe("Private Channels routes", () => {
   it("PATCH /instance refuses a destination that is not on the egress allowlist, without probing", async () => {
     probeConnectionMock.mockResolvedValue(successProbe());
     const created = await app.request(
-      "/v1/private-channels/instance",
+      "/v1/private-channels/instance-connection/connect",
       { method: "POST", headers: adminHeaders, body: JSON.stringify(SANDBOX_DEFAULTS) },
       env
     );
@@ -276,7 +284,7 @@ describe("Private Channels routes", () => {
     probeConnectionMock.mockClear();
 
     const updated = await app.request(
-      "/v1/private-channels/instance",
+      "/v1/private-channels/instance-connection",
       {
         method: "PATCH",
         headers: adminHeaders,
@@ -300,13 +308,13 @@ describe("Private Channels routes", () => {
   it("POST /instance/disconnect flips is_active and returns the row", async () => {
     probeConnectionMock.mockResolvedValueOnce(successProbe());
     await app.request(
-      "/v1/private-channels/instance",
+      "/v1/private-channels/instance-connection/connect",
       { method: "POST", headers: adminHeaders, body: JSON.stringify(SANDBOX_DEFAULTS) },
       env
     );
 
     const res = await app.request(
-      "/v1/private-channels/instance/disconnect",
+      "/v1/private-channels/instance-connection/disconnect",
       { method: "POST", headers: adminHeaders, body: "{}" },
       env
     );
@@ -315,7 +323,7 @@ describe("Private Channels routes", () => {
     expect(body.data.instance.isActive).toBe(false);
 
     const getRes = await app.request(
-      "/v1/private-channels/instance",
+      "/v1/private-channels/instance-connection",
       { headers: authHeaders() },
       env
     );
@@ -326,18 +334,18 @@ describe("Private Channels routes", () => {
   it("POST /instance requires confirmReactivate when a same-gateway inactive row exists", async () => {
     probeConnectionMock.mockResolvedValue(successProbe());
     await app.request(
-      "/v1/private-channels/instance",
+      "/v1/private-channels/instance-connection/connect",
       { method: "POST", headers: adminHeaders, body: JSON.stringify(SANDBOX_DEFAULTS) },
       env
     );
     await app.request(
-      "/v1/private-channels/instance/disconnect",
+      "/v1/private-channels/instance-connection/disconnect",
       { method: "POST", headers: adminHeaders, body: "{}" },
       env
     );
 
     const withoutConfirm = await app.request(
-      "/v1/private-channels/instance",
+      "/v1/private-channels/instance-connection/connect",
       { method: "POST", headers: adminHeaders, body: JSON.stringify(SANDBOX_DEFAULTS) },
       env
     );
@@ -351,7 +359,7 @@ describe("Private Channels routes", () => {
     expect(withoutBody.error.details?.existingInstance?.id).toMatch(/^pci_/);
 
     const withConfirm = await app.request(
-      "/v1/private-channels/instance",
+      "/v1/private-channels/instance-connection/connect",
       {
         method: "POST",
         headers: adminHeaders,
@@ -369,20 +377,20 @@ describe("Private Channels routes", () => {
   it("DELETE /instance removes the active row", async () => {
     probeConnectionMock.mockResolvedValueOnce(successProbe());
     await app.request(
-      "/v1/private-channels/instance",
+      "/v1/private-channels/instance-connection/connect",
       { method: "POST", headers: adminHeaders, body: JSON.stringify(SANDBOX_DEFAULTS) },
       env
     );
 
     const res = await app.request(
-      "/v1/private-channels/instance",
+      "/v1/private-channels/instance-connection",
       { method: "DELETE", headers: adminHeaders },
       env
     );
     expect(res.status).toBe(200);
 
     const getRes = await app.request(
-      "/v1/private-channels/instance",
+      "/v1/private-channels/instance-connection",
       { headers: authHeaders() },
       env
     );
@@ -393,7 +401,7 @@ describe("Private Channels routes", () => {
   it("DELETE /instance drains first: in-flight movement → 409, admission closed, retry deletes", async () => {
     probeConnectionMock.mockResolvedValueOnce(successProbe());
     const created = await app.request(
-      "/v1/private-channels/instance",
+      "/v1/private-channels/instance-connection/connect",
       { method: "POST", headers: adminHeaders, body: JSON.stringify(SANDBOX_DEFAULTS) },
       env
     );
@@ -412,7 +420,7 @@ describe("Private Channels routes", () => {
 
     // In-flight movement: deletion refuses but the drain is durable.
     const refused = await app.request(
-      "/v1/private-channels/instance",
+      "/v1/private-channels/instance-connection",
       { method: "DELETE", headers: adminHeaders },
       env
     );
@@ -443,7 +451,7 @@ describe("Private Channels routes", () => {
       .prepare("UPDATE private_channel_deposits SET status = 'failed' WHERE id = 'pcd_inflight'")
       .run();
     const retried = await app.request(
-      "/v1/private-channels/instance",
+      "/v1/private-channels/instance-connection",
       { method: "DELETE", headers: adminHeaders },
       env
     );
@@ -452,7 +460,7 @@ describe("Private Channels routes", () => {
 
   it("DELETE /instance returns 404 when there is no active row", async () => {
     const res = await app.request(
-      "/v1/private-channels/instance",
+      "/v1/private-channels/instance-connection",
       { method: "DELETE", headers: adminHeaders },
       env
     );
@@ -461,7 +469,7 @@ describe("Private Channels routes", () => {
 
   it("POST /instance returns 400 with field errors when the schema fails", async () => {
     const res = await app.request(
-      "/v1/private-channels/instance",
+      "/v1/private-channels/instance-connection/connect",
       {
         method: "POST",
         headers: adminHeaders,
@@ -481,7 +489,7 @@ describe("Private Channels routes", () => {
     // passes and the allowlist is what stops it. Nothing is dialled, so the
     // probe is never reached.
     const res = await app.request(
-      "/v1/private-channels/instance",
+      "/v1/private-channels/instance-connection/connect",
       {
         method: "POST",
         headers: adminHeaders,
@@ -503,7 +511,7 @@ describe("Private Channels routes", () => {
 
   it("GET /health reports an unapproved gateway as unreachable", async () => {
     const res = await app.request(
-      `/v1/private-channels/health?gatewayUrl=${encodeURIComponent("http://127.0.0.1:8899")}`,
+      `/v1/private-channels/instance-connection/check-gateway-health?gatewayUrl=${encodeURIComponent("http://127.0.0.1:8899")}`,
       { headers: authHeaders() },
       env
     );
@@ -531,7 +539,7 @@ describe("Private Channels routes", () => {
     });
 
     const res = await app.request(
-      "/v1/private-channels/instance",
+      "/v1/private-channels/instance-connection/connect",
       {
         method: "POST",
         headers: adminHeaders,
@@ -561,7 +569,7 @@ describe("Private Channels routes", () => {
     });
 
     const res = await app.request(
-      "/v1/private-channels/instance",
+      "/v1/private-channels/instance-connection/connect",
       {
         method: "POST",
         headers: adminHeaders,
