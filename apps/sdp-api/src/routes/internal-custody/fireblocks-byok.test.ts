@@ -139,6 +139,11 @@ beforeEach(async () => {
   await setOrganizationProviderOverrides(getDb(env), ORGANIZATION_ID, {
     custody: { fireblocks: true },
   });
+  // Each test gets its own Fireblocks API key: resolveFireblocksTransferAsset
+  // caches the supported-assets catalogue per key for five minutes, so a shared
+  // key would make one test's provider-read counts depend on another's.
+  fields.apiKey = `tenant-fireblocks-key-${crypto.randomUUID()}`;
+  body.fields.apiKey = fields.apiKey;
   app = new Hono<{ Bindings: Env }>();
   app.use("*", kvStoreMiddleware());
   app.use("*", async (c, next) => {
@@ -199,7 +204,7 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
     const connected = await connect();
     // The observation follows setup in the background; the periodic queue does the same work.
     await inSandboxScope(() => checkDueProviderPolicies(testEnv));
-    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(fetch).toHaveBeenCalledTimes(2);
     expect(fetch).toHaveBeenCalledWith(
       `${testEnv.FIREBLOCKS_API_BASE_URL}/v1/vault/accounts/0/SOL_TEST/addresses_paginated`,
       expect.objectContaining({
@@ -241,7 +246,7 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
       {}
     );
     expect(replay.status).toBe(200);
-    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(fetch).toHaveBeenCalledTimes(2);
     const listed = await request("/connections?provider=fireblocks");
     expect(listed.status).toBe(200);
     const serialized = JSON.stringify(await listed.json());

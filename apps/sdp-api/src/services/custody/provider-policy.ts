@@ -1,5 +1,6 @@
 import { denormalizeFireblocksWalletId } from "@sdp/custody/provider-wallet-ids";
 import {
+  hasFireblocksRuleOutsideAssets,
   inspectFireblocksPolicy,
   type PolicyResult,
   readFireblocksPolicy,
@@ -88,6 +89,12 @@ async function inspectBatch(
       // Presence of a native Transfer rule. RAW signing is not proven by this check.
       if ("error" in policy) return policy.error;
       const vaultId = denormalizeFireblocksWalletId(target.wallet_id);
+      // Rules naming the native asset (or any asset) decide the result on their
+      // own; the USDC asset id only matters when a rule names some other asset,
+      // which may be the USDC rule the wallet's coverage question turns on.
+      const native = inspectFireblocksPolicy(policy.value, vaultId, [credential.assetId]);
+      if (!hasFireblocksRuleOutsideAssets(policy.value, vaultId, [credential.assetId]))
+        return native;
       const mint = wellKnownMint("USDC", currentClusterScope().cluster);
       if (!mint) throw new Error("No canonical USDC mint for this cluster");
       const usdc = await resolveFireblocksTransferAsset(
