@@ -1,6 +1,6 @@
 import type { CustodyProviderUseCase, CustodyWalletSummary } from "@sdp/types/custody";
 import type { CustodyIntegration, IntegrationState } from "@sdp/types/integrations";
-import type { SdpModule } from "@sdp/types/release-channels";
+import { isCustodyProviderInReleaseChannel, type SdpModule } from "@sdp/types/release-channels";
 import { Button } from "@sdp/ui/button";
 import Link from "next/link";
 import {
@@ -24,7 +24,10 @@ import {
   StateBand,
   type StateBandTone,
 } from "@/components/refresh-record";
-import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
+import {
+  deploymentReleaseChannel,
+  isModuleInDeploymentReleaseChannel,
+} from "@/flags/release-channel";
 import { getTranslations } from "@/i18n/server";
 import { resolveDocsUrl } from "@/lib/docs-url";
 import { requestProjectHref } from "@/lib/sdp-api";
@@ -51,6 +54,18 @@ function custodyUseCasesInDeploymentReleaseChannel(
   return useCases.filter((useCase) =>
     isModuleInDeploymentReleaseChannel(CUSTODY_USE_CASE_MODULES[useCase])
   );
+}
+
+/**
+ * The provider's docs page, or the docs home when this build has none. The
+ * Fireblocks guide covers only BYOK setup, so a channel running only Managed
+ * Fireblocks (beta) does not publish it.
+ */
+function custodyProviderDocsPath(provider: CustodyIntegration["provider"]): string | undefined {
+  return provider === "fireblocks" &&
+    isCustodyProviderInReleaseChannel(deploymentReleaseChannel(), "fireblocks", "byok")
+    ? "wallet-operations/fireblocks"
+    : undefined;
 }
 
 const STATE_BANDS = {
@@ -191,9 +206,7 @@ function DetailsBlock({ entry, t }: { entry: CustodyProviderCatalogEntry; t: Tra
         )}
         <RecordLine label={t("Shared.integrations.detailResources")}>
           <a
-            href={resolveDocsUrl(
-              entry.id === "fireblocks" ? "wallet-operations/fireblocks" : undefined
-            )}
+            href={resolveDocsUrl(custodyProviderDocsPath(entry.id))}
             target="_blank"
             rel="noreferrer noopener"
             className="underline-offset-4 hover:underline"

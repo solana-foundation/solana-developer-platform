@@ -37,6 +37,12 @@ const PARA_NOT_CONFIGURED: CustodyIntegration = {
   state: { status: "not_configured", modes: ["managed"] },
 };
 
+const FIREBLOCKS_PROVIDED: CustodyIntegration = {
+  provider: "fireblocks",
+  category: "institutional",
+  state: { status: "provided", modes: ["managed"] },
+};
+
 const ANCHORAGE_NOT_CONFIGURED: CustodyIntegration = {
   provider: "anchorage",
   category: "institutional",
@@ -181,6 +187,22 @@ describe("IntegrationDetailView", () => {
     expect(recordLine(markup, "Connection name")).toBeNull();
     expect(recordLine(markup, "Credential scope")).toBeNull();
     expect(recordLine(markup, "Resources")).toBe("View documentation");
+  });
+
+  it("links the Fireblocks guide only where the channel runs its BYOK setup", async () => {
+    const docsOn = async (releaseChannel: SdpReleaseChannel) =>
+      /href="([^"]*)"[^>]*>View documentation</.exec(
+        await render({
+          integration: FIREBLOCKS_PROVIDED,
+          releaseChannel,
+          canManageCustody: true,
+          custodyConnections: null,
+        })
+      )?.[1];
+
+    expect(await docsOn("experimental")).toMatch(/\/wallet-operations\/fireblocks$/);
+    // Beta runs only Managed Fireblocks and does not publish the BYOK guide.
+    expect(await docsOn("beta")).not.toMatch(/fireblocks/);
   });
 
   it("lists no use whose module the release channel leaves out", async () => {
