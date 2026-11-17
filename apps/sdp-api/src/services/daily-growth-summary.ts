@@ -50,8 +50,15 @@ export interface DailyGrowth {
 
 /** A list longer than this ends with "and N more", so one busy day can't flood the channel. */
 const LISTED_MAX = 15;
-/** One list line's customer text is cut to this, which keeps a full list under Slack's 3,000. */
+/** One customer value in a list line (a name, an email, an organization) is cut to this. */
 const LINE_TEXT_MAX = 120;
+/** One whole list line, escaped, is cut to this. */
+const LINE_MAX = 300;
+/**
+ * What a list's lines may take of its section, leaving room for its title and the "and N more"
+ * line inside Slack's 3,000 characters.
+ */
+const LIST_BUDGET = 2700;
 
 function shiftUtcDay(day: string, days: number): string {
   const shifted = new Date(`${day}T00:00:00Z`);
@@ -130,17 +137,24 @@ export async function readDailyGrowth(env: Env, day: string): Promise<DailyGrowt
          (SELECT COUNT(*) FROM organizations WHERE mainnet_requested_at >= ? AND mainnet_requested_at < ?) AS week_mainnet_requests`
     )
     .bind(previous, day, previous, day, weekStart, end, weekStart, end, weekStart, end)
-    .first<Record<string, number | string>>();
-  const count = (key: string) => Number(totals?.[key] ?? 0);
+    .first<{
+      previous_organizations: number | string;
+      previous_signups: number | string;
+      week_organizations: number | string;
+      week_signups: number | string;
+      week_mainnet_requests: number | string;
+    }>();
+  // A SELECT of scalar subqueries always returns one row; none means the query itself is broken.
+  if (!totals) throw new Error("The daily growth totals query returned no row");
 
   return {
     day,
-    organizations: (organizations.results ?? []).map((row) => ({
+    organizations: organizations.results.map((row) => ({
       id: row.id,
       name: row.name,
       adminEmail: row.admin_email,
     })),
-    signups: (signups.results ?? []).map((row) => ({
+    signups: signups.results.map((row) => ({
       email: row.email,
       name: row.name,
       organization: row.organization_name
@@ -148,13 +162,13 @@ export async function readDailyGrowth(env: Env, day: string): Promise<DailyGrowt
         : null,
     })),
     previousDay: {
-      organizations: count("previous_organizations"),
-      signups: count("previous_signups"),
+      organizations: Number(totals.previous_organizations),
+      signups: Number(totals.previous_signups),
     },
     lastSevenDays: {
-      organizations: count("week_organizations"),
-      signups: count("week_signups"),
-      mainnetRequests: count("week_mainnet_requests"),
+      organizations: Number(totals.week_organizations),
+      signups: Number(totals.week_signups),
+      mainnetRequests: Number(totals.week_mainnet_requests),
     },
   };
 }
@@ -168,10 +182,21 @@ function text(value: string): string {
   return escapeSlackText(truncate(value, LINE_TEXT_MAX));
 }
 
+/**
+ * Lines while they fit: at most `LISTED_MAX`, each cut to `LINE_MAX`, all within `LIST_BUDGET`.
+ * Whatever is left over is counted in a closing "and N more", which always fits.
+ */
 function bulletList(lines: string[]): string {
   if (lines.length === 0) return "_None_";
-  const listed = lines.slice(0, LISTED_MAX).map((line) => `• ${line}`);
-  if (lines.length > LISTED_MAX) listed.push(`_…and ${lines.length - LISTED_MAX} more_`);
+  const listed: string[] = [];
+  let used = 0;
+  for (const line of lines) {
+    const bullet = `• ${truncate(line, LINE_MAX)}`;
+    if (listed.length === LISTED_MAX || used + bullet.length + 1 > LIST_BUDGET) break;
+    listed.push(bullet);
+    used += bullet.length + 1;
+  }
+  if (listed.length < lines.length) listed.push(`_…and ${lines.length - listed.length} more_`);
   return listed.join("\n");
 }
 
@@ -237,12 +262,16 @@ export function dailyGrowthSummaryEnabled(env: Env): boolean {
   return requestsSlackWebhookUrl(env) !== null;
 }
 
-const CLAIM_TTL_SECONDS = 3 * 24 * 60 * 60;
+/** How long a slot holds the day while it reads and posts; a Worker that dies frees it by then. */
+const WORKING_CLAIM_TTL_SECONDS = 10 * 60;
+/** How long a posted day is remembered, past every slot that could post it again. */
+const POSTED_TTL_SECONDS = 3 * 24 * 60 * 60;
 
 /**
- * Posts the previous UTC day's summary once. The cron fires several times a morning; the first
- * slot claims the day in Redis and the rest find it taken. A failed post lets the claim go, so the
- * next slot tries again.
+ * Posts the previous UTC day's summary once. The cron fires several times a morning. A slot
+ * claims the day in Redis for ten minutes while it reads and posts, then marks it posted for
+ * three days; a later slot finds either and skips. A failed post lets the claim go at once, and a
+ * Worker that dies mid-slot lets it lapse, so a later slot tries again.
  *
  * @returns Whether this call posted.
  * @throws When the post fails, after releasing the day for the next slot.
@@ -252,9 +281,9 @@ export async function postDailyGrowthSummary(env: Env, now = new Date()): Promis
   if (!webhookUrl) return false;
   const day = previousUtcDay(now);
   const key = `slack-daily-growth:${day}`;
-  const token = crypto.randomUUID();
+  const token = `working:${crypto.randomUUID()}`;
   const kv = createKVStoreSet(env).cache;
-  if (!(await kv.compareAndSet(key, null, token, { expirationTtl: CLAIM_TTL_SECONDS }))) {
+  if (!(await kv.compareAndSet(key, null, token, { expirationTtl: WORKING_CLAIM_TTL_SECONDS }))) {
     return false;
   }
   try {
@@ -263,5 +292,6 @@ export async function postDailyGrowthSummary(env: Env, now = new Date()): Promis
     await kv.compareAndDelete(key, token);
     throw error;
   }
+  await kv.compareAndSet(key, token, "posted", { expirationTtl: POSTED_TTL_SECONDS });
   return true;
 }

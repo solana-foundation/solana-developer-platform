@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { getDb } from "@/db/client";
+import { createKVStoreSet } from "@/runtime/kv-redis";
 import {
   dailyGrowthMessage,
   postDailyGrowthSummary,
@@ -143,6 +144,40 @@ describe("daily growth summary", () => {
     expect(body).toContain("*41* signups · *1* mainnet request ·");
     expect(body).toContain("u0@x.example · _no organization yet_");
     expect(message.text).toBe("SDP daily: 1 new organization, 20 signups on Mon 16 Nov");
+  });
+
+  it("keeps a list of long lines inside Slack's limit, with its closing count", () => {
+    const long = "n".repeat(120);
+    const message = dailyGrowthMessage({
+      day: DAY,
+      organizations: [],
+      signups: Array.from({ length: 15 }, (_, index) => ({
+        email: `${long}${index}@x.example`,
+        name: long,
+        organization: { name: long, relation: "joined" },
+      })),
+      previousDay: { organizations: 0, signups: 0 },
+      lastSevenDays: { organizations: 0, signups: 15, mainnetRequests: 0 },
+    });
+    const signups = message.attachments[0].blocks.at(-1);
+    if (signups?.type !== "section" || !signups.text) throw new Error("signups section");
+    expect(signups.text.text.length).toBeLessThanOrEqual(3000);
+    expect(signups.text.text).toMatch(/_…and \d+ more_$/);
+  });
+
+  it("lets a later slot post when a slot died holding the day", async () => {
+    await createKVStoreSet(env).cache.compareAndSet(
+      `slack-daily-growth:${DAY}`,
+      null,
+      "working:dead",
+      {
+        expirationTtl: 1,
+      }
+    );
+    await expect(postDailyGrowthSummary(env, NOW)).resolves.toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    await expect(postDailyGrowthSummary(env, NOW)).resolves.toBe(true);
+    expect(posts()).toHaveLength(1);
   });
 
   it("posts the day once, however many slots fire", async () => {

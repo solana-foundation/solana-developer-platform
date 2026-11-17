@@ -10,13 +10,14 @@ import {
   SlackWebhookError,
   slackMessage,
 } from "@/services/slack-webhook";
+import { env } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
 
 const WEBHOOK = "https://hooks.slack.com/services/T000/B000/secret";
 const EMPTY = slackMessage("t", SLACK_COLORS.pending, []);
 
 function envWith(url: string | undefined): Env {
-  return { SDP_REQUESTS_SLACK_WEBHOOK_URL: url } as Env;
+  return { ...env, SDP_REQUESTS_SLACK_WEBHOOK_URL: url };
 }
 
 describe("requestsSlackWebhookUrl", () => {
@@ -62,7 +63,9 @@ describe("message helpers", () => {
   });
 
   it("keeps text within Slack's limits", () => {
-    const [field] = (fieldsSection(["x".repeat(2500)]) as { fields: { text: string }[] }).fields;
+    const section = fieldsSection(["x".repeat(2500)]);
+    if (section.type !== "section") throw new Error("fieldsSection builds a section");
+    const [field] = section.fields ?? [];
     expect(field?.text).toHaveLength(2000);
     expect(field?.text.endsWith("…")).toBe(true);
     expect(linkButton("y".repeat(100), "https://example.com").text.text).toHaveLength(75);
@@ -92,6 +95,7 @@ describe("postSlackMessage", () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new TypeError(`fetch failed ${WEBHOOK}`));
     const error = await postSlackMessage(WEBHOOK, EMPTY).catch((cause: unknown) => cause);
     expect(error).toBeInstanceOf(SlackWebhookError);
-    expect(String((error as Error).message)).not.toContain("secret");
+    if (!(error instanceof Error)) throw new Error("postSlackMessage rejects with an Error");
+    expect(error.message).not.toContain("secret");
   });
 });

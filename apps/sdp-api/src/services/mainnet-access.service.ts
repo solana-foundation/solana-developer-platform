@@ -125,8 +125,9 @@ export async function notifyMainnetAccessRequest(
   if (!claim) {
     throw conflict("This organization's request is already being sent; try again in a minute");
   }
-  const request = requestEmail(claim.row, await repository.emailContext(claim.row));
+  let request: MainnetAccessRequestEmail;
   try {
+    request = requestEmail(claim.row, await repository.emailContext(claim.row));
     await sendMainnetAccessRequestEmail(env, request);
   } catch (error) {
     logEvent("warn", {
@@ -137,6 +138,10 @@ export async function notifyMainnetAccessRequest(
     await repository.releaseSend(claim);
     throw error;
   }
+  // Posted while the send claim still holds the request, so a correction (which waits for the
+  // claim) can never reach the channel before the request it corrects. Bounded by the post's 5 s
+  // deadline, well inside the claim's lease.
+  await postToRequestsChannel(env, organizationId, mainnetAccessRequestSlackMessage(request));
 
   const notified = await repository.markNotified(claim);
   if (!notified) throw conflict("The mainnet access request changed while it was being sent");
@@ -144,13 +149,12 @@ export async function notifyMainnetAccessRequest(
     event: "sdp_api_mainnet_access_request_notified",
     organization_id: organizationId,
   });
-  await postToRequestsChannel(env, organizationId, mainnetAccessRequestSlackMessage(request));
   return notified;
 }
 
 /**
- * Posts an operator email's Slack counterpart to #sdp-requests, once the email is sent (or, for a correction on a
- * deployment without email, once the change is saved). Never throws: the email and the saved
+ * Posts an operator email's Slack counterpart to #sdp-requests, once the email is sent (or, for
+ * a correction on a deployment without email, once the change is saved). Never throws: the email and the saved
  * request are the record, so a Slack failure is logged and nothing else.
  */
 async function postToRequestsChannel(

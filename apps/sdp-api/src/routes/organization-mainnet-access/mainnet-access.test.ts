@@ -3,6 +3,7 @@ import { SDP_TERMS } from "@sdp/types/mainnet-access";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
+import { MainnetAccessRepository } from "@/db/repositories/mainnet-access.repository";
 import { app } from "@/index";
 import { correctMainnetAccess } from "@/services/mainnet-access.service";
 import { requesterEmailDomain } from "@/services/mainnet-access-email";
@@ -409,6 +410,16 @@ describe("Organization mainnet access (HOO-2427)", () => {
     expect(loggedEvents().slice(2)).toEqual([NOTIFIED_EVENT]);
   });
 
+  it("releases the send claim when building the email fails, so notify can retry at once", async () => {
+    const lookup = vi
+      .spyOn(MainnetAccessRepository.prototype, "emailContext")
+      .mockRejectedValueOnce(new Error("database blip"));
+    expect((await post(SUBMISSION)).status).toBe(500);
+    lookup.mockRestore();
+    expect((await notify()).status).toBe(200);
+    expect(sentEmails()).toHaveLength(1);
+  });
+
   it("rebuilds the email on notify, so a renamed organization reads its new name", async () => {
     const restore = failIterable();
     expect((await post(SUBMISSION)).status).toBe(503);
@@ -620,6 +631,31 @@ describe("Organization mainnet access (HOO-2427)", () => {
       ]) {
         expect(posted).toContain(text);
       }
+    });
+
+    it("posts the request while its send claim still holds it, so a correction can't post first", async () => {
+      const answer = iterable.getMockImplementation();
+      if (!answer) throw new Error("the Slack stub is installed in beforeEach");
+      let claimedDuringPost: string | null | undefined;
+      iterable.mockImplementation(async (input, init) => {
+        if (String(input) === SLACK_WEBHOOK && claimedDuringPost === undefined) {
+          const row = await getDb(env)
+            .prepare(
+              "SELECT mainnet_request_sending_at, mainnet_request_notified_at FROM organizations WHERE id = ?"
+            )
+            .bind(ORGANIZATION_ID)
+            .first<{
+              mainnet_request_sending_at: string | null;
+              mainnet_request_notified_at: string | null;
+            }>();
+          claimedDuringPost = row?.mainnet_request_notified_at
+            ? null
+            : (row?.mainnet_request_sending_at ?? null);
+        }
+        return answer(input, init);
+      });
+      expect((await post(SUBMISSION)).status).toBe(201);
+      expect(claimedDuringPost).toEqual(expect.any(String));
     });
 
     it("posts nothing while the email fails, and posts once notify sends it", async () => {

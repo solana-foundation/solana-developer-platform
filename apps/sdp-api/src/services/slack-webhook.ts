@@ -33,7 +33,7 @@ export const SLACK_COLORS = {
   reset: "#E01E5A",
   /** The daily growth summary, in Solana purple. */
   daily: "#9945FF",
-} as const;
+} as const satisfies Record<string, `#${string}`>;
 
 /**
  * The three characters Slack reads as markup. Escaped, customer text can't write a mention
@@ -94,12 +94,13 @@ export function contextLine(text: string): SlackBlock {
 
 /** A link button; the label is plain text, so it needs no escaping, and is cut to Slack's 75. */
 export function linkButton(label: string, url: string, style?: "primary"): SlackButton {
-  return {
+  const button: SlackButton = {
     type: "button",
     text: { type: "plain_text", text: truncate(label, 75) },
     url,
-    ...(style ? { style } : {}),
   };
+  if (style !== undefined) button.style = style;
+  return button;
 }
 
 /**

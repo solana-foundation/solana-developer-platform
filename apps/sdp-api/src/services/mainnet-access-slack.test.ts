@@ -52,9 +52,8 @@ describe("mainnet access Slack posts", () => {
         { text: { text: "Email Jane" } },
       ],
     });
-    const compose = new URL(
-      (actions as { elements: { url: string }[] }).elements[1]?.url ?? "https://invalid"
-    );
+    if (actions?.type !== "actions") throw new Error("the request post has a row of buttons");
+    const compose = new URL(actions.elements[1]?.url ?? "https://invalid");
     expect(compose.searchParams.get("to")).toBe("jane@gmail.com");
   });
 
