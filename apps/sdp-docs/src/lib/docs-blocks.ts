@@ -33,7 +33,7 @@ import { apiUrl, canonicalSite } from "./site";
 
 /**
  * Generated blocks. A page about one module or provider carries `module:`,
- * `rampProvider:` or `custodyProvider:` frontmatter. A shared page instead
+ * `rampProvider:`, `custodyProvider:` or `byokCustodyProvider:` frontmatter. A shared page instead
  * places a block that lists what the build publishes:
  *
  * - `<ModuleTable />`: the modules, with what each does.
@@ -70,10 +70,15 @@ const publishedModules = (surface: PublicSurface): ModuleEntry[] =>
     (entry) => entry.module === "core" || isModulePublished(entry.module, surface)
   );
 
+const publishedCustodyProviderEntries = (
+  surface: PublicSurface
+): [string, CustodyProviderEntry][] =>
+  Object.entries(DOCS_CUSTODY_PROVIDERS).filter(([provider]) =>
+    surface.custodyProviders.some((id) => id === provider)
+  );
+
 const publishedCustodyProviders = (surface: PublicSurface): CustodyProviderEntry[] =>
-  Object.entries(DOCS_CUSTODY_PROVIDERS)
-    .filter(([provider]) => surface.custodyProviders.some((id) => id === provider))
-    .map(([, entry]) => entry);
+  publishedCustodyProviderEntries(surface).map(([, entry]) => entry);
 
 const BLOCKS = {
   ModuleTable: (surface) =>
@@ -115,9 +120,12 @@ const BLOCKS = {
       ])
     ),
   CustodyProviderGuides: (surface) =>
-    publishedCustodyProviders(surface)
-      .flatMap(({ guide }) =>
-        guide ? [`- [${guide.title}](${guide.href}): ${guide.description}`] : []
+    publishedCustodyProviderEntries(surface)
+      .flatMap(([provider, { guide }]) =>
+        guide &&
+        (guide.mode !== "byok" || surface.byokCustodyProviders.some((id) => id === provider))
+          ? [`- [${guide.title}](${guide.href}): ${guide.description}`]
+          : []
       )
       .join("\n"),
   WalletCreateRetryTable: ({ walletCreateDedupe }) =>

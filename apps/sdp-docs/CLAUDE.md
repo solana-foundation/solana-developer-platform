@@ -265,7 +265,9 @@ delivery.
 
 Gates follow module declarations, never sentences:
 - A page about one module takes `module: issuance` (or `ramps`, …) frontmatter; a page about one ramp provider takes `rampProvider: moonpay` (ramp provider pages are `payments/ramps-<provider>.mdx`). Outside the channel the page leaves `source` (it 404s and drops out of the sidebar, search, sitemap and the Markdown route) and the `llms*.txt` files.
-- A custody-provider guide takes `custodyProvider: fireblocks` frontmatter.
+- A custody-provider guide takes `custodyProvider: <provider>` frontmatter,
+  or `byokCustodyProvider: fireblocks` when it covers only BYOK setup (a
+  channel running only the provider's Managed custody leaves it out).
   Link it from shared pages with `<CustodyProviderGuides />`; the page and
   links follow the provider's publication in the API manifest.
 - Shared pages never name a module. Module-specific content lives on that module's pages; where a shared page lists modules, providers, tutorials or operations, it places a generated block instead: `<ModuleTable />`, `<ModuleCapabilities />`, `<RampProviderMatrix />`, `<CustodyProviderTable />`, `<TutorialLinks />`, `<ApiKeyGrantsTable />`, and `<RateLimitTable />` for the API's limits. The blocks render from `src/lib/docs-catalog.ts` (add a module or provider there) and the manifest.

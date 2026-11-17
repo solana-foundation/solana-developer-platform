@@ -100,7 +100,7 @@ async function newRegistration(projectId = PROJECT_ID) {
 }
 
 beforeEach(async () => {
-  testEnv.SDP_RELEASE_CHANNEL = "beta";
+  testEnv.SDP_RELEASE_CHANNEL = "experimental";
   testEnv.CREDENTIAL_SECRET_STORE_BACKEND = "encrypted_db";
   await seedTestDatabase(env);
   await clearKVStores(env);
@@ -367,7 +367,7 @@ describe("native Fireblocks BYOK payment routes", () => {
     ).toMatchObject({ status: "processing", last_poll: expect.any(String) });
   });
 
-  it("blocks new payments in stable but still reconciles a payment submitted in beta", async () => {
+  it("blocks new payments in stable but still reconciles a payment submitted in experimental", async () => {
     const mock = await ready();
     const response = await send();
     expect(response.status).toBe(200);

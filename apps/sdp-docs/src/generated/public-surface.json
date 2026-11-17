@@ -26,6 +26,7 @@
     "anchorage",
     "utila"
   ],
+  "byokCustodyProviders": ["fireblocks", "privy"],
   "walletCreateDedupe": [
     {
       "provider": "fireblocks",

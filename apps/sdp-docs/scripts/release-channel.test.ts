@@ -32,6 +32,7 @@ const STABLE: PublicSurface = {
   modules: ["custody", "payments", "compliance"],
   rampProviders: [],
   custodyProviders: ["privy"],
+  byokCustodyProviders: ["privy"],
   walletCreateDedupe: [
     { provider: "privy", mode: "managed", window: "permanent" },
     { provider: "privy", mode: "byok", window: "permanent" },
@@ -45,6 +46,7 @@ const EXPERIMENTAL: PublicSurface = {
   modules: ["custody", "payments", "ramps", "issuance", "compliance"],
   rampProviders: ["stripe"],
   custodyProviders: ["fireblocks", "privy", "turnkey"],
+  byokCustodyProviders: ["fireblocks", "privy"],
   walletCreateDedupe: [
     { provider: "fireblocks", mode: "byok", window: "24h" },
     { provider: "privy", mode: "managed", window: "permanent" },
@@ -137,6 +139,20 @@ describe("docs follow the release channel", () => {
     );
   });
 
+  it("publishes a BYOK-only guide only where the channel runs that provider's BYOK setup", () => {
+    const source =
+      "---\ntitle: Connect Fireblocks\nbyokCustodyProvider: fireblocks\n---\nCSR steps.\n";
+    // Beta: Managed Fireblocks is published, its BYOK setup is not.
+    const managedOnly: PublicSurface = {
+      ...STABLE,
+      releaseChannel: "beta",
+      custodyProviders: ["privy", "fireblocks"],
+      byokCustodyProviders: ["privy"],
+    };
+    assert.equal(isPageSourcePublished(source, "fireblocks.mdx", managedOnly), false);
+    assert.equal(isPageSourcePublished(source, "fireblocks.mdx", EXPERIMENTAL), true);
+  });
+
   it("rejects unknown custody providers and conflicting page gates before publication", () => {
     assert.throws(
       () =>
@@ -150,7 +166,7 @@ describe("docs follow the release channel", () => {
     for (const otherGate of [{ module: "custody" }, { rampProvider: "stripe" }]) {
       assert.throws(
         () => parsePageGateFields({ custodyProvider: "fireblocks", ...otherGate }, "p"),
-        /only one of module, rampProvider or custodyProvider/
+        /only one of module, rampProvider, custodyProvider or byokCustodyProvider/
       );
     }
     assert.throws(
@@ -225,9 +241,16 @@ describe("docs follow the release channel", () => {
 
   it("keeps custody setup links consistent in Markdown, compiled pages and search", () => {
     const source = "<CustodyProviderGuides />\n";
-    const beta: PublicSurface = { ...EXPERIMENTAL, releaseChannel: "beta" };
+    // Beta runs Managed Fireblocks only, so its BYOK-only guide is not linked.
+    const beta: PublicSurface = {
+      ...EXPERIMENTAL,
+      releaseChannel: "beta",
+      byokCustodyProviders: ["privy"],
+    };
     for (const surface of [STABLE, beta, EXPERIMENTAL]) {
-      const published = surface.custodyProviders.includes("fireblocks");
+      const published =
+        surface.custodyProviders.includes("fireblocks") &&
+        surface.byokCustodyProviders.includes("fireblocks");
       const markdown = expandDocsBlocks(source, "wallets.mdx", { surface });
       const compiled = compiledText(source, surface);
       const search = searchText(source, surface);
@@ -239,7 +262,11 @@ describe("docs follow the release channel", () => {
     }
     assert.match(
       expandDocsBlocks(source, "wallets.mdx", {
-        surface: { ...STABLE, custodyProviders: ["privy", "fireblocks"] },
+        surface: {
+          ...STABLE,
+          custodyProviders: ["privy", "fireblocks"],
+          byokCustodyProviders: ["privy", "fireblocks"],
+        },
       }),
       /\[Connect Fireblocks\]\(\/docs\/wallet-operations\/fireblocks\)/
     );

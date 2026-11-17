@@ -29,6 +29,8 @@ export type PublicSurface = {
   rampProviders: readonly RampProviderId[];
   /** The custody providers the public document names, which `<CustodyProviderTable />` lists. */
   custodyProviders: readonly CustodyProvider[];
+  /** The custody providers whose BYOK setup this channel runs, which a `byokCustodyProvider:` page needs. */
+  byokCustodyProviders: readonly CustodyProvider[];
   /** The custody provider and mode pairs whose wallet create dedupes on the request id, which `<WalletCreateRetryTable />` lists. */
   walletCreateDedupe: readonly {
     provider: ManagedCustodyProvider;
@@ -55,7 +57,8 @@ export const publicSurface = generatedSurface as PublicSurface;
 export type ChannelGate =
   | { module: SdpModule }
   | { rampProvider: RampProviderId }
-  | { custodyProvider: ManagedCustodyProvider };
+  | { custodyProvider: ManagedCustodyProvider }
+  | { byokCustodyProvider: ManagedCustodyProvider };
 
 /**
  * Parses a module or provider named in content (frontmatter), so a typo
@@ -64,7 +67,7 @@ export type ChannelGate =
  * @throws When the name is not a known module or provider.
  */
 export function parseGate(
-  key: "module" | "rampProvider" | "custodyProvider",
+  key: "module" | "rampProvider" | "custodyProvider" | "byokCustodyProvider",
   value: string,
   where: string,
   surface = publicSurface
@@ -76,10 +79,14 @@ export function parseGate(
       `${where}: module must be one of ${surface.allModules.join(", ")}; got "${value}"`
     );
   }
-  if (key === "custodyProvider") {
-    if (isDocsCustodyProvider(value)) return { custodyProvider: value };
+  if (key === "custodyProvider" || key === "byokCustodyProvider") {
+    if (isDocsCustodyProvider(value)) {
+      return key === "custodyProvider"
+        ? { custodyProvider: value }
+        : { byokCustodyProvider: value };
+    }
     throw new Error(
-      `${where}: custodyProvider must be one of ${Object.keys(DOCS_CUSTODY_PROVIDERS).join(", ")}; got "${value}"`
+      `${where}: ${key} must be one of ${Object.keys(DOCS_CUSTODY_PROVIDERS).join(", ")}; got "${value}"`
     );
   }
   const rampProvider = surface.allRampProviders.find((candidate) => candidate === value);
@@ -99,6 +106,9 @@ function isDocsCustodyProvider(value: string): value is ManagedCustodyProvider {
 export function isGatePublished(gate: ChannelGate, surface = publicSurface): boolean {
   if ("module" in gate) return surface.modules.includes(gate.module);
   if ("rampProvider" in gate) return surface.rampProviders.includes(gate.rampProvider);
+  if ("byokCustodyProvider" in gate) {
+    return surface.byokCustodyProviders.includes(gate.byokCustodyProvider);
+  }
   return surface.custodyProviders.includes(gate.custodyProvider);
 }
 
@@ -116,13 +126,17 @@ const pageGateFieldsSchema = z
     module: z.string().optional(),
     rampProvider: z.string().optional(),
     custodyProvider: z.string().optional(),
+    byokCustodyProvider: z.string().optional(),
   })
   .refine(
     (fields) =>
-      [fields.module, fields.rampProvider, fields.custodyProvider].filter(
-        (value) => value !== undefined
-      ).length <= 1,
-    "a page takes only one of module, rampProvider or custodyProvider"
+      [
+        fields.module,
+        fields.rampProvider,
+        fields.custodyProvider,
+        fields.byokCustodyProvider,
+      ].filter((value) => value !== undefined).length <= 1,
+    "a page takes only one of module, rampProvider, custodyProvider or byokCustodyProvider"
   );
 
 export type PageGateFields = z.infer<typeof pageGateFieldsSchema>;
@@ -158,7 +172,9 @@ export function frontmatterOf(
 /**
  * A page's gate from its frontmatter: `module: <module>` for a page about one
  * module, `rampProvider: <provider>` for a page about one ramp provider (which
- * implies Ramps), or `custodyProvider: <provider>` for a custody provider.
+ * implies Ramps), `custodyProvider: <provider>` for a custody provider, or
+ * `byokCustodyProvider: <provider>` for a provider's BYOK-only setup, which a
+ * channel running only its Managed custody leaves out.
  * Undefined for a page every channel publishes.
  */
 export function pageGateOf(data: PageGateFields, where: string): ChannelGate | undefined {
@@ -166,6 +182,9 @@ export function pageGateOf(data: PageGateFields, where: string): ChannelGate | u
   if (data.rampProvider !== undefined) return parseGate("rampProvider", data.rampProvider, where);
   if (data.custodyProvider !== undefined) {
     return parseGate("custodyProvider", data.custodyProvider, where);
+  }
+  if (data.byokCustodyProvider !== undefined) {
+    return parseGate("byokCustodyProvider", data.byokCustodyProvider, where);
   }
   return undefined;
 }
