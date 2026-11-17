@@ -1,6 +1,6 @@
 import { denormalizeFireblocksWalletId } from "@sdp/custody/provider-wallet-ids";
 import {
-  hasFireblocksRuleOutsideAssets,
+  fireblocksRuleScope,
   inspectFireblocksPolicy,
   type PolicyResult,
   readFireblocksPolicy,
@@ -93,8 +93,14 @@ async function inspectBatch(
       // own; the USDC asset id only matters when a rule names some other asset,
       // which may be the USDC rule the wallet's coverage question turns on.
       const native = inspectFireblocksPolicy(policy.value, vaultId, [credential.assetId]);
-      if (!hasFireblocksRuleOutsideAssets(policy.value, vaultId, [credential.assetId]))
-        return native;
+      const scope = fireblocksRuleScope(policy.value, vaultId, [credential.assetId]);
+      if (scope === "native") return native;
+      if (scope === "unknown") {
+        // A rule the asset list cannot name may still let the credential move
+        // funds alone, so absence is not proven; re-judging without an asset
+        // list keeps every finding the readable rules prove.
+        return inspectFireblocksPolicy(policy.value, vaultId, null);
+      }
       const mint = wellKnownMint("USDC", currentClusterScope().cluster);
       if (!mint) throw new Error("No canonical USDC mint for this cluster");
       const usdc = await resolveFireblocksTransferAsset(

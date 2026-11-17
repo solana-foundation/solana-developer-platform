@@ -328,6 +328,34 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
     });
   });
 
+  it("keeps an unreadable USDC rule from reporting missing coverage", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const path = new URL(String(url)).pathname;
+      if (path === "/v1/tap/active_policy")
+        return Response.json({
+          policy: {
+            rules: [
+              {
+                type: "TRANSFER",
+                asset: "USDC_TEST",
+                src: { ids: [["*", "VAULT", "*"]] },
+                action: "MAYBE",
+              },
+            ],
+          },
+        });
+      if (path === "/v1/supported_assets") return Response.json([usdcCatalogueEntry()]);
+      return Response.json({ addresses: [{ address: ADDRESS }] });
+    });
+    const connected = await connect();
+    await inSandboxScope(() => checkDueProviderPolicies(testEnv));
+    const detail = await request(`/connections/${connected.connectionId}`);
+    expect((await detail.json()).data.connection.providerPolicy).toMatchObject({
+      status: "unknown",
+      reason: "unsupported_response",
+    });
+  });
+
   it("pins production to SOL and rejects browser URL or asset overrides", async () => {
     const fetch = providerResponse();
     await connect(`${PROJECT_ID}_production`);

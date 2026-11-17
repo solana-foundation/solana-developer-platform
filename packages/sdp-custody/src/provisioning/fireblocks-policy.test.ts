@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasFireblocksRuleOutsideAssets, inspectFireblocksPolicy } from "./fireblocks-policy";
+import { fireblocksRuleScope, inspectFireblocksPolicy } from "./fireblocks-policy";
 
 const inspect = (rules: unknown[]) =>
   inspectFireblocksPolicy({ policy: { rules } }, "42", ["SOL", "usdc-asset"]);
@@ -91,20 +91,38 @@ describe("Fireblocks policy presence", () => {
   it("does not guess the meaning of an unknown vault subtype", () => {
     expect(inspect([rule([["42", "VAULT", "FUTURE"]])]).status).toBe("unknown");
   });
+  it("judges every readable rule when the caller cannot name the asset list", () => {
+    const unreadable = [rule([["42", "VAULT"]], "usdc-asset", { action: "MAYBE" })];
+    expect(inspectFireblocksPolicy({ policy: { rules: unreadable } }, "42", null)).toEqual({
+      status: "unknown",
+      reason: "unsupported_response",
+    });
+    const proven = [
+      rule([["42", "VAULT"]], "SOL", { action: "ALLOW" }),
+      rule([["42", "VAULT"]], "usdc-asset", { action: "MAYBE" }),
+    ];
+    expect(inspectFireblocksPolicy({ policy: { rules: proven } }, "42", null)).toEqual({
+      status: "missing",
+      reason: "no_policy",
+    });
+  });
 });
 
 describe("Fireblocks rule scope", () => {
-  const scope = (rules: unknown[]) =>
-    hasFireblocksRuleOutsideAssets({ policy: { rules } }, "42", ["SOL"]);
-  it("does not need the token catalogue for native, wildcard, unreadable or foreign-vault rules", () => {
-    expect(scope([rule([["42", "VAULT"]]), rule([["42", "VAULT"]], "*")])).toBe(false);
-    expect(scope([rule([["42", "VAULT"]], "SOL", { action: "MAYBE" })])).toBe(false);
-    expect(scope([{ type: "TRANSFER" }])).toBe(false);
-    expect(scope([rule([["43", "VAULT"]], "ETH")])).toBe(false);
-    expect(scope([])).toBe(false);
+  const scope = (rules: unknown[]) => fireblocksRuleScope({ policy: { rules } }, "42", ["SOL"]);
+  it("keeps native, wildcard and foreign-vault rules catalogue-free", () => {
+    expect(scope([rule([["42", "VAULT"]]), rule([["42", "VAULT"]], "*")])).toBe("native");
+    expect(scope([rule([["42", "VAULT"]], "SOL", { action: "MAYBE" })])).toBe("native");
+    expect(scope([rule([["43", "VAULT"]], "ETH")])).toBe("native");
+    expect(scope([])).toBe("native");
   });
   it("asks for the catalogue when a recognized matching rule names another asset", () => {
-    expect(scope([rule([["42", "VAULT"]], "ETH")])).toBe(true);
-    expect(scope([rule([["*", "VAULT", "*"]], "ETH")])).toBe(true);
+    expect(scope([rule([["42", "VAULT"]], "ETH")])).toBe("outside");
+    expect(scope([rule([["*", "VAULT", "*"]], "ETH")])).toBe("outside");
+  });
+  it("stays unknown when a matching foreign rule cannot be read", () => {
+    expect(scope([rule([["42", "VAULT"]], "ETH", { action: "MAYBE" })])).toBe("unknown");
+    expect(scope([{ type: "TRANSFER" }])).toBe("unknown");
+    expect(scope([rule([["42", "VAULT", "FUTURE"]], "ETH")])).toBe("unknown");
   });
 });
