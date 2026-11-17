@@ -100,7 +100,8 @@ export const DOCS_TUTORIALS: readonly {
 export type CustodyProviderEntry = {
   name: string;
   description: string;
-  guide?: { title: string; href: string; description: string };
+  /** `byok`: the guide covers only BYOK setup, so it follows `byokCustodyProviders`. */
+  guide?: { title: string; href: string; description: string; mode?: "byok" };
 };
 
 /**
@@ -118,6 +119,7 @@ export const DOCS_CUSTODY_PROVIDERS = {
       title: "Connect Fireblocks",
       href: "/docs/wallet-operations/fireblocks",
       description: "Connect your own Fireblocks workspace for production custody.",
+      mode: "byok",
     },
   },
   coinbase_cdp: { name: "Coinbase CDP", description: "Embedded wallets for developers" },
@@ -188,7 +190,7 @@ export const DOCS_ACTION_MODULES = {
   counterparties: "Counterparties, their accounts, and provider requirements",
   transactions: "The unified transaction list; each row also needs the read of its own module",
   recurring:
-    "Recurring payments and their collection attempts; on beta, also subscription plans and subscriptions",
+    "Recurring payments and their collection attempts; on experimental, also subscription plans and subscriptions",
   wallets: "Custody wallets and their balances",
   compliance: "Address screening",
   api_keys: "API keys",

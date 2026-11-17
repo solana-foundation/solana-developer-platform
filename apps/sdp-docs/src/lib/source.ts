@@ -16,8 +16,8 @@ const mdxSource = (
 const normalizedFiles = typeof mdxSource.files === "function" ? mdxSource.files() : mdxSource.files;
 
 /**
- * A page tagged `module: <module>`, `rampProvider: <provider>` or
- * `custodyProvider: <provider>` in its frontmatter is published only when the
+ * A page tagged `module: <module>`, `rampProvider: <provider>`,
+ * `custodyProvider: <provider>` or `byokCustodyProvider: <provider>` in its frontmatter is published only when the
  * build's release channel publishes it
  * (src/generated/public-surface.json). Dropping it here removes it
  * from every consumer of `source`: static params (so its URL 404s), the page

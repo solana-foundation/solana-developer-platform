@@ -378,6 +378,8 @@ export type PublicSurfaceManifest = {
   modules: SdpModule[];
   rampProviders: RampProviderId[];
   custodyProviders: CustodyProvider[];
+  /** The published custody providers whose BYOK (bring your own keys) setup this channel runs. */
+  byokCustodyProviders: CustodyProvider[];
   /** The published custody provider and mode pairs whose wallet create dedupes on the request id. */
   walletCreateDedupe: {
     provider: ManagedCustodyProvider;
@@ -404,6 +406,10 @@ export function createPublicSurfaceManifest(
     modules: SDP_MODULES.filter((module) => modules.has(module)),
     rampProviders: RAMP_PROVIDERS.filter(published),
     custodyProviders: CUSTODY_PROVIDERS.filter(published),
+    byokCustodyProviders: CUSTODY_PROVIDERS.filter(
+      (provider) =>
+        published(provider) && isCustodyProviderInReleaseChannel(releaseChannel, provider, "byok")
+    ),
     // Local signing is never published, so the rows name only Managed providers.
     walletCreateDedupe: CUSTODY_PROVIDERS.filter(
       (provider): provider is ManagedCustodyProvider => provider !== "local" && published(provider)

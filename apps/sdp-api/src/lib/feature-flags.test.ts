@@ -137,7 +137,7 @@ describe("isCustodyProviderAvailable", () => {
     it.each(BYOK_CUSTODY_PROVIDERS)("offers BYOK %s only within its channel", (provider) => {
       expect(
         isCustodyProviderAvailable({ SDP_RELEASE_CHANNEL: releaseChannel }, provider, "byok")
-      ).toBe(provider !== "fireblocks" || releaseChannel !== "stable");
+      ).toBe(provider !== "fireblocks" || releaseChannel === "experimental");
     });
 
     it.each(nonByokCustodyProviders)("never offers BYOK %s", (provider) => {
@@ -247,7 +247,7 @@ describe("release channels", () => {
         "private_channels",
         "helius_rings",
       ],
-      beta: ["custody", "payments", "recurring_payments", "subscriptions", "markets", "earn"],
+      beta: ["custody", "payments", "recurring_payments", "markets", "earn"],
       stable: ["custody", "payments", "recurring_payments"],
     });
   });
@@ -265,12 +265,15 @@ describe("release channels", () => {
       anchorage: "beta",
       utila: "beta",
     });
-    expect(SDP_BYOK_CUSTODY_PROVIDER_MATURITY).toEqual({ privy: "stable", fireblocks: "beta" });
+    expect(SDP_BYOK_CUSTODY_PROVIDER_MATURITY).toEqual({
+      privy: "stable",
+      fireblocks: "experimental",
+    });
   });
 
   it.each(SDP_RELEASE_CHANNEL_NAMES)("gates Fireblocks custody modes on %s", (channel) => {
     expect(isCustodyProviderInReleaseChannel(channel, "fireblocks", "byok")).toBe(
-      channel !== "stable"
+      channel === "experimental"
     );
     expect(isCustodyProviderInReleaseChannel(channel, "fireblocks", "managed")).toBe(
       channel !== "stable"

@@ -38,7 +38,7 @@ const publicKey = address(
 const apiSecretPem = rsa.privateKey.export({ type: "pkcs8", format: "pem" }).toString();
 const env = {
   ...testEnv,
-  SDP_RELEASE_CHANNEL: "beta",
+  SDP_RELEASE_CHANNEL: "experimental",
   FIREBLOCKS_API_BASE_URL: "https://fireblocks.example.test",
   FIREBLOCKS_API_KEY: "deployment-key",
   FIREBLOCKS_API_SECRET: "deployment-secret",
@@ -83,7 +83,7 @@ function testTransaction(version: 0 | "legacy" = 0, payer = publicKey) {
 }
 
 describe("Fireblocks BYOK transaction proposals", () => {
-  it.each(["beta", "experimental"] as const)(
+  it.each(["experimental"] as const)(
     "proposes a sign-only PROGRAM_CALL in %s, waits for SIGNED and never broadcasts",
     async (channel) => {
       const transaction = testTransaction();

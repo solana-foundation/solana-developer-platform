@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import type { ApiMethod } from "@sdp/api-catalog/reference";
+import type { ManagedCustodyProvider } from "@sdp/types/custody";
 import { embedSource } from "fumadocs-core/mdx-plugins/stringifier";
 import type { Code, Parent, Root, RootContent } from "mdast";
 import remarkGfm from "remark-gfm";
@@ -33,7 +34,7 @@ import { apiUrl, canonicalSite } from "./site";
 
 /**
  * Generated blocks. A page about one module or provider carries `module:`,
- * `rampProvider:` or `custodyProvider:` frontmatter. A shared page instead
+ * `rampProvider:`, `custodyProvider:` or `byokCustodyProvider:` frontmatter. A shared page instead
  * places a block that lists what the build publishes:
  *
  * - `<ModuleTable />`: the modules, with what each does.
@@ -70,10 +71,25 @@ const publishedModules = (surface: PublicSurface): ModuleEntry[] =>
     (entry) => entry.module === "core" || isModulePublished(entry.module, surface)
   );
 
-const publishedCustodyProviders = (surface: PublicSurface): CustodyProviderEntry[] =>
-  Object.entries(DOCS_CUSTODY_PROVIDERS)
-    .filter(([provider]) => surface.custodyProviders.some((id) => id === provider))
-    .map(([, entry]) => entry);
+type CustodyCatalogRow = [ManagedCustodyProvider, CustodyProviderEntry];
+
+// Object.entries widens the catalog's keys to string; matching each against the
+// manifest's typed providers keeps the catalog's display order and the type.
+const publishedCustodyProviderEntries = (surface: PublicSurface): CustodyCatalogRow[] =>
+  Object.entries(DOCS_CUSTODY_PROVIDERS).flatMap(([key, entry]): CustodyCatalogRow[] => {
+    const provider = surface.custodyProviders.find((id) => id === key);
+    return provider && provider !== "local" ? [[provider, entry]] : [];
+  });
+
+/** A provider's guide when this build publishes it: a BYOK-only guide needs the channel's BYOK setup. */
+const publishedGuide = (
+  provider: ManagedCustodyProvider,
+  { guide }: CustodyProviderEntry,
+  surface: PublicSurface
+): CustodyProviderEntry["guide"] =>
+  guide && (guide.mode !== "byok" || surface.byokCustodyProviders.includes(provider))
+    ? guide
+    : undefined;
 
 const BLOCKS = {
   ModuleTable: (surface) =>
@@ -109,16 +125,20 @@ const BLOCKS = {
   CustodyProviderTable: (surface) =>
     table(
       ["Provider", "Description"],
-      publishedCustodyProviders(surface).map((entry) => [
-        entry.guide ? `**[${entry.name}](${entry.guide.href})**` : `**${entry.name}**`,
-        entry.description,
-      ])
+      publishedCustodyProviderEntries(surface).map(([provider, entry]) => {
+        const guide = publishedGuide(provider, entry, surface);
+        return [
+          guide ? `**[${entry.name}](${guide.href})**` : `**${entry.name}**`,
+          entry.description,
+        ];
+      })
     ),
   CustodyProviderGuides: (surface) =>
-    publishedCustodyProviders(surface)
-      .flatMap(({ guide }) =>
-        guide ? [`- [${guide.title}](${guide.href}): ${guide.description}`] : []
-      )
+    publishedCustodyProviderEntries(surface)
+      .flatMap(([provider, entry]) => {
+        const guide = publishedGuide(provider, entry, surface);
+        return guide ? [`- [${guide.title}](${guide.href}): ${guide.description}`] : [];
+      })
       .join("\n"),
   WalletCreateRetryTable: ({ walletCreateDedupe }) =>
     table(

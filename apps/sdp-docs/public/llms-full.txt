@@ -44433,7 +44433,7 @@ Every API route performs exactly one **action**, named `module.verb`, and a key 
 | `payment_requests` | `payment_requests.read`, `payment_requests.manage` | Payment requests and their payment links |
 | `counterparties` | `counterparties.read`, `counterparties.manage`, `counterparties.execute` | Counterparties, their accounts, and provider requirements |
 | `transactions` | `transactions.read` | The unified transaction list; each row also needs the read of its own module |
-| `recurring` | `recurring.read`, `recurring.manage`, `recurring.execute` | Recurring payments and their collection attempts; on beta, also subscription plans and subscriptions |
+| `recurring` | `recurring.read`, `recurring.manage`, `recurring.execute` | Recurring payments and their collection attempts; on experimental, also subscription plans and subscriptions |
 | `wallets` | `wallets.read`, `wallets.manage`, `wallets.execute` | Custody wallets and their balances |
 | `compliance` | `compliance.execute` | Address screening |
 | `projects` | `projects.read` | Projects and provider availability |

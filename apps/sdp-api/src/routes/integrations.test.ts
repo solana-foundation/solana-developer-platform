@@ -136,6 +136,12 @@ const SANDBOX_UNSET_CUSTODY = custodyFamily([
   SANDBOX_PARA_NOT_CONFIGURED,
 ]);
 
+// Beta runs Fireblocks BYOK only on experimental, so a beta sandbox omits it.
+const BETA_SANDBOX_UNSET_CUSTODY = custodyFamily([
+  SANDBOX_PRIVY_NOT_CONFIGURED,
+  SANDBOX_PARA_NOT_CONFIGURED,
+]);
+
 function custodyFamily(integrations: CustodyIntegration[]): IntegrationFamily {
   return { family: "custody", integrations };
 }
@@ -456,7 +462,7 @@ describe("GET /v1/integrations", () => {
 
   it("omits Private Channels on a release channel that does not run the module", async () => {
     expect(await readFamilies("sandbox", { ...DEPLOYMENT, SDP_RELEASE_CHANNEL: "beta" })).toEqual([
-      SANDBOX_UNSET_CUSTODY,
+      BETA_SANDBOX_UNSET_CUSTODY,
     ]);
   });
 
