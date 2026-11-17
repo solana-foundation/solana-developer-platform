@@ -579,12 +579,18 @@ test("every beta deploy step that can fail starts the Slack alert", () => {
   const beta = betaJob();
   const alert = stepBlock(beta, "Install Doppler CLI");
   const alertIndex = steps(beta).findIndex(({ name }) => name === "Install Doppler CLI");
+  // A step without an id cannot be named in an alert condition (Checkout opts
+  // out of failure itself with continue-on-error), but if the id regex stopped
+  // matching, this sweep would check nothing and pass: pin a floor.
+  let checked = 0;
   for (const step of steps(beta).slice(0, alertIndex)) {
     const id = step.block.match(/\n {8}id: ([\w-]+)\n/)?.[1];
     if (!id) continue;
+    checked += 1;
     assert.ok(
       alert.includes(`steps.${id}.outcome == 'failure'`),
       `${step.name} (${id}) sends no alert`
     );
   }
+  assert.ok(checked >= 5, `the alert sweep checked only ${checked} steps' ids`);
 });

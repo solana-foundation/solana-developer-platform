@@ -369,13 +369,80 @@ function valueMovingRoutes(): string[] {
     .sort();
 }
 
-/** A test's body: from its title to the next test or describe. */
+/** A test's body: from past its title to the next test or describe. */
 function testBlock(source: string, title: string): string | null {
   const start = source.indexOf(title);
   if (start === -1) return null;
-  const rest = source.slice(start + title.length);
+  // Past the title's closing quote too: a scan of the body pairs every quote
+  // it sees, and a leading closer would open a phantom string that hides a
+  // comment from `stripComments`.
+  const rest = source.slice(start + title.length + 1);
   const next = rest.search(/\n\s*(it|test|describe)(\.each)?[(<]/);
   return next === -1 ? rest : rest.slice(0, next);
+}
+
+/**
+ * `source` with its comments gone and its strings kept whole, so what
+ * survives is only what would run: live code. One pass, the way a lexer
+ * reads — a marker inside a string ("https://…", or the asserted
+ * `wallet_out_of_scope` itself) is content, a marker inside a comment is
+ * comment, and a `//` cannot steal the block's closing marker.
+ * Comment-stripping by sequential regex replaces gets all three wrong and
+ * lets a commented-out assertion read as live code. Not a full lexer: a
+ * regex literal is read as code.
+ */
+function stripComments(source: string): string {
+  // Open strings, and template substitutions — a frame with a `braceDepth`
+  // is a `${ … }`, and its unbalanced `}` returns it to its template.
+  const open: Array<{ quote?: string; braceDepth?: number }> = [];
+  let out = "";
+  let i = 0;
+  while (i < source.length) {
+    const frame = open.at(-1);
+    const char = source[i];
+    const next = source[i + 1] ?? "";
+    if (frame?.quote !== undefined) {
+      // String content is live evidence: keep it, escapes and all.
+      if (char === "\\") {
+        out += source.slice(i, i + 2);
+        i += 2;
+      } else if (frame.quote === "`" && char === "$" && next === "{") {
+        out += "${";
+        i += 2;
+        open.push({ braceDepth: 0 });
+      } else {
+        if (char === frame.quote) open.pop();
+        out += char;
+        i += 1;
+      }
+      continue;
+    }
+    if (frame?.braceDepth !== undefined) {
+      if (char === "{") frame.braceDepth += 1;
+      if (char === "}" && frame.braceDepth === 0) {
+        open.pop();
+        out += char;
+        i += 1;
+        continue;
+      }
+      if (char === "}") frame.braceDepth -= 1;
+      // A comment or string inside the substitution is read as usual.
+    }
+    if (char === "/" && next === "/") {
+      const end = source.indexOf("\n", i);
+      i = end === -1 ? source.length : end; // the newline itself is kept
+      continue;
+    }
+    if (char === "/" && next === "*") {
+      const end = source.indexOf("*/", i + 2);
+      i = end === -1 ? source.length : end + 2; // unterminated: none is live
+      continue;
+    }
+    if (char === '"' || char === "'" || char === "`") open.push({ quote: char });
+    out += char;
+    i += 1;
+  }
+  return out;
 }
 
 /**
@@ -420,8 +487,29 @@ describe("wallet-scope route inventory", () => {
     const source = readFileSync(path.join(SRC, file), "utf8");
     const block = testBlock(source, test);
     expect(block, `${file} has no test named "${test}"`).not.toBeNull();
-    expect(block).toMatch(/wallet_?out_?of_?scope/i);
+    // The mention must be live code: a commented-out assertion asserts nothing.
+    const live = block === null ? null : stripComments(block);
+    expect(live).toMatch(/wallet_?out_?of_?scope/i);
     expect(isDisabledTest(source, test), `${file} skips "${test}"`).toBe(false);
+  });
+
+  it("counts a commented-out assertion as no evidence", () => {
+    const assertion = `expect(error).toBe("wallet_out_of_scope");`;
+    const live = (code: string) => stripComments(code).match(/wallet_?out_?of_?scope/i);
+    // Mixed markers: a `//` must not steal its block's `*/` and leave the
+    // commented-out assertion reading as live code.
+    expect(live(`/* ${assertion} // disabled */`)).toBeNull();
+    expect(live(`/* ${assertion} */ // disabled`)).toBeNull();
+    expect(live(`// ${assertion} /* disabled */`)).toBeNull();
+    expect(live(`/* ${assertion}`)).toBeNull(); // never closed
+    expect(live(`/* ${assertion} */`)).toBeNull();
+    // A mention in a string is live evidence, markers in it notwithstanding,
+    // and markers around the assertion do not hide it.
+    expect(
+      live(`${assertion} // refused before writing; see https://docs.example.com/x`)
+    ).not.toBeNull();
+    expect(live(`expect(error).toBe("wallet_out_of_scope /* // */")`)).not.toBeNull();
+    expect(live(`expect(error).toBe(\`wallet_out_of_scope \${why /* nope */}\`)`)).not.toBeNull();
   });
 
   it("counts a skipped or todo test as no evidence", () => {
