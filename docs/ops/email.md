@@ -27,6 +27,7 @@ Each mainnet access request email, and each correction or reset, is also posted 
 
 - **Best-effort.** A request posts only after its email is sent. A post that fails logs `sdp_api_mainnet_access_slack_post_failed` and changes nothing: the request still answers 201, and the email stays the record.
 - **Off unless configured.** `SDP_REQUESTS_SLACK_WEBHOOK_URL` must be an `https://hooks.slack.com/…` URL; anything else posts nothing. Prod sets it in Doppler `prd`. Leave it unset in `dev` and stage, so test requests don't reach the channel.
+- **Daily growth post.** The Worker cron `slack-daily-growth` (`apps/sdp-api/src/services/daily-growth-summary.ts`) posts the previous UTC day's new organizations (with each one's first admin) and signups to the same channel. Erased accounts are left out, and each list stops at 25 with "and N more". It fires hourly from 15:00 to 20:00 UTC; the first slot claims the day in Redis and posts, and a later slot retries only if that post failed. It is on wherever the webhook is set.
 - **The URL is a secret.** Anyone holding it can post to the channel. Rotate it in Slack (the app's Incoming Webhooks page) if it leaks.
 
 ## Admin alerts
