@@ -63,6 +63,33 @@ function sourceMatchesVault(
 }
 
 /**
+ * Whether the vault has a Transfer rule that names an asset outside `assets`.
+ * Only parseable rules with a recognised action count: any other rule reads as
+ * unknown whatever asset it names, so the answer cannot depend on the token
+ * catalogue. This is what tells a caller whether resolving a canonical token's
+ * asset id could still change the wallet's result.
+ */
+export function hasFireblocksRuleOutsideAssets(
+  value: unknown,
+  vaultId: string,
+  assets: string[]
+): boolean {
+  const parsed = policySchema.safeParse(value);
+  if (!parsed.success) return false;
+  for (const rule of parsed.data.policy.rules) {
+    if (rule.type !== "TRANSFER") continue;
+    const transfer = transferRuleSchema.safeParse(rule);
+    if (!transfer.success) continue;
+    if (transfer.data.asset === "*" || assets.includes(transfer.data.asset)) continue;
+    const src = z.object({ ids: z.array(sourceSchema) }).safeParse(transfer.data.src);
+    if (!src.success) continue;
+    if (!sourceMatchesVault(src.data.ids, vaultId).matches) continue;
+    if (ruleRequiresApproval(transfer.data) !== null) return true;
+  }
+  return false;
+}
+
+/**
  * The legacy active-policy API remains supported and returns all Transfer rules in one read.
  * Source tuples are [id, type, subtype], not [type, id]. Unrecognised selectors stay unknown.
  * A matching rule proves coverage only when it stops SDP's credential from moving funds

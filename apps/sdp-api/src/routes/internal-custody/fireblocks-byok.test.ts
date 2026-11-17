@@ -149,6 +149,11 @@ beforeEach(async () => {
     "UPDATE organizations SET settings = (settings::jsonb || ?::jsonb)::text WHERE id = ?",
     [JSON.stringify({ providerOverrides: { custody: { fireblocks: true } } }), ORGANIZATION_ID]
   );
+  // Each test gets its own Fireblocks API key: resolveFireblocksTransferAsset
+  // caches the supported-assets catalogue per key for five minutes, so a shared
+  // key would make one test's provider-read counts depend on another's.
+  fields.apiKey = `tenant-fireblocks-key-${crypto.randomUUID()}`;
+  body.fields.apiKey = fields.apiKey;
   token = await signSeededClerkMember(testEnv, db, USER_ID, ORGANIZATION_ID);
   await verifyClerkJwt(token, testEnv);
   app = new Hono<{ Bindings: Env }>();
@@ -175,7 +180,7 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
     const connected = await connect();
     // The observation follows setup in the background; the periodic queue does the same work.
     await inSandboxScope(() => checkDueProviderPolicies(testEnv));
-    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(fetch).toHaveBeenCalledTimes(2);
     expect(fetch).toHaveBeenCalledWith(
       `${testEnv.FIREBLOCKS_API_BASE_URL}/v1/vault/accounts/0/SOL_TEST/addresses_paginated`,
       expect.objectContaining({
@@ -215,7 +220,7 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
     ).toEqual({ encrypted_private_key: null });
     const replay = await request(`/connections/${connected.connectionId}/complete`, {});
     expect(replay.status).toBe(200);
-    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(fetch).toHaveBeenCalledTimes(2);
     const listed = await request("/connections?provider=fireblocks");
     const serialized = JSON.stringify(await listed.json());
     expect(serialized).toContain("fireblocks");
