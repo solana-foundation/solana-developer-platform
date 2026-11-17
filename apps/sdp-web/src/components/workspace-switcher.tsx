@@ -2,7 +2,7 @@
 
 import { useOrganization, useOrganizationList } from "@clerk/nextjs";
 import type { Project, ProjectEnvironment } from "@sdp/types/projects";
-import { DEFAULT_SDP_SANDBOX_WEB_URL } from "@sdp/types/site";
+import { DEFAULT_SDP_SANDBOX_WEB_URL, DEFAULT_SDP_WEB_URL } from "@sdp/types/site";
 import { cn } from "@sdp/ui/cn";
 import {
   DropdownMenu,
@@ -31,6 +31,7 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
+import { useDeploymentSandboxOnly } from "@/lib/deployment-sandbox-only";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 
 function OrgAvatar({ name, imageUrl }: { name: string; imageUrl: string | null }) {
@@ -145,14 +146,29 @@ function EnvironmentItem({
 }
 
 function LockedProductionItem({
+  organizationId,
   canRequestAccess,
   disabled,
 }: {
+  organizationId: string;
   canRequestAccess: boolean;
   disabled: boolean;
 }) {
   const t = useTranslations();
   const projectHref = useProjectHref();
+  // A sandbox-only deployment (the hosted sandbox) takes no mainnet requests: mainnet is on its
+  // own host, so the row links there instead of to a request this deployment would refuse.
+  const sandboxOnly = useDeploymentSandboxOnly(organizationId);
+  if (sandboxOnly) {
+    return (
+      <HostedEnvironmentItem
+        environment="production"
+        url={DEFAULT_SDP_WEB_URL}
+        detailKey="Shared.SharedComponents.environmentProductionHostedDetail"
+        disabled={disabled}
+      />
+    );
+  }
   const { icon: Icon, labelKey } = ENVIRONMENT_PRESENTATIONS.production;
   const label = (
     <>
@@ -200,20 +216,33 @@ function LockedProductionItem({
   );
 }
 
-/** On a deployment that serves mainnet only, the sandbox lives on its own host. */
-function HostedSandboxItem({ disabled }: { disabled: boolean }) {
+/**
+ * An environment that lives on another deployment: the sandbox on beta, seen from a mainnet-only
+ * deployment, or mainnet on production, seen from beta. It links out instead of switching.
+ */
+function HostedEnvironmentItem({
+  environment,
+  url,
+  detailKey,
+  disabled,
+}: {
+  environment: ProjectEnvironment;
+  url: string;
+  detailKey:
+    | "Shared.SharedComponents.environmentSandboxHostedDetail"
+    | "Shared.SharedComponents.environmentProductionHostedDetail";
+  disabled: boolean;
+}) {
   const t = useTranslations();
-  const { icon: Icon, labelKey } = ENVIRONMENT_PRESENTATIONS.sandbox;
+  const { icon: Icon, labelKey } = ENVIRONMENT_PRESENTATIONS[environment];
   return (
     <DropdownMenuItem asChild disabled={disabled} className="gap-2.5">
-      <a href={DEFAULT_SDP_SANDBOX_WEB_URL} target="_blank" rel="noreferrer">
+      <a href={url} target="_blank" rel="noreferrer">
         <Icon className="size-4 shrink-0 text-secondary" aria-hidden="true" />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate">{t(labelKey)}</span>
           <span className="truncate text-xs font-normal text-tertiary">
-            {t("Shared.SharedComponents.environmentSandboxHostedDetail", {
-              host: new URL(DEFAULT_SDP_SANDBOX_WEB_URL).host,
-            })}
+            {t(detailKey, { host: new URL(url).host })}
           </span>
         </span>
         <ArrowUpRightIcon className="ml-auto size-4 shrink-0 text-tertiary" aria-hidden="true" />
@@ -337,7 +366,12 @@ export function WorkspaceSwitcher({
               {t("Shared.SharedComponents.environmentsOf", { organization: activeOrg.name })}
             </DropdownMenuLabel>
             {sandboxProject === null && flags.sandboxOnBeta ? (
-              <HostedSandboxItem disabled={isSwitching} />
+              <HostedEnvironmentItem
+                environment="sandbox"
+                url={DEFAULT_SDP_SANDBOX_WEB_URL}
+                detailKey="Shared.SharedComponents.environmentSandboxHostedDetail"
+                disabled={isSwitching}
+              />
             ) : null}
             {environmentProjects.map((project) => (
               <EnvironmentItem
@@ -351,6 +385,7 @@ export function WorkspaceSwitcher({
             {/* The API lists no production project until the organization is entitled to one. */}
             {productionProject === null ? (
               <LockedProductionItem
+                organizationId={environmentProjects[0].organizationId}
                 canRequestAccess={dashboardAccess.capabilities.canManageOrgSettings}
                 disabled={isSwitching}
               />

@@ -30,8 +30,10 @@ const mocks = vi.hoisted(() => {
   };
   const member: { role: OrganizationRole } = { role: "admin" };
   const flags = { sandboxOnBeta: false };
+  const deployment = { sandboxOnly: false };
   return {
     workspace,
+    deployment,
     member,
     flags,
     organizationLoaded: true,
@@ -44,6 +46,9 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
+vi.mock("@/lib/deployment-sandbox-only", () => ({
+  useDeploymentSandboxOnly: () => mocks.deployment.sandboxOnly,
+}));
 vi.mock("@clerk/nextjs", () => ({
   useOrganization: () => ({ isLoaded: mocks.organizationLoaded, organization: mocks.acme }),
   useOrganizationList: () => ({
@@ -78,6 +83,7 @@ beforeEach(() => {
   mocks.workspace.productionProject = PRODUCTION_PROJECT;
   mocks.member.role = "admin";
   mocks.flags.sandboxOnBeta = false;
+  mocks.deployment.sandboxOnly = false;
   mocks.organizationLoaded = true;
   mocks.selectProject.mockReset();
   mocks.switching.mockReset();
@@ -140,6 +146,19 @@ describe("WorkspaceSwitcher", () => {
     expect(production.getAttribute("href")).toBe(
       `/dashboard/${SANDBOX_PROJECT.id}/settings#mainnet-access`
     );
+  });
+
+  it("links a locked Production to the mainnet host where the deployment serves the sandbox only", async () => {
+    mocks.workspace.productionProject = null;
+    mocks.deployment.sandboxOnly = true;
+    showProject(SANDBOX_PROJECT);
+    await openSwitcher();
+
+    const production = screen.getByRole("menuitem", { name: /^Production/ });
+    expect(within(production).getByText("Mainnet · platform.solana.com")).toBeDefined();
+    expect(within(production).queryByText("Request access")).toBeNull();
+    expect(production.getAttribute("href")).toBe("https://platform.solana.com");
+    expect(production.getAttribute("target")).toBe("_blank");
   });
 
   it("links to the hosted sandbox where the deployment serves mainnet only", async () => {

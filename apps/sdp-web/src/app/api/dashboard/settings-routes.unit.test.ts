@@ -7,7 +7,10 @@ import { DELETE as revokeInvitation } from "./members/invitations/[invitationId]
 import { POST as inviteMember } from "./members/invite/route";
 import { DELETE as leaveOrganization } from "./members/me/route";
 import { POST as notifyMainnetAccess } from "./organizations/[organizationId]/mainnet-access/notify/route";
-import { POST as requestMainnetAccess } from "./organizations/[organizationId]/mainnet-access/route";
+import {
+  GET as readMainnetAccess,
+  POST as requestMainnetAccess,
+} from "./organizations/[organizationId]/mainnet-access/route";
 import { PATCH as updateOrganization } from "./organizations/[organizationId]/route";
 
 const memberParams = { params: Promise.resolve({ memberId: "mem_test/1" }) };
@@ -46,6 +49,12 @@ describe("Settings dashboard routes", () => {
       "route.dashboard.organizations.update",
       (request) => updateOrganization(request, organizationParams),
       "/v1/organizations/org_test%2F1",
+    ],
+    [
+      "route.dashboard.organizations.mainnet-access.read",
+      (request) => readMainnetAccess(request, organizationParams),
+      "/v1/organizations/org_test%2F1/mainnet-access",
+      true,
     ],
     [
       "route.dashboard.organizations.mainnet-access.request",
