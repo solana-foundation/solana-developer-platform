@@ -53,7 +53,7 @@ function request(
   extra: Record<string, string>
 ) {
   return app.request(
-    "/v1/payments/transfers",
+    "/v1/payments/transfers/execute",
     {
       method: "POST",
       headers: { "Content-Type": "application/json", "Idempotency-Key": "channel-test" },

@@ -50,7 +50,7 @@ const contracts: ValueMovingContract[] = [
     // Access before the key, the row replay before admission (ADR 0009).
     authorization: {
       file: "apps/sdp-api/src/routes/payments/transfer-batches/index.ts",
-      section: 'transferBatches.post(\n  "/",',
+      section: 'transferBatches.post(\n  "/execute",',
       before:
         'requireAction("transfer_batches.execute"),\n  validateBody(createTransferBatchSchema),\n  authorize(authorizeTransferBatch)',
       through:
@@ -373,7 +373,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/payments/ramps/onramp/index.ts",
-      section: '"/quote",',
+      section: '"/start",',
       before: 'requireAction("onramp.execute")',
       through: "requestGate(",
       after: "\n  createOnrampQuote\n",
