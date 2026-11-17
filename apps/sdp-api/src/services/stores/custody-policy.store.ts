@@ -30,8 +30,8 @@ export interface PolicyCheckTarget {
   encrypted_secret_payload: string | null;
   claim: string;
   /** The observation the wallet already holds, if any; audited writes compare against it. */
-  previous_status: string | null;
-  previous_reason: string | null;
+  previous_status: ProviderPolicyCheck["status"] | null;
+  previous_reason: ProviderPolicyCheck["reason"] | null;
   previous_credential_id: string | null;
 }
 export type PolicyCheckScope = {
