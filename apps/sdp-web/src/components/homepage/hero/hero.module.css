@@ -130,6 +130,7 @@
 
 .cta {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   margin-top: 34px;
   justify-content: flex-start;

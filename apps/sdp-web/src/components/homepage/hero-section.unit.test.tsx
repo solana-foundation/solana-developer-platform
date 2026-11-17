@@ -80,6 +80,32 @@ describe("HeroSection", () => {
     expect(signup?.getAttribute("rel")).toBe("noreferrer");
   });
 
+  it("adds the hosted sandbox beside sign-up where the sandbox lives on its own host", async () => {
+    const hero = await renderHero({
+      ...signupLinks,
+      sandbox: {
+        href: "https://sandbox.example.test/sign-up",
+        label: "Try the sandbox",
+        external: true,
+      },
+    });
+    const sandbox = [...hero.querySelectorAll("a")].find(
+      (a) => a.textContent === "Try the sandbox"
+    );
+    expect(sandbox?.getAttribute("href")).toBe("https://sandbox.example.test/sign-up");
+    expect(sandbox?.getAttribute("target")).toBe("_blank");
+    expect(sandbox?.getAttribute("rel")).toBe("noreferrer");
+  });
+
+  it("shows no second sign-up button when the sandbox is sign-up itself", async () => {
+    for (const links of [signupLinks, waitlistLinks]) {
+      const hero = await renderHero(links);
+      const labels = [...hero.querySelectorAll("a")].map((a) => a.textContent);
+      expect(labels.filter((label) => label === links.signup.label)).toHaveLength(1);
+      expect(labels).not.toContain("Try the sandbox");
+    }
+  });
+
   it("links the docs", async () => {
     const hero = await renderHero(signupLinks);
     const docs = [...hero.querySelectorAll("a")].find((a) => a.textContent === "Read the docs");

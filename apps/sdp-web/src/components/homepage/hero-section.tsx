@@ -34,6 +34,16 @@ export async function HeroSection({ links }: { links: HomepageLinks }) {
             >
               {links.signup.label}
             </a>
+            {/* only where the sandbox lives on its own host; elsewhere sign-up is the sandbox */}
+            {links.sandbox.external && links.sandbox.href !== links.signup.href ? (
+              <a
+                className={cn(shared.btn, shared.btnLine, shared.btnLg)}
+                href={links.sandbox.href}
+                {...externalLinkProps(true)}
+              >
+                {links.sandbox.label}
+              </a>
+            ) : null}
             <a className={cn(shared.btn, shared.btnLine, shared.btnLg)} href={links.docs}>
               {t("Homepage.cta.readDocs")}
             </a>
