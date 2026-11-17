@@ -51,11 +51,17 @@ const FREE_EMAIL_DOMAINS: ReadonlySet<string> = new Set([
   "yandex.com",
 ]);
 
+/** An email's domain, and whether it is a free mailbox provider; null without one. */
+export function emailDomain(email: string | null): { domain: string; free: boolean } | null {
+  const domain = email?.split("@").at(1)?.trim().toLowerCase();
+  return domain ? { domain, free: FREE_EMAIL_DOMAINS.has(domain) } : null;
+}
+
 /** The requester's email domain, marked when it is a free provider; null without an email. */
 export function requesterEmailDomain(email: string | null): string | null {
-  const domain = email?.split("@").at(1)?.trim().toLowerCase();
-  if (!domain) return null;
-  return FREE_EMAIL_DOMAINS.has(domain) ? `${domain} (free email provider)` : domain;
+  const found = emailDomain(email);
+  if (!found) return null;
+  return found.free ? `${found.domain} (free email provider)` : found.domain;
 }
 
 const aliasSchema = z.string().trim().pipe(z.email());
@@ -87,6 +93,11 @@ const REQUESTED_AT_FORMAT = new Intl.DateTimeFormat("en-GB", {
   timeZone: "UTC",
 });
 
+/** A request's time as operators read it, such as `17 Nov 2026, 16:32 UTC`. */
+export function formatRequestedAt(requestedAt: string): string {
+  return `${REQUESTED_AT_FORMAT.format(new Date(requestedAt))} UTC`;
+}
+
 /**
  * The email an operator reads: who asked, from where, who at the Foundation knows them, what they
  * build, under which terms, and how to approve.
@@ -104,7 +115,7 @@ export function mainnetAccessRequestEmailContent(request: MainnetAccessRequestEm
       ...emailDomainDetail(request.requester.email),
       {
         label: "Requested at",
-        value: `${REQUESTED_AT_FORMAT.format(new Date(request.requestedAt))} UTC`,
+        value: formatRequestedAt(request.requestedAt),
       },
       {
         label: "Jurisdiction",
@@ -171,7 +182,7 @@ export function mainnetAccessCorrectionEmailContent(
   email: MainnetAccessCorrectionEmail
 ): EmailContent {
   const { request, correction } = email;
-  const requestedAt = `${REQUESTED_AT_FORMAT.format(new Date(request.requestedAt))} UTC`;
+  const requestedAt = formatRequestedAt(request.requestedAt);
   const reset = correction.operation === "reset";
   return {
     preheader: reset

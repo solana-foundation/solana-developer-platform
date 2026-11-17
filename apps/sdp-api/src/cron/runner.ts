@@ -31,6 +31,7 @@ import { custodyProposalsCron } from "@/cron/reconcile-custody-proposals";
 import { recurringPaymentsCron } from "@/cron/recurring-payments";
 import { ringsIndexingCron } from "@/cron/rings-indexing";
 import { secretRetirementsCron } from "@/cron/secret-retirements";
+import { slackDailyGrowthCron } from "@/cron/slack-daily-growth";
 import { sponsorshipBudgetsCron } from "@/cron/sponsorship-budgets";
 import { subscriptionAuthoritiesCron } from "@/cron/subscription-authorities";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
@@ -78,6 +79,7 @@ export const CRON_DEFINITIONS: readonly CronDefinition[] = [
   earnCatalogueSyncCron,
   earnMetricsRefreshCron,
   adminAlertEmailsCron,
+  slackDailyGrowthCron,
 ];
 
 /**
