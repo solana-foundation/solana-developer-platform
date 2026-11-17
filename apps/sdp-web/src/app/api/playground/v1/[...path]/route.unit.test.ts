@@ -143,14 +143,14 @@ describe("/api/playground/v1/[...path]", () => {
     mocks.createSdpApiClient.mockResolvedValue({ request });
 
     const response = await POST(
-      playgroundRequest("POST", "/v1/payments/transfers", { body: { amount: "1.00" } })
+      playgroundRequest("POST", "/v1/payments/transfers/execute", { body: { amount: "1.00" } })
     );
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toEqual(refusal);
     expect(mocks.logRouteResult).toHaveBeenLastCalledWith(expect.anything(), 403, {
       method: "POST",
-      operation: "/v1/payments/transfers",
+      operation: "/v1/payments/transfers/execute",
       ok: false,
     });
   });
@@ -166,8 +166,12 @@ describe("/api/playground/v1/[...path]", () => {
     ["a documented path under the wrong method", "DELETE", "/v1/payments/transfers"],
     ["an extra segment", "GET", "/v1/payments/transfers/trf_1/extra"],
     ["an empty path parameter", "GET", "/v1/payments/transfers/"],
-    ["literal parent segments", "POST", "/v1/payments/transfers/../../../admin/allowlist"],
-    ["percent-encoded parent segments", "GET", "/v1/%2e%2e/admin/allowlist"],
+    [
+      "literal parent segments",
+      "POST",
+      "/v1/payments/transfers/../../../admin/onboarding-allowlist",
+    ],
+    ["percent-encoded parent segments", "GET", "/v1/%2e%2e/admin/onboarding-allowlist"],
     ["backslash parent segments", "GET", "/v1/wallets/..\\..\\admin/allowlist"],
     ["a parent segment out of the proxy", "GET", "/v1/../v1/wallets/configs/../../../health"],
   ])("refuses %s that is not in the playground catalog", async (_label, method, path) => {
@@ -229,7 +233,7 @@ describe("/api/playground/v1/[...path]", () => {
     mocks.createSdpApiClient.mockResolvedValue({ request });
     const idempotencyKey = "8a0f7c55-3a02-4f5e-9d61-0f1f6d0a2b7e";
     const transfer = () =>
-      playgroundRequest("POST", "/v1/payments/transfers", {
+      playgroundRequest("POST", "/v1/payments/transfers/execute", {
         body: { amount: "1.00" },
         headers: { "Idempotency-Key": idempotencyKey },
       });
@@ -239,7 +243,7 @@ describe("/api/playground/v1/[...path]", () => {
 
     expect(request).toHaveBeenCalledTimes(2);
     for (const [path, init] of request.mock.calls) {
-      expect(path).toBe("/v1/payments/transfers");
+      expect(path).toBe("/v1/payments/transfers/execute");
       expect(new Headers(init.headers).get("Idempotency-Key")).toBe(idempotencyKey);
       expect(init.body).toBe(JSON.stringify({ amount: "1.00" }));
     }
@@ -263,7 +267,7 @@ describe("/api/playground/v1/[...path]", () => {
     mocks.createSdpApiClient.mockResolvedValue({ request });
 
     await POST(
-      playgroundRequest("POST", "/v1/payments/transfers", {
+      playgroundRequest("POST", "/v1/payments/transfers/execute", {
         body: { amount: "1.00" },
         headers: {
           "Idempotency-Key": "key_1",
@@ -300,7 +304,7 @@ describe("/api/playground/v1/[...path]", () => {
     mocks.createSdpApiClient.mockResolvedValue({ request });
 
     const response = await POST(
-      playgroundRequest("POST", "/v1/payments/transfers", {
+      playgroundRequest("POST", "/v1/payments/transfers/execute", {
         body: {},
         headers: { "Idempotency-Key": "k".repeat(256) },
       })
@@ -359,7 +363,7 @@ describe("/api/playground/v1/[...path]", () => {
     mocks.createSdpApiClient.mockResolvedValue({ request });
 
     const response = await POST(
-      playgroundRequest("POST", "/v1/payments/transfers", {
+      playgroundRequest("POST", "/v1/payments/transfers/execute", {
         body: { memo: "x".repeat(256 * 1024) },
       })
     );

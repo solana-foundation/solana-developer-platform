@@ -81,7 +81,7 @@ describe("read-only organization role", () => {
     ["invites a member", "POST", "/v1/members/invite", { email: "x@example.com", role: "viewer" }],
     ["changes a role", "PATCH", `/v1/members/${MEMBER.memberId}`, { role: "admin" }],
     ["adds a counterparty", "POST", "/v1/counterparties", { name: "Acme" }],
-    ["sends a transfer", "POST", "/v1/payments/transfers", {}],
+    ["sends a transfer", "POST", "/v1/payments/transfers/execute", {}],
     ["creates a wallet", "POST", "/v1/wallets", {}],
     ["creates a token", "POST", "/v1/issuance/tokens", {}],
     ["mints a token", "POST", "/v1/issuance/tokens/tok_viewer/mint", {}],
