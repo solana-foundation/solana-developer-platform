@@ -105,7 +105,7 @@ export function mainnetAccessRequestSlackMessage(request: MainnetAccessRequestEm
   });
   blocks.push(
     contextLine(
-      `${identifiers(request)} · Approve by setting \`enableProductionProject\` in Clerk private metadata`
+      `${identifiers(request)} · Approve by setting \`{"sdp": {"enableProductionProject": true}}\` in Clerk private metadata (a top-level key is ignored)`
     )
   );
   return slackMessage(
