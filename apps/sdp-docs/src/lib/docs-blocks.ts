@@ -447,6 +447,11 @@ export function remarkDocsBlocks(
           };
           return [child];
         }
+        if (child.type === "code") {
+          // Every page's code calls this deployment's API (beta docs show api-beta); the Markdown
+          // agents get and the llms files keep the canonical host.
+          child.value = child.value.replaceAll(canonicalSite.apiUrl, apiUrl);
+        }
         if (child.type === "code" && earnPage && pagePublished) {
           // Code identifiers are useful Earn queries too. Fumadocs keeps the
           // enclosing heading, so a hit opens the correct stage or example.
@@ -467,9 +472,8 @@ export function remarkDocsBlocks(
 
 /**
  * A generated reference page's node as the page shows it, where the Markdown agents get keeps the
- * node as it is: a field's facts with their separators set apart, a family table's method cell as
- * its badge, and code pointed at this deployment's API (`apiUrl`, from `NEXT_PUBLIC_SDP_API_URL`)
- * instead of the canonical one.
+ * node as it is: a field's facts with their separators set apart, and a family table's method cell
+ * as its badge.
  *
  * @param child - The node.
  * @param parent - The node that holds it.
@@ -485,10 +489,6 @@ function referenceNodes(child: RootContent, parent: Parent): RootContent[] | und
     Object.hasOwn(API_METHOD_NAMES, child.value)
   ) {
     return [methodBadge(child.value)];
-  }
-  if (child.type === "code") {
-    child.value = child.value.replaceAll(canonicalSite.apiUrl, apiUrl);
-    return [child];
   }
   return undefined;
 }
