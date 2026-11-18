@@ -10,12 +10,17 @@ internal pending named security sign-off.
 
 Discover strategies through `GET /v1/earn/discovery`, read holdings through
 `GET /v1/earn/positions`, and prepare deposits or withdrawals with the core
-mutation endpoints. Choose an owner-address source when your app collects the
-owner's signature; use a wallet ID for a registered wallet's signing policy.
+mutation endpoints. Your SDP API key and an `ownerAddress` are enough: use any
+compatible Solana wallet to sign the returned unsigned transaction, then send
+the exact signed bytes to `/v1/operations/{operationId}/submit`. The wallet does
+not need to be registered or connected in SDP.
 
-Review the operation's economic terms before submitting. The worker handles
-provider approval and broadcast asynchronously. Poll the operation, render its
-next action, and keep tracking through verified delivery.
+If the wallet is already connected in SDP, `walletId` is an optional convenience
+that lets SDP request signing through its configured provider.
+
+Review the operation's economic terms before submitting. The worker coordinates
+configured-wallet signing and broadcast asynchronously. Poll the operation,
+render its next action, and keep tracking through verified delivery.
 
 The [quickstart](/docs/earn/quickstart) covers the shared flow. Read
 [recovery rules](/docs/earn/integration-details) before handling retries,

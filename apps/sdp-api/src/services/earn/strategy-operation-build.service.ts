@@ -51,13 +51,12 @@ export async function resolveEarnOperationBuild(
   };
   if (queued) {
     const row = await requirePreparedQueuedStrategyTransaction(env, transactionScope, reference.id);
-    if ((row.action === "cancel") !== (claim.purpose === "cancel"))
+    if (row.action !== "request" || claim.operation.intent.kind !== "earn.withdraw")
       throw conflict("Prepared transaction does not match the operation action");
     const target: PreparedStrategySigningTarget = {
       ...row,
       fee_mode: row.fee_mode ?? "wallet",
-      movement:
-        row.action === "cancel" ? "earn.queued_withdraw_cancel" : "earn.queued_withdraw_request",
+      movement: "earn.queued_withdraw_request",
     };
     return {
       target,
@@ -81,10 +80,7 @@ export async function resolveEarnOperationBuild(
     };
   }
   const row = await requirePreparedStrategyTransaction(env, transactionScope, reference.id);
-  if (
-    (row.direction === "deposit") !== (claim.operation.intent.kind === "earn.deposit") ||
-    claim.purpose === "cancel"
-  ) {
+  if ((row.direction === "deposit") !== (claim.operation.intent.kind === "earn.deposit")) {
     throw conflict("Prepared transaction does not match the operation action");
   }
   if (claim.operation.intent.kind === "earn.deposit") {

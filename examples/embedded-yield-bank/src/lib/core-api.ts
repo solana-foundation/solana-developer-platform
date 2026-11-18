@@ -155,17 +155,25 @@ async function updatePreparedOperation(
   });
 }
 
-export function requestOperationCancellation(
-  operationId: string
+export async function requestOperationCancellation(
+  operation: EarnOperation
 ): Promise<EarnOperation> {
-  return updatePreparedOperation(operationId, { action: "cancel", input: {} });
+  if (!operation.canCancel)
+    throw new Error("This operation cannot be cancelled");
+  return updatePreparedOperation(operation.id, { action: "cancel", input: {} });
 }
 
-/** Refresh is available only when the API can safely replace an unsigned action. */
-export function refreshPreparedOperation(
+/** Refresh prepares only an advertised action before any submission is accepted. */
+export async function refreshPreparedOperation(
   operation: EarnOperation,
   optionId?: string
 ): Promise<EarnOperation> {
+  if (
+    operation.status !== "prepared" ||
+    (operation.nextAction?.type !== "refresh" &&
+      operation.nextAction?.type !== "select_option")
+  )
+    throw new Error("This operation cannot be refreshed");
   return updatePreparedOperation(operation.id, {
     action: "refresh",
     input: {

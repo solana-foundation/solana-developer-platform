@@ -27,6 +27,7 @@ const prepared: Operation = {
   buildRef: null,
   resourceRef: null,
   result: null,
+  canCancel: false,
   cancelRequestedAt: null,
   error: null,
   createdAt: "2026-11-18T12:00:00.000Z",
@@ -60,7 +61,7 @@ it("reports changed remote observations once without echoing initial render data
 
   remote = {
     ...remote,
-    status: "awaiting_approval",
+    status: "awaiting_signature",
     updatedAt: "2026-11-18T12:02:00.000Z",
   };
   await act(() => result.current.refresh());

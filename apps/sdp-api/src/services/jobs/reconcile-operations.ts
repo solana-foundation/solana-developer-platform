@@ -4,7 +4,10 @@ import type { OperationClaim, OperationScope } from "@/db/repositories/operation
 import { AppError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { OPERATION_WORKER_BUDGET_MS } from "@/services/earn/operation-worker-budget";
-import { advanceEarnOperation } from "@/services/earn/strategy-operations.service";
+import {
+  advanceEarnOperation,
+  isTerminalOperation,
+} from "@/services/earn/strategy-operations.service";
 import type { OperationsService } from "@/services/operations.service";
 import { createOperationsService } from "@/services/operations.service";
 import { runAsRecordedOperationPrincipal } from "@/services/operations-principal";
@@ -18,40 +21,22 @@ async function recordRecoveryFailure(
 ) {
   const current = await service.repository.get(scope, claim.operation.id);
   if (current === null || current.claimToken !== claim.token) return;
-  const expired = error instanceof AppError && error.details?.reason === "transaction_expired";
-  const attempt = expired ? await service.repository.getAttempt(scope, claim.operation.id) : null;
-  const refreshable =
-    expired &&
-    attempt !== null &&
-    attempt.signedTransaction === null &&
-    attempt.dispatchStartedAt === null;
+  if (isTerminalOperation(current.operation)) return;
   await service.transition(scope, claim, {
     status: current.operation.status,
     resourceRef: current.operation.resourceRef,
-    nextAction: refreshable
-      ? { type: "refresh" }
-      : {
-          type: "wait",
-          reason: expired
-            ? "Reconciling the expired transaction"
-            : "Recovery will retry this operation",
-        },
+    nextAction: { type: "wait", reason: "Recovery will retry this operation" },
     error: {
-      code: expired
-        ? "TRANSACTION_EXPIRED"
-        : error instanceof AppError
-          ? error.code
-          : "SERVICE_UNAVAILABLE",
-      message: refreshable
-        ? "Refresh the expired transaction"
-        : error instanceof AppError
+      code: error instanceof AppError ? error.code : "SERVICE_UNAVAILABLE",
+      message:
+        error instanceof AppError
           ? error.toResponse().error.message
           : "The operation could not advance; recovery will retry",
     },
   });
 }
 
-/** Resume durable attempts; a worker never executes an unapproved preparation. */
+/** Resume durable attempts; a worker never executes an unsubmitted preparation. */
 export async function reconcileOperations(env: Env): Promise<void> {
   const runExpiresAt = Date.now() + OPERATION_WORKER_BUDGET_MS;
   const { environment } = currentClusterScope();
@@ -66,10 +51,6 @@ export async function reconcileOperations(env: Env): Promise<void> {
        AND attempt.action_version = operation.action_version
      WHERE operation.environment = ? AND operation.status NOT IN ('completed', 'failed', 'cancelled')
        AND (attempt.execution_requested_at IS NOT NULL OR attempt.dispatch_started_at IS NOT NULL OR attempt.signed_transaction IS NOT NULL)
-       AND NOT (COALESCE(operation.resource_ref ->> 'kind', '') IN ('custody.proposal', 'custody.proposal_not_sent')
-         AND operation.error IS NOT NULL AND attempt.signed_transaction IS NULL)
-       AND NOT (COALESCE(operation.error ->> 'code', '') = 'TRANSACTION_EXPIRED'
-         AND attempt.signed_transaction IS NULL AND attempt.dispatch_started_at IS NULL)
        AND (operation.claim_until IS NULL OR operation.claim_until <= now())
      ORDER BY operation.updated_at, operation.id LIMIT 100`,
     [environment]

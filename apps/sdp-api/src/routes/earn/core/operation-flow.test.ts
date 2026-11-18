@@ -62,7 +62,6 @@ const mocks = vi.hoisted(() => ({
   sign: vi.fn(),
   proposer: vi.fn(),
   broadcast: vi.fn(),
-  projectionFails: false,
 }));
 vi.mock("@/services/earn/vault-wallet.service", async (original) => ({
   ...(await original<typeof import("@/services/earn/vault-wallet.service")>()),
@@ -147,16 +146,6 @@ vi.mock("@/services/earn/vault-intent-execution.service", async (original) => ({
   ...(await original<typeof import("@/services/earn/vault-intent-execution.service")>()),
   readConfirmedBlockHeight: async () => 50n,
 }));
-vi.mock("@/services/earn/strategy-operations.service", async (original) => {
-  const actual = await original<typeof import("@/services/earn/strategy-operations.service")>();
-  return {
-    ...actual,
-    projectEarnOperation: (...args: Parameters<typeof actual.projectEarnOperation>) => {
-      if (mocks.projectionFails) throw new Error("Projection unavailable");
-      return actual.projectEarnOperation(...args);
-    },
-  };
-});
 
 const TOKEN = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SHARE = "So11111111111111111111111111111111111111112";
@@ -233,7 +222,6 @@ beforeEach(async () => {
   mocks.withdrawalEnabled = false;
   mocks.withdrawalChoices = false;
   mocks.directWithdrawalAvailable = true;
-  mocks.projectionFails = false;
   mocks.quoteWithdrawal.mockResolvedValue({
     assetsOut: "9.9",
     assetDecimals: 6,
@@ -457,7 +445,7 @@ describe("Earn core operation HTTP flow", () => {
       {},
       "cancel-after-production-loss"
     );
-    expect(cancelled.status, await cancelled.clone().text()).toBe(202);
+    expect(cancelled.status, await cancelled.clone().text()).toBe(200);
     expect((await readOperation(cancelled)).status).toBe("cancelled");
 
     const positionId = generateEarnPositionId();
@@ -512,7 +500,7 @@ describe("Earn core operation HTTP flow", () => {
     ).toEqual([{ direction: "withdrawal" }]);
   });
 
-  it("prepares once, accepts exact owner-signed bytes asynchronously, then advances only in the worker", async () => {
+  it("prepares and submits with only an API key and owner signature, without registering a wallet", async () => {
     const operation = await prepare();
     expect(operation.status).toBe("prepared");
     expect(operation.nextAction).toMatchObject({ type: "sign_transaction", transaction: unsigned });
@@ -577,6 +565,9 @@ describe("Earn core operation HTTP flow", () => {
     expect(mocks.sign).not.toHaveBeenCalled();
     expect(mocks.proposer).not.toHaveBeenCalled();
     expect(await unfinishedCounts()).toEqual({ movements: 1, positions: 1 });
+    expect(
+      await getDb(env).queryOne("SELECT count(*)::int AS wallets FROM custody_wallets")
+    ).toEqual({ wallets: 0 });
   });
 
   it("infers an atomic swap from the funding mint and returns one signable deposit action", async () => {
@@ -609,6 +600,58 @@ describe("Earn core operation HTTP flow", () => {
     expect(mocks.sign).not.toHaveBeenCalled();
     expect(mocks.proposer).not.toHaveBeenCalled();
     expect(mocks.broadcast).not.toHaveBeenCalled();
+  });
+
+  it("withdraws an owner-address position using its signature without an SDP wallet", async () => {
+    mocks.withdrawalEnabled = true;
+    const positionId = generateEarnPositionId();
+    await getDb(env).execute(
+      `INSERT INTO earn_positions (id, organization_id, project_id, environment, provider,
+       kind, owner_address, vault_address, share_mint, token_mint, label, activated_at)
+       VALUES (?, ?, ?, 'sandbox', 'kamino', 'vault_direct', ?, ?, ?, ?, 'Holding', sdp_iso_now())`,
+      [positionId, tenant.org.id, tenant.project.id, owner, VAULT, SHARE, TOKEN]
+    );
+    const response = await request(
+      "earn/withdraw",
+      "POST",
+      { positionId, amount: { kind: "shares", value: "10" } },
+      "owner-withdrawal"
+    );
+    expect(response.status, await response.clone().text()).toBe(202);
+    const operation = await readOperation(response);
+    expect(operation.nextAction).toMatchObject({ type: "sign_transaction", transaction: unsigned });
+    expect(mocks.withdrawBuild).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ positionId, ownerAddress: owner })
+    );
+    expect(mocks.withdrawBuild.mock.calls[0]?.[1]).not.toHaveProperty("custodyWalletId");
+    const unsignedSubmission = await request(
+      `operations/${operation.id}/submit`,
+      "POST",
+      { actionId: operation.actionId, version: operation.version },
+      "owner-signature-required"
+    );
+    expect(unsignedSubmission.status).toBe(400);
+    const accepted = await request(
+      `operations/${operation.id}/submit`,
+      "POST",
+      action(operation),
+      "submit-owner-withdrawal"
+    );
+    expect(accepted.status, await accepted.clone().text()).toBe(202);
+    expect((await readOperation(accepted)).status).toBe("queued");
+    await runWithSystemDatabaseIdentity("cron:reconcile-operations", () =>
+      runInClusterScope({ projectId: null, environment: "sandbox" }, () => reconcileOperations(env))
+    );
+    expect((await readOperation(await request(`operations/${operation.id}`))).status).toBe(
+      "submitted"
+    );
+    expect(mocks.broadcast).toHaveBeenCalledOnce();
+    expect(mocks.sign).not.toHaveBeenCalled();
+    expect(mocks.proposer).not.toHaveBeenCalled();
+    expect(
+      await getDb(env).queryOne("SELECT count(*)::int AS wallets FROM custody_wallets")
+    ).toEqual({ wallets: 0 });
   });
 
   it("prepares an existing legacy custody position withdrawal and queues it without any inline signer", async () => {
@@ -778,9 +821,54 @@ describe("Earn core operation HTTP flow", () => {
     expect(mocks.sign).not.toHaveBeenCalled();
     expect(mocks.proposer).not.toHaveBeenCalled();
     expect(mocks.broadcast).not.toHaveBeenCalled();
+    const accepted = await request(
+      `operations/${refreshed.id}/submit`,
+      "POST",
+      { actionId: refreshed.actionId, version: refreshed.version },
+      "submit-selected-withdrawal"
+    );
+    expect(accepted.status, await accepted.clone().text()).toBe(202);
+    const snapshot = await getDb(env).queryOne("SELECT * FROM operations WHERE id = ?", [
+      operation.id,
+    ]);
+    const cached = await request(
+      refreshPath,
+      "POST",
+      { ...reviewed, optionId: "direct" },
+      "select-direct"
+    );
+    expect(cached.status, await cached.clone().text()).toBe(202);
+    expect(cached.headers.get("Idempotent-Replayed")).toBe("true");
+    expect((await readOperation(cached)).actionId).toBe(prepared.actionId);
+    const current = await readOperation(await request(`operations/${operation.id}`));
+    expect(current).toMatchObject({
+      actionId: refreshed.actionId,
+      status: "queued",
+      canCancel: false,
+    });
+    const refusedRefresh = await request(
+      refreshPath,
+      "POST",
+      { actionId: refreshed.actionId, version: refreshed.version },
+      "fresh-refresh-after-submit"
+    );
+    expect(refusedRefresh.status, await refusedRefresh.clone().text()).toBe(409);
+    expect(await refusedRefresh.json()).toMatchObject({
+      error: { details: { reason: "operation_already_submitted" } },
+    });
+    expect(
+      await getDb(env).queryOne("SELECT * FROM operations WHERE id = ?", [operation.id])
+    ).toEqual(snapshot);
+    expect(mocks.withdrawBuild).toHaveBeenCalledTimes(2);
+    expect(
+      await getDb(env).queryOne(
+        "SELECT count(*)::int AS attempts FROM operation_attempts WHERE operation_id = ?",
+        [operation.id]
+      )
+    ).toEqual({ attempts: 1 });
   });
 
-  it("leaves resolved proposal refusals for explicit review while fresh accepted work advances", async () => {
+  it("leaves failed signing outcomes terminal while fresh accepted work advances", async () => {
     const walletId = await seedOperationCustodyWallet("refused_operation");
     const refusedResponse = await request(
       "earn/deposit",
@@ -798,7 +886,7 @@ describe("Earn core operation HTTP flow", () => {
     );
     expect(acceptedRefusal.status, await acceptedRefusal.clone().text()).toBe(202);
     await getDb(env).execute(
-      `UPDATE operations SET status = 'awaiting_approval',
+      `UPDATE operations SET status = 'failed', next_action = NULL,
       resource_ref = ?::jsonb, error = ?::jsonb, updated_at = '2026-01-01T00:00:00.000Z' WHERE id = ?`,
       [
         JSON.stringify({ kind: "custody.proposal_not_sent", id: "resolved-refusal" }),
@@ -839,9 +927,7 @@ describe("Earn core operation HTTP flow", () => {
       runInClusterScope({ projectId: null, environment: "sandbox" }, () => reconcileOperations(env))
     );
     expect((await readOperation(await request(`operations/${fresh.id}`))).status).toBe("submitted");
-    expect((await readOperation(await request(`operations/${refused.id}`))).status).toBe(
-      "awaiting_approval"
-    );
+    expect((await readOperation(await request(`operations/${refused.id}`))).status).toBe("failed");
     expect(
       await getDb(env).queryOne("SELECT fence FROM operations WHERE id = ?", [refused.id])
     ).toEqual(before);
@@ -980,25 +1066,94 @@ describe("Earn core operation HTTP flow", () => {
     expect(mocks.broadcast).not.toHaveBeenCalled();
   });
 
-  it("keeps a committed cancellation response stable when its status projection fails", async () => {
+  it("refuses to revoke exposed owner bytes without recording cancellation intent", async () => {
     const operation = await prepare();
-    mocks.projectionFails = true;
-    const path = `operations/${operation.id}/cancel`;
-    const response = await request(path, "POST", {}, "cancel-projection-failure");
-    expect(response.status).toBe(500);
-    const stored = await getDb(env).queryOne<{ cancel_requested_at: string | null }>(
-      "SELECT cancel_requested_at FROM operations WHERE id = ?",
-      [operation.id]
+    expect(operation.canCancel).toBe(false);
+    const before = await getDb(env).queryOne("SELECT * FROM operations WHERE id = ?", [
+      operation.id,
+    ]);
+    const response = await request(
+      `operations/${operation.id}/cancel`,
+      "POST",
+      {},
+      "cancel-exposed-owner"
     );
-    expect(stored?.cancel_requested_at).toBeTypeOf("string");
-    mocks.projectionFails = false;
-    const replay = await request(path, "POST", {}, "cancel-projection-failure");
-    expect(replay.status).toBe(500);
-    expect(replay.headers.get("Idempotent-Replayed")).toBe("true");
+    expect(response.status, await response.clone().text()).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: { details: { reason: "wallet_transaction_outcome_unknown" } },
+    });
+    expect(
+      await getDb(env).queryOne("SELECT * FROM operations WHERE id = ?", [operation.id])
+    ).toEqual(before);
     expect(mocks.sign).not.toHaveBeenCalled();
     expect(mocks.proposer).not.toHaveBeenCalled();
     expect(mocks.broadcast).not.toHaveBeenCalled();
   });
+
+  it.each(["queued", "awaiting_signature", "submitted", "settling", "completed", "failed"])(
+    "rejects fresh cancellation and refresh of accepted %s operations without changing anything",
+    async (status) => {
+      const walletId = await seedOperationCustodyWallet(`accepted_${status}`);
+      const prepared = await readOperation(
+        await request(
+          "earn/deposit",
+          "POST",
+          { strategyId, source: { walletId }, amount: { mint: TOKEN, value: "10" } },
+          "prepare-accepted-state"
+        )
+      );
+      expect(prepared.canCancel).toBe(true);
+      const accepted = await request(
+        `operations/${prepared.id}/submit`,
+        "POST",
+        { actionId: prepared.actionId, version: prepared.version },
+        "submit-accepted-state"
+      );
+      expect(accepted.status, await accepted.clone().text()).toBe(202);
+      expect((await readOperation(accepted)).canCancel).toBe(false);
+      await getDb(env).execute(
+        "UPDATE operations SET status = ?, next_action = ?::jsonb WHERE id = ?",
+        [
+          status,
+          status === "completed" || status === "failed"
+            ? null
+            : JSON.stringify({ type: "wait", reason: "Tracking the accepted transaction" }),
+          prepared.id,
+        ]
+      );
+      const before = await getDb(env).queryOne("SELECT * FROM operations WHERE id = ?", [
+        prepared.id,
+      ]);
+      const attempts = await getDb(env).queryMany(
+        "SELECT * FROM operation_attempts WHERE operation_id = ?",
+        [prepared.id]
+      );
+      for (const mutation of ["cancel", "refresh"]) {
+        const response = await request(
+          `operations/${prepared.id}/${mutation}`,
+          "POST",
+          mutation === "cancel" ? {} : { actionId: prepared.actionId, version: prepared.version },
+          `refuse-${mutation}`
+        );
+        expect(response.status, await response.clone().text()).toBe(409);
+        expect(await response.json()).toMatchObject({
+          error: { details: { reason: "operation_already_submitted" } },
+        });
+      }
+      expect(
+        await getDb(env).queryOne("SELECT * FROM operations WHERE id = ?", [prepared.id])
+      ).toEqual(before);
+      expect(
+        await getDb(env).queryMany("SELECT * FROM operation_attempts WHERE operation_id = ?", [
+          prepared.id,
+        ])
+      ).toEqual(attempts);
+      expect(mocks.build).toHaveBeenCalledOnce();
+      expect(mocks.sign).not.toHaveBeenCalled();
+      expect(mocks.proposer).not.toHaveBeenCalled();
+      expect(mocks.broadcast).not.toHaveBeenCalled();
+    }
+  );
 
   it("rejects a different signed message and stale action without queueing money work", async () => {
     const operation = await prepare();

@@ -31,6 +31,8 @@ vi.mock("@/services/operations.service", () => ({
 }));
 vi.mock("@/services/earn/strategy-operations.service", () => ({
   advanceEarnOperation: mocks.advance,
+  isTerminalOperation: (operation: { status: string }) =>
+    ["completed", "failed", "cancelled"].includes(operation.status),
 }));
 vi.mock("@/services/operations-principal", () => ({
   runAsRecordedOperationPrincipal: (
@@ -82,15 +84,14 @@ describe("operation worker run budget", () => {
   });
 
   it.each([
-    { signedTransaction: null, dispatchStartedAt: null, action: "refresh" },
+    { signedTransaction: null, dispatchStartedAt: null },
     {
       signedTransaction: "retained-signed-bytes",
       dispatchStartedAt: "already-started",
-      action: "wait",
     },
   ])(
-    "offers $action after expiry only with current durable attempt evidence",
-    async ({ signedTransaction, dispatchStartedAt, action }) => {
+    "keeps uncertain failures under observation without offering replacement",
+    async ({ signedTransaction, dispatchStartedAt }) => {
       mocks.advance.mockRejectedValueOnce(conflict("Expired", { reason: "transaction_expired" }));
       mocks.get.mockResolvedValueOnce({
         claimToken: "one",
@@ -101,8 +102,22 @@ describe("operation worker run budget", () => {
       expect(mocks.transition).toHaveBeenCalledWith(
         expect.anything(),
         expect.anything(),
-        expect.objectContaining({ nextAction: expect.objectContaining({ type: action }) })
+        expect.objectContaining({
+          status: "queued",
+          nextAction: { type: "wait", reason: expect.any(String) },
+        })
       );
+      expect(mocks.getAttempt).not.toHaveBeenCalled();
     }
   );
+
+  it("preserves a terminal outcome if advancement loses its response", async () => {
+    mocks.advance.mockRejectedValueOnce(new Error("Response lost"));
+    mocks.get.mockResolvedValueOnce({
+      claimToken: "one",
+      operation: { status: "failed", resourceRef: null },
+    });
+    await expect(scoped()).rejects.toThrow("1 operation recovery attempts failed");
+    expect(mocks.transition).not.toHaveBeenCalled();
+  });
 });

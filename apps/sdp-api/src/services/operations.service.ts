@@ -16,7 +16,6 @@ import {
   type OperationClaim,
   type OperationListFilters,
   type OperationRecord,
-  type OperationReplacementEvidence,
   type OperationScope,
   type OperationsRepository,
   type OperationUpdate,
@@ -110,7 +109,7 @@ export class OperationsService {
     return { operation: created.record.operation, replayed: created.replayed };
   }
 
-  /** Read only; no approval, signing or broadcast is started by a status poll. */
+  /** Read only; a status poll never starts signing or broadcast. */
   async get(scope: OperationScope, id: string): Promise<Operation> {
     const record = await this.repository.get(scope, id);
     if (record === null) throw notFound("Operation");
@@ -219,31 +218,9 @@ export class OperationsService {
     return this.repository.transition(scope, claim, update);
   }
 
-  /** Cancellation stays pending until domain evidence establishes its actual outcome. */
-  requestCancellation(scope: OperationScope, id: string) {
-    return this.repository.requestCancellation(scope, id);
-  }
-
-  /** A signed cancellation names the authenticated recovery actor, not a revoked initiator. */
-  prepareCancellation(
-    scope: OperationScope,
-    id: string,
-    action: { actionId: string; version: number },
-    prepared: PreparedOperationAction,
-    evidence: OperationReplacementEvidence
-  ) {
-    const principal = currentMoneyPrincipal();
-    if (principal === null)
-      throw internalError("Cancellation requires an authenticated money principal");
-    return this.repository.replacePreparedAction(
-      scope,
-      id,
-      action,
-      prepared,
-      evidence,
-      "cancel",
-      principal
-    );
+  /** Cancel only a safe preparation before any submission has been accepted. */
+  cancelPreparation(scope: OperationScope, id: string) {
+    return this.repository.cancelPreparation(scope, id);
   }
 }
 

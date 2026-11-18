@@ -24,7 +24,6 @@ function acceptanceEntry(scope: OperationScope, claim: OperationClaim): AuditLog
       kind: claim.operation.kind,
       actionId: claim.operation.actionId,
       version: claim.operation.version,
-      actionPurpose: claim.purpose,
       attemptId: claim.attempt.id,
     },
   };
@@ -63,7 +62,7 @@ export async function acceptOperationExecution(
   signed?: OperationSignedAttempt
 ): Promise<void> {
   const repository = createOperationsRepository(getDb(c.env));
-  const exit = claim.operation.kind === "earn.withdraw" || claim.purpose === "cancel";
+  const exit = claim.operation.kind === "earn.withdraw";
   if (exit) await repository.requestExecution(scope, claim, signed);
   const entry = acceptanceEntry(scope, claim);
   let linked: AuditIntent | null;

@@ -27,7 +27,7 @@ interface GeneratedIntegration {
   }): Promise<unknown>;
   listEarnPositions(ownerAddress: string): Promise<unknown[]>;
   listEarnActivity(ownerAddress: string): Promise<unknown[]>;
-  requestEarnCancellation(operationId: string, key: string): Promise<unknown>;
+  cancelEarnOperation(operation: { id: string; canCancel: boolean }, key: string): Promise<unknown>;
   refreshEarnOperation(input: {
     operationId: string;
     actionId: string;
@@ -129,6 +129,16 @@ describe("Earn integration module", () => {
     );
     const integration = await loadGeneratedIntegration();
     await expect(integration.listEarnStrategies()).rejects.toThrow("Incomplete strategy catalogue");
+  });
+
+  it("does not send cancellation when SDP forbids it, even for a refreshed preparation", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const integration = await loadGeneratedIntegration();
+    await expect(
+      integration.cancelEarnOperation({ id: "operation", canCancel: false }, "key")
+    ).rejects.toThrow("cannot be cancelled");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("prepares a selected route with its current version before submission", async () => {

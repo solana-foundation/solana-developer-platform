@@ -8,14 +8,9 @@ import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { type AuthorizeInput, authorize, getAuthorized } from "@/middleware/authorize";
 import { idempotent, markIdempotencyCommitted } from "@/middleware/idempotency";
 import { projectContextMiddleware } from "@/middleware/project-context";
-import { assertCallerMayPerform, requireAction } from "@/middleware/require-action";
+import { requireAction } from "@/middleware/require-action";
 import { validateBody, validateParams, validateQuery } from "@/middleware/validate";
 import type { AppContext } from "@/routes/earn/context";
-import {
-  type AuthorizedEarnOperationCancellation,
-  authorizeEarnOperationCancellation,
-  prepareEarnOperationCancellation,
-} from "@/routes/earn/core/cancellation";
 import {
   type AuthorizedEarnPreparation,
   authorizeEarnDeposit,
@@ -43,7 +38,6 @@ import {
 interface AuthorizedOperation {
   record: OperationRecord;
   preparation: AuthorizedEarnPreparation | null;
-  cancellation?: AuthorizedEarnOperationCancellation | null;
 }
 
 async function authorizeOperation(
@@ -70,15 +64,6 @@ async function authorizeRefresh(
 ): Promise<AuthorizedOperation> {
   const authorized = await authorizeOperation(c, input, true);
   if (isTerminalOperation(authorized.record.operation)) return authorized;
-  if (authorized.record.actionPurpose === "cancel") {
-    assertCallerMayPerform(c, "earn.manage");
-    return {
-      ...authorized,
-      cancellation: await authorizeEarnOperationCancellation(c, authorized.record, {
-        includePrepared: true,
-      }),
-    };
-  }
   const { kind, ...body } = authorized.record.operation.intent;
   const prepareInput = { ...input, body };
   return {
@@ -152,9 +137,11 @@ operations.post(
   authorize(authorizeRefresh),
   idempotent({ key: "required", serverErrors: "rerun" }),
   async (c) => {
-    const { record, preparation, cancellation } = getAuthorized<AuthorizedOperation>(c);
+    const { record, preparation } = getAuthorized<AuthorizedOperation>(c);
     const body = refreshOperationSchema.parse(await c.req.json());
     assertReviewedOperationAction(record, body);
+    const service = createOperationsService(c.env);
+    await service.repository.requireRefreshablePreparation(record.scope, record.operation.id, body);
     const choosingOption = record.operation.nextAction?.type === "select_option";
     if (choosingOption && body.optionId === undefined)
       throw badRequest("Choose one of the advertised withdrawal options");
@@ -168,9 +155,7 @@ operations.post(
       return success(c, {
         operation: await projectEarnOperation(c.env, record.scope, record.operation),
       });
-    if (preparation === null && !cancellation)
-      throw badRequest("Operation has no refreshable action");
-    const service = createOperationsService(c.env);
+    if (preparation === null) throw badRequest("Operation has no refreshable action");
     const attempt = await service.repository.getAttempt(record.scope, record.operation.id);
     if (
       "ownerAddress" in record.source &&
@@ -193,39 +178,25 @@ operations.post(
     ) {
       throw conflict("The current transaction must be reconciled before refreshing");
     }
-    const prepared = cancellation
-      ? await prepareEarnOperationCancellation(c, cancellation, record)
-      : preparation === null
-        ? null
-        : await prepareEarnStrategyAction(
-            c,
-            preparation,
-            body.optionId ??
-              (record.operation.intent.kind === "earn.withdraw"
-                ? record.operation.terms.options[0]?.id
-                : undefined)
-          );
-    if (prepared === null) throw badRequest("Operation has no refreshable action");
+    const prepared = await prepareEarnStrategyAction(
+      c,
+      preparation,
+      body.optionId ??
+        (record.operation.intent.kind === "earn.withdraw"
+          ? record.operation.terms.options[0]?.id
+          : undefined)
+    );
     const evidence =
       reference?.kind === "custody.proposal" || reference?.kind === "custody.proposal_not_sent"
         ? { kind: "resolved_attempt" as const, resourceRef: reference }
         : { kind: "never_dispatched" as const };
-    const operation =
-      record.actionPurpose === "cancel"
-        ? await service.prepareCancellation(
-            record.scope,
-            record.operation.id,
-            record.operation,
-            prepared,
-            evidence
-          )
-        : await service.repository.replacePreparedAction(
-            record.scope,
-            record.operation.id,
-            record.operation,
-            prepared,
-            evidence
-          );
+    const operation = await service.repository.replacePreparedAction(
+      record.scope,
+      record.operation.id,
+      record.operation,
+      prepared,
+      evidence
+    );
     markIdempotencyCommitted(c);
     return success(c, { operation }, 202);
   }
@@ -236,43 +207,13 @@ operations.post(
   requireAction("earn.manage"),
   validateParams(paramsSchema),
   validateBody(emptyBody),
-  authorize(async (c, input) => {
-    const authorized = await authorizeOperation(c, input, true);
-    return {
-      ...authorized,
-      cancellation: await authorizeEarnOperationCancellation(c, authorized.record),
-    };
-  }),
+  authorize((c, input) => authorizeOperation(c, input, true)),
   idempotent({ key: "required", serverErrors: "rerun" }),
   async (c) => {
-    const { record, cancellation } = getAuthorized<AuthorizedOperation>(c);
+    const { record } = getAuthorized<AuthorizedOperation>(c);
     const service = createOperationsService(c.env);
-    let operation = await service.requestCancellation(record.scope, record.operation.id);
+    const operation = await service.cancelPreparation(record.scope, record.operation.id);
     markIdempotencyCommitted(c);
-    if (isTerminalOperation(operation))
-      return success(c, { operation: await projectEarnOperation(c.env, record.scope, operation) });
-    if (record.actionPurpose === "cancel") return success(c, { operation }, 202);
-    if (cancellation) {
-      const prepared = await prepareEarnOperationCancellation(c, cancellation, record);
-      operation = await service.prepareCancellation(
-        record.scope,
-        operation.id,
-        operation,
-        prepared,
-        {
-          kind: "resolved_attempt",
-          resourceRef: { kind: "earn.withdrawal_request", id: cancellation.request.id },
-        }
-      );
-      markIdempotencyCommitted(c);
-      return success(c, { operation }, 202);
-    }
-    operation =
-      (await service.repository.cancelUndispatched(record.scope, operation.id)) ?? operation;
-    return success(
-      c,
-      { operation: await projectEarnOperation(c.env, record.scope, operation) },
-      202
-    );
+    return success(c, { operation });
   }
 );

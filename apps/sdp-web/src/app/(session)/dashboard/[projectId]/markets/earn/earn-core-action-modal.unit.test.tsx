@@ -63,6 +63,7 @@ function operation(overrides: Partial<Operation> = {}): Operation {
     buildRef: null,
     resourceRef: null,
     result: null,
+    canCancel: false,
     cancelRequestedAt: null,
     error: null,
     createdAt: "2026-11-18T12:00:00.000Z",
@@ -211,7 +212,7 @@ describe("Earn operation review", () => {
     );
   });
 
-  it("prepares live terms before a separate submission approval", async () => {
+  it("prepares live terms before a separate submission confirmation", async () => {
     mocks.deposit.mockResolvedValue(operation());
     render(<EarnCoreActionModal kind="deposit" strategy={strategy} onClose={vi.fn()} />);
     fireEvent.change(screen.getByLabelText("amount"), { target: { value: "10" } });
@@ -266,33 +267,29 @@ describe("Earn operation review", () => {
     expect(mocks.submit).not.toHaveBeenCalled();
   });
 
-  it("shows provider approval instructions without inventing a transaction or completing", () => {
+  it("shows provider signing instructions without inventing a transaction or completing", () => {
     render(
       <EarnOperationReview
         operation={operation({
-          status: "awaiting_approval",
+          status: "awaiting_signature",
           nextAction: {
-            type: "approve_in_provider",
+            type: "sign_in_provider",
             provider: "fireblocks",
             providerTransactionId: "proposal",
-            instructions: "Approve in Fireblocks",
+            instructions: "Sign in Fireblocks",
             handoffUrl: null,
           },
         })}
       />
     );
-    expect(screen.getByText("Approve in Fireblocks")).toBeDefined();
+    expect(screen.getByText("Sign in Fireblocks")).toBeDefined();
     expect(screen.queryByRole("button", { name: "submit" })).toBeNull();
     expect(mocks.submit).not.toHaveBeenCalled();
   });
 
   it("refreshes an explicitly replaceable action without submitting it", async () => {
     mocks.refresh.mockResolvedValue(operation({ actionId: "replacement", version: 2 }));
-    render(
-      <EarnOperationReview
-        operation={operation({ status: "awaiting_approval", nextAction: { type: "refresh" } })}
-      />
-    );
+    render(<EarnOperationReview operation={operation({ nextAction: { type: "refresh" } })} />);
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "refreshTerms" })));
     expect(mocks.refresh).toHaveBeenCalledWith(
       "operation",
@@ -319,11 +316,22 @@ describe("Earn operation review", () => {
     expect(mocks.refresh).not.toHaveBeenCalled();
   });
 
-  it("keeps an uncertain approval observation-only", () => {
+  it.each(["queued", "awaiting_signature", "submitted", "settling", "failed"] as const)(
+    "never offers refreshed terms after a submission reaches %s",
+    (status) => {
+      render(
+        <EarnOperationReview operation={operation({ status, nextAction: { type: "refresh" } })} />
+      );
+      expect(screen.queryByRole("button", { name: "refreshTerms" })).toBeNull();
+      expect(mocks.refresh).not.toHaveBeenCalled();
+    }
+  );
+
+  it("keeps an uncertain signature observation-only", () => {
     render(
       <EarnOperationReview
         operation={operation({
-          status: "awaiting_approval",
+          status: "awaiting_signature",
           nextAction: { type: "wait", reason: "Provider outcome is unknown" },
         })}
       />
@@ -332,28 +340,33 @@ describe("Earn operation review", () => {
     expect(screen.queryByRole("button", { name: "submit" })).toBeNull();
   });
 
-  it("uses a new cancellation key after acknowledgement but reuses a lost response key", async () => {
+  it("retries cancellation of an unsubmitted preparation with its saved key", async () => {
     mocks.cancel.mockRejectedValueOnce(new Error("Lost response"));
-    mocks.cancel.mockResolvedValue(
-      operation({ status: "settling", nextAction: { type: "wait", reason: "Settling" } })
-    );
-    render(
-      <EarnOperationReview
-        operation={operation({
-          status: "settling",
-          nextAction: { type: "wait", reason: "Settling" },
-        })}
-      />
+    const cancelled = operation({ status: "cancelled", nextAction: null });
+    mocks.cancel.mockResolvedValue(cancelled);
+    const view = render(
+      <EarnOperationReview operation={operation({ version: 2, canCancel: true })} />
     );
     const cancel = screen.getByRole("button", { name: "cancel" });
     await act(async () => fireEvent.click(cancel));
     await act(async () => fireEvent.click(cancel));
-    await act(async () => fireEvent.click(cancel));
     const keys = mocks.cancel.mock.calls.map((call) => call[1]);
-    expect(keys).toHaveLength(3);
+    expect(keys).toHaveLength(2);
     expect(keys[1]).toBe(keys[0]);
-    expect(keys[2]).not.toBe(keys[1]);
+    view.rerender(<EarnOperationReview operation={cancelled} />);
+    expect(screen.queryByRole("button", { name: "cancel" })).toBeNull();
   });
+
+  it.each(["queued", "awaiting_signature", "submitted", "settling", "prepared"] as const)(
+    "hides cancellation when SDP forbids it for a %s operation, including refreshed preparations",
+    (status) => {
+      render(
+        <EarnOperationReview operation={operation({ status, version: 3, canCancel: false })} />
+      );
+      expect(screen.queryByRole("button", { name: "cancel" })).toBeNull();
+      expect(mocks.cancel).not.toHaveBeenCalled();
+    }
+  );
 
   it("blocks preparation when its retry key cannot be saved", async () => {
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
@@ -366,7 +379,7 @@ describe("Earn operation review", () => {
     expect(screen.getByText(/Enable browser storage/)).toBeDefined();
   });
 
-  it("refuses approval of expired terms", () => {
+  it("refuses submission of expired terms", () => {
     const expired = operation();
     expired.terms.expiresAt = "2000-01-01T00:00:00.000Z";
     render(<EarnOperationReview operation={expired} />);

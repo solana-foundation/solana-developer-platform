@@ -7,11 +7,17 @@ description: Discover strategies and manage your organization's holdings through
 Treasury uses the [Core Earn API](./core-api.mdx). It has no separate yield
 endpoints or program-allocation model.
 
-Use a registered `walletId` as the funding source. The wallet keeps its custody
-provider, signing permissions, approval policy and fee configuration. Preparation
-returns terms for review; execution queues work for the same asynchronous
-worker used by every Earn client.
+With an SDP API key, use `source: { "ownerAddress": "<owner-public-key>" }` and
+your preferred compatible Solana wallet. Sign the returned transaction through
+your integration, then submit its exact signed bytes. No SDP wallet record or
+provider connection is required.
+
+An existing connected wallet's `walletId` is an optional convenience. It keeps
+its signing and fee policies while the worker requests its provider signature.
+Both sources use the same asynchronous operation flow.
 
 Discovery, position reads, operation history and withdrawals use the shared
-contract. Approval tracking survives the request and browser session. Queued
-exits remain under one operation until delivery or a verified cancellation.
+contract. Signing progress survives the request and browser session. Once
+`/submit` is accepted, refresh and cancellation are unavailable; track the same
+operation through signing and settlement. Only a known terminal failure permits
+a new deposit or withdrawal with a new idempotency key.

@@ -77,8 +77,9 @@ applicable interfaces in `packages/sdp-earn/src/types.ts`:
   Builders must report exactly the admitted token identities, amount and floor.
 - Queued withdrawal capabilities cover request, observation and cancellation.
   Share escrow is not payout; verified provider or chain observations establish
-  delivery. An onchain cancellation can require another reviewed action; delayed
-  settlement remains under the same operation without a separate claim endpoint.
+  delivery. Provider cancellation capabilities remain internal; the public
+  operation cannot be cancelled after submit. Delayed settlement remains under
+  the same operation without a separate claim endpoint.
 - Provider-order settlement, preparation, cancellation and onboarding remain
   distinct capabilities when a strategy needs them. Eligibility is independent
   of authorization to move funds.
@@ -100,10 +101,17 @@ COPY lists. Dependencies stay exact-pinned with the lockfile committed.
 The core API prepares deposits by strategy/source/token amount and withdrawals
 by position/quantity. Preparation quotes, enforces floors and simulates before
 returning reviewable terms, an action ID/version and unsigned transaction bytes
-or the next action. Preparation never signs, opens approval or broadcasts.
+or the next action. Preparation never starts wallet signing or broadcasts.
 
-Sources name exactly one `walletId` or `ownerAddress`. A source changes signing
-authority, not the API flow. `POST /v1/operations/{operationId}/submit` authorizes
+API clients normally use an SDP API key and `source: { ownerAddress }`. Any
+compatible Solana wallet can sign the returned transaction through the client's
+integration, without an SDP wallet record or provider connection. Require the
+prepared owner and every other signer to sign the unchanged message, then accept
+base64 `signedTransaction` through the shared operation contract.
+
+An existing connected wallet's `source: { walletId }` is optional. A source
+changes signing authority, not the API flow.
+`POST /v1/operations/{operationId}/submit` authorizes
 and durably queues the exact reviewed transaction, returning `202`. It never
 prepares an action. Configured signing, custody proposals and broadcast run in
 the shared worker, including fast signers.
@@ -112,11 +120,27 @@ Withdrawal choices use `nextAction: select_option` and `terms.options`. Refresh
 requires the current `actionId`, `version` and an advertised `optionId`, then
 returns a new transaction review. Ordinary refresh omits `optionId` and retains
 the selected route. An unavailable route must fail instead of switching.
+Refresh only prepares unsigned bytes and terms before submit acceptance; it
+never signs or broadcasts. After any accepted submit, both refresh and cancel
+return `409 CONFLICT`. Definitive rejection or proven nonexecution is terminal
+`failed`, not an opportunity to refresh. A new request/key may retry only after
+known failure; uncertainty never permits another operation.
+
+Consumers use `canCancel`, not status, source kind or elapsed time, to decide
+whether to offer cancellation. It is false after any accepted submit and while
+an exposed owner transaction outcome is unknown.
+The cancel route still checks its own permission. Provider signing cleanup for
+permission loss or expiry is internal, not a post-submit API cancellation.
 
 Compose funding swaps and deposits atomically. Size deposits to the swap's
 guaranteed output, retain live simulation and compact-route retry, and reject
 an oversized composition before persisting a build. Never introduce a standalone
-funding swap or a follow-up deposit approval.
+funding swap or a follow-up deposit review.
+
+Configured-wallet signing remains asynchronous under `awaiting_signature`.
+Use `sign_in_provider` for instructions such as "Sign in Fireblocks".
+Provider-side approvals belong to wallet signing policy; they do not create a
+separate Earn approval API or require another submit call after signing.
 
 Use `createOrgSignerForCustodyWallet` and the shared sponsorship boundary with
 `MOVEMENTS`. A new custodian belongs in the custody family, not an Earn adapter.
@@ -132,10 +156,10 @@ Keep these invariants when adding a capability:
 - Persist exact signed bytes and attempt identity before submission. Retry an
   uncertain response with the same body and key. Missing RPC history, timeout
   or blockhash expiry alone cannot justify replacement or a second proposal.
-- Provider approval, chain inclusion, queue closure and delivered assets remain
+- Signing, chain inclusion, queue closure and delivered assets remain
   separate observations. Never copy estimates into settled fields.
-- New terms need a new explicit review. Cancellation records intent and preserves
-  uncertainty until the actual outcome is observed.
+- New terms need a new explicit review. Public cancellation cannot cross the
+  first submit acceptance; internal cleanup preserves unresolved outcomes.
 
 Sponsorship programs must appear in `infra/kora/kora.toml` and the deployed
 sdp-infra devnet/mainnet allowlists for the relevant cluster. The local
@@ -192,7 +216,7 @@ visibility flag a server authorization control.
 - Update OpenAPI descriptions, authored Earn guides, integration examples and
   current clients together. Regenerate OpenAPI, inventories, playground, API
   reference, Postman, AI resources and module map with their owning scripts.
-- Prove the relevant provider sandbox deposit, approval, position read,
+- Prove the relevant provider sandbox deposit, signing, position read,
   withdrawal and actual settlement. State which live flows and signed-in browser
   steps were verified; local tests do not establish those outcomes.
 

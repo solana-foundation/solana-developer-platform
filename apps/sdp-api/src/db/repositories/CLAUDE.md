@@ -31,6 +31,18 @@ advertised options to the chosen route; later refreshes preserve that route or
 fail if it is unavailable. No separate selection column or preparation-only
 submission is needed.
 
+Refresh and public cancellation are preparation-only. Both serialize against
+submit acceptance and permanently refuse after any accepted submit in the
+operation's history. A definitive signing refusal or proven nonexecution makes
+the operation terminal `failed`; retrying needs a new request/key. An uncertain
+outcome cannot authorize a replacement or another operation.
+
+`canCancel` derives from durable operation state and every prior attempt.
+Public cancellation cannot follow any accepted submit. An exposed owner
+transaction with an unknown outcome also keeps it false. Route permissions
+remain separate.
+Provider cleanup for permission loss or expiry does not reopen this capability.
+
 Deposit acceptance commits verified owner-signed bytes, `audit_intent_id`
 and `execution_requested_at` together (0244). No audit admission means no queued
 deposit. Exits retain their durable execution request if auditing is unavailable.
@@ -98,7 +110,8 @@ Things that will bite:
   advancement to an eligible state excludes active cancel actions. Only atomic
   action-failure recovery may reopen it. A failed create cannot discard a
   request once its nonce, creation timestamp or durable provider observation
-  establishes existence.
+  establishes existence. These are internal provider lifecycle constraints,
+  not a public post-submit cancellation flow.
 - **Expired owner-signed builds remain recovery records.** Cleanup releases their
   reservations, retaining the unsigned message, tenant, owner and terms. A
   late submit verifies the signed message before consuming the build, and only

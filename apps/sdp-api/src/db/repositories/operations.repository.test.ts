@@ -593,25 +593,75 @@ describe("durable operations repository", () => {
     ).rejects.toThrow("terms expired");
   });
 
-  it("a cancellation records its authorized recovery actor without replacing the original initiator", async () => {
+  it("retains the submission barrier across action versions", async () => {
     const claim = await createClaim();
+    await repository().requestExecution(scope, claim, signed);
     await repository().release(scope, claim);
-    await repository().requestCancellation(scope, claim.operation.id);
-    const cancellationActor = { kind: "api_key" as const, apiKeyId: "recovery-key" };
-    const operation = await runAsMoneyPrincipal(cancellationActor, () =>
-      new OperationsService(repository()).prepareCancellation(
-        scope,
-        claim.operation.id,
-        claim.operation,
-        input().prepared,
-        { kind: "never_dispatched" }
-      )
+    await getDb(env).execute(
+      `UPDATE operations SET action_id = 'new-review', action_version = action_version + 1,
+         status = 'prepared', next_action = '{"type":"submit"}'::jsonb WHERE id = ?`,
+      [claim.operation.id]
     );
-    const row = await repository().get(scope, operation.id);
-    expect(row?.principal).toEqual({ kind: "member", userId: USER });
-    expect(row?.actionPrincipal).toEqual(cancellationActor);
-    const cancellation = await repository().claimAction(scope, operation.id, operation);
-    expect(cancellation.attempt.principal).toEqual(cancellationActor);
+    const current = await repository().get(scope, claim.operation.id);
+    if (current === null) throw new Error("Missing operation");
+    expect(current.operation.canCancel).toBe(false);
+    const before = current.operation;
+    for (const mutation of [
+      () => repository().cancelPreparation(scope, before.id),
+      () => repository().requireRefreshablePreparation(scope, before.id, before),
+      () =>
+        repository().replacePreparedAction(scope, before.id, before, input().prepared, {
+          kind: "never_dispatched",
+        }),
+    ])
+      await expect(mutation()).rejects.toMatchObject({
+        details: { reason: "operation_already_submitted" },
+      });
+    expect((await repository().get(scope, before.id))?.operation).toEqual(before);
+  });
+
+  it("sees acceptance committed while a cancellation is waiting for its operation lock", async () => {
+    const claim = await createClaim();
+    let releaseAcceptance = () => {};
+    let signalAccepted = () => {};
+    const holdAcceptance = new Promise<void>((resolve) => {
+      releaseAcceptance = resolve;
+    });
+    const accepted = new Promise<void>((resolve) => {
+      signalAccepted = resolve;
+    });
+    const acceptance = getDb(env).transaction(async (tx) => {
+      await repository().requestExecutionWithin(tx, scope, claim, "acceptance-race", signed);
+      signalAccepted();
+      await holdAcceptance;
+    });
+    await accepted;
+    const cancellation = Promise.allSettled([
+      repository().cancelPreparation(scope, claim.operation.id),
+    ]);
+    try {
+      const deadline = Date.now() + 5_000;
+      let waiting = false;
+      while (!waiting && Date.now() < deadline) {
+        const result = await getDb(env).queryOne<{ waiting: boolean }>(
+          `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+             WHERE datname = current_database() AND pid <> pg_backend_pid()
+               AND wait_event_type = 'Lock' AND query LIKE '%FROM operations WHERE id%') AS waiting`
+        );
+        waiting = result?.waiting === true;
+        if (!waiting) await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(waiting).toBe(true);
+    } finally {
+      releaseAcceptance();
+    }
+    await acceptance;
+    expect(await cancellation).toMatchObject([
+      { status: "rejected", reason: { details: { reason: "operation_already_submitted" } } },
+    ]);
+    expect(
+      (await repository().get(scope, claim.operation.id))?.operation.cancelRequestedAt
+    ).toBeNull();
   });
 
   it("history filters wallets before pagination and requires an explicit owner address", async () => {
@@ -651,6 +701,10 @@ describe("durable operations repository", () => {
 
   it("cancels unexposed choices and custody builds while exposed owner bytes remain uncertain", async () => {
     const ownerOperation = await repository().createOrReplay(input());
+    expect(ownerOperation.record.operation.canCancel).toBe(false);
+    await expect(
+      repository().cancelPreparation(scope, ownerOperation.record.operation.id)
+    ).rejects.toMatchObject({ details: { reason: "wallet_transaction_outcome_unknown" } });
     await repository().requestCancellation(scope, ownerOperation.record.operation.id);
     expect(
       await repository().cancelUndispatched(scope, ownerOperation.record.operation.id)
@@ -666,10 +720,11 @@ describe("durable operations repository", () => {
         },
       })
     );
-    expect(await repository().cancelUndispatched(scope, choice.record.operation.id)).toBeNull();
-    await repository().requestCancellation(scope, choice.record.operation.id);
-    expect((await repository().cancelUndispatched(scope, choice.record.operation.id))?.status).toBe(
-      "cancelled"
+    expect(choice.record.operation.canCancel).toBe(true);
+    const cancelled = await repository().cancelPreparation(scope, choice.record.operation.id);
+    expect(cancelled).toMatchObject({ status: "cancelled", canCancel: false });
+    expect(await repository().cancelPreparation(scope, choice.record.operation.id)).toEqual(
+      cancelled
     );
     const custody = await repository().createOrReplay(
       input({
@@ -683,10 +738,40 @@ describe("durable operations repository", () => {
         prepared: { ...input().prepared, nextAction: { type: "submit" } },
       })
     );
-    await repository().requestCancellation(scope, custody.record.operation.id);
-    expect(
-      (await repository().cancelUndispatched(scope, custody.record.operation.id))?.status
-    ).toBe("cancelled");
+    expect(custody.record.operation.canCancel).toBe(true);
+    expect(await repository().cancelPreparation(scope, custody.record.operation.id)).toMatchObject({
+      status: "cancelled",
+      canCancel: false,
+    });
+  });
+
+  it("blocks preparation changes during a submission claim without treating an empty attempt as accepted", async () => {
+    const { record } = await repository().createOrReplay(
+      input({
+        intent: {
+          kind: "earn.deposit",
+          strategyId: "strategy_1",
+          source: { walletId: "wallet_1" },
+          amount: { mint: "mint", value: "1" },
+        },
+        prepared: { ...input().prepared, nextAction: { type: "submit" } },
+      })
+    );
+    const claim = await repository().claimAction(scope, record.operation.id, record.operation);
+    expect((await repository().get(scope, record.operation.id))?.operation.canCancel).toBe(false);
+    await expect(repository().cancelPreparation(scope, record.operation.id)).rejects.toMatchObject({
+      details: { reason: "operation_in_progress" },
+    });
+    await expect(
+      repository().requireRefreshablePreparation(scope, record.operation.id, record.operation)
+    ).rejects.toMatchObject({ details: { reason: "operation_in_progress" } });
+    await repository().release(scope, claim);
+    expect((await repository().get(scope, record.operation.id))?.operation.canCancel).toBe(true);
+    expect(await repository().cancelPreparation(scope, record.operation.id)).toMatchObject({
+      status: "cancelled",
+      canCancel: false,
+    });
+    await expect(repository().requestExecution(scope, claim)).rejects.toThrow("lease changed");
   });
 
   it("cancels queued wallet acceptance locally while an owner-signed message stays uncertain", async () => {
@@ -747,10 +832,10 @@ describe("durable operations repository", () => {
               id: mode === "wrong-attempt" ? "different-attempt" : claim.attempt.id,
             };
       await repository().transition(scope, claim, {
-        status: "awaiting_approval",
+        status: "awaiting_signature",
         nextAction: { type: "wait", reason: "Refresh review" },
         resourceRef: reference,
-        error: { code: "SIGNING_REJECTED", message: "Approval was not sent" },
+        error: { code: "SIGNING_REJECTED", message: "Signing request was not sent" },
       });
       expect(await repository().cancelUndispatched(scope, record.operation.id)).toBeNull();
       await repository().requestCancellation(scope, record.operation.id);

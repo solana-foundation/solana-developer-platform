@@ -10,6 +10,11 @@ catalogue, positions and asynchronous operations.
 
 The replacement contract is internal pending named security sign-off.
 
+Use your SDP API key with any compatible Solana wallet: prepare with
+`ownerAddress`, sign the returned transaction through your wallet integration,
+then submit the signed bytes. You do not need a wallet registered in SDP.
+An existing connected wallet's `walletId` is an optional alternative.
+
 ## Core actions
 
 - `GET /v1/earn/discovery` lists strategies, rates and supported actions.
@@ -18,8 +23,8 @@ The replacement contract is internal pending named security sign-off.
 - `POST /v1/earn/withdraw` prepares a withdrawal using a position ID.
 
 Every deposit or withdrawal returns an operation. Review its terms, submit its
-current action and track its next action until delivery is verified. Signing,
-provider approval and broadcast run in a worker.
+current action and track its next action until delivery is verified. A worker
+coordinates configured-wallet signing and broadcast.
 
 Start with the [quickstart](/docs/earn/quickstart), then read about
 [strategies](/docs/earn/strategies), [deposits](/docs/earn/deposits),

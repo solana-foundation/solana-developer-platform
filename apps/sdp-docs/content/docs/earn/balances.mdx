@@ -4,9 +4,10 @@ title: Balances and earnings
 description: Read holdings and complete-scope totals while preserving unavailable values.
 ---
 
-Use `GET /v1/earn/positions` for holdings across registered wallets and owner
-addresses. Filter with `walletId` or `ownerAddress`; `sourceType` distinguishes
-`wallet` and `address` sources. Position IDs are the references for withdrawals.
+Use `GET /v1/earn/positions?ownerAddress=<owner-public-key>` for your wallet's
+holdings. No SDP wallet registration is required. An optional `walletId` filter
+selects an existing connected wallet instead; `sourceType` distinguishes
+`address` and `wallet` sources. Position IDs are the references for withdrawals.
 
 ## Discover existing holdings
 

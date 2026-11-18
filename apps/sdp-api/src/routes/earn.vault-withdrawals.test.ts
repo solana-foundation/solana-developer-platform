@@ -291,7 +291,7 @@ afterEach(() => {
 });
 
 describe("operation wallet scope", () => {
-  it.each(["execute", "refresh", "cancel"].map((action) => ({ action })))(
+  it.each(["submit", "refresh", "cancel"].map((action) => ({ action })))(
     "refuses $action with wallet_out_of_scope before changing an operation",
     async ({ action }) => {
       await seedAuth();
@@ -323,7 +323,7 @@ describe("operation wallet scope", () => {
             "Idempotency-Key": idempotencyKey,
           },
           body: JSON.stringify(
-            action === "execute" ? { actionId: operation.actionId, version: operation.version } : {}
+            action === "cancel" ? {} : { actionId: operation.actionId, version: operation.version }
           ),
         },
         env

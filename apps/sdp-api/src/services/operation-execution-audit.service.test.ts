@@ -99,23 +99,19 @@ describe("operation execution audit admission", () => {
     expect(mocks.complete).not.toHaveBeenCalled();
   });
 
-  it.each(["withdrawal", "cancellation"])(
-    "preserves durable %s acceptance during an audit outage",
-    async (kind) => {
-      if (kind === "withdrawal") claim.operation.kind = "earn.withdraw";
-      else claim.purpose = "cancel";
-      mocks.begin.mockRejectedValue(new Error("audit unavailable"));
-      await expect(acceptOperationExecution(context, scope, claim)).resolves.toBeUndefined();
-      expect(mocks.queue).toHaveBeenCalledWith(scope, claim, undefined);
-      expect(mocks.queue.mock.invocationCallOrder[0]).toBeLessThan(
-        mocks.begin.mock.invocationCallOrder[0] ?? 0
-      );
-      expect(mocks.error).toHaveBeenCalledWith(
-        expect.objectContaining({ event: "operation_acceptance_audit_failed" }),
-        expect.any(String)
-      );
-    }
-  );
+  it("preserves durable withdrawal acceptance during an audit outage", async () => {
+    claim.operation.kind = "earn.withdraw";
+    mocks.begin.mockRejectedValue(new Error("audit unavailable"));
+    await expect(acceptOperationExecution(context, scope, claim)).resolves.toBeUndefined();
+    expect(mocks.queue).toHaveBeenCalledWith(scope, claim, undefined);
+    expect(mocks.queue.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.begin.mock.invocationCallOrder[0] ?? 0
+    );
+    expect(mocks.error).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "operation_acceptance_audit_failed" }),
+      expect.any(String)
+    );
+  });
 
   it("never reports accepted deposit execution as refused when only the outcome read fails", async () => {
     mocks.query.mockRejectedValue(new Error("audit outcome read unavailable"));

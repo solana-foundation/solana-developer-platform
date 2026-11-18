@@ -36,6 +36,7 @@ const operation: EarnOperation = {
   },
   resourceRef: null,
   result: null,
+  canCancel: false,
   cancelRequestedAt: null,
   error: null,
   createdAt: "2026-11-18T12:00:00Z",
@@ -63,7 +64,9 @@ it("refreshes terms without requesting a signature or submission", async () => {
       Response.json({ data: { operation } })
   );
   vi.stubGlobal("fetch", fetchMock);
-  await expect(refreshPreparedOperation(operation)).resolves.toMatchObject({
+  await expect(
+    refreshPreparedOperation({ ...operation, nextAction: { type: "refresh" } })
+  ).resolves.toMatchObject({
     actionId: "replacement",
   });
   expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -79,23 +82,51 @@ it("refreshes terms without requesting a signature or submission", async () => {
   });
 });
 
-it("retries cancellation with its saved key and retires only an acknowledged request", async () => {
+it("retries cancellation of an unsubmitted choice with its saved key", async () => {
+  const choice: EarnOperation = {
+    ...operation,
+    kind: "earn.withdraw",
+    intent: {
+      kind: "earn.withdraw",
+      positionId: "position",
+      amount: { kind: "all" },
+    },
+    nextAction: { type: "select_option" },
+    canCancel: true,
+  };
   const keys: string[] = [];
   const fetchMock = vi.fn(
     async (_url: URL | RequestInfo, init?: RequestInit) => {
       keys.push(JSON.parse(String(init?.body)).idempotencyKey);
       if (keys.length === 1) throw new Error("Response lost");
-      return Response.json({ data: { operation } });
+      return Response.json({
+        data: {
+          operation: {
+            ...choice,
+            status: "cancelled",
+            nextAction: null,
+            canCancel: false,
+          },
+        },
+      });
     }
   );
   vi.stubGlobal("fetch", fetchMock);
-  await expect(requestOperationCancellation(operation.id)).rejects.toThrow(
+  await expect(requestOperationCancellation(choice)).rejects.toThrow(
     "Response lost"
   );
-  await requestOperationCancellation(operation.id);
-  await requestOperationCancellation(operation.id);
+  await requestOperationCancellation(choice);
+  expect(keys).toHaveLength(2);
   expect(keys[1]).toBe(keys[0]);
-  expect(keys[2]).not.toBe(keys[1]);
+});
+
+it("never requests cancellation when the API marks the operation non-cancellable", async () => {
+  const fetchMock = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
+  await expect(requestOperationCancellation(operation)).rejects.toThrow(
+    "cannot be cancelled"
+  );
+  expect(fetchMock).not.toHaveBeenCalled();
 });
 
 it("selects a route through version-bound preparation without submission", async () => {
@@ -104,7 +135,10 @@ it("selects a route through version-bound preparation without submission", async
       Response.json({ data: { operation } })
   );
   vi.stubGlobal("fetch", fetchMock);
-  await refreshPreparedOperation(operation, "delayed");
+  await refreshPreparedOperation(
+    { ...operation, nextAction: { type: "select_option" } },
+    "delayed"
+  );
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(new URL(String(fetchMock.mock.calls[0]?.[0])).pathname).toBe(
     "/api/operations/operation/refresh"
@@ -117,6 +151,28 @@ it("selects a route through version-bound preparation without submission", async
   });
   expect(localStorage.getItem("northstar:pending-operation:v1")).toBeNull();
 });
+
+it.each([
+  "queued",
+  "awaiting_signature",
+  "submitted",
+  "settling",
+  "failed",
+] as const)(
+  "never requests refresh after a submission reaches %s",
+  async (status) => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(
+      refreshPreparedOperation({
+        ...operation,
+        status,
+        nextAction: { type: "refresh" },
+      })
+    ).rejects.toThrow("cannot be refreshed");
+    expect(fetchMock).not.toHaveBeenCalled();
+  }
+);
 
 it("recovers a lost submission response after reload with the exact action and key", async () => {
   const sent: unknown[] = [];

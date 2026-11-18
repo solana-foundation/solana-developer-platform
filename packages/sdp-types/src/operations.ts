@@ -8,7 +8,6 @@ export const OPERATION_STATUSES = [
   "prepared",
   "queued",
   "awaiting_signature",
-  "awaiting_approval",
   "submitted",
   "settling",
   "completed",
@@ -21,25 +20,9 @@ export const TERMINAL_OPERATION_STATUSES = ["completed", "failed", "cancelled"] 
 
 /** The shared legal transition matrix; terminal states cannot reopen. */
 export const OPERATION_TRANSITIONS = {
-  prepared: [
-    "queued",
-    "awaiting_signature",
-    "awaiting_approval",
-    "submitted",
-    "failed",
-    "cancelled",
-  ],
-  awaiting_signature: ["queued", "awaiting_approval", "submitted", "failed", "cancelled"],
-  queued: [
-    "awaiting_signature",
-    "awaiting_approval",
-    "submitted",
-    "settling",
-    "completed",
-    "failed",
-    "cancelled",
-  ],
-  awaiting_approval: ["submitted", "settling", "completed", "failed", "cancelled"],
+  prepared: ["queued", "awaiting_signature", "submitted", "failed", "cancelled"],
+  queued: ["awaiting_signature", "submitted", "settling", "completed", "failed", "cancelled"],
+  awaiting_signature: ["queued", "submitted", "settling", "completed", "failed", "cancelled"],
   submitted: ["settling", "completed", "failed", "cancelled"],
   settling: ["completed", "failed", "cancelled"],
   completed: [],
@@ -61,10 +44,16 @@ const positiveDecimal = decimal.refine((value) => /[1-9]/.test(value), "Amount m
 /** Explicit token units; valuation in USD is a separate observation. */
 export const operationAmountSchema = z.strictObject({ mint: identifier, value: decimal });
 
-/** Stored custody policy chooses the signer; owner addresses require owner signatures. */
+/** Use an owner address directly, or optionally select a connected wallet. */
 export const operationSourceSchema = z.union([
-  z.strictObject({ walletId: identifier }),
-  z.strictObject({ ownerAddress: identifier }),
+  z.strictObject({
+    ownerAddress: identifier.describe(
+      "Your wallet address. Sign the returned transaction yourself; no SDP wallet registration or signing-provider configuration is required."
+    ),
+  }),
+  z.strictObject({
+    walletId: identifier.describe("Optional alternative: an SDP wallet with configured signing."),
+  }),
 ]);
 
 /** Every withdrawal quantity declares whether it names shares, tokens or held intermediate. */
@@ -135,25 +124,49 @@ export const operationTermsSchema = z.strictObject({
     .max(32),
 });
 
-/** The next explicit action; preparing or reading it never initiates approval. */
+/** The next explicit action; preparing or reading it never initiates signing. */
 export const operationNextActionSchema = z.discriminatedUnion("type", [
-  z.strictObject({
-    type: z.literal("sign_transaction"),
-    transaction: z.string().min(1).max(1700),
-    lastValidBlockHeight: z.string().regex(/^\d+$/),
-    expiresAt: z.string().datetime().nullable(),
-  }),
-  z.strictObject({ type: z.literal("submit") }),
-  z.strictObject({ type: z.literal("select_option") }),
-  z.strictObject({ type: z.literal("refresh") }),
-  z.strictObject({
-    type: z.literal("approve_in_provider"),
-    provider: identifier,
-    providerTransactionId: identifier,
-    instructions: z.string().min(1).max(2000),
-    handoffUrl: z.url().nullable(),
-  }),
-  z.strictObject({ type: z.literal("wait"), reason: z.string().min(1).max(512) }),
+  z
+    .strictObject({
+      type: z.literal("sign_transaction"),
+      transaction: z.string().min(1).max(1700),
+      lastValidBlockHeight: z.string().regex(/^\d+$/),
+      expiresAt: z.string().datetime().nullable(),
+    })
+    .describe(
+      "Sign this exact transaction, then call /submit with signedTransaction and the current actionId/version. No SDP wallet setup is required."
+    ),
+  z
+    .strictObject({ type: z.literal("submit") })
+    .describe(
+      "Connected walletId only. Call /submit with actionId/version and no signedTransaction to request configured signing."
+    ),
+  z
+    .strictObject({ type: z.literal("select_option") })
+    .describe(
+      "Choose an advertised terms.options ID, then call /refresh with optionId and the current actionId/version. Review the returned transaction before submitting."
+    ),
+  z
+    .strictObject({ type: z.literal("refresh") })
+    .describe(
+      "SDP has established safe replacement. Call /refresh with the current actionId/version, then review again. Never use refresh to bypass an unresolved timeout."
+    ),
+  z
+    .strictObject({
+      type: z.literal("sign_in_provider"),
+      provider: identifier,
+      providerTransactionId: identifier,
+      instructions: z.string().min(1).max(2000),
+      handoffUrl: z.url().nullable(),
+    })
+    .describe(
+      "Connected walletId only. Follow the wallet provider's signing instructions, then poll this operation. Do not call /submit again."
+    ),
+  z
+    .strictObject({ type: z.literal("wait"), reason: z.string().min(1).max(512) })
+    .describe(
+      "Poll this operation. Keep the same attempt; do not rebuild or resubmit different transaction bytes."
+    ),
 ]);
 
 /** Public operation state; credentials, initiating principals and signed bytes stay internal. */
@@ -169,6 +182,11 @@ export const operationSchema = z.strictObject({
   terms: operationTermsSchema,
   buildRef: operationReferenceSchema.nullable(),
   resourceRef: operationReferenceSchema.nullable(),
+  canCancel: z
+    .boolean()
+    .describe(
+      "Whether state permits cancelling this preparation before any submission has been accepted. Does not grant permission or revoke exposed wallet transactions."
+    ),
   cancelRequestedAt: z.string().datetime().nullable(),
   error: z.strictObject({ code: identifier, message: z.string().min(1).max(2000) }).nullable(),
   result: z
@@ -194,7 +212,10 @@ export const submitOperationSchema = z.strictObject({
     .min(1)
     .max(1700)
     .regex(/^[A-Za-z0-9+/]+={0,2}$/)
-    .optional(),
+    .optional()
+    .describe(
+      "Required for an ownerAddress source: the exact prepared transaction, base64 encoded and signed by its required signers. Omit for a connected walletId source, whose configured signer signs asynchronously."
+    ),
 });
 
 /** Preparation stays bound to the current review; route selection never submits. */

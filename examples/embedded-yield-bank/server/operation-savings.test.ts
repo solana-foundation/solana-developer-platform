@@ -45,6 +45,7 @@ function operation(
       settledAmount: { mint, value: "105" },
       settlementOutcome: "delivered",
     },
+    canCancel: false,
     cancelRequestedAt: null,
     error: null,
     createdAt: "2026-11-18T12:00:00Z",

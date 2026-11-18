@@ -473,6 +473,7 @@ function coreOperation(status: Operation["status"]): Operation {
       settlementOutcome: null,
     },
     error: null,
+    canCancel: false,
     cancelRequestedAt: null,
     createdAt: "2026-11-18T00:00:00Z",
     updatedAt: "2026-11-18T00:00:00Z",

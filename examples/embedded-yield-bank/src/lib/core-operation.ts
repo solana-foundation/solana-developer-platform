@@ -14,7 +14,6 @@ export const coreOperationSchema = z.looseObject({
     "prepared",
     "queued",
     "awaiting_signature",
-    "awaiting_approval",
     "submitted",
     "settling",
     "completed",
@@ -54,7 +53,7 @@ export const coreOperationSchema = z.looseObject({
       z.object({ type: z.literal("select_option") }),
       z.object({ type: z.literal("refresh") }),
       z.object({
-        type: z.literal("approve_in_provider"),
+        type: z.literal("sign_in_provider"),
         provider: z.string(),
         providerTransactionId: z.string(),
         instructions: z.string(),
@@ -92,6 +91,7 @@ export const coreOperationSchema = z.looseObject({
         .optional(),
     })
     .nullable(),
+  canCancel: z.boolean(),
   cancelRequestedAt: z.string().nullable(),
   error: z.object({ code: z.string(), message: z.string() }).nullable(),
   createdAt: z.string(),

@@ -167,6 +167,7 @@ function operation(): Operation {
     terms: { expiresAt: null, estimate: null, minimum: null, fees: null, options: [] },
     buildRef: { kind: "earn.strategy_transaction", id: "build" },
     resourceRef: null,
+    canCancel: false,
     result: null,
     cancelRequestedAt: null,
     error: null,
@@ -484,6 +485,143 @@ describe("asynchronous operation execution", () => {
 });
 
 describe("custody proposal recovery", () => {
+  it.each([false, true])(
+    "fails an unsigned expired action before requesting signing (async=%s)",
+    async (asyncSigning) => {
+      if (asyncSigning) {
+        useExistingProposal();
+        claim.attempt.proposalBinding = null;
+        claim.attempt.dispatchStartedAt = null;
+      }
+      mocks.height.mockResolvedValue(101n);
+      expect(await scoped(() => advanceEarnOperation(env, scope, claim))).toMatchObject({
+        status: "failed",
+        nextAction: null,
+        error: { code: "TRANSACTION_EXPIRED" },
+      });
+      expect(mocks.prepareProposal).not.toHaveBeenCalled();
+      expect(mocks.propose).not.toHaveBeenCalled();
+      expect(mocks.sign).not.toHaveBeenCalled();
+      expect(mocks.submit).not.toHaveBeenCalled();
+    }
+  );
+
+  it("fails an expired incomplete sponsored signature without offering refresh", async () => {
+    useExistingProposal();
+    target.fee_mode = "sponsored";
+    mocks.height.mockResolvedValue(101n);
+    mocks.readProposal.mockResolvedValue({
+      phase: "signed",
+      providerTransactionId: "proposal",
+      signedTransaction: signed,
+    });
+    expect(await scoped(() => advanceEarnOperation(env, scope, claim))).toMatchObject({
+      status: "failed",
+      nextAction: null,
+      error: { code: "TRANSACTION_EXPIRED" },
+    });
+    expect(mocks.sponsor).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("waits for wallet-provider signing and broadcasts its signature without another submission", async () => {
+    const binding = useExistingProposal();
+    claim.operation.status = "queued";
+    claim.attempt.executionRequestedAt = "2026-11-18T00:00:00.000Z";
+    mocks.readProposal.mockResolvedValueOnce({
+      phase: "pending",
+      providerTransactionId: "proposal",
+      signedTransaction: null,
+    });
+    const pending = await scoped(() => advanceEarnOperation(env, scope, claim));
+    expect(pending).toMatchObject({
+      status: "awaiting_signature",
+      nextAction: {
+        type: "sign_in_provider",
+        provider: "fireblocks",
+        providerTransactionId: "proposal",
+        instructions: "Sign this transaction with your wallet provider",
+      },
+      error: null,
+    });
+    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(mocks.recordSigned).not.toHaveBeenCalled();
+    claim.operation = pending;
+    mocks.readProposal.mockResolvedValueOnce({
+      phase: "signed",
+      providerTransactionId: "proposal",
+      signedTransaction: signed,
+    });
+    mocks.sponsor.mockResolvedValue(signed);
+    const submitted = await scoped(() => advanceEarnOperation(env, scope, claim));
+    expect(submitted).toMatchObject({
+      status: "submitted",
+      resourceRef: { kind: "earn.movement", id: "movement" },
+      nextAction: { type: "wait" },
+    });
+    expect(mocks.readProposal).toHaveBeenCalledTimes(2);
+    expect(mocks.readProposal).toHaveBeenLastCalledWith({
+      binding,
+      unsignedTransaction: target.unsigned_transaction,
+    });
+    expect(mocks.recordSigned).toHaveBeenCalledOnce();
+    expect(mocks.submit).toHaveBeenCalledExactlyOnceWith(signed, true);
+    expect(mocks.request).not.toHaveBeenCalled();
+    expect(mocks.propose).not.toHaveBeenCalled();
+    expect(mocks.sign).not.toHaveBeenCalled();
+  });
+
+  it.each(["failed", "cancelled"] as const)(
+    "ends the accepted operation after provider signing is %s",
+    async (phase) => {
+      useExistingProposal();
+      mocks.readProposal.mockResolvedValue({
+        phase,
+        providerTransactionId: "proposal",
+        signedTransaction: null,
+      });
+      expect(await scoped(() => advanceEarnOperation(env, scope, claim))).toMatchObject({
+        status: "failed",
+        nextAction: null,
+        error: { code: "SIGNING_REJECTED" },
+        resourceRef: { kind: "custody.proposal", id: "proposal" },
+      });
+      expect(mocks.propose).not.toHaveBeenCalled();
+      expect(mocks.sign).not.toHaveBeenCalled();
+      expect(mocks.submit).not.toHaveBeenCalled();
+    }
+  );
+
+  it("waits for verified signing cancellation before declaring the expired operation failed", async () => {
+    const binding = useExistingProposal();
+    mocks.height.mockResolvedValue(101n);
+    mocks.readProposal.mockResolvedValueOnce({
+      phase: "pending",
+      providerTransactionId: "proposal",
+      signedTransaction: null,
+    });
+    const pending = await scoped(() => advanceEarnOperation(env, scope, claim));
+    expect(pending).toMatchObject({
+      status: "awaiting_signature",
+      nextAction: { type: "wait" },
+    });
+    expect(mocks.cancelProposal).toHaveBeenCalledExactlyOnceWith(binding);
+    claim.operation = pending;
+    mocks.readProposal.mockResolvedValueOnce({
+      phase: "cancelled",
+      providerTransactionId: "proposal",
+      signedTransaction: null,
+    });
+    expect(await scoped(() => advanceEarnOperation(env, scope, claim))).toMatchObject({
+      status: "failed",
+      nextAction: null,
+      error: { code: "TRANSACTION_EXPIRED" },
+    });
+    expect(mocks.propose).not.toHaveBeenCalled();
+    expect(mocks.sign).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
   it("yields before creating a proposal when the remaining action budget is exhausted", async () => {
     let elapsed = 0;
     const clock = vi.spyOn(performance, "now").mockImplementation(() => elapsed);
@@ -526,17 +664,17 @@ describe("custody proposal recovery", () => {
     }
   });
 
-  it("retains typed pre-submission refusal as refresh evidence without another provider POST", async () => {
+  it("ends a definitively unsent signing request without another provider POST", async () => {
     useExistingProposal();
     claim.attempt.dispatchStartedAt = null;
     claim.recoveryRequired = false;
     mocks.propose.mockRejectedValue(new ProposalNotSentError(forbidden("Revoked credential")));
     const result = await scoped(() => advanceEarnOperation(env, scope, claim));
     expect(result).toMatchObject({
-      status: "awaiting_approval",
+      status: "failed",
       resourceRef: { kind: "custody.proposal_not_sent", id: claim.attempt.id },
       error: { code: "SIGNING_REJECTED" },
-      nextAction: { type: "refresh" },
+      nextAction: null,
     });
     claim.operation = result;
     await scoped(() => advanceEarnOperation(env, scope, claim));
@@ -595,7 +733,7 @@ describe("custody proposal recovery", () => {
     const binding = useExistingProposal();
     mocks.readProposal.mockResolvedValue(null);
     expect(await scoped(() => advanceEarnOperation(env, scope, claim))).toMatchObject({
-      status: "awaiting_approval",
+      status: "awaiting_signature",
       nextAction: { type: "wait" },
     });
     expect(mocks.readProposal).toHaveBeenCalledWith({
@@ -620,7 +758,7 @@ describe("custody proposal recovery", () => {
       new ProposalAdmissionRefusedError("credential_revoked", forbidden("Revoked credential"))
     );
     expect(await scoped(() => advanceEarnOperation(env, scope, claim))).toMatchObject({
-      status: "awaiting_approval",
+      status: "awaiting_signature",
       nextAction: { type: "wait" },
     });
     expect(mocks.restrict).toHaveBeenCalledWith(scope, claim);

@@ -103,7 +103,7 @@ export interface PreparedOperationAction {
   buildRef: OperationReference | null;
 }
 
-/** First-write-wins request input; preparation never initiates signing or approval. */
+/** First-write-wins request input; preparation never initiates signing. */
 export interface CreateOperationInput extends OperationScope {
   intent: OperationIntent;
   source: OperationSource;
@@ -153,6 +153,7 @@ const rowSchema = z.object({
   fence: z.number(),
   created_at: z.string(),
   updated_at: z.string(),
+  has_submitted: z.boolean(),
 });
 const attemptRowSchema = z.object({
   id: z.string(),
@@ -171,8 +172,14 @@ const attemptRowSchema = z.object({
   proposal_binding: operationProposalBindingSchema.nullable(),
   resource_ref: operationReferenceSchema.nullable(),
 });
-const OPERATION_COLUMNS =
-  "*, CASE WHEN claim_until IS NULL THEN NULL ELSE to_char(claim_until AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') END AS claim_until";
+const OPERATION_COLUMNS = `*,
+  CASE WHEN claim_until IS NULL THEN NULL ELSE to_char(claim_until AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') END AS claim_until,
+  EXISTS (SELECT 1 FROM operation_attempts attempt
+    WHERE attempt.operation_id = operations.id
+      AND attempt.organization_id = operations.organization_id
+      AND attempt.project_id = operations.project_id
+      AND attempt.environment = operations.environment
+      AND attempt.execution_requested_at IS NOT NULL) AS has_submitted`;
 const scopeSql = "organization_id = ? AND project_id = ? AND environment = ?";
 const scopeValues = (scope: OperationScope) => [
   scope.organizationId,
@@ -194,6 +201,15 @@ function parseRecord(value: unknown): OperationRecord {
     terms: row.terms,
     buildRef: row.build_ref,
     resourceRef: row.resource_ref,
+    canCancel:
+      row.status === "prepared" &&
+      row.action_purpose === "execute" &&
+      row.resource_ref === null &&
+      !row.has_submitted &&
+      (row.claim_until === null || Date.parse(row.claim_until) <= Date.now()) &&
+      (("walletId" in row.source && row.next_action?.type === "submit") ||
+        (row.next_action?.type === "select_option" &&
+          row.build_ref?.kind === "earn.withdrawal_options")),
     error: row.error,
     result: null,
     cancelRequestedAt: row.cancel_requested_at,
@@ -309,6 +325,25 @@ export function createOperationsRepository(db: DatabaseClient) {
       [operation.id, operation.actionId, operation.version, ...scopeValues(scope)]
     );
     return row === null ? null : parseAttempt(row);
+  }
+  async function assertUnsubmitted(
+    tx: DatabaseExecutor,
+    scope: OperationScope,
+    row: OperationRecord
+  ): Promise<void> {
+    // Read after the lock so a preceding acceptance is visible even when our
+    // lock statement began before that acceptance committed.
+    const accepted = await tx.queryOne(
+      `SELECT 1 FROM operation_attempts WHERE operation_id = ? AND ${scopeSql}
+         AND execution_requested_at IS NOT NULL LIMIT 1`,
+      [row.operation.id, ...scopeValues(scope)]
+    );
+    if (accepted !== null)
+      throw conflict("Submitted operations cannot be changed; keep tracking the outcome", {
+        reason: "operation_already_submitted",
+      });
+    if (row.claimUntil !== null && Date.parse(row.claimUntil) > Date.now())
+      throw conflict("Operation submission is in progress", { reason: "operation_in_progress" });
   }
   async function writeSignedAttempt(
     tx: DatabaseExecutor,
@@ -688,7 +723,7 @@ export function createOperationsRepository(db: DatabaseClient) {
       return true;
     },
 
-    /** Queue explicit authorization durably; no signing, approval or broadcast happens here. */
+    /** Queue explicit authorization durably; no signing or broadcast happens here. */
     async requestExecution(
       scope: OperationScope,
       claim: OperationClaim,
@@ -814,6 +849,56 @@ export function createOperationsRepository(db: DatabaseClient) {
       return (await requireRecord(db, scope, id, false)).operation;
     },
 
+    /** The operation lock serializes pre-submit cancellation with durable acceptance. */
+    async cancelPreparation(scope: OperationScope, id: string): Promise<Operation> {
+      return db.transaction(async (tx) => {
+        const row = await requireRecord(tx, scope, id, true);
+        await assertUnsubmitted(tx, scope, row);
+        if (row.operation.status === "cancelled") return row.operation;
+        if (row.operation.nextAction?.type === "sign_transaction")
+          throw conflict("An exposed wallet transaction cannot be revoked by SDP", {
+            reason: "wallet_transaction_outcome_unknown",
+          });
+        if (!row.operation.canCancel)
+          throw conflict("Operation has no cancellable preparation", {
+            reason: "operation_not_cancellable",
+          });
+        const changed = await tx.queryOne(
+          `UPDATE operations SET status = 'cancelled', next_action = NULL,
+             cancel_requested_at = COALESCE(cancel_requested_at, sdp_iso_now()),
+             resource_ref = ?::jsonb, claim_token = NULL, claim_until = NULL,
+             updated_at = sdp_iso_now() WHERE id = ? AND ${scopeSql} RETURNING ${OPERATION_COLUMNS}`,
+          [
+            JSON.stringify({ kind: "operation.preparation", id: row.operation.buildRef?.id ?? id }),
+            id,
+            ...scopeValues(scope),
+          ]
+        );
+        return parseRecord(changed).operation;
+      });
+    },
+
+    /** Refuse accepted or exposed actions before making another provider build. */
+    async requireRefreshablePreparation(
+      scope: OperationScope,
+      id: string,
+      action: { actionId: string; version: number }
+    ): Promise<void> {
+      await db.transaction(async (tx) => {
+        const row = await requireRecord(tx, scope, id, true);
+        await assertUnsubmitted(tx, scope, row);
+        assertCurrentAction(row.operation, action);
+        if (isTerminal(row.operation.status))
+          throw conflict("Terminal operation cannot be refreshed");
+        if (row.operation.cancelRequestedAt !== null)
+          throw conflict("Operation cancellation was requested");
+        if (row.operation.nextAction?.type === "sign_transaction")
+          throw conflict("The exposed wallet transaction must be reconciled before refreshing", {
+            reason: "wallet_transaction_outcome_unknown",
+          });
+      });
+    },
+
     /** Only an unsigned, undispatched action can be replaced without domain evidence. */
     async replacePreparedAction(
       scope: OperationScope,
@@ -829,6 +914,7 @@ export function createOperationsRepository(db: DatabaseClient) {
       const buildRef = operationReferenceSchema.nullable().parse(prepared.buildRef);
       return db.transaction(async (tx) => {
         const row = await requireRecord(tx, scope, id, true);
+        await assertUnsubmitted(tx, scope, row);
         if (purpose === "cancel" && actionPrincipal === undefined)
           throw internalError("Cancellation action requires its authenticated principal");
         const principal =

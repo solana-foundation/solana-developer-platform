@@ -21,6 +21,7 @@ function operation(): Operation {
     buildRef: null,
     resourceRef: null,
     result: null,
+    canCancel: false,
     cancelRequestedAt: null,
     error: null,
     createdAt: "2026-11-18T12:00:00.000Z",

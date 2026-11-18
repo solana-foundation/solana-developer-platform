@@ -48,7 +48,7 @@ export async function fetchEarnOperations(query: EarnOperationsQuery = {}): Prom
   throw new Error("Earn operation pagination exceeded its safety limit");
 }
 
-/** Recover durable work on reload, including provider approval and settlement waits. */
+/** Recover durable work on reload, including provider signing and settlement waits. */
 export function useEarnOperations() {
   const { data, error, isLoading, mutate } = useSWR(
     "dashboard-earn-core-operations",

@@ -23,7 +23,7 @@ vi.mock("@/lib/core-api", () => ({
 const operation: EarnOperation = {
   id: "operation",
   kind: "earn.deposit",
-  status: "awaiting_approval",
+  status: "awaiting_signature",
   intent: {
     kind: "earn.deposit",
     strategyId: "strategy",
@@ -42,6 +42,7 @@ const operation: EarnOperation = {
   },
   resourceRef: null,
   result: null,
+  canCancel: false,
   cancelRequestedAt: null,
   error: null,
   createdAt: "2026-11-18T12:00:00Z",
@@ -49,6 +50,60 @@ const operation: EarnOperation = {
 };
 beforeEach(() => vi.resetAllMocks());
 afterEach(cleanup);
+it.each([
+  "queued",
+  "awaiting_signature",
+  "submitted",
+  "settling",
+  "prepared",
+] as const)(
+  "hides cancellation when SDP forbids it for a %s operation",
+  (status) => {
+    render(
+      <OperationActivity
+        operations={[{ ...operation, status, version: 3, canCancel: false }]}
+        strategyName="Strategy"
+        symbol="USDC"
+        tokenMint="usdc"
+        onUpdated={vi.fn()}
+      />
+    );
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(mocks.cancel).not.toHaveBeenCalled();
+  }
+);
+
+it("allows cancellation only for an unsubmitted preparation advertised as cancellable", async () => {
+  const choice: EarnOperation = {
+    ...operation,
+    status: "prepared",
+    version: 2,
+    nextAction: { type: "select_option" },
+    canCancel: true,
+  };
+  const cancelled = {
+    ...choice,
+    status: "cancelled",
+    nextAction: null,
+    canCancel: false,
+  };
+  mocks.cancel.mockResolvedValue(cancelled);
+  render(
+    <OperationActivity
+      operations={[choice]}
+      strategyName="Strategy"
+      symbol="USDC"
+      tokenMint="usdc"
+      onUpdated={vi.fn()}
+    />
+  );
+  await act(async () =>
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+  );
+  expect(mocks.cancel).toHaveBeenCalledWith(choice);
+  expect(mocks.submit).not.toHaveBeenCalled();
+});
+
 it("keeps the same route selectable after preparation fails", async () => {
   const choice: EarnOperation = {
     ...operation,
@@ -93,7 +148,8 @@ it("keeps the same route selectable after preparation fails", async () => {
   expect(mocks.submit).not.toHaveBeenCalled();
 });
 
-it("offers explicitly safe refresh and requires a separate submission approval", async () => {
+it("offers explicitly safe refresh and requires a separate submission confirmation", async () => {
+  const prepared: EarnOperation = { ...operation, status: "prepared" };
   mocks.refresh.mockResolvedValue({
     ...operation,
     status: "prepared",
@@ -102,7 +158,7 @@ it("offers explicitly safe refresh and requires a separate submission approval",
   const updated = vi.fn();
   render(
     <OperationActivity
-      operations={[operation]}
+      operations={[prepared]}
       strategyName="Strategy"
       symbol="USDC"
       tokenMint="usdc"
@@ -112,11 +168,34 @@ it("offers explicitly safe refresh and requires a separate submission approval",
   await act(async () =>
     fireEvent.click(screen.getByRole("button", { name: "Refresh terms" }))
   );
-  expect(mocks.refresh).toHaveBeenCalledWith(operation, undefined);
+  expect(mocks.refresh).toHaveBeenCalledWith(prepared, undefined);
   expect(mocks.submit).not.toHaveBeenCalled();
   expect(updated).toHaveBeenCalledTimes(1);
 });
-it("keeps uncertain approvals observation-only", () => {
+
+it.each([
+  "queued",
+  "awaiting_signature",
+  "submitted",
+  "settling",
+  "failed",
+] as const)(
+  "never offers refreshed terms after a submission reaches %s",
+  (status) => {
+    render(
+      <OperationActivity
+        operations={[{ ...operation, status }]}
+        strategyName="Strategy"
+        symbol="USDC"
+        tokenMint="usdc"
+        onUpdated={vi.fn()}
+      />
+    );
+    expect(screen.queryByRole("button", { name: "Refresh terms" })).toBeNull();
+    expect(mocks.refresh).not.toHaveBeenCalled();
+  }
+);
+it("keeps uncertain signing attempts observation-only", () => {
   render(
     <OperationActivity
       operations={[
@@ -135,6 +214,36 @@ it("keeps uncertain approvals observation-only", () => {
   expect(
     screen.queryByRole("button", { name: "Confirm and submit" })
   ).toBeNull();
+});
+
+it("shows provider signing as the signature step without another Earn confirmation", () => {
+  render(
+    <OperationActivity
+      operations={[
+        {
+          ...operation,
+          status: "awaiting_signature",
+          nextAction: {
+            type: "sign_in_provider",
+            provider: "fireblocks",
+            providerTransactionId: "proposal",
+            instructions: "Sign in Fireblocks",
+            handoffUrl: null,
+          },
+        },
+      ]}
+      strategyName="Strategy"
+      symbol="USDC"
+      tokenMint="usdc"
+      onUpdated={vi.fn()}
+    />
+  );
+  expect(screen.getByText("Waiting for a signature")).toBeDefined();
+  expect(screen.getByText("Sign in Fireblocks")).toBeDefined();
+  expect(
+    screen.queryByRole("button", { name: "Confirm and submit" })
+  ).toBeNull();
+  expect(mocks.submit).not.toHaveBeenCalled();
 });
 
 it("prepares a selected withdrawal route immediately and requires final review before submission", async () => {

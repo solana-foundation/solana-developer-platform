@@ -3,11 +3,11 @@
 Northstar is a self-contained Next.js App Router example of a bank that offers
 **Checking** and **Savings**, where Savings is one SDP Earn strategy.
 The React UI and its server routes deploy together, while SDP builds the
-transactions and tracks each operation through signing, approval and settlement.
+transactions and tracks each operation through signing, submission and settlement.
 
 This is a real integration, not a fixture UI. It defaults to a sandbox project
 on devnet and can run a controlled production-project canary on mainnet.
-Checking is the managed wallet's token balance read from the configured Solana
+Checking is the demo wallet's token balance read from the configured Solana
 cluster. Savings is the customer's position in the featured strategy, valued
 by SDP. Moving money between the two builds, signs, and submits real
 transactions on that cluster.
@@ -23,22 +23,23 @@ affordances for the example.
 
 ## How the bank maps to SDP
 
-| Northstar             | SDP                                                                                                                                       |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| Savings strategy      | `/v1/earn/discovery`, selected by `DEMO_STRATEGY_ID` or the first fundable DeFi USDC strategy on the configured cluster                   |
-| Savings holding       | `/v1/earn/positions?sourceType=address&ownerAddress=...&discover=true`, including verified pre-existing holdings in integrated strategies |
-| Move to savings       | `/v1/earn/deposit` prepares an operation for review                                                                                       |
-| Move to checking      | `/v1/earn/withdraw` prepares an operation using the position ID and token amount                                                          |
-| Approval and progress | `/v1/operations/{id}/submit`, then operation reads until verified completion                                                              |
-| Cancellation          | `/v1/operations/{id}/cancel`, followed by any returned signature action and continued polling                                             |
-| Updated terms         | `/v1/operations/{id}/refresh`, when the operation offers a refresh action                                                                 |
+| Northstar               | SDP                                                                                                                                       |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Savings strategy        | `/v1/earn/discovery`, selected by `DEMO_STRATEGY_ID` or the first fundable DeFi USDC strategy on the configured cluster                   |
+| Savings holding         | `/v1/earn/positions?sourceType=address&ownerAddress=...&discover=true`, including verified pre-existing holdings in integrated strategies |
+| Move to savings         | `/v1/earn/deposit` prepares an operation for review                                                                                       |
+| Move to checking        | `/v1/earn/withdraw` prepares an operation using the position ID and token amount                                                          |
+| Submission and progress | `/v1/operations/{id}/submit`, then operation reads until verified completion                                                              |
+| Cancellation            | `/v1/operations/{id}/cancel` discards an unsubmitted preparation when `canCancel` is true                                                 |
+| Updated terms           | `/v1/operations/{id}/refresh` selects a withdrawal route or updates advertised terms before submission                                    |
 
 Preparing shows current estimates, minimum proceeds, fees and withdrawal options.
-It does not sign or broadcast. **Approve execution** signs the exact transaction
-returned by SDP and submits the reviewed action ID and version. Submit returns
-`202` when work is durably accepted. SDP's worker handles submission, custody
-approval and settlement asynchronously. A queue request escrows shares; completion
-requires a verified payout or return of shares.
+It does not sign or broadcast. **Confirm and submit** signs the exact transaction
+returned by SDP. The demo's server sends its base64-encoded `signedTransaction`
+with the reviewed action ID and version to `/v1/operations/{id}/submit`. Submit
+returns `202` when work is durably accepted. SDP broadcasts and tracks settlement
+asynchronously. A queue request escrows shares; completion requires a verified
+payout or return of shares.
 
 Checking is the wallet's observed token balance. Savings uses SDP's observed
 position value, with unavailable values left unknown. Discovery cannot establish
@@ -47,8 +48,17 @@ remain unknown. APY is a decimal fraction with provider provenance and an
 observation timestamp, which can also be unknown.
 
 The four Earn endpoints serve this bank and the Treasury dashboard. The demo
-uses owner addresses, without registering custody wallets. All activity and
-pending withdrawals use the same shared operation lifecycle.
+uses `source: { ownerAddress }`, without creating or registering an SDP wallet.
+Any compatible Solana wallet can sign the returned transaction. Integrations
+with an existing connected SDP wallet can optionally pass `source: { walletId }`
+and let its configured provider sign instead. Both use the same `/submit`
+endpoint and operation lifecycle.
+
+Cancellation and refresh are unavailable once `/submit` is accepted, including
+while waiting for a signature. Cancellation never revokes an onchain transaction
+or a provider withdrawal request. The UI follows SDP's `canCancel` value and
+advertised next action. A definitively failed operation stays terminal; a new
+intent needs a new deposit or withdrawal request.
 
 The HTTP client is in [`server/sdp-client.ts`](server/sdp-client.ts), server-side
 signing in [`server/embedded-yield.ts`](server/embedded-yield.ts), and operation
@@ -123,11 +133,11 @@ development configuration described in
 
 4. In the local SDP dashboard, select a sandbox project and create an API key
    from **API keys** in the sidebar. Grant **Earn** Read, Execute and Manage
-   (Manage builds the owner-signed recovery of an expired queued withdrawal).
-   Northstar never signs with a custody wallet, so give it the narrowest wallet
-   access the form allows. Copy the full key when it is shown.
+   (Manage permits cancellation of an unsubmitted preparation).
+   Northstar signs outside SDP and does not need an SDP wallet. Copy the full key
+   when it is shown.
 
-5. Generate the demo customer's managed wallet:
+5. Generate the demo customer's wallet:
 
    ```bash
    pnpm --filter @sdp/api keygen:local

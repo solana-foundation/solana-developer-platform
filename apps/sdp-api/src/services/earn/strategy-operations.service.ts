@@ -275,7 +275,7 @@ export async function advanceEarnOperation(
   if (scope.environment !== currentClusterScope().environment)
     throw internalError("Operation cluster scope changed");
   const workerBudget = createOperationWorkerBudget();
-  if (claim.operation.resourceRef?.kind === "custody.proposal_not_sent") return claim.operation;
+  if (isTerminalOperation(claim.operation)) return claim.operation;
   const service = createOperationsService(env);
   const {
     target: built,
@@ -297,7 +297,7 @@ export async function advanceEarnOperation(
   }
   let attempt = claim.attempt;
   let signedTransaction = attempt.signedTransaction;
-  const stopping = claim.purpose !== "cancel" && claim.operation.cancelRequestedAt !== null;
+  const stopping = claim.operation.cancelRequestedAt !== null;
   let observeOnly = stopping || attempt.observationOnly;
   if (
     transactionScope.custodyWalletId === null &&
@@ -330,18 +330,18 @@ export async function advanceEarnOperation(
       await proposer.cancel(binding);
     }
     return update({
-      status: "awaiting_approval",
+      status: "awaiting_signature",
       resourceRef: null,
       error: null,
       nextAction:
         expired || observeOnly
-          ? { type: "wait", reason: "Waiting for the original custody approval to be cancelled" }
+          ? { type: "wait", reason: "Waiting for the original signing request to be cancelled" }
           : {
-              type: "approve_in_provider",
+              type: "sign_in_provider",
               provider: proposer.provider,
               providerTransactionId: observation.providerTransactionId,
               handoffUrl: null,
-              instructions: "Approve this transaction in your custody provider",
+              instructions: "Sign this transaction with your wallet provider",
             },
     });
   }
@@ -357,9 +357,17 @@ export async function advanceEarnOperation(
       if (stopping) throw conflict("Operation cancellation was requested");
       await admitDeposit(env, scope, claim.operation);
       if ((await readConfirmedBlockHeight()) > BigInt(built.last_valid_block_height)) {
-        throw conflict("Prepared transaction expired; refresh before executing", {
-          reason: "transaction_expired",
-        });
+        return {
+          operation: await update({
+            status: "failed",
+            nextAction: null,
+            resourceRef: null,
+            error: {
+              code: "TRANSACTION_EXPIRED",
+              message: "The transaction expired before signing",
+            },
+          }),
+        };
       }
       workerBudget.assertCanStart();
       binding = await proposer.prepare(attempt.id);
@@ -381,13 +389,13 @@ export async function advanceEarnOperation(
         if (!(error instanceof ProposalNotSentError)) throw error;
         return {
           operation: await update({
-            status: "awaiting_approval",
+            status: "failed",
             resourceRef: { kind: "custody.proposal_not_sent", id: attempt.id },
             error: {
               code: "SIGNING_REJECTED",
-              message: "The approval was not submitted; refresh to review a new transaction",
+              message: "The signing request was not sent",
             },
-            nextAction: { type: "refresh" },
+            nextAction: null,
           }),
         };
       }
@@ -422,19 +430,19 @@ export async function advanceEarnOperation(
       // No sponsor signature was requested for these bytes. Retaining the
       // owner proposal cannot create an executable sponsored transaction.
       return update({
-        status: observeOnly ? "cancelled" : "awaiting_approval",
+        status: observeOnly ? "cancelled" : "failed",
         resourceRef: { kind: "custody.proposal", id: observation.providerTransactionId },
         error: observeOnly
           ? null
           : {
               code: "TRANSACTION_EXPIRED",
-              message: "Approval expired; refresh to review a new transaction",
+              message: "The signing request expired",
             },
-        nextAction: observeOnly ? null : { type: "refresh" },
+        nextAction: null,
       });
     }
     observeOnly ||= expired;
-    // A provider signature is approval evidence, not fresh spend authority.
+    // A provider signature does not restore withdrawn spend authority.
     if (observeOnly) signedTransaction = observation.signedTransaction;
     else {
       await admitDeposit(env, scope, claim.operation);
@@ -455,10 +463,10 @@ export async function advanceEarnOperation(
     const { binding, observation } = result;
     if (observation === null)
       return update({
-        status: "awaiting_approval",
+        status: "awaiting_signature",
         resourceRef: null,
         error: null,
-        nextAction: { type: "wait", reason: "Reconciling the original custody approval" },
+        nextAction: { type: "wait", reason: "Reconciling the original signing request" },
       });
     const expired = (await readConfirmedBlockHeight()) > BigInt(built.last_valid_block_height);
     if (observation.phase === "pending")
@@ -466,17 +474,15 @@ export async function advanceEarnOperation(
     if (observation.phase === "failed" || observation.phase === "cancelled") {
       const cancelled = stopping && observation.phase === "cancelled";
       return update({
-        status: cancelled ? "cancelled" : "awaiting_approval",
+        status: cancelled ? "cancelled" : "failed",
         resourceRef: { kind: "custody.proposal", id: observation.providerTransactionId },
         error: cancelled
           ? null
           : {
               code: expired ? "TRANSACTION_EXPIRED" : "SIGNING_REJECTED",
-              message: expired
-                ? "The approval expired; refresh to review a new transaction"
-                : "The approval ended; refresh to review a new transaction",
+              message: expired ? "The signing request expired" : "The signing request ended",
             },
-        nextAction: cancelled ? null : { type: "refresh" },
+        nextAction: null,
       });
     }
     return acceptSignedCustodyProposal(proposer, binding, observation, expired);
@@ -496,8 +502,11 @@ export async function advanceEarnOperation(
       if (stopping) throw conflict("Operation cancellation was requested");
       await admitDeposit(env, scope, claim.operation);
       if ((await readConfirmedBlockHeight()) > BigInt(built.last_valid_block_height)) {
-        throw conflict("Prepared transaction expired; refresh before executing", {
-          reason: "transaction_expired",
+        return update({
+          status: "failed",
+          nextAction: null,
+          resourceRef: null,
+          error: { code: "TRANSACTION_EXPIRED", message: "The transaction expired before signing" },
         });
       }
       signedTransaction = await signPreparedStrategyTransaction(
@@ -543,8 +552,7 @@ export async function advanceEarnOperation(
       .send();
     if (observed.value[0] === null || observed.value[0] === undefined) {
       return update({
-        status:
-          transactionScope.custodyWalletId === null ? "awaiting_signature" : "awaiting_approval",
+        status: "awaiting_signature",
         nextAction: {
           type: "wait",
           reason: "Reconciling the signed transaction without sending it",
@@ -592,9 +600,9 @@ export async function submitEarnOperation(
       transactionScope.custodyWalletId === null &&
       claim.attempt.signedTransaction === null
     ) {
-      throw badRequest("Sign the advertised transaction before executing");
+      throw badRequest("Sign the advertised transaction before submitting");
     }
-    if (claim.purpose !== "cancel" && claim.operation.cancelRequestedAt !== null)
+    if (claim.operation.cancelRequestedAt !== null)
       await service.repository.restrictToObservation(scope, claim);
     await acceptOperationExecution(c, scope, claim, verifiedSigned);
     markIdempotencyCommitted(c);

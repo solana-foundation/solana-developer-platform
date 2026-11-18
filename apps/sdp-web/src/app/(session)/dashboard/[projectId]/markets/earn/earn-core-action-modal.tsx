@@ -158,7 +158,7 @@ function useEarnPreparation(props: ActionProps) {
   };
 }
 
-/** Preparation reviews terms; only the following explicit action can open custody approval. */
+/** Preparation reviews terms; only the following explicit action can request wallet signing. */
 export function EarnCoreActionModal(props: ActionProps) {
   const t = useTranslations();
   const preparation = useEarnPreparation(props);
@@ -286,7 +286,7 @@ function EarnWithdrawalQuantityFields({
   );
 }
 
-/** The same review and approval UI resumes an operation recovered after reload. */
+/** The same review and signing UI resumes an operation recovered after reload. */
 export function EarnOperationReview({
   operation: initial,
   onUpdated,
@@ -316,7 +316,7 @@ export function EarnOperationReview({
         <p className="text-body text-secondary">{operation.terms.description}</p>
       ) : null}
       <EarnOperationTerms operation={operation} />
-      {operation.nextAction?.type === "select_option" && !terminal ? (
+      {operation.status === "prepared" && operation.nextAction?.type === "select_option" ? (
         <div className="space-y-2">
           <Label htmlFor={`earn-option-${operation.id}`}>{t("DashboardEarn.core.route")}</Label>
           <Select
@@ -361,12 +361,14 @@ function EarnOperationActions({
   const t = useTranslations();
   if (isEarnOperationTerminal(operation)) return null;
   const nextAction = operation.nextAction;
-  const canRefresh = nextAction?.type === "refresh";
+  const canRefresh = operation.status === "prepared" && nextAction?.type === "refresh";
   return (
     <div className="flex flex-wrap justify-end gap-3 pt-4">
-      <Button variant="secondary" loading={busy} onClick={() => void onAction("cancel")}>
-        {t("DashboardEarn.core.cancel")}
-      </Button>
+      {operation.canCancel ? (
+        <Button variant="secondary" loading={busy} onClick={() => void onAction("cancel")}>
+          {t("DashboardEarn.core.cancel")}
+        </Button>
+      ) : null}
       {canRefresh ? (
         <Button variant="secondary" disabled={busy} onClick={() => void onAction("refresh")}>
           {t("DashboardEarn.core.refreshTerms")}
@@ -426,7 +428,7 @@ function EarnOperationStatus({
   const nextAction = operation.nextAction;
   return (
     <>
-      {nextAction?.type === "approve_in_provider" ? (
+      {nextAction?.type === "sign_in_provider" ? (
         <Callout variant="info">
           <p>{nextAction.instructions}</p>
           {nextAction.handoffUrl && new URL(nextAction.handoffUrl).protocol === "https:" ? (
@@ -540,6 +542,7 @@ function useEarnOperationActions(
   }, [operation]);
   async function act(action: "submit" | "cancel" | "refresh", optionId?: string) {
     if (busy) return;
+    if (action === "cancel" && !operation.canCancel) return;
     setBusy(true);
     setError(undefined);
     try {

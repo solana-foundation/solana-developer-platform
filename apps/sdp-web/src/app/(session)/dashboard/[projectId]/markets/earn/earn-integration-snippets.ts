@@ -99,11 +99,14 @@ export async function submitEarnOperation(input: {
 
 // Customer flow: prepare -> review operation.terms -> sign nextAction.transaction
 // in the customer's wallet -> submitEarnOperation with that signed transaction.
+// Any compatible Solana wallet can sign; no SDP wallet registration is needed.
+// Send its base64-encoded signed transaction as signedTransaction.
 // A separate fee payer must co-sign. Never alter the message before submitting.
-// Custody wallets use source: { walletId } and submit without signed bytes.
+// Optional: an existing connected wallet uses source: { walletId } instead.
+// Submit without signedTransaction; SDP requests signing from its provider.
 // Submission returns 202 once durable work is accepted; signing and broadcast run asynchronously.
 // A funding swap and deposit share one atomic transaction, or preparation refuses the route.
-// If nextAction.type is approve_in_provider, show its instructions and keep polling.`;
+// If nextAction.type is sign_in_provider, show its instructions and keep polling.`;
 
   const portfolio = `export async function getEarnOperation(operationId: string) {
   return (await sdp(\`/v1/operations/\${encodeURIComponent(operationId)}\`)).operation;
@@ -138,7 +141,7 @@ export function listEarnActivity(ownerAddress: string) {
 // Check coverage and discovery.unavailableStrategyCount; this is not every protocol on Solana.
 // Discovered acquisition dates and unknown cost basis are never inferred.
 // Absent shares/value mean unavailable, never zero. Values retain token units.
-// Poll active operations through approval, chain confirmation and provider settlement.
+// Poll active operations through signing, chain confirmation and provider settlement.
 // Only completed means the expected shares or payout were actually delivered.`;
 
   const withdraw = `/** The position binds its owner, strategy and underlying provider vault. */
@@ -160,12 +163,16 @@ export async function prepareEarnWithdrawal(input: {
 // Review the returned terms, then sign/submit the current action as in the deposit flow.
 // A submitted queue request escrows shares; it is not a completed payout.`;
 
-  const asyncWithdraw = `/** Cancellation can itself return an action that needs a signature. */
-export async function requestEarnCancellation(operationId: string, idempotencyKey: string) {
-  return (await post(\`/v1/operations/\${encodeURIComponent(operationId)}/cancel\`, {}, idempotencyKey)).operation;
+  const asyncWithdraw = `/** Discard an unsubmitted preparation only when SDP advertises canCancel. */
+export async function cancelEarnOperation(
+  operation: { id: string; canCancel: boolean },
+  idempotencyKey: string
+) {
+  if (!operation.canCancel) throw new Error("This operation cannot be cancelled");
+  return (await post(\`/v1/operations/\${encodeURIComponent(operation.id)}/cancel\`, {}, idempotencyKey)).operation;
 }
 
-/** Prepare a selected route, or safely replace an action the API marks refreshable. */
+/** Prepare a selected route or refreshed terms before any accepted submission. */
 export async function refreshEarnOperation(input: {
   operationId: string;
   actionId: string;
@@ -178,9 +185,9 @@ export async function refreshEarnOperation(input: {
 }
 
 // Resume the same operation after reload. Do not create a replacement because
-// signing timed out or RPC history is missing. Cancellation acknowledgement
-// does not prove signing or settlement stopped; keep watching the operation.
-// Only nextAction.type === "refresh" explicitly offers a replacement action.
+// signing timed out or RPC history is missing. Once /submit is accepted,
+// cancellation and refresh are unavailable; track the same operation.
+// Only a prepared nextAction.type === "refresh" offers replacement terms.
 // A previously exposed wallet message needs authoritative reconciliation; expiry alone is not proof.
 // Refresh changes the message: review new terms and obtain a new signature.`;
   return { client, deposit, portfolio, withdraw, asyncWithdraw };

@@ -14,7 +14,6 @@ vi.mock("./execution-registry", async (original) => ({
 }));
 vi.mock("./vault-queued-withdraw.service", () => ({
   buildWalletQueuedWithdrawalRequest: buildQueued,
-  buildWalletQueuedWithdrawalCancel: vi.fn(),
   submitWalletQueuedWithdrawalAction: vi.fn(),
 }));
 

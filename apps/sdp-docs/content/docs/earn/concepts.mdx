@@ -12,19 +12,20 @@ with different assets, rates and withdrawal terms.
 
 ## Position
 
-A position is a wallet's holding in a strategy. Its source identifies a
-registered `walletId` or an `ownerAddress`. That identity preserves wallet
-visibility and ownership checks while both sources use the same API.
+A position is a wallet's holding in a strategy. Its source normally identifies
+the signing wallet by `ownerAddress`, without registering it in SDP. An existing
+connected wallet can instead use its `walletId`. Both use the same API.
 
 Imported holdings have unknown acquisition history and cost basis. A current
 balance alone does not establish earned yield.
 
 ## Operation
 
-An operation tracks one deposit or withdrawal across reviewed actions, signing,
-provider approval, chain submission and economic delivery. A later transaction
-requires a new action identity and review under the same operation.
+An operation tracks one deposit or withdrawal through preparation, wallet
+signing, chain submission and economic delivery. Before submit acceptance,
+replacing unsigned terms requires a new action identity and review. After
+acceptance, refresh and cancellation are unavailable; track the outcome.
 
-An approval, confirmed request or escrowed share balance is not a payout.
+A signature, confirmed request or escrowed share balance is not a payout.
 `completed` requires verified delivery. Unknown outcomes retain their original
 signed bytes and remain unresolved until evidence establishes the outcome.

@@ -15,6 +15,15 @@ shared operations. Earn is prelaunch: old builds and removed product workflows
 have no compatibility upgrade path. Separate WisdomTree onboarding remains for
 customer verification and wallet registration.
 
+Use an SDP API key with any compatible Solana wallet. Prepare using
+`source: { "ownerAddress": "<owner-public-key>" }`, sign the returned transaction
+through your own wallet integration, and submit its exact signed bytes. You do
+not need to register a wallet or connect a provider in SDP. Strategy eligibility
+requirements still apply. An existing connected wallet's `walletId` is optional.
+
+The [integration guide](../../docs/earn/integration-details.mdx) explains when
+each source, signing action and operation mutation is needed.
+
 ## Discover strategies and holdings
 
 `GET /v1/earn/discovery` returns the validated strategy catalogue. Filter by `id`,
@@ -29,7 +38,8 @@ admission still runs when you prepare and submit. The catalogue covers
 integrated provider sources, not every Solana strategy.
 
 `GET /v1/earn/positions` returns holdings with a common
-`source` identity. Choose `walletId` or `ownerAddress`; use `before` and `limit`
+`source` identity. Use `ownerAddress`, or `walletId` for an existing connected
+wallet; use `before` and `limit`
 for position pages. `discover=true` requires one owner and also reads supported
 integrated strategies for pre-existing holdings. The response states its
 coverage and unavailable-strategy count. Discovery does not import ownership or
@@ -61,22 +71,20 @@ Content-Type: application/json
 
 {
   "strategyId": "strategy_example",
-  "source": { "walletId": "cwlt_example" },
+  "source": { "ownerAddress": "<owner-public-key>" },
   "amount": { "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU", "value": "100" },
   "slippageBps": 50
 }
 ```
 
 Choose a mint the prepared strategy path supports. `value` is a decimal string
-in that mint's token units. To identify the owner by address, use
-`{ "ownerAddress": "<owner-public-key>" }`; no custody registration is required.
-Optional `feePayer` applies when using `ownerAddress` and must also
-sign. Custody wallets use their configured fee policy. `slippageBps` is capped
-at 500.
+in that mint's token units. `ownerAddress` is the wallet that must sign and own
+the position; it need not exist in SDP's wallet records. Optional `feePayer`
+must also sign. `slippageBps` is capped at 500.
 
 A fresh preparation returns `202` with `data.operation`. It records intent,
-economic terms, `actionId` and `version`. It never signs, opens provider approval
-or broadcasts. Show `terms.estimate`, enforceable `terms.minimum` and fees
+economic terms, `actionId` and `version`. It never starts wallet signing or
+broadcasts. Show `terms.estimate`, enforceable `terms.minimum` and fees
 before submission. `fees=null` means unknown. It does not mean no fees.
 Show `terms.inputAmount` and `terms.description` when present.
 
@@ -91,40 +99,46 @@ funding swap or asks for a separate deposit continuation.
 
 ## Submit and track
 
-For `nextAction.type="submit"`, send the displayed action identity:
+For `nextAction.type="sign_transaction"`, sign `nextAction.transaction` through
+your wallet integration. The prepared owner and any required fee payer must
+sign the unchanged message. Send the complete transaction encoded as base64 to
+`POST /v1/operations/{operationId}/submit` with the displayed action identity
+and a persisted `Idempotency-Key`:
 
 ```json
 {
   "actionId": "opact_example",
-  "version": 1
+  "version": 1,
+  "signedTransaction": "<base64-signed-transaction>"
 }
 ```
 
-For `nextAction.type="sign_transaction"`, ask the owner and any required fee
-payer to sign `nextAction.transaction`, then include those exact signed bytes as
-`signedTransaction` in the same body. Send the body to
-`POST /v1/operations/{operationId}/submit` with its own persisted
-`Idempotency-Key`.
-
 Submit authorizes and durably queues the exact reviewed transaction, returning
 `202`. It never selects a withdrawal route or prepares another transaction.
-A worker handles configured signing, custody proposals and broadcast, including
-fast-signing wallets. Poll
-`GET /v1/operations/{operationId}`. If the next action is `approve_in_provider`,
-show its instructions and supplied handoff URL when present. Approval can
-outlive the request or browser session. `wait` means keep tracking the same
-operation.
+A worker broadcasts the signed transaction and tracks its result. Poll
+`GET /v1/operations/{operationId}`; `wait` means keep tracking that operation.
+
+If you already have a wallet connected in SDP, you may prepare with
+`source: { "walletId": "cwlt_example" }` instead. For its `submit` next action,
+send `actionId` and `version` without signed bytes. The worker requests signing
+through that wallet's configured provider and fee policy. For `sign_in_provider`,
+show the instructions, such as "Sign in Fireblocks", and supplied handoff URL.
+The worker observes signing and broadcasts without another submit call.
+
+A configured wallet's approval policy is part of its signing process. Earn has
+no separate approval endpoint or approval stage: `awaiting_signature` covers
+waiting for the wallet to sign, including any required provider-side approvals.
 
 If a response fails after its operation change was saved, the same key replays
 that response, including a server error. Read the known operation ID to recover;
 if preparation never returned an ID, find it in the source's operations feed.
 Do not create a new deposit or withdrawal to recover a missing response.
 
-`nextAction.type="refresh"` means SDP proved the old unsigned action expired or
-its proposal was refused without executable signed bytes. Show a refresh action
-to obtain new terms, then require a fresh review and submission. An uncertain
-provider dispatch or signed transaction remains `wait`; do not infer refresh
-permission from an error message or blockhash expiry.
+`nextAction.type="refresh"` applies only before submit acceptance, when the
+unsigned preparation can safely be replaced. Obtain new terms, then require a
+fresh review and submission. After submit acceptance, only track the outcome;
+`/refresh` and `/cancel` return `409 CONFLICT`. An uncertain provider dispatch
+or signed transaction remains `wait`.
 
 A `sign_transaction` action already exposed to its owner cannot be
 refreshed merely because SDP has no registered signature. The owner could have
@@ -133,13 +147,13 @@ signed and broadcast independently. Refresh returns `409 CONFLICT` with
 the original bytes for reconciliation. Unsigned custody actions and route-choice
 reviews do not have that independent-broadcast ambiguity.
 
-`queued`, `awaiting_signature`, `awaiting_approval`, `submitted` and `settling`
+`queued`, `awaiting_signature`, `submitted` and `settling`
 are nonterminal. Only `completed`, `failed` and `cancelled` end the operation.
 Completion follows verified delivery. A queue transaction, provider request ID
 or cancellation acknowledgment alone does not establish delivery.
 
-Recover after reload with `GET /v1/operations?walletId=...`, or specify
-`ownerAddress=...` for history scoped to that address. Without an explicit owner
+Recover after reload with `GET /v1/operations?ownerAddress=...`, or specify
+`walletId=...` for an existing connected wallet. Without an explicit owner
 address, the list returns visible registered-wallet operations only. Filters also support `kind`,
 `status`, `positionId`, `cursor` and `limit`. GET never starts execution.
 
@@ -158,6 +172,8 @@ Other quantities are `{ "kind": "shares", "value": "10" }`,
 `{ "kind": "token", "mint": "<token-mint>", "value": "10" }`, or
 `{ "kind": "intermediate", "mint": "<held-mint>", "value": "10" }`.
 The position supplies the strategy and owner; payout returns to that owner.
+Use the same wallet integration to sign its transaction. A withdrawal never
+requires an SDP wallet record or permits substituting a different owner.
 
 When `nextAction.type="select_option"`, choose an instant or delayed exit from
 `terms.options`. Send its `optionId` with the current action identity to
@@ -177,39 +193,46 @@ execution. Later refreshes retain that route; SDP does not silently switch
 between instant and delayed exits.
 
 Delayed withdrawals remain under the same operation while the provider settles.
-Keep polling; there is no separate claim endpoint. An advertised onchain
-cancellation requires another explicit review and submission.
+Keep polling; there is no separate claim endpoint, and `/cancel` is unavailable
+after `/submit` has been accepted.
 
 ## Refresh or cancel
 
 `POST /v1/operations/{operationId}/refresh` requires the current `actionId` and
 `version`. Include `optionId` only for an advertised `select_option` action.
-After earlier attempts are reconciled, refresh can prepare new terms for the
-same intent and selected route. Review the new action before submitting it.
-A refreshed blockhash changes the message and needs new signatures. Expiry,
-a timeout and missing RPC history alone never prove that the original
-transaction did not execute. Keep original signed bytes and keys.
+Before the first submit acceptance, refresh can prepare new terms for the same
+intent and selected route only when replacement is proven safe. Review the new
+action before submitting it.
+A refreshed blockhash changes the message and needs new signatures. Refresh
+never signs, broadcasts or revokes an earlier transaction. Expiry, a timeout
+and missing RPC history alone never prove that the original transaction did
+not execute. Keep original signed bytes and keys.
 
-`POST /v1/operations/{operationId}/cancel` with `{}` records cancellation intent.
-It requires `earn.manage`; preparation and execution require `earn.execute`,
-and reads require `earn.read`. Source ownership and current authority still
-apply. A cancellation actor can differ from the original initiating principal.
-Executing an onchain cancellation action requires both `earn.manage` and
-`earn.execute`.
+`operation.canCancel` is the authoritative state capability. Call
+`POST /v1/operations/{operationId}/cancel` with `{}` only when it is true.
+The caller still needs `earn.manage`; preparation and submission require
+`earn.execute`, and reads require `earn.read`. Source ownership and current
+authority still apply. A cancellation actor can differ from the original
+initiating principal.
 
-`cancelRequestedAt` is pending intent. The worker reconciles provider and chain
-races and can return an onchain cancellation action that needs explicit
-execution. A late exact signature after cancellation can be registered for
-observation; SDP does not start a new broadcast with it.
+After any submit acceptance, `canCancel=false` and both refresh and cancel are
+unavailable: track the outcome. Pending provider signing and queued withdrawals
+do not reopen preparation. An exposed owner transaction with an unknown
+outcome also cannot be refreshed or cancelled before submitting to SDP.
+Internal permission or expiry cleanup does not expose a public
+protocol-cancellation flow. Never infer cancellation from status or source kind.
 
-An owner may have sent an exposed transaction independently, so cancellation can remain
-pending until its outcome is known. Queue cancellation can leave an intermediate
-token rather than the original shares. Read `result.settlementOutcome` and
-`result.settledAmount`; null means the authoritative outcome or amount is not
-known yet.
+An owner may have independently broadcast an exposed transaction. SDP cannot
+revoke that signature or reverse a broadcast transaction. Read
+`result.settlementOutcome` and `result.settledAmount`; null means the
+authoritative outcome or amount is not known yet.
 
-Submit, including late signed registration, currently requires the action's
-original authenticated principal. If that credential was revoked before signed
-bytes were registered, a replacement key cannot register them. Keep the pending
-operation and original signed bytes for operator reconciliation; do not start a
-replacement deposit to clear the pending state.
+Submit requires the action's original authenticated principal. If that
+credential was revoked before signed bytes were registered, a replacement key
+cannot register them. Keep the pending operation and original signed bytes for
+operator reconciliation; do not start a replacement deposit to clear the
+pending state.
+
+After a definitive signing rejection or proven nonexecution, the operation is
+terminal `failed`. A retry starts a new deposit or withdrawal with a new
+idempotency key. Never start a replacement while the previous outcome is unknown.

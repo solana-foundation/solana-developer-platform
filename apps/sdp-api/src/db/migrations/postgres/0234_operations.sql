@@ -8,7 +8,7 @@ CREATE TABLE operations (
     environment TEXT NOT NULL CHECK (environment IN ('sandbox', 'production')),
     kind TEXT NOT NULL CHECK (kind IN ('earn.deposit', 'earn.withdraw')),
     status TEXT NOT NULL CHECK (status IN (
-        'prepared', 'queued', 'awaiting_signature', 'awaiting_approval', 'submitted',
+        'prepared', 'queued', 'awaiting_signature', 'submitted',
         'settling', 'completed', 'failed', 'cancelled'
     )),
     intent JSONB NOT NULL CHECK (jsonb_typeof(intent) = 'object' AND intent ->> 'kind' = kind),

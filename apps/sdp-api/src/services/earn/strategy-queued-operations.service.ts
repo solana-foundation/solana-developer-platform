@@ -12,7 +12,6 @@ import { earnWithdrawSlippageFloor } from "@sdp/types/provider-access";
 import { getDb } from "@/db/client";
 import {
   createPostgresEarnVaultWithdrawalRequestsRepository,
-  type EarnVaultWithdrawalRequestRow,
   type EarnWalletWithdrawalRequestTransactionRow,
 } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import { badRequest, conflict, notFound } from "@/lib/errors";
@@ -23,7 +22,6 @@ import { strategyOutputFloor } from "./strategy-terms";
 import { createVaultDeadline } from "./vault-deadline";
 import {
   type AsyncWithdrawalTermsInput,
-  buildWalletQueuedWithdrawalCancel,
   buildWalletQueuedWithdrawalRequest,
   type QueuedWithdrawalActor,
   type QueuedWithdrawalPosition,
@@ -291,27 +289,6 @@ export async function prepareQueuedStrategyWithdrawal(
 ): Promise<PreparedQueuedStrategyTransaction> {
   requirePreparationSource(input);
   return prepared(await buildWalletQueuedWithdrawalRequest(env, input));
-}
-
-/** Build the provider's recovery action, preserving its actual economic outcome. */
-export async function prepareQueuedStrategyCancellation(
-  env: Env,
-  input: QueuedStrategyPreparation & {
-    request: EarnVaultWithdrawalRequestRow;
-    requestAddress: string;
-  }
-): Promise<PreparedQueuedStrategyTransaction> {
-  requirePreparationSource(input);
-  if (
-    input.request.position_id !== input.position.id ||
-    input.request.custody_wallet_id !== (input.custodyWalletId ?? null) ||
-    input.request.owner_address !== input.position.ownerAddress ||
-    input.request.project_id !== input.actor.projectId ||
-    input.request.organization_id !== input.actor.organizationId
-  ) {
-    throw notFound("Earn withdrawal request");
-  }
-  return prepared(await buildWalletQueuedWithdrawalCancel(env, input));
 }
 
 /** Recover exactly the stored build under the operation's authorized source. */

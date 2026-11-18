@@ -131,19 +131,44 @@ and `POST /v1/earn/withdraw`. Catalogue items are **strategies**, identified by
 `strategyId`; a strategy may represent a vault, a token or an RWA product.
 Provider interfaces keep protocol-specific names such as `EarnVaultProvider`.
 
-Deposits select a strategy and a custody wallet or owner address; withdrawals
-select a position. Preparation records an operation and returns unsigned bytes
-or a next action without signing or broadcasting. Submit through
-`POST /v1/operations/{operationId}/submit` with the reviewed action ID,
-version and an `Idempotency-Key`; the response is `202`, and the worker handles
-configured signing, provider approval and broadcast. Poll the same operation to recover
-after reload or a lost response.
+API users normally have an SDP API key and their own Solana wallet, without any
+wallet registered in SDP. Lead examples with `source: { ownerAddress }`.
+Preparation returns unsigned transaction bytes; the caller signs through any
+compatible wallet integration and submits base64 `signedTransaction` with the
+reviewed action ID/version and an `Idempotency-Key`. Every required signature
+must match the prepared owner, fee payer and unchanged message. Submit returns
+`202`; the worker broadcasts those exact bytes. Withdrawals derive the same
+owner from the position ID, without requiring a custody-wallet record.
+
+An existing connected wallet's `source: { walletId }` is an optional convenience.
+It uses the same preparation and `/v1/operations/{operationId}/submit` routes,
+with signing delegated to that wallet's configured provider instead of caller
+signed bytes. Poll the same operation to recover after reload or a lost response.
+
+Use `awaiting_signature` for pending signing and `sign_in_provider` for provider
+instructions such as "Sign in Fireblocks". Custody adapters retain their own
+proposal and approval policy internally. Earn exposes no separate approval
+endpoint or status, and provider-side signing needs no second submit call.
 
 Submit authorizes only that exact reviewed transaction. Withdrawal selection
 uses `nextAction: select_option` and `terms.options`; refresh takes the current
 `actionId`, `version` and advertised `optionId` to prepare a new review.
 Later refreshes omit `optionId` and retain the selected route. If it is
 unavailable, fail instead of choosing another route.
+Refresh is preparation-only and requires safe replacement before any submit
+acceptance. Once accepted, refresh and cancellation return `409 CONFLICT`;
+track the original outcome. Definitive signing rejection or proven nonexecution
+is terminal `failed`. A retry then starts a new deposit/withdrawal request with
+a new idempotency key. Timeout, provider uncertainty and absent RPC history
+never justify another operation or post-submit refresh.
+
+`canCancel` is the authoritative state capability, not a route permission.
+It is false after any accepted submit in the operation's history and while an
+exposed owner transaction outcome is unknown. Consumers
+must not infer cancellation from status or wallet kind. Public `/cancel`
+abandons only safe preparation. Provider signing cleanup for permission loss
+or expiry remains private worker safety; there is no public queued-withdrawal
+cancellation after submit.
 
 Compose funding swaps and deposits in one atomic transaction, sized to the
 swap's guaranteed minimum output. Retry oversized compositions with a compact
@@ -277,8 +302,9 @@ Money moves through provider-specific execution packages: `@sdp/kamino`,
 `@sdp/veda`, `@sdp/jupiter-lend`, `@sdp/ondo`, `@sdp/hastra`, and pre-launch
 `@sdp/wisdomtree`. The core API prepares one operation for either owner model.
 For custody, the worker uses the organization's configured signer and tracks
-any provider approval before submission. For an owner address, the caller signs
-the exact prepared transaction and submit queues those bytes for the worker.
+its provider's signing process before broadcast. For an owner address, the
+caller signs the exact prepared transaction and submit queues those bytes for
+the worker.
 Both use the same builders, which take the owner as a parameter and never sign.
 Those packages depend on this one, never the reverse: the hourly catalogue cron
 must not load a chain SDK it never calls.
@@ -406,8 +432,8 @@ mint, but cannot receive devnet funds. `isClusterFundableInEnvironment`
 (src/support.ts) owns that comparison. `mapToEarnStrategy` calls it to emit
 the per-request `fundable` field, which clients consume. The core deposit
 admission path calls it through `assertStrategyDepositable`, both when
-preparing and before starting custody approval. Never re-derive the comparison
-in a client or provider adapter.
+preparing and before requesting a custody signature. Never re-derive the
+comparison in a client or provider adapter.
 
 Note `fundable` answers the cluster question ALONE. `true` does not promise a
 deposit will succeed: the matching execution capability, money-in environment,

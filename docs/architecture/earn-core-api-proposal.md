@@ -19,8 +19,8 @@ SDP supplies discovery, wallet integration, execution tracking and recovery.
 | `GET /v1/operations`                        | List scoped activity and outstanding actions.                       |
 | `GET /v1/operations/{operationId}`          | Read terms, next action and settlement observations.                |
 | `POST /v1/operations/{operationId}/submit`  | Authorize and queue the exact reviewed transaction.                 |
-| `POST /v1/operations/{operationId}/refresh` | Select an advertised route or safely prepare fresh terms.           |
-| `POST /v1/operations/{operationId}/cancel`  | Request cancellation and track its actual outcome.                  |
+| `POST /v1/operations/{operationId}/refresh` | Select a route or safely replace terms before submit acceptance.    |
+| `POST /v1/operations/{operationId}/cancel`  | Abandon preparation only while `canCancel` permits it.              |
 
 Six independent WisdomTree onboarding operations remain for customer
 verification, documents, corrections and wallet registration. They are
@@ -34,12 +34,16 @@ A **strategy** is a catalogue item, whether a vault, lending market or RWA.
 `strategyId` identifies the SDP record; `providerReference` identifies the
 provider instrument. A **position** is a wallet's holding. An **operation** is
 one durable deposit or withdrawal intent; an **attempt** is one immutable
-transaction or approval action within that operation.
+signing and submission attempt within that operation.
 
-Sources use exactly one of `walletId` or `ownerAddress`. Signing follows the
-wallet's configured policy or the owner's signature. Neither identity creates
-a separate product, API family or synchronous execution path. Provider adapters
-can retain exact protocol terms such as vault, reserve and redemption order.
+API clients normally supply an SDP API key and `source: { ownerAddress }`, using
+any compatible Solana wallet. Preparation returns an unsigned transaction; the
+caller signs its unchanged message with the prepared owner and submits base64
+`signedTransaction`. No SDP wallet record or provider connection is required.
+An existing connected wallet's `source: { walletId }` is optional and uses its
+configured signing policy. Neither source creates another API family or
+synchronous execution path. Provider adapters can retain exact protocol terms
+such as vault, reserve and redemption order.
 
 New database references use `strategy_id` and `strategy_reference`. Canonical
 wallet transaction tables store new operation builds with tenant-enforced RLS.
@@ -92,20 +96,40 @@ the dashboard and demo to the core contract.
 1. Discover a strategy and read positions using the selected source.
 2. Prepare a deposit by strategy, source and token amount, or a withdrawal by
    position and quantity. Preparation records intent and returns reviewable
-   terms, an `actionId`, a version and `nextAction`. It never signs or broadcasts.
-3. Review the estimate, enforceable minimum and known fees. Address owners sign
-   the exact returned transaction; registered wallets follow their custody
-   policy. Submit accepts the exact reviewed transaction and returns `202` after
-   durable acceptance. It never prepares another action.
-4. The worker signs, opens approval or submits through the existing signing and
-   sponsorship waists. Poll the same operation through provider approval,
-   submission and settlement. An on-chain cancellation requires another explicit
-   review when advertised; delayed settlement needs no separate claim endpoint.
+   terms, an `actionId`, a version and `nextAction`. For `ownerAddress`, this
+   includes the unsigned transaction. Preparation never signs or broadcasts.
+3. Review the estimate, enforceable minimum and known fees. The caller signs the
+   exact returned transaction with the prepared owner and submits its signed
+   bytes. Submit returns `202` after durable acceptance and never prepares
+   another action. An optional connected wallet instead authorizes the worker
+   to request signing through its configured provider.
+4. The worker broadcasts and tracks the same transaction. Poll the operation
+   through submission and settlement. Delayed settlement needs no separate claim
+   endpoint. Once submit is accepted, refresh and cancellation are unavailable.
+
+Configured-wallet signing uses `awaiting_signature`. When a person must act in
+the wallet provider, `nextAction: sign_in_provider` supplies instructions such
+as "Sign in Fireblocks". Provider approval policies are part of signing; Earn
+exposes no separate approval endpoint or status. The worker observes signing
+and proceeds without another submit call.
 
 Withdrawal route choice advertises `nextAction: select_option` and
 `terms.options`. Refresh takes the current `actionId`, `version` and selected
 `optionId`, then returns a new transaction review. Later refreshes retain the
 selected route and fail if it is unavailable. Submit accepts no route option.
+Refresh only prepares unsigned bytes and terms before the first submit
+acceptance. It never signs, broadcasts or revokes an earlier transaction.
+After acceptance, refresh and cancel return `409 CONFLICT`; only track the
+operation's outcome. A definitive signing rejection or proven nonexecution is
+terminal `failed`. Retrying then creates a new deposit or withdrawal with a new
+idempotency key. An unknown outcome never authorizes replacement.
+
+`canCancel` is the server's state capability, independent of route permission.
+It is false after any accepted submit and while an
+exposed owner transaction has an unknown outcome. Call cancel only when it is
+true and the caller has `earn.manage`. Pending provider signing and queued
+withdrawals have no public cancellation flow after submit. Internal permission
+or expiry cleanup remains private worker safety.
 
 Swap-funded deposits combine the swap and deposit instructions in one unsigned
 transaction. The deposit uses the swap's guaranteed minimum output. A compact
@@ -116,7 +140,7 @@ deposit continuation.
 
 Every mutation uses a persisted `Idempotency-Key`. An uncertain HTTP response
 retries the same request and exact signed bytes. Queue acceptance, share escrow,
-provider approval and chain inclusion do not establish economic payout.
+signing and chain inclusion do not establish economic payout.
 
 ## Replacement boundary
 
@@ -134,7 +158,7 @@ not weaken the async lifecycle for new actions.
 - Authorization checks named resources before idempotency. Deposit admission
   runs after replay and again at execution. Exits retain their weaker availability
   gate so disabling deposits cannot strand held funds.
-- Actions and signed bytes are immutable. An old version cannot approve a
+- Actions and signed bytes are immutable. An old version cannot authorize a
   replacement. Every worker restores the recorded principal and checks current
   permission, wallet binding and credential status.
 - A durable provider binding precedes its single create. Workers use fenced
@@ -143,12 +167,15 @@ not weaken the async lifecycle for new actions.
 - Signed or ambiguously dispatched attempts remain unresolved until proven.
   Blockhash expiry and missing RPC history alone do not prove nonexecution.
   An exposed owner transaction may have been broadcast independently.
-- Refresh always names the current action ID/version. It selects an advertised
-  option or creates a fresh review only after definitive refusal or safe expiry.
-  New terms require explicit submission. `wait` preserves an unresolved action.
-- Cancellation is durable intent. Acknowledgment, on-chain queue closure and
-  verified payout remain separate observations. Observation-only attempts can
-  never regain broadcast authority.
+- Refresh always names the current action ID/version and is limited to safe
+  preparation before any submit acceptance. It selects an advertised option or
+  replaces unsigned terms only when safe. New terms require explicit submission.
+  Post-acceptance refusal or proven nonexecution is terminal failure; unknown
+  outcomes retain `wait` and the original attempt.
+- Cancellation is limited to safe preparation before any submit acceptance.
+  Its check serializes against submission and survives later refreshes.
+  Internal cleanup never gives a caller post-submission cancellation authority.
+  Observation-only attempts can never regain broadcast authority.
 - Deposit acceptance atomically commits signed bytes, execution acceptance and
   its critical audit intent. Exit auditing retains its best-effort posture.
 - The movement ledger and provider requests remain the authority for settlement.

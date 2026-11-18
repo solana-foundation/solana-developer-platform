@@ -6,7 +6,7 @@ import { WELL_KNOWN_TOKENS } from "./well-known-tokens";
  *
  * Organizations and wallet integrators browse strategies across DeFi and
  * tokenized RWAs, then prepare provider-built transactions to enter or exit
- * a strategy. Operations track signing, approval and settlement. Durable
+ * a strategy. Operations track signing, submission and settlement. Durable
  * movements and positions live in SDP's ledger; balances are read live.
  *
  * Registries follow ADR 0001 (asset profiles): closed unions defined in code,

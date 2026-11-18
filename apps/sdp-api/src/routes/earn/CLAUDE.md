@@ -22,8 +22,7 @@ HTTP wrappers. Only current operation history and async recovery belong in opera
 Protocol-specific builders and ledger repositories remain shared domain code.
 
 Every route declares an action. Reads use `earn.read`; preparation and execution
-use `earn.execute`; cancellation intent uses `earn.manage`. A separately reviewed
-on-chain cancellation action also requires `earn.execute`.
+use `earn.execute`; safe preparation cancellation uses `earn.manage`.
 
 ### Public OpenAPI promotion
 
@@ -44,9 +43,17 @@ files must not be edited manually. The internal consumer guide lives at
 ## Preparation and authority
 
 `core/prepare.ts` resolves source ownership and the position's authoritative
-strategy before idempotency. Sources contain exactly one `walletId` or
-`ownerAddress`. Never infer source authority from a provider reference, replace
-it during withdrawal, or accept a caller-selected payout destination.
+strategy before idempotency. API clients normally have an SDP API key and use
+`source: { ownerAddress }` with any compatible Solana wallet. This path requires
+no SDP wallet record or provider connection. Return the unsigned transaction,
+then accept its base64 `signedTransaction` through `/submit`. Verify every
+required signature against the prepared owner and unchanged message.
+
+`source: { walletId }` is an optional convenience for an existing connected
+wallet; it delegates signing to that wallet's configured provider. Sources
+contain exactly one identity. Never infer source authority from a provider
+reference, replace it during withdrawal, or accept a caller-selected payout
+destination.
 
 Follow `validate → authorize → idempotent`. Every mutation requires a key.
 Authorization checks resource access, not mutable execution state. Deposit
@@ -60,8 +67,8 @@ custody proposal or broadcasting. Token quantities carry a mint and decimal
 string; withdrawal quantities explicitly name all, shares, token or intermediate.
 Keep live balance/precision/minimum checks in domain services, not only the UI.
 
-An attempt remains immutable after refresh. Preserve signed bytes and identity
-until a definitive outcome is known.
+Each prepared version retains its identity. An accepted attempt and its signed
+bytes stay immutable until a definitive outcome is known; it cannot be refreshed.
 
 Swap-funded deposits return one atomic swap-and-deposit transaction. Retry an
 oversized composition once with a compact route; refuse if both legs still
@@ -72,6 +79,9 @@ cannot fit. Never return a standalone funding swap or a deposit continuation.
 `version`, plus `optionId` only for that selection. It prepares a new review
 without authorizing execution. Later refreshes retain the selected route and
 fail if it is unavailable.
+Refresh is preparation-only: reject it after any accepted submit in the
+operation's history. Pre-submit replacement still requires proof it is safe;
+an exposed owner transaction with unknown outcome cannot be refreshed.
 
 ## Execution and async recovery
 
@@ -82,8 +92,13 @@ reviewed transaction using `actionId`, `version` and required signed bytes. It
 never selects a route or prepares another transaction. `nextAction: submit`
 asks the caller to authorize the configured wallet's worker signing path.
 The worker handles configured signing, provider proposals and broadcast,
-including fast signers. No status read performs money work. A provider URL is approval
-instruction, not proof of approval or settlement.
+including fast signers. No status read performs money work. A provider URL is a
+signing instruction, not proof of a signature or settlement.
+
+Use `awaiting_signature` while configured-wallet signing is pending and
+`sign_in_provider` when the caller must act there. A provider's own proposal
+and approval policy remain custody internals. Do not add an Earn approval
+endpoint, status or second submit call to acknowledge provider-side signing.
 
 Use existing signing and sponsorship waists, `createOrgSignerForCustodyWallet`
 and `createSponsorshipFeePayment`, with the movement from `MOVEMENTS`. Every
@@ -104,14 +119,24 @@ a sendable deposit. Exit auditing retains its best-effort posture.
 Retry an uncertain submission with its exact signed body and original identity.
 Blockhash expiry, a timeout or missing RPC history alone does not prove
 nonexecution. Exposed owner transactions may have been broadcast independently.
-Refresh only after definitive refusal, safe expiry or authoritative resolution;
-new terms require another review. Otherwise retain `wait` and the same attempt.
+After submit acceptance, only track the outcome. Refresh and cancellation must
+return `409 CONFLICT`. A definite signing rejection or proven nonexecution is
+terminal `failed`, with no refresh action. Retrying after that known failure
+uses a new deposit/withdrawal request and idempotency key. Unknown outcomes
+retain `wait` and the same attempt. Refresh never signs, broadcasts or revokes
+prior signed bytes.
 
-Cancellation records sticky intent. Observation-only attempts never regain
-broadcast authority. Queue acceptance, escrow, cancellation acknowledgment,
-returned shares, intermediate tokens and delivered assets are separate facts.
-Only verified chain/provider observations establish payout. Never copy expected
-amounts into settled fields.
+Expose `canCancel` from durable operation state and history. It is a state
+capability, not a permission grant. The public route checks `earn.manage` and
+permits cancellation only before any submit has been accepted, with no exposed
+owner transaction outcome unknown. Serialize that barrier against submission
+and retain it across action versions. Pending provider signing and queued
+withdrawals have no public refresh or cancellation path after submit.
+
+Permission/expiry cleanup remains an internal worker safety mechanism.
+Observation-only attempts never regain broadcast authority. Only verified
+chain/provider observations establish payout; never copy expected amounts into
+settled fields.
 
 ## Replacement boundary
 
@@ -161,7 +186,7 @@ deployment to remove; HTTP compatibility routes are not required.
 
 Run core routes, operations repository/recovery/worker and affected provider
 service tests. Keep explicit regression coverage for exact-byte retries,
-revocation, ambiguous outcomes, queued cancellation, tenant isolation, minimum
+revocation, ambiguous outcomes, cancellation/submission races, tenant isolation, minimum
 slot/finality, unknown amounts and route removal. Also run action inventories,
 production exit policy, typecheck, Biome and generated-artifact drift checks.
 Provider sandbox and signed-in browser outcomes require separate live evidence.

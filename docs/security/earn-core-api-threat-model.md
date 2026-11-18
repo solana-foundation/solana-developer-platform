@@ -21,7 +21,7 @@ deposit eligibility nor authority over a wallet.
 | HTTP to worker               | Submit persists authorization for the exact reviewed transaction and owner-signed bytes. It does not prepare, sign, propose or broadcast. The worker rechecks live authority. |
 | Worker to custody            | Existing custody and sponsorship waists admit the named movement. A durable account binding precedes the single provider create.                                              |
 | Signature to ledger          | Every required signature and the complete prepared message are verified. Signed intent commits before broadcast.                                                              |
-| Chain to provider settlement | Approval, chain inclusion and economic delivery remain separate observations. Requested amounts and queue escrow are not payout evidence.                                     |
+| Chain to provider settlement | Signing, chain inclusion and economic delivery remain separate observations. Requested amounts and queue escrow are not payout evidence.                                      |
 
 ## Failure and abuse cases
 
@@ -31,10 +31,15 @@ deposit eligibility nor authority over a wallet.
 - A changed wallet, fee payer, transaction message or signature cannot replace
   the reviewed action. Prepared sources are checked again against the stored
   operation source at the execution adapter.
+- The API-key and `ownerAddress` path needs no SDP wallet registration or
+  provider connection. An address alone grants no signing authority: every
+  required signature must verify over the unchanged prepared message. An
+  existing connected `walletId` is optional and retains its live wallet grants.
 - A stale action/version cannot submit or select a different withdrawal route.
-  Refresh selects only an advertised `select_option`, returns a new review and
-  preserves old attempts. Later refreshes retain the selected route; an
-  unavailable route fails instead of silently choosing another.
+  Refresh is preparation-only before any submit acceptance. It selects an
+  advertised route or safely replaces unsigned terms, returning a new review.
+  It retains the selected route; an unavailable route fails instead of silently
+  choosing another.
 - Swap-funded deposits contain both swap and deposit instructions in one
   transaction, sized to guaranteed output and simulated together. Oversized
   compositions fail before a build is persisted. No standalone funding swap
@@ -48,12 +53,17 @@ deposit eligibility nor authority over a wallet.
 - Signed bytes remain recoverable after an uncertain send. Recovery retries
   those exact bytes, with their original identity. Expiry and missing RPC
   history do not prove non-execution.
-- Cancellation records intent rather than pretending a payout or reversal
-  occurred. Observation-only restriction is durable and irreversible for an
-  attempt. Late signatures cannot authorize a fresh send after cancellation.
-- A definite pre-submission custody refusal can permit refresh. An uncertain
-  provider response cannot. Provider cancellation is observed before resolving
-  the original attempt.
+- Public cancellation requires `canCancel` and no accepted submit anywhere in
+  the operation's history. Its state check serializes against submission;
+  refresh cannot reset it. An exposed owner message with an unknown outcome
+  cannot be cancelled. Route authorization remains independently required.
+  Internal cleanup for permission loss or expiry is private worker safety, not
+  caller cancellation. Observation-only restriction remains irreversible.
+- Refresh and cancel reject after any submit acceptance, including after a
+  custody signing refusal. Definitive rejection or proven nonexecution makes
+  the operation terminal `failed`; only then can a new request/key create a
+  replacement. An uncertain provider response, timeout or missing RPC history
+  never permits one. Internal cleanup is observed before resolving an attempt.
 - A discovered holding is claimed only with verified signed intent, atomically
   with its first movement. It receives no synthetic deposit, acquisition
   history, cost basis or earnings.
@@ -64,10 +74,15 @@ deposit eligibility nor authority over a wallet.
 
 ## Residual risks and release gates
 
-Custody provider approval, provider liquidity, issuer redemption, RPC history,
+Custody signing policy, provider liquidity, issuer redemption, RPC history,
 SDK correctness and on-chain programs remain independent trust dependencies.
-An owner may independently broadcast signed bytes; SDP cannot guarantee that
-cancellation revokes them. A missing final outcome may remain unresolved.
+An owner may independently broadcast signed bytes; SDP cannot revoke them.
+Public cancellation is unavailable while that outcome is unknown. A missing
+final outcome may remain unresolved.
+
+`awaiting_signature` and `sign_in_provider` describe configured-wallet signing.
+The custody adapter can enforce provider approval policies and retain proposal
+state internally; those controls are not a separate Earn approval feature.
 
 Operations retain the original action principal. Rotating or revoking that
 credential can require an authorized recovery path; a different key does not

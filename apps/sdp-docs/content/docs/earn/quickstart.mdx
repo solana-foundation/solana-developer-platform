@@ -5,7 +5,8 @@ description: Discover a strategy, prepare an action and track asynchronous execu
 ---
 
 The replacement Earn contract is internal pending named security sign-off.
-Use an authenticated credential scoped to your project and environment.
+Use an SDP API key scoped to your project and environment, plus any compatible
+Solana wallet. You do not need to register or connect that wallet in SDP.
 Reads require `earn.read`; deposit and withdrawal actions require `earn.execute`.
 
 ## Discover a strategy
@@ -21,26 +22,53 @@ Persist an `Idempotency-Key` and send `POST /v1/earn/deposit`:
 ```json
 {
   "strategyId": "strategy_example",
-  "source": { "walletId": "cwlt_example" },
+  "source": { "ownerAddress": "<owner-public-key>" },
   "amount": { "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU", "value": "100" },
   "slippageBps": 50
 }
 ```
 
-Use `ownerAddress` instead of `walletId` when the owner signs through your app.
-Review the returned operation's terms. Preparation returns `202` and does not
-sign or broadcast.
+Set `ownerAddress` to the public key of the wallet that will sign and own the
+position. Review the returned operation's terms. Preparation returns `202`
+with `nextAction.type="sign_transaction"` and an unsigned transaction; it does
+not sign or broadcast.
 
 ## Submit and track
 
-Call `POST /v1/operations/{operationId}/submit` with the returned `actionId`
-and `version`. Include `signedTransaction` when the advertised next action asks
-the owner to sign. Persist a separate idempotency key for submission. This queues
-the exact reviewed transaction and returns `202`.
+Have the prepared owner and any required fee payer sign
+`nextAction.transaction` through your wallet integration. Keep its message
+unchanged. Call `POST /v1/operations/{operationId}/submit` with the signed
+transaction encoded as base64:
 
-Poll `GET /v1/operations/{operationId}`. Show provider approval instructions when
-requested and continue tracking while the next action is `wait`. Read holdings
-with `GET /v1/earn/positions`.
+```json
+{
+  "actionId": "opact_example",
+  "version": 1,
+  "signedTransaction": "<base64-signed-transaction>"
+}
+```
+
+Persist a separate idempotency key for submission. SDP returns `202`, then
+broadcasts and tracks that exact transaction asynchronously.
+
+Poll `GET /v1/operations/{operationId}`. Continue tracking while the next action
+is `wait`. Read holdings with
+`GET /v1/earn/positions?ownerAddress=<owner-public-key>`.
+
+After submit acceptance, refresh and cancellation are unavailable. A definitive
+failure requires a new preparation with a new idempotency key. Keep tracking
+uncertain outcomes rather than starting another deposit.
 
 To exit, prepare `POST /v1/earn/withdraw` with the returned `positionId` and
 `{ "amount": { "kind": "all" } }`, then follow the same operation flow.
+
+## Optional connected wallet
+
+If the wallet is already connected in SDP, you may instead use
+`source: { "walletId": "cwlt_example" }`. Submit the reviewed `actionId` and
+`version` without signed bytes; the worker requests the signature through the
+wallet's configured provider. `sign_in_provider` supplies any required signing
+instructions. This convenience uses the same endpoints and operation lifecycle.
+
+See [integration details](/docs/earn/integration-details) for when to use each
+source, submission, refresh and cancellation.

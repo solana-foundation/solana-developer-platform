@@ -1,7 +1,7 @@
 ---
 module: earn
 title: Withdraw funds
-description: Prepare position exits and track delivery and cancellation.
+description: Prepare position exits and track verified delivery.
 ---
 
 Prepare an exit with `POST /v1/earn/withdraw` using a position ID:
@@ -13,7 +13,10 @@ Prepare an exit with `POST /v1/earn/withdraw` using a position ID:
 }
 ```
 
-The position determines its strategy and owner. Other quantity kinds are
+The position determines its strategy and owner. For a wallet you sign through
+your own integration, obtain its position ID with
+`GET /v1/earn/positions?ownerAddress=<owner-public-key>`. No SDP wallet record is
+required. Other quantity kinds are
 `shares`, `token` and held `intermediate`; each quantity carries its own units.
 Payout returns to that owner.
 
@@ -23,19 +26,24 @@ For `nextAction.type="select_option"`, choose an advertised exit from
 `terms.options`. Call `POST /v1/operations/{operationId}/refresh` with its
 `optionId`, the current `actionId` and `version`, then review the newly prepared
 transaction. Selection does not authorize execution. Later refreshes retain the
-selected route instead of switching between instant and delayed exits.
+selected route instead of switching between instant and delayed exits. Refresh
+is available only before submit acceptance.
 
-Sign when requested and call `POST /v1/operations/{operationId}/submit` with the
-new action identity and any required signed bytes. The worker handles configured
-signing, provider approvals and broadcast asynchronously.
+Sign the returned transaction with the position's owner and any required fee
+payer through your wallet integration. Call
+`POST /v1/operations/{operationId}/submit` with the new action ID/version and
+base64 `signedTransaction`. An existing connected-wallet position may instead
+request provider signing. The same worker tracks broadcast and settlement.
 
-## Track delivery or cancellation
+## Track delivery
 
 Poll the same operation through request and settlement. A provider request ID
 or escrowed shares is not payout evidence. There is no separate claim endpoint.
 
-Request cancellation through `POST /v1/operations/{operationId}/cancel` with
-`earn.manage`. Cancellation records intent; a chain or provider race can keep
-it pending. Executing an onchain cancellation also requires `earn.execute`.
-The result distinguishes delivered assets, returned shares and held
-intermediate tokens. Null settled amounts remain unknown.
+Only when `operation.canCancel` is true can
+`POST /v1/operations/{operationId}/cancel` with `earn.manage` abandon preparation.
+After any submit acceptance, cancellation is unavailable, including for queued
+withdrawals and pending provider signing. Refresh is also unavailable. Keep
+tracking the operation. A definitive failure is terminal; only then may you
+prepare another withdrawal with a new idempotency key. Null settled amounts
+remain unknown.

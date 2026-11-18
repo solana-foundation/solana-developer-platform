@@ -30,7 +30,7 @@ export function registerOperationsPaths(registry: OpenAPIRegistry) {
     operationId: "listOperations",
     summary: "List operations",
     description:
-      "Lists operation history in the exact authenticated project and environment. The default feed contains visible project custody wallets. Wallet history requires an explicit ownerAddress; choose ownerAddress or walletId. Filters apply before cursor pagination. Requires earn.read for the initially supported Earn operation kinds. Reading never starts execution.",
+      "Lists operation history in the exact authenticated project and environment. Pass ownerAddress to list your wallet's operations; no SDP wallet registration is required. Use walletId instead for an existing connected wallet. With neither filter, the feed contains visible connected-wallet operations. Filters apply before cursor pagination. Requires earn.read for the initially supported Earn operation kinds. Reading never starts execution.",
     request: { headers: projectScopeHeaders, query: operationsListQuerySchema },
     responses: {
       200: {
@@ -47,7 +47,7 @@ export function registerOperationsPaths(registry: OpenAPIRegistry) {
     operationId: "getOperation",
     summary: "Get an operation",
     description:
-      "Returns current terms, the exact actionId/version, nextAction and authoritative settlement projection. Poll this route after execution or reload. nextAction refresh requests a fresh review only after SDP proves the prior action cannot execute; wait retains the same unresolved attempt. queued, awaiting_approval, submitted and settling are nonterminal. completed means verified delivery; cancelled means a verified cancellation outcome. cancelRequestedAt alone is pending intent. result fields stay null until their authoritative source is known. Requires earn.read and source visibility.",
+      "Returns current terms, the exact actionId/version, nextAction and authoritative settlement projection. Poll this route after submission or reload. nextAction sign_transaction asks your wallet to sign the supplied transaction before calling submit. sign_in_provider only applies when an explicitly selected connected wallet requires signing in its provider; follow its instructions and keep polling without submitting again. nextAction refresh rebuilds an unsigned preparation only before submission is accepted; wait retains the same unresolved attempt. queued, awaiting_signature, submitted and settling are nonterminal. completed means verified delivery; cancelled means a verified cancellation outcome. canCancel states whether this preparation can still be cancelled; earn.manage is also required. cancelRequestedAt alone is pending intent. result fields stay null until their authoritative source is known. Requires earn.read and source visibility.",
     request: { headers: projectScopeHeaders, params: operationIdParamsSchema },
     responses: {
       200: { description: "Current operation", content: jsonContent(response) },
@@ -57,18 +57,21 @@ export function registerOperationsPaths(registry: OpenAPIRegistry) {
   for (const action of ["submit", "refresh", "cancel"] as const) {
     const descriptions = {
       submit:
-        "Submits the exact reviewed transaction for asynchronous processing. Pass actionId and version. Route selection and transaction preparation never happen here. Wallets also supply signedTransaction, verified against the stored message and required signers. The request durably records authorization and returns 202; a worker performs every signature, custody proposal and broadcast, including fast signers. Stale actions return 409. A late exact signature after cancellation is retained for observation and never authorizes a new broadcast. Requires earn.execute and the current action principal.",
+        "Submits the exact reviewed transaction for asynchronous processing. Pass actionId and version. Route selection and transaction preparation never happen here. For source.ownerAddress, supply signedTransaction as base64 after signing the prepared transaction in your own wallet; no SDP wallet or provider connection is needed. SDP verifies the exact stored message and required signatures. For source.walletId, omit signedTransaction; the worker requests signing through that connected wallet's configured provider. The request durably records authorization and returns 202. A worker broadcasts and tracks the transaction asynchronously. Provider signing may return sign_in_provider instructions; it never requires a second submit. Stale actions return 409. Requires earn.execute and the current action principal.",
       refresh:
-        "Prepares a fresh reviewed action. Pass the current actionId and version. For nextAction select_option, also pass an optionId advertised in terms.options; this only prepares the selected transaction and never queues submission. Later refreshes preserve that selected route and fail if it is unavailable. Other replacements require proof the prior attempt cannot execute or its authoritative outcome is resolved. nextAction refresh advertises a proven refusal or expiry eligible for this action; unresolved attempts remain wait. An exposed owner sign_transaction action without registered signed bytes returns 409 CONFLICT with details.reason wallet_transaction_outcome_unknown because the owner may have independently signed and broadcast it. Old action IDs and signatures cannot approve the replacement. Signed or ambiguously dispatched attempts must be reconciled first; blockhash expiry or missing RPC history alone does not prove nonexecution. New terms require explicit submit. Requires earn.execute and fresh source admission.",
+        "Rebuilds an unsigned transaction and its terms before submission is accepted. It never signs, broadcasts or cancels a transaction. Pass the current actionId and version. For nextAction select_option, also pass an optionId advertised in terms.options; the selected route remains fixed on later refreshes. Review the new action/version and sign it before submit. After any POST /v1/operations/{operationId}/submit acceptance, new refresh requests return 409 CONFLICT with details.reason operation_already_submitted, including definitive failure; track that operation to its outcome, and start a new deposit or withdrawal only after a known failure. An exposed owner transaction without a known outcome returns 409 with details.reason wallet_transaction_outcome_unknown because SDP cannot invalidate bytes held by the caller. Timeout, blockhash expiry and missing RPC history alone never authorize replacement. An exact Idempotency-Key replay returns its original response without rebuilding; GET returns the current operation state. Requires earn.execute and fresh source admission.",
       cancel:
-        "Durably requests cancellation and returns the current operation. An undispatched server-controlled preparation can cancel locally. An unsigned transaction already exposed to an owner cannot prove nonexecution, so cancellation stays pending. A worker requests account-bound provider cleanup or exposes a separately authorized onchain cancellation action. Cancellation acknowledgment, queue closure and payout are separate observations. Existing provider obligations and intermediate tokens remain visible until their outcome is verified. Requires earn.manage and current source authority.",
+        "Cancels a preparation only before any submission has been accepted. After POST /v1/operations/{operationId}/submit is accepted, new cancellation requests return 409 CONFLICT with details.reason operation_already_submitted, including while queued or waiting for a provider signature. It never cancels an onchain transaction, revokes a signature or cancels a previously submitted queued withdrawal. An owner-address transaction already exposed for signing returns 409 with details.reason wallet_transaction_outcome_unknown because SDP cannot invalidate bytes held by the caller. Closing your own wallet signing prompt needs no API cancellation. A successful cancellation marks only an undispatched preparation cancelled. Requires earn.manage and current source authority.",
     };
     registry.registerPath({
       ...common,
       method: "post",
       path: `/v1/operations/{operationId}/${action}`,
       operationId: `${action}Operation`,
-      summary: `${action[0]?.toUpperCase()}${action.slice(1)} an operation`,
+      summary:
+        action === "cancel"
+          ? "Cancel a preparation"
+          : `${action[0]?.toUpperCase()}${action.slice(1)} an operation`,
       description: descriptions[action],
       request: {
         headers: projectScopeWithDeclaredIdempotencyHeaders({
@@ -78,23 +81,42 @@ export function registerOperationsPaths(registry: OpenAPIRegistry) {
         params: operationIdParamsSchema,
         body: {
           required: true,
-          content: jsonContent(
-            action === "submit"
-              ? submitOperationSchema
-              : action === "refresh"
-                ? refreshOperationSchema
-                : emptyOperationBodySchema
-          ),
+          content: {
+            "application/json": {
+              schema:
+                action === "submit"
+                  ? submitOperationSchema
+                  : action === "refresh"
+                    ? refreshOperationSchema
+                    : emptyOperationBodySchema,
+              example:
+                action === "submit"
+                  ? {
+                      actionId: "opact_example",
+                      version: 1,
+                      signedTransaction: "<base64-signed-transaction>",
+                    }
+                  : action === "refresh"
+                    ? { actionId: "opact_example", version: 1 }
+                    : {},
+            },
+          },
         },
       },
       responses: {
-        ...(action === "submit"
-          ? {}
-          : { 200: { description: "Already terminal operation", content: jsonContent(response) } }),
-        202: {
-          description: "Current operation; asynchronous work remains",
-          content: jsonContent(response),
-        },
+        ...(action === "cancel"
+          ? {
+              200: { description: "Cancelled preparation", content: jsonContent(response) },
+            }
+          : {
+              202: {
+                description:
+                  action === "refresh"
+                    ? "Rebuilt preparation; review the returned transaction"
+                    : "Submission accepted; poll the operation for progress",
+                content: jsonContent(response),
+              },
+            }),
         ...earnErrorResponses([400, 401, 403, 404, 409, 422, 429, 500, 501, 503]),
       },
     });

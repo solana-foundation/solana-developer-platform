@@ -26,22 +26,25 @@ program creation and allocation configuration.
 ## Operations and recovery
 
 Preparation never signs or broadcasts. `submit` returns 202 after durable
-acceptance; workers handle signing, provider approval and submission. Keep
+acceptance; workers request signatures, broadcast and track settlement. Keep
 polling queued and active operations, including custody providers that require
-approval in another application. Read requests never trigger execution.
+a signature in another application. Read requests never trigger submission.
 
 Render `nextAction` explicitly: `submit`, `sign_transaction`, `select_option`,
-`approve_in_provider`, `wait` or `refresh`. Selecting a withdrawal option
+`sign_in_provider`, `wait` or `refresh`. Selecting a withdrawal option
 prepares its terms through version-bound refresh, followed by separate review
 and submission. Only the API can decide whether a
 message is safe to replace. A pending or uncertain provider outcome remains
-`wait`. Refresh returns new terms for separate review and submission.
+`wait`. Refresh prepares new terms only before submission acceptance, for separate
+review and submission. Definitively failed submissions stay terminal; a new
+intent needs a new deposit or withdrawal request.
 
 Persist retry keys before sending. A lost response retries the same request
 and exact signed bytes. Do not prepare another transaction because an RPC read
-is missing or a signature expired. Release a cancellation key after a validated
-response so a later explicit request can act on a newly created queue record.
-Cancellation acknowledgement does not prove an in-flight action stopped.
+is missing or a signature expired. Show cancellation only when the API returns
+`canCancel: true`. It discards an unsubmitted preparation. Once `/submit` has
+been accepted, cancellation and refresh stay unavailable. Cancellation never
+revokes an onchain transaction or a provider withdrawal request.
 
 ## Positions and balances
 

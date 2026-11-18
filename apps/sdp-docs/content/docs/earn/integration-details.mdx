@@ -4,35 +4,72 @@ title: Integration details
 description: Use scoped sources, review terms and recover asynchronous actions safely.
 ---
 
+Use your SDP API key and any compatible Solana wallet. You do not need to
+register a wallet or connect its provider in SDP. Connected wallets are an
+optional convenience over the same API.
+
+## When each input or call is needed
+
+| Input or call | Use it when | Skip it when |
+| --- | --- | --- |
+| `source.ownerAddress` | Your wallet integration signs the returned unsigned transaction. This is the normal API flow. | You choose an existing connected wallet's `walletId` instead. |
+| `source.walletId` | An existing SDP wallet connection should handle signing through its configured provider. | You sign through your own wallet integration. No wallet connection is required. |
+| `signedTransaction` | An address source returns `sign_transaction`. Submit the complete signed transaction as base64. | A connected wallet returns `submit`; SDP requests its signature. |
+| `sign_in_provider` | The operation asks for signing in the connected wallet's provider. Show its instructions and handoff URL. | Your own wallet integration signs an address-source transaction. |
+| `/submit` | The address-source transaction is signed, or the user reviewed a connected-wallet action. Send its current `actionId` and `version`. | You only want to discover strategies, read holdings or prepare terms. |
+| `/refresh` | Before submit acceptance, `select_option` needs an advertised `optionId`, or preparation can safely replace unsigned bytes and terms. Include the current `actionId` and `version`, then review the new transaction. | Any `/submit` has been accepted, a normal deposit is already prepared, or an exposed signature outcome remains uncertain. It never signs, broadcasts or revokes a transaction. |
+| `/cancel` | `operation.canCancel` is true and you want to abandon preparation before any `/submit` has been accepted. | `canCancel` is false, including after submit acceptance or while an exposed owner transaction has an unknown outcome. |
+
+These operation mutations use `/v1/operations/{operationId}`. Refresh only
+prepares; submit authorizes processing. Later refreshes preserve the selected
+withdrawal route. There is no separate Earn approval endpoint or approval mode.
+
+## What cancellation can stop
+
+Use `operation.canCancel` to decide whether cancellation is available. It is a
+state capability; the caller still needs `earn.manage`. Do not infer it from
+the operation's status, wallet kind or elapsed time.
+
+Both `/cancel` and `/refresh` are preparation-only. After any `/submit`
+acceptance, they return `409 CONFLICT`; track the same operation's outcome.
+Waiting for a provider signature, chain confirmation or queued withdrawal does
+not reopen either action. An exposed owner transaction with an unknown outcome
+also cannot be refreshed or cancelled, even before submission to SDP.
+
+Dismiss your own wallet's signing prompt locally; that does not need an SDP
+call. SDP cannot revoke a signature or pull a broadcast transaction from Solana.
+Internal provider cleanup for lost permissions or expiry is a safety mechanism,
+not an API cancellation flow.
+
+## Reviewed signatures
+
+The prepared owner and every required fee payer must sign the unchanged
+transaction message. A different wallet cannot replace that owner. Connected
+wallet policies can require provider-side approvals, but those are part of
+signing and use `awaiting_signature`, not a separate Earn approval stage.
+
 ## Idempotency and recovery
 
 Persist a fresh `Idempotency-Key` and request body before every mutation. Reuse
-both after an uncertain response. Find accepted work with `GET /v1/operations`
-and recover its next action instead of creating another deposit or withdrawal.
+both after an uncertain response, including the same signed bytes. Find accepted
+work with `GET /v1/operations?ownerAddress=...` and recover its next action
+instead of creating another deposit or withdrawal.
 
-## Reviewed actions
+Replaying a successful pre-submit refresh with its original key returns the
+original cached response, even after a later submit was accepted. It creates no
+new build or mutation. Read `GET /v1/operations/{operationId}` for the current
+`canCancel` and `nextAction`; fresh refresh and cancel requests still reject
+after submit acceptance.
 
-Submit names the exact `actionId` and `version`. Owner-signed transactions
-must match the prepared message and all required signatures. A later step can
-require another review under the same operation.
+Timeout, blockhash expiry and missing RPC history do not prove non-execution.
+An exposed owner transaction may have been broadcast independently even before
+SDP receives a signature. Cancellation cannot revoke those bytes. Keep the
+operation pending until the outcome is known.
 
-## Refresh safely
-
-Call `POST /v1/operations/{operationId}/refresh` with the current `actionId` and
-`version` only when the operation permits preparation. For `select_option`,
-include an advertised `optionId`; review the new transaction before `/submit`.
-Later refreshes preserve the selected withdrawal route.
-
-Timeout, blockhash expiry and missing RPC history do not prove
-non-execution. Exposed owner-signed messages retain independent-broadcast
-uncertainty even before SDP receives a signature.
-
-## Source and approval
-
-A source uses a registered wallet ID or owner address. A provider can require
-approval outside your app; render the operation's instructions and supplied
-handoff URL. Approval policy belongs to the wallet, independent of whether
-Treasury or Embedded Yield initiated the operation.
+A definitive signing rejection or proven nonexecution ends the operation as
+`failed`. Only after that known failure may you prepare a new deposit or
+withdrawal with a new idempotency key. A timeout, unknown provider response or
+missing RPC history never authorizes a new operation.
 
 ## Provider eligibility
 

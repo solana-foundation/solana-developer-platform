@@ -14,7 +14,6 @@ const STATUS: Record<EarnOperation["status"], string> = {
   prepared: "Ready for review",
   queued: "Queued for execution",
   awaiting_signature: "Waiting for a signature",
-  awaiting_approval: "Waiting for custody approval",
   submitted: "Submitted to Solana",
   settling: "Waiting for provider settlement",
   completed: "Completed",
@@ -22,7 +21,7 @@ const STATUS: Record<EarnOperation["status"], string> = {
   cancelled: "Cancelled",
 };
 
-/** Operations retain pending approvals and settlement without inventing paid amounts. */
+/** Operations retain pending signatures and settlement without inventing paid amounts. */
 export function OperationActivity({
   operations,
   strategyName,
@@ -112,7 +111,7 @@ function OperationRow({
       {canSubmit ? (
         <OperationTerms operation={operation} format={format} />
       ) : null}
-      {next?.type === "select_option" ? (
+      {operation.status === "prepared" && next?.type === "select_option" ? (
         <label className="flex flex-col gap-1 text-sm">
           Withdrawal route
           <select
@@ -169,15 +168,17 @@ function OperationActions({
     next?.type === "submit" || next?.type === "sign_transaction";
   return (
     <div className="flex flex-wrap justify-end gap-2">
-      <Button
-        variant="outline"
-        size="sm"
-        disabled={busy}
-        onClick={() => void onAction("cancel")}
-      >
-        Request cancellation
-      </Button>
-      {next?.type === "refresh" ? (
+      {operation.canCancel ? (
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy}
+          onClick={() => void onAction("cancel")}
+        >
+          Cancel
+        </Button>
+      ) : null}
+      {operation.status === "prepared" && next?.type === "refresh" ? (
         <Button
           size="sm"
           disabled={busy}
@@ -268,7 +269,7 @@ function OperationProgress({
   const next = operation.nextAction;
   return (
     <>
-      {next?.type === "approve_in_provider" ? (
+      {next?.type === "sign_in_provider" ? (
         <p className="text-sm text-muted-foreground">{next.instructions}</p>
       ) : null}
       {next?.type === "wait" ? (
@@ -302,7 +303,7 @@ function useOperationActions(operation: EarnOperation, onUpdated: () => void) {
           ? await submitPreparedOperation(operation)
           : action === "refresh"
             ? await refreshPreparedOperation(operation, optionId)
-            : await requestOperationCancellation(operation.id);
+            : await requestOperationCancellation(operation);
       if (updated.status === "failed")
         throw new Error(updated.error?.message ?? "Execution failed");
       toast.info(STATUS[updated.status]);

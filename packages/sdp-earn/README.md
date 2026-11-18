@@ -10,7 +10,7 @@ that each strategy actually supports. Discovery does not imply deposit access,
 liquidity or signing authority.
 
 A position records a wallet's holding in a strategy. An operation tracks one
-deposit or withdrawal, including approval, submission and provider settlement.
+deposit or withdrawal, including signing, submission and provider settlement.
 Program creation, allocation configuration and their HTTP routes are removed.
 The movement ledger records the financial outcome of current operations.
 
@@ -34,16 +34,27 @@ vault, lending market or RWA product; its provider owns the implementation.
 | `POST /v1/earn/withdraw` | Prepare an exit from an existing position.            |
 
 Preparation stores a durable operation with reviewable terms and unsigned
-transaction bytes or a next action. It never signs, opens approval or broadcasts.
-The caller authorizes the exact reviewed transaction through
-`POST /v1/operations/{operationId}/submit`; `202` means accepted work. Submit
-never prepares another action. The worker handles configured signing, provider
-approvals and broadcast through the same lifecycle.
+transaction bytes or a next action. It never starts wallet signing or broadcasts.
+API clients need an SDP API key and any compatible Solana wallet. Prepare with
+`source: { ownerAddress }`, sign the returned transaction through your wallet
+integration, then send base64 `signedTransaction` with its `actionId` and
+`version` to `POST /v1/operations/{operationId}/submit`. No SDP wallet record or
+provider connection is required. The prepared owner and every other required
+signer must sign the unchanged message. `202` means accepted work; the worker
+broadcasts and tracks those exact bytes. Submit never prepares another action.
+
+An existing connected wallet's `source: { walletId }` is optional. Its `submit`
+action takes `actionId` and `version` without signed bytes; the worker requests
+signing through the configured provider. `awaiting_signature` covers pending
+signing, and `sign_in_provider` supplies instructions such as "Sign in
+Fireblocks". Wallet approval policies remain part of signing; Earn adds no
+approval endpoint or separate approval status.
 
 Withdrawal choices advertise `nextAction: select_option` and `terms.options`.
 Refresh requires the current `actionId` and `version`, plus an advertised
 `optionId` for selection. It returns a new review before submission. Later
 refreshes retain the selected route rather than choosing another.
+Refresh is preparation-only and unavailable after any submit acceptance.
 
 Funding swaps and deposits share one atomic transaction. The deposit uses the
 swap's guaranteed minimum output, leaving any excess in the wallet. Oversized
@@ -51,16 +62,24 @@ compositions retry a compact route, then refuse before persisting a build if
 both legs still cannot fit. Fund the strategy's deposit token separately in
 that case; SDP never returns a standalone funding swap or deposit continuation.
 
-A source uses a connected `walletId` or an `ownerAddress`. That identity selects
-signing authority; it does not select another Earn product or execution model.
+A source uses an `ownerAddress` or an optional connected `walletId`. That
+identity selects signing authority; it does not select another Earn product or
+execution model.
 The movement ledger still records the signing source so wallet visibility and
 position ownership remain explicit. Signed messages are immutable, and uncertain
 outcomes resume their original attempt instead of creating another transaction.
 
 Queued exits stay under the same operation. Request acceptance or share escrow
 is not a payout. Provider and chain observations establish delivery without a
-separate claim endpoint. An onchain cancellation needs another explicit review
-and submission when advertised.
+separate claim endpoint. Only `canCancel=true` permits preparation cancellation,
+and the route still checks `earn.manage`. The capability is false after any
+submit acceptance or while an exposed owner transaction outcome is unknown.
+Pending signing and queued exits remain tracking-only after submit: neither
+refresh nor cancellation can change an accepted operation. A definitive signing
+rejection or proven nonexecution ends it as `failed`; only then may a new
+deposit or withdrawal request use a new idempotency key. Unknown outcomes never
+permit replacement. Internal provider cleanup for permission loss or expiry is
+not an API cancellation feature.
 
 The 53 former catalogue, program, product and transaction HTTP operations are
 removed. Earn is prelaunch, so no historical-action adoption or compatibility
