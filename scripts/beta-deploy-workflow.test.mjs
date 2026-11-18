@@ -116,7 +116,7 @@ test("the beta workflow runs the beta steps in order", () => {
   assertLine(beta, "      PROJECT_ID: solana-developer-platform-beta");
   assertLine(beta, "      REPO: sdp-beta");
   assertLine(beta, "      BETA_SERVICE: sdp-beta-api-public");
-  assertLine(beta, "      BETA_WORKER_SERVICE: sdp-beta-worker");
+  assertLine(beta, "      BETA_CRON_SERVICE: sdp-beta-cron");
   assertLine(beta, "      BETA_MIGRATE_JOB: sdp-beta-api-public-migrate");
   assertLine(beta, "      BETA_ORIGIN: https://api-beta.solana.com");
   assert.deepEqual(
@@ -137,7 +137,7 @@ test("the beta workflow runs the beta steps in order", () => {
       "Deploy beta service",
       "Verify beta revision readiness",
       "Check the beta release channel",
-      "Update beta worker image",
+      "Update beta cron image",
       "Post the sdp-web beta gate status",
       "Install Doppler CLI",
       "Doppler OIDC login",
@@ -159,8 +159,8 @@ test("the beta workflow runs the beta steps in order", () => {
     ["Deploy beta service", "steps.migrate.outcome == 'success'"],
     ["Verify beta revision readiness", "steps.service.outcome == 'success'"],
     ["Check the beta release channel", "steps.ready.outcome == 'success'"],
-    ["Update beta worker image", "steps.channel.outcome == 'success'"],
-    ["Post the sdp-web beta gate status", "steps.worker.outcome == 'success'"],
+    ["Update beta cron image", "steps.channel.outcome == 'success'"],
+    ["Post the sdp-web beta gate status", "steps.cron.outcome == 'success'"],
   ];
   for (const [stepName, condition] of chain) {
     assertLine(stepBlock(beta, stepName), `        if: ${condition}`);
@@ -168,7 +168,7 @@ test("the beta workflow runs the beta steps in order", () => {
   for (const stepName of [
     "Run beta database migrations",
     "Deploy beta service",
-    "Update beta worker image",
+    "Update beta cron image",
   ]) {
     assertLine(
       stepBlock(beta, stepName),
@@ -323,20 +323,20 @@ const findEnv = {
   REGION: "us-central1",
   PROJECT_ID: "example-project",
   BETA_SERVICE: "sdp-beta-api-public",
-  BETA_WORKER_SERVICE: "sdp-beta-worker",
+  BETA_CRON_SERVICE: "sdp-beta-cron",
   BETA_MIGRATE_JOB: "sdp-beta-api-public-migrate",
 };
 
 test("the beta deploy skips without failing while a beta resource is not found", () => {
   const run = runScript(findScript(), {
     stubs: {
-      gcloud: `if [[ "$4" == sdp-beta-worker ]]; then echo "ERROR: (gcloud.run.services.describe) Cannot find service [sdp-beta-worker]" >&2; exit 1; fi; exit 0`,
+      gcloud: `if [[ "$4" == sdp-beta-cron ]]; then echo "ERROR: (gcloud.run.services.describe) Cannot find service [sdp-beta-cron]" >&2; exit 1; fi; exit 0`,
     },
     env: findEnv,
   });
   assert.equal(run.code, 0, run.stderr);
   assert.equal(run.output, "present=false\n");
-  assert.match(run.stdout, /missing: sdp-beta-worker/);
+  assert.match(run.stdout, /missing: sdp-beta-cron/);
 });
 
 test("the beta deploy refuses an image_sha that is not a full commit SHA", () => {

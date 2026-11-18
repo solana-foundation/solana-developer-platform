@@ -65,6 +65,8 @@ until a definitive outcome is known.
 
 ## Execution and async recovery
 
+The cron service schedules operation workers and financial reconciliation.
+
 The shared operations service durably accepts an exact `actionId` and version.
 The worker performs every signature, provider proposal and broadcast, including
 fast signers. No status read performs money work. A provider URL is approval

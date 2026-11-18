@@ -49,7 +49,7 @@ retain synchronized aliases where current ledger writers still use them.
 
 ## Verified baseline
 
-Source: `main` at `841434f03c3742475380e9a1ad169a4c85d9ec18`. Counts exclude
+Source: `main` at `c4c5467ece29707b8b3fbda1e6570a5dbd254d00`. Counts exclude
 middleware, automatic OPTIONS, dashboard proxies and cron routes.
 
 | Former Earn family                                  | Method/path pairs | Replacement                                              |

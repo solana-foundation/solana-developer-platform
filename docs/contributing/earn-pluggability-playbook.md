@@ -53,7 +53,8 @@ surfacing the provider:
 3. Register availability and any provider credentials in the API's shared
    provider definitions. A keyless upstream adds no placeholder secret. A new
    credential must appear in API `env.d.ts`, `scripts/secret-keys.mjs`,
-   `turbo.json` and the managed secret projection.
+   `turbo.json` and the managed secret projection for both API and cron
+   services.
 4. Add its dashboard label and complete all exhaustive cluster and provider
    registries. A sandbox HTTP environment does not prove a devnet deployment.
 5. Implement only capabilities needed by a supported strategy. Unsupported

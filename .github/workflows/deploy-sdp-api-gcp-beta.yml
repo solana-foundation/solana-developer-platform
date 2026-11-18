@@ -43,7 +43,7 @@ jobs:
       REGION: us-central1
       REPO: sdp-beta
       BETA_SERVICE: sdp-beta-api-public
-      BETA_WORKER_SERVICE: sdp-beta-worker
+      BETA_CRON_SERVICE: sdp-beta-cron
       BETA_MIGRATE_JOB: sdp-beta-api-public-migrate
       BETA_ORIGIN: https://api-beta.solana.com
       DEPLOY_IMAGE_SHA: ${{ inputs.image_sha }}
@@ -99,7 +99,7 @@ jobs:
           }
           describe jobs describe "${BETA_MIGRATE_JOB}"
           describe services describe "${BETA_SERVICE}"
-          describe services describe "${BETA_WORKER_SERVICE}"
+          describe services describe "${BETA_CRON_SERVICE}"
           if [[ "${#missing[@]}" -gt 0 ]]; then
             echo "::notice::Beta not created yet (missing: ${missing[*]}); skipping the beta deploy."
             echo "present=false" >> "${GITHUB_OUTPUT}"
@@ -345,22 +345,22 @@ jobs:
           echo "${BETA_ORIGIN}/health reports releaseChannel=${channel:-unreadable}"
           [[ "${channel}" == "beta" ]]
 
-      - name: Update beta worker image
-        id: worker
+      - name: Update beta cron image
+        id: cron
         if: steps.channel.outcome == 'success'
         continue-on-error: true
         timeout-minutes: 5
         env:
           IMAGE: ${{ steps.image.outputs.image }}
         run: |
-          gcloud run services update "${BETA_WORKER_SERVICE}" \
+          gcloud run services update "${BETA_CRON_SERVICE}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
 
       # Same shape as release-web in deploy-sdp-api-gcp-prod.yml: posts only while beta still
       # serves the revision this run deployed.
       - name: Post the sdp-web beta gate status
         id: gate
-        if: steps.worker.outcome == 'success'
+        if: steps.cron.outcome == 'success'
         continue-on-error: true
         timeout-minutes: 2
         env:
@@ -403,7 +403,7 @@ jobs:
           steps.image.outcome == 'failure' || steps.breaking.outcome == 'failure' ||
           steps.migrate.outcome == 'failure' ||
           steps.service.outcome == 'failure' || steps.ready.outcome == 'failure' ||
-          steps.channel.outcome == 'failure' || steps.worker.outcome == 'failure' ||
+          steps.channel.outcome == 'failure' || steps.cron.outcome == 'failure' ||
           steps.gate.outcome == 'failure'
         id: doppler
         continue-on-error: true
