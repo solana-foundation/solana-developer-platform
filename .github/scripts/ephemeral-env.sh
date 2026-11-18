@@ -21,9 +21,6 @@ pr="${2:?pr number is required}"
 
 api_service="sdp-dev-api-pr-${pr}"
 cron_service="sdp-dev-cron-pr-${pr}"
-# TEMPORARY (PRO-2519): the name of the cron clone of a PR deployed before the
-# rename. Delete it, and its two uses, once no such clone is left on dev.
-legacy_cron_service="sdp-dev-worker-pr-${pr}"
 db_job="sdp-dev-api-pr-${pr}-db"
 db_name="sdp_api_pr_${pr}"
 
@@ -86,12 +83,6 @@ base_cron_service() {
     "$(dirname "${BASH_SOURCE[0]}")/resolve-cron-service.sh" sdp-dev
 }
 
-delete_service_if_present() {
-  if run services describe "$1" >/dev/null 2>&1; then
-    run services delete "$1" --quiet
-  fi
-}
-
 ephemeral_env_json() {
   jq -n --arg db "${db_name}" --arg redis "${redis_db}" \
     '[{name: "EPHEMERAL_DB_NAME", value: $db}, {name: "EPHEMERAL_REDIS_DB", value: $redis}]'
@@ -148,8 +139,6 @@ deploy() {
   run services add-iam-policy-binding "${api_service}" \
     --member allUsers --role roles/run.invoker >/dev/null
 
-  # Two clones would run every cron twice against the PR's database.
-  delete_service_if_present "${legacy_cron_service}" >/dev/null
   export_json services "${base_cron}" | jq \
     --arg name "${cron_service}" --arg pr "${pr}" --arg image "${image}" \
     --argjson extra "$(ephemeral_env_json)" \
@@ -177,8 +166,10 @@ teardown() {
     run jobs execute "${db_job}" --args "${drop_args}" --wait || echo "database drop failed; dropping resources anyway" >&2
     run jobs delete "${db_job}" --quiet
   fi
-  for service in "${api_service}" "${cron_service}" "${legacy_cron_service}"; do
-    delete_service_if_present "${service}"
+  for service in "${api_service}" "${cron_service}"; do
+    if run services describe "${service}" >/dev/null 2>&1; then
+      run services delete "${service}" --quiet
+    fi
   done
 }
 
