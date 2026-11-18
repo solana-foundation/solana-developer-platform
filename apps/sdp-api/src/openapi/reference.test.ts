@@ -74,11 +74,7 @@ describe("buildApiReference", () => {
             expect(response.body.kind).toBe("json");
             if (response.body.kind !== "json") continue;
             const { error } = errorExampleSchema.parse(response.body.example);
-            if (response.status === "410") {
-              expect(error.code).toBe("NOT_IMPLEMENTED");
-            } else {
-              expect(String(new AppError(error.code).statusCode)).toBe(response.status);
-            }
+            expect(String(new AppError(error.code).statusCode)).toBe(response.status);
           }
         }
       });
@@ -139,10 +135,19 @@ describe("buildApiReference", () => {
     });
   }
 
-  it("builds the Earn reference with every documented response, including shared 501 errors", () => {
-    const document = createPublicOpenApiDocument({
-      releaseChannel: "experimental",
-    });
+  it("renders the internal Earn action's responses without publishing it", () => {
+    const internal = createOpenApiDocument();
+    const published = createPublicOpenApiDocument({ releaseChannel: "experimental" });
+    expect(published.paths["/v1/earn/deposit"]).toBeUndefined();
+    const deposit = internal.paths["/v1/earn/deposit"]?.post;
+    if (deposit === undefined) throw new Error("The internal Earn deposit is missing");
+    // Render an API-key-only fixture without changing the publication hold.
+    const document: OpenAPIObject = {
+      ...internal,
+      paths: {
+        "/v1/earn/deposit": { post: { ...deposit, security: [{ apiKeyAuth: [] }] } },
+      },
+    };
     const reference = apiReferenceSchema.parse(buildApiReference(document));
     const earn = reference.families.find((family) => family.name === "Earn");
     if (!earn) throw new Error("The Earn family is missing");
@@ -162,16 +167,7 @@ describe("buildApiReference", () => {
         expect(response.body.kind).toBe("json");
         if (response.body.kind !== "json") continue;
         const { error } = errorExampleSchema.parse(response.body.example);
-        if (response.status === "410") {
-          expect(error.code).toBe("NOT_IMPLEMENTED");
-          const method = HTTP_METHODS.find(
-            (candidate) => candidate === operation.method.toLowerCase()
-          );
-          if (method === undefined) throw new Error("The documented method is unsupported");
-          expect(document.paths[operation.path]?.[method]?.deprecated).toBe(true);
-        } else {
-          expect(String(new AppError(error.code).statusCode)).toBe(response.status);
-        }
+        expect(String(new AppError(error.code).statusCode)).toBe(response.status);
         if (response.status === "501") {
           expect(response.body.example).toMatchObject(new AppError("NOT_IMPLEMENTED").toResponse());
           missingCapabilityExamples += 1;

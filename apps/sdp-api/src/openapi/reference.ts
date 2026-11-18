@@ -477,16 +477,6 @@ function errorExample(
 ): Json {
   const codes = envelopeCodes(schema, document);
   if (codes === null) return jsonValueSchema.parse(sampleFromSchema(schema, document));
-  // Retired compatibility routes deliberately use 410 with the existing code;
-  // unsupported live capabilities still answer AppError's normal 501.
-  if (status === "410" && codes.has("NOT_IMPLEMENTED")) {
-    return {
-      error: {
-        code: "NOT_IMPLEMENTED",
-        message: "This endpoint is retired.",
-      },
-    };
-  }
   const code = exampleErrorCode(status, takesIdempotencyKey, where);
   const error = status === "403" && action !== null ? missingAction(action) : new AppError(code);
   if (String(error.statusCode) !== status || !codes.has(error.code)) {

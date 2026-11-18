@@ -672,7 +672,7 @@
       "sandboxUnavailable": "Chỉ Production",
       "redeemIntermediate": "Quy đổi wYLDS"
     },
-    "embeddedYield": {
+    "earnProgram": {
       "eyebrow": "Yield nhúng",
       "introTitle": "Chọn chiến lược yield mà khách hàng của bạn sẽ thấy",
       "introDescription": "Bắt đầu từ danh mục nhà cung cấp trực tiếp, xem trước thao tác của khách hàng và tạo tích hợp phía máy chủ với API gửi vault thực.",
