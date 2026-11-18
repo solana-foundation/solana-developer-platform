@@ -5,10 +5,15 @@ import { TenantScopeViolationError } from "@/lib/tenant-scope";
 
 // Selection and metrics share this predicate: terminal rows and the other environment
 // must never inflate a queue the worker cannot drain. No pending-age cutoff.
+// Viewer claims only stamp the proposal, so failed provider reads must rotate by that
+// clock too. Legacy poll facts remain readable while older revisions still serve.
 const PENDING = `WITH pending AS (
-  SELECT 'transfer' AS kind, pt.id, pt.organization_id, pt.project_id, pt.updated_at,
-    pt.created_at, pt.provider_data->>'fireblocksLastPolledAt' AS last_polled_at
+  SELECT 'transfer' AS kind, pt.id, pt.organization_id, pt.project_id,
+    GREATEST(pt.updated_at, cp.last_polled_at) AS updated_at,
+    pt.created_at, GREATEST(cp.last_polled_at, pt.provider_data->>'fireblocksLastPolledAt') AS last_polled_at
   FROM payment_transfers pt JOIN projects p ON p.id = pt.project_id
+  LEFT JOIN custody_proposals cp ON cp.payment_transfer_id = pt.id
+    AND cp.organization_id = pt.organization_id AND cp.project_id = pt.project_id
   WHERE p.environment = ? AND pt.status = 'processing' AND pt.provider_data->'fireblocksTransfer' IS NOT NULL
   UNION ALL
   SELECT 'signing' AS kind, sp.id, sp.organization_id, sp.project_id, sp.updated_at,

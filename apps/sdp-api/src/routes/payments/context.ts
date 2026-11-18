@@ -6,15 +6,17 @@ import { createPostgresPaymentsRepository } from "@/db/repositories/payments.rep
 import {
   createCounterpartiesRepository,
   createCounterpartyAccountsRepository,
+  createCustodyProposalsRepository,
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
   createPaymentsRepository,
   createPaymentTransferBatchesRepository,
+  createTransactionalCustodyProposalsRepository,
 } from "@/db/repositories/repository-factory";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
-import type { ProposalLedger } from "@/services/payments/fireblocks-transfer";
+import type { ProposalLedger } from "@/services/payments/custody-proposal-ledger";
 import { rampRuntimeFor } from "@/services/ramps/runtime";
 import type { Env } from "@/types/env";
 
@@ -35,9 +37,13 @@ export function requestProposalLedger(
 ): ProposalLedger {
   return {
     repo: getPaymentsRepository(c),
+    proposals: createCustodyProposalsRepository(c.env, getRequestTenantScope(c)),
     audited: (work) =>
       auditService.logWithin(c, (tx) =>
-        work(createPostgresPaymentsRepository(tx, getRequestTenantScope(c)))
+        work(
+          createPostgresPaymentsRepository(tx, getRequestTenantScope(c)),
+          createTransactionalCustodyProposalsRepository(tx, getRequestTenantScope(c))
+        )
       ),
   };
 }

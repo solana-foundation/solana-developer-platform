@@ -164,6 +164,14 @@ export function isSuccessfulPaymentTransferStatus(status: PaymentTransferStatus)
   return SUCCESSFUL_PAYMENT_TRANSFER_STATUSES.some((candidate) => candidate === status);
 }
 
+/**
+ * Statuses without a recorded execution success or failure. Order cancellation
+ * and expiry are lifecycle states, not execution verdicts.
+ */
+export const PAYMENT_TRANSFER_STATUSES_WITHOUT_EXECUTION_OUTCOME = PAYMENT_TRANSFER_STATUSES.filter(
+  (status) => !isSuccessfulPaymentTransferStatus(status) && status !== "failed"
+);
+
 /** Whether each status ends a ramp transfer's lifecycle. Scoped to ramps — onchain sends terminate at `finalized`. */
 export const RAMP_TRANSFER_STATUS_TERMINAL = {
   pending: false,

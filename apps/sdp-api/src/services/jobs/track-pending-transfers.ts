@@ -1,7 +1,8 @@
 /**
  * Background Job: Track Pending Transfers
  *
- * Runs on the API cron schedule to reconcile transfer statuses:
+ * Runs on the API cron schedule to reconcile transfer statuses. Pending custody proposals
+ * independently recheck the recorded principal and request cancellation on a durable refusal.
  *
  * 1. Recover stuck "processing" transfers with no signature — created by
  *    executeTransfer but the process may have crashed before receiving a signature.

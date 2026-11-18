@@ -1,27 +1,37 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
+import type { Action } from "@sdp/types/actions";
 import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createApp } from "@/app";
 import { getDb } from "@/db/client";
+import { runWithSystemDatabaseIdentity } from "@/db/identity";
+import { requestPendingProposalRecovery } from "@/db/repositories/proposal-recovery.repository";
 import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";
 import { verifyClerkJwt } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import type { MoneyPrincipal } from "@/lib/money-principal";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { internalCustody } from "@/routes/internal-custody";
+import { rootLogger } from "@/runtime/logger";
 import * as moneyPathEvents from "@/runtime/money-path-events";
 import { AuditService } from "@/services/audit.service";
 import * as credentialSecretStore from "@/services/credential-secret-store";
+import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
+import { systemProposalLedger } from "@/services/jobs/proposal-recovery-ledger";
 import { reconcileFireblocksProposals } from "@/services/jobs/reconcile-fireblocks-proposals";
+import { reconcilePendingProposals } from "@/services/jobs/reconcile-pending-proposals";
+import { applyProposalEvent } from "@/services/payments/custody-proposal-ledger";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
+import { deferred } from "@/test/helpers/deferred";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
+import { applyProposalObservation } from "./fireblocks-transfer";
 
 const ORGANIZATION_ID = "org_fireblocks_byok";
 const USER_ID = "usr_fireblocks_byok";
@@ -163,6 +173,10 @@ let readMissing = false;
 let createStatus = 200;
 let createResultPatch: Record<string, unknown> = {};
 let settlementPatch: Record<string, unknown> = {};
+let cancellationAccepted = true;
+let cancellationCompletesTransfer = false;
+let beforeCancellation: (() => Promise<void>) | null = null;
+let beforeCreateResponse: (() => Promise<void>) | null = null;
 async function ready(projectId = PROJECT_ID) {
   const mock = providerResponse();
   const connection = await connect(projectId);
@@ -178,6 +192,10 @@ async function ready(projectId = PROJECT_ID) {
   createStatus = 200;
   createResultPatch = {};
   settlementPatch = {};
+  cancellationAccepted = true;
+  cancellationCompletesTransfer = false;
+  beforeCancellation = null;
+  beforeCreateResponse = null;
   mock.mockImplementation(async (url, init) => {
     const path = String(url).replace(testEnv.FIREBLOCKS_API_BASE_URL ?? "", "");
     expect(new Headers(init?.headers).get("X-API-Key")).toBe(fields.apiKey);
@@ -201,10 +219,16 @@ async function ready(projectId = PROJECT_ID) {
     if (path === "/v1/transactions" && init?.method === "POST") {
       expect(new Headers(init.headers).has("Idempotency-Key")).toBe(false);
       createBody = JSON.parse(String(init.body));
+      if (beforeCreateResponse !== null) await beforeCreateResponse();
       if (lostResponse) throw new Error("Timeout after provider accepted payment");
       if (createStatus !== 200)
         return Response.json({ message: "secret must not be echoed" }, { status: createStatus });
       return Response.json({ id: "fb-proposal", status: providerStatus, ...createResultPatch });
+    }
+    if (path === "/v1/transactions/fb-proposal/cancel" && init?.method === "POST") {
+      if (beforeCancellation !== null) await beforeCancellation();
+      if (cancellationCompletesTransfer) providerStatus = "COMPLETED";
+      return Response.json({ success: cancellationAccepted });
     }
     if (path.startsWith("/v1/transactions/external_tx_id/") && init?.method === "GET") {
       if (readMissing) return Response.json({}, { status: 404 });
@@ -263,7 +287,7 @@ async function expireIdempotencyKey(key: string) {
 }
 async function refresh(id: string) {
   await getDb(env).execute(
-    "UPDATE payment_transfers SET provider_data = provider_data - 'fireblocksLastPolledAt' WHERE id = ?",
+    "UPDATE custody_proposals SET last_polled_at = NULL WHERE payment_transfer_id = ?",
     [id]
   );
   const response = await paymentApp.request(
@@ -303,6 +327,72 @@ async function transferAudit(transferId: string) {
 }
 
 describe("native Fireblocks BYOK payment routes", () => {
+  it.each(["status read", "revocation wake"] as const)(
+    "lets create claim a young payment after an overlapping %s",
+    async (trigger) => {
+      const mock = await ready();
+      const db = getDb(env);
+      const paused = deferred<string>();
+      const resume = deferred<void>();
+      const original = AuditService.prototype.beginCriticalWithin;
+      vi.spyOn(AuditService.prototype, "beginCriticalWithin").mockImplementationOnce(
+        async function (this: AuditService, ...args) {
+          const audit = await original.apply(this, args);
+          const row = await db.queryOne<{ id: string }>(
+            "SELECT id FROM payment_transfers WHERE organization_id = ?",
+            [ORGANIZATION_ID]
+          );
+          if (row === null) throw new Error("Expected a payment before the submission claim");
+          paused.resolve(row.id);
+          await resume.promise;
+          return audit;
+        }
+      );
+      const creating = send(`fireblocks-create-overlap-${trigger}`);
+      const id = await paused.promise;
+      try {
+        readMissing = true;
+        if (trigger === "status read") {
+          expect(await refresh(id)).toMatchObject({ status: "processing" });
+        } else {
+          await db.transaction((tx) =>
+            requestPendingProposalRecovery(tx, {
+              organizationId: ORGANIZATION_ID,
+              projectId: PROJECT_ID,
+              principal: { kind: "member", userId: USER_ID },
+              now: new Date().toISOString(),
+            })
+          );
+          expect(await recoverPendingProposal(id)).toMatchObject({ status: "processing" });
+        }
+        const proposal = await db.queryOne<{ provider_phase: string }>(
+          "SELECT provider_phase FROM custody_proposals WHERE payment_transfer_id = ?",
+          [id]
+        );
+        expect(proposal?.provider_phase).toBe("unsent");
+        expect(
+          mock.mock.calls.filter(([url]) => String(url).includes("/transactions/external_tx_id/"))
+        ).toHaveLength(0);
+      } finally {
+        readMissing = false;
+        resume.resolve();
+        const response = await creating;
+        expect(response.status, await response.clone().text()).toBe(200);
+        expect((await response.json()).data.transfer).toMatchObject({ status: "processing" });
+      }
+      const proposal = await db.queryOne<{ provider_phase: string }>(
+        "SELECT provider_phase FROM custody_proposals WHERE payment_transfer_id = ?",
+        [id]
+      );
+      expect(proposal?.provider_phase).toBe("pending");
+      expect(
+        mock.mock.calls.filter(
+          ([url, init]) => String(url).endsWith("/v1/transactions") && init?.method === "POST"
+        )
+      ).toHaveLength(1);
+    }
+  );
+
   it.each([undefined, SIG])(
     "keeps a COMPLETED create response pending until a verified detail read (hash: %s)",
     async (txHash) => {
@@ -361,7 +451,9 @@ describe("native Fireblocks BYOK payment routes", () => {
     expect(mock.mock.calls[0]?.[1]?.method).toBe("GET");
     expect(
       await getDb(env).queryOne(
-        "SELECT status, provider_data->>'fireblocksLastPolledAt' AS last_poll FROM payment_transfers WHERE id = ?",
+        `SELECT pt.status, cp.last_polled_at AS last_poll
+           FROM payment_transfers pt JOIN custody_proposals cp ON cp.payment_transfer_id = pt.id
+          WHERE pt.id = ?`,
         [transfer.id]
       )
     ).toMatchObject({ status: "processing", last_poll: expect.any(String) });
@@ -420,7 +512,9 @@ describe("native Fireblocks BYOK payment routes", () => {
       providerStatus = "COMPLETED";
       if (recovery === "cron") {
         await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
-          reconcileFireblocksProposals(testEnv)
+          runWithSystemDatabaseIdentity("cron:reconcile-custody-proposals", () =>
+            reconcilePendingProposals(testEnv)
+          )
         );
         expect(
           await db.queryOne<{ status: string; signature: string }>(
@@ -723,7 +817,9 @@ describe("native Fireblocks BYOK payment routes", () => {
       transfer.id,
     ]);
     await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
-      reconcileFireblocksProposals(testEnv)
+      runWithSystemDatabaseIdentity("cron:reconcile-custody-proposals", () =>
+        reconcilePendingProposals(testEnv)
+      )
     );
     expect(
       (
@@ -801,11 +897,13 @@ describe("native Fireblocks BYOK payment routes", () => {
       providerStatus = settledBy === "cron" ? "REJECTED" : "COMPLETED";
       if (settledBy === "cron") {
         await getDb(env).execute(
-          "UPDATE payment_transfers SET provider_data = provider_data - 'fireblocksLastPolledAt' WHERE id = ?",
+          "UPDATE custody_proposals SET last_polled_at = NULL WHERE payment_transfer_id = ?",
           [transfer.id]
         );
         await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
-          reconcileFireblocksProposals(testEnv)
+          runWithSystemDatabaseIdentity("cron:reconcile-custody-proposals", () =>
+            reconcilePendingProposals(testEnv)
+          )
         );
       } else {
         expect(await refresh(transfer.id)).toMatchObject({ status: "confirmed" });
@@ -859,6 +957,42 @@ describe("native Fireblocks BYOK payment routes", () => {
       }),
     ]);
   });
+  it("rolls proposal creation and the submission claim back together before any provider call", async () => {
+    const mock = await ready();
+    const original = AuditService.prototype.logWithin;
+    let rolledBackClaim = false;
+    vi.spyOn(AuditService.prototype, "logWithin").mockImplementation(async function (
+      this: AuditService,
+      c,
+      work
+    ) {
+      return original.call(this, c, async (tx) => {
+        const outcome = await work(tx);
+        const proposal = await tx.queryOne<{ provider_phase: string }>(
+          "SELECT provider_phase FROM custody_proposals WHERE organization_id = ?",
+          [ORGANIZATION_ID]
+        );
+        if (proposal?.provider_phase === "submitting") {
+          rolledBackClaim = true;
+          throw new Error("submission transaction failed");
+        }
+        return outcome;
+      });
+    });
+    expect((await send()).status).toBe(500);
+    expect(rolledBackClaim).toBe(true);
+    const row = await getDb(env).queryOne<{
+      status: string;
+      provider_data: Record<string, unknown>;
+    }>("SELECT status, provider_data FROM payment_transfers WHERE organization_id = ?", [
+      ORGANIZATION_ID,
+    ]);
+    // Only the durable payment remains for observation-only orphan recovery.
+    expect(row).toMatchObject({ status: "processing" });
+    expect(row?.provider_data).not.toHaveProperty("fireblocksSubmissionStartedAt");
+    expect(await getDb(env).queryMany("SELECT id FROM custody_proposals")).toEqual([]);
+    expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+  });
   it("rolls the settle back when the audit append fails, and a retry records exactly one outcome", async () => {
     await ready();
     const response = await send();
@@ -879,7 +1013,7 @@ describe("native Fireblocks BYOK payment routes", () => {
       });
     });
     await getDb(env).execute(
-      "UPDATE payment_transfers SET provider_data = provider_data - 'fireblocksLastPolledAt' WHERE id = ?",
+      "UPDATE custody_proposals SET last_polled_at = NULL WHERE payment_transfer_id = ?",
       [transfer.id]
     );
     const failed = await paymentApp.request(
@@ -947,6 +1081,33 @@ describe("native Fireblocks BYOK payment routes", () => {
       expect((await response.json()).error.code).toBe("TRANSACTION_FAILED");
     }
   );
+  it("records a definite create refusal even when an absence poll wins the version race", async () => {
+    const mock = await ready();
+    createStatus = 429;
+    beforeCreateResponse = () =>
+      runWithSystemDatabaseIdentity("cron:reconcile-custody-proposals", async () => {
+        const ledger = systemProposalLedger(testEnv);
+        const identity = {
+          transferId: createBody.externalTxId,
+          organizationId: ORGANIZATION_ID,
+          projectId: PROJECT_ID,
+        };
+        const row = await ledger.repo.getTransferById(identity);
+        const proposal = await ledger.proposals.getForTransfer(identity);
+        if (row === null || proposal === null) throw new Error("Missing claimed proposal");
+        const observed = await applyProposalObservation(ledger, row, null, Date.now(), proposal);
+        expect(observed.proposal.state.providerPhase).toBe("absent");
+      });
+    const response = await send("fireblocks-absence-before-refusal");
+    expect(response.status).toBe(400);
+    const row = await getDb(env).queryOne<{ status: string; phase: string }>(
+      `SELECT pt.status, cp.provider_phase AS phase FROM payment_transfers pt
+       JOIN custody_proposals cp ON cp.payment_transfer_id = pt.id WHERE pt.id = ?`,
+      [createBody.externalTxId]
+    );
+    expect(row).toEqual({ status: "failed", phase: "not_sent" });
+    expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
   it("keeps server failures pending and does not resubmit", async () => {
     const mock = await ready();
     createStatus = 503;
@@ -965,13 +1126,8 @@ describe("native Fireblocks BYOK payment routes", () => {
     const id = (await response.json()).data.transfer.id;
     expect(await refresh(id)).toMatchObject({ status: "processing" });
     await getDb(env).execute(
-      "UPDATE payment_transfers SET provider_data = provider_data || ?::jsonb WHERE id = ?",
-      [
-        JSON.stringify({
-          fireblocksFirstMissingAt: new Date(Date.now() - 86_400_001).toISOString(),
-        }),
-        id,
-      ]
+      "UPDATE custody_proposals SET first_missing_at = ? WHERE payment_transfer_id = ?",
+      [new Date(Date.now() - 86_400_001).toISOString(), id]
     );
     expect(await refresh(id)).toMatchObject({
       status: "failed",
@@ -986,13 +1142,8 @@ describe("native Fireblocks BYOK payment routes", () => {
     const id = (await response.json()).data.transfer.id;
     readMissing = true;
     await getDb(env).execute(
-      "UPDATE payment_transfers SET provider_data = provider_data || ?::jsonb WHERE id = ?",
-      [
-        JSON.stringify({
-          fireblocksFirstMissingAt: new Date(Date.now() - 86_400_001).toISOString(),
-        }),
-        id,
-      ]
+      "UPDATE custody_proposals SET first_missing_at = ? WHERE payment_transfer_id = ?",
+      [new Date(Date.now() - 86_400_001).toISOString(), id]
     );
     expect(await refresh(id)).toMatchObject({ status: "processing" });
   });
@@ -1001,13 +1152,8 @@ describe("native Fireblocks BYOK payment routes", () => {
     lostResponse = true;
     const id = (await (await send()).json()).data.transfer.id;
     await getDb(env).execute(
-      "UPDATE payment_transfers SET provider_data = provider_data || ?::jsonb WHERE id = ?",
-      [
-        JSON.stringify({
-          fireblocksFirstMissingAt: new Date(Date.now() - 86_400_001).toISOString(),
-        }),
-        id,
-      ]
+      "UPDATE custody_proposals SET first_missing_at = ? WHERE payment_transfer_id = ?",
+      [new Date(Date.now() - 86_400_001).toISOString(), id]
     );
     mock.mockImplementationOnce(async () => {
       await getDb(env).execute(
@@ -1067,11 +1213,15 @@ describe("native Fireblocks BYOK payment routes", () => {
     expect((await send("cron-production", {}, projectId)).status).toBe(200);
     mock.mockClear();
     await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
-      reconcileFireblocksProposals(testEnv)
+      runWithSystemDatabaseIdentity("cron:reconcile-custody-proposals", () =>
+        reconcilePendingProposals(testEnv)
+      )
     );
     expect(mock).not.toHaveBeenCalled();
     await runInClusterScope({ projectId: null, environment: "production" }, () =>
-      reconcileFireblocksProposals(testEnv)
+      runWithSystemDatabaseIdentity("cron:reconcile-custody-proposals", () =>
+        reconcilePendingProposals(testEnv)
+      )
     );
     expect(mock).toHaveBeenCalledTimes(1);
     expect(mock.mock.calls[0]?.[1]?.method).toBe("GET");
@@ -1263,7 +1413,415 @@ describe("native Fireblocks BYOK payment routes", () => {
   });
 });
 
+async function recoverPendingProposal(id: string) {
+  // Advance only the independent worker schedule; dashboard polling never does this.
+  await getDb(env).execute(
+    "UPDATE custody_proposals SET next_check_at = '2000-01-01T00:00:00.000Z' WHERE payment_transfer_id = ?",
+    [id]
+  );
+  await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+    runWithSystemDatabaseIdentity("cron:reconcile-custody-proposals", () =>
+      reconcilePendingProposals(testEnv, { organizationId: ORGANIZATION_ID, projectId: PROJECT_ID })
+    )
+  );
+  return recordedProposal(id);
+}
+
+async function recordedProposal(id: string) {
+  const row = await createSystemPaymentsRepository(testEnv).getTransferById({
+    transferId: id,
+    organizationId: ORGANIZATION_ID,
+    projectId: PROJECT_ID,
+  });
+  if (!row) throw new Error("Expected durable Fireblocks transfer");
+  return row;
+}
+
+async function useTransferApiKey(apiKeyId: string, grants: readonly Action[]) {
+  const raw = `sk_test_${crypto.randomUUID().replaceAll("-", "")}`;
+  await seedProjectApiKey(getDb(env), testEnv, {
+    key: { id: apiKeyId, raw, prefix: raw.slice(0, 16) },
+    organizationId: ORGANIZATION_ID,
+    projectId: PROJECT_ID,
+    createdBy: USER_ID,
+    grants,
+  });
+  token = raw;
+}
+
+describe("native Fireblocks pending proposal recovery (PRO-2435 D4)", () => {
+  it.each(["running", "failed"] as const)(
+    "retries a %s connection check without refusing or cancelling its pending payment",
+    async (check) => {
+      const mock = await ready();
+      const response = await send(`fireblocks-recovery-check-${check}`);
+      expect(response.status, await response.clone().text()).toBe(200);
+      const transfer = (await response.json()).data.transfer;
+      await getDb(env).execute(
+        "UPDATE custody_connections SET status = ?, last_check_status = ?, activated_at = NULL WHERE organization_id = ?",
+        [check === "running" ? "checking" : "failed", check, ORGANIZATION_ID]
+      );
+      const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
+      const pending = await recoverPendingProposal(transfer.id);
+      expect(pending.status).toBe("processing");
+      expect(pending.provider_data.proposalRefusal).toBeUndefined();
+      expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(0);
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "proposal_recovery_unavailable",
+          environment: "sandbox",
+          pending_age_seconds: expect.any(Number),
+        }),
+        "proposal_recovery_unavailable"
+      );
+      await getDb(env).execute(
+        "UPDATE custody_connections SET status = 'active', last_check_status = 'success', activated_at = sdp_iso_now() WHERE organization_id = ?",
+        [ORGANIZATION_ID]
+      );
+      providerStatus = "COMPLETED";
+      const completed = await recoverPendingProposal(transfer.id);
+      expect(completed).toMatchObject({ status: "confirmed", signature: SIG });
+      expect(completed.provider_data.proposalRefusal).toBeUndefined();
+      expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(0);
+    }
+  );
+
+  it("retries a temporary release-channel restriction without cancelling a pending payment", async () => {
+    const mock = await ready();
+    const response = await send("fireblocks-recovery-channel");
+    expect(response.status, await response.clone().text()).toBe(200);
+    const transfer = (await response.json()).data.transfer;
+    testEnv.SDP_RELEASE_CHANNEL = "stable";
+    const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
+    const pending = await recoverPendingProposal(transfer.id);
+    expect(pending.status).toBe("processing");
+    expect(pending.provider_data.proposalRefusal).toBeUndefined();
+    expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(0);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "proposal_recovery_unavailable",
+        environment: "sandbox",
+        pending_age_seconds: expect.any(Number),
+      }),
+      "proposal_recovery_unavailable"
+    );
+    testEnv.SDP_RELEASE_CHANNEL = "experimental";
+    providerStatus = "COMPLETED";
+    expect(await recoverPendingProposal(transfer.id)).toMatchObject({
+      status: "confirmed",
+      signature: SIG,
+    });
+  });
+
+  it("records key revocation before cancellation, keeps acknowledgment pending, and closes only on CANCELLED", async () => {
+    const mock = await ready();
+    const apiKeyId = "key_fireblocks_revoked_pending";
+    await useTransferApiKey(apiKeyId, ["transfers.execute"]);
+    const response = await send("fireblocks-recovery-revoked-key");
+    expect(response.status, await response.clone().text()).toBe(200);
+    const transfer = (await response.json()).data.transfer;
+    await getDb(env).execute("UPDATE api_keys SET status = 'revoked' WHERE id = ?", [apiKeyId]);
+    let refusalBeforeCancellation: Record<string, unknown> | undefined;
+    beforeCancellation = async () => {
+      const row = await recordedProposal(transfer.id);
+      expect(row.provider_data.proposalRefusal).toMatchObject({ reason: "principal_not_live" });
+      refusalBeforeCancellation = row.provider_data;
+      expect(row.status).toBe("processing");
+    };
+    const pending = await recoverPendingProposal(transfer.id);
+    expect(pending).toMatchObject({ status: "processing", signature: null });
+    expect(pending.provider_data.proposalRefusal).toMatchObject({ reason: "principal_not_live" });
+    expect(pending.provider_data.proposalCancellationAcceptedAt).toEqual(expect.any(String));
+    expect(refusalBeforeCancellation?.proposalRefusal).toEqual(
+      pending.provider_data.proposalRefusal
+    );
+    expect(
+      mock.mock.calls.filter(
+        ([url, init]) => String(url).endsWith("/v1/transactions") && init?.method === "POST"
+      )
+    ).toHaveLength(1);
+    expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(1);
+    providerStatus = "CANCELLED";
+    const cancelled = await recoverPendingProposal(transfer.id);
+    expect(cancelled).toMatchObject({ status: "failed", signature: null });
+    expect(cancelled.error).toBe("The credential moving money is no longer active");
+    expect(cancelled.provider_data.proposalRefusal).toEqual(pending.provider_data.proposalRefusal);
+    expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(1);
+  });
+
+  it("cancels a pending proposal after its initiating member is removed", async () => {
+    const mock = await ready();
+    const response = await send("fireblocks-recovery-removed-member");
+    expect(response.status, await response.clone().text()).toBe(200);
+    const transfer = (await response.json()).data.transfer;
+    await getDb(env).execute(
+      "UPDATE organization_members SET status = 'removed' WHERE organization_id = ? AND user_id = ?",
+      [ORGANIZATION_ID, USER_ID]
+    );
+    const pending = await recoverPendingProposal(transfer.id);
+    expect(pending.provider_data.proposalRefusal).toMatchObject({ reason: "principal_not_live" });
+    expect(pending.provider_data.proposalCancellationAcceptedAt).toEqual(expect.any(String));
+    expect(pending.status).toBe("processing");
+    expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(1);
+  });
+
+  it("records exact settlement and a critical event when completion wins the cancellation race", async () => {
+    const mock = await ready();
+    const response = await send("fireblocks-recovery-cancel-race");
+    expect(response.status, await response.clone().text()).toBe(200);
+    const transfer = (await response.json()).data.transfer;
+    await getDb(env).execute(
+      "UPDATE organization_members SET status = 'removed' WHERE organization_id = ? AND user_id = ?",
+      [ORGANIZATION_ID, USER_ID]
+    );
+    cancellationCompletesTransfer = true;
+    const critical = vi.spyOn(rootLogger, "fatal").mockImplementation(() => undefined);
+    const pending = await recoverPendingProposal(transfer.id);
+    expect(pending.status).toBe("processing");
+    const completed = await recoverPendingProposal(transfer.id);
+    expect(completed).toMatchObject({ status: "confirmed", signature: SIG });
+    expect(completed.provider_data.proposalRefusal).toEqual(pending.provider_data.proposalRefusal);
+    expect(completed.provider_data.proposalRefusalAlertedAt).toEqual(expect.any(String));
+    expect(critical).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "fireblocks_transfer_committed_after_refusal",
+        transferId: transfer.id,
+        refusalReason: "principal_not_live",
+        signature: SIG,
+      }),
+      "fireblocks_transfer_committed_after_refusal"
+    );
+    expect(
+      mock.mock.calls.filter(
+        ([url, init]) => String(url).endsWith("/v1/transactions") && init?.method === "POST"
+      )
+    ).toHaveLength(1);
+    expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(1);
+    critical.mockClear();
+    await recoverPendingProposal(transfer.id);
+    expect(critical).not.toHaveBeenCalled();
+  });
+
+  it("never borrows viewer authority to admit or cancel a revoked principal's proposal", async () => {
+    const mock = await ready();
+    const apiKeyId = "key_fireblocks_pending_original";
+    await useTransferApiKey(apiKeyId, ["transfers.execute"]);
+    const response = await send("fireblocks-recovery-viewer");
+    expect(response.status, await response.clone().text()).toBe(200);
+    const transfer = (await response.json()).data.transfer;
+    await getDb(env).execute("UPDATE api_keys SET status = 'revoked' WHERE id = ?", [apiKeyId]);
+    await useTransferApiKey("key_fireblocks_pending_viewer", ["transfers.read"]);
+    const recoveryFactory = vi.spyOn(
+      CustodyRuntimeTargets.prototype,
+      "getTransferProposalRecoveryForWalletRecord"
+    );
+    mock.mockClear();
+    expect(await refresh(transfer.id)).toMatchObject({ id: transfer.id, status: "processing" });
+    expect(recoveryFactory).not.toHaveBeenCalled();
+    expect(mock.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
+    const stored = await recordedProposal(transfer.id);
+    expect(stored.initiated_by_principal).toEqual({ kind: "api_key", apiKeyId });
+    expect(stored.provider_data.proposalRefusal).toBeUndefined();
+    expect(stored.provider_data.proposalCancellationAcceptedAt).toBeUndefined();
+    const schedule = await getDb(env).queryOne<{
+      last_checked_at: string | null;
+    }>("SELECT last_checked_at FROM custody_proposals WHERE payment_transfer_id = ?", [
+      transfer.id,
+    ]);
+    expect(schedule?.last_checked_at).toBeNull();
+  });
+});
+
 describe("manual native Fireblocks cancellation", () => {
+  it("offers and sends cancellation for pending enrichment", async () => {
+    const mock = await ready();
+    providerStatus = "PENDING_ENRICHMENT";
+    const submitted = await send();
+    expect(submitted.status, await submitted.clone().text()).toBe(200);
+    const transfer = (await submitted.json()).data.transfer;
+    const listed = await request(`/fireblocks/proposals?walletId=${walletId}&kind=transfer`);
+    expect(listed.status, await listed.clone().text()).toBe(200);
+    expect((await listed.json()).data.proposals).toMatchObject([
+      { id: transfer.id, status: "PENDING_ENRICHMENT", canCancel: true },
+    ]);
+    const cancelled = await request(`/fireblocks/proposals/transfer/${transfer.id}/cancel`, {});
+    expect(cancelled.status, await cancelled.clone().text()).toBe(200);
+    expect((await cancelled.json()).data).toMatchObject({
+      acknowledged: true,
+      proposal: { status: "PENDING_ENRICHMENT", cancellationRequestedAt: expect.any(String) },
+    });
+    expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(1);
+    expect(await recordedProposal(transfer.id)).toMatchObject({ status: "processing" });
+  });
+
+  it.each(["earlier", "later", "invalid"] as const)(
+    "shows the latest valid cancellation time when the manual marker is %s",
+    async (ordering) => {
+      const mock = await ready();
+      const transfer = (await (await send()).json()).data.transfer;
+      await getDb(env).execute("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?", [
+        walletId,
+      ]);
+      await recoverPendingProposal(transfer.id);
+      const proposal = await getDb(env).queryOne<{ cancel_requested_at: string }>(
+        "SELECT cancel_requested_at FROM custody_proposals WHERE payment_transfer_id = ?",
+        [transfer.id]
+      );
+      if (!proposal) throw new Error("Expected a worker cancellation attempt");
+      const manualRequestedAt =
+        ordering === "invalid"
+          ? "invalid"
+          : new Date(
+              Date.parse(proposal.cancel_requested_at) + (ordering === "later" ? 60_000 : -60_000)
+            ).toISOString();
+      await getDb(env).execute(
+        `UPDATE payment_transfers SET provider_data = jsonb_set(
+           provider_data, '{fireblocksCancelRequestedAt}', to_jsonb(?::text)) WHERE id = ?`,
+        [manualRequestedAt, transfer.id]
+      );
+      mock.mockClear();
+      const listed = await request(`/fireblocks/proposals?walletId=${walletId}&kind=transfer`);
+      expect(listed.status, await listed.clone().text()).toBe(200);
+      expect((await listed.json()).data.proposals).toMatchObject([
+        {
+          id: transfer.id,
+          cancellationRequestedAt:
+            ordering === "later" ? manualRequestedAt : proposal.cancel_requested_at,
+        },
+      ]);
+      expect(mock.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
+    }
+  );
+
+  it.each([1, 2])(
+    "bounds fresh reads after %i competing unchanged status writes",
+    async (conflicts) => {
+      const mock = await ready();
+      const transfer = (await (await send()).json()).data.transfer;
+      const original = mock.getMockImplementation();
+      if (!original) throw new Error("Expected provider transport");
+      let reads = 0;
+      mock.mockClear().mockImplementation(async (url, init) => {
+        const response = await original(url, init);
+        if (init?.method === "GET" && String(url).includes("/external_tx_id/")) {
+          reads += 1;
+          if (reads <= conflicts) {
+            await runWithSystemDatabaseIdentity("cron:reconcile-fireblocks-proposals", async () => {
+              const ledger = systemProposalLedger(testEnv);
+              const identity = {
+                transferId: transfer.id,
+                organizationId: ORGANIZATION_ID,
+                projectId: PROJECT_ID,
+              };
+              const row = await ledger.repo.getTransferById(identity);
+              const proposal = await ledger.proposals.getForTransfer(identity);
+              if (row === null || proposal === null) throw new Error("Missing proposal");
+              await applyProposalEvent(ledger, row, proposal, {
+                type: "observed",
+                at: new Date().toISOString(),
+                phase: "pending",
+                providerTransactionId: "fb-proposal",
+                providerStatus: "PENDING_AUTHORIZATION",
+                providerSubStatus: null,
+              });
+            });
+          }
+        }
+        return response;
+      });
+      const response = await request(`/fireblocks/proposals/transfer/${transfer.id}/cancel`, {});
+      expect(response.status, await response.clone().text()).toBe(conflicts === 1 ? 200 : 409);
+      if (conflicts === 1) expect((await response.json()).data.acknowledged).toBe(true);
+      else expect(reads).toBe(2);
+      expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(
+        conflicts === 1 ? 1 : 0
+      );
+    }
+  );
+
+  it.each([true, false])(
+    "lists a worker cancellation attempt after acknowledgment %s without another provider mutation",
+    async (accepted) => {
+      const mock = await ready();
+      const transfer = (await (await send()).json()).data.transfer;
+      cancellationAccepted = accepted;
+      await getDb(env).execute("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?", [
+        walletId,
+      ]);
+      const pending = await recoverPendingProposal(transfer.id);
+      expect(pending.provider_data.fireblocksCancelRequestedAt).toBeUndefined();
+      const proposal = await getDb(env).queryOne<{ cancel_requested_at: string }>(
+        "SELECT cancel_requested_at FROM custody_proposals WHERE payment_transfer_id = ?",
+        [transfer.id]
+      );
+      expect(proposal?.cancel_requested_at).toEqual(expect.any(String));
+      mock.mockClear();
+      const listed = await request(`/fireblocks/proposals?walletId=${walletId}&kind=transfer`);
+      expect(listed.status, await listed.clone().text()).toBe(200);
+      expect((await listed.json()).data.proposals).toMatchObject([
+        {
+          id: transfer.id,
+          status: "PENDING_AUTHORIZATION",
+          cancellationRequestedAt: proposal?.cancel_requested_at,
+          canCancel: true,
+        },
+      ]);
+      expect(mock.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
+    }
+  );
+
+  it.each(["before cancellation", "after cancellation"] as const)(
+    "preserves a competing observation %s",
+    async (race) => {
+      const mock = await ready();
+      const submitted = await send();
+      const transfer = (await submitted.json()).data.transfer;
+      const original = mock.getMockImplementation();
+      if (!original) throw new Error("Expected provider transport");
+      let reads = 0;
+      mock.mockClear().mockImplementation(async (url, init) => {
+        const response = await original(url, init);
+        if (init?.method === "GET" && String(url).includes("/external_tx_id/")) {
+          reads += 1;
+          if (reads === (race === "before cancellation" ? 1 : 2)) {
+            await runWithSystemDatabaseIdentity("cron:reconcile-custody-proposals", async () => {
+              const ledger = systemProposalLedger(testEnv);
+              const identity = {
+                transferId: transfer.id,
+                organizationId: ORGANIZATION_ID,
+                projectId: PROJECT_ID,
+              };
+              const row = await ledger.repo.getTransferById(identity);
+              const proposal = await ledger.proposals.getForTransfer(identity);
+              if (row === null || proposal === null) throw new Error("Missing proposal");
+              await applyProposalEvent(ledger, row, proposal, {
+                type: "observed",
+                at: new Date().toISOString(),
+                phase: "executing",
+                providerTransactionId: "fb-proposal",
+                providerStatus: "BROADCASTING",
+                providerSubStatus: null,
+              });
+            });
+          }
+        }
+        return response;
+      });
+      const response = await request(`/fireblocks/proposals/transfer/${transfer.id}/cancel`, {});
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect((await response.json()).data).toMatchObject({
+        acknowledged: race === "after cancellation",
+        proposal: { status: "BROADCASTING" },
+      });
+      expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(
+        race === "before cancellation" ? 0 : 1
+      );
+      const stored = await recordedProposal(transfer.id);
+      expect(stored.status).toBe("processing");
+      expect(stored.provider_data.proposalRefusal).toBeUndefined();
+    }
+  );
+
   it.each(["CANCELLED", "PENDING_AUTHORIZATION", "COMPLETED"] as const)(
     "records %s without treating an acknowledgement as a final verdict",
     async (resultStatus) => {
@@ -1290,7 +1848,7 @@ describe("manual native Fireblocks cancellation", () => {
       expect(response.status, await response.clone().text()).toBe(200);
       expect((await response.json()).data).toMatchObject({
         acknowledged: true,
-        proposal: { status: resultStatus },
+        proposal: { status: resultStatus, cancellationRequestedAt: expect.any(String) },
       });
       expect((await request(path, {}, PROJECT_ID, key)).status).toBe(200);
       expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(1);
