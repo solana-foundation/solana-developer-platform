@@ -3,6 +3,7 @@ import { SDP_TERMS } from "@sdp/types/mainnet-access";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
+import { MainnetAccessRepository } from "@/db/repositories/mainnet-access.repository";
 import { app } from "@/index";
 import { correctMainnetAccess } from "@/services/mainnet-access.service";
 import { requesterEmailDomain } from "@/services/mainnet-access-email";
@@ -409,6 +410,16 @@ describe("Organization mainnet access (HOO-2427)", () => {
     expect(loggedEvents().slice(2)).toEqual([NOTIFIED_EVENT]);
   });
 
+  it("releases the send claim when building the email fails, so notify can retry at once", async () => {
+    const lookup = vi
+      .spyOn(MainnetAccessRepository.prototype, "emailContext")
+      .mockRejectedValueOnce(new Error("database blip"));
+    expect((await post(SUBMISSION)).status).toBe(500);
+    lookup.mockRestore();
+    expect((await notify()).status).toBe(200);
+    expect(sentEmails()).toHaveLength(1);
+  });
+
   it("rebuilds the email on notify, so a renamed organization reads its new name", async () => {
     const restore = failIterable();
     expect((await post(SUBMISSION)).status).toBe(503);
@@ -576,6 +587,131 @@ describe("Organization mainnet access (HOO-2427)", () => {
     expect((await post(SUBMISSION, authorization)).status).toBe(403);
     expect((await notify(authorization)).status).toBe(403);
     expect(await storedRow()).toBeNull();
+  });
+
+  describe("#sdp-requests Slack posts", () => {
+    const SLACK_WEBHOOK = "https://hooks.slack.com/services/T000/B000/secret";
+    const operator = { operator: "ops@example.org", reason: "customer asked", ticket: "HOO-2427" };
+    let slackStatus = 200;
+
+    beforeEach(() => {
+      env.SDP_REQUESTS_SLACK_WEBHOOK_URL = SLACK_WEBHOOK;
+      slackStatus = 200;
+      const answer = iterable.getMockImplementation();
+      if (!answer) throw new Error("the Iterable stub is installed in beforeEach");
+      iterable.mockImplementation(async (input, init) =>
+        String(input) === SLACK_WEBHOOK
+          ? new Response(slackStatus === 200 ? "ok" : "invalid_blocks", { status: slackStatus })
+          : answer(input, init)
+      );
+    });
+
+    afterEach(() => {
+      env.SDP_REQUESTS_SLACK_WEBHOOK_URL = undefined;
+    });
+
+    /** Each post's text, flattened: the summary and every field, as Slack renders them. */
+    function slackPosts(): string[] {
+      return iterable.mock.calls
+        .filter(([url]) => String(url) === SLACK_WEBHOOK)
+        .map(([, init]) => String(init?.body));
+    }
+
+    it("posts the request with the email's details once the email is sent", async () => {
+      expect((await post(SUBMISSION)).status).toBe(201);
+      const [posted, ...others] = slackPosts();
+      expect(others).toHaveLength(0);
+      for (const text of [
+        "Mainnet access request",
+        `wants to go live on mainnet.`,
+        `*Requested by*\\nAda Admin\\n${TEST_USER.email}`,
+        "*Jurisdiction*\\n🇸🇬 Singapore\\n_self-declared_",
+        `\`${ORGANIZATION_ID}\``,
+        "https://dashboard.clerk.com",
+      ]) {
+        expect(posted).toContain(text);
+      }
+    });
+
+    it("posts the request while its send claim still holds it, so a correction can't post first", async () => {
+      const answer = iterable.getMockImplementation();
+      if (!answer) throw new Error("the Slack stub is installed in beforeEach");
+      let claimedDuringPost: string | null | undefined;
+      iterable.mockImplementation(async (input, init) => {
+        if (String(input) === SLACK_WEBHOOK && claimedDuringPost === undefined) {
+          const row = await getDb(env)
+            .prepare(
+              "SELECT mainnet_request_sending_at, mainnet_request_notified_at FROM organizations WHERE id = ?"
+            )
+            .bind(ORGANIZATION_ID)
+            .first<{
+              mainnet_request_sending_at: string | null;
+              mainnet_request_notified_at: string | null;
+            }>();
+          claimedDuringPost = row?.mainnet_request_notified_at
+            ? null
+            : (row?.mainnet_request_sending_at ?? null);
+        }
+        return answer(input, init);
+      });
+      expect((await post(SUBMISSION)).status).toBe(201);
+      expect(claimedDuringPost).toEqual(expect.any(String));
+    });
+
+    it("posts nothing while the email fails, and posts once notify sends it", async () => {
+      const restore = failIterable();
+      expect((await post(SUBMISSION)).status).toBe(503);
+      expect(slackPosts()).toHaveLength(0);
+      restore();
+      expect((await notify()).status).toBe(200);
+      expect(slackPosts()).toHaveLength(1);
+    });
+
+    it("keeps the request answering 201 when Slack refuses, logging the failure", async () => {
+      slackStatus = 404;
+      const loggedEvents = recordLoggedEvents(["sdp_api_mainnet_access_slack_post_failed"]);
+      expect((await post(SUBMISSION)).status).toBe(201);
+      expect((await storedRow())?.notified_at).not.toBeNull();
+      expect(loggedEvents()).toEqual([
+        [
+          "warn",
+          {
+            event: "sdp_api_mainnet_access_slack_post_failed",
+            organization_id: ORGANIZATION_ID,
+            error_name: "SlackWebhookError",
+          },
+        ],
+      ]);
+      expect(JSON.stringify(loggedEvents())).not.toContain("secret");
+    });
+
+    it("posts corrections, even on a deployment without email", async () => {
+      expect((await post(SUBMISSION)).status).toBe(201);
+      await correctMainnetAccess(env, {
+        organizationId: ORGANIZATION_ID,
+        operation: "set-country",
+        countryCode: "GB",
+        ...operator,
+      });
+      expect(slackPosts().at(-1)).toContain("~🇸🇬 Singapore~ → 🇬🇧 United Kingdom");
+
+      env.SDP_OPERATOR_EMAIL = undefined;
+      await expect(
+        correctMainnetAccess(env, {
+          organizationId: ORGANIZATION_ID,
+          operation: "reset",
+          ...operator,
+        })
+      ).resolves.toMatchObject({ operatorEmail: "not_configured" });
+      expect(slackPosts()).toHaveLength(3);
+      expect(slackPosts().at(-1)).toContain("Mainnet access request reset");
+    });
+
+    it("posts nothing without a webhook", async () => {
+      env.SDP_REQUESTS_SLACK_WEBHOOK_URL = "placeholder";
+      expect((await post(SUBMISSION)).status).toBe(201);
+      expect(slackPosts()).toHaveLength(0);
+    });
   });
 
   describe("operator corrections", () => {

@@ -1,14 +1,23 @@
 ---
 title: Set up your workspace
-description: Create your account and organization, which comes with a Sandbox and a Production project.
+description: Create your account and organization in the Devnet sandbox, or on mainnet once SDP approves you.
 breadcrumbParent: /docs
 ---
 
 Everything you do in SDP belongs to an **organization**, your team's workspace. An organization holds **projects**, and each project has its own API keys, wallets, and members. This guide creates your account and organization.
 
+SDP runs in two places, each with its own accounts, organizations, and API keys:
+
+| | Dashboard | API | Network |
+| --- | --- | --- | --- |
+| Devnet sandbox | [platform-beta.solana.com](https://platform-beta.solana.com) | `https://api-beta.solana.com` | devnet, open to everyone |
+| Mainnet | [platform.solana.com](https://platform.solana.com/dashboard) | `https://api.solana.com` | mainnet, after SDP approves your organization |
+
+Start in the Devnet sandbox. Nothing there holds real value. Request mainnet when your integration works there; see [Go to mainnet](/docs/guides/go-to-mainnet).
+
 ### 1. Create your account
 
-Go to [platform.solana.com](https://platform.solana.com) and click **Create account**. The sign-in screen has the same button at the top right. When sign-up is closed, these buttons read **Join the waitlist** and **Request access** instead.
+Go to [platform-beta.solana.com](https://platform-beta.solana.com) and click **Create account**. The sign-in screen has the same button at the top right. On platform.solana.com, **Try the sandbox** leads to the same place.
 
 Enter your email address and a password to create your account.
 
@@ -22,7 +31,7 @@ To switch organizations or projects later, click your organization's name at the
 
 ### 3. Work in a project
 
-Your organization comes with two projects: **Default Sandbox Project** on devnet and **Default Production Project** on mainnet. Build in the sandbox project. Production can't move money until SDP approves your organization; see [Go to mainnet](/docs/guides/go-to-mainnet). To read projects with an API key, see the [Projects API reference](/docs/reference/api/projects).
+Your organization comes with **Default Sandbox Project** on devnet. Build there. The switcher's **Production** row opens platform.solana.com, where mainnet lives. To read projects with an API key, see the [Projects API reference](/docs/reference/api/projects).
 
 ### 4. Next steps
 

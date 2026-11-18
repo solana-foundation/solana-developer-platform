@@ -28,7 +28,7 @@ const cases: { channel: SdpReleaseChannel; comingSoon: Record<GatedSurface, bool
       markets: false,
       compliance: true,
       ramps: true,
-      subscriptions: false,
+      subscriptions: true,
     },
   },
   {

@@ -364,10 +364,12 @@ export const revokeApiKey = async (c: ValidatedBodyContext<typeof apiKeyRevokeSc
   // ledger or Redis: a key must stay revocable while either is down. Grants
   // (create, rotate, update) keep their record in the same transaction and
   // fail closed; this record is best-effort and a failure is logged loudly.
-  const revokedKey = await new ApiKeyService(getDb(c.env), getRequestTenantScope(c)).revokeApiKey(
-    keyId,
-    actor.organizationId,
-    projectId
+  const revokedKey = await getDb(c.env).transaction((tx) =>
+    new ApiKeyService(tx, getRequestTenantScope(c)).revokeApiKey(
+      keyId,
+      actor.organizationId,
+      projectId
+    )
   );
   if (revokedKey && !revokedKey.alreadyRevoked) {
     await logReductionBestEffort(c, {

@@ -265,7 +265,9 @@ delivery.
 
 Gates follow module declarations, never sentences:
 - A page about one module takes `module: issuance` (or `ramps`, …) frontmatter; a page about one ramp provider takes `rampProvider: moonpay` (ramp provider pages are `payments/ramps-<provider>.mdx`). Outside the channel the page leaves `source` (it 404s and drops out of the sidebar, search, sitemap and the Markdown route) and the `llms*.txt` files.
-- A custody-provider guide takes `custodyProvider: fireblocks` frontmatter.
+- A custody-provider guide takes `custodyProvider: <provider>` frontmatter,
+  or `byokCustodyProvider: fireblocks` when it covers only BYOK setup (a
+  channel running only the provider's Managed custody leaves it out).
   Link it from shared pages with `<CustodyProviderGuides />`; the page and
   links follow the provider's publication in the API manifest.
 - Shared pages never name a module. Module-specific content lives on that module's pages; where a shared page lists modules, providers, tutorials or operations, it places a generated block instead: `<ModuleTable />`, `<ModuleCapabilities />`, `<RampProviderMatrix />`, `<CustodyProviderTable />`, `<TutorialLinks />`, `<ApiKeyGrantsTable />`, and `<RateLimitTable />` for the API's limits. The blocks render from `src/lib/docs-catalog.ts` (add a module or provider there) and the manifest.
@@ -342,7 +344,7 @@ keep Swagger UI for their own release channel.
   component needs both forms. `check:links` accepts a page's `.md`, and
   `generate-ai-resources.ts` reads a family folder's index as its first page
   and names a group's section after its family (`Payments: Transfers`).
-- On a reference page, `remarkDocsBlocks` sets each `·` between a field's facts in a `.launch-api-separator` span so the dots get room, turns a family table's method cells into `.launch-api-method` badges (the Markdown keeps the code span), and points the code at this deployment's API: it swaps `canonicalSite.apiUrl` for `apiUrl` (`src/lib/site.ts`, from `NEXT_PUBLIC_SDP_API_URL`, which the Docker image fills in at start). On Vercel the variable needs setting per environment, like `SDP_RELEASE_CHANNEL`; a deployment without it shows the canonical host. The MDX, the `.md` route and the llms files keep the plain text and the canonical host.
+- On a reference page, `remarkDocsBlocks` sets each `·` between a field's facts in a `.launch-api-separator` span so the dots get room, and turns a family table's method cells into `.launch-api-method` badges (the Markdown keeps the code span). On every page, guides included, it points code blocks at this deployment's API: it swaps `canonicalSite.apiUrl` for `apiUrl` (`src/lib/site.ts`, from `NEXT_PUBLIC_SDP_API_URL`, which the Docker image fills in at start). On Vercel the variable needs setting per environment, like `SDP_RELEASE_CHANNEL`; a deployment without it shows the canonical host. The MDX, the `.md` route and the llms files keep the plain text and the canonical host.
 - On an operation page, `apiReference: true` makes the page full width with no table of contents and scopes the `.is-api-reference` styles in `globals.css`, and `icon: method:<METHOD>` puts its method beside it in the sidebar (`src/lib/source.ts`). Each sample is a box whose code scrolls inside it. From 1280px its `<ApiPanel>` (the samples and example responses) sits beside the body; on a window at least 750px tall it stays in view, sized to the window, and never scrolls itself: the last box (the example responses) takes the height left, which 750px keeps at 10 lines or more. Below, it follows the body.
 
 Reference > Conventions (`content/docs/reference/conventions/`) holds the rules every route shares (errors, pagination, rate limits, versioning) and links the authentication, environments and idempotency guides; the API Reference index links it. It is written by hand, apart from `<RateLimitTable />`, names no module, and lives outside `reference/api/`, which `generate:api` rewrites.

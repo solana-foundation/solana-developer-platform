@@ -3,6 +3,7 @@ import {
   isFireblocksProposalCancellable,
 } from "@sdp/types/fireblocks";
 import { Hono } from "hono";
+import { z } from "zod";
 import { getDb } from "@/db/client";
 import {
   FireblocksProposalsRepository,
@@ -72,7 +73,24 @@ function signingSummary(row: FireblocksSigningProposalRow): FireblocksProposalSu
       (row.status === "SUBMITTING" || isFireblocksProposalCancellable(row.status)),
   };
 }
-function transferSummary(row: PaymentTransferRow): FireblocksProposalSummary {
+const cancellationRequestedAtSchema = z.iso.datetime();
+
+async function transferSummary(
+  c: AppContext,
+  row: PaymentTransferRow
+): Promise<FireblocksProposalSummary> {
+  const proposal = await requestProposalLedger(c).proposals.getForTransfer({
+    ...scope(c),
+    transferId: row.id,
+  });
+  const cancellationRequestedAt = [
+    proposal?.state.cancelRequestedAt,
+    row.provider_data.fireblocksCancelRequestedAt,
+  ].reduce<string | null>((latest, candidate) => {
+    const parsed = cancellationRequestedAtSchema.safeParse(candidate);
+    if (!parsed.success) return latest;
+    return latest === null || Date.parse(parsed.data) > Date.parse(latest) ? parsed.data : latest;
+  }, null);
   const status =
     typeof row.provider_data.fireblocksStatus === "string"
       ? row.provider_data.fireblocksStatus
@@ -84,10 +102,7 @@ function transferSummary(row: PaymentTransferRow): FireblocksProposalSummary {
     status,
     transactionId: row.provider_reference,
     createdAt: row.created_at,
-    cancellationRequestedAt:
-      typeof row.provider_data.fireblocksCancelRequestedAt === "string"
-        ? row.provider_data.fireblocksCancelRequestedAt
-        : null,
+    cancellationRequestedAt,
     canCancel:
       row.status === "processing" &&
       (status === "SUBMITTING" || isFireblocksProposalCancellable(status)),
@@ -190,7 +205,10 @@ fireblocksProposals.get(
       const row = await repo.getTransferById({ ...scope(c), transferId: id });
       if (row)
         items.push(
-          transferSummary(await refreshFireblocksTransfer(c.env, requestProposalLedger(c), row))
+          await transferSummary(
+            c,
+            await refreshFireblocksTransfer(c.env, requestProposalLedger(c), row)
+          )
         );
     }
     return success(c, { proposals: items, hasMore: ids.length > 20 });
@@ -221,7 +239,10 @@ fireblocksProposals.post(
             c.env,
             requestProposalLedger(c, audit),
             authorized.row
-          ).then(({ acknowledged, row }) => ({ acknowledged, proposal: transferSummary(row) }));
+          ).then(async ({ acknowledged, row }) => ({
+            acknowledged,
+            proposal: await transferSummary(c, row),
+          }));
     await audit.completeCritical(c, intent, {
       metadata: {
         event: "fireblocks_manual_cancellation_result",

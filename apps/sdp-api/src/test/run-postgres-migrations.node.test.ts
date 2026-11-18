@@ -54,11 +54,7 @@ function readMigration(migrationFile: string) {
   return readFileSync(path.join(testDir, "../db/migrations/postgres", migrationFile), "utf8");
 }
 
-/**
- * The last migration number that two files share. The runner records each file
- * by its full name, so those historical pairs apply; a new duplicate means two
- * branches picked the same number and their order is down to the suffix.
- */
+/** Legacy migrations through 0125 already share numbers; never renumber them. */
 const LAST_SHARED_MIGRATION_NUMBER = 125;
 
 /**
@@ -81,26 +77,43 @@ function isShippedPair(number: number, names: readonly string[]): boolean {
   );
 }
 
+function invalidSharedMigrationNumbers(files: readonly string[]): string[][] {
+  const byNumber = new Map<number, string[]>();
+  for (const file of files) {
+    const prefix = /^(\d{4})/.exec(file)?.[1];
+    if (prefix === undefined) throw new Error(`Migration ${file} has no four-digit number`);
+    const number = Number(prefix);
+    byNumber.set(number, [...(byNumber.get(number) ?? []), file]);
+  }
+  return [...byNumber]
+    .filter(
+      ([number, names]) =>
+        number > LAST_SHARED_MIGRATION_NUMBER && !isShippedPair(number, names) && names.length > 1
+    )
+    .map(([, names]) => names.sort());
+}
+
 describe("Postgres migration numbering", () => {
   it("gives every migration after the historical pairs its own number", () => {
     const testDir = path.dirname(fileURLToPath(import.meta.url));
     const files = readdirSync(path.join(testDir, "../db/migrations/postgres")).filter((file) =>
       file.endsWith(".sql")
     );
-    const byNumber = new Map<number, string[]>();
-    for (const file of files) {
-      const prefix = /^(\d{4})/.exec(file)?.[1];
-      if (prefix === undefined) throw new Error(`Migration ${file} has no four-digit number`);
-      const number = Number(prefix);
-      byNumber.set(number, [...(byNumber.get(number) ?? []), file]);
-    }
-    const shared = [...byNumber]
-      .filter(
-        ([number, names]) =>
-          number > LAST_SHARED_MIGRATION_NUMBER && !isShippedPair(number, names) && names.length > 1
-      )
-      .map(([, names]) => names.sort());
-    expect(shared).toEqual([]);
+    expect(invalidSharedMigrationNumbers(files)).toEqual([]);
+  });
+
+  it("grandfathers only the exact merged 0226 pair", () => {
+    const mergedPair = [
+      "0226_payment_transfer_batches_drop_options.sql",
+      "0226_payment_transfer_principal.sql",
+    ] as const;
+    expect(invalidSharedMigrationNumbers(mergedPair)).toEqual([]);
+    const third = [...mergedPair, "0226_another_migration.sql"].sort();
+    expect(invalidSharedMigrationNumbers(third)).toEqual([third]);
+    const replacement = [mergedPair[0], "0226_another_migration.sql"].sort();
+    expect(invalidSharedMigrationNumbers(replacement)).toEqual([replacement]);
+    const newCollision = ["0227_first.sql", "0227_second.sql"];
+    expect(invalidSharedMigrationNumbers(newCollision)).toEqual([newCollision]);
   });
 });
 

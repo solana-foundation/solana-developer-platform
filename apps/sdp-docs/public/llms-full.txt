@@ -62,17 +62,18 @@ Source: https://platform.solana.com/docs/guides/go-to-mainnet
 
 > Request mainnet access, connect your own custody account, and go live.
 
-You start with a Sandbox project on devnet. The SDP team must approve your
-organization before enabling Production on mainnet.
+You build in the Devnet sandbox at platform-beta.solana.com. Mainnet runs on
+[platform.solana.com](https://platform.solana.com/dashboard), with its own
+accounts, organizations, and API keys. The SDP team must approve your
+organization there before it can use mainnet.
 
 ## 1. Request mainnet access
 
-Sign in to the [dashboard](https://platform.solana.com/dashboard) as an
-**organization admin**. Open the account menu at the bottom of the sidebar, then
-**Settings**. Under **Mainnet**, click **Request mainnet access…**. If the
-section is missing, ask an admin to submit.
-
-[![The Mainnet section in organization settings, with Request mainnet access… and the status Sandbox only](/images/go-to-mainnet/01-request-access.png)](/docs/images/go-to-mainnet/01-request-access.png)
+On platform.solana.com, click **Create account** and create your organization,
+as you did in the sandbox; see [Set up your workspace](/docs/guides/setup-organization).
+Until SDP approves it, the organization opens on a page that says it isn't on
+mainnet yet. An **organization admin** clicks **Request mainnet access** there;
+anyone else asks an admin.
 
 Select your organization's registered **Country or region** and click
 **Continue**. Contact the SDP team to change it after submission.
@@ -87,32 +88,20 @@ reads both when it reviews your request.
 [![The About you step, with Yes selected for a Solana Foundation contact and a short description of what the organization is building](/images/go-to-mainnet/02b-about-you.png)](/docs/images/go-to-mainnet/02b-about-you.png)
 
 Read the **Terms and Conditions** to the end, accept them on your organization's
-behalf, and click **Send request**. **Request sent** confirms submission;
-Settings shows **In review** until approval.
+behalf, and click **Send request**. **Request sent** confirms submission; the
+page says the request is in review until approval.
 
 [![Request sent confirmation, with SDP review still pending](/images/go-to-mainnet/request-sent.png)](/docs/images/go-to-mainnet/request-sent.png)
 
 If you see **Request not sent**, click **Send request again**; your details are
 saved. If requests aren't open, contact the SDP team.
 
-## 2. Switch to Production
+## 2. Open your production project
 
-After approval, refresh **Settings**. When **Mainnet** shows **On**,
-click your organization's name at the top of the sidebar and select your
-production project (by default, **Default Production Project**).
-
-<a href="/docs/images/go-to-mainnet/03-production-project.png">
-  <img
-    src="/docs/images/go-to-mainnet/03-production-project.png"
-    alt="The workspace switcher showing Default Production Project"
-    width="330"
-    height="342"
-    style={{ maxWidth: "100%", height: "auto" }}
-  />
-</a>
-
-Production uses `mainnet-beta`. Wallets, provider connections, and API keys are
-separate from Sandbox and must be set up again.
+SDP emails you once mainnet is on. Sign in to platform.solana.com again: the
+dashboard opens your production project (by default, **Default Production
+Project**) on `mainnet-beta`. Wallets, provider connections, and API keys from
+the sandbox don't carry over; set them up again here.
 
 ## 3. Connect your custody provider account
 
@@ -140,8 +129,8 @@ the summary. Click **Create key**.
 [![API key review showing Production, selected permissions, and the Treasury wallet](/images/go-to-mainnet/05-production-api-key.png)](/docs/images/go-to-mainnet/05-production-api-key.png)
 
 Copy the key to your secret manager; it's shown once. Replace your backend's
-sandbox key. The API URL stays `https://api.solana.com`; the key's project
-determines the network. See
+sandbox key, and point it at `https://api.solana.com` instead of
+`https://api-beta.solana.com`. See
 [API key grants and wallet access](/docs/developing-with-sdp/manage-api-keys).
 
 ## 5. Fund your wallet with mainnet USDC
@@ -196,14 +185,14 @@ Build against the API for automation and integrations. Use the dashboard to set 
 
 An environment belongs to the **project**, not to individual requests. Every tenant resource and API key belongs to a project and inherits its environment.
 
-| Environment  | Network      |
-| ------------ | ------------ |
-| `sandbox`    | devnet       |
-| `production` | mainnet-beta |
+| Environment  | Network      | Dashboard                  | API                           |
+| ------------ | ------------ | -------------------------- | ----------------------------- |
+| `sandbox`    | devnet       | `platform-beta.solana.com` | `https://api-beta.solana.com` |
+| `production` | mainnet      | `platform.solana.com`      | `https://api.solana.com`      |
 
-A key's format doesn't name its environment; the project it belongs to does.
+A key's format doesn't name its environment; the project it belongs to does. Each host keeps its own accounts, organizations, and keys, so a sandbox key works only against `api-beta.solana.com`.
 
-Both environments expose the same route shapes. Build and test against your sandbox project, then move to production with a production project's API key. [Go to mainnet](/docs/guides/go-to-mainnet) covers requesting access and setting up your production wallets and API key.
+Both environments expose the same route shapes. Build and test against your sandbox project, then move to production with a production project's API key and the production API URL. [Go to mainnet](/docs/guides/go-to-mainnet) covers requesting access and setting up your production wallets and API key.
 
 ## Response conventions
 
@@ -17281,7 +17270,7 @@ Create transfer request payload for a custody-managed source wallet. This endpoi
 
       - **`fireblocks`** · `object`
 
-        Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.
+        Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. SDP rechecks the initiating principal on a minute schedule, prioritizing recorded access changes, and requests cancellation if access is lost before signing. Connection health checks do not trigger cancellation. Failed cancellation attempts retry at least five minutes apart while status checks continue. Queued work and provider delays can extend recovery latency. A cancellation request remains processing until Fireblocks confirms its outcome and can race execution. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.
 
         - **`transactionId`** · `string | null` · required
 
@@ -17866,7 +17855,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
     - **`fireblocks`** · `object`
 
-      Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.
+      Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. SDP rechecks the initiating principal on a minute schedule, prioritizing recorded access changes, and requests cancellation if access is lost before signing. Connection health checks do not trigger cancellation. Failed cancellation attempts retry at least five minutes apart while status checks continue. Queued work and provider delays can extend recovery latency. A cancellation request remains processing until Fireblocks confirms its outcome and can race execution. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.
 
       - **`transactionId`** · `string | null` · required
 
@@ -18368,7 +18357,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
       - **`fireblocks`** · `object`
 
-        Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.
+        Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. SDP rechecks the initiating principal on a minute schedule, prioritizing recorded access changes, and requests cancellation if access is lost before signing. Connection health checks do not trigger cancellation. Failed cancellation attempts retry at least five minutes apart while status checks continue. Queued work and provider delays can extend recovery latency. A cancellation request remains processing until Fireblocks confirms its outcome and can race execution. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.
 
         - **`transactionId`** · `string | null` · required
 
@@ -19299,7 +19288,7 @@ Create a custody-executed outbound transfer batch.
 
       - **`fireblocks`** · `object`
 
-        Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.
+        Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. SDP rechecks the initiating principal on a minute schedule, prioritizing recorded access changes, and requests cancellation if access is lost before signing. Connection health checks do not trigger cancellation. Failed cancellation attempts retry at least five minutes apart while status checks continue. Queued work and provider delays can extend recovery latency. A cancellation request remains processing until Fireblocks confirms its outcome and can race execution. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.
 
         - **`transactionId`** · `string | null` · required
 
@@ -20250,7 +20239,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
       - **`fireblocks`** · `object`
 
-        Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.
+        Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. SDP rechecks the initiating principal on a minute schedule, prioritizing recorded access changes, and requests cancellation if access is lost before signing. Connection health checks do not trigger cancellation. Failed cancellation attempts retry at least five minutes apart while status checks continue. Queued work and provider delays can extend recovery latency. A cancellation request remains processing until Fireblocks confirms its outcome and can race execution. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.
 
         - **`transactionId`** · `string | null` · required
 
@@ -20898,7 +20887,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
       - **`fireblocks`** · `object`
 
-        Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.
+        Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. SDP rechecks the initiating principal on a minute schedule, prioritizing recorded access changes, and requests cancellation if access is lost before signing. Connection health checks do not trigger cancellation. Failed cancellation attempts retry at least five minutes apart while status checks continue. Queued work and provider delays can extend recovery latency. A cancellation request remains processing until Fireblocks confirms its outcome and can race execution. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.
 
         - **`transactionId`** · `string | null` · required
 
@@ -23830,7 +23819,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
       - **`fireblocks`** · `object`
 
-        Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.
+        Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. SDP rechecks the initiating principal on a minute schedule, prioritizing recorded access changes, and requests cancellation if access is lost before signing. Connection health checks do not trigger cancellation. Failed cancellation attempts retry at least five minutes apart while status checks continue. Queued work and provider delays can extend recovery latency. A cancellation request remains processing until Fireblocks confirms its outcome and can race execution. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.
 
         - **`transactionId`** · `string | null` · required
 
@@ -43341,13 +43330,22 @@ Treat the public docs as the source of truth over internal implementation detail
 ### Set up your workspace
 Source: https://platform.solana.com/docs/guides/setup-organization
 
-> Create your account and organization, which comes with a Sandbox and a Production project.
+> Create your account and organization in the Devnet sandbox, or on mainnet once SDP approves you.
 
 Everything you do in SDP belongs to an **organization**, your team's workspace. An organization holds **projects**, and each project has its own API keys, wallets, and members. This guide creates your account and organization.
 
+SDP runs in two places, each with its own accounts, organizations, and API keys:
+
+| | Dashboard | API | Network |
+| --- | --- | --- | --- |
+| Devnet sandbox | [platform-beta.solana.com](https://platform-beta.solana.com) | `https://api-beta.solana.com` | devnet, open to everyone |
+| Mainnet | [platform.solana.com](https://platform.solana.com/dashboard) | `https://api.solana.com` | mainnet, after SDP approves your organization |
+
+Start in the Devnet sandbox. Nothing there holds real value. Request mainnet when your integration works there; see [Go to mainnet](/docs/guides/go-to-mainnet).
+
 ### 1. Create your account
 
-Go to [platform.solana.com](https://platform.solana.com) and click **Create account**. The sign-in screen has the same button at the top right. When sign-up is closed, these buttons read **Join the waitlist** and **Request access** instead.
+Go to [platform-beta.solana.com](https://platform-beta.solana.com) and click **Create account**. The sign-in screen has the same button at the top right. On platform.solana.com, **Try the sandbox** leads to the same place.
 
 Enter your email address and a password to create your account.
 
@@ -43361,7 +43359,7 @@ To switch organizations or projects later, click your organization's name at the
 
 ### 3. Work in a project
 
-Your organization comes with two projects: **Default Sandbox Project** on devnet and **Default Production Project** on mainnet. Build in the sandbox project. Production can't move money until SDP approves your organization; see [Go to mainnet](/docs/guides/go-to-mainnet). To read projects with an API key, see the [Projects API reference](/docs/reference/api/projects).
+Your organization comes with **Default Sandbox Project** on devnet. Build there. The switcher's **Production** row opens platform.solana.com, where mainnet lives. To read projects with an API key, see the [Projects API reference](/docs/reference/api/projects).
 
 ### 4. Next steps
 
@@ -44435,7 +44433,7 @@ Every API route performs exactly one **action**, named `module.verb`, and a key 
 | `payment_requests` | `payment_requests.read`, `payment_requests.manage` | Payment requests and their payment links |
 | `counterparties` | `counterparties.read`, `counterparties.manage`, `counterparties.execute` | Counterparties, their accounts, and provider requirements |
 | `transactions` | `transactions.read` | The unified transaction list; each row also needs the read of its own module |
-| `recurring` | `recurring.read`, `recurring.manage`, `recurring.execute` | Recurring payments and their collection attempts; on beta, also subscription plans and subscriptions |
+| `recurring` | `recurring.read`, `recurring.manage`, `recurring.execute` | Recurring payments and their collection attempts; on experimental, also subscription plans and subscriptions |
 | `wallets` | `wallets.read`, `wallets.manage`, `wallets.execute` | Custody wallets and their balances |
 | `compliance` | `compliance.execute` | Address screening |
 | `projects` | `projects.read` | Projects and provider availability |
@@ -48034,6 +48032,17 @@ Send a [small payment](/docs/payments/send-basic-payment), then open
 
 Approve the matching transaction in Fireblocks. In **Transaction history**,
 confirm **COMPLETED**; SDP should show **Confirmed**.
+
+SDP rechecks the initiating member or API key every minute while approval is
+pending, prioritizing recorded access changes. Provider delays and queued work
+can extend this interval. If access is lost, SDP requests cancellation. Connection
+health checks do not trigger cancellation. Failed cancellation attempts retry at
+least five minutes apart while status checks continue.
+
+The payment stays **Processing** until Fireblocks confirms cancellation or
+execution. Cancellation can race signing; check the outcome before starting a
+replacement payment. During an incident, reject pending transfers directly in
+Fireblocks as well.
 
 ## Cancel a pending proposal
 

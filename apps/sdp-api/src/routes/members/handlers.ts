@@ -701,7 +701,7 @@ async function endMembership(
     change: Extract<MembershipChange, { kind: "remove" | "leave" }>;
   }
 ): Promise<{ memberId: string; userId: string; changed: boolean }> {
-  return new AuditService(getDb(c.env)).logWithin(c, async (tx) => {
+  const ended = await new AuditService(getDb(c.env)).logWithin(c, async (tx) => {
     const ended = await applyMembershipChange(tx, params);
     return {
       entry: ended.changed
@@ -721,6 +721,7 @@ async function endMembership(
       result: { memberId: ended.memberId, userId: ended.userId, changed: ended.changed },
     };
   });
+  return ended;
 }
 
 /**

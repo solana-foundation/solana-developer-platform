@@ -487,9 +487,13 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
     }
   );
 
-  it.each(["beta", "experimental"] as const)(
+  // Beta runs only Managed Fireblocks; BYOK setup stays on experimental.
+  it.each([
+    ["beta", []],
+    ["experimental", ["byok"]],
+  ] as const)(
     "advertises the actual Fireblocks BYOK stage to the dashboard in %s",
-    async (channel) => {
+    async (channel, modes) => {
       await setProviderOverrides({ custody: { fireblocks: true } });
       const availability = await readAvailability(
         "sandbox",
@@ -498,7 +502,7 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
       const fireblocks = availability.providers.find(
         (entry) => entry.family === "custody" && entry.provider === "fireblocks"
       );
-      expect(fireblocks).toMatchObject({ modes: ["byok"] });
+      expect(fireblocks).toMatchObject({ modes });
     }
   );
 

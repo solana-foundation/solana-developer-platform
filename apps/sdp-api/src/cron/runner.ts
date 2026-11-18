@@ -27,9 +27,11 @@ import { providerCredentialSecretCleanupCron } from "@/cron/provider-credential-
 import { rampDeliveriesCron } from "@/cron/ramp-deliveries";
 import { rampTransferStatusesCron } from "@/cron/ramp-transfer-statuses";
 import { rampTransfersCron } from "@/cron/ramp-transfers";
+import { custodyProposalsCron } from "@/cron/reconcile-custody-proposals";
 import { recurringPaymentsCron } from "@/cron/recurring-payments";
 import { ringsIndexingCron } from "@/cron/rings-indexing";
 import { secretRetirementsCron } from "@/cron/secret-retirements";
+import { slackDailyGrowthCron } from "@/cron/slack-daily-growth";
 import { sponsorshipBudgetsCron } from "@/cron/sponsorship-budgets";
 import { subscriptionAuthoritiesCron } from "@/cron/subscription-authorities";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
@@ -53,6 +55,7 @@ export interface CronHandle {
 /** Every Cron Definition the Worker runs. */
 export const CRON_DEFINITIONS: readonly CronDefinition[] = [
   pendingTransfersCron,
+  custodyProposalsCron,
   fireblocksProposalsCron,
   paymentRequestsHotCron,
   paymentRequestsCron,
@@ -76,6 +79,7 @@ export const CRON_DEFINITIONS: readonly CronDefinition[] = [
   earnCatalogueSyncCron,
   earnMetricsRefreshCron,
   adminAlertEmailsCron,
+  slackDailyGrowthCron,
 ];
 
 /**

@@ -61,7 +61,7 @@ export type SdpReleaseChannel = (typeof SDP_RELEASE_CHANNEL_NAMES)[number];
 export const SDP_MODULE_MATURITY = {
   payments: "stable",
   recurring_payments: "stable",
-  subscriptions: "beta",
+  subscriptions: "experimental",
   compliance: "experimental",
   issuance: "experimental",
   earn: "beta",
@@ -89,7 +89,7 @@ export const SDP_MANAGED_CUSTODY_PROVIDER_MATURITY = {
 
 export const SDP_BYOK_CUSTODY_PROVIDER_MATURITY = {
   privy: "stable",
-  fireblocks: "beta",
+  fireblocks: "experimental",
 } as const satisfies Record<ByokCustodyProvider, SdpReleaseChannel>;
 
 export type SdpRampProviderMaturity = Record<RampProviderId, SdpReleaseChannel>;

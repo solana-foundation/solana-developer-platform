@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.90.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.89.0...v0.90.0) (2026-11-18)
+
+### ⚠ BREAKING CHANGES
+
+* **api:** drop the batch options column ([#2849](https://github.com/solana-foundation/solana-developer-platform/pull/2849)) ([f19e47f](https://github.com/solana-foundation/solana-developer-platform/commit/f19e47f6daf41bccea324999327cf75683e14262))
+
+### Features
+
+* **payments:** isolate async custody proposal recovery ([#2865](https://github.com/solana-foundation/solana-developer-platform/pull/2865)) ([d23c61c](https://github.com/solana-foundation/solana-developer-platform/commit/d23c61c7e2c47f0d456800a9f5c50fd5dd11ebf1))
+* **web:** label the hosted sandbox Devnet instead of Beta ([#2901](https://github.com/solana-foundation/solana-developer-platform/pull/2901)) ([f5805e3](https://github.com/solana-foundation/solana-developer-platform/commit/f5805e3c7571aedb97bc40be1af13826bef3b4a7))
+* **release:** run only Earn at beta; subscriptions and Fireblocks BYOK to experimental ([#2885](https://github.com/solana-foundation/solana-developer-platform/pull/2885)) ([01a9bcb](https://github.com/solana-foundation/solana-developer-platform/commit/01a9bcb240d327df53d17a3a0995a5571a3c428d))
+* **api:** post mainnet access requests and a daily growth summary to Slack ([#2896](https://github.com/solana-foundation/solana-developer-platform/pull/2896)) ([8e849b2](https://github.com/solana-foundation/solana-developer-platform/commit/8e849b2a07bfe85d5af23f8087e4ca6e4b678d65))
+* **custody:** stabilize Fireblocks proposals and reconciliation ([#2887](https://github.com/solana-foundation/solana-developer-platform/pull/2887)) ([07c606e](https://github.com/solana-foundation/solana-developer-platform/commit/07c606eae17fca7543b9c6cdf6aa53966f4b4e62))
+* **web:** a mainnet-only deployment locks unapproved orgs and links the hosted sandbox ([#2878](https://github.com/solana-foundation/solana-developer-platform/pull/2878)) ([d96a698](https://github.com/solana-foundation/solana-developer-platform/commit/d96a6989e58d4f7e6a7ab686d05b24aa01435fad))
+* **api:** a deployment can serve mainnet only ([#2875](https://github.com/solana-foundation/solana-developer-platform/pull/2875)) ([edf7b8e](https://github.com/solana-foundation/solana-developer-platform/commit/edf7b8ecc946f61b054e12fb5379da2d167ec085))
+* **docs:** send account links to the docs' own dashboard ([#2879](https://github.com/solana-foundation/solana-developer-platform/pull/2879)) ([07ca6cd](https://github.com/solana-foundation/solana-developer-platform/commit/07ca6cd1748ee49179e0c5a24e37787e1eff5f6c))
+* **custody:** open every custody provider to all organizations ([#2868](https://github.com/solana-foundation/solana-developer-platform/pull/2868)) ([f611090](https://github.com/solana-foundation/solana-developer-platform/commit/f6110903801728b5e95a948418c18a493644f1fe))
+* **web:** ask for a Solana Foundation contact on mainnet requests ([#2872](https://github.com/solana-foundation/solana-developer-platform/pull/2872)) ([9bd9eb4](https://github.com/solana-foundation/solana-developer-platform/commit/9bd9eb44e954ba272dae2152425ba8470f49f016))
+* **payments:** persist initiating transfer principal ([#2864](https://github.com/solana-foundation/solana-developer-platform/pull/2864)) ([d86d9c3](https://github.com/solana-foundation/solana-developer-platform/commit/d86d9c3ec9550b5c8c69bb29ca31b02f82e18c32))
+
+### Bug Fixes
+
+* **api:** name the nested approval key in the mainnet request email ([#2899](https://github.com/solana-foundation/solana-developer-platform/pull/2899)) ([538b329](https://github.com/solana-foundation/solana-developer-platform/commit/538b329137040658bf8b9faab2d1ed2ae02998b7))
+* **web:** link beta's locked Production row to the mainnet host ([#2897](https://github.com/solana-foundation/solana-developer-platform/pull/2897)) ([68373d1](https://github.com/solana-foundation/solana-developer-platform/commit/68373d1581543eacc94838b65dfde3a334dcd917))
+* **web:** key earn program withdrawals on the shared action key, not … ([#2891](https://github.com/solana-foundation/solana-developer-platform/pull/2891)) ([b9c932d](https://github.com/solana-foundation/solana-developer-platform/commit/b9c932d92fa41ee4af7c09069874d71ecb86c5d7))
+* **web:** draw the Beta badge as the design system's filled chip ([#2883](https://github.com/solana-foundation/solana-developer-platform/pull/2883)) ([dbde7c1](https://github.com/solana-foundation/solana-developer-platform/commit/dbde7c13ef89b18ff20fe80b19a7ecac82cf97a2))
+* **web:** end an integration's status at the row edge when it has no chevron ([#2847](https://github.com/solana-foundation/solana-developer-platform/pull/2847)) ([d3f6b8f](https://github.com/solana-foundation/solana-developer-platform/commit/d3f6b8f6b47aac4dfc4bade5072d5ee2128f32cc))
+* **docs:** link a production build to its configured dashboard ([#2874](https://github.com/solana-foundation/solana-developer-platform/pull/2874)) ([fa8d80f](https://github.com/solana-foundation/solana-developer-platform/commit/fa8d80f2bbc73fdc9ec614ea4da1d4e12cf40f08))
+* **api:** boot a devnet-only deployment without a mainnet RPC pool ([#2869](https://github.com/solana-foundation/solana-developer-platform/pull/2869)) ([c3a6230](https://github.com/solana-foundation/solana-developer-platform/commit/c3a6230c7b334338fbb629c864dcb2a22199d057))
+* **api:** drop the batch options column ([#2849](https://github.com/solana-foundation/solana-developer-platform/pull/2849)) ([f19e47f](https://github.com/solana-foundation/solana-developer-platform/commit/f19e47f6daf41bccea324999327cf75683e14262))
+
+### Documentation
+
+* **web:** document the sandbox on platform-beta and mainnet on platform ([#2900](https://github.com/solana-foundation/solana-developer-platform/pull/2900)) ([eae8aa2](https://github.com/solana-foundation/solana-developer-platform/commit/eae8aa26ae3b282e5a24db41b359a2b4b281d6ca))
+* **ops:** move the beta cutover runbook out of the public repo ([#2893](https://github.com/solana-foundation/solana-developer-platform/pull/2893)) ([37681a6](https://github.com/solana-foundation/solana-developer-platform/commit/37681a6f318b5a34100774f7b1c20bbcf07fa2d0))
+
+### Refactors
+
+* **payments:** route Fireblocks transfers through the custody waist ([#2863](https://github.com/solana-foundation/solana-developer-platform/pull/2863)) ([f377433](https://github.com/solana-foundation/solana-developer-platform/commit/f3774339ec0b65ffab16252fc86c16e73081a4ff))
+
+### Maintenance
+
+* close four green-for-the-wrong-reason holes the hunt found ([#2890](https://github.com/solana-foundation/solana-developer-platform/pull/2890)) ([15141ef](https://github.com/solana-foundation/solana-developer-platform/commit/15141efdcb6f768cd7982a06ce1b908c65712143))
+* **web:** pin statusVariant by status instead of echoing the production tone map ([#2892](https://github.com/solana-foundation/solana-developer-platform/pull/2892)) ([bc8aadd](https://github.com/solana-foundation/solana-developer-platform/commit/bc8aadda5025d4402219324a135d9ced59357d6a))
+* **deploy:** deploy and smoke the beta host in its own GCP project ([#2712](https://github.com/solana-foundation/solana-developer-platform/pull/2712)) ([7e1753f](https://github.com/solana-foundation/solana-developer-platform/commit/7e1753fec1540efe85da13fb0a1cd7a8b6ac9765))
+* **web:** pace dashboard e2e under the API rate limit and pin the sign-in org ([#2881](https://github.com/solana-foundation/solana-developer-platform/pull/2881)) ([9285c5d](https://github.com/solana-foundation/solana-developer-platform/commit/9285c5d61149ca21afa932cf639d7bcfd00c8e56))
+* **api:** accept the shipped 0226 migration pair in the numbering test ([#2873](https://github.com/solana-foundation/solana-developer-platform/pull/2873)) ([d30a037](https://github.com/solana-foundation/solana-developer-platform/commit/d30a037502301ec057475dc2b4aa424f05faa69e))
+
 ## [0.89.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.88.0...v0.89.0) (2026-11-11)
 
 ### ⚠ BREAKING CHANGES

@@ -4,6 +4,7 @@ import type { TransactionSigner } from "@solana/kit";
 import type {
   CustodyProposalCanceller,
   CustodyProposalReader,
+  CustodyProposalRecovery,
   CustodyTransferProposer,
   TransferProposalIntent,
 } from "@/services/domain/signing/admitted-proposer";
@@ -68,6 +69,27 @@ export async function createOrgTransferProposalReader(
     projectId,
     custodyWalletId,
     binding
+  );
+}
+
+/**
+ * Resolve recovery capabilities for trusted worker use under the recorded principal. Admission
+ * is explicit so a refused movement can still request cancellation, never another submission.
+ */
+export async function createOrgTransferProposalRecovery<Module extends SdpModule = never>(
+  env: Env,
+  orgId: string,
+  projectId: string,
+  custodyWalletId: string,
+  binding: TransferProposalIntent & { sourceAddress: string | null },
+  movement: WaistMovement<Module>
+): Promise<CustodyProposalRecovery> {
+  return createSigningService(env).getTransferProposalRecoveryForWalletRecord(
+    orgId,
+    projectId,
+    custodyWalletId,
+    binding,
+    movement
   );
 }
 

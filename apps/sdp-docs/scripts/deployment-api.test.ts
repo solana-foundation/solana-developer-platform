@@ -26,17 +26,21 @@ async function loadDocs() {
 }
 
 describe("the samples' API", () => {
-  it("is this deployment's on a generated reference page, and only there", async () => {
+  it("is this deployment's on a generated reference page and in a guide", async () => {
     const { canonicalSite, compiled } = await loadDocs();
-    const reference = compiled("/repo/apps/sdp-docs/content/docs/reference/api/widgets/get.mdx");
-    assert.ok(reference.includes(`${DEPLOYMENT_API}/v1/widgets/wdg_1`));
-    assert.ok(!reference.includes(canonicalSite.apiUrl));
-    const guide = compiled("/repo/apps/sdp-docs/content/docs/guides/widgets.mdx");
-    assert.ok(guide.includes(`${canonicalSite.apiUrl}/v1/widgets/wdg_1`));
+    for (const path of [
+      "/repo/apps/sdp-docs/content/docs/reference/api/widgets/get.mdx",
+      "/repo/apps/sdp-docs/content/docs/guides/widgets.mdx",
+    ]) {
+      const page = compiled(path);
+      assert.ok(page.includes(`${DEPLOYMENT_API}/v1/widgets/wdg_1`), path);
+      assert.ok(!page.includes(canonicalSite.apiUrl), path);
+    }
   });
 
   it("stays canonical in the Markdown agents and the llms files get", async () => {
     const { expandDocsBlocks, sample } = await loadDocs();
     assert.equal(expandDocsBlocks(sample, "content/docs/reference/api/widgets/get.mdx"), sample);
+    assert.equal(expandDocsBlocks(sample, "content/docs/guides/widgets.mdx"), sample);
   });
 });

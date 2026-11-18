@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import type { ApiMethod } from "@sdp/api-catalog/reference";
+import type { ManagedCustodyProvider } from "@sdp/types/custody";
 import { embedSource } from "fumadocs-core/mdx-plugins/stringifier";
-import type { Parent, Root, RootContent } from "mdast";
+import type { Code, Parent, Root, RootContent } from "mdast";
 import remarkGfm from "remark-gfm";
 import remarkMdx from "remark-mdx";
 import remarkParse from "remark-parse";
@@ -33,7 +34,7 @@ import { apiUrl, canonicalSite } from "./site";
 
 /**
  * Generated blocks. A page about one module or provider carries `module:`,
- * `rampProvider:` or `custodyProvider:` frontmatter. A shared page instead
+ * `rampProvider:`, `custodyProvider:` or `byokCustodyProvider:` frontmatter. A shared page instead
  * places a block that lists what the build publishes:
  *
  * - `<ModuleTable />`: the modules, with what each does.
@@ -70,10 +71,25 @@ const publishedModules = (surface: PublicSurface): ModuleEntry[] =>
     (entry) => entry.module === "core" || isModulePublished(entry.module, surface)
   );
 
-const publishedCustodyProviders = (surface: PublicSurface): CustodyProviderEntry[] =>
-  Object.entries(DOCS_CUSTODY_PROVIDERS)
-    .filter(([provider]) => surface.custodyProviders.some((id) => id === provider))
-    .map(([, entry]) => entry);
+type CustodyCatalogRow = [ManagedCustodyProvider, CustodyProviderEntry];
+
+// Object.entries widens the catalog's keys to string; matching each against the
+// manifest's typed providers keeps the catalog's display order and the type.
+const publishedCustodyProviderEntries = (surface: PublicSurface): CustodyCatalogRow[] =>
+  Object.entries(DOCS_CUSTODY_PROVIDERS).flatMap(([key, entry]): CustodyCatalogRow[] => {
+    const provider = surface.custodyProviders.find((id) => id === key);
+    return provider && provider !== "local" ? [[provider, entry]] : [];
+  });
+
+/** A provider's guide when this build publishes it: a BYOK-only guide needs the channel's BYOK setup. */
+const publishedGuide = (
+  provider: ManagedCustodyProvider,
+  { guide }: CustodyProviderEntry,
+  surface: PublicSurface
+): CustodyProviderEntry["guide"] =>
+  guide && (guide.mode !== "byok" || surface.byokCustodyProviders.includes(provider))
+    ? guide
+    : undefined;
 
 const BLOCKS = {
   ModuleTable: (surface) =>
@@ -109,16 +125,20 @@ const BLOCKS = {
   CustodyProviderTable: (surface) =>
     table(
       ["Provider", "Description"],
-      publishedCustodyProviders(surface).map((entry) => [
-        entry.guide ? `**[${entry.name}](${entry.guide.href})**` : `**${entry.name}**`,
-        entry.description,
-      ])
+      publishedCustodyProviderEntries(surface).map(([provider, entry]) => {
+        const guide = publishedGuide(provider, entry, surface);
+        return [
+          guide ? `**[${entry.name}](${guide.href})**` : `**${entry.name}**`,
+          entry.description,
+        ];
+      })
     ),
   CustodyProviderGuides: (surface) =>
-    publishedCustodyProviders(surface)
-      .flatMap(({ guide }) =>
-        guide ? [`- [${guide.title}](${guide.href}): ${guide.description}`] : []
-      )
+    publishedCustodyProviderEntries(surface)
+      .flatMap(([provider, entry]) => {
+        const guide = publishedGuide(provider, entry, surface);
+        return guide ? [`- [${guide.title}](${guide.href}): ${guide.description}`] : [];
+      })
       .join("\n"),
   WalletCreateRetryTable: ({ walletCreateDedupe }) =>
     table(
@@ -447,14 +467,7 @@ export function remarkDocsBlocks(
           };
           return [child];
         }
-        if (child.type === "code" && earnPage && pagePublished) {
-          // Code identifiers are useful Earn queries too. Fumadocs keeps the
-          // enclosing heading, so a hit opens the correct stage or example.
-          child.data = {
-            ...child.data,
-            structuredData: { contents: [{ heading: undefined, content: child.value }] },
-          };
-        }
+        if (child.type === "code") prepareCode(child, earnPage && pagePublished);
         const referenceContent = referencePage ? referenceNodes(child, parent) : undefined;
         if (referenceContent !== undefined) return referenceContent;
         if ("children" in child) walk(child);
@@ -467,9 +480,8 @@ export function remarkDocsBlocks(
 
 /**
  * A generated reference page's node as the page shows it, where the Markdown agents get keeps the
- * node as it is: a field's facts with their separators set apart, a family table's method cell as
- * its badge, and code pointed at this deployment's API (`apiUrl`, from `NEXT_PUBLIC_SDP_API_URL`)
- * instead of the canonical one.
+ * node as it is: a field's facts with their separators set apart, and a family table's method cell
+ * as its badge.
  *
  * @param child - The node.
  * @param parent - The node that holds it.
@@ -486,11 +498,26 @@ function referenceNodes(child: RootContent, parent: Parent): RootContent[] | und
   ) {
     return [methodBadge(child.value)];
   }
-  if (child.type === "code") {
-    child.value = child.value.replaceAll(canonicalSite.apiUrl, apiUrl);
-    return [child];
-  }
   return undefined;
+}
+
+/**
+ * A code block as the page shows it: calling this deployment's API (beta docs show api-beta) where
+ * the Markdown agents get and the llms files keep the canonical host, and, on a published Earn
+ * page, searchable by its identifiers.
+ *
+ * @param code - The code block, changed in place.
+ * @param searchable - Whether search indexes the code (a published Earn page).
+ */
+function prepareCode(code: Code, searchable: boolean): void {
+  code.value = code.value.replaceAll(canonicalSite.apiUrl, apiUrl);
+  if (!searchable) return;
+  // Code identifiers are useful Earn queries too. Fumadocs keeps the enclosing heading, so a hit
+  // opens the correct stage or example.
+  code.data = {
+    ...code.data,
+    structuredData: { contents: [{ heading: undefined, content: code.value }] },
+  };
 }
 
 /** What separates a field's facts on a generated reference page (scripts/lib/api-reference-page.ts). */

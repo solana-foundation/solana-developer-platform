@@ -49,6 +49,11 @@
       "import": "./src/custody.ts",
       "default": "./src/custody.ts"
     },
+    "./custody-proposals": {
+      "types": "./src/custody-proposals.ts",
+      "import": "./src/custody-proposals.ts",
+      "default": "./src/custody-proposals.ts"
+    },
     "./dvp": {
       "types": "./src/dvp.ts",
       "import": "./src/dvp.ts",

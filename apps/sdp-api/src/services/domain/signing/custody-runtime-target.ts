@@ -10,6 +10,7 @@ import {
   type CustodyWalletPurpose,
   type CustodyWalletStatus,
   isByokCustodyProvider,
+  isProviderCredentialRevoked,
   type ProviderCredentialStatus,
 } from "@sdp/types/custody";
 import type { MovementId } from "@sdp/types/movements";
@@ -18,6 +19,7 @@ import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import type { Address, TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
 import type { DatabaseClient } from "@/db/client";
+import { currentDatabaseIdentity } from "@/db/identity";
 import { isCustodyWalletRequestRecorded } from "@/db/postgres-utils";
 import { AppError, conflict, internalError, notFound, providerUnavailable } from "@/lib/errors";
 import { isCustodyProviderAvailable } from "@/lib/feature-flags";
@@ -26,6 +28,7 @@ import {
   decideMovement,
   decideWalletPurpose,
   type MoneyAdmissionDecision,
+  MoneyMovementRefusedError,
   readMovementFactsWith,
 } from "@/lib/money-admission";
 import { getLogger } from "@/runtime/logger";
@@ -70,10 +73,13 @@ import {
   admittedTransferProposer,
   type CustodyProposalCanceller,
   type CustodyProposalReader,
+  type CustodyProposalRecovery,
   type CustodyTransferProposer,
   type ProposalAccess,
+  ProposalAdmissionRefusedError,
   proposalCanceller,
   proposalReader,
+  proposalRecovery,
   type TransferProposalIntent,
 } from "./admitted-proposer";
 import { privyWalletExternalId } from "./provider-wallet-lifecycle";
@@ -88,6 +94,7 @@ interface RuntimeWallet {
   walletId: string;
   publicKey: Address;
   purpose: CustodyWalletPurpose | null;
+  status: CustodyWalletStatus;
 }
 
 interface ConfigRuntimeTarget {
@@ -192,7 +199,7 @@ interface ConfigWalletRow extends ConfigRow {
   wallet_id: string;
   wallet_public_key: string;
   wallet_purpose: string | null;
-  wallet_status: string;
+  wallet_status: CustodyWalletStatus;
 }
 
 export interface CustodyConnectionRuntimeAvailabilityFacts {
@@ -255,10 +262,10 @@ function isConnectionOwnedWalletRow(
 interface ConnectionCredentialRow {
   connection_id: string;
   provider: string;
-  connection_status: string;
-  last_check_status: string | null;
+  connection_status: CustodyConnectionLifecycle;
+  last_check_status: CustodyConnectionCheckStatus | null;
   provider_credential_id: string;
-  credential_status: string;
+  credential_status: ProviderCredentialStatus;
   provider_account_fingerprint: string | null;
   request_delay_ms: number | null;
   credential_version: number;
@@ -838,6 +845,106 @@ export class CustodyRuntimeTargets {
   }
 
   /**
+   * Trusted-worker recovery does not admit during construction: a refused principal or disabled
+   * wallet must still be able to cancel an accepted proposal using its retained account binding.
+   */
+  async getTransferProposalRecoveryForWalletRecord(
+    organizationId: string,
+    projectId: string,
+    custodyWalletId: string,
+    binding: TransferProposalIntent & { sourceAddress: string | null },
+    movement: MovementId
+  ): Promise<CustodyProposalRecovery> {
+    const identity = currentDatabaseIdentity();
+    if (identity?.kind !== "system" || identity.component !== "cron:reconcile-custody-proposals") {
+      throw new AppError(
+        "INTERNAL_ERROR",
+        "Custody proposal recovery requires the recovery worker"
+      );
+    }
+    const retainedTarget = async () => {
+      const target = await this.resolveRetainedWalletRecord(
+        organizationId,
+        projectId,
+        custodyWalletId
+      );
+      if (!target) throw notFound("Custody wallet");
+      if (!isProposingTarget(target))
+        throw conflict("Fireblocks connection does not match the payment intent");
+      return target;
+    };
+    return proposalRecovery(
+      async () => this.loadProposalAccess(await retainedTarget(), binding),
+      binding,
+      async () => {
+        try {
+          const target = await this.resolveRetainedWalletRecord(
+            organizationId,
+            projectId,
+            custodyWalletId
+          );
+          if (!target)
+            throw new ProposalAdmissionRefusedError(
+              "custody_wallet_missing",
+              notFound("Custody wallet")
+            );
+          if (!isProposingTarget(target))
+            throw new ProposalAdmissionRefusedError(
+              "proposal_binding_changed",
+              conflict("Custody connection does not match the payment intent")
+            );
+          const credential = await this.loadConnectionCredential(target);
+          if (target.wallet.status !== "active" || credential?.connection_status === "deactivated")
+            throw new ProposalAdmissionRefusedError(
+              RUNTIME_EXECUTION_UNAVAILABLE_REASON,
+              conflict("Custody Connection is unavailable")
+            );
+          if (!credential || isProviderCredentialRevoked(credential.credential_status))
+            throw new ProposalAdmissionRefusedError(
+              "provider_credential_unavailable",
+              conflict("Custody Connection is unavailable")
+            );
+          if (!this.proposalBindingMatches(target, credential, binding))
+            throw new ProposalAdmissionRefusedError(
+              "proposal_binding_changed",
+              conflict("Custody connection does not match the payment intent")
+            );
+          const decide = await this.admitWalletRecord(target, {
+            organizationId,
+            projectId,
+            custodyWalletId,
+            movement,
+          });
+          assertMovementAdmitted(await decide(), {
+            surface: "signer",
+            movement,
+            organizationId,
+            projectId,
+            subjectId: custodyWalletId,
+          });
+          // Health checks and deployment gates do not revoke the recorded authority.
+          // Check them after live policy so a real revocation still cancels during an outage.
+          this.assertRuntimeExecutionAllowed(target, custodyWalletId);
+          if (!isUsableCredentialOwner(credential))
+            throw conflict("Custody Connection is unavailable", {
+              reason: RUNTIME_EXECUTION_UNAVAILABLE_REASON,
+            });
+        } catch (error) {
+          if (error instanceof MoneyMovementRefusedError)
+            throw new ProposalAdmissionRefusedError(error.reason, error);
+          if (
+            error instanceof AppError &&
+            error.code === "FORBIDDEN" &&
+            error.details?.reason === "provider_not_entitled"
+          )
+            throw new ProposalAdmissionRefusedError("provider_not_entitled", error);
+          throw error;
+        }
+      }
+    );
+  }
+
+  /**
    * Cancellation for a recorded proposal. Like the reader it skips admission and runtime
    * availability on purpose: disabling a Connection cannot unrequest a cancellation the provider
    * already accepted, so cleanup must keep reaching the proposal. The live Connection must still
@@ -932,12 +1039,7 @@ export class CustodyRuntimeTargets {
       throw conflict("Custody Connection is unavailable");
     if (!binding) {
       if (!isUsableCredentialOwner(row)) throw conflict("Custody Connection is unavailable");
-    } else if (
-      target.connectionId !== binding.connectionId ||
-      row.provider_account_fingerprint !== binding.accountFingerprint ||
-      target.wallet.walletId !== `fb_${binding.vaultAccountId}` ||
-      target.wallet.publicKey !== binding.sourceAddress
-    ) {
+    } else if (!this.proposalBindingMatches(target, row, binding)) {
       throw conflict("Fireblocks connection does not match the payment intent");
     }
     const secret = await this.readByokCredential(target, row);
@@ -951,6 +1053,19 @@ export class CustodyRuntimeTargets {
       accountFingerprint: row.provider_account_fingerprint,
       apiBaseUrl: this.env.FIREBLOCKS_API_BASE_URL,
     };
+  }
+
+  private proposalBindingMatches(
+    target: ConnectionRuntimeTarget & { wallet: RuntimeWallet },
+    credential: ConnectionCredentialRow,
+    binding: TransferProposalIntent & { sourceAddress: string | null }
+  ): boolean {
+    return (
+      target.connectionId === binding.connectionId &&
+      credential.provider_account_fingerprint === binding.accountFingerprint &&
+      target.wallet.walletId === `fb_${binding.vaultAccountId}` &&
+      target.wallet.publicKey === binding.sourceAddress
+    );
   }
 
   private async resolveConnection(
@@ -1193,6 +1308,8 @@ export class CustodyRuntimeTargets {
        JOIN provider_credentials pc
          ON pc.id = c.provider_credential_id
         AND pc.project_id = c.project_id
+        AND pc.organization_id = c.organization_id
+        AND pc.provider = c.provider
        WHERE c.id = ?
          AND c.organization_id = ?
          AND c.project_id = ?
@@ -1363,6 +1480,7 @@ export class CustodyRuntimeTargets {
         walletId: row.wallet_id,
         publicKey: row.wallet_public_key as Address,
         purpose: parseWalletPurpose(row.wallet_purpose),
+        status: row.wallet_status,
       },
       isRuntimeAvailable: row.status === "active" && row.wallet_status === "active",
     };
@@ -1457,6 +1575,7 @@ export class CustodyRuntimeTargets {
         walletId: row.wallet_id,
         publicKey: row.wallet_public_key as Address,
         purpose: parseWalletPurpose(row.wallet_purpose),
+        status: row.wallet_status,
       },
       isRuntimeAvailable: this.isConnectionRuntimeAvailable(row) && row.wallet_status === "active",
     };

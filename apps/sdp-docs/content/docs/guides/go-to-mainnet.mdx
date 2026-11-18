@@ -5,17 +5,18 @@ icon: Rocket
 breadcrumbParent: /docs
 ---
 
-You start with a Sandbox project on devnet. The SDP team must approve your
-organization before enabling Production on mainnet.
+You build in the Devnet sandbox at platform-beta.solana.com. Mainnet runs on
+[platform.solana.com](https://platform.solana.com/dashboard), with its own
+accounts, organizations, and API keys. The SDP team must approve your
+organization there before it can use mainnet.
 
 ## 1. Request mainnet access
 
-Sign in to the [dashboard](https://platform.solana.com/dashboard) as an
-**organization admin**. Open the account menu at the bottom of the sidebar, then
-**Settings**. Under **Mainnet**, click **Request mainnet access…**. If the
-section is missing, ask an admin to submit.
-
-[![The Mainnet section in organization settings, with Request mainnet access… and the status Sandbox only](/images/go-to-mainnet/01-request-access.png)](/docs/images/go-to-mainnet/01-request-access.png)
+On platform.solana.com, click **Create account** and create your organization,
+as you did in the sandbox; see [Set up your workspace](/docs/guides/setup-organization).
+Until SDP approves it, the organization opens on a page that says it isn't on
+mainnet yet. An **organization admin** clicks **Request mainnet access** there;
+anyone else asks an admin.
 
 Select your organization's registered **Country or region** and click
 **Continue**. Contact the SDP team to change it after submission.
@@ -30,32 +31,20 @@ reads both when it reviews your request.
 [![The About you step, with Yes selected for a Solana Foundation contact and a short description of what the organization is building](/images/go-to-mainnet/02b-about-you.png)](/docs/images/go-to-mainnet/02b-about-you.png)
 
 Read the **Terms and Conditions** to the end, accept them on your organization's
-behalf, and click **Send request**. **Request sent** confirms submission;
-Settings shows **In review** until approval.
+behalf, and click **Send request**. **Request sent** confirms submission; the
+page says the request is in review until approval.
 
 [![Request sent confirmation, with SDP review still pending](/images/go-to-mainnet/request-sent.png)](/docs/images/go-to-mainnet/request-sent.png)
 
 If you see **Request not sent**, click **Send request again**; your details are
 saved. If requests aren't open, contact the SDP team.
 
-## 2. Switch to Production
+## 2. Open your production project
 
-After approval, refresh **Settings**. When **Mainnet** shows **On**,
-click your organization's name at the top of the sidebar and select your
-production project (by default, **Default Production Project**).
-
-<a href="/docs/images/go-to-mainnet/03-production-project.png">
-  <img
-    src="/docs/images/go-to-mainnet/03-production-project.png"
-    alt="The workspace switcher showing Default Production Project"
-    width="330"
-    height="342"
-    style={{ maxWidth: "100%", height: "auto" }}
-  />
-</a>
-
-Production uses `mainnet-beta`. Wallets, provider connections, and API keys are
-separate from Sandbox and must be set up again.
+SDP emails you once mainnet is on. Sign in to platform.solana.com again: the
+dashboard opens your production project (by default, **Default Production
+Project**) on `mainnet-beta`. Wallets, provider connections, and API keys from
+the sandbox don't carry over; set them up again here.
 
 ## 3. Connect your custody provider account
 
@@ -83,8 +72,8 @@ the summary. Click **Create key**.
 [![API key review showing Production, selected permissions, and the Treasury wallet](/images/go-to-mainnet/05-production-api-key.png)](/docs/images/go-to-mainnet/05-production-api-key.png)
 
 Copy the key to your secret manager; it's shown once. Replace your backend's
-sandbox key. The API URL stays `https://api.solana.com`; the key's project
-determines the network. See
+sandbox key, and point it at `https://api.solana.com` instead of
+`https://api-beta.solana.com`. See
 [API key grants and wallet access](/docs/developing-with-sdp/manage-api-keys).
 
 ## 5. Fund your wallet with mainnet USDC
