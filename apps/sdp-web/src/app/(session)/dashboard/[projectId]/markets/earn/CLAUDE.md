@@ -368,9 +368,15 @@ nothing else; the program create still sends the body `requestId` form.
   detail through terminal state. An expired request exposes an idempotent cancel
   action that recovers escrowed shares; closing the create modal never hides it.
 - `earn-vault-withdraw-tracking.ts` — the withdrawal idempotency-key store
-  (fingerprint: project, position, shares, minAmountOut — the derived exit
-  floor is in there for the same reason the deposit's is) under its own
-  versioned `sessionStorage` key.
+  (fingerprint: project, position, the TYPED quantity — the dollar amount an
+  atomic exit starts from, the shares a provider order starts from — and the
+  user's tolerance; the DERIVED share intent and the derived exit floor move
+  with the live positions polls and live quotes, so neither is in the
+  fingerprint, and each is remembered beside the key instead —
+  `rememberVaultWithdrawalShares` / `rememberVaultWithdrawalFloor` — to be
+  replayed verbatim for a kept key, because the API's own idempotency
+  fingerprint pins both `shares` and `minAmountOut`) under its own versioned
+  `sessionStorage` key.
 - `earn-vault-slippage.ts` — the slippage-floor machinery BOTH vault modals
   share: `parseSlippageToleranceBps`, `floorForTolerance` (BigInt at the quoted
   mint's scale, floored, one-atom minimum; a quote FINER than that scale is a
@@ -384,9 +390,11 @@ nothing else; the program create still sends the body `requestId` form.
   DISABLES the action rather than guessing. Quotes EXPIRE (PRO-1691): past
   `VAULT_QUOTE_TTL_MS` the hook re-quotes on its own, silently in place (the
   standing quote stays on screen and swaps when the fresh one lands — never a
-  loading flicker or a disarmed confirm), and the deposit modal's
+  loading flicker or a disarmed confirm), and each modal's
   `floorSafeToSubmit` additionally refuses to SUBMIT a floor whose quote aged
-  past the TTL without re-quoting first: still satisfiable proceeds with the
+  past the TTL without re-quoting first (the shared `revalidateExpiredFloor`
+  is the read half; the withdrawal passes its own preview read and its
+  `assetsOut`): still satisfiable proceeds with the
   floor the user reviewed, a rate beyond it stops client-side through the
   blown-floor copy and control. Replayed floors bypass the check — a replay must
   carry the floor its key was minted with, verbatim. The floor POLICY (whether

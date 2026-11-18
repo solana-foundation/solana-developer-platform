@@ -49,10 +49,13 @@ import {
   derivedMinOut,
   floorToReplay,
   initialSlippageInput,
+  isExpiredQuote,
   isSlippageExceededRefusal,
   parseSlippageToleranceState,
   quoteForKey,
+  revalidateExpiredFloor,
   useDebouncedVaultQuote,
+  type VaultFloorReplay,
   type VaultQuoteState,
 } from "./earn-vault-slippage";
 import { VaultQuoteNotices, VaultSlippageSection } from "./earn-vault-slippage-section";
@@ -74,8 +77,11 @@ import {
 } from "./earn-vault-withdraw-amount";
 import {
   forgetVaultWithdrawalFloor,
+  forgetVaultWithdrawalShares,
   recallVaultWithdrawalFloor,
+  recallVaultWithdrawalShares,
   rememberVaultWithdrawalFloor,
+  rememberVaultWithdrawalShares,
   vaultWithdrawalIdempotencyKeyStore,
   vaultWithdrawalRequestFingerprint,
 } from "./earn-vault-withdraw-tracking";
@@ -128,6 +134,26 @@ type WithdrawalOutcome = {
 type WithdrawalSubmissionResolution =
   | { kind: "error"; message: string; slippageExceeded?: true }
   | { kind: "outcome"; outcome: WithdrawalOutcome; withdrawn?: EarnVaultWithdrawal };
+
+/**
+ * The share intent a submission sends, decided once from the key resolution:
+ * a provider order's intent is its typed input itself; a FRESH atomic key
+ * sends the live derivation; a KEPT atomic key replays the MINTED intent from
+ * the shares memo — the API's fingerprint pins `shares`, so a fresh
+ * re-derivation from a moved live position would be a changed request under a
+ * live key. `undefined` for a reuse whose memo lost the intent: the caller
+ * stops, submitting nothing, rather than pair the live key with a guess.
+ */
+function sharesForSubmission(
+  settlement: EarnVaultWithdrawalSettlement,
+  reused: boolean,
+  quantity: string,
+  derivedShares: string | undefined,
+  fingerprint: string
+): string | undefined {
+  if (settlement === "provider_order") return quantity;
+  return reused ? (recallVaultWithdrawalShares(fingerprint) ?? undefined) : derivedShares;
+}
 
 function resolveWithdrawalSubmission(
   result: Awaited<ReturnType<typeof createEarnVaultWithdrawal>>,
@@ -853,26 +879,78 @@ export function EarnVaultWithdrawModal({
   );
   const submitBlocked = continueBlocked || (slippagePolicy !== null && minAmountOut === undefined);
 
-  async function submitResolvedIntent(controller: AbortController, shares: string, amount: string) {
+  /**
+   * EXPIRY BACKSTOP (PRO-1691), the state half. The quote hook re-quotes on
+   * its own, but timers throttle in background tabs, so the floor on screen
+   * can be older than the TTL at submit. A replayed floor — a kept key's
+   * minted floor, which must go out verbatim — or a fresh one passes straight
+   * through. An expired one is revalidated first; a rate that moved beyond it
+   * stops the submission on THIS side of the API, through the same copy and
+   * control as a blown floor, and either way the displayed quote re-syncs.
+   * Returns whether to proceed.
+   */
+  async function floorSafeToSubmit(
+    controller: AbortController,
+    shares: string,
+    replay: VaultFloorReplay,
+    floor: string | null
+  ): Promise<boolean> {
+    if (replay.kind !== "fresh" || floor === null || !isExpiredQuote(quote)) return true;
+    const verdict = await revalidateExpiredFloor(
+      (signal) => fetchEarnVaultWithdrawalPreview({ positionId: position.id, shares }, signal),
+      (preview) => preview.assetsOut,
+      floor,
+      controller.signal
+    );
+    if (verdict === "still_satisfiable") return true;
+    if (verdict === "aborted") return false;
+    if (verdict === "floor_exceeded") setSlippageOpen(true);
+    setQuoteRefreshKey((refresh) => refresh + 1);
+    setSubmitError(
+      verdict === "floor_exceeded"
+        ? t("DashboardEarn.vaultWithdraw.slippageExceeded")
+        : t("DashboardEarn.vaultWithdraw.quoteUnavailable")
+    );
+    return false;
+  }
+
+  async function submitResolvedIntent(controller: AbortController, quantity: string) {
+    // Keyed by the user's TYPED quantity, never the derived share intent:
+    // the atomic exit derives its shares from the live position value, which
+    // the positions polls keep moving — a fingerprint on them drifts under a
+    // kept key, the retry misses it and mints a SECOND key whose submit can
+    // exit again while the first attempt may already have executed. The
+    // tracking module documents the fingerprint's other terms.
     const fingerprint = vaultWithdrawalRequestFingerprint({
       projectId,
       positionId: position.id,
-      shares,
+      quantity,
       toleranceBps: slippagePolicy === null ? null : slippageBps,
       redemptionMode,
     });
     const reused = vaultWithdrawalIdempotencyKeyStore.has(fingerprint);
 
     // A KEPT key — one an earlier attempt left unretired (a lost answer, a 5xx,
-    // a refusal that settled nothing) — must replay the floor it was MINTED
-    // with, verbatim — the deposit modal documents why. A changed floor under
-    // the key is a 422, which retires the key and lets the next submit mint a
-    // fresh one while the first attempt may already have exited. The floor
-    // memo answers for it. A fresh key takes
-    // the freshly derived floor, and records it for exactly that future replay.
-    // A reuse whose memo LOST the floor cannot re-floor safely at all — it
-    // stops here, submitting nothing, rather than pair the live key with a
-    // changed request.
+    // a refusal that settled nothing) — must replay the request it was MINTED
+    // with, verbatim: the API's own idempotency fingerprint includes both
+    // `shares` and the floor, and a changed body under the key is a 422, which
+    // retires the key and lets the next submit mint a fresh one while the
+    // first attempt may already have exited. Two memos answer for it. The
+    // floor memo is the deposit modal's, documented there. The SHARES memo
+    // exists because a fresh atomic derivation would silently re-derive the
+    // share intent from a MOVED live position — the fingerprint now keys on
+    // the typed quantity, so the kept key is found and the minted shares must
+    // be remembered (`rememberVaultWithdrawalShares`) and replayed. A provider
+    // order's shares are its typed input itself. A reuse whose memos LOST
+    // either value cannot resubmit safely at all — it stops here, submitting
+    // nothing, rather than pair the live key with a changed request.
+    const shares = sharesForSubmission(settlement, reused, quantity, sharesToRedeem, fingerprint);
+    if (shares === undefined) {
+      // Reachable only on a reuse whose shares memo was lost — submit() gates
+      // the fresh path. The same posture as a lost floor below.
+      setSubmitError(t("DashboardEarn.vaultWithdraw.floorUnavailable"));
+      return;
+    }
     const replay = floorToReplay(
       { reused },
       recallVaultWithdrawalFloor,
@@ -883,7 +961,9 @@ export function EarnVaultWithdrawModal({
       setSubmitError(t("DashboardEarn.vaultWithdraw.floorUnavailable"));
       return;
     }
+    if (!(await floorSafeToSubmit(controller, shares, replay, replay.floor))) return;
     rememberVaultWithdrawalFloor(fingerprint, replay.floor);
+    rememberVaultWithdrawalShares(fingerprint, shares);
 
     // No abort signal on the value-moving POST — see the deposit modal.
     const submittedAt = Date.now();
@@ -915,9 +995,12 @@ export function EarnVaultWithdrawModal({
     // found under this key: the retry is a new request (see the deposit modal).
     const slippageRefused = !result.ok && isSlippageExceededRefusal(result.body);
     if (slippageRefused) vaultWithdrawalIdempotencyKeyStore.release(fingerprint, key);
-    // A retired key can never be replayed, so its remembered floor is dead
-    // weight the next fresh derivation must not inherit.
-    if (retired || slippageRefused) forgetVaultWithdrawalFloor(fingerprint);
+    // A retired key can never be replayed, so its remembered floor and shares
+    // are dead weight the next fresh derivation must not inherit.
+    if (retired || slippageRefused) {
+      forgetVaultWithdrawalFloor(fingerprint);
+      forgetVaultWithdrawalShares(fingerprint);
+    }
     if (controller.signal.aborted) return;
     const resolution = resolveWithdrawalSubmission(
       result,
@@ -939,7 +1022,7 @@ export function EarnVaultWithdrawModal({
     setOutcome(resolution.outcome);
     if (resolution.withdrawn) {
       onWithdrawn?.(resolution.withdrawn, {
-        amount,
+        amount: quantity,
         submittedAt,
       });
     }
@@ -964,7 +1047,7 @@ export function EarnVaultWithdrawModal({
     setSubmitError(null);
 
     try {
-      await submitResolvedIntent(controller, sharesToRedeem, amountValidation.canonicalAmount);
+      await submitResolvedIntent(controller, amountValidation.canonicalAmount);
     } catch (cause) {
       if (!controller.signal.aborted) {
         setSubmitError(

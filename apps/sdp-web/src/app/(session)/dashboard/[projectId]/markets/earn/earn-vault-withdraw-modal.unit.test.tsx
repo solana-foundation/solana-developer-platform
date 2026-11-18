@@ -5,9 +5,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EnglishTestI18n } from "@/app/(session)/dashboard/[projectId]/markets/test-i18n";
-import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
-import { VAULT_QUOTE_DEBOUNCE_MS } from "./earn-vault-slippage";
+import { VAULT_QUOTE_DEBOUNCE_MS, VAULT_QUOTE_TTL_MS } from "./earn-vault-slippage";
 import { EarnVaultWithdrawModal } from "./earn-vault-withdraw-modal";
+import { resetVaultWithdrawalTrackingStateForTests } from "./earn-vault-withdraw-tracking";
 
 const mocks = vi.hoisted(() => ({
   createEarnVaultWithdrawal: vi.fn(),
@@ -79,7 +79,7 @@ function renderModal(
 
 beforeEach(() => {
   sessionStorage.clear();
-  resetIdempotencyKeyStoresForTests();
+  resetVaultWithdrawalTrackingStateForTests();
   vi.clearAllMocks();
   // Kamino declares no exit floor policy, so most tests never quote; the veda
   // suite overrides this with a real quote.
@@ -461,7 +461,7 @@ describe("exit slippage floors (quote-derived)", () => {
     });
   }
 
-  async function enterVedaShares(shares = "5") {
+  async function armVedaShares(shares = "5") {
     screen.getByRole("dialog");
     fireEvent.change(screen.getByLabelText("Amount"), { target: { value: shares } });
     await advancePastQuoteDebounce();
@@ -472,8 +472,19 @@ describe("exit slippage floors (quote-derived)", () => {
     // The floor waits on the debounced live quote; the summary row appearing is
     // the signal that confirm is armed with a quote-derived floor.
     expect(screen.getByText("Minimum received")).toBeTruthy();
+  }
+
+  async function enterVedaShares(shares = "5") {
+    await armVedaShares(shares);
     vi.useRealTimers();
     fireEvent.click(screen.getByRole("button", { name: "Confirm withdrawal" }));
+  }
+
+  /** Flush the submit's promise chain without moving any timer. */
+  async function flushSubmission() {
+    await act(async () => {
+      for (let step = 0; step < 25; step += 1) await Promise.resolve();
+    });
   }
 
   it("derives the exit floor from the LIVE quote and sends it with the withdrawal", async () => {
@@ -656,6 +667,186 @@ describe("exit slippage floors (quote-derived)", () => {
     await vi.waitFor(() => {
       expect(screen.getByRole("alert").textContent).toMatch(/could not confirm the exact terms/);
     });
+  });
+
+  it("replays a kept key's minted shares when the live position value moved under it", async () => {
+    mocks.fetchEarnVaultWithdrawalPreview.mockResolvedValue({
+      kind: "quoted",
+      preview: {
+        positionId: vedaPosition.id,
+        assetsOut: "4.997",
+        assetDecimals: 6,
+        blockingIssues: [],
+      },
+    });
+    // A 5xx is the ambiguous case: the API may have recorded and broadcast the
+    // exit, and the key stays live in the store either way.
+    mocks.createEarnVaultWithdrawal
+      .mockResolvedValueOnce({
+        ok: false,
+        error: "Bad gateway",
+        status: 503,
+        body: null,
+      })
+      .mockResolvedValue({
+        ok: true,
+        status: 200,
+        data: { kind: "submitted", withdrawal: withdrawal("submitted") },
+      });
+
+    const first = renderModal(vi.fn(), vedaPosition);
+    await enterVedaShares("5");
+    await vi.waitFor(() => expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(1));
+    first.unmount();
+
+    // The positions polls re-read the live value between the arms: the same
+    // typed $5 now DERIVES a different share intent (4, not 5). A fingerprint
+    // on the derived shares would miss the held key here and mint a SECOND
+    // one — whose submit can exit again while the first attempt may already
+    // have executed. Keyed on the typed dollars, the retry finds the key and
+    // replays the minted shares verbatim.
+    vi.useFakeTimers();
+    renderModal(vi.fn(), { ...vedaPosition, tokenValue: "12.5" });
+    await enterVedaShares("5");
+
+    expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(2);
+    expect(mocks.createEarnVaultWithdrawal.mock.calls[1][0]).toMatchObject({
+      shares: "5",
+      minAmountOut: "4.992003",
+    });
+    expect(mocks.createEarnVaultWithdrawal.mock.calls[1][1]).toBe(
+      mocks.createEarnVaultWithdrawal.mock.calls[0][1]
+    );
+  });
+
+  it("stops a reused key whose minted shares memo was lost: error copy, no POST", async () => {
+    mocks.fetchEarnVaultWithdrawalPreview.mockResolvedValue({
+      kind: "quoted",
+      preview: {
+        positionId: vedaPosition.id,
+        assetsOut: "4.997",
+        assetDecimals: 6,
+        blockingIssues: [],
+      },
+    });
+    mocks.createEarnVaultWithdrawal.mockResolvedValueOnce({
+      ok: false,
+      error: "Bad gateway",
+      status: 503,
+      body: null,
+    });
+
+    const first = renderModal(vi.fn(), vedaPosition);
+    await enterVedaShares("5");
+    await vi.waitFor(() => expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(1));
+    first.unmount();
+
+    // The shares memo is stored separately from the key store, so a refused
+    // or evicted write can lose a live key's share intent. The retry must NOT
+    // go out under a freshly derived intent — the API's fingerprint pins
+    // `shares`, its refusal retires the key, and the next submit can exit a
+    // second time. The submission stops with its own words instead.
+    sessionStorage.removeItem("sdp:earn:vault-withdrawal:shares:v1");
+
+    vi.useFakeTimers();
+    renderModal(vi.fn(), vedaPosition);
+    await enterVedaShares("5");
+
+    expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toMatch(/could not confirm the exact terms/);
+    });
+  });
+
+  it("re-quotes an exit floor older than the TTL at submit, then sends the reviewed floor", async () => {
+    mocks.fetchEarnVaultWithdrawalPreview
+      .mockResolvedValueOnce({
+        kind: "quoted",
+        preview: {
+          positionId: vedaPosition.id,
+          assetsOut: "4.997",
+          assetDecimals: 6,
+          blockingIssues: [],
+        },
+      })
+      .mockResolvedValueOnce({
+        kind: "quoted",
+        preview: {
+          positionId: vedaPosition.id,
+          assetsOut: "4.9975",
+          assetDecimals: 6,
+          blockingIssues: [],
+        },
+      });
+    mocks.createEarnVaultWithdrawal.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { kind: "submitted", withdrawal: withdrawal("submitted") },
+    });
+    renderModal(vi.fn(), vedaPosition);
+    await armVedaShares("5");
+    // The clock passes the TTL without the auto-refresh timer firing — the
+    // throttled-background-tab case the submit-time check exists for.
+    vi.setSystemTime(Date.now() + VAULT_QUOTE_TTL_MS + 1000);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm withdrawal" }));
+    await flushSubmission();
+
+    // The fresh check ran, BEFORE the money moved…
+    expect(mocks.fetchEarnVaultWithdrawalPreview).toHaveBeenCalledTimes(2);
+    expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchEarnVaultWithdrawalPreview.mock.invocationCallOrder[1]).toBeLessThan(
+      mocks.createEarnVaultWithdrawal.mock.invocationCallOrder[0]
+    );
+    // …and the floor sent is the one the user REVIEWED, freshly revalidated:
+    // the still-satisfiable 4.992003, never a weaker floor off the 4.9975 rate.
+    expect(mocks.createEarnVaultWithdrawal.mock.calls[0][0]).toEqual({
+      positionId: vedaPosition.id,
+      shares: "5",
+      minAmountOut: "4.992003",
+    });
+    expect(screen.getByText("Withdrawal submitted")).toBeTruthy();
+  });
+
+  it("stops a stale submit whose fresh rate broke the exit floor: slippage copy, no POST", async () => {
+    mocks.fetchEarnVaultWithdrawalPreview
+      .mockResolvedValueOnce({
+        kind: "quoted",
+        preview: {
+          positionId: vedaPosition.id,
+          assetsOut: "4.997",
+          assetDecimals: 6,
+          blockingIssues: [],
+        },
+      })
+      .mockResolvedValue({
+        kind: "quoted",
+        preview: {
+          positionId: vedaPosition.id,
+          assetsOut: "2.5",
+          assetDecimals: 6,
+          blockingIssues: [],
+        },
+      });
+    renderModal(vi.fn(), vedaPosition);
+    await armVedaShares("5");
+    vi.setSystemTime(Date.now() + VAULT_QUOTE_TTL_MS + 1000);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm withdrawal" }));
+    await flushSubmission();
+
+    // The rate moved beyond the chosen tolerance while the quote sat stale:
+    // friction lands HERE, before submit, never as a server refusal after.
+    expect(mocks.createEarnVaultWithdrawal).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toMatch(/Increase the tolerance below/);
+    expect(
+      (screen.getByLabelText("Slippage tolerance (basis points)") as HTMLInputElement).value
+    ).toBe("10");
+    // The displayed quote re-syncs so the retry reviews the fresh floor.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(mocks.fetchEarnVaultWithdrawalPreview.mock.calls.length).toBeGreaterThanOrEqual(3);
+    // 2.5 quoted × (1 − 10 bps), shown to the stablecoin's cent.
+    expect(screen.getByText("$2.50")).toBeTruthy();
   });
 
   it("sends no floor and never quotes for a provider with no declared policy", async () => {

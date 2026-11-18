@@ -11,13 +11,24 @@ import {
 } from "./earn-vault-deposit-tracking";
 import {
   forgetVaultWithdrawalFloor,
+  forgetVaultWithdrawalShares,
   recallVaultWithdrawalFloor,
+  recallVaultWithdrawalShares,
   rememberVaultWithdrawalFloor,
+  rememberVaultWithdrawalShares,
+  resetVaultWithdrawalTrackingStateForTests,
   vaultWithdrawalIdempotencyKeyStore,
   vaultWithdrawalRequestFingerprint,
 } from "./earn-vault-withdraw-tracking";
 
 const IDEMPOTENCY_STORE_KEY = "sdp:earn:vault-deposit:idempotency:v1";
+
+const withdrawalRequest = {
+  projectId: "prj_1",
+  positionId: "pos_1",
+  quantity: "1",
+  toleranceBps: null as number | null,
+};
 
 const request = {
   projectId: "prj_1",
@@ -32,6 +43,7 @@ let nextUuid = 0;
 beforeEach(() => {
   sessionStorage.clear();
   resetVaultDepositTrackingStateForTests();
+  resetVaultWithdrawalTrackingStateForTests();
   nextUuid = 0;
   vi.spyOn(globalThis.crypto, "randomUUID").mockImplementation(() => {
     nextUuid += 1;
@@ -267,12 +279,7 @@ describe("the floor memo", () => {
   });
 
   it("keeps a newer withdrawal key's floor on the same rule", () => {
-    const exit = vaultWithdrawalRequestFingerprint({
-      projectId: "prj_1",
-      positionId: "pos_1",
-      shares: "1",
-      toleranceBps: 10,
-    });
+    const exit = vaultWithdrawalRequestFingerprint({ ...withdrawalRequest, toleranceBps: 10 });
     const first = vaultWithdrawalIdempotencyKeyStore.claim(exit).key;
     vaultWithdrawalIdempotencyKeyStore.release(exit, first);
     rememberVaultWithdrawalFloor(exit, "0.8");
@@ -293,5 +300,77 @@ describe("the floor memo", () => {
     });
     rememberVaultDepositFloor(fingerprint, "1.5");
     expect(recallVaultDepositFloor(fingerprint)).toBe("1.5");
+  });
+});
+
+describe("vaultWithdrawalRequestFingerprint", () => {
+  it("separates a retry from a different withdrawal", () => {
+    const base = vaultWithdrawalRequestFingerprint(withdrawalRequest);
+
+    expect(vaultWithdrawalRequestFingerprint({ ...withdrawalRequest })).toBe(base);
+    for (const different of [
+      { ...withdrawalRequest, projectId: "prj_2" },
+      { ...withdrawalRequest, projectId: null },
+      { ...withdrawalRequest, positionId: "pos_2" },
+      // The TYPED quantity, not the derived share intent: the atomic exit
+      // derives shares from a live position value the polls keep moving, and
+      // a fingerprint on them drifts under a kept key.
+      { ...withdrawalRequest, quantity: "2" },
+      { ...withdrawalRequest, toleranceBps: 50 },
+    ]) {
+      expect(vaultWithdrawalRequestFingerprint(different)).not.toBe(base);
+    }
+  });
+
+  it("keeps an instant redemption's fingerprint apart from the standard route", () => {
+    const standard = vaultWithdrawalRequestFingerprint(withdrawalRequest);
+
+    expect(
+      vaultWithdrawalRequestFingerprint({ ...withdrawalRequest, redemptionMode: "instant" })
+    ).not.toBe(standard);
+    expect(
+      vaultWithdrawalRequestFingerprint({ ...withdrawalRequest, redemptionMode: "instant" })
+    ).toBe(vaultWithdrawalRequestFingerprint({ ...withdrawalRequest, redemptionMode: "instant" }));
+  });
+});
+
+describe("the withdrawal shares memo", () => {
+  const fingerprint = vaultWithdrawalRequestFingerprint({ ...withdrawalRequest, quantity: "5" });
+
+  it("replays the share intent a key was minted with, across a reload", () => {
+    rememberVaultWithdrawalShares(fingerprint, "5");
+    // A reload is exactly this: every in-memory reference is gone and a fresh
+    // derivation would re-derive DIFFERENT shares off the moved live position
+    // value — a changed body the API's fingerprint refuses under the held key.
+    expect(recallVaultWithdrawalShares(fingerprint)).toBe("5");
+  });
+
+  it("forgets a retired key's shares and keeps a live key's", () => {
+    const key = vaultWithdrawalIdempotencyKeyStore.claim(fingerprint).key;
+    rememberVaultWithdrawalShares(fingerprint, "5");
+    // A kept key's shares are never erased: a late answer to an earlier
+    // attempt, or one from another tab, must not unrecord what a live replay
+    // will need.
+    forgetVaultWithdrawalShares(fingerprint);
+    expect(recallVaultWithdrawalShares(fingerprint)).toBe("5");
+
+    vaultWithdrawalIdempotencyKeyStore.release(fingerprint, key);
+    forgetVaultWithdrawalShares(fingerprint);
+    expect(recallVaultWithdrawalShares(fingerprint)).toBeUndefined();
+  });
+
+  it("keeps a newer key's shares when a late answer settles an earlier attempt", () => {
+    const first = vaultWithdrawalIdempotencyKeyStore.claim(fingerprint).key;
+    rememberVaultWithdrawalShares(fingerprint, "5");
+    vaultWithdrawalIdempotencyKeyStore.release(fingerprint, first);
+    forgetVaultWithdrawalShares(fingerprint);
+    rememberVaultWithdrawalShares(fingerprint, "4");
+    vaultWithdrawalIdempotencyKeyStore.claim(fingerprint);
+
+    // The first attempt's late answer.
+    vaultWithdrawalIdempotencyKeyStore.release(fingerprint, first);
+    forgetVaultWithdrawalShares(fingerprint);
+
+    expect(recallVaultWithdrawalShares(fingerprint)).toBe("4");
   });
 });
