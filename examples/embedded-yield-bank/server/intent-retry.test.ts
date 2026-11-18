@@ -21,7 +21,7 @@ vi.mock("./solana", async (original) => ({
 }));
 
 import { POST as prepare } from "../src/app/api/deposits/route";
-import { POST as execute } from "../src/app/api/operations/[operationId]/execute/route";
+import { POST as submit } from "../src/app/api/operations/[operationId]/submit/route";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -29,7 +29,7 @@ afterEach(() => {
   sign.mockClear();
 });
 
-it("prepares without signing and recovers a lost execute response through the same operation", async () => {
+it("prepares without signing and recovers a lost submit response through the same operation", async () => {
   let submits = 0;
   const accepted = new Set<string>();
   const bodies: string[] = [];
@@ -95,7 +95,7 @@ it("prepares without signing and recovers a lost execute response through the sa
         });
       if (path.endsWith("/deposit"))
         return Response.json({ data: { operation } });
-      if (path.endsWith("/execute")) {
+      if (path.endsWith("/submit")) {
         submits += 1;
         accepted.add(
           new Headers(init?.headers).get("Idempotency-Key") ?? "missing"
@@ -130,26 +130,18 @@ it("prepares without signing and recovers a lost execute response through the sa
   const action = {
     actionId: "action-1",
     version: 1,
-    idempotencyKey: "execute-key",
+    idempotencyKey: "submit-key",
   };
   const params = { params: Promise.resolve({ operationId: "operation" }) };
   expect(
-    (
-      await execute(
-        request("/api/operations/operation/execute", action),
-        params
-      )
-    ).status
+    (await submit(request("/api/operations/operation/submit", action), params))
+      .status
   ).toBe(500);
   expect(accepted.size).toBe(1);
   expect(new Set(bodies).size).toBe(1);
   expect(
-    (
-      await execute(
-        request("/api/operations/operation/execute", action),
-        params
-      )
-    ).status
+    (await submit(request("/api/operations/operation/submit", action), params))
+      .status
   ).toBe(200);
   expect(submits).toBe(3);
   expect(sign).toHaveBeenCalledTimes(1);
@@ -196,8 +188,8 @@ it("refuses to sign an operation belonging to a different owner", async () => {
     })
   );
   vi.stubGlobal("fetch", fetchMock);
-  const response = await execute(
-    new Request("https://bank.example/api/operations/foreign/execute", {
+  const response = await submit(
+    new Request("https://bank.example/api/operations/foreign/submit", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

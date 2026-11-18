@@ -1,4 +1,4 @@
-import { executeOperationSchema } from "@sdp/types/operations";
+import { refreshOperationSchema, submitOperationSchema } from "@sdp/types/operations";
 import { Hono } from "hono";
 import type { OperationRecord } from "@/db/repositories/operations.repository";
 import { badRequest, conflict, notFound } from "@/lib/errors";
@@ -16,7 +16,6 @@ import {
   authorizeEarnOperationCancellation,
   prepareEarnOperationCancellation,
 } from "@/routes/earn/core/cancellation";
-import { authorizeEarnDepositRefresh } from "@/routes/earn/core/deposit-refresh";
 import {
   type AuthorizedEarnPreparation,
   authorizeEarnDeposit,
@@ -26,15 +25,14 @@ import {
 } from "@/routes/earn/core/prepare";
 import { listReadableEarnWallets } from "@/routes/earn/wallet-scope";
 import {
-  executeEarnOperation,
   isTerminalOperation,
   projectEarnOperation,
+  submitEarnOperation,
 } from "@/services/earn/strategy-operations.service";
 import {
-  requirePreparedSwapStrategyTransaction,
-  swapStrategyContinuation,
-} from "@/services/earn/strategy-swap-operations.service";
-import { createOperationsService } from "@/services/operations.service";
+  assertReviewedOperationAction,
+  createOperationsService,
+} from "@/services/operations.service";
 import type { Env } from "@/types/env";
 import {
   emptyOperationBodySchema as emptyBody,
@@ -87,24 +85,9 @@ async function authorizeRefresh(
     ...authorized,
     preparation:
       kind === "earn.deposit"
-        ? await authorizeEarnDepositRefresh(
-            c,
-            authorized.record,
-            await authorizeEarnDeposit(c, prepareInput)
-          )
+        ? await authorizeEarnDeposit(c, prepareInput)
         : await authorizeEarnWithdrawal(c, prepareInput),
   };
-}
-
-async function authorizeExecution(
-  c: AppContext,
-  input: AuthorizeInput
-): Promise<AuthorizedOperation> {
-  const authorized = await authorizeOperation(c, input, true);
-  return authorized.record.operation.buildRef?.kind === "earn.withdrawal_options" ||
-    authorized.record.operation.buildRef?.kind === "earn.deposit_continuation"
-    ? authorizeRefresh(c, input)
-    : authorized;
 }
 
 /** A shared URL retains each stored operation family's own money grants. */
@@ -144,79 +127,18 @@ operations.get(
 );
 
 operations.post(
-  "/:operationId/execute",
+  "/:operationId/submit",
   requireAction("earn.execute"),
   validateParams(paramsSchema),
-  validateBody(executeOperationSchema),
-  authorize(authorizeExecution),
+  validateBody(submitOperationSchema),
+  authorize((c, input) => authorizeOperation(c, input, true)),
   idempotent({ key: "required", serverErrors: "rerun" }),
   async (c) => {
-    const { record, preparation } = getAuthorized<AuthorizedOperation>(c);
-    const body = executeOperationSchema.parse(await c.req.json());
-    if (record.operation.buildRef?.kind === "earn.deposit_continuation") {
-      if (
-        preparation === null ||
-        preparation.intent.kind !== "earn.deposit" ||
-        body.signedTransaction !== undefined
-      ) {
-        throw badRequest("Review the deposit transaction after the swap completes");
-      }
-      const source = preparation.intent.source;
-      const swap = await requirePreparedSwapStrategyTransaction(
-        c.env,
-        { ...record.scope, custodyWalletId: "walletId" in source ? source.walletId : null },
-        record.operation.buildRef.id
-      );
-      if (swap.swap_chain_status !== "finalized")
-        throw conflict("The deposit swap has not finalized");
-      const continuation = swapStrategyContinuation(swap);
-      if (continuation.strategyId !== preparation.intent.strategyId)
-        throw conflict("Swap strategy identity changed");
-      const service = createOperationsService(c.env);
-      const claim = await service.claimExecution(record.scope, record.operation.id, body);
-      await service.repository.release(record.scope, claim);
-      const prepared = await prepareEarnStrategyAction(c, {
-        ...preparation,
-        intent: {
-          ...preparation.intent,
-          amount: { mint: continuation.depositTokenMint, value: continuation.minOutAmount },
-        },
-      });
-      const operation = await service.repository.replacePreparedAction(
-        record.scope,
-        record.operation.id,
-        record.operation,
-        prepared,
-        { kind: "never_dispatched" }
-      );
-      markIdempotencyCommitted(c);
-      return success(c, { operation }, 202);
-    }
-    if (record.operation.buildRef?.kind === "earn.withdrawal_options") {
-      if (
-        preparation === null ||
-        body.optionId === undefined ||
-        body.signedTransaction !== undefined
-      ) {
-        throw badRequest("Choose a withdrawal option before reviewing its transaction");
-      }
-      const service = createOperationsService(c.env);
-      const claim = await service.claimExecution(record.scope, record.operation.id, body);
-      await service.repository.release(record.scope, claim);
-      const prepared = await prepareEarnStrategyAction(c, preparation, body.optionId);
-      const operation = await service.repository.replacePreparedAction(
-        record.scope,
-        record.operation.id,
-        record.operation,
-        prepared,
-        { kind: "never_dispatched" }
-      );
-      markIdempotencyCommitted(c);
-      return success(c, { operation }, 202);
-    }
+    const { record } = getAuthorized<AuthorizedOperation>(c);
+    const body = submitOperationSchema.parse(await c.req.json());
     return success(
       c,
-      { operation: await executeEarnOperation(c.env, record.scope, record.operation.id, body, c) },
+      { operation: await submitEarnOperation(c.env, record.scope, record.operation.id, body, c) },
       202
     );
   }
@@ -226,11 +148,22 @@ operations.post(
   "/:operationId/refresh",
   requireAction("earn.execute"),
   validateParams(paramsSchema),
-  validateBody(emptyBody),
+  validateBody(refreshOperationSchema),
   authorize(authorizeRefresh),
   idempotent({ key: "required", serverErrors: "rerun" }),
   async (c) => {
     const { record, preparation, cancellation } = getAuthorized<AuthorizedOperation>(c);
+    const body = refreshOperationSchema.parse(await c.req.json());
+    assertReviewedOperationAction(record, body);
+    const choosingOption = record.operation.nextAction?.type === "select_option";
+    if (choosingOption && body.optionId === undefined)
+      throw badRequest("Choose one of the advertised withdrawal options");
+    if (
+      body.optionId !== undefined &&
+      (!choosingOption ||
+        !record.operation.terms.options.some((option) => option.id === body.optionId))
+    )
+      throw badRequest("Operation option is not advertised for selection");
     if (isTerminalOperation(record.operation))
       return success(c, {
         operation: await projectEarnOperation(c.env, record.scope, record.operation),
@@ -264,7 +197,14 @@ operations.post(
       ? await prepareEarnOperationCancellation(c, cancellation, record)
       : preparation === null
         ? null
-        : await prepareEarnStrategyAction(c, preparation);
+        : await prepareEarnStrategyAction(
+            c,
+            preparation,
+            body.optionId ??
+              (record.operation.intent.kind === "earn.withdraw"
+                ? record.operation.terms.options[0]?.id
+                : undefined)
+          );
     if (prepared === null) throw badRequest("Operation has no refreshable action");
     const evidence =
       reference?.kind === "custody.proposal" || reference?.kind === "custody.proposal_not_sent"

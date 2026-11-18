@@ -1,5 +1,5 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
-import type { ExecuteOperation, Operation, OperationProposalBinding } from "@sdp/types/operations";
+import type { Operation, OperationProposalBinding, SubmitOperation } from "@sdp/types/operations";
 import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
 import {
   address,
@@ -31,8 +31,8 @@ import {
 import { env } from "@/test/helpers/env";
 import {
   advanceEarnOperation,
-  executeEarnOperation,
   projectEarnOperation,
+  submitEarnOperation,
 } from "./strategy-operations.service";
 import type { PreparedStrategySigningTarget } from "./strategy-transactions.service";
 
@@ -63,8 +63,6 @@ const mocks = vi.hoisted(() => ({
   admitProposal: vi.fn(),
   cancelProposal: vi.fn(),
   signatureStatus: vi.fn(),
-  observeSwap: vi.fn(),
-  retrySwap: vi.fn(),
   committed: vi.fn(),
 }));
 
@@ -78,16 +76,12 @@ vi.mock("@/middleware/idempotency", async (original) => ({
   ...(await original<typeof import("@/middleware/idempotency")>()),
   markIdempotencyCommitted: mocks.committed,
 }));
-vi.mock("./strategy-swap-operations.service", () => ({
-  observePreparedSwapStrategyAction: mocks.observeSwap,
-  retryPreparedSwapStrategyAction: mocks.retrySwap,
-}));
 vi.mock("@/services/operation-execution-audit.service", () => ({
   acceptOperationExecution: (_c: unknown, ...args: unknown[]) => mocks.request(...args),
 }));
 vi.mock("@/services/operations.service", () => ({
   createOperationsService: () => ({
-    claimExecution: mocks.claim,
+    claimSubmission: mocks.claim,
     transition: mocks.transition,
     recordSignedAttempt: mocks.recordSigned,
     recordProposalBinding: mocks.recordBinding,
@@ -169,7 +163,7 @@ function operation(): Operation {
     },
     actionId: "action",
     version: 1,
-    nextAction: { type: "execute" },
+    nextAction: { type: "submit" },
     terms: { expiresAt: null, estimate: null, minimum: null, fees: null, options: [] },
     buildRef: { kind: "earn.strategy_transaction", id: "build" },
     resourceRef: null,
@@ -210,7 +204,7 @@ async function transaction(message: string) {
   };
 }
 
-const body = (): ExecuteOperation => ({
+const body = (): SubmitOperation => ({
   actionId: claim.operation.actionId,
   version: claim.operation.version,
 });
@@ -267,7 +261,6 @@ beforeEach(async () => {
       operationId: "operation",
       actionId: "action",
       version: 1,
-      selectedOptionId: null,
       principal: { kind: "member", userId: "member" },
       buildRef: { kind: "earn.strategy_transaction", id: "build" },
       signedTransaction: null,
@@ -307,7 +300,6 @@ beforeEach(async () => {
   mocks.sign.mockResolvedValue(signed);
   mocks.submit.mockResolvedValue({ kind: "earn.movement", id: "movement" });
   mocks.signatureStatus.mockResolvedValue({ value: [null] });
-  mocks.observeSwap.mockResolvedValue({ status: "submitted", observed: false });
 });
 
 function walletBuild() {
@@ -333,7 +325,7 @@ function walletBuild() {
 describe("asynchronous operation execution", () => {
   it("acknowledges a custody action without resolving a signer, proposal or broadcast", async () => {
     expect(
-      await scoped(() => executeEarnOperation(env, scope, "operation", body(), {} as AppContext))
+      await scoped(() => submitEarnOperation(env, scope, "operation", body(), {} as AppContext))
     ).toMatchObject({ status: "queued", nextAction: { type: "wait" }, result: null });
     expect(mocks.request).toHaveBeenCalledWith(scope, claim, undefined);
     expect(mocks.committed).toHaveBeenCalledTimes(1);
@@ -355,7 +347,7 @@ describe("asynchronous operation execution", () => {
     walletBuild();
     expect(
       await scoped(() =>
-        executeEarnOperation(
+        submitEarnOperation(
           env,
           scope,
           "operation",
@@ -379,7 +371,7 @@ describe("asynchronous operation execution", () => {
   it("keeps acceptance committed when the later response transition fails", async () => {
     mocks.transition.mockRejectedValue(serviceUnavailable("Response transition unavailable"));
     await expect(
-      scoped(() => executeEarnOperation(env, scope, "operation", body(), {} as AppContext))
+      scoped(() => submitEarnOperation(env, scope, "operation", body(), {} as AppContext))
     ).rejects.toThrow("Response transition unavailable");
     expect(mocks.request).toHaveBeenCalledTimes(1);
     expect(mocks.committed).toHaveBeenCalledTimes(1);
@@ -392,7 +384,7 @@ describe("asynchronous operation execution", () => {
     const forged = await transaction("different unreviewed deposit");
     await expect(
       scoped(() =>
-        executeEarnOperation(
+        submitEarnOperation(
           env,
           scope,
           "operation",
@@ -418,7 +410,7 @@ describe("asynchronous operation execution", () => {
     const forged = await transaction("changed replay after acceptance");
     await expect(
       scoped(() =>
-        executeEarnOperation(
+        submitEarnOperation(
           env,
           scope,
           "operation",
@@ -437,7 +429,7 @@ describe("asynchronous operation execution", () => {
     claim.attempt.signedTransaction = signed;
     claim.recoveryRequired = true;
     await scoped(() =>
-      executeEarnOperation(
+      submitEarnOperation(
         env,
         scope,
         "operation",
@@ -459,7 +451,7 @@ describe("asynchronous operation execution", () => {
     claim.recoveryRequired = true;
     await expect(
       scoped(() =>
-        executeEarnOperation(
+        submitEarnOperation(
           env,
           scope,
           "operation",
@@ -488,61 +480,6 @@ describe("asynchronous operation execution", () => {
       mocks.submit.mock.invocationCallOrder[0] ?? 0
     );
     expect(mocks.submit).toHaveBeenCalledWith(signed, true);
-  });
-});
-
-describe("swap signed-byte recovery", () => {
-  function retainedSwap() {
-    claim.operation.resourceRef = { kind: "earn.swap", id: "swap" };
-    claim.attempt.signedTransaction = signed;
-    claim.attempt.signature = transactionSignature;
-  }
-
-  it.each(["wallet", "address"])(
-    "does not resend a %s swap after admission is revoked",
-    async (source) => {
-      if (source === "address") walletBuild();
-      retainedSwap();
-      mocks.moneyAdmission.mockRejectedValue(forbidden("Authority revoked"));
-      await scoped(() => advanceEarnOperation(env, scope, claim));
-      expect(mocks.restrict).toHaveBeenCalledWith(scope, claim);
-      expect(mocks.retrySwap).not.toHaveBeenCalled();
-    }
-  );
-
-  it("rechecks the retained custody proposal account before resending a swap", async () => {
-    useExistingProposal();
-    retainedSwap();
-    mocks.admitProposal.mockRejectedValue(
-      new ProposalAdmissionRefusedError("credential_revoked", forbidden("Account changed"))
-    );
-    await scoped(() => advanceEarnOperation(env, scope, claim));
-    expect(mocks.admitProposal).toHaveBeenCalledWith(claim.attempt.proposalBinding);
-    expect(mocks.restrict).toHaveBeenCalledWith(scope, claim);
-    expect(mocks.retrySwap).not.toHaveBeenCalled();
-  });
-
-  it("resends only the retained exact bytes after current admission succeeds", async () => {
-    retainedSwap();
-    await scoped(() => advanceEarnOperation(env, scope, claim));
-    expect(mocks.retrySwap).toHaveBeenCalledWith(env, {
-      ...scope,
-      custodyWalletId: "wallet",
-      advisoryId: "swap",
-      signedTransaction: signed,
-    });
-    expect(mocks.sign).not.toHaveBeenCalled();
-    expect(mocks.propose).not.toHaveBeenCalled();
-  });
-
-  it("keeps a transient admission lookup failure uncertain without sending", async () => {
-    retainedSwap();
-    mocks.moneyAdmission.mockRejectedValue(serviceUnavailable("Authority lookup timed out"));
-    await expect(scoped(() => advanceEarnOperation(env, scope, claim))).rejects.toThrow(
-      "Authority lookup timed out"
-    );
-    expect(mocks.restrict).not.toHaveBeenCalled();
-    expect(mocks.retrySwap).not.toHaveBeenCalled();
   });
 });
 

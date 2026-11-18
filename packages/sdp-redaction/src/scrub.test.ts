@@ -102,15 +102,15 @@ describe("scrubTelemetry", () => {
 
   it("redacts an end-user owner address by key while the treasury address survives", () => {
     const scrubbed = scrubTelemetry({
-      event: "sdp_api_earn_split_swap_orphaned",
-      advisory_id: "adv_01HZY",
+      event: "sdp_api_earn_operation_pending",
+      operation_id: "op_01HZY",
       owner_address: OWNER_ADDRESS,
       vault_address: SOLANA_ADDRESS,
     });
 
     assert.deepEqual(scrubbed, {
-      event: "sdp_api_earn_split_swap_orphaned",
-      advisory_id: "adv_01HZY",
+      event: "sdp_api_earn_operation_pending",
+      operation_id: "op_01HZY",
       owner_address: "[REDACTED]",
       vault_address: SOLANA_ADDRESS,
     });

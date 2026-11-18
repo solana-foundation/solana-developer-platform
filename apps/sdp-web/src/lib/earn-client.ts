@@ -1,10 +1,11 @@
 import type { EarnDiscoveryResponse, EarnPositionsResponse } from "@sdp/types/earn-core";
 import {
-  type ExecuteOperation,
   type Operation,
   type OperationIntent,
   operationResponseSchema,
   operationsPageSchema,
+  type RefreshOperation,
+  type SubmitOperation,
 } from "@sdp/types/operations";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { earnDiscoveryResponseSchema, earnPositionsResponseSchema } from "./earn-response-schemas";
@@ -85,7 +86,7 @@ function errorDetails(body: unknown): { code?: string; message?: string } {
 
 /**
  * The dashboard's typed Earn contract, shared by its data hooks and action dialogs.
- * Preparing returns terms; callers explicitly execute the advertised action after review.
+ * Preparing returns terms; callers submit the advertised action after review.
  */
 export function createEarnClient(transport: EarnTransport) {
   async function read(path: string, init?: RequestInit): Promise<unknown> {
@@ -164,11 +165,11 @@ export function createEarnClient(transport: EarnTransport) {
     async operation(id: string, signal?: AbortSignal): Promise<Operation> {
       return operationResponseSchema.parse(await read(operationPath(id), { signal })).operation;
     },
-    execute(id: string, action: ExecuteOperation, idempotencyKey: string, signal?: AbortSignal) {
-      return mutate(operationPath(id, "/execute"), action, idempotencyKey, signal);
+    submit(id: string, action: SubmitOperation, idempotencyKey: string, signal?: AbortSignal) {
+      return mutate(operationPath(id, "/submit"), action, idempotencyKey, signal);
     },
-    refresh(id: string, idempotencyKey: string, signal?: AbortSignal) {
-      return mutate(operationPath(id, "/refresh"), {}, idempotencyKey, signal);
+    refresh(id: string, action: RefreshOperation, idempotencyKey: string, signal?: AbortSignal) {
+      return mutate(operationPath(id, "/refresh"), action, idempotencyKey, signal);
     },
     cancel(id: string, idempotencyKey: string, signal?: AbortSignal) {
       return mutate(operationPath(id, "/cancel"), {}, idempotencyKey, signal);

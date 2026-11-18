@@ -212,11 +212,9 @@ function applyLookupTables<TMessage>(
 const SOLANA_TRANSACTION_SIZE_LIMIT_BYTES = 1232;
 
 /**
- * Typed oversize refusal, so a caller that can legitimately fall back — the
- * swap-funded deposit build splits into a swap transaction plus a follow-up
- * deposit when the composed plan cannot fit — can recognize this exact
- * verdict without matching on message text. Everything else still treats it
- * as the hard stop it is.
+ * Typed oversize refusal lets atomic swap-funded deposits retry a more
+ * compact route without matching error text. A plan that still cannot fit
+ * is refused before signing; it is never split into separate transactions.
  */
 export class VaultTransactionTooLargeError extends Error {
   constructor(
@@ -516,7 +514,7 @@ export async function simulateVaultPlan(
   // Solana's RPC rejects an oversized base64 transaction before it can
   // simulate anything. Classify that locally with the same typed verdict the
   // signing/unsigned-compile paths use, so swap-funded callers can retry a
-  // compact route or return their documented split-swap fallback instead of
+  // compact route before refusing an oversized atomic composition instead of
   // leaking the RPC's -32602 as an internal error.
   const compiledBytes = new Uint8Array(getTransactionEncoder().encode(compiled));
   assertVaultTransactionFits(

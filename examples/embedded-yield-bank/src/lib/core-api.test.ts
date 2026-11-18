@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
-  executePreparedOperation,
   prepareDepositOperation,
   refreshPreparedOperation,
   requestOperationCancellation,
   resumePendingOperation,
+  submitPreparedOperation,
 } from "./core-api";
 import type { EarnOperation } from "./core-operation";
 
@@ -57,13 +57,13 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-it("refreshes terms without requesting a signature or execution", async () => {
+it("refreshes terms without requesting a signature or submission", async () => {
   const fetchMock = vi.fn(
     async (_url: URL | RequestInfo, _init?: RequestInit) =>
       Response.json({ data: { operation } })
   );
   vi.stubGlobal("fetch", fetchMock);
-  await expect(refreshPreparedOperation(operation.id)).resolves.toMatchObject({
+  await expect(refreshPreparedOperation(operation)).resolves.toMatchObject({
     actionId: "replacement",
   });
   expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -73,6 +73,8 @@ it("refreshes terms without requesting a signature or execution", async () => {
     "/api/operations/operation/refresh"
   );
   expect(JSON.parse(String(calls[0]?.[1]?.body))).toEqual({
+    actionId: "replacement",
+    version: 2,
     idempotencyKey: expect.any(String),
   });
 });
@@ -96,7 +98,27 @@ it("retries cancellation with its saved key and retires only an acknowledged req
   expect(keys[2]).not.toBe(keys[1]);
 });
 
-it("recovers a lost execution response after reload with the exact action and key", async () => {
+it("selects a route through version-bound preparation without submission", async () => {
+  const fetchMock = vi.fn(
+    async (_url: URL | RequestInfo, _init?: RequestInit) =>
+      Response.json({ data: { operation } })
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  await refreshPreparedOperation(operation, "delayed");
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(new URL(String(fetchMock.mock.calls[0]?.[0])).pathname).toBe(
+    "/api/operations/operation/refresh"
+  );
+  expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+    actionId: "replacement",
+    version: 2,
+    optionId: "delayed",
+    idempotencyKey: expect.any(String),
+  });
+  expect(localStorage.getItem("northstar:pending-operation:v1")).toBeNull();
+});
+
+it("recovers a lost submission response after reload with the exact action and key", async () => {
   const sent: unknown[] = [];
   vi.stubGlobal(
     "fetch",
@@ -111,7 +133,7 @@ it("recovers a lost execution response after reload with the exact action and ke
       });
     })
   );
-  await expect(executePreparedOperation(operation)).rejects.toThrow(
+  await expect(submitPreparedOperation(operation)).rejects.toThrow(
     "Lost response"
   );
   vi.resetModules();
@@ -140,26 +162,24 @@ it("retains a saved action across malformed success, foreign operation and autho
       Response.json({ error: { message: "Session expired" } }, { status: 401 })
     );
   vi.stubGlobal("fetch", fetchMock);
-  await expect(executePreparedOperation(operation)).rejects.toThrow();
+  await expect(submitPreparedOperation(operation)).rejects.toThrow();
   const saved = localStorage.getItem("northstar:pending-operation:v1");
   await expect(resumePendingOperation()).rejects.toThrow("does not match");
   await expect(resumePendingOperation()).rejects.toThrow("Session expired");
   expect(localStorage.getItem("northstar:pending-operation:v1")).toBe(saved);
 });
 
-it("blocks new preparation and another operation while execution is uncertain", async () => {
+it("blocks new preparation and another operation while submission is uncertain", async () => {
   const fetchMock = vi.fn(async () => {
     throw new Error("Uncertain");
   });
   vi.stubGlobal("fetch", fetchMock);
-  await expect(executePreparedOperation(operation)).rejects.toThrow(
-    "Uncertain"
-  );
+  await expect(submitPreparedOperation(operation)).rejects.toThrow("Uncertain");
   await expect(prepareDepositOperation("10")).rejects.toThrow(
     "earlier pending transfer"
   );
   await expect(
-    executePreparedOperation({ ...operation, id: "other" })
+    submitPreparedOperation({ ...operation, id: "other" })
   ).rejects.toThrow("earlier pending operation");
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
@@ -169,14 +189,14 @@ it("retains a malformed saved action without signing or replacing it", async () 
   const fetchMock = vi.fn();
   vi.stubGlobal("fetch", fetchMock);
   await expect(resumePendingOperation()).rejects.toThrow();
-  await expect(executePreparedOperation(operation)).rejects.toThrow();
+  await expect(submitPreparedOperation(operation)).rejects.toThrow();
   expect(fetchMock).not.toHaveBeenCalled();
   expect(localStorage.getItem("northstar:pending-operation:v1")).toBe(
     "invalid"
   );
 });
 
-it("retries lost preparation with its original key without executing", async () => {
+it("retries lost preparation with its original key without submitting", async () => {
   const keys: Array<string | null> = [];
   const paths: string[] = [];
   vi.stubGlobal(

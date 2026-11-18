@@ -3,7 +3,12 @@ import { apiErrorResponse, apiSuccessResponse } from "@server/http";
 import { assertTrustedJsonRequest } from "@server/request-security";
 import { z } from "zod";
 
-const schema = z.strictObject({ idempotencyKey: z.string().min(1).max(255) });
+const schema = z.strictObject({
+  actionId: z.string().min(1).max(256),
+  version: z.number().int().positive(),
+  optionId: z.string().min(1).max(256).optional(),
+  idempotencyKey: z.string().min(1).max(255),
+});
 
 export async function POST(
   request: Request,
@@ -11,10 +16,14 @@ export async function POST(
 ) {
   try {
     assertTrustedJsonRequest(request);
-    const { idempotencyKey } = schema.parse(await request.json());
+    const { idempotencyKey, ...action } = schema.parse(await request.json());
     const { operationId } = await params;
     return apiSuccessResponse({
-      operation: await refreshCoreOperation(operationId, idempotencyKey),
+      operation: await refreshCoreOperation(
+        operationId,
+        action,
+        idempotencyKey
+      ),
     });
   } catch (error) {
     return apiErrorResponse(error);

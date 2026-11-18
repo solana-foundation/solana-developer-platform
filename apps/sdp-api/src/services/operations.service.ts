@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
 import {
-  type ExecuteOperation,
-  executeOperationSchema,
   type Operation,
   type OperationIntent,
   type OperationProposalBinding,
   type OperationSource,
   operationIntentSchema,
   operationSchema,
+  type SubmitOperation,
+  submitOperationSchema,
 } from "@sdp/types/operations";
 import { z } from "zod";
 import { getDb } from "@/db/client";
@@ -15,6 +15,7 @@ import {
   createOperationsRepository,
   type OperationClaim,
   type OperationListFilters,
+  type OperationRecord,
   type OperationReplacementEvidence,
   type OperationScope,
   type OperationsRepository,
@@ -36,6 +37,20 @@ const signedAttemptSchema = z.strictObject({
   signature: z.string().min(1).max(128),
   lastValidBlockHeight: z.string().regex(/^\d+$/),
 });
+
+/** Preparation and submission must retain the principal and exact reviewed action. */
+export function assertReviewedOperationAction(
+  record: OperationRecord,
+  action: { actionId: string; version: number }
+): void {
+  const principal = currentMoneyPrincipal();
+  if (principal === null || JSON.stringify(principal) !== JSON.stringify(record.actionPrincipal))
+    throw conflict("Operation requires its authenticated action principal");
+  if (record.operation.actionId !== action.actionId || record.operation.version !== action.version)
+    throw conflict("Operation action or terms version changed", {
+      reason: "stale_operation_action",
+    });
+}
 
 /**
  * Coordinates durable actions without signing or provider effects. Callers must
@@ -129,27 +144,16 @@ export class OperationsService {
   }
 
   /** Validate the displayed action before claiming it. A recovery claim cannot create another proposal. */
-  async claimExecution(
+  async claimSubmission(
     scope: OperationScope,
     id: string,
-    body: ExecuteOperation
+    body: SubmitOperation
   ): Promise<OperationClaim> {
-    const input = executeOperationSchema.parse(body);
+    const input = submitOperationSchema.parse(body);
     const record = await this.repository.get(scope, id);
     if (record === null) throw notFound("Operation");
     const operation = record.operation;
-    const principal = currentMoneyPrincipal();
-    if (principal === null || JSON.stringify(principal) !== JSON.stringify(record.actionPrincipal))
-      throw conflict("Operation execution requires its authenticated action principal");
-    if (operation.actionId !== input.actionId || operation.version !== input.version)
-      throw conflict("Operation action or terms version changed", {
-        reason: "stale_operation_action",
-      });
-    if (
-      input.optionId !== undefined &&
-      !operation.terms.options.some((option) => option.id === input.optionId)
-    )
-      throw badRequest("Operation option is not advertised in these terms");
+    assertReviewedOperationAction(record, input);
     const attempt = await this.repository.getAttempt(scope, id);
     const recovering =
       attempt !== null &&
@@ -175,7 +179,7 @@ export class OperationsService {
         throw badRequest("This action does not accept a caller-signed transaction");
       if (
         operation.nextAction?.type !== "sign_transaction" &&
-        operation.nextAction?.type !== "execute"
+        operation.nextAction?.type !== "submit"
       )
         throw conflict("Operation is waiting for its advertised next action");
     }

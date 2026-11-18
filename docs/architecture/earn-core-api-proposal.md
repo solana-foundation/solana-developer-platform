@@ -18,8 +18,8 @@ SDP supplies discovery, wallet integration, execution tracking and recovery.
 | `POST /v1/earn/withdraw`                    | Prepare an exit using a position and explicit quantity.             |
 | `GET /v1/operations`                        | List scoped activity and outstanding actions.                       |
 | `GET /v1/operations/{operationId}`          | Read terms, next action and settlement observations.                |
-| `POST /v1/operations/{operationId}/execute` | Accept the exact reviewed action for async execution.               |
-| `POST /v1/operations/{operationId}/refresh` | Prepare replacement terms only when safe.                           |
+| `POST /v1/operations/{operationId}/submit`  | Authorize and queue the exact reviewed transaction.                 |
+| `POST /v1/operations/{operationId}/refresh` | Select an advertised route or safely prepare fresh terms.           |
 | `POST /v1/operations/{operationId}/cancel`  | Request cancellation and track its actual outcome.                  |
 
 Six independent WisdomTree onboarding operations remain for customer
@@ -95,12 +95,24 @@ the dashboard and demo to the core contract.
    terms, an `actionId`, a version and `nextAction`. It never signs or broadcasts.
 3. Review the estimate, enforceable minimum and known fees. Address owners sign
    the exact returned transaction; registered wallets follow their custody
-   policy. Execute accepts the reviewed identity and returns `202` after durable
-   acceptance.
+   policy. Submit accepts the exact reviewed transaction and returns `202` after
+   durable acceptance. It never prepares another action.
 4. The worker signs, opens approval or submits through the existing signing and
    sponsorship waists. Poll the same operation through provider approval,
-   submission and settlement. A later claim or on-chain cancellation requires
-   another explicit review when advertised.
+   submission and settlement. An on-chain cancellation requires another explicit
+   review when advertised; delayed settlement needs no separate claim endpoint.
+
+Withdrawal route choice advertises `nextAction: select_option` and
+`terms.options`. Refresh takes the current `actionId`, `version` and selected
+`optionId`, then returns a new transaction review. Later refreshes retain the
+selected route and fail if it is unavailable. Submit accepts no route option.
+
+Swap-funded deposits combine the swap and deposit instructions in one unsigned
+transaction. The deposit uses the swap's guaranteed minimum output. A compact
+route retry may reduce transaction size; if both legs still cannot fit,
+preparation refuses before persisting a build. The caller must fund the
+strategy's deposit token separately. There is no standalone funding swap or
+deposit continuation.
 
 Every mutation uses a persisted `Idempotency-Key`. An uncertain HTTP response
 retries the same request and exact signed bytes. Queue acceptance, share escrow,
@@ -131,9 +143,9 @@ not weaken the async lifecycle for new actions.
 - Signed or ambiguously dispatched attempts remain unresolved until proven.
   Blockhash expiry and missing RPC history alone do not prove nonexecution.
   An exposed owner transaction may have been broadcast independently.
-- `refresh` advertises a fresh review only after definitive refusal or safe
-  expiry. New terms require explicit execution. `wait` preserves an unresolved
-  action.
+- Refresh always names the current action ID/version. It selects an advertised
+  option or creates a fresh review only after definitive refusal or safe expiry.
+  New terms require explicit submission. `wait` preserves an unresolved action.
 - Cancellation is durable intent. Acknowledgment, on-chain queue closure and
   verified payout remain separate observations. Observation-only attempts can
   never regain broadcast authority.
@@ -164,6 +176,12 @@ Withdrawal planning quotes each route once and reuses its protection floor.
 Token-sized exits add one cold share-mint precision read, zero warm reads;
 concurrent precision reads share work and failures are not cached. Required
 simulation remains before returning unsigned bytes.
+
+Successful atomic deposit preparation keeps its existing RPC budget: one
+maximum-compute probe and one final simulation. Size overflow allows one compact
+retry. Removing the split path removes one baseline token-balance read and two
+standalone-swap simulations from an oversized preparation. No follow-up
+swap-status polling or second deposit preparation is needed.
 
 ## Rollout and remaining gates
 

@@ -7,7 +7,6 @@ const actionSchema = z.object({
   operationId: z.string(),
   actionId: z.string(),
   version: z.number().int().positive(),
-  optionId: z.string().optional(),
   idempotencyKey: z.string(),
 });
 
@@ -17,7 +16,7 @@ async function withOperationLock<T>(work: () => Promise<T>): Promise<T> {
   return navigator.locks.request(pendingKey, work);
 }
 
-function assertNoPendingExecution() {
+function assertNoPendingSubmission() {
   if (window.localStorage.getItem(pendingKey) !== null)
     throw new Error(
       "Recover the earlier pending transfer before starting another action"
@@ -57,7 +56,7 @@ async function request(
 /** Persist preparation identity before sending; a lost response retries the same operation. */
 async function prepare(path: string, input: unknown): Promise<EarnOperation> {
   return withOperationLock(async () => {
-    assertNoPendingExecution();
+    assertNoPendingSubmission();
     const storageKey = `northstar:prepare:${JSON.stringify([path, input])}`;
     const key = window.localStorage.getItem(storageKey) ?? crypto.randomUUID();
     window.localStorage.setItem(storageKey, key);
@@ -83,11 +82,10 @@ async function submitSaved(
   action: z.infer<typeof actionSchema>
 ): Promise<EarnOperation> {
   const operation = await request(
-    `/api/operations/${encodeURIComponent(action.operationId)}/execute`,
+    `/api/operations/${encodeURIComponent(action.operationId)}/submit`,
     {
       actionId: action.actionId,
       version: action.version,
-      ...(action.optionId ? { optionId: action.optionId } : {}),
       idempotencyKey: action.idempotencyKey,
     }
   );
@@ -98,9 +96,8 @@ async function submitSaved(
 }
 
 /** Only this explicit user action can ask the demo wallet to sign. */
-export async function executePreparedOperation(
-  operation: EarnOperation,
-  optionId?: string
+export async function submitPreparedOperation(
+  operation: EarnOperation
 ): Promise<EarnOperation> {
   return withOperationLock(async () => {
     const saved = window.localStorage.getItem(pendingKey);
@@ -110,7 +107,6 @@ export async function executePreparedOperation(
             operationId: operation.id,
             actionId: operation.actionId,
             version: operation.version,
-            ...(optionId ? { optionId } : {}),
             idempotencyKey: crypto.randomUUID(),
           }
         : actionSchema.parse(JSON.parse(saved));
@@ -135,16 +131,24 @@ export async function resumePendingOperation(): Promise<EarnOperation | null> {
 
 async function updatePreparedOperation(
   operationId: string,
-  action: "cancel" | "refresh"
+  {
+    action,
+    input,
+  }:
+    | { action: "cancel"; input: Record<string, never> }
+    | {
+        action: "refresh";
+        input: { actionId: string; version: number; optionId?: string };
+      }
 ): Promise<EarnOperation> {
   return withOperationLock(async () => {
-    assertNoPendingExecution();
-    const keyName = `northstar:${action}:${operationId}`;
+    assertNoPendingSubmission();
+    const keyName = `northstar:${action}:${operationId}:${JSON.stringify(input)}`;
     const key = window.localStorage.getItem(keyName) ?? crypto.randomUUID();
     window.localStorage.setItem(keyName, key);
     const operation = await request(
       `/api/operations/${encodeURIComponent(operationId)}/${action}`,
-      { idempotencyKey: key }
+      { ...input, idempotencyKey: key }
     );
     window.localStorage.removeItem(keyName);
     return operation;
@@ -154,12 +158,20 @@ async function updatePreparedOperation(
 export function requestOperationCancellation(
   operationId: string
 ): Promise<EarnOperation> {
-  return updatePreparedOperation(operationId, "cancel");
+  return updatePreparedOperation(operationId, { action: "cancel", input: {} });
 }
 
 /** Refresh is available only when the API can safely replace an unsigned action. */
 export function refreshPreparedOperation(
-  operationId: string
+  operation: EarnOperation,
+  optionId?: string
 ): Promise<EarnOperation> {
-  return updatePreparedOperation(operationId, "refresh");
+  return updatePreparedOperation(operation.id, {
+    action: "refresh",
+    input: {
+      actionId: operation.actionId,
+      version: operation.version,
+      ...(optionId ? { optionId } : {}),
+    },
+  });
 }

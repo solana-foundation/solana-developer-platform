@@ -90,7 +90,7 @@ const DASHBOARD_REQUIRED_ROUTES = {
 const EARN_REQUIRED_ROUTES = [
   "POST /api/dashboard/markets/earn/deposit",
   "POST /api/dashboard/markets/earn/withdraw",
-  "POST /api/dashboard/operations/:operationId/execute",
+  "POST /api/dashboard/operations/:operationId/submit",
   "POST /api/dashboard/operations/:operationId/refresh",
   "POST /api/dashboard/operations/:operationId/cancel",
 ] as const;

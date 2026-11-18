@@ -143,7 +143,8 @@ export const operationNextActionSchema = z.discriminatedUnion("type", [
     lastValidBlockHeight: z.string().regex(/^\d+$/),
     expiresAt: z.string().datetime().nullable(),
   }),
-  z.strictObject({ type: z.literal("execute") }),
+  z.strictObject({ type: z.literal("submit") }),
+  z.strictObject({ type: z.literal("select_option") }),
   z.strictObject({ type: z.literal("refresh") }),
   z.strictObject({
     type: z.literal("approve_in_provider"),
@@ -184,11 +185,10 @@ export const operationSchema = z.strictObject({
   updatedAt: z.string().datetime(),
 });
 
-/** Execution is bound to the displayed action and terms version. */
-export const executeOperationSchema = z.strictObject({
+/** Submission authorizes only the displayed transaction and terms version. */
+export const submitOperationSchema = z.strictObject({
   actionId: identifier,
   version: z.number().int().positive(),
-  optionId: identifier.optional(),
   signedTransaction: z
     .string()
     .min(1)
@@ -197,7 +197,12 @@ export const executeOperationSchema = z.strictObject({
     .optional(),
 });
 
-/** Shared response for preparation, execution, refresh and cancellation. */
+/** Preparation stays bound to the current review; route selection never submits. */
+export const refreshOperationSchema = submitOperationSchema
+  .omit({ signedTransaction: true })
+  .extend({ optionId: identifier.optional() });
+
+/** Shared response for preparation, submission, refresh and cancellation. */
 export const operationResponseSchema = z.strictObject({ operation: operationSchema });
 
 /** Scoped history uses a stable cursor rather than returning an unbounded address book. */
@@ -214,5 +219,6 @@ export type OperationSource = z.infer<typeof operationSourceSchema>;
 export type OperationTerms = z.infer<typeof operationTermsSchema>;
 export type OperationNextAction = z.infer<typeof operationNextActionSchema>;
 export type OperationReference = z.infer<typeof operationReferenceSchema>;
-export type ExecuteOperation = z.infer<typeof executeOperationSchema>;
+export type SubmitOperation = z.infer<typeof submitOperationSchema>;
+export type RefreshOperation = z.infer<typeof refreshOperationSchema>;
 export type OperationResponse = z.infer<typeof operationResponseSchema>;

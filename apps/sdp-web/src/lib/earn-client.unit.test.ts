@@ -16,7 +16,7 @@ function operation(): Operation {
     },
     actionId: "action-1",
     version: 1,
-    nextAction: { type: "execute" },
+    nextAction: { type: "submit" },
     terms: { expiresAt: null, estimate: null, minimum: null, fees: null, options: [] },
     buildRef: null,
     resourceRef: null,
@@ -29,7 +29,7 @@ function operation(): Operation {
 }
 
 describe("Earn core client", () => {
-  it("prepares an owner-signed deposit without executing or adding credentials", async () => {
+  it("prepares an owner-signed deposit without submitting or adding credentials", async () => {
     const transport = vi
       .fn()
       .mockResolvedValue(Response.json({ data: { operation: operation() } }));
@@ -51,15 +51,15 @@ describe("Earn core client", () => {
     expect(new Headers(init.headers).has("Authorization")).toBe(false);
   });
 
-  it("executes the exact advertised version and preserves signed bytes on retry", async () => {
+  it("submits the exact advertised version and preserves signed bytes on retry", async () => {
     const transport = vi.fn(async (_path: string, _init?: RequestInit) =>
       Response.json({ data: { operation: operation() } })
     );
     const client = createEarnClient(transport);
     const action = { actionId: "action-1", version: 1, signedTransaction: "c2lnbmVk" };
-    await client.execute("operation/with space", action, "stable-submit-key");
-    await client.execute("operation/with space", action, "stable-submit-key");
-    expect(transport.mock.calls[0]?.[0]).toBe("/v1/operations/operation%2Fwith%20space/execute");
+    await client.submit("operation/with space", action, "stable-submit-key");
+    await client.submit("operation/with space", action, "stable-submit-key");
+    expect(transport.mock.calls[0]?.[0]).toBe("/v1/operations/operation%2Fwith%20space/submit");
     expect(transport.mock.calls[0]?.[1]).toEqual(transport.mock.calls[1]?.[1]);
   });
 
@@ -78,7 +78,26 @@ describe("Earn core client", () => {
     } satisfies Partial<EarnApiError>);
   });
 
-  it("refuses malformed successful operations before exposing an executable action", async () => {
+  it("prepares a chosen route against the current action without submitting", async () => {
+    const transport = vi.fn(async (_path: string, _init?: RequestInit) =>
+      Response.json({ data: { operation: operation() } })
+    );
+    const client = createEarnClient(transport);
+    await client.refresh(
+      "operation/with space",
+      { actionId: "action-1", version: 1, optionId: "delayed" },
+      "persisted-choice-key"
+    );
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(transport.mock.calls[0]?.[0]).toBe("/v1/operations/operation%2Fwith%20space/refresh");
+    expect(JSON.parse(String(transport.mock.calls[0]?.[1]?.body))).toEqual({
+      actionId: "action-1",
+      version: 1,
+      optionId: "delayed",
+    });
+  });
+
+  it("refuses malformed successful operations before exposing an action", async () => {
     const client = createEarnClient(async () =>
       Response.json({ data: { operation: { id: "only-id" } } })
     );

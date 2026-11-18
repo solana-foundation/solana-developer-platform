@@ -31,7 +31,6 @@ const EARN_API_FILES = [
     .filter((file) => file.startsWith("earn-") && !file.includes(".test."))
     .map((file) => join(API_SRC, "cron", file)),
   join(API_SRC, "services/earn-provider-registry.ts"),
-  join(API_SRC, "services/jobs/detect-orphaned-earn-split-swaps.ts"),
   join(API_SRC, "services/jobs/reconcile-earn-vault-movements.ts"),
   // Operator-run catalogue inventories read the chain like the catalogue sync does.
   ...readdirSync(join(API_SRC, "../scripts"))

@@ -85,24 +85,24 @@ export async function prepareEarnDeposit(input: {
   return operation;
 }
 
-/** Execute only the reviewed action/version, using the exact returned message. */
-export async function executeEarnOperation(input: {
+/** Submit only the reviewed action/version, using the exact returned message. */
+export async function submitEarnOperation(input: {
   operationId: string;
   actionId: string;
   version: number;
   idempotencyKey: string;
   signedTransaction?: string;
-  optionId?: string;
 }) {
   const { operationId, idempotencyKey, ...action } = input;
-  return (await post(\`/v1/operations/\${encodeURIComponent(operationId)}/execute\`, action, idempotencyKey)).operation;
+  return (await post(\`/v1/operations/\${encodeURIComponent(operationId)}/submit\`, action, idempotencyKey)).operation;
 }
 
 // Customer flow: prepare -> review operation.terms -> sign nextAction.transaction
-// in the customer's wallet -> executeEarnOperation with that signed transaction.
+// in the customer's wallet -> submitEarnOperation with that signed transaction.
 // A separate fee payer must co-sign. Never alter the message before submitting.
-// Custody wallets use source: { walletId } and execute without signed bytes.
-// Execution returns 202 once durable work is accepted; signing and submission run asynchronously.
+// Custody wallets use source: { walletId } and submit without signed bytes.
+// Submission returns 202 once durable work is accepted; signing and broadcast run asynchronously.
+// A funding swap and deposit share one atomic transaction, or preparation refuses the route.
 // If nextAction.type is approve_in_provider, show its instructions and keep polling.`;
 
   const portfolio = `export async function getEarnOperation(operationId: string) {
@@ -155,8 +155,9 @@ export async function prepareEarnWithdrawal(input: {
 }
 
 // The same endpoint prepares direct, queued and provider-operated withdrawals.
-// Review the returned options, select an advertised optionId when necessary,
-// then sign/execute the current action as in the deposit flow.
+// If nextAction.type is select_option, show terms.options and call
+// refreshEarnOperation with the selected optionId to prepare its transaction.
+// Review the returned terms, then sign/submit the current action as in the deposit flow.
 // A submitted queue request escrows shares; it is not a completed payout.`;
 
   const asyncWithdraw = `/** Cancellation can itself return an action that needs a signature. */
@@ -164,9 +165,16 @@ export async function requestEarnCancellation(operationId: string, idempotencyKe
   return (await post(\`/v1/operations/\${encodeURIComponent(operationId)}/cancel\`, {}, idempotencyKey)).operation;
 }
 
-/** The server allows refresh only when the earlier action is proven unexecuted. */
-export async function refreshEarnOperation(operationId: string, idempotencyKey: string) {
-  return (await post(\`/v1/operations/\${encodeURIComponent(operationId)}/refresh\`, {}, idempotencyKey)).operation;
+/** Prepare a selected route, or safely replace an action the API marks refreshable. */
+export async function refreshEarnOperation(input: {
+  operationId: string;
+  actionId: string;
+  version: number;
+  optionId?: string;
+  idempotencyKey: string;
+}) {
+  const { operationId, idempotencyKey, ...action } = input;
+  return (await post(\`/v1/operations/\${encodeURIComponent(operationId)}/refresh\`, action, idempotencyKey)).operation;
 }
 
 // Resume the same operation after reload. Do not create a replacement because

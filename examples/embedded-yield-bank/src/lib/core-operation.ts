@@ -50,7 +50,8 @@ export const coreOperationSchema = z.looseObject({
         lastValidBlockHeight: z.string(),
         expiresAt: z.string().nullable(),
       }),
-      z.object({ type: z.literal("execute") }),
+      z.object({ type: z.literal("submit") }),
+      z.object({ type: z.literal("select_option") }),
       z.object({ type: z.literal("refresh") }),
       z.object({
         type: z.literal("approve_in_provider"),

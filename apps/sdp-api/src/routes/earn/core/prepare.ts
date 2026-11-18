@@ -173,7 +173,7 @@ function actionFor(
 ): OperationNextAction {
   return source.wallet === null
     ? { type: "sign_transaction", transaction, lastValidBlockHeight, expiresAt: null }
-    : { type: "execute" };
+    : { type: "submit" };
 }
 
 function emptyTerms(): OperationTerms {
@@ -249,20 +249,6 @@ async function prepareDepositAction(
   });
   const terms = emptyTerms();
   terms.inputAmount = intent.amount;
-  if (result.kind === "swap_required") {
-    terms.description = "Swap the funding token before reviewing the strategy deposit";
-    terms.estimate = { mint: tokenMint, value: result.swap.quotedAmount };
-    terms.minimum = { mint: tokenMint, value: result.swap.minOutAmount };
-    return {
-      nextAction: actionFor(
-        source,
-        Buffer.from(result.swapTransaction.bytes).toString("base64"),
-        result.swapTransaction.lastValidBlockHeight
-      ),
-      terms,
-      buildRef: { kind: "earn.swap", id: result.advisoryId },
-    };
-  }
   terms.description = "Deposit into the strategy";
   if (result.quote !== undefined)
     terms.estimate = { mint: strategy.share_mint, value: result.quote.sharesOut };
@@ -430,7 +416,7 @@ async function prepareWithdrawalAction(
   if (choices.choices.length > 1 && selectedOptionId === undefined) {
     terms.description = "Choose a withdrawal route before reviewing its transaction";
     return {
-      nextAction: { type: "execute" },
+      nextAction: { type: "select_option" },
       terms,
       buildRef: { kind: "earn.withdrawal_options", id: `choices_${crypto.randomUUID()}` },
     };

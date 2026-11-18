@@ -572,7 +572,7 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
   it.each([
     "/api/dashboard/markets/earn/deposit",
     "/api/dashboard/markets/earn/withdraw",
-    "/api/dashboard/operations/operation/execute",
+    "/api/dashboard/operations/operation/submit",
     "/api/dashboard/operations/operation/refresh",
     "/api/dashboard/operations/operation/cancel",
   ])("refuses %s when storage refuses its key", async (path) => {

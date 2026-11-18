@@ -36,13 +36,12 @@ describe("CRON_DEFINITIONS", () => {
     expect(
       [
         "reconcile-earn-vault-movements",
-        "detect-orphaned-earn-split-swaps",
         "refresh-earn-metrics",
         "track-pending-withdrawals",
         "track-pending-deposits",
         "poll-rings-indexing",
       ].map((name) => scopeByName.get(name))
-    ).toEqual(["cluster", "cluster", "cluster", "cluster", "cluster", "cluster"]);
+    ).toEqual(["cluster", "cluster", "cluster", "cluster", "cluster"]);
   });
 
   it("runs the payment request hot lane every 30 seconds and its sweep and expiry every minute", () => {

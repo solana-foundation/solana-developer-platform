@@ -179,7 +179,7 @@ describe("EarnIntegrationGuide", () => {
     expect(code).toContain("/v1/earn/withdraw");
     expect(code).toContain("/v1/earn/positions?");
     expect(code).toContain("/v1/operations?");
-    expect(code).toContain("/execute");
+    expect(code).toContain("/submit");
     expect(code).toContain("/refresh");
     expect(code).toContain("/cancel");
     expect(code).toContain('const SDP_API_URL = "http://127.0.0.1:8787"');
@@ -188,7 +188,7 @@ describe("EarnIntegrationGuide", () => {
     expect(code).toContain("source: { ownerAddress }");
     expect(code).toContain("signedTransaction?: string");
     expect(code).toContain("Show returned terms before asking the customer to sign");
-    expect(code).toContain("Execution returns 202");
+    expect(code).toContain("Submission returns 202");
     expect(code).toContain("not a completed payout");
     expect(code).toContain("Pagination did not advance");
     expect(code).not.toMatch(/\/v1\/earn\/external-wallet\/|vault-deposits|deposit-transactions/);

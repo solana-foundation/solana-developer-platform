@@ -23,7 +23,7 @@ const PRODUCTION_PROJECT_ID = `prj_${TEST_ORG.id}_production`;
 const INTENT_SCOPED_OPERATION_ROUTES = new Map([
   ["GET /v1/operations", "Read authorized operation history"],
   ["GET /v1/operations/:operationId", "Read an authorized operation"],
-  ["POST /v1/operations/:operationId/execute", "Queue the authorized stored intent"],
+  ["POST /v1/operations/:operationId/submit", "Queue the authorized stored intent"],
   ["POST /v1/operations/:operationId/refresh", "Prepare the authorized stored intent"],
   ["POST /v1/operations/:operationId/cancel", "Cancel the authorized stored intent"],
 ]);

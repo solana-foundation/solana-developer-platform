@@ -114,7 +114,7 @@ describe("operation cancellation planning", () => {
       })
     );
     expect(prepared).toMatchObject({
-      nextAction: { type: "execute" },
+      nextAction: { type: "submit" },
       buildRef: { kind: "earn.queued_transaction", id: "cancel-build" },
       terms: { estimate: { mint: "intermediate", value: "2000" }, minimum: null },
     });

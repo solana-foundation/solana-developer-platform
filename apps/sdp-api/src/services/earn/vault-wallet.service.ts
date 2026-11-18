@@ -15,10 +15,6 @@ import {
 } from "@solana/kit";
 import { getDb } from "@/db/client";
 import {
-  createPostgresEarnSplitSwapAdvisoriesRepository,
-  generateEarnSplitSwapAdvisoryId,
-} from "@/db/repositories/earn-split-swap-advisories.repository";
-import {
   createPostgresEarnWalletTransactionsRepository,
   type EarnWalletTransactionRow,
   generateEarnWalletTransactionId,
@@ -35,10 +31,8 @@ import {
   MAX_COMPUTE_UNIT_LIMIT,
   prependSwapLegToVaultPlan,
   RETRY_SWAP_MAX_ACCOUNTS,
-  requireEarnSwapMintMetadata,
   withComputeUnitLimit,
 } from "./jupiter-swap.service";
-import { readOwnerMintBalance } from "./owner-token-balance";
 import { earnRuntime } from "./runtime";
 import { requireAcceptedPlan, requireAcceptedWithdrawalPlan } from "./strategy-plan";
 import { strategyOutputFloor } from "./strategy-terms";
@@ -173,7 +167,7 @@ export type WalletBuiltTransaction = Pick<
 /** A wallet deposit build. The open cluster scope decides its environment and cluster. */
 export type WalletDepositBuildInput = WalletBuildContext & {
   provider: EarnProviderId;
-  /** Catalogue row id, so a split-swap advisory can name the strategy (PRO-1864). */
+  /** Catalogue strategy selected for the deposit. */
   strategyId: string;
   /** Vault address — the strategy's providerReference. */
   providerReference: string;
@@ -202,7 +196,7 @@ export type WalletDepositBuildInput = WalletBuildContext & {
   minSharesOut?: string;
   /** Core strategy preparations derive the floor from one live quote after swap sizing. */
   slippageBps?: number;
-  /** Fund the deposit by swapping another stablecoin first (Jupiter). */
+  /** Swap another stablecoin into the deposit token in the same transaction. */
   swap?: {
     /** Validated by the route: a supported swap-source mint on this cluster. */
     sourceTokenMint: string;
@@ -251,28 +245,14 @@ function throwSimulationRefusal(
   throw badRequest(message, rawSimulationDetails(simulation.raw));
 }
 
-export type WalletDepositBuildResult =
-  | {
-      kind: "built";
-      built: WalletBuiltTransaction;
-      /** The swap leg composed into the transaction, when the build was swap-funded. */
-      swap?: JupiterSwapLeg;
-      quote?: EarnVaultDepositQuote;
-    }
-  | {
-      /**
-       * The composed swap + deposit could not fit one Solana packet, even
-       * after re-routing for compactness. No submit-capable build or movement
-       * was persisted; the build records only its recovery advisory. The
-       * caller gets an unsigned SWAP-ONLY
-       * transaction to sign and broadcast itself, then requests an ordinary
-       * unswapped build for `swap.minOutAmount`.
-       */
-      kind: "swap_required";
-      swap: JupiterSwapLeg;
-      swapTransaction: UnsignedVaultTransaction;
-      advisoryId: string;
-    };
+/** Every successful preparation contains the complete atomic deposit transaction. */
+export interface WalletDepositBuildResult {
+  kind: "built";
+  built: WalletBuiltTransaction;
+  /** The swap leg composed into the transaction, when the build was swap-funded. */
+  swap?: JupiterSwapLeg;
+  quote?: EarnVaultDepositQuote;
+}
 
 type WalletDepositAttempt =
   | {
@@ -284,7 +264,7 @@ type WalletDepositAttempt =
       swapLeg?: JupiterSwapLeg;
       quote?: EarnVaultDepositQuote;
     }
-  | { fit: false; swapLeg: JupiterSwapLeg };
+  | { fit: false };
 
 async function firstWalletDepositAttempt(
   attemptBuild: (maxAccounts?: number, compactMemo?: boolean) => Promise<WalletDepositAttempt>,
@@ -433,8 +413,6 @@ export async function buildWalletDepositTransaction(
           plan,
           ownerAddress: input.ownerAddress,
           fee,
-          probeLabel: "wallet deposit: compute-unit probe simulation failed",
-          refusalNoun: "Vault deposit",
         });
       }
 
@@ -479,12 +457,10 @@ export async function buildWalletDepositTransaction(
         ...(quote === undefined ? {} : { quote }),
       };
     } catch (error) {
-      // Size is measured before every RPC simulation as well as at the final
-      // compile. Only a swap-funded plan has a legitimate next move on
-      // overflow; an unswapped provider plan that cannot fit is the provider's
-      // own defect and keeps failing loudly, exactly as before.
+      // Retry oversized swap routes with fewer accounts. Every successful
+      // build must still contain both the swap and the strategy deposit.
       if (swapLeg && error instanceof VaultTransactionTooLargeError) {
-        return { fit: false, swapLeg };
+        return { fit: false };
       }
       throw error;
     }
@@ -495,70 +471,11 @@ export async function buildWalletDepositTransaction(
     attempt = await attemptBuild(RETRY_SWAP_MAX_ACCOUNTS, true);
   }
   if (!attempt.fit) {
-    // Split flow: the swap alone, compiled through the same simulate-and-size
-    // seam, for the owner and any separate fee payer to sign before the owner
-    // broadcasts it. It carries no request memo and records NO movement: it moves
-    // the owner's own funds between the
-    // owner's own accounts, and the follow-up deposit build takes the ordinary
-    // path. A keyed build records an ADVISORY (PRO-1864, EARN-026): the
-    // standalone swap is the one transaction this flow hands out that SDP never
-    // sees again, so without a row a partner that broadcast it and crashed left
-    // the customer's funds swapped-but-undeposited with nothing for a detector
-    // to inspect.
-    const swapLeg = attempt.swapLeg;
-    const sourceTokenMint = input.swap?.sourceTokenMint ?? input.tokenMint;
-    const depositTokenDecimals = requireEarnSwapMintMetadata(
-      input.tokenMint,
-      "deposit token"
-    ).decimals;
-    // Compile and read the baseline concurrently, preserving the partner's
-    // blockhash window. The baseline fails closed alongside the advisory insert.
-    const [swapTransaction, baseline] = await Promise.all([
-      compileStandaloneSwapTransaction({
-        deadline,
-        ownerAddress: input.ownerAddress,
-        sourceTokenMint,
-        depositTokenMint: input.tokenMint,
-        swapLeg,
-        // The split swap is one of the transactions this flow hands out, so
-        // the partner fee payer covers it too and co-signs before the owner
-        // broadcasts it, exactly like the deposit it precedes.
-        fee,
-      }),
-      deadline.run("Reading the split-swap baseline balance", () =>
-        readOwnerMintBalance(input.ownerAddress, input.tokenMint)
-      ),
-    ]);
-    if (baseline.decimals !== null && baseline.decimals !== depositTokenDecimals) {
-      throw internalError(
-        `Split-swap baseline balance reports ${baseline.decimals} decimals for a ${depositTokenDecimals}-decimal deposit token`
-      );
-    }
-    const advisoryId = generateEarnSplitSwapAdvisoryId();
-    await createPostgresEarnSplitSwapAdvisoriesRepository(getDb(env)).create({
-      id: advisoryId,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      environment,
-      provider: input.provider,
-      strategyId: input.strategyId,
-      custodyWalletId: input.custodyWalletId,
-      unsignedTransaction: Buffer.from(swapTransaction.bytes).toString("base64"),
-      vaultAddress: input.providerReference,
-      ownerAddress: input.ownerAddress,
-      sourceTokenMint,
-      depositTokenMint: input.tokenMint,
-      depositTokenDecimals,
-      swapSourceAmount: swapLeg.sourceAmount,
-      swapMinOutAmount: swapLeg.minOutAmount,
-      swapMinOutAtoms: swapLeg.minOutAtoms,
-      swapLastValidBlockHeight: swapTransaction.lastValidBlockHeight,
-      feePayer: feePayer ?? null,
-      baselineDepositTokenAtoms: baseline.atoms.toString(),
-      createdBy: input.userId ?? null,
-      initiatedByKeyId: input.apiKeyId ?? null,
-    });
-    return { kind: "swap_required", swap: swapLeg, swapTransaction, advisoryId };
+    throw badRequest(
+      "This swap and strategy deposit cannot fit in one Solana transaction. " +
+        "Fund the wallet with the strategy's deposit token and retry.",
+      { reason: "atomic_swap_deposit_too_large", depositTokenMint: input.tokenMint }
+    );
   }
 
   const { unsigned, plan, depositAmount, minSharesOut, swapLeg, quote } = attempt;
@@ -603,10 +520,8 @@ export async function buildWalletDepositTransaction(
 }
 
 /**
- * Probe-simulate a plan at the maximum compute-unit limit, then pin the
- * buffered observed consumption as its limit. Shared by the composed
- * swap-funded build and the standalone split swap — one copy of the sizing
- * rule, one copy of its refusal shape.
+ * Probe-simulate the composed plan at the maximum compute-unit limit, then
+ * pin the buffered observed consumption as its limit.
  */
 async function pinProbedComputeUnitLimit(input: {
   deadline: ReturnType<typeof createVaultDeadline>;
@@ -614,8 +529,6 @@ async function pinProbedComputeUnitLimit(input: {
   plan: EarnVaultTransactionPlan;
   ownerAddress: string;
   fee: VaultFeeMode;
-  probeLabel: string;
-  refusalNoun: string;
 }): Promise<EarnVaultTransactionPlan> {
   const probe = await simulateVaultPlan({
     deadline: input.deadline,
@@ -627,72 +540,11 @@ async function pinProbedComputeUnitLimit(input: {
   if (!probe.ok) {
     getLogger().error(
       { error: probe.error, raw: probe.raw, logs: probe.logs.slice(-5) },
-      input.probeLabel
+      "wallet deposit: compute-unit probe simulation failed"
     );
-    throwSimulationRefusal(`${input.refusalNoun} simulation failed`, probe);
+    throwSimulationRefusal("Vault deposit simulation failed", probe);
   }
   return withComputeUnitLimit(input.plan, bufferedComputeUnitLimit(probe.unitsConsumed));
-}
-
-/**
- * Compile the swap leg alone as one unsigned owner-signed transaction, for the
- * split flow. It rides the same simulate-then-compile seam as every vault
- * transaction with the same resolved fee-payer funds check and size assertion,
- * with an asset identity that states the swap's own mints (source in, deposit
- * token out) since there is no vault leg to testify to.
- */
-async function compileStandaloneSwapTransaction(input: {
-  deadline: ReturnType<typeof createVaultDeadline>;
-  ownerAddress: string;
-  sourceTokenMint: string;
-  depositTokenMint: string;
-  swapLeg: JupiterSwapLeg;
-  /** The build's resolved fee mode: the split swap keeps the same payer. */
-  fee: VaultFeeMode;
-}): Promise<UnsignedVaultTransaction> {
-  const assetIdentity = {
-    depositTokenMint: input.sourceTokenMint,
-    shareMint: input.depositTokenMint,
-  };
-  const bare: EarnVaultTransactionPlan = {
-    cluster: currentClusterScope().cluster,
-    instructions: input.swapLeg.instructions,
-    lookupTables: input.swapLeg.lookupTableAddresses,
-    assetIdentity,
-  };
-  // Same locally derived compute-unit limit as the composed path: probe at
-  // the maximum, then pin the buffered consumption.
-  const plan = await pinProbedComputeUnitLimit({
-    deadline: input.deadline,
-    expectedAssetIdentity: assetIdentity,
-    plan: bare,
-    ownerAddress: input.ownerAddress,
-    fee: input.fee,
-    probeLabel: "wallet deposit: standalone swap probe simulation failed",
-    refusalNoun: "Swap",
-  });
-  const simulation = await simulateVaultPlan({
-    deadline: input.deadline,
-    expectedAssetIdentity: assetIdentity,
-    plan,
-    owner: address(input.ownerAddress),
-    fee: input.fee,
-  });
-  if (!simulation.ok) {
-    getLogger().error(
-      { error: simulation.error, raw: simulation.raw, logs: simulation.logs.slice(-5) },
-      "wallet deposit: standalone swap simulation failed"
-    );
-    throwSimulationRefusal("Swap simulation failed", simulation);
-  }
-  return compileUnsignedVaultTransaction({
-    deadline: input.deadline,
-    expectedAssetIdentity: assetIdentity,
-    plan,
-    owner: address(input.ownerAddress),
-    ...preparedFeePayer(input.fee),
-    prepared: simulation.prepared,
-  });
 }
 
 /** A wallet exit build. The open cluster scope decides its environment and cluster. */

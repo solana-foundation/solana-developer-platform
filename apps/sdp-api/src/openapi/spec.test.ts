@@ -323,7 +323,7 @@ describe("OpenAPI spec", () => {
         "POST /v1/earn/onboarding/wisdomtree/{counterpartyId}/wallets",
         "GET /v1/operations",
         "GET /v1/operations/{operationId}",
-        "POST /v1/operations/{operationId}/execute",
+        "POST /v1/operations/{operationId}/submit",
         "POST /v1/operations/{operationId}/refresh",
         "POST /v1/operations/{operationId}/cancel",
       ].sort()

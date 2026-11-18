@@ -8,7 +8,7 @@ Send `POST /v1/earn/deposit` with `strategyId`, a source and token amount.
 The source contains exactly one `walletId` or `ownerAddress`; amounts use a mint
 and decimal-string `value` in that token's units.
 
-## Review before execution
+## Review before submission
 
 Preparation returns `202` with a durable operation, economic terms and its next
 action. It performs quotes, planning and simulation without signing, opening
@@ -16,9 +16,15 @@ approval or broadcasting. Show the estimate, enforceable minimum and fees.
 Unknown fees are not zero fees.
 
 For `sign_transaction`, have every required signer sign the exact advertised
-message. For `execute`, follow the registered wallet's configured policy.
-Call `POST /v1/operations/{operationId}/execute` with the current action ID and
-version, including signed bytes when required.
+message. For `submit`, follow the registered wallet's configured policy.
+Call `POST /v1/operations/{operationId}/submit` with the current action ID and
+version, including signed bytes when required. Submission authorizes and queues
+that exact transaction; it does not prepare another action.
+
+Funding with another supported token combines the swap and deposit into one
+transaction. If they cannot fit together after a compact-route retry, preparation
+refuses before signing. Fund the strategy's deposit token and retry; SDP never
+returns a standalone funding swap.
 
 The worker handles signing, provider approval and submission. Poll
 `GET /v1/operations/{operationId}` and display its next action. A queued or

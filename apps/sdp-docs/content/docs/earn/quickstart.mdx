@@ -31,11 +31,12 @@ Use `ownerAddress` instead of `walletId` when the owner signs through your app.
 Review the returned operation's terms. Preparation returns `202` and does not
 sign or broadcast.
 
-## Execute and track
+## Submit and track
 
-Call `POST /v1/operations/{operationId}/execute` with the returned `actionId`
+Call `POST /v1/operations/{operationId}/submit` with the returned `actionId`
 and `version`. Include `signedTransaction` when the advertised next action asks
-the owner to sign. Persist a separate idempotency key for execution.
+the owner to sign. Persist a separate idempotency key for submission. This queues
+the exact reviewed transaction and returns `202`.
 
 Poll `GET /v1/operations/{operationId}`. Show provider approval instructions when
 requested and continue tracking while the next action is `wait`. Read holdings

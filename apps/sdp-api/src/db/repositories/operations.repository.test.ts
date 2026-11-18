@@ -317,6 +317,36 @@ describe("durable operations repository", () => {
     ).rejects.toThrow("must be reconciled");
   });
 
+  it("allows one concurrent route preparation without creating an execution attempt", async () => {
+    const { record } = await repository().createOrReplay(
+      input({
+        intent: { kind: "earn.withdraw", positionId: "position_1", amount: { kind: "all" } },
+        prepared: {
+          ...input().prepared,
+          nextAction: { type: "select_option" },
+          buildRef: { kind: "earn.withdrawal_options", id: "choices_1" },
+        },
+      })
+    );
+    const results = await Promise.allSettled(
+      ["direct", "queued"].map((id) =>
+        repository().replacePreparedAction(
+          scope,
+          record.operation.id,
+          record.operation,
+          { ...input().prepared, buildRef: { kind: "earn.strategy_transaction", id } },
+          { kind: "never_dispatched" }
+        )
+      )
+    );
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const current = await repository().get(scope, record.operation.id);
+    expect(current?.operation.version).toBe(record.operation.version + 1);
+    expect(current?.actionPrincipal).toEqual(record.actionPrincipal);
+    expect(current?.operation.intent).toEqual(record.operation.intent);
+    expect(await repository().getAttempt(scope, record.operation.id)).toBeNull();
+  });
+
   it("cancellation actions remain executable after cancellation intent is durable", async () => {
     const claim = await createClaim();
     await repository().release(scope, claim);
@@ -437,7 +467,7 @@ describe("durable operations repository", () => {
     expect(second.replayed).toBe(true);
     await expect(
       runAsMoneyPrincipal({ kind: "member", userId: "another-user" }, () =>
-        service.claimExecution(scope, first.operation.id, {
+        service.claimSubmission(scope, first.operation.id, {
           actionId: first.operation.actionId,
           version: 1,
           signedTransaction: signed.signedTransaction,
@@ -468,11 +498,10 @@ describe("durable operations repository", () => {
     const body = {
       actionId: operation.actionId,
       version: operation.version,
-      optionId: "direct",
       signedTransaction: signed.signedTransaction,
     };
     const first = await runAsMoneyPrincipal(principal, () =>
-      service.claimExecution(scope, operation.id, body)
+      service.claimSubmission(scope, operation.id, body)
     );
     await repository().recordSignedAttempt(scope, first, signed);
     const requested = await repository().requestExecution(scope, first);
@@ -488,7 +517,7 @@ describe("durable operations repository", () => {
       [operation.id]
     );
     const replay = await runAsMoneyPrincipal(principal, () =>
-      service.claimExecution(scope, operation.id, body)
+      service.claimSubmission(scope, operation.id, body)
     );
     expect(replay.operation.status).toBe("queued");
     expect(replay.attempt).toMatchObject({
@@ -500,19 +529,20 @@ describe("durable operations repository", () => {
     await repository().release(scope, replay);
     await expect(
       runAsMoneyPrincipal({ kind: "member", userId: "another-user" }, () =>
-        service.claimExecution(scope, operation.id, body)
+        service.claimSubmission(scope, operation.id, body)
       )
     ).rejects.toThrow("authenticated action principal");
     await expect(
       runAsMoneyPrincipal(principal, () =>
-        service.claimExecution(scope, operation.id, { ...body, version: body.version + 1 })
+        service.claimSubmission(scope, operation.id, { ...body, version: body.version + 1 })
       )
     ).rejects.toThrow("terms version changed");
+    const invalidSelection = { ...body, optionId: "different" };
     await expect(
       runAsMoneyPrincipal(principal, () =>
-        service.claimExecution(scope, operation.id, { ...body, optionId: "different" })
+        service.claimSubmission(scope, operation.id, invalidSelection)
       )
-    ).rejects.toThrow("not advertised");
+    ).rejects.toThrow("Unrecognized key");
     expect(
       await getDb(env).queryOne(
         "SELECT count(*)::int AS count FROM operation_attempts WHERE operation_id = ?",
@@ -538,7 +568,7 @@ describe("durable operations repository", () => {
     );
     await expect(
       runAsMoneyPrincipal(principal, () =>
-        service.claimExecution(scope, ownerOperation.operation.id, {
+        service.claimSubmission(scope, ownerOperation.operation.id, {
           actionId: ownerOperation.operation.actionId,
           version: 1,
           signedTransaction: signed.signedTransaction,
@@ -550,12 +580,12 @@ describe("durable operations repository", () => {
         source: input().source,
         intent: input().intent,
         requestKey: "expired-custody",
-        prepared: { ...expired, nextAction: { type: "execute" } },
+        prepared: { ...expired, nextAction: { type: "submit" } },
       })
     );
     await expect(
       runAsMoneyPrincipal(principal, () =>
-        service.claimExecution(scope, custody.operation.id, {
+        service.claimSubmission(scope, custody.operation.id, {
           actionId: custody.operation.actionId,
           version: 1,
         })
@@ -619,12 +649,28 @@ describe("durable operations repository", () => {
     ).toEqual([]);
   });
 
-  it("only custody unsigned preparation can be terminal-cancelled without a domain observation", async () => {
+  it("cancels unexposed choices and custody builds while exposed owner bytes remain uncertain", async () => {
     const ownerOperation = await repository().createOrReplay(input());
     await repository().requestCancellation(scope, ownerOperation.record.operation.id);
     expect(
       await repository().cancelUndispatched(scope, ownerOperation.record.operation.id)
     ).toBeNull();
+    const choice = await repository().createOrReplay(
+      input({
+        requestKey: "unexposed-choice",
+        intent: { kind: "earn.withdraw", positionId: "position_1", amount: { kind: "all" } },
+        prepared: {
+          ...input().prepared,
+          nextAction: { type: "select_option" },
+          buildRef: { kind: "earn.withdrawal_options", id: "choices_1" },
+        },
+      })
+    );
+    expect(await repository().cancelUndispatched(scope, choice.record.operation.id)).toBeNull();
+    await repository().requestCancellation(scope, choice.record.operation.id);
+    expect((await repository().cancelUndispatched(scope, choice.record.operation.id))?.status).toBe(
+      "cancelled"
+    );
     const custody = await repository().createOrReplay(
       input({
         requestKey: "custody",
@@ -634,7 +680,7 @@ describe("durable operations repository", () => {
           source: { walletId: "wallet_1" },
           amount: { mint: "mint", value: "1" },
         },
-        prepared: { ...input().prepared, nextAction: { type: "execute" } },
+        prepared: { ...input().prepared, nextAction: { type: "submit" } },
       })
     );
     await repository().requestCancellation(scope, custody.record.operation.id);
@@ -722,7 +768,7 @@ describe("durable operations repository", () => {
   it("retains authorized withdrawal source across option selection without relying on a build row", async () => {
     const prepared = {
       ...input().prepared,
-      nextAction: { type: "execute" as const },
+      nextAction: { type: "select_option" as const },
       buildRef: { kind: "earn.withdrawal_options", id: "choices_1" },
     };
     const withdrawal = input({
@@ -853,7 +899,7 @@ describe("durable operations repository", () => {
     const { record } = await repository().createOrReplay(input());
     await repository().requestCancellation(scope, record.operation.id);
     const claim = await runAsMoneyPrincipal({ kind: "member", userId: USER }, () =>
-      new OperationsService(repository()).claimExecution(scope, record.operation.id, {
+      new OperationsService(repository()).claimSubmission(scope, record.operation.id, {
         actionId: record.operation.actionId,
         version: 1,
         signedTransaction: signed.signedTransaction,

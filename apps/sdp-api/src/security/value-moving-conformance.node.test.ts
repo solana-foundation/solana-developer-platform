@@ -718,7 +718,7 @@ describe("value-moving authorization and replay conformance", () => {
 
   it("acknowledges Earn execution without signing or broadcasting on the HTTP path", () => {
     const source = readSource("apps/sdp-api/src/services/earn/strategy-operations.service.ts");
-    const execution = source.slice(source.indexOf("export async function executeEarnOperation("));
+    const execution = source.slice(source.indexOf("export async function submitEarnOperation("));
     expect(execution).toContain("await acceptOperationExecution(c, scope, claim, verifiedSigned)");
     expect(execution).toContain('status: "queued"');
     expect(execution).not.toMatch(/\b(?:advanceEarnOperation|signPreparedStrategyTransaction)\(/);

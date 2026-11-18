@@ -192,9 +192,9 @@ function expectProtectedTerms(operation: Operation, outputMint: string) {
   expect(minimum).toEqual({ mint: outputMint, value: floorFromQuote(estimate.value) });
 }
 
-async function executeAndSettle(operation: Operation, keyPair?: CryptoKeyPair): Promise<Operation> {
+async function submitAndSettle(operation: Operation, keyPair?: CryptoKeyPair): Promise<Operation> {
   const action = operation.nextAction;
-  if (action?.type !== "execute" && action?.type !== "sign_transaction") {
+  if (action?.type !== "submit" && action?.type !== "sign_transaction") {
     throw new Error(`Unexpected Jupiter Lend next action: ${action?.type}`);
   }
   if (action.type === "sign_transaction" && keyPair === undefined) {
@@ -206,7 +206,7 @@ async function executeAndSettle(operation: Operation, keyPair?: CryptoKeyPair): 
       : undefined;
   const accepted = await requestData<OperationResponse>(
     "POST",
-    `/v1/operations/${operation.id}/execute`,
+    `/v1/operations/${operation.id}/submit`,
     { actionId: operation.actionId, version: operation.version, signedTransaction }
   );
   expect(accepted.operation.status).toBe("queued");
@@ -250,8 +250,8 @@ async function roundTrip(
     slippageBps: SLIPPAGE_TOLERANCE_BPS,
   });
   expectProtectedTerms(deposit, JUPITER_LEND_USDT.shareMint);
-  expect(deposit.nextAction?.type).toBe("walletId" in source ? "execute" : "sign_transaction");
-  const deposited = await executeAndSettle(deposit, keyPair);
+  expect(deposit.nextAction?.type).toBe("walletId" in source ? "submit" : "sign_transaction");
+  const deposited = await submitAndSettle(deposit, keyPair);
   expect(deposited.result?.source).toEqual(source);
   const holding = await waitForShares(source, false);
   if (holding === undefined || holding.shares === undefined)
@@ -275,7 +275,7 @@ async function roundTrip(
     }
   );
   expectProtectedTerms(withdrawal, JUPITER_LEND_USDT.assetMint);
-  const withdrawn = await executeAndSettle(withdrawal, keyPair);
+  const withdrawn = await submitAndSettle(withdrawal, keyPair);
   expect(withdrawn.result?.source).toEqual(source);
   expect(withdrawn.result?.positionId).toBe(holding.id);
   expect((await waitForShares(source, true))?.shares ?? "0").toBe("0");

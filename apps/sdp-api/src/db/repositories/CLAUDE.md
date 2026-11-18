@@ -25,6 +25,12 @@ signed bytes, proposal bindings and dispatch identity cannot be replaced after
 an uncertain effect. Cancellation intent is sticky, and an observation-only
 attempt can never regain broadcast authority.
 
+Submit queues only the exact reviewed transaction. Refresh checks the current
+action ID/version before preparing terms. Withdrawal selection narrows the
+advertised options to the chosen route; later refreshes preserve that route or
+fail if it is unavailable. No separate selection column or preparation-only
+submission is needed.
+
 Deposit acceptance commits verified owner-signed bytes, `audit_intent_id`
 and `execution_requested_at` together (0244). No audit admission means no queued
 deposit. Exits retain their durable execution request if auditing is unavailable.
@@ -67,8 +73,8 @@ Things that will bite:
   share ATAs retain rent for an explicit owner-authorized close, including
   newly created accounts that could have been pre-funded.
 - **Every movement needs a holding, and a missing one must never fail a money
-  write.** Resolve or open the holding before writing the movement. The custodial
-  holding for a program is minted when its provider wallet is linked.
+  write.** Resolve or open the holding before writing the movement, in the same
+  transaction that records the verified signed intent.
 - **Amounts carry a `denomination`** (`usd`, the token mint, or the SHARE mint
   on a vault withdrawal, whose exact intent-time quantity is shares). A par
   fulfillment whose request burned no shares (it redeemed held intermediate)
@@ -129,7 +135,7 @@ Things that will bite:
   and you must change both. Both take the sweep's `environment` (HOO-2148), so
   pass the same one to both.
 - **Earn's sweep queries select one environment** (HOO-2148). The vault
-  movement, queued withdrawal and split-swap crons run once per environment,
+  movement, queued withdrawal and operation crons run once per environment,
   so every claim, repair, backlog count and cleanup they call takes
   `environment` and filters Earn's own `environment` column (joining
   `projects` waits on `project_id NOT NULL`, HOO-2177). A row in the other
@@ -144,16 +150,6 @@ Things that will bite:
   once, inside the same transaction that inserts the movement. One durable
   build can therefore never ledger twice; that consume is written HERE, with
   the single ledger writer, not in the built-transactions repository.
-- **`earn_split_swap_advisories` is advisory state, never a movement**
-  (PRO-1864, migration 0091). A row records that a split-swap build handed a
-  partner a standalone swap. The detector writes nothing but back to this
-  table and never touches `earn_movements`. Its amount columns carry ONE
-  declared unit each: the floor and both balance samples are deposit-mint ATOMS
-  with the decimals recorded beside them, and the two `*_amount` columns are
-  display-only decimal strings. Compare atoms to atoms.
-  `listWalletDepositsSince` on the movements repository is its
-  status-aware follow-up read: a `failed` deposit must not discharge an
-  advisory.
 
 The full rule set is in [`../../routes/earn/CLAUDE.md`](../../routes/earn/CLAUDE.md).
 Architecture and the migration inventory are in

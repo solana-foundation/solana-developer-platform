@@ -195,18 +195,17 @@ export class EmbeddedYieldClient {
     throw new Error("SDP operation pagination exceeded its safety limit");
   }
 
-  async executeOperation(
+  async submitOperation(
     id: string,
     action: {
       actionId: string;
       version: number;
       signedTransaction?: string;
-      optionId?: string;
     },
     idempotencyKey: string
   ): Promise<EarnOperation> {
     const data = await this.request<{ operation: unknown }>(
-      `/v1/operations/${encodeURIComponent(id)}/execute`,
+      `/v1/operations/${encodeURIComponent(id)}/submit`,
       {
         method: "POST",
         body: action,
@@ -218,11 +217,12 @@ export class EmbeddedYieldClient {
 
   async refreshOperation(
     id: string,
+    action: { actionId: string; version: number; optionId?: string },
     idempotencyKey: string
   ): Promise<EarnOperation> {
     const data = await this.request<{ operation: unknown }>(
       `/v1/operations/${encodeURIComponent(id)}/refresh`,
-      { method: "POST", body: {}, idempotencyKey }
+      { method: "POST", body: action, idempotencyKey }
     );
     return coreOperationSchema.parse(data.operation);
   }

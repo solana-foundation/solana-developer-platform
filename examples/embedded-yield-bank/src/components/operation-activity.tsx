@@ -3,9 +3,9 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
-  executePreparedOperation,
   refreshPreparedOperation,
   requestOperationCancellation,
+  submitPreparedOperation,
 } from "@/lib/core-api";
 import { type EarnOperation, isOperationActive } from "@/lib/core-operation";
 import { formatAmount, shortAddress } from "@/lib/format";
@@ -69,21 +69,19 @@ function OperationRow({
   tokenMint: string;
   onUpdated: () => void;
 }) {
-  const [optionId, setOptionId] = useState<string>();
   const next = operation.nextAction;
-  const canExecute =
-    next?.type === "sign_transaction" || next?.type === "execute";
+  const canSubmit =
+    next?.type === "sign_transaction" || next?.type === "submit";
   const expired =
     operation.terms.expiresAt !== null &&
     Date.parse(operation.terms.expiresAt) <= Date.now();
   const settled = operation.result?.settledAmount;
-  const selected = optionId ?? operation.terms.options[0]?.id;
   const format = (amount: { mint: string; value: string }) =>
     amount.mint === tokenMint
       ? formatAmount(amount.value, symbol)
       : `${amount.value} (${shortAddress(amount.mint)})`;
 
-  const { busy, act } = useOperationActions(operation, selected, onUpdated);
+  const { busy, act } = useOperationActions(operation, onUpdated);
 
   const requested = requestedAmount(operation, format);
 
@@ -111,17 +109,21 @@ function OperationRow({
           : {format(settled)}
         </p>
       ) : null}
-      {canExecute ? (
+      {canSubmit ? (
         <OperationTerms operation={operation} format={format} />
       ) : null}
-      {operation.terms.options.length > 1 && canExecute ? (
+      {next?.type === "select_option" ? (
         <label className="flex flex-col gap-1 text-sm">
           Withdrawal route
           <select
             className="rounded-md border bg-background p-2"
-            value={selected}
-            onChange={(event) => setOptionId(event.target.value)}
+            value=""
+            disabled={busy}
+            onChange={(event) => void act("refresh", event.target.value)}
           >
+            <option value="" disabled>
+              Choose withdrawal route
+            </option>
             {operation.terms.options.map((option) => (
               <option key={option.id} value={option.id}>
                 {option.label}
@@ -132,7 +134,7 @@ function OperationRow({
       ) : null}
       <OperationProgress
         operation={operation}
-        canExecute={canExecute}
+        canSubmit={canSubmit}
         expired={expired}
       />
       {operation.error ? (
@@ -159,12 +161,12 @@ function OperationActions({
   operation: EarnOperation;
   busy: boolean;
   expired: boolean;
-  onAction: (action: "execute" | "cancel" | "refresh") => Promise<void>;
+  onAction: (action: "submit" | "cancel" | "refresh") => Promise<void>;
 }) {
   if (!isOperationActive(operation)) return null;
   const next = operation.nextAction;
-  const canExecute =
-    next?.type === "execute" || next?.type === "sign_transaction";
+  const canSubmit =
+    next?.type === "submit" || next?.type === "sign_transaction";
   return (
     <div className="flex flex-wrap justify-end gap-2">
       <Button
@@ -184,17 +186,17 @@ function OperationActions({
           Refresh terms
         </Button>
       ) : null}
-      {canExecute ? (
+      {canSubmit ? (
         <Button
           size="sm"
           disabled={busy || expired}
           aria-busy={busy}
-          onClick={() => void onAction("execute")}
+          onClick={() => void onAction("submit")}
         >
           {busy ? (
             <LoaderCircleIcon className="animate-spin" aria-hidden="true" />
           ) : null}
-          Approve execution
+          Confirm and submit
         </Button>
       ) : null}
     </div>
@@ -256,11 +258,11 @@ function OperationTerms({
 
 function OperationProgress({
   operation,
-  canExecute,
+  canSubmit,
   expired,
 }: {
   operation: EarnOperation;
-  canExecute: boolean;
+  canSubmit: boolean;
   expired: boolean;
 }) {
   const next = operation.nextAction;
@@ -277,7 +279,7 @@ function OperationProgress({
           A request has been submitted. The provider has not confirmed delivery.
         </p>
       ) : null}
-      {canExecute && expired ? (
+      {canSubmit && expired ? (
         <p className="text-sm text-muted-foreground">
           These terms expired. Wait for the operation to offer refreshed terms.
         </p>
@@ -286,21 +288,20 @@ function OperationProgress({
   );
 }
 
-function useOperationActions(
-  operation: EarnOperation,
-  selected: string | undefined,
-  onUpdated: () => void
-) {
+function useOperationActions(operation: EarnOperation, onUpdated: () => void) {
   const [busy, setBusy] = useState(false);
-  async function act(action: "execute" | "cancel" | "refresh") {
+  async function act(
+    action: "submit" | "cancel" | "refresh",
+    optionId?: string
+  ) {
     if (busy) return;
     setBusy(true);
     try {
       const updated =
-        action === "execute"
-          ? await executePreparedOperation(operation, selected)
+        action === "submit"
+          ? await submitPreparedOperation(operation)
           : action === "refresh"
-            ? await refreshPreparedOperation(operation.id)
+            ? await refreshPreparedOperation(operation, optionId)
             : await requestOperationCancellation(operation.id);
       if (updated.status === "failed")
         throw new Error(updated.error?.message ?? "Execution failed");

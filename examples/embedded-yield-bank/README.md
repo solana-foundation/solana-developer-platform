@@ -29,13 +29,13 @@ affordances for the example.
 | Savings holding       | `/v1/earn/positions?sourceType=address&ownerAddress=...&discover=true`, including verified pre-existing holdings in integrated strategies |
 | Move to savings       | `/v1/earn/deposit` prepares an operation for review                                                                                       |
 | Move to checking      | `/v1/earn/withdraw` prepares an operation using the position ID and token amount                                                          |
-| Approval and progress | `/v1/operations/{id}/execute`, then operation reads until verified completion                                                             |
+| Approval and progress | `/v1/operations/{id}/submit`, then operation reads until verified completion                                                              |
 | Cancellation          | `/v1/operations/{id}/cancel`, followed by any returned signature action and continued polling                                             |
 | Updated terms         | `/v1/operations/{id}/refresh`, when the operation offers a refresh action                                                                 |
 
 Preparing shows current estimates, minimum proceeds, fees and withdrawal options.
 It does not sign or broadcast. **Approve execution** signs the exact transaction
-returned by SDP and submits the reviewed action ID and version. Execute returns
+returned by SDP and submits the reviewed action ID and version. Submit returns
 `202` when work is durably accepted. SDP's worker handles submission, custody
 approval and settlement asynchronously. A queue request escrows shares; completion
 requires a verified payout or return of shares.

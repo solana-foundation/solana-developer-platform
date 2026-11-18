@@ -203,12 +203,11 @@ export async function prepareCoreWithdrawal(
 }
 
 /** The browser persists this action before asking the server-held demo owner to sign. */
-export async function executeCoreOperation(
+export async function submitCoreOperation(
   id: string,
   action: {
     actionId: string;
     version: number;
-    optionId?: string;
     idempotencyKey: string;
   }
 ) {
@@ -223,7 +222,7 @@ export async function executeCoreOperation(
   )
     return operation;
   const nextAction = operation.nextAction;
-  if (nextAction?.type !== "sign_transaction" && nextAction?.type !== "execute")
+  if (nextAction?.type !== "sign_transaction" && nextAction?.type !== "submit")
     return operation;
   await assertRpcCluster(config.SOLANA_RPC_URL, config.SOLANA_CLUSTER);
   const signedTransaction =
@@ -235,12 +234,11 @@ export async function executeCoreOperation(
         )
       : undefined;
   return retryUncertainSubmit(() =>
-    client.executeOperation(
+    client.submitOperation(
       id,
       {
         actionId: action.actionId,
         version: action.version,
-        ...(action.optionId ? { optionId: action.optionId } : {}),
         ...(signedTransaction ? { signedTransaction } : {}),
       },
       action.idempotencyKey
@@ -276,9 +274,13 @@ export async function cancelCoreOperation(id: string, idempotencyKey: string) {
   return client.cancelOperation(id, idempotencyKey);
 }
 
-/** Preparing replacement terms never signs or requests execution. */
-export async function refreshCoreOperation(id: string, idempotencyKey: string) {
+/** Preparing a selected route or replacement terms never requests a signature. */
+export async function refreshCoreOperation(
+  id: string,
+  action: { actionId: string; version: number; optionId?: string },
+  idempotencyKey: string
+) {
   const client = new EmbeddedYieldClient(getConfig());
   await getOwnedOperation(client, id, (await getDemoSigner()).address);
-  return client.refreshOperation(id, idempotencyKey);
+  return client.refreshOperation(id, action, idempotencyKey);
 }

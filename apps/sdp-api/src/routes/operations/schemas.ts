@@ -6,7 +6,7 @@ export const operationIdParamsSchema = z.object({
   operationId: z.string().min(1).max(256),
 });
 
-/** Refresh and cancellation derive intent from the stored operation. */
+/** Cancellation derives intent from the stored operation. */
 export const emptyOperationBodySchema = z.strictObject({});
 
 /** External history requires an explicit owner; omitted owner filters list custody operations. */

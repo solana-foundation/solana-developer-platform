@@ -4,6 +4,12 @@ Date: 2026-07-20
 Status: Accepted — implemented on `main` (`earn-initial` merged as
 `bdb63491`, #831; subsequent amendments are recorded as addenda below)
 
+The [core API replacement](../architecture/earn-core-api-proposal.md) supersedes
+the historical product routes, allocation contracts and split funding flow
+described below. Current deposits combine swap and deposit instructions
+atomically or refuse preparation. Shared `/submit` only queues a reviewed
+transaction; `/refresh` prepares terms or selects an advertised withdrawal route.
+
 ## Context
 
 Solana Earn (SDP Markets V1) fronts yield strategies through external
@@ -1244,16 +1250,15 @@ Decisions that hold it together:
   durable movement that can only die at broadcast. The recorded ledger
   `signature` is slot zero — the partner's when present — which is the
   on-chain txid, so reconciliation is unchanged.
-- **The split-swap contract carries `feePayer`** through `followUp`, and the
-  standalone swap compiles with the same payer, so every transaction the flow
-  hands out is partner-payable.
+- **Historical split funding carried `feePayer`** through both transactions.
+  That flow is removed by the core replacement. Funding swaps and deposits now
+  compose into one partner-payable transaction or preparation fails.
 
-Accepted costs: the partner wallet needs a SOL float and its balance is now
-partner-operational surface (a broke sponsor 400s at build, naming the fee
-payer); the fee payer adds 96 bytes to the compiled transaction, so near-limit
-swap-funded builds fall to the split flow slightly more often; and the
-blockhash window now has to fit the partner's co-signature too, which is why
-the docs tell partners to co-sign programmatically.
+Accepted costs at the time: the partner wallet needed a SOL float; a separate
+fee payer added 96 bytes, making the split funding flow more likely; and the
+blockhash window had to fit both signatures. The core replacement keeps the
+fee-payer and co-signature costs but refuses oversized atomic compositions
+instead of splitting them.
 
 ## Addendum: 2026-09-22 Queued withdrawals enter the Embedded Yield contract
 

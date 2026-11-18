@@ -13,7 +13,6 @@ import { adminAlertEmailsCron } from "@/cron/admin-alert-emails";
 import { dvpTradesCron } from "@/cron/dvp-trades";
 import { earnCatalogueSyncCron } from "@/cron/earn-catalogue-sync";
 import { earnMetricsRefreshCron } from "@/cron/earn-metrics-refresh";
-import { earnSplitSwapsCron } from "@/cron/earn-split-swaps";
 import { earnVaultMovementsCron } from "@/cron/earn-vault-movements";
 import { fireblocksProposalsCron } from "@/cron/fireblocks-proposals";
 import { idempotencyKeyPruneCron } from "@/cron/idempotency-keys";
@@ -69,7 +68,6 @@ export const CRON_DEFINITIONS: readonly CronDefinition[] = [
   rampDeliveriesCron,
   rampTransferStatusesCron,
   earnVaultMovementsCron,
-  earnSplitSwapsCron,
   dvpTradesCron,
   ringsIndexingCron,
   pendingDepositsCron,

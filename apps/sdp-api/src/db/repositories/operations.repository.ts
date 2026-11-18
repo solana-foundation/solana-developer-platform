@@ -49,7 +49,6 @@ export interface OperationAttempt {
   operationId: string;
   actionId: string;
   version: number;
-  selectedOptionId: string | null;
   principal: MoneyPrincipal;
   buildRef: OperationReference | null;
   signedTransaction: string | null;
@@ -160,7 +159,6 @@ const attemptRowSchema = z.object({
   operation_id: z.string(),
   action_id: z.string(),
   action_version: z.number(),
-  selected_option_id: z.string().nullable(),
   principal: moneyPrincipalSchema,
   build_ref: operationReferenceSchema.nullable(),
   signed_transaction: z.string().nullable(),
@@ -227,7 +225,6 @@ function parseAttempt(value: unknown): OperationAttempt {
     operationId: row.operation_id,
     actionId: row.action_id,
     version: row.action_version,
-    selectedOptionId: row.selected_option_id,
     principal: row.principal,
     buildRef: row.build_ref,
     signedTransaction: row.signed_transaction,
@@ -474,7 +471,7 @@ export function createOperationsRepository(db: DatabaseClient) {
     async claimAction(
       scope: OperationScope,
       id: string,
-      action: { actionId: string; version: number; optionId?: string },
+      action: { actionId: string; version: number },
       leaseSeconds = 60,
       allowCancelledSignedRecovery = false
     ): Promise<OperationClaim> {
@@ -498,17 +495,15 @@ export function createOperationsRepository(db: DatabaseClient) {
           !signedCancellationRecovery
         )
           throw conflict("Operation cancellation was requested");
-        if (attempt !== null && attempt.selectedOptionId !== (action.optionId ?? null))
-          throw conflict("Operation action already selected a different option");
         if (attempt === null) {
           if (
-            row.operation.nextAction?.type !== "execute" &&
+            row.operation.nextAction?.type !== "submit" &&
             row.operation.nextAction?.type !== "sign_transaction"
           )
             throw conflict("Operation has no executable action");
           const created = await tx.queryOne(
-            `INSERT INTO operation_attempts (id, operation_id, organization_id, project_id, environment, action_id, action_version, build_ref, selected_option_id, principal)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?::jsonb) RETURNING *`,
+            `INSERT INTO operation_attempts (id, operation_id, organization_id, project_id, environment, action_id, action_version, build_ref, principal)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb) RETURNING *`,
             [
               `opat_${randomUUID()}`,
               id,
@@ -516,7 +511,6 @@ export function createOperationsRepository(db: DatabaseClient) {
               action.actionId,
               action.version,
               sqlJson(row.operation.buildRef),
-              action.optionId ?? null,
               JSON.stringify(row.actionPrincipal),
             ]
           );
@@ -584,7 +578,7 @@ export function createOperationsRepository(db: DatabaseClient) {
       });
     },
 
-    /** Only a server-controlled unsigned preparation proves no independent broadcast was possible. */
+    /** Unexposed choices and server-held unsigned builds cannot broadcast independently. */
     async cancelUndispatched(scope: OperationScope, id: string): Promise<Operation | null> {
       return db.transaction(async (tx) => {
         const row = await requireRecord(tx, scope, id, true);
@@ -599,7 +593,10 @@ export function createOperationsRepository(db: DatabaseClient) {
           sameJson(attempt.resourceRef, row.operation.resourceRef);
         const localUnsigned =
           row.actionPurpose === "execute" &&
-          "walletId" in row.source &&
+          ("walletId" in row.source ||
+            (row.operation.nextAction?.type === "select_option" &&
+              row.operation.buildRef?.kind === "earn.withdrawal_options" &&
+              attempt === null)) &&
           row.operation.resourceRef === null &&
           (attempt === null ||
             (attempt.signedTransaction === null && attempt.dispatchStartedAt === null));

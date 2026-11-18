@@ -11,8 +11,7 @@ program creation and allocation configuration.
   `earn-response-schemas.ts` validates reads; shared operation schemas validate
   writes and polling. `earn-core-data.ts` owns dashboard transport and polling.
 - `earn-core-action-modal.tsx` collects intent, shows current operation terms,
-  then requires an explicit execution click. Current step `terms.inputAmount`
-  takes precedence over the original intent after a prerequisite swap.
+  then requires explicit submission. A funding swap and deposit are atomic.
 - `earn-core-operations.tsx` shows requested and verified settled amounts
   separately. Queue acceptance or Solana submission never means payout.
 - BFF routes under `src/app/api/dashboard/markets/earn` forward the four core
@@ -26,15 +25,17 @@ program creation and allocation configuration.
 
 ## Operations and recovery
 
-Preparation never signs or broadcasts. `execute` returns 202 after durable
+Preparation never signs or broadcasts. `submit` returns 202 after durable
 acceptance; workers handle signing, provider approval and submission. Keep
 polling queued and active operations, including custody providers that require
 approval in another application. Read requests never trigger execution.
 
-Render `nextAction` explicitly: `execute`, `sign_transaction`,
-`approve_in_provider`, `wait` or `refresh`. Only the API can decide whether a
+Render `nextAction` explicitly: `submit`, `sign_transaction`, `select_option`,
+`approve_in_provider`, `wait` or `refresh`. Selecting a withdrawal option
+prepares its terms through version-bound refresh, followed by separate review
+and submission. Only the API can decide whether a
 message is safe to replace. A pending or uncertain provider outcome remains
-`wait`. Refresh returns new terms for a separate review and execution approval.
+`wait`. Refresh returns new terms for separate review and submission.
 
 Persist retry keys before sending. A lost response retries the same request
 and exact signed bytes. Do not prepare another transaction because an RPC read

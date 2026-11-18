@@ -174,7 +174,7 @@ const WALLET_SCOPE_ROUTES = {
       test: "checks current wallet scope before creating a prepared withdrawal",
     },
   },
-  "POST /v1/operations/:operationId/execute": {
+  "POST /v1/operations/:operationId/submit": {
     refusedEarly: {
       file: EARN_EXITS,
       test: "refuses $action with wallet_out_of_scope before changing an operation",

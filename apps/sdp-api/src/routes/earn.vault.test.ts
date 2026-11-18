@@ -495,7 +495,7 @@ describe("POST /v1/earn/deposit custody preparation admission", () => {
         data: {
           operation: {
             status: "prepared",
-            nextAction: { type: "execute" },
+            nextAction: { type: "submit" },
             terms: {
               estimate: { mint: SHARE_MINT, value: "10" },
               minimum: { mint: SHARE_MINT, value: "9.9" },

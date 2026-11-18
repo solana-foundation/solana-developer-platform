@@ -5,5 +5,5 @@ export async function POST(
   { params }: { params: Promise<{ operationId: string }> }
 ) {
   const { operationId } = await params;
-  return proxyEarnCore(request, `/v1/operations/${encodeURIComponent(operationId)}/execute`);
+  return proxyEarnCore(request, `/v1/operations/${encodeURIComponent(operationId)}/submit`);
 }

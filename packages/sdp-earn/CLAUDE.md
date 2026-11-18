@@ -12,7 +12,7 @@ This package defines provider capabilities; the API router defines caller
 authentication. Do not confuse a provider's own upstream credential with an
 integrator's SDP API key.
 
-- Every Earn route, catalogue reads and previews included, requires an
+- Every Earn route, catalogue reads and preparation included, requires an
   authenticated SDP credential with its Earn permission, and runs in that
   credential's project environment.
 - Missing credentials for a provider that requires them are a provider
@@ -21,10 +21,10 @@ integrator's SDP API key.
 
 Earn guides live in `apps/sdp-docs/content/docs/earn` and
 `apps/sdp-docs/content/docs/guides/embedded-yield.mdx`. The normal docs generators render the
-public contract for the deployment's release channel: Earn appears on `beta`
-and `experimental`, and stays hidden on `stable`. The new core Earn and shared
-operation routes remain internal, as do Programs and provider-action routes;
-promoting another route requires named security sign-off. The core contract is
+public contract for the deployment's release channel. Earn's publication hold
+keeps every Earn and shared operation route internal pending named security
+sign-off, independently of runtime channel access. Programs and provider-action
+routes are removed. The core contract is
 documented in `apps/sdp-docs/content/unpublished/earn/core-api.mdx`.
 
 ## Local development — the whole Earn stack
@@ -133,11 +133,22 @@ Provider interfaces keep protocol-specific names such as `EarnVaultProvider`.
 
 Deposits select a strategy and a custody wallet or owner address; withdrawals
 select a position. Preparation records an operation and returns unsigned bytes
-or a next action without signing or broadcasting. Execute through
-`POST /v1/operations/{operationId}/execute` with the reviewed action ID,
+or a next action without signing or broadcasting. Submit through
+`POST /v1/operations/{operationId}/submit` with the reviewed action ID,
 version and an `Idempotency-Key`; the response is `202`, and the worker handles
-signing, provider approval and submission. Poll the same operation to recover
+configured signing, provider approval and broadcast. Poll the same operation to recover
 after reload or a lost response.
+
+Submit authorizes only that exact reviewed transaction. Withdrawal selection
+uses `nextAction: select_option` and `terms.options`; refresh takes the current
+`actionId`, `version` and advertised `optionId` to prepare a new review.
+Later refreshes omit `optionId` and retain the selected route. If it is
+unavailable, fail instead of choosing another route.
+
+Compose funding swaps and deposits in one atomic transaction, sized to the
+swap's guaranteed minimum output. Retry oversized compositions with a compact
+route, then refuse before persisting a build. Do not return a standalone funding
+swap, a deposit continuation or a separate claim API.
 
 The old catalogue, program, preview, build and submission HTTP routes are
 removed. Current holdings and obligations use the core routes and shared operations. There are no compatibility HTTP routes or retirement stubs.
@@ -267,7 +278,7 @@ Money moves through provider-specific execution packages: `@sdp/kamino`,
 `@sdp/wisdomtree`. The core API prepares one operation for either owner model.
 For custody, the worker uses the organization's configured signer and tracks
 any provider approval before submission. For an owner address, the caller signs
-the exact prepared transaction and execute queues those bytes for the worker.
+the exact prepared transaction and submit queues those bytes for the worker.
 Both use the same builders, which take the owner as a parameter and never sign.
 Those packages depend on this one, never the reverse: the hourly catalogue cron
 must not load a chain SDK it never calls.
@@ -474,8 +485,8 @@ the five-minute pass would re-pay the whole catalogue cost for the rate alone.
 - Registry: `EARN_PROVIDER_CLIENTS` (src/index.ts) + fail-closed
   `resolveEarnProviderClient` — DB provider ids are open strings and MUST be
   resolved through this, never direct-indexed.
-- Optional capabilities so far: portfolio wallets, withdrawal approvals, live
-  metrics, vault-direct (deposit + read), vault-withdraw,
+- Optional capabilities include live metrics, vault-direct (deposit + read),
+  vault-withdraw,
   vault-queued-withdraw, provider-operated par redemption, deposit eligibility,
   and the two live quotes (deposit and withdrawal previews). All are
   method-presence guards in capabilities.ts,
@@ -552,6 +563,12 @@ to 2 warm per operation (3 for a sponsored first deposit, 4 for a sponsored
 first queue request), with identical values, by reading every account the SDK
 touches in one batch and serving the SDK's own re-reads from it (`@sdp/veda`
 CLAUDE.md, "Every operation reads each account once").
+
+Atomic-only funding leaves successful deposit RPC counts unchanged: one compute
+probe and one final simulation for a successful composed attempt. If compact
+composition is oversized, refuse instead of adding the former baseline balance
+read and two standalone-swap simulations. No split-swap status polling or second
+deposit build follows.
 
 ## Conventions
 

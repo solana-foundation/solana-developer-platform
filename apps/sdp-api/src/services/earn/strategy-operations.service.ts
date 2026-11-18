@@ -1,6 +1,6 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
-import type { ExecuteOperation, Operation, OperationProposalBinding } from "@sdp/types/operations";
+import type { Operation, OperationProposalBinding, SubmitOperation } from "@sdp/types/operations";
 import { TERMINAL_OPERATION_STATUSES } from "@sdp/types/operations";
 import { signature } from "@solana/kit";
 import { getDb } from "@/db/client";
@@ -32,15 +32,10 @@ import { acceptOperationExecution } from "@/services/operation-execution-audit.s
 import { createOperationsService } from "@/services/operations.service";
 import { createOrgTransactionProposerForCustodyWallet } from "@/services/solana/signer";
 import type { Env } from "@/types/env";
-import { createOperationWorkerBudget, type OperationWorkerBudget } from "./operation-worker-budget";
+import { createOperationWorkerBudget } from "./operation-worker-budget";
 import { resolveEarnOperationBuild } from "./strategy-operation-build.service";
 import {
-  observePreparedSwapStrategyAction,
-  retryPreparedSwapStrategyAction,
-} from "./strategy-swap-operations.service";
-import {
   type PreparedStrategySigningTarget,
-  type StrategyTransactionScope,
   signPreparedStrategyTransaction,
   sponsorPreparedStrategyTransaction,
 } from "./strategy-transactions.service";
@@ -245,90 +240,6 @@ async function admitRecordedCustodyBroadcast(
   }
 }
 
-/**
- * Run only an already claimed action. The durable attempt is the outbox for
- * provider approval; the existing Earn movement remains the broadcast outbox.
- */
-async function advanceSwapOperation(
-  env: Env,
-  scope: OperationScope,
-  claim: OperationClaim,
-  transactionScope: StrategyTransactionScope,
-  built: PreparedStrategySigningTarget,
-  workerBudget: OperationWorkerBudget
-): Promise<Operation> {
-  const reference = claim.operation.resourceRef;
-  if (reference?.kind !== "earn.swap") throw internalError("Operation has no swap reference");
-  const service = createOperationsService(env);
-  const update = (change: OperationUpdate) => service.transition(scope, claim, change);
-  const observed = await observePreparedSwapStrategyAction(env, transactionScope, reference.id);
-  if (observed.status === "failed")
-    return update({
-      status: "failed",
-      nextAction: null,
-      resourceRef: reference,
-      error: { code: "TRANSACTION_FAILED", message: "The deposit swap failed on chain" },
-    });
-  if (observed.status === "finalized") {
-    if (claim.operation.cancelRequestedAt !== null)
-      return update({
-        status: "cancelled",
-        nextAction: null,
-        resourceRef: reference,
-        error: null,
-      });
-    await update({
-      status: "settling",
-      nextAction: { type: "wait", reason: "Preparing the deposit review" },
-      resourceRef: reference,
-      error: null,
-    });
-    await service.repository.release(scope, claim);
-    return service.repository.replacePreparedAction(
-      scope,
-      claim.operation.id,
-      claim.operation,
-      {
-        nextAction: { type: "execute" },
-        terms: { expiresAt: null, estimate: null, minimum: null, fees: null, options: [] },
-        buildRef: { kind: "earn.deposit_continuation", id: reference.id },
-      },
-      { kind: "resolved_attempt", resourceRef: reference }
-    );
-  }
-  if (
-    !observed.observed &&
-    claim.attempt.signedTransaction !== null &&
-    !claim.attempt.observationOnly &&
-    claim.operation.cancelRequestedAt === null
-  ) {
-    const admitted =
-      transactionScope.custodyWalletId === null
-        ? await admitOwnerOperationBroadcast(env, scope, claim, built)
-        : await admitRecordedCustodyBroadcast(
-            env,
-            scope,
-            claim,
-            built,
-            transactionScope.custodyWalletId
-          );
-    if (admitted) {
-      workerBudget.assertCanStart();
-      await retryPreparedSwapStrategyAction(env, {
-        ...transactionScope,
-        advisoryId: reference.id,
-        signedTransaction: claim.attempt.signedTransaction,
-      });
-    }
-  }
-  return update({
-    status: "submitted",
-    nextAction: { type: "wait", reason: "Waiting for swap finalization" },
-    resourceRef: reference,
-    error: null,
-  });
-}
-
 async function admitOwnerOperationBroadcast(
   env: Env,
   scope: OperationScope,
@@ -359,8 +270,7 @@ async function admitOwnerOperationBroadcast(
 export async function advanceEarnOperation(
   env: Env,
   scope: OperationScope,
-  claim: OperationClaim,
-  input?: ExecuteOperation
+  claim: OperationClaim
 ): Promise<Operation> {
   if (scope.environment !== currentClusterScope().environment)
     throw internalError("Operation cluster scope changed");
@@ -373,9 +283,6 @@ export async function advanceEarnOperation(
     submit,
   } = await resolveEarnOperationBuild(env, scope, claim);
   const update = (change: OperationUpdate) => service.transition(scope, claim, change);
-  if (claim.operation.resourceRef?.kind === "earn.swap") {
-    return advanceSwapOperation(env, scope, claim, transactionScope, built, workerBudget);
-  }
   if (
     claim.operation.resourceRef?.kind === "earn.movement" ||
     claim.operation.resourceRef?.kind === "earn.withdrawal_request"
@@ -399,17 +306,8 @@ export async function advanceEarnOperation(
   ) {
     observeOnly = !(await admitOwnerOperationBroadcast(env, scope, claim, built));
   }
-  if (signedTransaction === null && transactionScope.custodyWalletId === null) {
-    if (input?.signedTransaction === undefined)
-      throw conflict("The operation is waiting for its signed transaction");
-    const signed = await verifySignedWalletTransaction(built, input.signedTransaction);
-    attempt = await service.recordSignedAttempt(scope, claim, {
-      signedTransaction: signed.signedTransactionBase64,
-      signature: signed.signature,
-      lastValidBlockHeight: built.last_valid_block_height,
-    });
-    signedTransaction = attempt.signedTransaction;
-  }
+  if (signedTransaction === null && transactionScope.custodyWalletId === null)
+    throw internalError("Accepted wallet submission has no stored signed transaction");
   // These helpers capture the same leased action; extraction does not add a
   // signing authority, retry identity, or independent lifecycle state.
   async function pendingCustodyProposal(
@@ -668,15 +566,15 @@ export async function advanceEarnOperation(
 }
 
 /** Acknowledgement only. Every signer, provider proposal and send runs in the worker. */
-export async function executeEarnOperation(
+export async function submitEarnOperation(
   env: Env,
   scope: OperationScope,
   id: string,
-  input: ExecuteOperation,
+  input: SubmitOperation,
   c: AppContext
 ) {
   const service = createOperationsService(env);
-  const claim = await service.claimExecution(scope, id, input);
+  const claim = await service.claimSubmission(scope, id, input);
   try {
     const { target, transactionScope } = await resolveEarnOperationBuild(env, scope, claim);
     let verifiedSigned: OperationSignedAttempt | undefined;

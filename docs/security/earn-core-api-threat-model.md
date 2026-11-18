@@ -14,14 +14,14 @@ deposit eligibility nor authority over a wallet.
 
 ## Boundaries
 
-| Boundary                     | Control                                                                                                                                                                   |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Caller to preparation        | Authentication, project/environment scope, wallet binding and exact resource ownership precede idempotency. Mutable deposit admission follows replay.                     |
-| Preparation to execution     | An immutable intent and private source bind a versioned, reviewable action to its authenticated principal. Changed terms require another review.                          |
-| HTTP to worker               | Execute persists acceptance and exact owner-signed bytes. It does not sign, propose or broadcast. The worker restores the recorded principal and rechecks live authority. |
-| Worker to custody            | Existing custody and sponsorship waists admit the named movement. A durable account binding precedes the single provider create.                                          |
-| Signature to ledger          | Every required signature and the complete prepared message are verified. Signed intent commits before broadcast.                                                          |
-| Chain to provider settlement | Approval, chain inclusion and economic delivery remain separate observations. Requested amounts and queue escrow are not payout evidence.                                 |
+| Boundary                     | Control                                                                                                                                                                       |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Caller to preparation        | Authentication, project/environment scope, wallet binding and exact resource ownership precede idempotency. Mutable deposit admission follows replay.                         |
+| Preparation to execution     | An immutable intent and private source bind a versioned, reviewable action to its authenticated principal. Changed terms require another review.                              |
+| HTTP to worker               | Submit persists authorization for the exact reviewed transaction and owner-signed bytes. It does not prepare, sign, propose or broadcast. The worker rechecks live authority. |
+| Worker to custody            | Existing custody and sponsorship waists admit the named movement. A durable account binding precedes the single provider create.                                              |
+| Signature to ledger          | Every required signature and the complete prepared message are verified. Signed intent commits before broadcast.                                                              |
+| Chain to provider settlement | Approval, chain inclusion and economic delivery remain separate observations. Requested amounts and queue escrow are not payout evidence.                                     |
 
 ## Failure and abuse cases
 
@@ -31,8 +31,14 @@ deposit eligibility nor authority over a wallet.
 - A changed wallet, fee payer, transaction message or signature cannot replace
   the reviewed action. Prepared sources are checked again against the stored
   operation source at the execution adapter.
-- A stale action/version cannot execute or select a different withdrawal
-  route. Refresh preserves old attempts rather than changing their bytes.
+- A stale action/version cannot submit or select a different withdrawal route.
+  Refresh selects only an advertised `select_option`, returns a new review and
+  preserves old attempts. Later refreshes retain the selected route; an
+  unavailable route fails instead of silently choosing another.
+- Swap-funded deposits contain both swap and deposit instructions in one
+  transaction, sized to guaranteed output and simulated together. Oversized
+  compositions fail before a build is persisted. No standalone funding swap
+  can leave the operation swapped but undeposited.
 - Concurrent workers use fenced leases. Dispatch is recorded before a provider
   create. A takeover reads the original provider identity; a missing lookup or
   timeout never permits another create.
@@ -65,7 +71,7 @@ cancellation revokes them. A missing final outcome may remain unresolved.
 
 Operations retain the original action principal. Rotating or revoking that
 credential can require an authorized recovery path; a different key does not
-automatically acquire authority to execute its prepared action.
+automatically acquire authority to submit its prepared action.
 
 Catalogue coverage and execution coverage are distinct. A discovery-only
 strategy cannot enter the deposit path. Expanding assets beyond current stable

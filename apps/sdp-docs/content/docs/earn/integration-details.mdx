@@ -12,14 +12,18 @@ and recover its next action instead of creating another deposit or withdrawal.
 
 ## Reviewed actions
 
-Execute names the exact `actionId` and `version`. Owner-signed transactions
+Submit names the exact `actionId` and `version`. Owner-signed transactions
 must match the prepared message and all required signatures. A later step can
 require another review under the same operation.
 
 ## Refresh safely
 
-Use `POST /v1/operations/{operationId}/refresh` only when the operation permits
-replacement. Timeout, blockhash expiry and missing RPC history do not prove
+Call `POST /v1/operations/{operationId}/refresh` with the current `actionId` and
+`version` only when the operation permits preparation. For `select_option`,
+include an advertised `optionId`; review the new transaction before `/submit`.
+Later refreshes preserve the selected withdrawal route.
+
+Timeout, blockhash expiry and missing RPC history do not prove
 non-execution. Exposed owner-signed messages retain independent-broadcast
 uncertainty even before SDP receives a signature.
 

@@ -18,7 +18,7 @@ interface GeneratedIntegration {
     idempotencyKey: string;
     feePayer?: string;
   }): Promise<unknown>;
-  executeEarnOperation(input: {
+  submitEarnOperation(input: {
     operationId: string;
     actionId: string;
     version: number;
@@ -28,6 +28,13 @@ interface GeneratedIntegration {
   listEarnPositions(ownerAddress: string): Promise<unknown[]>;
   listEarnActivity(ownerAddress: string): Promise<unknown[]>;
   requestEarnCancellation(operationId: string, key: string): Promise<unknown>;
+  refreshEarnOperation(input: {
+    operationId: string;
+    actionId: string;
+    version: number;
+    optionId?: string;
+    idempotencyKey: string;
+  }): Promise<unknown>;
 }
 
 async function loadGeneratedIntegration(): Promise<GeneratedIntegration> {
@@ -101,11 +108,11 @@ describe("Earn integration module", () => {
       signedTransaction: "signed",
       idempotencyKey: "persisted",
     };
-    await integration.executeEarnOperation(input);
-    await integration.executeEarnOperation(input);
+    await integration.submitEarnOperation(input);
+    await integration.submitEarnOperation(input);
     expect(fetchMock.mock.calls[0]).toEqual(fetchMock.mock.calls[1]);
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "https://api.test/v1/operations/operation%2Fone/execute"
+      "https://api.test/v1/operations/operation%2Fone/submit"
     );
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
       actionId: "action",
@@ -122,6 +129,31 @@ describe("Earn integration module", () => {
     );
     const integration = await loadGeneratedIntegration();
     await expect(integration.listEarnStrategies()).rejects.toThrow("Incomplete strategy catalogue");
+  });
+
+  it("prepares a selected route with its current version before submission", async () => {
+    process.env.SDP_API_KEY = "key";
+    const fetchMock = vi.fn(async (_path: string, _init?: RequestInit) =>
+      Response.json({ data: { operation: { id: "operation", status: "prepared" } } })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const integration = await loadGeneratedIntegration();
+    await integration.refreshEarnOperation({
+      operationId: "operation/one",
+      actionId: "choice-action",
+      version: 1,
+      optionId: "delayed",
+      idempotencyKey: "persisted",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://api.test/v1/operations/operation%2Fone/refresh"
+    );
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      actionId: "choice-action",
+      version: 1,
+      optionId: "delayed",
+    });
   });
 
   it("preserves owner scope on every operation page and refuses cursor cycles", async () => {

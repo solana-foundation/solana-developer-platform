@@ -22,7 +22,7 @@ const prepared: Operation = {
   },
   actionId: "action",
   version: 1,
-  nextAction: { type: "execute" },
+  nextAction: { type: "submit" },
   terms: { expiresAt: null, estimate: null, minimum: null, fees: null, options: [] },
   buildRef: null,
   resourceRef: null,

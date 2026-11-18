@@ -4,7 +4,7 @@ import type { MovementId } from "@sdp/types/movements";
 import type { Operation } from "@sdp/types/operations";
 import { operationResponseSchema } from "@sdp/types/operations";
 import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
-import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
+import { CLUSTER_BY_SDP_ENVIRONMENT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import {
   address,
   appendTransactionMessageInstruction,
@@ -57,6 +57,8 @@ const mocks = vi.hoisted(() => ({
   withdrawBuild: vi.fn(),
   quoteWithdrawal: vi.fn(),
   withdrawalEnabled: false,
+  withdrawalChoices: false,
+  directWithdrawalAvailable: true,
   sign: vi.fn(),
   proposer: vi.fn(),
   broadcast: vi.fn(),
@@ -88,6 +90,45 @@ vi.mock("@/services/earn/vault-execution.service", async (original) => ({
   ...(await original<typeof import("@/services/earn/vault-execution.service")>()),
   broadcastVaultTransaction: mocks.broadcast,
 }));
+vi.mock("@/services/earn/strategy-queued-operations.service", async (original) => {
+  const actual =
+    await original<typeof import("@/services/earn/strategy-queued-operations.service")>();
+  return {
+    ...actual,
+    prepareStrategyWithdrawalChoices: (
+      ...args: Parameters<typeof actual.prepareStrategyWithdrawalChoices>
+    ) => {
+      if (!mocks.withdrawalChoices) return actual.prepareStrategyWithdrawalChoices(...args);
+      const choices = [
+        ...(mocks.directWithdrawalAvailable
+          ? [
+              {
+                id: "direct",
+                kind: "direct" as const,
+                option: {
+                  id: "direct",
+                  label: "Direct withdrawal",
+                  settlement: "instant" as const,
+                  estimatedSeconds: null,
+                },
+              },
+            ]
+          : []),
+        {
+          id: "queued",
+          kind: "queued" as const,
+          option: {
+            id: "queued",
+            label: "Delayed withdrawal",
+            settlement: "delayed" as const,
+            estimatedSeconds: null,
+          },
+        },
+      ];
+      return Promise.resolve({ choices, options: choices.map((choice) => choice.option) });
+    },
+  };
+});
 vi.mock("@/services/solana/signer", async (original) => ({
   ...(await original<typeof import("@/services/solana/signer")>()),
   createOrgSignerForCustodyWallet: mocks.sign,
@@ -190,6 +231,8 @@ beforeEach(async () => {
   await clearKVStores(env);
   vi.resetAllMocks();
   mocks.withdrawalEnabled = false;
+  mocks.withdrawalChoices = false;
+  mocks.directWithdrawalAvailable = true;
   mocks.projectionFails = false;
   mocks.quoteWithdrawal.mockResolvedValue({
     assetsOut: "9.9",
@@ -386,7 +429,7 @@ describe("Earn core operation HTTP flow", () => {
     expect(prepared.status, await prepared.clone().text()).toBe(202);
     const deposit = await readOperation(prepared);
     const accepted = await request(
-      `operations/${deposit.id}/execute`,
+      `operations/${deposit.id}/submit`,
       "POST",
       { actionId: deposit.actionId, version: deposit.version },
       "queue-production-deposit"
@@ -433,7 +476,7 @@ describe("Earn core operation HTTP flow", () => {
     expect(exitResponse.status, await exitResponse.clone().text()).toBe(202);
     const exit = await readOperation(exitResponse);
     const exitAccepted = await request(
-      `operations/${exit.id}/execute`,
+      `operations/${exit.id}/submit`,
       "POST",
       { actionId: exit.actionId, version: exit.version },
       "queue-exit-after-production-loss"
@@ -481,8 +524,9 @@ describe("Earn core operation HTTP flow", () => {
     );
     expect((await readOperation(replay)).id).toBe(operation.id);
     expect(mocks.build).toHaveBeenCalledTimes(1);
+    expect(mocks.build.mock.calls[0]?.[1]).not.toHaveProperty("swap");
     const accepted = await request(
-      `operations/${operation.id}/execute`,
+      `operations/${operation.id}/submit`,
       "POST",
       action(operation),
       "execute-one"
@@ -535,6 +579,38 @@ describe("Earn core operation HTTP flow", () => {
     expect(await unfinishedCounts()).toEqual({ movements: 1, positions: 1 });
   });
 
+  it("infers an atomic swap from the funding mint and returns one signable deposit action", async () => {
+    const amount = { mint: WELL_KNOWN_TOKENS.USDC.mints.devnet.address, value: "10" };
+    const response = await request(
+      "earn/deposit",
+      "POST",
+      { strategyId, source: { ownerAddress: owner }, amount },
+      "automatic-swap-deposit"
+    );
+    expect(response.status, await response.clone().text()).toBe(202);
+    const operation = await readOperation(response);
+    expect(operation).toMatchObject({
+      kind: "earn.deposit",
+      status: "prepared",
+      version: 1,
+      intent: { amount },
+      terms: { inputAmount: amount },
+      nextAction: { type: "sign_transaction", transaction: unsigned },
+      buildRef: { kind: "earn.strategy_transaction" },
+    });
+    expect(mocks.build).toHaveBeenCalledOnce();
+    expect(mocks.build).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({
+        tokenMint: TOKEN,
+        swap: { sourceTokenMint: amount.mint, slippageBps: 2 },
+      })
+    );
+    expect(mocks.sign).not.toHaveBeenCalled();
+    expect(mocks.proposer).not.toHaveBeenCalled();
+    expect(mocks.broadcast).not.toHaveBeenCalled();
+  });
+
   it("prepares an existing legacy custody position withdrawal and queues it without any inline signer", async () => {
     mocks.withdrawalEnabled = true;
     const walletId = await seedOperationCustodyWallet("core_operation_existing");
@@ -557,7 +633,7 @@ describe("Earn core operation HTTP flow", () => {
     expect(operation).toMatchObject({
       kind: "earn.withdraw",
       status: "prepared",
-      nextAction: { type: "execute" },
+      nextAction: { type: "submit" },
       intent: { positionId },
       terms: { estimate: { mint: TOKEN, value: "9.9" } },
     });
@@ -574,7 +650,7 @@ describe("Earn core operation HTTP flow", () => {
     expect(mocks.sign).not.toHaveBeenCalled();
     expect(mocks.proposer).not.toHaveBeenCalled();
     const accepted = await request(
-      `operations/${operation.id}/execute`,
+      `operations/${operation.id}/submit`,
       "POST",
       {
         actionId: operation.actionId,
@@ -585,6 +661,120 @@ describe("Earn core operation HTTP flow", () => {
     expect(accepted.status, await accepted.clone().text()).toBe(202);
     expect(await readOperation(accepted)).toMatchObject({ status: "queued", result: null });
     expect(await unfinishedCounts()).toEqual({ positions: 1, movements: 0 });
+    expect(mocks.sign).not.toHaveBeenCalled();
+    expect(mocks.proposer).not.toHaveBeenCalled();
+    expect(mocks.broadcast).not.toHaveBeenCalled();
+  });
+
+  it("selects and refreshes a withdrawal route without submitting or changing its authority", async () => {
+    mocks.withdrawalEnabled = true;
+    mocks.withdrawalChoices = true;
+    const walletId = await seedOperationCustodyWallet("withdrawal_choices");
+    const positionId = generateEarnPositionId();
+    await getDb(env).execute(
+      `INSERT INTO earn_positions (id, organization_id, project_id, environment, provider,
+       kind, custody_wallet_id, vault_address, share_mint, token_mint, label, activated_at)
+       VALUES (?, ?, ?, 'sandbox', 'kamino', 'vault_direct', ?, ?, ?, ?, 'Holding', sdp_iso_now())`,
+      [positionId, tenant.org.id, tenant.project.id, walletId, VAULT, SHARE, TOKEN]
+    );
+    const initial = await request(
+      "earn/withdraw",
+      "POST",
+      { positionId, amount: { kind: "shares", value: "10" } },
+      "prepare-withdrawal-choices"
+    );
+    expect(initial.status, await initial.clone().text()).toBe(202);
+    const operation = await readOperation(initial);
+    expect(operation.nextAction).toEqual({ type: "select_option" });
+    expect(operation.terms.options.map((option) => option.id)).toEqual(["direct", "queued"]);
+    expect(mocks.withdrawBuild).not.toHaveBeenCalled();
+    const reviewed = { actionId: operation.actionId, version: operation.version };
+    const refreshPath = `operations/${operation.id}/refresh`;
+    const submitted = await request(
+      `operations/${operation.id}/submit`,
+      "POST",
+      reviewed,
+      "cannot-submit-choice"
+    );
+    expect(submitted.status).toBe(409);
+    for (const [tag, body, status] of [
+      ["missing", reviewed, 400],
+      ["unknown", { ...reviewed, optionId: "unknown" }, 400],
+      ["stale", { ...reviewed, version: reviewed.version + 1, optionId: "direct" }, 409],
+    ] as const) {
+      const response = await request(refreshPath, "POST", body, `choice-${tag}`);
+      expect(response.status, await response.clone().text()).toBe(status);
+    }
+    const otherKey = await seedEarnApiKey(env, tenant, {
+      id: "other-choice-principal",
+      grants: ["earn.read", "earn.execute"],
+      environment: "sandbox",
+    });
+    const otherPrincipal = await request(
+      refreshPath,
+      "POST",
+      { ...reviewed, optionId: "direct" },
+      "choice-other-principal",
+      otherKey
+    );
+    expect(otherPrincipal.status, await otherPrincipal.clone().text()).toBe(409);
+    expect(mocks.withdrawBuild).not.toHaveBeenCalled();
+
+    const selected = await request(
+      refreshPath,
+      "POST",
+      { ...reviewed, optionId: "direct" },
+      "select-direct"
+    );
+    expect(selected.status, await selected.clone().text()).toBe(202);
+    const prepared = await readOperation(selected);
+    expect(prepared).toMatchObject({
+      id: operation.id,
+      version: operation.version + 1,
+      status: "prepared",
+      intent: operation.intent,
+      nextAction: { type: "submit" },
+      terms: { options: [{ id: "direct" }] },
+    });
+    expect(prepared.actionId).not.toBe(operation.actionId);
+    expect(mocks.withdrawBuild).toHaveBeenCalledTimes(1);
+    const replay = await request(
+      refreshPath,
+      "POST",
+      { ...reviewed, optionId: "direct" },
+      "select-direct"
+    );
+    expect((await readOperation(replay)).actionId).toBe(prepared.actionId);
+    expect(mocks.withdrawBuild).toHaveBeenCalledTimes(1);
+
+    const refreshedResponse = await request(
+      refreshPath,
+      "POST",
+      { actionId: prepared.actionId, version: prepared.version },
+      "refresh-selected-direct"
+    );
+    expect(refreshedResponse.status, await refreshedResponse.clone().text()).toBe(202);
+    const refreshed = await readOperation(refreshedResponse);
+    expect(refreshed.nextAction).toEqual({ type: "submit" });
+    expect(refreshed.terms.options.map((option) => option.id)).toEqual(["direct"]);
+    expect(mocks.withdrawBuild).toHaveBeenCalledTimes(2);
+    mocks.directWithdrawalAvailable = false;
+    const unavailable = await request(
+      refreshPath,
+      "POST",
+      { actionId: refreshed.actionId, version: refreshed.version },
+      "no-route-fallback"
+    );
+    expect(unavailable.status, await unavailable.clone().text()).toBe(400);
+    expect(mocks.withdrawBuild).toHaveBeenCalledTimes(2);
+    expect(
+      await getDb(env).queryOne(
+        `SELECT (SELECT count(*)::int FROM operation_attempts WHERE operation_id = ?) AS attempts,
+         (SELECT count(*)::int FROM audit_logs WHERE resource_type = 'earn_operation'
+           AND resource_id = ? AND action = 'submit') AS submissions`,
+        [operation.id, operation.id]
+      )
+    ).toEqual({ attempts: 0, submissions: 0 });
     expect(mocks.sign).not.toHaveBeenCalled();
     expect(mocks.proposer).not.toHaveBeenCalled();
     expect(mocks.broadcast).not.toHaveBeenCalled();
@@ -601,7 +791,7 @@ describe("Earn core operation HTTP flow", () => {
     expect(refusedResponse.status, await refusedResponse.clone().text()).toBe(202);
     const refused = await readOperation(refusedResponse);
     const acceptedRefusal = await request(
-      `operations/${refused.id}/execute`,
+      `operations/${refused.id}/submit`,
       "POST",
       { actionId: refused.actionId, version: refused.version },
       "refused-accepted"
@@ -638,7 +828,7 @@ describe("Earn core operation HTTP flow", () => {
     expect(
       (
         await request(
-          `operations/${fresh.id}/execute`,
+          `operations/${fresh.id}/submit`,
           "POST",
           action(fresh),
           "execute-after-refusal"
@@ -666,7 +856,7 @@ describe("Earn core operation HTTP flow", () => {
       .spyOn(AuditService.prototype, "beginCriticalWithin")
       .mockRejectedValueOnce(new Error("audit ledger unavailable"));
     const rejected = await request(
-      `operations/${operation.id}/execute`,
+      `operations/${operation.id}/submit`,
       "POST",
       action(operation),
       "audit-down"
@@ -698,7 +888,7 @@ describe("Earn core operation HTTP flow", () => {
     expect(mocks.broadcast).not.toHaveBeenCalled();
     expect(await unfinishedCounts()).toEqual({ positions: 0, movements: 0 });
     const retry = await request(
-      `operations/${operation.id}/execute`,
+      `operations/${operation.id}/submit`,
       "POST",
       action(operation),
       "audit-recovered"
@@ -709,7 +899,7 @@ describe("Earn core operation HTTP flow", () => {
 
   it("replays accepted queued bytes after HTTP key loss without another attempt or audit", async () => {
     const operation = await prepare();
-    const path = `operations/${operation.id}/execute`;
+    const path = `operations/${operation.id}/submit`;
     const first = await request(path, "POST", action(operation), "accepted-first");
     expect(first.status, await first.clone().text()).toBe(202);
     const before = await getDb(env).queryOne(
@@ -768,7 +958,7 @@ describe("Earn core operation HTTP flow", () => {
     const response = await request(
       `operations/${operation.id}/refresh`,
       "POST",
-      {},
+      { actionId: operation.actionId, version: operation.version },
       "unsafe-address-refresh"
     );
     expect(response.status, await response.clone().text()).toBe(409);
@@ -814,14 +1004,14 @@ describe("Earn core operation HTTP flow", () => {
     const operation = await prepare();
     const forged = await transaction("different financial instructions");
     const rejected = await request(
-      `operations/${operation.id}/execute`,
+      `operations/${operation.id}/submit`,
       "POST",
       action(operation, forged.signed),
       "forged-one"
     );
     expect(rejected.status, await rejected.clone().text()).toBe(400);
     const stale = await request(
-      `operations/${operation.id}/execute`,
+      `operations/${operation.id}/submit`,
       "POST",
       { ...action(operation), version: operation.version + 1 },
       "stale-one"
@@ -861,7 +1051,7 @@ describe("Earn core operation HTTP flow", () => {
     expect(
       (
         await request(
-          `operations/${operation.id}/execute`,
+          `operations/${operation.id}/submit`,
           "POST",
           action(operation),
           "other-one",

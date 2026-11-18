@@ -176,7 +176,7 @@ export async function prepareEarnOperationCancellation(
             lastValidBlockHeight: transaction.lastValidBlockHeight,
             expiresAt: null,
           }
-        : { type: "execute" },
+        : { type: "submit" },
     terms,
     buildRef: { kind: "earn.queued_transaction", id: transaction.id },
   };

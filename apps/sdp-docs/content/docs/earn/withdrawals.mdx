@@ -1,7 +1,7 @@
 ---
 module: earn
 title: Withdraw funds
-description: Prepare position exits and track delivery, claims and cancellation.
+description: Prepare position exits and track delivery and cancellation.
 ---
 
 Prepare an exit with `POST /v1/earn/withdraw` using a position ID:
@@ -19,19 +19,20 @@ Payout returns to that owner.
 
 ## Choose and review an exit
 
-Preparation advertises available instant or delayed exits in `terms.options`.
-When a choice is required, execute its `optionId` with the current action ID and
-version, then review the prepared transaction. A client cannot invent a route
-or approve changed terms with an old action identity.
+For `nextAction.type="select_option"`, choose an advertised exit from
+`terms.options`. Call `POST /v1/operations/{operationId}/refresh` with its
+`optionId`, the current `actionId` and `version`, then review the newly prepared
+transaction. Selection does not authorize execution. Later refreshes retain the
+selected route instead of switching between instant and delayed exits.
 
-Sign when requested and execute through the shared operation endpoint. All
-signing, provider approvals and broadcast run asynchronously in the worker.
+Sign when requested and call `POST /v1/operations/{operationId}/submit` with the
+new action identity and any required signed bytes. The worker handles configured
+signing, provider approvals and broadcast asynchronously.
 
 ## Track delivery or cancellation
 
-Poll the operation through request, claim and settlement. A provider request ID
-or escrowed shares is not payout evidence. Later steps can require another
-explicit review and execution.
+Poll the same operation through request and settlement. A provider request ID
+or escrowed shares is not payout evidence. There is no separate claim endpoint.
 
 Request cancellation through `POST /v1/operations/{operationId}/cancel` with
 `earn.manage`. Cancellation records intent; a chain or provider race can keep

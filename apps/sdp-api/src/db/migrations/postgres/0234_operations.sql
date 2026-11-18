@@ -50,7 +50,6 @@ CREATE TABLE operation_attempts (
     environment TEXT NOT NULL CHECK (environment IN ('sandbox', 'production')),
     action_id TEXT NOT NULL,
     action_version INTEGER NOT NULL CHECK (action_version > 0),
-    selected_option_id TEXT,
     principal JSONB NOT NULL CHECK (jsonb_typeof(principal) = 'object'),
     build_ref JSONB,
     signed_transaction TEXT,

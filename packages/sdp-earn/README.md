@@ -35,9 +35,21 @@ vault, lending market or RWA product; its provider owns the implementation.
 
 Preparation stores a durable operation with reviewable terms and unsigned
 transaction bytes or a next action. It never signs, opens approval or broadcasts.
-The caller executes the reviewed action through `/v1/operations`; `202` means
-accepted work. The worker handles configured signers, wallet signatures,
-provider approvals and submission through the same lifecycle.
+The caller authorizes the exact reviewed transaction through
+`POST /v1/operations/{operationId}/submit`; `202` means accepted work. Submit
+never prepares another action. The worker handles configured signing, provider
+approvals and broadcast through the same lifecycle.
+
+Withdrawal choices advertise `nextAction: select_option` and `terms.options`.
+Refresh requires the current `actionId` and `version`, plus an advertised
+`optionId` for selection. It returns a new review before submission. Later
+refreshes retain the selected route rather than choosing another.
+
+Funding swaps and deposits share one atomic transaction. The deposit uses the
+swap's guaranteed minimum output, leaving any excess in the wallet. Oversized
+compositions retry a compact route, then refuse before persisting a build if
+both legs still cannot fit. Fund the strategy's deposit token separately in
+that case; SDP never returns a standalone funding swap or deposit continuation.
 
 A source uses a connected `walletId` or an `ownerAddress`. That identity selects
 signing authority; it does not select another Earn product or execution model.
@@ -46,8 +58,9 @@ position ownership remain explicit. Signed messages are immutable, and uncertain
 outcomes resume their original attempt instead of creating another transaction.
 
 Queued exits stay under the same operation. Request acceptance or share escrow
-is not a payout. Provider and chain observations establish delivery, and a later
-claim or cancellation can require another explicit approval.
+is not a payout. Provider and chain observations establish delivery without a
+separate claim endpoint. An onchain cancellation needs another explicit review
+and submission when advertised.
 
 The 53 former catalogue, program, product and transaction HTTP operations are
 removed. Earn is prelaunch, so no historical-action adoption or compatibility
@@ -162,26 +175,6 @@ refresh is update-only.
   the status back to `active` — a sync pass can no longer resurrect it. Metadata
   and rates keep converging while the row is closed.
 
-### Orphaned split-swap detection (`services/jobs/detect-orphaned-earn-split-swaps.ts`)
-
-- **What it does:** judges every open `earn_split_swap_advisories` row (written
-  when a wallet swap-funded deposit had to split) against the chain:
-  a confirmed/finalized follow-up deposit resolves it, an in-flight deposit or
-  recent follow-up build is the partner still working, and past the swap's
-  blockhash plus a 30-minute grace the owner's deposit-token balance is read
-  with the same call as the build-time baseline. A rise of at least the swap's
-  floor is reported as `sdp_api_earn_split_swap_orphaned` on every visit while
-  it persists. It alerts and never acts (PRO-1864, threat model EARN-026).
-- **When it runs:** every minute as the `detect-orphaned-earn-split-swaps` Cron
-  Definition, once per environment (`scope: "cluster"`), each registration
-  claiming only its environment's advisories and reading its cluster's block
-  height. Always enabled (no earn flag gate: an advisory written before an
-  incident flag flip must keep being watched), under the system database
-  identity like every sweep.
-- **Failure behaviour:** a chain read failure emits its own error event, marks
-  the `sdp_api_earn_split_swap_detection_tick` error-level and throws, so the
-  cron run reads error; the job's own query failing emits no tick at all.
-- **Cadence:** the definition's `schedule` in `cron/earn-split-swaps.ts`.
 - **Delist convergence:** after a successful non-empty provider response, active
   rows absent from that provider's live catalogue become deprecated metadata
   tombstones, scoped to the cluster sub-shelf the responding lane is the truth

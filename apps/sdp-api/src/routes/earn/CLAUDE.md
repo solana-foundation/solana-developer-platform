@@ -16,7 +16,7 @@ program creation, allocation configuration or automation.
 - `/onboarding/wisdomtree`: independent KYC/KYB, documents, corrections and wallet
   registration. Onboarding approval does not authorize a deposit.
 
-Shared `/v1/operations` supplies list, detail, execute, refresh and cancellation.
+Shared `/v1/operations` supplies list, detail, submit, refresh and cancellation.
 There are no other Earn catalogue, preview, build, submit, movement or program
 HTTP wrappers. Only current operation history and async recovery belong in operations.
 Protocol-specific builders and ledger repositories remain shared domain code.
@@ -63,13 +63,26 @@ Keep live balance/precision/minimum checks in domain services, not only the UI.
 An attempt remains immutable after refresh. Preserve signed bytes and identity
 until a definitive outcome is known.
 
+Swap-funded deposits return one atomic swap-and-deposit transaction. Retry an
+oversized composition once with a compact route; refuse if both legs still
+cannot fit. Never return a standalone funding swap or a deposit continuation.
+
+`nextAction: select_option` advertises withdrawal choices in `terms.options`.
+`POST /v1/operations/{operationId}/refresh` requires the current `actionId` and
+`version`, plus `optionId` only for that selection. It prepares a new review
+without authorizing execution. Later refreshes retain the selected route and
+fail if it is unavailable.
+
 ## Execution and async recovery
 
 The cron service schedules operation workers and financial reconciliation.
 
-The shared operations service durably accepts an exact `actionId` and version.
-The worker performs every signature, provider proposal and broadcast, including
-fast signers. No status read performs money work. A provider URL is approval
+`POST /v1/operations/{operationId}/submit` authorizes and durably queues the exact
+reviewed transaction using `actionId`, `version` and required signed bytes. It
+never selects a route or prepares another transaction. `nextAction: submit`
+asks the caller to authorize the configured wallet's worker signing path.
+The worker handles configured signing, provider proposals and broadcast,
+including fast signers. No status read performs money work. A provider URL is approval
 instruction, not proof of approval or settlement.
 
 Use existing signing and sponsorship waists, `createOrgSignerForCustodyWallet`
@@ -131,6 +144,10 @@ identical concurrent work only within exact authorized scope, cache static facts
 without caching failures, and do not fetch an account twice. Fresh reads after
 movement confirmation cannot join work begun before their freshness boundary.
 State before/after request counts when changing read or quote behavior.
+
+Atomic swap-funded builds retain one compute probe and one final simulation per
+attempt. An oversized request no longer reads a split baseline balance or runs
+two standalone-swap simulations. Successful atomic builds make no extra reads.
 
 ## Storage and checks
 

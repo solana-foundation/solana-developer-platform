@@ -1,8 +1,9 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import {
-  executeOperationSchema,
   operationResponseSchema,
   operationsPageSchema,
+  refreshOperationSchema,
+  submitOperationSchema,
 } from "@sdp/types/operations";
 import { successResponseSchema } from "@/openapi/schemas/base";
 import {
@@ -53,12 +54,12 @@ export function registerOperationsPaths(registry: OpenAPIRegistry) {
       ...earnErrorResponses([400, 401, 403, 404, 429, 500, 503]),
     },
   });
-  for (const action of ["execute", "refresh", "cancel"] as const) {
+  for (const action of ["submit", "refresh", "cancel"] as const) {
     const descriptions = {
-      execute:
-        "Queues the exact displayed action for asynchronous execution. Pass actionId and version; optionId may select only an option advertised by those terms. Wallets also supply signedTransaction, verified against the stored message and required signers. The request durably records authorization and returns 202; a worker performs every signature, custody proposal and broadcast, including fast signers. Stale actions return 409. A late exact signature after cancellation is retained for observation and never authorizes a new broadcast. Requires earn.execute and the current action principal.",
+      submit:
+        "Submits the exact reviewed transaction for asynchronous processing. Pass actionId and version. Route selection and transaction preparation never happen here. Wallets also supply signedTransaction, verified against the stored message and required signers. The request durably records authorization and returns 202; a worker performs every signature, custody proposal and broadcast, including fast signers. Stale actions return 409. A late exact signature after cancellation is retained for observation and never authorizes a new broadcast. Requires earn.execute and the current action principal.",
       refresh:
-        "Rebuilds an unsigned action after proving prior attempts cannot execute or reconciling their authoritative outcome. nextAction refresh advertises a proven refusal or expiry eligible for this action; unresolved attempts remain wait. An exposed owner sign_transaction action without registered signed bytes returns 409 CONFLICT with details.reason wallet_transaction_outcome_unknown because the owner may have independently signed and broadcast it. Old action IDs and signatures cannot approve the replacement. Signed or ambiguously dispatched attempts must be reconciled first; blockhash expiry or missing RPC history alone does not prove nonexecution. New terms require explicit execute. Requires earn.execute and fresh source admission.",
+        "Prepares a fresh reviewed action. Pass the current actionId and version. For nextAction select_option, also pass an optionId advertised in terms.options; this only prepares the selected transaction and never queues submission. Later refreshes preserve that selected route and fail if it is unavailable. Other replacements require proof the prior attempt cannot execute or its authoritative outcome is resolved. nextAction refresh advertises a proven refusal or expiry eligible for this action; unresolved attempts remain wait. An exposed owner sign_transaction action without registered signed bytes returns 409 CONFLICT with details.reason wallet_transaction_outcome_unknown because the owner may have independently signed and broadcast it. Old action IDs and signatures cannot approve the replacement. Signed or ambiguously dispatched attempts must be reconciled first; blockhash expiry or missing RPC history alone does not prove nonexecution. New terms require explicit submit. Requires earn.execute and fresh source admission.",
       cancel:
         "Durably requests cancellation and returns the current operation. An undispatched server-controlled preparation can cancel locally. An unsigned transaction already exposed to an owner cannot prove nonexecution, so cancellation stays pending. A worker requests account-bound provider cleanup or exposes a separately authorized onchain cancellation action. Cancellation acknowledgment, queue closure and payout are separate observations. Existing provider obligations and intermediate tokens remain visible until their outcome is verified. Requires earn.manage and current source authority.",
     };
@@ -78,12 +79,16 @@ export function registerOperationsPaths(registry: OpenAPIRegistry) {
         body: {
           required: true,
           content: jsonContent(
-            action === "execute" ? executeOperationSchema : emptyOperationBodySchema
+            action === "submit"
+              ? submitOperationSchema
+              : action === "refresh"
+                ? refreshOperationSchema
+                : emptyOperationBodySchema
           ),
         },
       },
       responses: {
-        ...(action === "execute"
+        ...(action === "submit"
           ? {}
           : { 200: { description: "Already terminal operation", content: jsonContent(response) } }),
         202: {

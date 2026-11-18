@@ -9,7 +9,7 @@ import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import { Modal } from "@sdp/ui/modal";
 import { Select, SelectItem } from "@sdp/ui/select";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { earnCoreClient, isEarnOperationTerminal, useEarnOperation } from "@/lib/earn-core-data";
@@ -302,19 +302,11 @@ export function EarnOperationReview({
     update,
   } = useEarnOperation(initial.id, initial, onUpdated);
   const operation = observed ?? initial;
-  const [optionId, setOptionId] = useState<string | null>(null);
   const terminal = isEarnOperationTerminal(operation);
-  const selectedOption = optionId ?? operation.terms.options[0]?.id;
   const expired =
     operation.terms.expiresAt !== null && Date.parse(operation.terms.expiresAt) <= Date.now();
 
-  const { busy, error, act } = useEarnOperationActions(
-    operation,
-    selectedOption,
-    onUpdated,
-    update,
-    refresh
-  );
+  const { busy, error, act } = useEarnOperationActions(operation, onUpdated, update, refresh);
 
   const statusKey = `DashboardEarn.core.status.${operation.status}` as const;
   return (
@@ -324,13 +316,17 @@ export function EarnOperationReview({
         <p className="text-body text-secondary">{operation.terms.description}</p>
       ) : null}
       <EarnOperationTerms operation={operation} />
-      {operation.terms.options.length > 1 && !terminal ? (
+      {operation.nextAction?.type === "select_option" && !terminal ? (
         <div className="space-y-2">
           <Label htmlFor={`earn-option-${operation.id}`}>{t("DashboardEarn.core.route")}</Label>
           <Select
             id={`earn-option-${operation.id}`}
-            value={selectedOption}
-            onValueChange={setOptionId}
+            value={null}
+            disabled={busy}
+            placeholder={t("DashboardEarn.core.chooseRoute")}
+            onValueChange={(optionId) => {
+              if (optionId) void act("refresh", optionId);
+            }}
           >
             {operation.terms.options.map((option) => (
               <SelectItem key={option.id} value={option.id}>
@@ -360,14 +356,12 @@ function EarnOperationActions({
   operation: Operation;
   busy: boolean;
   expired: boolean;
-  onAction: (action: "execute" | "cancel" | "refresh") => Promise<void>;
+  onAction: (action: "submit" | "cancel" | "refresh") => Promise<void>;
 }) {
   const t = useTranslations();
   if (isEarnOperationTerminal(operation)) return null;
   const nextAction = operation.nextAction;
-  const canRefresh =
-    (operation.status === "prepared" && nextAction?.type === "execute") ||
-    nextAction?.type === "refresh";
+  const canRefresh = nextAction?.type === "refresh";
   return (
     <div className="flex flex-wrap justify-end gap-3 pt-4">
       <Button variant="secondary" loading={busy} onClick={() => void onAction("cancel")}>
@@ -378,9 +372,9 @@ function EarnOperationActions({
           {t("DashboardEarn.core.refreshTerms")}
         </Button>
       ) : null}
-      {nextAction?.type === "execute" ? (
-        <Button loading={busy} disabled={expired} onClick={() => void onAction("execute")}>
-          {t("DashboardEarn.core.execute")}
+      {nextAction?.type === "submit" ? (
+        <Button loading={busy} disabled={expired} onClick={() => void onAction("submit")}>
+          {t("DashboardEarn.core.submit")}
         </Button>
       ) : null}
     </div>
@@ -533,7 +527,6 @@ function EarnFundingSourceFields({
 
 function useEarnOperationActions(
   operation: Operation,
-  selectedOption: string | undefined,
   onUpdated: ((operation: Operation) => void) | undefined,
   update: (operation: Operation) => Promise<Operation | undefined>,
   refresh: () => Promise<Operation | undefined>
@@ -541,7 +534,11 @@ function useEarnOperationActions(
   const t = useTranslations();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
-  async function act(action: "execute" | "cancel" | "refresh") {
+  const latestOperation = useRef(operation);
+  useEffect(() => {
+    latestOperation.current = operation;
+  }, [operation]);
+  async function act(action: "submit" | "cancel" | "refresh", optionId?: string) {
     if (busy) return;
     setBusy(true);
     setError(undefined);
@@ -551,24 +548,32 @@ function useEarnOperationActions(
         action,
         operation.actionId,
         operation.version,
-        selectedOption,
+        optionId,
       ]);
       const key = durableKey(fingerprint);
       const updated =
-        action === "execute"
-          ? await earnCoreClient.execute(
+        action === "submit"
+          ? await earnCoreClient.submit(
               operation.id,
               {
                 actionId: operation.actionId,
                 version: operation.version,
-                ...(selectedOption ? { optionId: selectedOption } : {}),
               },
               key
             )
           : action === "cancel"
             ? await earnCoreClient.cancel(operation.id, key)
-            : await earnCoreClient.refresh(operation.id, key);
+            : await earnCoreClient.refresh(
+                operation.id,
+                {
+                  actionId: operation.actionId,
+                  version: operation.version,
+                  ...(optionId ? { optionId } : {}),
+                },
+                key
+              );
       if (action === "cancel") operationKeys.release(fingerprint, key);
+      if (updated.version < latestOperation.current.version) return;
       onUpdated?.(updated);
       await update(updated);
       await refresh();

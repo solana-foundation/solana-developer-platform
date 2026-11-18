@@ -8,11 +8,6 @@ import {
   submitPreparedQueuedStrategyAction,
 } from "./strategy-queued-operations.service";
 import {
-  requirePreparedSwapStrategyTransaction,
-  submitPreparedSwapStrategyAction,
-  swapStrategySigningTarget,
-} from "./strategy-swap-operations.service";
-import {
   type PreparedStrategySigningTarget,
   requirePreparedStrategyTransaction,
   type StrategyTransactionScope,
@@ -27,14 +22,9 @@ export async function resolveEarnOperationBuild(
 ) {
   const reference = claim.attempt.buildRef;
   const queued = reference?.kind === "earn.queued_transaction";
-  const swap = reference?.kind === "earn.swap";
-  if (reference?.kind !== "earn.strategy_transaction" && !queued && !swap)
-    throw conflict("Operation prerequisite requires its advertised continuation");
-  const table = swap
-    ? "earn_split_swap_advisories"
-    : queued
-      ? "earn_wallet_withdrawal_request_transactions"
-      : "earn_wallet_transactions";
+  if (reference?.kind !== "earn.strategy_transaction" && !queued)
+    throw conflict("Operation has no prepared transaction to submit");
+  const table = queued ? "earn_wallet_withdrawal_request_transactions" : "earn_wallet_transactions";
   const source = await getDb(env).queryOne<{
     custody_wallet_id: string | null;
     owner_address: string;
@@ -59,26 +49,6 @@ export async function resolveEarnOperationBuild(
     ...scope,
     custodyWalletId: source.custody_wallet_id,
   };
-  if (swap) {
-    const row = await requirePreparedSwapStrategyTransaction(env, transactionScope, reference.id);
-    if (
-      claim.operation.intent.kind !== "earn.deposit" ||
-      row.strategy_id !== claim.operation.intent.strategyId
-    )
-      throw conflict("Swap does not match its deposit operation");
-    const target = swapStrategySigningTarget(row);
-    return {
-      target,
-      transactionScope,
-      submit: (signedTransaction: string, broadcast: boolean) =>
-        submitPreparedSwapStrategyAction(env, {
-          ...transactionScope,
-          advisoryId: row.id,
-          signedTransaction,
-          broadcast,
-        }),
-    };
-  }
   if (queued) {
     const row = await requirePreparedQueuedStrategyTransaction(env, transactionScope, reference.id);
     if ((row.action === "cancel") !== (claim.purpose === "cancel"))

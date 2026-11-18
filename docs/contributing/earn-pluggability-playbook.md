@@ -77,7 +77,8 @@ applicable interfaces in `packages/sdp-earn/src/types.ts`:
   Builders must report exactly the admitted token identities, amount and floor.
 - Queued withdrawal capabilities cover request, observation and cancellation.
   Share escrow is not payout; verified provider or chain observations establish
-  delivery. A later claim or cancellation can require another reviewed action.
+  delivery. An onchain cancellation can require another reviewed action; delayed
+  settlement remains under the same operation without a separate claim endpoint.
 - Provider-order settlement, preparation, cancellation and onboarding remain
   distinct capabilities when a strategy needs them. Eligibility is independent
   of authorization to move funds.
@@ -102,9 +103,20 @@ returning reviewable terms, an action ID/version and unsigned transaction bytes
 or the next action. Preparation never signs, opens approval or broadcasts.
 
 Sources name exactly one `walletId` or `ownerAddress`. A source changes signing
-authority, not the API flow. Execute durably accepts the reviewed action and
-returns `202`. Every signature, custody proposal and submission runs in the
-shared worker, including fast signers.
+authority, not the API flow. `POST /v1/operations/{operationId}/submit` authorizes
+and durably queues the exact reviewed transaction, returning `202`. It never
+prepares an action. Configured signing, custody proposals and broadcast run in
+the shared worker, including fast signers.
+
+Withdrawal choices use `nextAction: select_option` and `terms.options`. Refresh
+requires the current `actionId`, `version` and an advertised `optionId`, then
+returns a new transaction review. Ordinary refresh omits `optionId` and retains
+the selected route. An unavailable route must fail instead of switching.
+
+Compose funding swaps and deposits atomically. Size deposits to the swap's
+guaranteed output, retain live simulation and compact-route retry, and reject
+an oversized composition before persisting a build. Never introduce a standalone
+funding swap or a follow-up deposit approval.
 
 Use `createOrgSignerForCustodyWallet` and the shared sponsorship boundary with
 `MOVEMENTS`. A new custodian belongs in the custody family, not an Earn adapter.
@@ -146,6 +158,11 @@ Follow `packages/sdp-earn/CLAUDE.md`'s RPC budget: reuse clients, batch independ
 accounts, cache static facts without failures, coalesce identical authorized
 reads and never fetch one input twice. Quotes and builds read every value-bearing
 input live. State before/after request counts when modifying these paths.
+
+The atomic-only change leaves successful deposit RPC counts unchanged: one
+compute probe and one final simulation. Oversized requests lose the former
+baseline balance read and two standalone-swap
+simulations; they do not create swap-status polling or a second deposit build.
 
 ## Pause or hide a provider
 

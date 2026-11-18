@@ -40,7 +40,6 @@ const resolveVaultWithdrawClient = vi.hoisted(() => vi.fn());
 const simulateVaultPlan = vi.hoisted(() => vi.fn());
 const broadcastVaultTransaction = vi.hoisted(() => vi.fn());
 const fetchJupiterSwapLeg = vi.hoisted(() => vi.fn());
-const readOwnerMintBalance = vi.hoisted(() => vi.fn());
 
 // RPC boundary for the expiry gate and the audit's independently finalized
 // transaction: each cluster's pool, reached through the real factory.
@@ -54,8 +53,6 @@ const RPC_UNREACHABLE = {
 
 // `prependSwapLegToVaultPlan` stays REAL — instruction ordering is part of
 // what the swap-funded cases prove. Only the Jupiter HTTP boundary is stubbed.
-vi.mock("./owner-token-balance", () => ({ readOwnerMintBalance }));
-
 vi.mock("./jupiter-swap.service", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./jupiter-swap.service")>()),
   fetchJupiterSwapLeg,
@@ -265,12 +262,9 @@ async function countRows(table: "earn_movements" | "earn_wallet_transactions") {
   return row?.rows ?? 0;
 }
 
-/** Unwrap the atomic build answer; swap-split cases assert on the union directly. */
+/** Return the persisted complete deposit transaction. */
 async function buildDepositRow(input: WalletDepositBuildInput): Promise<WalletBuiltTransaction> {
   const result = await buildWalletDepositTransaction(env, input);
-  if (result.kind !== "built") {
-    throw new Error(`expected a built transaction, got ${result.kind}`);
-  }
   return result.built;
 }
 
@@ -421,10 +415,6 @@ beforeEach(async () => {
   await seedTestDatabase(env);
   await seedTenancy();
   vi.clearAllMocks();
-  // The split path's build-time baseline: the owner already holds 0.5 of the
-  // deposit token, which the detector must never mistake for the swap.
-  readOwnerMintBalance.mockResolvedValue({ atoms: 500000n, decimals: 6 });
-
   ownerKeyPair = await generateKeyPair();
   ownerAddress = await getAddressFromPublicKey(ownerKeyPair.publicKey);
 
@@ -543,7 +533,6 @@ describe("buildWalletDepositTransaction (swap-funded)", () => {
       sourceAmount: "25",
       quotedAmount: "24.99",
       minOutAmount: "24.8",
-      minOutAtoms: "24800000",
       priceImpactPct: "0.0001",
       routeLabels: ["Whirlpool"],
       slippageBps: 50,
@@ -591,7 +580,6 @@ describe("buildWalletDepositTransaction (swap-funded)", () => {
       })
     );
 
-    if (result.kind !== "built") throw new Error(`expected built, got ${result.kind}`);
     // The persisted amount is the DEPOSIT amount in the deposit token, so the
     // row's denomination stays truthful.
     expect(result.built.amount_requested).toBe("24.8");
@@ -649,17 +637,44 @@ describe("buildWalletDepositTransaction (swap-funded)", () => {
       expect.anything(),
       expect.objectContaining({ owner: ownerAddress, payer: VAULT })
     );
-    if (result.kind !== "built") throw new Error(`expected built, got ${result.kind}`);
     const decoded = getTransactionDecoder().decode(
       Uint8Array.from(Buffer.from(result.built.unsigned_transaction, "base64"))
     );
     expect(Object.keys(decoded.signatures)).toEqual([VAULT, ownerAddress]);
   });
 
-  it("splits into a standalone swap when the composed transaction cannot fit, persisting nothing", async () => {
+  it("retries an oversized route compactly while keeping the swap and deposit together", async () => {
+    fetchJupiterSwapLeg
+      .mockResolvedValueOnce(swapLeg())
+      .mockResolvedValueOnce(swapLeg({ quotedAmount: "24.7", minOutAmount: "24.6" }));
+    buildVaultDeposit.mockImplementation(async (_runtime, input) =>
+      depositPlan({ accepted: { amount: input.amount } })
+    );
+    simulateVaultPlan.mockImplementationOnce(async () => {
+      throw new VaultTransactionTooLargeError(1_300, false);
+    });
+
+    const result = await buildWalletDepositTransaction(env, swapDepositInput());
+
+    expect(fetchJupiterSwapLeg).toHaveBeenCalledTimes(2);
+    expect(fetchJupiterSwapLeg.mock.calls[1]?.[2]).toMatchObject({ maxAccounts: 24 });
+    expect(buildVaultDeposit.mock.calls.map(([, input]) => input.amount)).toEqual(["24.8", "24.6"]);
+    expect(result.built.amount_requested).toBe("24.6");
+    expect(result.swap?.minOutAmount).toBe("24.6");
+    const prepared = simulateVaultPlan.mock.calls.at(-1)?.[0]?.plan;
+    const instructionData = prepared.instructions.map((instruction: { data: string }) =>
+      Buffer.from(instruction.data, "base64").toString("utf8")
+    );
+    expect(instructionData.slice(1, 3)).toEqual(["swap-leg", "provider-instruction"]);
+    expect(instructionData.at(-1)).toMatch(/^sdp:e:sd:[A-Za-z0-9_-]{22}$/);
+    expect(await countRows("earn_wallet_transactions")).toBe(1);
+    expect(await countRows("earn_movements")).toBe(0);
+  });
+
+  it("refuses an oversized composed transaction without persisting or exposing a standalone swap", async () => {
     fetchJupiterSwapLeg.mockResolvedValue(swapLeg());
-    // A provider plan too bulky to share a packet with anything: the composed
-    // compile overflows on both route widths, the swap alone still fits.
+    // Both route widths overflow at final compilation, even though the swap
+    // alone would fit. Preparation must never offer that partial action.
     buildVaultDeposit.mockResolvedValue(
       depositPlan({
         accepted: { amount: "24.8" },
@@ -673,9 +688,18 @@ describe("buildWalletDepositTransaction (swap-funded)", () => {
       })
     );
 
-    const result = await buildWalletDepositTransaction(env, swapDepositInput());
+    await expect(buildWalletDepositTransaction(env, swapDepositInput())).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message:
+        "This swap and strategy deposit cannot fit in one Solana transaction. " +
+        "Fund the wallet with the strategy's deposit token and retry.",
+      details: {
+        reason: "atomic_swap_deposit_too_large",
+        depositTokenMint: TOKEN_MINT,
+      },
+    });
 
-    // One re-route for compactness before giving up on atomicity.
+    // Both attempts include the swap and deposit; there is no standalone build.
     expect(fetchJupiterSwapLeg).toHaveBeenCalledTimes(2);
     expect(fetchJupiterSwapLeg.mock.calls[1]?.[2]).toMatchObject({ maxAccounts: 24 });
     const usedCompactMemo = simulateVaultPlan.mock.calls.some(([input]) =>
@@ -687,43 +711,16 @@ describe("buildWalletDepositTransaction (swap-funded)", () => {
     );
     expect(usedCompactMemo).toBe(true);
 
-    if (result.kind !== "swap_required")
-      throw new Error(`expected swap_required, got ${result.kind}`);
-    expect(result.swap.minOutAmount).toBe("24.8");
-    // The standalone swap is genuinely compilable owner-signed bytes.
-    const decoded = getTransactionDecoder().decode(result.swapTransaction.bytes);
-    expect(Object.keys(decoded.signatures)).toEqual([ownerAddress]);
-
-    // No consumable build and no movement: the split answer hands out nothing
-    // SDP could ever consume. What it DOES leave behind is the advisory the
-    // orphan detector reads (PRO-1864), with the floor in atoms and the
-    // owner's deposit-token baseline read at build time.
-    const row = await getDb(env)
-      .prepare("SELECT COUNT(*)::int AS builds FROM earn_wallet_transactions")
-      .first<{ builds: number }>();
-    expect(row?.builds).toBe(0);
+    expect(simulateVaultPlan).toHaveBeenCalledTimes(4);
+    expect(await countRows("earn_wallet_transactions")).toBe(0);
+    expect(await countRows("earn_movements")).toBe(0);
     const advisory = await getDb(env)
-      .prepare("SELECT * FROM earn_split_swap_advisories")
-      .first<Record<string, unknown>>();
-    expect(advisory).toMatchObject({
-      owner_address: ownerAddress,
-      strategy_id: "strategy_ext_test",
-      unsigned_transaction: Buffer.from(result.swapTransaction.bytes).toString("base64"),
-      custody_wallet_id: null,
-      deposit_token_mint: TOKEN_MINT,
-      deposit_token_decimals: 6,
-      swap_min_out_amount: "24.8",
-      swap_min_out_atoms: "24800000",
-      baseline_deposit_token_atoms: "500000",
-      resolved_at: null,
-    });
-    expect(String(advisory?.swap_last_valid_block_height)).toBe(
-      result.swapTransaction.lastValidBlockHeight
-    );
-    expect(readOwnerMintBalance).toHaveBeenCalledWith(ownerAddress, TOKEN_MINT);
+      .prepare("SELECT COUNT(*)::int AS rows FROM earn_split_swap_advisories")
+      .first<{ rows: number }>();
+    expect(advisory?.rows).toBe(0);
   });
 
-  it("splits when the composed probe is oversized before RPC simulation", async () => {
+  it("refuses an oversized composed probe before any partial transaction is persisted", async () => {
     fetchJupiterSwapLeg.mockResolvedValue(
       swapLeg({
         instructions: [
@@ -736,90 +733,27 @@ describe("buildWalletDepositTransaction (swap-funded)", () => {
       })
     );
     buildVaultDeposit.mockResolvedValue(depositPlan({ accepted: { amount: "24.8" } }));
-    simulateVaultPlan.mockImplementation(async (input) => {
-      const hasProviderDeposit = input.plan.instructions.some(
-        (instruction: { data: string }) =>
-          Buffer.from(instruction.data, "base64").toString("utf8") === "provider-instruction"
-      );
-      if (hasProviderDeposit) {
-        throw new VaultTransactionTooLargeError(2_056, "caller-provided");
-      }
-      return {
-        ok: true,
-        prepared: {
-          plan: input.plan,
-          lookupTables: {},
-          blockhash: BLOCKHASH,
-          lastValidBlockHeight: 361n,
-        },
-        unitsConsumed: 200_000n,
-      };
+    simulateVaultPlan.mockImplementation(async () => {
+      throw new VaultTransactionTooLargeError(2_056, "caller-provided");
     });
 
-    const result = await buildWalletDepositTransaction(env, {
-      ...swapDepositInput(),
-      feePayer: VAULT,
+    await expect(
+      buildWalletDepositTransaction(env, {
+        ...swapDepositInput(),
+        feePayer: VAULT,
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      details: { reason: "atomic_swap_deposit_too_large", depositTokenMint: TOKEN_MINT },
     });
 
     expect(fetchJupiterSwapLeg).toHaveBeenCalledTimes(2);
-    if (result.kind !== "swap_required")
-      throw new Error(`expected swap_required, got ${result.kind}`);
-    const decoded = getTransactionDecoder().decode(result.swapTransaction.bytes);
-    expect(Object.keys(decoded.signatures)).toEqual([VAULT, ownerAddress]);
-  });
-
-  it("refuses the split when the baseline balance cannot be read, recording nothing", async () => {
-    // Fail-closed on purpose (money IN may refuse): a blind advisory could only
-    // ever page on any wallet that happened to hold the deposit token.
-    fetchJupiterSwapLeg.mockResolvedValue(swapLeg());
-    buildVaultDeposit.mockResolvedValue(
-      depositPlan({
-        accepted: { amount: "24.8" },
-        instructions: [
-          {
-            programAddress: MEMO_PROGRAM_ADDRESS,
-            accounts: [],
-            data: Buffer.alloc(1300).toString("base64"),
-          },
-        ],
-      })
-    );
-    readOwnerMintBalance.mockRejectedValue(new Error("rpc unavailable"));
-
-    await expect(buildWalletDepositTransaction(env, swapDepositInput())).rejects.toThrow(
-      "rpc unavailable"
-    );
-
-    const row = await getDb(env)
-      .prepare("SELECT COUNT(*)::int AS advisories FROM earn_split_swap_advisories")
-      .first<{ advisories: number }>();
-    expect(row?.advisories).toBe(0);
-  });
-
-  it("refuses the split when the baseline balance uses a different mint scale", async () => {
-    fetchJupiterSwapLeg.mockResolvedValue(swapLeg());
-    buildVaultDeposit.mockResolvedValue(
-      depositPlan({
-        accepted: { amount: "24.8" },
-        instructions: [
-          {
-            programAddress: MEMO_PROGRAM_ADDRESS,
-            accounts: [],
-            data: Buffer.alloc(1300).toString("base64"),
-          },
-        ],
-      })
-    );
-    readOwnerMintBalance.mockResolvedValue({ atoms: 500000n, decimals: 9 });
-
-    await expect(buildWalletDepositTransaction(env, swapDepositInput())).rejects.toThrow(
-      "reports 9 decimals for a 6-decimal deposit token"
-    );
-
-    const row = await getDb(env)
-      .prepare("SELECT COUNT(*)::int AS advisories FROM earn_split_swap_advisories")
-      .first<{ advisories: number }>();
-    expect(row?.advisories).toBe(0);
+    expect(simulateVaultPlan).toHaveBeenCalledTimes(2);
+    expect(await countRows("earn_wallet_transactions")).toBe(0);
+    expect(await countRows("earn_movements")).toBe(0);
+    expect(
+      await getDb(env).queryOne("SELECT COUNT(*)::int AS rows FROM earn_split_swap_advisories")
+    ).toEqual({ rows: 0 });
   });
 
   it("returns an actionable refusal when a direct plan cannot fit even with a compact memo", async () => {
