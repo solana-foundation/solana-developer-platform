@@ -92,7 +92,7 @@
     "@solana/subscriptions": "0.5.0",
     "@solana/sysvars": "catalog:",
     "@solana/token-acl-sdk": "catalog:",
-    "hono": "4.13.14",
+    "hono": "4.13.16",
     "ioredis": "6.0.0",
     "jose": "6.2.13",
     "nanoid": "6.0.2",
