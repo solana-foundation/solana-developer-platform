@@ -822,7 +822,7 @@ describe("Issuance Routes", () => {
       const row = await getDb(env)
         .prepare("SELECT COUNT(*)::int AS count FROM issuance_transactions")
         .first<{ count: number }>();
-      return row?.count ?? -1;
+      return required(row).count;
     }
 
     function mint(tokenId: string, signingCustodyWalletId: string) {

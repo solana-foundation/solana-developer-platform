@@ -30,7 +30,7 @@ export const HELD_BACK_WALLETS_KEY =
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 function isCustodyProvider(value: string): value is CustodyProvider {
-  return (CUSTODY_PROVIDERS as readonly string[]).includes(value);
+  return CUSTODY_PROVIDERS.some((provider) => provider === value);
 }
 
 /**

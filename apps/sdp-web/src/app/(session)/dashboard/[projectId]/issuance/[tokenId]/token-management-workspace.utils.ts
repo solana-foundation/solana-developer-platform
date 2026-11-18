@@ -809,9 +809,14 @@ const SIGNER_ACTION_MOVEMENTS = {
   mint: "issuance.authority",
   authority: "issuance.authority",
   metadata: "issuance.authority",
-  allowlist: "issuance.authority",
-  freeze: "issuance.authority",
-  pause: "issuance.authority",
+  // One picker serves a restricting exit and its reversing start (freeze and
+  // thaw, pause and unpause, allowlist removal and addition), and the direction
+  // is chosen after the wallet. The exit must stay possible for every wallet,
+  // so the picker filters on the exit; the API refuses the start half with
+  // the same message the picker would have shown.
+  allowlist: "issuance.control",
+  freeze: "issuance.control",
+  pause: "issuance.control",
   seize: "issuance.seize",
   burn: "issuance.control",
   "force-burn": "issuance.control",

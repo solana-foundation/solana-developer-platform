@@ -1,11 +1,14 @@
+import type { MovementId } from "@sdp/types/movements";
 import { describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
+import { createRecurringPayment } from "@/services/payments/recurring-payments/create";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
-import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
+import { inSandboxScope, installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   createOrgSignerForCustodyWalletMock,
+  DEVNET_USDC_MINT,
   installPaymentsRouteTestHooks,
   seedCounterparty,
   TEST_API_KEY,
@@ -92,7 +95,7 @@ function postJson(path: string, body: Record<string, unknown>, idempotencyKey: s
   );
 }
 
-function refusal(movement: string) {
+function refusal(movement: MovementId) {
   return {
     code: "CUSTODY_PROVIDER_UNSUPPORTED_OPERATION",
     message:
@@ -192,6 +195,70 @@ describe("Payments routes: Fireblocks BYOK sources outside direct payments (PRO-
     expect((await readErrorResponse(response)).error).toEqual(refusal("recurring.activate"));
     expect(await countRows("payment_recurring_payments")).toBe(0);
     expect(await storedIdempotencyKeys(idempotencyKey)).toBe(0);
+  });
+
+  it("refuses activating a schedule pinned to a Fireblocks BYOK wallet before the key is claimed", async () => {
+    await seedFireblocksByokWallet();
+    const counterpartyId = await seedCounterparty();
+    const counterpartyAccountId = "cpacct_fireblocks_gate_pinned";
+    const now = new Date().toISOString();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO counterparty_accounts (
+           id, organization_id, project_id, counterparty_id, account_kind, label,
+           details, provider_account_data, status, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, 'crypto_wallet', 'Pinned schedule wallet', ?, '{}', 'active', ?, ?)`
+      )
+      .bind(
+        counterpartyAccountId,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        counterpartyId,
+        JSON.stringify({ network: "solana", address: TEST_SOLANA_ADDRESSES.wallet2 }),
+        now,
+        now
+      )
+      .run();
+    // A schedule created before the gate: written by the service, not the route.
+    const pinned = await inSandboxScope(() =>
+      createRecurringPayment({
+        env,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        sourceWallet: {
+          id: FIREBLOCKS_WALLET_ID,
+          walletId: "0",
+          publicKey: TEST_SOLANA_ADDRESSES.wallet3,
+          label: "Fireblocks vault",
+          purpose: "transfer",
+          status: "active",
+          createdAt: now,
+          custodyConnectionId: CONNECTION_ID,
+        },
+        counterpartyId,
+        counterpartyAccountId,
+        token: DEVNET_USDC_MINT,
+        amount: "1",
+        periodHours: 24,
+        firstCollectionAt: null,
+        metadataUri: null,
+        idempotency: null,
+        createdBy: TEST_USER.id,
+      })
+    );
+    const idempotencyKey = crypto.randomUUID();
+
+    const response = await postJson(
+      `/v1/payments/recurring-payments/${pinned.id}/activate`,
+      {},
+      idempotencyKey
+    );
+
+    expect(response.status).toBe(400);
+    expect((await readErrorResponse(response)).error).toEqual(refusal("recurring.activate"));
+    expect(await countRows("payment_recurring_payment_activation_attempts")).toBe(0);
+    expect(await storedIdempotencyKeys(idempotencyKey)).toBe(0);
+    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
   });
 
   it("refuses a Fireblocks BYOK source for an off-ramp quote before the provider is asked", async () => {

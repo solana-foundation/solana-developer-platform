@@ -27,6 +27,7 @@ import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { setOrganizationProviderOverrides } from "@/test/helpers/provider-overrides";
+import { required } from "@/test/helpers/required";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedRateLimit } from "@/test/mocks/kv";
 import { deriveDvpTradeKind } from "./dvp/handlers";
@@ -888,7 +889,7 @@ describe("DvP routes", () => {
         .prepare("SELECT COUNT(*)::int AS n FROM dvp_leg_action_requests WHERE trade_id = ?")
         .bind("dvp_fireblocks_byok")
         .first<{ n: number }>();
-      expect(requests?.n ?? 0).toBe(0);
+      expect(required(requests).n).toBe(0);
     });
   });
 

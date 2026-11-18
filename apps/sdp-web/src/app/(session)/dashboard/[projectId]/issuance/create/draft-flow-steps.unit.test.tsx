@@ -2,7 +2,7 @@
 
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { ComponentProps, ReactNode } from "react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
@@ -10,33 +10,6 @@ import { ClassifyStep, PermissionsStep } from "./draft-flow-steps";
 import type { DraftState } from "./draft-model";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
-// A native select, so the options a key may be held by can be read without opening a menu.
-vi.mock("@sdp/ui/select", () => ({
-  Select: ({
-    ariaLabel,
-    children,
-    onValueChange,
-    value,
-  }: {
-    ariaLabel?: string;
-    children: ReactNode;
-    onValueChange?: (value: string | null) => void;
-    value?: string | null;
-    placeholder?: string;
-  }) => (
-    <select
-      aria-label={ariaLabel}
-      onChange={(event) => onValueChange?.(event.target.value || null)}
-      value={value ?? ""}
-    >
-      <option value="">Select</option>
-      {children}
-    </select>
-  ),
-  SelectItem: ({ children, value }: ComponentProps<"option">) => (
-    <option value={value}>{children}</option>
-  ),
-}));
 
 afterEach(() => cleanup());
 
@@ -106,13 +79,12 @@ function renderPermissions(wallets: PaymentsDashboardWallet[]) {
 }
 
 describe("PermissionsStep", () => {
-  it("offers each key a managed Fireblocks wallet and a Privy connection, not a Fireblocks connection", () => {
+  it("offers each key a managed Fireblocks wallet and a Privy connection, not a Fireblocks connection", async () => {
+    const user = userEvent.setup();
     renderPermissions([fireblocksByok, fireblocksManaged, privyByok]);
-    const mintAuthority = screen.getByRole("combobox", { name: "Mint authority" });
-    const names = Array.from(mintAuthority.querySelectorAll("option")).map(
-      (option) => option.textContent
-    );
-    expect(names).toEqual(["Select", "Managed vault", "Privy wallet"]);
+    await user.click(screen.getByRole("combobox", { name: "Mint authority" }));
+    const names = (await screen.findAllByRole("option")).map((option) => option.textContent);
+    expect(names).toEqual(["Managed vault", "Privy wallet"]);
     expect(screen.queryByText(/send direct payments only/)).toBeNull();
   });
 
