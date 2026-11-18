@@ -399,6 +399,17 @@ export function createPostgresCustodyProposalsRepository(
       );
       return rows.map(mapProposal);
     },
+    async requestRecheck(input) {
+      assertSystem("requestRecheck");
+      const now = timestampSchema.parse(input.now);
+      await db.execute(
+        `UPDATE custody_proposals
+            SET recheck_requested_at = COALESCE(recheck_requested_at, ?)
+          WHERE payment_transfer_id = ? AND organization_id = ? AND project_id = ?
+            AND status = 'active' AND provider_phase IN (${ACTIVE_PHASES_SQL})`,
+        [now, input.transferId, input.organizationId, input.projectId]
+      );
+    },
     async listUnalerted(input) {
       assertSystem("listUnalerted");
       const scope = recoveryScopeWhere(input);

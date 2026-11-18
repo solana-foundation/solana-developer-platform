@@ -333,7 +333,12 @@ export function createOrganizationRepository(env: Env): OrganizationRepository {
   return createPostgresOrganizationRepository(getDb(env));
 }
 
-const CUSTODY_PROPOSALS_SYSTEM_ONLY_METHODS = ["claimDue", "listUnalerted", "adoptLegacyTransfers"];
+const CUSTODY_PROPOSALS_SYSTEM_ONLY_METHODS = [
+  "claimDue",
+  "requestRecheck",
+  "listUnalerted",
+  "adoptLegacyTransfers",
+];
 
 /** Tenant proposals bound to the authenticated project. */
 export function createCustodyProposalsRepository(

@@ -177,6 +177,13 @@ function harness(initialRows: PaymentTransferRow[] = [transfer()]) {
     state(input.transferId)
   );
   const adopt = vi.spyOn(proposals, "adoptLegacyTransfers").mockResolvedValue(0);
+  const recheck = vi.spyOn(proposals, "requestRecheck").mockImplementation(async (input) => {
+    const current = state(input.transferId);
+    states.set(input.transferId, {
+      ...current,
+      recheck_requested_at: current.recheck_requested_at ?? input.now,
+    });
+  });
   const claim = vi
     .spyOn(proposals, "claimDue")
     .mockImplementation(async () =>
@@ -228,6 +235,7 @@ function harness(initialRows: PaymentTransferRow[] = [transfer()]) {
     repo,
     proposals,
     adopt,
+    recheck,
     claim,
     alerts,
     transition,
@@ -682,15 +690,97 @@ describe("reconcilePendingProposals", () => {
     expect(h.recovery.cancel).not.toHaveBeenCalled();
   });
 
-  it("does not reuse a provider observation after a competing state change", async () => {
+  it.each(["observed", "admission_refused", "cancel_requested"] as const)(
+    "restarts with a fresh provider read after losing the %s CAS to a status observation",
+    async (eventType) => {
+      const h = harness();
+      h.recovery.admit.mockRejectedValue(revoke());
+      let conflicted = false;
+      h.transition.mockImplementation(async (input) => {
+        if (!conflicted && input.event.type === eventType) {
+          conflicted = true;
+          observeDuringCancellation(h);
+          return null;
+        }
+        return h.apply(input);
+      });
+      await runRecovery();
+      expect(conflicted).toBe(true);
+      expect(h.recovery.read).toHaveBeenCalledTimes(2);
+      expect(h.recovery.cancel).toHaveBeenCalledExactlyOnceWith("xfr_recovery");
+      expect(h.state().state.authorizationState).toBe("cancel_acknowledged");
+      expect(h.recheck).not.toHaveBeenCalled();
+    }
+  );
+
+  it("does not reuse the losing pending observation when a fresh read reports broadcasting", async () => {
     const h = harness();
-    h.recovery.read.mockImplementation(async () => {
-      h.states.set("xfr_recovery", { ...h.state(), version: h.state().version + 1 });
+    h.recovery.read.mockImplementationOnce(async () => {
+      observeDuringCancellation(h, "executing");
       return observation();
     });
+    h.recovery.read.mockResolvedValueOnce(observation("BROADCASTING"));
     await runRecovery();
+    expect(h.recovery.read).toHaveBeenCalledTimes(2);
+    expect(h.state().state.providerPhase).toBe("executing");
     expect(h.recovery.admit).not.toHaveBeenCalled();
     expect(h.recovery.cancel).not.toHaveBeenCalled();
+  });
+
+  it.each([1, 2])(
+    "stops at a terminal outcome on conflict %s and drains its refusal alert",
+    async (terminalAt) => {
+      const h = harness();
+      let reads = 0;
+      h.recovery.read.mockImplementation(async () => {
+        reads += 1;
+        if (reads < terminalAt) {
+          observeDuringCancellation(h);
+          return observation();
+        }
+        const row = h.state();
+        h.states.set(row.payment_transfer_id, {
+          ...row,
+          version: row.version + 1,
+          state: {
+            ...row.state,
+            providerPhase: "completed",
+            authorizationState: "committed_after_refusal",
+            refusal: { at: NOW, reason: "principal_not_live", message: "Authority revoked" },
+          },
+        });
+        h.payments.set(row.payment_transfer_id, { ...h.payment(), status: "confirmed" });
+        return observation();
+      });
+      await runRecovery();
+      expect(h.recovery.read).toHaveBeenCalledTimes(terminalAt);
+      expect(h.recovery.admit).not.toHaveBeenCalled();
+      expect(h.recovery.cancel).not.toHaveBeenCalled();
+      expect(h.alert).toHaveBeenCalledOnce();
+      expect(h.state().state.authorizationState).toBe("refusal_alerted");
+      expect(h.recheck).not.toHaveBeenCalled();
+    }
+  );
+
+  it("bounds conflicting reads and restores priority without replacing an intervening wake", async () => {
+    const h = harness();
+    h.recovery.read.mockImplementation(async () => {
+      observeDuringCancellation(h);
+      const row = h.state();
+      h.states.set(row.payment_transfer_id, { ...row, recheck_requested_at: NOW });
+      return observation();
+    });
+    await expect(runRecovery()).rejects.toThrow("Custody proposal recovery changed concurrently");
+    expect(h.recovery.read).toHaveBeenCalledTimes(2);
+    expect(h.recovery.admit).not.toHaveBeenCalled();
+    expect(h.recovery.cancel).not.toHaveBeenCalled();
+    expect(h.recheck).toHaveBeenCalledExactlyOnceWith({
+      transferId: "xfr_recovery",
+      organizationId: "org_recovery",
+      projectId: "prj_recovery",
+      now: expect.any(String),
+    });
+    expect(h.state().recheck_requested_at).toBe(NOW);
   });
 
   it("records missing legacy authority without using its audit key as a principal", async () => {

@@ -510,8 +510,10 @@ Cancellation reloads the account-bound credential and makes another bound detail
 GET before one cancel POST. This catches credential, binding or provider-state
 changes during admission and the durable cancellation write. Normal worker
 observation adds one provider GET, zero Solana RPC; refusal adds at most one GET
-and one POST in that pass. Provider acknowledgment remains `processing`; only a
-terminal provider outcome closes the payment. The first cancellation attempt is
+and one POST in that pass. A competing status write can trigger one fresh recovery
+pass, adding one observation GET. Continued contention preserves a priority wake
+for the next tick; a losing observation is never replayed. Provider acknowledgment
+remains `processing`; only a terminal provider outcome closes the payment. The first cancellation attempt is
 immediate; a timeout or rejected cancel keeps the durable refusal and retries no
 sooner than five minutes after the last attempt. Observations continue every
 minute during that cooldown, including completion-after-refusal alerts.
@@ -583,8 +585,15 @@ provider outcomes remain pending; `success: true` from cancel is an acknowledgem
 `CANCELLED`. A native TRANSFER can still execute during cancellation; its existing settlement
 validation records the real result. No automatic replacement is submitted.
 
+The dashboard approval list reads worker cancellation attempts from the proposal
+row; manual attempts retain their existing timestamp. This adds one indexed DB
+read per displayed native transfer, bounded at 20, and zero provider or Solana
+calls.
+
 Request budget: each cancellation makes one status GET, at most one cancel POST and one
-follow-up GET; zero Solana RPC. The paginated list reads at most 20 pending proposals per
+follow-up GET; zero Solana RPC. A competing unchanged status write permits one
+extra status GET before cancellation. Further contention returns a conflict for
+an explicit retry. The paginated list reads at most 20 pending proposals per
 page, throttled to one status GET per proposal per 15 seconds across concurrent requests.
 Terminal rows need no provider read. SDK tracking writes on status transitions, not each
 identical poll. List pages show the last known status during provider outages. Historical

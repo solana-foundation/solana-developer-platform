@@ -37,6 +37,7 @@ import type { Env } from "@/types/env";
 
 const RECOVERY_PAGE_SIZE = 50;
 const RECOVERY_CONCURRENCY = 5;
+const RECOVERY_PASSES = 2;
 const CANCELLATION_RESULT_WRITE_ATTEMPTS = 5;
 
 function identity(proposal: CustodyProposalRow) {
@@ -48,14 +49,43 @@ function identity(proposal: CustodyProposalRow) {
 }
 
 async function recoverProposal(env: Env, ledger: ProposalLedger, snapshot: CustodyProposalRow) {
+  for (let attempt = 0; attempt < RECOVERY_PASSES; attempt += 1) {
+    if (await finishTerminalProposal(ledger, snapshot)) return;
+    if (await recoverProposalPass(env, ledger, snapshot)) return;
+    const fresh = await ledger.proposals.getForTransfer(identity(snapshot));
+    if (fresh === null) throw internalError("Custody proposal is missing");
+    snapshot = fresh;
+  }
+  if (await finishTerminalProposal(ledger, snapshot)) return;
+  // A status reader must not consume a revocation's priority without re-admission.
+  await ledger.proposals.requestRecheck({ ...identity(snapshot), now: new Date().toISOString() });
+  throw internalError("Custody proposal recovery changed concurrently");
+}
+
+async function finishTerminalProposal(ledger: ProposalLedger, proposal: CustodyProposalRow) {
+  if (!isTerminalCustodyProposalPhase(proposal.state.providerPhase)) return false;
+  if (hasUnalertedCustodyProposalRefusal(proposal.state)) {
+    const transfer = await ledger.repo.getTransferById(identity(proposal));
+    if (transfer === null) throw internalError("Custody proposal payment is missing");
+    await emitRefusalAlert(ledger, transfer, proposal);
+  }
+  return true;
+}
+
+async function recoverProposalPass(
+  env: Env,
+  ledger: ProposalLedger,
+  snapshot: CustodyProposalRow
+): Promise<boolean> {
   const initial = await ledger.repo.getTransferById(identity(snapshot));
   if (initial === null) throw internalError("Custody proposal payment is missing");
   const recorded = await reconcileRecordedProposalOutcome(ledger, initial, snapshot, Date.now());
   if (recorded !== null) {
-    if (recorded.written && hasUnalertedCustodyProposalRefusal(recorded.proposal.state)) {
+    if (!recorded.written) return false;
+    if (hasUnalertedCustodyProposalRefusal(recorded.proposal.state)) {
       await emitRefusalAlert(ledger, recorded.transfer, recorded.proposal);
     }
-    return;
+    return true;
   }
   if (snapshot.custody_wallet_id === null)
     throw internalError("Custody proposal wallet is missing");
@@ -70,18 +100,15 @@ async function recoverProposal(env: Env, ledger: ProposalLedger, snapshot: Custo
     },
     "payments.transfer"
   );
-  // Pin the expected version before provider I/O. Losing that CAS authorizes no more work.
+  // Each pass pins the version before a fresh GET; a lost CAS never reuses its observation.
   const result = await recovery.read(initial.id);
   let current = await applyProposalObservation(ledger, initial, result, Date.now(), snapshot);
+  if (!current.written) return false;
   if (hasUnalertedCustodyProposalRefusal(current.proposal.state)) {
     await emitRefusalAlert(ledger, current.transfer, current.proposal);
   }
-  if (
-    result === null ||
-    !current.written ||
-    !isCancellableCustodyProposalPhase(current.proposal.state.providerPhase)
-  )
-    return;
+  if (result === null || !isCancellableCustodyProposalPhase(current.proposal.state.providerPhase))
+    return true;
   if (current.proposal.state.authorizationState === "authorized") {
     let refusal: { reason: string; message: string };
     if (current.transfer.initiated_by_principal === null) {
@@ -92,7 +119,7 @@ async function recoverProposal(env: Env, ledger: ProposalLedger, snapshot: Custo
     } else {
       try {
         await runAsRecordedMoneyPrincipal(current.transfer, () => recovery.admit());
-        return;
+        return true;
       } catch (error) {
         // Unavailable admission is not proof of revoked authority.
         if (!(error instanceof ProposalAdmissionRefusedError)) throw error;
@@ -104,15 +131,15 @@ async function recoverProposal(env: Env, ledger: ProposalLedger, snapshot: Custo
       at: new Date().toISOString(),
       ...refusal,
     });
-    if (!current.written) return;
+    if (!current.written) return false;
   }
   const cancellationAt = new Date().toISOString();
-  if (!canRequestCustodyProposalCancellation(current.proposal.state, cancellationAt)) return;
+  if (!canRequestCustodyProposalCancellation(current.proposal.state, cancellationAt)) return true;
   current = await applyProposalEvent(ledger, current.transfer, current.proposal, {
     type: "cancel_requested",
     at: cancellationAt,
   });
-  if (!current.written) return;
+  if (!current.written) return false;
   // Only the durable CAS winner calls cancel. A timeout retains retry work; acknowledgment
   // does not settle the payment.
   let accepted: boolean;
@@ -136,6 +163,7 @@ async function recoverProposal(env: Env, ledger: ProposalLedger, snapshot: Custo
     type: accepted ? "cancel_accepted" : "cancel_declined",
     at: new Date().toISOString(),
   });
+  return true;
 }
 
 async function recordCancellationResult(

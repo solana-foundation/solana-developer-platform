@@ -3,6 +3,7 @@ import type { FireblocksTransferResult } from "@sdp/custody/provisioning/fireblo
 import { compareDecimalAmounts, parseDecimalAmount } from "@sdp/solana/amount";
 import {
   type CustodyProposalEvent,
+  isCancellableCustodyProposalPhase,
   isTerminalCustodyProposalPhase,
 } from "@sdp/types/custody-proposals";
 import {
@@ -456,11 +457,9 @@ export async function cancelPendingFireblocksTransfer(
     row.custody_wallet_id,
     { ...intent, sourceAddress: row.source_address }
   );
-  const before = await canceller.read(row.id);
-  if (before === null)
-    throw conflict("Fireblocks proposal is unavailable; cancellation is unconfirmed");
-  // Validate the exact intent and win the observation CAS before acting on this read.
-  const current = await applyProposalObservation(ledger, row, before, Date.now(), proposal);
+  const { before, current } = await observeManualCancellation(ledger, row, proposal, (externalId) =>
+    canceller.read(externalId)
+  );
   if (
     !current.written ||
     current.transfer.status !== "processing" ||
@@ -508,6 +507,30 @@ export async function cancelPendingFireblocksTransfer(
     );
   }
   return { acknowledged, row: await currentRow(ledger.repo, row) };
+}
+
+/** Retry a competing status write with a fresh read, never a stale observation. */
+async function observeManualCancellation(
+  ledger: ProposalLedger,
+  row: PaymentTransferRow,
+  proposal: CustodyProposalRow,
+  read: (externalId: string) => Promise<FireblocksTransferResult | null>
+): Promise<{ before: FireblocksTransferResult; current: ProposalEventResult }> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const before = await read(row.id);
+    if (before === null)
+      throw conflict("Fireblocks proposal is unavailable; cancellation is unconfirmed");
+    const current = await applyProposalObservation(ledger, row, before, Date.now(), proposal);
+    if (
+      current.written ||
+      current.transfer.status !== "processing" ||
+      !isCancellableCustodyProposalPhase(current.proposal.state.providerPhase)
+    )
+      return { before, current };
+    row = current.transfer;
+    proposal = current.proposal;
+  }
+  throw conflict("The proposal kept changing during cancellation. Retry the cancellation.");
 }
 
 /** A provider completion must prove the exact net recipient and decimal amount. */

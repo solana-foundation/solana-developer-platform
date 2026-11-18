@@ -74,6 +74,8 @@ export interface CustodyProposalsRepository {
   ): Promise<CustodyProposalTransition | null>;
   /** System only; clear the old wake before I/O and reserve ordinary sweep capacity. */
   claimDue(input: ClaimCustodyProposalsInput): Promise<CustodyProposalRow[]>;
+  /** System only; preserve priority when concurrent writes exhaust a recovery pass. */
+  requestRecheck(input: CustodyProposalIdentity & { now: string }): Promise<void>;
   /** Viewer-only throttle, independent of worker scheduling and authority wakes. */
   claimForPoll(
     input: CustodyProposalIdentity & { now: string; polledBefore: string }

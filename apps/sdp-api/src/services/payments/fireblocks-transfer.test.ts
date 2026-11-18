@@ -1617,6 +1617,122 @@ describe("native Fireblocks pending proposal recovery (PRO-2435 D4)", () => {
 });
 
 describe("manual native Fireblocks cancellation", () => {
+  it.each(["earlier", "later", "invalid"] as const)(
+    "shows the latest valid cancellation time when the manual marker is %s",
+    async (ordering) => {
+      const mock = await ready();
+      const transfer = (await (await send()).json()).data.transfer;
+      await getDb(env).execute("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?", [
+        walletId,
+      ]);
+      await recoverPendingProposal(transfer.id);
+      const proposal = await getDb(env).queryOne<{ cancel_requested_at: string }>(
+        "SELECT cancel_requested_at FROM custody_proposals WHERE payment_transfer_id = ?",
+        [transfer.id]
+      );
+      if (!proposal) throw new Error("Expected a worker cancellation attempt");
+      const manualRequestedAt =
+        ordering === "invalid"
+          ? "invalid"
+          : new Date(
+              Date.parse(proposal.cancel_requested_at) + (ordering === "later" ? 60_000 : -60_000)
+            ).toISOString();
+      await getDb(env).execute(
+        `UPDATE payment_transfers SET provider_data = jsonb_set(
+           provider_data, '{fireblocksCancelRequestedAt}', to_jsonb(?::text)) WHERE id = ?`,
+        [manualRequestedAt, transfer.id]
+      );
+      mock.mockClear();
+      const listed = await request(`/fireblocks/proposals?walletId=${walletId}&kind=transfer`);
+      expect(listed.status, await listed.clone().text()).toBe(200);
+      expect((await listed.json()).data.proposals).toMatchObject([
+        {
+          id: transfer.id,
+          cancellationRequestedAt:
+            ordering === "later" ? manualRequestedAt : proposal.cancel_requested_at,
+        },
+      ]);
+      expect(mock.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
+    }
+  );
+
+  it.each([1, 2])(
+    "bounds fresh reads after %i competing unchanged status writes",
+    async (conflicts) => {
+      const mock = await ready();
+      const transfer = (await (await send()).json()).data.transfer;
+      const original = mock.getMockImplementation();
+      if (!original) throw new Error("Expected provider transport");
+      let reads = 0;
+      mock.mockClear().mockImplementation(async (url, init) => {
+        const response = await original(url, init);
+        if (init?.method === "GET" && String(url).includes("/external_tx_id/")) {
+          reads += 1;
+          if (reads <= conflicts) {
+            await runWithSystemDatabaseIdentity("cron:reconcile-fireblocks-proposals", async () => {
+              const ledger = systemProposalLedger(testEnv);
+              const identity = {
+                transferId: transfer.id,
+                organizationId: ORGANIZATION_ID,
+                projectId: PROJECT_ID,
+              };
+              const row = await ledger.repo.getTransferById(identity);
+              const proposal = await ledger.proposals.getForTransfer(identity);
+              if (row === null || proposal === null) throw new Error("Missing proposal");
+              await applyProposalEvent(ledger, row, proposal, {
+                type: "observed",
+                at: new Date().toISOString(),
+                phase: "pending",
+                providerTransactionId: "fb-proposal",
+                providerStatus: "PENDING_AUTHORIZATION",
+                providerSubStatus: null,
+              });
+            });
+          }
+        }
+        return response;
+      });
+      const response = await request(`/fireblocks/proposals/transfer/${transfer.id}/cancel`, {});
+      expect(response.status, await response.clone().text()).toBe(conflicts === 1 ? 200 : 409);
+      if (conflicts === 1) expect((await response.json()).data.acknowledged).toBe(true);
+      else expect(reads).toBe(2);
+      expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(
+        conflicts === 1 ? 1 : 0
+      );
+    }
+  );
+
+  it.each([true, false])(
+    "lists a worker cancellation attempt after acknowledgment %s without another provider mutation",
+    async (accepted) => {
+      const mock = await ready();
+      const transfer = (await (await send()).json()).data.transfer;
+      cancellationAccepted = accepted;
+      await getDb(env).execute("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?", [
+        walletId,
+      ]);
+      const pending = await recoverPendingProposal(transfer.id);
+      expect(pending.provider_data.fireblocksCancelRequestedAt).toBeUndefined();
+      const proposal = await getDb(env).queryOne<{ cancel_requested_at: string }>(
+        "SELECT cancel_requested_at FROM custody_proposals WHERE payment_transfer_id = ?",
+        [transfer.id]
+      );
+      expect(proposal?.cancel_requested_at).toEqual(expect.any(String));
+      mock.mockClear();
+      const listed = await request(`/fireblocks/proposals?walletId=${walletId}&kind=transfer`);
+      expect(listed.status, await listed.clone().text()).toBe(200);
+      expect((await listed.json()).data.proposals).toMatchObject([
+        {
+          id: transfer.id,
+          status: "PENDING_AUTHORIZATION",
+          cancellationRequestedAt: proposal?.cancel_requested_at,
+          canCancel: true,
+        },
+      ]);
+      expect(mock.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
+    }
+  );
+
   it.each(["before cancellation", "after cancellation"] as const)(
     "preserves a competing observation %s",
     async (race) => {
@@ -1695,7 +1811,7 @@ describe("manual native Fireblocks cancellation", () => {
       expect(response.status, await response.clone().text()).toBe(200);
       expect((await response.json()).data).toMatchObject({
         acknowledged: true,
-        proposal: { status: resultStatus },
+        proposal: { status: resultStatus, cancellationRequestedAt: expect.any(String) },
       });
       expect((await request(path, {}, PROJECT_ID, key)).status).toBe(200);
       expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(1);

@@ -487,6 +487,30 @@ describe("CustodyProposalsRepository", () => {
     expect(new Set([...page, ...remaining].map((row) => row.payment_transfer_id)).size).toBe(5);
   });
 
+  it("requeues only the named active proposal while preserving a concurrent authority wake", async () => {
+    await seedProposal("retry");
+    await seedProposal("terminal_retry", { ...pendingState(), providerPhase: "cancelled" });
+    await repo.claimDue(claimInput);
+    expect(await repo.claimDue(claimInput)).toEqual([]);
+    await repo.requestRecheck({
+      ...identity("retry"),
+      organizationId: FOREIGN_ORGANIZATION.id,
+      now: NOW,
+    });
+    await repo.requestRecheck({ ...identity("retry"), projectId: productionProjectId, now: NOW });
+    expect((await repo.getForTransfer(identity("retry")))?.recheck_requested_at).toBeNull();
+    await repo.requestRecheck({ ...identity("retry"), now: BEFORE });
+    await repo.requestRecheck({ ...identity("retry"), now: NOW });
+    expect((await repo.getForTransfer(identity("retry")))?.recheck_requested_at).toBe(BEFORE);
+    await repo.requestRecheck({ ...identity("terminal_retry"), now: NOW });
+    expect(
+      (await repo.getForTransfer(identity("terminal_retry")))?.recheck_requested_at
+    ).toBeNull();
+    expect((await repo.claimDue(claimInput)).map((row) => row.payment_transfer_id)).toEqual([
+      "retry",
+    ]);
+  });
+
   it("gives concurrent workers disjoint pages and skips locked proposals", async () => {
     for (const id of ["a", "b", "c", "d", "locked"]) await seedProposal(id);
     const lock = await holdTransaction(getDb(env), async (tx) => {
@@ -570,6 +594,7 @@ describe("CustodyProposalsRepository", () => {
     for (const repository of [repo, scoped]) {
       const operations: readonly (() => Promise<unknown>)[] = [
         () => repository.claimDue(claimInput),
+        () => repository.requestRecheck({ ...identity("scoped"), now: NOW }),
         () => repository.listUnalerted({ environment: "sandbox", limit: 10 }),
         () => repository.adoptLegacyTransfers(claimInput),
       ];
