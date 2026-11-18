@@ -58,22 +58,28 @@ export function parseBackofficeCommand(argv: readonly string[]): BackofficeComma
   return parsed.data;
 }
 
-/** What the run prints: outcomes only, safe for a public log. */
-export type BackofficeOutcome =
-  | {
-      organizationId: string;
-      operation: "status";
-      requested: boolean;
-      requestedAt: string | null;
-      notified: boolean | null;
-      termsVersion: string | null;
-    }
-  | {
-      organizationId: string;
-      operation: "reset" | "set-country";
-      requested: boolean;
-      operatorEmail: "sent" | "not_configured";
-    };
+/**
+ * What the run prints: outcomes only, safe for a public log. Strict, so a field that is not named
+ * here (a requester, an email, a jurisdiction) fails the run instead of reaching the log.
+ */
+const backofficeOutcomeSchema = z.discriminatedUnion("operation", [
+  z.strictObject({
+    organizationId: z.string(),
+    operation: z.literal("status"),
+    requested: z.boolean(),
+    requestedAt: z.string().nullable(),
+    notified: z.boolean().nullable(),
+    termsVersion: z.string().nullable(),
+  }),
+  z.strictObject({
+    organizationId: z.string(),
+    operation: z.enum(["reset", "set-country"]),
+    requested: z.boolean(),
+    operatorEmail: z.enum(["sent", "not_configured"]),
+  }),
+]);
+
+export type BackofficeOutcome = z.infer<typeof backofficeOutcomeSchema>;
 
 /** Runs one allowlisted command and returns what may be printed. */
 export async function runBackofficeCommand(
@@ -82,20 +88,20 @@ export async function runBackofficeCommand(
 ): Promise<BackofficeOutcome> {
   if (command.operation === "status") {
     const row = await readMainnetAccessRow(getDb(env), command.organizationId);
-    return {
+    return backofficeOutcomeSchema.parse({
       organizationId: command.organizationId,
       operation: "status",
       requested: row !== null,
       requestedAt: row?.requested_at ?? null,
       notified: row ? row.notified_at !== null : null,
       termsVersion: row?.terms_version ?? null,
-    };
+    });
   }
   const result = await correctMainnetAccess(env, command);
-  return {
+  return backofficeOutcomeSchema.parse({
     organizationId: command.organizationId,
     operation: command.operation,
     requested: result.request !== null,
     operatorEmail: result.operatorEmail,
-  };
+  });
 }
