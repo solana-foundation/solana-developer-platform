@@ -40,7 +40,11 @@ At minimum, the configs used by local development and CI should contain the valu
 - API database and cache values such as `DATABASE_URL` and `REDIS_URL`
 - application secrets such as `API_KEY_PEPPER`, `CUSTODY_ENCRYPTION_KEY`, and
   `CREDENTIAL_FINGERPRINT_PEPPER` when stored-credential provisioning is enabled
-- authentication values under `CLERK_*`
+- authentication values under `CLERK_*`. Each deployment has its own Clerk application:
+  prod signs in on the production instance of "Solana Developer Platform", stage on "SDP
+  Stage" and beta on "SDP Beta". The production instance's secret key is configured only on
+  prod (`prd`, `prd_ci`), because the mainnet entitlement lives in its organizations' private
+  metadata; `stg`, `stg_ci` and `beta` hold their own application's keys.
 - Solana RPC URLs and API keys
 - Kora and custody-provider values used by integration tests
 - compliance and ramp-provider credentials used by live discovery or integration coverage
