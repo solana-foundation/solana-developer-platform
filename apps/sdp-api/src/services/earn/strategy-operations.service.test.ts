@@ -308,7 +308,7 @@ beforeEach(async () => {
   mocks.observeSwap.mockResolvedValue({ status: "submitted", observed: false });
 });
 
-function externalBuild() {
+function walletBuild() {
   claim.operation.intent = {
     kind: "earn.deposit",
     strategyId: "strategy",
@@ -349,8 +349,8 @@ describe("asynchronous operation execution", () => {
     expect(mocks.release).toHaveBeenCalledWith(scope, claim);
   });
 
-  it("verifies and durably records external bytes before acknowledging queued work", async () => {
-    externalBuild();
+  it("verifies and durably records owner-signed bytes before acknowledging queued work", async () => {
+    walletBuild();
     expect(
       await scoped(() =>
         executeEarnOperation(
@@ -386,7 +386,7 @@ describe("asynchronous operation execution", () => {
   });
 
   it("rejects a genuine owner signature over forged bytes before requesting execution", async () => {
-    externalBuild();
+    walletBuild();
     const forged = await transaction("different unreviewed deposit");
     await expect(
       scoped(() =>
@@ -409,8 +409,8 @@ describe("asynchronous operation execution", () => {
     expect(mocks.release).toHaveBeenCalledWith(scope, claim);
   });
 
-  it("rejects a changed external signed replay even after the original bytes were retained", async () => {
-    externalBuild();
+  it("rejects a changed owner-signed replay even after the original bytes were retained", async () => {
+    walletBuild();
     claim.attempt.signedTransaction = signed;
     claim.recoveryRequired = true;
     const forged = await transaction("changed replay after acceptance");
@@ -431,7 +431,7 @@ describe("asynchronous operation execution", () => {
   });
 
   it("passes a verified exact signed replay through atomic acceptance", async () => {
-    externalBuild();
+    walletBuild();
     claim.attempt.signedTransaction = signed;
     claim.recoveryRequired = true;
     await scoped(() =>
@@ -496,10 +496,10 @@ describe("swap signed-byte recovery", () => {
     claim.attempt.signature = transactionSignature;
   }
 
-  it.each(["custody", "external"])(
+  it.each(["wallet", "address"])(
     "does not resend a %s swap after admission is revoked",
     async (source) => {
-      if (source === "external") externalBuild();
+      if (source === "address") walletBuild();
       retainedSwap();
       mocks.moneyAdmission.mockRejectedValue(forbidden("Authority revoked"));
       await scoped(() => advanceEarnOperation(env, scope, claim));

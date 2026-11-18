@@ -505,7 +505,7 @@ export interface EarnVaultDepositInput {
    * Omitted means the `owner` funds it, which is what an owner-paid deposit
    * wants. SDP names an address here only when someone else pays: its Kora
    * sponsor under sponsorship, or the partner's caller-provided fee payer on
-   * the external-wallet builds — and then the SAME address is also the fee
+   * the wallet builds — and then the SAME address is also the fee
    * payer, so one extra signature covers both roles. See
    * docs/decisions/0002-earn-provider-pluggability.md.
    */
@@ -536,7 +536,7 @@ export interface EarnVaultWithdrawInput {
    * Omitted means the `owner` funds it, which is what an owner-paid deposit
    * wants. SDP names an address here only when someone else pays: its Kora
    * sponsor under sponsorship, or the partner's caller-provided fee payer on
-   * the external-wallet builds — and then the SAME address is also the fee
+   * the wallet builds — and then the SAME address is also the fee
    * payer, so one extra signature covers both roles. See
    * docs/decisions/0002-earn-provider-pluggability.md.
    */

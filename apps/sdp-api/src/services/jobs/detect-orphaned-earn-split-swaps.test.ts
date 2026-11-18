@@ -1,12 +1,12 @@
 import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
-import { createPostgresEarnExternalWalletTransactionsRepository } from "@/db/repositories/earn-external-wallet-transactions.repository";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import {
   createPostgresEarnSplitSwapAdvisoriesRepository,
   generateEarnSplitSwapAdvisoryId,
 } from "@/db/repositories/earn-split-swap-advisories.repository";
+import { createPostgresEarnWalletTransactionsRepository } from "@/db/repositories/earn-wallet-transactions.repository";
 import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
 import {
   ENVIRONMENT_CLUSTER_CASES,
@@ -116,8 +116,8 @@ async function advisoryRow(id: string) {
 
 /** A follow-up deposit BUILD for the owner (what the partner requests after the swap). */
 async function seedFollowUpBuild(ageMs = 0): Promise<string> {
-  const id = `earn_external_wallet_transaction_${crypto.randomUUID()}`;
-  await createPostgresEarnExternalWalletTransactionsRepository(getDb(env)).create({
+  const id = `earn_wallet_transaction_${crypto.randomUUID()}`;
+  await createPostgresEarnWalletTransactionsRepository(getDb(env)).create({
     id,
     organizationId: ORG,
     projectId: PROJECT,
@@ -137,7 +137,7 @@ async function seedFollowUpBuild(ageMs = 0): Promise<string> {
   });
   if (ageMs > 0) {
     await getDb(env)
-      .prepare("UPDATE earn_external_wallet_transactions SET created_at = ? WHERE id = ?")
+      .prepare("UPDATE earn_wallet_transactions SET created_at = ? WHERE id = ?")
       .bind(new Date(Date.now() - ageMs).toISOString(), id)
       .run();
   }
@@ -150,13 +150,13 @@ async function seedFollowUpMovement(
   shape: { vaultAddress?: string; amount?: string } = {}
 ): Promise<string> {
   const buildId = await seedFollowUpBuild();
-  const built = await createPostgresEarnExternalWalletTransactionsRepository(getDb(env)).getById({
+  const built = await createPostgresEarnWalletTransactionsRepository(getDb(env)).getById({
     organizationId: ORG,
     transactionId: buildId,
   });
   if (!built) throw new Error("build row did not persist");
   const ledger = createPostgresEarnMovementsRepository(getDb(env));
-  const seeded = await ledger.createSignedExternalWalletDepositIntent({
+  const seeded = await ledger.createSignedWalletDepositIntent({
     organizationId: ORG,
     projectId: PROJECT,
     environment: "sandbox",
@@ -172,7 +172,7 @@ async function seedFollowUpMovement(
     lastValidBlockHeight: "100",
     requestId: crypto.randomUUID(),
     idempotencyFingerprint: crypto.randomUUID(),
-    externalWalletTransactionId: built.id,
+    walletTransactionId: built.id,
   });
   if (status !== "requested") {
     const observedAt = new Date().toISOString();

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import {
-  earnExternalWalletPositionsQuerySchema,
   earnVaultPositionsQuerySchema,
+  earnWalletPositionsQuerySchema,
   listEarnStrategiesQuerySchema,
 } from "@/routes/earn/schemas";
 
@@ -39,10 +39,10 @@ export const earnDiscoveryQuerySchema = listEarnStrategiesQuerySchema
 export const earnPositionsQuerySchema = z
   .object({
     walletId: z.string().min(1).max(128).optional(),
-    ownerAddress: earnExternalWalletPositionsQuerySchema.shape.ownerAddress.optional(),
-    ownerKind: z.enum(["custody", "external"]).optional(),
+    ownerAddress: earnWalletPositionsQuerySchema.shape.ownerAddress.optional(),
+    sourceType: z.enum(["wallet", "address"]).optional(),
     limit: earnVaultPositionsQuerySchema.shape.limit,
-    before: earnExternalWalletPositionsQuerySchema.shape.before,
+    before: earnWalletPositionsQuerySchema.shape.before,
     afterMovementIds: earnVaultPositionsQuerySchema.shape.afterMovementIds,
     includeSummary: optionalBoolean,
     includeOwnerAddresses: optionalBoolean,
@@ -66,13 +66,13 @@ export const earnPositionsQuerySchema = z
       });
     }
     if (
-      (query.walletId && query.ownerKind === "external") ||
-      (query.ownerAddress && query.ownerKind === "custody")
+      (query.walletId && query.sourceType === "address") ||
+      (query.ownerAddress && query.sourceType === "wallet")
     ) {
       ctx.addIssue({
         code: "custom",
-        path: ["ownerKind"],
-        message: "ownerKind must match the selected owner",
+        path: ["sourceType"],
+        message: "sourceType must match the selected source",
       });
     }
     if ((query.includeOwnerAddresses || query.includePositions) && !query.includeSummary) {

@@ -244,8 +244,8 @@ operations.post(
       record.operation.nextAction?.type === "sign_transaction" &&
       attempt?.signedTransaction == null
     ) {
-      throw conflict("The exposed external transaction must be reconciled before refreshing", {
-        reason: "external_transaction_outcome_unknown",
+      throw conflict("The exposed wallet transaction must be reconciled before refreshing", {
+        reason: "wallet_transaction_outcome_unknown",
       });
     }
     const reference = attempt?.resourceRef;

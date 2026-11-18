@@ -143,7 +143,7 @@ export function resolveVaultWithdrawClient(
 ): EarnVaultWithdrawProvider | null {
   // Hastra always retains its separate operator-redemption capability below.
   // This opt-in controls only admission to NEW Jupiter quote/build work; it is
-  // deliberately checked here so every custody and external-wallet entry
+  // deliberately checked here so every custody and wallet entry
   // point, plus withdrawal-options discovery, agrees on the default par-only
   // posture.
   if (!isEarnDirectWithdrawalConfigured(env, provider)) return null;

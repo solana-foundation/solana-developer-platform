@@ -37,7 +37,7 @@ import {
   EARN_WITHDRAWAL_TRANSACTION_EXAMPLE,
   EARN_WITHDRAWAL_TRANSACTION_REQUEST_EXAMPLE,
 } from "@/openapi/schemas/earn-examples";
-import { earnExternalWalletPositionsQuerySchema } from "@/routes/earn/schemas";
+import { earnWalletPositionsQuerySchema } from "@/routes/earn/schemas";
 
 /** A missing Earn provider capability uses the shared NOT_IMPLEMENTED code. */
 export const earnNotImplementedErrorResponseSchema = errorResponseSchema.extend({
@@ -189,7 +189,7 @@ export const earnStrategyResponse = successResponseSchema(
 );
 
 // ---------------------------------------------------------------------------
-// External-wallet (caller-signed) vault flows (PRO-1722): SDP builds an
+// Wallet (caller-signed) vault flows (PRO-1722): SDP builds an
 // unsigned transaction for a wallet it does not custody, and the caller submits
 // it back for durable tracking and SDP broadcast.
 // ---------------------------------------------------------------------------
@@ -210,7 +210,7 @@ const earnOwnerAddressSchema = z
   .regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/)
   .openapi({
     description:
-      "The customer's wallet address: an external wallet, so SDP holds no key " +
+      "The customer's wallet address: a wallet, so SDP holds no key " +
       "for it. It signs, owns the shares, and pays the network fee unless the " +
       "build names a `feePayer`. It must decode to a 32-byte public key; a " +
       "base58 string that matches the pattern but does not decode returns " +
@@ -258,7 +258,7 @@ const earnSolanaMintSchema = z
     example: "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
   });
 
-export const earnExternalWalletDepositTransactionRequest = z
+export const earnWalletDepositTransactionRequest = z
   .object({
     strategyId: z.string().min(1).openapi({ example: EARN_EXAMPLE_IDS.strategy }),
     ownerAddress: earnOwnerAddressSchema,
@@ -301,7 +301,7 @@ export const earnExternalWalletDepositTransactionRequest = z
         example: 2,
       }),
   })
-  .openapi({ description: "Build one unsigned deposit transaction for an external wallet." })
+  .openapi({ description: "Build one unsigned deposit transaction for a wallet." })
   .openapi({ example: EARN_DEPOSIT_TRANSACTION_REQUEST_EXAMPLE });
 
 const earnDepositSwapSchema = z
@@ -335,7 +335,7 @@ const earnDepositSwapSchema = z
     description: "The Jupiter swap leg attached to (or split out of) a swap-funded deposit.",
   });
 
-const earnExternalWalletPositionLocatorSchema = z.object({
+const earnWalletPositionLocatorSchema = z.object({
   positionId: z
     .string()
     .min(1)
@@ -347,7 +347,7 @@ const earnExternalWalletPositionLocatorSchema = z.object({
     }),
 });
 
-const earnExternalWalletWithdrawalFields = {
+const earnWalletWithdrawalFields = {
   redemptionMode: z
     .enum(EARN_PROVIDER_REDEMPTION_MODES)
     .optional()
@@ -374,17 +374,16 @@ const earnExternalWalletWithdrawalFields = {
   feePayer: earnFeePayerRequestSchema.optional(),
 } as const;
 
-export const earnExternalWalletWithdrawalTransactionRequest =
-  earnExternalWalletPositionLocatorSchema
-    .extend(earnExternalWalletWithdrawalFields)
-    .openapi({
-      description:
-        "Build one unsigned withdrawal transaction for a position. SDP reads " +
-        "the strategy and mints from the position.",
-    })
-    .openapi({ example: EARN_WITHDRAWAL_TRANSACTION_REQUEST_EXAMPLE });
+export const earnWalletWithdrawalTransactionRequest = earnWalletPositionLocatorSchema
+  .extend(earnWalletWithdrawalFields)
+  .openapi({
+    description:
+      "Build one unsigned withdrawal transaction for a position. SDP reads " +
+      "the strategy and mints from the position.",
+  })
+  .openapi({ example: EARN_WITHDRAWAL_TRANSACTION_REQUEST_EXAMPLE });
 
-const earnExternalWalletWithdrawalPreviewFields = {
+const earnWalletWithdrawalPreviewFields = {
   shares: earnDecimalAmountSchema.openapi({
     description:
       "Shares to withdraw, as a decimal string in share units. Keep it within the " +
@@ -393,8 +392,8 @@ const earnExternalWalletWithdrawalPreviewFields = {
   }),
 } as const;
 
-export const earnExternalWalletWithdrawalPreviewRequest = earnExternalWalletPositionLocatorSchema
-  .extend(earnExternalWalletWithdrawalPreviewFields)
+export const earnWalletWithdrawalPreviewRequest = earnWalletPositionLocatorSchema
+  .extend(earnWalletWithdrawalPreviewFields)
   .openapi({
     description:
       "Quote one withdrawal from a position against the strategy's live " +
@@ -555,7 +554,7 @@ export const earnVaultShareReconciliationResponse = successResponseSchema(
   })
 );
 
-export const earnExternalWalletWithdrawalPreviewResponseFields = {
+export const earnWalletWithdrawalPreviewResponseFields = {
   assetsOut: earnDecimalAmountSchema.openapi({
     description:
       "What redeeming the shares would pay at the live rate, decimal string in the deposit " +
@@ -571,9 +570,9 @@ export const earnExternalWalletWithdrawalPreviewResponseFields = {
   }),
 } as const;
 
-export const earnExternalWalletWithdrawalPreviewResponse = successResponseSchema(
-  earnExternalWalletPositionLocatorSchema
-    .extend(earnExternalWalletWithdrawalPreviewResponseFields)
+export const earnWalletWithdrawalPreviewResponse = successResponseSchema(
+  earnWalletPositionLocatorSchema
+    .extend(earnWalletWithdrawalPreviewResponseFields)
     .openapi({ example: EARN_WITHDRAWAL_PREVIEW_EXAMPLE })
 );
 
@@ -740,23 +739,23 @@ const earnParRedemptionIntermediateTermsFields = {
   mechanism: earnParRedemptionTermsFields.mechanism,
 } as const;
 
-export const earnExternalWalletWithdrawalOptionsRequest = earnExternalWalletPositionLocatorSchema
+export const earnWalletWithdrawalOptionsRequest = earnWalletPositionLocatorSchema
   .openapi({
     description: "List the withdrawal routes a position supports right now.",
   })
   .openapi({ example: EARN_WITHDRAWAL_OPTIONS_REQUEST_EXAMPLE });
 
-export const earnExternalWalletWithdrawalOptionsResponse = successResponseSchema(
-  earnExternalWalletPositionLocatorSchema
+export const earnWalletWithdrawalOptionsResponse = successResponseSchema(
+  earnWalletPositionLocatorSchema
     .extend(earnQueuedWithdrawalOptionsFields)
     .openapi({ example: EARN_WITHDRAWAL_OPTIONS_EXAMPLE })
 );
 
-export const earnExternalWalletQueuedWithdrawalPreviewRequest = z
+export const earnWalletQueuedWithdrawalPreviewRequest = z
   .union([
-    earnExternalWalletPositionLocatorSchema.extend(earnQueuedWithdrawalTermsFields),
-    earnExternalWalletPositionLocatorSchema.extend(earnParRedemptionTermsFields),
-    earnExternalWalletPositionLocatorSchema.extend(earnParRedemptionIntermediateTermsFields),
+    earnWalletPositionLocatorSchema.extend(earnQueuedWithdrawalTermsFields),
+    earnWalletPositionLocatorSchema.extend(earnParRedemptionTermsFields),
+    earnWalletPositionLocatorSchema.extend(earnParRedemptionIntermediateTermsFields),
   ])
   .openapi({
     description:
@@ -809,26 +808,26 @@ export const earnParRedemptionPreviewFields = {
   blockingIssues: z.array(earnVaultQuoteIssueSchema),
 } as const;
 
-export const earnExternalWalletQueuedWithdrawalPreviewResponse = successResponseSchema(
+export const earnWalletQueuedWithdrawalPreviewResponse = successResponseSchema(
   z
     .union([
-      earnExternalWalletPositionLocatorSchema.extend(earnQueuedWithdrawalPreviewFields),
-      earnExternalWalletPositionLocatorSchema.extend(earnParRedemptionPreviewFields),
+      earnWalletPositionLocatorSchema.extend(earnQueuedWithdrawalPreviewFields),
+      earnWalletPositionLocatorSchema.extend(earnParRedemptionPreviewFields),
     ])
     .openapi({ example: EARN_QUEUED_WITHDRAWAL_PREVIEW_EXAMPLE })
 );
 
-export const earnExternalWalletWithdrawalRequestTransactionRequest = z
+export const earnWalletWithdrawalRequestTransactionRequest = z
   .union([
-    earnExternalWalletPositionLocatorSchema.extend({
+    earnWalletPositionLocatorSchema.extend({
       ...earnQueuedWithdrawalTermsFields,
       feePayer: earnFeePayerRequestSchema.optional(),
     }),
-    earnExternalWalletPositionLocatorSchema.extend({
+    earnWalletPositionLocatorSchema.extend({
       ...earnParRedemptionTermsFields,
       feePayer: earnFeePayerRequestSchema.optional(),
     }),
-    earnExternalWalletPositionLocatorSchema.extend({
+    earnWalletPositionLocatorSchema.extend({
       ...earnParRedemptionIntermediateTermsFields,
       feePayer: earnFeePayerRequestSchema.optional(),
     }),
@@ -839,7 +838,7 @@ export const earnExternalWalletWithdrawalRequestTransactionRequest = z
   })
   .openapi({ example: EARN_QUEUED_WITHDRAWAL_REQUEST_EXAMPLE });
 
-export const earnExternalWalletWithdrawalRequestCancelTransactionRequest = z
+export const earnWalletWithdrawalRequestCancelTransactionRequest = z
   .object({
     withdrawalRequestId: z.string().min(1).max(128).openapi({
       example: EARN_EXAMPLE_IDS.withdrawalRequest,
@@ -938,20 +937,20 @@ const earnAsyncWithdrawalRequestSchema = z.union([
   earnOperatorRedemptionRequestSchema,
 ]);
 
-export const earnExternalWalletWithdrawalRequestResponse = successResponseSchema(
+export const earnWalletWithdrawalRequestResponse = successResponseSchema(
   z
     .object({ withdrawalRequest: earnAsyncWithdrawalRequestSchema })
     .openapi({ example: EARN_WITHDRAWAL_REQUEST_EXAMPLE })
 );
 
 /** The same body as a request read, shown as it looks right after a cancellation submit. */
-export const earnExternalWalletWithdrawalRequestCancellationResponse = successResponseSchema(
+export const earnWalletWithdrawalRequestCancellationResponse = successResponseSchema(
   z
     .object({ withdrawalRequest: earnAsyncWithdrawalRequestSchema })
     .openapi({ example: EARN_WITHDRAWAL_REQUEST_CANCELLING_EXAMPLE })
 );
 
-export const earnExternalWalletWithdrawalRequestsResponse = successResponseSchema(
+export const earnWalletWithdrawalRequestsResponse = successResponseSchema(
   z
     .object({
       withdrawalRequests: z.array(earnAsyncWithdrawalRequestSchema),
@@ -961,7 +960,7 @@ export const earnExternalWalletWithdrawalRequestsResponse = successResponseSchem
     .openapi({ example: EARN_WITHDRAWAL_REQUESTS_EXAMPLE })
 );
 
-export const earnExternalWalletSubmitRequest = z
+export const earnWalletSubmitRequest = z
   .object({
     transactionId: z.string().min(1).max(128).openapi({
       description: "The built transaction being submitted; single-use.",
@@ -988,7 +987,7 @@ export const earnExternalWalletSubmitRequest = z
       "same key resolves the original movement or withdrawal request instead of acting twice.",
   });
 
-const earnExternalWalletTransactionSchema = z
+const earnWalletTransactionSchema = z
   .object({
     transactionId: z.string().openapi({ example: EARN_EXAMPLE_IDS.depositBuild }),
     transaction: z.string().openapi({
@@ -1005,7 +1004,7 @@ const earnExternalWalletTransactionSchema = z
     }),
     sponsored: z.boolean().openapi({
       description:
-        "Always false: SDP does not pay an external wallet's fees. The customer's " +
+        "Always false: SDP does not pay a wallet's fees. The customer's " +
         "wallet pays, or the `feePayer` you name.",
       example: false,
     }),
@@ -1031,9 +1030,9 @@ const earnExternalWalletTransactionSchema = z
     tokenMint: z.string().openapi({ example: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU" }),
     shareMint: z.string().openapi({ example: "hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2" }),
   })
-  .openapi({ description: "One unsigned transaction SDP built for an external wallet to sign." });
+  .openapi({ description: "One unsigned transaction SDP built for a wallet to sign." });
 
-const earnQueuedWithdrawalRequestBuildSchema = earnExternalWalletTransactionSchema
+const earnQueuedWithdrawalRequestBuildSchema = earnWalletTransactionSchema
   .extend({
     positionId: z.string().openapi({ example: EARN_EXAMPLE_IDS.position }),
     action: z.literal("request"),
@@ -1047,7 +1046,7 @@ const earnQueuedWithdrawalRequestBuildSchema = earnExternalWalletTransactionSche
   })
   .openapi({ description: "A solver queue request for the customer's wallet to sign." });
 
-const earnOperatorRedemptionRequestBuildSchema = earnExternalWalletTransactionSchema
+const earnOperatorRedemptionRequestBuildSchema = earnWalletTransactionSchema
   .extend({
     positionId: z.string().openapi({ example: EARN_EXAMPLE_IDS.position }),
     action: z.literal("request"),
@@ -1060,7 +1059,7 @@ const earnOperatorRedemptionRequestBuildSchema = earnExternalWalletTransactionSc
   })
   .openapi({ description: "An operator redemption request for the customer's wallet to sign." });
 
-const earnQueuedWithdrawalCancelBuildSchema = earnExternalWalletTransactionSchema
+const earnQueuedWithdrawalCancelBuildSchema = earnWalletTransactionSchema
   .extend({
     positionId: z.string().openapi({ example: EARN_EXAMPLE_IDS.position }),
     withdrawalRequestId: z.string().openapi({
@@ -1073,7 +1072,7 @@ const earnQueuedWithdrawalCancelBuildSchema = earnExternalWalletTransactionSchem
   .openapi({ description: "A cancellation for the customer's wallet to sign." });
 
 /** A request build answers only request transactions. */
-export const earnExternalWalletWithdrawalRequestTransactionResponse = successResponseSchema(
+export const earnWalletWithdrawalRequestTransactionResponse = successResponseSchema(
   z
     .object({
       transaction: z.union([
@@ -1085,13 +1084,13 @@ export const earnExternalWalletWithdrawalRequestTransactionResponse = successRes
 );
 
 /** A cancellation build answers only a cancellation transaction. */
-export const earnExternalWalletWithdrawalRequestCancelTransactionResponse = successResponseSchema(
+export const earnWalletWithdrawalRequestCancelTransactionResponse = successResponseSchema(
   z
     .object({ transaction: earnQueuedWithdrawalCancelBuildSchema })
     .openapi({ example: EARN_WITHDRAWAL_REQUEST_CANCEL_TRANSACTION_EXAMPLE })
 );
 
-const earnExternalWalletDepositTransactionSchema = earnExternalWalletTransactionSchema
+const earnWalletDepositTransactionSchema = earnWalletTransactionSchema
   .extend({
     amount: earnDecimalAmountSchema,
     minSharesOut: earnDecimalAmountSchema.nullable(),
@@ -1112,7 +1111,7 @@ const earnExternalWalletDepositTransactionSchema = earnExternalWalletTransaction
   })
   .openapi({ description: "The built deposit transaction plus the strategy it targets." });
 
-const earnExternalWalletWithdrawalTransactionSchema = earnExternalWalletTransactionSchema
+const earnWalletWithdrawalTransactionSchema = earnWalletTransactionSchema
   .extend({
     shares: earnDecimalAmountSchema,
     minAmountOut: earnDecimalAmountSchema.nullable().openapi({
@@ -1121,7 +1120,7 @@ const earnExternalWalletWithdrawalTransactionSchema = earnExternalWalletTransact
   })
   .openapi({ description: "The common fields of one built withdrawal transaction." });
 
-const earnExternalWalletMovementSchema = z
+const earnWalletMovementSchema = z
   .object({
     settlementOutcome: z.enum(["delivered", "cancelled"]).optional(),
     movementId: z.string().openapi({ example: EARN_EXAMPLE_IDS.depositMovement }),
@@ -1175,9 +1174,9 @@ const earnExternalWalletMovementSchema = z
         "True when the idempotency key already produced this movement and nothing was re-sent.",
     }),
   })
-  .openapi({ description: "One recorded external-wallet vault movement." });
+  .openapi({ description: "One recorded wallet vault movement." });
 
-const earnExternalWalletDepositSwapSplitSchema = z
+const earnWalletDepositSwapSplitSchema = z
   .object({
     requiresSeparateSwap: z.literal(true).openapi({
       description: "Discriminates from the atomic answer, which carries `transaction`.",
@@ -1227,34 +1226,34 @@ const earnExternalWalletDepositSwapSplitSchema = z
       "route. SDP saves no build or movement for it.",
   });
 
-export const earnExternalWalletDepositTransactionResponse = successResponseSchema(
+export const earnWalletDepositTransactionResponse = successResponseSchema(
   z
     .union([
-      z.object({ transaction: earnExternalWalletDepositTransactionSchema }),
-      earnExternalWalletDepositSwapSplitSchema,
+      z.object({ transaction: earnWalletDepositTransactionSchema }),
+      earnWalletDepositSwapSplitSchema,
     ])
     .openapi({ example: EARN_DEPOSIT_TRANSACTION_EXAMPLE })
 );
 
-export const earnExternalWalletWithdrawalTransactionResponse = successResponseSchema(
+export const earnWalletWithdrawalTransactionResponse = successResponseSchema(
   z
     .object({
-      transaction: earnExternalWalletWithdrawalTransactionSchema.extend({
+      transaction: earnWalletWithdrawalTransactionSchema.extend({
         positionId: z.string().openapi({ example: EARN_EXAMPLE_IDS.position }),
       }),
     })
     .openapi({ example: EARN_WITHDRAWAL_TRANSACTION_EXAMPLE })
 );
 
-export const earnExternalWalletDepositResponse = successResponseSchema(
+export const earnWalletDepositResponse = successResponseSchema(
   z.object({
-    deposit: earnExternalWalletMovementSchema.openapi({ example: EARN_DEPOSIT_SUBMIT_EXAMPLE }),
+    deposit: earnWalletMovementSchema.openapi({ example: EARN_DEPOSIT_SUBMIT_EXAMPLE }),
   })
 );
 
-export const earnExternalWalletWithdrawalResponse = successResponseSchema(
+export const earnWalletWithdrawalResponse = successResponseSchema(
   z.object({
-    withdrawal: earnExternalWalletMovementSchema.openapi({
+    withdrawal: earnWalletMovementSchema.openapi({
       example: EARN_WITHDRAWAL_SUBMIT_EXAMPLE,
     }),
   })
@@ -1269,7 +1268,7 @@ const earnLiveDecimalAmountSchema = z
     example: "25.42",
   });
 
-export const earnExternalWalletPositionSchema = z
+export const earnWalletPositionSchema = z
   .object({
     id: z.string().openapi({ example: EARN_EXAMPLE_IDS.position }),
     ownerAddress: earnOwnerAddressFieldSchema,
@@ -1335,7 +1334,7 @@ export const earnExternalWalletPositionSchema = z
   })
   .openapi({ description: "One live position held by a customer wallet." });
 
-const earnExternalWalletTokenTotalSchema = z.object({
+const earnWalletTokenTotalSchema = z.object({
   tokenMint: z.string().openapi({ example: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU" }),
   walletCount: z.number().int().nonnegative(),
   positionCount: z.number().int().nonnegative(),
@@ -1348,7 +1347,7 @@ const earnExternalWalletTokenTotalSchema = z.object({
   }),
 });
 
-const earnExternalWalletStrategyTotalSchema = z.object({
+const earnWalletStrategyTotalSchema = z.object({
   provider: z.string().openapi({ example: "kamino" }),
   providerReference: z.string().openapi({
     example: "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
@@ -1364,7 +1363,7 @@ const earnExternalWalletStrategyTotalSchema = z.object({
         "your customers, so opt in only where you show per-customer detail.",
     }),
   positions: z
-    .array(earnExternalWalletPositionSchema)
+    .array(earnWalletPositionSchema)
     .optional()
     .openapi({
       description:
@@ -1374,39 +1373,39 @@ const earnExternalWalletStrategyTotalSchema = z.object({
     }),
   walletCount: z.number().int().nonnegative(),
   positionCount: z.number().int().nonnegative(),
-  totalsByToken: z.array(earnExternalWalletTokenTotalSchema),
+  totalsByToken: z.array(earnWalletTokenTotalSchema),
 });
 
-export const earnExternalWalletPositionsResponse = successResponseSchema(
+export const earnWalletPositionsResponse = successResponseSchema(
   z
     .object({
       ownerAddress: earnOwnerAddressFieldSchema,
-      positions: z.array(earnExternalWalletPositionSchema),
+      positions: z.array(earnWalletPositionSchema),
       hasMore: z.boolean(),
       nextCursor: z.string().nullable(),
     })
     .openapi({ example: EARN_POSITIONS_EXAMPLE })
 );
 
-export const earnExternalWalletPositionSummaryResponse = successResponseSchema(
+export const earnWalletPositionSummaryResponse = successResponseSchema(
   z
     .object({
       summary: z.object({
         walletCount: z.number().int().nonnegative(),
         positionCount: z.number().int().nonnegative(),
         unavailablePositionCount: z.number().int().nonnegative(),
-        totalsByStrategy: z.array(earnExternalWalletStrategyTotalSchema),
-        totalsByToken: z.array(earnExternalWalletTokenTotalSchema),
+        totalsByStrategy: z.array(earnWalletStrategyTotalSchema),
+        totalsByToken: z.array(earnWalletTokenTotalSchema),
       }),
     })
     .openapi({ example: EARN_POSITION_SUMMARY_EXAMPLE })
 );
 
-export const earnExternalWalletMovementsResponse = successResponseSchema(
+export const earnWalletMovementsResponse = successResponseSchema(
   z
     .object({
       ownerAddress: earnOwnerAddressFieldSchema,
-      movements: z.array(earnExternalWalletMovementSchema).openapi({
+      movements: z.array(earnWalletMovementSchema).openapi({
         description: "The wallet's recorded movements, newest first.",
       }),
       hasMore: z.boolean(),
@@ -1415,9 +1414,9 @@ export const earnExternalWalletMovementsResponse = successResponseSchema(
     .openapi({ example: EARN_MOVEMENTS_EXAMPLE })
 );
 
-export const earnExternalWalletMovementDetailResponse = successResponseSchema(
+export const earnWalletMovementDetailResponse = successResponseSchema(
   z.object({
-    movement: earnExternalWalletMovementSchema.openapi({
+    movement: earnWalletMovementSchema.openapi({
       example: EARN_MOVEMENT_FINALIZED_EXAMPLE,
     }),
   })
@@ -1432,7 +1431,7 @@ const earnSignedDecimalAmountSchema = z
     example: "5.2",
   });
 
-const earnExternalWalletTokenEarningsSchema = z
+const earnWalletTokenEarningsSchema = z
   .object({
     tokenMint: z.string().openapi({ example: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU" }),
     positionCount: z.number().int().nonnegative(),
@@ -1485,14 +1484,14 @@ const earnExternalWalletTokenEarningsSchema = z
   })
   .openapi({ description: "Earnings for one deposit token across the wallet's positions." });
 
-export const earnExternalWalletEarningsResponse = successResponseSchema(
+export const earnWalletEarningsResponse = successResponseSchema(
   z.object({
     earnings: z
       .object({
         ownerAddress: earnOwnerAddressFieldSchema,
         positionCount: z.number().int().nonnegative(),
         unavailablePositionCount: z.number().int().nonnegative(),
-        totalsByToken: z.array(earnExternalWalletTokenEarningsSchema),
+        totalsByToken: z.array(earnWalletTokenEarningsSchema),
       })
       .openapi({ example: EARN_EARNINGS_EXAMPLE }),
   })
@@ -1506,10 +1505,10 @@ export const earnExternalWalletEarningsResponse = successResponseSchema(
 export const earnOwnerAddressQueryParam = earnOwnerAddressSchema;
 
 export const earnCursorQueryParams = {
-  limit: withOpenApi(earnExternalWalletPositionsQuerySchema.shape.limit, {
+  limit: withOpenApi(earnWalletPositionsQuerySchema.shape.limit, {
     description: "Page size, from 1 to 100. Defaults to 20.",
   }),
-  before: withOpenApi(earnExternalWalletPositionsQuerySchema.shape.before, {
+  before: withOpenApi(earnWalletPositionsQuerySchema.shape.before, {
     description: "The previous page's `nextCursor`. Omit it for the first page.",
   }),
 };

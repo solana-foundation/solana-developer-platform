@@ -24,16 +24,18 @@ async function request(
     },
     body: JSON.stringify(body),
   });
-  const result: unknown = await response.json().catch(() => null);
-  const error = z
-    .object({ error: z.object({ message: z.string() }) })
-    .safeParse(result);
-  if (!response.ok)
+  if (!response.ok) {
+    const result: unknown = await response.json().catch(() => null);
+    const error = z
+      .object({ error: z.object({ message: z.string() }) })
+      .safeParse(result);
     throw new Error(
       error.success
         ? error.data.error.message
         : `Request failed (${response.status})`
     );
+  }
+  const result: unknown = await response.json();
   return z
     .object({ data: z.object({ operation: coreOperationSchema }) })
     .parse(result).data.operation;

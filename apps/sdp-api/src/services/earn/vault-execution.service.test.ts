@@ -159,7 +159,7 @@ function useRealPoolWithDevnetGenesis(genesis: string): string[] {
 describe("vault execution validation", () => {
   it("refuses caller-signed transactions that require any signer besides the owner", async () => {
     const extraSigner = await generateKeyPairSigner();
-    const externalPlan: EarnVaultTransactionPlan = {
+    const walletPlan: EarnVaultTransactionPlan = {
       ...plan,
       instructions: [
         {
@@ -173,11 +173,11 @@ describe("vault execution validation", () => {
     expect(() =>
       compileUnsignedVaultTransaction({
         deadline: createVaultDeadline(),
-        expectedAssetIdentity: externalPlan.assetIdentity,
-        plan: externalPlan,
+        expectedAssetIdentity: walletPlan.assetIdentity,
+        plan: walletPlan,
         owner: ownerAddress,
         prepared: {
-          plan: externalPlan,
+          plan: walletPlan,
           lookupTables: {},
           blockhash,
           lastValidBlockHeight: 100n,
@@ -187,15 +187,15 @@ describe("vault execution validation", () => {
   });
 
   it("compiles a caller-provided fee payer into slot zero beside the owner", () => {
-    const externalPlan = planForOwner(ownerAddress);
+    const walletPlan = planForOwner(ownerAddress);
     const unsigned = compileUnsignedVaultTransaction({
       deadline: createVaultDeadline(),
-      expectedAssetIdentity: externalPlan.assetIdentity,
-      plan: externalPlan,
+      expectedAssetIdentity: walletPlan.assetIdentity,
+      plan: walletPlan,
       owner: ownerAddress,
       feePayer: feePayerAddress,
       prepared: {
-        plan: externalPlan,
+        plan: walletPlan,
         lookupTables: {},
         blockhash,
         lastValidBlockHeight: 100n,
@@ -210,7 +210,7 @@ describe("vault execution validation", () => {
 
   it("still refuses a smuggled third signer when a fee payer is requested", async () => {
     const extraSigner = await generateKeyPairSigner();
-    const externalPlan: EarnVaultTransactionPlan = {
+    const walletPlan: EarnVaultTransactionPlan = {
       ...plan,
       instructions: [
         {
@@ -227,12 +227,12 @@ describe("vault execution validation", () => {
     expect(() =>
       compileUnsignedVaultTransaction({
         deadline: createVaultDeadline(),
-        expectedAssetIdentity: externalPlan.assetIdentity,
-        plan: externalPlan,
+        expectedAssetIdentity: walletPlan.assetIdentity,
+        plan: walletPlan,
         owner: ownerAddress,
         feePayer: feePayerAddress,
         prepared: {
-          plan: externalPlan,
+          plan: walletPlan,
           lookupTables: {},
           blockhash,
           lastValidBlockHeight: 100n,
@@ -242,18 +242,18 @@ describe("vault execution validation", () => {
   });
 
   it("treats a fee payer equal to the owner as absent", () => {
-    const externalPlan = planForOwner(ownerAddress);
+    const walletPlan = planForOwner(ownerAddress);
     // Solana deduplicates account keys, so owner-as-fee-payer compiles to ONE
     // signer slot; the compile normalizes rather than tripping its own
     // two-slot assertion on a legitimate build.
     const unsigned = compileUnsignedVaultTransaction({
       deadline: createVaultDeadline(),
-      expectedAssetIdentity: externalPlan.assetIdentity,
-      plan: externalPlan,
+      expectedAssetIdentity: walletPlan.assetIdentity,
+      plan: walletPlan,
       owner: ownerAddress,
       feePayer: ownerAddress,
       prepared: {
-        plan: externalPlan,
+        plan: walletPlan,
         lookupTables: {},
         blockhash,
         lastValidBlockHeight: 100n,

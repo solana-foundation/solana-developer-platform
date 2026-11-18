@@ -57,7 +57,7 @@ export interface VaultWithdrawalResult {
 }
 
 /**
- * Shared with the external-wallet withdrawal build, whose plan must pass the
+ * Shared with the wallet withdrawal build, whose plan must pass the
  * same bar.
  *
  * The accepted floor is checked here but deliberately NOT persisted yet: the

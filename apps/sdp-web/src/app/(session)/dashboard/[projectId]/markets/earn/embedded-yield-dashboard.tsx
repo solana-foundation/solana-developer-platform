@@ -1,10 +1,10 @@
 "use client";
 
 import type {
-  EarnExternalWalletPosition,
-  EarnExternalWalletPositionSummary,
-  EarnExternalWalletStrategyTotal,
   EarnStrategy,
+  EarnWalletPosition,
+  EarnWalletPositionSummary,
+  EarnWalletStrategyTotal,
 } from "@sdp/types/earn";
 import { type SolanaCluster, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { Button } from "@sdp/ui/button";
@@ -48,7 +48,7 @@ import {
   sumDecimalStrings,
 } from "./earn-market-presentation";
 import { EarnRowIdentity, EarnSummary } from "./earn-page-blocks";
-import { useEarnExternalWalletPositionSummary, useEarnStrategies } from "./earn-program-data";
+import { useEarnStrategies, useEarnWalletPositionSummary } from "./earn-program-data";
 import { EARN_TABLE, EARN_TABLE_FRAME } from "./earn-table-layout";
 import { earnVaultHoldingValue } from "./earn-vault-holding";
 import {
@@ -95,7 +95,7 @@ const LIVE_VALUE_HINTS = {
   not_dollar: "DashboardMarkets.earnProgram.liveValueNotDollar",
 } as const satisfies Record<PortfolioLiveValue["kind"], MessageKey | undefined>;
 
-function portfolioLiveValue(summary: EarnExternalWalletPositionSummary): PortfolioLiveValue {
+function portfolioLiveValue(summary: EarnWalletPositionSummary): PortfolioLiveValue {
   if (summary.unavailablePositionCount > 0) return { kind: "withheld" };
   const values: string[] = [];
   for (const total of summary.totalsByToken) {
@@ -108,7 +108,7 @@ function portfolioLiveValue(summary: EarnExternalWalletPositionSummary): Portfol
 }
 
 function formatLatestDepositDate(
-  positions: readonly EarnExternalWalletPosition[] | undefined,
+  positions: readonly EarnWalletPosition[] | undefined,
   locale: string
 ): string {
   if (positions === undefined) return "—";
@@ -122,7 +122,7 @@ function formatLatestDepositDate(
 }
 
 /** The portfolio's live value, then how many customers, positions and assets make it up. */
-function PortfolioSummary({ summary }: { summary: EarnExternalWalletPositionSummary }) {
+function PortfolioSummary({ summary }: { summary: EarnWalletPositionSummary }) {
   const t = useTranslations();
   const locale = useLocale();
   const countFormat = useMemo(() => new Intl.NumberFormat(locale), [locale]);
@@ -185,7 +185,7 @@ function CustomerWallet({
   position,
 }: {
   cluster: SolanaCluster;
-  position: EarnExternalWalletPosition;
+  position: EarnWalletPosition;
 }) {
   const locale = useLocale();
   const t = useTranslations();
@@ -271,7 +271,7 @@ function StrategyWalletDetails({
   strategy,
 }: {
   cluster: SolanaCluster;
-  strategy: EarnExternalWalletStrategyTotal;
+  strategy: EarnWalletStrategyTotal;
 }) {
   const t = useTranslations();
   // Absent when the summary could not hydrate this strategy's wallets.
@@ -314,7 +314,7 @@ function StrategyRows({
   definition?: EarnStrategy;
   isOpen: boolean;
   onToggle: () => void;
-  strategy: EarnExternalWalletStrategyTotal;
+  strategy: EarnWalletStrategyTotal;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -422,7 +422,7 @@ function PortfolioByStrategy({
   onStrategyToggle: (strategyId: string) => void;
   selectedStrategyId: string | null;
   strategies?: EarnStrategy[];
-  summary: EarnExternalWalletPositionSummary;
+  summary: EarnWalletPositionSummary;
 }) {
   const t = useTranslations();
   const strategiesByReference = useMemo(
@@ -496,7 +496,7 @@ export function EmbeddedYieldDashboard({ configureHref }: { configureHref: strin
   const cluster = useSolanaCluster();
   const [selectedStrategyId, setSelectedStrategyId] = useState<string | null>(null);
   const { strategies } = useEarnStrategies();
-  const { summary, error, isInitialLoading } = useEarnExternalWalletPositionSummary({
+  const { summary, error, isInitialLoading } = useEarnWalletPositionSummary({
     detailsVisible: selectedStrategyId !== null,
   });
 

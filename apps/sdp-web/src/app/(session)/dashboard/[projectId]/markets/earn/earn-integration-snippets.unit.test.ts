@@ -52,7 +52,9 @@ describe("Earn integration module", () => {
     expect(source).toContain("/v1/earn/positions");
     expect(source).toContain("/v1/earn/deposit");
     expect(source).toContain("/v1/earn/withdraw");
-    expect(source).not.toMatch(/external-wallet|vault-deposits|deposit-transactions|\/programs/);
+    expect(source).not.toMatch(
+      /\/v1\/earn\/external-wallet\/|vault-deposits|deposit-transactions|\/programs/
+    );
     expect(source).toContain("&discover=true");
     expect(source).toContain("discovery.unavailableStrategyCount");
   });

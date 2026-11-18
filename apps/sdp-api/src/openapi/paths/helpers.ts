@@ -29,7 +29,7 @@ export const projectScopeWithIdempotencyHeaders = projectScopeHeaders.extend({
 
 /**
  * For routes where the header is the ONLY accepted idempotency source and the
- * runtime refuses a request without it (the vault and external-wallet money
+ * runtime refuses a request without it (the vault and wallet money
  * movers). Marking it optional here would let a generated client omit a header
  * the API 400s on.
  */

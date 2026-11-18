@@ -29,7 +29,7 @@ function operation(): Operation {
 }
 
 describe("Earn core client", () => {
-  it("prepares an external deposit without executing or adding credentials", async () => {
+  it("prepares an owner-signed deposit without executing or adding credentials", async () => {
     const transport = vi
       .fn()
       .mockResolvedValue(Response.json({ data: { operation: operation() } }));

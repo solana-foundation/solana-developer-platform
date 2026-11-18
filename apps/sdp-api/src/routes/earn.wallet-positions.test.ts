@@ -1,6 +1,6 @@
 import type { EarnVaultDirectProvider, EarnVaultPositionSnapshot } from "@sdp/earn/types";
 import { hashString } from "@sdp/payments/hash";
-import type { EarnExternalWalletPositionSummaryResponse } from "@sdp/types/earn";
+import type { EarnWalletPositionSummaryResponse } from "@sdp/types/earn";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import {
@@ -10,7 +10,7 @@ import {
 } from "@/db/repositories/earn-movements.repository";
 import { app } from "@/index";
 import * as auth from "@/lib/auth";
-import { collectAllExternalWalletPositionRows } from "@/routes/earn/handlers/external-wallet";
+import { collectAllWalletPositionRows } from "@/routes/earn/handlers/wallet";
 import { getLogger } from "@/runtime/logger";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
@@ -196,7 +196,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("external-wallet position reads", () => {
+describe("wallet position reads", () => {
   async function settleSeededMovements(positionId: string) {
     await getDb(env)
       .prepare(
@@ -377,7 +377,7 @@ describe("external-wallet position reads", () => {
       "/v1/earn/external-wallet/positions/summary?includeOwnerAddresses=true&includePositions=true"
     );
     expect(response.status).toBe(200);
-    const body = (await response.json()) as { data: EarnExternalWalletPositionSummaryResponse };
+    const body = (await response.json()) as { data: EarnWalletPositionSummaryResponse };
 
     expect(body.data.summary).toMatchObject({
       walletCount: 2,
@@ -471,7 +471,7 @@ describe("external-wallet position reads", () => {
     );
     expect(response.status).toBe(200);
     // SAFETY: the summary route's success envelope; the assertions below check every field read.
-    const body = (await response.json()) as { data: EarnExternalWalletPositionSummaryResponse };
+    const body = (await response.json()) as { data: EarnWalletPositionSummaryResponse };
 
     expect(body.data.summary).toMatchObject({
       walletCount: 1,
@@ -826,7 +826,7 @@ describe("external-wallet position reads", () => {
       created_at: "2026-08-28T00:00:00.000Z",
     } as EarnPositionRow;
     await expect(
-      collectAllExternalWalletPositionRows(async () => ({ rows: [row], hasMore: true }))
+      collectAllWalletPositionRows(async () => ({ rows: [row], hasMore: true }))
     ).rejects.toThrow("pagination did not advance");
   });
 
@@ -837,7 +837,7 @@ describe("external-wallet position reads", () => {
     ] as EarnPositionRow[];
     let page = 0;
     await expect(
-      collectAllExternalWalletPositionRows(async () => ({
+      collectAllWalletPositionRows(async () => ({
         rows: [rows[page++] as EarnPositionRow],
         hasMore: true,
       }))
@@ -846,7 +846,7 @@ describe("external-wallet position reads", () => {
 
   it("continues past one hundred pages until the keyset reader is complete", async () => {
     let page = 0;
-    const rows = await collectAllExternalWalletPositionRows(async () => {
+    const rows = await collectAllWalletPositionRows(async () => {
       const current = page;
       page += 1;
       return {

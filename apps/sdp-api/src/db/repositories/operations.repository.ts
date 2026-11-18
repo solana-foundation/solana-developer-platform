@@ -33,7 +33,7 @@ export interface OperationScope {
   environment: SdpEnvironment;
 }
 
-/** External history names one owner; custody history names known project wallets. */
+/** Address-filtered history names one owner; wallet history names known project wallets. */
 export interface OperationListFilters {
   kind?: Operation["kind"];
   status?: OperationStatus;
@@ -421,8 +421,8 @@ export function createOperationsRepository(db: DatabaseClient) {
       }
       const wallet = "source ->> 'walletId'";
       if (input.ownerAddress !== undefined) {
-        // Match existing external history: one explicitly addressed owner,
-        // exact project, and a proven external source. Never list an address book.
+        // Match owner-address history: one explicitly addressed owner,
+        // exact project, and a proven address source. Never list an address book.
         const owner = "source ->> 'ownerAddress'";
         filters.push(`(${wallet} IS NULL AND ${owner} = ?)`);
         values.push(input.ownerAddress);
@@ -445,10 +445,10 @@ export function createOperationsRepository(db: DatabaseClient) {
             AND ${alias}.project_id = operations.project_id
             AND ${alias}.environment = operations.environment AND ${alias}.position_id = ?`;
         filters.push(`(intent ->> 'positionId' = ?
-          OR EXISTS (SELECT 1 FROM earn_external_wallet_transactions build
+          OR EXISTS (SELECT 1 FROM earn_wallet_transactions build
             WHERE operations.build_ref ->> 'kind' = 'earn.strategy_transaction'
               AND ${scopedReference("build", "build_ref")})
-          OR EXISTS (SELECT 1 FROM earn_external_wallet_withdrawal_request_transactions build
+          OR EXISTS (SELECT 1 FROM earn_wallet_withdrawal_request_transactions build
             WHERE operations.build_ref ->> 'kind' = 'earn.queued_transaction'
               AND ${scopedReference("build", "build_ref")})
           OR EXISTS (SELECT 1 FROM earn_movements movement

@@ -114,7 +114,7 @@ export function hydratedHoldingTokenValue(
 }
 
 export interface VaultPositionHydrationOptions {
-  ownerKind: "custody" | "external-wallet";
+  sourceType: "wallet" | "address";
   minimumSlotByPositionId?: ReadonlyMap<string, number>;
   /** `markVaultPositionRowsRead()`, taken once the positions' rows were read. */
   rowsReadAt: number;
@@ -149,7 +149,7 @@ function recordDiscoveryObservations(
  * Hydrate vault claims in bounded owner/provider batches, on the open cluster
  * scope's cluster.
  *
- * Both SDP-custody and external-wallet reads use this exact identity check and
+ * Both SDP-custody and wallet reads use this exact identity check and
  * failure posture: provider failures leave the affected value unavailable,
  * while a mismatched owner, cluster, vault, or mint is ignored rather than
  * attached to somebody else's position.
@@ -248,7 +248,7 @@ export async function hydrateVaultPositions(
               getLogger().warn(
                 {
                   provider,
-                  ...ownerTelemetryFields(options.ownerKind, owner, snapshot.owner),
+                  ...ownerTelemetryFields(options.sourceType, owner, snapshot.owner),
                   providerReference: snapshot.providerReference,
                   snapshotCluster: snapshot.cluster,
                   snapshotTokenMint: snapshot.tokenMint,
@@ -280,7 +280,7 @@ export async function hydrateVaultPositions(
               getLogger().warn(
                 {
                   provider,
-                  ...ownerTelemetryFields(options.ownerKind, owner),
+                  ...ownerTelemetryFields(options.sourceType, owner),
                   providerReference: snapshot.providerReference,
                   snapshotTokenMint: snapshot.tokenMint,
                   snapshotShareMint: snapshot.shareMint,
@@ -302,11 +302,11 @@ export async function hydrateVaultPositions(
       const job = hydrationJobs[index];
       // Provider messages may embed the owner, so an end-user owner is
       // scrubbed from them as well as from the fields.
-      const redactedOwner = options.ownerKind === "external-wallet" ? job?.owner : undefined;
+      const redactedOwner = options.sourceType === "address" ? job?.owner : undefined;
       getLogger().warn(
         {
           provider: job?.provider,
-          ...(job ? ownerTelemetryFields(options.ownerKind, job.owner) : {}),
+          ...(job ? ownerTelemetryFields(options.sourceType, job.owner) : {}),
           positionCount: job?.positionCount,
           error: scrubLoggedText(
             result.reason instanceof Error ? result.reason.message : String(result.reason),
@@ -372,11 +372,11 @@ function scrubLoggedText(text: string, redactedOwner: string | undefined): strin
 
 /** End-user owner addresses are omitted before the payload reaches the logger. */
 function ownerTelemetryFields(
-  ownerKind: VaultPositionHydrationOptions["ownerKind"],
+  sourceType: VaultPositionHydrationOptions["sourceType"],
   owner: string,
   snapshotOwner?: string
 ): { owner?: string; snapshotOwner?: string; ownerMismatch?: boolean } {
-  if (ownerKind === "external-wallet") {
+  if (sourceType === "address") {
     return snapshotOwner === undefined ? {} : { ownerMismatch: snapshotOwner !== owner };
   }
   return {

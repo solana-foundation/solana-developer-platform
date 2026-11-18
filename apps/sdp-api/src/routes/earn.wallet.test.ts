@@ -14,10 +14,10 @@ import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks
 import { clearKVStores, readRateLimitCount, seedRateLimit } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 
-const buildExternalWalletDepositTransaction = vi.hoisted(() => vi.fn());
-const buildExternalWalletWithdrawalTransaction = vi.hoisted(() => vi.fn());
-const submitExternalWalletDeposit = vi.hoisted(() => vi.fn());
-const submitExternalWalletWithdrawal = vi.hoisted(() => vi.fn());
+const buildWalletDepositTransaction = vi.hoisted(() => vi.fn());
+const buildWalletWithdrawalTransaction = vi.hoisted(() => vi.fn());
+const submitWalletDeposit = vi.hoisted(() => vi.fn());
+const submitWalletWithdrawal = vi.hoisted(() => vi.fn());
 const quoteVaultWithdrawal = vi.hoisted(() => vi.fn());
 const resolveVaultWithdrawClient = vi.hoisted(() =>
   vi.fn(() => ({
@@ -41,12 +41,12 @@ vi.mock("@/routes/earn/handlers/curation", async (original) => ({
   HIDDEN_STRATEGY_TERMS: [],
 }));
 
-vi.mock("@/services/earn/vault-external-wallet.service", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/earn/vault-external-wallet.service")>()),
-  buildExternalWalletDepositTransaction,
-  buildExternalWalletWithdrawalTransaction,
-  submitExternalWalletDeposit,
-  submitExternalWalletWithdrawal,
+vi.mock("@/services/earn/vault-wallet.service", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/earn/vault-wallet.service")>()),
+  buildWalletDepositTransaction,
+  buildWalletWithdrawalTransaction,
+  submitWalletDeposit,
+  submitWalletWithdrawal,
 }));
 
 vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
@@ -87,7 +87,7 @@ vi.mock("@/runtime/kv-redis", async (importOriginal) => {
 });
 
 /**
- * The external-wallet (caller-signed) routes — the gates, and the ADR 0002
+ * The wallet (caller-signed) routes — the gates, and the ADR 0002
  * gate ASYMMETRY between them (PRO-1722).
  *
  * The deposit BUILD takes the full money-in stack (environment capability,
@@ -95,7 +95,7 @@ vi.mock("@/runtime/kv-redis", async (importOriginal) => {
  * only 404-scoping and must keep working with every one of those gates
  * hostile — the "exit safety" describe proves the contrast under identical
  * conditions. Signature verification, replay and consumption semantics live
- * in `services/earn/vault-external-wallet.service.test.ts`; here the service
+ * in `services/earn/vault-wallet.service.test.ts`; here the service
  * is mocked and the routing contract is the subject.
  */
 
@@ -220,7 +220,7 @@ async function seedStrategy(
   return strategy;
 }
 
-async function seedExternalWalletPosition(
+async function seedWalletPosition(
   overrides: Partial<{
     projectId: string | null;
     ownerAddress: string;
@@ -281,7 +281,7 @@ async function seedCustodyPosition(): Promise<string> {
 
 function builtRow(overrides: Record<string, unknown> = {}) {
   return {
-    id: `earn_external_wallet_transaction_${crypto.randomUUID()}`,
+    id: `earn_wallet_transaction_${crypto.randomUUID()}`,
     organization_id: TEST_ORG.id,
     project_id: TEST_PROJECT.id,
     environment: "sandbox",
@@ -366,8 +366,8 @@ beforeEach(async () => {
   await seedTestDatabase(env);
   await clearKVStores(env);
   vi.clearAllMocks();
-  buildExternalWalletDepositTransaction.mockResolvedValue({ kind: "built", built: builtRow() });
-  buildExternalWalletWithdrawalTransaction.mockResolvedValue(
+  buildWalletDepositTransaction.mockResolvedValue({ kind: "built", built: builtRow() });
+  buildWalletWithdrawalTransaction.mockResolvedValue(
     builtRow({
       direction: "withdrawal",
       position_id: "earn_position_ext_test",
@@ -375,8 +375,8 @@ beforeEach(async () => {
       amount_requested: "10",
     })
   );
-  submitExternalWalletDeposit.mockResolvedValue(submitResult());
-  submitExternalWalletWithdrawal.mockResolvedValue(
+  submitWalletDeposit.mockResolvedValue(submitResult());
+  submitWalletWithdrawal.mockResolvedValue(
     submitResult({ direction: "withdrawal", denomination: SHARE_MINT, amount_requested: "10" })
   );
   quoteVaultWithdrawal.mockResolvedValue({
@@ -461,16 +461,16 @@ describe("core deposit preparation replaces legacy deposit builds", () => {
     );
     expect(response.status).toBe(410);
     expect(await response.json()).toMatchObject({ error: { code: "NOT_IMPLEMENTED" } });
-    expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
-    expect(submitExternalWalletDeposit).not.toHaveBeenCalled();
-    expect(buildExternalWalletWithdrawalTransaction).not.toHaveBeenCalled();
-    expect(submitExternalWalletWithdrawal).not.toHaveBeenCalled();
+    expect(buildWalletDepositTransaction).not.toHaveBeenCalled();
+    expect(submitWalletDeposit).not.toHaveBeenCalled();
+    expect(buildWalletWithdrawalTransaction).not.toHaveBeenCalled();
+    expect(submitWalletWithdrawal).not.toHaveBeenCalled();
   });
 
   it("prepares one scoped operation and never submits the transaction", async () => {
     await seedAuth();
     const strategy = await seedStrategy();
-    const scopes = recordCallScopes(buildExternalWalletDepositTransaction);
+    const scopes = recordCallScopes(buildWalletDepositTransaction);
     const response = await prepareDeposit(depositBody(strategy.id));
     expect(response.status, await response.clone().text()).toBe(202);
     const body = await response.json();
@@ -494,7 +494,7 @@ describe("core deposit preparation replaces legacy deposit builds", () => {
         },
       },
     });
-    expect(buildExternalWalletDepositTransaction).toHaveBeenCalledWith(
+    expect(buildWalletDepositTransaction).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         organizationId: TEST_ORG.id,
@@ -509,7 +509,7 @@ describe("core deposit preparation replaces legacy deposit builds", () => {
     expect(scopes).toEqual([
       expect.objectContaining({ projectId: TEST_PROJECT.id, environment: "sandbox" }),
     ]);
-    expect(submitExternalWalletDeposit).not.toHaveBeenCalled();
+    expect(submitWalletDeposit).not.toHaveBeenCalled();
   });
 
   it("replays prepared intent without rebuilding or substituting terms", async () => {
@@ -520,7 +520,7 @@ describe("core deposit preparation replaces legacy deposit builds", () => {
     const initial = await first.json();
     const second = await prepareDeposit(depositBody(strategy.id), { idempotencyKey });
     expect((await second.json()).data.operation.id).toBe(initial.data.operation.id);
-    expect(buildExternalWalletDepositTransaction).toHaveBeenCalledTimes(1);
+    expect(buildWalletDepositTransaction).toHaveBeenCalledTimes(1);
   });
 
   it("requires idempotency before provider preparation", async () => {
@@ -540,7 +540,7 @@ describe("core deposit preparation replaces legacy deposit builds", () => {
     );
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({ error: { code: "IDEMPOTENCY_KEY_REQUIRED" } });
-    expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
+    expect(buildWalletDepositTransaction).not.toHaveBeenCalled();
   });
 
   it.each(["paused", "deprecated"] as const)(
@@ -550,7 +550,7 @@ describe("core deposit preparation replaces legacy deposit builds", () => {
       const strategy = await seedStrategy({ status });
       const response = await prepareDeposit(depositBody(strategy.id));
       expect(response.status).toBe(400);
-      expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
+      expect(buildWalletDepositTransaction).not.toHaveBeenCalled();
     }
   );
 
@@ -559,7 +559,7 @@ describe("core deposit preparation replaces legacy deposit builds", () => {
     expect((await prepareDeposit(depositBody("missing"))).status).toBe(404);
     const strategy = await seedStrategy({ hostCluster: "mainnet-beta" });
     expect((await prepareDeposit(depositBody(strategy.id))).status).toBe(400);
-    expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
+    expect(buildWalletDepositTransaction).not.toHaveBeenCalled();
   });
 
   it.each(["surfacing", "entitlement"] as const)("rechecks provider %s", async (gate) => {
@@ -569,7 +569,7 @@ describe("core deposit preparation replaces legacy deposit builds", () => {
     expect((await prepareDeposit(depositBody(strategy.id))).status).toBe(
       gate === "surfacing" ? 400 : 403
     );
-    expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
+    expect(buildWalletDepositTransaction).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -582,7 +582,7 @@ describe("core deposit preparation replaces legacy deposit builds", () => {
     await seedAuth();
     const strategy = await seedStrategy();
     expect((await prepareDeposit(depositBody(strategy.id, invalid))).status).toBe(400);
-    expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
+    expect(buildWalletDepositTransaction).not.toHaveBeenCalled();
   });
 
   it("preserves a valid partner payer in its immutable intent and build", async () => {
@@ -592,7 +592,7 @@ describe("core deposit preparation replaces legacy deposit builds", () => {
     const response = await prepareDeposit(depositBody(strategy.id, { feePayer }));
     expect(response.status).toBe(202);
     expect((await response.json()).data.operation.intent.feePayer).toBe(feePayer);
-    expect(buildExternalWalletDepositTransaction).toHaveBeenCalledWith(
+    expect(buildWalletDepositTransaction).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ feePayer })
     );
@@ -604,7 +604,7 @@ describe("POST /v1/earn/external-wallet/deposits — the submit contract", () =>
     await seedAuth();
     const res = await post("deposits", { transactionId: "earn_ext_tx", signedTransaction: "AQ==" });
     expect(res.status).toBe(400);
-    expect(submitExternalWalletDeposit).not.toHaveBeenCalled();
+    expect(submitWalletDeposit).not.toHaveBeenCalled();
   });
 
   it("rejects a body requestId", async () => {
@@ -633,7 +633,7 @@ describe("POST /v1/earn/external-wallet/deposits — the submit contract", () =>
 
   it("records the submit and answers the movement in ledger vocabulary", async () => {
     await seedAuth();
-    const scopes = recordCallScopes(submitExternalWalletDeposit);
+    const scopes = recordCallScopes(submitWalletDeposit);
     const key = crypto.randomUUID();
     const res = await post(
       "deposits",
@@ -647,7 +647,7 @@ describe("POST /v1/earn/external-wallet/deposits — the submit contract", () =>
     expect(body.data.deposit.settlement).toBe("atomic");
     expect(body.data.deposit.ownerAddress).toBe(OWNER);
     expect(body.data.deposit.replayed).toBe(false);
-    expect(submitExternalWalletDeposit).toHaveBeenCalledWith(
+    expect(submitWalletDeposit).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         organizationId: TEST_ORG.id,
@@ -663,7 +663,7 @@ describe("POST /v1/earn/external-wallet/deposits — the submit contract", () =>
   });
 });
 
-describe("core external-wallet withdrawal preparation", () => {
+describe("core wallet withdrawal preparation", () => {
   it("refuses an exit body that names a strategy instead of a position", async () => {
     await seedAuth();
     const strategy = await seedStrategy();
@@ -674,12 +674,12 @@ describe("core external-wallet withdrawal preparation", () => {
     });
 
     expect(res.status).toBe(400);
-    expect(buildExternalWalletWithdrawalTransaction).not.toHaveBeenCalled();
+    expect(buildWalletWithdrawalTransaction).not.toHaveBeenCalled();
   });
 
   it("404s another project's position for withdrawal preparation", async () => {
     await seedAuth();
-    const positionId = await seedExternalWalletPosition();
+    const positionId = await seedWalletPosition();
     const response = await prepareWithdrawal(withdrawalBody(positionId), {
       apiKey: PROD_API_KEY.raw,
     });
@@ -688,7 +688,7 @@ describe("core external-wallet withdrawal preparation", () => {
 
   it("404s another project's position for the retained withdrawal preview", async () => {
     await seedAuth();
-    const positionId = await seedExternalWalletPosition();
+    const positionId = await seedWalletPosition();
     const response = await post(
       "withdrawal-previews",
       { positionId, shares: "10" },
@@ -697,9 +697,9 @@ describe("core external-wallet withdrawal preparation", () => {
     expect(response.status).toBe(404);
   });
 
-  it("quotes an external-wallet exit so callers can derive minAmountOut", async () => {
+  it("quotes a wallet exit so callers can derive minAmountOut", async () => {
     await seedAuth();
-    const positionId = await seedExternalWalletPosition();
+    const positionId = await seedWalletPosition();
 
     const res = await post("withdrawal-previews", { positionId, shares: "10" });
 
@@ -733,12 +733,12 @@ describe("core external-wallet withdrawal preparation", () => {
       minAmountOut: "9.5",
     });
     expect(res.status).toBe(410);
-    expect(buildExternalWalletWithdrawalTransaction).not.toHaveBeenCalled();
+    expect(buildWalletWithdrawalTransaction).not.toHaveBeenCalled();
   });
 
   it("builds the exit from the recorded position facts", async () => {
     await seedAuth();
-    const positionId = await seedExternalWalletPosition();
+    const positionId = await seedWalletPosition();
     const res = await prepareWithdrawal(withdrawalBody(positionId));
 
     expect(res.status, await res.clone().text()).toBe(202);
@@ -751,7 +751,7 @@ describe("core external-wallet withdrawal preparation", () => {
         },
       },
     });
-    expect(buildExternalWalletWithdrawalTransaction).toHaveBeenCalledWith(
+    expect(buildWalletWithdrawalTransaction).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         positionId,
@@ -768,12 +768,12 @@ describe("core external-wallet withdrawal preparation", () => {
 
   it("derives the provider's output floor from a live quote", async () => {
     await seedAuth();
-    const positionId = await seedExternalWalletPosition({ provider: "jupiter_lend" });
+    const positionId = await seedWalletPosition({ provider: "jupiter_lend" });
 
     const res = await prepareWithdrawal(withdrawalBody(positionId));
 
     expect(res.status, await res.clone().text()).toBe(202);
-    expect(buildExternalWalletWithdrawalTransaction).toHaveBeenCalledWith(
+    expect(buildWalletWithdrawalTransaction).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ minAmountOut: "9.94005" })
     );
@@ -791,13 +791,13 @@ describe("core external-wallet withdrawal preparation", () => {
 
   it("applies the caller's tolerance to the same quoted output", async () => {
     await seedAuth();
-    const positionId = await seedExternalWalletPosition({ provider: "jupiter_lend" });
+    const positionId = await seedWalletPosition({ provider: "jupiter_lend" });
 
     const res = await prepareWithdrawal(withdrawalBody(positionId, { slippageBps: 250 }));
 
     expect(res.status, await res.clone().text()).toBe(202);
-    expect(buildExternalWalletWithdrawalTransaction).toHaveBeenCalledTimes(1);
-    expect(buildExternalWalletWithdrawalTransaction).toHaveBeenCalledWith(
+    expect(buildWalletWithdrawalTransaction).toHaveBeenCalledTimes(1);
+    expect(buildWalletWithdrawalTransaction).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ minAmountOut: "9.70125" })
     );
@@ -809,7 +809,7 @@ describe("exit safety (ADR 0002): the exit outlives every money-in gate", () => 
     await seedAuth({ entitled: false });
     surfacingEnabled.value = false;
     await seedStrategy({ status: "paused" });
-    const positionId = await seedExternalWalletPosition();
+    const positionId = await seedWalletPosition();
 
     const exit = await prepareWithdrawal(withdrawalBody(positionId));
     expect(exit.status, await exit.clone().text()).toBe(202);
@@ -861,7 +861,7 @@ describe("metered quotas (PRO-1994): the deposit build is metered, the exit neve
     expect(res.status).toBe(429);
     expect(await res.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
     // Refused before the RPC probe was paid for, which is the whole point.
-    expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
+    expect(buildWalletDepositTransaction).not.toHaveBeenCalled();
   });
 
   it("charges nothing for a keyed request the body validator refuses", async () => {
@@ -882,7 +882,7 @@ describe("metered quotas (PRO-1994): the deposit build is metered, the exit neve
   it("never lets an exhausted quota stand between the owner and its exit", async () => {
     await seedAuth();
     const strategy = await seedStrategy();
-    const positionId = await seedExternalWalletPosition();
+    const positionId = await seedWalletPosition();
     // Both Earn quotas exhausted for this actor AND the whole organization.
     for (const quota of ["earn-provider-read", "earn-chain-read"]) {
       await seedRateLimit(env, `metered:${quota}:org:${TEST_ORG.id}:key:${TEST_API_KEY.id}`, 1000);
@@ -893,7 +893,7 @@ describe("metered quotas (PRO-1994): the deposit build is metered, the exit neve
     expect(preview.status).toBe(200);
     const exit = await prepareWithdrawal(withdrawalBody(positionId));
     expect(exit.status, await exit.clone().text()).toBe(202);
-    expect(buildExternalWalletWithdrawalTransaction).toHaveBeenCalledTimes(1);
+    expect(buildWalletWithdrawalTransaction).toHaveBeenCalledTimes(1);
 
     // The CONTRAST under identical conditions: the deposit build is refused.
     const deposit = await post("deposit-transactions", {
@@ -907,7 +907,7 @@ describe("metered quotas (PRO-1994): the deposit build is metered, the exit neve
   it("a counter-store outage refuses the deposit build and never the exit", async () => {
     await seedAuth();
     const strategy = await seedStrategy();
-    const positionId = await seedExternalWalletPosition();
+    const positionId = await seedWalletPosition();
     rateLimitStoreDown.value = true;
 
     const preview = await post("withdrawal-previews", { positionId, shares: "10" });
@@ -922,11 +922,11 @@ describe("metered quotas (PRO-1994): the deposit build is metered, the exit neve
     });
     expect(deposit.status).toBe(410);
     expect(await deposit.json()).toMatchObject({ error: { code: "NOT_IMPLEMENTED" } });
-    expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
+    expect(buildWalletDepositTransaction).not.toHaveBeenCalled();
   });
 });
 
-describe("external-wallet submits: audit ledger parity (PRO-1866)", () => {
+describe("wallet submits: audit ledger parity (PRO-1866)", () => {
   function auditRows(action: "deposit" | "withdraw") {
     return getDb(env)
       .prepare("SELECT * FROM audit_logs WHERE action = ? AND resource_type = 'earn_movement'")
@@ -938,7 +938,7 @@ describe("external-wallet submits: audit ledger parity (PRO-1866)", () => {
   it("records the deposit submit, keyed to the movement and the caller's key", async () => {
     await seedAuth();
     const result = submitResult();
-    submitExternalWalletDeposit.mockResolvedValue(result);
+    submitWalletDeposit.mockResolvedValue(result);
 
     const res = await post(
       "deposits",
@@ -966,7 +966,7 @@ describe("external-wallet submits: audit ledger parity (PRO-1866)", () => {
       created_by: null,
       initiated_by_key_id: TEST_API_KEY.id,
     });
-    submitExternalWalletWithdrawal.mockResolvedValue(result);
+    submitWalletWithdrawal.mockResolvedValue(result);
 
     const res = await post(
       "withdrawals",
@@ -991,7 +991,7 @@ describe("external-wallet submits: audit ledger parity (PRO-1866)", () => {
       denomination: SHARE_MINT,
       initiated_by_key_id: TEST_API_KEY.id,
     });
-    submitExternalWalletWithdrawal.mockResolvedValue({ ...result, replayed: true });
+    submitWalletWithdrawal.mockResolvedValue({ ...result, replayed: true });
 
     const first = await post(
       "withdrawals",
@@ -1015,7 +1015,7 @@ describe("external-wallet submits: audit ledger parity (PRO-1866)", () => {
 
   it("closes the deposit intent as a failure when the submit is refused with a 4xx", async () => {
     await seedAuth();
-    submitExternalWalletDeposit.mockRejectedValue(badRequest("signature verification failed"));
+    submitWalletDeposit.mockRejectedValue(badRequest("signature verification failed"));
 
     const res = await post(
       "deposits",
@@ -1034,7 +1034,7 @@ describe("external-wallet submits: audit ledger parity (PRO-1866)", () => {
 
   it("closes the deposit audit when a mismatched replay is refused (409)", async () => {
     await seedAuth();
-    submitExternalWalletDeposit.mockRejectedValue(
+    submitWalletDeposit.mockRejectedValue(
       conflict("Idempotency key already used with different request payload")
     );
 
@@ -1053,7 +1053,7 @@ describe("external-wallet submits: audit ledger parity (PRO-1866)", () => {
 
   it("writes no withdrawal audit row for a mismatched replay (409)", async () => {
     await seedAuth();
-    submitExternalWalletWithdrawal.mockRejectedValue(
+    submitWalletWithdrawal.mockRejectedValue(
       conflict("Idempotency key already used with different request payload")
     );
 
@@ -1073,7 +1073,7 @@ describe("external-wallet submits: audit ledger parity (PRO-1866)", () => {
     // transition failed to verify), so a non-4xx never records a failure
     // outcome: the unresolved intent is what pages an operator to reconcile.
     await seedAuth();
-    submitExternalWalletDeposit.mockRejectedValue(
+    submitWalletDeposit.mockRejectedValue(
       new Error("Vault deposit was broadcast but its ledger transition could not be verified")
     );
 

@@ -19,13 +19,13 @@ import {
   getDb,
 } from "@/db/client";
 import {
-  createPostgresEarnExternalWalletTransactionsRepository,
-  type EarnExternalWalletTransactionRow,
-} from "@/db/repositories/earn-external-wallet-transactions.repository";
-import {
   claimDiscoveredStrategyPosition,
   createPostgresEarnMovementsRepository,
 } from "@/db/repositories/earn-movements.repository";
+import {
+  createPostgresEarnWalletTransactionsRepository,
+  type EarnWalletTransactionRow,
+} from "@/db/repositories/earn-wallet-transactions.repository";
 import { conflict, internalError, notFound } from "@/lib/errors";
 import { MAX_CUSTODY_SIGNING_TIMEOUT_MS } from "@/services/domain/signing/signing-timeout";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
@@ -36,12 +36,9 @@ import {
 } from "./operation-worker-budget";
 import { createVaultDeadline } from "./vault-deadline";
 import { ledgerVaultExposureGate } from "./vault-exposure";
-import {
-  type ExternalWalletSubmitResult,
-  verifySignedExternalWalletTransaction,
-} from "./vault-external-wallet.service";
 import { broadcastRecordedVaultMovement } from "./vault-intent-execution.service";
 import { resolveVaultSponsorship } from "./vault-sponsorship";
+import { verifySignedWalletTransaction, type WalletSubmitResult } from "./vault-wallet.service";
 
 /** An authenticated operation chooses the source; a signed body cannot change it. */
 export interface StrategyTransactionScope {
@@ -52,7 +49,7 @@ export interface StrategyTransactionScope {
 
 /** Exact prepared bytes plus their named admission action, shared by all steps. */
 export type PreparedStrategySigningTarget = Pick<
-  EarnExternalWalletTransactionRow,
+  EarnWalletTransactionRow,
   | "id"
   | "owner_address"
   | "unsigned_transaction"
@@ -68,7 +65,7 @@ export async function signPreparedStrategyTransaction(
   built: PreparedStrategySigningTarget,
   workerBudget?: OperationWorkerBudget
 ): Promise<string> {
-  if (scope.custodyWalletId === null) throw internalError("An external owner signs outside SDP");
+  if (scope.custodyWalletId === null) throw internalError("An owner signs outside SDP");
   const movement = built.movement;
   const signer = await createOrgSignerForCustodyWallet<"earn">(
     env,
@@ -132,7 +129,7 @@ export async function sponsorPreparedStrategyTransaction(
   workerBudget?: OperationWorkerBudget
 ): Promise<string> {
   if (built.fee_mode !== "sponsored") return ownerSignedTransaction;
-  if (scope.custodyWalletId === null) throw internalError("External signing has no SDP sponsor");
+  if (scope.custodyWalletId === null) throw internalError("Owner signing has no SDP sponsor");
   workerBudget?.assertCanStart();
   const deadline = createVaultDeadline();
   const fee = await resolveVaultSponsorship(env, {
@@ -149,7 +146,7 @@ export async function sponsorPreparedStrategyTransaction(
     fee.feePayment.signAsFeePayer(Uint8Array.from(Buffer.from(ownerSignedTransaction, "base64")))
   );
   const result = Buffer.from(bytes).toString("base64");
-  await verifySignedExternalWalletTransaction(built, result);
+  await verifySignedWalletTransaction(built, result);
   return result;
 }
 
@@ -158,8 +155,8 @@ export async function requirePreparedStrategyTransaction(
   env: Env,
   scope: StrategyTransactionScope,
   transactionId: string
-): Promise<EarnExternalWalletTransactionRow> {
-  const built = await createPostgresEarnExternalWalletTransactionsRepository(getDb(env)).getById({
+): Promise<EarnWalletTransactionRow> {
+  const built = await createPostgresEarnWalletTransactionsRepository(getDb(env)).getById({
     organizationId: scope.organizationId,
     transactionId,
   });
@@ -176,10 +173,10 @@ export async function requirePreparedStrategyTransaction(
 async function replayConsumedStrategyTransaction(
   db: DatabaseClient,
   scope: StrategyTransactionScope,
-  built: EarnExternalWalletTransactionRow,
+  built: EarnWalletTransactionRow,
   movementId: string,
   signedTransaction: string
-): Promise<ExternalWalletSubmitResult> {
+): Promise<WalletSubmitResult> {
   const ledger = createPostgresEarnMovementsRepository(db);
   const movement = await ledger.getMovementById({
     organizationId: scope.organizationId,
@@ -204,7 +201,7 @@ async function replayConsumedStrategyTransaction(
 
 async function claimPreparedStrategyPosition(
   executor: DatabaseExecutor,
-  built: EarnExternalWalletTransactionRow,
+  built: EarnWalletTransactionRow,
   input: StrategyTransactionScope & { userId: string | null }
 ): Promise<string | null> {
   if (built.direction !== "withdrawal" || built.position_id !== null) return built.position_id;
@@ -230,7 +227,7 @@ async function claimPreparedStrategyPosition(
     executor
   );
   await executor.execute(
-    "UPDATE earn_external_wallet_transactions SET position_id = ? WHERE id = ? AND organization_id = ?",
+    "UPDATE earn_wallet_transactions SET position_id = ? WHERE id = ? AND organization_id = ?",
     [claimed.id, built.id, input.organizationId]
   );
   return claimed.id;
@@ -250,10 +247,10 @@ export async function submitPreparedStrategyTransaction(
     apiKeyId: string | null;
     broadcast?: boolean;
   }
-): Promise<ExternalWalletSubmitResult> {
+): Promise<WalletSubmitResult> {
   const built = await requirePreparedStrategyTransaction(env, input, input.transactionId);
   const custodyWalletId = input.custodyWalletId;
-  const signed = await verifySignedExternalWalletTransaction(built, input.signedTransaction);
+  const signed = await verifySignedWalletTransaction(built, input.signedTransaction);
   const fingerprint = createHash("sha256")
     .update(
       canonicalJson({
@@ -269,7 +266,7 @@ export async function submitPreparedStrategyTransaction(
   const result = await getDb(env).transaction(async (executor) => {
     const db = asTransactionalClient(executor);
     const locked = await db.queryOne<{ movement_id: string | null }>(
-      `SELECT movement_id FROM earn_external_wallet_transactions
+      `SELECT movement_id FROM earn_wallet_transactions
        WHERE id = ? AND organization_id = ? AND project_id = ?
          AND custody_wallet_id IS NOT DISTINCT FROM ? AND environment = ? FOR UPDATE`,
       [built.id, input.organizationId, input.projectId, custodyWalletId, built.environment]
@@ -303,7 +300,7 @@ export async function submitPreparedStrategyTransaction(
       createdBy: input.userId,
       initiatedByKeyId: input.apiKeyId,
     };
-    let recorded: ExternalWalletSubmitResult;
+    let recorded: WalletSubmitResult;
     if (built.direction === "deposit") {
       const deposit = {
         ...common,
@@ -319,10 +316,10 @@ export async function submitPreparedStrategyTransaction(
       };
       recorded =
         custodyWalletId === null
-          ? await ledger.createSignedExternalWalletDepositIntent({
+          ? await ledger.createSignedWalletDepositIntent({
               ...deposit,
               ownerAddress: built.owner_address,
-              externalWalletTransactionId: built.id,
+              walletTransactionId: built.id,
             })
           : await ledger.createSignedVaultDepositIntent({
               ...deposit,
@@ -334,10 +331,10 @@ export async function submitPreparedStrategyTransaction(
       const withdrawal = { ...common, positionId, requestedShares: built.amount_requested };
       recorded =
         custodyWalletId === null
-          ? await ledger.createSignedExternalWalletWithdrawalIntent({
+          ? await ledger.createSignedWalletWithdrawalIntent({
               ...withdrawal,
               ownerAddress: built.owner_address,
-              externalWalletTransactionId: built.id,
+              walletTransactionId: built.id,
             })
           : await ledger.createSignedVaultWithdrawalIntent({
               ...withdrawal,
@@ -349,7 +346,7 @@ export async function submitPreparedStrategyTransaction(
       throw conflict("Prepared strategy transaction was already consumed");
     }
     const consumed = await db.execute(
-      `UPDATE earn_external_wallet_transactions
+      `UPDATE earn_wallet_transactions
        SET movement_id = ?, consumed_at = COALESCE(consumed_at, sdp_iso_now()),
            updated_at = sdp_iso_now()
        WHERE id = ? AND organization_id = ?

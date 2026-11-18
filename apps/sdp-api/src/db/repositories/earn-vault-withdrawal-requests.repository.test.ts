@@ -4,8 +4,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
+import { createPostgresEarnWalletTransactionsRepository } from "@/db/repositories/earn-wallet-transactions.repository";
 import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
-import { recordSignedExternalQueuedRequest } from "@/services/earn/vault-queued-withdraw.service";
+import { recordSignedWalletQueuedRequest } from "@/services/earn/vault-queued-withdraw.service";
 import { reconcileEarnVaultQueuedWithdrawals } from "@/services/earn/vault-queued-withdrawal-reconciliation.service";
 import { ENVIRONMENT_CLUSTER_CASES, installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/helpers/custody";
@@ -31,13 +32,179 @@ const TOKEN_MINT = "9VfVedaQueueToken111111111111111111111111111";
 const SHARE_MINT = "AVfVedaQueueShare111111111111111111111111111";
 const INTERMEDIATE_MINT = "BVfHastraWylds1111111111111111111111111111";
 const POSITION = "earn_position_queued_withdrawal_repo";
-const EXTERNAL_POSITION = "earn_position_queued_withdrawal_repo_external";
-const OTHER_EXTERNAL_POSITION = "earn_position_queued_withdrawal_repo_other_external";
-const EXTERNAL_OWNER = "CVfExternalQueueOwner11111111111111111111111";
+const OWNER_POSITION = "earn_position_queued_withdrawal_repo_external";
+const OTHER_OWNER_POSITION = "earn_position_queued_withdrawal_repo_other_external";
+const OWNER_ADDRESS = "CVfExternalQueueOwner11111111111111111111111";
 
 describe("Earn queued withdrawal repository", () => {
   let repository: EarnVaultWithdrawalRequestsRepository;
   let sequence = 0;
+
+  describe("canonical wallet build views", () => {
+    // The physical names exercise compatibility with the previous revision.
+    const legacyDirect = "earn_external_wallet_transactions";
+    const legacyQueue = "earn_external_wallet_withdrawal_request_transactions";
+
+    async function directBuild() {
+      return createPostgresEarnWalletTransactionsRepository(getDb(env)).create({
+        id: "earn_wallet_transaction_alias_test",
+        organizationId: ORG,
+        projectId: PROJECT,
+        environment: "sandbox",
+        provider: "veda",
+        direction: "deposit",
+        ownerAddress: OWNER_ADDRESS,
+        vaultAddress: VAULT,
+        tokenMint: TOKEN_MINT,
+        shareMint: SHARE_MINT,
+        label: "Alias test",
+        denomination: TOKEN_MINT,
+        amountRequested: "1",
+        createsShareAccount: false,
+        unsignedTransaction: "AQ==",
+        lastValidBlockHeight: "20000",
+      });
+    }
+
+    async function queuedBuild() {
+      return repository.createWalletTransaction({
+        id: "earn_wallet_withdrawal_request_transaction_alias_test",
+        organizationId: ORG,
+        projectId: PROJECT,
+        environment: "sandbox",
+        provider: "veda",
+        positionId: OWNER_POSITION,
+        action: "request",
+        ownerAddress: OWNER_ADDRESS,
+        vaultAddress: VAULT,
+        tokenMint: TOKEN_MINT,
+        shareMint: SHARE_MINT,
+        requestAddress: "AliasQueueRequestAddress111111111111111111",
+        shares: "1",
+        quotedAssets: "0.99",
+        shareDecimals: 6,
+        assetDecimals: 6,
+        discountBps: 25,
+        maturityTimestamp: "1700000060",
+        deadlineTimestamp: "1700000120",
+        unsignedTransaction: "AQ==",
+        lastValidBlockHeight: "20000",
+        currentBlockHeight: "10000",
+      });
+    }
+
+    it("keeps both aliases automatically writable with caller-enforced RLS", async () => {
+      const result = await getDb(env).queryMany<{ relname: string; reloptions: string[] }>(
+        `SELECT relname, reloptions FROM pg_class
+          WHERE relname IN ('earn_wallet_transactions',
+                            'earn_wallet_withdrawal_request_transactions')
+            AND relkind = 'v' ORDER BY relname`
+      );
+      expect(result).toHaveLength(2);
+      expect(result.every((row) => row.reloptions.includes("security_invoker=true"))).toBe(true);
+    });
+
+    it("shares builds, row locks, update counts and triggers with the old names", async () => {
+      const built = await directBuild();
+      await getDb(env).transaction(async (tx) => {
+        const locked = await tx
+          .prepare(
+            "SELECT unsigned_transaction FROM earn_wallet_transactions WHERE id = ? FOR UPDATE"
+          )
+          .bind(built.id)
+          .first<{ unsigned_transaction: string }>();
+        expect(locked?.unsigned_transaction).toBe("AQ==");
+        expect(
+          await tx
+            .prepare("UPDATE earn_wallet_transactions SET operation_only = TRUE WHERE id = ?")
+            .bind(built.id)
+            .run()
+        ).toBe(1);
+        expect(
+          await tx
+            .prepare(`SELECT operation_only FROM ${legacyDirect} WHERE id = ?`)
+            .bind(built.id)
+            .first<{ operation_only: boolean }>()
+        ).toEqual({ operation_only: true });
+        expect(
+          await tx
+            .prepare(`UPDATE ${legacyDirect} SET label = 'Updated' WHERE id = ?`)
+            .bind(built.id)
+            .run()
+        ).toBe(1);
+      });
+      expect(
+        (
+          await createPostgresEarnWalletTransactionsRepository(getDb(env)).getById({
+            organizationId: ORG,
+            transactionId: built.id,
+          })
+        )?.label
+      ).toBe("Updated");
+      await expect(
+        getDb(env)
+          .prepare("UPDATE earn_wallet_transactions SET operation_only = FALSE WHERE id = ?")
+          .bind(built.id)
+          .run()
+      ).rejects.toThrow(/irreversible/i);
+    });
+
+    it("supports queued ON CONFLICT and projects the same signed consumption", async () => {
+      const built = await queuedBuild();
+      const duplicate = await getDb(env)
+        .prepare(`INSERT INTO earn_wallet_withdrawal_request_transactions
+          SELECT * FROM earn_wallet_withdrawal_request_transactions WHERE id = ?
+          ON CONFLICT DO NOTHING RETURNING *`)
+        .bind(built.id)
+        .first();
+      expect(duplicate).toBeNull();
+      const recorded = await repository.createSignedRequest(
+        requestInput({
+          requestAddress: built.request_address,
+          positionId: OWNER_POSITION,
+          custodyWalletId: null,
+          ownerAddress: OWNER_ADDRESS,
+          pdaLeaseToken: built.id,
+          walletTransactionId: built.id,
+        })
+      );
+      const old = await getDb(env)
+        .prepare(`SELECT consumed_action_id FROM ${legacyQueue} WHERE id = ?`)
+        .bind(built.id)
+        .first<{ consumed_action_id: string }>();
+      expect(old?.consumed_action_id).toBe(recorded.action.id);
+      expect(
+        (
+          await repository.getWalletTransaction({
+            organizationId: ORG,
+            transactionId: built.id,
+          })
+        )?.consumed_action_id
+      ).toBe(recorded.action.id);
+    });
+
+    it("cannot read or update another tenant through either canonical name", async () => {
+      const direct = await directBuild();
+      const queued = await queuedBuild();
+      await runWithTenantDatabaseIdentity({ organizationId: OTHER_ORG }, async () => {
+        for (const [table, id] of [
+          ["earn_wallet_transactions", direct.id],
+          ["earn_wallet_withdrawal_request_transactions", queued.id],
+        ]) {
+          const db = getDb(env);
+          expect(
+            await db.prepare(`SELECT id FROM ${table} WHERE id = ?`).bind(id).first()
+          ).toBeNull();
+          expect(
+            await db
+              .prepare(`UPDATE ${table} SET operation_only = TRUE WHERE id = ?`)
+              .bind(id)
+              .run()
+          ).toBe(0);
+        }
+      });
+    });
+  });
 
   beforeAll(async () => {
     await seedTestDatabase(env);
@@ -50,7 +217,7 @@ describe("Earn queued withdrawal repository", () => {
   beforeEach(async () => {
     const db = getDb(env);
     for (const table of [
-      "earn_external_wallet_withdrawal_request_transactions",
+      "earn_wallet_withdrawal_request_transactions",
       "earn_vault_withdrawal_request_actions",
       "earn_vault_withdrawal_request_reservations",
       "earn_vault_withdrawal_request_pda_leases",
@@ -129,7 +296,7 @@ describe("Earn queued withdrawal repository", () => {
          ) VALUES (?, ?, ?, 'sandbox', 'veda', 'vault_direct', ?, ?, ?, ?,
                    'External Veda queued vault', sdp_iso_now())`
       )
-      .bind(EXTERNAL_POSITION, ORG, PROJECT, EXTERNAL_OWNER, VAULT, SHARE_MINT, TOKEN_MINT)
+      .bind(OWNER_POSITION, ORG, PROJECT, OWNER_ADDRESS, VAULT, SHARE_MINT, TOKEN_MINT)
       .run();
     await db
       .prepare(
@@ -141,10 +308,10 @@ describe("Earn queued withdrawal repository", () => {
                    'Other external Veda queued vault', sdp_iso_now())`
       )
       .bind(
-        OTHER_EXTERNAL_POSITION,
+        OTHER_OWNER_POSITION,
         OTHER_ORG,
         OTHER_PROJECT,
-        EXTERNAL_OWNER,
+        OWNER_ADDRESS,
         VAULT,
         SHARE_MINT,
         TOKEN_MINT
@@ -603,8 +770,8 @@ describe("Earn queued withdrawal repository", () => {
 
     await expect(
       runWithTenantDatabaseIdentity({ organizationId: OTHER_ORG }, () =>
-        repository.createExternalWalletTransaction({
-          id: "earn_external_wallet_withdrawal_request_transaction_collision",
+        repository.createWalletTransaction({
+          id: "earn_wallet_withdrawal_request_transaction_collision",
           organizationId: OTHER_ORG,
           projectId: OTHER_PROJECT,
           environment: "sandbox",
@@ -633,15 +800,15 @@ describe("Earn queued withdrawal repository", () => {
 
   it("closes the consume-versus-build race by atomically promoting the shared lease", async () => {
     const requestAddress = "ConcurrentQueueRequestAddress111111111111";
-    const build = await repository.createExternalWalletTransaction({
-      id: "earn_external_wallet_withdrawal_request_transaction_winner",
+    const build = await repository.createWalletTransaction({
+      id: "earn_wallet_withdrawal_request_transaction_winner",
       organizationId: ORG,
       projectId: PROJECT,
       environment: "sandbox",
       provider: "veda",
-      positionId: EXTERNAL_POSITION,
+      positionId: OWNER_POSITION,
       action: "request",
-      ownerAddress: EXTERNAL_OWNER,
+      ownerAddress: OWNER_ADDRESS,
       vaultAddress: VAULT,
       tokenMint: TOKEN_MINT,
       shareMint: SHARE_MINT,
@@ -659,11 +826,11 @@ describe("Earn queued withdrawal repository", () => {
     });
     const signed = requestInput({
       requestAddress,
-      positionId: EXTERNAL_POSITION,
+      positionId: OWNER_POSITION,
       custodyWalletId: null,
-      ownerAddress: EXTERNAL_OWNER,
+      ownerAddress: OWNER_ADDRESS,
       pdaLeaseToken: build.id,
-      externalWalletTransactionId: build.id,
+      walletTransactionId: build.id,
     });
     const [winner, contender] = await Promise.allSettled([
       repository.createSignedRequest(signed),
@@ -674,7 +841,7 @@ describe("Earn queued withdrawal repository", () => {
         environment: "sandbox",
         provider: "veda",
         vaultAddress: VAULT,
-        ownerAddress: EXTERNAL_OWNER,
+        ownerAddress: OWNER_ADDRESS,
         requestAddress,
         clientRequestId: "contender-key",
         idempotencyFingerprint: "contender-fingerprint",
@@ -701,18 +868,18 @@ describe("Earn queued withdrawal repository", () => {
   });
 
   it("reports unconsumed builds per environment until the cleanup expires them", async () => {
-    await expect(repository.hasUnconsumedExternalBuilds({ environment: "sandbox" })).resolves.toBe(
+    await expect(repository.hasUnconsumedWalletBuilds({ environment: "sandbox" })).resolves.toBe(
       false
     );
-    await repository.createExternalWalletTransaction({
-      id: "earn_external_wallet_withdrawal_request_transaction_cleanup_gate",
+    await repository.createWalletTransaction({
+      id: "earn_wallet_withdrawal_request_transaction_cleanup_gate",
       organizationId: ORG,
       projectId: PROJECT,
       environment: "sandbox",
       provider: "veda",
-      positionId: EXTERNAL_POSITION,
+      positionId: OWNER_POSITION,
       action: "request",
-      ownerAddress: EXTERNAL_OWNER,
+      ownerAddress: OWNER_ADDRESS,
       vaultAddress: VAULT,
       tokenMint: TOKEN_MINT,
       shareMint: SHARE_MINT,
@@ -730,45 +897,45 @@ describe("Earn queued withdrawal repository", () => {
     });
 
     // Only outstanding reservations need cleanup; the build remains recoverable.
-    await expect(repository.hasUnconsumedExternalBuilds({ environment: "sandbox" })).resolves.toBe(
+    await expect(repository.hasUnconsumedWalletBuilds({ environment: "sandbox" })).resolves.toBe(
       true
     );
-    await expect(
-      repository.hasUnconsumedExternalBuilds({ environment: "production" })
-    ).resolves.toBe(false);
-    await expect(
-      repository.cleanupExpiredExternalBuilds({ environment: "sandbox", currentBlockHeight: "101" })
-    ).resolves.toBe(1);
-    await expect(repository.hasUnconsumedExternalBuilds({ environment: "sandbox" })).resolves.toBe(
+    await expect(repository.hasUnconsumedWalletBuilds({ environment: "production" })).resolves.toBe(
       false
     );
     await expect(
-      repository.getExternalWalletTransaction({
+      repository.cleanupExpiredWalletBuilds({ environment: "sandbox", currentBlockHeight: "101" })
+    ).resolves.toBe(1);
+    await expect(repository.hasUnconsumedWalletBuilds({ environment: "sandbox" })).resolves.toBe(
+      false
+    );
+    await expect(
+      repository.getWalletTransaction({
         organizationId: ORG,
-        transactionId: "earn_external_wallet_withdrawal_request_transaction_cleanup_gate",
+        transactionId: "earn_wallet_withdrawal_request_transaction_cleanup_gate",
       })
     ).resolves.toMatchObject({ unsigned_transaction: "AQ==", consumed_action_id: null });
     await expect(
-      repository.cleanupExpiredExternalBuilds({
+      repository.cleanupExpiredWalletBuilds({
         environment: "sandbox",
         currentBlockHeight: "102",
       })
     ).resolves.toBe(0);
   });
 
-  describe("late external-wallet submission", () => {
+  describe("late wallet submission", () => {
     const clusterRpc = installClusterRpcResponder();
 
     async function expiredBuild() {
-      return repository.createExternalWalletTransaction({
-        id: "earn_external_wallet_withdrawal_request_transaction_late",
+      return repository.createWalletTransaction({
+        id: "earn_wallet_withdrawal_request_transaction_late",
         organizationId: ORG,
         projectId: PROJECT,
         environment: "sandbox",
         provider: "veda",
-        positionId: EXTERNAL_POSITION,
+        positionId: OWNER_POSITION,
         action: "request",
-        ownerAddress: EXTERNAL_OWNER,
+        ownerAddress: OWNER_ADDRESS,
         vaultAddress: VAULT,
         tokenMint: TOKEN_MINT,
         shareMint: SHARE_MINT,
@@ -804,21 +971,21 @@ describe("Earn queued withdrawal repository", () => {
 
     it("recovers a finalized signed build after cleanup and replays it without RPC", async () => {
       const build = await expiredBuild();
-      await repository.cleanupExpiredExternalBuilds({
+      await repository.cleanupExpiredWalletBuilds({
         environment: "sandbox",
         currentBlockHeight: "101",
       });
       clusterRpc.answer("getTransaction", historicalTransaction());
       const input = requestInput({
-        positionId: EXTERNAL_POSITION,
+        positionId: OWNER_POSITION,
         custodyWalletId: null,
-        ownerAddress: EXTERNAL_OWNER,
+        ownerAddress: OWNER_ADDRESS,
         requestAddress: build.request_address,
         pdaLeaseToken: build.id,
-        externalWalletTransactionId: build.id,
+        walletTransactionId: build.id,
       });
       const recovered = await runInEnvironmentClusterScope("sandbox", () =>
-        recordSignedExternalQueuedRequest(env, repository, input)
+        recordSignedWalletQueuedRequest(env, repository, input)
       );
       expect(recovered).toMatchObject({
         alreadyFinalized: true,
@@ -827,13 +994,13 @@ describe("Earn queued withdrawal repository", () => {
       });
       expect(clusterRpc.calls.filter((call) => call.method === "getTransaction")).toHaveLength(1);
       await expect(
-        repository.getExternalWalletTransaction({ organizationId: ORG, transactionId: build.id })
+        repository.getWalletTransaction({ organizationId: ORG, transactionId: build.id })
       ).resolves.toMatchObject({
         consumed_action_id: recovered.action.id,
       });
       const before = clusterRpc.calls.length;
       const replay = await runInEnvironmentClusterScope("sandbox", () =>
-        recordSignedExternalQueuedRequest(env, repository, input)
+        recordSignedWalletQueuedRequest(env, repository, input)
       );
       expect(replay.replayed).toBe(true);
       expect(replay.request.id).toBe(recovered.request.id);
@@ -842,7 +1009,7 @@ describe("Earn queued withdrawal repository", () => {
 
     it("cannot replace another durable occupancy even with finalized execution", async () => {
       const build = await expiredBuild();
-      await repository.cleanupExpiredExternalBuilds({
+      await repository.cleanupExpiredWalletBuilds({
         environment: "sandbox",
         currentBlockHeight: "101",
       });
@@ -854,16 +1021,16 @@ describe("Earn queued withdrawal repository", () => {
         .run();
       clusterRpc.answer("getTransaction", historicalTransaction());
       const input = requestInput({
-        positionId: EXTERNAL_POSITION,
+        positionId: OWNER_POSITION,
         custodyWalletId: null,
-        ownerAddress: EXTERNAL_OWNER,
+        ownerAddress: OWNER_ADDRESS,
         requestAddress: build.request_address,
         pdaLeaseToken: build.id,
-        externalWalletTransactionId: build.id,
+        walletTransactionId: build.id,
       });
       await expect(
         runInEnvironmentClusterScope("sandbox", () =>
-          recordSignedExternalQueuedRequest(env, repository, input)
+          recordSignedWalletQueuedRequest(env, repository, input)
         )
       ).rejects.toThrow(/no longer owns/);
       expect(
@@ -875,7 +1042,7 @@ describe("Earn queued withdrawal repository", () => {
           .first()
       ).toEqual({ lease_token: "other-durable-request", occupied: true });
       await expect(
-        repository.getExternalWalletTransaction({ organizationId: ORG, transactionId: build.id })
+        repository.getWalletTransaction({ organizationId: ORG, transactionId: build.id })
       ).resolves.toMatchObject({ consumed_action_id: null });
       await expect(
         repository.getById({
@@ -904,26 +1071,26 @@ describe("Earn queued withdrawal repository", () => {
       },
     ])("preserves an expired build when $name", async ({ transaction, expectedError }) => {
       const build = await expiredBuild();
-      await repository.cleanupExpiredExternalBuilds({
+      await repository.cleanupExpiredWalletBuilds({
         environment: "sandbox",
         currentBlockHeight: "101",
       });
       clusterRpc.respond("getTransaction", () => ({ result: transaction }));
       const input = requestInput({
-        positionId: EXTERNAL_POSITION,
+        positionId: OWNER_POSITION,
         custodyWalletId: null,
-        ownerAddress: EXTERNAL_OWNER,
+        ownerAddress: OWNER_ADDRESS,
         requestAddress: build.request_address,
         pdaLeaseToken: build.id,
-        externalWalletTransactionId: build.id,
+        walletTransactionId: build.id,
       });
       await expect(
         runInEnvironmentClusterScope("sandbox", () =>
-          recordSignedExternalQueuedRequest(env, repository, input)
+          recordSignedWalletQueuedRequest(env, repository, input)
         )
       ).rejects.toMatchObject(expectedError);
       await expect(
-        repository.getExternalWalletTransaction({ organizationId: ORG, transactionId: build.id })
+        repository.getWalletTransaction({ organizationId: ORG, transactionId: build.id })
       ).resolves.toMatchObject({ consumed_action_id: null });
       await expect(
         repository.getById({
@@ -937,15 +1104,15 @@ describe("Earn queued withdrawal repository", () => {
 
   it("lets another tenant take over an expired build through the shared PDA lease", async () => {
     const requestAddress = "ExpiredCrossTenantQueueRequest111111111111";
-    await repository.createExternalWalletTransaction({
-      id: "earn_external_wallet_withdrawal_request_transaction_expired",
+    await repository.createWalletTransaction({
+      id: "earn_wallet_withdrawal_request_transaction_expired",
       organizationId: ORG,
       projectId: PROJECT,
       environment: "sandbox",
       provider: "veda",
-      positionId: EXTERNAL_POSITION,
+      positionId: OWNER_POSITION,
       action: "request",
-      ownerAddress: EXTERNAL_OWNER,
+      ownerAddress: OWNER_ADDRESS,
       vaultAddress: VAULT,
       tokenMint: TOKEN_MINT,
       shareMint: SHARE_MINT,
@@ -963,15 +1130,15 @@ describe("Earn queued withdrawal repository", () => {
     });
 
     const successor = await runWithTenantDatabaseIdentity({ organizationId: OTHER_ORG }, () =>
-      repository.createExternalWalletTransaction({
-        id: "earn_external_wallet_withdrawal_request_transaction_successor",
+      repository.createWalletTransaction({
+        id: "earn_wallet_withdrawal_request_transaction_successor",
         organizationId: OTHER_ORG,
         projectId: OTHER_PROJECT,
         environment: "sandbox",
         provider: "veda",
-        positionId: OTHER_EXTERNAL_POSITION,
+        positionId: OTHER_OWNER_POSITION,
         action: "request",
-        ownerAddress: EXTERNAL_OWNER,
+        ownerAddress: OWNER_ADDRESS,
         vaultAddress: VAULT,
         tokenMint: TOKEN_MINT,
         shareMint: SHARE_MINT,
@@ -990,13 +1157,13 @@ describe("Earn queued withdrawal repository", () => {
     );
 
     expect(successor).toMatchObject({
-      id: "earn_external_wallet_withdrawal_request_transaction_successor",
+      id: "earn_wallet_withdrawal_request_transaction_successor",
       organization_id: OTHER_ORG,
     });
     const rows = await getDb(env)
       .prepare(
         `SELECT organization_id
-           FROM earn_external_wallet_withdrawal_request_transactions
+           FROM earn_wallet_withdrawal_request_transactions
           WHERE environment = 'sandbox' AND request_address = ?
           ORDER BY organization_id`
       )
@@ -1012,17 +1179,17 @@ describe("Earn queued withdrawal repository", () => {
       .bind(requestAddress)
       .first<{ lease_token: string; occupied: boolean }>();
     expect(lease).toEqual({
-      lease_token: "earn_external_wallet_withdrawal_request_transaction_successor",
+      lease_token: "earn_wallet_withdrawal_request_transaction_successor",
       occupied: false,
     });
 
     const stale = requestInput({
       requestAddress,
-      positionId: EXTERNAL_POSITION,
+      positionId: OWNER_POSITION,
       custodyWalletId: null,
-      ownerAddress: EXTERNAL_OWNER,
-      pdaLeaseToken: "earn_external_wallet_withdrawal_request_transaction_expired",
-      externalWalletTransactionId: "earn_external_wallet_withdrawal_request_transaction_expired",
+      ownerAddress: OWNER_ADDRESS,
+      pdaLeaseToken: "earn_wallet_withdrawal_request_transaction_expired",
+      walletTransactionId: "earn_wallet_withdrawal_request_transaction_expired",
     });
     await expect(
       runWithTenantDatabaseIdentity({ organizationId: ORG }, () =>
@@ -1032,8 +1199,8 @@ describe("Earn queued withdrawal repository", () => {
     const staleState = await getDb(env)
       .prepare(
         `SELECT consumed_action_id
-           FROM earn_external_wallet_withdrawal_request_transactions
-          WHERE id = 'earn_external_wallet_withdrawal_request_transaction_expired'`
+           FROM earn_wallet_withdrawal_request_transactions
+          WHERE id = 'earn_wallet_withdrawal_request_transaction_expired'`
       )
       .first<{ consumed_action_id: string | null }>();
     expect(staleState?.consumed_action_id).toBeNull();
@@ -1048,7 +1215,7 @@ describe("Earn queued withdrawal repository", () => {
     // Finalized execution may reclaim a transient successor, including one
     // hidden by RLS, but not a durable occupied request.
     const recovered = await runWithTenantDatabaseIdentity({ organizationId: ORG }, () =>
-      repository.createSignedRequest({ ...stale, recoverFinalizedExternalBuild: true })
+      repository.createSignedRequest({ ...stale, recoverFinalizedWalletBuild: true })
     );
     expect(recovered.request.id).toBe(stale.requestId);
     const occupied = await getDb(env)
@@ -1441,7 +1608,7 @@ describe("Earn queued withdrawal repository", () => {
     }
   );
 
-  it("persists the fulfilled payout movement for custody and external wallets", async () => {
+  it("persists the fulfilled payout movement for custody and wallets", async () => {
     const custody = await createRequest();
     await repository.advanceRequest({
       withdrawalRequestId: custody.request.id,
@@ -1454,9 +1621,9 @@ describe("Earn queued withdrawal repository", () => {
     });
 
     const external = await createRequest({
-      positionId: EXTERNAL_POSITION,
+      positionId: OWNER_POSITION,
       custodyWalletId: null,
-      ownerAddress: EXTERNAL_OWNER,
+      ownerAddress: OWNER_ADDRESS,
     });
     await repository.advanceRequest({
       withdrawalRequestId: external.request.id,
@@ -1469,7 +1636,7 @@ describe("Earn queued withdrawal repository", () => {
     });
 
     // A custody fulfillment claims the custody wallet and keeps owner_address
-    // NULL: binding both would activate the external-wallet claim foreign key
+    // NULL: binding both would activate the wallet claim foreign key
     // against a custody position that has no owner address.
     const custodyMovement = await getDb(env)
       .prepare(
@@ -1488,7 +1655,7 @@ describe("Earn queued withdrawal repository", () => {
       status: "finalized",
     });
 
-    const externalMovement = await getDb(env)
+    const walletMovement = await getDb(env)
       .prepare(
         `SELECT custody_wallet_id, owner_address, vault_address, destination_address,
                 signature, status
@@ -1496,26 +1663,26 @@ describe("Earn queued withdrawal repository", () => {
       )
       .bind(`earn_queue_fulfillment_${external.request.id}`)
       .first<Record<string, unknown>>();
-    expect(externalMovement).toMatchObject({
+    expect(walletMovement).toMatchObject({
       custody_wallet_id: null,
-      owner_address: EXTERNAL_OWNER,
+      owner_address: OWNER_ADDRESS,
       vault_address: VAULT,
-      destination_address: EXTERNAL_OWNER,
+      destination_address: OWNER_ADDRESS,
       signature: "queued-fulfilled-external-signature",
       status: "finalized",
     });
 
     // The fulfilled request now exists BOTH as a persisted movement and as a
     // queue row; the owner's earned totals must count the payout once.
-    const totals = await createPostgresEarnMovementsRepository(
-      getDb(env)
-    ).aggregateExternalWalletMovements({
-      organizationId: ORG,
-      projectId: PROJECT,
-      environment: "sandbox",
-      ownerAddress: EXTERNAL_OWNER,
-    });
-    expect(totals.get(EXTERNAL_POSITION)).toMatchObject({
+    const totals = await createPostgresEarnMovementsRepository(getDb(env)).aggregateWalletMovements(
+      {
+        organizationId: ORG,
+        projectId: PROJECT,
+        environment: "sandbox",
+        ownerAddress: OWNER_ADDRESS,
+      }
+    );
+    expect(totals.get(OWNER_POSITION)).toMatchObject({
       finalizedDeposits: "0",
       finalizedWithdrawals: "9.8",
       finalizedWithdrawalCount: 1,
@@ -1525,14 +1692,14 @@ describe("Earn queued withdrawal repository", () => {
 
   it("records every payout in a batched solver transaction exactly once", async () => {
     const first = await createRequest({
-      positionId: EXTERNAL_POSITION,
+      positionId: OWNER_POSITION,
       custodyWalletId: null,
-      ownerAddress: EXTERNAL_OWNER,
+      ownerAddress: OWNER_ADDRESS,
     });
     const second = await createRequest({
-      positionId: EXTERNAL_POSITION,
+      positionId: OWNER_POSITION,
       custodyWalletId: null,
-      ownerAddress: EXTERNAL_OWNER,
+      ownerAddress: OWNER_ADDRESS,
     });
     const fulfill = (withdrawalRequestId: string, assetsPaid: string) =>
       repository.advanceRequest({
@@ -1547,15 +1714,15 @@ describe("Earn queued withdrawal repository", () => {
     await fulfill(second.request.id, "9.8");
     expect(await fulfill(first.request.id, "9.9")).toBeNull();
     expect(await fulfill(second.request.id, "9.8")).toBeNull();
-    const totals = await createPostgresEarnMovementsRepository(
-      getDb(env)
-    ).aggregateExternalWalletMovements({
-      organizationId: ORG,
-      projectId: PROJECT,
-      environment: "sandbox",
-      ownerAddress: EXTERNAL_OWNER,
-    });
-    expect(totals.get(EXTERNAL_POSITION)).toMatchObject({
+    const totals = await createPostgresEarnMovementsRepository(getDb(env)).aggregateWalletMovements(
+      {
+        organizationId: ORG,
+        projectId: PROJECT,
+        environment: "sandbox",
+        ownerAddress: OWNER_ADDRESS,
+      }
+    );
+    expect(totals.get(OWNER_POSITION)).toMatchObject({
       finalizedWithdrawals: "19.7",
       finalizedWithdrawalCount: 2,
     });
@@ -2119,10 +2286,10 @@ describe("Earn queued withdrawal repository", () => {
     // both environments, works one, and proves the other's rows were neither
     // returned nor touched. Owner-signed requests keep the fixture free of
     // custody: managed custody is Sandbox-only (ADR 0006).
-    const PRODUCTION_EXTERNAL_POSITION = "earn_position_queued_withdrawal_repo_production_external";
+    const PRODUCTION_OWNER_POSITION = "earn_position_queued_withdrawal_repo_production_external";
     const SCOPE = {
-      sandbox: { projectId: PROJECT, positionId: EXTERNAL_POSITION },
-      production: { projectId: `${PROJECT}_production`, positionId: PRODUCTION_EXTERNAL_POSITION },
+      sandbox: { projectId: PROJECT, positionId: OWNER_POSITION },
+      production: { projectId: `${PROJECT}_production`, positionId: PRODUCTION_OWNER_POSITION },
     } as const satisfies Record<SdpEnvironment, { projectId: string; positionId: string }>;
 
     beforeEach(async () => {
@@ -2136,10 +2303,10 @@ describe("Earn queued withdrawal repository", () => {
                      'Production external Veda queued vault', sdp_iso_now())`
         )
         .bind(
-          PRODUCTION_EXTERNAL_POSITION,
+          PRODUCTION_OWNER_POSITION,
           ORG,
           SCOPE.production.projectId,
-          EXTERNAL_OWNER,
+          OWNER_ADDRESS,
           VAULT,
           SHARE_MINT,
           TOKEN_MINT
@@ -2178,7 +2345,7 @@ describe("Earn queued withdrawal repository", () => {
         environment,
         provider: "veda",
         vaultAddress: VAULT,
-        ownerAddress: EXTERNAL_OWNER,
+        ownerAddress: OWNER_ADDRESS,
         requestAddress: `ScopeReservationAddress${String(sequence).padStart(16, "1")}`,
         clientRequestId: `scope-reservation-key-${sequence}`,
         idempotencyFingerprint: `scope-reservation-fingerprint-${sequence}`,
@@ -2189,15 +2356,15 @@ describe("Earn queued withdrawal repository", () => {
     /** An unconsumed owner-signed request build in `environment`. */
     async function buildIn(environment: SdpEnvironment, lastValidBlockHeight = "20000") {
       sequence += 1;
-      return repository.createExternalWalletTransaction({
-        id: `earn_external_wallet_withdrawal_request_transaction_scope_${sequence}`,
+      return repository.createWalletTransaction({
+        id: `earn_wallet_withdrawal_request_transaction_scope_${sequence}`,
         organizationId: ORG,
         projectId: SCOPE[environment].projectId,
         environment,
         provider: "veda",
         positionId: SCOPE[environment].positionId,
         action: "request",
-        ownerAddress: EXTERNAL_OWNER,
+        ownerAddress: OWNER_ADDRESS,
         vaultAddress: VAULT,
         tokenMint: TOKEN_MINT,
         shareMint: SHARE_MINT,
@@ -2224,10 +2391,10 @@ describe("Earn queued withdrawal repository", () => {
           environment,
           positionId: SCOPE[environment].positionId,
           custodyWalletId: null,
-          ownerAddress: EXTERNAL_OWNER,
+          ownerAddress: OWNER_ADDRESS,
           requestAddress: build.request_address,
           pdaLeaseToken: build.id,
-          externalWalletTransactionId: build.id,
+          walletTransactionId: build.id,
         })
       );
       await repository.advanceAction({
@@ -2279,19 +2446,19 @@ describe("Earn queued withdrawal repository", () => {
     it.each(SDP_ENVIRONMENTS)(
       "gates and expires only %s unconsumed builds",
       async (environment) => {
-        await expect(repository.hasUnconsumedExternalBuilds({ environment })).resolves.toBe(false);
+        await expect(repository.hasUnconsumedWalletBuilds({ environment })).resolves.toBe(false);
         await buildIn(otherThan(environment), "100");
-        await expect(repository.hasUnconsumedExternalBuilds({ environment })).resolves.toBe(false);
+        await expect(repository.hasUnconsumedWalletBuilds({ environment })).resolves.toBe(false);
         await buildIn(environment, "100");
-        await expect(repository.hasUnconsumedExternalBuilds({ environment })).resolves.toBe(true);
+        await expect(repository.hasUnconsumedWalletBuilds({ environment })).resolves.toBe(true);
 
         await expect(
-          repository.cleanupExpiredExternalBuilds({ environment, currentBlockHeight: "101" })
+          repository.cleanupExpiredWalletBuilds({ environment, currentBlockHeight: "101" })
         ).resolves.toBe(1);
 
-        await expect(repository.hasUnconsumedExternalBuilds({ environment })).resolves.toBe(false);
+        await expect(repository.hasUnconsumedWalletBuilds({ environment })).resolves.toBe(false);
         await expect(
-          repository.hasUnconsumedExternalBuilds({ environment: otherThan(environment) })
+          repository.hasUnconsumedWalletBuilds({ environment: otherThan(environment) })
         ).resolves.toBe(true);
       }
     );
@@ -2321,9 +2488,9 @@ describe("Earn queued withdrawal repository", () => {
             reservations
           );
           expect(await countIn("earn_vault_withdrawal_request_pda_leases", other)).toBe(leases);
-          await expect(
-            repository.hasUnconsumedExternalBuilds({ environment: other })
-          ).resolves.toBe(true);
+          await expect(repository.hasUnconsumedWalletBuilds({ environment: other })).resolves.toBe(
+            true
+          );
           expect(clusterRpc.calls).toEqual([]);
         }
       );

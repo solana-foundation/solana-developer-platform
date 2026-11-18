@@ -15,7 +15,6 @@ import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import type { EarnRepository } from "./earn.repository";
 import { createPostgresEarnRepository } from "./earn.repository.postgres";
-import { createPostgresEarnExternalWalletTransactionsRepository } from "./earn-external-wallet-transactions.repository";
 import {
   type CreateSignedVaultDepositIntentInput,
   createPostgresEarnMovementsRepository,
@@ -26,6 +25,7 @@ import {
   generateEarnPositionId,
 } from "./earn-movements.repository";
 import { createEarnProviderActionsRepository } from "./earn-provider-actions.repository";
+import { createPostgresEarnWalletTransactionsRepository } from "./earn-wallet-transactions.repository";
 
 /**
  * The unified movement ledger (PRO-1705).
@@ -49,7 +49,7 @@ const SHARE_MINT = "ShareMint1111111111111111111111111111111111";
 // Exposure spans organizations, so this vault must be unique to the suite.
 const VAULT = "EarnMovementVault11111111111111111111111111";
 const WALLET_PUBKEY = "DepositorPublicKey11111111111111111111111111";
-const EXTERNAL_OWNER = "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF";
+const WALLET_OWNER = "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF";
 const PROJECT_BY_ENVIRONMENT = {
   sandbox: PROJECT,
   production: `${PROJECT}_production`,
@@ -93,7 +93,7 @@ describe("Unified earn movement ledger (postgres)", () => {
 
     for (const table of [
       "earn_provider_actions",
-      "earn_external_wallet_transactions",
+      "earn_wallet_transactions",
       "earn_movements",
       "earn_positions",
       "earn_provider_wallets",
@@ -731,11 +731,15 @@ describe("Unified earn movement ledger (postgres)", () => {
           "CREATE TEMP TABLE earn_movements ON COMMIT DROP AS SELECT * FROM public.earn_movements WHERE id = ?",
           [created.movement.id]
         );
+        // Re-add later columns after 0121 so SELECT * keeps the public table's
+        // column order when this connection reuses a named repository query.
+        await tx.execute("ALTER TABLE earn_movements DROP COLUMN strategy_reference");
         await tx.execute("ALTER TABLE earn_movements DROP COLUMN deposit_receipt_observed_at");
         await tx.execute(
           "UPDATE earn_movements SET amount_settled = amount_requested, token_amount_settled = amount_requested, shares_out = '99'"
         );
         await tx.execute(migration);
+        await tx.execute("ALTER TABLE earn_movements ADD COLUMN strategy_reference TEXT");
         expect(
           await tx.queryOne(
             "SELECT amount_requested, amount_settled, token_amount_settled, shares_out, status, signature FROM earn_movements"
@@ -1719,14 +1723,14 @@ describe("Unified earn movement ledger (postgres)", () => {
       build: { direction: "deposit" | "withdrawal"; vaultAddress: string }
     ): Promise<string> {
       const id = `earn_ewt_${crypto.randomUUID()}`;
-      await createPostgresEarnExternalWalletTransactionsRepository(getDb(env)).create({
+      await createPostgresEarnWalletTransactionsRepository(getDb(env)).create({
         id,
         organizationId: ORG,
         projectId: PROJECT_BY_ENVIRONMENT[environment],
         environment,
         provider: "kamino",
         direction: build.direction,
-        ownerAddress: EXTERNAL_OWNER,
+        ownerAddress: WALLET_OWNER,
         vaultAddress: build.vaultAddress,
         tokenMint: TOKEN_MINT,
         shareMint: SHARE_MINT,
@@ -1743,13 +1747,13 @@ describe("Unified earn movement ledger (postgres)", () => {
     /** An owner-signed Kamino deposit in `environment`, still `requested`, into a fresh vault. */
     async function depositIn(environment: SdpEnvironment) {
       const vaultAddress = `vault_${crypto.randomUUID()}`;
-      const deposit = await ledger.createSignedExternalWalletDepositIntent({
+      const deposit = await ledger.createSignedWalletDepositIntent({
         organizationId: ORG,
         projectId: PROJECT_BY_ENVIRONMENT[environment],
         environment,
         provider: "kamino",
         vaultAddress,
-        ownerAddress: EXTERNAL_OWNER,
+        ownerAddress: WALLET_OWNER,
         shareMint: SHARE_MINT,
         tokenMint: TOKEN_MINT,
         label: "USDC vault",
@@ -1759,7 +1763,7 @@ describe("Unified earn movement ledger (postgres)", () => {
         lastValidBlockHeight: "100",
         requestId: crypto.randomUUID(),
         idempotencyFingerprint: crypto.randomUUID(),
-        externalWalletTransactionId: await buildFor(environment, {
+        walletTransactionId: await buildFor(environment, {
           direction: "deposit",
           vaultAddress,
         }),
@@ -1772,14 +1776,14 @@ describe("Unified earn movement ledger (postgres)", () => {
       const deposit = await depositIn(environment);
       await finalize(deposit.movement.id);
       const { vaultAddress } = deposit;
-      const withdrawal = await ledger.createSignedExternalWalletWithdrawalIntent({
+      const withdrawal = await ledger.createSignedWalletWithdrawalIntent({
         organizationId: ORG,
         projectId: PROJECT_BY_ENVIRONMENT[environment],
         environment,
         provider: "kamino",
         positionId: deposit.position.id,
         vaultAddress,
-        ownerAddress: EXTERNAL_OWNER,
+        ownerAddress: WALLET_OWNER,
         shareMint: SHARE_MINT,
         requestedShares: "1",
         signature: `sig_${crypto.randomUUID()}`,
@@ -1787,7 +1791,7 @@ describe("Unified earn movement ledger (postgres)", () => {
         lastValidBlockHeight: "100",
         requestId: crypto.randomUUID(),
         idempotencyFingerprint: crypto.randomUUID(),
-        externalWalletTransactionId: await buildFor(environment, {
+        walletTransactionId: await buildFor(environment, {
           direction: "withdrawal",
           vaultAddress,
         }),

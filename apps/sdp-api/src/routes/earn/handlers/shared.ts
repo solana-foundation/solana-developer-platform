@@ -51,7 +51,7 @@ export function pageWindow({ page, pageSize }: EarnPageQuery): { limit: number; 
 /**
  * Normalize a deposit request's swap-funding fields into a validated swap
  * input, or null when no swap is needed. Shared by both deposit surfaces
- * (custody and external-wallet) so the rules cannot drift:
+ * (custody and wallet) so the rules cannot drift:
  *
  * - the source mint must be one of the open cluster scope's supported
  *   swap-source stablecoins (`earnSwapSourceTokens` — pinned mints, never

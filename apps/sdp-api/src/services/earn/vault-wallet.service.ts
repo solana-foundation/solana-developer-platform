@@ -15,11 +15,6 @@ import {
 } from "@solana/kit";
 import { getDb } from "@/db/client";
 import {
-  createPostgresEarnExternalWalletTransactionsRepository,
-  type EarnExternalWalletTransactionRow,
-  generateEarnExternalWalletTransactionId,
-} from "@/db/repositories/earn-external-wallet-transactions.repository";
-import {
   assertMovementIsOwnReplay,
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,
@@ -29,10 +24,15 @@ import {
   createPostgresEarnSplitSwapAdvisoriesRepository,
   generateEarnSplitSwapAdvisoryId,
 } from "@/db/repositories/earn-split-swap-advisories.repository";
+import {
+  createPostgresEarnWalletTransactionsRepository,
+  type EarnWalletTransactionRow,
+  generateEarnWalletTransactionId,
+} from "@/db/repositories/earn-wallet-transactions.repository";
 import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
 import {
-  buildEarnExternalWalletDepositFingerprint,
-  buildEarnExternalWalletWithdrawalFingerprint,
+  buildEarnWalletDepositFingerprint,
+  buildEarnWalletWithdrawalFingerprint,
   resolveIdempotencyReplay,
 } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
@@ -74,7 +74,7 @@ import { requireAcceptedWithdrawalPlan } from "./vault-withdraw.service";
 async function quotePreparedStrategyDeposit(
   client: NonNullable<ReturnType<typeof resolveVaultDirectClient>>,
   runtime: ReturnType<typeof earnRuntime>,
-  input: ExternalWalletDepositBuildInput,
+  input: WalletDepositBuildInput,
   amount: string
 ): Promise<{ quote?: EarnVaultDepositQuote; minSharesOut?: string }> {
   if (input.slippageBps === undefined) return { minSharesOut: input.minSharesOut };
@@ -101,22 +101,21 @@ async function quotePreparedStrategyDeposit(
 }
 
 /**
- * The external-wallet (caller-signed) vault flows: SDP moves money for a wallet it
- * does NOT custody (PRO-1722, ADR 0002 addendum 2026-08-26).
+ * Shared wallet transaction preparation for direct owner signatures and the
+ * configured custody signer chosen by an operation's immutable source.
  *
  * Each direction starts with a BUILD that produces one complete unsigned
  * transaction: provider build, simulation with the resolved fee payer, memo
  * binding, and compile. Every build is persisted so the SUBMIT can prove it
  * received the exact bytes SDP built. The SUBMIT verifies every returned
- * signature, records the movement durably, and only then broadcasts. Past that durable write, the custody and external-wallet flows
- * share one tail and one reconciler.
+ * signature, records the movement durably, and only then broadcasts. Legacy
+ * signed submissions and core operations share one ledger and reconciler.
  *
- * NOTHING here signs, resolves a signer, or touches custody: the owner's
- * own signature is the authorization to move the owner's money, which is
- * why these paths take no request gate.
+ * This module never signs. Core execution queues the reviewed action for the
+ * worker; legacy submissions require the exact owner's signature.
  */
 
-export interface ExternalWalletBuildContext {
+export interface WalletBuildContext {
   organizationId: string;
   projectId: string;
   userId?: string | null;
@@ -131,7 +130,7 @@ export interface ExternalWalletBuildContext {
 
 /** Custody and owner-signed strategy plans share one fee and rent decision. */
 function preparedStrategyFee(
-  context: ExternalWalletBuildContext,
+  context: WalletBuildContext,
   feePayer: string | undefined
 ): VaultFeeMode {
   if (context.fee !== undefined) {
@@ -168,8 +167,8 @@ function storedFeeMode(fee: VaultFeeMode): "wallet" | "partner" | "sponsored" {
  * Fields the builder and wire adapter share. Database-only metadata stays on
  * the repository row instead of becoming part of the service contract.
  */
-export type ExternalWalletBuiltTransaction = Pick<
-  EarnExternalWalletTransactionRow,
+export type WalletBuiltTransaction = Pick<
+  EarnWalletTransactionRow,
   | "id"
   | "environment"
   | "provider"
@@ -193,14 +192,14 @@ export type ExternalWalletBuiltTransaction = Pick<
   | "last_valid_block_height"
 >;
 
-/** An external-wallet deposit build. The open cluster scope decides its environment and cluster. */
-export type ExternalWalletDepositBuildInput = ExternalWalletBuildContext & {
+/** A wallet deposit build. The open cluster scope decides its environment and cluster. */
+export type WalletDepositBuildInput = WalletBuildContext & {
   provider: EarnProviderId;
   /** Catalogue row id, so a split-swap advisory can name the strategy (PRO-1864). */
   strategyId: string;
   /** Vault address — the strategy's providerReference. */
   providerReference: string;
-  /** The external wallet that will sign and own the shares. */
+  /** The wallet that will sign and own the shares. */
   ownerAddress: string;
   /**
    * Optional partner fee payer: a caller-controlled wallet that pays the
@@ -274,10 +273,10 @@ function throwSimulationRefusal(
   throw badRequest(message, rawSimulationDetails(simulation.raw));
 }
 
-export type ExternalWalletDepositBuildResult =
+export type WalletDepositBuildResult =
   | {
       kind: "built";
-      built: ExternalWalletBuiltTransaction;
+      built: WalletBuiltTransaction;
       /** The swap leg composed into the transaction, when the build was swap-funded. */
       swap?: JupiterSwapLeg;
       quote?: EarnVaultDepositQuote;
@@ -297,7 +296,7 @@ export type ExternalWalletDepositBuildResult =
       advisoryId: string;
     };
 
-type ExternalWalletDepositAttempt =
+type WalletDepositAttempt =
   | {
       fit: true;
       unsigned: UnsignedVaultTransaction;
@@ -309,14 +308,11 @@ type ExternalWalletDepositAttempt =
     }
   | { fit: false; swapLeg: JupiterSwapLeg };
 
-async function firstExternalWalletDepositAttempt(
-  attemptBuild: (
-    maxAccounts?: number,
-    compactMemo?: boolean
-  ) => Promise<ExternalWalletDepositAttempt>,
+async function firstWalletDepositAttempt(
+  attemptBuild: (maxAccounts?: number, compactMemo?: boolean) => Promise<WalletDepositAttempt>,
   swapFunded: boolean,
   fee: VaultFeeMode
-): Promise<ExternalWalletDepositAttempt> {
+): Promise<WalletDepositAttempt> {
   try {
     return await attemptBuild();
   } catch (error) {
@@ -335,10 +331,10 @@ async function firstExternalWalletDepositAttempt(
   }
 }
 
-export async function buildExternalWalletDepositTransaction(
+export async function buildWalletDepositTransaction(
   env: Env,
-  input: ExternalWalletDepositBuildInput
-): Promise<ExternalWalletDepositBuildResult> {
+  input: WalletDepositBuildInput
+): Promise<WalletDepositBuildResult> {
   const deadline = createVaultDeadline();
   const client = resolveVaultDirectClient(env, input.provider, deadline);
   if (!client) {
@@ -349,7 +345,7 @@ export async function buildExternalWalletDepositTransaction(
   // it is the transaction's on-chain identity, the way the custody flow binds
   // the caller's idempotency key. The submit's key cannot serve here — it does
   // not exist yet at build time.
-  const transactionId = generateEarnExternalWalletTransactionId();
+  const transactionId = generateEarnWalletTransactionId();
   const expectedAssetIdentity = {
     depositTokenMint: input.tokenMint,
     shareMint: input.shareMint,
@@ -391,7 +387,7 @@ export async function buildExternalWalletDepositTransaction(
   const attemptBuild = async (
     maxAccounts?: number,
     compactMemo = false
-  ): Promise<ExternalWalletDepositAttempt> => {
+  ): Promise<WalletDepositAttempt> => {
     let swapLeg: JupiterSwapLeg | undefined;
     let depositAmount = input.amount;
     if (input.swap) {
@@ -436,7 +432,7 @@ export async function buildExternalWalletDepositTransaction(
         { compact: compactMemo }
       );
     } catch (error) {
-      rethrowProviderBuildFailure(error, "external-wallet deposit");
+      rethrowProviderBuildFailure(error, "wallet deposit");
     }
 
     if (plan.cluster !== cluster) {
@@ -459,7 +455,7 @@ export async function buildExternalWalletDepositTransaction(
           plan,
           ownerAddress: input.ownerAddress,
           fee,
-          probeLabel: "external-wallet deposit: compute-unit probe simulation failed",
+          probeLabel: "wallet deposit: compute-unit probe simulation failed",
           refusalNoun: "Vault deposit",
         });
       }
@@ -482,7 +478,7 @@ export async function buildExternalWalletDepositTransaction(
       if (!simulation.ok) {
         getLogger().error(
           { error: simulation.error, raw: simulation.raw, logs: simulation.logs.slice(-5) },
-          "external-wallet deposit: simulation failed"
+          "wallet deposit: simulation failed"
         );
         throwSimulationRefusal("Vault deposit simulation failed", simulation);
       }
@@ -516,11 +512,7 @@ export async function buildExternalWalletDepositTransaction(
     }
   };
 
-  let attempt = await firstExternalWalletDepositAttempt(
-    attemptBuild,
-    input.swap !== undefined,
-    fee
-  );
+  let attempt = await firstWalletDepositAttempt(attemptBuild, input.swap !== undefined, fee);
   if (!attempt.fit) {
     attempt = await attemptBuild(RETRY_SWAP_MAX_ACCOUNTS, true);
   }
@@ -592,7 +584,7 @@ export async function buildExternalWalletDepositTransaction(
   }
 
   const { unsigned, plan, depositAmount, minSharesOut, swapLeg, quote } = attempt;
-  const built = await createPostgresEarnExternalWalletTransactionsRepository(getDb(env)).create({
+  const built = await createPostgresEarnWalletTransactionsRepository(getDb(env)).create({
     id: transactionId,
     organizationId: input.organizationId,
     projectId: input.projectId,
@@ -698,7 +690,7 @@ async function compileStandaloneSwapTransaction(input: {
     plan: bare,
     ownerAddress: input.ownerAddress,
     fee: input.fee,
-    probeLabel: "external-wallet deposit: standalone swap probe simulation failed",
+    probeLabel: "wallet deposit: standalone swap probe simulation failed",
     refusalNoun: "Swap",
   });
   const simulation = await simulateVaultPlan({
@@ -711,7 +703,7 @@ async function compileStandaloneSwapTransaction(input: {
   if (!simulation.ok) {
     getLogger().error(
       { error: simulation.error, raw: simulation.raw, logs: simulation.logs.slice(-5) },
-      "external-wallet deposit: standalone swap simulation failed"
+      "wallet deposit: standalone swap simulation failed"
     );
     throwSimulationRefusal("Swap simulation failed", simulation);
   }
@@ -725,8 +717,8 @@ async function compileStandaloneSwapTransaction(input: {
   });
 }
 
-/** An external-wallet exit build. The open cluster scope decides its environment and cluster. */
-export type ExternalWalletWithdrawalBuildInput = ExternalWalletBuildContext & {
+/** A wallet exit build. The open cluster scope decides its environment and cluster. */
+export type WalletWithdrawalBuildInput = WalletBuildContext & {
   strategyId?: string;
   redemptionMode?: "standard" | "instant";
   provider: string;
@@ -751,10 +743,10 @@ export type ExternalWalletWithdrawalBuildInput = ExternalWalletBuildContext & {
   minAmountOut?: string;
 };
 
-export async function buildExternalWalletWithdrawalTransaction(
+export async function buildWalletWithdrawalTransaction(
   env: Env,
-  input: ExternalWalletWithdrawalBuildInput
-): Promise<ExternalWalletBuiltTransaction> {
+  input: WalletWithdrawalBuildInput
+): Promise<WalletBuiltTransaction> {
   const deadline = createVaultDeadline();
   // Capability is the ONLY provider-shaped refusal on this path (ADR 0002 exit
   // safety): no surfacing, no entitlement, no availability, no catalogue.
@@ -763,7 +755,7 @@ export async function buildExternalWalletWithdrawalTransaction(
     throw notImplemented(input.provider, "vault withdrawals");
   }
   const { environment, cluster } = currentClusterScope();
-  const transactionId = generateEarnExternalWalletTransactionId();
+  const transactionId = generateEarnWalletTransactionId();
   const expectedAssetIdentity = {
     depositTokenMint: input.tokenMint,
     shareMint: input.shareMint,
@@ -801,7 +793,7 @@ export async function buildExternalWalletWithdrawalTransaction(
         compact: compactMemo,
       });
     } catch (error) {
-      rethrowProviderBuildFailure(error, "external-wallet withdrawal");
+      rethrowProviderBuildFailure(error, "wallet withdrawal");
     }
   };
 
@@ -837,7 +829,7 @@ export async function buildExternalWalletWithdrawalTransaction(
     if (!simulation.ok) {
       getLogger().error(
         { error: simulation.error, raw: simulation.raw, logs: simulation.logs.slice(-5) },
-        "external-wallet withdrawal: simulation failed"
+        "wallet withdrawal: simulation failed"
       );
       throwSimulationRefusal("Vault withdrawal simulation failed", simulation);
     }
@@ -873,7 +865,7 @@ export async function buildExternalWalletWithdrawalTransaction(
     }
   }
 
-  return createPostgresEarnExternalWalletTransactionsRepository(getDb(env)).create({
+  return createPostgresEarnWalletTransactionsRepository(getDb(env)).create({
     id: transactionId,
     organizationId: input.organizationId,
     projectId: input.projectId,
@@ -909,7 +901,7 @@ export async function buildExternalWalletWithdrawalTransaction(
 }
 
 /** A submit of a keyed build, in its project's cluster scope. */
-export interface ExternalWalletSubmitInput {
+export interface WalletSubmitInput {
   organizationId: string;
   projectId: string;
   /** The built transaction being submitted. */
@@ -924,20 +916,20 @@ export interface ExternalWalletSubmitInput {
   broadcast?: boolean;
 }
 
-export interface ExternalWalletSubmitResult {
+export interface WalletSubmitResult {
   position: EarnPositionRow;
   movement: EarnMovementRow;
   /** True when an existing recorded movement won; nothing was re-sent. */
   replayed: boolean;
 }
 
-export async function submitExternalWalletDeposit(
+export async function submitWalletDeposit(
   env: Env,
-  input: ExternalWalletSubmitInput
-): Promise<ExternalWalletSubmitResult> {
+  input: WalletSubmitInput
+): Promise<WalletSubmitResult> {
   const { environment } = currentClusterScope();
   const built = await requireSubmittableBuiltTransaction(env, input, "deposit");
-  const fingerprint = buildEarnExternalWalletDepositFingerprint({
+  const fingerprint = buildEarnWalletDepositFingerprint({
     environment,
     provider: built.provider,
     providerReference: built.vault_address,
@@ -967,9 +959,9 @@ export async function submitExternalWalletDeposit(
     return replayedSubmitResult(ledger, input, prior);
   }
 
-  const signed = await verifySignedExternalWalletTransaction(built, input.signedTransaction);
+  const signed = await verifySignedWalletTransaction(built, input.signedTransaction);
 
-  const result = await ledger.createSignedExternalWalletDepositIntent({
+  const result = await ledger.createSignedWalletDepositIntent({
     organizationId: input.organizationId,
     projectId: input.projectId,
     environment,
@@ -997,7 +989,7 @@ export async function submitExternalWalletDeposit(
     lastValidBlockHeight: built.last_valid_block_height,
     requestId: input.requestId,
     idempotencyFingerprint: fingerprint,
-    externalWalletTransactionId: built.id,
+    walletTransactionId: built.id,
     createsShareAccount: built.creates_share_account,
     // Build-time payer claim only. Kamino's builder ignores historical hints.
     shareAtaRentFunder: built.share_ata_rent_funder,
@@ -1006,19 +998,19 @@ export async function submitExternalWalletDeposit(
   });
   if (result.replayed || input.broadcast === false) return result;
 
-  return broadcastSubmitResult(env, input, result, signed, "external-wallet deposit");
+  return broadcastSubmitResult(env, input, result, signed, "wallet deposit");
 }
 
-export async function submitExternalWalletWithdrawal(
+export async function submitWalletWithdrawal(
   env: Env,
-  input: ExternalWalletSubmitInput
-): Promise<ExternalWalletSubmitResult> {
+  input: WalletSubmitInput
+): Promise<WalletSubmitResult> {
   const { environment } = currentClusterScope();
   const built = await requireSubmittableBuiltTransaction(env, input, "withdrawal");
   if (!built.position_id) {
-    throw internalError(`Earn external-wallet withdrawal build ${built.id} names no position`);
+    throw internalError(`Earn wallet withdrawal build ${built.id} names no position`);
   }
-  const fingerprint = buildEarnExternalWalletWithdrawalFingerprint({
+  const fingerprint = buildEarnWalletWithdrawalFingerprint({
     environment,
     provider: built.provider,
     positionId: built.position_id,
@@ -1044,9 +1036,9 @@ export async function submitExternalWalletWithdrawal(
     return replayedSubmitResult(ledger, input, prior);
   }
 
-  const signed = await verifySignedExternalWalletTransaction(built, input.signedTransaction);
+  const signed = await verifySignedWalletTransaction(built, input.signedTransaction);
 
-  const result = await ledger.createSignedExternalWalletWithdrawalIntent({
+  const result = await ledger.createSignedWalletWithdrawalIntent({
     organizationId: input.organizationId,
     projectId: input.projectId,
     environment,
@@ -1061,7 +1053,7 @@ export async function submitExternalWalletWithdrawal(
     lastValidBlockHeight: built.last_valid_block_height,
     requestId: input.requestId,
     idempotencyFingerprint: fingerprint,
-    externalWalletTransactionId: built.id,
+    walletTransactionId: built.id,
     createsShareAccount: built.creates_share_account,
     shareAtaRentFunder: built.share_ata_rent_funder,
     createdBy: input.userId ?? null,
@@ -1069,7 +1061,7 @@ export async function submitExternalWalletWithdrawal(
   });
   if (result.replayed || input.broadcast === false) return result;
 
-  return broadcastSubmitResult(env, input, result, signed, "external-wallet withdrawal");
+  return broadcastSubmitResult(env, input, result, signed, "wallet withdrawal");
 }
 
 /**
@@ -1080,10 +1072,10 @@ export async function submitExternalWalletWithdrawal(
  */
 async function requireSubmittableBuiltTransaction(
   env: Env,
-  input: ExternalWalletSubmitInput,
+  input: WalletSubmitInput,
   direction: "deposit" | "withdrawal"
-): Promise<EarnExternalWalletTransactionRow> {
-  const built = await createPostgresEarnExternalWalletTransactionsRepository(getDb(env)).getById({
+): Promise<EarnWalletTransactionRow> {
+  const built = await createPostgresEarnWalletTransactionsRepository(getDb(env)).getById({
     organizationId: input.organizationId,
     transactionId: input.transactionId,
   });
@@ -1096,7 +1088,7 @@ async function requireSubmittableBuiltTransaction(
     built.custody_wallet_id !== null ||
     built.direction !== direction
   ) {
-    throw notFound("Earn external-wallet transaction");
+    throw notFound("Earn wallet transaction");
   }
   if (built.operation_only === true)
     throw conflict("Submit this transaction through its operation action", {
@@ -1107,9 +1099,9 @@ async function requireSubmittableBuiltTransaction(
 
 async function replayedSubmitResult(
   ledger: ReturnType<typeof createPostgresEarnMovementsRepository>,
-  input: ExternalWalletSubmitInput,
+  input: WalletSubmitInput,
   movement: EarnMovementRow
-): Promise<ExternalWalletSubmitResult> {
+): Promise<WalletSubmitResult> {
   const position = await ledger.getPositionById({
     organizationId: input.organizationId,
     environment: currentClusterScope().environment,
@@ -1123,11 +1115,11 @@ async function replayedSubmitResult(
 
 async function broadcastSubmitResult(
   env: Env,
-  input: ExternalWalletSubmitInput,
-  result: ExternalWalletSubmitResult,
-  signed: VerifiedSignedExternalWalletTransaction,
+  input: WalletSubmitInput,
+  result: WalletSubmitResult,
+  signed: VerifiedSignedWalletTransaction,
   operation: string
-): Promise<ExternalWalletSubmitResult> {
+): Promise<WalletSubmitResult> {
   const movement = await broadcastRecordedVaultMovement(env, {
     operation,
     organizationId: input.organizationId,
@@ -1139,7 +1131,7 @@ async function broadcastSubmitResult(
   return { ...result, movement };
 }
 
-export interface VerifiedSignedExternalWalletTransaction {
+export interface VerifiedSignedWalletTransaction {
   bytes: Uint8Array;
   signature: string;
   /** Canonical re-encoding of the verified bytes, for the ledger outbox. */
@@ -1161,13 +1153,13 @@ export interface VerifiedSignedExternalWalletTransaction {
  * durable movement that parks reconcilable until its blockhash expires,
  * failing a customer minutes later for something knowable now.
  */
-export async function verifySignedExternalWalletTransaction(
+export async function verifySignedWalletTransaction(
   built: Pick<
-    EarnExternalWalletTransactionRow,
+    EarnWalletTransactionRow,
     "id" | "owner_address" | "fee_payer" | "unsigned_transaction"
   >,
   signedTransactionBase64: string
-): Promise<VerifiedSignedExternalWalletTransaction> {
+): Promise<VerifiedSignedWalletTransaction> {
   let signedBytes: Uint8Array;
   let decoded: ReturnType<ReturnType<typeof getTransactionDecoder>["decode"]>;
   try {
@@ -1188,9 +1180,7 @@ export async function verifySignedExternalWalletTransaction(
 
   const ownerAddress = address(built.owner_address);
   if (decoded.signatures[ownerAddress] === undefined) {
-    throw internalError(
-      `Earn external-wallet build ${built.id} does not require its owner to sign`
-    );
+    throw internalError(`Earn wallet build ${built.id} does not require its owner to sign`);
   }
   for (const [signerAddress, signature] of Object.entries(decoded.signatures)) {
     const slotNoun =

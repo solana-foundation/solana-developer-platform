@@ -174,7 +174,7 @@ movements, and your customer's wallet pays its own fees unless you set a
 
 ## 3. Build the transaction
 
-[`POST /v1/earn/external-wallet/deposit-transactions`](/docs/reference/api/earn/create-earn-external-wallet-deposit-transaction)
+[`POST /v1/earn/external-wallet/deposit-transactions`](/docs/reference/api/earn/create-earn-wallet-deposit-transaction)
 returns an unsigned transaction for the customer's wallet.
 
 <Tabs items={["cURL", "TypeScript"]} groupId="earn-code-language">
@@ -207,7 +207,7 @@ const { transaction: built } = await earnRequest(
 {
   "data": {
     "transaction": {
-      "transactionId": "earn_external_wallet_transaction_b116f3ed-5f19-41b1-85cd-8afe6b37875d",
+      "transactionId": "earn_wallet_transaction_b116f3ed-5f19-41b1-85cd-8afe6b37875d",
       "transaction": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA...",
       "lastValidBlockHeight": "14846",
       "sponsored": false,
@@ -255,7 +255,7 @@ const signedTransaction = await signWithTestWallet(built.transaction);
 
 ## 5. Submit it
 
-[`POST /v1/earn/external-wallet/deposits`](/docs/reference/api/earn/create-earn-external-wallet-deposit)
+[`POST /v1/earn/external-wallet/deposits`](/docs/reference/api/earn/create-earn-wallet-deposit)
 takes the signed transaction. SDP checks it against the build, records the
 deposit, then broadcasts it. The `Idempotency-Key` header is required.
 
@@ -325,7 +325,7 @@ cases.
 
 ## 6. Track it to finality
 
-Poll [`GET /v1/earn/external-wallet/movements/{movementId}`](/docs/reference/api/earn/get-earn-external-wallet-movement)
+Poll [`GET /v1/earn/external-wallet/movements/{movementId}`](/docs/reference/api/earn/get-earn-wallet-movement)
 until the status is `finalized` or `failed`.
 
 <Tabs items={["cURL", "TypeScript"]} groupId="earn-code-language">
@@ -381,7 +381,7 @@ while you keep tracking to `finalized`. A `provider_order` deposit stays
 
 ## 7. Read the position
 
-[`GET /v1/earn/external-wallet/positions`](/docs/reference/api/earn/list-earn-external-wallet-positions)
+[`GET /v1/earn/external-wallet/positions`](/docs/reference/api/earn/list-earn-wallet-positions)
 returns the wallet's live positions.
 
 <Tabs items={["cURL", "TypeScript"]} groupId="earn-code-language">

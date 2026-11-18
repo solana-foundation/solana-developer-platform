@@ -3,8 +3,8 @@ import type { EarnMovementDirection } from "@sdp/types/earn";
 import type { DatabaseClient as AppDb } from "@/db/client";
 
 /**
- * Built external-wallet transactions (PRO-1722): the unsigned transactions SDP built
- * for an external (non-custodial) wallet to sign.
+ * Unsigned wallet transactions shared by owner signing and configured custody
+ * signers. Core operations hold custody builds until worker execution.
  *
  * NOT part of the movement ledger, and deliberately a separate repository: a
  * row here records that SDP built something signable, never that money moved.
@@ -17,13 +17,13 @@ import type { DatabaseClient as AppDb } from "@/db/client";
  * holds expires with its recorded blockhash window.
  */
 
-const EARN_EXTERNAL_WALLET_TRANSACTION_ID_PREFIX = "earn_external_wallet_transaction_";
+const EARN_WALLET_TRANSACTION_ID_PREFIX = "earn_wallet_transaction_";
 
-export function generateEarnExternalWalletTransactionId(): string {
-  return `${EARN_EXTERNAL_WALLET_TRANSACTION_ID_PREFIX}${crypto.randomUUID()}`;
+export function generateEarnWalletTransactionId(): string {
+  return `${EARN_WALLET_TRANSACTION_ID_PREFIX}${crypto.randomUUID()}`;
 }
 
-export interface EarnExternalWalletTransactionRow {
+export interface EarnWalletTransactionRow {
   id: string;
   organization_id: string;
   project_id: string | null;
@@ -73,7 +73,7 @@ export interface EarnExternalWalletTransactionRow {
   updated_at: string;
 }
 
-interface CreateEarnExternalWalletTransactionInput {
+interface CreateEarnWalletTransactionInput {
   id: string;
   organizationId: string;
   projectId: string;
@@ -103,18 +103,16 @@ interface CreateEarnExternalWalletTransactionInput {
   initiatedByKeyId?: string | null;
 }
 
-export interface EarnExternalWalletTransactionsRepository {
-  create(
-    input: CreateEarnExternalWalletTransactionInput
-  ): Promise<EarnExternalWalletTransactionRow>;
+export interface EarnWalletTransactionsRepository {
+  create(input: CreateEarnWalletTransactionInput): Promise<EarnWalletTransactionRow>;
   /** Org-scoped in the query (BOLA): a foreign id reads as absent, never as 403. */
   getById(params: {
     organizationId: string;
     transactionId: string;
-  }): Promise<EarnExternalWalletTransactionRow | null>;
+  }): Promise<EarnWalletTransactionRow | null>;
 }
 
-function mapRow(row: Record<string, unknown>): EarnExternalWalletTransactionRow {
+function mapRow(row: Record<string, unknown>): EarnWalletTransactionRow {
   return {
     id: row.id as string,
     organization_id: row.organization_id as string,
@@ -123,7 +121,7 @@ function mapRow(row: Record<string, unknown>): EarnExternalWalletTransactionRow 
     provider: row.provider as string,
     strategy_id: row.strategy_id as string | null,
     custody_wallet_id: row.custody_wallet_id as string | null,
-    fee_mode: row.fee_mode as EarnExternalWalletTransactionRow["fee_mode"],
+    fee_mode: row.fee_mode as EarnWalletTransactionRow["fee_mode"],
     operation_only: row.operation_only === true,
     direction: row.direction as EarnMovementDirection,
     owner_address: row.owner_address as string,
@@ -150,14 +148,14 @@ function mapRow(row: Record<string, unknown>): EarnExternalWalletTransactionRow 
   };
 }
 
-export function createPostgresEarnExternalWalletTransactionsRepository(
+export function createPostgresEarnWalletTransactionsRepository(
   db: AppDb
-): EarnExternalWalletTransactionsRepository {
+): EarnWalletTransactionsRepository {
   return {
     async create(input) {
       const row = await db
         .prepare(
-          `INSERT INTO earn_external_wallet_transactions (
+          `INSERT INTO earn_wallet_transactions (
              id, organization_id, project_id, environment, provider, direction,
              owner_address, vault_address, token_mint, share_mint, label,
              position_id, denomination, amount_requested, min_shares_out,
@@ -197,16 +195,14 @@ export function createPostgresEarnExternalWalletTransactionsRepository(
         )
         .first<Record<string, unknown>>();
       if (!row) {
-        throw new Error("Failed to record the built earn external-wallet transaction");
+        throw new Error("Failed to record the built earn wallet transaction");
       }
       return mapRow(row);
     },
 
     async getById(params) {
       const row = await db
-        .prepare(
-          `SELECT * FROM earn_external_wallet_transactions WHERE id = ? AND organization_id = ?`
-        )
+        .prepare(`SELECT * FROM earn_wallet_transactions WHERE id = ? AND organization_id = ?`)
         .bind(params.transactionId, params.organizationId)
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;

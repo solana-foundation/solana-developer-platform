@@ -13,9 +13,9 @@ vi.mock("./execution-registry", async (original) => ({
   resolveEarnExecutionClient: resolve,
 }));
 vi.mock("./vault-queued-withdraw.service", () => ({
-  buildExternalQueuedWithdrawalRequest: buildQueued,
-  buildExternalQueuedWithdrawalCancel: vi.fn(),
-  submitExternalQueuedWithdrawalAction: vi.fn(),
+  buildWalletQueuedWithdrawalRequest: buildQueued,
+  buildWalletQueuedWithdrawalCancel: vi.fn(),
+  submitWalletQueuedWithdrawalAction: vi.fn(),
 }));
 
 const position = {

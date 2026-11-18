@@ -43,7 +43,7 @@ async function cancellationRequestId(
     record.operation.buildRef?.kind === "earn.queued_transaction"
       ? await createPostgresEarnVaultWithdrawalRequestsRepository(
           getDb(c.env)
-        ).getExternalWalletTransaction({
+        ).getWalletTransaction({
           organizationId: record.scope.organizationId,
           transactionId: record.operation.buildRef.id,
         })

@@ -174,7 +174,7 @@ async function requireProgram(c: AppContext, programId: string): Promise<EarnPro
   // The project is a boundary here as it is everywhere else money moves
   // (HOO-1563). Organization scope alone let a key scoped to project B preview
   // and withdraw from a program provisioned under project A, while the
-  // neighbouring vault-exit and external-wallet paths already compared
+  // neighbouring vault-exit and wallet paths already compared
   // `project_id` before releasing funds. This is the single place every
   // per-program route resolves its row, so deposits, withdrawals and previews
   // all get the same answer.

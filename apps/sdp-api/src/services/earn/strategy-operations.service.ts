@@ -44,8 +44,8 @@ import {
   signPreparedStrategyTransaction,
   sponsorPreparedStrategyTransaction,
 } from "./strategy-transactions.service";
-import { verifySignedExternalWalletTransaction } from "./vault-external-wallet.service";
 import { readConfirmedBlockHeight } from "./vault-intent-execution.service";
+import { verifySignedWalletTransaction } from "./vault-wallet.service";
 
 export function isTerminalOperation(operation: Operation): boolean {
   return TERMINAL_OPERATION_STATUSES.some((status) => status === operation.status);
@@ -292,7 +292,7 @@ async function advanceSwapOperation(
   ) {
     const admitted =
       transactionScope.custodyWalletId === null
-        ? await admitExternalOperationBroadcast(env, scope, claim, built)
+        ? await admitOwnerOperationBroadcast(env, scope, claim, built)
         : await admitRecordedCustodyBroadcast(
             env,
             scope,
@@ -317,7 +317,7 @@ async function advanceSwapOperation(
   });
 }
 
-async function admitExternalOperationBroadcast(
+async function admitOwnerOperationBroadcast(
   env: Env,
   scope: OperationScope,
   claim: OperationClaim,
@@ -385,12 +385,12 @@ export async function advanceEarnOperation(
     attempt.dispatchStartedAt === null &&
     !observeOnly
   ) {
-    observeOnly = !(await admitExternalOperationBroadcast(env, scope, claim, built));
+    observeOnly = !(await admitOwnerOperationBroadcast(env, scope, claim, built));
   }
   if (signedTransaction === null && transactionScope.custodyWalletId === null) {
     if (input?.signedTransaction === undefined)
       throw conflict("The operation is waiting for its signed transaction");
-    const signed = await verifySignedExternalWalletTransaction(built, input.signedTransaction);
+    const signed = await verifySignedWalletTransaction(built, input.signedTransaction);
     attempt = await service.recordSignedAttempt(scope, claim, {
       signedTransaction: signed.signedTransactionBase64,
       signature: signed.signature,
@@ -601,7 +601,7 @@ export async function advanceEarnOperation(
       if (outcome !== undefined) return outcome;
     }
     if (signedTransaction === null) throw internalError("Custody signing returned no transaction");
-    const signed = await verifySignedExternalWalletTransaction(built, signedTransaction);
+    const signed = await verifySignedWalletTransaction(built, signedTransaction);
     attempt = await service.recordSignedAttempt(scope, claim, {
       signedTransaction: signed.signedTransactionBase64,
       signature: signed.signature,
@@ -627,7 +627,7 @@ export async function advanceEarnOperation(
   const broadcast = !observeOnly;
   if (!broadcast) {
     await service.repository.restrictToObservation(scope, claim);
-    const signed = await verifySignedExternalWalletTransaction(built, signedTransaction);
+    const signed = await verifySignedWalletTransaction(built, signedTransaction);
     const observed = await createClusterRpc()
       .getSignatureStatuses([signature(signed.signature)], { searchTransactionHistory: true })
       .send();
@@ -672,7 +672,7 @@ export async function executeEarnOperation(
       throw badRequest("Custody transactions are signed through their configured provider");
     }
     if (transactionScope.custodyWalletId === null && input.signedTransaction !== undefined) {
-      const signed = await verifySignedExternalWalletTransaction(target, input.signedTransaction);
+      const signed = await verifySignedWalletTransaction(target, input.signedTransaction);
       verifiedSigned = {
         signedTransaction: signed.signedTransactionBase64,
         signature: signed.signature,

@@ -3,9 +3,9 @@ import { operationSourceSchema } from "@sdp/types/operations";
 import { z } from "zod";
 import { successResponseSchema } from "./base";
 import {
-  earnExternalWalletPositionSchema,
-  earnExternalWalletPositionSummaryResponse,
   earnStrategiesResponse,
+  earnWalletPositionSchema,
+  earnWalletPositionSummaryResponse,
 } from "./earn";
 import { earnVaultPositionSchema } from "./earn-treasury";
 
@@ -44,7 +44,7 @@ const corePositionSchema = earnVaultPositionSchema.omit({ custodyWalletId: true 
   discovered: z.boolean().optional(),
   costBasisKnown: z.boolean(),
 });
-const summarySchema = earnExternalWalletPositionSummaryResponse.shape.data.shape.summary;
+const summarySchema = earnWalletPositionSummaryResponse.shape.data.shape.summary;
 const strategyTotalSchema = summarySchema.shape.totalsByStrategy.element;
 const coreSummarySchema = summarySchema.extend({
   costBasisCoverage: z.enum(["complete", "unknown"]),
@@ -53,7 +53,7 @@ const coreSummarySchema = summarySchema.extend({
     strategyTotalSchema.extend({
       positions: z
         .array(
-          earnExternalWalletPositionSchema.extend({
+          earnWalletPositionSchema.extend({
             createdAt: nullableDate,
             discovered: z.boolean().optional(),
           })

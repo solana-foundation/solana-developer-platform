@@ -166,7 +166,7 @@ describe("Earn operation review", () => {
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 
-  it("never refreshes an exposed external message merely because it is prepared", () => {
+  it("never refreshes an exposed wallet message merely because it is prepared", () => {
     render(
       <EarnOperationReview
         operation={operation({

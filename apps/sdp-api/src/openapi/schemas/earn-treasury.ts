@@ -17,11 +17,11 @@ import {
 import { z } from "zod";
 import { successResponseSchema } from "@/openapi/schemas/base";
 import {
-  earnExternalWalletPositionSchema,
-  earnExternalWalletWithdrawalPreviewResponseFields,
   earnParRedemptionPreviewFields,
   earnQueuedWithdrawalOptionsFields,
   earnQueuedWithdrawalPreviewFields,
+  earnWalletPositionSchema,
+  earnWalletWithdrawalPreviewResponseFields,
 } from "./earn";
 
 export const pageFields = {
@@ -37,7 +37,7 @@ export const listFields = {
 };
 export const envelope = (shape: z.ZodRawShape) => successResponseSchema(z.object(shape));
 
-export const earnVaultPositionSchema = earnExternalWalletPositionSchema
+export const earnVaultPositionSchema = earnWalletPositionSchema
   .omit({ ownerAddress: true })
   .extend({
     custodyWalletId: z.string().openapi({ example: "cwlt_example" }),
@@ -47,7 +47,7 @@ export const earnVaultPositionSchema = earnExternalWalletPositionSchema
   }) satisfies z.ZodType<EarnVaultPosition>;
 export const earnVaultWithdrawalPreviewResponse = envelope({
   positionId: z.string(),
-  ...earnExternalWalletWithdrawalPreviewResponseFields,
+  ...earnWalletWithdrawalPreviewResponseFields,
   feeSponsored: z.boolean(),
 });
 export const earnVaultWithdrawalOptionsResponse = envelope({

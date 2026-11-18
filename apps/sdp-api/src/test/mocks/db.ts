@@ -34,6 +34,7 @@ const POSTGRES_TEST_TABLES = [
   "ramp_webhook_events",
   "moonpay_failed_transactions",
   "earn_vault_withdrawal_request_pda_leases",
+  // TRUNCATE requires the physical compatibility table behind the wallet view.
   "earn_external_wallet_withdrawal_request_transactions",
   "earn_vault_withdrawal_request_actions",
   "earn_vault_withdrawal_request_reservations",

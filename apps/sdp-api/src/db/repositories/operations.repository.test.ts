@@ -521,14 +521,14 @@ describe("durable operations repository", () => {
     ).toEqual({ count: 1 });
   });
 
-  it("expired signed external attempts remain recoverable while new expired custody proposals refuse", async () => {
+  it("expired owner-signed attempts remain recoverable while new expired custody proposals refuse", async () => {
     const service = new OperationsService(repository());
     const expired = {
       ...input().prepared,
       terms: { ...input().prepared.terms, expiresAt: "2020-01-01T00:00:00.000Z" },
     };
     const principal = { kind: "member" as const, userId: USER };
-    const external = await runAsMoneyPrincipal(principal, () =>
+    const ownerOperation = await runAsMoneyPrincipal(principal, () =>
       service.prepare(scope, {
         source: input().source,
         intent: input().intent,
@@ -538,8 +538,8 @@ describe("durable operations repository", () => {
     );
     await expect(
       runAsMoneyPrincipal(principal, () =>
-        service.claimExecution(scope, external.operation.id, {
-          actionId: external.operation.actionId,
+        service.claimExecution(scope, ownerOperation.operation.id, {
+          actionId: ownerOperation.operation.actionId,
           version: 1,
           signedTransaction: signed.signedTransaction,
         })
@@ -584,8 +584,8 @@ describe("durable operations repository", () => {
     expect(cancellation.attempt.principal).toEqual(cancellationActor);
   });
 
-  it("history filters custody before pagination and requires an explicit external owner", async () => {
-    const external = await repository().createOrReplay(input());
+  it("history filters wallets before pagination and requires an explicit owner address", async () => {
+    const ownerOperation = await repository().createOrReplay(input());
     const custodyIntent = {
       kind: "earn.deposit" as const,
       strategyId: "strategy_1",
@@ -613,16 +613,18 @@ describe("durable operations repository", () => {
       ownerAddress: "owner",
       allowedWalletIds: [],
     });
-    expect(owner.map((row) => row.operation.id)).toEqual([external.record.operation.id]);
+    expect(owner.map((row) => row.operation.id)).toEqual([ownerOperation.record.operation.id]);
     expect(
       await repository().list(scope, { before: null, limit: 10, ownerAddress: "someone-else" })
     ).toEqual([]);
   });
 
   it("only custody unsigned preparation can be terminal-cancelled without a domain observation", async () => {
-    const external = await repository().createOrReplay(input());
-    await repository().requestCancellation(scope, external.record.operation.id);
-    expect(await repository().cancelUndispatched(scope, external.record.operation.id)).toBeNull();
+    const ownerOperation = await repository().createOrReplay(input());
+    await repository().requestCancellation(scope, ownerOperation.record.operation.id);
+    expect(
+      await repository().cancelUndispatched(scope, ownerOperation.record.operation.id)
+    ).toBeNull();
     const custody = await repository().createOrReplay(
       input({
         requestKey: "custody",
@@ -641,9 +643,9 @@ describe("durable operations repository", () => {
     ).toBe("cancelled");
   });
 
-  it("cancels queued custody acceptance locally while an external unsigned message stays uncertain", async () => {
-    for (const kind of ["custody", "external"] as const) {
-      const source = kind === "custody" ? { walletId: "wallet_1" } : { ownerAddress: "owner" };
+  it("cancels queued wallet acceptance locally while an owner-signed message stays uncertain", async () => {
+    for (const kind of ["wallet", "address"] as const) {
+      const source = kind === "wallet" ? { walletId: "wallet_1" } : { ownerAddress: "owner" };
       const { record } = await repository().createOrReplay(
         input({
           requestKey: `queued-${kind}`,
@@ -665,7 +667,7 @@ describe("durable operations repository", () => {
       });
       await repository().requestCancellation(scope, record.operation.id);
       const cancelled = await repository().cancelUndispatched(scope, record.operation.id);
-      if (kind === "custody") {
+      if (kind === "wallet") {
         expect(cancelled).toMatchObject({ status: "cancelled", nextAction: null });
         expect((await repository().get(scope, record.operation.id))?.claimToken).toBeNull();
         await expect(repository().recordSignedAttempt(scope, claim, signed)).rejects.toThrow(
@@ -847,7 +849,7 @@ describe("durable operations repository", () => {
     ).toEqual([]);
   });
 
-  it("cancelled external signed registration claims recovery without permitting a broadcast", async () => {
+  it("cancelled owner-signed registration claims recovery without permitting a broadcast", async () => {
     const { record } = await repository().createOrReplay(input());
     await repository().requestCancellation(scope, record.operation.id);
     const claim = await runAsMoneyPrincipal({ kind: "member", userId: USER }, () =>

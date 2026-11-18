@@ -18,6 +18,16 @@ import { isEarnExitOrRead } from "./earn/exits";
 
 const PRODUCTION_PROJECT_ID = `prj_${TEST_ORG.id}_production`;
 
+// These shared routes resolve a stored intent. Reads and exits stay available;
+// the worker admits a deposit from live entitlement facts before signing/send.
+const INTENT_SCOPED_OPERATION_ROUTES = new Map([
+  ["GET /v1/operations", "Read authorized operation history"],
+  ["GET /v1/operations/:operationId", "Read an authorized operation"],
+  ["POST /v1/operations/:operationId/execute", "Queue the authorized stored intent"],
+  ["POST /v1/operations/:operationId/refresh", "Prepare the authorized stored intent"],
+  ["POST /v1/operations/:operationId/cancel", "Cancel the authorized stored intent"],
+]);
+
 function concretePath(path: string): string {
   return projectRoutePath(path, PRODUCTION_PROJECT_ID);
 }
@@ -34,6 +44,10 @@ function exemption(
 ): string | undefined {
   const reason = NO_PROJECT_ROUTES.find(([pattern]) => pattern.test(path))?.[1];
   if (reason) return reason;
+  if (productionProjectsAllowed) {
+    const operationReason = INTENT_SCOPED_OPERATION_ROUTES.get(`${method} ${path}`);
+    if (operationReason) return operationReason;
+  }
   if (
     productionProjectsAllowed &&
     path.startsWith("/v1/earn/") &&
@@ -142,6 +156,15 @@ describe.each([
       const paths = [...routes.values()].map(({ path }) => path);
       const unused = NO_PROJECT_ROUTES.filter(([pattern]) => !paths.some((p) => pattern.test(p)));
       expect(unused.map(([pattern]) => String(pattern))).toEqual([]);
+    });
+
+    it("pins the shared operation exceptions to the exact mounted methods and paths", () => {
+      expect(
+        [...routes.values()]
+          .filter(({ path }) => path === "/v1/operations" || path.startsWith("/v1/operations/"))
+          .map(({ method, path }) => `${method} ${path}`)
+          .sort()
+      ).toEqual([...INTENT_SCOPED_OPERATION_ROUTES.keys()].sort());
     });
   }
 );

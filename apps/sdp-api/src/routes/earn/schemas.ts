@@ -226,7 +226,7 @@ export const earnProgramWithdrawalsListQuerySchema = z.object(earnPageQueryShape
 
 /**
  * The swap-funding fields both deposit surfaces share (custody and
- * external-wallet): pay in one supported stablecoin, let a Jupiter swap close
+ * wallet): pay in one supported stablecoin, let a Jupiter swap close
  * the gap to the vault's own token inside the same transaction. Which mints
  * are supported is a per-cluster fact the HANDLER checks against
  * `earnSwapSourceTokens` — the schema only pins the address shape, the same
@@ -544,7 +544,7 @@ export const earnVaultWithdrawalRequestsQuerySchema = z
   .strict();
 
 // ---------------------------------------------------------------------------
-// External-wallet (caller-signed) vault flows (PRO-1722): SDP builds unsigned
+// Wallet (caller-signed) vault flows (PRO-1722): SDP builds unsigned
 // transactions for a wallet it does not custody, and the caller submits them
 // back for a durable movement and SDP broadcast.
 // ---------------------------------------------------------------------------
@@ -566,27 +566,27 @@ const solanaFeePayerAddressSchema = z.preprocess(
 );
 
 /**
- * The fee-payer field both external-wallet BUILD bodies share: an optional
+ * The fee-payer field both wallet BUILD bodies share: an optional
  * partner wallet. When present,
  * the partner pays the network fee and share-account rent, and the transaction
  * requires its signature alongside the owner's. Sending the owner's own
  * address is accepted and normalizes to the default.
  */
-const earnExternalWalletFeePayerShape = {
+const earnWalletFeePayerShape = {
   feePayer: solanaFeePayerAddressSchema.optional(),
 } as const;
 
 /**
- * Build one unsigned deposit transaction for an external wallet. Shares the
+ * Build one unsigned deposit transaction for a wallet. Shares the
  * custody deposit's amount/floor shapes; the wallet is an ADDRESS, because
  * there is no custody row to name.
  */
-export const earnExternalWalletDepositTransactionSchema = z.object({
+export const earnWalletDepositTransactionSchema = z.object({
   /** Catalogue strategy id, resolved to a vault address server-side. */
   strategyId: z.string().min(1),
-  /** The external wallet that will sign and own the shares. */
+  /** The wallet that will sign and own the shares. */
   ownerAddress: solanaOwnerAddressSchema,
-  ...earnExternalWalletFeePayerShape,
+  ...earnWalletFeePayerShape,
   /**
    * Deposit amount as a decimal string — the vault token's units, or the
    * SOURCE token's units when `sourceTokenMint` requests a swap-funded build.
@@ -607,31 +607,31 @@ export const earnExternalWalletDepositTransactionSchema = z.object({
 });
 
 /**
- * Exit an external-wallet position. The caller names its tenant-scoped
+ * Exit a wallet position. The caller names its tenant-scoped
  * `earn_positions` row, which carries the vault, owner and mints.
  */
-export const earnExternalWalletWithdrawalTransactionSchema = z.object({
+export const earnWalletWithdrawalTransactionSchema = z.object({
   redemptionMode: z.enum(EARN_PROVIDER_REDEMPTION_MODES).optional(),
   positionId: earnWithdrawalPositionIdSchema,
   /** Shares to redeem, decimal string in share units. */
   shares: earnWithdrawalSharesSchema,
   /** Same explicit output floor contract as the custody withdrawal builder. */
   minAmountOut: earnMinAmountOutSchema,
-  ...earnExternalWalletFeePayerShape,
+  ...earnWalletFeePayerShape,
 });
 
-export const earnExternalWalletWithdrawalPreviewSchema = z.object({
+export const earnWalletWithdrawalPreviewSchema = z.object({
   /** The caller's tenant-scoped `earn_positions` row. */
   positionId: earnWithdrawalPositionIdSchema,
   shares: earnWithdrawalSharesSchema,
 });
 
 /** The position whose queued exit routes are discovered. */
-export const earnExternalWalletWithdrawalOptionsSchema = z
+export const earnWalletWithdrawalOptionsSchema = z
   .object({ positionId: earnWithdrawalPositionIdSchema })
   .strict();
 
-export const earnExternalWalletQueuedWithdrawalPreviewSchema = z.union([
+export const earnWalletQueuedWithdrawalPreviewSchema = z.union([
   z
     .object({
       positionId: earnWithdrawalPositionIdSchema,
@@ -652,38 +652,38 @@ export const earnExternalWalletQueuedWithdrawalPreviewSchema = z.union([
     .strict(),
 ]);
 
-export const earnExternalWalletWithdrawalRequestTransactionSchema = z.union([
+export const earnWalletWithdrawalRequestTransactionSchema = z.union([
   z
     .object({
       positionId: earnWithdrawalPositionIdSchema,
-      ...earnExternalWalletFeePayerShape,
+      ...earnWalletFeePayerShape,
       ...earnVaultQueuedWithdrawalTermsShape,
     })
     .strict(),
   z
     .object({
       positionId: earnWithdrawalPositionIdSchema,
-      ...earnExternalWalletFeePayerShape,
+      ...earnWalletFeePayerShape,
       ...earnVaultParRedemptionTermsShape,
     })
     .strict(),
   z
     .object({
       positionId: earnWithdrawalPositionIdSchema,
-      ...earnExternalWalletFeePayerShape,
+      ...earnWalletFeePayerShape,
       ...earnVaultParRedemptionIntermediateTermsShape,
     })
     .strict(),
 ]);
 
-export const earnExternalWalletWithdrawalRequestCancelTransactionSchema = z
+export const earnWalletWithdrawalRequestCancelTransactionSchema = z
   .object({
     withdrawalRequestId: z.string().min(1).max(128),
-    ...earnExternalWalletFeePayerShape,
+    ...earnWalletFeePayerShape,
   })
   .strict();
 
-export const earnExternalWalletWithdrawalRequestsQuerySchema = z
+export const earnWalletWithdrawalRequestsQuerySchema = z
   .object({
     ownerAddress: solanaOwnerAddressSchema,
     limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -700,7 +700,7 @@ export const earnExternalWalletWithdrawalRequestsQuerySchema = z
  * schema. Idempotency is header-only, exactly like the custody vault routes:
  * the chain has no request dedupe to anchor a body key to.
  */
-export const earnExternalWalletSubmitSchema = z.object({
+export const earnWalletSubmitSchema = z.object({
   /** The built transaction (`transactionId` from the build response). */
   transactionId: z.string().min(1).max(128),
   /** Base64 wire bytes of the signed transaction. */
@@ -716,12 +716,12 @@ export const earnExternalWalletSubmitSchema = z.object({
 });
 
 /**
- * One external wallet's holdings, newest first. The owner rides the query on
- * EVERY per-owner external-wallet read (movements, positions, earnings) —
+ * One wallet's holdings, newest first. The owner rides the query on
+ * EVERY per-owner wallet read (movements, positions, earnings) —
  * one addressing style for one concept, and no literal segment (`summary`)
  * can ever collide with a path parameter.
  */
-export const earnExternalWalletPositionsQuerySchema = z
+export const earnWalletPositionsQuerySchema = z
   .object({
     ownerAddress: solanaOwnerAddressSchema,
     limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -739,7 +739,7 @@ export const earnExternalWalletPositionsQuerySchema = z
  * owners, so they require the explicit opt-in; totals-only consumers should
  * request neither.
  */
-export const earnExternalWalletPositionSummaryQuerySchema = z
+export const earnWalletPositionSummaryQuerySchema = z
   .object({
     includeOwnerAddresses: z
       .enum(["true", "false"])
@@ -762,14 +762,14 @@ export const earnExternalWalletPositionSummaryQuerySchema = z
   });
 
 /**
- * One external wallet's activity, newest first (PRO-1772). The owner is a
+ * One wallet's activity, newest first (PRO-1772). The owner is a
  * REQUIRED query filter rather than a path segment so the collection keeps its
  * `:movementId` detail route unambiguous; direction/status are the same
  * equality filters the cross-provider feed takes, and `status` stays an open
  * string for the same reason — an unknown value matches nothing, which is the
  * honest answer.
  */
-export const earnExternalWalletMovementsQuerySchema = z
+export const earnWalletMovementsQuerySchema = z
   .object({
     ownerAddress: solanaOwnerAddressSchema,
     direction: z.enum(EARN_MOVEMENT_DIRECTIONS).optional(),
@@ -779,13 +779,13 @@ export const earnExternalWalletMovementsQuerySchema = z
   })
   .strict();
 
-/** The recorded external-wallet movement a partner polls to a terminal state. */
-export const earnExternalWalletMovementParamsSchema = z
+/** The recorded wallet movement a partner polls to a terminal state. */
+export const earnWalletMovementParamsSchema = z
   .object({ movementId: z.string().min(1).max(128) })
   .strict();
 
-/** Balance + earned for one external wallet (PRO-1772); the owner filter is the only knob. */
-export const earnExternalWalletEarningsQuerySchema = z
+/** Balance + earned for one wallet (PRO-1772); the owner filter is the only knob. */
+export const earnWalletEarningsQuerySchema = z
   .object({ ownerAddress: solanaOwnerAddressSchema })
   .strict();
 

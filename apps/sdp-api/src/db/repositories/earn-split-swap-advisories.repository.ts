@@ -395,7 +395,7 @@ export function createPostgresEarnSplitSwapAdvisoriesRepository(
     async findFollowUpBuildAt(params) {
       const row = await db
         .prepare(
-          `SELECT created_at FROM earn_external_wallet_transactions
+          `SELECT created_at FROM earn_wallet_transactions
             WHERE organization_id = ?
               AND project_id IS NOT DISTINCT FROM ?
               AND environment = ?

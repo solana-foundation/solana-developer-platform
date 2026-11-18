@@ -2,10 +2,10 @@ import { runInClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  earnExternalWalletQueuedWithdrawalPreviewSchema,
-  earnExternalWalletWithdrawalRequestTransactionSchema,
   earnVaultQueuedWithdrawalPreviewSchema,
   earnVaultWithdrawalRequestSchema,
+  earnWalletQueuedWithdrawalPreviewSchema,
+  earnWalletWithdrawalRequestTransactionSchema,
 } from "@/routes/earn/schemas";
 import { AuditService } from "@/services/audit.service";
 import { parTermsFromRecordedRequest } from "@/services/earn/vault-queued-withdraw.service";
@@ -70,14 +70,14 @@ describe("queued withdrawal handler contracts", () => {
       }).success
     ).toBe(true);
     expect(
-      earnExternalWalletWithdrawalRequestTransactionSchema.safeParse({
+      earnWalletWithdrawalRequestTransactionSchema.safeParse({
         positionId: position.id,
         shares: "10",
         mechanism: "operatorRedemption",
       }).success
     ).toBe(true);
     expect(
-      earnExternalWalletWithdrawalRequestTransactionSchema.safeParse({
+      earnWalletWithdrawalRequestTransactionSchema.safeParse({
         strategyId: "hastra-prime",
         ownerAddress: "11111111111111111111111111111111",
         shares: "10",
@@ -104,8 +104,8 @@ describe("queued withdrawal handler contracts", () => {
     for (const schema of [
       earnVaultWithdrawalRequestSchema,
       earnVaultQueuedWithdrawalPreviewSchema,
-      earnExternalWalletWithdrawalRequestTransactionSchema,
-      earnExternalWalletQueuedWithdrawalPreviewSchema,
+      earnWalletWithdrawalRequestTransactionSchema,
+      earnWalletQueuedWithdrawalPreviewSchema,
     ]) {
       expect(schema.safeParse(held).success).toBe(true);
       expect(schema.safeParse({ ...held, shares: "10" }).success).toBe(false);
@@ -202,9 +202,9 @@ describe("queued withdrawal handler contracts", () => {
     });
   });
 
-  it("emits the established unsigned external transaction envelope", () => {
+  it("emits the established unsigned wallet transaction envelope", () => {
     const wire = builtTransactionWire({
-      id: "earn_external_wallet_withdrawal_request_transaction_test",
+      id: "earn_wallet_withdrawal_request_transaction_test",
       environment: "sandbox",
       provider: "veda",
       position_id: position.id,
@@ -243,7 +243,7 @@ describe("queued withdrawal handler contracts", () => {
 
   it("emits only par-redemption terms for an operator request build", () => {
     const wire = builtTransactionWire({
-      id: "earn_external_wallet_withdrawal_request_transaction_par",
+      id: "earn_wallet_withdrawal_request_transaction_par",
       environment: "production",
       provider: "hastra",
       position_id: position.id,

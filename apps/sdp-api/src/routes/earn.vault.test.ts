@@ -8,14 +8,14 @@ import { getDb } from "@/db/client";
 import type { EarnStrategyRow, UpsertEarnStrategyInput } from "@/db/repositories/earn.repository";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import {
-  createPostgresEarnExternalWalletTransactionsRepository,
-  generateEarnExternalWalletTransactionId,
-} from "@/db/repositories/earn-external-wallet-transactions.repository";
+  createPostgresEarnWalletTransactionsRepository,
+  generateEarnWalletTransactionId,
+} from "@/db/repositories/earn-wallet-transactions.repository";
 import { app } from "@/index";
 import { serviceUnavailable } from "@/lib/errors";
 import { resolveEarnExecutionClient } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
-import type { ExternalWalletDepositBuildInput } from "@/services/earn/vault-external-wallet.service";
+import type { WalletDepositBuildInput } from "@/services/earn/vault-wallet.service";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { recordCallScopes } from "@/test/helpers/cluster-scope";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
@@ -44,9 +44,9 @@ vi.mock("@sdp/types/release-channels", async (original) => {
   const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
   return mockCustodyReleaseChannels(await original<typeof import("@sdp/types/release-channels")>());
 });
-vi.mock("@/services/earn/vault-external-wallet.service", async (original) => ({
-  ...(await original<typeof import("@/services/earn/vault-external-wallet.service")>()),
-  buildExternalWalletDepositTransaction: build,
+vi.mock("@/services/earn/vault-wallet.service", async (original) => ({
+  ...(await original<typeof import("@/services/earn/vault-wallet.service")>()),
+  buildWalletDepositTransaction: build,
 }));
 vi.mock("@/services/earn/vault-deposit.service", async (original) => ({
   ...(await original<typeof import("@/services/earn/vault-deposit.service")>()),
@@ -331,10 +331,10 @@ beforeEach(async () => {
   await seedTestDatabase(env);
   await clearKVStores(env);
   vi.resetAllMocks();
-  build.mockImplementation(async (binding: Env, input: ExternalWalletDepositBuildInput) => ({
+  build.mockImplementation(async (binding: Env, input: WalletDepositBuildInput) => ({
     kind: "built",
-    built: await createPostgresEarnExternalWalletTransactionsRepository(getDb(binding)).create({
-      id: generateEarnExternalWalletTransactionId(),
+    built: await createPostgresEarnWalletTransactionsRepository(getDb(binding)).create({
+      id: generateEarnWalletTransactionId(),
       organizationId: input.organizationId,
       projectId: input.projectId,
       environment: input.projectId === TEST_PRODUCTION_PROJECT.id ? "production" : "sandbox",

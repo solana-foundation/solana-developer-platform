@@ -41,11 +41,11 @@ import {
 } from "@/services/earn/strategy-queued-operations.service";
 import { strategySharesForTokenAmount } from "@/services/earn/strategy-terms";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
-import {
-  buildExternalWalletDepositTransaction,
-  buildExternalWalletWithdrawalTransaction,
-} from "@/services/earn/vault-external-wallet.service";
 import { resolveVaultSponsorship } from "@/services/earn/vault-sponsorship";
+import {
+  buildWalletDepositTransaction,
+  buildWalletWithdrawalTransaction,
+} from "@/services/earn/vault-wallet.service";
 import { createOperationsService } from "@/services/operations.service";
 import {
   DISCOVERED_EARN_POSITION_PREFIX,
@@ -231,7 +231,7 @@ async function prepareDepositAction(
           walletId: source.wallet.id,
           deadline: createVaultDeadline(),
         });
-  const result = await buildExternalWalletDepositTransaction(c.env, {
+  const result = await buildWalletDepositTransaction(c.env, {
     asyncOperation: true,
     ...context,
     provider,
@@ -504,7 +504,7 @@ async function buildSelectedWithdrawalAction(
           walletId: source.wallet.id,
           deadline,
         });
-  const built = await buildExternalWalletWithdrawalTransaction(c.env, {
+  const built = await buildWalletWithdrawalTransaction(c.env, {
     asyncOperation: true,
     ...context,
     provider: position.provider,

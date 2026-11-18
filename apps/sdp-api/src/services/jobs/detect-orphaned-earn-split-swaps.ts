@@ -203,7 +203,7 @@ async function judgeAdvisory(
     createdAfter: advisory.created_at,
   };
 
-  const deposits = await ledger.listExternalWalletDepositsSince(scope);
+  const deposits = await ledger.listWalletDepositsSince(scope);
 
   // 1. The partner is demonstrably still working: a deposit in flight, or a
   //    recent unconsumed follow-up build.

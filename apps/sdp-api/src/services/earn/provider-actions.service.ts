@@ -42,9 +42,9 @@ import {
   signVaultPlan,
   simulateVaultPlan,
 } from "./vault-execution.service";
-import { verifySignedExternalWalletTransaction } from "./vault-external-wallet.service";
 import { rethrowVaultProviderFailure } from "./vault-refusals";
 import { resolveVaultSponsorship, type VaultFeeMode } from "./vault-sponsorship";
+import { verifySignedWalletTransaction } from "./vault-wallet.service";
 
 const ACTION_MOVEMENTS = {
   preparation: "earn.prepare",
@@ -197,7 +197,7 @@ async function executeProviderAction(
   return executeCustodyProviderAction(env, row, plan, fee, simulation.prepared, deadline);
 }
 
-export async function submitExternalProviderAction(
+export async function submitWalletProviderAction(
   env: Env,
   row: EarnProviderActionRow,
   signedTransaction: string
@@ -208,9 +208,9 @@ export async function submitExternalProviderAction(
     row.custody_wallet_id !== null ||
     row.unsigned_transaction === null
   )
-    throw badRequest("This action is not an external-wallet build");
+    throw badRequest("This action is not a wallet build");
   if (row.status !== "prepared") return row;
-  const signed = await verifySignedExternalWalletTransaction(
+  const signed = await verifySignedWalletTransaction(
     { ...row, unsigned_transaction: row.unsigned_transaction },
     signedTransaction
   );
@@ -255,7 +255,7 @@ export async function submitExternalProviderAction(
     } catch (cause) {
       getLogger().warn(
         { actionId: row.id, errorName: cause instanceof Error ? cause.name : "unknown" },
-        "External provider action broadcast outcome remains unknown"
+        "Owner-signed provider action broadcast outcome remains unknown"
       );
       // Submission may already have happened in the caller's wallet; keep the exact bytes recoverable.
     }

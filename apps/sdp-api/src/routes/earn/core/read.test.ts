@@ -179,7 +179,7 @@ describe("Earn core read contracts", () => {
     ).toBe(false);
     expect(earnPositionsQuerySchema.safeParse({ discover: "true" }).success).toBe(false);
     expect(
-      earnPositionsQuerySchema.safeParse({ ownerAddress: OWNER, ownerKind: "custody" }).success
+      earnPositionsQuerySchema.safeParse({ ownerAddress: OWNER, sourceType: "wallet" }).success
     ).toBe(false);
     expect(
       earnPositionsQuerySchema.safeParse({ includeSummary: "true", includePositions: "true" })
@@ -264,7 +264,7 @@ describe("Earn core read contracts", () => {
     });
   });
 
-  it("keeps external owner reads exact-project scoped", async () => {
+  it("keeps owner-address reads exact-project scoped", async () => {
     const visible = await seedPosition({ reference: "visible" });
     await seedPosition({ reference: "sibling", projectId: "prj_core_reads_production" });
     const response = await get(`positions?ownerAddress=${OWNER}`);
@@ -322,7 +322,7 @@ describe("Earn core read contracts", () => {
       ]
     );
     const response = await get(
-      "positions?ownerKind=external&limit=1&includeSummary=true&includeOwnerAddresses=true&includePositions=true"
+      "positions?sourceType=address&limit=1&includeSummary=true&includeOwnerAddresses=true&includePositions=true"
     );
     expect(response.status).toBe(200);
     const body = (await response.json()) as { data: EarnPositionsResponse };
@@ -351,7 +351,7 @@ describe("Earn core read contracts", () => {
       projectId: "prj_core_reads_production",
     });
     const response = await get(
-      `positions?ownerKind=external&afterMovementIds=${sibling.movementId}`
+      `positions?sourceType=address&afterMovementIds=${sibling.movementId}`
     );
     expect(response.status).toBe(404);
     expect(readVaultPositions).not.toHaveBeenCalled();

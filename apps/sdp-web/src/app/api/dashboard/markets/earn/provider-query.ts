@@ -197,10 +197,10 @@ export function vaultPositionsProxyQuery(request: Request): ProxyQueryValidation
   });
 }
 
-export function externalWalletPositionsProxyQuery(request: Request): ProxyQueryValidation {
+export function walletPositionsProxyQuery(request: Request): ProxyQueryValidation {
   return positionsProxyQuery(request, {
-    resource: "external-wallet positions",
-    title: "External-wallet positions",
+    resource: "wallet positions",
+    title: "Wallet positions",
   });
 }
 

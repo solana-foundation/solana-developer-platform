@@ -63,8 +63,8 @@ export const RETRY_SWAP_MAX_ACCOUNTS = 24;
 
 /**
  * The instruction trust boundary: Jupiter's answer is response-controlled
- * executable content headed for a transaction the custody wallet or external
- * owner will AUTHORIZE WHOLESALE, so its instructions are admitted against a
+ * executable content headed for a transaction the wallet owner will
+ * AUTHORIZE WHOLESALE, so its instructions are admitted against a
  * closed outer contract rather than trusted wholesale:
  *
  * - the only admitted auxiliary operation is an exact idempotent ATA create

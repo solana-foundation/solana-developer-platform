@@ -8,8 +8,8 @@ import {
 import { z } from "zod";
 import { successResponseSchema } from "@/openapi/schemas/base";
 import {
-  earnExternalWalletWithdrawalRequestResponse,
-  earnExternalWalletWithdrawalRequestsResponse,
+  earnWalletWithdrawalRequestResponse,
+  earnWalletWithdrawalRequestsResponse,
 } from "@/openapi/schemas/earn";
 import {
   earnMovementSchema,
@@ -302,7 +302,7 @@ export function registerEarnTreasuryPaths(
     "vault-withdrawal-requests",
     "createEarnVaultWithdrawalRequest",
     "Create a custody withdrawal request",
-    earnExternalWalletWithdrawalRequestResponse,
+    earnWalletWithdrawalRequestResponse,
     {
       retired: true,
       description:
@@ -316,7 +316,7 @@ export function registerEarnTreasuryPaths(
     "vault-withdrawal-requests",
     "listEarnVaultWithdrawalRequests",
     "List custody withdrawal requests",
-    earnExternalWalletWithdrawalRequestsResponse,
+    earnWalletWithdrawalRequestsResponse,
     {
       query: requests.earnVaultWithdrawalRequestsQuerySchema,
       description:
@@ -331,7 +331,7 @@ export function registerEarnTreasuryPaths(
     "vault-withdrawal-requests/{withdrawalRequestId}",
     "getEarnVaultWithdrawalRequest",
     "Get a custody withdrawal request",
-    earnExternalWalletWithdrawalRequestResponse,
+    earnWalletWithdrawalRequestResponse,
     {
       params: requests.earnVaultWithdrawalRequestParamsSchema,
       description:
@@ -345,7 +345,7 @@ export function registerEarnTreasuryPaths(
     "vault-withdrawal-requests/{withdrawalRequestId}/cancel",
     "cancelEarnVaultWithdrawalRequest",
     "Cancel a custody withdrawal request",
-    earnExternalWalletWithdrawalRequestResponse,
+    earnWalletWithdrawalRequestResponse,
     {
       params: requests.earnVaultWithdrawalRequestParamsSchema,
       body: requests.earnVaultWithdrawalRequestCancelSchema.omit({ requestId: true }),

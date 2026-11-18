@@ -75,7 +75,7 @@ describe("post-swap deposit refresh", () => {
     expect(retainedSwap).not.toHaveBeenCalled();
   });
 
-  it("rejects a retained swap belonging to another external owner", async () => {
+  it("rejects a retained swap belonging to another owner address", async () => {
     retainedSwap.mockResolvedValue({
       strategyId: "strategy",
       source: { ownerAddress: "sibling" },

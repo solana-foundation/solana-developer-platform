@@ -20,7 +20,7 @@ const { request, retainedBuild, position, resolveSource, buildCancel, resolveFee
 vi.mock("@/db/repositories/earn-vault-withdrawal-requests.repository", () => ({
   createPostgresEarnVaultWithdrawalRequestsRepository: () => ({
     getById: request,
-    getExternalWalletTransaction: retainedBuild,
+    getWalletTransaction: retainedBuild,
   }),
 }));
 vi.mock("@/db/repositories/earn-movements.repository", () => ({
@@ -129,8 +129,8 @@ describe("operation cancellation planning", () => {
     expect(buildCancel).not.toHaveBeenCalled();
   });
 
-  it("returns an unsigned external cancellation without custody sponsorship", async () => {
-    const externalRecord = { ...record, source: { ownerAddress: "owner" } };
+  it("returns an unsigned owner-authorized cancellation without custody sponsorship", async () => {
+    const walletRecord = { ...record, source: { ownerAddress: "owner" } };
     request.mockResolvedValue({ ...requestRow, custody_wallet_id: null });
     position.mockResolvedValue({
       ...requestRow,
@@ -143,9 +143,9 @@ describe("operation cancellation planning", () => {
       ownerAddress: "owner",
       wallet: null,
     });
-    const authorized = await authorizeEarnOperationCancellation(context, externalRecord);
+    const authorized = await authorizeEarnOperationCancellation(context, walletRecord);
     if (authorized === null) throw new Error("Missing cancellation authorization");
-    const prepared = await prepareEarnOperationCancellation(context, authorized, externalRecord);
+    const prepared = await prepareEarnOperationCancellation(context, authorized, walletRecord);
     expect(prepared.nextAction).toEqual({
       type: "sign_transaction",
       transaction: "AQ==",

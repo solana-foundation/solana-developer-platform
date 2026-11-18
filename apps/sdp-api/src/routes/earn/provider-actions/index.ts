@@ -30,16 +30,16 @@ import {
   claimProviderAction,
   executeClaimedProviderAction,
   readProviderAction,
-  submitExternalProviderAction,
+  submitWalletProviderAction,
 } from "@/services/earn/provider-actions.service";
 import type { Env } from "@/types/env";
 import {
   custodyCancellationSchema,
   custodyPreparationSchema,
-  externalCancellationSchema,
-  externalPreparationSchema,
   providerActionParamsSchema,
   providerActionSubmitSchema,
+  walletCancellationSchema,
+  walletPreparationSchema,
 } from "./schemas";
 
 type Target = Omit<
@@ -67,13 +67,13 @@ function base(c: AppContext) {
 async function preparationTarget(
   c: AppContext,
   body: { strategyId: string; custodyWalletId?: string; ownerAddress?: string; feePayer?: string },
-  external: boolean
+  ownerSigned: boolean
 ): Promise<Target> {
   const { strategy } = await requireEarnStrategyForCaller(c, body.strategyId);
   let owner: string;
-  if (external) {
+  if (ownerSigned) {
     if (body.ownerAddress === undefined)
-      throw internalError("External preparation needs its owner");
+      throw internalError("Owner-signed preparation needs its owner");
     owner = body.ownerAddress;
   } else {
     if (body.custodyWalletId === undefined)
@@ -105,7 +105,7 @@ async function preparationTarget(
 async function cancellationTarget(
   c: AppContext,
   body: { movementId: string; feePayer?: string },
-  external: boolean
+  ownerSigned: boolean
 ): Promise<Target> {
   const scoped = base(c),
     ledger = createPostgresEarnMovementsRepository(getDb(c.env));
@@ -130,11 +130,11 @@ async function cancellationTarget(
     !position?.token_mint ||
     !position.share_mint ||
     !parent.vault_address ||
-    external !== (parent.custody_wallet_id === null)
+    ownerSigned !== (parent.custody_wallet_id === null)
   )
     throw notFound("Earn provider order");
   let owner: string;
-  if (external) {
+  if (ownerSigned) {
     if (!parent.owner_address) throw notFound("Earn provider order");
     owner = parent.owner_address;
   } else {
@@ -242,7 +242,7 @@ function authorizeSubmission(kind: EarnProviderActionKind) {
     const input = providerActionSubmitSchema.parse(body);
     const row = await requireScopedAction(c, input.actionId);
     if (row.custody_wallet_id !== null || row.action !== kind)
-      throw notFound("External provider action");
+      throw notFound("Owner-signed provider action");
     return { row, signedTransaction: input.signedTransaction };
   });
 }
@@ -252,7 +252,7 @@ async function submit(c: AppContext) {
     signedTransaction: string;
   }>(c);
   return success(c, {
-    action: providerActionWire(await submitExternalProviderAction(c.env, row, signedTransaction)),
+    action: providerActionWire(await submitWalletProviderAction(c.env, row, signedTransaction)),
   });
 }
 
@@ -277,8 +277,8 @@ providerActions.post(
 providerActions.post(
   "/external/preparation-transactions",
   requireAction("earn.execute"),
-  validateBody(externalPreparationSchema),
-  authorize((c, { body }) => preparationTarget(c, externalPreparationSchema.parse(body), true)),
+  validateBody(walletPreparationSchema),
+  authorize((c, { body }) => preparationTarget(c, walletPreparationSchema.parse(body), true)),
   idempotent({ key: "required", serverErrors: "rerun" }),
   meteredQuota({ name: "earn-provider-preparation", actorMax: 30, orgMax: 120 }),
   create
@@ -286,8 +286,8 @@ providerActions.post(
 providerActions.post(
   "/external/cancellation-transactions",
   requireAction("earn.manage"),
-  validateBody(externalCancellationSchema),
-  authorize((c, { body }) => cancellationTarget(c, externalCancellationSchema.parse(body), true)),
+  validateBody(walletCancellationSchema),
+  authorize((c, { body }) => cancellationTarget(c, walletCancellationSchema.parse(body), true)),
   idempotent({ key: "required", serverErrors: "rerun" }),
   create
 );

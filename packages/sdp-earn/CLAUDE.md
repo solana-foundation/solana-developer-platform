@@ -22,9 +22,10 @@ integrator's SDP API key.
 Earn guides live in `apps/sdp-docs/content/docs/earn` and
 `apps/sdp-docs/content/docs/guides/embedded-yield.mdx`. The normal docs generators render the
 public contract for the deployment's release channel: Earn appears on `beta`
-and `experimental`, and stays hidden on `stable`. Treasury, Programs and
-provider-action routes remain internal; promoting another route requires
-named security sign-off.
+and `experimental`, and stays hidden on `stable`. The new core Earn and shared
+operation routes remain internal, as do Programs and provider-action routes;
+promoting another route requires named security sign-off. The core contract is
+documented in `apps/sdp-docs/content/unpublished/earn/core-api.mdx`.
 
 ## Local development — the whole Earn stack
 
@@ -122,30 +123,26 @@ See README.md → "Catalogue data" for cadence and failure behaviour. A database
 still holding `seed-demo-` rows from the removed `db:seed:earn` needs a one-time
 clear — SQL in `docs/contributing/earn-pluggability-playbook.md` § 3.
 
-### 4b. Get a program — create one through the API
+### 4b. Prepare a strategy action
 
-Create programs through the dashboard or `POST /v1/earn/programs`. Since
-PRO-1670 an org may hold N programs per (environment, provider), each pinned to
-one vault. Migration 0056 replaced the old per-org cap with the global
-`UNIQUE (provider, provider_wallet_ref)`, so a provider wallet can belong to
-exactly one SDP link row.
+Treasury and Embedded Yield use the same four core routes:
+`GET /v1/earn/discovery`, `GET /v1/earn/positions`, `POST /v1/earn/deposit`
+and `POST /v1/earn/withdraw`. Catalogue items are **strategies**, identified by
+`strategyId`; a strategy may represent a vault, a token or an RWA product.
+Provider interfaces keep protocol-specific names such as `EarnVaultProvider`.
 
-A custodial provider has no concept of an SDP organization: one provider
-account holds many portfolio wallets, while SDP returns only the wallets linked
-to the current organization — which is why a provider console total and the SDP
-organization total can legitimately differ. (No shipped provider uses this flow
-today; the Ground integration that did was removed. See §5b.)
+Deposits select a strategy and a custody wallet or owner address; withdrawals
+select a position. Preparation records an operation and returns unsigned bytes
+or a next action without signing or broadcasting. Execute through
+`POST /v1/operations/{operationId}/execute` with the reviewed action ID,
+version and an `Idempotency-Key`; the response is `202`, and the worker handles
+signing, provider approval and submission. Poll the same operation to recover
+after reload or a lost response.
 
-Practical notes:
+Program creation, allocation changes and fresh legacy transaction builds return
+`410`. Existing history, exact already-built signed submissions, queued-request
+cancellations and program exits remain available to drain existing obligations.
 
-- Use the signed-in Clerk organization in the dashboard, or mint an API key for
-  that organization's sandbox project. The `db:seed:local` development key
-  belongs to the test organization and has no Earn program by default.
-- Program creation uses a single-strategy allocation at 100% (the only V1 shape,
-  PRO-1667). Add another strategy by creating another program.
-- Fund a sandbox program by sending devnet USDC to its Solana deposit address.
-  Circle's faucet (<https://faucet.circle.com/>, USDC + Solana Devnet) mints the
-  official devnet USDC used by the provider flow.
 ### 5. The last gate: org entitlement
 
 Flags control _visibility_; earn access is **override-only per organization**
@@ -161,8 +158,9 @@ shows Kamino's devnet shelf plus Veda's devnet Test Vault. Its explicit mainnet
 mirror can also show browse-only Jupiter Lend and Ondo rows. Production has no
 Veda row because `VEDA_DEPLOYMENTS` is devnet-only until Veda names a production
 vault. The Ground integration that previously served the custodial program flow
-was removed, so no registered provider is portfolio-capable today; the program
-routes stay and answer 501 for providers without that capability.
+was removed, so no registered provider is portfolio-capable today. Legacy
+program reads and exits retain their capability guards; creating or
+reconfiguring a program returns `410`.
 `EARN_PROVIDER_SURFACING`
 (`packages/sdp-types/src/provider-access.ts`) declares which registered
 providers SDP OFFERS; it is a code constant, so there is no env var or DB row to
@@ -172,34 +170,30 @@ ADR 0002's 2026-08-14 addendum.
 
 ### Troubleshooting
 
-| Symptom                                                                                                         | Cause                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Sandbox Kamino rows name devnet vaults you do not recognise                                                     | correct — they are the real devnet shelf (Allez, Steakhouse, RockawayX, Gauntlet Frontier and friends), read on-chain from `devkRng…`, not the mainnet names                                                                                                                                                                                                                                                                                                                                                                                       |
-| Sandbox shows mainnet vaults, badged "Mainnet only"                                                             | correct — the PRO-1742 mirror: the Treasury strategies card always lists the mirrored production shelf above its devnet shelf. Rows are browse-only (`fundable: false`); only devnet rows deposit, and a failed mirror read hides nothing but itself (PRO-1961)                                                                                                                                                                                                                                                                                    |
-| No "Set up Earn"/"Add strategy"/"Change strategy" buttons; `/deposit` shows a notice                            | correct today: no registered provider is portfolio-capable, so the custodial (program) affordances hide (§5b). The `vault_direct` deposit path is separate and unaffected                                                                                                                                                                                                                                                                                                                                                                          |
-| `POST /v1/earn/programs` → 403 "is not currently offered"                                                       | the surfacing gate, not entitlement — no `providerOverrides` lifts it (§5b)                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| Every request 500s                                                                                              | Redis missing/wrong port (rate limiter)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `/v1/earn/*` → 403                                                                                              | the release channel does not run Earn (`stable`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `/dashboard/markets/embedded-yield` → 404                                                                       | same channel, web side (segment guards); legacy `/dashboard/markets/earn/*` redirects here                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| Dashboard "provider not configured" (503)                                                                       | the named provider has no credentials in this environment                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| "requires manual activation"                                                                                    | org lacks the earn provider override                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| API waits then dies on boot                                                                                     | `DATABASE_URL` not preserved → Doppler's Cloud SQL URL won                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| Web typecheck fails in `.next/dev/types`                                                                        | stale generated cache: `rm -rf apps/sdp-web/.next/dev/types`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Dashboard shows empty onboarding, but a program exists in the DB                                                | the selected Clerk organization or environment does not own that program; verify both scopes                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `GET /v1/earn/programs` → `programs: []` with the dev API key                                                   | that key is the test org's, which has no program by design (§4b)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| A key you minted yourself returns `strategies: []` **and** `programs: []`                                       | the key inherited the **production** environment. An API key has no environment column — it comes from `projects.environment` (the JOIN in `middleware/auth.ts`), and every org has both a `default-sandbox` and a `default-production` project. A key on the production project sees no sandbox catalogue and no sandbox programs, which reads as "everything is missing" rather than as a scoping error. Mint against the sandbox project, and refuse anything else: a production key would drive a provider's **production** API from a laptop. |
-| `POST /v1/earn/programs` → 400 "needs an idempotency key"                                                       | creation is key-REQUIRED since PRO-1670: send exactly one of body `requestId` (UUIDv4) or the `Idempotency-Key` header — never both                                                                                                                                                                                                                                                                                                                                                                                                                |
-| Catalogue empty right after boot                                                                                | the sync runs on Worker start and then once per hourly slot; verify the release channel, provider credentials, and scheduler registration, then wait for a live pass                                                                                                                                                                                                                                                                                                                                                                               |
-| Kamino rows appear disabled in the dashboard                                                                    | read the row's badge: since PRO-1692 SDP HAS a `vault_direct` deposit path (`POST /v1/earn/vault-deposits`, signed from an org custody wallet), so sandbox devnet rows are depositable once the org holds the earn override (§5). `earnVaultDepositAvailability` (sdp-web `earn-surfacing.ts`) names the gate per row; since PRO-1986 Kamino deposits open in production too, while Veda stays `environment_unavailable` there until PRO-1777                                                                                                      |
-| Kamino APY is blank in sandbox                                                                                  | correct: the metrics endpoint is mainnet's and 404s for devnet pubkeys, so `listStrategyMetrics` returns `[]` outside production and the row renders "—" rather than a fabricated rate                                                                                                                                                                                                                                                                                                                                                             |
-| Kamino APY looks stale in production                                                                            | the 5-minute metrics refresh is a separate cron — check it registered (`isEarnEnabled`), not the hourly sync                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Local API boots on 8787 despite `PORT=…`                                                                        | the dev wrapper reads **`SDP_API_PORT`**, not `PORT` (apps/sdp-api/scripts/lib/dev-env.mjs)                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| Need devnet USDC to fund a program                                                                              | Circle's faucet: <https://faucet.circle.com/> — USDC + Solana Devnet (§4b)                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| No Veda rows in the PRODUCTION catalogue                                                                        | correct — `VEDA_DEPLOYMENTS` (`@sdp/types/veda-programs`) is devnet-only: the published mainnet vault state is Veda's shared Test Vault, so production `listStrategies` throws `PROVIDER_NOT_CONFIGURED` and the sync skips that lane without touching other providers' rows. Sandbox carries the devnet Test Vault row                                                                                                                                                                                                                            |
-| A Veda deposit answers 403 "is not currently offered"                                                           | stale build — `EARN_PROVIDER_SURFACING.veda` flipped `true` on 2026-08-31 (Kamino, Veda, Jupiter Lend and Ondo are offered). The gate still exists and still answers this for upshift/perena, and no org override lifts it (§5b)                                                                                                                                                                                                                                                                                                                   |
-| No Ondo rows in the sandbox catalogue's own lane; USDY only appears under the mainnet-mirror toggle             | correct — Ondo has no devnet deployment anywhere (even its staging runs on mainnet), so sandbox carries USDY only as the PRO-1742 browse-only mirror row. See the Ondo section below                                                                                                                                                                                                                                                                                                                                                               |
-| The Ondo pass fails with `Ondo assets API listed no usdy entry` or `Ondo USDY apy is not a non-negative number` | `ondo.finance/api/v1/assets` changed shape (the `usdy` entry or its numeric `apy` percent). Check the live body; the row keeps its last figures until fixed                                                                                                                                                                                                                                                                                                                                                                                        |
-| No Ondo row in the sandbox MIRROR either, on a deployment with no mainnet RPC                                   | the production pass needs a mainnet RPC: the catalogue sync hands every on-chain read the preferred endpoint of the requested cluster's managed pool (`ctx.catalogueRpcUrl`, read by `resolveCatalogueRpcUrl`), with no process-default fallback. With no `SOLANA_RPC_<PROVIDER>_MAINNET_API_KEY_URL` the pass is a steady-state skip and the mirror converges to empty. Managed deployments refuse to boot without both pools; a local or self-hosted stack sets one                                                                              |
+| Symptom                                                                                                         | Cause                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sandbox Kamino rows name devnet vaults you do not recognise                                                     | correct — they are the real devnet shelf (Allez, Steakhouse, RockawayX, Gauntlet Frontier and friends), read on-chain from `devkRng…`, not the mainnet names                                                                                                                                                                                                                                                                                                          |
+| Sandbox shows mainnet strategies, badged "Mainnet only"                                                         | The production mirror is browse-only (`fundable: false`); a sandbox deposit must use its own cluster.                                                                                                                                                                                                                                                                                                                                                                 |
+| Legacy program creation or allocation changes return `410`                                                      | Those writers are retired. Prepare strategy actions through the core Earn routes (§4b).                                                                                                                                                                                                                                                                                                                                                                               |
+| Every request 500s                                                                                              | Redis missing/wrong port (rate limiter)                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `/v1/earn/*` → 403                                                                                              | the release channel does not run Earn (`stable`)                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `/dashboard/markets/embedded-yield` → 404                                                                       | same channel, web side (segment guards); legacy `/dashboard/markets/earn/*` redirects here                                                                                                                                                                                                                                                                                                                                                                            |
+| Dashboard "provider not configured" (503)                                                                       | the named provider has no credentials in this environment                                                                                                                                                                                                                                                                                                                                                                                                             |
+| "requires manual activation"                                                                                    | org lacks the earn provider override                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| API waits then dies on boot                                                                                     | `DATABASE_URL` not preserved → Doppler's Cloud SQL URL won                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Web typecheck fails in `.next/dev/types`                                                                        | stale generated cache: `rm -rf apps/sdp-web/.next/dev/types`                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Discovery returns `strategies: []` unexpectedly                                                                 | Check the credential's project environment and the requested `cluster`; local calls must use a sandbox project.                                                                                                                                                                                                                                                                                                                                                       |
+| Catalogue empty right after boot                                                                                | the sync runs on Worker start and then once per hourly slot; verify the release channel, provider credentials, and scheduler registration, then wait for a live pass                                                                                                                                                                                                                                                                                                  |
+| A discovered strategy cannot accept a deposit                                                                   | Check `capabilities.deposit` and its unavailable reason. Preparation also checks cluster, provider availability, active status and entitlement; Veda production remains unavailable until PRO-1777.                                                                                                                                                                                                                                                                   |
+| Kamino APY is blank in sandbox                                                                                  | correct: the metrics endpoint is mainnet's and 404s for devnet pubkeys, so `listStrategyMetrics` returns `[]` outside production and the row renders "—" rather than a fabricated rate                                                                                                                                                                                                                                                                                |
+| Kamino APY looks stale in production                                                                            | the 5-minute metrics refresh is a separate cron — check it registered (`isEarnEnabled`), not the hourly sync                                                                                                                                                                                                                                                                                                                                                          |
+| Local API boots on 8787 despite `PORT=…`                                                                        | the dev wrapper reads **`SDP_API_PORT`**, not `PORT` (apps/sdp-api/scripts/lib/dev-env.mjs)                                                                                                                                                                                                                                                                                                                                                                           |
+| Need devnet USDC to fund a program                                                                              | Circle's faucet: <https://faucet.circle.com/> — USDC + Solana Devnet (§4b)                                                                                                                                                                                                                                                                                                                                                                                            |
+| No Veda rows in the PRODUCTION catalogue                                                                        | correct — `VEDA_DEPLOYMENTS` (`@sdp/types/veda-programs`) is devnet-only: the published mainnet vault state is Veda's shared Test Vault, so production `listStrategies` throws `PROVIDER_NOT_CONFIGURED` and the sync skips that lane without touching other providers' rows. Sandbox carries the devnet Test Vault row                                                                                                                                               |
+| A Veda deposit answers 403 "is not currently offered"                                                           | stale build — `EARN_PROVIDER_SURFACING.veda` flipped `true` on 2026-08-31 (Kamino, Veda, Jupiter Lend and Ondo are offered). The gate still exists and still answers this for upshift/perena, and no org override lifts it (§5b)                                                                                                                                                                                                                                      |
+| No Ondo rows in the sandbox catalogue's own lane; USDY only appears under the mainnet-mirror toggle             | correct — Ondo has no devnet deployment anywhere (even its staging runs on mainnet), so sandbox carries USDY only as the PRO-1742 browse-only mirror row. See the Ondo section below                                                                                                                                                                                                                                                                                  |
+| The Ondo pass fails with `Ondo assets API listed no usdy entry` or `Ondo USDY apy is not a non-negative number` | `ondo.finance/api/v1/assets` changed shape (the `usdy` entry or its numeric `apy` percent). Check the live body; the row keeps its last figures until fixed                                                                                                                                                                                                                                                                                                           |
+| No Ondo row in the sandbox MIRROR either, on a deployment with no mainnet RPC                                   | the production pass needs a mainnet RPC: the catalogue sync hands every on-chain read the preferred endpoint of the requested cluster's managed pool (`ctx.catalogueRpcUrl`, read by `resolveCatalogueRpcUrl`), with no process-default fallback. With no `SOLANA_RPC_<PROVIDER>_MAINNET_API_KEY_URL` the pass is a steady-state skip and the mirror converges to empty. Managed deployments refuse to boot without both pools; a local or self-hosted stack sets one |
 
 ## Ondo — a TOKEN-HOLDING strategy, no vault program at all
 
@@ -237,11 +231,11 @@ entry point) and how the Jupiter trust boundary stays single-owner in the API.
 
 ## Two provider shapes — read this before assuming either model
 
-The **custodial** shape (the retired Ground integration): SDP provisions an
-omnibus portfolio wallet, the customer funds it, the provider spreads it across
-yield sources. Programs, withdrawals and the deposit wizard all assume that
-shape. No shipped provider uses it today, but the routes, ledger and
-`EarnPortfolioWalletProvider` capability stay — they are provider-neutral.
+The legacy **custodial** shape (the retired Ground integration): SDP provisions
+an omnibus portfolio wallet, the customer funds it, and the provider spreads it
+across yield sources. No shipped provider uses it today. The legacy reads,
+exits, ledger and `EarnPortfolioWalletProvider` capability remain for recovery;
+the core API does not create portfolio programs or configure allocations.
 
 Every current executing provider is **non-custodial** and implements the base
 `EarnVaultProvider` contract plus the **vault-direct** capability
@@ -273,21 +267,18 @@ never a permission gate, since ADR 0002 forbids money-out inheriting a
 money-in gate, and it traps nothing — the shares sit in the organization's own
 custody wallet and each provider's own surfaces can redeem them.
 
-No current provider implements the portfolio-wallet capability, so every
-portfolio route answers 501 through `supportsPortfolioWallets`, never a
-provider-id check. The two capabilities are asserted MUTUALLY EXCLUSIVE: a
-client claiming both would let a portfolio route render the vault account as a
-fundable address.
+No current provider implements the portfolio-wallet capability. Retained
+portfolio reads and exits test `supportsPortfolioWallets`, never a provider ID.
+The two capabilities are asserted MUTUALLY EXCLUSIVE: a client claiming both
+would let a portfolio route render the vault account as a fundable address.
 
-Money moves through provider-specific execution packages. SDP builds the plan,
-signs it with one of the organization's own custody wallets, and submits it.
-The current packages are `@sdp/kamino`, `@sdp/veda`, `@sdp/jupiter-lend`,
-`@sdp/ondo`, `@sdp/hastra`, and pre-launch `@sdp/wisdomtree`; the API signs and submits
-(`POST /v1/earn/vault-deposits`). Since PRO-1722 the same builders also serve
-the EXTERNAL-WALLET flow (`/v1/earn/external-wallet/*`), where the plan's
-`owner` is a wallet SDP does not custody and the OWNER signs instead of SDP.
-The caller submits those signed bytes through SDP. Nothing changes on the
-packages' side because the builders always took the owner as a parameter.
+Money moves through provider-specific execution packages: `@sdp/kamino`,
+`@sdp/veda`, `@sdp/jupiter-lend`, `@sdp/ondo`, `@sdp/hastra`, and pre-launch
+`@sdp/wisdomtree`. The core API prepares one operation for either owner model.
+For custody, the worker uses the organization's configured signer and tracks
+any provider approval before submission. For an owner address, the caller signs
+the exact prepared transaction and execute queues those bytes for the worker.
+Both use the same builders, which take the owner as a parameter and never sign.
 Those packages depend on this one, never the reverse: the hourly catalogue cron
 must not load a chain SDK it never calls.
 
@@ -336,9 +327,11 @@ page it links is fetchable as raw markdown):
   deposit set). Review a change to that number
   against `pnpm --filter @sdp/api earn:inventory:kamino`, which regenerates
   docs/earn/kamino-catalogue-inventory.md including the largest near-misses.
-  Note admission is only what the SYNC stores: the strategy routes additionally
-  apply the PRO-1727 curated allowlists (`routes/earn/handlers/curation.ts` in
-  apps/sdp-api), so the browsable shelf is six vaults on mainnet, not 25.
+  Sync admission determines the indexed catalogue. Legacy strategy reads and
+  core deposit admission additionally apply the reviewed execution allowlists
+  (`routes/earn/handlers/curation.ts` in apps/sdp-api). Core discovery includes
+  indexed rows outside that shelf with deposits marked `catalogue_only`; a
+  broader discovery result never widens execution admission.
 
   Permissionless also means **the vault NAME is attacker-controlled** — free
   text chosen by whoever called `createVaultIxs`. SDP may quote it (it is the
@@ -407,21 +400,13 @@ cluster's shelf (fundable) plus a browse-only MIRROR of the production mainnet
 shelf, written by the sync as two cluster-scoped lanes so each sub-shelf
 converges independently (`apps/sdp-api/src/cron/earn-catalogue-sync.ts`). List
 reads default to the environment's own cluster; the mirrored shelf is an
-explicit `?cluster=` opt-in (the Treasury strategies card requests it beside
-the default shelf in sandbox). A mirrored
-row names a live mainnet vault and a mainnet mint — everything about it true,
-none of it fundable from devnet — so ONE predicate decides —
-`isClusterFundableInEnvironment` (src/support.ts) — and
-three gates enforce its answer, none of which may re-derive the comparison:
-
-1. `assertKnownYieldSources` in the API **calls it**, the last gate before a
-   provider mutation, on both program create and re-target.
-2. `mapToEarnStrategy` **calls it** to emit `hostCluster` plus a per-request
-   `fundable` boolean — the machine-readable warning a partner reads.
-3. `fundableStrategies` in the dashboard's deposit model **consumes that
-   answer** over the wire (`strategy.fundable`). It deliberately does not
-   recompute it: a browser-side copy of the cluster comparison is the second
-   thing that can drift toward permissive.
+explicit `?cluster=` opt-in. A mirrored row names a live mainnet strategy and
+mint, but cannot receive devnet funds. `isClusterFundableInEnvironment`
+(src/support.ts) owns that comparison. `mapToEarnStrategy` calls it to emit
+the per-request `fundable` field, which clients consume. The core deposit
+admission path calls it through `assertStrategyDepositable`, both when
+preparing and before starting custody approval. Never re-derive the comparison
+in a client or provider adapter.
 
 Note `fundable` answers the cluster question ALONE. `true` does not promise a
 deposit will succeed: the matching execution capability, money-in environment,
@@ -452,17 +437,25 @@ Two properties keep it from fighting the sync, and both are load-bearing:
   in the hourly sync. Kamino deliberately reports its whole shelf (173 rows) and
   only catalogued rows land.
 - **It cannot change what a strategy IS.** `UpdateEarnStrategyMetricsInput`
-  carries the rate and volatile risk metadata only, and the metadata is MERGED
-  so `curator` (which the sync derives) survives.
+  carries rate observations and volatile risk metadata only. Metadata is
+  merged so `curator` (which the sync derives) survives.
+
+`ProviderStrategySnapshot.rateObservedAt` records when SDP observed the
+provider-reported APY. The catalogue pass stamps a rate when its snapshot has
+no observation time, and mirrors preserve the same timestamp. The metrics
+pass stamps its own successful observations; a missing rate clears its time.
+Core discovery exposes this as `rate.observedAt`, which remains null for an
+unknown observation. Never substitute a row's unrelated `updated_at`.
 
 **A provider's shelf read must be ALL-OR-NOTHING.** `_loadMetricsByVault`
 throws rather than returning a short map — on a page missing its `result` array
 and on hitting the pagination cap with a live token. This is not defensive
 padding: a vault with no metrics row is dropped as `no_metrics`, and the sync
-DELETES rows a provider no longer lists, so a half-read shelf would not degrade
-gracefully — it would delist every vault whose page went unread, in both
-environments. Failing the read makes the sync skip the pass and leave the
-catalogue intact. Any future provider whose catalogue read is paginated owes the
+deprecates strategies a provider no longer lists, so a half-read shelf would
+delist every strategy whose page went unread, in both environments. The row
+and its exit metadata remain available for existing holdings. Failing the read
+makes the sync skip the pass and leave the catalogue intact. Any future
+provider whose catalogue read is paginated owes the
 same guarantee; `providerFetchJson` does no schema validation, so a 200 carrying
 `{}` is otherwise indistinguishable from an empty page.
 
@@ -526,14 +519,14 @@ the five-minute pass would re-pay the whole catalogue cost for the rate alone.
 
 - **Money out beats money off**: nothing in this package may make withdrawals
   depend on availability/enablement — only on configured credentials.
-- Catalogue mapping must exclude anything that would trap funds: a source that
-  cannot be exited through SDP's rails must never be listed.
+- New deposits require an admitted execution path and a supported way out.
+  Discovery-only strategies never authorize a deposit by their presence alone.
 - **Persistence and visibility are separate.** A provider's distillation indexes
-  every source it can fund and exit through SDP's rails. The catalogue sync
-  deletes only rows the provider no longer lists or that stop satisfying those
-  safety gates. The Earn strategy API separately hides Aave- and Morpho-related
-  rows from list and detail reads; do not move that product policy into a
-  provider client.
+  sources within its declared support. The catalogue sync deprecates unlisted
+  active strategies and retains their stable exit metadata; operator pauses
+  remain sticky. Legacy strategy reads apply the reviewed execution shelf,
+  while core discovery can show catalogue-only rows. Deposit admission still
+  enforces that shelf. Keep product curation out of provider clients.
 - Missing required provider configuration ⇒ throw `PROVIDER_NOT_CONFIGURED`
   **before** any network call.
 
@@ -629,9 +622,9 @@ CLAUDE.md, "Every operation reads each account once").
 
 `EARN_PROVIDERS` is what this deployment can talk to; `EARN_PROVIDER_SURFACING`
 (both in `packages/sdp-types/src/provider-access.ts`) is what SDP sells today.
-An un-surfaced provider keeps everything in this package — client, credentials,
-catalogue sync, metrics refresh — and disappears from `GET /strategies` and
-`POST /programs` only.
+An un-surfaced provider keeps its client, credentials, catalogue sync and
+metrics refresh, but disappears from discovery and legacy strategy reads.
+Core deposit admission also requires a surfaced provider.
 
 **Nothing in this package reads it, and nothing should.** Surfacing is a product
 policy enforced at the API's read/write boundary, exactly like
@@ -641,15 +634,17 @@ what makes the DB a truthful inventory and re-surfacing a deploy rather than an
 hour's wait.
 
 The invariant it must never break is the one at the top of "Hard invariants":
-surfacing gates the way IN (a NEW program) and nothing else, so it can never
-trap funds. §6 of `docs/contributing/earn-pluggability-playbook.md` is the
+surfacing gates the way IN (a new strategy deposit) and nothing else, so it
+cannot trap funds. §6 of `docs/contributing/earn-pluggability-playbook.md` is the
 checklist.
 
 ## Cross-package coupling
 
-- Wire DTOs shared with API/web live in `packages/sdp-types/src/earn.ts`.
-  Runtime deposit, deposit-history and direct-withdrawal response schemas live
-  in `@sdp/types/earn-wire`; internal OpenAPI and Treasury reuse those parsers.
+- Core DTOs shared by Treasury and Embedded Yield live in
+  `packages/sdp-types/src/earn-core.ts` and `operations.ts`; legacy wire DTOs
+  remain in `earn.ts`.
+  Legacy deposit, deposit-history and direct-withdrawal response schemas live
+  in `@sdp/types/earn-wire`; internal OpenAPI reuses those parsers.
   External movement responses declare atomic or provider-order `settlement`.
   Consumers must not interpret a missing settlement kind as atomic completion.
 - Curators/categories are open-string registries in `@sdp/types` — adding one

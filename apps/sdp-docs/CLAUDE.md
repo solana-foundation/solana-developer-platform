@@ -362,10 +362,18 @@ Yield in `content/docs/guides/embedded-yield.mdx`. The public API reference,
 Postman, playground and AI resources regenerate from the channel's public
 OpenAPI document. No branch or deployment-preview override admits content.
 
-The Treasury and provider-integration guides remain under
-`content/unpublished/earn` because they describe internal operations. Treasury, Programs and provider administration
-stay outside the pinned public API contract. A change to that contract needs
-security review; publication follows module maturity.
+The replacement contract lives in `content/unpublished/earn/core-api.mdx`.
+Its four core Earn routes and five shared operation routes remain internal;
+public reference, playground, Postman and AI generators must not include them.
+Publishing those routes requires named security sign-off. The Treasury and
+provider-integration guides also remain under `content/unpublished/earn`.
+
+Legacy guides describe retirement and recovery: fresh legacy deposit and
+withdrawal writers, program creation and allocation changes return `410`.
+Historical reads, exact already-built signed submissions and existing exits
+remain available. Keep these compatibility behaviors distinct from the new
+asynchronous operation contract. Programs and provider administration remain
+outside the pinned public API contract.
 
 ---
 

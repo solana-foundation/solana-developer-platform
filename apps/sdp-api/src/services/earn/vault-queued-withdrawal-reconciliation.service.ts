@@ -244,14 +244,14 @@ async function readActionExpiry(
  *
  * @param ledger - The two queue repository reads and writes the cleanup uses.
  */
-export async function cleanupAbandonedExternalBuilds(
-  ledger: Pick<QueueLedger, "hasUnconsumedExternalBuilds" | "cleanupExpiredExternalBuilds">
+export async function cleanupAbandonedWalletBuilds(
+  ledger: Pick<QueueLedger, "hasUnconsumedWalletBuilds" | "cleanupExpiredWalletBuilds">
 ): Promise<void> {
   const { environment } = currentClusterScope();
   try {
-    if (!(await ledger.hasUnconsumedExternalBuilds({ environment }))) return;
+    if (!(await ledger.hasUnconsumedWalletBuilds({ environment }))) return;
     const height = await createClusterRpc().getBlockHeight({ commitment: "finalized" }).send();
-    await ledger.cleanupExpiredExternalBuilds({
+    await ledger.cleanupExpiredWalletBuilds({
       environment,
       currentBlockHeight: height.toString(),
     });
@@ -282,7 +282,7 @@ export async function reconcileEarnVaultQueuedWithdrawals(env: Env): Promise<voi
   const ledger = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
   const { environment } = currentClusterScope();
   await ledger.cleanupExpiredReservations({ environment });
-  await cleanupAbandonedExternalBuilds(ledger);
+  await cleanupAbandonedWalletBuilds(ledger);
   const actions = await ledger.claimUnsettledActions({ environment, limit: ACTION_BATCH_SIZE });
   const stats = emptyStats(actions.length, 0);
   await reconcileActions(env, ledger, actions, stats);

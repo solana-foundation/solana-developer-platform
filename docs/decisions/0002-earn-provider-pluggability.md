@@ -991,14 +991,14 @@ production row does not propagate to the sandbox mirror row. Both are
 review-surface fidelity gaps, not deposit paths: `fundable: false` holds
 throughout.
 
-## Addendum — 2026-08-26 External wallets: caller-signed vault movements (PRO-1722)
+## Addendum — 2026-08-26 Wallets: caller-signed vault movements (PRO-1722)
 
-The B2B2C money path ships. An _external wallet_ is a **non-custodial wallet**
+The B2B2C money path ships. An _wallet_ is a **non-custodial wallet**
 the partner's platform connects — SDP holds no key for it, and its owner is
 not an SDP tenant. Every prior vault money path resolved an exact custody
 wallet and signed from it. The contract decided here: **SDP builds and returns
 an unsigned
-transaction for the external wallet to sign, and records the movement when the
+transaction for the wallet to sign, and records the movement when the
 signed transaction is submitted back, before SDP broadcasts it.**
 
 ### The load-bearing question: who broadcasts
@@ -1019,13 +1019,13 @@ converges on one correct ledger row.
 
 ### Not a third execution model
 
-An external-wallet movement is a `vault_direct` movement: one signed
+A wallet movement is a `vault_direct` movement: one signed
 transaction, recorded before broadcast, chain lifecycle, same reconciler, same
 transition matrix, same org-scoped idempotency anchor. The execution model names
 HOW money moves on chain, not whose key signed. The signer distinction is a
 column pair — exactly one of `custody_wallet_id` and `owner_address` per vault
 row (migration 0070) — and every treasury read scopes by custody wallet, so
-external-wallet rows are structurally invisible to those surfaces rather than
+wallet rows are structurally invisible to those surfaces rather than
 filtered by convention.
 
 ### The authenticated two-call shape, and why the build persists
@@ -1067,9 +1067,9 @@ transaction is a different request and conflicts rather than silently replaying.
   signature, which IS the authorization. There is no signing sink for the
   value-moving conformance inventory to find.
 
-### Scoping: the external wallet belongs to the partner org AND project
+### Scoping: the wallet belongs to the partner org AND project
 
-The claim key for an external-wallet position is (org, **project**, environment,
+The claim key for a wallet position is (org, **project**, environment,
 provider, vault, owner) — stricter than the custody claim, where the project is
 attribution only. A partner's sibling project is a different integration
 surface: it must not learn the position exists, let alone exit it. Movements
@@ -1083,7 +1083,7 @@ carry the exact-claim FK onto (vault, owner) the way custody movements do onto
   co-signing a stranger's transaction is its own decision). The share-ATA rent
   funder is recorded as NULL (the signing wallet paid and keeps it), so the
   exit's rent refund defaults back to the owner with no attribution to carry.
-- **Live hydration of an external-wallet position reads the OWNER's balance in
+- **Live hydration of a wallet position reads the OWNER's balance in
   that vault**, which includes shares acquired outside SDP. That is the honest
   non-custodial answer — the chain cannot attribute fungible shares to SDP
   movements — and the per-wallet read surface (PRO-1724) inherits it as a
@@ -1096,7 +1096,7 @@ carry the exact-claim FK onto (vault, owner) the way custody movements do onto
   accumulate until a cleanup sweep exists. Nothing reads them but their own
   submit.
 
-## Addendum — 2026-08-31 External wallets: per-owner reads and the earned figure (PRO-1772)
+## Addendum — 2026-08-31 Wallets: per-owner reads and the earned figure (PRO-1772)
 
 PRO-1722 shipped the B2B2C surface write-only; this addendum adds the reads
 that close the loop: a per-owner activity list and movement detail, and a
@@ -1161,7 +1161,7 @@ integration measured against the live API:
   A balance screen must render for a new customer, and every query is already
   org/project/environment scoped, so a foreign claim produces the same empty
   bytes as no claim: nothing leaks that the content itself would not. The
-  `hasExternalWalletPositionOwner` gate is gone. Only the retired
+  `hasWalletPositionOwner` gate is gone. Only the retired
   path-addressed shapes and the movement-by-id detail still 404.
 - **`withdrawals_not_valued` is now the exception, not the rule.** The
   "deliberately follow-up work" above is done: when a withdrawal reaches
@@ -1178,7 +1178,7 @@ integration measured against the live API:
 - **A fully exited holding closes.** The same settlement hook reads the
   holding live for that one vault and owner and stamps `closed_at` when
   shares are "0" (fail-soft; a later deposit transition re-opens it), for
-  external-wallet and custody rows alike. Before this nothing ever wrote
+  wallet and custody rows alike. Before this nothing ever wrote
   `closed_at` at runtime, so an exited position stayed "held" forever.
 
 ### Addendum to the addendum: 2026-09-29 open queued withdrawals are `withdrawals_pending`
@@ -1201,10 +1201,10 @@ it delegated rather than recreating PRIME, so that wYLDS still backs the
 claim there when the report can attribute it, and the claim carries
 `ambiguousBacking` when it cannot.
 
-## Addendum — 2026-09-02 The partner pays: caller-provided fee payers on the external-wallet builds
+## Addendum — 2026-09-02 The partner pays: caller-provided fee payers on the wallet builds
 
 Supersedes the "Owner pays everything" accepted cost in the 2026-08-26
-addendum. Both external-wallet BUILD routes now take an optional `feePayer`: a
+addendum. Both wallet BUILD routes now take an optional `feePayer`: a
 wallet the API caller (the partner) controls, which becomes the transaction's
 fee payer and, through the provider's `rentPayer`, funds the share-ATA rent an
 account creation needs. The compiled transaction then requires the partner's
@@ -1259,7 +1259,7 @@ the docs tell partners to co-sign programmatically.
 
 PR #1987 completed the PRO-1872 / EARN-027 security gate at exact head
 `b2d313803`, with named approval from `cutbow7`, and published the
-external-wallet queued-withdrawal lifecycle. The public Earn document now pins
+wallet queued-withdrawal lifecycle. The public Earn document now pins
 21 operations, every one requiring an API key; the project behind the key
 decides the environment.
 

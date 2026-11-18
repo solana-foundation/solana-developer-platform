@@ -127,7 +127,7 @@ async function collectEarnPages(path: string, collection: "positions" | "operati
 }
 
 export function listEarnPositions(ownerAddress: string) {
-  return collectEarnPages(\`/v1/earn/positions?ownerKind=external&ownerAddress=\${encodeURIComponent(ownerAddress)}&discover=true\`, "positions");
+  return collectEarnPages(\`/v1/earn/positions?sourceType=address&ownerAddress=\${encodeURIComponent(ownerAddress)}&discover=true\`, "positions");
 }
 
 export function listEarnActivity(ownerAddress: string) {
@@ -173,7 +173,7 @@ export async function refreshEarnOperation(operationId: string, idempotencyKey: 
 // signing timed out or RPC history is missing. Cancellation acknowledgement
 // does not prove signing or settlement stopped; keep watching the operation.
 // Only nextAction.type === "refresh" explicitly offers a replacement action.
-// A previously exposed external message needs authoritative reconciliation; expiry alone is not proof.
+// A previously exposed wallet message needs authoritative reconciliation; expiry alone is not proof.
 // Refresh changes the message: review new terms and obtain a new signature.`;
   return { client, deposit, portfolio, withdraw, asyncWithdraw };
 }

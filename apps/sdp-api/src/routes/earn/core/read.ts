@@ -26,11 +26,6 @@ import { decodeKeysetCursor } from "@/lib/keyset-cursor";
 import { success } from "@/lib/response";
 import type { AppContext } from "@/routes/earn/context";
 import { getEarnRepository } from "@/routes/earn/context";
-import {
-  collectAllExternalWalletPositionRows,
-  type ExternalWalletHolding,
-  summarizeExternalWalletPositions,
-} from "@/routes/earn/handlers/external-wallet";
 import { parseQuery } from "@/routes/earn/handlers/shared";
 import {
   isEarnStrategyInExecutionShelf,
@@ -50,6 +45,11 @@ import {
   markVaultPositionRowsRead,
   vaultPositionDiscoveryScope,
 } from "@/routes/earn/handlers/vault-position-hydration";
+import {
+  collectAllWalletPositionRows,
+  summarizeWalletPositions,
+  type WalletHolding,
+} from "@/routes/earn/handlers/wallet";
 import {
   isEarnDirectWithdrawalConfigured,
   resolveEarnExecutionClient,
@@ -150,15 +150,15 @@ export function mergeEarnPositionPages(
 }
 
 function positionSummary(
-  holdings: readonly ExternalWalletHolding[],
+  holdings: readonly WalletHolding[],
   live: ReadonlyMap<string, HydratedVaultPositionValue>,
   discoveredIds: ReadonlySet<string>,
   observedIds: ReadonlySet<string>,
   query: z.output<typeof earnPositionsQuerySchema>
 ): EarnCorePositionSummary | undefined {
   if (!query.includeSummary) return undefined;
-  // Historical custody and external claims can name one physical holding.
-  const unique = new Map<string, ExternalWalletHolding>();
+  // Historical wallet-ID and owner-address claims can name one physical holding.
+  const unique = new Map<string, WalletHolding>();
   for (const holding of holdings) {
     if (discoveredIds.has(holding.id) && !observedIds.has(holding.id)) continue;
     const identity = JSON.stringify([
@@ -172,7 +172,7 @@ function positionSummary(
     if (!existing) unique.set(identity, holding);
     else if (holding.costBasisKnown === false) existing.costBasisKnown = false;
   }
-  const summary = summarizeExternalWalletPositions([...unique.values()], live, {
+  const summary = summarizeWalletPositions([...unique.values()], live, {
     includeOwnerAddresses: query.includeOwnerAddresses ?? false,
     includePositions: query.includePositions ?? false,
   });
@@ -208,8 +208,8 @@ export async function readEarnPositions(
   const { environment, cluster } = currentClusterScope();
   const before = query.before ? positionCursor(query.before, query.discover) : null;
   if (query.before && !before) throw badRequest("Invalid Earn position pagination cursor");
-  const includeCustody = query.ownerKind !== "external" && query.ownerAddress === undefined;
-  const includeExternal = query.ownerKind !== "custody" && query.walletId === undefined;
+  const includeCustody = query.sourceType !== "address" && query.ownerAddress === undefined;
+  const includeAddress = query.sourceType !== "wallet" && query.walletId === undefined;
   const allWallets = includeCustody ? await listReadableEarnVaultWallets(c, auth, projectId) : [];
   const wallets = query.walletId
     ? allWallets.filter((wallet) => wallet.id === query.walletId)
@@ -221,8 +221,8 @@ export async function readEarnPositions(
     organizationId: auth.organizationId,
     projectId,
     custodyWalletIds,
-    includeExternal,
-    externalOwnerAddress: query.ownerAddress,
+    includeAddress,
+    ownerAddress: query.ownerAddress,
   });
   const repo = createPostgresEarnMovementsRepository(getDb(c.env));
   const scope = { organizationId: auth.organizationId, environment };
@@ -231,8 +231,8 @@ export async function readEarnPositions(
       custodyWalletIds.length > 0
         ? repo.listVaultPositions({ ...scope, custodyWalletIds, before: cursor, limit })
         : Promise.resolve({ rows: [], hasMore: false }),
-      includeExternal
-        ? repo.listExternalWalletPositions({
+      includeAddress
+        ? repo.listWalletPositions({
             ...scope,
             projectId,
             ownerAddress: query.ownerAddress,
@@ -246,7 +246,7 @@ export async function readEarnPositions(
   const page =
     query.includeSummary || query.discover
       ? {
-          rows: await collectAllExternalWalletPositionRows((cursor) => readPage(cursor, 100)),
+          rows: await collectAllWalletPositionRows((cursor) => readPage(cursor, 100)),
           hasMore: false,
         }
       : await readPage(before, query.limit);
@@ -278,7 +278,7 @@ export async function readEarnPositions(
   const candidateRows = [...page.rows, ...discoveredRows].sort(newestFirst);
   const rowsReadAt = markVaultPositionRowsRead();
   const addresses = new Map(wallets.map((wallet) => [wallet.id, wallet.publicKey]));
-  const holdings: ExternalWalletHolding[] = candidateRows.map((row) => {
+  const holdings: WalletHolding[] = candidateRows.map((row) => {
     const ownerAddress = row.custody_wallet_id
       ? addresses.get(row.custody_wallet_id)
       : row.owner_address;
@@ -316,7 +316,7 @@ export async function readEarnPositions(
       shareMint: holding.shareMint,
     })),
     {
-      ownerKind: includeCustody ? "custody" : "external-wallet",
+      sourceType: includeAddress ? "address" : "wallet",
       rowsReadAt,
       minimumSlotByPositionId: balanceContext?.minimumSlotByPositionId,
       discoverAll: query.discover,

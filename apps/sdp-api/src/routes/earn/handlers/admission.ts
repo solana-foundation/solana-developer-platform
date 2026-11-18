@@ -114,16 +114,13 @@ function assertVaultDepositEnvironmentOpen(
  */
 export function assertVaultDirectDepositStyle(provider: string): void {
   if (earnDepositStyle(provider) !== "vault_direct") {
-    throw badRequest(`${provider} is a custodial provider; use POST /v1/earn/programs instead.`);
+    throw badRequest(`${provider} does not support strategy deposits.`);
   }
 }
 
 /**
- * The ONE vault money-in gate sequence for every handler that commits a
- * strategy to the vault-deposit path: `POST /vault-deposits` (custody),
- * `POST /external-wallet/deposit-transactions` (caller-signed), and
- * `POST /vault-deposit-previews` (the quote that opens either). Runs, in
- * order: deposit-style shape, provider registration, environment capability,
+ * Shared money-in admission for strategy preparation and execution adapters.
+ * Runs in order: deposit-style shape, provider registration, environment capability,
  * the project provider rule, catalogue admission,
  * and LAST, when the caller passes the deposit `amount`, the SDP-wide vault
  * exposure cap (ADR 0004 layer 1, `services/earn/vault-exposure.ts`). Keep it shared: a second copy

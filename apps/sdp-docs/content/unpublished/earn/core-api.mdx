@@ -8,7 +8,7 @@ This contract is internal while its replacement public surface awaits named
 security sign-off. Treasury and Embedded Yield use the same strategy, source
 and operation shapes. Existing published partner routes remain compatibility
 routes during migration. Legacy deposit preview, custody deposit and withdrawal,
-new custody withdrawal requests, external deposit/withdrawal/request builds,
+new custody withdrawal requests, wallet deposit/withdrawal/request builds,
 program creation and allocation changes return `410 NOT_IMPLEMENTED`. New
 withdrawals use the core operation, including existing legacy direct positions.
 
@@ -20,7 +20,7 @@ parent refreshes to a new action.
 
 ## Discover strategies and holdings
 
-`GET /v1/earn/discovery` returns the curated strategy catalogue. Filter by `id`,
+`GET /v1/earn/discovery` returns the validated strategy catalogue. Filter by `id`,
 `provider`, `depositMint`, `sourceKind`, `apyType`, `cluster`, `minApy` or `maxApy`,
 and use `page` and `pageSize`. Pass a returned strategy's `id` as `strategyId`
 when preparing a deposit.
@@ -31,12 +31,17 @@ only. Check `capabilities.deposit` and its unavailable reason; actual wallet
 admission still runs when you prepare and execute. The catalogue covers
 integrated provider sources, not every Solana strategy.
 
-`GET /v1/earn/positions` returns custody and external holdings with a common
+`GET /v1/earn/positions` returns holdings with a common
 `source` identity. Choose `walletId` or `ownerAddress`; use `before` and `limit`
 for position pages. `discover=true` requires one owner and also reads supported
 integrated strategies for pre-existing holdings. The response states its
 coverage and unavailable-strategy count. Discovery does not import ownership or
 claim to know when the wallet acquired its assets.
+
+Filter with `sourceType=wallet` for registered wallets or `sourceType=address`
+for owners supplied by address. Omit it to include both. A filter must agree
+with its source identity: `walletId` selects `wallet`, `ownerAddress` selects
+`address`. These identify the source; signing follows its provider and policy.
 
 `includeSummary=true` computes totals for the full selected scope. Customer
 drill-down requires `includeOwnerAddresses=true`; `includePositions=true`
@@ -66,9 +71,9 @@ Content-Type: application/json
 ```
 
 Choose a mint the prepared strategy path supports. `value` is a decimal string
-in that mint's token units. For an external wallet, replace the source with
+in that mint's token units. To identify the owner by address, use
 `{ "ownerAddress": "<owner-public-key>" }`; no custody registration is required.
-Optional `feePayer` applies to supported external-wallet builds and must also
+Optional `feePayer` applies when using `ownerAddress` and must also
 sign. Custody wallets use their configured fee policy. `slippageBps` is capped
 at 500.
 
@@ -115,10 +120,10 @@ to obtain new terms, then require a fresh review and execute. An uncertain
 provider dispatch or signed transaction remains `wait`; do not infer refresh
 permission from an error message or blockhash expiry.
 
-An external `sign_transaction` action already exposed to its owner cannot be
+A `sign_transaction` action already exposed to its owner cannot be
 refreshed merely because SDP has no registered signature. The owner could have
 signed and broadcast independently. Refresh returns `409 CONFLICT` with
-`details.reason="external_transaction_outcome_unknown"`, including after expiry; preserve
+`details.reason="wallet_transaction_outcome_unknown"`, including after expiry; preserve
 the original bytes for reconciliation. Unsigned custody actions and route-choice
 reviews do not have that independent-broadcast ambiguity.
 
@@ -128,8 +133,8 @@ Completion follows verified delivery. A queue transaction, provider request ID
 or cancellation acknowledgment alone does not establish delivery.
 
 Recover after reload with `GET /v1/operations?walletId=...`, or specify
-`ownerAddress=...` for external history. Without an explicit external owner,
-the list returns visible custody operations only. Filters also support `kind`,
+`ownerAddress=...` for history scoped to that address. Without an explicit owner
+address, the list returns visible registered-wallet operations only. Filters also support `kind`,
 `status`, `positionId`, `cursor` and `limit`. GET never starts execution.
 
 ## Prepare a withdrawal
@@ -175,8 +180,7 @@ races and can return an onchain cancellation action that needs explicit
 execution. A late exact signature after cancellation can be registered for
 observation; SDP does not start a new broadcast with it.
 
-An external owner may
-have sent an exposed transaction independently, so cancellation can remain
+An owner may have sent an exposed transaction independently, so cancellation can remain
 pending until its outcome is known. Queue cancellation can leave an intermediate
 token rather than the original shares. Read `result.settlementOutcome` and
 `result.settledAmount`; null means the authoritative outcome or amount is not

@@ -69,7 +69,6 @@ function OperationRow({
   tokenMint: string;
   onUpdated: () => void;
 }) {
-  const [busy, setBusy] = useState(false);
   const [optionId, setOptionId] = useState<string>();
   const next = operation.nextAction;
   const canExecute =
@@ -84,45 +83,9 @@ function OperationRow({
       ? formatAmount(amount.value, symbol)
       : `${amount.value} (${shortAddress(amount.mint)})`;
 
-  async function act(action: "execute" | "cancel" | "refresh") {
-    if (busy) return;
-    setBusy(true);
-    try {
-      const updated =
-        action === "execute"
-          ? await executePreparedOperation(operation, selected)
-          : action === "refresh"
-            ? await refreshPreparedOperation(operation.id)
-            : await requestOperationCancellation(operation.id);
-      if (updated.status === "failed")
-        throw new Error(updated.error?.message ?? "Execution failed");
-      toast.info(STATUS[updated.status]);
-      onUpdated();
-    } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : "Could not update this operation"
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
+  const { busy, act } = useOperationActions(operation, selected, onUpdated);
 
-  const requested = operation.terms.inputAmount
-    ? format(operation.terms.inputAmount)
-    : operation.intent.kind === "earn.deposit"
-      ? format(operation.intent.amount)
-      : operation.intent.amount.kind === "all"
-        ? "All holdings"
-        : operation.intent.amount.kind === "shares"
-          ? `${operation.intent.amount.value} shares`
-          : operation.intent.amount.mint && operation.intent.amount.value
-            ? format({
-                mint: operation.intent.amount.mint,
-                value: operation.intent.amount.value,
-              })
-            : "Withdrawal";
+  const requested = requestedAmount(operation, format);
 
   return (
     <article className="space-y-3 py-4">
@@ -149,30 +112,7 @@ function OperationRow({
         </p>
       ) : null}
       {canExecute ? (
-        <dl className="space-y-1 text-sm text-muted-foreground">
-          {operation.terms.estimate ? (
-            <div className="flex justify-between">
-              <dt>Estimated proceeds</dt>
-              <dd>{format(operation.terms.estimate)}</dd>
-            </div>
-          ) : null}
-          {operation.terms.minimum ? (
-            <div className="flex justify-between">
-              <dt>Minimum proceeds</dt>
-              <dd>{format(operation.terms.minimum)}</dd>
-            </div>
-          ) : null}
-          <div className="flex justify-between">
-            <dt>Quoted fees</dt>
-            <dd>
-              {operation.terms.fees === null
-                ? "Not yet known"
-                : operation.terms.fees.length
-                  ? operation.terms.fees.map(format).join(", ")
-                  : "No quoted fees"}
-            </dd>
-          </div>
-        </dl>
+        <OperationTerms operation={operation} format={format} />
       ) : null}
       {operation.terms.options.length > 1 && canExecute ? (
         <label className="flex flex-col gap-1 text-sm">
@@ -190,6 +130,142 @@ function OperationRow({
           </select>
         </label>
       ) : null}
+      <OperationProgress
+        operation={operation}
+        canExecute={canExecute}
+        expired={expired}
+      />
+      {operation.error ? (
+        <p className="text-sm text-destructive" role="alert">
+          {operation.error.message}
+        </p>
+      ) : null}
+      <OperationActions
+        operation={operation}
+        busy={busy}
+        expired={expired}
+        onAction={act}
+      />
+    </article>
+  );
+}
+
+function OperationActions({
+  operation,
+  busy,
+  expired,
+  onAction,
+}: {
+  operation: EarnOperation;
+  busy: boolean;
+  expired: boolean;
+  onAction: (action: "execute" | "cancel" | "refresh") => Promise<void>;
+}) {
+  if (!isOperationActive(operation)) return null;
+  const next = operation.nextAction;
+  const canExecute =
+    next?.type === "execute" || next?.type === "sign_transaction";
+  return (
+    <div className="flex flex-wrap justify-end gap-2">
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={busy}
+        onClick={() => void onAction("cancel")}
+      >
+        Request cancellation
+      </Button>
+      {next?.type === "refresh" ? (
+        <Button
+          size="sm"
+          disabled={busy}
+          onClick={() => void onAction("refresh")}
+        >
+          Refresh terms
+        </Button>
+      ) : null}
+      {canExecute ? (
+        <Button
+          size="sm"
+          disabled={busy || expired}
+          aria-busy={busy}
+          onClick={() => void onAction("execute")}
+        >
+          {busy ? (
+            <LoaderCircleIcon className="animate-spin" aria-hidden="true" />
+          ) : null}
+          Approve execution
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+type FormatAmount = (amount: { mint: string; value: string }) => string;
+
+function requestedAmount(
+  operation: EarnOperation,
+  format: FormatAmount
+): string {
+  const input = operation.terms.inputAmount;
+  if (input) return format(input);
+  if (operation.intent.kind === "earn.deposit")
+    return format(operation.intent.amount);
+  const { amount } = operation.intent;
+  if (amount.kind === "all") return "All holdings";
+  if (amount.kind === "shares") return `${amount.value} shares`;
+  return amount.mint && amount.value
+    ? format({ mint: amount.mint, value: amount.value })
+    : "Withdrawal";
+}
+
+function quotedFees(operation: EarnOperation, format: FormatAmount): string {
+  const { fees } = operation.terms;
+  if (fees === null) return "Not yet known";
+  return fees.length ? fees.map(format).join(", ") : "No quoted fees";
+}
+
+function OperationTerms({
+  operation,
+  format,
+}: {
+  operation: EarnOperation;
+  format: FormatAmount;
+}) {
+  return (
+    <dl className="space-y-1 text-sm text-muted-foreground">
+      {operation.terms.estimate ? (
+        <div className="flex justify-between">
+          <dt>Estimated proceeds</dt>
+          <dd>{format(operation.terms.estimate)}</dd>
+        </div>
+      ) : null}
+      {operation.terms.minimum ? (
+        <div className="flex justify-between">
+          <dt>Minimum proceeds</dt>
+          <dd>{format(operation.terms.minimum)}</dd>
+        </div>
+      ) : null}
+      <div className="flex justify-between">
+        <dt>Quoted fees</dt>
+        <dd>{quotedFees(operation, format)}</dd>
+      </div>
+    </dl>
+  );
+}
+
+function OperationProgress({
+  operation,
+  canExecute,
+  expired,
+}: {
+  operation: EarnOperation;
+  canExecute: boolean;
+  expired: boolean;
+}) {
+  const next = operation.nextAction;
+  return (
+    <>
       {next?.type === "approve_in_provider" ? (
         <p className="text-sm text-muted-foreground">{next.instructions}</p>
       ) : null}
@@ -206,43 +282,40 @@ function OperationRow({
           These terms expired. Wait for the operation to offer refreshed terms.
         </p>
       ) : null}
-      {operation.error ? (
-        <p className="text-sm text-destructive" role="alert">
-          {operation.error.message}
-        </p>
-      ) : null}
-      {isOperationActive(operation) ? (
-        <div className="flex flex-wrap justify-end gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={busy}
-            onClick={() => void act("cancel")}
-          >
-            Request cancellation
-          </Button>
-          {next?.type === "refresh" ? (
-            <Button
-              size="sm"
-              disabled={busy}
-              onClick={() => void act("refresh")}
-            >
-              Refresh terms
-            </Button>
-          ) : null}
-          {canExecute ? (
-            <Button
-              size="sm"
-              disabled={busy || expired}
-              aria-busy={busy}
-              onClick={() => void act("execute")}
-            >
-              {busy ? <LoaderCircleIcon className="animate-spin" /> : null}
-              Approve execution
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
-    </article>
+    </>
   );
+}
+
+function useOperationActions(
+  operation: EarnOperation,
+  selected: string | undefined,
+  onUpdated: () => void
+) {
+  const [busy, setBusy] = useState(false);
+  async function act(action: "execute" | "cancel" | "refresh") {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const updated =
+        action === "execute"
+          ? await executePreparedOperation(operation, selected)
+          : action === "refresh"
+            ? await refreshPreparedOperation(operation.id)
+            : await requestOperationCancellation(operation.id);
+      if (updated.status === "failed")
+        throw new Error(updated.error?.message ?? "Execution failed");
+      toast.info(STATUS[updated.status]);
+      onUpdated();
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Could not update this operation"
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return { busy, act };
 }

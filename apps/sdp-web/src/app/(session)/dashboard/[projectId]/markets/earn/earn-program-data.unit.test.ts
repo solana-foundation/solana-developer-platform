@@ -1,11 +1,11 @@
 import type {
-  EarnExternalWalletPosition,
   EarnProgramWithdrawalRecord,
   EarnProgramWithdrawalRecordStatus,
   EarnVaultDepositRecord,
   EarnVaultPosition,
   EarnVaultWithdrawal,
   EarnVaultWithdrawalRequestRecord,
+  EarnWalletPosition,
 } from "@sdp/types/earn";
 import type { EarnCoreStrategy } from "@sdp/types/earn-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -14,18 +14,18 @@ import {
   appendVaultPositionsRead,
   createEarnWithdrawal,
   type EarnVaultPositionsRead,
-  earnExternalWalletSummaryRefreshInterval,
   earnLedgerRefreshInterval,
   earnProgramsRefreshInterval,
   earnVaultMovementRefreshInterval,
   earnVaultPositionsRefreshInterval,
-  fetchEarnExternalWalletPositionSummary,
-  fetchEarnExternalWalletPositions,
+  earnWalletSummaryRefreshInterval,
   fetchEarnProgramsState,
   fetchEarnProgramWithdrawals,
   fetchEarnStrategies,
   fetchEarnVaultPositions,
   fetchEarnVaultWithdrawalRequests,
+  fetchEarnWalletPositionSummary,
+  fetchEarnWalletPositions,
   isEarnVaultDepositInFlight,
   isEarnVaultWithdrawalInFlight,
   readEarnVaultPositions,
@@ -217,12 +217,12 @@ describe("earnVaultMovementRefreshInterval", () => {
   });
 });
 
-describe("earnExternalWalletSummaryRefreshInterval", () => {
+describe("earnWalletSummaryRefreshInterval", () => {
   it("refreshes drawer details at the prior cadence without polling the overview as often", () => {
-    expect(earnExternalWalletSummaryRefreshInterval(false, "production")).toBe(60_000);
-    expect(earnExternalWalletSummaryRefreshInterval(true, "production")).toBe(15_000);
-    expect(earnExternalWalletSummaryRefreshInterval(false, "development")).toBe(3_000);
-    expect(earnExternalWalletSummaryRefreshInterval(true, "development")).toBe(3_000);
+    expect(earnWalletSummaryRefreshInterval(false, "production")).toBe(60_000);
+    expect(earnWalletSummaryRefreshInterval(true, "production")).toBe(15_000);
+    expect(earnWalletSummaryRefreshInterval(false, "development")).toBe(3_000);
+    expect(earnWalletSummaryRefreshInterval(true, "development")).toBe(3_000);
   });
 });
 
@@ -394,10 +394,10 @@ describe("fetchEarnVaultPositions", () => {
     );
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "/api/dashboard/markets/earn/positions?ownerKind=custody&limit=100"
+      "/api/dashboard/markets/earn/positions?sourceType=wallet&limit=100"
     );
     expect(fetchMock.mock.calls[1]?.[0]).toBe(
-      "/api/dashboard/markets/earn/positions?ownerKind=custody&limit=100&before=cursor_1"
+      "/api/dashboard/markets/earn/positions?sourceType=wallet&limit=100&before=cursor_1"
     );
   });
 
@@ -420,9 +420,9 @@ describe("fetchEarnVaultPositions", () => {
   });
 });
 
-function externalWalletPosition(
+function walletPosition(
   id: string
-): EarnExternalWalletPosition & { source: { ownerAddress: string }; feeSponsored: boolean } {
+): EarnWalletPosition & { source: { ownerAddress: string }; feeSponsored: boolean } {
   return {
     id,
     ownerAddress: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
@@ -439,15 +439,15 @@ function externalWalletPosition(
   };
 }
 
-describe("external-wallet position reads", () => {
+describe("wallet position reads", () => {
   it("pages one wallet to the end", async () => {
     const pages = [
       {
-        positions: Array.from({ length: 100 }, () => externalWalletPosition("p1")),
+        positions: Array.from({ length: 100 }, () => walletPosition("p1")),
         hasMore: true,
         nextCursor: "cursor_1",
       },
-      { positions: [externalWalletPosition("p2")], hasMore: false, nextCursor: null },
+      { positions: [walletPosition("p2")], hasMore: false, nextCursor: null },
     ];
     const fetchMock = vi.fn(
       async () =>
@@ -458,7 +458,7 @@ describe("external-wallet position reads", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      fetchEarnExternalWalletPositions("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
+      fetchEarnWalletPositions("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
     ).resolves.toHaveLength(101);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -471,7 +471,7 @@ describe("external-wallet position reads", () => {
       return new Response(
         JSON.stringify({
           data: {
-            positions: Array.from({ length: 100 }, () => externalWalletPosition(`p${current}`)),
+            positions: Array.from({ length: 100 }, () => walletPosition(`p${current}`)),
             hasMore: true,
             nextCursor: `cursor_${current}`,
           },
@@ -482,8 +482,8 @@ describe("external-wallet position reads", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      fetchEarnExternalWalletPositions("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
-    ).rejects.toThrow("External-wallet positions pagination exceeded its safety limit");
+      fetchEarnWalletPositions("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
+    ).rejects.toThrow("Wallet positions pagination exceeded its safety limit");
     expect(fetchMock).toHaveBeenCalledTimes(20);
   });
 
@@ -498,7 +498,7 @@ describe("external-wallet position reads", () => {
       return new Response(
         JSON.stringify({
           data: {
-            positions: Array.from({ length: 100 }, () => externalWalletPosition(`p${current}`)),
+            positions: Array.from({ length: 100 }, () => walletPosition(`p${current}`)),
             hasMore: current < 19,
             nextCursor: current < 19 ? `cursor_${current}` : null,
           },
@@ -509,7 +509,7 @@ describe("external-wallet position reads", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      fetchEarnExternalWalletPositions("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
+      fetchEarnWalletPositions("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
     ).resolves.toHaveLength(20 * 100);
     expect(fetchMock).toHaveBeenCalledTimes(20);
   });
@@ -520,7 +520,7 @@ describe("external-wallet position reads", () => {
         new Response(
           JSON.stringify({
             data: {
-              positions: Array.from({ length: 100 }, () => externalWalletPosition("p1")),
+              positions: Array.from({ length: 100 }, () => walletPosition("p1")),
               hasMore: true,
               nextCursor: "same_cursor",
             },
@@ -531,8 +531,8 @@ describe("external-wallet position reads", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      fetchEarnExternalWalletPositions("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
-    ).rejects.toThrow("External-wallet positions pagination did not advance");
+      fetchEarnWalletPositions("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
+    ).rejects.toThrow("Wallet positions pagination did not advance");
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -560,7 +560,7 @@ describe("external-wallet position reads", () => {
                       providerReference: "vault_1",
                       label: "Vault one",
                       ownerAddresses: ["9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"],
-                      positions: [externalWalletPosition("p1")],
+                      positions: [walletPosition("p1")],
                       walletCount: 1,
                       positionCount: 1,
                       totalsByToken: [
@@ -591,7 +591,7 @@ describe("external-wallet position reads", () => {
       )
     );
 
-    await expect(fetchEarnExternalWalletPositionSummary()).resolves.toMatchObject({
+    await expect(fetchEarnWalletPositionSummary()).resolves.toMatchObject({
       walletCount: 2,
       positionCount: 3,
       totalsByStrategy: [{ provider: "kamino", positions: [{ id: "p1" }] }],
@@ -630,7 +630,7 @@ describe("external-wallet position reads", () => {
             provider: "kamino",
             providerReference: "vault_1",
             label: "Vault one",
-            positions: [{ ...externalWalletPosition("p1"), withdrawableShares: 0 }],
+            positions: [{ ...walletPosition("p1"), withdrawableShares: 0 }],
             walletCount: 1,
             positionCount: 1,
             totalsByToken: [],
@@ -661,7 +661,7 @@ describe("external-wallet position reads", () => {
       )
     );
 
-    await expect(fetchEarnExternalWalletPositionSummary()).rejects.toThrow();
+    await expect(fetchEarnWalletPositionSummary()).rejects.toThrow();
   });
 });
 

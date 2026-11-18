@@ -25,6 +25,10 @@ redemption order. Those terms do not name the shared catalogue or API.
 `vault_address` remains a synchronized database compatibility alias while old
 revisions serve traffic. New positions, movements and transaction builds carry
 the canonical strategy reference. Removing aliases follows deployment drain.
+Wallet transaction repositories use `earn_wallet_transactions` and
+`earn_wallet_withdrawal_request_transactions`, writable `security_invoker`
+views over the existing storage. Both revisions share the same rows, tenant
+policies and ledger constraints; the old physical names remain rollout aliases.
 
 ## Implementation and release boundary
 
@@ -38,10 +42,10 @@ expiry or definitively refused proposal. Clients request new terms and review
 again. Uncertain dispatch or signatures remain `wait`; an error string never
 authorizes replacing a possibly executable attempt.
 
-Exposed external unsigned transactions also require outcome reconciliation
+Exposed owner-signed transactions also require outcome reconciliation
 before replacement. An absent registered signature or expired blockhash cannot
 prove that the owner did not sign and broadcast independently. Refresh refuses
-that action with `external_transaction_outcome_unknown`; custody preparations
+that action with `wallet_transaction_outcome_unknown`; custody preparations
 and nontransaction option reviews remain refreshable under their usual guards.
 
 Workers hold a 180-second fenced lease and reserve time before each external
@@ -53,7 +57,7 @@ explicit refresh rather than occupying the recovery queue indefinitely.
 The `submit` audit event for an `earn_operation` records execution acceptance,
 including the action/version and attempt ID. Its stage is `accepted`, its
 operation status is `queued`, and `settlementObserved` is false. The event does
-not claim that a deposit settled. Verified external bytes, the audit link and
+not claim that a deposit settled. Verified owner-signed bytes, the audit link and
 execution acceptance commit atomically for deposits; audit failure cannot leave
 signed work eligible for a worker send. Exit auditing keeps its existing
 best-effort behavior after durable acceptance.
@@ -115,20 +119,20 @@ beta and experimental; stable publishes none**. The earlier publication hold is
 removed on fetched main. Deleting the existing partner contract therefore needs
 a consumer migration, even though Earn has not reached stable.
 
-| Current surface | Count | Destination |
-| --- | ---: | --- |
-| Strategy list and detail | 2 | Discovery, including an ID filter |
-| Custody vault actions, positions and reconciliation | 15 | Four core routes, operations, internal reporting |
-| Shared deposit preview | 1 | Deposit preparation |
-| Shared movement feed | 1 | Shared operation history |
-| External-wallet routes | 18 | Same four core routes and operations |
-| Programs | 9 | Retire creation/configuration; adapt existing holdings/exits |
-| Provider preparation/cancellation actions | 7 | Operation steps and cancellation |
-| WisdomTree onboarding | 6 | Eligibility integration outside the core contract |
-| **Total** | **59** | |
+| Current surface                                     |  Count | Destination                                                  |
+| --------------------------------------------------- | -----: | ------------------------------------------------------------ |
+| Strategy list and detail                            |      2 | Discovery, including an ID filter                            |
+| Custody vault actions, positions and reconciliation |     15 | Four core routes, operations, internal reporting             |
+| Shared deposit preview                              |      1 | Deposit preparation                                          |
+| Shared movement feed                                |      1 | Shared operation history                                     |
+| Wallet routes                                       |     18 | Same four core routes and operations                         |
+| Programs                                            |      9 | Retire creation/configuration; adapt existing holdings/exits |
+| Provider preparation/cancellation actions           |      7 | Operation steps and cancellation                             |
+| WisdomTree onboarding                               |      6 | Eligibility integration outside the core contract            |
+| **Total**                                           | **59** |                                                              |
 
 The database already shares `earn_positions` and `earn_movements` across custody
-and external-wallet execution. Provider builders already return common plans.
+and wallet execution. Provider builders already return common plans.
 Reuse these boundaries and the existing reconciliation workers.
 
 Current positions reads enumerate database-known holdings, then refresh their
@@ -175,12 +179,12 @@ and policy.
 All routes remain authenticated and scoped to the caller's project and
 environment. The replacement paths below are internal until publication review.
 
-| Endpoint | Input | Result |
-| --- | --- | --- |
-| `GET /v1/earn/discovery` | Strategy/provider/asset filters and pagination | Strategies, rates, terms and supported actions |
-| `GET /v1/earn/positions` | Wallet/owner filters and pagination | Unified holdings and optional portfolio totals |
-| `POST /v1/earn/deposit` | Strategy ID, funding wallet, token amount | Prepared operation with unsigned transaction or next action |
-| `POST /v1/earn/withdraw` | Position ID, amount or all | Prepared operation with unsigned transaction or next action |
+| Endpoint                 | Input                                          | Result                                                      |
+| ------------------------ | ---------------------------------------------- | ----------------------------------------------------------- |
+| `GET /v1/earn/discovery` | Strategy/provider/asset filters and pagination | Strategies, rates, terms and supported actions              |
+| `GET /v1/earn/positions` | Wallet/owner filters and pagination            | Unified holdings and optional portfolio totals              |
+| `POST /v1/earn/deposit`  | Strategy ID, funding wallet, token amount      | Prepared operation with unsigned transaction or next action |
+| `POST /v1/earn/withdraw` | Position ID, amount or all                     | Prepared operation with unsigned transaction or next action |
 
 Preparation performs live quotes, simulation and required provider planning.
 It records an operation but never signs, broadcasts or opens a custody approval
@@ -252,8 +256,9 @@ Include pending operation references and the existing balance-read context so
 confirmation refreshes cannot immediately display an older chain snapshot.
 Activity and historical operation recovery live in the shared operations feed.
 
-Unification must preserve existing access rules: custody holdings require wallet
-visibility; external holdings require exact project/environment scope. An owner
+Unification must preserve existing access rules: registered wallets require
+wallet visibility; address-scoped holdings require exact project/environment
+scope. An owner
 address is a filter, never proof of permission to read another project's data.
 
 ### Deposit: strategy ID plus funding source
@@ -269,7 +274,7 @@ Proposed request sketch:
 }
 ```
 
-External-wallet callers instead supply `source: { "ownerAddress": "..." }`.
+Wallet callers instead supply `source: { "ownerAddress": "..." }`.
 They need no custody-wallet registration. A wallet ID resolves the custody
 capability; an owner address requires the owner's actual transaction signature.
 Clients cannot select a signing provider to bypass the stored wallet policy.
@@ -307,7 +312,7 @@ Four Earn endpoints still need execution and recovery. Proposed shared routes:
 - `GET /v1/operations`: scoped history and pending-operation recovery.
 - `GET /v1/operations/{id}`: status, economic terms and current next action.
 - `POST /v1/operations/{id}/execute`: require an advertised `actionId` and terms
-  version; execute that action or submit its external-wallet signed transaction.
+  version; execute that action or submit its wallet signed transaction.
 - `POST /v1/operations/{id}/refresh`: rebuild the current unsigned action after
   reconciling prior attempts. Earlier steps can already have completed.
 - `POST /v1/operations/{id}/cancel`: request cancellation and expose any required
@@ -348,7 +353,7 @@ the worker, including fast signers. For custody wallets, the worker opens at
 most one provider proposal per executable action/attempt and exposes an approval
 next action when required.
 Include provider instructions and a verified handoff URL only when the adapter
-supplies one. For external wallets, execute verifies the returned signed bytes
+supplies one. For wallets, execute verifies the returned signed bytes
 against the stored message and signer set. Stale action IDs or versions are
 refused, never interpreted as approval of the latest action. Fast signers use
 the same asynchronous durable workflow.
@@ -397,7 +402,7 @@ chain confirmation and cancellation acknowledgement are different facts.
 
 HTTP callers can queue only the stored action identity and version. They cannot
 provide a worker principal, provider binding, settlement status or arbitrary
-transaction message. External signatures are checked against the stored build.
+transaction message. Owner signatures are checked against the stored build.
 Provider signatures are verified over that same message before merging them.
 
 The trusted worker restores the exact scoped attempt's recorded principal only
@@ -412,8 +417,8 @@ replacement attempt. Existing Earn movements and provider request rows remain
 the economic ledger; generic operations coordinate them without overwriting
 their settlement evidence.
 
-Late external signed registration still requires the recorded action principal.
-A rotated or revoked key can leave an unknown external signature pending until
+Late owner-signed registration still requires the recorded action principal.
+A rotated or revoked key can leave an unknown signature pending until
 operator reconciliation. Cross-principal signature registration needs its own
 authority review; cancellation never grants another actor broadcast permission.
 
@@ -476,13 +481,13 @@ unifying custody routes does not automatically authorize publishing them.
 ## Acceptance criteria
 
 - Both products and Northstar use the same four Earn endpoints and shared
-  operation lifecycle; external wallets need no custody registration.
+  operation lifecycle; wallets need no custody registration.
 - The agreed initial coverage matrix ships, including complete validated
   provider shelves rather than only featured vaults. Discovery filters and
   pagination describe that coverage accurately. Missing or stale rates and
   non-executable strategies are explicit. An unavailable provider cannot erase
   other providers' catalogue or misstate freshness.
-- Custody and external-wallet deposits/withdrawals preserve exact amount units,
+- Custody and wallet deposits/withdrawals preserve exact amount units,
   output floors, fee funding, wallet scope and tenant/project isolation.
 - Approval can outlive an HTTP request and process restart. Duplicate execute
   requests create one provider proposal and one economic action. Rejection,

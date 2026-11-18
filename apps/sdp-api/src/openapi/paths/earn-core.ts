@@ -34,7 +34,7 @@ export function registerEarnCorePaths(registry: OpenAPIRegistry) {
     operationId: "discoverEarnStrategies",
     summary: "Discover strategies",
     description:
-      "Lists the curated strategy catalogue with provider and asset filters. Rates are decimal APY fractions, with their provider source and nullable observation time. Adapter capability is separate from live wallet admission; discovery-only rows cannot accept deposits.",
+      "Lists the validated strategy catalogue with provider and asset filters. Rates are decimal APY fractions, with their provider source and nullable observation time. Adapter capability is separate from live wallet admission; discovery-only rows cannot accept deposits.",
     request: { headers: projectScopeHeaders, query: earnDiscoveryQuerySchema },
     responses: {
       200: { description: "One catalogue page", content: jsonContent(earnDiscoveryResponseSchema) },
@@ -48,7 +48,7 @@ export function registerEarnCorePaths(registry: OpenAPIRegistry) {
     operationId: "listEarnCorePositions",
     summary: "List positions",
     description:
-      "Lists project holdings with one source shape for custody and external wallets. Choose walletId or ownerAddress. discover=true requires one owner and reads supported integrated strategies without importing ownership or inventing acquisition history. Missing live observations stay unavailable. Optional summary covers the full selected scope; costBasisKnown and costBasisCoverage distinguish unknown earnings history. Pending queue shares and intermediate-token balances remain visible.",
+      "Lists project holdings with a source identified by walletId or ownerAddress. sourceType=wallet selects configured wallets; sourceType=address selects owner-address holdings. Omit sourceType to include both authorized scopes. discover=true requires one owner and reads supported integrated strategies without importing ownership or inventing acquisition history. Missing live observations stay unavailable. Optional summary covers the full selected scope; costBasisKnown and costBasisCoverage distinguish unknown earnings history. Pending queue shares and intermediate-token balances remain visible.",
     request: { headers: projectScopeHeaders, query: earnPositionsQuerySchema },
     responses: {
       200: {

@@ -4,7 +4,7 @@ export function GET(request: Request) {
   return proxyEarnCore(request, "/v1/earn/positions", [
     "walletId",
     "ownerAddress",
-    "ownerKind",
+    "sourceType",
     "limit",
     "before",
     "discover",

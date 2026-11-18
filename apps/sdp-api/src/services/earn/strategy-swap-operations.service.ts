@@ -17,8 +17,8 @@ import type {
 } from "./strategy-transactions.service";
 import { createVaultDeadline } from "./vault-deadline";
 import { broadcastVaultTransaction } from "./vault-execution.service";
-import { verifySignedExternalWalletTransaction } from "./vault-external-wallet.service";
 import { readConfirmedBlockHeight } from "./vault-intent-execution.service";
+import { verifySignedWalletTransaction } from "./vault-wallet.service";
 
 export type PreparedSwapStrategyTransaction = EarnSplitSwapAdvisoryRow & {
   unsigned_transaction: string;
@@ -133,7 +133,7 @@ export async function submitPreparedSwapStrategyAction(
   }
 ): Promise<OperationReference> {
   const row = await requirePreparedSwapStrategyTransaction(env, input, input.advisoryId);
-  const signed = await verifySignedExternalWalletTransaction(
+  const signed = await verifySignedWalletTransaction(
     swapStrategySigningTarget(row),
     input.signedTransaction
   );
@@ -172,7 +172,7 @@ export async function retryPreparedSwapStrategyAction(
   input: StrategyTransactionScope & { advisoryId: string; signedTransaction: string }
 ): Promise<boolean> {
   const row = await requirePreparedSwapStrategyTransaction(env, input, input.advisoryId);
-  const signed = await verifySignedExternalWalletTransaction(
+  const signed = await verifySignedWalletTransaction(
     swapStrategySigningTarget(row),
     input.signedTransaction
   );

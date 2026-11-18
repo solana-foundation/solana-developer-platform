@@ -33,8 +33,8 @@ export async function resolveEarnOperationBuild(
   const table = swap
     ? "earn_split_swap_advisories"
     : queued
-      ? "earn_external_wallet_withdrawal_request_transactions"
-      : "earn_external_wallet_transactions";
+      ? "earn_wallet_withdrawal_request_transactions"
+      : "earn_wallet_transactions";
   const source = await getDb(env).queryOne<{
     custody_wallet_id: string | null;
     owner_address: string;

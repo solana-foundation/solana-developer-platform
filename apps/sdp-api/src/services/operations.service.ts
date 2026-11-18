@@ -102,7 +102,7 @@ export class OperationsService {
     return record.operation;
   }
 
-  /** Custody feed by default; external history requires an explicit ownerAddress. */
+  /** Wallet feed by default; address-filtered history requires an explicit ownerAddress. */
   async list(
     scope: OperationScope,
     input: OperationListFilters & { limit?: number; cursor?: string }
@@ -172,7 +172,7 @@ export class OperationsService {
         input.signedTransaction !== undefined &&
         operation.nextAction?.type !== "sign_transaction"
       )
-        throw badRequest("This action does not accept an external signed transaction");
+        throw badRequest("This action does not accept a caller-signed transaction");
       if (
         operation.nextAction?.type !== "sign_transaction" &&
         operation.nextAction?.type !== "execute"

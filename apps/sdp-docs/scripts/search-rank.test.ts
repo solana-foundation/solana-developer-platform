@@ -12,7 +12,7 @@ const descriptions = {
   "/docs/earn/concepts": "Understand strategies, shares, value, and withdrawals.",
   "/docs/earn/withdrawals": "Choose an exit and track funds back to the owner's wallet.",
   "/docs/reference/api/earn": "Earn API operations.",
-  "/docs/reference/api/earn/get-earn-external-wallet-earnings": "Read balance and earned yield.",
+  "/docs/reference/api/earn/get-earn-wallet-earnings": "Read balance and earned yield.",
   "/docs/reference/api/earn/create-earn-vault-withdrawal": "Submit a custody withdrawal.",
 } as const satisfies Record<string, string>;
 
@@ -70,7 +70,7 @@ describe("search ranking", () => {
 
   it("puts the Earn overview before an earnings prefix and the family reference", () => {
     const results = [
-      page("/docs/reference/api/earn/get-earn-external-wallet-earnings", "Get wallet earnings"),
+      page("/docs/reference/api/earn/get-earn-wallet-earnings", "Get wallet earnings"),
       page("/docs/reference/api/earn", "Earn"),
       page("/docs/earn", "Earn"),
     ];

@@ -46,7 +46,7 @@ remain unknown. APY is a decimal fraction with provider provenance and an
 observation timestamp, which can also be unknown.
 
 The four Earn endpoints serve this bank and the Treasury dashboard. The demo
-uses external owner addresses, without registering custody wallets. Historical
+uses owner addresses, without registering custody wallets. Historical
 movement and withdrawal-request reads remain internal compatibility sources for
 older accounting and recovery. New actions use operations.
 

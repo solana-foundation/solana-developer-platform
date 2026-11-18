@@ -4,7 +4,7 @@ import { WELL_KNOWN_TOKENS } from "./well-known-tokens";
 /**
  * Solana Earn (SDP Markets V1) — shared wire contracts.
  *
- * Earn is a stablecoin deposit facility: organizations and external-wallet
+ * Earn is a stablecoin deposit facility: organizations and wallet
  * integrators browse a catalogue of DeFi vaults and tokenized RWAs, then use
  * provider-built transactions to enter or exit a strategy. Current providers
  * are non-custodial; the retained portfolio-wallet contracts support a future
@@ -369,8 +369,8 @@ export interface EarnVaultPositionsPage {
   balanceReadContext?: { afterMovementIds: string[]; minimumSlot: number };
 }
 
-/** One live position held by a partner end user's external wallet. */
-export interface EarnExternalWalletPosition {
+/** One live position held by a partner end user's wallet. */
+export interface EarnWalletPosition {
   id: string;
   ownerAddress: string;
   provider: string;
@@ -396,15 +396,15 @@ export interface EarnExternalWalletPosition {
   parIntermediate?: EarnVaultPositionIntermediate;
 }
 
-/** Keyset page for exactly one external wallet. */
-export interface EarnExternalWalletPositionsPage {
+/** Keyset page for exactly one wallet. */
+export interface EarnWalletPositionsPage {
   ownerAddress: string;
-  positions: EarnExternalWalletPosition[];
+  positions: EarnWalletPosition[];
   hasMore: boolean;
   nextCursor: string | null;
 }
 
-export interface EarnExternalWalletTokenTotal {
+export interface EarnWalletTokenTotal {
   tokenMint: string;
   walletCount: number;
   positionCount: number;
@@ -417,7 +417,7 @@ export interface EarnExternalWalletTokenTotal {
   tokenValue?: string;
 }
 
-export interface EarnExternalWalletStrategyTotal {
+export interface EarnWalletStrategyTotal {
   provider: string;
   providerReference: string;
   label: string;
@@ -435,23 +435,23 @@ export interface EarnExternalWalletStrategyTotal {
    * `includeOwnerAddresses=true`; absent from totals-only responses so
    * analytics consumers do not receive per-customer details.
    */
-  positions?: EarnExternalWalletPosition[];
+  positions?: EarnWalletPosition[];
   walletCount: number;
   positionCount: number;
-  totalsByToken: EarnExternalWalletTokenTotal[];
+  totalsByToken: EarnWalletTokenTotal[];
 }
 
 /** Complete live aggregate for one partner project across its end-user wallets. */
-export interface EarnExternalWalletPositionSummary {
+export interface EarnWalletPositionSummary {
   walletCount: number;
   positionCount: number;
   unavailablePositionCount: number;
-  totalsByStrategy: EarnExternalWalletStrategyTotal[];
-  totalsByToken: EarnExternalWalletTokenTotal[];
+  totalsByStrategy: EarnWalletStrategyTotal[];
+  totalsByToken: EarnWalletTokenTotal[];
 }
 
-export interface EarnExternalWalletPositionSummaryResponse {
-  summary: EarnExternalWalletPositionSummary;
+export interface EarnWalletPositionSummaryResponse {
+  summary: EarnWalletPositionSummary;
 }
 
 /** JSON body for POST /v1/earn/vault-deposits. Idempotency is header-only. */
@@ -802,21 +802,19 @@ export interface EarnVaultWithdrawalRequestsPage {
 }
 
 /**
- * External-wallet (caller-signed) vault flows — the B2B2C money path (PRO-1722).
- *
- * An external wallet is a NON-CUSTODIAL wallet the partner's platform
- * connects; SDP holds no key for it and never signs. A BUILD returns an
- * unsigned transaction, and the integration SUBMITs the signed bytes for a
- * durable movement and SDP broadcast. These surfaces postdate the unified ledger,
- * so recorded statuses use its vault vocabulary (`requested … finalized`).
+ * Wallet transaction builds, shared by wallet-ID and owner-address sources.
+ * The exact prepared message binds the owner and any fee payer. Signing policy
+ * selects the configured signer or requires the caller's signatures; operation
+ * workers persist execution before broadcasting. Legacy submit contracts remain
+ * available only to recover builds prepared before the core API migration.
  */
 
-/** One unsigned transaction SDP built for an external wallet to sign. */
-export interface EarnExternalWalletTransaction {
+/** One unsigned transaction SDP built for a wallet to sign. */
+export interface EarnWalletTransaction {
   /** Opaque build id, single-use on submit. */
   transactionId: string;
   /**
-   * Base64 wire bytes of the UNSIGNED transaction. The external wallet signs
+   * Base64 wire bytes of the UNSIGNED transaction. The wallet signs
    * exactly these bytes. The fee payer is the owner, or the partner's
    * `feePayer`. The integration returns the signed encoding on submit.
    */
@@ -841,9 +839,9 @@ export interface EarnExternalWalletTransaction {
   shareMint: string;
 }
 
-/** Response body of POST /v1/earn/external-wallet/deposit-transactions. */
-export interface EarnExternalWalletDepositTransactionResponse {
-  transaction: EarnExternalWalletTransaction & {
+/** Legacy wallet response retained for recovery. */
+export interface EarnWalletDepositTransactionResponse {
+  transaction: EarnWalletTransaction & {
     /** Deposit amount encoded in the transaction, vault-token units. */
     amount: string;
     /** Slippage floor encoded in the transaction, share units, or null. */
@@ -865,8 +863,8 @@ export interface EarnExternalWalletDepositTransactionResponse {
 }
 
 /**
- * Response body of POST /v1/earn/external-wallet/deposit-transactions when a
- * swap-funded deposit could not fit in ONE Solana transaction (the packet
+ * Legacy wallet build response when a swap-funded deposit could not fit in
+ * one Solana transaction (the packet
  * limit is 1,232 bytes and some Jupiter routes leave no room for the vault
  * instructions). No CONSUMABLE build is persisted for this answer: SDP hands
  * back an unsigned SWAP-ONLY transaction for the owner to sign and broadcast
@@ -875,7 +873,7 @@ export interface EarnExternalWalletDepositTransactionResponse {
  * records an advisory and flags owners whose swap landed without a follow-up
  * deposit (PRO-1864); recovery stays the caller's duty.
  */
-export interface EarnExternalWalletDepositSwapSplitResponse {
+export interface EarnWalletDepositSwapSplitResponse {
   /** Discriminates from the atomic response, which carries `transaction`. */
   requiresSeparateSwap: true;
   /** Split swap transactions are never sponsored by SDP. */
@@ -914,15 +912,15 @@ export interface EarnExternalWalletDepositSwapSplitResponse {
   };
 }
 
-interface EarnExternalWalletExitReference {
+interface EarnWalletExitReference {
   /** The tenant position being exited. */
   positionId: string;
 }
 
-/** Response body of POST /v1/earn/external-wallet/withdrawal-transactions. */
-export interface EarnExternalWalletWithdrawalTransactionResponse {
-  transaction: EarnExternalWalletTransaction &
-    EarnExternalWalletExitReference & {
+/** Legacy wallet response retained for recovery. */
+export interface EarnWalletWithdrawalTransactionResponse {
+  transaction: EarnWalletTransaction &
+    EarnWalletExitReference & {
       /** Shares encoded in the transaction, share units. */
       shares: string;
       /** Minimum deposit-token amount encoded in the transaction, or null. */
@@ -930,18 +928,18 @@ export interface EarnExternalWalletWithdrawalTransactionResponse {
     };
 }
 
-/** The two signed actions in a queued external-wallet withdrawal lifecycle. */
-export type EarnExternalWalletWithdrawalRequestAction = "request" | "cancel";
+/** The two signed actions in a queued wallet withdrawal lifecycle. */
+export type EarnWalletWithdrawalRequestAction = "request" | "cancel";
 
 /**
  * Unsigned queued-withdrawal action for the owner (and optional partner fee
  * payer) to sign. Request builds carry the expected quote fields; cancellation
  * builds identify only the already-landed request.
  */
-export interface EarnExternalWalletWithdrawalRequestTransactionResponse {
-  transaction: EarnExternalWalletTransaction &
-    Partial<EarnExternalWalletExitReference> & {
-      action: EarnExternalWalletWithdrawalRequestAction;
+export interface EarnWalletWithdrawalRequestTransactionResponse {
+  transaction: EarnWalletTransaction &
+    Partial<EarnWalletExitReference> & {
+      action: EarnWalletWithdrawalRequestAction;
       /** Present for a cancellation of an already-landed request. */
       withdrawalRequestId?: string;
       requestAddress: string;
@@ -956,8 +954,8 @@ export interface EarnExternalWalletWithdrawalRequestTransactionResponse {
     };
 }
 
-/** One recorded external-wallet vault movement, either direction. */
-export interface EarnExternalWalletMovement {
+/** One recorded wallet strategy movement, either direction. */
+export interface EarnWalletMovement {
   /** Verified cross-chain fulfillment; cancelled means shares returned and no USDC payout. */
   settlementOutcome?: "delivered" | "cancelled";
   movementId: string;
@@ -992,27 +990,27 @@ export interface EarnExternalWalletMovement {
   replayed?: boolean;
 }
 
-/** Response body of POST /v1/earn/external-wallet/deposits. */
-export interface EarnExternalWalletDepositResponse {
-  deposit: EarnExternalWalletMovement;
+/** Legacy wallet response retained for recovery. */
+export interface EarnWalletDepositResponse {
+  deposit: EarnWalletMovement;
 }
 
-/** Response body of POST /v1/earn/external-wallet/withdrawals. */
-export interface EarnExternalWalletWithdrawalResponse {
-  withdrawal: EarnExternalWalletMovement;
+/** Legacy wallet response retained for recovery. */
+export interface EarnWalletWithdrawalResponse {
+  withdrawal: EarnWalletMovement;
 }
 
-/** Keyset activity page for exactly one external wallet, newest first. */
-export interface EarnExternalWalletMovementsPage {
+/** Keyset activity page for exactly one wallet, newest first. */
+export interface EarnWalletMovementsPage {
   ownerAddress: string;
-  movements: EarnExternalWalletMovement[];
+  movements: EarnWalletMovement[];
   hasMore: boolean;
   nextCursor: string | null;
 }
 
-/** Response body of GET /v1/earn/external-wallet/movements/:movementId. */
-export interface EarnExternalWalletMovementResponse {
-  movement: EarnExternalWalletMovement;
+/** Legacy wallet response retained for recovery. */
+export interface EarnWalletMovementResponse {
+  movement: EarnWalletMovement;
 }
 
 /**
@@ -1035,7 +1033,7 @@ export interface EarnExternalWalletMovementResponse {
  * along with its withdrawals), so one full exit does not withhold the open
  * positions' earned. The exited history stays on the movements list.
  */
-export type EarnExternalWalletEarnedUnavailableReason =
+export type EarnWalletEarnedUnavailableReason =
   | "cost_basis_unknown"
   | "live_value_unavailable"
   | "movements_pending"
@@ -1043,8 +1041,8 @@ export type EarnExternalWalletEarnedUnavailableReason =
   | "deposits_not_valued"
   | "withdrawals_not_valued";
 
-/** Earnings for one deposit token across an external wallet's positions. */
-export interface EarnExternalWalletTokenEarnings {
+/** Earnings for one deposit token across a wallet's positions. */
+export interface EarnWalletTokenEarnings {
   tokenMint: string;
   positionCount: number;
   /** Positions whose live value could not hydrate. */
@@ -1070,20 +1068,20 @@ export interface EarnExternalWalletTokenEarnings {
    * (ADR 0002).
    */
   earned?: string;
-  earnedUnavailableReason?: EarnExternalWalletEarnedUnavailableReason;
+  earnedUnavailableReason?: EarnWalletEarnedUnavailableReason;
 }
 
-/** Balance and earnings for one external wallet, grouped by deposit token. */
-export interface EarnExternalWalletEarnings {
+/** Balance and earnings for one wallet, grouped by deposit token. */
+export interface EarnWalletEarnings {
   ownerAddress: string;
   positionCount: number;
   unavailablePositionCount: number;
-  totalsByToken: EarnExternalWalletTokenEarnings[];
+  totalsByToken: EarnWalletTokenEarnings[];
 }
 
-/** Response body of GET /v1/earn/external-wallet/earnings?ownerAddress=…. */
-export interface EarnExternalWalletEarningsResponse {
-  earnings: EarnExternalWalletEarnings;
+/** Legacy wallet response retained for recovery. */
+export interface EarnWalletEarningsResponse {
+  earnings: EarnWalletEarnings;
 }
 
 /**

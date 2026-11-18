@@ -9,7 +9,7 @@ import {
 } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
-import { recordSignedExternalQueuedRequest } from "./vault-queued-withdraw.service";
+import { recordSignedWalletQueuedRequest } from "./vault-queued-withdraw.service";
 import {
   assertClosingIdentity,
   findClosingEventInHistoryPage,
@@ -170,7 +170,7 @@ function signedRequestInput(
     clientRequestId: current.client_request_id,
     idempotencyFingerprint: current.idempotency_fingerprint,
     pdaLeaseToken: "external-build",
-    externalWalletTransactionId: "external-build",
+    walletTransactionId: "external-build",
   };
 }
 
@@ -293,7 +293,7 @@ describe("queued withdrawal reconciliation", () => {
           ),
         };
         const pending = inSandboxScope(() =>
-          recordSignedExternalQueuedRequest(env, { createSignedRequest: write }, input)
+          recordSignedWalletQueuedRequest(env, { createSignedRequest: write }, input)
         );
         if (closedAt === "failed" || closedAt === "expired_unknown") {
           await expect(pending).rejects.toMatchObject({
@@ -365,7 +365,7 @@ describe("queued withdrawal reconciliation", () => {
     clusterRpc.respond("getTransaction", () => ({ result }));
 
     const pending = inSandboxScope(() =>
-      recordSignedExternalQueuedRequest(env, { createSignedRequest: write }, input)
+      recordSignedWalletQueuedRequest(env, { createSignedRequest: write }, input)
     );
     if (code !== null) {
       await expect(pending).rejects.toMatchObject({ code, statusCode });
@@ -373,7 +373,7 @@ describe("queued withdrawal reconciliation", () => {
     } else {
       await expect(pending).resolves.toMatchObject({ alreadyFinalized: true });
       expect(write).toHaveBeenCalledTimes(2);
-      expect(write).toHaveBeenLastCalledWith({ ...input, recoverFinalizedExternalBuild: true });
+      expect(write).toHaveBeenLastCalledWith({ ...input, recoverFinalizedWalletBuild: true });
     }
     expect(clusterRpc.requests.filter((call) => call.method === "getTransaction")).toHaveLength(1);
   });
@@ -419,7 +419,7 @@ describe("queued withdrawal reconciliation", () => {
 
     await expect(
       inSandboxScope(() =>
-        recordSignedExternalQueuedRequest(env, { createSignedRequest: write }, input)
+        recordSignedWalletQueuedRequest(env, { createSignedRequest: write }, input)
       )
     ).rejects.toMatchObject({
       code: "PROVIDER_UNAVAILABLE",
@@ -428,7 +428,7 @@ describe("queued withdrawal reconciliation", () => {
     });
     expect(write).toHaveBeenCalledTimes(stage === "queue_creation" ? 1 : 0);
     expect(write).not.toHaveBeenCalledWith(
-      expect.objectContaining({ recoverFinalizedExternalBuild: true })
+      expect.objectContaining({ recoverFinalizedWalletBuild: true })
     );
   });
 

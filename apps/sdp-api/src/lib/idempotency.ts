@@ -237,7 +237,7 @@ export interface EarnVaultQueuedWithdrawalFingerprintInput {
   shares: string;
   discountBps: number;
   deadlineSeconds: number;
-  /** Exact unsigned build consumed by an external-wallet submit. */
+  /** Exact unsigned build consumed by a wallet submit. */
   transactionId?: string;
 }
 
@@ -262,7 +262,7 @@ export type EarnVaultParRedemptionFingerprintInput = {
   environment: string;
   provider: string;
   positionId: string;
-  /** Exact unsigned build consumed by an external-wallet submit. */
+  /** Exact unsigned build consumed by a wallet submit. */
   transactionId?: string;
 } & (
   | { shares: string; intermediateAmount?: undefined }
@@ -295,7 +295,7 @@ export interface EarnVaultQueuedWithdrawalCancelFingerprintInput {
   environment: string;
   withdrawalRequestId: string;
   requestAddress: string;
-  /** Exact unsigned build consumed by an external-wallet submit. */
+  /** Exact unsigned build consumed by a wallet submit. */
   transactionId?: string;
 }
 
@@ -313,21 +313,21 @@ export const buildEarnVaultQueuedWithdrawalCancelFingerprint = (
     })
   );
 
-export interface EarnExternalWalletDepositFingerprintInput {
+export interface EarnWalletDepositFingerprintInput {
   environment: string;
   provider: string;
   /** The vault address. */
   providerReference: string;
-  /** The external wallet that signs and holds the shares. */
+  /** The wallet that signs and holds the shares. */
   ownerAddress: string;
   amount: string;
   minSharesOut: string | null;
-  /** The built transaction being submitted (`earn_external_wallet_transactions.id`). */
+  /** The built transaction being submitted (`earn_wallet_transactions.id`). */
   transactionId: string;
 }
 
 /**
- * Fingerprint for an external-wallet (caller-signed) vault deposit submit.
+ * Fingerprint for a wallet (caller-signed) vault deposit submit.
  *
  * Same inclusion test as the custody deposit's: every field changes WHAT MOVES.
  * `transactionId` earns its place because the submit names one specific built
@@ -335,11 +335,12 @@ export interface EarnExternalWalletDepositFingerprintInput {
  * retried against a REBUILT transaction is a different request and must 409
  * rather than silently answer with the first build's movement.
  */
-export const buildEarnExternalWalletDepositFingerprint = (
-  input: EarnExternalWalletDepositFingerprintInput
+export const buildEarnWalletDepositFingerprint = (
+  input: EarnWalletDepositFingerprintInput
 ): string =>
   JSON.stringify(
     normalizeForFingerprint({
+      // Persisted legacy scope: changing it would reject exact signed replays.
       scope: "earn_external_wallet_deposit",
       environment: input.environment,
       provider: input.provider,
@@ -352,24 +353,25 @@ export const buildEarnExternalWalletDepositFingerprint = (
     })
   );
 
-export interface EarnExternalWalletWithdrawalFingerprintInput {
+export interface EarnWalletWithdrawalFingerprintInput {
   environment: string;
   provider: string;
   /** The `earn_positions` row being exited. */
   positionId: string;
-  /** The external wallet whose shares redeem. */
+  /** The wallet whose shares redeem. */
   ownerAddress: string;
   shares: string;
-  /** The built transaction being submitted (`earn_external_wallet_transactions.id`). */
+  /** The built transaction being submitted (`earn_wallet_transactions.id`). */
   transactionId: string;
 }
 
-/** Fingerprint for an external-wallet withdrawal submit; see the deposit's note. */
-export const buildEarnExternalWalletWithdrawalFingerprint = (
-  input: EarnExternalWalletWithdrawalFingerprintInput
+/** Fingerprint for a wallet withdrawal submit; see the deposit's note. */
+export const buildEarnWalletWithdrawalFingerprint = (
+  input: EarnWalletWithdrawalFingerprintInput
 ): string =>
   JSON.stringify(
     normalizeForFingerprint({
+      // Persisted legacy scope: changing it would reject exact signed replays.
       scope: "earn_external_wallet_withdrawal",
       environment: input.environment,
       provider: input.provider,

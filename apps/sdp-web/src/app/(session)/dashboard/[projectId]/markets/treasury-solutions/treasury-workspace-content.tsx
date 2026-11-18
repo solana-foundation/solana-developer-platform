@@ -92,7 +92,9 @@ import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/wallet
 import { RecordBlock, RecordStack } from "@/components/refresh-record";
 import { useCanWrite, useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
+import { formatDateTime } from "@/lib/date-format";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { type KaminoVaultAllocationsRead, kaminoAllocationsVault } from "./kamino-allocations";
 import {
@@ -1144,15 +1146,10 @@ function strategyRateValue(strategy: EarnStrategy): string | undefined {
 function StrategyRate({ strategy }: { strategy: EarnStrategy }) {
   const t = useTranslations();
   const locale = useLocale();
-  const observedAt = strategy.rate?.observedAt;
-  const timestamp = observedAt ? Date.parse(observedAt) : Number.NaN;
-  const observation = Number.isFinite(timestamp)
-    ? t("DashboardEarn.core.rateObserved", {
-        timestamp: new Intl.DateTimeFormat(locale, {
-          dateStyle: "medium",
-          timeStyle: "short",
-        }).format(timestamp),
-      })
+  const timeZone = useTimeZone();
+  const timestamp = formatDateTime(locale, timeZone, strategy.rate?.observedAt);
+  const observation = timestamp
+    ? t("DashboardEarn.core.rateObserved", { timestamp })
     : t("DashboardEarn.core.rateObservationUnknown");
   const provenance = t("DashboardEarn.core.rateProviderReported", {
     provider: earnProviderLabel(strategy.rate?.source.provider ?? strategy.provider),

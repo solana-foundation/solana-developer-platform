@@ -432,7 +432,7 @@ export async function admitEarnVaultDeposit(
   //                 swap-funded deposit is the SOURCE stablecoin's units (a
   //                 dollar-for-dollar approximation the cap accepts by design).
   //
-  // The sequence lives in handlers/admission.ts so the external-wallet build
+  // The sequence lives in handlers/admission.ts so the wallet build
   // shares it instead of re-deriving it. Money-OUT must never inherit any of
   // these (ADR 0002): un-offering a provider closes the door in, never the
   // door out.
@@ -936,7 +936,7 @@ export async function listEarnVaultPositions(c: AppContext) {
       };
     }),
     {
-      ownerKind: "custody",
+      sourceType: "wallet",
       minimumSlotByPositionId: balanceReadContext?.minimumSlotByPositionId,
       rowsReadAt,
     }

@@ -1,7 +1,7 @@
 "use client";
 
 import type { Operation } from "@sdp/types/operations";
-import { useEffect, useEffectEvent, useRef } from "react";
+import { useRef } from "react";
 import useSWR from "swr";
 import { dashboardRequest } from "./dashboard-fetch";
 import { createEarnClient, type EarnOperationsQuery } from "./earn-client";
@@ -64,7 +64,6 @@ export function useEarnOperation(
   initial?: Operation,
   onUpdated?: (operation: Operation) => void
 ) {
-  const updated = useEffectEvent((operation: Operation) => onUpdated?.(operation));
   const reported = useRef<string | null>(null);
   const { data, error, mutate } = useSWR(
     operationId ? ["dashboard-earn-operation", operationId] : null,
@@ -75,15 +74,19 @@ export function useEarnOperation(
         const operation = latest ?? initial;
         return operation && isEarnOperationTerminal(operation) ? 0 : 2_000;
       },
+      onSuccess(operation) {
+        const observation = JSON.stringify([
+          operation.id,
+          operation.status,
+          operation.version,
+          operation.updatedAt,
+        ]);
+        if (reported.current === observation) return;
+        reported.current = observation;
+        onUpdated?.(operation);
+      },
     }
   );
-  useEffect(() => {
-    if (!data) return;
-    const observation = JSON.stringify([data.id, data.status, data.version, data.updatedAt]);
-    if (reported.current === observation) return;
-    reported.current = observation;
-    updated(data);
-  }, [data]);
   return {
     operation: data,
     error,

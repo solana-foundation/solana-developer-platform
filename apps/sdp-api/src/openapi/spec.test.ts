@@ -628,7 +628,7 @@ describe("OpenAPI spec", () => {
 
   it("documents the 422 SIGNING_REJECTED response on sponsored submit operations", () => {
     const doc = createOpenApiDocument();
-    // Earn's external-wallet submits are absent on purpose: no paymaster co-signs
+    // Earn's wallet submits are absent on purpose: no paymaster co-signs
     // them (the customer's wallet or the caller's own fee payer signs), so they
     // cannot answer SIGNING_REJECTED until SDP sponsors them (PRO-1744).
     const sponsored = [

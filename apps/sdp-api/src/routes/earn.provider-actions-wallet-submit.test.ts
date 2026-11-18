@@ -44,7 +44,7 @@ vi.mock("@sdp/types/release-channels", async (importOriginal) => {
 });
 
 /**
- * An external-wallet cancellation submit must recheck its selected redemption
+ * A wallet cancellation submit must recheck its selected redemption
  * before accepting the signed bytes: a build prepared while the redemption was
  * pending goes stale once that redemption settles, and Plume's cancellation
  * clears every pending standard redemption for the wallet and vault — so the
@@ -286,7 +286,7 @@ afterEach(() => {
   env.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
 });
 
-describe("external cancellation submit rechecks its selected redemption", () => {
+describe("owner-signed cancellation submit rechecks its selected redemption", () => {
   it("refuses a build whose selected redemption settled since preparation", async () => {
     await seedAuth();
     await seedConnectionWallet();

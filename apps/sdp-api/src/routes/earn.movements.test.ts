@@ -549,7 +549,7 @@ describe("GET /v1/earn/movements", () => {
       expect(body.movements.map((m) => m.id)).not.toContain(production);
     });
 
-    it("structurally excludes external-wallet movements (owner-signed, no custody-wallet match)", async () => {
+    it("structurally excludes wallet movements (owner-signed, no custody-wallet match)", async () => {
       // EARN-016: an owner-signed vault row carries owner_address and NULL
       // custody_wallet_id, so the feed's vault arm (which requires a
       // custody-wallet match) can never grant it. It is served only by the

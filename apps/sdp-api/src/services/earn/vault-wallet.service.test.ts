@@ -28,10 +28,10 @@ import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 import { submitPreparedStrategyTransaction } from "./strategy-transactions.service";
 import type {
-  ExternalWalletBuiltTransaction,
-  ExternalWalletDepositBuildInput,
-  ExternalWalletWithdrawalBuildInput,
-} from "./vault-external-wallet.service";
+  WalletBuiltTransaction,
+  WalletDepositBuildInput,
+  WalletWithdrawalBuildInput,
+} from "./vault-wallet.service";
 
 const buildVaultDeposit = vi.hoisted(() => vi.fn());
 const buildVaultWithdrawal = vi.hoisted(() => vi.fn());
@@ -77,7 +77,7 @@ vi.mock("./vault-execution.service", async (importOriginal) => ({
   broadcastVaultTransaction,
 }));
 
-const service = await import("./vault-external-wallet.service");
+const service = await import("./vault-wallet.service");
 
 /** Each call in the cluster scope a sandbox request opens: every case here is on devnet. */
 function inRequestScope<TInput, TResult>(
@@ -89,19 +89,15 @@ function inRequestScope<TInput, TResult>(
     );
 }
 
-const buildExternalWalletDepositTransaction = inRequestScope(
-  service.buildExternalWalletDepositTransaction
-);
-const buildExternalWalletWithdrawalTransaction = inRequestScope(
-  service.buildExternalWalletWithdrawalTransaction
-);
-const submitExternalWalletDeposit = inRequestScope(service.submitExternalWalletDeposit);
-const submitExternalWalletWithdrawal = inRequestScope(service.submitExternalWalletWithdrawal);
+const buildWalletDepositTransaction = inRequestScope(service.buildWalletDepositTransaction);
+const buildWalletWithdrawalTransaction = inRequestScope(service.buildWalletWithdrawalTransaction);
+const submitWalletDeposit = inRequestScope(service.submitWalletDeposit);
+const submitWalletWithdrawal = inRequestScope(service.submitWalletWithdrawal);
 const submitStrategyTransaction = inRequestScope(submitPreparedStrategyTransaction);
 const { VaultTransactionTooLargeError } = await import("./vault-execution.service");
 
 /**
- * The external-wallet (caller-signed) flows, end to end minus the chain
+ * The wallet (caller-signed) flows, end to end minus the chain
  * (PRO-1722): build persists an unsigned transaction, submit verifies a real
  * signature over exactly those bytes, records the movement before broadcast,
  * and answers retries from the ledger.
@@ -158,9 +154,7 @@ function withdrawalPlan(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function depositInput(
-  overrides: Partial<ExternalWalletDepositBuildInput> = {}
-): ExternalWalletDepositBuildInput {
+function depositInput(overrides: Partial<WalletDepositBuildInput> = {}): WalletDepositBuildInput {
   return {
     organizationId: ORG,
     projectId: PROJECT,
@@ -182,7 +176,7 @@ async function seedTenancy(): Promise<void> {
   await db.batch([
     db
       .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(ORG, "External Wallet Org", "ext-wallet", "enterprise", "active"),
+      .bind(ORG, "Wallet Org", "ext-wallet", "enterprise", "active"),
     db
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
       .bind(USER, "ext-wallet@example.com"),
@@ -202,7 +196,7 @@ async function seedTenancy(): Promise<void> {
   });
 }
 
-async function seedExternalWalletPosition(
+async function seedWalletPosition(
   overrides: Partial<{ projectId: string; ownerAddress: string }> = {}
 ): Promise<string> {
   const id = generateEarnPositionId();
@@ -228,8 +222,8 @@ async function seedExternalWalletPosition(
 
 function withdrawalInput(
   positionId: string,
-  overrides: Partial<ExternalWalletWithdrawalBuildInput> = {}
-): ExternalWalletWithdrawalBuildInput {
+  overrides: Partial<WalletWithdrawalBuildInput> = {}
+): WalletWithdrawalBuildInput {
   return {
     organizationId: ORG,
     projectId: PROJECT,
@@ -266,7 +260,7 @@ function preflightBlockhashNotFound(): SolanaError {
   });
 }
 
-async function countRows(table: "earn_movements" | "earn_external_wallet_transactions") {
+async function countRows(table: "earn_movements" | "earn_wallet_transactions") {
   const row = await getDb(env)
     .prepare(`SELECT COUNT(*)::int AS rows FROM ${table}`)
     .first<{ rows: number }>();
@@ -274,10 +268,8 @@ async function countRows(table: "earn_movements" | "earn_external_wallet_transac
 }
 
 /** Unwrap the atomic build answer; swap-split cases assert on the union directly. */
-async function buildDepositRow(
-  input: ExternalWalletDepositBuildInput
-): Promise<ExternalWalletBuiltTransaction> {
-  const result = await buildExternalWalletDepositTransaction(env, input);
+async function buildDepositRow(input: WalletDepositBuildInput): Promise<WalletBuiltTransaction> {
+  const result = await buildWalletDepositTransaction(env, input);
   if (result.kind !== "built") {
     throw new Error(`expected a built transaction, got ${result.kind}`);
   }
@@ -285,7 +277,7 @@ async function buildDepositRow(
 }
 
 async function signBuiltTransaction(
-  built: ExternalWalletBuiltTransaction,
+  built: WalletBuiltTransaction,
   keyPair: CryptoKeyPair = ownerKeyPair
 ): Promise<string> {
   const transaction = getTransactionDecoder().decode(
@@ -296,12 +288,12 @@ async function signBuiltTransaction(
 }
 
 function submitDeposit(
-  built: ExternalWalletBuiltTransaction,
+  built: WalletBuiltTransaction,
   signedTransaction: string,
   requestId: string,
-  overrides: Partial<Parameters<typeof submitExternalWalletDeposit>[1]> = {}
+  overrides: Partial<Parameters<typeof submitWalletDeposit>[1]> = {}
 ) {
-  return submitExternalWalletDeposit(env, {
+  return submitWalletDeposit(env, {
     organizationId: ORG,
     projectId: PROJECT,
     transactionId: built.id,
@@ -313,7 +305,7 @@ function submitDeposit(
 }
 
 function submitCore(
-  built: ExternalWalletBuiltTransaction,
+  built: WalletBuiltTransaction,
   signedTransaction: string,
   overrides: Partial<Parameters<typeof submitPreparedStrategyTransaction>[1]> = {}
 ) {
@@ -333,7 +325,7 @@ function submitCore(
 
 describe("shared asynchronous strategy ledger writer", () => {
   it("claims discovered holdings only with signed intent, without a synthetic deposit", async () => {
-    const built = await buildExternalWalletWithdrawalTransaction(
+    const built = await buildWalletWithdrawalTransaction(
       env,
       withdrawalInput("discovered", {
         positionId: null,
@@ -364,7 +356,7 @@ describe("shared asynchronous strategy ledger writer", () => {
   });
 
   it("refuses foreign projects and different signed bytes before claiming a discovered holding", async () => {
-    const built = await buildExternalWalletWithdrawalTransaction(
+    const built = await buildWalletWithdrawalTransaction(
       env,
       withdrawalInput("discovered", {
         positionId: null,
@@ -372,7 +364,7 @@ describe("shared asynchronous strategy ledger writer", () => {
         asyncOperation: true,
       })
     );
-    const other = await buildExternalWalletWithdrawalTransaction(
+    const other = await buildWalletWithdrawalTransaction(
       env,
       withdrawalInput("discovered", {
         positionId: null,
@@ -389,10 +381,9 @@ describe("shared asynchronous strategy ledger writer", () => {
     expect(await getDb(env).queryOne("SELECT id FROM earn_positions")).toBeNull();
     expect(await countRows("earn_movements")).toBe(0);
     expect(
-      await getDb(env).queryOne(
-        "SELECT consumed_at FROM earn_external_wallet_transactions WHERE id = ?",
-        [built.id]
-      )
+      await getDb(env).queryOne("SELECT consumed_at FROM earn_wallet_transactions WHERE id = ?", [
+        built.id,
+      ])
     ).toEqual({ consumed_at: null });
   });
 
@@ -459,7 +450,7 @@ beforeEach(async () => {
   clusterRpc.respond("getSignatureStatuses", () => signatureStatusesReplyAt(100, [null]));
 });
 
-describe("buildExternalWalletDepositTransaction", () => {
+describe("buildWalletDepositTransaction", () => {
   it("persists and returns a decodable unsigned transaction for the owner", async () => {
     const built = await buildDepositRow(depositInput());
 
@@ -471,7 +462,7 @@ describe("buildExternalWalletDepositTransaction", () => {
     expect(built.creates_share_account).toBe(true);
     expect(built.last_valid_block_height).toBe("361");
     const persisted = await getDb(env)
-      .prepare("SELECT movement_id FROM earn_external_wallet_transactions WHERE id = ?")
+      .prepare("SELECT movement_id FROM earn_wallet_transactions WHERE id = ?")
       .bind(built.id)
       .first<{ movement_id: string | null }>();
     expect(persisted?.movement_id).toBeNull();
@@ -493,7 +484,7 @@ describe("buildExternalWalletDepositTransaction", () => {
 
   it("answers 501 when the provider has no vault-direct capability", async () => {
     resolveVaultDirectClient.mockReturnValue(null);
-    await expect(buildExternalWalletDepositTransaction(env, depositInput())).rejects.toThrowError(
+    await expect(buildWalletDepositTransaction(env, depositInput())).rejects.toThrowError(
       /direct vault deposits/
     );
   });
@@ -503,7 +494,7 @@ describe("buildExternalWalletDepositTransaction", () => {
       new SdpVedaError("INVALID_AMOUNT", "Veda deposits require minSharesOut")
     );
 
-    await expect(buildExternalWalletDepositTransaction(env, depositInput())).rejects.toMatchObject({
+    await expect(buildWalletDepositTransaction(env, depositInput())).rejects.toMatchObject({
       code: "BAD_REQUEST",
       message: "Veda deposits require minSharesOut",
     });
@@ -511,11 +502,11 @@ describe("buildExternalWalletDepositTransaction", () => {
 
   it("refuses a failed simulation before persisting anything", async () => {
     simulateVaultPlan.mockResolvedValue({ ok: false, error: "InstructionError", logs: [] });
-    await expect(buildExternalWalletDepositTransaction(env, depositInput())).rejects.toMatchObject({
+    await expect(buildWalletDepositTransaction(env, depositInput())).rejects.toMatchObject({
       code: "BAD_REQUEST",
     });
     const row = await getDb(env)
-      .prepare("SELECT COUNT(*)::int AS builds FROM earn_external_wallet_transactions")
+      .prepare("SELECT COUNT(*)::int AS builds FROM earn_wallet_transactions")
       .first<{ builds: number }>();
     expect(row?.builds).toBe(0);
   });
@@ -528,9 +519,7 @@ describe("buildExternalWalletDepositTransaction", () => {
         error: "custom program error: 0x1771",
         logs: [`Program log: AnchorError. Error Code: ${marker}.`],
       });
-      await expect(
-        buildExternalWalletDepositTransaction(env, depositInput())
-      ).rejects.toMatchObject({
+      await expect(buildWalletDepositTransaction(env, depositInput())).rejects.toMatchObject({
         code: "BAD_REQUEST",
         details: { reason: "slippage_exceeded" },
         message: expect.stringContaining("slippage"),
@@ -539,7 +528,7 @@ describe("buildExternalWalletDepositTransaction", () => {
   );
 });
 
-describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
+describe("buildWalletDepositTransaction (swap-funded)", () => {
   // Devnet USDG — any pinned mint works; the route validates membership, the
   // service only carries it to the (stubbed) Jupiter boundary.
   const SOURCE_MINT = "4F6PM96JJxngmHnZLBh9n58RH4aTVNWvDs2nuwrT5BP7";
@@ -586,7 +575,7 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
       unitsConsumed: 400_000n,
     }));
 
-    const result = await buildExternalWalletDepositTransaction(env, swapDepositInput());
+    const result = await buildWalletDepositTransaction(env, swapDepositInput());
 
     // The provider built for the FLOOR, not the request's source amount.
     expect(buildVaultDeposit).toHaveBeenCalledWith(
@@ -653,7 +642,7 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
       })
     );
 
-    const result = await buildExternalWalletDepositTransaction(env, {
+    const result = await buildWalletDepositTransaction(env, {
       ...swapDepositInput(),
       feePayer: VAULT,
     });
@@ -687,7 +676,7 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
       })
     );
 
-    const result = await buildExternalWalletDepositTransaction(env, swapDepositInput());
+    const result = await buildWalletDepositTransaction(env, swapDepositInput());
 
     // One re-route for compactness before giving up on atomicity.
     expect(fetchJupiterSwapLeg).toHaveBeenCalledTimes(2);
@@ -713,7 +702,7 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
     // orphan detector reads (PRO-1864), with the floor in atoms and the
     // owner's deposit-token baseline read at build time.
     const row = await getDb(env)
-      .prepare("SELECT COUNT(*)::int AS builds FROM earn_external_wallet_transactions")
+      .prepare("SELECT COUNT(*)::int AS builds FROM earn_wallet_transactions")
       .first<{ builds: number }>();
     expect(row?.builds).toBe(0);
     const advisory = await getDb(env)
@@ -770,7 +759,7 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
       };
     });
 
-    const result = await buildExternalWalletDepositTransaction(env, {
+    const result = await buildWalletDepositTransaction(env, {
       ...swapDepositInput(),
       feePayer: VAULT,
     });
@@ -800,7 +789,7 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
     );
     readOwnerMintBalance.mockRejectedValue(new Error("rpc unavailable"));
 
-    await expect(buildExternalWalletDepositTransaction(env, swapDepositInput())).rejects.toThrow(
+    await expect(buildWalletDepositTransaction(env, swapDepositInput())).rejects.toThrow(
       "rpc unavailable"
     );
 
@@ -826,7 +815,7 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
     );
     readOwnerMintBalance.mockResolvedValue({ atoms: 500000n, decimals: 9 });
 
-    await expect(buildExternalWalletDepositTransaction(env, swapDepositInput())).rejects.toThrow(
+    await expect(buildWalletDepositTransaction(env, swapDepositInput())).rejects.toThrow(
       "reports 9 decimals for a 6-decimal deposit token"
     );
 
@@ -849,7 +838,7 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
       })
     );
 
-    await expect(buildExternalWalletDepositTransaction(env, depositInput())).rejects.toMatchObject({
+    await expect(buildWalletDepositTransaction(env, depositInput())).rejects.toMatchObject({
       code: "BAD_REQUEST",
       message:
         "This vault deposit cannot fit in one Solana transaction, even with a compact request binding.",
@@ -859,7 +848,7 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
   });
 });
 
-describe("submitExternalWalletDeposit", () => {
+describe("submitWalletDeposit", () => {
   it("cannot consume an operation-only build through legacy submission, even without a parent reference", async () => {
     const built = await buildDepositRow(depositInput({ asyncOperation: true }));
     const signed = await signBuiltTransaction(built);
@@ -869,13 +858,13 @@ describe("submitExternalWalletDeposit", () => {
     });
     expect(broadcastVaultTransaction).not.toHaveBeenCalled();
     const row = await getDb(env).queryOne<{ operation_only: boolean; movement_id: string | null }>(
-      "SELECT operation_only, movement_id FROM earn_external_wallet_transactions WHERE id = ?",
+      "SELECT operation_only, movement_id FROM earn_wallet_transactions WHERE id = ?",
       [built.id]
     );
     expect(row).toEqual({ operation_only: true, movement_id: null });
     await expect(
       getDb(env).execute(
-        "UPDATE earn_external_wallet_transactions SET operation_only = FALSE WHERE id = ?",
+        "UPDATE earn_wallet_transactions SET operation_only = FALSE WHERE id = ?",
         [built.id]
       )
     ).rejects.toThrow("irreversible");
@@ -915,7 +904,7 @@ describe("submitExternalWalletDeposit", () => {
 
     // The build is consumed by exactly this movement.
     const consumed = await getDb(env)
-      .prepare("SELECT movement_id FROM earn_external_wallet_transactions WHERE id = ?")
+      .prepare("SELECT movement_id FROM earn_wallet_transactions WHERE id = ?")
       .bind(built.id)
       .first<{ movement_id: string | null }>();
     expect(consumed?.movement_id).toBe(result.movement.id);
@@ -972,7 +961,7 @@ describe("submitExternalWalletDeposit", () => {
     await expect(
       getDb(env)
         .prepare(
-          `UPDATE earn_external_wallet_transactions
+          `UPDATE earn_wallet_transactions
            SET movement_id = ?, consumed_at = sdp_iso_now()
            WHERE id = ?`
         )
@@ -1035,7 +1024,7 @@ describe("submitExternalWalletDeposit", () => {
     );
   });
 
-  it("enforces the external position's project claim in the database", async () => {
+  it("enforces the owner-address position's project claim in the database", async () => {
     const built = await buildDepositRow(depositInput());
     const result = await submitDeposit(
       built,
@@ -1065,7 +1054,7 @@ describe("submitExternalWalletDeposit", () => {
     ).rejects.toThrow(/earn_movements_external_wallet_claim_fkey/i);
   });
 
-  it("preserves external position and movement history after project deletion", async () => {
+  it("preserves owner-address position and movement history after project deletion", async () => {
     const built = await buildDepositRow(depositInput());
     const result = await submitDeposit(
       built,
@@ -1119,7 +1108,7 @@ describe("submitExternalWalletDeposit", () => {
     expect(result.movement.signed_transaction).toBe(signed);
     expect(await countRows("earn_movements")).toBe(1);
     const row = await getDb(env)
-      .prepare("SELECT movement_id FROM earn_external_wallet_transactions WHERE id = ?")
+      .prepare("SELECT movement_id FROM earn_wallet_transactions WHERE id = ?")
       .bind(built.id)
       .first<{ movement_id: string | null }>();
     expect(row?.movement_id).toBe(result.movement.id);
@@ -1392,8 +1381,8 @@ describe("partner fee payer (caller-provided)", () => {
   });
 
   it("builds the exit with the partner paying and refunds the recorded funder", async () => {
-    const positionId = await seedExternalWalletPosition();
-    const built = await buildExternalWalletWithdrawalTransaction(
+    const positionId = await seedWalletPosition();
+    const built = await buildWalletWithdrawalTransaction(
       env,
       withdrawalInput(positionId, {
         feePayer: partnerAddress,
@@ -1415,16 +1404,16 @@ describe("partner fee payer (caller-provided)", () => {
   });
 });
 
-describe("external-wallet withdrawals", () => {
+describe("wallet withdrawals", () => {
   it("builds and submits the exit against the recorded position", async () => {
-    const positionId = await seedExternalWalletPosition();
-    const built = await buildExternalWalletWithdrawalTransaction(env, withdrawalInput(positionId));
+    const positionId = await seedWalletPosition();
+    const built = await buildWalletWithdrawalTransaction(env, withdrawalInput(positionId));
     expect(built.direction).toBe("withdrawal");
     expect(built.position_id).toBe(positionId);
     expect(built.denomination).toBe(SHARE_MINT);
     expect(built.amount_requested).toBe("10");
 
-    const result = await submitExternalWalletWithdrawal(env, {
+    const result = await submitWalletWithdrawal(env, {
       organizationId: ORG,
       projectId: PROJECT,
       transactionId: built.id,
@@ -1446,12 +1435,12 @@ describe("external-wallet withdrawals", () => {
   });
 
   it("carries the caller's withdrawal floor through the shared provider plan", async () => {
-    const positionId = await seedExternalWalletPosition();
+    const positionId = await seedWalletPosition();
     buildVaultWithdrawal.mockResolvedValue(
       withdrawalPlan({ accepted: { shares: "10", minAmountOut: "9.5" } })
     );
 
-    const built = await buildExternalWalletWithdrawalTransaction(
+    const built = await buildWalletWithdrawalTransaction(
       env,
       withdrawalInput(positionId, { minAmountOut: "9.5" })
     );
@@ -1464,42 +1453,36 @@ describe("external-wallet withdrawals", () => {
   });
 
   it("refuses a floor the provider's exit plan cannot enforce, persisting nothing", async () => {
-    const positionId = await seedExternalWalletPosition();
+    const positionId = await seedWalletPosition();
     // The default plan reports shares only, the way Kamino's kvault exit does.
     await expect(
-      buildExternalWalletWithdrawalTransaction(
-        env,
-        withdrawalInput(positionId, { minAmountOut: "9.5" })
-      )
+      buildWalletWithdrawalTransaction(env, withdrawalInput(positionId, { minAmountOut: "9.5" }))
     ).rejects.toMatchObject({
       code: "BAD_REQUEST",
       message: expect.stringContaining("minAmountOut is not supported for kamino exits"),
     });
     expect(simulateVaultPlan).not.toHaveBeenCalled();
-    expect(await countRows("earn_external_wallet_transactions")).toBe(0);
+    expect(await countRows("earn_wallet_transactions")).toBe(0);
   });
 
   it("fails closed when the plan echoes a floor other than the one requested", async () => {
-    const positionId = await seedExternalWalletPosition();
+    const positionId = await seedWalletPosition();
     buildVaultWithdrawal.mockResolvedValue(
       withdrawalPlan({ accepted: { shares: "10", minAmountOut: "9.0" } })
     );
     await expect(
-      buildExternalWalletWithdrawalTransaction(
-        env,
-        withdrawalInput(positionId, { minAmountOut: "9.5" })
-      )
+      buildWalletWithdrawalTransaction(env, withdrawalInput(positionId, { minAmountOut: "9.5" }))
     ).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
     expect(simulateVaultPlan).not.toHaveBeenCalled();
   });
 
   it("retains an expired signed exit when broadcast cannot establish execution", async () => {
-    const positionId = await seedExternalWalletPosition();
-    const built = await buildExternalWalletWithdrawalTransaction(env, withdrawalInput(positionId));
+    const positionId = await seedWalletPosition();
+    const built = await buildWalletWithdrawalTransaction(env, withdrawalInput(positionId));
     clusterRpc.answer("getBlockHeight", 362);
 
     broadcastVaultTransaction.mockRejectedValue(preflightBlockhashNotFound());
-    const result = await submitExternalWalletWithdrawal(env, {
+    const result = await submitWalletWithdrawal(env, {
       organizationId: ORG,
       projectId: PROJECT,
       transactionId: built.id,
@@ -1514,9 +1497,9 @@ describe("external-wallet withdrawals", () => {
 
   it("answers 501 when the provider cannot build an exit", async () => {
     resolveVaultWithdrawClient.mockReturnValue(null);
-    const positionId = await seedExternalWalletPosition();
+    const positionId = await seedWalletPosition();
     await expect(
-      buildExternalWalletWithdrawalTransaction(env, withdrawalInput(positionId))
+      buildWalletWithdrawalTransaction(env, withdrawalInput(positionId))
     ).rejects.toThrowError(/vault withdrawals/);
   });
 
@@ -1524,10 +1507,10 @@ describe("external-wallet withdrawals", () => {
     buildVaultWithdrawal.mockRejectedValue(
       new SdpVedaError("WITHDRAW_REFUSED", "The Veda vault is temporarily paused")
     );
-    const positionId = await seedExternalWalletPosition();
+    const positionId = await seedWalletPosition();
 
     await expect(
-      buildExternalWalletWithdrawalTransaction(env, withdrawalInput(positionId))
+      buildWalletWithdrawalTransaction(env, withdrawalInput(positionId))
     ).rejects.toMatchObject({
       code: "BAD_REQUEST",
       message: "The Veda vault is temporarily paused",
@@ -1535,8 +1518,8 @@ describe("external-wallet withdrawals", () => {
   });
 
   it("refuses a deposit submit against a withdrawal build", async () => {
-    const positionId = await seedExternalWalletPosition();
-    const built = await buildExternalWalletWithdrawalTransaction(env, withdrawalInput(positionId));
+    const positionId = await seedWalletPosition();
+    const built = await buildWalletWithdrawalTransaction(env, withdrawalInput(positionId));
     await expect(
       submitDeposit(built, await signBuiltTransaction(built), crypto.randomUUID())
     ).rejects.toMatchObject({ code: "NOT_FOUND" });

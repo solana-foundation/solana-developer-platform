@@ -222,10 +222,10 @@ export async function executeSignedVaultIntent<TResult extends SignedVaultIntent
  * mover: broadcast the recorded bytes, then reconcile the optimistic
  * `submitted` transition. A broadcast error is ambiguous and leaves the
  * durable `requested` row for the shared reconciler. Even an expired-blockhash
- * refusal describes only this broadcast attempt: an external wallet or a
+ * refusal describes only this broadcast attempt: a wallet or a
  * concurrent reconciler may already have sent the exact signed transaction.
  *
- * Split out of `executeSignedVaultIntent` for the caller-signed external-wallet flow
+ * Split out of `executeSignedVaultIntent` for the caller-signed wallet flow
  * (PRO-1722), which records a movement it never signed and so has no
  * simulate/sign head — but past the durable write the two paths must not
  * differ at all.

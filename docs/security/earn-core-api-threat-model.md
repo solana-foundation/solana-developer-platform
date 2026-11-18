@@ -8,26 +8,26 @@ authorization and recovery boundary, not custody ownership.
 
 Assets include customer strategy shares, deposit tokens, redemption claims,
 signed transactions, sponsor funds and the integrity of financial history.
-Actors are project members, API keys, external wallet owners, custody providers,
+Actors are project members, API keys, wallet owners, custody providers,
 Earn providers and the operation worker. A strategy listing conveys neither
 deposit eligibility nor authority over a wallet.
 
 ## Boundaries
 
-| Boundary | Control |
-| --- | --- |
-| Caller to preparation | Authentication, project/environment scope, wallet binding and exact resource ownership precede idempotency. Mutable deposit admission follows replay. |
-| Preparation to execution | An immutable intent and private source bind a versioned, reviewable action to its authenticated principal. Changed terms require another review. |
-| HTTP to worker | Execute persists acceptance and exact external signed bytes. It does not sign, propose or broadcast. The worker restores the recorded principal and rechecks live authority. |
-| Worker to custody | Existing custody and sponsorship waists admit the named movement. A durable account binding precedes the single provider create. |
-| Signature to ledger | Every required signature and the complete prepared message are verified. Signed intent commits before broadcast. |
-| Chain to provider settlement | Approval, chain inclusion and economic delivery remain separate observations. Requested amounts and queue escrow are not payout evidence. |
+| Boundary                     | Control                                                                                                                                                                   |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Caller to preparation        | Authentication, project/environment scope, wallet binding and exact resource ownership precede idempotency. Mutable deposit admission follows replay.                     |
+| Preparation to execution     | An immutable intent and private source bind a versioned, reviewable action to its authenticated principal. Changed terms require another review.                          |
+| HTTP to worker               | Execute persists acceptance and exact owner-signed bytes. It does not sign, propose or broadcast. The worker restores the recorded principal and rechecks live authority. |
+| Worker to custody            | Existing custody and sponsorship waists admit the named movement. A durable account binding precedes the single provider create.                                          |
+| Signature to ledger          | Every required signature and the complete prepared message are verified. Signed intent commits before broadcast.                                                          |
+| Chain to provider settlement | Approval, chain inclusion and economic delivery remain separate observations. Requested amounts and queue escrow are not payout evidence.                                 |
 
 ## Failure and abuse cases
 
 - A foreign strategy, position, operation or build ID cannot cross project or
-  environment scope. External history requires an explicit owner filter;
-  an unfiltered feed contains custody operations only.
+  environment scope. Address-scoped history requires an explicit owner filter;
+  an unfiltered feed contains registered-wallet operations only.
 - A changed wallet, fee payer, transaction message or signature cannot replace
   the reviewed action. Prepared sources are checked again against the stored
   operation source at the execution adapter.
@@ -78,5 +78,8 @@ provider sandbox flow or signed-in browser flow is established by local tests.
 
 Migrations are additive while the previous revision serves traffic. Canonical
 strategy references retain synchronized legacy column aliases during that
-window. Dropping those aliases or drain-only recovery routes is a separate
+window. Canonical wallet build views use the existing rows, constraints and
+triggers with caller-enforced RLS. Legacy physical table names remain compatible
+with the previous revision; no second ledger is introduced. Dropping those
+aliases or drain-only recovery routes is a separate
 deployment step after old revisions and obligations are gone.

@@ -201,13 +201,12 @@ afterEach(async () => {
 });
 
 describe("Earn routes — retired surfaces stay retired (PRO-1628)", () => {
-  it("serves 404 for the removed positions/movements/quotes/nav routes", async () => {
+  it("serves 404 for removed position details, movement details, quotes and NAV routes", async () => {
     await seedAuth();
 
     const strategy = await seedStrategy({});
 
     for (const path of [
-      "/v1/earn/positions",
       "/v1/earn/positions/pos_1",
 
       "/v1/earn/movements/mov_1",
@@ -235,6 +234,15 @@ describe("Earn routes — retired surfaces stay retired (PRO-1628)", () => {
       );
       expect(res.status, path).toBe(404);
     }
+  });
+
+  it("serves the core positions collection", async () => {
+    await seedAuth();
+    const response = await getEarn("/v1/earn/positions", {});
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { positions: [], hasMore: false, nextCursor: null },
+    });
   });
 
   it("serves the DELIBERATELY re-introduced movements collection (PRO-1705)", async () => {

@@ -115,7 +115,7 @@ Pass it the build's `transaction` and the customer's signed transaction, then
 submit what it returns. A missing sponsor signature fails the submit with
 `400`, and changing the fee payer means a new build and new signatures. The
 build's `sponsored` field stays `false`: it reports whether SDP paid, and SDP
-never pays for an external wallet. In the
+never pays for a wallet. In the
 [backend module](/docs/guides/embedded-yield#get-the-backend-module),
 `signEarnTransaction` runs steps 2 and 3, and `createSponsorSigner` checks
 the fee payer before it signs.

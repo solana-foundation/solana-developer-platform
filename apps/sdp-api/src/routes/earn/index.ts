@@ -19,16 +19,6 @@ import {
 import { listEarnDiscovery, listEarnPositions } from "./core/read";
 import { prepareEarnDepositSchema, prepareEarnWithdrawalSchema } from "./core/schemas";
 import { isEarnExitOrRead } from "./exits";
-import {
-  createEarnExternalWalletDeposit,
-  createEarnExternalWalletWithdrawal,
-  createEarnExternalWalletWithdrawalPreview,
-  getEarnExternalWalletEarnings,
-  getEarnExternalWalletMovement,
-  getEarnExternalWalletPositionSummary,
-  listEarnExternalWalletMovements,
-  listEarnExternalWalletPositions,
-} from "./handlers/external-wallet";
 import { listEarnMovements } from "./handlers/movements";
 import {
   createEarnProgramWithdrawal,
@@ -42,17 +32,17 @@ import {
 } from "./handlers/program";
 import {
   cancelEarnVaultWithdrawalRequest,
-  createEarnExternalWalletQueuedWithdrawalPreview,
-  createEarnExternalWalletWithdrawalRequest,
-  createEarnExternalWalletWithdrawalRequestCancellation,
-  createEarnExternalWalletWithdrawalRequestCancelTransaction,
   createEarnVaultQueuedWithdrawalPreview,
-  getEarnExternalWalletWithdrawalOptions,
-  getEarnExternalWalletWithdrawalRequest,
+  createEarnWalletQueuedWithdrawalPreview,
+  createEarnWalletWithdrawalRequest,
+  createEarnWalletWithdrawalRequestCancellation,
+  createEarnWalletWithdrawalRequestCancelTransaction,
   getEarnVaultWithdrawalOptions,
   getEarnVaultWithdrawalRequest,
-  listEarnExternalWalletWithdrawalRequests,
+  getEarnWalletWithdrawalOptions,
+  getEarnWalletWithdrawalRequest,
   listEarnVaultWithdrawalRequests,
+  listEarnWalletWithdrawalRequests,
 } from "./handlers/queued-withdrawals";
 import { getEarnStrategy, listEarnStrategies } from "./handlers/strategies";
 import {
@@ -64,19 +54,29 @@ import {
   listEarnVaultWithdrawals,
 } from "./handlers/vault";
 import { getEarnVaultShareReconciliation } from "./handlers/vault-reconciliation";
+import {
+  createEarnWalletDeposit,
+  createEarnWalletWithdrawal,
+  createEarnWalletWithdrawalPreview,
+  getEarnWalletEarnings,
+  getEarnWalletMovement,
+  getEarnWalletPositionSummary,
+  listEarnWalletMovements,
+  listEarnWalletPositions,
+} from "./handlers/wallet";
 import { providerActions } from "./provider-actions";
 import {
-  earnExternalWalletQueuedWithdrawalPreviewSchema,
-  earnExternalWalletSubmitSchema,
-  earnExternalWalletWithdrawalOptionsSchema,
-  earnExternalWalletWithdrawalPreviewSchema,
-  earnExternalWalletWithdrawalRequestCancelTransactionSchema,
   earnProgramWithdrawalCreateSchema,
   earnProgramWithdrawalPreviewSchema,
   earnVaultQueuedWithdrawalPreviewSchema,
   earnVaultWithdrawalOptionsSchema,
   earnVaultWithdrawalPreviewSchema,
   earnVaultWithdrawalRequestCancelSchema,
+  earnWalletQueuedWithdrawalPreviewSchema,
+  earnWalletSubmitSchema,
+  earnWalletWithdrawalOptionsSchema,
+  earnWalletWithdrawalPreviewSchema,
+  earnWalletWithdrawalRequestCancelTransactionSchema,
 } from "./schemas";
 
 export const earnRoutes = new Hono<{ Bindings: Env }>();
@@ -148,8 +148,8 @@ earn.use("*", projectContextMiddleware(earnProjectContextOptions));
 // an unmetered caller spends the platform's money at whatever rate it likes.
 //
 // What is deliberately NOT metered is every money-OUT route and every EXIT
-// quote: withdrawals, vault withdrawals, the external-wallet submits, the
-// external-wallet exit build, and the previews an exit derives its floor from.
+// quote: withdrawals, vault withdrawals, the wallet submits, the
+// wallet exit build, and the previews an exit derives its floor from.
 // `meteredQuota` FAILS CLOSED — a counter-store outage answers 503 — and a 5xx
 // on a customer's way out of a position is precisely the failure ADR 0002 exit
 // safety rules out. A refused read costs a caller a retry; a refused exit traps
@@ -157,7 +157,7 @@ earn.use("*", projectContextMiddleware(earnProjectContextOptions));
 // (PRO-1994): a 429 is still a refusal on the way out, so keyed exit traffic
 // is bounded by the general per-key tier alone, as accepted risk.
 //
-// Money-IN carries no such rule, so the deposit quote and the external-wallet
+// Money-IN carries no such rule, so the deposit quote and the wallet
 // deposit build are metered.
 earn.route("/provider-actions", providerActions);
 
@@ -203,6 +203,8 @@ earn.get(
 // draw from.
 earn.post("/vault-deposit-previews", requireAction("earn.read"), retiredEarnDeposit);
 
+// Legacy /external-wallet URLs remain for existing integrations and pending
+// signed transactions. New clients use /discovery, /positions and operations.
 // B2B2C live holdings (PRO-1724). The owner is a REQUIRED query filter on
 // every per-owner read of this surface (positions, movements, earnings) — one
 // addressing style for one concept, and no literal segment (`summary`) can
@@ -212,13 +214,13 @@ earn.get(
   "/external-wallet/positions/summary",
   requireAction("earn.read"),
   meteredQuota(EARN_CHAIN_READ_QUOTA),
-  getEarnExternalWalletPositionSummary
+  getEarnWalletPositionSummary
 );
 earn.get(
   "/external-wallet/positions",
   requireAction("earn.read"),
   meteredQuota(EARN_CHAIN_READ_QUOTA),
-  listEarnExternalWalletPositions
+  listEarnWalletPositions
 );
 
 // B2B2C activity and earnings (PRO-1772): the reads that close the loop the
@@ -227,17 +229,17 @@ earn.get(
 // these report on money that already moved (ADR 0002). The
 // movements collection is declared before its `:movementId` detail so a
 // literal segment can never be captured as an id.
-earn.get("/external-wallet/movements", requireAction("earn.read"), listEarnExternalWalletMovements);
+earn.get("/external-wallet/movements", requireAction("earn.read"), listEarnWalletMovements);
 earn.get(
   "/external-wallet/movements/:movementId",
   requireAction("earn.read"),
-  getEarnExternalWalletMovement
+  getEarnWalletMovement
 );
 earn.get(
   "/external-wallet/earnings",
   requireAction("earn.read"),
   meteredQuota(EARN_CHAIN_READ_QUOTA),
-  getEarnExternalWalletEarnings
+  getEarnWalletEarnings
 );
 earn.post(
   "/external-wallet/withdrawal-request-transactions",
@@ -247,18 +249,18 @@ earn.post(
 earn.post(
   "/external-wallet/withdrawal-request-cancel-transactions",
   requireAction("earn.manage"),
-  validateBody(earnExternalWalletWithdrawalRequestCancelTransactionSchema),
-  createEarnExternalWalletWithdrawalRequestCancelTransaction
+  validateBody(earnWalletWithdrawalRequestCancelTransactionSchema),
+  createEarnWalletWithdrawalRequestCancelTransaction
 );
 earn.get(
   "/external-wallet/withdrawal-requests",
   requireAction("earn.read"),
-  listEarnExternalWalletWithdrawalRequests
+  listEarnWalletWithdrawalRequests
 );
 earn.get(
   "/external-wallet/withdrawal-requests/:withdrawalRequestId",
   requireAction("earn.read"),
-  getEarnExternalWalletWithdrawalRequest
+  getEarnWalletWithdrawalRequest
 );
 
 // Non-custodial ("vault_direct") positions: SDP builds and signs the deposit
@@ -356,7 +358,7 @@ earn.get(
   getEarnVaultShareReconciliation
 );
 
-// External-wallet builds, previews and submits. The deposit BUILD is money-IN,
+// Wallet builds, previews and submits. The deposit BUILD is money-IN,
 // so it takes the same meter as the deposit quote (PRO-1994), validated first;
 // the exit builds and previews carry none (see the metered-quotas note above).
 //
@@ -374,8 +376,8 @@ earn.post(
 earn.post(
   "/external-wallet/withdrawal-previews",
   requireAction("earn.read"),
-  validateBody(earnExternalWalletWithdrawalPreviewSchema),
-  createEarnExternalWalletWithdrawalPreview
+  validateBody(earnWalletWithdrawalPreviewSchema),
+  createEarnWalletWithdrawalPreview
 );
 earn.post(
   "/external-wallet/withdrawal-transactions",
@@ -385,38 +387,38 @@ earn.post(
 earn.post(
   "/external-wallet/withdrawal-options",
   requireAction("earn.read"),
-  validateBody(earnExternalWalletWithdrawalOptionsSchema),
-  getEarnExternalWalletWithdrawalOptions
+  validateBody(earnWalletWithdrawalOptionsSchema),
+  getEarnWalletWithdrawalOptions
 );
 earn.post(
   "/external-wallet/queued-withdrawal-previews",
   requireAction("earn.read"),
-  validateBody(earnExternalWalletQueuedWithdrawalPreviewSchema),
-  createEarnExternalWalletQueuedWithdrawalPreview
+  validateBody(earnWalletQueuedWithdrawalPreviewSchema),
+  createEarnWalletQueuedWithdrawalPreview
 );
 earn.post(
   "/external-wallet/deposits",
   requireAction("earn.execute"),
-  validateBody(earnExternalWalletSubmitSchema),
-  createEarnExternalWalletDeposit
+  validateBody(earnWalletSubmitSchema),
+  createEarnWalletDeposit
 );
 earn.post(
   "/external-wallet/withdrawals",
   requireAction("earn.execute"),
-  validateBody(earnExternalWalletSubmitSchema),
-  createEarnExternalWalletWithdrawal
+  validateBody(earnWalletSubmitSchema),
+  createEarnWalletWithdrawal
 );
 earn.post(
   "/external-wallet/withdrawal-requests",
   requireAction("earn.execute"),
-  validateBody(earnExternalWalletSubmitSchema),
-  createEarnExternalWalletWithdrawalRequest
+  validateBody(earnWalletSubmitSchema),
+  createEarnWalletWithdrawalRequest
 );
 earn.post(
   "/external-wallet/withdrawal-request-cancellations",
   requireAction("earn.manage"),
-  validateBody(earnExternalWalletSubmitSchema),
-  createEarnExternalWalletWithdrawalRequestCancellation
+  validateBody(earnWalletSubmitSchema),
+  createEarnWalletWithdrawalRequestCancellation
 );
 
 // The cross-provider movement feed (source: earn_movements). One chronological

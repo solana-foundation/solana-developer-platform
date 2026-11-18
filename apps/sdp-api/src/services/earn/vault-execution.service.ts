@@ -390,7 +390,7 @@ export async function signVaultPlan(input: SignVaultPlanInput): Promise<SignedVa
 export interface CompileUnsignedVaultTransactionInput extends VaultPlanExecutionScope {
   plan: EarnVaultTransactionPlan;
   /**
-   * The external wallet: required signer of the compiled message, and its fee
+   * The wallet: required signer of the compiled message, and its fee
    * payer unless `feePayer` names someone else. A plain address on purpose —
    * SDP holds no signer for it, which is the whole point of the caller-signed
    * flow (PRO-1722).
@@ -517,8 +517,8 @@ export function compileUnsignedVaultTransaction(
   ) {
     throw new Error(
       feePayer === undefined
-        ? "External-wallet vault transactions must require only the owner signature"
-        : "External-wallet vault transactions must require exactly the fee-payer and owner signatures"
+        ? "Transactions must require only the owner signature"
+        : "Transactions must require exactly the fee-payer and owner signatures"
     );
   }
   const bytes = new Uint8Array(getTransactionEncoder().encode(transaction));

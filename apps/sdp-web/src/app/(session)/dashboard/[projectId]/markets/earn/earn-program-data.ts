@@ -4,9 +4,6 @@ import {
   EARN_TERMINAL_MOVEMENT_STATUSES,
   EARN_TERMINAL_VAULT_MOVEMENT_STATUSES,
   EARN_TERMINAL_WITHDRAWAL_STATUSES,
-  type EarnExternalWalletPosition,
-  type EarnExternalWalletPositionSummary,
-  type EarnExternalWalletTokenTotal,
   type EarnPortfolioToken,
   type EarnPortfolioWalletStatus,
   type EarnPortfolioWithdrawal,
@@ -21,6 +18,9 @@ import {
   type EarnVaultWithdrawal,
   type EarnVaultWithdrawalRequestRecord,
   type EarnVaultWithdrawalRequestStatus,
+  type EarnWalletPosition,
+  type EarnWalletPositionSummary,
+  type EarnWalletTokenTotal,
   type ListEarnProgramsResponse,
   type ListEarnProgramWithdrawalsResponse,
 } from "@sdp/types/earn";
@@ -407,7 +407,7 @@ export async function fetchEarnVaultPositions(
   observeMinimumSlot?: (slot: number) => void
 ): Promise<EarnVaultPosition[]> {
   const positions = await fetchAllPositionPages<import("@sdp/types/earn-core").EarnCorePosition>(
-    (query) => `/api/dashboard/markets/earn/positions?ownerKind=custody&${query}`,
+    (query) => `/api/dashboard/markets/earn/positions?sourceType=wallet&${query}`,
     "Vault positions",
     afterMovementIds,
     observeMinimumSlot
@@ -617,17 +617,17 @@ export function useEarnVaultPositions() {
  * Reads every live position for exactly one partner end-user wallet.
  * Kept at the strict dashboard boundary for the planned wallet drill-down.
  */
-export async function fetchEarnExternalWalletPositions(
+export async function fetchEarnWalletPositions(
   ownerAddress: string
-): Promise<Array<Omit<EarnExternalWalletPosition, "createdAt"> & { createdAt: string | null }>> {
+): Promise<Array<Omit<EarnWalletPosition, "createdAt"> & { createdAt: string | null }>> {
   const positions = await fetchAllPositionPages<import("@sdp/types/earn-core").EarnCorePosition>(
     (query) =>
-      `/api/dashboard/markets/earn/positions?ownerKind=external&ownerAddress=${encodeURIComponent(ownerAddress)}&discover=true&${query}`,
-    "External-wallet positions"
+      `/api/dashboard/markets/earn/positions?sourceType=address&ownerAddress=${encodeURIComponent(ownerAddress)}&discover=true&${query}`,
+    "Wallet positions"
   );
   return positions.map((position) => {
     if (!("ownerAddress" in position.source) || position.source.ownerAddress !== ownerAddress) {
-      throw new Error("Invalid external position identity");
+      throw new Error("Invalid owner-address position identity");
     }
     return {
       ...position,
@@ -638,7 +638,7 @@ export async function fetchEarnExternalWalletPositions(
 }
 
 /** One per-token aggregate; `tokenValue` is absent when any position is unavailable. */
-const earnExternalWalletTokenTotalSchema: z.ZodType<EarnExternalWalletTokenTotal> = z.object({
+const earnWalletTokenTotalSchema: z.ZodType<EarnWalletTokenTotal> = z.object({
   tokenMint: z.string(),
   walletCount: z.number().int().nonnegative(),
   positionCount: z.number().int().nonnegative(),
@@ -647,7 +647,7 @@ const earnExternalWalletTokenTotalSchema: z.ZodType<EarnExternalWalletTokenTotal
   tokenValue: z.string().optional(),
 });
 
-const earnExternalWalletPositionRecordSchema: z.ZodType<EarnExternalWalletPosition> = z.object({
+const earnWalletPositionRecordSchema: z.ZodType<EarnWalletPosition> = z.object({
   id: z.string(),
   ownerAddress: z.string(),
   provider: z.string(),
@@ -681,39 +681,38 @@ const earnExternalWalletPositionRecordSchema: z.ZodType<EarnExternalWalletPositi
  * non-array `totalsByStrategy` or mis-derive the onboarding/portfolio split
  * from unvalidated counts.
  */
-const earnExternalWalletPositionSummarySchema: z.ZodType<EarnExternalWalletPositionSummary> =
-  z.object({
-    walletCount: z.number().int().nonnegative(),
-    positionCount: z.number().int().nonnegative(),
-    unavailablePositionCount: z.number().int().nonnegative(),
-    totalsByStrategy: z.array(
-      z.object({
-        provider: z.string(),
-        providerReference: z.string(),
-        label: z.string(),
-        ownerAddresses: z.array(z.string()).optional(),
-        positions: z.array(earnExternalWalletPositionRecordSchema).optional(),
-        walletCount: z.number().int().nonnegative(),
-        positionCount: z.number().int().nonnegative(),
-        totalsByToken: z.array(earnExternalWalletTokenTotalSchema),
-      })
-    ),
-    totalsByToken: z.array(earnExternalWalletTokenTotalSchema),
-  });
+const earnWalletPositionSummarySchema: z.ZodType<EarnWalletPositionSummary> = z.object({
+  walletCount: z.number().int().nonnegative(),
+  positionCount: z.number().int().nonnegative(),
+  unavailablePositionCount: z.number().int().nonnegative(),
+  totalsByStrategy: z.array(
+    z.object({
+      provider: z.string(),
+      providerReference: z.string(),
+      label: z.string(),
+      ownerAddresses: z.array(z.string()).optional(),
+      positions: z.array(earnWalletPositionRecordSchema).optional(),
+      walletCount: z.number().int().nonnegative(),
+      positionCount: z.number().int().nonnegative(),
+      totalsByToken: z.array(earnWalletTokenTotalSchema),
+    })
+  ),
+  totalsByToken: z.array(earnWalletTokenTotalSchema),
+});
 
-export async function fetchEarnExternalWalletPositionSummary(): Promise<EarnExternalWalletPositionSummary> {
+export async function fetchEarnWalletPositionSummary(): Promise<EarnWalletPositionSummary> {
   const response = await earnCoreClient.positions({
-    ownerKind: "external",
+    sourceType: "address",
     includeSummary: true,
     includeOwnerAddresses: true,
     includePositions: true,
     limit: 1,
   });
-  if (!response.summary) throw new Error("Missing external-wallet position summary");
-  return earnExternalWalletPositionSummarySchema.parse(response.summary);
+  if (!response.summary) throw new Error("Missing wallet position summary");
+  return earnWalletPositionSummarySchema.parse(response.summary);
 }
 
-export function earnExternalWalletSummaryRefreshInterval(
+export function earnWalletSummaryRefreshInterval(
   detailsVisible: boolean,
   environment = process.env.NODE_ENV
 ): number {
@@ -722,16 +721,16 @@ export function earnExternalWalletSummaryRefreshInterval(
 }
 
 /** Live customer portfolio totals refresh while the Embedded Yield dashboard is mounted. */
-export function useEarnExternalWalletPositionSummary({
+export function useEarnWalletPositionSummary({
   detailsVisible = false,
 }: {
   detailsVisible?: boolean;
 } = {}) {
   const { data, error, isLoading, mutate } = useSWR(
-    "dashboard-earn-external-wallet-position-summary",
-    () => fetchEarnExternalWalletPositionSummary(),
+    "dashboard-earn-wallet-position-summary",
+    () => fetchEarnWalletPositionSummary(),
     {
-      refreshInterval: earnExternalWalletSummaryRefreshInterval(detailsVisible),
+      refreshInterval: earnWalletSummaryRefreshInterval(detailsVisible),
     }
   );
   return {

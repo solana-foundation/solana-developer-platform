@@ -5,7 +5,7 @@ vi.mock("@/lib/sdp-api", () => ({ proxyToSdpApi: mocks.proxyToSdpApi }));
 
 import { GET } from "./route";
 
-describe("GET external-wallet position summary proxy", () => {
+describe("GET wallet position summary proxy", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.proxyToSdpApi.mockResolvedValue(new Response(null, { status: 200 }));
@@ -16,7 +16,7 @@ describe("GET external-wallet position summary proxy", () => {
     await GET(request);
     expect(mocks.proxyToSdpApi).toHaveBeenCalledWith({
       request,
-      traceSource: "route.dashboard.earn.external_wallet_positions.summary",
+      traceSource: "route.dashboard.earn.wallet_positions.summary",
       path: "/v1/earn/external-wallet/positions/summary?includeOwnerAddresses=true&includePositions=true",
     });
     const { path } = mocks.proxyToSdpApi.mock.calls[0][0] as { path: string };

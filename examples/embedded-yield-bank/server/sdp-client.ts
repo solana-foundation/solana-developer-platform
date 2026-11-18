@@ -224,7 +224,7 @@ export class EmbeddedYieldClient {
     let before: string | undefined;
     for (let page = 0; page < 100; page += 1) {
       const query = new URLSearchParams({
-        ownerKind: "external",
+        sourceType: "address",
         ownerAddress,
         discover: "true",
         limit: "100",

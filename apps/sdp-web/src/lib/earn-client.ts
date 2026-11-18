@@ -31,7 +31,7 @@ export interface EarnDiscoveryQuery {
 export interface EarnPositionsQuery {
   walletId?: string;
   ownerAddress?: string;
-  ownerKind?: "custody" | "external";
+  sourceType?: "wallet" | "address";
   discover?: boolean;
   limit?: number;
   before?: string;

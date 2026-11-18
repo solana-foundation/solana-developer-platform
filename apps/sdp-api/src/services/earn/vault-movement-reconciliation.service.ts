@@ -736,8 +736,8 @@ export async function repairUnvaluedKaminoDeposits(
 }
 
 /**
- * The wallet a withdrawal paid out to, as recorded at intent: the external
- * wallet on an owner-signed row, the custody wallet's public key on an
+ * The wallet a withdrawal paid out to, as recorded at intent: the owner's
+ * address on an owner-signed row, the custody wallet's public key on an
  * SDP-signed row (both write it as `destination_address`).
  */
 function withdrawalReceiver(movement: EarnMovementRow): string | null {

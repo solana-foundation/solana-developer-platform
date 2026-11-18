@@ -40,7 +40,7 @@ vi.mock("@/services/earn/vault-movement-reconciliation.service", () => ({
 
 /**
  * The B2B2C activity and earnings reads (PRO-1772): the loop-closing half of
- * the external-wallet surface. The API key here holds ONLY `earn:read` — that
+ * the wallet surface. The API key here holds ONLY `earn:read` — that
  * these routes need no `wallets:read` is a ticket acceptance criterion, not an
  * accident of the fixture.
  */
@@ -256,7 +256,7 @@ async function seedMovement(input: {
 }
 
 /**
- * One external-wallet withdrawal request (0113/0116) with the terms its
+ * One wallet withdrawal request (0113/0116) with the terms its
  * mechanism requires: a Veda solver-queue request carries a discount and queue
  * clock, a Hastra operator redemption carries its intermediate wYLDS instead.
  * Terminal `cancelled`/`failed` rows stamp the metadata 0113 ties to them.
@@ -346,7 +346,7 @@ beforeEach(async () => {
   liveValue({});
 });
 
-describe("external-wallet activity", () => {
+describe("wallet activity", () => {
   it("404s another project's movement", async () => {
     const positionId = await seedPosition({
       ownerAddress: OWNER_A,
@@ -713,7 +713,7 @@ describe("external-wallet activity", () => {
     );
     reconcileEarnVaultMovementReadThrough.mockClear();
 
-    // A custody-signed vault movement is not an external-wallet movement, and a
+    // A custody-signed vault movement is not a wallet movement, and a
     // guessed id answers exactly like a missing row.
     const custodyPositionId = generateEarnPositionId();
     const custodyMovementId = generateEarnMovementId();
@@ -775,7 +775,7 @@ describe("external-wallet activity", () => {
   });
 });
 
-describe("external-wallet earnings", () => {
+describe("wallet earnings", () => {
   it.each([true, false])(
     "reports a capped Kamino deposit honestly (receipt observed=%s)",
     async (observed) => {

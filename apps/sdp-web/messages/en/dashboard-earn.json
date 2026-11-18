@@ -1056,7 +1056,7 @@
       "noFees": "No quoted fees",
       "route": "Withdrawal route",
       "openProvider": "Open {provider}",
-      "externalSignature": "This action needs the owner’s wallet signature. Continue in the application that controls that wallet.",
+      "walletSignature": "This action needs the owner’s wallet signature. Continue in the application that controls that wallet.",
       "settlementNote": "The provider is still processing this request. Funds have not been confirmed as delivered.",
       "refreshFailed": "Status could not be refreshed. The last known state is shown; progress continues in the background.",
       "cancel": "Request cancellation",

@@ -16,6 +16,28 @@ The mechanism-split predecessors
 (`earn_program_withdrawals`, `earn_vault_movements`, `earn_vault_positions`) no
 longer have writers, and their code is retired.
 
+`operations.repository.ts` coordinates asynchronous Earn execution through
+`operations` and `operation_attempts` (0234); it does not replace the movement
+ledger or provider withdrawal obligations. Every access includes organization,
+project and environment. Immutable intent/source/principal and versioned actions
+bind each attempt to its reviewed transaction. Recovery uses a fenced lease;
+signed bytes, proposal bindings and dispatch identity cannot be replaced after
+an uncertain effect. Cancellation intent is sticky, and an observation-only
+attempt can never regain broadcast authority.
+
+Deposit acceptance commits verified owner-signed bytes, `audit_intent_id`
+and `execution_requested_at` together (0244). No audit admission means no queued
+deposit. Exits retain their durable execution request if auditing is unavailable.
+Neither acceptance nor an operation status proves settlement.
+
+New shared references use `strategy_id` and `strategy_reference`.
+Migration 0238 synchronizes `strategy_reference` with `vault_address` on
+positions, movements and direct builds while previous revisions serve traffic;
+keep the alias until deployment drain. A discovered holding receives unknown
+cost basis (0241), never a synthetic deposit or earnings. Direct and queued
+builds marked `operation_only` (0243) must stay unavailable to legacy submits,
+including builds retained after action refresh.
+
 Things that will bite:
 - **Legal source states come from `EARN_MOVEMENT_TRANSITIONS` (`@sdp/types`),
   never from the caller.** Terminal regression is unrepresentable rather than
@@ -72,7 +94,7 @@ Things that will bite:
   action-failure recovery may reopen it. A failed create cannot discard a
   request once its nonce, creation timestamp or durable provider observation
   establishes existence.
-- **Expired external builds remain recovery records.** Cleanup releases their
+- **Expired owner-signed builds remain recovery records.** Cleanup releases their
   reservations, retaining the unsigned message, tenant, owner and terms. A
   late submit verifies the signed message before consuming the build, and only
   finalized execution can reclaim a released transient lease. Occupied leases
@@ -117,9 +139,9 @@ Things that will bite:
   takes `environment` too.
 - **A vault row's signer is a column pair, not a new model** (PRO-1722,
   migration 0070): exactly one of `custody_wallet_id` (SDP signs) and
-  `owner_address` (an external wallet SDP holds no key for signs) is set, on
-  positions and movements alike. Keyed external-wallet submits consume a row
-  of `earn_external_wallet_transactions`, locked FIRST and consumable at most
+  `owner_address` (a wallet SDP holds no key for signs) is set, on
+  positions and movements alike. Keyed wallet submits consume a row
+  of `earn_wallet_transactions`, locked FIRST and consumable at most
   once, inside the same transaction that inserts the movement. One durable
   build can therefore never ledger twice; that consume is written HERE, with
   the single ledger writer, not in the built-transactions repository.
@@ -130,7 +152,7 @@ Things that will bite:
   declared unit each: the floor and both balance samples are deposit-mint ATOMS
   with the decimals recorded beside them, and the two `*_amount` columns are
   display-only decimal strings. Compare atoms to atoms.
-  `listExternalWalletDepositsSince` on the movements repository is its
+  `listWalletDepositsSince` on the movements repository is its
   status-aware follow-up read: a `failed` deposit must not discharge an
   advisory.
 

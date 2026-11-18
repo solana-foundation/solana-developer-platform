@@ -1,10 +1,10 @@
 import type {
-  EarnExternalWalletPosition,
-  EarnExternalWalletPositionSummary,
-  EarnExternalWalletStrategyTotal,
   EarnStrategy,
   EarnVaultPosition,
   EarnVaultPositionsPage,
+  EarnWalletPosition,
+  EarnWalletPositionSummary,
+  EarnWalletStrategyTotal,
 } from "./earn";
 
 /** A strategy with explicit rate provenance and adapter capabilities. */
@@ -52,13 +52,13 @@ export interface EarnCorePosition extends Omit<EarnVaultPosition, "custodyWallet
 
 /** Summary values retain their units and unknown discovered acquisition dates. */
 export interface EarnCorePositionSummary
-  extends Omit<EarnExternalWalletPositionSummary, "totalsByStrategy"> {
+  extends Omit<EarnWalletPositionSummary, "totalsByStrategy"> {
   costBasisCoverage: "complete" | "unknown";
   unknownCostBasisPositionCount: number;
   totalsByStrategy: Array<
-    Omit<EarnExternalWalletStrategyTotal, "positions"> & {
+    Omit<EarnWalletStrategyTotal, "positions"> & {
       positions?: Array<
-        Omit<EarnExternalWalletPosition, "createdAt"> & {
+        Omit<EarnWalletPosition, "createdAt"> & {
           createdAt: string | null;
           discovered?: boolean;
         }

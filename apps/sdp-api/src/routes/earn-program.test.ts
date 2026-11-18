@@ -105,12 +105,11 @@ const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const UPSHIFT_SANDBOX_KEY = "upshift-sandbox-test-api-key";
 const UPSHIFT_PRODUCTION_KEY = "upshift-production-test-api-key";
 const UPSHIFT_SOURCE = "morpho-gauntlet-usdc";
-const USDT_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
-const UPSHIFT_USDT_SOURCE = "morpho-gauntlet-usdt";
 const WALLET_REF = "8f14e45f-ceea-467f-9b6b-3c1a5c7f9d21";
 
 const WALLET_REF_B = "2b6e1f80-7a3c-4f0d-9b21-5c8d4e2f1a03";
 const SOLANA_DESTINATION = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
+
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const VALID_ALLOCATIONS = { usdc: [{ yieldSourceId: UPSHIFT_SOURCE, pct: 100 }] };
@@ -314,9 +313,6 @@ const createProgramBody = (extra: Record<string, unknown>) => ({
   ...extra,
 });
 
-const derivedCreateId = (callerKey: string, environment: string) =>
-  deriveProviderRequestId(["earn_program_create", TEST_ORG.id, environment, "upshift"], callerKey);
-
 interface ProgramEnvelope {
   id: string;
   provider: string;
@@ -354,21 +350,6 @@ function stubProgramReads() {
     }));
 }
 
-function stubProviderWalletDedupe() {
-  const minted = new Map<string, string>();
-  return vi
-    .spyOn(portfolioClient, "createPortfolioWallet")
-    .mockImplementation(async (_ctx, input) => {
-      const existing = minted.get(input.requestId);
-      if (existing) {
-        return { providerWalletRef: existing, status: "creating" };
-      }
-      const ref = `0000000${minted.size + 1}-0000-4000-8000-000000000000`;
-      minted.set(input.requestId, ref);
-      return { providerWalletRef: ref, status: "creating" };
-    });
-}
-
 async function countProviderWallets(): Promise<number> {
   const row = await getDb(env)
     .prepare("SELECT COUNT(*)::int AS total FROM earn_provider_wallets")
@@ -393,561 +374,110 @@ afterEach(async () => {
   await clearKVStores(env);
 });
 
-describe("Earn program — POST /programs (create) and PUT /programs/:id (re-target)", () => {
-  it("creates a program, then re-targets that program in place", async () => {
-    await seedAuth({ entitleGround: true });
-    await seedUpshiftStrategy({ environment: "sandbox" });
-    const createWallet = vi
-      .spyOn(portfolioClient, "createPortfolioWallet")
-      .mockResolvedValue({ providerWalletRef: WALLET_REF, status: "creating" });
-    const updateStrategy = vi
-      .spyOn(portfolioClient, "updatePortfolioStrategy")
-      .mockResolvedValue({ allocations: WALLET_SNAPSHOT.allocations });
-    stubProgramReads();
-
-    const callerKey = crypto.randomUUID();
-    const created = await requestEarn(
-      "POST",
-      PROGRAMS_PATH,
-      createProgramBody({ label: "Treasury", requestId: callerKey }),
-      {}
-    );
-
-    expect(created.status).toBe(201);
-    const createdBody = (await created.clone().json()) as { data: Record<string, unknown> };
-
-    expect(createdBody.data).not.toHaveProperty("created");
-    const program = await readProgram(created);
-    expect(program.id).toMatch(/^earn_provider_wallet_/);
-    expect(program.provider).toBe("upshift");
-    expect(program.label).toBe("Treasury");
-    expect(program.wallet).toEqual(WALLET_SNAPSHOT);
-    expect(createWallet).toHaveBeenCalledWith(expect.objectContaining({ environment: "sandbox" }), {
-      label: "Treasury",
-      allocations: VALID_ALLOCATIONS,
-      requestId: derivedCreateId(callerKey, "sandbox"),
-    });
-    expect(updateStrategy).not.toHaveBeenCalled();
-
-    const row = await createPostgresEarnRepository(getDb(env)).getProviderWalletById({
-      organizationId: TEST_ORG.id,
-      environment: "sandbox",
-      walletId: program.id,
-    });
-    expect(required(row).provider_wallet_ref).toBe(WALLET_REF);
-
-    const retargeted = await requestEarn(
-      "PUT",
-      programPath(program.id, ""),
-      {
-        allocations: VALID_ALLOCATIONS,
-      },
-      {}
-    );
-
-    expect(retargeted.status).toBe(200);
-    expect((await readProgram(retargeted)).id).toBe(program.id);
-    expect(createWallet).toHaveBeenCalledTimes(1);
-    expect(updateStrategy).toHaveBeenCalledWith(
-      expect.objectContaining({ environment: "sandbox" }),
-      { providerWalletRef: WALLET_REF, allocations: VALID_ALLOCATIONS }
-    );
-  });
-
-  it("derives the provider request id on both branches — never forwards the caller's raw key", async () => {
-    await seedAuth({ entitleGround: true });
-    await seedUpshiftStrategy({ environment: "sandbox" });
-    const createWallet = vi
-      .spyOn(portfolioClient, "createPortfolioWallet")
-      .mockResolvedValue({ providerWalletRef: WALLET_REF, status: "creating" });
-    const updateStrategy = vi
-      .spyOn(portfolioClient, "updatePortfolioStrategy")
-      .mockResolvedValue({ allocations: WALLET_SNAPSHOT.allocations });
-    stubProgramReads();
-
-    const createRequestId = "3f1d5a2e-9b64-4c7f-8a10-2d5e6f7a8b90";
-    const retargetRequestId = "5c2e7b41-8d36-4a92-bf05-1e4c9a7d3b28";
-
-    const created = await requestEarn(
-      "POST",
-      PROGRAMS_PATH,
-      createProgramBody({ requestId: createRequestId }),
-      {}
-    );
-    expect(created.status).toBe(201);
-    const program = await readProgram(created);
-    const sentOnCreate = required(required(createWallet.mock.calls[0])[1]).requestId;
-    expect(sentOnCreate).toBe(derivedCreateId(createRequestId, "sandbox"));
-    expect(sentOnCreate).not.toBe(createRequestId);
-    expect(sentOnCreate).toMatch(UUID_V4_PATTERN);
-
-    const retargeted = await requestEarn(
-      "PUT",
-      programPath(program.id, ""),
-      {
-        allocations: VALID_ALLOCATIONS,
-        requestId: retargetRequestId,
-      },
-      {}
-    );
-    expect(retargeted.status).toBe(200);
-    const sentOnRetarget = required(required(updateStrategy.mock.calls[0])[1]).requestId;
-
-    expect(sentOnRetarget).toBe(
-      deriveProviderRequestId(["earn_program_retarget", WALLET_REF], retargetRequestId)
-    );
-    expect(sentOnRetarget).not.toBe(retargetRequestId);
-  });
-
-  it("honors an Idempotency-Key header on re-target exactly like its siblings", async () => {
-    await seedAuth({ entitleGround: true });
-    await seedUpshiftStrategy({ environment: "sandbox" });
-    const program = await seedProgramWallet({});
-    const updateStrategy = vi
-      .spyOn(portfolioClient, "updatePortfolioStrategy")
-      .mockResolvedValue({ allocations: WALLET_SNAPSHOT.allocations });
-    stubProgramReads();
-
-    const headerKey = "retarget-9f2b";
-    const retargeted = await requestEarn(
-      "PUT",
-      programPath(program.id, ""),
-      { allocations: VALID_ALLOCATIONS },
-      { "Idempotency-Key": headerKey }
-    );
-    expect(retargeted.status).toBe(200);
-    expect(required(required(updateStrategy.mock.calls[0])[1]).requestId).toBe(
-      deriveProviderRequestId(["earn_program_retarget", program.provider_wallet_ref], headerKey)
-    );
-
-    const both = await requestEarn(
-      "PUT",
-      programPath(program.id, ""),
-      { allocations: VALID_ALLOCATIONS, requestId: crypto.randomUUID() },
-      { "Idempotency-Key": headerKey }
-    );
-    expect(both.status).toBe(400);
-    expect(updateStrategy).toHaveBeenCalledTimes(1);
-  });
-
-  it("refuses re-target when the organization is not entitled or credentials are missing", async () => {
-    await seedAuth({ entitleGround: false });
-    await seedUpshiftStrategy({ environment: "sandbox" });
-    const program = await seedProgramWallet({});
-    const updateStrategy = vi.spyOn(portfolioClient, "updatePortfolioStrategy");
-
-    const unentitled = await requestEarn(
-      "PUT",
-      programPath(program.id, ""),
-      {
-        allocations: VALID_ALLOCATIONS,
-      },
-      {}
-    );
-    expect(unentitled.status).toBe(403);
-
-    await clearKVStores(env);
-    await seedTestDatabase(env);
-    await seedAuth({ entitleGround: true });
-    await seedUpshiftStrategy({ environment: "sandbox" });
-    const reseeded = await seedProgramWallet({});
-    env.UPSHIFT_SANDBOX_API_KEY = undefined;
-
-    const noCredentials = await requestEarn(
-      "PUT",
-      programPath(reseeded.id, ""),
-      {
-        allocations: VALID_ALLOCATIONS,
-      },
-      {}
-    );
-    expect(noCredentials.status).toBe(503);
-    expect(await noCredentials.json()).toMatchObject({
-      error: {
-        code: "PROVIDER_NOT_CONFIGURED",
-        message: "Upshift is not configured for sandbox projects in this deployment.",
-      },
-    });
-    expect(updateStrategy).not.toHaveBeenCalled();
-  });
-
-  it("rejects a requestId that is not a UUIDv4", async () => {
-    await seedAuth({ entitleGround: true });
-    await seedUpshiftStrategy({ environment: "sandbox" });
-    const createWallet = vi.spyOn(portfolioClient, "createPortfolioWallet");
-
-    const res = await requestEarn(
-      "POST",
-      PROGRAMS_PATH,
-      createProgramBody({ requestId: "not-a-uuid" }),
-      {}
-    );
-
-    expect(res.status).toBe(400);
-    expect(createWallet).not.toHaveBeenCalled();
-  });
-
-  it("rejects allocations referencing yield sources outside the synced catalogue", async () => {
-    await seedAuth({ entitleGround: true });
-    await seedUpshiftStrategy({ environment: "sandbox" });
-    const createWallet = vi.spyOn(portfolioClient, "createPortfolioWallet");
-
-    const res = await requestEarn(
-      "POST",
-      PROGRAMS_PATH,
-      createProgramBody({
-        allocations: { usdc: [{ yieldSourceId: "morpho-unknown-usdc", pct: 100 }] },
-        requestId: crypto.randomUUID(),
+describe("Earn program creation and allocation retirement", () => {
+  const retiredBodies = [
+    { name: "valid allocations", body: createProgramBody({ requestId: crypto.randomUUID() }) },
+    { name: "missing body key", body: createProgramBody({}) },
+    { name: "invalid body key", body: createProgramBody({ requestId: "not-a-uuid" }) },
+    { name: "unknown provider", body: createProgramBody({ provider: "unknown" }) },
+    {
+      name: "unknown strategy",
+      body: createProgramBody({
+        allocations: { usdc: [{ yieldSourceId: "not-in-catalogue", pct: 100 }] },
       }),
-      {}
-    );
-
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as {
-      error: { code: string; details?: { unknownYieldSourceIds?: string[] } };
-    };
-    expect(body.error.code).toBe("BAD_REQUEST");
-    expect(required(body.error.details).unknownYieldSourceIds).toEqual(["morpho-unknown-usdc"]);
-    expect(createWallet).not.toHaveBeenCalled();
-  });
-
-  it("rejects more than one allocation entry per token group (V1 single-vault cap)", async () => {
-    await seedAuth({ entitleGround: true });
-    await seedUpshiftStrategy({ environment: "sandbox" });
-    const createWallet = vi.spyOn(portfolioClient, "createPortfolioWallet");
-
-    const res = await requestEarn(
-      "POST",
-      PROGRAMS_PATH,
-      createProgramBody({
+    },
+    {
+      name: "multiple allocations",
+      body: createProgramBody({
         allocations: {
           usdc: [
             { yieldSourceId: UPSHIFT_SOURCE, pct: 50 },
-            { yieldSourceId: "morpho-steakhouse-usdc", pct: 50 },
+            { yieldSourceId: "another-strategy", pct: 50 },
           ],
         },
-        requestId: crypto.randomUUID(),
       }),
-      {}
-    );
-
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("BAD_REQUEST");
-    expect(JSON.stringify(body)).toContain("exactly one allocation entry per token group");
-    expect(createWallet).not.toHaveBeenCalled();
-  });
-
-  it("rejects a lone allocation entry whose weight is not 100", async () => {
-    await seedAuth({ entitleGround: true });
-    await seedUpshiftStrategy({ environment: "sandbox" });
-
-    const res = await requestEarn(
-      "POST",
-      PROGRAMS_PATH,
-      createProgramBody({
+    },
+    {
+      name: "partial allocation",
+      body: createProgramBody({
         allocations: { usdc: [{ yieldSourceId: UPSHIFT_SOURCE, pct: 60 }] },
-        requestId: crypto.randomUUID(),
       }),
-      {}
-    );
+    },
+    { name: "empty payload", body: {} },
+  ];
 
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("BAD_REQUEST");
-    expect(JSON.stringify(body)).toContain("sum to exactly 100");
-  });
-
-  it("accepts one entry per token group across both deposit tokens", async () => {
+  it.each(retiredBodies)("refuses creation with $name before provisioning", async ({ body }) => {
     await seedAuth({ entitleGround: true });
-    await seedUpshiftStrategy({ environment: "sandbox" });
-    await seedUpshiftStrategy({
-      environment: "sandbox",
-      providerReference: UPSHIFT_USDT_SOURCE,
-      name: "Gauntlet USDT",
-      depositMints: [USDT_MINT],
-    });
-    const createWallet = vi
-      .spyOn(portfolioClient, "createPortfolioWallet")
-      .mockResolvedValue({ providerWalletRef: WALLET_REF, status: "creating" });
-    stubProgramReads();
-
-    const res = await requestEarn(
-      "POST",
-      PROGRAMS_PATH,
-      createProgramBody({
-        allocations: {
-          usdc: [{ yieldSourceId: UPSHIFT_SOURCE, pct: 100 }],
-          usdt: [{ yieldSourceId: UPSHIFT_USDT_SOURCE, pct: 100 }],
-        },
-        requestId: crypto.randomUUID(),
-      }),
-      {}
-    );
-
-    expect(res.status).toBe(201);
-    expect(createWallet).toHaveBeenCalledTimes(1);
-  });
-
-  it("blocks create when the organization is not entitled or credentials are missing", async () => {
-    await seedAuth({ entitleGround: false });
     await seedUpshiftStrategy({ environment: "sandbox" });
     const createWallet = vi.spyOn(portfolioClient, "createPortfolioWallet");
-
-    const unentitled = await requestEarn(
-      "POST",
-      PROGRAMS_PATH,
-      createProgramBody({ requestId: crypto.randomUUID() }),
-      {}
-    );
-    expect(unentitled.status).toBe(403);
-
-    await clearKVStores(env);
-    await seedTestDatabase(env);
-    await seedAuth({ entitleGround: true });
-    await seedUpshiftStrategy({ environment: "sandbox" });
-    env.UPSHIFT_SANDBOX_API_KEY = undefined;
-
-    const unconfigured = await requestEarn(
-      "POST",
-      PROGRAMS_PATH,
-      createProgramBody({ requestId: crypto.randomUUID() }),
-      {}
-    );
-    expect(unconfigured.status).toBe(503);
-    expect(await unconfigured.json()).toMatchObject({
-      error: {
-        code: "PROVIDER_NOT_CONFIGURED",
-        message: "Upshift is not configured for sandbox projects in this deployment.",
-      },
-    });
+    const updateStrategy = vi.spyOn(portfolioClient, "updatePortfolioStrategy");
+    const response = await requestEarn("POST", PROGRAMS_PATH, body, {});
+    expect(response.status).toBe(410);
+    expect(await response.json()).toMatchObject({ error: { code: "NOT_IMPLEMENTED" } });
     expect(createWallet).not.toHaveBeenCalled();
+    expect(updateStrategy).not.toHaveBeenCalled();
+    expect(await countProviderWallets()).toBe(0);
   });
 
-  it("returns 501 for providers without the portfolio-wallet capability", async () => {
-    await seedAuth({ entitleGround: true });
-
-    const res = await requestEarn(
-      "POST",
-      PROGRAMS_PATH,
-      {
-        provider: "veda",
-        allocations: VALID_ALLOCATIONS,
-      },
-      {}
-    );
-
-    expect(res.status).toBe(501);
-    const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("NOT_IMPLEMENTED");
-  });
-
-  it("returns 501 for a catalogue-only provider, whose vaults ARE in the catalogue", async () => {
-    await seedAuth({ entitleGround: true });
-    await seedUpshiftStrategy({
-      environment: "sandbox",
-      provider: "kamino",
-      hostCluster: "mainnet-beta",
-    });
-
-    const res = await requestEarn(
-      "POST",
-      PROGRAMS_PATH,
-      {
-        provider: "kamino",
-        allocations: VALID_ALLOCATIONS,
-      },
-      {}
-    );
-
-    expect(res.status).toBe(501);
-    const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("NOT_IMPLEMENTED");
-  });
-
-  it("refuses an allocation whose strategy is hosted on another cluster", async () => {
-    await seedAuth({ entitleGround: true });
-    await seedUpshiftStrategy({ environment: "sandbox", hostCluster: "mainnet-beta" });
-    const createWallet = vi.spyOn(portfolioClient, "createPortfolioWallet");
-
-    const res = await requestEarn(
-      "POST",
-      PROGRAMS_PATH,
-      createProgramBody({ requestId: crypto.randomUUID() }),
-      {}
-    );
-
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as {
-      error: { code: string; details?: { unknownYieldSourceIds?: string[] } };
-    };
-    expect(body.error.code).toBe("BAD_REQUEST");
-    expect(required(body.error.details).unknownYieldSourceIds).toEqual([UPSHIFT_SOURCE]);
-    expect(createWallet).not.toHaveBeenCalled();
-  });
-
-  it("accepts the same allocation once the strategy is hosted on this cluster", async () => {
-    await seedAuth({ entitleGround: true });
-    await seedUpshiftStrategy({ environment: "sandbox", hostCluster: "devnet" });
-    const createWallet = vi
-      .spyOn(portfolioClient, "createPortfolioWallet")
-      .mockResolvedValue({ providerWalletRef: WALLET_REF, status: "creating" });
-    stubProgramReads();
-
-    const res = await requestEarn(
-      "POST",
-      PROGRAMS_PATH,
-      createProgramBody({ requestId: crypto.randomUUID() }),
-      {}
-    );
-
-    expect(res.status).toBe(201);
-    expect(createWallet).toHaveBeenCalled();
-  });
-
-  it("answers an unentitled create 403 even when no idempotency key was sent", async () => {
-    await seedAuth({ entitleGround: false });
-    await seedUpshiftStrategy({ environment: "sandbox" });
-    const createWallet = vi.spyOn(portfolioClient, "createPortfolioWallet");
-
-    const res = await requestEarn("POST", PROGRAMS_PATH, createProgramBody({}), {});
-
-    expect(res.status).toBe(403);
-    expect(createWallet).not.toHaveBeenCalled();
-  });
-
-  describe("required idempotency key (PRO-1670)", () => {
-    it("refuses both key sources and neither, and accepts the header alone", async () => {
+  it.each(retiredBodies)(
+    "refuses reallocation with $name without changing holdings",
+    async ({ body }) => {
       await seedAuth({ entitleGround: true });
-      await seedUpshiftStrategy({ environment: "sandbox" });
-      const createWallet = vi
-        .spyOn(portfolioClient, "createPortfolioWallet")
-        .mockResolvedValue({ providerWalletRef: WALLET_REF, status: "creating" });
-      stubProgramReads();
+      const program = await seedProgramWallet({});
+      const updateStrategy = vi.spyOn(portfolioClient, "updatePortfolioStrategy");
+      const response = await requestEarn("PUT", programPath(program.id, ""), body, {});
+      expect(response.status).toBe(410);
+      expect(updateStrategy).not.toHaveBeenCalled();
+      expect(
+        await createPostgresEarnRepository(getDb(env)).getProviderWalletById({
+          organizationId: TEST_ORG.id,
+          environment: "sandbox",
+          walletId: program.id,
+        })
+      ).toEqual(program);
+    }
+  );
 
-      const both = await requestEarn(
-        "POST",
-        PROGRAMS_PATH,
-        createProgramBody({ requestId: "0d7fbb1e-9b26-4b8f-8f5e-2a1f4a3b6c9d" }),
-        { "Idempotency-Key": "onboarding-9f2b" }
-      );
-      expect(both.status).toBe(400);
-
-      const neither = await requestEarn("POST", PROGRAMS_PATH, createProgramBody({}), {});
-      expect(neither.status).toBe(400);
+  it.each(["repeated", "concurrent", "different keys"])(
+    "refuses %s creation requests without provisioning",
+    async (scenario) => {
+      await seedAuth({ entitleGround: true });
+      const createWallet = vi.spyOn(portfolioClient, "createPortfolioWallet");
+      const send = (key: string) =>
+        requestEarn("POST", PROGRAMS_PATH, createProgramBody({}), { "Idempotency-Key": key });
+      const first = send("retired-create");
+      const responses =
+        scenario === "concurrent"
+          ? await Promise.all([first, send("retired-create")])
+          : [
+              await first,
+              await send(scenario === "different keys" ? "another-create" : "retired-create"),
+            ];
+      expect(responses.map((response) => response.status)).toEqual([410, 410]);
       expect(createWallet).not.toHaveBeenCalled();
+      expect(await countProviderWallets()).toBe(0);
+    }
+  );
 
-      const headerOnly = await requestEarn("POST", PROGRAMS_PATH, createProgramBody({}), {
-        "Idempotency-Key": "onboarding-9f2b",
-      });
-      expect(headerOnly.status).toBe(201);
-      expect(createWallet).toHaveBeenCalledTimes(1);
-      expect(required(required(createWallet.mock.calls[0])[1]).requestId).toBe(
-        derivedCreateId("onboarding-9f2b", "sandbox")
-      );
-    });
-
-    it("provisions exactly ONE wallet when the same caller key is retried", async () => {
-      await seedAuth({ entitleGround: true });
-      await seedUpshiftStrategy({ environment: "sandbox" });
-      const createWallet = stubProviderWalletDedupe();
-      stubProgramReads();
-
-      const callerKey = crypto.randomUUID();
-      const first = await requestEarn(
-        "POST",
-        PROGRAMS_PATH,
-        createProgramBody({ requestId: callerKey }),
-        {}
-      );
-      const retry = await requestEarn(
-        "POST",
-        PROGRAMS_PATH,
-        createProgramBody({ requestId: callerKey }),
-        {}
-      );
-
-      expect(first.status).toBe(201);
-
-      expect(retry.status).toBe(200);
-      expect((await readProgram(retry)).id).toBe((await readProgram(first)).id);
-
-      expect(createWallet).toHaveBeenCalledTimes(2);
-      expect(required(required(createWallet.mock.calls[1])[1]).requestId).toBe(
-        required(required(createWallet.mock.calls[0])[1]).requestId
-      );
-      await expect(countProviderWallets()).resolves.toBe(1);
-    });
-
-    it("provisions exactly ONE wallet when the same caller key arrives concurrently", async () => {
-      await seedAuth({ entitleGround: true });
-      await seedUpshiftStrategy({ environment: "sandbox" });
-      stubProviderWalletDedupe();
-      stubProgramReads();
-
-      const callerKey = crypto.randomUUID();
-      const [a, b] = await Promise.all([
-        requestEarn("POST", PROGRAMS_PATH, createProgramBody({ requestId: callerKey }), {}),
-        requestEarn("POST", PROGRAMS_PATH, createProgramBody({ requestId: callerKey }), {}),
+  it.each(["unentitled", "no credentials", "un-surfaced"])(
+    "keeps creation and reallocation retired when %s",
+    async (state) => {
+      await seedAuth({ entitleGround: state !== "unentitled" });
+      const program = await seedProgramWallet({});
+      if (state === "no credentials") env.UPSHIFT_SANDBOX_API_KEY = undefined;
+      if (state === "un-surfaced") surfacing.forceOn = false;
+      const createWallet = vi.spyOn(portfolioClient, "createPortfolioWallet");
+      const updateStrategy = vi.spyOn(portfolioClient, "updatePortfolioStrategy");
+      const responses = await Promise.all([
+        requestEarn("POST", PROGRAMS_PATH, createProgramBody({}), {}),
+        requestEarn("PUT", programPath(program.id, ""), { allocations: VALID_ALLOCATIONS }, {}),
       ]);
-
-      expect([a.status, b.status].sort()).toEqual([200, 201]);
-      expect((await readProgram(a)).id).toBe((await readProgram(b)).id);
-      await expect(countProviderWallets()).resolves.toBe(1);
-    });
-
-    it("provisions TWO wallets for two different caller keys", async () => {
-      await seedAuth({ entitleGround: true });
-      await seedUpshiftStrategy({ environment: "sandbox" });
-      const createWallet = stubProviderWalletDedupe();
-      stubProgramReads();
-
-      const first = await requestEarn(
-        "POST",
-        PROGRAMS_PATH,
-        createProgramBody({ requestId: crypto.randomUUID() }),
-        {}
-      );
-      const second = await requestEarn(
-        "POST",
-        PROGRAMS_PATH,
-        createProgramBody({ requestId: crypto.randomUUID() }),
-        {}
-      );
-
-      expect(first.status).toBe(201);
-      expect(second.status).toBe(201);
-      const [programA, programB] = [await readProgram(first), await readProgram(second)];
-      expect(programA.id).not.toBe(programB.id);
-      expect(programA.wallet.providerWalletRef).not.toBe(programB.wallet.providerWalletRef);
-      expect(required(required(createWallet.mock.calls[0])[1]).requestId).not.toBe(
-        required(required(createWallet.mock.calls[1])[1]).requestId
-      );
-      await expect(countProviderWallets()).resolves.toBe(2);
-    });
-
-    it("gives each unlabelled program its own default provider label", async () => {
-      await seedAuth({ entitleGround: true });
-      await seedUpshiftStrategy({ environment: "sandbox" });
-      const createWallet = stubProviderWalletDedupe();
-      stubProgramReads();
-
-      const keyOne = crypto.randomUUID();
-      const keyTwo = crypto.randomUUID();
-      await requestEarn("POST", PROGRAMS_PATH, createProgramBody({ requestId: keyOne }), {});
-      await requestEarn("POST", PROGRAMS_PATH, createProgramBody({ requestId: keyTwo }), {});
-
-      const labelOne = required(required(createWallet.mock.calls[0])[1]).label;
-      const labelTwo = required(required(createWallet.mock.calls[1])[1]).label;
-      expect(labelOne).toBe(
-        `sdp-earn-${TEST_ORG.id}-sandbox-${derivedCreateId(keyOne, "sandbox").slice(0, 8)}`
-      );
-      expect(labelTwo).toBe(
-        `sdp-earn-${TEST_ORG.id}-sandbox-${derivedCreateId(keyTwo, "sandbox").slice(0, 8)}`
-      );
-      expect(labelOne).not.toBe(labelTwo);
-    });
-  });
+      expect(responses.map((response) => response.status)).toEqual([410, 410]);
+      expect(createWallet).not.toHaveBeenCalled();
+      expect(updateStrategy).not.toHaveBeenCalled();
+      expect(await countProviderWallets()).toBe(1);
+    }
+  );
 });
 
 describe("Earn programs — many per (organization, environment) (PRO-1670)", () => {
@@ -1175,64 +705,20 @@ describe("Earn programs — many per (organization, environment) (PRO-1670)", ()
 });
 
 describe("Earn program — Clerk callers and environment isolation", () => {
-  it("creates a production program from a production-project dashboard Clerk", async () => {
+  it("keeps program creation retired for a production-project dashboard member", async () => {
     await seedAuth({ entitleGround: true });
     await seedClerkAuth();
     env.UPSHIFT_API_KEY = UPSHIFT_PRODUCTION_KEY;
-    await seedUpshiftStrategy({ environment: "production" });
-    const createWallet = vi
-      .spyOn(portfolioClient, "createPortfolioWallet")
-      .mockResolvedValue({ providerWalletRef: WALLET_REF, status: "creating" });
-    stubProgramReads();
-
-    const callerKey = crypto.randomUUID();
-    const res = await requestEarnAsClerk(
+    const createWallet = vi.spyOn(portfolioClient, "createPortfolioWallet");
+    const response = await requestEarnAsClerk(
       "POST",
       PROGRAMS_PATH,
       TEST_PRODUCTION_PROJECT.id,
-      createProgramBody({ requestId: callerKey })
+      createProgramBody({ requestId: crypto.randomUUID() })
     );
-
-    expect(res.status).toBe(201);
-    const program = await readProgram(res);
-    expect(createWallet).toHaveBeenCalledWith(
-      expect.objectContaining({ environment: "production" }),
-      expect.objectContaining({
-        allocations: VALID_ALLOCATIONS,
-
-        requestId: derivedCreateId(callerKey, "production"),
-      })
-    );
-
-    const repo = createPostgresEarnRepository(getDb(env));
-    const productionRow = await repo.getProviderWalletById({
-      organizationId: TEST_ORG.id,
-      environment: "production",
-      walletId: program.id,
-    });
-    expect(required(productionRow).provider_wallet_ref).toBe(WALLET_REF);
-    expect(required(productionRow).environment).toBe("production");
-    await expect(
-      repo.listProviderWallets({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT.id,
-        environment: "sandbox",
-        limit: 20,
-        offset: 0,
-      })
-    ).resolves.toMatchObject({ rows: [], total: 0 });
-
-    const sandboxList = await requestEarn(
-      "GET",
-      `${PROGRAMS_PATH}?provider=upshift`,
-      undefined,
-      {}
-    );
-    expect(sandboxList.status).toBe(200);
-    expect(await readPrograms(sandboxList)).toMatchObject({ programs: [], total: 0 });
-
-    const guessed = await requestEarn("GET", programPath(program.id, ""), undefined, {});
-    expect(guessed.status).toBe(404);
+    expect(response.status).toBe(410);
+    expect(createWallet).not.toHaveBeenCalled();
+    expect(await countProviderWallets()).toBe(0);
   });
 
   it("never serves a sandbox program to a production-project Clerk", async () => {
@@ -1380,32 +866,7 @@ describe("Earn program — un-surfaced provider", () => {
     surfacing.forceOn = false;
   });
 
-  it("refuses to open a new position, even for a fully entitled and credentialed org", async () => {
-    await seedAuth({ entitleGround: true });
-    await seedUpshiftStrategy({ environment: "sandbox" });
-    const createWallet = vi.spyOn(portfolioClient, "createPortfolioWallet");
-
-    const res = await requestEarn(
-      "POST",
-      PROGRAMS_PATH,
-      createProgramBody({ requestId: crypto.randomUUID() }),
-      {}
-    );
-
-    expect(res.status).toBe(403);
-    expect(await res.json()).toEqual({
-      error: {
-        code: "FORBIDDEN",
-        message: "Upshift is not currently offered.",
-        details: { reason: "provider_not_offered" },
-      },
-      meta: { requestId: expect.any(String) },
-    });
-
-    expect(createWallet).not.toHaveBeenCalled();
-  });
-
-  it("keeps an existing program readable, re-targetable and withdrawable", async () => {
+  it("keeps an existing program readable and withdrawable after allocation retirement", async () => {
     await seedAuth({ entitleGround: true });
     await seedUpshiftStrategy({ environment: "sandbox" });
     const program = await seedProgramWallet({});
@@ -1429,8 +890,8 @@ describe("Earn program — un-surfaced provider", () => {
       },
       {}
     );
-    expect(retarget.status).toBe(200);
-    expect(updateStrategy).toHaveBeenCalledTimes(1);
+    expect(retarget.status).toBe(410);
+    expect(updateStrategy).not.toHaveBeenCalled();
 
     const withdrawal = await requestEarn(
       "POST",
@@ -1444,26 +905,6 @@ describe("Earn program — un-surfaced provider", () => {
       {}
     );
     expect(withdrawal.status).toBe(201);
-  });
-
-  it("still validates re-target allocations against the stored catalogue", async () => {
-    await seedAuth({ entitleGround: true });
-    await seedUpshiftStrategy({ environment: "sandbox" });
-    const program = await seedProgramWallet({});
-    stubProgramReads();
-
-    const res = await requestEarn(
-      "PUT",
-      programPath(program.id, ""),
-      {
-        allocations: [
-          { token: "usdc", entries: [{ yieldSourceId: "not-in-catalogue", pct: 100 }] },
-        ],
-      },
-      {}
-    );
-
-    expect(res.status).toBe(400);
   });
 });
 

@@ -1,25 +1,6 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import {
   earnCursorQueryParams,
-  earnExternalWalletDepositResponse,
-  earnExternalWalletEarningsResponse,
-  earnExternalWalletMovementDetailResponse,
-  earnExternalWalletMovementsResponse,
-  earnExternalWalletPositionSummaryResponse,
-  earnExternalWalletPositionsResponse,
-  earnExternalWalletQueuedWithdrawalPreviewRequest,
-  earnExternalWalletQueuedWithdrawalPreviewResponse,
-  earnExternalWalletSubmitRequest,
-  earnExternalWalletWithdrawalOptionsRequest,
-  earnExternalWalletWithdrawalOptionsResponse,
-  earnExternalWalletWithdrawalPreviewRequest,
-  earnExternalWalletWithdrawalPreviewResponse,
-  earnExternalWalletWithdrawalRequestCancellationResponse,
-  earnExternalWalletWithdrawalRequestCancelTransactionRequest,
-  earnExternalWalletWithdrawalRequestCancelTransactionResponse,
-  earnExternalWalletWithdrawalRequestResponse,
-  earnExternalWalletWithdrawalRequestsResponse,
-  earnExternalWalletWithdrawalResponse,
   earnMovementIdParam,
   earnMovementStatusQueryParam,
   earnOwnerAddressQueryParam,
@@ -27,6 +8,25 @@ import {
   earnStrategyIdParam,
   earnStrategyResponse,
   earnVaultShareReconciliationResponse,
+  earnWalletDepositResponse,
+  earnWalletEarningsResponse,
+  earnWalletMovementDetailResponse,
+  earnWalletMovementsResponse,
+  earnWalletPositionSummaryResponse,
+  earnWalletPositionsResponse,
+  earnWalletQueuedWithdrawalPreviewRequest,
+  earnWalletQueuedWithdrawalPreviewResponse,
+  earnWalletSubmitRequest,
+  earnWalletWithdrawalOptionsRequest,
+  earnWalletWithdrawalOptionsResponse,
+  earnWalletWithdrawalPreviewRequest,
+  earnWalletWithdrawalPreviewResponse,
+  earnWalletWithdrawalRequestCancellationResponse,
+  earnWalletWithdrawalRequestCancelTransactionRequest,
+  earnWalletWithdrawalRequestCancelTransactionResponse,
+  earnWalletWithdrawalRequestResponse,
+  earnWalletWithdrawalRequestsResponse,
+  earnWalletWithdrawalResponse,
   earnWithdrawalRequestIdParam,
 } from "@/openapi/schemas/earn";
 import {
@@ -36,14 +36,14 @@ import {
   EARN_WITHDRAWAL_SUBMIT_REQUEST_EXAMPLE,
 } from "@/openapi/schemas/earn-examples";
 import {
-  earnExternalWalletEarningsQuerySchema,
-  earnExternalWalletMovementParamsSchema,
-  earnExternalWalletMovementsQuerySchema,
-  earnExternalWalletPositionSummaryQuerySchema,
-  earnExternalWalletPositionsQuerySchema,
-  earnExternalWalletWithdrawalRequestsQuerySchema,
   earnStrategyIdParamsSchema,
   earnVaultWithdrawalRequestParamsSchema,
+  earnWalletEarningsQuerySchema,
+  earnWalletMovementParamsSchema,
+  earnWalletMovementsQuerySchema,
+  earnWalletPositionSummaryQuerySchema,
+  earnWalletPositionsQuerySchema,
+  earnWalletWithdrawalRequestsQuerySchema,
   listEarnStrategiesQuerySchema,
 } from "@/routes/earn/schemas";
 import { registerEarnCorePaths } from "./earn-core";
@@ -69,7 +69,7 @@ export function registerEarnPaths(registry: OpenAPIRegistry) {
   registerEarnCorePaths(registry);
   registerEarnStrategyPaths(registry, earnConfigurationSecurity);
   registerEarnDepositPreviewPath(registry, earnConfigurationSecurity);
-  registerEarnExternalWalletPaths(registry, earnConfigurationSecurity);
+  registerEarnWalletPaths(registry, earnConfigurationSecurity);
   registerEarnTreasuryPaths(registry, earnConfigurationSecurity);
   registerEarnProviderActionPaths(registry, earnConfigurationSecurity);
   registerEarnOnboardingPaths(registry);
@@ -82,7 +82,7 @@ export function registerEarnPaths(registry: OpenAPIRegistry) {
 export function registerPublicEarnPaths(registry: OpenAPIRegistry) {
   registerEarnStrategyPaths(registry, earnPublicSecurity);
   registerEarnDepositPreviewPath(registry, earnPublicSecurity);
-  registerEarnExternalWalletPaths(registry, earnPublicSecurity);
+  registerEarnWalletPaths(registry, earnPublicSecurity);
 }
 
 function registerEarnStrategyPaths(
@@ -198,8 +198,8 @@ function registerEarnVaultShareReconciliationPath(
   });
 }
 
-function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: EarnSecurity) {
-  // External-wallet (caller-signed) vault flows (PRO-1722): the B2B2C money
+function registerEarnWalletPaths(registry: OpenAPIRegistry, security: EarnSecurity) {
+  // Wallet (caller-signed) vault flows (PRO-1722): the B2B2C money
   // path. Each direction is a BUILD (returns an unsigned transaction for the
   // customer's own wallet to sign) and a SUBMIT (verifies the signature over
   // the exact built message, records the movement, then broadcasts).
@@ -209,7 +209,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     tags: ["Earn"],
     [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Get position totals",
-    operationId: "getEarnExternalWalletPositionSummary",
+    operationId: "getEarnWalletPositionSummary",
     description:
       "Gets live position totals across every customer wallet in your project, grouped by " +
       "strategy and token. Wallet addresses are left out unless you pass " +
@@ -217,11 +217,11 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
       "wallet's positions, which saves one read per wallet. A total that depends on an " +
       "unavailable live value is left out, never reported as zero or partial.",
     security,
-    request: { headers: projectScopeHeaders, query: earnExternalWalletPositionSummaryQuerySchema },
+    request: { headers: projectScopeHeaders, query: earnWalletPositionSummaryQuerySchema },
     responses: {
       200: {
         description: "Position totals",
-        content: jsonContent(earnExternalWalletPositionSummaryResponse),
+        content: jsonContent(earnWalletPositionSummaryResponse),
       },
       ...earnErrorResponses([400, 401, 403, 429, 500, 503]),
     },
@@ -233,7 +233,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     tags: ["Earn"],
     [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "List positions",
-    operationId: "listEarnExternalWalletPositions",
+    operationId: "listEarnWalletPositions",
     description:
       "Lists one customer wallet's live positions, one page at a time. `ownerAddress` is " +
       "required. A wallet with no positions in your project (never deposited, fully " +
@@ -243,7 +243,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     security,
     request: {
       headers: projectScopeHeaders,
-      query: earnExternalWalletPositionsQuerySchema.extend({
+      query: earnWalletPositionsQuerySchema.extend({
         ownerAddress: earnOwnerAddressQueryParam,
         ...earnCursorQueryParams,
       }),
@@ -251,7 +251,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     responses: {
       200: {
         description: "One page of positions",
-        content: jsonContent(earnExternalWalletPositionsResponse),
+        content: jsonContent(earnWalletPositionsResponse),
       },
       ...earnErrorResponses([400, 401, 403, 429, 500, 503]),
     },
@@ -263,7 +263,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     tags: ["Earn"],
     [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "List movements",
-    operationId: "listEarnExternalWalletMovements",
+    operationId: "listEarnWalletMovements",
     description:
       "Lists one customer wallet's deposits and withdrawals, newest first, one page at a " +
       "time. Movement statuses are `requested`, `submitted`, `confirmed`, `finalized` and " +
@@ -275,7 +275,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     security,
     request: {
       headers: projectScopeHeaders,
-      query: earnExternalWalletMovementsQuerySchema.extend({
+      query: earnWalletMovementsQuerySchema.extend({
         ownerAddress: earnOwnerAddressQueryParam,
         status: earnMovementStatusQueryParam,
         ...earnCursorQueryParams,
@@ -284,7 +284,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     responses: {
       200: {
         description: "One page of movements",
-        content: jsonContent(earnExternalWalletMovementsResponse),
+        content: jsonContent(earnWalletMovementsResponse),
       },
       ...earnErrorResponses([400, 401, 403, 429, 500, 503]),
     },
@@ -296,7 +296,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     tags: ["Earn"],
     [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Get a movement",
-    operationId: "getEarnExternalWalletMovement",
+    operationId: "getEarnWalletMovement",
     description:
       "Gets one deposit or withdrawal and refreshes its onchain status when it can. Use it " +
       "to track a movement after submit, or to recover a submit whose response was lost. If " +
@@ -307,12 +307,12 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     security,
     request: {
       headers: projectScopeHeaders,
-      params: earnExternalWalletMovementParamsSchema.extend({ movementId: earnMovementIdParam }),
+      params: earnWalletMovementParamsSchema.extend({ movementId: earnMovementIdParam }),
     },
     responses: {
       200: {
         description: "Recorded movement",
-        content: jsonContent(earnExternalWalletMovementDetailResponse),
+        content: jsonContent(earnWalletMovementDetailResponse),
       },
       ...earnErrorResponses([400, 401, 403, 404, 429, 500, 503]),
     },
@@ -324,7 +324,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     tags: ["Earn"],
     [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Get earnings",
-    operationId: "getEarnExternalWalletEarnings",
+    operationId: "getEarnWalletEarnings",
     description:
       "Gets one customer wallet's live balance and earnings per deposit token. `earned` is " +
       "live value plus observed withdrawal payouts (`totalWithdrawn`) minus finalized " +
@@ -338,14 +338,14 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     security,
     request: {
       headers: projectScopeHeaders,
-      query: earnExternalWalletEarningsQuerySchema.extend({
+      query: earnWalletEarningsQuerySchema.extend({
         ownerAddress: earnOwnerAddressQueryParam,
       }),
     },
     responses: {
       200: {
         description: "Earnings per deposit token",
-        content: jsonContent(earnExternalWalletEarningsResponse),
+        content: jsonContent(earnWalletEarningsResponse),
       },
       ...earnErrorResponses([400, 401, 403, 429, 500, 503]),
     },
@@ -358,7 +358,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Build a deposit transaction",
     deprecated: true,
-    operationId: "createEarnExternalWalletDepositTransaction",
+    operationId: "createEarnWalletDepositTransaction",
     description:
       "Retired. Returns 410 NOT_IMPLEMENTED without building or reserving a transaction. Existing legacy signed builds can still be recovered through the legacy submit endpoint. Operation-only builds must use their operation action.",
     security,
@@ -376,7 +376,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     tags: ["Earn"],
     [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Submit a deposit",
-    operationId: "createEarnExternalWalletDeposit",
+    operationId: "createEarnWalletDeposit",
     description:
       "Recovery only for previously exposed legacy builds. Operation-only builds return 409 operation_execution_required and must use their durable operation action, including after refresh. Submits a deposit transaction signed by the customer's wallet. SDP checks that the " +
       "signed bytes match the built transaction and that every required signature is valid " +
@@ -394,14 +394,14 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
       body: {
         required: true,
         content: jsonContent(
-          earnExternalWalletSubmitRequest.openapi({ example: EARN_DEPOSIT_SUBMIT_REQUEST_EXAMPLE })
+          earnWalletSubmitRequest.openapi({ example: EARN_DEPOSIT_SUBMIT_REQUEST_EXAMPLE })
         ),
       },
     },
     responses: {
       200: {
         description: "The recorded deposit",
-        content: jsonContent(earnExternalWalletDepositResponse),
+        content: jsonContent(earnWalletDepositResponse),
       },
       ...earnErrorResponses([400, 401, 403, 404, 409, 429, 500, 503]),
     },
@@ -413,7 +413,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     tags: ["Earn"],
     [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Preview a withdrawal",
-    operationId: "createEarnExternalWalletWithdrawalPreview",
+    operationId: "createEarnWalletWithdrawalPreview",
     description:
       "Quotes what withdrawing these shares would pay right now, from the strategy's live " +
       "accounting. When the strategy's `withdrawalSlippage` is not null, set `minAmountOut` " +
@@ -427,13 +427,13 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
       headers: projectScopeHeaders,
       body: {
         required: true,
-        content: jsonContent(earnExternalWalletWithdrawalPreviewRequest),
+        content: jsonContent(earnWalletWithdrawalPreviewRequest),
       },
     },
     responses: {
       200: {
         description: "Live withdrawal quote",
-        content: jsonContent(earnExternalWalletWithdrawalPreviewResponse),
+        content: jsonContent(earnWalletWithdrawalPreviewResponse),
       },
       ...earnErrorResponses([400, 401, 403, 404, 429, 500, 501, 503]),
     },
@@ -445,7 +445,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     tags: ["Earn"],
     [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Build a withdrawal transaction",
-    operationId: "createEarnExternalWalletWithdrawalTransaction",
+    operationId: "createEarnWalletWithdrawalTransaction",
     deprecated: true,
     description:
       "Retired. Returns 410 NOT_IMPLEMENTED without building a transaction. New withdrawals " +
@@ -466,7 +466,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     tags: ["Earn"],
     [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Submit a withdrawal",
-    operationId: "createEarnExternalWalletWithdrawal",
+    operationId: "createEarnWalletWithdrawal",
     description:
       "Recovers an exact already-built legacy withdrawal signed by the customer's wallet. " +
       "Operation-only builds return 409 and must use their operation action. It works like a " +
@@ -483,7 +483,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
       body: {
         required: true,
         content: jsonContent(
-          earnExternalWalletSubmitRequest.openapi({
+          earnWalletSubmitRequest.openapi({
             example: EARN_WITHDRAWAL_SUBMIT_REQUEST_EXAMPLE,
           })
         ),
@@ -492,16 +492,16 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     responses: {
       200: {
         description: "The recorded withdrawal",
-        content: jsonContent(earnExternalWalletWithdrawalResponse),
+        content: jsonContent(earnWalletWithdrawalResponse),
       },
       ...earnErrorResponses([400, 401, 403, 404, 409, 429, 500, 503]),
     },
   });
 
-  registerEarnExternalWalletQueuedWithdrawalPaths(registry, security);
+  registerEarnWalletQueuedWithdrawalPaths(registry, security);
 }
 
-function registerEarnExternalWalletQueuedWithdrawalPaths(
+function registerEarnWalletQueuedWithdrawalPaths(
   registry: OpenAPIRegistry,
   security: EarnSecurity
 ) {
@@ -511,7 +511,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     tags: ["Earn"],
     [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "List withdrawal options",
-    operationId: "getEarnExternalWalletWithdrawalOptions",
+    operationId: "getEarnWalletWithdrawalOptions",
     description:
       "Lists the withdrawal routes a position supports right now: instant, provider order, " +
       "solver queue and operator redemption, each read from live provider state. A position " +
@@ -524,13 +524,13 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
       headers: projectScopeHeaders,
       body: {
         required: true,
-        content: jsonContent(earnExternalWalletWithdrawalOptionsRequest),
+        content: jsonContent(earnWalletWithdrawalOptionsRequest),
       },
     },
     responses: {
       200: {
         description: "Withdrawal options and their live terms",
-        content: jsonContent(earnExternalWalletWithdrawalOptionsResponse),
+        content: jsonContent(earnWalletWithdrawalOptionsResponse),
       },
       ...earnErrorResponses([400, 401, 403, 404, 429, 500, 501, 503]),
     },
@@ -542,7 +542,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     tags: ["Earn"],
     [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Preview a withdrawal request",
-    operationId: "createEarnExternalWalletQueuedWithdrawalPreview",
+    operationId: "createEarnWalletQueuedWithdrawalPreview",
     description:
       "Previews a withdrawal request: a solver queue's discounted payout and timing, or an " +
       "operator redemption's intermediate-token conversion and payout. Check the mechanism " +
@@ -555,13 +555,13 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
       headers: projectScopeHeaders,
       body: {
         required: true,
-        content: jsonContent(earnExternalWalletQueuedWithdrawalPreviewRequest),
+        content: jsonContent(earnWalletQueuedWithdrawalPreviewRequest),
       },
     },
     responses: {
       200: {
         description: "Expected request terms",
-        content: jsonContent(earnExternalWalletQueuedWithdrawalPreviewResponse),
+        content: jsonContent(earnWalletQueuedWithdrawalPreviewResponse),
       },
       ...earnErrorResponses([400, 401, 403, 404, 429, 500, 501, 503]),
     },
@@ -573,7 +573,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     tags: ["Earn"],
     [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Build a withdrawal request transaction",
-    operationId: "createEarnExternalWalletWithdrawalRequestTransaction",
+    operationId: "createEarnWalletWithdrawalRequestTransaction",
     deprecated: true,
     description:
       "Retired. Returns 410 NOT_IMPLEMENTED without building or reserving a request. New " +
@@ -594,7 +594,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     tags: ["Earn"],
     [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Submit a withdrawal request",
-    operationId: "createEarnExternalWalletWithdrawalRequest",
+    operationId: "createEarnWalletWithdrawalRequest",
     description:
       "Recovers an exact already-built legacy withdrawal request signed by the customer's " +
       "wallet. Operation-only builds return 409 and must use their operation action. SDP checks " +
@@ -619,7 +619,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
       body: {
         required: true,
         content: jsonContent(
-          earnExternalWalletSubmitRequest.openapi({
+          earnWalletSubmitRequest.openapi({
             example: EARN_WITHDRAWAL_REQUEST_SUBMIT_REQUEST_EXAMPLE,
           })
         ),
@@ -628,7 +628,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     responses: {
       200: {
         description: "The recorded withdrawal request",
-        content: jsonContent(earnExternalWalletWithdrawalRequestResponse),
+        content: jsonContent(earnWalletWithdrawalRequestResponse),
       },
       ...earnErrorResponses([400, 401, 403, 404, 409, 429, 500, 503]),
     },
@@ -640,7 +640,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     tags: ["Earn"],
     [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "List withdrawal requests",
-    operationId: "listEarnExternalWalletWithdrawalRequests",
+    operationId: "listEarnWalletWithdrawalRequests",
     description:
       "Lists one customer wallet's withdrawal requests, one page at a time. `ownerAddress` " +
       "is required. On startup and after reconnecting, pass `settled=false` to restore " +
@@ -649,7 +649,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     security,
     request: {
       headers: projectScopeHeaders,
-      query: earnExternalWalletWithdrawalRequestsQuerySchema.extend({
+      query: earnWalletWithdrawalRequestsQuerySchema.extend({
         ownerAddress: earnOwnerAddressQueryParam,
         ...earnCursorQueryParams,
       }),
@@ -657,7 +657,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     responses: {
       200: {
         description: "One page of withdrawal requests",
-        content: jsonContent(earnExternalWalletWithdrawalRequestsResponse),
+        content: jsonContent(earnWalletWithdrawalRequestsResponse),
       },
       ...earnErrorResponses([400, 401, 403, 429, 500, 503]),
     },
@@ -669,7 +669,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     tags: ["Earn"],
     [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Get a withdrawal request",
-    operationId: "getEarnExternalWalletWithdrawalRequest",
+    operationId: "getEarnWalletWithdrawalRequest",
     description:
       "Gets one withdrawal request with its latest recorded status. Creating a request " +
       "escrows shares or converts them to an intermediate token; it does not pay out. Only " +
@@ -686,7 +686,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     responses: {
       200: {
         description: "The withdrawal request",
-        content: jsonContent(earnExternalWalletWithdrawalRequestResponse),
+        content: jsonContent(earnWalletWithdrawalRequestResponse),
       },
       ...earnErrorResponses([400, 401, 403, 404, 429, 500, 503]),
     },
@@ -698,7 +698,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     tags: ["Earn"],
     [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Build a cancellation transaction",
-    operationId: "createEarnExternalWalletWithdrawalRequestCancelTransaction",
+    operationId: "createEarnWalletWithdrawalRequestCancelTransaction",
     description:
       "Builds an unsigned transaction that cancels a withdrawal request, for the customer's " +
       "wallet to sign. A solver queue request can be canceled only at `expiredCancelable`, " +
@@ -712,13 +712,13 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
       headers: projectScopeHeaders,
       body: {
         required: true,
-        content: jsonContent(earnExternalWalletWithdrawalRequestCancelTransactionRequest),
+        content: jsonContent(earnWalletWithdrawalRequestCancelTransactionRequest),
       },
     },
     responses: {
       200: {
         description: "Unsigned cancellation transaction",
-        content: jsonContent(earnExternalWalletWithdrawalRequestCancelTransactionResponse),
+        content: jsonContent(earnWalletWithdrawalRequestCancelTransactionResponse),
       },
       ...earnErrorResponses([400, 401, 403, 404, 409, 429, 500, 501, 503]),
     },
@@ -730,7 +730,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     tags: ["Earn"],
     [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Submit a cancellation",
-    operationId: "createEarnExternalWalletWithdrawalRequestCancellation",
+    operationId: "createEarnWalletWithdrawalRequestCancellation",
     description:
       "Submits a cancellation transaction signed by the customer's wallet. SDP verifies it, " +
       "records it before broadcast, and returns the withdrawal request. Idempotency-Key is " +
@@ -745,14 +745,14 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
       body: {
         required: true,
         content: jsonContent(
-          earnExternalWalletSubmitRequest.openapi({ example: EARN_CANCEL_SUBMIT_REQUEST_EXAMPLE })
+          earnWalletSubmitRequest.openapi({ example: EARN_CANCEL_SUBMIT_REQUEST_EXAMPLE })
         ),
       },
     },
     responses: {
       200: {
         description: "The withdrawal request with its cancellation recorded",
-        content: jsonContent(earnExternalWalletWithdrawalRequestCancellationResponse),
+        content: jsonContent(earnWalletWithdrawalRequestCancellationResponse),
       },
       ...earnErrorResponses([400, 401, 403, 404, 409, 429, 500, 503]),
     },

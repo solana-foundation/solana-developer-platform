@@ -12,8 +12,8 @@ import { earnWithdrawSlippageFloor } from "@sdp/types/provider-access";
 import { getDb } from "@/db/client";
 import {
   createPostgresEarnVaultWithdrawalRequestsRepository,
-  type EarnExternalWalletWithdrawalRequestTransactionRow,
   type EarnVaultWithdrawalRequestRow,
+  type EarnWalletWithdrawalRequestTransactionRow,
 } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import { badRequest, conflict, notFound } from "@/lib/errors";
 import type { Env } from "@/types/env";
@@ -23,12 +23,12 @@ import { strategyOutputFloor } from "./strategy-terms";
 import { createVaultDeadline } from "./vault-deadline";
 import {
   type AsyncWithdrawalTermsInput,
-  buildExternalQueuedWithdrawalCancel,
-  buildExternalQueuedWithdrawalRequest,
-  type ExternalQueuedWithdrawalBuiltTransaction,
+  buildWalletQueuedWithdrawalCancel,
+  buildWalletQueuedWithdrawalRequest,
   type QueuedWithdrawalActor,
   type QueuedWithdrawalPosition,
-  submitExternalQueuedWithdrawalAction,
+  submitWalletQueuedWithdrawalAction,
+  type WalletQueuedWithdrawalBuiltTransaction,
 } from "./vault-queued-withdraw.service";
 import type { VaultFeeMode } from "./vault-sponsorship";
 
@@ -224,7 +224,7 @@ export function selectStrategyWithdrawalChoice(
   return selected;
 }
 
-/** One unsigned approval target for either custody or an external owner. */
+/** One unsigned approval target for either custody or an owner. */
 export interface PreparedQueuedStrategyTransaction {
   id: string;
   unsignedTransaction: string;
@@ -234,7 +234,7 @@ export interface PreparedQueuedStrategyTransaction {
   feeMode: "wallet" | "partner" | "sponsored";
   feePayer: string | null;
   action: "request" | "cancel";
-  build: ExternalQueuedWithdrawalBuiltTransaction;
+  build: WalletQueuedWithdrawalBuiltTransaction;
 }
 
 interface QueuedStrategyPreparation {
@@ -264,12 +264,12 @@ function requirePreparationSource(input: QueuedStrategyPreparation): void {
     throw conflict("A custody withdrawal uses its configured fee payer");
   }
   if (input.custodyWalletId === undefined && input.fee?.kind === "sponsored") {
-    throw conflict("An external owner has no SDP custody sponsorship");
+    throw conflict("An owner has no SDP custody sponsorship");
   }
 }
 
 function prepared(
-  build: ExternalQueuedWithdrawalBuiltTransaction
+  build: WalletQueuedWithdrawalBuiltTransaction
 ): PreparedQueuedStrategyTransaction {
   return {
     id: build.id,
@@ -291,7 +291,7 @@ export async function prepareQueuedStrategyWithdrawal(
 ): Promise<PreparedQueuedStrategyTransaction> {
   requirePreparationSource(input);
   return prepared(
-    await buildExternalQueuedWithdrawalRequest(env, { ...input, asyncOperation: true })
+    await buildWalletQueuedWithdrawalRequest(env, { ...input, asyncOperation: true })
   );
 }
 
@@ -313,9 +313,7 @@ export async function prepareQueuedStrategyCancellation(
   ) {
     throw notFound("Earn withdrawal request");
   }
-  return prepared(
-    await buildExternalQueuedWithdrawalCancel(env, { ...input, asyncOperation: true })
-  );
+  return prepared(await buildWalletQueuedWithdrawalCancel(env, { ...input, asyncOperation: true }));
 }
 
 /** Recover exactly the stored build under the operation's authorized source. */
@@ -323,10 +321,10 @@ export async function requirePreparedQueuedStrategyTransaction(
   env: Env,
   scope: { organizationId: string; projectId: string; custodyWalletId: string | null },
   transactionId: string
-): Promise<EarnExternalWalletWithdrawalRequestTransactionRow> {
+): Promise<EarnWalletWithdrawalRequestTransactionRow> {
   const build = await createPostgresEarnVaultWithdrawalRequestsRepository(
     getDb(env)
-  ).getExternalWalletTransaction({ organizationId: scope.organizationId, transactionId });
+  ).getWalletTransaction({ organizationId: scope.organizationId, transactionId });
   if (
     build === null ||
     build.project_id !== scope.projectId ||
@@ -358,7 +356,7 @@ export async function submitPreparedQueuedStrategyAction(
     { ...input.actor, custodyWalletId: input.custodyWalletId },
     input.transactionId
   );
-  const result = await submitExternalQueuedWithdrawalAction(env, {
+  const result = await submitWalletQueuedWithdrawalAction(env, {
     ...input,
     action: build.action,
     allowDiscoveredPosition: true,

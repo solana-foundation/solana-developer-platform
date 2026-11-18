@@ -54,7 +54,7 @@ export function isRetiredRampProviderId(value: string): value is RetiredRampProv
  * Every executing provider currently uses the **vault-direct** model: Kamino,
  * Veda, Jupiter Lend, Ondo, and the pre-launch WisdomTree integration. They
  * front an on-chain vault or yield-bearing token that an organization custody
- * wallet or an end user's external wallet deposits into. Their catalogue client
+ * wallet or an end user's wallet deposits into. Their catalogue client
  * implements the base `EarnVaultProvider` contract; a separate execution
  * package implements `EarnVaultDirectProvider`.
  *
@@ -192,7 +192,7 @@ export const EARN_PROVIDER_SURFACING = {
  *   provider deploys on its own rebalance. (No current provider uses this.)
  * - `vault_direct`: the position is non-custodial and reached through an
  *   on-chain transaction signed by the organization's selected custody wallet
- *   or an end user's external wallet. There is no generic provider deposit
+ *   or an end user's wallet. There is no generic provider deposit
  *   address to fund; SDP builds the transaction and either submits the
  *   custody-signed form or verifies and submits the caller-signed form. Every
  *   current provider uses this shape, including the registered but pre-launch

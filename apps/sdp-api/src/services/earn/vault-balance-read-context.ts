@@ -54,8 +54,8 @@ export async function resolveVaultBalanceReadContext(
     projectId: string;
     custodyWalletIds: readonly string[];
     /** The core positions read may also constrain exact-project owner-signed rows. */
-    includeExternal?: boolean;
-    externalOwnerAddress?: string;
+    includeAddress?: boolean;
+    ownerAddress?: string;
   }
 ): Promise<
   | {
@@ -83,9 +83,9 @@ export async function resolveVaultBalanceReadContext(
       movement.project_id !== input.projectId ||
       !(movement.custody_wallet_id
         ? input.custodyWalletIds.includes(movement.custody_wallet_id)
-        : input.includeExternal &&
+        : input.includeAddress &&
           movement.owner_address &&
-          (!input.externalOwnerAddress || movement.owner_address === input.externalOwnerAddress))
+          (!input.ownerAddress || movement.owner_address === input.ownerAddress))
     ) {
       throw notFound("Earn vault movement");
     }

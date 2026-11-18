@@ -191,7 +191,7 @@ describe("EarnIntegrationGuide", () => {
     expect(code).toContain("Execution returns 202");
     expect(code).toContain("not a completed payout");
     expect(code).toContain("Pagination did not advance");
-    expect(code).not.toMatch(/external-wallet|vault-deposits|deposit-transactions/);
+    expect(code).not.toMatch(/\/v1\/earn\/external-wallet\/|vault-deposits|deposit-transactions/);
   });
 
   it("copies the whole server module in one action, not just the active tab", async () => {

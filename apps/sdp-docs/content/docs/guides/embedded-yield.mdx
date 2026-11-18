@@ -97,10 +97,10 @@ Prefer raw requests? Every function maps to one endpoint in
 | Step | Module function | Endpoint |
 | --- | --- | --- |
 | 1. Quote | `previewEarnDeposit` | [`POST /v1/earn/vault-deposit-previews`](/docs/reference/api/earn/create-earn-vault-deposit-preview) |
-| 2. Build | `buildEarnDepositTransaction` | [`POST /v1/earn/external-wallet/deposit-transactions`](/docs/reference/api/earn/create-earn-external-wallet-deposit-transaction) |
+| 2. Build | `buildEarnDepositTransaction` | [`POST /v1/earn/external-wallet/deposit-transactions`](/docs/reference/api/earn/create-earn-wallet-deposit-transaction) |
 | 3. Sign | `signEarnTransaction` | In the customer's wallet |
-| 4. Submit | `submitEarnDeposit` | [`POST /v1/earn/external-wallet/deposits`](/docs/reference/api/earn/create-earn-external-wallet-deposit) |
-| 5. Track | `waitForEarnMovement` | [`GET /v1/earn/external-wallet/movements/{movementId}`](/docs/reference/api/earn/get-earn-external-wallet-movement) |
+| 4. Submit | `submitEarnDeposit` | [`POST /v1/earn/external-wallet/deposits`](/docs/reference/api/earn/create-earn-wallet-deposit) |
+| 5. Track | `waitForEarnMovement` | [`GET /v1/earn/external-wallet/movements/{movementId}`](/docs/reference/api/earn/get-earn-wallet-movement) |
 
 `buildEarnDepositTransaction` previews the deposit itself when the strategy
 needs a floor; call `previewEarnDeposit` too when you want to show your
@@ -146,13 +146,13 @@ covers every field. Two rules matter most:
 
 | Step | Module function | Endpoint |
 | --- | --- | --- |
-| Choose a route | `getEarnWithdrawalOptions` | [`POST /v1/earn/external-wallet/withdrawal-options`](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-options) |
-| Withdraw instantly | `buildEarnWithdrawalTransaction`, `submitEarnWithdrawal` | [`POST /v1/earn/external-wallet/withdrawal-transactions`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-transaction), [`POST /v1/earn/external-wallet/withdrawals`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal) |
-| Preview a request | `previewEarnQueuedWithdrawal` | [`POST /v1/earn/external-wallet/queued-withdrawal-previews`](/docs/reference/api/earn/create-earn-external-wallet-queued-withdrawal-preview) |
-| Build a request | `buildEarnQueuedWithdrawalRequest` | [`POST /v1/earn/external-wallet/withdrawal-request-transactions`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-transaction) |
-| Submit a request | `submitEarnWithdrawalRequest` | [`POST /v1/earn/external-wallet/withdrawal-requests`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request) |
-| Track a request | `getEarnWithdrawalRequest` | [`GET /v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}`](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-request) |
-| Cancel a request | `buildEarnWithdrawalRequestCancellation`, `submitEarnWithdrawalRequestCancellation` | [`POST /v1/earn/external-wallet/withdrawal-request-cancel-transactions`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancel-transaction), [`POST /v1/earn/external-wallet/withdrawal-request-cancellations`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancellation) |
+| Choose a route | `getEarnWithdrawalOptions` | [`POST /v1/earn/external-wallet/withdrawal-options`](/docs/reference/api/earn/get-earn-wallet-withdrawal-options) |
+| Withdraw instantly | `buildEarnWithdrawalTransaction`, `submitEarnWithdrawal` | [`POST /v1/earn/external-wallet/withdrawal-transactions`](/docs/reference/api/earn/create-earn-wallet-withdrawal-transaction), [`POST /v1/earn/external-wallet/withdrawals`](/docs/reference/api/earn/create-earn-wallet-withdrawal) |
+| Preview a request | `previewEarnQueuedWithdrawal` | [`POST /v1/earn/external-wallet/queued-withdrawal-previews`](/docs/reference/api/earn/create-earn-wallet-queued-withdrawal-preview) |
+| Build a request | `buildEarnQueuedWithdrawalRequest` | [`POST /v1/earn/external-wallet/withdrawal-request-transactions`](/docs/reference/api/earn/create-earn-wallet-withdrawal-request-transaction) |
+| Submit a request | `submitEarnWithdrawalRequest` | [`POST /v1/earn/external-wallet/withdrawal-requests`](/docs/reference/api/earn/create-earn-wallet-withdrawal-request) |
+| Track a request | `getEarnWithdrawalRequest` | [`GET /v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}`](/docs/reference/api/earn/get-earn-wallet-withdrawal-request) |
+| Cancel a request | `buildEarnWithdrawalRequestCancellation`, `submitEarnWithdrawalRequestCancellation` | [`POST /v1/earn/external-wallet/withdrawal-request-cancel-transactions`](/docs/reference/api/earn/create-earn-wallet-withdrawal-request-cancel-transaction), [`POST /v1/earn/external-wallet/withdrawal-request-cancellations`](/docs/reference/api/earn/create-earn-wallet-withdrawal-request-cancellation) |
 
 A withdrawal spends shares, not a dollar amount, and a request transaction
 is not a payout. [Withdraw funds](/docs/earn/withdrawals) covers each route.

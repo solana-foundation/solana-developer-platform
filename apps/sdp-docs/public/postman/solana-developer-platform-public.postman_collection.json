@@ -2004,7 +2004,7 @@
               },
               {
                 "key": "Idempotency-Key",
-                "value": "{{idempotencyKey.createEarnExternalWalletDeposit}}",
+                "value": "{{idempotencyKey.createEarnWalletDeposit}}",
                 "type": "text"
               }
             ],
@@ -2012,7 +2012,7 @@
             "description": "Recovery only for previously exposed legacy builds. Operation-only builds return 409 operation_execution_required and must use their durable operation action, including after refresh. Submits a deposit transaction signed by the customer's wallet. SDP checks that the signed bytes match the built transaction and that every required signature is valid (the customer's, plus your fee payer's when the build named one), records the movement, then broadcasts. Idempotency-Key is required: a retry with the same key returns the original movement with `replayed: true`, and each built transaction can be submitted once. Reusing a key with a different body, or submitting one build under a second key, returns `409 CONFLICT`. Submit the original signed bytes even after the blockhash expires, since the wallet may already have broadcast them. After an uncertain response, retry with the same key and body, then read the movement; never replace a signed transaction whose outcome is unknown.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"transactionId\": \"earn_external_wallet_transaction_e7a88258-1d19-48f3-8d0e-81fefa4bf3b3\",\n  \"signedTransaction\": \"AUyx/sEc49/1l6jxo3nbViPAIUqdrXCo8Qx5SfDvIbtUI0zex3Bi6Cyhhn1QTVU8zWDzXTRyIX2aCmq9v7yk5AOA\"\n}",
+              "raw": "{\n  \"transactionId\": \"earn_wallet_transaction_e7a88258-1d19-48f3-8d0e-81fefa4bf3b3\",\n  \"signedTransaction\": \"AUyx/sEc49/1l6jxo3nbViPAIUqdrXCo8Qx5SfDvIbtUI0zex3Bi6Cyhhn1QTVU8zWDzXTRyIX2aCmq9v7yk5AOA\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2066,7 +2066,7 @@
               },
               {
                 "key": "Idempotency-Key",
-                "value": "{{idempotencyKey.createEarnExternalWalletWithdrawal}}",
+                "value": "{{idempotencyKey.createEarnWalletWithdrawal}}",
                 "type": "text"
               }
             ],
@@ -2074,7 +2074,7 @@
             "description": "Recovers an exact already-built legacy withdrawal signed by the customer's wallet. Operation-only builds return 409 and must use their operation action. It works like a deposit submit: SDP checks every signature against the exact built message, records the movement before broadcast, requires an Idempotency-Key, and accepts each built transaction once, with the same `409 CONFLICT` answers. Submit the original signed bytes even after the blockhash expires, since the wallet may already have broadcast them. After an uncertain response, retry with the same key and body, then read the movement instead of building a new withdrawal. Withdrawals stay available while Earn is disabled.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"transactionId\": \"earn_external_wallet_transaction_0ebe7320-4b8e-4d1a-a5f0-6c2d9e8b1f47\",\n  \"signedTransaction\": \"AUyx/sEc49/1l6jxo3nbViPAIUqdrXCo8Qx5SfDvIbtUI0zex3Bi6Cyhhn1QTVU8zWDzXTRyIX2aCmq9v7yk5AOA\"\n}",
+              "raw": "{\n  \"transactionId\": \"earn_wallet_transaction_0ebe7320-4b8e-4d1a-a5f0-6c2d9e8b1f47\",\n  \"signedTransaction\": \"AUyx/sEc49/1l6jxo3nbViPAIUqdrXCo8Qx5SfDvIbtUI0zex3Bi6Cyhhn1QTVU8zWDzXTRyIX2aCmq9v7yk5AOA\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2161,7 +2161,7 @@
               },
               {
                 "key": "Idempotency-Key",
-                "value": "{{idempotencyKey.createEarnExternalWalletWithdrawalRequest}}",
+                "value": "{{idempotencyKey.createEarnWalletWithdrawalRequest}}",
                 "type": "text"
               }
             ],
@@ -2169,7 +2169,7 @@
             "description": "Recovers an exact already-built legacy withdrawal request signed by the customer's wallet. Operation-only builds return 409 and must use their operation action. SDP checks every signature against the exact built message, records the request before broadcast, then sends it. Idempotency-Key is required: a retry with the same key returns the original request, and each built transaction can be submitted once. Reusing a key with a different body, or submitting one build under a second key, returns `409 CONFLICT`. An expired build can still be submitted late. If its reservation was released or replaced, SDP accepts it only once the exact signed transaction is finalized as successful, so after a `409 CONFLICT` retry the same bytes and key until that shows. A late operator redemption whose original cycle already closed is refused for operator reconciliation, so it cannot claim a newer request at the same address. A transaction that recovery finds finalized as failed returns `400 TRANSACTION_FAILED`; a fresh withdrawal requires the core API. A recovery RPC outage returns `503 PROVIDER_UNAVAILABLE`: retry the original bytes and key. An unresolved 16-signature history window returns `503` and needs support to reconcile. An expired operator redemption build whose creation history is unavailable also returns `503`: keep and retry the original signed intent rather than signing a replacement.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"transactionId\": \"earn_external_wallet_withdrawal_request_transaction_54c50679-1b52-494d-84fa-106df66452ff\",\n  \"signedTransaction\": \"AUyx/sEc49/1l6jxo3nbViPAIUqdrXCo8Qx5SfDvIbtUI0zex3Bi6Cyhhn1QTVU8zWDzXTRyIX2aCmq9v7yk5AOA\"\n}",
+              "raw": "{\n  \"transactionId\": \"earn_wallet_withdrawal_request_transaction_54c50679-1b52-494d-84fa-106df66452ff\",\n  \"signedTransaction\": \"AUyx/sEc49/1l6jxo3nbViPAIUqdrXCo8Qx5SfDvIbtUI0zex3Bi6Cyhhn1QTVU8zWDzXTRyIX2aCmq9v7yk5AOA\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2223,7 +2223,7 @@
               },
               {
                 "key": "Idempotency-Key",
-                "value": "{{idempotencyKey.createEarnExternalWalletWithdrawalRequestCancellation}}",
+                "value": "{{idempotencyKey.createEarnWalletWithdrawalRequestCancellation}}",
                 "type": "text"
               }
             ],
@@ -2231,7 +2231,7 @@
             "description": "Submits a cancellation transaction signed by the customer's wallet. SDP verifies it, records it before broadcast, and returns the withdrawal request. Idempotency-Key is required, with the same `409 CONFLICT` answers as the other submits. Requires `earn.manage`, and stays available without production access and while Earn is disabled; a suspended organization still cannot authenticate. Keep polling until the request is `cancelled`, `fulfilled` or `failed`, because a fulfillment can race the cancellation.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"transactionId\": \"earn_external_wallet_withdrawal_request_transaction_9a3c1e27-5d84-4f0b-b6e2-7f19c4a8d035\",\n  \"signedTransaction\": \"AUyx/sEc49/1l6jxo3nbViPAIUqdrXCo8Qx5SfDvIbtUI0zex3Bi6Cyhhn1QTVU8zWDzXTRyIX2aCmq9v7yk5AOA\"\n}",
+              "raw": "{\n  \"transactionId\": \"earn_wallet_withdrawal_request_transaction_9a3c1e27-5d84-4f0b-b6e2-7f19c4a8d035\",\n  \"signedTransaction\": \"AUyx/sEc49/1l6jxo3nbViPAIUqdrXCo8Qx5SfDvIbtUI0zex3Bi6Cyhhn1QTVU8zWDzXTRyIX2aCmq9v7yk5AOA\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

@@ -120,7 +120,7 @@ organization, project, environment and counterparty; filenames stay encrypted.
 
 ## Deposit boundary and request budget
 
-Both custody and external-wallet deposits require a linked owner/customer
+Both custody and wallet deposits require a linked owner/customer
 mapping before provider eligibility. Then each check makes three Connect reads:
 `/organizations/me` (live moderator/assignment), the child's wallet registry,
 and products with `organization_guid=<child>`. The latter two run concurrently.

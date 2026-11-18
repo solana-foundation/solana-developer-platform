@@ -32,18 +32,18 @@ import { getRequestGateContext, type RequestGateExtraction } from "@/middleware/
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import type { AppContext } from "@/routes/earn/context";
 import {
-  type earnExternalWalletQueuedWithdrawalPreviewSchema,
-  type earnExternalWalletSubmitSchema,
-  type earnExternalWalletWithdrawalOptionsSchema,
-  type earnExternalWalletWithdrawalRequestCancelTransactionSchema,
-  earnExternalWalletWithdrawalRequestsQuerySchema,
-  type earnExternalWalletWithdrawalRequestTransactionSchema,
   type earnVaultQueuedWithdrawalPreviewSchema,
   type earnVaultWithdrawalOptionsSchema,
   type earnVaultWithdrawalRequestCancelSchema,
   earnVaultWithdrawalRequestParamsSchema,
   type earnVaultWithdrawalRequestSchema,
   earnVaultWithdrawalRequestsQuerySchema,
+  type earnWalletQueuedWithdrawalPreviewSchema,
+  type earnWalletSubmitSchema,
+  type earnWalletWithdrawalOptionsSchema,
+  type earnWalletWithdrawalRequestCancelTransactionSchema,
+  earnWalletWithdrawalRequestsQuerySchema,
+  type earnWalletWithdrawalRequestTransactionSchema,
 } from "@/routes/earn/schemas";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
@@ -60,34 +60,30 @@ import { earnRuntime } from "@/services/earn/runtime";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import {
   type AsyncWithdrawalTermsInput,
-  buildExternalQueuedWithdrawalCancel,
-  buildExternalQueuedWithdrawalRequest,
+  buildWalletQueuedWithdrawalCancel,
+  buildWalletQueuedWithdrawalRequest,
   type CustodyQueuedWithdrawalActor,
   cancelCustodyQueuedWithdrawal,
   createCustodyQueuedWithdrawal,
-  type ExternalQueuedWithdrawalBuiltTransaction,
   type QueuedWithdrawalActor,
   type QueuedWithdrawalMutationResult,
   type QueuedWithdrawalPosition,
-  submitExternalQueuedWithdrawalAction,
+  submitWalletQueuedWithdrawalAction,
+  type WalletQueuedWithdrawalBuiltTransaction,
 } from "@/services/earn/vault-queued-withdraw.service";
 import { rethrowVaultProviderFailure } from "@/services/earn/vault-refusals";
-import { resolveExternalWalletExit } from "./external-wallet";
 import { parseParams, parseQuery } from "./shared";
 import {
   listReadableEarnVaultWallets,
   resolveEarnVaultCustodyWallet,
   toVaultHolding,
 } from "./vault";
+import { resolveWalletExit } from "./wallet";
 
 type CustodyRequestBody = z.output<typeof earnVaultWithdrawalRequestSchema>;
-type ExternalRequestBuildBody = z.output<
-  typeof earnExternalWalletWithdrawalRequestTransactionSchema
->;
-type ExternalCancelBuildBody = z.output<
-  typeof earnExternalWalletWithdrawalRequestCancelTransactionSchema
->;
-type ExternalSubmitBody = z.output<typeof earnExternalWalletSubmitSchema>;
+type WalletRequestBuildBody = z.output<typeof earnWalletWithdrawalRequestTransactionSchema>;
+type WalletCancelBuildBody = z.output<typeof earnWalletWithdrawalRequestCancelTransactionSchema>;
+type WalletSubmitBody = z.output<typeof earnWalletSubmitSchema>;
 
 interface ResolvedCustodyQueueTarget {
   auth: ApiKeyContext;
@@ -205,7 +201,7 @@ function isUniqueViolationDeep(error: unknown): boolean {
   return false;
 }
 
-export function builtTransactionWire(built: ExternalQueuedWithdrawalBuiltTransaction) {
+export function builtTransactionWire(built: WalletQueuedWithdrawalBuiltTransaction) {
   return {
     transactionId: built.id,
     transaction: built.unsigned_transaction,
@@ -635,7 +631,7 @@ export async function cancelEarnVaultWithdrawalRequest(
   });
 }
 
-function externalActor(c: AppContext): QueuedWithdrawalActor {
+function walletActor(c: AppContext): QueuedWithdrawalActor {
   const auth = getAuth(c);
   return {
     organizationId: auth.organizationId,
@@ -645,7 +641,7 @@ function externalActor(c: AppContext): QueuedWithdrawalActor {
   };
 }
 
-function externalPosition(target: Awaited<ReturnType<typeof resolveExternalWalletExit>>) {
+function walletPosition(target: Awaited<ReturnType<typeof resolveWalletExit>>) {
   return {
     id: target.positionId,
     provider: target.provider,
@@ -656,32 +652,32 @@ function externalPosition(target: Awaited<ReturnType<typeof resolveExternalWalle
   } satisfies QueuedWithdrawalPosition;
 }
 
-export async function getEarnExternalWalletWithdrawalOptions(
-  c: ValidatedBodyContext<typeof earnExternalWalletWithdrawalOptionsSchema>
+export async function getEarnWalletWithdrawalOptions(
+  c: ValidatedBodyContext<typeof earnWalletWithdrawalOptionsSchema>
 ) {
   const body = c.req.valid("json");
-  const target = await resolveExternalWalletExit(c, body);
-  const options = await readOptions(c, externalPosition(target));
+  const target = await resolveWalletExit(c, body);
+  const options = await readOptions(c, walletPosition(target));
   return success(c, { positionId: target.positionId, ...options });
 }
 
-export async function createEarnExternalWalletQueuedWithdrawalPreview(
-  c: ValidatedBodyContext<typeof earnExternalWalletQueuedWithdrawalPreviewSchema>
+export async function createEarnWalletQueuedWithdrawalPreview(
+  c: ValidatedBodyContext<typeof earnWalletQueuedWithdrawalPreviewSchema>
 ) {
   const body = c.req.valid("json");
-  const target = await resolveExternalWalletExit(c, body);
-  const quote = await readPreview(c, externalPosition(target), queuedTerms(body));
+  const target = await resolveWalletExit(c, body);
+  const quote = await readPreview(c, walletPosition(target), queuedTerms(body));
   return success(c, { positionId: target.positionId, ...quote });
 }
 
-export async function createEarnExternalWalletWithdrawalRequestTransaction(
-  c: ValidatedBodyContext<typeof earnExternalWalletWithdrawalRequestTransactionSchema>
+export async function createEarnWalletWithdrawalRequestTransaction(
+  c: ValidatedBodyContext<typeof earnWalletWithdrawalRequestTransactionSchema>
 ) {
-  const body: ExternalRequestBuildBody = c.req.valid("json");
-  const target = await resolveExternalWalletExit(c, body);
-  const built = await buildExternalQueuedWithdrawalRequest(c.env, {
-    actor: externalActor(c),
-    position: externalPosition(target),
+  const body: WalletRequestBuildBody = c.req.valid("json");
+  const target = await resolveWalletExit(c, body);
+  const built = await buildWalletQueuedWithdrawalRequest(c.env, {
+    actor: walletActor(c),
+    position: walletPosition(target),
     terms: queuedTerms(body),
     ...(body.feePayer ? { feePayer: body.feePayer } : {}),
   });
@@ -693,10 +689,10 @@ export async function createEarnExternalWalletWithdrawalRequestTransaction(
   });
 }
 
-export async function createEarnExternalWalletWithdrawalRequestCancelTransaction(
-  c: ValidatedBodyContext<typeof earnExternalWalletWithdrawalRequestCancelTransactionSchema>
+export async function createEarnWalletWithdrawalRequestCancelTransaction(
+  c: ValidatedBodyContext<typeof earnWalletWithdrawalRequestCancelTransactionSchema>
 ) {
-  const body: ExternalCancelBuildBody = c.req.valid("json");
+  const body: WalletCancelBuildBody = c.req.valid("json");
   const auth = getAuth(c);
   const { environment } = currentClusterScope();
   const projectId = requireProjectId(c);
@@ -706,15 +702,15 @@ export async function createEarnExternalWalletWithdrawalRequestCancelTransaction
     withdrawalRequestId: body.withdrawalRequestId,
   });
   if (!request || request.custody_wallet_id !== null || request.project_id !== projectId) {
-    throw notFound("Earn external-wallet withdrawal request");
+    throw notFound("Earn wallet withdrawal request");
   }
-  const target = await resolveExternalWalletExit(c, { positionId: request.position_id });
+  const target = await resolveWalletExit(c, { positionId: request.position_id });
   if (target.ownerAddress !== request.owner_address) {
-    throw notFound("Earn external-wallet withdrawal request");
+    throw notFound("Earn wallet withdrawal request");
   }
-  const built = await buildExternalQueuedWithdrawalCancel(c.env, {
-    actor: externalActor(c),
-    position: externalPosition(target),
+  const built = await buildWalletQueuedWithdrawalCancel(c.env, {
+    actor: walletActor(c),
+    position: walletPosition(target),
     request,
     requestAddress: request.request_address,
     ...(body.feePayer ? { feePayer: body.feePayer } : {}),
@@ -730,22 +726,22 @@ function requireIdempotencyKey(c: AppContext, noun: string): string {
   return key;
 }
 
-async function submitExternalQueueAction(
-  c: ValidatedBodyContext<typeof earnExternalWalletSubmitSchema>,
+async function submitWalletQueueAction(
+  c: ValidatedBodyContext<typeof earnWalletSubmitSchema>,
   action: "request" | "cancel"
 ) {
-  const body: ExternalSubmitBody = c.req.valid("json");
+  const body: WalletSubmitBody = c.req.valid("json");
   const actor: QueuedWithdrawalActor = {
     organizationId: getAuth(c).organizationId,
     projectId: requireProjectId(c),
     userId: getAuth(c).userId ?? null,
     apiKeyId: getAuth(c).apiKeyId ?? null,
   };
-  const result = await submitExternalQueuedWithdrawalAction(c.env, {
+  const result = await submitWalletQueuedWithdrawalAction(c.env, {
     actor,
     transactionId: body.transactionId,
     signedTransaction: body.signedTransaction,
-    clientRequestId: requireIdempotencyKey(c, `external-wallet queued withdrawal ${action}s`),
+    clientRequestId: requireIdempotencyKey(c, `wallet queued withdrawal ${action}s`),
     action,
   });
   await recordQueuedWithdrawalActionAudit(c, result);
@@ -754,20 +750,20 @@ async function submitExternalQueueAction(
   });
 }
 
-export async function createEarnExternalWalletWithdrawalRequest(
-  c: ValidatedBodyContext<typeof earnExternalWalletSubmitSchema>
+export async function createEarnWalletWithdrawalRequest(
+  c: ValidatedBodyContext<typeof earnWalletSubmitSchema>
 ) {
-  return submitExternalQueueAction(c, "request");
+  return submitWalletQueueAction(c, "request");
 }
 
-export async function createEarnExternalWalletWithdrawalRequestCancellation(
-  c: ValidatedBodyContext<typeof earnExternalWalletSubmitSchema>
+export async function createEarnWalletWithdrawalRequestCancellation(
+  c: ValidatedBodyContext<typeof earnWalletSubmitSchema>
 ) {
-  return submitExternalQueueAction(c, "cancel");
+  return submitWalletQueueAction(c, "cancel");
 }
 
-export async function listEarnExternalWalletWithdrawalRequests(c: AppContext) {
-  const query = parseQuery(c, earnExternalWalletWithdrawalRequestsQuerySchema);
+export async function listEarnWalletWithdrawalRequests(c: AppContext) {
+  const query = parseQuery(c, earnWalletWithdrawalRequestsQuerySchema);
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const page = await createPostgresEarnVaultWithdrawalRequestsRepository(getDb(c.env)).list({
@@ -775,7 +771,7 @@ export async function listEarnExternalWalletWithdrawalRequests(c: AppContext) {
     projectId,
     environment: currentClusterScope().environment,
     ownerAddress: query.ownerAddress,
-    externalWalletOnly: true,
+    walletOnly: true,
     ...(query.status ? { status: STATUS_FROM_WIRE[query.status] } : {}),
     ...(query.settled === undefined ? {} : { settled: query.settled }),
     ...(query.before ? { before: decodeRequestCursor(query.before) } : {}),
@@ -789,7 +785,7 @@ export async function listEarnExternalWalletWithdrawalRequests(c: AppContext) {
   });
 }
 
-export async function getEarnExternalWalletWithdrawalRequest(c: AppContext) {
+export async function getEarnWalletWithdrawalRequest(c: AppContext) {
   const { withdrawalRequestId } = parseParams(c, earnVaultWithdrawalRequestParamsSchema);
   const auth = getAuth(c);
   const request = await createPostgresEarnVaultWithdrawalRequestsRepository(getDb(c.env)).getById({
@@ -802,7 +798,7 @@ export async function getEarnExternalWalletWithdrawalRequest(c: AppContext) {
     request.custody_wallet_id !== null ||
     request.project_id !== requireProjectId(c)
   ) {
-    throw notFound("Earn external-wallet withdrawal request");
+    throw notFound("Earn wallet withdrawal request");
   }
   return success(c, { withdrawalRequest: withdrawalRequestWire(request) });
 }
