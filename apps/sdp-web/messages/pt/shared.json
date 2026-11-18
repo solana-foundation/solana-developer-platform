@@ -224,7 +224,7 @@
     "allowlist": "Allowlist",
     "markets": "Mercados",
     "treasurySolutions": "Tesouraria",
-    "earnProgram": "Embedded Yield",
+    "embeddedYield": "Embedded Yield",
     "configureEarnButton": "Integração com Embedded Yield",
     "heliusRings": "Helius Rings",
     "expandSectionMenu": "Expandir o menu de {section}",

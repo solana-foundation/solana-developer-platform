@@ -4,19 +4,16 @@ title: Core Earn API
 description: Discover strategies, prepare deposits and withdrawals, and track asynchronous execution through one operation lifecycle.
 ---
 
-This contract is internal while its replacement public surface awaits named
-security sign-off. Treasury and Embedded Yield use the same strategy, source
-and operation shapes. Existing published partner routes remain compatibility
-routes during migration. Legacy deposit preview, custody deposit and withdrawal,
-new custody withdrawal requests, wallet deposit/withdrawal/request builds,
-program creation and allocation changes return `410 NOT_IMPLEMENTED`. New
-withdrawals use the core operation, including existing legacy direct positions.
+This contract is internal pending named security sign-off. Treasury and
+Embedded Yield share the same strategies, positions and operations. The old
+catalogue, product, preview, build and submission URLs are removed. There are
+no compatibility routes or retirement stubs. Program creation, allocations
+and automation are removed.
 
-Legacy reads, exact already-built signed submissions, existing queued-request
-cancellation and program exits remain available to drain existing obligations.
-Those last two exit paths retain their existing execution model until migrated.
-An operation-only build cannot use a legacy submit route, including after its
-parent refreshes to a new action.
+Holdings use `/positions` and `/withdraw`; activity and pending actions use
+shared operations. Earn is prelaunch: old builds and removed product workflows
+have no compatibility upgrade path. Separate WisdomTree onboarding remains for
+customer verification and wallet registration.
 
 ## Discover strategies and holdings
 

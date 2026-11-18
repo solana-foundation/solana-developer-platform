@@ -290,9 +290,7 @@ export async function prepareQueuedStrategyWithdrawal(
   input: QueuedStrategyPreparation & { terms: AsyncWithdrawalTermsInput }
 ): Promise<PreparedQueuedStrategyTransaction> {
   requirePreparationSource(input);
-  return prepared(
-    await buildWalletQueuedWithdrawalRequest(env, { ...input, asyncOperation: true })
-  );
+  return prepared(await buildWalletQueuedWithdrawalRequest(env, input));
 }
 
 /** Build the provider's recovery action, preserving its actual economic outcome. */
@@ -313,7 +311,7 @@ export async function prepareQueuedStrategyCancellation(
   ) {
     throw notFound("Earn withdrawal request");
   }
-  return prepared(await buildWalletQueuedWithdrawalCancel(env, { ...input, asyncOperation: true }));
+  return prepared(await buildWalletQueuedWithdrawalCancel(env, input));
 }
 
 /** Recover exactly the stored build under the operation's authorized source. */

@@ -5,11 +5,9 @@ import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   type EarnProviderId,
-  earnDepositSlippagePolicy,
   earnDepositStyle,
   isVaultDirectDepositEnabled,
 } from "@sdp/types/provider-access";
-import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { getDb } from "@/db/client";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
 import { badRequest, forbidden } from "@/lib/errors";
@@ -21,26 +19,7 @@ import {
 } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
 
-/**
- * The ONE money-in admission predicate for an Earn catalogue row.
- *
- * Both money-in paths reach this: `POST /programs` (custodial allocations) and
- * `POST /vault-deposits` (non-custodial). Before it existed the two disagreed,
- * and the disagreement was not theoretical — the vault path resolved its row
- * with a bare `getStrategyById` and so would happily fund a `paused` or
- * `deprecated` strategy that `POST /programs` refused. `paused` is the operator
- * stop switch: the hourly sync goes out of its way NOT to clobber it and the
- * delist pass deliberately leaves such rows behind, precisely so a human can
- * halt deposits during an exploit or a depeg. A second money-in path that
- * ignored it made that switch a suggestion.
- *
- * ── What this deliberately does NOT check ───────────────────────────────────
- * Browse policy — hidden terms, curation, provider surfacing. Those live in
- * `handlers/strategies.ts` and gate what a reader SEES, not what an existing
- * customer may fund; see routes/earn/CLAUDE.md. Surfacing and entitlement are
- * separate, earlier gates with their own error codes, because "SDP does not
- * offer this" and "this instrument is halted" are different answers.
- */
+/** Shared admission for catalogue status, cluster and provider deposit capability. */
 export function assertStrategyDepositable(
   strategy: EarnStrategyRow,
   environment: SdpEnvironment
@@ -170,31 +149,4 @@ export async function assertVaultDepositAdmissible(
   }
 
   return provider;
-}
-
-/**
- * The share-floor gate both deposit routes call before building. It refuses a
- * request that omits `minSharesOut` when `earnDepositSlippagePolicy` says the
- * build enforces a floor for this provider on this row's cluster in this
- * environment: every production deposit, plus any provider whose builder
- * refuses an implicit floor — minus a Kamino row hosted on a cluster whose
- * kvault build lacks the floor instruction (devnet), and minus a next-NAV
- * subscription whose on-chain leg cannot encode a share floor, which
- * deliberately publishes null instead. The catalogue publishes that same
- * policy as `depositSlippage` (from the same `host_cluster`), so a caller who
- * follows the row they were shown never trips this.
- */
-export function assertDepositFloorPresent(
-  provider: string,
-  environment: SdpEnvironment,
-  minSharesOut: string | undefined,
-  hostCluster?: SolanaCluster
-): void {
-  if (minSharesOut !== undefined) return;
-  if (earnDepositSlippagePolicy(provider, environment, hostCluster) === null) return;
-  throw badRequest(
-    environment === "production"
-      ? "minSharesOut is required: every production deposit carries a share floor. Quote the deposit with POST /v1/earn/vault-deposit-previews and derive the floor from sharesOut."
-      : `minSharesOut is required: ${provider} deposits carry a share floor wherever the vault program can enforce one. Quote the deposit with POST /v1/earn/vault-deposit-previews and derive the floor from sharesOut.`
-  );
 }

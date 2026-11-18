@@ -138,6 +138,46 @@ describe("shared strategy withdrawal options", () => {
     expect(buildQueued).not.toHaveBeenCalled();
   });
 
+  it("keeps direct-only exits available without queue capabilities", async () => {
+    resolve.mockReturnValue(direct);
+    const prepared = await choices({ position, shares: "2" });
+    expect(prepared.options).toEqual([
+      expect.objectContaining({ id: "direct", settlement: "instant", mechanism: "direct" }),
+    ]);
+    expect(queued.getWithdrawalOptions).not.toHaveBeenCalled();
+    expect(buildQueued).not.toHaveBeenCalled();
+  });
+
+  it("reports a provider redemption order as delayed without promising payout time", async () => {
+    resolve.mockReturnValue({ ...direct, vaultWithdrawalSettlement: "provider_order" });
+    const prepared = await choices({ position, shares: "2" });
+    expect(prepared.options).toEqual([
+      expect.objectContaining({
+        id: "direct",
+        settlement: "delayed",
+        estimatedSeconds: null,
+        mechanism: "provider_order",
+      }),
+    ]);
+    expect(buildQueued).not.toHaveBeenCalled();
+  });
+
+  it("intersects static exit capabilities with the provider's live availability", async () => {
+    const original = queued.getWithdrawalOptions.getMockImplementation();
+    if (!original) throw new Error("Missing provider option fixture");
+    queued.getWithdrawalOptions.mockImplementationOnce(async () => ({
+      ...(await original()),
+      instant: false,
+      queued: false,
+    }));
+    await expect(choices({ position, shares: "2" })).rejects.toThrow(
+      "No supported withdrawal route"
+    );
+    expect(direct.quoteVaultWithdrawal).not.toHaveBeenCalled();
+    expect(queued.quoteQueuedWithdrawal).not.toHaveBeenCalled();
+    expect(buildQueued).not.toHaveBeenCalled();
+  });
+
   it("keeps held intermediate exits independent from redeemable shares", async () => {
     resolve.mockReturnValue(par);
     const prepared = await choices({ position, intermediateAmount: "2000" });

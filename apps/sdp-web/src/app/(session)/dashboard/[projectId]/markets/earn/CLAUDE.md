@@ -18,9 +18,9 @@ program creation and allocation configuration.
 - BFF routes under `src/app/api/dashboard/markets/earn` forward the four core
   routes. Shared operation proxies live under `api/dashboard/operations`.
   Preserve project, environment, auth and idempotency headers through the seam.
-- `earn-program-data.ts` retains historical movement reads, existing queued
-  requests, their cancellation and legacy program exits. These are recovery
-  paths. Fresh legacy vault deposit and withdrawal builders are retired.
+- `earn-data.ts` supplies shared discovery and position reads. Activity and
+  outstanding exits use current operations.
+  Do not add a second history model or obsolete API proxies.
 - `earn-integration-snippets.ts` supplies every guide code tab and Copy all.
   Keep it on the same core contract as the application.
 

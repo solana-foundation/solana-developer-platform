@@ -1,4 +1,3 @@
-import { supportsPortfolioWallets } from "@sdp/earn/capabilities";
 import { VedaEarnClient } from "@sdp/earn/providers/veda/client";
 import type {
   EarnRuntimeContext,
@@ -697,22 +696,6 @@ export class VedaVaultDirectClient
           ];
         });
       }
-    );
-  }
-}
-
-/**
- * Guard asserted at construction rather than trusted: the two capabilities
- * describe opposite money models, and a client answering yes to both would let a
- * portfolio route hand a customer the vault's own account as a deposit address —
- * where funds are destroyed. Exported so the API can assert it at registry wiring.
- */
-export function assertNotPortfolioProvider(client: VedaVaultDirectClient): void {
-  if (supportsPortfolioWallets(client)) {
-    throw new SdpVedaError(
-      "UNSUPPORTED_VAULT",
-      "Veda must never report the portfolio-wallet capability: it custodies nothing, " +
-        "and its vault-state account is not a fundable address."
     );
   }
 }

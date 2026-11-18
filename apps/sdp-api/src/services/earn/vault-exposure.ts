@@ -459,10 +459,8 @@ export async function assertVaultExposureWithinCap(
 /**
  * The LATE half: the `admit` hook the ledger runs inside the transaction that
  * records a deposit's `requested` row (`LedgerAdmissionHook`,
- * earn-movements.repository.ts). Both ledgered deposit paths pass it: the
- * custody deposit from `depositIntoVault` and the authenticated
- * wallet deposit from `submitWalletDeposit`. Anonymous
- * builds have no SDP submit or ledger transaction.
+ * earn-movements.repository.ts). The operation worker passes it when submitting
+ * a signed wallet deposit. Unsigned builds have no ledger transaction.
  *
  * Order, and why each step is where it is:
  *

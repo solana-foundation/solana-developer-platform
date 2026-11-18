@@ -139,9 +139,8 @@ version and an `Idempotency-Key`; the response is `202`, and the worker handles
 signing, provider approval and submission. Poll the same operation to recover
 after reload or a lost response.
 
-Program creation, allocation changes and fresh legacy transaction builds return
-`410`. Existing history, exact already-built signed submissions, queued-request
-cancellations and program exits remain available to drain existing obligations.
+The old catalogue, program, preview, build and submission HTTP routes are
+removed. Current holdings and obligations use the core routes and shared operations. There are no compatibility HTTP routes or retirement stubs.
 
 ### 5. The last gate: org entitlement
 
@@ -158,9 +157,7 @@ shows Kamino's devnet shelf plus Veda's devnet Test Vault. Its explicit mainnet
 mirror can also show browse-only Jupiter Lend and Ondo rows. Production has no
 Veda row because `VEDA_DEPLOYMENTS` is devnet-only until Veda names a production
 vault. The Ground integration that previously served the custodial program flow
-was removed, so no registered provider is portfolio-capable today. Legacy
-program reads and exits retain their capability guards; creating or
-reconfiguring a program returns `410`.
+was removed, so no registered provider is portfolio-capable today. The unsupported program HTTP surface is removed.
 `EARN_PROVIDER_SURFACING`
 (`packages/sdp-types/src/provider-access.ts`) declares which registered
 providers SDP OFFERS; it is a code constant, so there is no env var or DB row to
@@ -174,7 +171,7 @@ ADR 0002's 2026-08-14 addendum.
 | --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Sandbox Kamino rows name devnet vaults you do not recognise                                                     | correct — they are the real devnet shelf (Allez, Steakhouse, RockawayX, Gauntlet Frontier and friends), read on-chain from `devkRng…`, not the mainnet names                                                                                                                                                                                                                                                                                                          |
 | Sandbox shows mainnet strategies, badged "Mainnet only"                                                         | The production mirror is browse-only (`fundable: false`); a sandbox deposit must use its own cluster.                                                                                                                                                                                                                                                                                                                                                                 |
-| Legacy program creation or allocation changes return `410`                                                      | Those writers are retired. Prepare strategy actions through the core Earn routes (§4b).                                                                                                                                                                                                                                                                                                                                                                               |
+| Program creation and allocation HTTP routes are removed                                                         | Those writers are retired. Prepare strategy actions through the core Earn routes (§4b).                                                                                                                                                                                                                                                                                                                                                                               |
 | Every request 500s                                                                                              | Redis missing/wrong port (rate limiter)                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `/v1/earn/*` → 403                                                                                              | the release channel does not run Earn (`stable`)                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `/dashboard/markets/embedded-yield` → 404                                                                       | same channel, web side (segment guards); legacy `/dashboard/markets/earn/*` redirects here                                                                                                                                                                                                                                                                                                                                                                            |
@@ -229,13 +226,11 @@ Execution lives in `@sdp/ondo`; see that package's CLAUDE.md for why the
 primary mint/redeem facility is deliberately unused (Ondo onboarding, no Solana
 entry point) and how the Jupiter trust boundary stays single-owner in the API.
 
-## Two provider shapes — read this before assuming either model
+## Provider execution capabilities
 
-The legacy **custodial** shape (the retired Ground integration): SDP provisions
-an omnibus portfolio wallet, the customer funds it, and the provider spreads it
-across yield sources. No shipped provider uses it today. The legacy reads,
-exits, ledger and `EarnPortfolioWalletProvider` capability remain for recovery;
-the core API does not create portfolio programs or configure allocations.
+The core API supports per-strategy actions. Program creation, automated
+allocation and portfolio-wallet adapter contracts are removed. Add only
+capabilities used by a current strategy and the shared operation lifecycle.
 
 Every current executing provider is **non-custodial** and implements the base
 `EarnVaultProvider` contract plus the **vault-direct** capability
@@ -266,11 +261,6 @@ route answers 501 until it implements this capability too. Withholding it is
 never a permission gate, since ADR 0002 forbids money-out inheriting a
 money-in gate, and it traps nothing — the shares sit in the organization's own
 custody wallet and each provider's own surfaces can redeem them.
-
-No current provider implements the portfolio-wallet capability. Retained
-portfolio reads and exits test `supportsPortfolioWallets`, never a provider ID.
-The two capabilities are asserted MUTUALLY EXCLUSIVE: a client claiming both
-would let a portfolio route render the vault account as a fundable address.
 
 Money moves through provider-specific execution packages: `@sdp/kamino`,
 `@sdp/veda`, `@sdp/jupiter-lend`, `@sdp/ondo`, `@sdp/hastra`, and pre-launch
@@ -469,12 +459,9 @@ the five-minute pass would re-pay the whole catalogue cost for the rate alone.
 
 - `EarnVaultProvider` (src/types.ts) is the base catalogue contract:
   `provider` + `declaredSupport` + `listStrategies`. Quote, execution,
-  eligibility, metrics, and portfolio-wallet behavior live in optional
-  capabilities; the portfolio-wallet
-  surface (`EarnPortfolioWalletProvider`) is an **optional capability** detected
-  via `supportsPortfolioWallets()` (src/capabilities.ts, all-or-nothing method
-  presence). New optional surfaces follow the same pattern: interface extension
-  - type guard in capabilities.ts — never `instanceof` or provider-id checks.
+  eligibility and metrics behavior live in optional capabilities. Detect each
+  complete interface through its method-presence guard in capabilities.ts,
+  never `instanceof` or provider-id checks. Do not add unused future interfaces.
 - All USD/amount values in contract types are **decimal strings**; convert to
   wire numbers only at the provider HTTP boundary.
 - **An on-chain catalogue read takes its endpoint from `ctx.catalogueRpcUrl`**
@@ -590,26 +577,6 @@ CLAUDE.md, "Every operation reads each account once").
   callers, and the envelope redacts credentials only. `@sdp/redaction` is the
   package's one dependency besides `@sdp/types`; it is dependency-free, so the
   hourly cron still loads no chain SDK.
-- **The withdrawal preview takes an OPTIONAL amount** (PRO-1675).
-  `EarnPortfolioWithdrawalPreviewInput.amountUsd` may be omitted to ask the
-  liquidity question; a provider client must then OMIT the field from its wire
-  call, never send `null` or `0`. Two provider behaviours were measured on
-  2026-08-13 and **neither matches the published contract** — do not "fix" them
-  without re-measuring:
-  1. The docs say omitting `amountUsd` returns the maximum withdrawable. A live
-     provider instead answers **409** — but carries the lane's `balance`
-     breakdown, so the number still arrives, on the error path. That is why
-     `errorDetails` lifts it onto `SdpEarnError.details` and why the dashboard
-     treats a 409-with-balance as a resolved read rather than a failure.
-  2. `withdrawableUsd` is a **balance, not a fillable amount**. A lane reporting
-     `20.001241` answers 200 for `20.00` and **409 for `20.001241` itself**.
-     Anything offering a one-click max must floor to whole cents; the dashboard
-     does (`floorUsdToCents`) while still permitting a hand-typed larger amount.
-- Withdrawal approval is **policy-conditional, not default** (resolved
-  2026-08-05 — README → "Withdrawals unwind in reverse"). A payout leg parked
-  in `pending_customer_approval` must surface as the `pending_approval` wire
-  status, never as indefinite `processing`; the approval surface is the
-  optional capability behind `supportsWithdrawalApprovals` (capabilities.ts).
 - Tests: node:test (`pnpm --filter @sdp/earn test`), **no network** — stub
   global fetch per the canonical pattern in src/fetch.test.ts. Every new client
   method needs mapping + error-taxonomy coverage.
@@ -623,7 +590,7 @@ CLAUDE.md, "Every operation reads each account once").
 `EARN_PROVIDERS` is what this deployment can talk to; `EARN_PROVIDER_SURFACING`
 (both in `packages/sdp-types/src/provider-access.ts`) is what SDP sells today.
 An un-surfaced provider keeps its client, credentials, catalogue sync and
-metrics refresh, but disappears from discovery and legacy strategy reads.
+metrics refresh, but disappears from discovery.
 Core deposit admission also requires a surfaced provider.
 
 **Nothing in this package reads it, and nothing should.** Surfacing is a product

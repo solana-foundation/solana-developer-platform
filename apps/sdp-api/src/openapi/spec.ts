@@ -42,7 +42,7 @@ import { registerCompliancePaths } from "./paths/compliance";
 import { registerCounterpartyPaths } from "./paths/counterparties";
 import { registerCustodyAdministrationPaths, registerCustodyPaths } from "./paths/custody";
 import { registerDvpPaths } from "./paths/dvp";
-import { registerEarnPaths, registerPublicEarnPaths } from "./paths/earn";
+import { registerEarnPaths } from "./paths/earn";
 import { registerHealthPaths } from "./paths/health";
 import { registerIntegrationPaths } from "./paths/integrations";
 import { registerIssuancePaths } from "./paths/issuance";
@@ -228,7 +228,6 @@ function registerInternalSecuritySchemes(registry: OpenAPIRegistry) {
 function registerPublicPaths(registry: OpenAPIRegistry) {
   registerHealthPaths(registry);
   registerCustodyPaths(registry);
-  registerPublicEarnPaths(registry);
   registerProjectPaths(registry);
   registerIntegrationPaths(registry);
   registerIssuancePaths(registry);

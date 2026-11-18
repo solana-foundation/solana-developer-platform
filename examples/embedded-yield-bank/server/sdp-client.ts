@@ -4,12 +4,7 @@ import {
   coreOperationSchema,
   type EarnOperation,
 } from "../src/lib/core-operation";
-import type {
-  YieldMovement,
-  YieldPosition,
-  YieldStrategy,
-  YieldWithdrawalRequest,
-} from "../src/types";
+import type { YieldPosition, YieldStrategy } from "../src/types";
 import type { DemoConfig } from "./env";
 
 interface SdpErrorEnvelope {
@@ -22,24 +17,6 @@ interface SdpErrorEnvelope {
 interface Page {
   hasMore: boolean;
   nextCursor: string | null;
-}
-
-export interface BuiltTransaction {
-  transactionId: string;
-  transaction: string;
-  lastValidBlockHeight: string;
-  ownerAddress: string;
-  feePayer?: string;
-  provider: string;
-}
-
-interface QueuedWithdrawalBuildResult {
-  transaction: BuiltTransaction & {
-    positionId: string;
-    action: "request" | "cancel";
-    requestAddress: string;
-    withdrawalRequestId?: string;
-  };
 }
 
 export class SdpApiError extends Error {
@@ -108,116 +85,7 @@ export class EmbeddedYieldClient {
     );
   }
 
-  async submitDeposit(
-    transactionId: string,
-    signedTransaction: string,
-    idempotencyKey: string
-  ): Promise<YieldMovement> {
-    const data = await this.request<{ deposit: YieldMovement }>(
-      "/v1/earn/external-wallet/deposits",
-      {
-        method: "POST",
-        body: { transactionId, signedTransaction },
-        idempotencyKey,
-      }
-    );
-    return data.deposit;
-  }
-
-  async submitWithdrawal(
-    transactionId: string,
-    signedTransaction: string,
-    idempotencyKey: string
-  ): Promise<YieldMovement> {
-    const data = await this.request<{ withdrawal: YieldMovement }>(
-      "/v1/earn/external-wallet/withdrawals",
-      {
-        method: "POST",
-        body: { transactionId, signedTransaction },
-        idempotencyKey,
-      }
-    );
-    return data.withdrawal;
-  }
-
-  async submitQueuedWithdrawalRequest(
-    transactionId: string,
-    signedTransaction: string,
-    idempotencyKey: string
-  ): Promise<YieldWithdrawalRequest> {
-    const data = await this.request<{
-      withdrawalRequest: YieldWithdrawalRequest;
-    }>("/v1/earn/external-wallet/withdrawal-requests", {
-      method: "POST",
-      body: { transactionId, signedTransaction },
-      idempotencyKey,
-    });
-    return data.withdrawalRequest;
-  }
-
-  async listPendingWithdrawalRequests(
-    ownerAddress: string
-  ): Promise<YieldWithdrawalRequest[]> {
-    return this.allowUnknownOwner(
-      () =>
-        this.collectPages<YieldWithdrawalRequest>(
-          "/v1/earn/external-wallet/withdrawal-requests",
-          "withdrawalRequests",
-          ownerAddress,
-          { settled: "false" }
-        ),
-      []
-    );
-  }
-
-  async buildQueuedWithdrawalCancellation(input: {
-    withdrawalRequestId: string;
-    feePayer?: string;
-  }): Promise<QueuedWithdrawalBuildResult["transaction"]> {
-    const data = await this.request<QueuedWithdrawalBuildResult>(
-      "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
-      { method: "POST", body: input }
-    );
-    return data.transaction;
-  }
-
-  async submitQueuedWithdrawalCancellation(
-    transactionId: string,
-    signedTransaction: string,
-    idempotencyKey: string
-  ): Promise<YieldWithdrawalRequest> {
-    const data = await this.request<{
-      withdrawalRequest: YieldWithdrawalRequest;
-    }>("/v1/earn/external-wallet/withdrawal-request-cancellations", {
-      method: "POST",
-      body: { transactionId, signedTransaction },
-      idempotencyKey,
-    });
-    return data.withdrawalRequest;
-  }
-
-  /** Every recorded movement for the wallet, newest first, across all pages. */
-  async listMovements(ownerAddress: string): Promise<YieldMovement[]> {
-    return this.allowUnknownOwner(
-      () =>
-        this.collectPages<YieldMovement>(
-          "/v1/earn/external-wallet/movements",
-          "movements",
-          ownerAddress
-        ),
-      []
-    );
-  }
-
-  /** Read one movement through SDP's chain-aware detail endpoint. */
-  async getMovement(movementId: string): Promise<YieldMovement> {
-    const data = await this.request<{ movement: YieldMovement }>(
-      `/v1/earn/external-wallet/movements/${encodeURIComponent(movementId)}`
-    );
-    return data.movement;
-  }
-
-  /** Core position reads preserve external identity without custody registration. */
+  /** Read positions belonging to the configured owner address. */
   async listPositions(ownerAddress: string): Promise<YieldPosition[]> {
     const positions: YieldPosition[] = [];
     const seen = new Set<string>();
@@ -372,48 +240,6 @@ export class EmbeddedYieldClient {
       }
     );
     return coreOperationSchema.parse(data.operation);
-  }
-
-  private async collectPages<T>(
-    path: string,
-    key: "movements" | "positions" | "withdrawalRequests",
-    ownerAddress: string,
-    filters: Record<string, string> = {}
-  ): Promise<T[]> {
-    const items: T[] = [];
-    const seenCursors = new Set<string>();
-    let cursor: string | undefined;
-
-    while (true) {
-      const query = new URLSearchParams({
-        ownerAddress,
-        limit: "100",
-        ...filters,
-      });
-      if (cursor) query.set("before", cursor);
-      const data = await this.request<Page & Record<typeof key, T[]>>(
-        `${path}?${query}`
-      );
-      items.push(...data[key]);
-      if (!data.hasMore) return items;
-      if (!data.nextCursor || seenCursors.has(data.nextCursor)) {
-        throw new Error(`SDP ${key} cursor did not advance`);
-      }
-      seenCursors.add(data.nextCursor);
-      cursor = data.nextCursor;
-    }
-  }
-
-  private async allowUnknownOwner<T>(
-    load: () => Promise<T>,
-    empty: T
-  ): Promise<T> {
-    try {
-      return await load();
-    } catch (error) {
-      if (error instanceof SdpApiError && error.status === 404) return empty;
-      throw error;
-    }
   }
 
   private async request<T>(

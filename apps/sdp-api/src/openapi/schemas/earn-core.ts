@@ -7,12 +7,11 @@ import {
   earnWalletPositionSchema,
   earnWalletPositionSummaryResponse,
 } from "./earn";
-import { earnVaultPositionSchema } from "./earn-treasury";
 
 const strategySchema = earnStrategiesResponse.shape.data.shape.strategies.element;
 const nullableDate = z.string().datetime().nullable();
 
-/** Core discovery extends the existing strategy identity without changing legacy responses. */
+/** Discovery exposes one strategy catalogue with explicit rates and capabilities. */
 export const earnDiscoveryResponseSchema = successResponseSchema(
   earnStrategiesResponse.shape.data.extend({
     strategies: z.array(
@@ -22,7 +21,8 @@ export const earnDiscoveryResponseSchema = successResponseSchema(
           measure: z.literal("apy"),
           basis: z.literal("provider_reported"),
           observedAt: nullableDate.openapi({
-            description: "Rate observation time; null for unknown legacy observations.",
+            description:
+              "Rate observation time; null when the provider observation time is unknown.",
           }),
           source: z.object({ provider: z.string(), providerReference: z.string() }),
         }),
@@ -37,7 +37,8 @@ export const earnDiscoveryResponseSchema = successResponseSchema(
   })
 );
 
-const corePositionSchema = earnVaultPositionSchema.omit({ custodyWalletId: true }).extend({
+const corePositionSchema = earnWalletPositionSchema.omit({ ownerAddress: true }).extend({
+  feeSponsored: z.boolean(),
   source: operationSourceSchema,
   strategyId: z.string().optional(),
   createdAt: nullableDate,

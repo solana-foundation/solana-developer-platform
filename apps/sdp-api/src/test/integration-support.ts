@@ -35,14 +35,10 @@ import { closeAllRedisClients, createKVStoreSet } from "@/runtime/kv-redis";
 import { createSigningService } from "@/services/domain/signing.service";
 import { resolveEarnExecutionClient } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
-import { depositIntoVault } from "@/services/earn/vault-deposit.service";
 import {
   buildWalletDepositTransaction,
   buildWalletWithdrawalTransaction,
-  submitWalletDeposit,
-  submitWalletWithdrawal,
 } from "@/services/earn/vault-wallet.service";
-import { withdrawFromVault } from "@/services/earn/vault-withdraw.service";
 import { createMosaicService } from "@/services/issuance/mosaic";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
 import { reconcileOperations } from "@/services/jobs/reconcile-operations";
@@ -79,7 +75,6 @@ export const apiTestSupport = {
   createPostgresEarnRepository,
   createSigningService,
   createVaultDeadline,
-  depositIntoVault,
   CustodyConfigStore,
   ensureTestClerkIssuer,
   DVP_SWAP_PROGRAM_PROGRAM_ADDRESS,
@@ -96,8 +91,6 @@ export const apiTestSupport = {
   runAsMoneyPrincipal,
   seedTestDatabase,
   signTestClerkJwt,
-  submitWalletDeposit,
-  submitWalletWithdrawal,
   supportsVaultDirect,
   TOKEN_PROGRAM_ADDRESS,
   SponsorshipBudgetRepository,
@@ -161,5 +154,4 @@ export const apiTestSupport = {
     runWithSystemDatabaseIdentity("cron:track-pending-transfers", () =>
       runInEachClusterScope(() => trackPendingTransfers(env))
     ),
-  withdrawFromVault,
 };

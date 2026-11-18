@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   supportsVaultDirect,
   supportsVaultParRedemption,
@@ -28,12 +29,6 @@ import type { AppContext } from "@/routes/earn/context";
 import { getEarnRepository } from "@/routes/earn/context";
 import { parseQuery } from "@/routes/earn/handlers/shared";
 import {
-  isEarnStrategyInExecutionShelf,
-  mapToEarnStrategy,
-  readEarnStrategyPage,
-} from "@/routes/earn/handlers/strategies";
-import { listReadableEarnVaultWallets } from "@/routes/earn/handlers/vault";
-import {
   decodeVaultPositionCursor,
   encodeVaultPositionCursor,
   type VaultPositionCursor,
@@ -46,16 +41,24 @@ import {
   vaultPositionDiscoveryScope,
 } from "@/routes/earn/handlers/vault-position-hydration";
 import {
-  collectAllWalletPositionRows,
-  summarizeWalletPositions,
-  type WalletHolding,
-} from "@/routes/earn/handlers/wallet";
+  collectAllEarnPositionRows,
+  type EarnPositionHolding,
+  summarizeEarnPositions,
+} from "@/routes/earn/position-summary";
+import {
+  isEarnStrategyInExecutionShelf,
+  mapToEarnStrategy,
+  readEarnStrategyPage,
+} from "@/routes/earn/strategy-catalogue";
+import { listReadableEarnWallets } from "@/routes/earn/wallet-scope";
+import { earnProviderEndpointUrls } from "@/services/earn/cluster-rpc";
 import {
   isEarnDirectWithdrawalConfigured,
   resolveEarnExecutionClient,
 } from "@/services/earn/execution-registry";
 import { resolveVaultBalanceReadContext } from "@/services/earn/vault-balance-read-context";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
+import type { Env } from "@/types/env";
 import { parseDiscoveredEarnPositionLocator } from "./discovered-position";
 import { buildDiscoveredEarnPositionRows } from "./position-discovery";
 import { earnDiscoveryQuerySchema, earnPositionsQuerySchema } from "./read-schemas";
@@ -150,7 +153,7 @@ export function mergeEarnPositionPages(
 }
 
 function positionSummary(
-  holdings: readonly WalletHolding[],
+  holdings: readonly EarnPositionHolding[],
   live: ReadonlyMap<string, HydratedVaultPositionValue>,
   discoveredIds: ReadonlySet<string>,
   observedIds: ReadonlySet<string>,
@@ -158,13 +161,13 @@ function positionSummary(
 ): EarnCorePositionSummary | undefined {
   if (!query.includeSummary) return undefined;
   // Historical wallet-ID and owner-address claims can name one physical holding.
-  const unique = new Map<string, WalletHolding>();
+  const unique = new Map<string, EarnPositionHolding>();
   for (const holding of holdings) {
     if (discoveredIds.has(holding.id) && !observedIds.has(holding.id)) continue;
     const identity = JSON.stringify([
       holding.ownerAddress,
       holding.provider,
-      holding.vaultAddress,
+      holding.providerReference,
       holding.tokenMint,
       holding.shareMint,
     ]);
@@ -172,7 +175,7 @@ function positionSummary(
     if (!existing) unique.set(identity, holding);
     else if (holding.costBasisKnown === false) existing.costBasisKnown = false;
   }
-  const summary = summarizeWalletPositions([...unique.values()], live, {
+  const summary = summarizeEarnPositions([...unique.values()], live, {
     includeOwnerAddresses: query.includeOwnerAddresses ?? false,
     includePositions: query.includePositions ?? false,
   });
@@ -195,6 +198,10 @@ function positionSummary(
   };
 }
 
+const MAX_IN_FLIGHT_POSITION_SUMMARIES = 256;
+const inFlightPositionSummaries = new WeakMap<Env, Map<string, Promise<EarnPositionsResponse>>>();
+type ReadableWallets = Awaited<ReturnType<typeof listReadableEarnWallets>>;
+
 /**
  * Read tracked holdings with the existing wallet and exact-project boundaries.
  * Summaries scan the complete selected scope and share this one hydration.
@@ -209,12 +216,57 @@ export async function readEarnPositions(
   const before = query.before ? positionCursor(query.before, query.discover) : null;
   if (query.before && !before) throw badRequest("Invalid Earn position pagination cursor");
   const includeCustody = query.sourceType !== "address" && query.ownerAddress === undefined;
-  const includeAddress = query.sourceType !== "wallet" && query.walletId === undefined;
-  const allWallets = includeCustody ? await listReadableEarnVaultWallets(c, auth, projectId) : [];
+  const allWallets = includeCustody ? await listReadableEarnWallets(c, auth, projectId) : [];
   const wallets = query.walletId
     ? allWallets.filter((wallet) => wallet.id === query.walletId)
     : allWallets;
   if (query.walletId && wallets.length === 0) throw notFound("Earn wallet");
+  // Authorize each caller before joining. A confirmation-aware refresh keeps
+  // its own provider read and observed-slot floor.
+  if (!query.includeSummary || query.afterMovementIds !== undefined) {
+    return loadEarnPositions(c, query, wallets, before);
+  }
+  const key = JSON.stringify([
+    auth.organizationId,
+    projectId,
+    environment,
+    auth.walletAccess,
+    createHash("sha256")
+      .update(JSON.stringify(earnProviderEndpointUrls(cluster)))
+      .digest("hex"),
+    query,
+    wallets
+      .map(({ id, publicKey }) => [id, publicKey] as const)
+      .sort(([left], [right]) => left.localeCompare(right)),
+    isEarnVaultSponsorshipEnabled(c.env, cluster),
+  ]);
+  let reads = inFlightPositionSummaries.get(c.env);
+  if (!reads) {
+    reads = new Map();
+    inFlightPositionSummaries.set(c.env, reads);
+  }
+  const existing = reads.get(key);
+  if (existing) return existing;
+  const read = loadEarnPositions(c, query, wallets, before);
+  if (reads.size >= MAX_IN_FLIGHT_POSITION_SUMMARIES) return read;
+  reads.set(key, read);
+  const clear = () => {
+    if (reads.get(key) === read) reads.delete(key);
+  };
+  void read.then(clear, clear);
+  return read;
+}
+
+async function loadEarnPositions(
+  c: AppContext,
+  query: z.output<typeof earnPositionsQuerySchema>,
+  wallets: ReadableWallets,
+  before: VaultPositionCursor | null
+): Promise<EarnPositionsResponse> {
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const { environment, cluster } = currentClusterScope();
+  const includeAddress = query.sourceType !== "wallet" && query.walletId === undefined;
   const custodyWalletIds = wallets.map((wallet) => wallet.id);
   const balanceContext = await resolveVaultBalanceReadContext(c.env, {
     movementIds: query.afterMovementIds?.split(",") ?? [],
@@ -246,7 +298,7 @@ export async function readEarnPositions(
   const page =
     query.includeSummary || query.discover
       ? {
-          rows: await collectAllWalletPositionRows((cursor) => readPage(cursor, 100)),
+          rows: await collectAllEarnPositionRows((cursor) => readPage(cursor, 100)),
           hasMore: false,
         }
       : await readPage(before, query.limit);
@@ -278,7 +330,7 @@ export async function readEarnPositions(
   const candidateRows = [...page.rows, ...discoveredRows].sort(newestFirst);
   const rowsReadAt = markVaultPositionRowsRead();
   const addresses = new Map(wallets.map((wallet) => [wallet.id, wallet.publicKey]));
-  const holdings: WalletHolding[] = candidateRows.map((row) => {
+  const holdings: EarnPositionHolding[] = candidateRows.map((row) => {
     const ownerAddress = row.custody_wallet_id
       ? addresses.get(row.custody_wallet_id)
       : row.owner_address;
@@ -287,7 +339,7 @@ export async function readEarnPositions(
     return {
       id: row.id,
       provider: row.provider,
-      vaultAddress: row.vault_address,
+      providerReference: row.vault_address,
       label: row.label,
       ownerAddress,
       tokenMint: row.token_mint,
@@ -310,7 +362,7 @@ export async function readEarnPositions(
     holdings.map((holding) => ({
       id: holding.id,
       provider: holding.provider,
-      providerReference: holding.vaultAddress,
+      providerReference: holding.providerReference,
       ownerAddress: holding.ownerAddress,
       tokenMint: holding.tokenMint,
       shareMint: holding.shareMint,
@@ -382,10 +434,15 @@ export async function readEarnPositions(
       strategyId:
         row.strategy_id ??
         strategyIds.get(
-          JSON.stringify([row.provider, holding.vaultAddress, holding.shareMint, holding.tokenMint])
+          JSON.stringify([
+            row.provider,
+            holding.providerReference,
+            holding.shareMint,
+            holding.tokenMint,
+          ])
         ),
       provider: row.provider,
-      providerReference: holding.vaultAddress,
+      providerReference: holding.providerReference,
       label: row.label,
       tokenMint: holding.tokenMint,
       shareMint: holding.shareMint,

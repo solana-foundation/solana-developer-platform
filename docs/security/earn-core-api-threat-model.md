@@ -51,8 +51,8 @@ deposit eligibility nor authority over a wallet.
 - A discovered holding is claimed only with verified signed intent, atomically
   with its first movement. It receives no synthetic deposit, acquisition
   history, cost basis or earnings.
-- Legacy submit routes reject builds reserved for operations, including old
-  versions left behind by refresh. They cannot bypass the async worker.
+- Old submission URLs and their unused wrappers are removed. Every supported
+  operation enters through core preparation and the shared async worker.
 - Deposit acceptance requires its critical audit intent. Exit auditing retains
   the existing best-effort posture so an audit outage cannot trap funds.
 
@@ -71,15 +71,15 @@ Catalogue coverage and execution coverage are distinct. A discovery-only
 strategy cannot enter the deposit path. Expanding assets beyond current stable
 token exposure accounting requires appropriate valuation and safety controls.
 
-The four core Earn routes and five operation routes remain internal. Existing
-published compatibility routes do not authorize publishing their replacements.
+The four core Earn routes and five operation routes remain internal. The old
+53 non-onboarding routes are removed rather than mounted as compatibility URLs.
 Public promotion requires named security sign-off. No production migration,
 provider sandbox flow or signed-in browser flow is established by local tests.
 
 Migrations are additive while the previous revision serves traffic. Canonical
-strategy references retain synchronized legacy column aliases during that
-window. Canonical wallet build views use the existing rows, constraints and
-triggers with caller-enforced RLS. Legacy physical table names remain compatible
-with the previous revision; no second ledger is introduced. Dropping those
-aliases or drain-only recovery routes is a separate
-deployment step after old revisions and obligations are gone.
+wallet transaction tables start empty, enforce tenant RLS and retain the build
+constraints needed by current operations. Old builds are neither copied nor
+resumed. Strategy references retain synchronized aliases where current ledger
+writers still use them. Old physical objects remain until a separate schema-only
+deployment can remove them. No historical action adoption or compatibility
+execution path is supported.

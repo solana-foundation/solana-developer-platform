@@ -11,8 +11,8 @@ liquidity or signing authority.
 
 A position records a wallet's holding in a strategy. An operation tracks one
 deposit or withdrawal, including approval, submission and provider settlement.
-Legacy portfolio-wallet capabilities remain for existing history and exits;
-new program creation and allocation configuration are retired.
+Program creation, allocation configuration and their HTTP routes are removed.
+The movement ledger records the financial outcome of current operations.
 
 Companion docs:
 
@@ -29,7 +29,7 @@ vault, lending market or RWA product; its provider owns the implementation.
 | Endpoint                 | Purpose                                               |
 | ------------------------ | ----------------------------------------------------- |
 | `GET /v1/earn/discovery` | List validated strategies and execution capabilities. |
-| `GET /v1/earn/positions` | Read holdings, pending exits and optional totals.     |
+| `GET /v1/earn/positions` | Read holdings and optional complete-scope totals.     |
 | `POST /v1/earn/deposit`  | Prepare a strategy deposit from a wallet.             |
 | `POST /v1/earn/withdraw` | Prepare an exit from an existing position.            |
 
@@ -49,11 +49,13 @@ Queued exits stay under the same operation. Request acceptance or share escrow
 is not a payout. Provider and chain observations establish delivery, and a later
 claim or cancellation can require another explicit approval.
 
-Fresh legacy writers and program configuration return `410`. Existing history,
-exact previously prepared signed submissions, queued cancellations and program
-exits remain available for recovery. Canonical database access uses
-`earn_wallet_transactions` and `earn_wallet_withdrawal_request_transactions`;
-these views share the original records during rollout rather than copying them.
+The 53 former catalogue, program, product and transaction HTTP operations are
+removed. Earn is prelaunch, so no historical-action adoption or compatibility
+execution path is supported. Current operations use one async lifecycle.
+
+Canonical database access uses `earn_wallet_transactions` and
+`earn_wallet_withdrawal_request_transactions`. New builds use these physical
+tables. Old build tables are unused by the replacement; no data is copied.
 
 The replacement contract remains internal pending named security sign-off. Read
 `apps/sdp-docs/content/unpublished/earn/core-api.mdx` for requests and recovery,
@@ -252,10 +254,9 @@ walk:
    to `env.d.ts`, `turbo.json`, `scripts/secret-keys.mjs`, and managed secret
    projection. A public/on-chain provider joins the deliberate keyless set and
    adds no placeholder secret.
-4. Implement capabilities method-by-method (`listStrategies` first — the sync
-   cron picks it up automatically). If the provider is portfolio-based,
-   implement `EarnPortfolioWalletProvider`; the program routes light up via the
-   capability guard, no route changes.
+4. Implement `listStrategies` first, then only the capabilities needed by
+   current strategy actions. Catalogue sync picks it up through the registry.
+   Do not restore program or automated-allocation contracts.
 5. Tests are no-network by design: stub `fetch` per the canonical pattern in
    `src/fetch.test.ts`.
 6. If SDP executes for the provider (vault-direct): the executing client in

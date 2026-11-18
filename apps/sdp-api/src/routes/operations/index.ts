@@ -24,7 +24,7 @@ import {
   earnOperationActor,
   prepareEarnStrategyAction,
 } from "@/routes/earn/core/prepare";
-import { listReadableEarnVaultWallets } from "@/routes/earn/handlers/vault";
+import { listReadableEarnWallets } from "@/routes/earn/wallet-scope";
 import {
   executeEarnOperation,
   isTerminalOperation,
@@ -59,7 +59,7 @@ async function authorizeOperation(
   if (record === null) throw notFound("Operation");
   const walletId = "walletId" in record.source ? record.source.walletId : null;
   if (walletId !== null) {
-    const wallets = await listReadableEarnVaultWallets(c, actor.auth, actor.projectId);
+    const wallets = await listReadableEarnWallets(c, actor.auth, actor.projectId);
     if (!wallets.some((wallet) => wallet.id === walletId)) throw notFound("Operation");
     if (spend) assertCallerWalletInScope(actor.auth, walletId);
   }
@@ -115,7 +115,7 @@ operations.use("*", projectContextMiddleware({ allowUnentitledProduction: () => 
 operations.get("/", requireAction("earn.read"), validateQuery(querySchema), async (c) => {
   const actor = earnOperationActor(c);
   const query = querySchema.parse(c.req.query());
-  const wallets = await listReadableEarnVaultWallets(c, actor.auth, actor.projectId);
+  const wallets = await listReadableEarnWallets(c, actor.auth, actor.projectId);
   if (query.walletId !== undefined && !wallets.some((wallet) => wallet.id === query.walletId))
     throw notFound("Wallet");
   const page = await createOperationsService(c.env).list(actor, {

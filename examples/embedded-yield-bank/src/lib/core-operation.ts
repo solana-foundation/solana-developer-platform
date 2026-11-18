@@ -82,6 +82,7 @@ export const coreOperationSchema = z.looseObject({
     .looseObject({
       positionId: z.string(),
       signature: z.string().nullable(),
+      strategyId: z.string().optional(),
       source: source.optional(),
       settledAmount: tokenAmount.nullable().optional(),
       settlementOutcome: z

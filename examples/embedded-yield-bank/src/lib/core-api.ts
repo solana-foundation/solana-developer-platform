@@ -11,6 +11,19 @@ const actionSchema = z.object({
   idempotencyKey: z.string(),
 });
 
+async function withOperationLock<T>(work: () => Promise<T>): Promise<T> {
+  if (!navigator.locks)
+    throw new Error("This browser cannot safely save operation retries");
+  return navigator.locks.request(pendingKey, work);
+}
+
+function assertNoPendingExecution() {
+  if (window.localStorage.getItem(pendingKey) !== null)
+    throw new Error(
+      "Recover the earlier pending transfer before starting another action"
+    );
+}
+
 async function request(
   path: string,
   body: unknown,
@@ -43,12 +56,15 @@ async function request(
 
 /** Persist preparation identity before sending; a lost response retries the same operation. */
 async function prepare(path: string, input: unknown): Promise<EarnOperation> {
-  const storageKey = `northstar:prepare:${JSON.stringify([path, input])}`;
-  const key = window.localStorage.getItem(storageKey) ?? crypto.randomUUID();
-  window.localStorage.setItem(storageKey, key);
-  const operation = await request(path, input, key);
-  window.localStorage.removeItem(storageKey);
-  return operation;
+  return withOperationLock(async () => {
+    assertNoPendingExecution();
+    const storageKey = `northstar:prepare:${JSON.stringify([path, input])}`;
+    const key = window.localStorage.getItem(storageKey) ?? crypto.randomUUID();
+    window.localStorage.setItem(storageKey, key);
+    const operation = await request(path, input, key);
+    window.localStorage.removeItem(storageKey);
+    return operation;
+  });
 }
 
 export function prepareDepositOperation(
@@ -68,8 +84,15 @@ async function submitSaved(
 ): Promise<EarnOperation> {
   const operation = await request(
     `/api/operations/${encodeURIComponent(action.operationId)}/execute`,
-    action
+    {
+      actionId: action.actionId,
+      version: action.version,
+      ...(action.optionId ? { optionId: action.optionId } : {}),
+      idempotencyKey: action.idempotencyKey,
+    }
   );
+  if (operation.id !== action.operationId)
+    throw new Error("Operation response does not match the saved request");
   window.localStorage.removeItem(pendingKey);
   return operation;
 }
@@ -79,9 +102,7 @@ export async function executePreparedOperation(
   operation: EarnOperation,
   optionId?: string
 ): Promise<EarnOperation> {
-  if (!navigator.locks)
-    throw new Error("This browser cannot safely save operation retries");
-  return navigator.locks.request(pendingKey, async () => {
+  return withOperationLock(async () => {
     const saved = window.localStorage.getItem(pendingKey);
     const action =
       saved === null
@@ -104,8 +125,7 @@ export async function executePreparedOperation(
 
 /** Resume the exact stored action after reload without preparing another transaction. */
 export async function resumePendingOperation(): Promise<EarnOperation | null> {
-  if (!navigator.locks) return null;
-  return navigator.locks.request(pendingKey, async () => {
+  return withOperationLock(async () => {
     const saved = window.localStorage.getItem(pendingKey);
     return saved === null
       ? null
@@ -117,15 +137,18 @@ async function updatePreparedOperation(
   operationId: string,
   action: "cancel" | "refresh"
 ): Promise<EarnOperation> {
-  const keyName = `northstar:${action}:${operationId}`;
-  const key = window.localStorage.getItem(keyName) ?? crypto.randomUUID();
-  window.localStorage.setItem(keyName, key);
-  const operation = await request(
-    `/api/operations/${encodeURIComponent(operationId)}/${action}`,
-    { idempotencyKey: key }
-  );
-  window.localStorage.removeItem(keyName);
-  return operation;
+  return withOperationLock(async () => {
+    assertNoPendingExecution();
+    const keyName = `northstar:${action}:${operationId}`;
+    const key = window.localStorage.getItem(keyName) ?? crypto.randomUUID();
+    window.localStorage.setItem(keyName, key);
+    const operation = await request(
+      `/api/operations/${encodeURIComponent(operationId)}/${action}`,
+      { idempotencyKey: key }
+    );
+    window.localStorage.removeItem(keyName);
+    return operation;
+  });
 }
 
 export function requestOperationCancellation(

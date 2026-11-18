@@ -3,7 +3,7 @@
 import type { EarnVaultPosition } from "@sdp/types/earn";
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
 import { useEarnFundingWallets } from "@/app/(session)/dashboard/[projectId]/markets/earn/deposit/earn-funding-wallets";
-import { useEarnVaultPositions } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-program-data";
+import { useEarnVaultPositions } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-data";
 import {
   displayedVaultBalance,
   hasUnconfirmedVaultMovement,

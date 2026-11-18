@@ -91,15 +91,13 @@ function inRequestScope<TInput, TResult>(
 
 const buildWalletDepositTransaction = inRequestScope(service.buildWalletDepositTransaction);
 const buildWalletWithdrawalTransaction = inRequestScope(service.buildWalletWithdrawalTransaction);
-const submitWalletDeposit = inRequestScope(service.submitWalletDeposit);
-const submitWalletWithdrawal = inRequestScope(service.submitWalletWithdrawal);
 const submitStrategyTransaction = inRequestScope(submitPreparedStrategyTransaction);
 const { VaultTransactionTooLargeError } = await import("./vault-execution.service");
 
 /**
  * The wallet (caller-signed) flows, end to end minus the chain
  * (PRO-1722): build persists an unsigned transaction, submit verifies a real
- * signature over exactly those bytes, records the movement before broadcast,
+ * signature through the shared worker writer, records before broadcast,
  * and answers retries from the ledger.
  *
  * The owner is a REAL keypair generated per run: the signature-verification
@@ -287,13 +285,15 @@ async function signBuiltTransaction(
   return Buffer.from(getTransactionEncoder().encode(signed)).toString("base64");
 }
 
-function submitDeposit(
+function submitPrepared(
   built: WalletBuiltTransaction,
   signedTransaction: string,
   requestId: string,
-  overrides: Partial<Parameters<typeof submitWalletDeposit>[1]> = {}
+  overrides: Partial<Parameters<typeof submitPreparedStrategyTransaction>[1]> = {}
 ) {
-  return submitWalletDeposit(env, {
+  return submitStrategyTransaction(env, {
+    custodyWalletId: null,
+    apiKeyId: null,
     organizationId: ORG,
     projectId: PROJECT,
     transactionId: built.id,
@@ -330,7 +330,6 @@ describe("shared asynchronous strategy ledger writer", () => {
       withdrawalInput("discovered", {
         positionId: null,
         strategyId: "strategy_ext_test",
-        asyncOperation: true,
       })
     );
     expect(await getDb(env).queryOne("SELECT id FROM earn_positions")).toBeNull();
@@ -361,7 +360,6 @@ describe("shared asynchronous strategy ledger writer", () => {
       withdrawalInput("discovered", {
         positionId: null,
         strategyId: "strategy_ext_test",
-        asyncOperation: true,
       })
     );
     const other = await buildWalletWithdrawalTransaction(
@@ -369,7 +367,6 @@ describe("shared asynchronous strategy ledger writer", () => {
       withdrawalInput("discovered", {
         positionId: null,
         strategyId: "strategy_ext_test",
-        asyncOperation: true,
       })
     );
     await expect(
@@ -401,7 +398,7 @@ describe("shared asynchronous strategy ledger writer", () => {
       [ownerAddress]
     );
     const built = await buildDepositRow(
-      depositInput({ custodyWalletId: "wallet_strategy_operation", asyncOperation: true })
+      depositInput({ custodyWalletId: "wallet_strategy_operation" })
     );
     const result = await submitCore(built, await signBuiltTransaction(built), {
       custodyWalletId: "wallet_strategy_operation",
@@ -625,7 +622,7 @@ describe("buildWalletDepositTransaction (swap-funded)", () => {
       );
     expect(datas[0]).toBe("swap-leg");
     expect(datas[1]).toBe("provider-instruction");
-    expect(datas[2]).toMatch(/^sdp:earn:external-deposit:/);
+    expect(datas[2]).toMatch(/^sdp:earn:strategy-deposit:/);
   });
 
   it("makes the caller-provided fee payer Jupiter's ATA-rent payer too", async () => {
@@ -683,7 +680,7 @@ describe("buildWalletDepositTransaction (swap-funded)", () => {
     expect(fetchJupiterSwapLeg.mock.calls[1]?.[2]).toMatchObject({ maxAccounts: 24 });
     const usedCompactMemo = simulateVaultPlan.mock.calls.some(([input]) =>
       input.plan.instructions.some((instruction: { data: string }) =>
-        /^sdp:e:ed:[A-Za-z0-9_-]{22}$/.test(
+        /^sdp:e:sd:[A-Za-z0-9_-]{22}$/.test(
           Buffer.from(instruction.data, "base64").toString("utf8")
         )
       )
@@ -848,34 +845,13 @@ describe("buildWalletDepositTransaction (swap-funded)", () => {
   });
 });
 
-describe("submitWalletDeposit", () => {
-  it("cannot consume an operation-only build through legacy submission, even without a parent reference", async () => {
-    const built = await buildDepositRow(depositInput({ asyncOperation: true }));
-    const signed = await signBuiltTransaction(built);
-    await expect(submitDeposit(built, signed, crypto.randomUUID())).rejects.toMatchObject({
-      code: "CONFLICT",
-      details: { reason: "operation_execution_required" },
-    });
-    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
-    const row = await getDb(env).queryOne<{ operation_only: boolean; movement_id: string | null }>(
-      "SELECT operation_only, movement_id FROM earn_wallet_transactions WHERE id = ?",
-      [built.id]
-    );
-    expect(row).toEqual({ operation_only: true, movement_id: null });
-    await expect(
-      getDb(env).execute(
-        "UPDATE earn_wallet_transactions SET operation_only = FALSE WHERE id = ?",
-        [built.id]
-      )
-    ).rejects.toThrow("irreversible");
-  });
-
+describe("prepared strategy deposit submission", () => {
   it("verifies the owner signature, records before broadcast, and claims the position", async () => {
     const built = await buildDepositRow(depositInput());
     const signed = await signBuiltTransaction(built);
     const requestId = crypto.randomUUID();
 
-    const result = await submitDeposit(built, signed, requestId);
+    const result = await submitPrepared(built, signed, requestId);
 
     expect(result.replayed).toBe(false);
     expect(result.movement.status).toBe("submitted");
@@ -915,8 +891,8 @@ describe("submitWalletDeposit", () => {
     const signed = await signBuiltTransaction(built);
     const requestId = crypto.randomUUID();
 
-    const first = await submitDeposit(built, signed, requestId);
-    const replay = await submitDeposit(built, signed, requestId);
+    const first = await submitPrepared(built, signed, requestId);
+    const replay = await submitPrepared(built, signed, requestId);
 
     expect(replay.replayed).toBe(true);
     expect(replay.movement.id).toBe(first.movement.id);
@@ -928,20 +904,21 @@ describe("submitWalletDeposit", () => {
     const second = await buildDepositRow(depositInput());
     const requestId = crypto.randomUUID();
 
-    await submitDeposit(first, await signBuiltTransaction(first), requestId);
+    await submitPrepared(first, await signBuiltTransaction(first), requestId);
     await expect(
-      submitDeposit(second, await signBuiltTransaction(second), requestId)
+      submitPrepared(second, await signBuiltTransaction(second), requestId)
     ).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
-  it("rejects a second key against an already-submitted build", async () => {
+  it("replays a consumed build with the same signed bytes under another delivery key", async () => {
     const built = await buildDepositRow(depositInput());
     const signed = await signBuiltTransaction(built);
 
-    await submitDeposit(built, signed, crypto.randomUUID());
-    await expect(submitDeposit(built, signed, crypto.randomUUID())).rejects.toMatchObject({
-      code: "CONFLICT",
-    });
+    const first = await submitPrepared(built, signed, crypto.randomUUID());
+    const replay = await submitPrepared(built, signed, crypto.randomUUID());
+    expect(replay.replayed).toBe(true);
+    expect(replay.movement.id).toBe(first.movement.id);
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
     // One built transaction, one movement — the ledger holds no duplicate.
     const rows = await getDb(env)
       .prepare("SELECT COUNT(*)::int AS movements FROM earn_movements")
@@ -952,7 +929,7 @@ describe("submitWalletDeposit", () => {
   it("prevents one movement from consuming more than one built transaction", async () => {
     const first = await buildDepositRow(depositInput());
     const second = await buildDepositRow(depositInput());
-    const result = await submitDeposit(
+    const result = await submitPrepared(
       first,
       await signBuiltTransaction(first),
       crypto.randomUUID()
@@ -967,7 +944,7 @@ describe("submitWalletDeposit", () => {
         )
         .bind(result.movement.id, second.id)
         .run()
-    ).rejects.toThrow(/earn_external_wallet_transactions_movement_id_key/i);
+    ).rejects.toThrow(/earn_wallet_transactions_movement_id_key/i);
   });
 
   it("rejects signed bytes whose message is not the built transaction", async () => {
@@ -978,7 +955,7 @@ describe("submitWalletDeposit", () => {
     const other = await buildDepositRow(depositInput());
 
     await expect(
-      submitDeposit(built, await signBuiltTransaction(other), crypto.randomUUID())
+      submitPrepared(built, await signBuiltTransaction(other), crypto.randomUUID())
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
     expect(broadcastVaultTransaction).not.toHaveBeenCalled();
   });
@@ -986,7 +963,7 @@ describe("submitWalletDeposit", () => {
   it("rejects a submit with no owner signature", async () => {
     const built = await buildDepositRow(depositInput());
     await expect(
-      submitDeposit(built, built.unsigned_transaction, crypto.randomUUID())
+      submitPrepared(built, built.unsigned_transaction, crypto.randomUUID())
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
@@ -1005,7 +982,7 @@ describe("submitWalletDeposit", () => {
     } as any;
     const bytes = Buffer.from(getTransactionEncoder().encode(forged)).toString("base64");
 
-    await expect(submitDeposit(built, bytes, crypto.randomUUID())).rejects.toMatchObject({
+    await expect(submitPrepared(built, bytes, crypto.randomUUID())).rejects.toMatchObject({
       code: "BAD_REQUEST",
     });
     expect(broadcastVaultTransaction).not.toHaveBeenCalled();
@@ -1016,7 +993,7 @@ describe("submitWalletDeposit", () => {
     const signed = await signBuiltTransaction(built);
     await expectProjectScoped(
       (projectId) =>
-        submitDeposit(built, signed, crypto.randomUUID(), { projectId }).catch((error: unknown) =>
+        submitPrepared(built, signed, crypto.randomUUID(), { projectId }).catch((error: unknown) =>
           error instanceof Error && "code" in error ? error.code : error
         ),
       { own: projects.sandbox, other: projects.production },
@@ -1026,7 +1003,7 @@ describe("submitWalletDeposit", () => {
 
   it("enforces the owner-address position's project claim in the database", async () => {
     const built = await buildDepositRow(depositInput());
-    const result = await submitDeposit(
+    const result = await submitPrepared(
       built,
       await signBuiltTransaction(built),
       crypto.randomUUID()
@@ -1056,7 +1033,7 @@ describe("submitWalletDeposit", () => {
 
   it("preserves owner-address position and movement history after project deletion", async () => {
     const built = await buildDepositRow(depositInput());
-    const result = await submitDeposit(
+    const result = await submitPrepared(
       built,
       await signBuiltTransaction(built),
       crypto.randomUUID()
@@ -1080,7 +1057,7 @@ describe("submitWalletDeposit", () => {
   it("leaves the movement requested and reconcilable when broadcast fails", async () => {
     broadcastVaultTransaction.mockRejectedValue(new Error("rpc unreachable"));
     const built = await buildDepositRow(depositInput());
-    const result = await submitDeposit(
+    const result = await submitPrepared(
       built,
       await signBuiltTransaction(built),
       crypto.randomUUID()
@@ -1097,7 +1074,7 @@ describe("submitWalletDeposit", () => {
     clusterRpc.answer("getBlockHeight", 362);
     broadcastVaultTransaction.mockRejectedValue(preflightBlockhashNotFound());
 
-    const result = await submitDeposit(built, signed, crypto.randomUUID());
+    const result = await submitPrepared(built, signed, crypto.randomUUID());
 
     expect(result.movement.status).toBe("requested");
     expect(result.movement.signature).toBe(
@@ -1118,10 +1095,10 @@ describe("submitWalletDeposit", () => {
     const built = await buildDepositRow(depositInput());
     const signed = await signBuiltTransaction(built);
     const requestId = crypto.randomUUID();
-    const first = await submitDeposit(built, signed, requestId);
+    const first = await submitPrepared(built, signed, requestId);
 
     clusterRpc.answer("getBlockHeight", 10_000);
-    const replay = await submitDeposit(built, signed, requestId);
+    const replay = await submitPrepared(built, signed, requestId);
 
     expect(replay.replayed).toBe(true);
     expect(replay.movement.id).toBe(first.movement.id);
@@ -1144,7 +1121,7 @@ describe("submitWalletDeposit", () => {
       ])
     );
 
-    await submitDeposit(built, signed, crypto.randomUUID()).catch(() => undefined);
+    await submitPrepared(built, signed, crypto.randomUUID()).catch(() => undefined);
 
     // Whatever HTTP outcome is chosen, preserve the actual signed intent so
     // accounting and retries can reconcile it instead of starting a new deposit.
@@ -1158,7 +1135,7 @@ describe("submitWalletDeposit", () => {
   it("does not refuse when the block height cannot be read", async () => {
     clusterRpc.respond("getBlockHeight", () => RPC_UNREACHABLE);
     const built = await buildDepositRow(depositInput());
-    const result = await submitDeposit(
+    const result = await submitPrepared(
       built,
       await signBuiltTransaction(built),
       crypto.randomUUID()
@@ -1170,7 +1147,7 @@ describe("submitWalletDeposit", () => {
     broadcastVaultTransaction.mockRejectedValue(preflightBlockhashNotFound());
     clusterRpc.answer("getBlockHeight", 361);
     const built = await buildDepositRow(depositInput());
-    const result = await submitDeposit(
+    const result = await submitPrepared(
       built,
       await signBuiltTransaction(built),
       crypto.randomUUID()
@@ -1189,7 +1166,7 @@ describe("submitWalletDeposit", () => {
   it("keeps a preflight blockhash refusal reconcilable while the window is open", async () => {
     broadcastVaultTransaction.mockRejectedValue(preflightBlockhashNotFound());
     const built = await buildDepositRow(depositInput());
-    const result = await submitDeposit(
+    const result = await submitPrepared(
       built,
       await signBuiltTransaction(built),
       crypto.randomUUID()
@@ -1271,10 +1248,10 @@ describe("partner fee payer (caller-provided)", () => {
       const memo = Buffer.from(input.plan.instructions.at(-1)?.data ?? "", "base64").toString(
         "utf8"
       );
-      if (memo.startsWith("sdp:earn:external-deposit:")) {
+      if (memo.startsWith("sdp:earn:strategy-deposit:")) {
         throw new VaultTransactionTooLargeError(1_290, "caller-provided");
       }
-      expect(memo).toMatch(/^sdp:e:ed:[A-Za-z0-9_-]{22}$/);
+      expect(memo).toMatch(/^sdp:e:sd:[A-Za-z0-9_-]{22}$/);
       return {
         ok: true,
         prepared: {
@@ -1326,7 +1303,7 @@ describe("partner fee payer (caller-provided)", () => {
     const signed = await partiallySignTransaction([ownerKeyPair, partnerKeyPair], transaction);
     const signedBase64 = Buffer.from(getTransactionEncoder().encode(signed)).toString("base64");
 
-    const result = await submitDeposit(built, signedBase64, crypto.randomUUID());
+    const result = await submitPrepared(built, signedBase64, crypto.randomUUID());
 
     expect(result.movement.status).toBe("submitted");
     // Slot zero is the partner's signature — the on-chain txid the ledger and
@@ -1350,7 +1327,7 @@ describe("partner fee payer (caller-provided)", () => {
     // Owner-only signature: the partner slot stays null.
     const ownerOnly = await signBuiltTransaction(built);
 
-    await expect(submitDeposit(built, ownerOnly, crypto.randomUUID())).rejects.toMatchObject({
+    await expect(submitPrepared(built, ownerOnly, crypto.randomUUID())).rejects.toMatchObject({
       code: "BAD_REQUEST",
       message: expect.stringContaining("fee-payer signature"),
     });
@@ -1373,7 +1350,7 @@ describe("partner fee payer (caller-provided)", () => {
     } as any;
     const bytes = Buffer.from(getTransactionEncoder().encode(forged)).toString("base64");
 
-    await expect(submitDeposit(built, bytes, crypto.randomUUID())).rejects.toMatchObject({
+    await expect(submitPrepared(built, bytes, crypto.randomUUID())).rejects.toMatchObject({
       code: "BAD_REQUEST",
       message: expect.stringContaining("invalid fee-payer signature"),
     });
@@ -1413,7 +1390,9 @@ describe("wallet withdrawals", () => {
     expect(built.denomination).toBe(SHARE_MINT);
     expect(built.amount_requested).toBe("10");
 
-    const result = await submitWalletWithdrawal(env, {
+    const result = await submitStrategyTransaction(env, {
+      custodyWalletId: null,
+      apiKeyId: null,
       organizationId: ORG,
       projectId: PROJECT,
       transactionId: built.id,
@@ -1482,7 +1461,9 @@ describe("wallet withdrawals", () => {
     clusterRpc.answer("getBlockHeight", 362);
 
     broadcastVaultTransaction.mockRejectedValue(preflightBlockhashNotFound());
-    const result = await submitWalletWithdrawal(env, {
+    const result = await submitStrategyTransaction(env, {
+      custodyWalletId: null,
+      apiKeyId: null,
       organizationId: ORG,
       projectId: PROJECT,
       transactionId: built.id,
@@ -1517,11 +1498,18 @@ describe("wallet withdrawals", () => {
     });
   });
 
-  it("refuses a deposit submit against a withdrawal build", async () => {
+  it("takes the movement direction from the prepared build", async () => {
     const positionId = await seedWalletPosition();
     const built = await buildWalletWithdrawalTransaction(env, withdrawalInput(positionId));
-    await expect(
-      submitDeposit(built, await signBuiltTransaction(built), crypto.randomUUID())
-    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const result = await submitPrepared(
+      built,
+      await signBuiltTransaction(built),
+      crypto.randomUUID()
+    );
+    expect(result.movement.direction).toBe("withdrawal");
+    expect(result.movement.position_id).toBe(positionId);
+    expect(await getDb(env).queryOne("SELECT direction FROM earn_movements")).toEqual({
+      direction: "withdrawal",
+    });
   });
 });

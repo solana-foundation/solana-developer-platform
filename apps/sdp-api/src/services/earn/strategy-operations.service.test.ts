@@ -115,7 +115,7 @@ vi.mock("./vault-intent-execution.service", async (original) => ({
 vi.mock("@/routes/earn/handlers/admission", () => ({
   assertRecordedStrategyDepositAdmitted: mocks.depositAdmission,
 }));
-vi.mock("@/routes/earn/handlers/strategies", () => ({
+vi.mock("@/routes/earn/strategy-catalogue", () => ({
   isEarnStrategyInExecutionShelf: () => true,
 }));
 vi.mock("@/lib/money-admission", async (original) => ({
@@ -127,7 +127,9 @@ vi.mock("@/db/client", async (original) => ({
   getDb: () => ({}),
 }));
 vi.mock("@/db/repositories/earn.repository.postgres", () => ({
-  createPostgresEarnRepository: () => ({ getStrategyById: mocks.strategy }),
+  createPostgresEarnRepository: () => ({
+    getStrategyById: mocks.strategy,
+  }),
 }));
 vi.mock("@/db/repositories/earn-vault-withdrawal-requests.repository", () => ({
   createPostgresEarnVaultWithdrawalRequestsRepository: () => ({ getById: mocks.withdrawal }),
@@ -758,6 +760,57 @@ describe("operation settlement projection", () => {
         settlementOutcome: "cancelled",
         source: { walletId: "wallet" },
       },
+    });
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("keeps a closed position's strategy on its withdrawal history", async () => {
+    claim.operation.kind = "earn.withdraw";
+    claim.operation.intent = {
+      kind: "earn.withdraw",
+      positionId: "position",
+      amount: { kind: "all" },
+    };
+    claim.operation.resourceRef = { kind: "earn.movement", id: "movement" };
+    mocks.movement.mockResolvedValue({
+      environment: scope.environment,
+      project_id: scope.projectId,
+      position_id: "position",
+      status: "finalized",
+      signature: "signature",
+      token_amount_settled: "10",
+      chain_finalized_at: "2026-11-18T00:00:00.000Z",
+    });
+    mocks.position.mockResolvedValue({
+      id: "position",
+      strategy_id: "held-strategy",
+      custody_wallet_id: "wallet",
+      token_mint: "mint",
+      closed_at: "2026-11-18T00:00:00.000Z",
+    });
+    expect(await scoped(() => projectEarnOperation(env, scope, claim.operation))).toMatchObject({
+      status: "completed",
+      result: { strategyId: "held-strategy", positionId: "position" },
+    });
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("includes the held strategy in queued withdrawal history", async () => {
+    queue("pending");
+    mocks.position.mockResolvedValue({ strategy_id: "held-strategy" });
+    expect(await scoped(() => projectEarnOperation(env, scope, claim.operation))).toMatchObject({
+      result: { strategyId: "held-strategy" },
+    });
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("shows the accepted cancellation signature while its outcome is pending", async () => {
+    queue("cancelling");
+    const request = await mocks.withdrawal();
+    mocks.withdrawal.mockResolvedValue({ ...request, cancel_signature: "cancel-signature" });
+    expect(await scoped(() => projectEarnOperation(env, scope, claim.operation))).toMatchObject({
+      status: "settling",
+      result: { signature: "cancel-signature", settledAmount: null, settlementOutcome: null },
     });
     expect(mocks.submit).not.toHaveBeenCalled();
   });

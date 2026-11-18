@@ -98,8 +98,8 @@ vi.mock("@/routes/earn/handlers/admission", async (original) => ({
   assertVaultDepositAdmissible: async () => "kamino",
   assertRecordedStrategyDepositAdmitted: async () => undefined,
 }));
-vi.mock("@/routes/earn/handlers/strategies", async (original) => ({
-  ...(await original<typeof import("@/routes/earn/handlers/strategies")>()),
+vi.mock("@/routes/earn/strategy-catalogue", async (original) => ({
+  ...(await original<typeof import("@/routes/earn/strategy-catalogue")>()),
   isEarnStrategyInExecutionShelf: () => true,
 }));
 vi.mock("@/services/earn/vault-intent-execution.service", async (original) => ({
@@ -569,7 +569,6 @@ describe("Earn core operation HTTP flow", () => {
         custodyWalletId: walletId,
         ownerAddress: owner,
         shares: "10",
-        asyncOperation: true,
       })
     );
     expect(mocks.sign).not.toHaveBeenCalled();

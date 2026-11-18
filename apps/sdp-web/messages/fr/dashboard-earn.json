@@ -119,7 +119,7 @@
       "sandboxUnavailable": "Production uniquement",
       "redeemIntermediate": "Racheter des wYLDS"
     },
-    "earnProgram": {
+    "embeddedYield": {
       "eyebrow": "Yield intégré",
       "introTitle": "Choisissez la stratégie de rendement que vos clients verront",
       "introDescription": "Commencez par le catalogue des fournisseurs en direct, prévisualisez l'action client et générez une intégration côté serveur sur la véritable API de dépôt en vault.",

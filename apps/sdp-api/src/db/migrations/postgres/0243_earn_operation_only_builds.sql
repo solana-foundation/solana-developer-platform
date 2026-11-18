@@ -1,5 +1,5 @@
--- Legacy submissions remain available for already exposed transactions. New
--- operation builds cannot bypass their durable worker through those routes.
+-- Persist an irreversible worker-execution requirement on operation builds.
+-- Migration 0245 applies the same guard to the canonical build tables.
 ALTER TABLE earn_external_wallet_transactions
     ADD COLUMN operation_only BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE earn_external_wallet_withdrawal_request_transactions

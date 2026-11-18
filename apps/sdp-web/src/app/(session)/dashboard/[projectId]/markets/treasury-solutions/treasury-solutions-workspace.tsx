@@ -2,8 +2,6 @@
 
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type {
-  EarnProgram,
-  EarnProgramWithdrawalRecord,
   EarnStrategy,
   EarnVaultDepositRecord,
   EarnVaultPosition,
@@ -14,24 +12,11 @@ import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { Modal } from "@sdp/ui/modal";
 import { Loader2Icon } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useSWRConfig } from "swr";
 import { EarnCoreOperations } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-core-operations";
+import { useEarnStrategies } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-data";
 import { EARN_TRANSACTION_MODAL_FRAME } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-modal";
-import {
-  EarnVaultDepositOutcomeTracker,
-  EarnVaultWithdrawalOutcomeTracker,
-  EarnWithdrawalOutcomeTracker,
-} from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-outcome-trackers";
-import {
-  isEarnVaultDepositInFlight,
-  isEarnVaultWithdrawalInFlight,
-  useEarnPrograms,
-  useEarnProgramWithdrawals,
-  useEarnStrategies,
-  useEarnVaultDeposits,
-  useEarnVaultWithdrawals,
-} from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-program-data";
 import type { EarnProviderAccess } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-surfacing";
 import type { EarnVaultParRedemptionSource } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-vault-holding";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
@@ -45,19 +30,12 @@ import {
   type TreasuryAllocation,
   type VaultShareMintVocabulary,
 } from "./treasury-allocation";
-import {
-  observeVaultMovementCommit,
-  type TrackedVaultMovement,
-  type VaultMovementBalanceState,
-  vaultActivities,
-} from "./treasury-vault-balance";
+import type { VaultMovementBalanceState } from "./treasury-vault-balance";
 import { TreasuryWorkspaceContent } from "./treasury-workspace-content";
 import { useTreasuryBalances } from "./use-treasury-balances";
 
-// The three transaction surfaces account for most of this route's client
-// module graph. They are not needed to inspect a portfolio, so load each only
-// after the corresponding action opens it. Outcome polling stays in the small
-// tracker module above and remains immediate after a reload.
+const EMPTY_TREASURY_ACTIVITIES = [] as const;
+
 export function EarnTransactionModalLoading() {
   const t = useTranslations();
   const label = t("Shared.SharedComponents.loading");
@@ -82,14 +60,6 @@ const EarnCoreActionModal = dynamic(
     ),
   { loading: EarnTransactionModalLoading, ssr: false }
 );
-const EarnWithdrawModal = dynamic(
-  () =>
-    import("@/app/(session)/dashboard/[projectId]/markets/earn/earn-withdraw-modal").then(
-      (module) => module.EarnWithdrawModal
-    ),
-  { loading: EarnTransactionModalLoading, ssr: false }
-);
-
 export type TrackedVaultDeposit = Pick<
   EarnVaultDepositRecord,
   "failureReason" | "movementId" | "positionId" | "status"
@@ -104,130 +74,6 @@ export type TrackedVaultWithdrawal = Pick<
   "createdAt" | "failureReason" | "movementId" | "positionId" | "status"
 > &
   VaultMovementBalanceState;
-
-/** What a caller hands the watch lists; order and commit stamps are this file's to assign. */
-type VaultMovementWatchInput<Movement extends VaultMovementBalanceState> = Omit<
-  Movement,
-  "committedObservedAt" | "observedOrder"
->;
-
-type VaultDepositWatchInput = VaultMovementWatchInput<TrackedVaultDeposit>;
-
-type VaultWithdrawalWatchInput = VaultMovementWatchInput<TrackedVaultWithdrawal>;
-
-const MAX_VISIBLE_VAULT_ACTIVITY = 50;
-
-function replaceTrackedVaultMovement<
-  Movement extends TrackedVaultMovement,
-  Update extends { movementId: string; status: string },
->(current: readonly Movement[], updated: Update): readonly Movement[] {
-  return current.map((candidate) =>
-    candidate.movementId === updated.movementId
-      ? observeVaultMovementCommit({ ...candidate, ...updated })
-      : candidate
-  );
-}
-
-/**
- * Pure merge for the vault deposit/withdrawal watch lists: append the incoming
- * movements newest-first — callers reverse before passing so the latest
- * observed movement for a position stays last and wins the status column's map
- * reduction — refresh rows already present, and keep the list bounded.
- * `settledIds` is load-bearing, not defensive: the ledger list keeps
- * re-asserting a row until the server marks it terminal, so without a
- * tombstone a settled movement would resume polling. Shared by the deposit and
- * withdrawal watchers, whose updaters are otherwise line-for-line identical.
- */
-function mergeTrackedVaultMovements<Movement extends TrackedVaultMovement>(
-  current: readonly Movement[],
-  incoming: readonly Movement[],
-  settledIds: ReadonlySet<string>
-): readonly Movement[] {
-  const next = [...current];
-  for (const movement of incoming) {
-    const existingIndex = next.findIndex(
-      (candidate) => candidate.movementId === movement.movementId
-    );
-    if (settledIds.has(movement.movementId)) continue;
-    if (existingIndex >= 0) {
-      const existing = next[existingIndex];
-      next[existingIndex] = observeVaultMovementCommit({
-        ...existing,
-        ...movement,
-        observedOrder: existing?.observedOrder ?? movement.observedOrder,
-      });
-    } else {
-      next.push(observeVaultMovementCommit(movement));
-    }
-  }
-  return next.slice(-MAX_VISIBLE_VAULT_ACTIVITY);
-}
-
-/**
- * Stamp the incoming movements newest-first with their place in the page's
- * single activity order, ready for `mergeTrackedVaultMovements`. Shared by the
- * deposit and withdrawal watchers, whose stamping is otherwise line-for-line
- * identical. Pure apart from `nextOrder`, and called BEFORE the state updater
- * runs so the order advances exactly once per observed movement.
- */
-function observeIncomingVaultMovements<Movement>(
-  incoming: readonly Movement[],
-  nextOrder: () => number
-): (Movement & { observedOrder: number })[] {
-  return [...incoming].reverse().map((movement) => ({
-    ...movement,
-    observedOrder: nextOrder(),
-  }));
-}
-
-interface EarnWithdrawalWatch {
-  programId: string;
-  withdrawalRef: string;
-}
-
-function withdrawalWatchKey(watch: EarnWithdrawalWatch): string {
-  return `${watch.programId}:${watch.withdrawalRef}`;
-}
-
-/**
- * Recover only provider-accepted withdrawals that can still change. A
- * `requested` ledger row has no accepted provider operation to poll, and a row
- * without a provider reference cannot name the live resource without inventing
- * one. Duplicate references collapse to one tracker.
- */
-function recoverableWithdrawalWatches(
-  programId: string,
-  withdrawals: readonly EarnProgramWithdrawalRecord[]
-): EarnWithdrawalWatch[] {
-  const seen = new Set<string>();
-  const watches: EarnWithdrawalWatch[] = [];
-  for (const withdrawal of withdrawals) {
-    if (withdrawal.status !== "processing" && withdrawal.status !== "pending_approval") continue;
-    const withdrawalRef = withdrawal.withdrawalRef;
-    if (!withdrawalRef || withdrawalRef.trim() === "" || seen.has(withdrawalRef)) continue;
-    seen.add(withdrawalRef);
-    watches.push({ programId, withdrawalRef });
-  }
-  return watches;
-}
-
-function EarnWithdrawalLedgerRecovery({
-  onRecover,
-  programId,
-}: {
-  onRecover: (watches: readonly EarnWithdrawalWatch[]) => void;
-  programId: string;
-}) {
-  const { withdrawals } = useEarnProgramWithdrawals(programId);
-
-  useEffect(() => {
-    if (!withdrawals) return;
-    const watches = recoverableWithdrawalWatches(programId, withdrawals);
-    if (watches.length > 0) onRecover(watches);
-  }, [onRecover, programId, withdrawals]);
-
-  return null;
-}
 
 function treasuryShareMints(
   positions: readonly EarnVaultPosition[] | undefined,
@@ -428,16 +274,7 @@ export function TreasurySolutionsWorkspace({
     [catalogueStrategies]
   );
   const kaminoAllocations = useKaminoVaultAllocations(kaminoAllocationVaults);
-  const {
-    state: programsState,
-    error: programsError,
-    isLoading: programsLoading,
-    refresh: refreshPrograms,
-  } = useEarnPrograms();
-  const { deposits: discoveredVaultDeposits } = useEarnVaultDeposits();
-  const { withdrawals: discoveredVaultWithdrawals } = useEarnVaultWithdrawals();
   const [depositStrategy, setDepositStrategy] = useState<EarnStrategy | null>(null);
-  const [withdrawProgram, setWithdrawProgram] = useState<EarnProgram | null>(null);
   const [withdrawPosition, setWithdrawPosition] = useState<EarnVaultPosition | null>(null);
   const [withdrawParSource, setWithdrawParSource] =
     useState<EarnVaultParRedemptionSource>("shares");
@@ -448,76 +285,6 @@ export function TreasurySolutionsWorkspace({
     },
     []
   );
-  const [withdrawalWatches, setWithdrawalWatches] = useState<readonly EarnWithdrawalWatch[]>([]);
-  const settledWithdrawalKeys = useRef(new Set<string>());
-  const vaultActivityOrder = useRef(0);
-  const [vaultDepositWatches, setVaultDepositWatches] = useState<readonly TrackedVaultDeposit[]>(
-    []
-  );
-  const [settledVaultDepositIds, setSettledVaultDepositIds] = useState<ReadonlySet<string>>(
-    () => new Set()
-  );
-  const [vaultWithdrawalWatches, setVaultWithdrawalWatches] = useState<
-    readonly TrackedVaultWithdrawal[]
-  >([]);
-  const [settledVaultWithdrawalIds, setSettledVaultWithdrawalIds] = useState<ReadonlySet<string>>(
-    () => new Set()
-  );
-
-  // Pure updater: the recovery list re-asserts every 30s, so this runs often
-  // and must not have side effects (StrictMode double-invokes it in dev).
-  const addVaultDepositWatches = useCallback(
-    (incoming: readonly VaultDepositWatchInput[]) => {
-      const observedIncoming = observeIncomingVaultMovements(
-        incoming,
-        () => ++vaultActivityOrder.current
-      );
-      setVaultDepositWatches((current) =>
-        mergeTrackedVaultMovements(current, observedIncoming, settledVaultDepositIds)
-      );
-    },
-    [settledVaultDepositIds]
-  );
-
-  // Same pure-updater and tombstone rules as the deposit watches above.
-  const addVaultWithdrawalWatches = useCallback(
-    (incoming: readonly VaultWithdrawalWatchInput[]) => {
-      const observedIncoming = observeIncomingVaultMovements(
-        incoming,
-        () => ++vaultActivityOrder.current
-      );
-      setVaultWithdrawalWatches((current) =>
-        mergeTrackedVaultMovements(current, observedIncoming, settledVaultWithdrawalIds)
-      );
-    },
-    [settledVaultWithdrawalIds]
-  );
-
-  const addWithdrawalWatches = useCallback((incoming: readonly EarnWithdrawalWatch[]) => {
-    setWithdrawalWatches((current) => {
-      const known = new Set(current.map(withdrawalWatchKey));
-      const additions = incoming.filter((watch) => {
-        const key = withdrawalWatchKey(watch);
-        if (known.has(key) || settledWithdrawalKeys.current.has(key)) return false;
-        known.add(key);
-        return true;
-      });
-      return additions.length === 0 ? current : [...current, ...additions];
-    });
-  }, []);
-
-  const updateVaultDepositWatch = useCallback((updatedDeposit: EarnVaultDepositRecord) => {
-    setVaultDepositWatches((current) => replaceTrackedVaultMovement(current, updatedDeposit));
-  }, []);
-  const updateVaultWithdrawalWatch = useCallback((updatedWithdrawal: EarnVaultWithdrawal) => {
-    setVaultWithdrawalWatches((current) => replaceTrackedVaultMovement(current, updatedWithdrawal));
-  }, []);
-
-  const trackedActivities = useMemo(
-    () => vaultActivities(vaultDepositWatches, vaultWithdrawalWatches),
-    [vaultDepositWatches, vaultWithdrawalWatches]
-  );
-
   const {
     positions,
     positionsError,
@@ -529,7 +296,7 @@ export function TreasurySolutionsWorkspace({
     balanceOf,
     refresh: refreshTreasuryBalances,
     refreshOperation,
-  } = useTreasuryBalances(trackedActivities);
+  } = useTreasuryBalances(EMPTY_TREASURY_ACTIVITIES);
 
   const { mutate: mutateCore } = useSWRConfig();
   const observedCoreResults = useRef(new Set<string>());
@@ -565,23 +332,6 @@ export function TreasurySolutionsWorkspace({
     [mutateCore, refreshOperation, refreshTreasuryBalances]
   );
 
-  // A provisional row stands in only until the API lists the position itself.
-  useEffect(() => {
-    const listed = new Set(positions?.map((position) => position.id));
-    setVaultDepositWatches((current) => {
-      let changed = false;
-      const next = current.map((deposit) => {
-        if (deposit.provisionalPosition === undefined || !listed.has(deposit.positionId)) {
-          return deposit;
-        }
-        changed = true;
-        const { provisionalPosition: _, ...movement } = deposit;
-        return movement;
-      });
-      return changed ? next : current;
-    });
-  }, [positions]);
-
   const activeWallets = useMemo(() => wallets ?? [], [wallets]);
   // Every share mint the page knows about, from positions AND the catalogue:
   // a wallet can hold receipt tokens for a strategy it has no recorded
@@ -614,34 +364,6 @@ export function TreasurySolutionsWorkspace({
       }),
     [positions, positionsError, shareMints, wallets, walletsError]
   );
-  const programs = useMemo(
-    () => (programsState?.kind === "ready" ? programsState.programs : []),
-    [programsState]
-  );
-  // Recovery seeds durable component state. Do not derive tracker mounts
-  // directly from the live list: the list can stop returning a movement just
-  // before its detail poll observes terminal state, which would unmount the
-  // tracker and skip `onSettled` balance refreshes and the final table status.
-  useEffect(() => {
-    addVaultDepositWatches((discoveredVaultDeposits ?? []).filter(isEarnVaultDepositInFlight));
-  }, [addVaultDepositWatches, discoveredVaultDeposits]);
-  useEffect(() => {
-    addVaultWithdrawalWatches(
-      (discoveredVaultWithdrawals ?? []).filter(isEarnVaultWithdrawalInFlight)
-    );
-  }, [addVaultWithdrawalWatches, discoveredVaultWithdrawals]);
-
-  const activeVaultDepositWatches = useMemo(
-    () => vaultDepositWatches.filter((deposit) => !settledVaultDepositIds.has(deposit.movementId)),
-    [settledVaultDepositIds, vaultDepositWatches]
-  );
-  const activeVaultWithdrawalWatches = useMemo(
-    () =>
-      vaultWithdrawalWatches.filter(
-        (withdrawal) => !settledVaultWithdrawalIds.has(withdrawal.movementId)
-      ),
-    [settledVaultWithdrawalIds, vaultWithdrawalWatches]
-  );
   const portfolioApy = useMemo(
     () => treasuryPortfolioApy(allocation, positions, positionsError, strategies, strategiesError),
     [allocation, positions, positionsError, strategies, strategiesError]
@@ -658,12 +380,7 @@ export function TreasurySolutionsWorkspace({
     void refreshTreasuryBalances();
     refreshStrategies();
     if (catalogueCluster !== undefined) refreshCatalogue();
-    refreshPrograms();
   };
-  // A queued request settling moves holdings and cash, never the catalogue or a
-  // custodial program, so it re-reads balances alone.
-  const refreshHoldings = () => void refreshTreasuryBalances();
-
   return (
     <DashboardWorkspaceOverviewPanel>
       <TreasuryWorkspaceContent
@@ -679,23 +396,18 @@ export function TreasurySolutionsWorkspace({
         mainnetCatalogueFailed={Boolean(mainnetCatalogueError)}
         mainnetCatalogueLoading={mainnetCatalogueLoading}
         onDeposit={setDepositStrategy}
-        onHoldingsChanged={refreshHoldings}
         onRefresh={refreshTreasury}
         onWithdrawPosition={openVaultExit}
-        onWithdrawProgram={setWithdrawProgram}
         portfolioApy={portfolioApy}
         positions={positions}
         positionsFailed={Boolean(positionsError)}
         positionsLoading={positionsLoading}
         balanceOf={balanceOf}
-        programs={programs}
-        programsLoading={programsLoading}
-        programsUnavailable={Boolean(programsError || programsState?.kind === "unconfigured")}
         providerAccess={providerAccess}
         summaryLoading={summaryLoading}
         balancesRefreshing={balancesRefreshing}
-        vaultDeposits={vaultDepositWatches}
-        vaultWithdrawals={vaultWithdrawalWatches}
+        vaultDeposits={[]}
+        vaultWithdrawals={[]}
         walletsFailed={Boolean(walletsError)}
         walletsLoading={walletsLoading}
       />
@@ -715,18 +427,6 @@ export function TreasurySolutionsWorkspace({
         />
       ) : null}
 
-      {withdrawProgram ? (
-        <EarnWithdrawModal
-          onClose={() => setWithdrawProgram(null)}
-          onWithdrawalCreated={(withdrawalRef) => {
-            addWithdrawalWatches([{ programId: withdrawProgram.id, withdrawalRef }]);
-            refreshPrograms();
-          }}
-          provider={withdrawProgram.provider}
-          programId={withdrawProgram.id}
-        />
-      ) : null}
-
       {withdrawPosition ? (
         <EarnCoreActionModal
           kind="withdraw"
@@ -736,61 +436,6 @@ export function TreasurySolutionsWorkspace({
           onUpdated={onCoreUpdated}
         />
       ) : null}
-
-      {programs.map((program) => (
-        <EarnWithdrawalLedgerRecovery
-          key={`withdrawal-ledger:${program.id}`}
-          onRecover={addWithdrawalWatches}
-          programId={program.id}
-        />
-      ))}
-
-      {activeVaultWithdrawalWatches.map((withdrawal) => (
-        <EarnVaultWithdrawalOutcomeTracker
-          key={`vault-withdrawal:${withdrawal.movementId}`}
-          movementId={withdrawal.movementId}
-          onUpdated={updateVaultWithdrawalWatch}
-          onSettled={(settledWithdrawal) => {
-            updateVaultWithdrawalWatch(settledWithdrawal);
-            setSettledVaultWithdrawalIds((current) =>
-              new Set(current).add(settledWithdrawal.movementId)
-            );
-            if (settledWithdrawal.status === "failed") void refreshTreasuryBalances();
-          }}
-        />
-      ))}
-
-      {activeVaultDepositWatches.map((deposit) => (
-        <EarnVaultDepositOutcomeTracker
-          key={`vault-deposit:${deposit.movementId}`}
-          movementId={deposit.movementId}
-          onUpdated={updateVaultDepositWatch}
-          onSettled={(settledDeposit) => {
-            updateVaultDepositWatch(settledDeposit);
-            setSettledVaultDepositIds((current) => new Set(current).add(settledDeposit.movementId));
-            if (settledDeposit.status === "failed") void refreshTreasuryBalances();
-          }}
-        />
-      ))}
-
-      {withdrawalWatches.map((watch) => (
-        <EarnWithdrawalOutcomeTracker
-          onSettled={() => {
-            settledWithdrawalKeys.current.add(withdrawalWatchKey(watch));
-            refreshPrograms();
-            setWithdrawalWatches((current) =>
-              current.filter(
-                (candidate) =>
-                  candidate.programId !== watch.programId ||
-                  candidate.withdrawalRef !== watch.withdrawalRef
-              )
-            );
-          }}
-          key={withdrawalWatchKey(watch)}
-          programId={watch.programId}
-          withdrawalRef={watch.withdrawalRef}
-        />
-      ))}
     </DashboardWorkspaceOverviewPanel>
   );
 }

@@ -1,10 +1,5 @@
-/** Where each Earn operation sits in the API reference. */
+/** Core yield actions and independent provider eligibility. */
 export const EARN_GROUPS = {
   core: "Core",
-  discovery: "Discovery",
-  embeddedYield: "Embedded Yield",
-  treasury: "Treasury",
-  programs: "Programs",
-  providerActions: "Provider actions",
   onboarding: "Onboarding",
 } as const satisfies Record<string, string>;

@@ -70,7 +70,7 @@ function getWalletResponseSchema(value: unknown): TestJsonSchema {
 
 function literalEarnPaths(source: string): string[] {
   return Array.from(new Set(source.match(/\/v1\/earn\/[A-Za-z0-9{}._/-]+/g) ?? []))
-    .filter((path) => !path.endsWith("/") && path !== "/v1/earn/external-wallet")
+    .filter((path) => !path.endsWith("/"))
     .sort();
 }
 
@@ -280,238 +280,95 @@ describe("OpenAPI spec", () => {
     ]);
   });
 
-  it.each([
-    ["experimental", true],
-    ["beta", true],
-    ["stable", false],
-  ] as const)(
-    "%s publishes Earn only when its release channel runs it",
-    (releaseChannel, runsEarn) => {
+  it.each(["experimental", "beta", "stable"] as const)(
+    "%s holds the replacement Earn contract out of public surfaces",
+    (releaseChannel) => {
       const document = createPublicOpenApiDocument({ releaseChannel });
-      const operations = Object.entries(document.paths)
-        .filter(([path]) => path.startsWith("/v1/earn/"))
-        .flatMap(([, item]) =>
-          (["get", "post", "put", "patch", "delete"] as const).filter(
-            (method) => item[method] !== undefined
-          )
-        );
       const manifest = createPublicSurfaceManifest(releaseChannel);
-
-      expect(operations.length).toBe(runsEarn ? 21 : 0);
-      expect(document.tags?.some((tag) => tag.name === "Earn")).toBe(runsEarn);
-      expect(/earn/i.test(JSON.stringify(document))).toBe(runsEarn);
-      expect(manifest.modules.includes("earn")).toBe(runsEarn);
-      expect(manifest.grantableActions.some(({ module }) => module === "earn")).toBe(runsEarn);
+      expect(
+        Object.keys(document.paths).filter(
+          (path) => path.startsWith("/v1/earn") || path.startsWith("/v1/operations")
+        )
+      ).toEqual([]);
+      expect(document.tags?.some((tag) => tag.name === "Earn")).toBe(false);
+      expect(/earn/i.test(JSON.stringify(document))).toBe(false);
+      expect(manifest.modules).not.toContain("earn");
+      expect(manifest.grantableActions.some(({ module }) => module === "earn")).toBe(false);
     }
   );
 
-  it("publishes the caller-signed money routes and keeps retired button-configuration paths out", () => {
+  it("documents only four core Earn actions, eligibility and five shared lifecycle operations", () => {
     const internal = createOpenApiDocument();
-    const publicDocument = createPublicOpenApiDocument(EXPERIMENTAL);
-
-    expect(internal.components?.securitySchemes?.clerkBearerAuth).toMatchObject({
-      type: "http",
-      scheme: "bearer",
-      bearerFormat: "JWT",
-    });
-
-    // Removed with the UI builder: neither document may resurrect them.
-    for (const doc of [internal, publicDocument]) {
-      expect(doc.paths?.["/v1/earn/button-configurations/current"]).toBeUndefined();
-      expect(doc.paths?.["/v1/earn/button-configurations/public/{publicToken}"]).toBeUndefined();
-    }
-    expect(publicDocument.components?.securitySchemes?.clerkBearerAuth).toBeUndefined();
-
-    // SECURITY REVIEW GATE (PRO-1872, threat model EARN-027)
-    // The public/internal split is a publication boundary. Changing either the
-    // operation list or an operation's public security declaration is a
-    // threat-model revisit trigger. This list is the route-publication gate: a PR that grows it must
-    // carry security sign-off (routes/earn/CLAUDE.md, "Public OpenAPI
-    // promotion"). Do not widen the list to make a red test pass.
-    const publicEarnOperations = Object.entries(publicDocument.paths ?? {})
-      .filter(([path]) => path.startsWith("/v1/earn"))
+    const operations = Object.entries(internal.paths)
+      .filter(([path]) => path.startsWith("/v1/earn") || path.startsWith("/v1/operations"))
       .flatMap(([path, item]) =>
-        Object.keys(item ?? {})
-          .filter((method) => ["get", "post", "put", "patch", "delete"].includes(method))
-          .map((method) => `${method.toUpperCase()} ${path}`)
+        OPERATION_METHODS.filter((method) => item[method]).map(
+          (method) => `${method.toUpperCase()} ${path}`
+        )
       )
       .sort();
-    expect(publicEarnOperations).toEqual(
+    // SECURITY REVIEW GATE (PRO-1872): publication of these replacements
+    // requires named sign-off. Do not promote routes to fix a drift test.
+    expect(operations).toEqual(
       [
-        "GET /v1/earn/strategies",
-        "GET /v1/earn/strategies/{strategyId}",
-        "POST /v1/earn/vault-deposit-previews",
-        "GET /v1/earn/external-wallet/positions/summary",
-        "GET /v1/earn/external-wallet/positions",
-        "GET /v1/earn/external-wallet/movements",
-        "GET /v1/earn/external-wallet/movements/{movementId}",
-        "GET /v1/earn/external-wallet/earnings",
-        "POST /v1/earn/external-wallet/deposit-transactions",
-        "POST /v1/earn/external-wallet/deposits",
-        "POST /v1/earn/external-wallet/withdrawal-previews",
-        "POST /v1/earn/external-wallet/withdrawal-transactions",
-        "POST /v1/earn/external-wallet/withdrawals",
-        "POST /v1/earn/external-wallet/withdrawal-options",
-        "POST /v1/earn/external-wallet/queued-withdrawal-previews",
-        "POST /v1/earn/external-wallet/withdrawal-request-transactions",
-        "POST /v1/earn/external-wallet/withdrawal-requests",
-        "GET /v1/earn/external-wallet/withdrawal-requests",
-        "GET /v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}",
-        "POST /v1/earn/external-wallet/withdrawal-request-cancel-transactions",
-        "POST /v1/earn/external-wallet/withdrawal-request-cancellations",
+        "GET /v1/earn/discovery",
+        "GET /v1/earn/positions",
+        "POST /v1/earn/deposit",
+        "POST /v1/earn/withdraw",
+        "GET /v1/earn/onboarding/wisdomtree/forms/{entityType}",
+        "GET /v1/earn/onboarding/wisdomtree/{counterpartyId}",
+        "POST /v1/earn/onboarding/wisdomtree/{counterpartyId}",
+        "POST /v1/earn/onboarding/wisdomtree/{counterpartyId}/documents",
+        "POST /v1/earn/onboarding/wisdomtree/{counterpartyId}/corrections/{reasonId}",
+        "POST /v1/earn/onboarding/wisdomtree/{counterpartyId}/wallets",
+        "GET /v1/operations",
+        "GET /v1/operations/{operationId}",
+        "POST /v1/operations/{operationId}/execute",
+        "POST /v1/operations/{operationId}/refresh",
+        "POST /v1/operations/{operationId}/cancel",
       ].sort()
     );
-    expect(Object.keys(publicDocument.paths["/v1/transactions"])).toEqual(["get"]);
-    // Coverage parity across the boundary: every published operation is the
-    // same registered route as its internal twin (same operationId), so the
-    // app-level request tracing and rate limiting that wrap `/v1/*` apply to
-    // both by construction; there is no public-only mount to fall outside them.
-    for (const operation of [...publicEarnOperations, "GET /v1/transactions"]) {
-      const [method, path] = operation.split(" ") as [string, string];
-      const key = method.toLowerCase() as "get" | "post";
-      expect(internal.paths?.[path]?.[key]?.operationId).toBe(
-        publicDocument.paths?.[path]?.[key]?.operationId
-      );
-    }
-
-    // Every Earn operation requires a credential in both documents: no empty
-    // security requirement, so no request may be anonymous.
-    for (const [path, item] of Object.entries(publicDocument.paths ?? {})) {
-      if (!path.startsWith("/v1/earn")) continue;
-      for (const method of ["get", "post", "put", "patch", "delete"] as const) {
-        const operation = item[method];
-        if (!operation) continue;
-        expect(operation.security, `${method} ${path}`).toEqual([{ apiKeyAuth: [] }]);
-        expect(internal.paths?.[path]?.[method]?.security, `${method} ${path}`).toEqual([
+    for (const [path, item] of Object.entries(internal.paths)) {
+      if (!path.startsWith("/v1/earn") && !path.startsWith("/v1/operations")) continue;
+      for (const method of OPERATION_METHODS) {
+        if (!item[method]) continue;
+        expect(item[method]?.security, `${method} ${path}`).toEqual([
           { apiKeyAuth: [] },
           { clerkBearerAuth: [] },
         ]);
       }
     }
-
-    for (const path of [
-      "/v1/earn/vault-deposit-previews",
-      "/v1/earn/external-wallet/deposit-transactions",
-      "/v1/earn/external-wallet/withdrawal-transactions",
-      "/v1/earn/external-wallet/withdrawal-request-transactions",
-    ]) {
-      const retired = publicDocument.paths?.[path]?.post;
-      expect(retired?.deprecated).toBe(true);
-      expect(retired?.responses?.["410"]).toBeDefined();
-      expect(retired?.responses?.["200"]).toBeUndefined();
-      expect(retired?.requestBody).toBeUndefined();
-    }
-
-    expect(
-      JSON.stringify(
-        publicDocument.paths?.["/v1/earn/external-wallet/positions"]?.get?.responses?.["200"]
-      )
-    ).toContain('"unlockTimestamp"');
-
-    const submitRequest = getJsonSchema(
-      publicDocument.paths?.["/v1/earn/external-wallet/deposits"]?.post?.requestBody
-    );
-    const signedTransactionExample = submitRequest.properties?.signedTransaction?.example;
-    expect(signedTransactionExample).toEqual(expect.any(String));
-    expect(signedTransactionExample).toMatch(/^[A-Za-z0-9+/]+={0,2}$/);
-    expect(Buffer.from(signedTransactionExample as string, "base64").toString("base64")).toBe(
-      signedTransactionExample
-    );
   });
 
-  it("keeps literal Earn guide endpoints aligned with their documented scopes", () => {
-    const publicDocument = createPublicOpenApiDocument(EXPERIMENTAL);
-    const internalDocument = createOpenApiDocument();
-    const guide = readFileSync(
-      new URL("../../../sdp-docs/content/docs/guides/embedded-yield.mdx", import.meta.url),
-      "utf8"
+  it("keeps authored Earn guides aligned with the internal replacement contract", () => {
+    const internal = createOpenApiDocument();
+    const directories = [
+      new URL("../../../sdp-docs/content/docs/earn/", import.meta.url),
+      new URL("../../../sdp-docs/content/unpublished/earn/", import.meta.url),
+    ];
+    const sources = directories.flatMap((directory) =>
+      readdirSync(directory, { recursive: true, encoding: "utf8" })
+        .filter((file) => file.endsWith(".mdx"))
+        .map((file) => readFileSync(new URL(file, directory), "utf8"))
     );
-    const generatedModule = readFileSync(
-      new URL(
-        "../../../sdp-web/src/app/(session)/dashboard/[projectId]/markets/earn/earn-integration-snippets.ts",
-        import.meta.url
-      ),
-      "utf8"
+    sources.push(
+      readFileSync(
+        new URL("../../../sdp-docs/content/docs/guides/embedded-yield.mdx", import.meta.url),
+        "utf8"
+      )
     );
-    const guideDirectory = new URL("../../../sdp-docs/content/docs/earn/", import.meta.url);
-    const guides = readdirSync(guideDirectory, { recursive: true, encoding: "utf8" })
-      .filter((file) => file.endsWith(".mdx"))
-      .map((file) => readFileSync(new URL(file, guideDirectory), "utf8"))
-      .join("\n");
-    const partnerPaths = literalEarnPaths(`${guide}\n${guides}`);
-    expect(partnerPaths).toEqual(
+    const paths = literalEarnPaths(sources.join("\n"));
+    expect(paths).toEqual(
       expect.arrayContaining([
-        "/v1/earn/external-wallet/withdrawal-options",
-        "/v1/earn/external-wallet/queued-withdrawal-previews",
-        "/v1/earn/external-wallet/withdrawal-request-transactions",
-        "/v1/earn/external-wallet/withdrawal-requests",
-        "/v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}",
-        "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
-        "/v1/earn/external-wallet/withdrawal-request-cancellations",
+        "/v1/earn/discovery",
+        "/v1/earn/positions",
+        "/v1/earn/deposit",
+        "/v1/earn/withdraw",
       ])
     );
-    for (const path of partnerPaths) {
-      expect(publicDocument.paths?.[path], `Missing public OpenAPI path: ${path}`).toBeDefined();
+    for (const path of paths) {
+      expect(internal.paths[path], `Missing internal OpenAPI path: ${path}`).toBeDefined();
     }
-    const draftDirectory = new URL("../../../sdp-docs/content/unpublished/earn/", import.meta.url);
-    const drafts = readdirSync(draftDirectory, { recursive: true, encoding: "utf8" })
-      .filter((file) => file.endsWith(".mdx"))
-      .map((file) => readFileSync(new URL(file, draftDirectory), "utf8"))
-      .join("\n");
-    // Dashboard snippets can use internal routes; their source is not a
-    // publication decision for the partner OpenAPI contract.
-    const draftPaths = literalEarnPaths(`${drafts}\n${generatedModule}`);
-    expect(draftPaths.length).toBeGreaterThan(0);
-    for (const path of draftPaths) {
-      expect(
-        internalDocument.paths?.[path],
-        `Missing internal OpenAPI path: ${path}`
-      ).toBeDefined();
-    }
-  });
-
-  it("retains both legacy withdrawal mechanisms in reads and previews", () => {
-    const doc = createPublicOpenApiDocument(EXPERIMENTAL);
-
-    const options = getJsonSchema(
-      doc.paths?.["/v1/earn/external-wallet/withdrawal-options"]?.post?.responses?.["200"]
-    );
-    expect(options.properties?.data?.properties?.parRedemption).toMatchObject({
-      nullable: true,
-      required: expect.arrayContaining([
-        "intermediateMint",
-        "assetMint",
-        "minimumShares",
-        "minimumIntermediateAmount",
-        "cancelable",
-        "operatorSettled",
-      ]),
-    });
-
-    const preview = getJsonSchema(
-      doc.paths?.["/v1/earn/external-wallet/queued-withdrawal-previews"]?.post?.responses?.["200"]
-    );
-    const operatorPreview = preview.properties?.data?.anyOf?.find((variant) =>
-      variant.properties?.mechanism?.enum?.includes("operatorRedemption")
-    );
-    expect(operatorPreview?.required).toEqual(
-      expect.arrayContaining(["mechanism", "intermediateMint", "intermediateAmount", "assets"])
-    );
-
-    const record = getJsonSchema(
-      doc.paths?.["/v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}"]?.get
-        ?.responses?.["200"]
-    );
-    const recordVariants = record.properties?.data?.properties?.withdrawalRequest?.anyOf ?? [];
-    expect(recordVariants).toHaveLength(2);
-    const operatorRecord = recordVariants.find((variant) =>
-      variant.properties?.mechanism?.enum?.includes("operatorRedemption")
-    );
-    expect(operatorRecord?.properties?.intermediateMint?.type).toBe("string");
-    expect(operatorRecord?.properties?.intermediateAmount?.type).toBe("string");
-    expect(operatorRecord?.properties?.discountBps?.nullable).toBe(true);
-    expect(operatorRecord?.properties?.maturityTimestamp?.nullable).toBe(true);
-    expect(operatorRecord?.properties?.deadlineTimestamp?.nullable).toBe(true);
   });
 
   it("documents allowlist search/label filters and the labels endpoint", () => {
@@ -762,7 +619,6 @@ describe("OpenAPI spec", () => {
       "Compliance",
       "Counterparties",
       "Asset Profiles",
-      "Earn",
     ]);
 
     expect(doc.paths?.["/v1/organizations/{orgId}"]).toBeUndefined();

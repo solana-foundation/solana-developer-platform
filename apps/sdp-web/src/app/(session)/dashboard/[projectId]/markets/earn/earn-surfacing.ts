@@ -32,7 +32,7 @@ export type EarnVaultDepositAvailability =
  * the module), so only a browser catches it.
  *
  * Keep server-readable gates here. Anything that needs a hook, SWR, or
- * `window` belongs in `earn-program-data.ts`; client callers import the gates
+ * `window` belongs in `earn-data.ts`; client callers import the gates
  * from this file directly, never through that client module.
  */
 

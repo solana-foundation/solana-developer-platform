@@ -19,7 +19,7 @@ import { assertMoneyStartAdmitted, MoneyMovementRefusedError } from "@/lib/money
 import { markIdempotencyCommitted } from "@/middleware/idempotency";
 import type { AppContext } from "@/routes/earn/context";
 import { assertRecordedStrategyDepositAdmitted } from "@/routes/earn/handlers/admission";
-import { isEarnStrategyInExecutionShelf } from "@/routes/earn/handlers/strategies";
+import { isEarnStrategyInExecutionShelf } from "@/routes/earn/strategy-catalogue";
 import {
   ProposalAdmissionRefusedError,
   ProposalNotSentError,
@@ -64,6 +64,12 @@ async function projectQueuedOperation(
   });
   if (request === null || request.project_id !== scope.projectId)
     throw notFound("Operation withdrawal request");
+  const position = await createPostgresEarnMovementsRepository(getDb(env)).getPositionById({
+    organizationId: scope.organizationId,
+    environment: scope.environment,
+    positionId: request.position_id,
+  });
+  const strategyId = position?.strategy_id;
   const status =
     request.status === "fulfilled"
       ? "completed"
@@ -86,11 +92,13 @@ async function projectQueuedOperation(
         : operation.error,
     result: {
       positionId: request.position_id,
+      ...(strategyId ? { strategyId } : {}),
       source:
         request.custody_wallet_id === null
           ? { ownerAddress: request.owner_address }
           : { walletId: request.custody_wallet_id },
-      signature: request.closing_signature ?? request.creation_signature,
+      signature:
+        request.closing_signature ?? request.cancel_signature ?? request.creation_signature,
       settledAmount:
         request.assets_paid === null
           ? null
@@ -129,6 +137,9 @@ export async function projectEarnOperation(
     positionId: movement.position_id,
   });
   if (position === null) throw internalError("Operation position is missing");
+  const strategyId =
+    position.strategy_id ??
+    (operation.intent.kind === "earn.deposit" ? operation.intent.strategyId : undefined);
   const status: Operation["status"] =
     movement.status === "failed"
       ? "failed"
@@ -166,6 +177,7 @@ export async function projectEarnOperation(
         : operation.error,
     result: {
       positionId: position.id,
+      ...(strategyId ? { strategyId } : {}),
       source,
       signature: movement.signature,
       settledAmount:

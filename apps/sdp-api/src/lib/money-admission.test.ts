@@ -613,8 +613,6 @@ describe("MOVEMENTS starts", () => {
       "dvp.fund": ["dvp.execute"],
       "dvp.settle": ["dvp.execute"],
       "earn.deposit": ["earn.execute"],
-      "earn.prepare": ["earn.execute"],
-      "earn.provider_order_cancel": ["earn.manage"],
       "private_channels.session": ["private_channels.execute"],
       "private_channels.deposit": ["private_channels.execute"],
       "private_channels.transfer": ["private_channels.execute"],

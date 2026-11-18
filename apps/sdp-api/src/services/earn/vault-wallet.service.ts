@@ -15,12 +15,6 @@ import {
 } from "@solana/kit";
 import { getDb } from "@/db/client";
 import {
-  assertMovementIsOwnReplay,
-  createPostgresEarnMovementsRepository,
-  type EarnMovementRow,
-  type EarnPositionRow,
-} from "@/db/repositories/earn-movements.repository";
-import {
   createPostgresEarnSplitSwapAdvisoriesRepository,
   generateEarnSplitSwapAdvisoryId,
 } from "@/db/repositories/earn-split-swap-advisories.repository";
@@ -29,12 +23,7 @@ import {
   type EarnWalletTransactionRow,
   generateEarnWalletTransactionId,
 } from "@/db/repositories/earn-wallet-transactions.repository";
-import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
-import {
-  buildEarnWalletDepositFingerprint,
-  buildEarnWalletWithdrawalFingerprint,
-  resolveIdempotencyReplay,
-} from "@/lib/idempotency";
+import { badRequest, internalError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { assertVaultDepositEligible } from "./deposit-eligibility";
@@ -51,9 +40,9 @@ import {
 } from "./jupiter-swap.service";
 import { readOwnerMintBalance } from "./owner-token-balance";
 import { earnRuntime } from "./runtime";
+import { requireAcceptedPlan, requireAcceptedWithdrawalPlan } from "./strategy-plan";
 import { strategyOutputFloor } from "./strategy-terms";
 import { createVaultDeadline } from "./vault-deadline";
-import { requireAcceptedPlan } from "./vault-deposit.service";
 import {
   appendVaultRequestMemo,
   compileUnsignedVaultTransaction,
@@ -61,15 +50,10 @@ import {
   type UnsignedVaultTransaction,
   VaultTransactionTooLargeError,
 } from "./vault-execution.service";
-import { ledgerVaultExposureGate } from "./vault-exposure";
-import {
-  broadcastRecordedVaultMovement,
-  isSlippageSimulationFailure,
-} from "./vault-intent-execution.service";
+import { isSlippageSimulationFailure } from "./vault-intent-execution.service";
 import { rethrowVaultProviderFailure } from "./vault-refusals";
 import { rawSimulationDetails } from "./vault-simulation-error";
 import { type VaultFeeMode, vaultRentPayer } from "./vault-sponsorship";
-import { requireAcceptedWithdrawalPlan } from "./vault-withdraw.service";
 
 async function quotePreparedStrategyDeposit(
   client: NonNullable<ReturnType<typeof resolveVaultDirectClient>>,
@@ -106,13 +90,9 @@ async function quotePreparedStrategyDeposit(
  *
  * Each direction starts with a BUILD that produces one complete unsigned
  * transaction: provider build, simulation with the resolved fee payer, memo
- * binding, and compile. Every build is persisted so the SUBMIT can prove it
- * received the exact bytes SDP built. The SUBMIT verifies every returned
- * signature, records the movement durably, and only then broadcasts. Legacy
- * signed submissions and core operations share one ledger and reconciler.
- *
- * This module never signs. Core execution queues the reviewed action for the
- * worker; legacy submissions require the exact owner's signature.
+ * binding, and compile. Every build is persisted so the operation worker can
+ * verify every signature over those exact bytes, record the movement durably,
+ * and only then broadcast. This module never signs or sends.
  */
 
 export interface WalletBuildContext {
@@ -120,8 +100,6 @@ export interface WalletBuildContext {
   projectId: string;
   userId?: string | null;
   apiKeyId?: string | null;
-  /** Trusted core preparation; legacy routes cannot submit this build. */
-  asyncOperation?: boolean;
   /** Present only for preparation through the shared custody execution path. */
   custodyWalletId?: string;
   /** Trusted fee mode resolved through the shared sponsorship boundary. */
@@ -427,7 +405,7 @@ export async function buildWalletDepositTransaction(
       });
       plan = appendVaultRequestMemo(
         swapLeg ? prependSwapLegToVaultPlan(built, swapLeg) : built,
-        "external-deposit",
+        "strategy-deposit",
         transactionId,
         { compact: compactMemo }
       );
@@ -591,7 +569,7 @@ export async function buildWalletDepositTransaction(
     environment,
     provider: input.provider,
     direction: "deposit",
-    operationOnly: input.asyncOperation ?? false,
+    operationOnly: true,
     strategyId: input.strategyId,
     custodyWalletId: input.custodyWalletId,
     feeMode: storedFeeMode(fee),
@@ -789,7 +767,7 @@ export async function buildWalletWithdrawalTransaction(
         ...(rentPayer === undefined ? {} : { rentPayer }),
         ...(rentRefundTo === undefined ? {} : { rentRefundTo }),
       });
-      return appendVaultRequestMemo(built, "external-withdrawal", transactionId, {
+      return appendVaultRequestMemo(built, "strategy-withdrawal", transactionId, {
         compact: compactMemo,
       });
     } catch (error) {
@@ -872,7 +850,7 @@ export async function buildWalletWithdrawalTransaction(
     environment,
     provider: input.provider,
     direction: "withdrawal",
-    operationOnly: input.asyncOperation ?? false,
+    operationOnly: true,
     strategyId: input.strategyId,
     custodyWalletId: input.custodyWalletId,
     feeMode: storedFeeMode(fee),
@@ -898,237 +876,6 @@ export async function buildWalletWithdrawalTransaction(
     createdBy: input.userId ?? null,
     initiatedByKeyId: input.apiKeyId ?? null,
   });
-}
-
-/** A submit of a keyed build, in its project's cluster scope. */
-export interface WalletSubmitInput {
-  organizationId: string;
-  projectId: string;
-  /** The built transaction being submitted. */
-  transactionId: string;
-  /** Base64 wire bytes of the SIGNED transaction. */
-  signedTransaction: string;
-  /** Caller idempotency key. */
-  requestId: string;
-  userId?: string | null;
-  apiKeyId?: string | null;
-  /** Recovery may record externally signed bytes without initiating a send. */
-  broadcast?: boolean;
-}
-
-export interface WalletSubmitResult {
-  position: EarnPositionRow;
-  movement: EarnMovementRow;
-  /** True when an existing recorded movement won; nothing was re-sent. */
-  replayed: boolean;
-}
-
-export async function submitWalletDeposit(
-  env: Env,
-  input: WalletSubmitInput
-): Promise<WalletSubmitResult> {
-  const { environment } = currentClusterScope();
-  const built = await requireSubmittableBuiltTransaction(env, input, "deposit");
-  const fingerprint = buildEarnWalletDepositFingerprint({
-    environment,
-    provider: built.provider,
-    providerReference: built.vault_address,
-    ownerAddress: built.owner_address,
-    amount: built.amount_requested,
-    minSharesOut: built.min_shares_out,
-    transactionId: built.id,
-  });
-
-  const ledger = createPostgresEarnMovementsRepository(getDb(env));
-  // Fast sequential replay path: a durable read that must keep answering
-  // during an RPC outage, and must never touch a chain client. The atomic
-  // insert below repeats the check under the built-transaction row lock.
-  const prior = await resolveIdempotencyReplay(
-    () =>
-      ledger.findVaultMovementByRequestId({
-        organizationId: input.organizationId,
-        requestId: input.requestId,
-      }),
-    fingerprint
-  );
-  if (prior) {
-    assertMovementIsOwnReplay(prior, {
-      projectId: input.projectId,
-      idempotencyFingerprint: fingerprint,
-    });
-    return replayedSubmitResult(ledger, input, prior);
-  }
-
-  const signed = await verifySignedWalletTransaction(built, input.signedTransaction);
-
-  const result = await ledger.createSignedWalletDepositIntent({
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    environment,
-    provider: built.provider,
-    vaultAddress: built.vault_address,
-    ownerAddress: built.owner_address,
-    shareMint: built.share_mint,
-    tokenMint: built.token_mint,
-    label: built.label,
-    requestedAmount: built.amount_requested,
-    acceptedMinSharesOut: built.min_shares_out,
-    // ADR 0004 layer 1, the write-side half (see the custody deposit): the
-    // build's admission gate could not see a deposit admitted a moment
-    // earlier, so the cap is decided again here under a per-vault lock. The
-    // customer has signed; nothing has been sent. A refusal is the typed 409
-    // and records nothing, which is the ADR's direction over landing a
-    // deposit past the cap.
-    admit: ledgerVaultExposureGate(env, {
-      provider: built.provider,
-      vaultAddress: built.vault_address,
-      amount: built.amount_requested,
-    }),
-    signature: signed.signature,
-    signedTransaction: signed.signedTransactionBase64,
-    lastValidBlockHeight: built.last_valid_block_height,
-    requestId: input.requestId,
-    idempotencyFingerprint: fingerprint,
-    walletTransactionId: built.id,
-    createsShareAccount: built.creates_share_account,
-    // Build-time payer claim only. Kamino's builder ignores historical hints.
-    shareAtaRentFunder: built.share_ata_rent_funder,
-    createdBy: input.userId ?? null,
-    initiatedByKeyId: input.apiKeyId ?? null,
-  });
-  if (result.replayed || input.broadcast === false) return result;
-
-  return broadcastSubmitResult(env, input, result, signed, "wallet deposit");
-}
-
-export async function submitWalletWithdrawal(
-  env: Env,
-  input: WalletSubmitInput
-): Promise<WalletSubmitResult> {
-  const { environment } = currentClusterScope();
-  const built = await requireSubmittableBuiltTransaction(env, input, "withdrawal");
-  if (!built.position_id) {
-    throw internalError(`Earn wallet withdrawal build ${built.id} names no position`);
-  }
-  const fingerprint = buildEarnWalletWithdrawalFingerprint({
-    environment,
-    provider: built.provider,
-    positionId: built.position_id,
-    ownerAddress: built.owner_address,
-    shares: built.amount_requested,
-    transactionId: built.id,
-  });
-
-  const ledger = createPostgresEarnMovementsRepository(getDb(env));
-  const prior = await resolveIdempotencyReplay(
-    () =>
-      ledger.findVaultMovementByRequestId({
-        organizationId: input.organizationId,
-        requestId: input.requestId,
-      }),
-    fingerprint
-  );
-  if (prior) {
-    assertMovementIsOwnReplay(prior, {
-      projectId: input.projectId,
-      idempotencyFingerprint: fingerprint,
-    });
-    return replayedSubmitResult(ledger, input, prior);
-  }
-
-  const signed = await verifySignedWalletTransaction(built, input.signedTransaction);
-
-  const result = await ledger.createSignedWalletWithdrawalIntent({
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    environment,
-    provider: built.provider,
-    positionId: built.position_id,
-    vaultAddress: built.vault_address,
-    ownerAddress: built.owner_address,
-    shareMint: built.share_mint,
-    requestedShares: built.amount_requested,
-    signature: signed.signature,
-    signedTransaction: signed.signedTransactionBase64,
-    lastValidBlockHeight: built.last_valid_block_height,
-    requestId: input.requestId,
-    idempotencyFingerprint: fingerprint,
-    walletTransactionId: built.id,
-    createsShareAccount: built.creates_share_account,
-    shareAtaRentFunder: built.share_ata_rent_funder,
-    createdBy: input.userId ?? null,
-    initiatedByKeyId: input.apiKeyId ?? null,
-  });
-  if (result.replayed || input.broadcast === false) return result;
-
-  return broadcastSubmitResult(env, input, result, signed, "wallet withdrawal");
-}
-
-/**
- * Resolve the built transaction a submit names, with every scoping rule
- * answering 404: organization (in the query), exact project, the scope's
- * environment, and direction. A caller who may not submit a build must not
- * learn it exists.
- */
-async function requireSubmittableBuiltTransaction(
-  env: Env,
-  input: WalletSubmitInput,
-  direction: "deposit" | "withdrawal"
-): Promise<EarnWalletTransactionRow> {
-  const built = await createPostgresEarnWalletTransactionsRepository(getDb(env)).getById({
-    organizationId: input.organizationId,
-    transactionId: input.transactionId,
-  });
-  if (
-    !built ||
-    built.environment !== currentClusterScope().environment ||
-    // Exact match: a null project_id means the project was deleted, and a
-    // deleted project's builds are unaddressable, not shared.
-    built.project_id !== input.projectId ||
-    built.custody_wallet_id !== null ||
-    built.direction !== direction
-  ) {
-    throw notFound("Earn wallet transaction");
-  }
-  if (built.operation_only === true)
-    throw conflict("Submit this transaction through its operation action", {
-      reason: "operation_execution_required",
-    });
-  return built;
-}
-
-async function replayedSubmitResult(
-  ledger: ReturnType<typeof createPostgresEarnMovementsRepository>,
-  input: WalletSubmitInput,
-  movement: EarnMovementRow
-): Promise<WalletSubmitResult> {
-  const position = await ledger.getPositionById({
-    organizationId: input.organizationId,
-    environment: currentClusterScope().environment,
-    positionId: movement.position_id,
-  });
-  if (!position || !movement.signature) {
-    throw internalError(`Replayed movement ${movement.id} references missing execution details`);
-  }
-  return { position, movement, replayed: true };
-}
-
-async function broadcastSubmitResult(
-  env: Env,
-  input: WalletSubmitInput,
-  result: WalletSubmitResult,
-  signed: VerifiedSignedWalletTransaction,
-  operation: string
-): Promise<WalletSubmitResult> {
-  const movement = await broadcastRecordedVaultMovement(env, {
-    operation,
-    organizationId: input.organizationId,
-    deadline: createVaultDeadline(),
-    bytes: signed.bytes,
-    signature: signed.signature,
-    movement: result.movement,
-  });
-  return { ...result, movement };
 }
 
 export interface VerifiedSignedWalletTransaction {

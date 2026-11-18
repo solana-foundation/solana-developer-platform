@@ -34,9 +34,8 @@ New shared references use `strategy_id` and `strategy_reference`.
 Migration 0238 synchronizes `strategy_reference` with `vault_address` on
 positions, movements and direct builds while previous revisions serve traffic;
 keep the alias until deployment drain. A discovered holding receives unknown
-cost basis (0241), never a synthetic deposit or earnings. Direct and queued
-builds marked `operation_only` (0243) must stay unavailable to legacy submits,
-including builds retained after action refresh.
+cost basis (0241), never a synthetic deposit or earnings. Current operations use the same movement ledger and provider obligations;
+do not create a second financial ledger or adopt old prelaunch actions.
 
 Things that will bite:
 - **Legal source states come from `EARN_MOVEMENT_TRANSITIONS` (`@sdp/types`),

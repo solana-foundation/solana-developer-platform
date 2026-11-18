@@ -259,9 +259,6 @@ describe("Earn core read contracts", () => {
         ],
       },
     });
-    expect(await (await get(`strategies`)).json()).toMatchObject({
-      data: { total: 0, strategies: [] },
-    });
   });
 
   it("keeps owner-address reads exact-project scoped", async () => {

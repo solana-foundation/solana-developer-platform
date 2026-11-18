@@ -23,20 +23,8 @@ describe("Earn API contract coverage", () => {
             .filter(([method]) => ["get", "post", "put", "patch", "delete"].includes(method))
             .map(([method, operation]) => {
               expect(operation).toHaveProperty("operationId");
-              const retired =
-                (method === "post" &&
-                  [
-                    "/v1/earn/vault-deposit-previews",
-                    "/v1/earn/vault-deposits",
-                    "/v1/earn/external-wallet/deposit-transactions",
-                    "/v1/earn/vault-withdrawals",
-                    "/v1/earn/vault-withdrawal-requests",
-                    "/v1/earn/external-wallet/withdrawal-transactions",
-                    "/v1/earn/external-wallet/withdrawal-request-transactions",
-                  ].includes(path)) ||
-                (method === "post" && path === "/v1/earn/programs") ||
-                (method === "put" && path === "/v1/earn/programs/{programId}");
-              expect(operation).toHaveProperty(retired ? "responses.410" : "responses.200");
+              expect(operation).toHaveProperty("responses.200");
+              expect(operation).not.toHaveProperty("responses.410");
               return `${method.toUpperCase()} ${path}`;
             })
         )
@@ -54,12 +42,7 @@ describe("Earn API contract coverage", () => {
         if (!operation) continue;
         expect(operation.security).toBeDefined();
         expect(operation.security).not.toContainEqual({});
-        if (
-          operation[DOCS_GROUP] !== EARN_GROUPS.discovery &&
-          operation[DOCS_GROUP] !== EARN_GROUPS.embeddedYield
-        ) {
-          expect(published.paths[path]?.[method]).toBeUndefined();
-        }
+        expect(published.paths[path]?.[method]).toBeUndefined();
       }
     }
   });
@@ -79,17 +62,8 @@ describe("Earn API contract coverage", () => {
     }
     expect([...groups].sort()).toEqual(Object.values(EARN_GROUPS).sort());
 
-    const partner = createPublicOpenApiDocument({
-      releaseChannel: "experimental",
-    });
-    for (const [path, item] of Object.entries(partner.paths)) {
-      if (!path.startsWith("/v1/earn/")) continue;
-      for (const method of ["get", "post"] as const) {
-        const operation = item[method];
-        if (!operation) continue;
-        expect([EARN_GROUPS.discovery, EARN_GROUPS.embeddedYield]).toContain(operation[DOCS_GROUP]);
-      }
-    }
+    const published = createPublicOpenApiDocument({ releaseChannel: "experimental" });
+    expect(Object.keys(published.paths).filter((path) => path.startsWith("/v1/earn"))).toEqual([]);
   });
 
   it("documents lifecycle routes internally without publishing the replacement contract", () => {

@@ -173,6 +173,7 @@ export const operationSchema = z.strictObject({
   result: z
     .strictObject({
       positionId: identifier,
+      strategyId: identifier.optional(),
       signature: z.string().nullable(),
       source: operationSourceSchema,
       settledAmount: operationAmountSchema.nullable(),

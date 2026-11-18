@@ -32,7 +32,7 @@ vi.mock("@/lib/use-solana-cluster", () => ({
   useSolanaCluster: () => mocks.cluster,
 }));
 
-vi.mock("./earn-program-data", () => ({
+vi.mock("./earn-data", () => ({
   fetchEarnWalletPositions: mocks.fetchPositions,
   useEarnWalletPositionSummary: (options?: { detailsVisible?: boolean }) => {
     mocks.summaryOptions(options);

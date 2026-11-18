@@ -24,8 +24,8 @@ import { getIdempotencyRecordKey, markIdempotencyCommitted } from "@/middleware/
 import { type AppContext, requireEarnStrategyForCaller } from "@/routes/earn/context";
 import { assertVaultDepositAdmissible } from "@/routes/earn/handlers/admission";
 import { resolveDepositSwapRequest } from "@/routes/earn/handlers/shared";
-import { isEarnStrategyInExecutionShelf } from "@/routes/earn/handlers/strategies";
-import { resolveEarnVaultCustodyWallet } from "@/routes/earn/handlers/vault";
+import { isEarnStrategyInExecutionShelf } from "@/routes/earn/strategy-catalogue";
+import { resolveEarnCustodyWallet } from "@/routes/earn/wallet-scope";
 import {
   CustodyRuntimeTargets,
   type CustodyRuntimeWalletProjection,
@@ -96,7 +96,7 @@ export async function resolveStrategySource(
   const wallets = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).listWallets(
     actor
   );
-  const wallet = resolveEarnVaultCustodyWallet(wallets, source.walletId);
+  const wallet = resolveEarnCustodyWallet(wallets, source.walletId);
   assertCallerWalletInScope(actor.auth, wallet.id);
   return { source, ownerAddress: wallet.publicKey, wallet };
 }
@@ -232,7 +232,6 @@ async function prepareDepositAction(
           deadline: createVaultDeadline(),
         });
   const result = await buildWalletDepositTransaction(c.env, {
-    asyncOperation: true,
     ...context,
     provider,
     strategyId: strategy.id,
@@ -505,7 +504,6 @@ async function buildSelectedWithdrawalAction(
           deadline,
         });
   const built = await buildWalletWithdrawalTransaction(c.env, {
-    asyncOperation: true,
     ...context,
     provider: position.provider,
     positionId: discovered ? null : position.id,

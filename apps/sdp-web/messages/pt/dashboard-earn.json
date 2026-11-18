@@ -129,7 +129,7 @@
       "sandboxUnavailable": "Somente Produção",
       "redeemIntermediate": "Resgatar wYLDS"
     },
-    "earnProgram": {
+    "embeddedYield": {
       "eyebrow": "Yield embutido",
       "introTitle": "Escolha a estratégia de yield que seus clientes verão",
       "introDescription": "Comece pelo catálogo de provedores ao vivo, visualize a ação do cliente e gere uma integração server-side contra a API real de depósito em vault.",

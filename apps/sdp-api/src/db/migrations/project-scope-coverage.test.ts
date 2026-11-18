@@ -7,7 +7,8 @@ const EARN_FORENSIC_HISTORY =
 const NULLABLE_PROJECT_TABLES = {
   admin_alerts:
     "HOO-2299: organization-wide alerts (members, the entitlement, settings) are about no project",
-  // This registry inspects physical tables, not their canonical wallet views.
+  earn_wallet_transactions: EARN_FORENSIC_HISTORY,
+  earn_wallet_withdrawal_request_transactions: EARN_FORENSIC_HISTORY,
   earn_external_wallet_transactions: EARN_FORENSIC_HISTORY,
   earn_external_wallet_withdrawal_request_transactions: EARN_FORENSIC_HISTORY,
   earn_movements: EARN_FORENSIC_HISTORY,

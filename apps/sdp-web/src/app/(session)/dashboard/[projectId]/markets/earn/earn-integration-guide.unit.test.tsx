@@ -90,7 +90,7 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({ sdpEnvironment: mocks.environment }),
 }));
 
-vi.mock("./earn-program-data", () => ({
+vi.mock("./earn-data", () => ({
   useEarnStrategies: (options?: { cluster?: SolanaCluster }) => {
     mocks.strategyClusters.push(options?.cluster);
     const mainnet = options?.cluster === "mainnet-beta";

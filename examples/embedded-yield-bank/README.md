@@ -3,7 +3,7 @@
 Northstar is a self-contained Next.js App Router example of a bank that offers
 **Checking** and **Savings**, where Savings is one SDP Earn strategy.
 The React UI and its server routes deploy together, while SDP builds the
-transactions and keeps the movement and queued-withdrawal ledgers.
+transactions and tracks each operation through signing, approval and settlement.
 
 This is a real integration, not a fixture UI. It defaults to a sandbox project
 on devnet and can run a controlled production-project canary on mainnet.
@@ -23,14 +23,15 @@ affordances for the example.
 
 ## How the bank maps to SDP
 
-| Northstar             | SDP                                                                                                                     |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| Savings strategy      | `/v1/earn/discovery`, selected by `DEMO_STRATEGY_ID` or the first fundable DeFi USDC strategy on the configured cluster |
-| Savings holding       | `/v1/earn/positions?ownerAddress=...&discover=true`, including verified pre-existing holdings in integrated strategies  |
-| Move to savings       | `/v1/earn/deposit` prepares an operation for review                                                                     |
-| Move to checking      | `/v1/earn/withdraw` prepares an operation using the position ID and token amount                                        |
-| Approval and progress | `/v1/operations/{id}/execute`, then operation reads until verified completion                                           |
-| Cancellation          | `/v1/operations/{id}/cancel`, followed by any returned signature action and continued polling                           |
+| Northstar             | SDP                                                                                                                                       |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Savings strategy      | `/v1/earn/discovery`, selected by `DEMO_STRATEGY_ID` or the first fundable DeFi USDC strategy on the configured cluster                   |
+| Savings holding       | `/v1/earn/positions?sourceType=address&ownerAddress=...&discover=true`, including verified pre-existing holdings in integrated strategies |
+| Move to savings       | `/v1/earn/deposit` prepares an operation for review                                                                                       |
+| Move to checking      | `/v1/earn/withdraw` prepares an operation using the position ID and token amount                                                          |
+| Approval and progress | `/v1/operations/{id}/execute`, then operation reads until verified completion                                                             |
+| Cancellation          | `/v1/operations/{id}/cancel`, followed by any returned signature action and continued polling                                             |
+| Updated terms         | `/v1/operations/{id}/refresh`, when the operation offers a refresh action                                                                 |
 
 Preparing shows current estimates, minimum proceeds, fees and withdrawal options.
 It does not sign or broadcast. **Approve execution** signs the exact transaction
@@ -46,9 +47,8 @@ remain unknown. APY is a decimal fraction with provider provenance and an
 observation timestamp, which can also be unknown.
 
 The four Earn endpoints serve this bank and the Treasury dashboard. The demo
-uses owner addresses, without registering custody wallets. Historical
-movement and withdrawal-request reads remain internal compatibility sources for
-older accounting and recovery. New actions use operations.
+uses owner addresses, without registering custody wallets. All activity and
+pending withdrawals use the same shared operation lifecycle.
 
 The HTTP client is in [`server/sdp-client.ts`](server/sdp-client.ts), server-side
 signing in [`server/embedded-yield.ts`](server/embedded-yield.ts), and operation
@@ -65,19 +65,18 @@ recovery in [`src/lib/core-api.ts`](src/lib/core-api.ts).
 - Preparation keys are saved before sending. The browser saves the reviewed
   operation action and idempotency key before asking the server to sign. Web
   Locks serialize execution across tabs. Storage refusal blocks a new action.
-- Uncertain submissions retain the same action ID, version, signed bytes and
-  idempotency key. Reload retries the accepted action, without preparing a new
-  financial instruction. A parsed acknowledgement releases the local journal.
+- Uncertain submissions retain the same action ID, version and idempotency key.
+  Immediate retries send identical signed bytes; reload reads the same stored
+  operation before signing. An advanced action returns its current state.
+  A validated acknowledgement for that operation releases the local journal.
 - Browser storage is only the example's recovery journal. A production app
-  needs authenticated durable recovery across devices. Legacy saved signed
-  intents can still be replayed through the compatibility submit route.
-- Active operation reads are single-flight and poll every second. Idle reads
+  needs authenticated durable recovery across devices.
+- Active dashboard reads are single-flight and poll every two seconds. Idle reads
   run every 30 seconds. HTTP 429 pauses polling for the server's retry interval.
   The server caches discovery for five minutes; live balances are never inferred
   from requested transfer amounts.
-- A normal refresh reads operations, positions, historical movements and legacy
-  withdrawal requests, plus the checking token balance over RPC. Historical
-  movement detail reads cover unresolved submissions. Position discovery covers
+- A normal refresh reads operations and positions, plus the checking token
+  balance over RPC. Position discovery covers
   integrated strategies only; unavailable observations never count as empty.
 - Pending withdrawal quotes never count as delivered assets. Earnings and
   portfolio totals remain unknown while escrow cannot be valued. Completed

@@ -9,11 +9,11 @@ import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
+import { submitPreparedQueuedStrategyAction } from "./strategy-queued-operations.service";
 
 const quoteParRedemption = vi.hoisted(() => vi.fn());
 const buildParRedemptionRequest = vi.hoisted(() => vi.fn());
 const simulateVaultPlan = vi.hoisted(() => vi.fn());
-const signVaultPlan = vi.hoisted(() => vi.fn());
 const broadcastVaultTransaction = vi.hoisted(() => vi.fn());
 const compileUnsignedVaultTransaction = vi.hoisted(() => vi.fn());
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
@@ -28,7 +28,6 @@ vi.mock("./execution-registry", async (importOriginal) => ({
 vi.mock("./vault-execution.service", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./vault-execution.service")>()),
   simulateVaultPlan,
-  signVaultPlan,
   broadcastVaultTransaction,
   compileUnsignedVaultTransaction,
 }));
@@ -63,9 +62,15 @@ function inProjectScope<TArgs extends unknown[], TResult>(
 const buildWalletQueuedWithdrawalRequest = inProjectScope(
   service.buildWalletQueuedWithdrawalRequest
 );
-const createCustodyQueuedWithdrawal = inProjectScope(service.createCustodyQueuedWithdrawal);
 const submitWalletQueuedWithdrawalAction = inProjectScope(
-  service.submitWalletQueuedWithdrawalAction
+  (
+    scopedEnv: Parameters<typeof service.submitWalletQueuedWithdrawalAction>[0],
+    input: Parameters<typeof service.submitWalletQueuedWithdrawalAction>[1]
+  ) =>
+    submitPreparedQueuedStrategyAction(scopedEnv, {
+      ...input,
+      custodyWalletId: input.custodyWalletId ?? null,
+    })
 );
 
 const ORG = "org_par_intermediate";
@@ -180,11 +185,6 @@ beforeEach(async () => {
   resolveVaultSponsorship.mockResolvedValue({ kind: "wallet-pays" });
   simulateVaultPlan.mockResolvedValue({ ok: true, prepared: {} });
   createOrgSignerForCustodyWallet.mockResolvedValue({ address: WALLET_ADDRESS });
-  signVaultPlan.mockResolvedValue({
-    bytes: new Uint8Array([1, 2, 3]),
-    signature: "sig_par_intermediate_custody",
-    lastValidBlockHeight: "12345",
-  });
   broadcastVaultTransaction.mockResolvedValue(undefined);
   compileUnsignedVaultTransaction.mockReturnValue({
     bytes: new Uint8Array([9, 9]),
@@ -198,17 +198,16 @@ beforeEach(async () => {
 });
 
 describe("a par request over held intermediate", () => {
-  it("keeps operation queue builds out of legacy submit independently of discovery permission", async () => {
+  it("requires the operation worker fence before consuming an asynchronous queue build", async () => {
     const actor = { organizationId: ORG, projectId: PROJECT, userId: USER };
     buildParRedemptionRequest.mockResolvedValue(heldIntermediatePlan(OWNER_REQUEST));
     const built = await buildWalletQueuedWithdrawalRequest(env, {
       actor,
       position: position(OWNER_POSITION, OWNER_ADDRESS, null),
       terms,
-      asyncOperation: true,
     });
     await expect(
-      submitWalletQueuedWithdrawalAction(env, {
+      inProjectScope(service.submitWalletQueuedWithdrawalAction)(env, {
         actor,
         transactionId: built.id,
         signedTransaction: "CQk=",
@@ -278,11 +277,12 @@ describe("a par request over held intermediate", () => {
         await db.prepare("SELECT id FROM earn_positions WHERE id = ?").bind(positionId).first()
       ).toBeNull();
       await expect(
-        submitWalletQueuedWithdrawalAction(env, {
+        inProjectScope(service.submitWalletQueuedWithdrawalAction)(env, {
           actor,
           transactionId: built.id,
           signedTransaction: "CQk=",
-          clientRequestId: "legacy-refused",
+          clientRequestId: "undiscovered-source-refused",
+          allowOperationBuild: true,
           action: "request",
           custodyWalletId,
         })
@@ -342,24 +342,27 @@ describe("a par request over held intermediate", () => {
           .prepare("SELECT COUNT(*)::int AS count FROM earn_movements WHERE direction = 'deposit'")
           .first()
       ).toEqual({ count: 0 });
-      expect(signVaultPlan).not.toHaveBeenCalled();
+      expect(createOrgSignerForCustodyWallet).not.toHaveBeenCalled();
       expect(broadcastVaultTransaction).not.toHaveBeenCalled();
     }
   );
 
-  it("builds, signs and records a custody request that burns no shares", async () => {
+  it("prepares then records a custody operation over intermediate tokens without burning shares", async () => {
     buildParRedemptionRequest.mockResolvedValue(heldIntermediatePlan(CUSTODY_REQUEST));
-
-    const result = await createCustodyQueuedWithdrawal(env, {
-      actor: {
-        organizationId: ORG,
-        projectId: PROJECT,
-        custodyWalletId: WALLET_ROW_ID,
-        custodyWalletPublicKey: WALLET_ADDRESS,
-        userId: USER,
-      },
+    const actor = { organizationId: ORG, projectId: PROJECT, userId: USER };
+    const built = await buildWalletQueuedWithdrawalRequest(env, {
+      actor,
       position: position(CUSTODY_POSITION, WALLET_ADDRESS, WALLET_ROW_ID),
+      custodyWalletId: WALLET_ROW_ID,
       terms,
+    });
+    expect(createOrgSignerForCustodyWallet).not.toHaveBeenCalled();
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+    const result = await inProjectScope(submitPreparedQueuedStrategyAction)(env, {
+      actor,
+      custodyWalletId: WALLET_ROW_ID,
+      transactionId: built.id,
+      signedTransaction: "CQk=",
       clientRequestId: "par-intermediate-custody-key",
     });
 
@@ -379,6 +382,7 @@ describe("a par request over held intermediate", () => {
         provider: "hastra",
         positionId: CUSTODY_POSITION,
         intermediateAmount: "2000",
+        transactionId: built.id,
       }),
     });
     expect(result.action).toMatchObject({ status: "submitted" });
@@ -386,22 +390,16 @@ describe("a par request over held intermediate", () => {
 
   it("refuses a build that burns shares the caller did not ask to redeem", async () => {
     buildParRedemptionRequest.mockResolvedValue(heldIntermediatePlan(CUSTODY_REQUEST, "1"));
-
     await expect(
-      createCustodyQueuedWithdrawal(env, {
-        actor: {
-          organizationId: ORG,
-          projectId: PROJECT,
-          custodyWalletId: WALLET_ROW_ID,
-          custodyWalletPublicKey: WALLET_ADDRESS,
-          userId: USER,
-        },
+      buildWalletQueuedWithdrawalRequest(env, {
+        actor: { organizationId: ORG, projectId: PROJECT, userId: USER },
         position: position(CUSTODY_POSITION, WALLET_ADDRESS, WALLET_ROW_ID),
+        custodyWalletId: WALLET_ROW_ID,
         terms,
-        clientRequestId: "par-intermediate-drift-key",
       })
     ).rejects.toThrow(/changed the position asset identity or the requested amount/);
-    expect(signVaultPlan).not.toHaveBeenCalled();
+    expect(createOrgSignerForCustodyWallet).not.toHaveBeenCalled();
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
   });
 
   it("persists an owner-signed build and reconstructs the held source on submit", async () => {

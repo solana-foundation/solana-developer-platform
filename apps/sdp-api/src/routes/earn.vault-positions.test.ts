@@ -176,23 +176,7 @@ async function createPosition(params: {
 
 function getPositions(query = "") {
   return app.request(
-    `/v1/earn/vault-positions${query}`,
-    { headers: { Authorization: `Bearer ${API_KEY.raw}` } },
-    env
-  );
-}
-
-function listDeposits(query = "") {
-  return app.request(
-    `/v1/earn/vault-deposits${query}`,
-    { headers: { Authorization: `Bearer ${API_KEY.raw}` } },
-    env
-  );
-}
-
-function getDeposit(movementId: string) {
-  return app.request(
-    `/v1/earn/vault-deposits/${encodeURIComponent(movementId)}`,
+    `/v1/earn/positions${query}`,
     { headers: { Authorization: `Bearer ${API_KEY.raw}` } },
     env
   );
@@ -233,7 +217,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("GET /v1/earn/vault-positions", () => {
+describe("GET /v1/earn/positions custody holdings", () => {
   it.each(["veda", "kamino", "ondo", "hastra", "jupiter_lend", "wisdomtree"])(
     "does not constrain an unrelated %s position after a Kamino deposit",
     async (provider) => {
@@ -319,30 +303,22 @@ describe("GET /v1/earn/vault-positions", () => {
   it("rejects a foreign movement before any status or provider RPC read", async () => {
     const created = await createPosition({});
     const response = await requestAsProduction(
-      `/v1/earn/vault-positions?afterMovementIds=${created.movement.id}`
+      `/v1/earn/positions?afterMovementIds=${created.movement.id}`
     );
     expect(response.status).toBe(404);
     expect(signatureStatuses).not.toHaveBeenCalled();
     expect(readVaultPositions).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ["position list", "/v1/earn/vault-positions", 200],
-    ["deposit list", "/v1/earn/vault-deposits", 200],
-    ["deposit request-id lookup", "/v1/earn/vault-deposits?requestId=project-scope", 200],
-  ])("hides another project's resource from the %s", async (_name, path, status) => {
-    await createPosition({ requestId: "project-scope" });
-    const response = await requestAsProduction(path);
-    expect(response.status).toBe(status);
-    expect(JSON.stringify(await response.json())).not.toContain(PROJECT_A);
-  });
-
-  it("404s another project's deposit", async () => {
-    const created = await createPosition({});
-    expect(
-      (await requestAsProduction(`/v1/earn/vault-deposits/${created.movement.id}`)).status
-    ).toBe(404);
-  });
+  it.each([["position list", "/v1/earn/positions", 200]])(
+    "hides another project's resource from the %s",
+    async (_name, path, status) => {
+      await createPosition({ requestId: "project-scope" });
+      const response = await requestAsProduction(path);
+      expect(response.status).toBe(status);
+      expect(JSON.stringify(await response.json())).not.toContain(PROJECT_A);
+    }
+  );
 
   /**
    * The exit's fee copy reads the position, not a quote: Kamino declares no
@@ -524,7 +500,7 @@ describe("GET /v1/earn/vault-positions", () => {
     const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
     readVaultPositions.mockResolvedValue([
       {
-        vaultAddress: providerReference,
+        providerReference,
         owner: PUBLIC_KEY_A,
         cluster: "devnet",
         shares: "99",
@@ -547,8 +523,8 @@ describe("GET /v1/earn/vault-positions", () => {
     expect(body.data.positions[0]).not.toHaveProperty("tokenValue");
     expect(warn).toHaveBeenCalledWith(
       expect.objectContaining({
-        owner: PUBLIC_KEY_A,
-        snapshotOwner: kind === "owner" ? PUBLIC_KEY_B : PUBLIC_KEY_A,
+        provider: "kamino",
+        ownerMismatch: kind === "owner",
       }),
       "vault position: ignored live snapshot with mismatched identity"
     );
@@ -587,7 +563,7 @@ describe("GET /v1/earn/vault-positions", () => {
     expect(await response.json()).toMatchObject({
       error: {
         code: "BAD_REQUEST",
-        message: "Invalid vault position pagination cursor",
+        message: "Invalid Earn position pagination cursor",
       },
     });
     expect(readVaultPositions).not.toHaveBeenCalled();
@@ -646,317 +622,5 @@ describe("GET /v1/earn/vault-positions", () => {
     expect(
       new Set(resolveVaultDirectClient.mock.calls.map(([, , deadline]) => deadline)).size
     ).toBe(1);
-  });
-});
-
-/**
- * The deposit READ shares this file because it shares this route's scope rule:
- * both resolve which custody wallets the caller may see through
- * `listReadableEarnVaultWallets`, and a binding that hides a position has to
- * hide that position's deposits too. Testing them apart is how the two drift.
- */
-
-describe("GET /v1/earn/vault-deposits/:movementId", () => {
-  it("reports the recorded deposit so an unconfirmed signature stays answerable", async () => {
-    const created = await createPosition({ providerReference: "vault_read_own" });
-
-    const response = await getDeposit(created.movement.id);
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      data: {
-        deposit: {
-          movementId: string;
-          positionId: string;
-          provider: string;
-          providerReference: string;
-          status: string;
-          signature: string;
-          amount: string;
-          failureReason: string | null;
-          confirmedAt: string | null;
-        };
-      };
-    };
-
-    expect(body.data.deposit).toEqual({
-      movementId: created.movement.id,
-      positionId: created.position.id,
-      provider: "kamino",
-      providerReference: "vault_read_own",
-      // Recorded BEFORE broadcast, which is the whole reason this route exists.
-      status: "pending",
-      signature: created.movement.signature,
-      amount: "1",
-      failureReason: null,
-      createdAt: created.movement.created_at,
-      confirmedAt: null,
-    });
-    expect(reconcileEarnVaultMovementReadThrough).toHaveBeenCalledWith(
-      env,
-      expect.objectContaining({ id: created.movement.id })
-    );
-  });
-
-  it("reads back the terminal state the reconciliation sweep wrote", async () => {
-    const created = await createPosition({ providerReference: "vault_read_settled" });
-    await createPostgresEarnMovementsRepository(getDb(env)).advanceVaultMovement({
-      movementId: created.movement.id,
-      organizationId: ORG,
-      toStatus: "failed",
-      failureReason: "Blockhash expired without the transaction landing",
-    });
-
-    const response = await getDeposit(created.movement.id);
-    const body = (await response.json()) as {
-      data: { deposit: { status: string; failureReason: string | null } };
-    };
-
-    expect(response.status).toBe(200);
-    expect(body.data.deposit.status).toBe("failed");
-    expect(body.data.deposit.failureReason).toBe(
-      "Blockhash expired without the transaction landing"
-    );
-  });
-
-  it("refuses a withdrawal from the deposit path", async () => {
-    const created = await createPosition({ providerReference: "vault_read_direction" });
-    await getDb(env)
-      .prepare(
-        `UPDATE earn_movements
-            SET direction = 'withdrawal', denomination = ?, min_shares_out = NULL
-          WHERE id = ?`
-      )
-      .bind(SHARE_MINT, created.movement.id)
-      .run();
-
-    expect((await getDeposit(created.movement.id)).status).toBe(404);
-  });
-
-  it("refuses a movement recorded in another environment", async () => {
-    const productionProjectId = `${PROJECT_A}_production`;
-    const positionId = `earn_vault_position_${crypto.randomUUID()}`;
-    const movementId = `earn_vault_movement_${crypto.randomUUID()}`;
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `INSERT INTO earn_positions (
-             id, organization_id, project_id, environment, provider, kind, vault_address,
-             custody_wallet_id, share_mint, token_mint, label, created_by, activated_at
-           ) VALUES (?, ?, ?, 'production', 'kamino', 'vault_direct', 'vault_read_environment',
-                     ?, ?, ?, 'Production vault', ?, sdp_iso_now())`
-        )
-        .bind(positionId, ORG, productionProjectId, WALLET_A, SHARE_MINT, TOKEN_MINT, USER),
-      getDb(env)
-        .prepare(
-          `INSERT INTO earn_movements (
-             id, organization_id, project_id, environment, position_id, provider,
-             execution_model, vault_address, custody_wallet_id, direction, status,
-             request_id, idempotency_fingerprint, denomination, amount_requested,
-             signature, signed_transaction, last_valid_block_height, created_by
-           ) VALUES (?, ?, ?, 'production', ?, 'kamino', 'vault_direct',
-                     'vault_read_environment', ?, 'deposit', 'requested', ?,
-                     'fingerprint_environment', ?, '1', ?, 'AQ==', '12345', ?)`
-        )
-        .bind(
-          movementId,
-          ORG,
-          productionProjectId,
-          positionId,
-          WALLET_A,
-          crypto.randomUUID(),
-          TOKEN_MINT,
-          `sig_${crypto.randomUUID()}`,
-          USER
-        ),
-    ]);
-
-    expect((await getDeposit(movementId)).status).toBe(404);
-  });
-
-  it("answers 404 for an id this organization has never held", async () => {
-    expect((await getDeposit(`earn_vault_movement_${crypto.randomUUID()}`)).status).toBe(404);
-  });
-});
-
-/**
- * The LIST is the discovery tier: it is what lets a client re-derive its own
- * in-flight deposits after losing local state, and — via `?requestId=` — find a
- * deposit by the Idempotency-Key the caller kept.
- */
-describe("GET /v1/earn/vault-deposits", () => {
-  it("returns this workspace's deposits newest first", async () => {
-    const first = await createPosition({ providerReference: "vault_list_1" });
-    const second = await createPosition({ providerReference: "vault_list_2" });
-
-    const response = await listDeposits();
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      data: {
-        deposits: Array<{ movementId: string }>;
-        hasMore: boolean;
-        nextCursor: string | null;
-      };
-    };
-
-    expect(body.data.deposits.map((deposit) => deposit.movementId)).toEqual([
-      second.movement.id,
-      first.movement.id,
-    ]);
-    expect(body.data.hasMore).toBe(false);
-    expect(body.data.nextCursor).toBeNull();
-  });
-
-  it("omits a withdrawal, which is not a deposit", async () => {
-    const deposit = await createPosition({ providerReference: "vault_list_deposit" });
-    const withdrawal = await createPosition({ providerReference: "vault_list_withdrawal" });
-    await getDb(env)
-      .prepare(
-        `UPDATE earn_movements
-            SET direction = 'withdrawal', denomination = ?, min_shares_out = NULL
-          WHERE id = ?`
-      )
-      .bind(SHARE_MINT, withdrawal.movement.id)
-      .run();
-
-    const body = (await (await listDeposits()).json()) as {
-      data: { deposits: Array<{ movementId: string }> };
-    };
-
-    expect(body.data.deposits.map((deposit) => deposit.movementId)).toEqual([deposit.movement.id]);
-  });
-
-  it("pages by keyset without overlap", async () => {
-    await createPosition({ providerReference: "vault_list_page_1" });
-    await createPosition({ providerReference: "vault_list_page_2" });
-    await createPosition({ providerReference: "vault_list_page_3" });
-
-    const first = (await (await listDeposits("?limit=2")).json()) as {
-      data: {
-        deposits: Array<{ movementId: string }>;
-        hasMore: boolean;
-        nextCursor: string | null;
-      };
-    };
-    expect(first.data.deposits).toHaveLength(2);
-    expect(first.data.hasMore).toBe(true);
-
-    const second = (await (
-      await listDeposits(`?limit=2&before=${encodeURIComponent(first.data.nextCursor ?? "")}`)
-    ).json()) as {
-      data: {
-        deposits: Array<{ movementId: string }>;
-        hasMore: boolean;
-        nextCursor: string | null;
-      };
-    };
-    expect(second.data.deposits).toHaveLength(1);
-    expect(second.data.hasMore).toBe(false);
-    expect(
-      first.data.deposits.some((row) =>
-        second.data.deposits.some((next) => next.movementId === row.movementId)
-      )
-    ).toBe(false);
-  });
-
-  it("rejects a malformed cursor rather than silently returning the first page", async () => {
-    expect((await listDeposits("?before=not-a-cursor")).status).toBe(400);
-  });
-
-  it("finds a deposit by the caller's own idempotency key", async () => {
-    // A caller that lost the response finds the movement by the key it kept.
-    const requestId = `caller-chosen-${crypto.randomUUID()}`;
-    const created = await createPosition({ providerReference: "vault_by_key", requestId });
-
-    const body = (await (
-      await listDeposits(`?requestId=${encodeURIComponent(requestId)}`)
-    ).json()) as { data: { deposits: Array<{ movementId: string }> } };
-
-    expect(body.data.deposits.map((deposit) => deposit.movementId)).toEqual([created.movement.id]);
-  });
-
-  it("returns only in-flight movements when asked, so recovery cannot be paged out", async () => {
-    const inFlight = await createPosition({ providerReference: "vault_settled_pending" });
-    const settled = await createPosition({ providerReference: "vault_settled_confirmed" });
-    const providerOrder = await createPosition({
-      provider: "wisdomtree",
-      providerReference: "vault_provider_order_confirmed",
-    });
-    const legacyFinalizedProviderOrder = await createPosition({
-      provider: "wisdomtree",
-      providerReference: "vault_provider_order_legacy_finalized",
-    });
-    const repository = createPostgresEarnMovementsRepository(getDb(env));
-    await repository.advanceVaultMovement({
-      movementId: settled.movement.id,
-      organizationId: ORG,
-      toStatus: "confirmed",
-      confirmedAt: new Date(0).toISOString(),
-    });
-    await repository.advanceVaultMovement({
-      movementId: providerOrder.movement.id,
-      organizationId: ORG,
-      toStatus: "confirmed",
-      confirmedAt: new Date(0).toISOString(),
-    });
-    await repository.advanceVaultMovement({
-      movementId: legacyFinalizedProviderOrder.movement.id,
-      organizationId: ORG,
-      toStatus: "confirmed",
-      confirmedAt: new Date(0).toISOString(),
-    });
-    await repository.advanceVaultMovement({
-      movementId: legacyFinalizedProviderOrder.movement.id,
-      organizationId: ORG,
-      toStatus: "finalized",
-      confirmedAt: new Date(0).toISOString(),
-      settledAt: new Date(0).toISOString(),
-    });
-
-    const open = (await (await listDeposits("?settled=false")).json()) as {
-      data: { deposits: Array<{ movementId: string; status: string }> };
-    };
-    expect(new Set(open.data.deposits.map((deposit) => deposit.movementId))).toEqual(
-      new Set([
-        inFlight.movement.id,
-        providerOrder.movement.id,
-        legacyFinalizedProviderOrder.movement.id,
-      ])
-    );
-
-    const closed = (await (await listDeposits("?settled=true")).json()) as {
-      data: { deposits: Array<{ movementId: string }> };
-    };
-    expect(closed.data.deposits.map((deposit) => deposit.movementId)).toEqual([
-      settled.movement.id,
-    ]);
-  });
-
-  it("rejects a settled filter that is not a boolean", async () => {
-    expect((await listDeposits("?settled=maybe")).status).toBe(400);
-  });
-
-  it("hides a movement whose project was deleted", async () => {
-    // `project_id` is nullable only through ON DELETE SET NULL, so a null means
-    // the owning project is gone, not that the row is unscoped.
-    const orphaned = await createPosition({ providerReference: "vault_orphaned" });
-    await getDb(env)
-      .prepare("UPDATE earn_movements SET project_id = NULL WHERE id = ?")
-      .bind(orphaned.movement.id)
-      .run();
-
-    expect((await getDeposit(orphaned.movement.id)).status).toBe(404);
-    const body = (await (await listDeposits()).json()) as {
-      data: { deposits: Array<{ movementId: string }> };
-    };
-    expect(body.data.deposits.map((deposit) => deposit.movementId)).not.toContain(
-      orphaned.movement.id
-    );
-  });
-
-  it("answers empty for a key nobody has used", async () => {
-    const body = (await (await listDeposits("?requestId=never-used")).json()) as {
-      data: { deposits: unknown[] };
-    };
-    expect(body.data.deposits).toEqual([]);
   });
 });

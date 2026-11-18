@@ -9,48 +9,30 @@ import {
   type Address,
   type AddressesByLookupTableAddress,
   address,
-  addSignersToTransactionMessage,
   appendTransactionMessageInstructions,
-  assertIsFullySignedTransaction,
   type Blockhash,
-  bytesEqual,
   compileTransaction,
   compressTransactionMessageUsingAddressLookupTables,
   createTransactionMessage,
   fetchAddressesForLookupTables,
   getBase64EncodedWireTransaction,
   getCompiledTransactionMessageDecoder,
-  getSignatureFromTransaction,
   getTransactionDecoder,
   getTransactionEncoder,
   type Instruction,
   blockhash as parseBlockhash,
   pipe,
-  type Signature,
   setTransactionMessageFeePayer,
-  setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
-  type TransactionSigner,
 } from "@solana/kit";
-import {
-  isTransactionModifyingSigner,
-  isTransactionPartialSigner,
-  partiallySignTransactionMessageWithSigners,
-  partiallySignTransactionWithSigners,
-  signTransactionMessageWithSigners,
-} from "@solana/signers";
+import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import type { VaultDeadline } from "./vault-deadline";
 import { describeVaultSimulationError } from "./vault-simulation-error";
 import type { VaultFeeMode } from "./vault-sponsorship";
 
 /**
- * Turn a provider's unsigned plan into a landed transaction, signed by an SDP
- * custody wallet.
- *
- * This is the seam the whole vault-direct model rests on: a `vault_direct`
- * provider custodies nothing and hands back instructions, so the ONLY thing
- * that moves money is SDP signing with a wallet it controls. Nothing here is
- * Kamino-specific — it consumes the neutral `EarnVaultTransactionPlan`.
+ * Validate, simulate and compile provider-neutral strategy plans. Signing is
+ * owned by the operation worker; broadcasting takes already-recorded bytes.
  */
 
 /** A plain-data instruction from the provider contract, back in kit form. */
@@ -78,14 +60,10 @@ function toKitInstruction(instruction: EarnVaultTransactionPlan["instructions"][
 export function appendVaultRequestMemo(
   plan: EarnVaultTransactionPlan,
   kind:
-    | "vault-deposit"
-    | "vault-withdrawal"
-    | "vault-withdrawal-request"
-    | "vault-withdrawal-cancel"
-    | "external-deposit"
-    | "external-withdrawal"
-    | "external-withdrawal-request"
-    | "external-withdrawal-cancel",
+    | "strategy-deposit"
+    | "strategy-withdrawal"
+    | "strategy-withdrawal-request"
+    | "strategy-withdrawal-cancel",
   requestId: string,
   options: { compact?: boolean } = {}
 ): EarnVaultTransactionPlan {
@@ -100,14 +78,10 @@ export function appendVaultRequestMemo(
   const payload = options.compact
     ? `sdp:e:${
         {
-          "vault-deposit": "vd",
-          "vault-withdrawal": "vw",
-          "vault-withdrawal-request": "vr",
-          "vault-withdrawal-cancel": "vc",
-          "external-deposit": "ed",
-          "external-withdrawal": "ew",
-          "external-withdrawal-request": "er",
-          "external-withdrawal-cancel": "ec",
+          "strategy-deposit": "sd",
+          "strategy-withdrawal": "sw",
+          "strategy-withdrawal-request": "sr",
+          "strategy-withdrawal-cancel": "sc",
         }[kind]
       }:${createHash("sha256").update(requestId).digest("base64url").slice(0, 22)}`
     : `sdp:earn:${kind}:${requestId}`;
@@ -132,33 +106,11 @@ export interface VaultPlanExecutionScope extends VaultExecutionScope {
   expectedAssetIdentity: EarnVaultAssetIdentity;
 }
 
-export interface SignVaultPlanInput extends VaultPlanExecutionScope {
-  plan: EarnVaultTransactionPlan;
-  /** The custody wallet signer — the vault `user`, and the only real signer. */
-  owner: TransactionSigner;
-  fee: VaultFeeMode;
-  /** Successful simulation preparation reused to sign the exact same plan. */
-  prepared?: PreparedVaultPlanExecution;
-}
-
 export interface PreparedVaultPlanExecution {
   plan: EarnVaultTransactionPlan;
   lookupTables: AddressesByLookupTableAddress;
   blockhash: Blockhash;
   lastValidBlockHeight: bigint;
-}
-
-export interface SignedVaultTransaction {
-  /** The wire bytes, ready to broadcast. */
-  bytes: Uint8Array;
-  /**
-   * The signature this transaction WILL have on chain, known before it is
-   * sent — a Solana signature is the fee payer's signature over the message,
-   * so signing determines it and broadcasting only publishes it.
-   */
-  signature: Signature;
-  /** Inclusive block height after which these exact bytes cannot land. */
-  lastValidBlockHeight: string;
 }
 
 function assertExpectedPlan(
@@ -305,88 +257,6 @@ function assertVaultTransactionFits(
   throw new VaultTransactionTooLargeError(bytes.length, extraSigner);
 }
 
-/** Sign exactly one complete vault transaction without broadcasting it. */
-export async function signVaultPlan(input: SignVaultPlanInput): Promise<SignedVaultTransaction> {
-  assertExpectedPlan(input.plan, input.expectedAssetIdentity);
-  if (input.plan.providerTransaction !== undefined) return signImmutableVaultPlan(input);
-  const instructions = planInstructions(input.plan).map(toKitInstruction);
-  let prepared = input.prepared;
-  if (prepared && prepared.plan !== input.plan) {
-    throw new Error("Vault execution preparation belongs to a different plan");
-  }
-  if (!prepared) {
-    const rpc = createClusterRpc();
-    const [lookupTables, { blockhash, lastValidBlockHeight }] = await Promise.all([
-      resolveLookupTables(input),
-      input.deadline.run("Fetching the vault transaction blockhash", () =>
-        getRecentBlockhash(rpc, "confirmed")
-      ),
-    ]);
-    prepared = { plan: input.plan, lookupTables, blockhash, lastValidBlockHeight };
-  }
-  const { lookupTables, blockhash, lastValidBlockHeight } = prepared;
-
-  let signedBytes: Uint8Array;
-  if (input.fee.kind === "sponsored") {
-    // The sponsor was resolved before the provider built, because its address
-    // also had to travel into the instructions as the rent payer. Reusing it
-    // here is not just a saved round trip: re-reading it could hand signing a
-    // DIFFERENT address than the one the instructions already name.
-    const { feePayment, sponsor: feePayer } = input.fee;
-    const message = pipe(
-      createTransactionMessage({ version: 0 }),
-      (m) => setTransactionMessageFeePayer(feePayer, m),
-      (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
-      (m) => appendTransactionMessageInstructions(instructions, m),
-      (m) => applyLookupTables(m, lookupTables),
-      (m) => addSignersToTransactionMessage([input.owner], m)
-    );
-    const ownerSigned = await input.deadline.run("Signing the vault transaction", () =>
-      partiallySignTransactionMessageWithSigners(message)
-    );
-    const ownerSignedBytes = new Uint8Array(getTransactionEncoder().encode(ownerSigned));
-    assertVaultTransactionFits(ownerSignedBytes, "sponsored");
-    signedBytes = await input.deadline.run("Signing the sponsored vault fee", () =>
-      feePayment.signAsFeePayer(ownerSignedBytes)
-    );
-  } else if (input.fee.kind === "caller-provided") {
-    // Unreachable from the custody paths by construction; asserted so a new
-    // caller cannot silently fall through to wallet-pays and sign the custody
-    // wallet as the fee payer. A caller-provided fee payer signs OUTSIDE SDP —
-    // that flow compiles unsigned bytes via compileUnsignedVaultTransaction.
-    throw new Error(
-      "Caller-provided fee payers cannot be signed by SDP; compile the transaction unsigned instead"
-    );
-  } else {
-    const message = pipe(
-      createTransactionMessage({ version: 0 }),
-      (m) => setTransactionMessageFeePayerSigner(input.owner, m),
-      (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
-      (m) => appendTransactionMessageInstructions(instructions, m),
-      (m) => applyLookupTables(m, lookupTables),
-      (m) => addSignersToTransactionMessage([input.owner], m)
-    );
-    const signed = await input.deadline.run("Signing the vault transaction", () =>
-      signTransactionMessageWithSigners(message)
-    );
-    signedBytes = new Uint8Array(getTransactionEncoder().encode(signed));
-  }
-
-  assertVaultTransactionFits(signedBytes, input.fee.kind === "sponsored" ? "sponsored" : false);
-  const signed = getTransactionDecoder().decode(signedBytes);
-  if (
-    signed.signatures[input.owner.address] === null ||
-    signed.signatures[input.owner.address] === undefined
-  ) {
-    throw new Error("Vault transaction is missing the custody-owner signature");
-  }
-  return {
-    bytes: signedBytes,
-    signature: getSignatureFromTransaction(signed),
-    lastValidBlockHeight: String(lastValidBlockHeight),
-  };
-}
-
 export interface CompileUnsignedVaultTransactionInput extends VaultPlanExecutionScope {
   plan: EarnVaultTransactionPlan;
   /**
@@ -419,55 +289,10 @@ export interface UnsignedVaultTransaction {
   lastValidBlockHeight: string;
 }
 
-/** Owner authorization only; the owned-submission sponsor persists before it sends. */
-export async function signVaultOwnerOnly(
-  input: SignVaultPlanInput & { prepared: PreparedVaultPlanExecution }
-): Promise<UnsignedVaultTransaction> {
-  const owner = input.owner;
-  if (!isTransactionPartialSigner(owner) && !isTransactionModifyingSigner(owner))
-    throw new Error("Custody signer cannot sign this transaction");
-  const feePayer =
-    input.fee.kind === "sponsored"
-      ? input.fee.sponsor
-      : input.fee.kind === "caller-provided"
-        ? input.fee.feePayer
-        : owner.address;
-  const unsigned = compileUnsignedVaultTransaction({ ...input, owner: owner.address, feePayer });
-  const original = getTransactionDecoder().decode(unsigned.bytes);
-  const withLifetime = {
-    ...original,
-    lifetimeConstraint: {
-      blockhash: input.prepared.blockhash,
-      lastValidBlockHeight: input.prepared.lastValidBlockHeight,
-    },
-  };
-  const signed = await input.deadline.run("Signing the vault owner authorization", () =>
-    partiallySignTransactionWithSigners([owner], withLifetime)
-  );
-  if (!bytesEqual(signed.messageBytes, original.messageBytes))
-    throw new Error("Custody signer changed the admitted transaction");
-  for (const [signer, before] of Object.entries(original.signatures)) {
-    if (before !== null) {
-      const after = signed.signatures[address(signer)];
-      if (after === null || after === undefined || !bytesEqual(before, after))
-        throw new Error("Custody signer changed an existing signature");
-    }
-  }
-  return {
-    bytes: new Uint8Array(getTransactionEncoder().encode(signed)),
-    lastValidBlockHeight: unsigned.lastValidBlockHeight,
-  };
-}
-
 /**
- * Compile exactly one complete vault transaction WITHOUT any signature — the
- * caller-signed twin of `signVaultPlan`.
- *
- * The message shape must stay identical to the wallet-pays branch of
- * `signVaultPlan` (fee payer, lifetime, instructions, lookup-table
- * compression, in that order): the submit step later proves a signed
- * transaction is one SDP built by comparing MESSAGE bytes, so any divergence
- * here is a refused submit, not a subtle drift. A caller-provided `feePayer`
+ * Compile one complete strategy transaction for its operation signing step.
+ * The worker proves the returned signed message matches these exact bytes.
+ * A caller-provided `feePayer`
  * changes only who sits in the fee-payer seat (adding its signature slot); the
  * pipeline order is unchanged. Signature slots encode as
  * zeroed 64-byte runs, which means the unsigned encoding and the signed one
@@ -736,73 +561,4 @@ export async function simulateVaultPlan(
     prepared: { plan: input.plan, lookupTables, blockhash, lastValidBlockHeight },
     ...(unitsConsumed === undefined ? {} : { unitsConsumed: BigInt(unitsConsumed) }),
   };
-}
-
-async function signImmutableVaultPlan(input: SignVaultPlanInput): Promise<SignedVaultTransaction> {
-  const immutable = input.plan.providerTransaction;
-  if (immutable === undefined) throw new Error("Expected an immutable provider transaction");
-  if (input.fee.kind === "sponsored")
-    throw new Error("Use owned submission for sponsored provider transactions");
-  if (input.fee.kind === "caller-provided")
-    throw new Error("SDP cannot sign a caller-provided fee payer");
-  const feePayer = input.owner.address;
-  const original = immutableVaultTransaction(input.plan, input.owner.address, feePayer);
-  const owner = input.owner;
-  if (!isTransactionPartialSigner(owner) && !isTransactionModifyingSigner(owner)) {
-    throw new Error("Custody signer cannot add a signature to a provider transaction");
-  }
-  const compiled = getCompiledTransactionMessageDecoder().decode(original.messageBytes);
-  const withLifetime = {
-    ...original,
-    lifetimeConstraint: {
-      blockhash: parseBlockhash(compiled.lifetimeToken),
-      lastValidBlockHeight: BigInt(immutable.lastValidBlockHeight),
-    },
-  };
-  const ownerSigned = await input.deadline.run("Signing the provider vault transaction", () =>
-    partiallySignTransactionWithSigners([owner], withLifetime)
-  );
-  if (!bytesEqual(ownerSigned.messageBytes, original.messageBytes))
-    throw new Error("Custody signer changed the provider transaction");
-  for (const signer of immutable.additionalSigners) {
-    const before = original.signatures[address(signer)],
-      after = ownerSigned.signatures[address(signer)];
-    if (
-      before === null ||
-      before === undefined ||
-      after === null ||
-      after === undefined ||
-      !bytesEqual(before, after)
-    )
-      throw new Error("Custody signer changed a provider signature");
-  }
-  const ownerBytes = new Uint8Array(getTransactionEncoder().encode(ownerSigned));
-  const bytes = ownerBytes;
-  const signed = getTransactionDecoder().decode(bytes);
-  if (!bytesEqual(signed.messageBytes, original.messageBytes))
-    throw new Error("Fee payer changed the provider transaction");
-  assertIsFullySignedTransaction(signed);
-  assertVaultTransactionFits(bytes, false);
-  return {
-    bytes,
-    signature: getSignatureFromTransaction(signed),
-    lastValidBlockHeight: immutable.lastValidBlockHeight,
-  };
-}
-
-/** A co-signer may fill its own slot; it must preserve every signature already admitted. */
-export function assertVaultSignaturesPreserved(
-  requestedBytes: Uint8Array,
-  signedBytes: Uint8Array
-): void {
-  const before = getTransactionDecoder().decode(requestedBytes),
-    after = getTransactionDecoder().decode(signedBytes);
-  if (!bytesEqual(before.messageBytes, after.messageBytes))
-    throw new Error("Co-signer changed the admitted vault message");
-  for (const [signer, signature] of Object.entries(before.signatures)) {
-    if (signature === null) continue;
-    const actual = after.signatures[address(signer)];
-    if (actual === undefined || actual === null || !bytesEqual(signature, actual))
-      throw new Error("Co-signer changed an existing vault signature");
-  }
 }

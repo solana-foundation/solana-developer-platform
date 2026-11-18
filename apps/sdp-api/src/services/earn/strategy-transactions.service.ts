@@ -21,6 +21,8 @@ import {
 import {
   claimDiscoveredStrategyPosition,
   createPostgresEarnMovementsRepository,
+  type EarnMovementRow,
+  type EarnPositionRow,
 } from "@/db/repositories/earn-movements.repository";
 import {
   createPostgresEarnWalletTransactionsRepository,
@@ -38,7 +40,14 @@ import { createVaultDeadline } from "./vault-deadline";
 import { ledgerVaultExposureGate } from "./vault-exposure";
 import { broadcastRecordedVaultMovement } from "./vault-intent-execution.service";
 import { resolveVaultSponsorship } from "./vault-sponsorship";
-import { verifySignedWalletTransaction, type WalletSubmitResult } from "./vault-wallet.service";
+import { verifySignedWalletTransaction } from "./vault-wallet.service";
+
+/** The durable result of one prepared strategy action. */
+export interface PreparedStrategyTransactionResult {
+  position: EarnPositionRow;
+  movement: EarnMovementRow;
+  replayed: boolean;
+}
 
 /** An authenticated operation chooses the source; a signed body cannot change it. */
 export interface StrategyTransactionScope {
@@ -150,7 +159,7 @@ export async function sponsorPreparedStrategyTransaction(
   return result;
 }
 
-/** Resolve an exact prepared message, retaining compatibility with existing build IDs. */
+/** Resolve an exact prepared message within its authorized source scope. */
 export async function requirePreparedStrategyTransaction(
   env: Env,
   scope: StrategyTransactionScope,
@@ -176,7 +185,7 @@ async function replayConsumedStrategyTransaction(
   built: EarnWalletTransactionRow,
   movementId: string,
   signedTransaction: string
-): Promise<WalletSubmitResult> {
+): Promise<PreparedStrategyTransactionResult> {
   const ledger = createPostgresEarnMovementsRepository(db);
   const movement = await ledger.getMovementById({
     organizationId: scope.organizationId,
@@ -247,7 +256,7 @@ export async function submitPreparedStrategyTransaction(
     apiKeyId: string | null;
     broadcast?: boolean;
   }
-): Promise<WalletSubmitResult> {
+): Promise<PreparedStrategyTransactionResult> {
   const built = await requirePreparedStrategyTransaction(env, input, input.transactionId);
   const custodyWalletId = input.custodyWalletId;
   const signed = await verifySignedWalletTransaction(built, input.signedTransaction);
@@ -300,7 +309,7 @@ export async function submitPreparedStrategyTransaction(
       createdBy: input.userId,
       initiatedByKeyId: input.apiKeyId,
     };
-    let recorded: WalletSubmitResult;
+    let recorded: PreparedStrategyTransactionResult;
     if (built.direction === "deposit") {
       const deposit = {
         ...common,

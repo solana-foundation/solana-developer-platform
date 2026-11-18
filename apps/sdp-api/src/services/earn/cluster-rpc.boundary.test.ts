@@ -88,7 +88,7 @@ describe("Earn's cluster RPC boundary", () => {
   it("covers the files it claims to", () => {
     expect(EARN_API_FILES).toContain(DOOR);
     expect(EARN_API_FILES.length).toBeGreaterThan(20);
-    expect(EARN_SCOPED_FILES).toContain(join(API_SRC, "routes/earn/handlers/vault.ts"));
+    expect(EARN_SCOPED_FILES).toContain(join(API_SRC, "routes/earn/core/read.ts"));
     expect(RPC_PACKAGE_FILES).toContain(join(REPO, "packages/sdp-rpc/src/factory.ts"));
   });
 

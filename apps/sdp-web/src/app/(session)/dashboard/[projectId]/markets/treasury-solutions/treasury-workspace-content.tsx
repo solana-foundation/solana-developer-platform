@@ -3,16 +3,11 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   type EarnStrategy as BaseEarnStrategy,
-  type EarnPortfolioWalletStatus,
-  type EarnProgram,
   type EarnVaultPosition,
   isEarnVaultHoldingEmpty,
 } from "@sdp/types/earn";
 import type { EarnCoreStrategy } from "@sdp/types/earn-core";
-import {
-  earnProgramSolanaPayoutTokens,
-  isVaultDirectDepositEnabled,
-} from "@sdp/types/provider-access";
+import { isVaultDirectDepositEnabled } from "@sdp/types/provider-access";
 import { SOLANA_CLUSTER_LABELS } from "@sdp/types/well-known-tokens";
 import { Button } from "@sdp/ui/button";
 import { Callout } from "@sdp/ui/callout";
@@ -55,7 +50,6 @@ import {
   EarnRowIdentity,
   EarnSummary,
 } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-page-blocks";
-import { EarnProviderOrdersCard } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-provider-orders-card";
 import {
   type EarnProviderAccess,
   earnVaultDepositAvailability,
@@ -73,7 +67,6 @@ import {
   earnVaultPositionStatusLabels,
   earnVaultWithdrawalUiState,
 } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-vault-ui-state";
-import { EarnVaultWithdrawalRequestsCard } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-vault-withdrawal-requests-card";
 import {
   EarnSummarySkeleton,
   EarnTableSkeleton,
@@ -114,7 +107,6 @@ import {
 import {
   TREASURY_POSITION_COLUMNS,
   TREASURY_POSITIONS_BODY,
-  TREASURY_PROGRAM_COLUMNS,
   TREASURY_STRATEGIES_BODY,
   TREASURY_STRATEGY_COLUMNS,
   TREASURY_WALLET_GRID,
@@ -149,20 +141,6 @@ const VERIFIED_AT_FORMAT = {
   timeZone: "UTC",
   timeZoneName: "short",
 } as const satisfies Intl.DateTimeFormatOptions;
-
-/** A custodial program wallet's state, as words in their tone. */
-const PROGRAM_STATUS_DISPLAY = {
-  creating: { labelKey: "DashboardMarkets.treasury.programStatusCreating", tone: "progress" },
-  ready: { labelKey: "DashboardMarkets.treasury.programStatusReady", tone: "positive" },
-  busy: { labelKey: "DashboardMarkets.treasury.programStatusBusy", tone: "progress" },
-  failed: { labelKey: "DashboardMarkets.treasury.programStatusFailed", tone: "critical" },
-} as const satisfies Record<
-  EarnPortfolioWalletStatus,
-  {
-    labelKey: `DashboardMarkets.treasury.programStatus${string}`;
-    tone: StatusTone;
-  }
->;
 
 /**
  * A wire decimal that can be compared. Strategy rows are provider-supplied,
@@ -253,13 +231,6 @@ function strategyPositionValue(
   const values = active.map(earnVaultHoldingValue);
   if (values.some((value) => value === undefined)) return { count: active.length };
   return { count: active.length, value: sumDecimalStrings(values as string[]) };
-}
-
-function programName(program: EarnProgram, fallback: string): string {
-  const positionName = program.wallet.positions.find(
-    (position) => position.kind === "yield_source"
-  )?.label;
-  return program.label?.trim() || positionName?.trim() || fallback;
 }
 
 function treasuryStrategiesDisclosureKey(
@@ -1499,153 +1470,7 @@ function TreasuryStrategies({
   );
 }
 
-/**
- * A custodial program's way out. An open provider id may outlive its runtime capability, so the
- * withdrawal form opens only where the shared contract declares a Solana payout lane, and the row
- * says why otherwise. A read-only member (`viewer`) gets neither, which the API refuses them.
- */
-function TreasuryProgramAction({
-  onWithdraw,
-  program,
-}: {
-  onWithdraw: (program: EarnProgram) => void;
-  program: EarnProgram;
-}) {
-  const t = useTranslations();
-  const canWrite = useCanWrite();
-  if (!canWrite) return null;
-  if (earnProgramSolanaPayoutTokens(program.provider).length === 0) {
-    // The reason wraps rather than truncates: it stands in for the action, so it reads whole.
-    return (
-      <span className="block whitespace-normal text-pretty text-tertiary">
-        {t("DashboardMarkets.treasury.providerWithdrawalUnavailable")}
-      </span>
-    );
-  }
-  return (
-    <Button
-      data-earn-withdraw-focus-fallback={program.id}
-      disabled={program.wallet.status === "creating"}
-      onClick={() => onWithdraw(program)}
-      size="sm"
-      type="button"
-      variant="outline"
-    >
-      {t("DashboardMarkets.treasury.withdraw")}
-    </Button>
-  );
-}
-
-/** Organization-wide custodial programs: listed and withdrawable after their provider closes. */
-function TreasuryPrograms({
-  isLoading,
-  onWithdraw,
-  programs,
-  unavailable,
-}: {
-  isLoading: boolean;
-  onWithdraw: (program: EarnProgram) => void;
-  programs: readonly EarnProgram[];
-  unavailable: boolean;
-}) {
-  const t = useTranslations();
-  const locale = useLocale();
-  // Most organizations hold none, so nothing stands in while the list loads: a placeholder
-  // that then disappears would shift the page. The section closes the page, so arriving late
-  // moves nothing.
-  if (isLoading || (!unavailable && programs.length === 0)) return null;
-
-  let body: ReactNode;
-  if (unavailable) {
-    body = (
-      <p className="text-body text-secondary">
-        {t("DashboardMarkets.treasury.existingProgramsUnavailable")}
-      </p>
-    );
-  } else {
-    body = (
-      <>
-        <div className={EARN_TABLE_FRAME}>
-          <Table className={EARN_TABLE} data-treasury-table="programs">
-            <TableHeader>
-              <TableRow>
-                <TableHead className={cn(PAYMENTS_TABLE_HEAD, TREASURY_PROGRAM_COLUMNS.program)}>
-                  {t("DashboardMarkets.treasury.strategy")}
-                </TableHead>
-                <TableHead className={cn(PAYMENTS_TABLE_HEAD, TREASURY_PROGRAM_COLUMNS.status)}>
-                  {t("DashboardMarkets.treasury.status")}
-                </TableHead>
-                <TableHead className={cn(PAYMENTS_TABLE_HEAD, TREASURY_PROGRAM_COLUMNS.balance)}>
-                  {t("DashboardMarkets.treasury.balance")}
-                </TableHead>
-                <TableHead className={cn(PAYMENTS_TABLE_HEAD, TREASURY_PROGRAM_COLUMNS.actions)}>
-                  <span className="sr-only">{t("DashboardMarkets.treasury.actions")}</span>
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {programs.map((program) => {
-                const status = PROGRAM_STATUS_DISPLAY[program.wallet.status];
-                return (
-                  <TableRow key={program.id}>
-                    <TableCell
-                      className={cn(PAYMENTS_TABLE_CELL, TREASURY_PROGRAM_COLUMNS.program)}
-                    >
-                      <EarnRowIdentity
-                        detail={earnProviderLabel(program.provider)}
-                        name={programName(program, t("DashboardMarkets.treasury.unnamedProgram"))}
-                      />
-                    </TableCell>
-                    <TableCell className={cn(PAYMENTS_TABLE_CELL, TREASURY_PROGRAM_COLUMNS.status)}>
-                      <StatusText className="block truncate" tone={status.tone}>
-                        {t(status.labelKey)}
-                      </StatusText>
-                    </TableCell>
-                    <TableCell
-                      className={cn(
-                        PAYMENTS_TABLE_CELL,
-                        TREASURY_PROGRAM_COLUMNS.balance,
-                        "text-primary tabular-nums"
-                      )}
-                    >
-                      {formatUsd(program.wallet.balance.totalUsd, locale)}
-                      {/* On a phone the status column drops out and its word reads here. */}
-                      <StatusText className="block truncate @2xl:hidden" tone={status.tone}>
-                        {t(status.labelKey)}
-                      </StatusText>
-                    </TableCell>
-                    <TableCell
-                      className={cn(PAYMENTS_TABLE_CELL, TREASURY_PROGRAM_COLUMNS.actions)}
-                    >
-                      <TreasuryProgramAction onWithdraw={onWithdraw} program={program} />
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
-        {/* A provider can require customer-side approval, but SDP has no provider-approval
-            route or signer UI yet. Never imply the dashboard can release a withdrawal that is
-            parked there. */}
-        <Callout variant="neutral">
-          {t("DashboardMarkets.treasury.withdrawalApprovalUnavailable")}
-        </Callout>
-      </>
-    );
-  }
-
-  return (
-    <RecordBlock
-      hint={t("DashboardMarkets.treasury.existingProgramsDescription")}
-      title={t("DashboardMarkets.treasury.existingProgramsTitle")}
-    >
-      {body}
-    </RecordBlock>
-  );
-}
-
-export interface TreasuryWorkspaceContentProps {
+interface TreasuryWorkspaceContentProps {
   activeWallets: readonly EarnFundingWallet[];
   allocation: TreasuryAllocation;
   catalogueFailed: boolean;
@@ -1658,22 +1483,16 @@ export interface TreasuryWorkspaceContentProps {
   mainnetCatalogueFailed: boolean;
   mainnetCatalogueLoading: boolean;
   onDeposit: (strategy: EarnStrategy) => void;
-  /** A queued request settled: re-read holdings and cash, nothing else. */
-  onHoldingsChanged: () => void;
   onRefresh: () => void;
   onWithdrawPosition: (
     position: EarnVaultPosition,
     parSource?: EarnVaultParRedemptionSource
   ) => void;
-  onWithdrawProgram: (program: EarnProgram) => void;
   portfolioApy: string | undefined;
   positions: readonly EarnVaultPosition[] | undefined;
   positionsFailed: boolean;
   positionsLoading: boolean;
   balanceOf: (position: EarnVaultPosition) => TreasuryPositionBalance;
-  programs: readonly EarnProgram[];
-  programsLoading: boolean;
-  programsUnavailable: boolean;
   providerAccess: EarnProviderAccess | null;
   summaryLoading: boolean;
   balancesRefreshing: boolean;
@@ -1685,8 +1504,7 @@ export interface TreasuryWorkspaceContentProps {
 
 /**
  * Treasury's page, in the page column the shell titles: the summary, the custody wallets that
- * fund it, the open positions, any queued withdrawals, the strategies to deposit into, and any
- * custodial programs still held.
+ * fund it, open positions and the strategies available to deposit into.
  */
 export function TreasuryWorkspaceContent({
   activeWallets,
@@ -1701,18 +1519,13 @@ export function TreasuryWorkspaceContent({
   mainnetCatalogueFailed,
   mainnetCatalogueLoading,
   onDeposit,
-  onHoldingsChanged,
   onRefresh,
   onWithdrawPosition,
-  onWithdrawProgram,
   portfolioApy,
   positions,
   positionsFailed,
   positionsLoading,
   balanceOf,
-  programs,
-  programsLoading,
-  programsUnavailable,
   providerAccess,
   summaryLoading,
   balancesRefreshing,
@@ -1747,8 +1560,6 @@ export function TreasuryWorkspaceContent({
         wallets={activeWallets}
         withdrawals={vaultWithdrawals}
       />
-      <EarnVaultWithdrawalRequestsCard onChanged={onHoldingsChanged} />
-      <EarnProviderOrdersCard onChanged={onHoldingsChanged} />
       <TreasuryStrategies
         devnetFailed={devnetCatalogueFailed}
         devnetLoading={devnetCatalogueLoading}
@@ -1764,12 +1575,6 @@ export function TreasuryWorkspaceContent({
         providerAccess={providerAccess}
         strategies={catalogueStrategies}
         unrecordedShareMints={allocation.unrecordedShareMints}
-      />
-      <TreasuryPrograms
-        isLoading={programsLoading}
-        onWithdraw={onWithdrawProgram}
-        programs={programs}
-        unavailable={programsUnavailable}
       />
     </RecordStack>
   );

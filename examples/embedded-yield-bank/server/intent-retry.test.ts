@@ -154,3 +154,64 @@ it("prepares without signing and recovers a lost execute response through the sa
   expect(submits).toBe(3);
   expect(sign).toHaveBeenCalledTimes(1);
 });
+
+it("refuses to sign an operation belonging to a different owner", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  const fetchMock = vi.fn(async () =>
+    Response.json({
+      data: {
+        operation: {
+          id: "foreign",
+          kind: "earn.deposit",
+          status: "prepared",
+          intent: {
+            kind: "earn.deposit",
+            strategyId: "strategy",
+            source: { ownerAddress: "other" },
+            amount: { mint: "usdc", value: "10" },
+          },
+          actionId: "action",
+          version: 1,
+          nextAction: {
+            type: "sign_transaction",
+            transaction: "unsigned",
+            lastValidBlockHeight: "100",
+            expiresAt: null,
+          },
+          terms: {
+            expiresAt: null,
+            estimate: null,
+            minimum: null,
+            fees: null,
+            options: [],
+          },
+          resourceRef: null,
+          result: null,
+          cancelRequestedAt: null,
+          error: null,
+          createdAt: "2026-11-18T12:00:00Z",
+          updatedAt: "2026-11-18T12:00:00Z",
+        },
+      },
+    })
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  const response = await execute(
+    new Request("https://bank.example/api/operations/foreign/execute", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "https://bank.example",
+      },
+      body: JSON.stringify({
+        actionId: "action",
+        version: 1,
+        idempotencyKey: "key",
+      }),
+    }),
+    { params: Promise.resolve({ operationId: "foreign" }) }
+  );
+  expect(response.status).toBe(500);
+  expect(sign).not.toHaveBeenCalled();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});

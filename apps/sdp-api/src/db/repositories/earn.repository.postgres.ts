@@ -8,22 +8,17 @@ import type {
 } from "@sdp/types/earn";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
-import { type DatabaseClient as AppDb, asTransactionalClient } from "@/db/client";
+import type { DatabaseClient as AppDb } from "@/db/client";
 import type {
   DeprecateUnlistedEarnStrategiesInput,
-  EarnProviderWalletRow,
   EarnRepository,
   EarnStrategyRow,
-  InsertEarnProviderWalletInput,
-  ListEarnProviderWalletsInput,
-  ListEarnProviderWalletsResult,
   ListEarnStrategiesInput,
   ListEarnStrategiesResult,
   UpdateEarnStrategyMetricsInput,
   UpsertEarnStrategyInput,
 } from "./earn.repository";
-import { generateEarnProviderWalletId, generateEarnStrategyId } from "./earn.repository";
-import { mintEarnPositionForProviderWallet } from "./earn-movements.repository";
+import { generateEarnStrategyId } from "./earn.repository";
 
 /**
  * `host_cluster` is NULLABLE in the schema on purpose (migration 0057 is the
@@ -60,21 +55,6 @@ function mapStrategyRow(row: Record<string, unknown>): EarnStrategyRow {
     host_cluster:
       (row.host_cluster as SolanaCluster | null) ?? CLUSTER_BY_SDP_ENVIRONMENT[environment],
     environment,
-    created_at: row.created_at as string,
-    updated_at: row.updated_at as string,
-  };
-}
-
-function mapProviderWalletRow(row: Record<string, unknown>): EarnProviderWalletRow {
-  return {
-    id: row.id as string,
-    organization_id: row.organization_id as string,
-    project_id: row.project_id as string | null,
-    environment: row.environment as SdpEnvironment,
-    provider: row.provider as string,
-    provider_wallet_ref: row.provider_wallet_ref as string,
-    label: row.label as string | null,
-    created_by: row.created_by as string,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -610,87 +590,6 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
           current_apy: row.current_apy as string | null,
           tvl_usd: tvl !== null && Number.isFinite(tvl) ? tvl : null,
         };
-      });
-    },
-
-    async getProviderWalletById(params) {
-      const row = await db
-        .prepare(
-          `SELECT * FROM earn_provider_wallets
-             WHERE organization_id = ? AND environment = ? AND id = ?`
-        )
-        .bind(params.organizationId, params.environment, params.walletId)
-        .first<Record<string, unknown>>();
-      return row ? mapProviderWalletRow(row) : null;
-    },
-
-    async listProviderWallets(
-      input: ListEarnProviderWalletsInput
-    ): Promise<ListEarnProviderWalletsResult> {
-      const conditions = ["organization_id = ?", "project_id = ?", "environment = ?"];
-      const bindings: unknown[] = [input.organizationId, input.projectId, input.environment];
-
-      if (input.provider) {
-        conditions.push("provider = ?");
-        bindings.push(input.provider);
-      }
-
-      // Oldest first, so the head of the list is stable for a program's
-      // whole life (migration 0056).
-      return selectPage(
-        db,
-        "earn_provider_wallets",
-        conditions,
-        bindings,
-        input,
-        mapProviderWalletRow,
-        "created_at ASC, id ASC"
-      );
-    },
-
-    async getProviderWalletByRef(params) {
-      const row = await db
-        .prepare(
-          `SELECT * FROM earn_provider_wallets
-             WHERE provider = ? AND provider_wallet_ref = ?`
-        )
-        .bind(params.provider, params.providerWalletRef)
-        .first<Record<string, unknown>>();
-      return row ? mapProviderWalletRow(row) : null;
-    },
-
-    async insertProviderWallet(input: InsertEarnProviderWalletInput) {
-      const id = generateEarnProviderWalletId();
-
-      // Linking a program also opens its custodial HOLDING in the unified
-      // ledger, atomically. Without it the program's first withdrawal would have
-      // no position to belong to, and the ledger requires every movement to have
-      // one (PRO-1705). 0064 does the same for programs that already exist.
-      return db.transaction(async (executor) => {
-        const transaction = asTransactionalClient(executor);
-        const row = await transaction
-          .prepare(
-            `INSERT INTO earn_provider_wallets (
-             id, organization_id, project_id, environment,
-             provider, provider_wallet_ref, label, created_by
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-           RETURNING *`
-          )
-          .bind(
-            id,
-            input.organizationId,
-            input.projectId,
-            input.environment,
-            input.provider,
-            input.providerWalletRef,
-            input.label,
-            input.createdBy
-          )
-          .first<Record<string, unknown>>();
-        if (!row) return null;
-
-        await mintEarnPositionForProviderWallet(transaction, id);
-        return mapProviderWalletRow(row);
       });
     },
   };

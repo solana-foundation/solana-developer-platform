@@ -368,14 +368,12 @@ public reference, playground, Postman and AI generators must not include them.
 Publishing those routes requires named security sign-off. The Treasury and
 provider-integration guides also remain under `content/unpublished/earn`.
 
-Legacy guides describe retirement and recovery: fresh legacy deposit and
-withdrawal writers, program creation and allocation changes return `410`.
-Historical reads, exact already-built signed submissions and existing exits
-remain available. Keep these compatibility behaviors distinct from the new
-asynchronous operation contract. Programs and provider administration remain
-outside the pinned public API contract.
-
----
+Earn has four core actions and five shared operation lifecycle operations.
+Six independent WisdomTree onboarding operations remain for eligibility. Old
+catalogue, product, preview, transaction and program routes are removed. Guides
+must use the core contract for holdings, history, pending actions and exits.
+`EARN_PUBLIC_SURFACE_PUBLISHED=false` also holds Earn out of the public manifest;
+publication of the replacements requires named security sign-off.
 
 ## Do's and Don'ts
 

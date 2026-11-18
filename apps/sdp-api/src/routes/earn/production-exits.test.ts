@@ -16,18 +16,6 @@ const EARN_ENTRY_ROUTES = [
   "POST /v1/earn/onboarding/wisdomtree/:counterpartyId",
   "POST /v1/earn/onboarding/wisdomtree/:counterpartyId/documents",
   "POST /v1/earn/onboarding/wisdomtree/:counterpartyId/corrections/:reasonId",
-  "POST /v1/earn/provider-actions/preparations",
-  "POST /v1/earn/provider-actions/cancellations",
-  "POST /v1/earn/provider-actions/external/preparation-transactions",
-  "POST /v1/earn/provider-actions/external/cancellation-transactions",
-  "POST /v1/earn/provider-actions/external/preparations",
-  "POST /v1/earn/provider-actions/external/cancellations",
-  "POST /v1/earn/vault-deposit-previews",
-  "POST /v1/earn/external-wallet/deposit-transactions",
-  "POST /v1/earn/vault-deposits",
-  "POST /v1/earn/external-wallet/deposits",
-  "POST /v1/earn/programs",
-  "PUT /v1/earn/programs/:programId",
 ];
 
 function earnRoutes(): Array<{ method: string; path: string }> {
@@ -83,17 +71,13 @@ describe("Earn exits without the production entitlement (APE-351, ADR 0002)", ()
     }
   });
 
-  it.each([
-    "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
-    "/v1/earn/external-wallet/withdrawal-request-cancellations",
-    "/v1/earn/vault-withdrawal-requests/request-id/cancel",
-  ])("keeps cancellation available as an exit: %s", (path) => {
-    expect(isEarnExitOrRead("POST", path)).toBe(true);
+  it("keeps the shared withdrawal preparation available as an exit", () => {
+    expect(isEarnExitOrRead("POST", "/v1/earn/withdraw")).toBe(true);
   });
 
   it("refuses unknown methods and paths outside Earn", () => {
-    expect(isEarnExitOrRead("DELETE", "/v1/earn/vault-withdrawals")).toBe(false);
+    expect(isEarnExitOrRead("DELETE", "/v1/earn/withdraw")).toBe(false);
     expect(isEarnExitOrRead("POST", "/v1/payments/transfers")).toBe(false);
-    expect(isEarnExitOrRead("POST", "/v1/earn/vault-withdrawals/extra")).toBe(false);
+    expect(isEarnExitOrRead("POST", "/v1/earn/withdraw/extra")).toBe(false);
   });
 });

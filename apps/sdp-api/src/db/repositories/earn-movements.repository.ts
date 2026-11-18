@@ -201,76 +201,6 @@ export interface EarnMovementRow {
 }
 
 /**
- * Columns a re-projection must not clobber.
- *
- * `finalized` is the one status the unified ledger can hold that no legacy table
- * can express, so a legacy row can never be the authority on a row that already
- * reached it. Without this guard a later legacy write would not merely regress
- * the status — it would re-project `settled_at` as NULL and violate 0062's
- * settlement biconditional, failing the legacy write itself.
- */
-
-/**
- * Create the custodial holding for a newly linked program wallet.
- *
- * The only projection that mints an id instead of preserving one: a program
- * wallet never had a holding row to carry an id from. Insert-only and guarded on
- * the wallet, so linking is idempotent and an existing holding — including one
- * 0064 already minted — is left exactly as it is.
- */
-export async function mintEarnPositionForProviderWallet(
-  db: AppDb,
-  providerWalletId: string
-): Promise<void> {
-  await db
-    .prepare(
-      `INSERT INTO earn_positions (
-         id, organization_id, project_id, environment, provider, kind,
-         provider_wallet_id, label, created_by, created_at, updated_at, activated_at
-       )
-       SELECT
-         ?, wallet.organization_id, wallet.project_id, wallet.environment,
-         wallet.provider, 'custodial', wallet.id,
-         -- earn_provider_wallets.label is nullable and earn_positions.label is
-         -- not. The provider wallet ref is the honest fallback: it is what the
-         -- provider console shows for an unlabelled program.
-         COALESCE(wallet.label, wallet.provider_wallet_ref),
-         wallet.created_by, wallet.created_at, wallet.updated_at,
-         -- A custodial holding is live from the moment its program exists, unlike a
-         -- vault claim, which is only activated by a durably recorded signed
-         -- transaction.
-         wallet.created_at
-       FROM earn_provider_wallets wallet
-       WHERE wallet.id = ?
-         AND NOT EXISTS (
-           SELECT 1 FROM earn_positions existing
-            WHERE existing.provider_wallet_id = wallet.id
-              AND existing.kind = 'custodial'
-         )
-       ON CONFLICT DO NOTHING`
-    )
-    .bind(generateEarnPositionId(), providerWalletId)
-    .run();
-
-  // The invariant is the POST-condition, not the insert: after this call the
-  // program has a custodial holding, whether this call minted it or found one.
-  // Asserting it here is what stops a program from existing that the ledger
-  // cannot record a withdrawal against — a zero-row insert is silent otherwise.
-  const held = await db
-    .prepare(
-      `SELECT 1 AS held FROM earn_positions
-       WHERE provider_wallet_id = ? AND kind = 'custodial'`
-    )
-    .bind(providerWalletId)
-    .first<{ held: number }>();
-  if (!held) {
-    throw new Error(
-      `Earn ledger could not open a custodial holding for program wallet ${providerWalletId}`
-    );
-  }
-}
-
-/**
  * ── Reads ──────────────────────────────────────────────────────────────────
  *
  * Every Earn read serves from the unified tables. The wire contracts are
@@ -305,41 +235,6 @@ export interface EarnMovementsRepository {
     organizationId: string;
     requestId: string;
   }): Promise<EarnMovementRow | null>;
-  /** Custodial replay lookup — HOLDING-scoped, matching 0055's wallet anchor. */
-  findCustodialMovementByRequestId(params: {
-    organizationId: string;
-    providerWalletId: string;
-    requestId: string;
-  }): Promise<EarnMovementRow | null>;
-  /** Observation lookup — global index; callers assert the org after the fetch. */
-  findMovementByProviderReference(params: {
-    provider: string;
-    providerReference: string;
-  }): Promise<EarnMovementRow | null>;
-  /**
-   * One workspace's recorded vault movements of ONE direction, newest first, as
-   * a keyset page. The direction is a required parameter rather than two copies
-   * of this query: deposits and withdrawals share every scoping rule
-   * (organization, environment, exact project, wallet binding), and a shared
-   * builder is what keeps them from drifting apart.
-   */
-  listVaultMovements(params: {
-    organizationId: string;
-    environment: SdpEnvironment;
-    projectId: string;
-    custodyWalletIds: readonly string[];
-    direction: EarnMovementDirection;
-    limit: number;
-    before: EarnMovementCursor | null;
-    settled?: boolean;
-  }): Promise<{ rows: EarnMovementRow[]; hasMore: boolean }>;
-  /** One program's withdrawal history, offset-paged with a total. */
-  listCustodialMovements(params: {
-    organizationId: string;
-    providerWalletId: string;
-    limit: number;
-    offset: number;
-  }): Promise<{ rows: EarnMovementRow[]; total: number }>;
   getPositionById(params: {
     organizationId: string;
     environment: SdpEnvironment;
@@ -689,16 +584,6 @@ export interface EarnMovementsRepository {
     movementId: string;
     organizationId: string;
   }): Promise<EarnMovementRow | null>;
-  /**
-   * Insert-at-intent for a custodial movement: the row exists before the provider
-   * accepts. Always returns the row — a missing holding heals then retries, and a
-   * missing program wallet throws rather than letting money move unrecorded.
-   */
-  createCustodialMovement(input: CreateCustodialMovementInput): Promise<EarnMovementRow>;
-  /** Guarded CAS on a custodial movement, by row id or by provider reference. */
-  updateCustodialMovementGuarded(
-    input: UpdateCustodialMovementGuardedInput
-  ): Promise<EarnMovementRow | null>;
 }
 
 export interface CreateSignedVaultDepositIntentInput
@@ -920,41 +805,6 @@ interface CreateSignedWalletWithdrawalIntentInput {
   initiatedByKeyId?: string | null;
 }
 
-export interface CreateCustodialMovementInput {
-  organizationId: string;
-  projectId: string;
-  environment: SdpEnvironment;
-  provider: string;
-  /** The program wallet this movement is reached through; resolves the holding. */
-  providerWalletId: string;
-  /** USD decimal string (the portfolio vocabulary). */
-  amountRequestedUsd: string;
-  /** Payout stablecoin symbol; NOT the unit, which is always `usd` here. */
-  payoutToken: string;
-  destinationAddress: string;
-  requestId: string;
-  idempotencyFingerprint: string;
-  providerData: Record<string, unknown>;
-  createdBy: string | null;
-  initiatedByKeyId: string | null;
-}
-
-type UpdateCustodialMovementSelector =
-  | { movementId: string }
-  | { provider: string; providerReference: string };
-
-interface UpdateCustodialMovementGuardedInput {
-  selector: UpdateCustodialMovementSelector;
-  organizationId: string;
-  toStatus: string;
-  providerReference?: string;
-  amountSettled?: string | null;
-  feeAmount?: string | null;
-  failureReason?: string | null;
-  settledAt?: string | null;
-  providerData?: Record<string, unknown>;
-}
-
 /**
  * The legal source states for a transition, read from the shared matrix rather
  * than spelled again here — so the guard cannot drift from the vocabulary it is
@@ -996,7 +846,7 @@ const ATOMIC_SETTLED_STATUSES_BY_DIRECTION = {
  * finalized; a future authenticated provider reconciler must introduce its
  * own durable completion fact before this predicate can close those rows.
  */
-function vaultSettlementFilter(
+function _vaultSettlementFilter(
   direction: EarnMovementDirection,
   settled: boolean | undefined
 ): { clause: string; values: readonly unknown[] } {
@@ -1267,147 +1117,6 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         .bind(params.organizationId, params.requestId)
         .first<Record<string, unknown>>();
       return row ? mapMovementRow(row) : null;
-    },
-
-    async findCustodialMovementByRequestId(params) {
-      // Anchored on the HOLDING, which is 1:1 with the program wallet, so sibling
-      // projects sharing that program resolve the same replay row — 0055's rule.
-      const row = await db
-        .prepare(
-          `SELECT movement.* FROM earn_movements movement
-             INNER JOIN earn_positions position
-               ON position.id = movement.position_id
-              AND position.kind = 'custodial'
-             WHERE movement.organization_id = ?
-               AND position.provider_wallet_id = ?
-               AND movement.request_id = ?
-               AND movement.execution_model = 'custodial'`
-        )
-        .bind(params.organizationId, params.providerWalletId, params.requestId)
-        .first<Record<string, unknown>>();
-      return row ? mapMovementRow(row) : null;
-    },
-
-    async findMovementByProviderReference(params) {
-      const row = await db
-        .prepare(`SELECT * FROM earn_movements WHERE provider = ? AND provider_reference = ?`)
-        .bind(params.provider, params.providerReference)
-        .first<Record<string, unknown>>();
-      return row ? mapMovementRow(row) : null;
-    },
-
-    async listVaultMovements(params) {
-      if (params.custodyWalletIds.length === 0) {
-        throw new Error(
-          "listVaultMovements requires at least one project-scoped custody wallet id"
-        );
-      }
-      const beforeClause = params.before ? "AND (created_at, id) < (?, ?)" : "";
-      const beforeValues = params.before ? [params.before.createdAt, params.before.id] : [];
-      const settledFilter = vaultSettlementFilter(params.direction, params.settled);
-      const result = await db
-        .prepare(
-          // An EXACT project match. `project_id` is nullable only through
-          // ON DELETE SET NULL, so a null means the project was deleted, and a
-          // deleted project's movements are not addressable through a
-          // project-scoped read.
-          `SELECT * FROM earn_movements
-             WHERE organization_id = ?
-               AND environment = ?
-               AND execution_model = 'vault_direct'
-               AND direction = ?
-               AND custody_wallet_id = ANY (?::text[])
-               AND project_id = ?
-               ${settledFilter.clause}
-               ${beforeClause}
-             ORDER BY created_at DESC, id DESC
-             LIMIT ?`
-        )
-        .bind(
-          params.organizationId,
-          params.environment,
-          params.direction,
-          params.custodyWalletIds,
-          params.projectId,
-          ...settledFilter.values,
-          ...beforeValues,
-          params.limit + 1
-        )
-        .all<Record<string, unknown>>();
-      const ledgerRows = (result.results ?? []).map(mapMovementRow);
-      if (params.direction !== "withdrawal" || params.settled === false) {
-        return {
-          rows: ledgerRows.slice(0, params.limit),
-          hasMore: ledgerRows.length > params.limit,
-        };
-      }
-      const queueBeforeClause = params.before
-        ? `AND (COALESCE(fulfilled_at, updated_at),
-                    '${QUEUED_FULFILLMENT_MOVEMENT_PREFIX}' || id) < (?, ?)`
-        : "";
-      const queue = await db
-        .prepare(
-          `SELECT * FROM earn_vault_withdrawal_requests
-            WHERE organization_id = ? AND environment = ? AND project_id = ?
-              AND custody_wallet_id = ANY (?::text[])
-              AND status = 'fulfilled' AND closing_signature IS NOT NULL
-              ${queueBeforeClause}
-            ORDER BY COALESCE(fulfilled_at, updated_at) DESC, id DESC
-            LIMIT ?`
-        )
-        .bind(
-          params.organizationId,
-          params.environment,
-          params.projectId,
-          params.custodyWalletIds,
-          ...(params.before ? [params.before.createdAt, params.before.id] : []),
-          params.limit + 1
-        )
-        .all<Record<string, unknown>>();
-      return mergeMovementPage(
-        ledgerRows,
-        (queue.results ?? []).map(mapFulfilledQueueMovement),
-        params.limit
-      );
-    },
-
-    async listCustodialMovements(params) {
-      // Program-scoped, not (org, project): every project in the environment
-      // reaches the same programs, and since PRO-1670 an organization may hold
-      // several — so the program is what joins sibling projects' history while
-      // keeping a sibling PROGRAM's payouts out. One program = one history.
-      const conditions = [
-        "movement.organization_id = ?",
-        "position.provider_wallet_id = ?",
-        "movement.execution_model = 'custodial'",
-      ];
-      const bindings: unknown[] = [params.organizationId, params.providerWalletId];
-      const where = conditions.join(" AND ");
-      const from = `FROM earn_movements movement
-             INNER JOIN earn_positions position
-               ON position.id = movement.position_id
-              AND position.kind = 'custodial'`;
-
-      const [page, countRow] = await Promise.all([
-        db
-          .prepare(
-            `SELECT movement.* ${from}
-               WHERE ${where}
-               ORDER BY movement.created_at DESC, movement.id DESC
-               LIMIT ? OFFSET ?`
-          )
-          .bind(...bindings, params.limit, params.offset)
-          .all<Record<string, unknown>>(),
-        db
-          .prepare(`SELECT COUNT(*)::int AS total ${from} WHERE ${where}`)
-          .bind(...bindings)
-          .first<{ total: number }>(),
-      ]);
-
-      return {
-        rows: (page.results ?? []).map(mapMovementRow),
-        total: countRow?.total ?? 0,
-      };
     },
 
     async getPositionById(params) {
@@ -2766,127 +2475,6 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
             RETURNING *`
         )
         .bind(input.movementId, input.organizationId)
-        .first<Record<string, unknown>>();
-      return row ? mapMovementRow(row) : null;
-    },
-
-    async createCustodialMovement(input) {
-      // Status, denomination and direction are fixed for this shape: an intent row
-      // exists before the provider call is accepted and never in another state, and
-      // a portfolio withdrawal is USD-denominated by definition. The holding is
-      // resolved by JOIN rather than passed in, so a movement can never name one
-      // that does not belong to its program.
-      const insert = () =>
-        db
-          .prepare(
-            `INSERT INTO earn_movements (
-             id, organization_id, project_id, environment, provider,
-             execution_model, direction, position_id, status,
-             denomination, amount_requested, payout_token, destination_address,
-             request_id, idempotency_fingerprint, provider_data,
-             created_by, initiated_by_key_id
-           )
-           SELECT ?, ?, ?, ?, ?, 'custodial', 'withdrawal', position.id, 'requested',
-                  'usd', ?, ?, ?, ?, ?, ?::jsonb, ?, ?
-             FROM earn_positions position
-            WHERE position.provider_wallet_id = ?
-              AND position.kind = 'custodial'
-           RETURNING *`
-          )
-          .bind(
-            generateEarnMovementId(),
-            input.organizationId,
-            input.projectId,
-            input.environment,
-            input.provider,
-            input.amountRequestedUsd,
-            input.payoutToken,
-            input.destinationAddress,
-            input.requestId,
-            input.idempotencyFingerprint,
-            JSON.stringify(input.providerData ?? {}),
-            input.createdBy,
-            input.initiatedByKeyId,
-            input.providerWalletId
-          )
-          .first<Record<string, unknown>>();
-
-      const row = await insert();
-      if (row) return mapMovementRow(row);
-
-      // Zero rows means the JOIN found no holding for this program. Open one and
-      // retry rather than failing: a program linked by a revision that predates
-      // the ledger, or during a rollout or rollback window, has no holding
-      // through no fault of the caller, and refusing here takes that program's
-      // whole withdrawal endpoint down permanently until an operator intervenes.
-      // The mint is insert-only and guarded on the wallet, so this is safe to
-      // race.
-      await mintEarnPositionForProviderWallet(db, input.providerWalletId);
-      const healed = await insert();
-      if (!healed) {
-        // Still nothing: the program wallet itself does not exist, which is a
-        // caller bug rather than a gap in the ledger. Loud, because the
-        // alternative is money moving unrecorded.
-        throw new Error(
-          `Earn program wallet ${input.providerWalletId} has no custodial holding to record a movement against`
-        );
-      }
-      return mapMovementRow(healed);
-    },
-
-    async updateCustodialMovementGuarded(input) {
-      // Dynamic SET list, payments idiom: `undefined` means "don't touch", `null`
-      // is a real write; provider_data is a shallow JSONB merge. updated_at is
-      // DB-stamped (earn convention), never caller-supplied.
-      const assignments = ["status = ?", "updated_at = sdp_iso_now()"];
-      const assignmentValues: unknown[] = [input.toStatus];
-      for (const [column, value] of [
-        ["provider_reference", input.providerReference],
-        ["amount_settled", input.amountSettled],
-        ["fee_amount", input.feeAmount],
-        ["failure_reason", input.failureReason],
-        ["settled_at", input.settledAt],
-      ] as const) {
-        if (value !== undefined) {
-          assignments.push(`${column} = ?`);
-          assignmentValues.push(value);
-        }
-      }
-      if (input.providerData !== undefined) {
-        assignments.push("provider_data = provider_data || ?::jsonb");
-        assignmentValues.push(JSON.stringify(input.providerData));
-      }
-
-      // The CAS guard and the org scope live in the same WHERE as the selector, so
-      // the whole transition is one atomic statement: the loser of a concurrent
-      // race simply matches zero rows.
-      const conditions = [
-        "organization_id = ?",
-        "execution_model = 'custodial'",
-        "status = ANY(?)",
-      ];
-      const conditionValues: unknown[] = [
-        input.organizationId,
-        // From the shared matrix, never the caller: terminal statuses appear in no
-        // source list, so regression is unrepresentable rather than merely refused.
-        [...allowedSourceStatuses("custodial", input.toStatus)],
-      ];
-      if ("movementId" in input.selector) {
-        conditions.push("id = ?");
-        conditionValues.push(input.selector.movementId);
-      } else {
-        conditions.push("provider = ?", "provider_reference = ?");
-        conditionValues.push(input.selector.provider, input.selector.providerReference);
-      }
-
-      const row = await db
-        .prepare(
-          `UPDATE earn_movements
-              SET ${assignments.join(", ")}
-            WHERE ${conditions.join(" AND ")}
-            RETURNING *`
-        )
-        .bind(...assignmentValues, ...conditionValues)
         .first<Record<string, unknown>>();
       return row ? mapMovementRow(row) : null;
     },

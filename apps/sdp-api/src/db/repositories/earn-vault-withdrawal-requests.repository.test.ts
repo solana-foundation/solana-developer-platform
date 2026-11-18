@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
-import { runWithTenantDatabaseIdentity } from "@/db/identity";
+import { runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";
+import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { createPostgresEarnWalletTransactionsRepository } from "@/db/repositories/earn-wallet-transactions.repository";
 import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
@@ -10,6 +11,7 @@ import { recordSignedWalletQueuedRequest } from "@/services/earn/vault-queued-wi
 import { reconcileEarnVaultQueuedWithdrawals } from "@/services/earn/vault-queued-withdrawal-reconciliation.service";
 import { ENVIRONMENT_CLUSTER_CASES, installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/helpers/custody";
+import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -40,8 +42,8 @@ describe("Earn queued withdrawal repository", () => {
   let repository: EarnVaultWithdrawalRequestsRepository;
   let sequence = 0;
 
-  describe("canonical wallet build views", () => {
-    // The physical names exercise compatibility with the previous revision.
+  describe("canonical wallet build storage", () => {
+    // Historical storage stays separate from the prelaunch core.
     const legacyDirect = "earn_external_wallet_transactions";
     const legacyQueue = "earn_external_wallet_withdrawal_request_transactions";
 
@@ -66,16 +68,19 @@ describe("Earn queued withdrawal repository", () => {
       });
     }
 
-    async function queuedBuild() {
+    async function queuedBuild(
+      input: { positionId?: string; custodyWalletId?: string; ownerAddress?: string } = {}
+    ) {
       return repository.createWalletTransaction({
         id: "earn_wallet_withdrawal_request_transaction_alias_test",
         organizationId: ORG,
         projectId: PROJECT,
         environment: "sandbox",
         provider: "veda",
-        positionId: OWNER_POSITION,
+        positionId: input.positionId ?? OWNER_POSITION,
+        custodyWalletId: input.custodyWalletId,
         action: "request",
-        ownerAddress: OWNER_ADDRESS,
+        ownerAddress: input.ownerAddress ?? OWNER_ADDRESS,
         vaultAddress: VAULT,
         tokenMint: TOKEN_MINT,
         shareMint: SHARE_MINT,
@@ -93,18 +98,215 @@ describe("Earn queued withdrawal repository", () => {
       });
     }
 
-    it("keeps both aliases automatically writable with caller-enforced RLS", async () => {
-      const result = await getDb(env).queryMany<{ relname: string; reloptions: string[] }>(
-        `SELECT relname, reloptions FROM pg_class
+    it("uses physical tables with forced tenant RLS", async () => {
+      const result = await getDb(env).queryMany<{
+        relname: string;
+        relkind: string;
+        relrowsecurity: boolean;
+        relforcerowsecurity: boolean;
+      }>(
+        `SELECT relname, relkind, relrowsecurity, relforcerowsecurity FROM pg_class
           WHERE relname IN ('earn_wallet_transactions',
                             'earn_wallet_withdrawal_request_transactions')
-            AND relkind = 'v' ORDER BY relname`
+            ORDER BY relname`
       );
       expect(result).toHaveLength(2);
-      expect(result.every((row) => row.reloptions.includes("security_invoker=true"))).toBe(true);
+      expect(
+        result.every((row) => row.relkind === "r" && row.relrowsecurity && row.relforcerowsecurity)
+      ).toBe(true);
     });
 
-    it("shares builds, row locks, update counts and triggers with the old names", async () => {
+    it("retains constraints without linking historical build storage", async () => {
+      const db = getDb(env);
+      for (const [current, historical] of [
+        ["earn_wallet_transactions", legacyDirect],
+        ["earn_wallet_withdrawal_request_transactions", legacyQueue],
+      ]) {
+        const definitions = async (table: string) =>
+          (
+            await db.queryMany<{ definition: string }>(
+              `SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+            WHERE conrelid = ?::regclass AND conname <> 'earn_queued_build_custody_position_fk'`,
+              [table]
+            )
+          )
+            .map((row) => row.definition.replaceAll("position_owner_address", "owner_address"))
+            .sort();
+        expect(await definitions(current)).toEqual(await definitions(historical));
+        const names = await db.queryMany<{ conname: string }>(
+          "SELECT conname FROM pg_constraint WHERE conrelid = ?::regclass",
+          [current]
+        );
+        expect(names.every((row) => !row.conname.includes("external_wallet"))).toBe(true);
+      }
+      const direct = await directBuild();
+      const queued = await queuedBuild();
+      expect(
+        await db.queryOne(`SELECT id FROM ${legacyDirect} WHERE id = ?`, [direct.id])
+      ).toBeNull();
+      expect(
+        await db.queryOne(`SELECT id FROM ${legacyQueue} WHERE id = ?`, [queued.id])
+      ).toBeNull();
+    });
+
+    it("retains the owner position claim in both directions", async () => {
+      const built = await queuedBuild();
+      await expect(
+        getDb(env).execute(
+          "UPDATE earn_wallet_withdrawal_request_transactions SET owner_address = ? WHERE id = ?",
+          [OWNER, built.id]
+        )
+      ).rejects.toThrow(/foreign key/i);
+      await expect(
+        getDb(env).execute("UPDATE earn_positions SET owner_address = ? WHERE id = ?", [
+          OWNER,
+          OWNER_POSITION,
+        ])
+      ).rejects.toThrow(/foreign key/i);
+    });
+
+    it("binds custody builds to their exact wallet, position, project and instrument", async () => {
+      const built = await queuedBuild({
+        positionId: POSITION,
+        custodyWalletId: WALLET,
+        ownerAddress: OWNER,
+      });
+      expect(
+        await getDb(env).queryOne(
+          "SELECT custody_wallet_id, owner_address, position_owner_address FROM earn_wallet_withdrawal_request_transactions WHERE id = ?",
+          [built.id]
+        )
+      ).toEqual({ custody_wallet_id: WALLET, owner_address: OWNER, position_owner_address: null });
+      for (const [column, value] of [
+        ["position_id", OWNER_POSITION],
+        ["project_id", OTHER_PROJECT],
+        ["owner_address", OWNER_ADDRESS],
+        ["token_mint", SHARE_MINT],
+        ["share_mint", TOKEN_MINT],
+        ["provider", "hastra"],
+        ["environment", "production"],
+        ["vault_address", SHARE_MINT],
+      ])
+        await expect(
+          getDb(env).execute(
+            `UPDATE earn_wallet_withdrawal_request_transactions SET ${column} = ? WHERE id = ?`,
+            [value, built.id]
+          )
+        ).rejects.toThrow(/custody source|foreign key/i);
+      await expect(
+        getDb(env).execute("UPDATE earn_positions SET vault_address = ? WHERE id = ?", [
+          TOKEN_MINT,
+          POSITION,
+        ])
+      ).rejects.toThrow(/foreign key/i);
+    });
+
+    it("scopes discovery builds to a config or connection even for system writers", async () => {
+      const db = getDb(env);
+      const strategy = await createPostgresEarnRepository(db).upsertStrategy({
+        provider: "veda",
+        providerReference: VAULT,
+        name: "Custody discovery",
+        sourceKind: "defi",
+        underlyingSource: null,
+        depositMints: [TOKEN_MINT],
+        shareMint: SHARE_MINT,
+        apyType: "variable",
+        currentApy: "0.04",
+        liquidityTerm: "instant",
+        redemptionDelayDays: null,
+        riskMetadata: {},
+        status: "active",
+        hostCluster: "devnet",
+        environment: "sandbox",
+      });
+      if (strategy === null) throw new Error("Missing strategy fixture");
+      const built = await queuedBuild({
+        positionId: POSITION,
+        custodyWalletId: WALLET,
+        ownerAddress: OWNER,
+      });
+      await db.execute(
+        "UPDATE earn_wallet_withdrawal_request_transactions SET position_id = NULL, strategy_id = ? WHERE id = ?",
+        [strategy.id, built.id]
+      );
+      await expect(
+        runWithSystemDatabaseIdentity("test:queued-source-binding", () =>
+          db.execute(
+            "UPDATE earn_wallet_withdrawal_request_transactions SET project_id = ? WHERE id = ?",
+            [`${PROJECT}_production`, built.id]
+          )
+        )
+      ).rejects.toThrow(/custody source/i);
+      for (const [suffix, organizationId, projectId] of [
+        ["foreign", OTHER_ORG, OTHER_PROJECT],
+        ["other_project", ORG, `${PROJECT}_production`],
+      ]) {
+        const configId = `cfg_discovery_${suffix}`;
+        const walletId = `cwlt_discovery_${suffix}`;
+        if (suffix === "foreign") {
+          await insertTestCustodyConfigRow(db, {
+            id: configId,
+            organizationId,
+            projectId,
+            provider: "local",
+            configEncrypted: "encrypted",
+            status: "active",
+          });
+          await insertTestCustodyWalletRow(db, {
+            id: walletId,
+            owner: { kind: "config", custodyConfigId: configId },
+            walletId,
+            publicKey: OWNER,
+            label: null,
+            purpose: null,
+            status: "active",
+          });
+          await expect(
+            runWithSystemDatabaseIdentity("test:queued-source-binding", () =>
+              db.execute(
+                "UPDATE earn_wallet_withdrawal_request_transactions SET custody_wallet_id = ? WHERE id = ?",
+                [walletId, built.id]
+              )
+            )
+          ).rejects.toThrow(/custody source/i);
+        }
+        await seedUnreadPrivyWallet(db, {
+          organizationId,
+          projectId,
+          createdBy: USER,
+          custodyWalletId: `${walletId}_connection`,
+          walletId: `${walletId}_connection`,
+          publicKey: OWNER,
+        });
+        await expect(
+          runWithSystemDatabaseIdentity("test:queued-source-binding", () =>
+            db.execute(
+              "UPDATE earn_wallet_withdrawal_request_transactions SET custody_wallet_id = ? WHERE id = ?",
+              [`${walletId}_connection`, built.id]
+            )
+          )
+        ).rejects.toThrow(/custody source/i);
+      }
+      await seedUnreadPrivyWallet(db, {
+        organizationId: ORG,
+        projectId: PROJECT,
+        createdBy: USER,
+        custodyWalletId: "cwlt_queue_connection",
+        walletId: "queue_connection",
+        publicKey: OWNER,
+      });
+      expect(
+        await runWithSystemDatabaseIdentity("test:queued-source-binding", () =>
+          db.execute(
+            "UPDATE earn_wallet_withdrawal_request_transactions SET custody_wallet_id = 'cwlt_queue_connection' WHERE id = ?",
+            [built.id]
+          )
+        )
+      ).toBe(1);
+    });
+
+    it("retains row locks, update counts and irreversible execution guards", async () => {
       const built = await directBuild();
       await getDb(env).transaction(async (tx) => {
         const locked = await tx
@@ -122,13 +324,13 @@ describe("Earn queued withdrawal repository", () => {
         ).toBe(1);
         expect(
           await tx
-            .prepare(`SELECT operation_only FROM ${legacyDirect} WHERE id = ?`)
+            .prepare("SELECT operation_only FROM earn_wallet_transactions WHERE id = ?")
             .bind(built.id)
             .first<{ operation_only: boolean }>()
         ).toEqual({ operation_only: true });
         expect(
           await tx
-            .prepare(`UPDATE ${legacyDirect} SET label = 'Updated' WHERE id = ?`)
+            .prepare("UPDATE earn_wallet_transactions SET label = 'Updated' WHERE id = ?")
             .bind(built.id)
             .run()
         ).toBe(1);
@@ -151,9 +353,15 @@ describe("Earn queued withdrawal repository", () => {
 
     it("supports queued ON CONFLICT and projects the same signed consumption", async () => {
       const built = await queuedBuild();
+      const insertable = await getDb(env).queryMany<{ name: string }>(
+        `SELECT quote_ident(attname) AS name FROM pg_attribute
+          WHERE attrelid = 'earn_wallet_withdrawal_request_transactions'::regclass
+            AND attnum > 0 AND NOT attisdropped AND attgenerated = '' ORDER BY attnum`
+      );
+      const columns = insertable.map((column) => column.name).join(", ");
       const duplicate = await getDb(env)
-        .prepare(`INSERT INTO earn_wallet_withdrawal_request_transactions
-          SELECT * FROM earn_wallet_withdrawal_request_transactions WHERE id = ?
+        .prepare(`INSERT INTO earn_wallet_withdrawal_request_transactions (${columns})
+          SELECT ${columns} FROM earn_wallet_withdrawal_request_transactions WHERE id = ?
           ON CONFLICT DO NOTHING RETURNING *`)
         .bind(built.id)
         .first();
@@ -168,11 +376,13 @@ describe("Earn queued withdrawal repository", () => {
           walletTransactionId: built.id,
         })
       );
-      const old = await getDb(env)
-        .prepare(`SELECT consumed_action_id FROM ${legacyQueue} WHERE id = ?`)
+      const consumed = await getDb(env)
+        .prepare(
+          "SELECT consumed_action_id FROM earn_wallet_withdrawal_request_transactions WHERE id = ?"
+        )
         .bind(built.id)
         .first<{ consumed_action_id: string }>();
-      expect(old?.consumed_action_id).toBe(recorded.action.id);
+      expect(consumed?.consumed_action_id).toBe(recorded.action.id);
       expect(
         (
           await repository.getWalletTransaction({
@@ -225,6 +435,8 @@ describe("Earn queued withdrawal repository", () => {
       "earn_vault_withdrawal_requests",
       "earn_positions",
       "custody_wallets",
+      "custody_connections",
+      "provider_credentials",
       "custody_configs",
       "projects",
       "organizations",

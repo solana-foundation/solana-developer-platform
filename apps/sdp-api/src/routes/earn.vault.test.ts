@@ -32,7 +32,6 @@ import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 
 const build = vi.hoisted(() => vi.fn());
-const oldDeposit = vi.hoisted(() => vi.fn());
 // Admission fixtures are independent of the current address curation picks.
 vi.mock("@/routes/earn/handlers/curation", async (original) => ({
   ...(await original<typeof import("@/routes/earn/handlers/curation")>()),
@@ -47,10 +46,6 @@ vi.mock("@sdp/types/release-channels", async (original) => {
 vi.mock("@/services/earn/vault-wallet.service", async (original) => ({
   ...(await original<typeof import("@/services/earn/vault-wallet.service")>()),
   buildWalletDepositTransaction: build,
-}));
-vi.mock("@/services/earn/vault-deposit.service", async (original) => ({
-  ...(await original<typeof import("@/services/earn/vault-deposit.service")>()),
-  depositIntoVault: oldDeposit,
 }));
 
 const TEST_ORG = { id: "org_test_earn_vault", name: "Earn Vault Org", slug: "earn-vault" };
@@ -516,11 +511,9 @@ describe("POST /v1/earn/deposit custody preparation admission", () => {
           custodyWalletId: "cwlt_production",
           amount: "10",
           slippageBps: expect.any(Number),
-          asyncOperation: true,
         })
       );
       expect(scopes).toEqual([expect.objectContaining({ environment: "production" })]);
-      expect(oldDeposit).not.toHaveBeenCalled();
     }
   );
 
@@ -638,24 +631,6 @@ describe("POST /v1/earn/deposit request identity", () => {
 });
 
 describe("retired synchronous money-in routes", () => {
-  it.each(["vault-deposits", "vault-deposit-previews"])(
-    "returns410 from %s without reaching money builders",
-    async (path) => {
-      await seedAuth();
-      await seedConnectionWallet();
-      const strategy = await seedStrategy({});
-      const res = await post(path, {
-        strategyId: strategy.id,
-        custodyWalletId: "cwlt_earn_vault_connection",
-        amount: "10",
-        minSharesOut: "1",
-      });
-      expect(res.status).toBe(410);
-      expect(build).not.toHaveBeenCalled();
-      expect(oldDeposit).not.toHaveBeenCalled();
-    }
-  );
-
   it("retains the actual Kamino quote capability used by core preparation", () => {
     const client = required(resolveEarnExecutionClient(env, "kamino", createVaultDeadline()));
     expect(supportsVaultDepositQuote(client)).toBe(true);

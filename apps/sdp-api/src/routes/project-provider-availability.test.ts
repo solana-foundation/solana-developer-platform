@@ -121,17 +121,6 @@ const COMPLIANCE_AVAILABILITY: ProjectProviderAvailabilityEntry[] = [
     reason: "provider_not_entitled",
   },
 ];
-const EARN_AVAILABILITY: ProjectProviderAvailabilityEntry[] = [
-  { family: "earn", provider: "veda", available: true },
-  { family: "earn", provider: "upshift", available: false, reason: "provider_not_offered" },
-  { family: "earn", provider: "perena", available: false, reason: "provider_not_offered" },
-  { family: "earn", provider: "kamino", available: false, reason: "provider_not_entitled" },
-  { family: "earn", provider: "jupiter_lend", available: false, reason: "provider_not_entitled" },
-  { family: "earn", provider: "ondo", available: false, reason: "provider_not_entitled" },
-  { family: "earn", provider: "hastra", available: false, reason: "provider_not_offered" },
-  { family: "earn", provider: "wisdomtree", available: false, reason: "provider_not_offered" },
-  { family: "earn", provider: "plume", available: false, reason: "provider_not_offered" },
-];
 const SANDBOX_AVAILABILITY: ProjectProviderAvailability = {
   projectId: PROJECT_IDS.sandbox,
   environment: "sandbox",
@@ -194,7 +183,6 @@ const SANDBOX_AVAILABILITY: ProjectProviderAvailability = {
     ...COMPLIANCE_AVAILABILITY,
     { family: "ramps", provider: "moonpay", available: true },
     { family: "ramps", provider: "stripe", available: true },
-    ...EARN_AVAILABILITY,
   ],
 };
 const PRODUCTION_AVAILABILITY: ProjectProviderAvailability = {
@@ -264,7 +252,6 @@ const PRODUCTION_AVAILABILITY: ProjectProviderAvailability = {
     ...COMPLIANCE_AVAILABILITY,
     { family: "ramps", provider: "moonpay", available: false, reason: "provider_not_configured" },
     { family: "ramps", provider: "stripe", available: false, reason: "provider_not_configured" },
-    ...EARN_AVAILABILITY,
   ],
 };
 const PROJECT_NOT_FOUND_BODY = {
@@ -425,16 +412,14 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
   });
 
   it.each(SDP_RELEASE_CHANNEL_NAMES)(
-    "lists Earn providers in %s only when the release channel runs Earn",
+    "omits Earn providers in %s while publication is held",
     async (releaseChannel) => {
       const availability = await readAvailability(
         "sandbox",
         deploymentEnv({ SDP_RELEASE_CHANNEL: releaseChannel })
       );
 
-      expect(availability.providers.filter((entry) => entry.family === "earn")).toEqual(
-        releaseChannel === "stable" ? [] : EARN_AVAILABILITY
-      );
+      expect(availability.providers.filter((entry) => entry.family === "earn")).toEqual([]);
     }
   );
 
@@ -571,12 +556,7 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
       available: false,
       reason: "provider_not_entitled",
     });
-    expect(availability.providers).toContainEqual({
-      family: "earn",
-      provider: "veda",
-      available: false,
-      reason: "provider_not_entitled",
-    });
+    expect(availability.providers.filter((entry) => entry.family === "earn")).toEqual([]);
   });
 
   it("reports below-stable providers the release channel offers the same in a Production project as in a Sandbox one, Managed custody aside", async () => {
@@ -628,17 +608,8 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
       available: false,
       reason: "provider_not_configured",
     });
-    expect(availability.providers).toContainEqual({
-      family: "earn",
-      provider: "upshift",
-      available: false,
-      reason: "provider_not_configured",
-    });
-    expect(withUpshiftKey.providers).toContainEqual({
-      family: "earn",
-      provider: "upshift",
-      available: true,
-    });
+    expect(availability.providers.filter((entry) => entry.family === "earn")).toEqual([]);
+    expect(withUpshiftKey.providers.filter((entry) => entry.family === "earn")).toEqual([]);
   });
 
   it("reports MoonPay in a Production project only once its production keys are mounted", async () => {

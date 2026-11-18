@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
+  executePreparedOperation,
+  prepareDepositOperation,
   refreshPreparedOperation,
   requestOperationCancellation,
+  resumePendingOperation,
 } from "./core-api";
 import type { EarnOperation } from "./core-operation";
 
@@ -38,7 +41,20 @@ const operation: EarnOperation = {
   createdAt: "2026-11-18T12:00:00Z",
   updatedAt: "2026-11-18T12:00:00Z",
 };
-beforeEach(() => localStorage.clear());
+beforeEach(() => {
+  localStorage.clear();
+  let chain = Promise.resolve<unknown>(undefined);
+  Object.defineProperty(navigator, "locks", {
+    configurable: true,
+    value: {
+      request: (_key: string, work: () => Promise<unknown>) => {
+        const result = chain.then(work, work);
+        chain = result.catch(() => undefined);
+        return result;
+      },
+    },
+  });
+});
 afterEach(() => vi.unstubAllGlobals());
 
 it("refreshes terms without requesting a signature or execution", async () => {
@@ -78,4 +94,104 @@ it("retries cancellation with its saved key and retires only an acknowledged req
   await requestOperationCancellation(operation.id);
   expect(keys[1]).toBe(keys[0]);
   expect(keys[2]).not.toBe(keys[1]);
+});
+
+it("recovers a lost execution response after reload with the exact action and key", async () => {
+  const sent: unknown[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (_url: URL, init?: RequestInit) => {
+      expect(localStorage.getItem("northstar:pending-operation:v1")).toContain(
+        '"operationId":"operation"'
+      );
+      sent.push(JSON.parse(String(init?.body)));
+      if (sent.length === 1) throw new Error("Lost response after acceptance");
+      return Response.json({
+        data: { operation: { ...operation, status: "submitted", version: 3 } },
+      });
+    })
+  );
+  await expect(executePreparedOperation(operation)).rejects.toThrow(
+    "Lost response"
+  );
+  vi.resetModules();
+  const reloaded = await import("./core-api");
+  await expect(reloaded.resumePendingOperation()).resolves.toMatchObject({
+    status: "submitted",
+  });
+  expect(sent).toHaveLength(2);
+  expect(sent[0]).toEqual(sent[1]);
+  expect(sent[0]).toEqual({
+    actionId: "replacement",
+    version: 2,
+    idempotencyKey: expect.any(String),
+  });
+  expect(localStorage.getItem("northstar:pending-operation:v1")).toBeNull();
+});
+
+it("retains a saved action across malformed success, foreign operation and authorization failures", async () => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json({ data: { operation: {} } }))
+    .mockResolvedValueOnce(
+      Response.json({ data: { operation: { ...operation, id: "other" } } })
+    )
+    .mockResolvedValueOnce(
+      Response.json({ error: { message: "Session expired" } }, { status: 401 })
+    );
+  vi.stubGlobal("fetch", fetchMock);
+  await expect(executePreparedOperation(operation)).rejects.toThrow();
+  const saved = localStorage.getItem("northstar:pending-operation:v1");
+  await expect(resumePendingOperation()).rejects.toThrow("does not match");
+  await expect(resumePendingOperation()).rejects.toThrow("Session expired");
+  expect(localStorage.getItem("northstar:pending-operation:v1")).toBe(saved);
+});
+
+it("blocks new preparation and another operation while execution is uncertain", async () => {
+  const fetchMock = vi.fn(async () => {
+    throw new Error("Uncertain");
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  await expect(executePreparedOperation(operation)).rejects.toThrow(
+    "Uncertain"
+  );
+  await expect(prepareDepositOperation("10")).rejects.toThrow(
+    "earlier pending transfer"
+  );
+  await expect(
+    executePreparedOperation({ ...operation, id: "other" })
+  ).rejects.toThrow("earlier pending operation");
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it("retains a malformed saved action without signing or replacing it", async () => {
+  localStorage.setItem("northstar:pending-operation:v1", "invalid");
+  const fetchMock = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
+  await expect(resumePendingOperation()).rejects.toThrow();
+  await expect(executePreparedOperation(operation)).rejects.toThrow();
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(localStorage.getItem("northstar:pending-operation:v1")).toBe(
+    "invalid"
+  );
+});
+
+it("retries lost preparation with its original key without executing", async () => {
+  const keys: Array<string | null> = [];
+  const paths: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: URL, init?: RequestInit) => {
+      paths.push(url.pathname);
+      keys.push(new Headers(init?.headers).get("Idempotency-Key"));
+      if (keys.length === 1) throw new Error("Lost prepare response");
+      return Response.json({ data: { operation } });
+    })
+  );
+  await expect(prepareDepositOperation("10")).rejects.toThrow("Lost prepare");
+  await expect(prepareDepositOperation("10")).resolves.toMatchObject({
+    id: "operation",
+  });
+  expect(keys[0]).toBe(keys[1]);
+  expect(paths).toEqual(["/api/deposits", "/api/deposits"]);
 });

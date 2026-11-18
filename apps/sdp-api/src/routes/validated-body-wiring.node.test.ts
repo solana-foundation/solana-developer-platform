@@ -31,22 +31,6 @@ const INLINE_HANDLER =
 
 const REGISTRATION_METHOD = /\.(?:get|post|patch|put|delete|all)\(/g;
 
-// Retired writers stay unregistered while existing builds drain through submits.
-const RETIRED_EARN_HANDLERS = [
-  "createEarnWalletDepositTransaction",
-  "createEarnWalletWithdrawalTransaction",
-  "createEarnProgram",
-  "retargetEarnProgram",
-  "extractEarnVaultWithdrawalRequest",
-  "createEarnVaultWithdrawalRequest",
-  "createEarnWalletWithdrawalRequestTransaction",
-  "createEarnVaultDepositPreview",
-  "createEarnVaultDeposit",
-  "extractEarnVaultDeposit",
-  "extractEarnVaultWithdrawal",
-  "createEarnVaultWithdrawal",
-] as const;
-
 function sourceFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const entryPath = path.join(directory, entry.name);
@@ -269,28 +253,18 @@ describe("validated handler wiring", () => {
       source: stripImports(source),
     }));
 
-  it.each(RETIRED_EARN_HANDLERS)("keeps retired handler %s unreachable", (handler) => {
-    expect(handlers.some((candidate) => candidate.handler === handler)).toBe(true);
+  it.each(handlers)("wires $handler with its declared validators", ({ handler, validators }) => {
     const chains = registrationFiles.flatMap(({ source }) => registrationChains(source, handler));
-    expect(chains).toEqual([]);
-  });
-
-  const retiredHandlers: ReadonlySet<string> = new Set(RETIRED_EARN_HANDLERS);
-  it.each(handlers.filter(({ handler }) => !retiredHandlers.has(handler)))(
-    "wires $handler with its declared validators",
-    ({ handler, validators }) => {
-      const chains = registrationFiles.flatMap(({ source }) => registrationChains(source, handler));
-      expect(chains.length, `${handler} must appear in a route registration`).toBeGreaterThan(0);
-      for (const chain of chains) {
-        for (const validator of validators) {
-          expect(
-            containsValidator(chain, validator),
-            `${handler} chain must contain ${validator}`
-          ).toBe(true);
-        }
+    expect(chains.length, `${handler} must appear in a route registration`).toBeGreaterThan(0);
+    for (const chain of chains) {
+      for (const validator of validators) {
+        expect(
+          containsValidator(chain, validator),
+          `${handler} chain must contain ${validator}`
+        ).toBe(true);
       }
     }
-  );
+  });
 
   const inlineHandlers = collectInlineHandlers();
 

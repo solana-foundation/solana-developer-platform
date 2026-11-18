@@ -31,7 +31,7 @@ function earnStartRoutes(): EarnStartRoute[] {
   return registeredRouteAuthorizations(app).flatMap(({ method, path, declarations }) => {
     if (method !== "POST") return [];
     const movement = earnPostRouteMovement(samplePath(path));
-    if (movement === undefined || movement === "read") return [];
+    if (movement === undefined) return [];
     const actions = movementActions(movement);
     if (actions === null) return [];
     const [declaration] = declarations;
@@ -54,18 +54,7 @@ describe("Earn routes declare an action their movement admits (HOO-2099)", () =>
   const routes = earnStartRoutes();
 
   it("classifies every start route", () => {
-    expect(routes.map(({ route }) => route).sort()).toEqual([
-      "POST /v1/earn/deposit",
-      "POST /v1/earn/external-wallet/deposit-transactions",
-      "POST /v1/earn/external-wallet/deposits",
-      "POST /v1/earn/provider-actions/cancellations",
-      "POST /v1/earn/provider-actions/external/cancellation-transactions",
-      "POST /v1/earn/provider-actions/external/cancellations",
-      "POST /v1/earn/provider-actions/external/preparation-transactions",
-      "POST /v1/earn/provider-actions/external/preparations",
-      "POST /v1/earn/provider-actions/preparations",
-      "POST /v1/earn/vault-deposits",
-    ]);
+    expect(routes.map(({ route }) => route).sort()).toEqual(["POST /v1/earn/deposit"]);
   });
 
   it("declares an action each start admits", () => {

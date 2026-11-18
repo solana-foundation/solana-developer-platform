@@ -133,7 +133,7 @@
       "programStatusFailed": "Failed",
       "usdSymbol": "USD"
     },
-    "earnProgram": {
+    "embeddedYield": {
       "eyebrow": "Embedded yield",
       "configureShort": "Integrate",
       "customerWallets": "Customer wallets",

@@ -1,13 +1,12 @@
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { EARN_SWAP_DEFAULT_SLIPPAGE_BPS, earnSwapSourceTokens } from "@sdp/types/earn";
 import { z } from "zod";
-import { badRequest, badRequestParams, badRequestQuery } from "@/lib/errors";
+import { badRequest, badRequestQuery } from "@/lib/errors";
 import type { AppContext } from "@/routes/earn/context";
 
 /**
- * Request-parsing and list-envelope helpers shared by every earn handler, so
- * the zod-failure -> 400 mapping stays on one convention per input class
- * (query/params) instead of being repeated per endpoint. Body validation is
+ * Query validation and deposit funding helpers shared by the core routes.
+ * Query failures use one 400 convention. Body validation is
  * route-level middleware (`validateBody`); handlers read it via
  * `c.req.valid("json")`.
  */
@@ -25,19 +24,6 @@ export function parseQuery<Schema extends z.ZodType>(
   return parsed.data;
 }
 
-export function parseParams<Schema extends z.ZodType>(
-  c: AppContext,
-  schema: Schema
-): z.output<Schema> {
-  const parsed = schema.safeParse(c.req.param());
-
-  if (!parsed.success) {
-    throw badRequestParams();
-  }
-
-  return parsed.data;
-}
-
 export interface EarnPageQuery {
   page: number;
   pageSize: number;
@@ -50,8 +36,7 @@ export function pageWindow({ page, pageSize }: EarnPageQuery): { limit: number; 
 
 /**
  * Normalize a deposit request's swap-funding fields into a validated swap
- * input, or null when no swap is needed. Shared by both deposit surfaces
- * (custody and wallet) so the rules cannot drift:
+ * input, or null when no swap is needed:
  *
  * - the source mint must be one of the open cluster scope's supported
  *   swap-source stablecoins (`earnSwapSourceTokens` — pinned mints, never
@@ -86,13 +71,4 @@ export function resolveDepositSwapRequest(
     sourceTokenMint: body.sourceTokenMint,
     slippageBps: body.swapSlippageBps ?? EARN_SWAP_DEFAULT_SLIPPAGE_BPS,
   };
-}
-
-/** The `{ <items>, total, page, pageSize }` envelope every earn list shares. */
-export function listResponse<Items extends Record<string, unknown[]>>(
-  { page, pageSize }: EarnPageQuery,
-  total: number,
-  items: Items
-): Items & { total: number; page: number; pageSize: number } {
-  return { ...items, total, page, pageSize };
 }
