@@ -22,7 +22,7 @@ jobs:
       REGION: us-central1
       REPO: sdp-stage
       SERVICE: sdp-stage-api-public
-      WORKER_SERVICE: sdp-stage-worker
+      CRON_SERVICE: sdp-stage-cron
       MIGRATE_JOB: sdp-stage-api-public-migrate
     steps:
       - name: Checkout
@@ -81,11 +81,11 @@ jobs:
           echo "revision ${REVISION} never became ready" >&2
           exit 1
 
-      - name: Update worker image
+      - name: Update cron image
         run: |
-          # The Worker is the only scheduler (ADR 0011): a missing service means no Money Exit
-          # runs, so this fails the deploy instead of skipping.
-          gcloud run services update "${WORKER_SERVICE}" \
+          # The cron service is the only scheduler (ADR 0011): a missing service means no Money
+          # Exit runs, so this fails the deploy instead of skipping.
+          gcloud run services update "${CRON_SERVICE}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
 
   smoke:
