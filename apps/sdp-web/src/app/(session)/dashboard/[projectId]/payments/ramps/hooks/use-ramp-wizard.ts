@@ -1,6 +1,7 @@
 "use client";
 
 import type { Counterparty } from "@sdp/types/counterparties";
+import type { MovementId } from "@sdp/types/movements";
 import type { CryptoRailId } from "@sdp/types/payment-rails";
 import type { PaymentRampQuote, PaymentsDashboardWallet, RampDirection } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
@@ -27,6 +28,10 @@ import {
   type RampFields,
   rampSelectionSchema,
 } from "@/app/(session)/dashboard/[projectId]/payments/ramps/schema";
+import {
+  heldBackWalletsHint,
+  walletsStartingMovement,
+} from "@/app/(session)/dashboard/[projectId]/payments/wallet-movement-support";
 import { useTranslations } from "@/i18n/provider";
 import type { RampProviderAccess } from "@/lib/provider-availability";
 import { DEFAULT_RAMP_PAIR, findRampPair, type RampPair, type SelectedRampPair } from "@/lib/ramps";
@@ -61,6 +66,12 @@ export interface RampWizardConfig<TId extends string = string> {
   quoteStepId: TId;
   memoStepId?: TId;
   selectionSchema: z.ZodTypeAny;
+  /**
+   * The start the picked wallet is the source of, when the flow has one: the
+   * picker leaves out a wallet whose custody provider may not start it
+   * (PRO-2435 D1). A flow whose wallet only receives names none.
+   */
+  sourceWalletMovement?: MovementId;
   quoteEndpoint: string;
   buildQuotePayload: (args: RampQuotePayloadArgs) => Record<string, unknown>;
   /**
@@ -144,10 +155,24 @@ export function useRampWizard<TId extends string>(
     }
   }, [config.pairs, selectedRampPair, selectedProviderField, setField]);
 
-  const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets(
-    wallets,
-    walletsError
+  const {
+    liveWallets: allLiveWallets,
+    walletsLoading,
+    liveWalletsError,
+  } = usePaymentsActionWallets(wallets, walletsError);
+  const sourceWalletMovement = config.sourceWalletMovement;
+  const liveWallets = useMemo(
+    () =>
+      sourceWalletMovement === undefined
+        ? allLiveWallets
+        : walletsStartingMovement(allLiveWallets, sourceWalletMovement),
+    [allLiveWallets, sourceWalletMovement]
   );
+  // Why the picker is empty when wallets exist but none may start the movement.
+  const heldBackHint =
+    sourceWalletMovement === undefined
+      ? null
+      : heldBackWalletsHint(allLiveWallets, sourceWalletMovement, t);
 
   const selectedWallet = useMemo(
     () => liveWallets.find((wallet) => wallet.id === fields.walletId) ?? null,
@@ -442,6 +467,7 @@ export function useRampWizard<TId extends string>(
     liveWallets,
     walletsLoading,
     liveWalletsError,
+    heldBackHint,
     selectedWallet,
     selectedRampPair,
     fields,

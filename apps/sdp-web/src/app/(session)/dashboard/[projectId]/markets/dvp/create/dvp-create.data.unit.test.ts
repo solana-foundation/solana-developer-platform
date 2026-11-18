@@ -153,6 +153,25 @@ describe("fetchDvpCreateContext", () => {
     });
   });
 
+  it("carries the custody provider so the party picker can apply the custody rule", async () => {
+    const context = await fetchDvpCreateContext(
+      request({
+        wallets: ok({
+          data: [
+            { ...WALLET, provider: "fireblocks" },
+            { ...WALLET, id: "cwlt_2", provider: "a_provider_this_build_lacks" },
+          ],
+        }),
+        tokens: ok({ data: [] }),
+      })
+    );
+    expect(context.error).toBeNull();
+    expect(context.wallets.map((wallet) => wallet.provider)).toEqual([
+      "fireblocks",
+      "a_provider_this_build_lacks",
+    ]);
+  });
+
   it("accepts the wrapped wallets shape as well as the bare array", async () => {
     const context = await fetchDvpCreateContext(
       request({ wallets: ok({ data: { wallets: [WALLET] } }), tokens: ok({ data: [] }) })

@@ -293,6 +293,7 @@ export const freezeAccount = async (c: ValidatedBodyContext<typeof freezeSchema>
   }
 
   const { custodyWalletId } = await resolveAuthorityWallet({
+    movement: "issuance.control",
     env: c.env,
     auth,
     requestedCustodyWalletId: body.signingCustodyWalletId,
@@ -544,6 +545,7 @@ export const unfreezeAccount = async (c: ValidatedBodyContext<typeof unfreezeSch
   );
 
   const { custodyWalletId } = await resolveAuthorityWallet({
+    movement: "issuance.authority",
     env: c.env,
     auth,
     requestedCustodyWalletId: body.signingCustodyWalletId,

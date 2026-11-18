@@ -16,6 +16,10 @@ import { HashIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { BASE58_ADDRESS_PATTERN } from "@/app/(session)/dashboard/[projectId]/markets/base58-address";
 import { shortenAddress } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
+import {
+  heldBackWalletsHint,
+  walletsStartingMovement,
+} from "@/app/(session)/dashboard/[projectId]/payments/wallet-movement-support";
 import { TokenMark } from "@/components/token-mark";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
@@ -286,7 +290,12 @@ export function PartySlotPicker({
     slot.mode === "address" && slot.address.length > 0 && !BASE58_ADDRESS_PATTERN.test(slot.address)
       ? t("DashboardMarkets.dvp.partyAddressInvalid")
       : null;
-  const pickerError = formatError === null ? error : formatError;
+  // A party's wallet signs the trade's starts, so the rule may hold one back (PRO-2435 D1);
+  // the payout pickers below only receive, and keep every wallet.
+  const partyWallets = walletsStartingMovement(wallets, "dvp.create");
+  const heldBackMessage =
+    slot.mode === "wallet" ? heldBackWalletsHint(wallets, "dvp.create", t) : null;
+  const pickerError = formatError === null ? (error ?? heldBackMessage) : formatError;
   let control: ReactNode;
   switch (slot.mode) {
     case "wallet":
@@ -295,7 +304,7 @@ export function PartySlotPicker({
           hideLabel
           label={label}
           onChange={(walletId) => onChange({ mode: "wallet", walletId })}
-          options={wallets.map((wallet) => ({
+          options={partyWallets.map((wallet) => ({
             value: wallet.id,
             label: wallet.label === null ? t("DashboardMarkets.dvp.partySdpWallet") : wallet.label,
             description: shortenAddress(wallet.address),

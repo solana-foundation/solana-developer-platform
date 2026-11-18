@@ -104,6 +104,12 @@ const walletRowSchema = z
     id: z.string().min(1),
     publicKey: z.string().min(1),
     label: z.string().nullable().default(null),
+    /**
+     * The custody provider, which with the owner below decides whether the
+     * wallet may be a party (PRO-2435 D1). Any string: a provider this build
+     * has not heard of must not fail the row.
+     */
+    provider: z.string().optional(),
     custodyConfigId: z.string().min(1).optional(),
     custodyConnectionId: z.string().min(1).optional(),
     isRuntimeExecutionAllowed: z.boolean(),
@@ -142,6 +148,7 @@ function mapWallets(rows: z.infer<typeof walletRowSchema>[]): DvpCreateWallet[] 
     id: wallet.id,
     address: wallet.publicKey,
     label: wallet.label,
+    provider: wallet.provider,
     custodyConfigId: wallet.custodyConfigId,
     custodyConnectionId: wallet.custodyConnectionId,
     isRuntimeExecutionAllowed: wallet.isRuntimeExecutionAllowed,

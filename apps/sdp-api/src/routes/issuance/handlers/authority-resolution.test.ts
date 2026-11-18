@@ -438,6 +438,9 @@ describe("authority-resolution", () => {
       custodyWalletId: "cwlt_authority",
       providerWalletId: "wal_authority",
       publicKey: AUTHORITY,
+      provider: "local",
+      custodyConfigId: "cfg_cwlt_authority",
+      custodyConnectionId: null,
     });
   });
 
@@ -483,6 +486,9 @@ describe("authority-resolution", () => {
       custodyWalletId: "cwlt_connection",
       providerWalletId: "wal_connection",
       publicKey: AUTHORITY,
+      provider: "privy",
+      custodyConfigId: null,
+      custodyConnectionId: "connection_cwlt_connection",
     });
   });
 
@@ -556,6 +562,9 @@ describe("authority-resolution", () => {
       custodyWalletId: "cwlt_draft",
       providerWalletId: "wal_draft",
       publicKey: AUTHORITY,
+      provider: "privy",
+      custodyConfigId: null,
+      custodyConnectionId: "connection_cwlt_draft",
     });
     expect(exactSigner).not.toHaveBeenCalled();
   });

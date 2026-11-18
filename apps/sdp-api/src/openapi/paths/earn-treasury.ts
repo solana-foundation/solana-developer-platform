@@ -158,7 +158,10 @@ export function registerEarnTreasuryPaths(
         "Builds, signs and broadcasts a deposit from an authorized custody wallet. Quote " +
         "first when the strategy requires minSharesOut. Swap-funded deposits stay atomic; " +
         "if the combined transaction cannot fit, the request is refused without sending. " +
-        "Convert funds separately or deposit the vault's own token before retrying.",
+        "Convert funds separately or deposit the vault's own token before retrying. A custody " +
+        "wallet whose provider cannot start a deposit yet (a Fireblocks wallet your organization " +
+        "connected, which sends direct payments only for now) is refused with 400 " +
+        "`CUSTODY_PROVIDER_UNSUPPORTED_OPERATION` before anything is recorded, built or signed.",
     }
   );
   route(

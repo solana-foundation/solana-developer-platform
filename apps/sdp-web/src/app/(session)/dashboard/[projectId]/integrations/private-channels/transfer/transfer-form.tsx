@@ -24,6 +24,10 @@ import {
   fetchWalletBalancesAction,
   type WalletBalanceView,
 } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/wallet-balances";
+import {
+  heldBackWalletsHint,
+  walletsStartingMovement,
+} from "@/app/(session)/dashboard/[projectId]/payments/wallet-movement-support";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import {
@@ -120,14 +124,17 @@ export function TransferForm({ scopeKey, ...props }: TransferFormProps) {
       <p className="text-sm text-secondary">{t("DashboardPrivateChannels.transfer.noChannels")}</p>
     );
   }
-  if (props.sourceWallets.length === 0) {
+  // A channel transfer is a start the rule may hold a wallet back from (PRO-2435 D1).
+  const sourceWallets = walletsStartingMovement(props.sourceWallets, "private_channels.transfer");
+  if (sourceWallets.length === 0) {
     return (
       <p className="text-sm text-secondary">
-        {t("DashboardPrivateChannels.transfer.noSourceWallets")}
+        {heldBackWalletsHint(props.sourceWallets, "private_channels.transfer", t) ??
+          t("DashboardPrivateChannels.transfer.noSourceWallets")}
       </p>
     );
   }
-  return <TransferFormState key={scopeKey} {...props} />;
+  return <TransferFormState key={scopeKey} {...props} sourceWallets={sourceWallets} />;
 }
 
 function validateTransferSubmission({

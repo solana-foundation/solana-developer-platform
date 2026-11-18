@@ -13,6 +13,7 @@ import { address, type TransactionPartialSigner } from "@solana/kit";
 import { Context } from "hono";
 import { afterEach, aroundEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
+import { AppError } from "@/lib/errors";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { runAsMoneyPrincipal } from "@/lib/money-principal";
 import { createTenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
@@ -27,6 +28,7 @@ import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { inSandboxScope } from "@/test/helpers/cluster-rpc";
 import { insertTestCustodyWalletRow, seedTestCustodyRows } from "@/test/helpers/custody";
 import {
+  activateTestCustodyConnection,
   insertTestCustodyConnection,
   insertTestStoredProviderCredential,
   seedTestPrivyConnection,
@@ -657,6 +659,118 @@ describe("CustodyRuntimeTargets", () => {
       details: { reason: "runtime_execution_unavailable" },
     });
     expect(getConfigAdapter).not.toHaveBeenCalled();
+  });
+
+  // PRO-2435 D1: the waist's own copy of the per-path provider refusal, so no
+  // route can reach a Fireblocks Connection for a start the table leaves out.
+  describe("custody provider start movements", () => {
+    async function seedFireblocksConnection(): Promise<string> {
+      const connectionId = "cconn_runtime_targets_fireblocks";
+      const credentialId = "pcred_runtime_targets_fireblocks";
+      const custodyWalletId = `cwlt_${connectionId}`;
+      const now = new Date().toISOString();
+      await insertTestStoredProviderCredential(getDb(env), {
+        id: credentialId,
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        provider: "fireblocks",
+        label: "Fireblocks",
+        stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "ciphertext" },
+        displayMetadata: {},
+        status: "active",
+        credentialVersion: 1,
+        rotatedFromProviderCredentialId: null,
+        lastValidatedAt: null,
+        deactivatedAt: null,
+        createdBy: USER_ID,
+      });
+      await insertTestCustodyConnection(getDb(env), {
+        id: connectionId,
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        provider: "fireblocks",
+        credential: { id: credentialId, projectId: PROJECT_ID },
+        status: "pending",
+        setupMetadata: {},
+        providerAccountFingerprint: null,
+        lastCheckStatus: null,
+        lastCheckAt: null,
+        lastCheckFailureCode: null,
+        activatedAt: null,
+        deactivatedAt: null,
+        createdBy: USER_ID,
+        createdAt: now,
+      });
+      await insertTestCustodyWalletRow(getDb(env), {
+        id: custodyWalletId,
+        owner: { kind: "connection", custodyConnectionId: connectionId },
+        walletId: "0",
+        publicKey: SECOND_CONNECTION_PUBLIC_KEY,
+        label: null,
+        purpose: "transfer",
+        status: "active",
+      });
+      await activateTestCustodyConnection(getDb(env), {
+        connectionId,
+        custodyWalletId,
+        providerAccountFingerprint: "sha256:runtime-targets-fireblocks",
+      });
+      return custodyWalletId;
+    }
+
+    it("refuses a Fireblocks Connection wallet for a start outside its table before entitlement or credentials", async () => {
+      const custodyWalletId = await seedFireblocksConnection();
+      const read = mockStoredCredentialRead();
+      const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+      await expect(
+        targets.getTransactionSignerForWalletRecord(
+          ORGANIZATION_ID,
+          PROJECT_ID,
+          custodyWalletId,
+          "recurring.activate",
+          createConfigAdapterFactory(CONFIG_PUBLIC_KEY)
+        )
+      ).rejects.toMatchObject({
+        code: "CUSTODY_PROVIDER_UNSUPPORTED_OPERATION",
+        statusCode: 400,
+        details: { provider: "fireblocks", mode: "byok", movement: "recurring.activate" },
+      });
+      expect(read).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it("lets the same wallet exit and propose a direct payment", async () => {
+      const custodyWalletId = await seedFireblocksConnection();
+      const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+      const codes = await Promise.all([
+        targets
+          .getTransactionSignerForWalletRecord(
+            ORGANIZATION_ID,
+            PROJECT_ID,
+            custodyWalletId,
+            "earn.withdraw",
+            createConfigAdapterFactory(CONFIG_PUBLIC_KEY)
+          )
+          .then(
+            () => null,
+            (error: unknown) => (error instanceof AppError ? error.code : String(error))
+          ),
+        targets
+          .getTransferProposerForWalletRecord(
+            ORGANIZATION_ID,
+            PROJECT_ID,
+            custodyWalletId,
+            "payments.transfer"
+          )
+          .then(
+            () => null,
+            (error: unknown) => (error instanceof AppError ? error.code : String(error))
+          ),
+      ]);
+      // Later steps (entitlement, the credential read) may refuse; this table never does.
+      for (const code of codes) expect(code).not.toBe("CUSTODY_PROVIDER_UNSUPPORTED_OPERATION");
+    });
   });
 
   it("refuses a recurring collection from a DvP settlement authority wallet before constructing its signer", async () => {

@@ -127,6 +127,16 @@ reuse are rejected by this direct-payment path. Managed Fireblocks wallets retai
 signing path. Batch and custom-program signing use sign-only PROGRAM_CALL through solana-keychain;
 they have not been converted to native transfers.
 
+**Direct payments only (PRO-2435 D1).** Every other start a custody wallet can sign for
+(recurring activation and updates, transfer batches, off-ramp deposit funding, Earn deposits,
+issuance, DvP, private-channel transfers) signs under the 60–90 second bound above and cannot
+hold for a human approval, so it refuses a Fireblocks BYOK source wallet with 400
+`CUSTODY_PROVIDER_UNSUPPORTED_OPERATION` in its `authorize` step, before any row or
+Idempotency-Key claim and before any Fireblocks request. The rule is the
+`CUSTODY_PROVIDER_START_MOVEMENTS` table in `@sdp/types/movements`, which the dashboard's source
+pickers read too; lifting a path is one entry there once that path is async-safe. Exits are never
+refused, so a position or mandate that predates the gate can still be unwound.
+
 SDP sends the exact selected address using `ONE_TIME_ADDRESS`. Fireblocks resolves matching
 whitelisted destinations in its workspace; unmatched destinations require one-time transfers
 to be allowed by the workspace. The read-only SDP checks do not change the submitted address.

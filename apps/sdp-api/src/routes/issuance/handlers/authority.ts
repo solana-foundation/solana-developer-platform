@@ -355,6 +355,7 @@ export async function extractUpdateAuthorityRequest(
   }
 
   const { custodyWalletId } = await resolveAuthorityWallet({
+    movement: "issuance.authority",
     env: c.env,
     auth,
     requestedCustodyWalletId: input.signingCustodyWalletId,

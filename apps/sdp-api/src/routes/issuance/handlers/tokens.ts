@@ -96,6 +96,7 @@ async function resolveMetadataUpdate(params: {
   }
 
   const authorityWallet = await resolveAuthorityWallet({
+    movement: "issuance.authority",
     env: params.c.env,
     auth: params.auth,
     currentAuthority,
@@ -137,8 +138,12 @@ export const createToken = async (c: ValidatedBodyContext<typeof createTokenSche
     });
   }
 
+  // The draft only stores the wallet id, but that wallet deploys the token
+  // (`issuance.authority`), so a provider that cannot start it is refused now
+  // rather than at deploy.
   const signingWallet = body.signingCustodyWalletId
     ? await resolveIssuanceWallet({
+        movement: "issuance.authority",
         env: c.env,
         auth,
         custodyWalletId: body.signingCustodyWalletId,
@@ -371,7 +376,9 @@ export const updateToken = async (c: ValidatedBodyContext<typeof updateTokenSche
 
   let draftWallet: ResolvedIssuanceWallet | null = null;
   if (signingCustodyWalletId && !existing.mintAddress && existing.status === "pending") {
+    // As in createToken: the draft's wallet is the one that deploys it.
     draftWallet = await resolveIssuanceWallet({
+      movement: "issuance.authority",
       env: c.env,
       auth,
       custodyWalletId: signingCustodyWalletId,

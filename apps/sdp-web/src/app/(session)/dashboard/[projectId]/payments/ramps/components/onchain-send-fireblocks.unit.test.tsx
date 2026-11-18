@@ -128,6 +128,12 @@ describe("Fireblocks payment selection", () => {
       { wrapper }
     );
     await waitFor(() => expect(result.current.accountsLoading).toBe(false));
+    // A direct payment is the one start a connected Fireblocks wallet keeps (PRO-2435 D1).
+    expect(result.current.liveWallets.map((wallet) => wallet.id)).toEqual([
+      "wallet_managed",
+      "wallet_byok",
+      "wallet_privy",
+    ]);
     act(() => {
       result.current.setField("accountId", account.id);
       result.current.setField("amount", "0.01");

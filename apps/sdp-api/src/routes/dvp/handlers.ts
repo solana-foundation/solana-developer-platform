@@ -591,7 +591,7 @@ const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
  * @returns The funded-leg response envelope.
  */
 export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchema>) => {
-  const { trade, actor, params } = await resolveLegAction(c, c.req.valid("json"));
+  const { trade, actor, params } = await resolveLegAction(c, c.req.valid("json"), "dvp.fund");
 
   // Money IN to the escrow, so the intent is fail-closed and admitted after
   // the refusals resolveLegAction makes (which move nothing and are not worth
@@ -645,7 +645,7 @@ export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchem
  * @returns The reclaimed-leg response envelope.
  */
 export const reclaimTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchema>) => {
-  const { trade, actor, params } = await resolveLegAction(c, c.req.valid("json"));
+  const { trade, actor, params } = await resolveLegAction(c, c.req.valid("json"), "dvp.reclaim");
   const { result, replayed } = await runDvpLegActionOnce(
     c.env,
     c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null,

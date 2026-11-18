@@ -23,7 +23,7 @@
  */
 
 import type { Action } from "./actions";
-import type { CustodyWalletPurpose } from "./custody";
+import type { CustodyMode, CustodyProvider, CustodyWalletPurpose } from "./custody";
 import type { HeliusRingsOperationType } from "./helius-rings";
 import type { PaymentRecurringPaymentStatus, PaymentRequestStatus } from "./payments";
 import type { SdpModule } from "./release-channels";
@@ -254,6 +254,55 @@ export function movementAllowsWalletPurpose(
     return true;
   }
   return purpose !== null && definition.walletPurposes.includes(purpose);
+}
+
+/**
+ * The start movements a custody wallet may begin, by the mode and provider of
+ * the wallet (PRO-2435 D1). A provider whose signing can wait for a human
+ * approval breaks every path that expects a signature inside the 60–90 second
+ * signing bound: the request fails while the approval is pending, or sends
+ * nothing. Until a path is async-safe it refuses such a wallet at create,
+ * before any row or Idempotency-Key claim, and the dashboard keeps the wallet
+ * out of that path's source picker. A provider missing from its mode starts
+ * every movement. Lifting a path is one entry here plus the path's own tests.
+ *
+ * Exits are never listed: a wallet that could never start a path has nothing
+ * to exit, and money already committed must always come out (ADR 0002).
+ * `ramps.offramp_quote` stands for the off-ramp flow: the quote signs nothing,
+ * but the deposit it leads to is funded through `payments.transfer` with the
+ * ramp's `transferId`, which the transfer route refuses the same way.
+ */
+export const CUSTODY_PROVIDER_START_MOVEMENTS = {
+  byok: {
+    /** Fireblocks builds and sends its own direct transfers and waits for approval (D2). */
+    fireblocks: ["custody.signer_check", "payments.transfer"],
+  },
+  managed: {},
+} as const satisfies Record<
+  CustodyMode,
+  Partial<Record<CustodyProvider, readonly StartMovementId[]>>
+>;
+
+/**
+ * Whether a custody wallet on `provider` in `mode` may begin `movement`.
+ *
+ * @param provider - The wallet's custody provider.
+ * @param mode - `managed` for a custody config, `byok` for a custody connection.
+ * @param movement - The movement the path would sign for.
+ * @returns True for every exit, for a provider absent from `CUSTODY_PROVIDER_START_MOVEMENTS`,
+ * and for a start the table lists for it.
+ */
+export function custodyProviderStartsMovement(
+  provider: CustodyProvider,
+  mode: CustodyMode,
+  movement: MovementId
+): boolean {
+  const definition: MovementDefinition = MOVEMENTS[movement];
+  if (definition.kind === "exit") return true;
+  const table: Partial<Record<CustodyProvider, readonly MovementId[]>> =
+    CUSTODY_PROVIDER_START_MOVEMENTS[mode];
+  const started = table[provider];
+  return started === undefined || started.includes(movement);
 }
 
 /**

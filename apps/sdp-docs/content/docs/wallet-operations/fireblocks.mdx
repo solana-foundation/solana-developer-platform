@@ -42,6 +42,15 @@ workspace compatibility with the SDP team.
 These steps enable direct **SOL and canonical USDC transfers**. Fireblocks signs
 and broadcasts them. RAW signing and SDP fee sponsorship are not used.
 
+**Direct payments only, for now.** A connected Fireblocks wallet can wait for a
+human approval, and SDP's other paths cannot hold for one yet. Recurring
+payments, transfer batches, off-ramp deposits, Earn deposits, token issuance
+and DvP refuse a connected Fireblocks wallet as their source with
+`400 CUSTODY_PROVIDER_UNSUPPORTED_OPERATION` before anything is written or sent,
+and the dashboard leaves these wallets out of those source pickers. Receiving
+into a Fireblocks wallet is always allowed. Pick a wallet on another custody
+provider for those operations.
+
 ### Configure approvals
 
 Have an authorized Fireblocks operator open **Security → Policies → Transfer →

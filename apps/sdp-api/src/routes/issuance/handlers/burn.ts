@@ -151,6 +151,7 @@ export const prepareBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
   assertTokenIsDeployed(token);
 
   const wallet = await resolveIssuanceWallet({
+    movement: "issuance.control",
     env: c.env,
     auth,
     custodyWalletId: body.signingCustodyWalletId,
@@ -292,6 +293,7 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
   assertTokenIsDeployed(token);
 
   const wallet = await resolveIssuanceWallet({
+    movement: "issuance.control",
     env: c.env,
     auth,
     custodyWalletId: body.signingCustodyWalletId,

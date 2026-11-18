@@ -33,7 +33,7 @@ import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { requireProjectId } from "@/lib/auth";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { AppError, conflict, unsupportedRampCorridor } from "@/lib/errors";
-import { assertCallerMaySignWith } from "@/lib/money-admission";
+import { assertCallerMaySignWith, assertCustodyWalletStartsMovement } from "@/lib/money-admission";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { isRampProviderInChannel } from "@/middleware/require-module";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
@@ -200,6 +200,9 @@ export async function resolveRampQuoteRequest(
   if (direction === "offramp") {
     // The quote's deposit is a transfer from this wallet; refuse it before quoting.
     assertCallerMaySignWith(scope.auth, wallet, "payments.transfer");
+    // The deposit it leads to is funded under the off-ramp flow, which a provider
+    // that waits for human approval cannot start yet (PRO-2435 D1).
+    assertCustodyWalletStartsMovement(wallet, "ramps.offramp_quote");
   }
   return { scope, projectId, counterparty, wallet, walletAddress: wallet.publicKey };
 }

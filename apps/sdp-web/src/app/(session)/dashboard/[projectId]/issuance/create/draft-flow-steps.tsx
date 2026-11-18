@@ -12,6 +12,10 @@ import { BoxIcon, InfoIcon, LandmarkIcon, type LucideIcon, TriangleAlertIcon } f
 import Link from "next/link";
 import { type ReactNode, useState } from "react";
 import { IssuanceCheckRow } from "@/app/(session)/dashboard/[projectId]/issuance/issuance-checkbox";
+import {
+  heldBackWalletsHint,
+  walletsStartingMovement,
+} from "@/app/(session)/dashboard/[projectId]/payments/wallet-movement-support";
 import { RecordLine } from "@/components/refresh-record";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
@@ -489,11 +493,15 @@ export function PermissionsStep({
 }) {
   const t = useTranslations();
   const projectHref = useProjectHref();
-  if (walletsError || wallets.length === 0) {
+  // A key's wallet signs the token's starts, so the rule may hold one back (PRO-2435 D1).
+  const offeredWallets = walletsStartingMovement(wallets, "issuance.authority");
+  if (walletsError || offeredWallets.length === 0) {
     return (
       <div className="flex flex-col items-start gap-4">
         <p className="max-w-[40em] text-body text-secondary">
-          {walletsError ?? t("DashboardIssuance.newDesign.draft.noWallets")}
+          {walletsError ??
+            heldBackWalletsHint(wallets, "issuance.authority", t) ??
+            t("DashboardIssuance.newDesign.draft.noWallets")}
         </p>
         {walletsError ? null : (
           <Button asChild variant="outline" size="sm">
@@ -521,7 +529,7 @@ export function PermissionsStep({
                     update({ authorities: { ...draft.authorities, [authority.key]: value } });
                 }}
               >
-                {wallets.map((wallet) => (
+                {offeredWallets.map((wallet) => (
                   <SelectItem key={wallet.id} value={wallet.id}>
                     {wallet.label?.trim() ||
                       `${wallet.publicKey.slice(0, 5)}…${wallet.publicKey.slice(-4)}`}

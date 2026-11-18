@@ -13,7 +13,11 @@ import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
 import { createDvpTradeRepository } from "@/db/repositories/repository-factory";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { forbidden, notFound } from "@/lib/errors";
-import { assertCallerWalletInScope } from "@/lib/money-admission";
+import {
+  assertCallerWalletInScope,
+  assertCustodyWalletStartsMovement,
+} from "@/lib/money-admission";
+import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { custodyWalletForParty, walletIdIfHoldsAddress } from "@/services/dvp/custody-party";
 import type { DvpCloseAction } from "@/services/dvp/settle";
 import {
@@ -58,11 +62,14 @@ export interface DvpCloseActionContext {
  *
  * @param c - Request context.
  * @param body - The validated body naming the side and any explicit wallet.
+ * @param movement - The movement the action signs for: funding is a start the
+ * wallet's provider must be able to begin (PRO-2435 D1); reclaiming is an exit.
  * @returns The trade and the re-read wallet to sign with.
  */
 export async function resolveLegAction(
   c: Context<{ Bindings: Env }>,
-  body: { side: "a" | "b"; walletId?: string | null }
+  body: { side: "a" | "b"; walletId?: string | null },
+  movement: "dvp.fund" | "dvp.reclaim"
 ): Promise<DvpLegActionContext> {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
@@ -100,6 +107,19 @@ export async function resolveLegAction(
   // The custody signer refuses a wallet outside the key's scope (HOO-2099);
   // refusing here as well stops the action before it records anything.
   assertCallerWalletInScope(auth, custodyWalletId);
+  // So does a provider that cannot start the movement yet (PRO-2435 D1): the
+  // wallet is re-read with its provider, before the action's reservation row.
+  const wallet = await new CustodyRuntimeTargets(
+    getDb(c.env),
+    c.env,
+    new Map()
+  ).findOperationalWalletById({
+    organizationId: auth.organizationId,
+    projectId,
+    custodyWalletId,
+  });
+  if (wallet === null) throw notFound("Custody wallet");
+  assertCustodyWalletStartsMovement(wallet, movement);
   return {
     trade,
     actor: dvpTradeAuditActor(auth),

@@ -12,14 +12,21 @@ import {
   isByokCustodyProvider,
   type ProviderCredentialStatus,
 } from "@sdp/types/custody";
-import type { MovementId } from "@sdp/types/movements";
+import { custodyProviderStartsMovement, type MovementId } from "@sdp/types/movements";
 import type { OrganizationProviderAvailabilityResponse } from "@sdp/types/provider-access";
 import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import type { Address, TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
 import type { DatabaseClient } from "@/db/client";
 import { isCustodyWalletRequestRecorded } from "@/db/postgres-utils";
-import { AppError, conflict, internalError, notFound, providerUnavailable } from "@/lib/errors";
+import {
+  AppError,
+  conflict,
+  custodyProviderUnsupportedOperation,
+  internalError,
+  notFound,
+  providerUnavailable,
+} from "@/lib/errors";
 import { isCustodyProviderAvailable } from "@/lib/feature-flags";
 import {
   assertMovementAdmitted,
@@ -902,6 +909,7 @@ export class CustodyRuntimeTargets {
       projectId,
       subjectId: custodyWalletId,
     });
+    this.assertTargetStartsMovement(target, movement, custodyWalletId);
     await assertCustodyProviderEntitled(this.env, this.db, organizationId, target.provider);
     const subject = { custodyWalletId };
     return async () =>
@@ -1386,6 +1394,35 @@ export class CustodyRuntimeTargets {
     }
     this.logUnavailable(target, "not_in_release_channel", custodyWalletId);
     throw custodyProviderNotInReleaseChannel(target.provider, mode);
+  }
+
+  /**
+   * Refuses a start the target's (provider, custody mode) pair cannot begin yet
+   * (PRO-2435 D1, `CUSTODY_PROVIDER_START_MOVEMENTS`): the waist's own copy of
+   * the refusal every route makes in its authorize step, so no path reaches a
+   * provider the table leaves out. Exits always pass.
+   *
+   * @param target - The custody target about to sign or propose.
+   * @param movement - The movement it would sign for.
+   * @param custodyWalletId - The wallet row the caller named, for the refusal log.
+   * @throws 400 `CUSTODY_PROVIDER_UNSUPPORTED_OPERATION`.
+   */
+  private assertTargetStartsMovement(
+    target: CustodyRuntimeTarget,
+    movement: MovementId,
+    custodyWalletId: string
+  ): void {
+    const mode: CustodyMode = target.kind === "config" ? "managed" : "byok";
+    if (custodyProviderStartsMovement(target.provider, mode, movement)) return;
+    logEvent("info", {
+      event: "sdp_custody_provider_path_refused",
+      surface: "signer",
+      movement,
+      subject_id: custodyWalletId,
+      provider: target.provider,
+      custody_mode: mode,
+    });
+    throw custodyProviderUnsupportedOperation(target.provider, mode, movement);
   }
 
   private assertRuntimeExecutionAllowed(

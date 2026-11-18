@@ -10,7 +10,10 @@ import {
 } from "@/db/repositories/earn-provider-actions.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { internalError, notFound } from "@/lib/errors";
-import { assertCallerWalletInScope } from "@/lib/money-admission";
+import {
+  assertCallerWalletInScope,
+  assertCustodyWalletStartsMovement,
+} from "@/lib/money-admission";
 import { success } from "@/lib/response";
 import { authorize, getAuthorized } from "@/middleware/authorize";
 import { getIdempotencyClaim, getIdempotencyRecordKey, idempotent } from "@/middleware/idempotency";
@@ -46,7 +49,11 @@ type Target = Omit<
   EarnProviderActionClaim,
   "request_id" | "fingerprint" | "created_by" | "initiated_by_key_id"
 > & { admit?: () => Promise<void> };
-async function custodyOwner(c: AppContext, walletId: string) {
+async function custodyOwner(
+  c: AppContext,
+  walletId: string,
+  movement: "earn.prepare" | "earn.provider_order_cancel"
+) {
   const auth = getAuth(c),
     projectId = requireProjectId(c);
   const wallets = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).listWallets({
@@ -55,6 +62,8 @@ async function custodyOwner(c: AppContext, walletId: string) {
   });
   const wallet = resolveEarnVaultCustodyWallet(wallets, walletId);
   assertCallerWalletInScope(auth, wallet.id);
+  // Before the claim: a provider that waits for human approval cannot start it yet (PRO-2435 D1).
+  assertCustodyWalletStartsMovement(wallet, movement);
   return wallet.publicKey;
 }
 function base(c: AppContext) {
@@ -78,7 +87,7 @@ async function preparationTarget(
   } else {
     if (body.custodyWalletId === undefined)
       throw internalError("Preparation needs its custody wallet");
-    owner = await custodyOwner(c, body.custodyWalletId);
+    owner = await custodyOwner(c, body.custodyWalletId, "earn.prepare");
   }
   if (
     strategy.share_mint === null ||
@@ -139,7 +148,7 @@ async function cancellationTarget(
     owner = parent.owner_address;
   } else {
     if (parent.custody_wallet_id === null) throw notFound("Earn provider order");
-    owner = await custodyOwner(c, parent.custody_wallet_id);
+    owner = await custodyOwner(c, parent.custody_wallet_id, "earn.provider_order_cancel");
   }
   return {
     ...scoped,

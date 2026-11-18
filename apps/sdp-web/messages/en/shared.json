@@ -796,5 +796,8 @@
       "passwordWeak": "That password is too easy to guess. Make it longer.",
       "passwordTooLong": "That password is too long."
     }
+  },
+  "custodyWallets": {
+    "fireblocksDirectPaymentsOnly": "Fireblocks wallets your organization connected send direct payments only. Choose a wallet on another custody provider."
   }
 }

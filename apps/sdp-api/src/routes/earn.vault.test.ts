@@ -478,6 +478,61 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
     expect(audit).not.toHaveBeenCalled();
   });
 
+  // PRO-2435 D1: a connected Fireblocks wallet can wait for a human approval the
+  // deposit cannot hold for, so it is refused before any custody-shaped work.
+  it("refuses a Fireblocks BYOK wallet before opening an audit intent or deposit", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy({});
+    const custodyWalletId = "cwlt_earn_vault_fireblocks";
+    const db = getDb(env);
+    await db.batch([
+      db
+        .prepare(`INSERT INTO provider_credentials (
+          id, organization_id, project_id, provider, label, scope, source, storage_backend,
+          encrypted_secret_payload, status, credential_version, created_by
+        ) VALUES ('pcred_earn_vault_fireblocks', ?, ?, 'fireblocks', 'Fireblocks', 'project',
+          'stored', 'encrypted_db', 'not-read', 'active', 1, ?)`)
+        .bind(TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id),
+      db
+        .prepare(`INSERT INTO custody_connections (
+          id, organization_id, project_id, provider, scope, provider_credential_id,
+          provider_credential_scope_key, status, created_by
+        ) VALUES ('cconn_earn_vault_fireblocks', ?, ?, 'fireblocks', 'project',
+          'pcred_earn_vault_fireblocks', ?, 'pending', ?)`)
+        .bind(TEST_ORG.id, TEST_PROJECT.id, TEST_PROJECT.id, TEST_USER.id),
+      db
+        .prepare(`INSERT INTO custody_wallets
+          (id, custody_connection_id, wallet_id, public_key, label, purpose, status)
+          VALUES (?, 'cconn_earn_vault_fireblocks', '0',
+            '3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF', 'Vault 0', 'transfer', 'active')`)
+        .bind(custodyWalletId),
+      db
+        .prepare(`UPDATE custody_connections SET default_custody_wallet_id = ?,
+          provider_account_fingerprint = 'sha256:earn-vault-fireblocks', status = 'active',
+          last_check_status = 'success', last_check_at = sdp_iso_now(),
+          activated_at = sdp_iso_now(), updated_at = sdp_iso_now()
+          WHERE id = 'cconn_earn_vault_fireblocks'`)
+        .bind(custodyWalletId),
+    ]);
+    const audit = vi.spyOn(AuditService.prototype, "beginCritical");
+
+    const response = await postVaultDeposit(
+      { strategyId: strategy.id, custodyWalletId, amount: "10" },
+      "fireblocks-byok-deposit",
+      TEST_API_KEY.raw
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "CUSTODY_PROVIDER_UNSUPPORTED_OPERATION",
+        details: { provider: "fireblocks", mode: "byok", movement: "earn.deposit" },
+      },
+    });
+    expect(depositIntoVault).not.toHaveBeenCalled();
+    expect(audit).not.toHaveBeenCalled();
+  });
+
   it("refuses a wallet outside the key's scope before opening an audit intent or deposit", async () => {
     await seedAuth();
     await seedConnectionWallet();
