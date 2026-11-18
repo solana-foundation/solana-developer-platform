@@ -1115,9 +1115,7 @@ test("each promotion records the build it replaced, and a breaking migration ret
   ]);
   const switched = recorded.calls.findIndex((call) => call.includes("update-traffic"));
   const labelled = recorded.calls.findIndex((call) => call.includes("sdp_prod_previous_revision"));
-  const cron = recorded.calls.findIndex((call) =>
-    call.includes("services update sdp-prod-cron")
-  );
+  const cron = recorded.calls.findIndex((call) => call.includes("services update sdp-prod-cron"));
   assert.ok(labelled < switched && switched < cron);
 
   // The switch lands but the new revision never answers: the target must already be set.

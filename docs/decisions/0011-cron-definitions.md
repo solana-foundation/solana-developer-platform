@@ -3,7 +3,6 @@
 > **Note (2026-11-17):** The always-on service this ADR first called the worker
 > is now the cron service, `sdp-<env>-cron` (PRO-2519). Only the name changed;
 > the decision stands as written.
-
 - **Status:** Accepted
 - **Date:** 2026-10-19
 - **Deciders:** SDP engineering
