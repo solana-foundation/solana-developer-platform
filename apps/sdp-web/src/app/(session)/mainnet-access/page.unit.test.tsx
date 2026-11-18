@@ -138,12 +138,12 @@ describe("mainnet request page", () => {
     expect(screen.getByText("In review")).toBeTruthy();
   });
 
-  it("badges the product name Beta on the hosted sandbox", async () => {
+  it("badges the product name Devnet on the hosted sandbox", async () => {
     loadAccess(LOCKED);
     state.betaLabel = true;
 
     await renderPage();
 
-    expect(screen.getByText("Beta")).toBeTruthy();
+    expect(screen.getByText("Devnet")).toBeTruthy();
   });
 });
