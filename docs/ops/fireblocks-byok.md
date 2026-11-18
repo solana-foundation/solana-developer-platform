@@ -437,11 +437,10 @@ Key revocation and member removal try to enqueue affected proposals in a
 savepoint inside their database transaction. A failed wake rolls back only its
 adoption and flags; authority withdrawal still commits. The error event
 `proposal_recovery_wake_failed` records tenant scope and available SQLSTATE
-without raw provider data. The minute worker retries discovery and continues checking known
-proposals even when legacy adoption fails; it still reports that failure.
-A nonempty recovery page where every proposal fails marks the cron run failed;
-successful proposals and terminal-alert delivery remain independent. Mixed pages
-keep per-payment warnings. Malformed legacy records need repair before adoption.
+without raw provider data. The minute worker continues checking known proposals
+when legacy adoption fails; that failure still fails the cron. Ordinary recovery
+failures use the per-payment age signal described below. Malformed legacy records
+need repair before adoption.
 
 Set `organization_id` and `project_id` as psql variables. This read-only query
 lists suspicious legacy refusal rows oldest first, including already-adopted rows:
@@ -513,10 +512,11 @@ observation adds one provider GET, zero Solana RPC; refusal adds at most one GET
 and one POST in that pass. A competing status write can trigger one fresh recovery
 pass, adding one observation GET. Continued contention preserves a priority wake
 for the next tick; a losing observation is never replayed. Provider acknowledgment
-remains `processing`; only a terminal provider outcome closes the payment. The first cancellation attempt is
-immediate; a timeout or rejected cancel keeps the durable refusal and retries no
-sooner than five minutes after the last attempt. Observations continue every
-minute during that cooldown, including completion-after-refusal alerts.
+remains `processing`; only a terminal provider outcome closes the payment. The
+first cancellation attempt is immediate; a timeout or rejected cancel keeps the
+durable refusal and retries no sooner than five minutes after the last attempt.
+Observations continue every minute during that cooldown, including
+completion-after-refusal alerts.
 An acknowledged cancel is polled to outcome. Cancellation stages are explicit:
 `cancel_requested` is in flight, `cancel_ambiguous` records an uncertain result,
 and `cancel_declined` records a definitive decline. Retries after that decline use
@@ -548,9 +548,9 @@ their completion raises no critical event even if the initiating principal was
 revoked. Delivery is at least once: deduplicate on transfer ID. Configure on-call
 routing for this event before rollout; this repository does not deploy that rule.
 Monitor `proposal_recovery_unavailable` for stalled mitigation. Every ordinary
-recovery failure emits this event, whether the rest of its page succeeds or fails. It includes the
-environment, `pending_age_seconds` from the durable payment creation time, and
-organization, project and transfer IDs. Ordinary row failures do not fail the cron;
+recovery failure emits this event, whether the rest of its page succeeds or fails.
+It includes the environment, `pending_age_seconds` from the durable payment
+creation time, and organization, project and transfer IDs. Ordinary row failures do not fail the cron;
 selection, legacy adoption and critical-alert delivery failures still do.
 
 Route this event by environment and pending age before rollout, independently of
