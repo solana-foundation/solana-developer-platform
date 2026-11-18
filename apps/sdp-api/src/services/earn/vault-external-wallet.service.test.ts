@@ -26,6 +26,7 @@ import {
 } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
+import { submitPreparedStrategyTransaction } from "./strategy-transactions.service";
 import type {
   ExternalWalletBuiltTransaction,
   ExternalWalletDepositBuildInput,
@@ -96,6 +97,7 @@ const buildExternalWalletWithdrawalTransaction = inRequestScope(
 );
 const submitExternalWalletDeposit = inRequestScope(service.submitExternalWalletDeposit);
 const submitExternalWalletWithdrawal = inRequestScope(service.submitExternalWalletWithdrawal);
+const submitStrategyTransaction = inRequestScope(submitPreparedStrategyTransaction);
 const { VaultTransactionTooLargeError } = await import("./vault-execution.service");
 
 /**
@@ -185,6 +187,13 @@ async function seedTenancy(): Promise<void> {
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
       .bind(USER, "ext-wallet@example.com"),
   ]);
+  await db.execute(
+    `INSERT INTO earn_strategies (id, provider, provider_reference, name, source_kind,
+       deposit_mints, share_mint, apy_type, liquidity_term, environment, host_cluster)
+     VALUES ('strategy_ext_test', 'kamino', ?, 'Test strategy', 'defi', ?::jsonb, ?,
+       'variable', 'instant', 'sandbox', 'devnet')`,
+    [VAULT, JSON.stringify([TOKEN_MINT]), SHARE_MINT]
+  );
   projects = await seedDefaultProjects(db, {
     organizationId: ORG,
     createdBy: USER,
@@ -302,6 +311,123 @@ function submitDeposit(
     ...overrides,
   });
 }
+
+function submitCore(
+  built: ExternalWalletBuiltTransaction,
+  signedTransaction: string,
+  overrides: Partial<Parameters<typeof submitPreparedStrategyTransaction>[1]> = {}
+) {
+  return submitStrategyTransaction(env, {
+    organizationId: ORG,
+    projectId: PROJECT,
+    custodyWalletId: null,
+    transactionId: built.id,
+    signedTransaction,
+    requestId: `operation_${built.id}`,
+    userId: USER,
+    apiKeyId: null,
+    broadcast: false,
+    ...overrides,
+  });
+}
+
+describe("shared asynchronous strategy ledger writer", () => {
+  it("claims discovered holdings only with signed intent, without a synthetic deposit", async () => {
+    const built = await buildExternalWalletWithdrawalTransaction(
+      env,
+      withdrawalInput("discovered", {
+        positionId: null,
+        strategyId: "strategy_ext_test",
+        asyncOperation: true,
+      })
+    );
+    expect(await getDb(env).queryOne("SELECT id FROM earn_positions")).toBeNull();
+    const signedTransaction = await signBuiltTransaction(built);
+    const results = await Promise.all([
+      submitCore(built, signedTransaction),
+      submitCore(built, signedTransaction),
+    ]);
+    expect(results.map((result) => result.replayed).sort()).toEqual([false, true]);
+    expect(results[0]?.position.id).toBe(results[1]?.position.id);
+    const position = await getDb(env).queryOne(
+      "SELECT cost_basis_known, strategy_id, owner_address FROM earn_positions"
+    );
+    expect(position).toEqual({
+      cost_basis_known: false,
+      strategy_id: "strategy_ext_test",
+      owner_address: ownerAddress,
+    });
+    expect(
+      await getDb(env).queryMany("SELECT direction, amount_requested FROM earn_movements")
+    ).toEqual([{ direction: "withdrawal", amount_requested: "10" }]);
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+
+  it("refuses foreign projects and different signed bytes before claiming a discovered holding", async () => {
+    const built = await buildExternalWalletWithdrawalTransaction(
+      env,
+      withdrawalInput("discovered", {
+        positionId: null,
+        strategyId: "strategy_ext_test",
+        asyncOperation: true,
+      })
+    );
+    const other = await buildExternalWalletWithdrawalTransaction(
+      env,
+      withdrawalInput("discovered", {
+        positionId: null,
+        strategyId: "strategy_ext_test",
+        asyncOperation: true,
+      })
+    );
+    await expect(
+      submitCore(built, await signBuiltTransaction(built), { projectId: PRODUCTION_PROJECT })
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(submitCore(built, await signBuiltTransaction(other))).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    });
+    expect(await getDb(env).queryOne("SELECT id FROM earn_positions")).toBeNull();
+    expect(await countRows("earn_movements")).toBe(0);
+    expect(
+      await getDb(env).queryOne(
+        "SELECT consumed_at FROM earn_external_wallet_transactions WHERE id = ?",
+        [built.id]
+      )
+    ).toEqual({ consumed_at: null });
+  });
+
+  it("uses the custody ledger identity for a custody-funded prepared strategy", async () => {
+    await getDb(env).execute(
+      `INSERT INTO custody_configs
+      (id, organization_id, project_id, provider, config_encrypted, status)
+      VALUES ('cfg_strategy_operation', ?, ?, 'privy', 'test-encrypted', 'active')`,
+      [ORG, PROJECT]
+    );
+    await getDb(env).execute(
+      `INSERT INTO custody_wallets
+      (id, custody_config_id, wallet_id, public_key, status)
+      VALUES ('wallet_strategy_operation', 'cfg_strategy_operation', 'provider_wallet', ?, 'active')`,
+      [ownerAddress]
+    );
+    const built = await buildDepositRow(
+      depositInput({ custodyWalletId: "wallet_strategy_operation", asyncOperation: true })
+    );
+    const result = await submitCore(built, await signBuiltTransaction(built), {
+      custodyWalletId: "wallet_strategy_operation",
+    });
+    expect(result.position.custody_wallet_id).toBe("wallet_strategy_operation");
+    expect(result.position.owner_address).toBeNull();
+    expect(result.movement.custody_wallet_id).toBe("wallet_strategy_operation");
+    expect(result.movement.owner_address).toBeNull();
+    expect(result.replayed).toBe(false);
+    expect(
+      await getDb(env).queryOne("SELECT strategy_id FROM earn_positions WHERE id = ?", [
+        result.position.id,
+      ])
+    ).toEqual({ strategy_id: "strategy_ext_test" });
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+});
 
 beforeEach(async () => {
   await seedTestDatabase(env);
@@ -596,6 +722,8 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
     expect(advisory).toMatchObject({
       owner_address: ownerAddress,
       strategy_id: "strategy_ext_test",
+      unsigned_transaction: Buffer.from(result.swapTransaction.bytes).toString("base64"),
+      custody_wallet_id: null,
       deposit_token_mint: TOKEN_MINT,
       deposit_token_decimals: 6,
       swap_min_out_amount: "24.8",
@@ -732,6 +860,27 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
 });
 
 describe("submitExternalWalletDeposit", () => {
+  it("cannot consume an operation-only build through legacy submission, even without a parent reference", async () => {
+    const built = await buildDepositRow(depositInput({ asyncOperation: true }));
+    const signed = await signBuiltTransaction(built);
+    await expect(submitDeposit(built, signed, crypto.randomUUID())).rejects.toMatchObject({
+      code: "CONFLICT",
+      details: { reason: "operation_execution_required" },
+    });
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+    const row = await getDb(env).queryOne<{ operation_only: boolean; movement_id: string | null }>(
+      "SELECT operation_only, movement_id FROM earn_external_wallet_transactions WHERE id = ?",
+      [built.id]
+    );
+    expect(row).toEqual({ operation_only: true, movement_id: null });
+    await expect(
+      getDb(env).execute(
+        "UPDATE earn_external_wallet_transactions SET operation_only = FALSE WHERE id = ?",
+        [built.id]
+      )
+    ).rejects.toThrow("irreversible");
+  });
+
   it("verifies the owner signature, records before broadcast, and claims the position", async () => {
     const built = await buildDepositRow(depositInput());
     const signed = await signBuiltTransaction(built);

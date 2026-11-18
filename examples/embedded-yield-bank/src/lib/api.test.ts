@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createDeposit, createWithdrawal, resumePendingIntent } from "./api";
+import { resumePendingIntent } from "./api";
 
 const movement = {
   movementId: "movement",
@@ -47,9 +47,7 @@ afterEach(() => {
 describe("durable example intent", () => {
   it("recovers after a lost submit response and reload without rebuilding", async () => {
     const sent: unknown[] = [];
-    const fetch = vi.fn(async (url: URL, init?: RequestInit) => {
-      if (url.pathname === "/api/deposits")
-        return Response.json({ data: { intent } });
+    const fetch = vi.fn(async (_url: URL, init?: RequestInit) => {
       expect(localStorage.getItem("northstar:pending-intent:v1")).toContain(
         "signed"
       );
@@ -58,7 +56,11 @@ describe("durable example intent", () => {
       return Response.json({ data: { kind: "movement", movement } });
     });
     vi.stubGlobal("fetch", fetch);
-    await expect(createDeposit("10")).rejects.toThrow("Lost response");
+    localStorage.setItem(
+      "northstar:pending-intent:v1",
+      JSON.stringify({ fingerprint: "saved-before-upgrade", intent })
+    );
+    await expect(resumePendingIntent()).rejects.toThrow("Lost response");
     vi.resetModules();
     const reloaded = await import("./api");
     await expect(reloaded.resumePendingIntent()).resolves.toMatchObject({
@@ -67,17 +69,7 @@ describe("durable example intent", () => {
     expect(sent).toEqual([intent, intent]);
     expect(
       fetch.mock.calls.filter(([url]) => url.pathname === "/api/deposits")
-    ).toHaveLength(1);
-  });
-
-  it("never submits when durable storage is unavailable", async () => {
-    const fetch = vi.fn(async () => Response.json({ data: { intent } }));
-    vi.stubGlobal("fetch", fetch);
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new Error("Storage full");
-    });
-    await expect(createDeposit("10")).rejects.toThrow("Storage full");
-    expect(fetch).toHaveBeenCalledTimes(1);
+    ).toHaveLength(0);
   });
 
   it("retains intent across malformed success and later authorization failures", async () => {
@@ -85,7 +77,6 @@ describe("durable example intent", () => {
       "fetch",
       vi
         .fn()
-        .mockResolvedValueOnce(Response.json({ data: { intent } }))
         .mockResolvedValueOnce(
           Response.json({ data: { kind: "movement", movement: {} } })
         )
@@ -96,53 +87,14 @@ describe("durable example intent", () => {
           )
         )
     );
-    await expect(createDeposit("10")).rejects.toThrow();
+    localStorage.setItem(
+      "northstar:pending-intent:v1",
+      JSON.stringify({ fingerprint: "saved-before-upgrade", intent })
+    );
+    await expect(resumePendingIntent()).rejects.toThrow();
     await expect(resumePendingIntent()).rejects.toThrow("Session expired");
     expect(localStorage.getItem("northstar:pending-intent:v1")).toContain(
       '"idempotencyKey":"key"'
     );
   });
-
-  it.each(["deposit", "withdrawal"])(
-    "allows three same-amount %s operations after acknowledged submits",
-    async (kind) => {
-      let builds = 0;
-      const keys: string[] = [];
-      vi.stubGlobal(
-        "fetch",
-        vi.fn(async (url: URL, init?: RequestInit) => {
-          if (url.pathname !== "/api/intents/submit") {
-            builds += 1;
-            return Response.json({
-              data: {
-                intent: {
-                  ...intent,
-                  kind,
-                  transactionId: `build-${builds}`,
-                  idempotencyKey: `key-${builds}`,
-                },
-              },
-            });
-          }
-          keys.push(JSON.parse(String(init?.body)).idempotencyKey);
-          return Response.json({
-            data: {
-              kind: "movement",
-              movement: {
-                ...movement,
-                direction: kind,
-                movementId: `movement-${builds}`,
-              },
-            },
-          });
-        })
-      );
-      for (let i = 0; i < 3; i += 1) {
-        if (kind === "deposit") await createDeposit("10");
-        else await createWithdrawal({ amount: "10", route: "direct" });
-      }
-      expect(builds).toBe(3);
-      expect(new Set(keys).size).toBe(3);
-    }
-  );
 });

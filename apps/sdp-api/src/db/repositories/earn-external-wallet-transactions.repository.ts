@@ -29,9 +29,15 @@ export interface EarnExternalWalletTransactionRow {
   project_id: string | null;
   environment: SdpEnvironment;
   provider: string;
+  strategy_id: string | null;
+  custody_wallet_id: string | null;
+  fee_mode: "wallet" | "partner" | "sponsored";
+  operation_only?: boolean;
   direction: EarnMovementDirection;
   owner_address: string;
   vault_address: string;
+  /** Canonical strategy instrument reference; legacy alias remains during rollout. */
+  strategy_reference?: string;
   token_mint: string;
   share_mint: string;
   label: string;
@@ -73,6 +79,10 @@ interface CreateEarnExternalWalletTransactionInput {
   projectId: string;
   environment: SdpEnvironment;
   provider: string;
+  strategyId?: string;
+  custodyWalletId?: string;
+  feeMode?: "wallet" | "partner" | "sponsored";
+  operationOnly?: boolean;
   direction: EarnMovementDirection;
   ownerAddress: string;
   vaultAddress: string;
@@ -111,9 +121,14 @@ function mapRow(row: Record<string, unknown>): EarnExternalWalletTransactionRow 
     project_id: row.project_id as string | null,
     environment: row.environment as SdpEnvironment,
     provider: row.provider as string,
+    strategy_id: row.strategy_id as string | null,
+    custody_wallet_id: row.custody_wallet_id as string | null,
+    fee_mode: row.fee_mode as EarnExternalWalletTransactionRow["fee_mode"],
+    operation_only: row.operation_only === true,
     direction: row.direction as EarnMovementDirection,
     owner_address: row.owner_address as string,
-    vault_address: row.vault_address as string,
+    strategy_reference: (row.strategy_reference ?? row.vault_address) as string,
+    vault_address: (row.strategy_reference ?? row.vault_address) as string,
     token_mint: row.token_mint as string,
     share_mint: row.share_mint as string,
     label: row.label as string,
@@ -148,8 +163,8 @@ export function createPostgresEarnExternalWalletTransactionsRepository(
              position_id, denomination, amount_requested, min_shares_out,
              creates_share_account, fee_payer, share_ata_rent_funder,
              unsigned_transaction, last_valid_block_height,
-             created_by, initiated_by_key_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             created_by, initiated_by_key_id, strategy_id, custody_wallet_id, fee_mode, operation_only
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            RETURNING *`
         )
         .bind(
@@ -174,7 +189,11 @@ export function createPostgresEarnExternalWalletTransactionsRepository(
           input.unsignedTransaction,
           input.lastValidBlockHeight,
           input.createdBy ?? null,
-          input.initiatedByKeyId ?? null
+          input.initiatedByKeyId ?? null,
+          input.strategyId ?? null,
+          input.custodyWalletId ?? null,
+          input.feeMode ?? "wallet",
+          input.operationOnly ?? false
         )
         .first<Record<string, unknown>>();
       if (!row) {

@@ -141,14 +141,15 @@ rounding can leave it slightly below zero. When it is left out,
 | `withdrawals_pending` | An open withdrawal request holds shares that have not paid out yet. |
 | `deposits_not_valued` | SDP did not observe a finalized deposit's amount. |
 | `withdrawals_not_valued` | SDP did not observe a finalized withdrawal's payout. |
+| `cost_basis_unknown` | Acquisition history is incomplete, so the live balance cannot establish earned yield. |
 
 Show a dash, never `$0`, while `earned` is missing. Three limits apply:
 
 - **Only held positions count.** A fully withdrawn position drops out of
   earnings but stays in the movement history.
-- **Outside transfers count.** The live value reads the wallet's whole balance
-  in the strategy, including shares acquired outside SDP, while deposits and
-  withdrawals come only from SDP's records.
+- **Outside acquisition can leave earnings unknown.** Live value includes the
+  wallet's whole strategy balance. Unknown acquisition history withholds earned
+  amounts rather than treating transferred shares as profit.
 - **It is not an accounting ledger.** It gives no lifetime realized returns or
   daily accrual history. Reconcile against your own records for statements.
 

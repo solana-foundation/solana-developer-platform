@@ -7,6 +7,13 @@ export interface YieldStrategy {
   depositMints: string[];
   shareMint?: string;
   currentApy?: string;
+  rate?: {
+    value: string | null;
+    measure: "apy";
+    basis: "provider_reported";
+    observedAt: string | null;
+    source: { provider: string; providerReference: string };
+  };
   liquidityTerm: "instant" | "delayed";
   redemptionDelayDays?: number;
   status: "active" | "paused" | "deprecated";
@@ -22,6 +29,8 @@ export interface SlippagePolicy {
 }
 
 export interface YieldPosition {
+  discovered?: boolean;
+  costBasisKnown?: boolean;
   id: string;
   ownerAddress: string;
   provider: string;
@@ -29,7 +38,7 @@ export interface YieldPosition {
   label: string;
   tokenMint: string;
   shareMint: string;
-  createdAt: string;
+  createdAt: string | null;
   closedAt: string | null;
   shares?: string;
   withdrawableShares?: string;
@@ -101,14 +110,9 @@ export interface YieldWithdrawalRequest {
   replayed?: boolean;
 }
 
-export type WithdrawalIntent =
-  | { amount: string; route: "direct" }
-  | {
-      amount: string;
-      route: "queued";
-      discountBps: number;
-      deadlineSeconds: number;
-    };
+export interface WithdrawalIntent {
+  amount: string;
+}
 
 export type MovementStatus =
   | "requested"
@@ -175,6 +179,7 @@ export interface DashboardData {
   };
   /** Checking plus savings. Undefined while the savings valuation is unavailable. */
   total?: string;
+  operations?: import("./lib/core-operation").EarnOperation[];
   movements: YieldMovement[];
   /** Every non-terminal queued exit, restored on every dashboard load. */
   withdrawalRequests: YieldWithdrawalRequest[];

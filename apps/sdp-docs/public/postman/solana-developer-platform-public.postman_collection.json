@@ -1933,24 +1933,9 @@
           "name": "Preview a deposit",
           "request": {
             "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
+            "header": [],
             "url": "{{baseUrl}}/v1/earn/vault-deposit-previews",
-            "description": "Quotes how many shares a deposit would receive right now, from the provider's live accounting. When the strategy's `depositSlippage` is not null, set `minSharesOut` from this quote: take your tolerance off `sharesOut`. Resolve every `blockingIssues` entry before you build. The preview is read-only, takes no Idempotency-Key, and applies a deposit's access checks, provider activation included. It returns 501 when the provider cannot quote deposits.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"strategyId\": \"earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e\",\n  \"amount\": \"25\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
+            "description": "Retired. Returns 410 NOT_IMPLEMENTED without calling a provider. This compatibility path no longer prepares new deposits."
           }
         },
         {
@@ -2002,24 +1987,9 @@
           "name": "Build a deposit transaction",
           "request": {
             "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
+            "header": [],
             "url": "{{baseUrl}}/v1/earn/external-wallet/deposit-transactions",
-            "description": "Builds an unsigned deposit transaction for the customer's wallet to sign. Nothing moves until you submit the signed transaction. The build applies provider access checks and can name your own `feePayer`, which then signs alongside the customer. A swap-funded deposit that cannot fit in one transaction returns a separate swap and follow-up deposit instead of `transaction`, so check the response before you request a signature.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"strategyId\": \"earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e\",\n  \"ownerAddress\": \"9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM\",\n  \"amount\": \"25\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
+            "description": "Retired. Returns 410 NOT_IMPLEMENTED without building or reserving a transaction. Existing legacy signed builds can still be recovered through the legacy submit endpoint. Operation-only builds must use their operation action."
           }
         },
         {
@@ -2039,7 +2009,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/earn/external-wallet/deposits",
-            "description": "Submits a deposit transaction signed by the customer's wallet. SDP checks that the signed bytes match the built transaction and that every required signature is valid (the customer's, plus your fee payer's when the build named one), records the movement, then broadcasts. Idempotency-Key is required: a retry with the same key returns the original movement with `replayed: true`, and each built transaction can be submitted once. Reusing a key with a different body, or submitting one build under a second key, returns `409 CONFLICT`. Submit the original signed bytes even after the blockhash expires, since the wallet may already have broadcast them. After an uncertain response, retry with the same key and body, then read the movement; never replace a signed transaction whose outcome is unknown.",
+            "description": "Recovery only for previously exposed legacy builds. Operation-only builds return 409 operation_execution_required and must use their durable operation action, including after refresh. Submits a deposit transaction signed by the customer's wallet. SDP checks that the signed bytes match the built transaction and that every required signature is valid (the customer's, plus your fee payer's when the build named one), records the movement, then broadcasts. Idempotency-Key is required: a retry with the same key returns the original movement with `replayed: true`, and each built transaction can be submitted once. Reusing a key with a different body, or submitting one build under a second key, returns `409 CONFLICT`. Submit the original signed bytes even after the blockhash expires, since the wallet may already have broadcast them. After an uncertain response, retry with the same key and body, then read the movement; never replace a signed transaction whose outcome is unknown.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"transactionId\": \"earn_external_wallet_transaction_e7a88258-1d19-48f3-8d0e-81fefa4bf3b3\",\n  \"signedTransaction\": \"AUyx/sEc49/1l6jxo3nbViPAIUqdrXCo8Qx5SfDvIbtUI0zex3Bi6Cyhhn1QTVU8zWDzXTRyIX2aCmq9v7yk5AOA\"\n}",
@@ -2079,24 +2049,9 @@
           "name": "Build a withdrawal transaction",
           "request": {
             "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
+            "header": [],
             "url": "{{baseUrl}}/v1/earn/external-wallet/withdrawal-transactions",
-            "description": "Builds an unsigned withdrawal transaction for a position, for the customer's wallet to sign. Withdrawals keep working after a provider stops taking deposits. Send `minAmountOut` when the strategy's `withdrawalSlippage` is not null, and omit it when null. A provider-order route may not support a preview: it places an order that pays out later, not an instant redemption.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"positionId\": \"earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b\",\n  \"shares\": \"10\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
+            "description": "Retired. Returns 410 NOT_IMPLEMENTED without building a transaction. New withdrawals use the internal core Earn API. Exact already-built legacy transactions retain their signed-submit recovery path; operation-only builds must use their operation action."
           }
         },
         {
@@ -2116,7 +2071,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/earn/external-wallet/withdrawals",
-            "description": "Submits a withdrawal transaction signed by the customer's wallet. It works like a deposit submit: SDP checks every signature against the exact built message, records the movement before broadcast, requires an Idempotency-Key, and accepts each built transaction once, with the same `409 CONFLICT` answers. Submit the original signed bytes even after the blockhash expires, since the wallet may already have broadcast them. After an uncertain response, retry with the same key and body, then read the movement instead of building a new withdrawal. Withdrawals stay available while Earn is disabled.",
+            "description": "Recovers an exact already-built legacy withdrawal signed by the customer's wallet. Operation-only builds return 409 and must use their operation action. It works like a deposit submit: SDP checks every signature against the exact built message, records the movement before broadcast, requires an Idempotency-Key, and accepts each built transaction once, with the same `409 CONFLICT` answers. Submit the original signed bytes even after the blockhash expires, since the wallet may already have broadcast them. After an uncertain response, retry with the same key and body, then read the movement instead of building a new withdrawal. Withdrawals stay available while Earn is disabled.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"transactionId\": \"earn_external_wallet_transaction_0ebe7320-4b8e-4d1a-a5f0-6c2d9e8b1f47\",\n  \"signedTransaction\": \"AUyx/sEc49/1l6jxo3nbViPAIUqdrXCo8Qx5SfDvIbtUI0zex3Bi6Cyhhn1QTVU8zWDzXTRyIX2aCmq9v7yk5AOA\"\n}",
@@ -2180,24 +2135,9 @@
           "name": "Build a withdrawal request transaction",
           "request": {
             "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
+            "header": [],
             "url": "{{baseUrl}}/v1/earn/external-wallet/withdrawal-request-transactions",
-            "description": "Builds an unsigned withdrawal request transaction for a position, for the customer's wallet to sign. A solver queue request escrows shares; an operator redemption converts shares into an intermediate token that the operator settles later. Neither transaction pays the customer. Save the `withdrawalRequestId` the submit returns and track the request until it is fulfilled, canceled, or failed.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"positionId\": \"earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc\",\n  \"mechanism\": \"solverQueue\",\n  \"shares\": \"15\",\n  \"discountBps\": 10,\n  \"deadlineSeconds\": 60\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
+            "description": "Retired. Returns 410 NOT_IMPLEMENTED without building or reserving a request. New withdrawals use the internal core Earn API. Exact already-built legacy signed requests remain recoverable. Existing request cancellation is retained for draining funds."
           }
         },
         {
@@ -2226,7 +2166,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/earn/external-wallet/withdrawal-requests",
-            "description": "Submits a withdrawal request transaction signed by the customer's wallet. SDP checks every signature against the exact built message, records the request before broadcast, then sends it. Idempotency-Key is required: a retry with the same key returns the original request, and each built transaction can be submitted once. Reusing a key with a different body, or submitting one build under a second key, returns `409 CONFLICT`. An expired build can still be submitted late. If its reservation was released or replaced, SDP accepts it only once the exact signed transaction is finalized as successful, so after a `409 CONFLICT` retry the same bytes and key until that shows. A late operator redemption whose original cycle already closed is refused for operator reconciliation, so it cannot claim a newer request at the same address. A transaction that recovery finds finalized as failed returns `400 TRANSACTION_FAILED`; build a new one. A recovery RPC outage returns `503 PROVIDER_UNAVAILABLE`: retry the original bytes and key. An unresolved 16-signature history window returns `503` and needs support to reconcile. An expired operator redemption build whose creation history is unavailable also returns `503`: keep and retry the original signed intent rather than signing a replacement.",
+            "description": "Recovers an exact already-built legacy withdrawal request signed by the customer's wallet. Operation-only builds return 409 and must use their operation action. SDP checks every signature against the exact built message, records the request before broadcast, then sends it. Idempotency-Key is required: a retry with the same key returns the original request, and each built transaction can be submitted once. Reusing a key with a different body, or submitting one build under a second key, returns `409 CONFLICT`. An expired build can still be submitted late. If its reservation was released or replaced, SDP accepts it only once the exact signed transaction is finalized as successful, so after a `409 CONFLICT` retry the same bytes and key until that shows. A late operator redemption whose original cycle already closed is refused for operator reconciliation, so it cannot claim a newer request at the same address. A transaction that recovery finds finalized as failed returns `400 TRANSACTION_FAILED`; a fresh withdrawal requires the core API. A recovery RPC outage returns `503 PROVIDER_UNAVAILABLE`: retry the original bytes and key. An unresolved 16-signature history window returns `503` and needs support to reconcile. An expired operator redemption build whose creation history is unavailable also returns `503`: keep and retry the original signed intent rather than signing a replacement.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"transactionId\": \"earn_external_wallet_withdrawal_request_transaction_54c50679-1b52-494d-84fa-106df66452ff\",\n  \"signedTransaction\": \"AUyx/sEc49/1l6jxo3nbViPAIUqdrXCo8Qx5SfDvIbtUI0zex3Bi6Cyhhn1QTVU8zWDzXTRyIX2aCmq9v7yk5AOA\"\n}",

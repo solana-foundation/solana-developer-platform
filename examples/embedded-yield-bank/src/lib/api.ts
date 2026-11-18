@@ -2,10 +2,7 @@ import { z } from "zod";
 import type {
   ApiErrorBody,
   DashboardData,
-  TransferResult,
   WithdrawalCancellationResult,
-  WithdrawalIntent,
-  WithdrawalResult,
 } from "@/types";
 import { intentResultSchema } from "./intent-result";
 import { preparedIntentSchema } from "./prepared-intent";
@@ -103,20 +100,6 @@ export async function resumePendingIntent() {
     const pending = pendingIntent();
     return pending ? submitPending(pending) : null;
   });
-}
-
-export async function createDeposit(amount: string): Promise<TransferResult> {
-  const result = await executeIntent("/api/deposits", { amount });
-  if (result.kind !== "movement") throw new Error("Invalid deposit response");
-  return { movement: result.movement };
-}
-
-export async function createWithdrawal(
-  input: WithdrawalIntent
-): Promise<WithdrawalResult> {
-  const result = await executeIntent("/api/withdrawals", input);
-  if (result.kind === "cancel") throw new Error("Invalid withdrawal response");
-  return result;
 }
 
 export async function cancelQueuedWithdrawal(

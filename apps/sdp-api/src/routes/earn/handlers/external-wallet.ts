@@ -582,6 +582,7 @@ interface MutableTokenEarnings {
  * reconciler's window, and the request's longer-lived reason then surfaces.
  */
 const EARNED_UNAVAILABLE_PRIORITY: Record<EarnExternalWalletEarnedUnavailableReason, number> = {
+  cost_basis_unknown: 6,
   live_value_unavailable: 5,
   movements_pending: 4,
   withdrawals_pending: 3,
@@ -623,7 +624,10 @@ function summarizeExternalWalletEarnings(
       token.withdrawals.push(totals.finalizedWithdrawals);
     }
 
-    const reason = earnedUnavailableReason(value, totals);
+    const reason =
+      holding.costBasisKnown === false
+        ? "cost_basis_unknown"
+        : earnedUnavailableReason(value, totals);
     if (
       reason &&
       (!token.earnedUnavailableReason ||
@@ -1139,7 +1143,7 @@ function requireExternalWalletIdempotencyKey(c: AppContext, noun: string): strin
 }
 
 /** One external-wallet holding with its owner and instrument columns proven present. */
-interface ExternalWalletHolding {
+export interface ExternalWalletHolding {
   id: string;
   provider: string;
   vaultAddress: string;
@@ -1148,6 +1152,7 @@ interface ExternalWalletHolding {
   tokenMint: string;
   shareMint: string;
   shareAtaRentFunder: string | null;
+  costBasisKnown?: boolean;
   createdAt: string;
   closedAt: string | null;
   /** Snapshot boundary for the read-path close-out; see closeEmptyHydratedPositions. */
@@ -1183,6 +1188,7 @@ function toExternalWalletHolding(
     tokenMint: row.token_mint,
     shareMint: row.share_mint,
     shareAtaRentFunder: row.share_ata_rent_funder,
+    costBasisKnown: row.cost_basis_known !== false,
     createdAt: row.created_at,
     closedAt: row.closed_at,
     updatedAt: row.updated_at,
@@ -1251,7 +1257,7 @@ interface MutableStrategyTotal {
   tokens: Map<string, MutableTokenTotal>;
 }
 
-function summarizeExternalWalletPositions(
+export function summarizeExternalWalletPositions(
   holdings: readonly ExternalWalletHolding[],
   live: ReadonlyMap<string, HydratedVaultPositionValue>,
   options: { includeOwnerAddresses: boolean; includePositions: boolean } = {

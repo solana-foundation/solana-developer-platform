@@ -5,6 +5,8 @@ import {
   type DatabaseExecutor,
 } from "@/db/client";
 import {
+  type ClaimDiscoveredStrategyPositionInput,
+  claimDiscoveredStrategyPosition,
   fulfilledQueueQuantity,
   queuedFulfillmentMovementId,
 } from "@/db/repositories/earn-movements.repository";
@@ -117,6 +119,10 @@ export interface EarnExternalWalletWithdrawalRequestTransactionRow {
   project_id: string | null;
   environment: SdpEnvironment;
   provider: string;
+  custody_wallet_id?: string | null;
+  fee_mode?: "wallet" | "partner" | "sponsored";
+  operation_only?: boolean;
+  strategy_id?: string | null;
   position_id: string | null;
   withdrawal_request_id: string | null;
   action: EarnVaultWithdrawalRequestActionKind;
@@ -176,6 +182,8 @@ export interface CreateSignedQueuedWithdrawalRequestInput {
   environment: SdpEnvironment;
   provider: string;
   positionId: string;
+  /** Authorized retained strategy context, claimed atomically after signature verification. */
+  discoveredPosition?: ClaimDiscoveredStrategyPositionInput;
   custodyWalletId?: string | null;
   ownerAddress: string;
   vaultAddress: string;
@@ -228,6 +236,10 @@ interface CreateExternalWalletQueuedTransactionInput {
   projectId: string;
   environment: SdpEnvironment;
   provider: string;
+  custodyWalletId?: string | null;
+  feeMode?: "wallet" | "partner" | "sponsored";
+  operationOnly?: boolean;
+  strategyId?: string | null;
   positionId?: string | null;
   withdrawalRequestId?: string | null;
   action: EarnVaultWithdrawalRequestActionKind;
@@ -408,6 +420,7 @@ function mapRequest(row: Record<string, unknown>): EarnVaultWithdrawalRequestRow
     share_decimals: Number(row.share_decimals),
     asset_decimals: Number(row.asset_decimals),
     mechanism: (row.mechanism ?? "solver_queue") as EarnVaultWithdrawalMechanism,
+    custody_wallet_id: (row.custody_wallet_id as string | null | undefined) ?? null,
     discount_bps: row.discount_bps == null ? null : Number(row.discount_bps),
     nonce: row.nonce === null || row.nonce === undefined ? null : String(row.nonce),
     creation_timestamp:
@@ -431,6 +444,11 @@ function mapExternalBuild(
 ): EarnExternalWalletWithdrawalRequestTransactionRow {
   return {
     ...(row as unknown as EarnExternalWalletWithdrawalRequestTransactionRow),
+    custody_wallet_id: (row.custody_wallet_id as string | null | undefined) ?? null,
+    fee_mode: (row.fee_mode ?? (row.fee_payer ? "partner" : "wallet")) as
+      | "wallet"
+      | "partner"
+      | "sponsored",
     mechanism: (row.mechanism ?? "solver_queue") as EarnVaultWithdrawalMechanism,
     share_decimals: row.share_decimals == null ? null : Number(row.share_decimals),
     asset_decimals: row.asset_decimals == null ? null : Number(row.asset_decimals),
@@ -1021,6 +1039,9 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
           );
         }
 
+        const positionId = input.discoveredPosition
+          ? (await claimDiscoveredStrategyPosition(input.discoveredPosition, executor)).id
+          : input.positionId;
         const requestRow = await tx
           .prepare(
             `INSERT INTO earn_vault_withdrawal_requests (
@@ -1042,7 +1063,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
             input.projectId,
             input.environment,
             input.provider,
-            input.positionId,
+            positionId,
             input.custodyWalletId ?? null,
             input.ownerAddress,
             input.vaultAddress,
@@ -1808,8 +1829,8 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
              asset_decimals, intermediate_mint, intermediate_amount,
              discount_bps, maturity_timestamp, deadline_timestamp,
              fee_payer, unsigned_transaction, last_valid_block_height,
-             created_by, initiated_by_key_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             created_by, initiated_by_key_id, custody_wallet_id, fee_mode, strategy_id, operation_only
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT DO NOTHING
            RETURNING *`
           )
@@ -1841,7 +1862,11 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
             input.unsignedTransaction,
             input.lastValidBlockHeight,
             input.createdBy ?? null,
-            input.initiatedByKeyId ?? null
+            input.initiatedByKeyId ?? null,
+            input.custodyWalletId ?? null,
+            input.feeMode ?? (input.feePayer ? "partner" : "wallet"),
+            input.strategyId ?? null,
+            input.operationOnly ?? false
           )
           .first<Record<string, unknown>>();
         if (row) return mapExternalBuild(row);

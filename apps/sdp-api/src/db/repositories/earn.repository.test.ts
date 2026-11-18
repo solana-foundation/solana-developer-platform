@@ -698,6 +698,125 @@ describe("EarnRepository (postgres)", () => {
     });
   });
 
+  describe("core discovery filters and rate provenance", () => {
+    it("intersects caller filters with visibility before pagination and counts", async () => {
+      const target = await seedStrategy({ providerReference: "core-first", currentApy: "0.06" });
+      await seedStrategy({ providerReference: "core-second", currentApy: "0.02" });
+      await seedStrategy({ providerReference: "core-unknown", currentApy: null });
+      await seedStrategy({
+        provider: "kamino",
+        providerReference: "core-other-provider",
+        currentApy: "0.08",
+      });
+      const page = await repo.listStrategies({
+        environment: "sandbox",
+        provider: "veda",
+        depositMint: USDC_MINT,
+        minApy: "0.04",
+        maxApy: "0.07",
+        providers: ["veda"],
+        limit: 1,
+        offset: 0,
+      });
+      expect(page.total).toBe(1);
+      expect(page.rows.map((row) => row.id)).toEqual([target.id]);
+      expect(
+        (
+          await repo.listStrategies({
+            environment: "sandbox",
+            id: target.id,
+            providers: [],
+            limit: 10,
+            offset: 0,
+          })
+        ).total
+      ).toBe(0);
+      expect(
+        (
+          await repo.listStrategies({
+            environment: "sandbox",
+            depositMint: "absent-mint",
+            limit: 10,
+            offset: 0,
+          })
+        ).total
+      ).toBe(0);
+    });
+
+    it("does not invent a rate observation on metadata updates", async () => {
+      const observedAt = "2026-11-18T10:00:00.000Z";
+      const first = await seedStrategy({ rateObservedAt: observedAt });
+      const metadataUpdate = await repo.upsertStrategy(strategyInput({ name: "New label" }));
+      expect(metadataUpdate?.id).toBe(first.id);
+      expect(metadataUpdate?.rate_observed_at).toBe(observedAt);
+      await repo.updateStrategyMetrics({
+        provider: "veda",
+        providerReference: "vault-usdc-prime",
+        environment: "sandbox",
+        currentApy: "0.052",
+        riskMetadata: { tvlUsd: 100 },
+      });
+      expect((await repo.getStrategyById(first.id))?.rate_observed_at).toBe(observedAt);
+      await repo.updateStrategyMetrics({
+        provider: "veda",
+        providerReference: "vault-usdc-prime",
+        environment: "sandbox",
+        currentApy: "0.08",
+        riskMetadata: {},
+      });
+      expect((await repo.getStrategyById(first.id))?.rate_observed_at).toBeNull();
+      await repo.updateStrategyMetrics({
+        provider: "veda",
+        providerReference: "vault-usdc-prime",
+        environment: "sandbox",
+        currentApy: "0.08",
+        rateObservedAt: observedAt,
+        riskMetadata: {},
+      });
+      await getDb(env)
+        .prepare("UPDATE earn_strategies SET current_apy = ? WHERE id = ?")
+        .bind("0.09", first.id)
+        .run();
+      expect((await repo.getStrategyById(first.id))?.rate_observed_at).toBeNull();
+    });
+
+    it("keeps batch rate observations separate from null and malformed rates", async () => {
+      const observedAt = "2026-11-18T10:01:00.000Z";
+      await repo.upsertStrategies([
+        strategyInput({ providerReference: "core-batch", rateObservedAt: observedAt }),
+      ]);
+      const first = await repo.getStrategyByReference({
+        provider: "veda",
+        providerReference: "core-batch",
+        environment: "sandbox",
+      });
+      expect(first?.rate_observed_at).toBe(observedAt);
+      await repo.updateStrategyMetricsBatch([
+        {
+          provider: "veda",
+          providerReference: "core-batch",
+          environment: "sandbox",
+          currentApy: null,
+          rateObservedAt: observedAt,
+          riskMetadata: {},
+        },
+      ]);
+      if (!first) throw new Error("missing strategy");
+      expect((await repo.getStrategyById(first.id))?.rate_observed_at).toBeNull();
+      await getDb(env)
+        .prepare("UPDATE earn_strategies SET current_apy = ? WHERE id = ?")
+        .bind("not-a-rate", first.id)
+        .run();
+      const page = await repo.listStrategies({
+        environment: "sandbox",
+        minApy: "0",
+        limit: 10,
+        offset: 0,
+      });
+      expect(page.total).toBe(0);
+    });
+  });
+
   describe("listStrategies pagination", () => {
     it("windows by limit/offset with a stable total and the id tiebreaker", async () => {
       const ids: string[] = [];

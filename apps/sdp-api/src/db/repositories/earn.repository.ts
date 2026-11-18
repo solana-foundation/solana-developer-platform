@@ -34,6 +34,8 @@ export interface EarnStrategyRow {
   share_mint: string | null;
   apy_type: EarnApyType;
   current_apy: string | null;
+  /** Provider rate observation, independent of metadata updates. */
+  rate_observed_at?: string | null;
   liquidity_term: EarnLiquidityTerm;
   redemption_delay_days: number | null;
   risk_metadata: EarnStrategyRiskMetadata;
@@ -97,6 +99,8 @@ export interface UpsertEarnStrategyInput {
   shareMint: string | null;
   apyType: EarnApyType;
   currentApy: string | null;
+  /** When this rate was fetched; omit for metadata-only writes. */
+  rateObservedAt?: string | null;
   liquidityTerm: EarnLiquidityTerm;
   redemptionDelayDays: number | null;
   riskMetadata: EarnStrategyRiskMetadata;
@@ -118,6 +122,8 @@ export interface UpdateEarnStrategyMetricsInput {
   environment: SdpEnvironment;
   /** Null clears a rate the provider no longer reports. */
   currentApy: string | null;
+  /** When this rate was fetched, not when its database write completes. */
+  rateObservedAt?: string | null;
   /** Merged over the stored metadata, so curator and friends survive. */
   riskMetadata: EarnStrategyRiskMetadata;
 }
@@ -163,6 +169,13 @@ export interface DeprecateUnlistedEarnStrategiesInput {
 
 export interface ListEarnStrategiesInput {
   environment: SdpEnvironment;
+  id?: string;
+  /** Caller filter, intersected with the server-owned provider allowlist. */
+  provider?: string;
+  depositMint?: string;
+  /** Decimal APY fraction bounds; unavailable/malformed rates never match. */
+  minApy?: string;
+  maxApy?: string;
   /**
    * Restrict to one cluster's sub-shelf. Server-resolved, never a raw caller
    * value: the strategies route defaults it to the environment's own cluster so

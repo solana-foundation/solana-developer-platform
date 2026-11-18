@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from "vitest";
 vi.mock("./env", () => ({
   getConfig: () => ({
     SDP_API_BASE_URL: "https://sdp.example.invalid",
-    SDP_API_KEY: "test-api-key",
+    SDP_API_KEY: "key",
     SOLANA_CLUSTER: "devnet",
     SOLANA_RPC_URL: "https://rpc.example.invalid",
     DEMO_STRATEGY_ID: "strategy",
@@ -11,31 +11,67 @@ vi.mock("./env", () => ({
   getDemoSigner: async () => ({ address: "owner" }),
   getFeePayerSigner: async () => undefined,
 }));
-
-vi.mock("./solana", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./solana")>()),
+const sign = vi.hoisted(() =>
+  vi.fn(async (bytes: string) => `signed:${bytes}`)
+);
+vi.mock("./solana", async (original) => ({
+  ...(await original<typeof import("./solana")>()),
   assertRpcCluster: async () => undefined,
-  signTransaction: async (bytes: string) => `signed:${bytes}`,
+  signTransaction: sign,
 }));
 
 import { POST as prepare } from "../src/app/api/deposits/route";
-import { POST as submit } from "../src/app/api/intents/submit/route";
+import { POST as execute } from "../src/app/api/operations/[operationId]/execute/route";
 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  sign.mockClear();
 });
 
-it("an HTTP retry after lost submit responses preserves one deposit intent", async () => {
-  let builds = 0;
-  let submitCalls = 0;
-  const accepted = new Map<string, string>();
+it("prepares without signing and recovers a lost execute response through the same operation", async () => {
+  let submits = 0;
+  const accepted = new Set<string>();
+  const bodies: string[] = [];
+  const operation = {
+    id: "operation",
+    kind: "earn.deposit",
+    status: "prepared",
+    environment: "sandbox",
+    intent: {
+      kind: "earn.deposit",
+      strategyId: "strategy",
+      source: { ownerAddress: "owner" },
+      amount: { mint: "usdc", value: "10" },
+    },
+    actionId: "action-1",
+    version: 1,
+    nextAction: {
+      type: "sign_transaction",
+      transaction: "unsigned",
+      lastValidBlockHeight: "100",
+      expiresAt: null,
+    },
+    terms: {
+      expiresAt: null,
+      estimate: null,
+      minimum: null,
+      fees: null,
+      options: [],
+    },
+    resourceRef: null,
+    result: null,
+    cancelRequestedAt: null,
+    error: null,
+    createdAt: "2026-11-18T12:00:00.000Z",
+    updatedAt: "2026-11-18T12:00:00.000Z",
+  };
   vi.spyOn(console, "error").mockImplementation(() => {});
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string, init?: RequestInit) => {
       const path = new URL(url).pathname;
-      if (path.endsWith("/strategies")) {
+      if (path.endsWith("/discovery"))
         return Response.json({
           data: {
             total: 1,
@@ -57,71 +93,64 @@ it("an HTTP retry after lost submit responses preserves one deposit intent", asy
             ],
           },
         });
+      if (path.endsWith("/deposit"))
+        return Response.json({ data: { operation } });
+      if (path.endsWith("/execute")) {
+        submits += 1;
+        accepted.add(
+          new Headers(init?.headers).get("Idempotency-Key") ?? "missing"
+        );
+        bodies.push(String(init?.body));
+        // The economic action was accepted; all three immediate responses disappear.
+        operation.status = "submitted";
+        operation.version = 2;
+        if (submits <= 3) throw new TypeError("Lost response after acceptance");
+        return Response.json({ data: { operation } });
       }
-      if (path.endsWith("/deposit-transactions")) {
-        builds += 1;
-        return Response.json({
-          data: {
-            transaction: {
-              transactionId: `build-${builds}`,
-              transaction: `unsigned-${builds}`,
-              lastValidBlockHeight: "1000",
-              ownerAddress: "owner",
-              provider: "kamino",
-            },
-          },
-        });
-      }
-      if (path.endsWith("/deposits")) {
-        submitCalls += 1;
-        const key = new Headers(init?.headers).get("Idempotency-Key");
-        if (!key) throw new Error("Missing submit key");
-        const body = JSON.parse(String(init?.body));
-        accepted.set(key, body.transactionId);
-        // The API accepted the first submit. All three responses disappear.
-        if (submitCalls <= 3)
-          throw new TypeError("Lost response after acceptance");
-        return Response.json({
-          data: {
-            deposit: {
-              movementId: `movement-${accepted.size}`,
-              status: "submitted",
-            },
-          },
-        });
-      }
+      if (path.endsWith("/operations/operation"))
+        return Response.json({ data: { operation } });
       throw new Error(`Unexpected request: ${path}`);
     })
   );
-
-  const request = () =>
-    new Request("https://bank.example/api/deposits", {
+  const request = (path: string, body: unknown, key?: string) =>
+    new Request(`https://bank.example${path}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Origin: "https://bank.example",
-        "Idempotency-Key": "same-browser-intent",
+        ...(key ? { "Idempotency-Key": key } : {}),
       },
-      body: JSON.stringify({ amount: "10" }),
+      body: JSON.stringify(body),
     });
-  const preparation = await prepare(request());
-  expect(preparation.status).toBe(200);
-  expect(submitCalls).toBe(0);
-  const {
-    data: { intent },
-  } = await preparation.json();
-  const submitRequest = () =>
-    new Request("https://bank.example/api/intents/submit", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Origin: "https://bank.example",
-      },
-      body: JSON.stringify(intent),
-    });
-  expect((await submit(submitRequest())).status).toBe(500);
+  expect(
+    (await prepare(request("/api/deposits", { amount: "10" }, "prepare-key")))
+      .status
+  ).toBe(200);
+  expect(sign).not.toHaveBeenCalled();
+  const action = {
+    actionId: "action-1",
+    version: 1,
+    idempotencyKey: "execute-key",
+  };
+  const params = { params: Promise.resolve({ operationId: "operation" }) };
+  expect(
+    (
+      await execute(
+        request("/api/operations/operation/execute", action),
+        params
+      )
+    ).status
+  ).toBe(500);
   expect(accepted.size).toBe(1);
-  expect((await submit(submitRequest())).status).toBe(200);
-  expect(builds).toBe(1);
-  expect(accepted.size).toBe(1);
+  expect(new Set(bodies).size).toBe(1);
+  expect(
+    (
+      await execute(
+        request("/api/operations/operation/execute", action),
+        params
+      )
+    ).status
+  ).toBe(200);
+  expect(submits).toBe(3);
+  expect(sign).toHaveBeenCalledTimes(1);
 });

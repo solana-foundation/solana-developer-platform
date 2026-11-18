@@ -1,0 +1,189 @@
+---
+module: earn
+title: Core Earn API
+description: Discover strategies, prepare deposits and withdrawals, and track asynchronous execution through one operation lifecycle.
+---
+
+This contract is internal while its replacement public surface awaits named
+security sign-off. Treasury and Embedded Yield use the same strategy, source
+and operation shapes. Existing published partner routes remain compatibility
+routes during migration. Legacy deposit preview, custody deposit and withdrawal,
+new custody withdrawal requests, external deposit/withdrawal/request builds,
+program creation and allocation changes return `410 NOT_IMPLEMENTED`. New
+withdrawals use the core operation, including existing legacy direct positions.
+
+Legacy reads, exact already-built signed submissions, existing queued-request
+cancellation and program exits remain available to drain existing obligations.
+Those last two exit paths retain their existing execution model until migrated.
+An operation-only build cannot use a legacy submit route, including after its
+parent refreshes to a new action.
+
+## Discover strategies and holdings
+
+`GET /v1/earn/discovery` returns the curated strategy catalogue. Filter by `id`,
+`provider`, `depositMint`, `sourceKind`, `apyType`, `cluster`, `minApy` or `maxApy`,
+and use `page` and `pageSize`. Pass a returned strategy's `id` as `strategyId`
+when preparing a deposit.
+
+`rate.value` is an APY decimal fraction: `"0.062"` means 6.2%. `rate.observedAt`
+is null when its observation time is unknown. A catalogue row can be discovery
+only. Check `capabilities.deposit` and its unavailable reason; actual wallet
+admission still runs when you prepare and execute. The catalogue covers
+integrated provider sources, not every Solana strategy.
+
+`GET /v1/earn/positions` returns custody and external holdings with a common
+`source` identity. Choose `walletId` or `ownerAddress`; use `before` and `limit`
+for position pages. `discover=true` requires one owner and also reads supported
+integrated strategies for pre-existing holdings. The response states its
+coverage and unavailable-strategy count. Discovery does not import ownership or
+claim to know when the wallet acquired its assets.
+
+`includeSummary=true` computes totals for the full selected scope. Customer
+drill-down requires `includeOwnerAddresses=true`; `includePositions=true`
+requires both flags. `costBasisKnown=false` and summary
+`costBasisCoverage="unknown"` mean acquisition history is incomplete. Do not
+display a live balance as earned yield. Keep pending queue shares and held
+intermediate tokens visible until their outcome is known.
+
+## Prepare a deposit
+
+Persist a new random `Idempotency-Key` with the request body before sending it.
+Every mutation requires the header. Reuse the same key and body after an
+uncertain response.
+
+```http
+POST /v1/earn/deposit
+Authorization: Bearer <api-key>
+Idempotency-Key: 7472ae60-2d0c-4e69-b73b-339cf825d18a
+Content-Type: application/json
+
+{
+  "strategyId": "strategy_example",
+  "source": { "walletId": "cwlt_example" },
+  "amount": { "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU", "value": "100" },
+  "slippageBps": 50
+}
+```
+
+Choose a mint the prepared strategy path supports. `value` is a decimal string
+in that mint's token units. For an external wallet, replace the source with
+`{ "ownerAddress": "<owner-public-key>" }`; no custody registration is required.
+Optional `feePayer` applies to supported external-wallet builds and must also
+sign. Custody wallets use their configured fee policy. `slippageBps` is capped
+at 500.
+
+A fresh preparation returns `202` with `data.operation`. It records intent,
+economic terms, `actionId` and `version`. It never signs, opens provider approval
+or broadcasts. Show `terms.estimate`, enforceable `terms.minimum` and fees
+before execution. `fees=null` means unknown. It does not mean no fees.
+For a multi-step route, show `terms.inputAmount` and `terms.description` when
+present. They describe the current transaction; immutable intent can still name
+the original deposit asset before a completed swap.
+
+## Execute and track
+
+For `nextAction.type="execute"`, send the displayed action identity:
+
+```json
+{
+  "actionId": "opact_example",
+  "version": 1
+}
+```
+
+For `nextAction.type="sign_transaction"`, ask the owner and any required fee
+payer to sign `nextAction.transaction`, then include those exact signed bytes as
+`signedTransaction` in the same body. Send the body to
+`POST /v1/operations/{operationId}/execute` with its own persisted
+`Idempotency-Key`.
+
+Execute durably queues work and returns `202`. A worker performs every signature,
+custody proposal and broadcast, including fast-signing wallets. Poll
+`GET /v1/operations/{operationId}`. If the next action is `approve_in_provider`,
+show its instructions and supplied handoff URL when present. Approval can
+outlive the request or browser session. `wait` means keep tracking the same
+operation.
+
+If a response fails after its operation change was saved, the same key replays
+that response, including a server error. Read the known operation ID to recover;
+if preparation never returned an ID, find it in the source's operations feed.
+Do not create a new deposit or withdrawal to recover a missing response.
+
+`nextAction.type="refresh"` means SDP proved the old unsigned action expired or
+its proposal was refused without executable signed bytes. Show a refresh action
+to obtain new terms, then require a fresh review and execute. An uncertain
+provider dispatch or signed transaction remains `wait`; do not infer refresh
+permission from an error message or blockhash expiry.
+
+An external `sign_transaction` action already exposed to its owner cannot be
+refreshed merely because SDP has no registered signature. The owner could have
+signed and broadcast independently. Refresh returns `409 CONFLICT` with
+`details.reason="external_transaction_outcome_unknown"`, including after expiry; preserve
+the original bytes for reconciliation. Unsigned custody actions and route-choice
+reviews do not have that independent-broadcast ambiguity.
+
+`queued`, `awaiting_signature`, `awaiting_approval`, `submitted` and `settling`
+are nonterminal. Only `completed`, `failed` and `cancelled` end the operation.
+Completion follows verified delivery. A queue transaction, provider request ID
+or cancellation acknowledgment alone does not establish delivery.
+
+Recover after reload with `GET /v1/operations?walletId=...`, or specify
+`ownerAddress=...` for external history. Without an explicit external owner,
+the list returns visible custody operations only. Filters also support `kind`,
+`status`, `positionId`, `cursor` and `limit`. GET never starts execution.
+
+## Prepare a withdrawal
+
+Send `POST /v1/earn/withdraw` with a position ID from the positions response:
+
+```json
+{
+  "positionId": "earn_position_example",
+  "amount": { "kind": "all" }
+}
+```
+
+Other quantities are `{ "kind": "shares", "value": "10" }`,
+`{ "kind": "token", "mint": "<token-mint>", "value": "10" }`, or
+`{ "kind": "intermediate", "mint": "<held-mint>", "value": "10" }`.
+The position supplies the strategy and owner; payout returns to that owner.
+
+Preparation advertises available instant or delayed exits in `terms.options`.
+When a choice exists, include its `optionId` in execute alongside the exact
+action ID and version. A client cannot invent a mechanism or approve newer
+terms with an old action identity. Later swap, request, claim or cancellation
+steps remain under the same operation and can require renewed explicit
+execution.
+
+## Refresh or cancel
+
+`POST /v1/operations/{operationId}/refresh` with `{}` can replace an unsigned
+action after earlier attempts are reconciled. Review the new terms and execute
+its new action ID/version. A refreshed blockhash changes the message and needs
+new signatures. Expiry, a timeout and missing RPC history alone never prove that
+the original transaction did not execute. Keep original signed bytes and keys.
+
+`POST /v1/operations/{operationId}/cancel` with `{}` records cancellation intent.
+It requires `earn.manage`; preparation and execution require `earn.execute`,
+and reads require `earn.read`. Source ownership and current authority still
+apply. A cancellation actor can differ from the original initiating principal.
+Executing an onchain cancellation action requires both `earn.manage` and
+`earn.execute`.
+
+`cancelRequestedAt` is pending intent. The worker reconciles provider and chain
+races and can return an onchain cancellation action that needs explicit
+execution. A late exact signature after cancellation can be registered for
+observation; SDP does not start a new broadcast with it.
+
+An external owner may
+have sent an exposed transaction independently, so cancellation can remain
+pending until its outcome is known. Queue cancellation can leave an intermediate
+token rather than the original shares. Read `result.settlementOutcome` and
+`result.settledAmount`; null means the authoritative outcome or amount is not
+known yet.
+
+Execute, including late signed registration, currently requires the action's
+original authenticated principal. If that credential was revoked before signed
+bytes were registered, a replacement key cannot register them. Keep the pending
+operation and original signed bytes for operator reconciliation; do not start a
+replacement deposit to clear the pending state.

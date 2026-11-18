@@ -1,10 +1,13 @@
 import "server-only";
 
+import {
+  coreOperationSchema,
+  type EarnOperation,
+} from "../src/lib/core-operation";
 import type {
   YieldMovement,
   YieldPosition,
   YieldStrategy,
-  YieldWithdrawalOptions,
   YieldWithdrawalRequest,
 } from "../src/types";
 import type { DemoConfig } from "./env";
@@ -28,26 +31,6 @@ export interface BuiltTransaction {
   ownerAddress: string;
   feePayer?: string;
   provider: string;
-}
-
-interface DepositBuildResult {
-  transaction?: BuiltTransaction & {
-    amount: string;
-    minSharesOut: string | null;
-    strategy: Pick<
-      YieldStrategy,
-      "id" | "name" | "provider" | "providerReference" | "hostCluster"
-    >;
-  };
-  requiresSeparateSwap?: true;
-}
-
-interface WithdrawalBuildResult {
-  transaction: BuiltTransaction & {
-    positionId: string;
-    shares: string;
-    minAmountOut: string | null;
-  };
 }
 
 interface QueuedWithdrawalBuildResult {
@@ -105,7 +88,7 @@ export class EmbeddedYieldClient {
       const data = await this.request<{
         strategies: YieldStrategy[];
         total: number;
-      }>(`/v1/earn/strategies?${query}`);
+      }>(`/v1/earn/discovery?${query}`);
       let added = 0;
       for (const strategy of data.strategies) {
         if (seenStrategyIds.has(strategy.id)) continue;
@@ -125,38 +108,6 @@ export class EmbeddedYieldClient {
     );
   }
 
-  async previewDeposit(strategyId: string, amount: string) {
-    return this.request<{
-      strategyId: string;
-      sharesOut: string;
-      shareDecimals: number;
-      blockingIssues: Array<{ code: string; message: string }>;
-    }>("/v1/earn/vault-deposit-previews", {
-      method: "POST",
-      body: { strategyId, amount },
-    });
-  }
-
-  async buildDeposit(input: {
-    strategyId: string;
-    ownerAddress: string;
-    feePayer?: string;
-    amount: string;
-    sourceTokenMint: string;
-    minSharesOut?: string;
-  }): Promise<BuiltTransaction> {
-    const data = await this.request<DepositBuildResult>(
-      "/v1/earn/external-wallet/deposit-transactions",
-      { method: "POST", body: input }
-    );
-    if (data.requiresSeparateSwap || !data.transaction) {
-      throw new Error(
-        "The direct-deposit demo unexpectedly received a split-swap transaction"
-      );
-    }
-    return data.transaction;
-  }
-
   async submitDeposit(
     transactionId: string,
     signedTransaction: string,
@@ -173,63 +124,6 @@ export class EmbeddedYieldClient {
     return data.deposit;
   }
 
-  async previewWithdrawal(positionId: string, shares: string) {
-    return this.request<{
-      positionId: string;
-      assetsOut: string;
-      assetDecimals: number;
-      blockingIssues: Array<{ code: string; message: string }>;
-    }>("/v1/earn/external-wallet/withdrawal-previews", {
-      method: "POST",
-      body: { positionId, shares },
-    });
-  }
-
-  async getWithdrawalOptions(
-    positionId: string
-  ): Promise<YieldWithdrawalOptions> {
-    return this.request<YieldWithdrawalOptions>(
-      "/v1/earn/external-wallet/withdrawal-options",
-      { method: "POST", body: { positionId } }
-    );
-  }
-
-  async previewQueuedWithdrawal(input: {
-    positionId: string;
-    shares: string;
-    discountBps: number;
-    deadlineSeconds: number;
-  }) {
-    return this.request<{
-      positionId: string;
-      assetMint: string;
-      shares: string;
-      shareDecimals: number;
-      assets: string;
-      assetDecimals: number;
-      discountBps: number;
-      maturityTimestamp: string;
-      deadlineTimestamp: string;
-      blockingIssues: Array<{ code: string; message: string }>;
-    }>("/v1/earn/external-wallet/queued-withdrawal-previews", {
-      method: "POST",
-      body: input,
-    });
-  }
-
-  async buildWithdrawal(input: {
-    positionId: string;
-    shares: string;
-    minAmountOut?: string;
-    feePayer?: string;
-  }): Promise<BuiltTransaction> {
-    const data = await this.request<WithdrawalBuildResult>(
-      "/v1/earn/external-wallet/withdrawal-transactions",
-      { method: "POST", body: input }
-    );
-    return data.transaction;
-  }
-
   async submitWithdrawal(
     transactionId: string,
     signedTransaction: string,
@@ -244,20 +138,6 @@ export class EmbeddedYieldClient {
       }
     );
     return data.withdrawal;
-  }
-
-  async buildQueuedWithdrawalRequest(input: {
-    positionId: string;
-    shares: string;
-    discountBps: number;
-    deadlineSeconds: number;
-    feePayer?: string;
-  }): Promise<QueuedWithdrawalBuildResult["transaction"]> {
-    const data = await this.request<QueuedWithdrawalBuildResult>(
-      "/v1/earn/external-wallet/withdrawal-request-transactions",
-      { method: "POST", body: input }
-    );
-    return data.transaction;
   }
 
   async submitQueuedWithdrawalRequest(
@@ -337,17 +217,161 @@ export class EmbeddedYieldClient {
     return data.movement;
   }
 
-  /** Open positions for the wallet. SDP omits a position once it is closed. */
+  /** Core position reads preserve external identity without custody registration. */
   async listPositions(ownerAddress: string): Promise<YieldPosition[]> {
-    return this.allowUnknownOwner(
-      () =>
-        this.collectPages<YieldPosition>(
-          "/v1/earn/external-wallet/positions",
-          "positions",
-          ownerAddress
-        ),
-      []
+    const positions: YieldPosition[] = [];
+    const seen = new Set<string>();
+    let before: string | undefined;
+    for (let page = 0; page < 100; page += 1) {
+      const query = new URLSearchParams({
+        ownerKind: "external",
+        ownerAddress,
+        discover: "true",
+        limit: "100",
+      });
+      if (before) query.set("before", before);
+      const data = await this.request<
+        Page & {
+          positions: Array<
+            Omit<YieldPosition, "ownerAddress"> & {
+              source: { ownerAddress?: string };
+            }
+          >;
+        }
+      >(`/v1/earn/positions?${query}`);
+      for (const position of data.positions) {
+        if (position.source.ownerAddress !== ownerAddress)
+          throw new Error("Invalid position owner");
+        positions.push({ ...position, ownerAddress });
+      }
+      if (!data.hasMore) return positions;
+      if (!data.nextCursor || seen.has(data.nextCursor))
+        throw new Error("SDP position cursor did not advance");
+      seen.add(data.nextCursor);
+      before = data.nextCursor;
+    }
+    throw new Error("SDP position pagination exceeded its safety limit");
+  }
+
+  /** Preparation builds terms and unsigned bytes without asking a custodian to sign. */
+  async prepareDeposit(
+    input: {
+      strategyId: string;
+      source: { ownerAddress: string };
+      amount: { mint: string; value: string };
+      slippageBps?: number;
+      feePayer?: string;
+    },
+    idempotencyKey: string
+  ): Promise<EarnOperation> {
+    const data = await this.request<{ operation: unknown }>(
+      "/v1/earn/deposit",
+      {
+        method: "POST",
+        body: input,
+        idempotencyKey,
+      }
     );
+    return coreOperationSchema.parse(data.operation);
+  }
+
+  async prepareWithdrawal(
+    input: {
+      positionId: string;
+      amount: { kind: "token"; mint: string; value: string };
+      slippageBps?: number;
+      feePayer?: string;
+    },
+    idempotencyKey: string
+  ): Promise<EarnOperation> {
+    const data = await this.request<{ operation: unknown }>(
+      "/v1/earn/withdraw",
+      {
+        method: "POST",
+        body: input,
+        idempotencyKey,
+      }
+    );
+    return coreOperationSchema.parse(data.operation);
+  }
+
+  async getOperation(id: string): Promise<EarnOperation> {
+    const data = await this.request<{ operation: unknown }>(
+      `/v1/operations/${encodeURIComponent(id)}`
+    );
+    return coreOperationSchema.parse(data.operation);
+  }
+
+  async listOperations(ownerAddress: string): Promise<EarnOperation[]> {
+    const operations: EarnOperation[] = [];
+    const seen = new Set<string>();
+    let before: string | undefined;
+    for (let page = 0; page < 100; page += 1) {
+      const query = new URLSearchParams({ ownerAddress, limit: "100" });
+      if (before) query.set("cursor", before);
+      const data = await this.request<{
+        operations: unknown[];
+        nextCursor: string | null;
+      }>(`/v1/operations?${query}`);
+      operations.push(
+        ...data.operations.map((operation) =>
+          coreOperationSchema.parse(operation)
+        )
+      );
+      if (data.nextCursor === null) return operations;
+      if (seen.has(data.nextCursor))
+        throw new Error("SDP operation cursor did not advance");
+      seen.add(data.nextCursor);
+      before = data.nextCursor;
+    }
+    throw new Error("SDP operation pagination exceeded its safety limit");
+  }
+
+  async executeOperation(
+    id: string,
+    action: {
+      actionId: string;
+      version: number;
+      signedTransaction?: string;
+      optionId?: string;
+    },
+    idempotencyKey: string
+  ): Promise<EarnOperation> {
+    const data = await this.request<{ operation: unknown }>(
+      `/v1/operations/${encodeURIComponent(id)}/execute`,
+      {
+        method: "POST",
+        body: action,
+        idempotencyKey,
+      }
+    );
+    return coreOperationSchema.parse(data.operation);
+  }
+
+  async refreshOperation(
+    id: string,
+    idempotencyKey: string
+  ): Promise<EarnOperation> {
+    const data = await this.request<{ operation: unknown }>(
+      `/v1/operations/${encodeURIComponent(id)}/refresh`,
+      { method: "POST", body: {}, idempotencyKey }
+    );
+    return coreOperationSchema.parse(data.operation);
+  }
+
+  async cancelOperation(
+    id: string,
+    idempotencyKey: string
+  ): Promise<EarnOperation> {
+    const data = await this.request<{ operation: unknown }>(
+      `/v1/operations/${encodeURIComponent(id)}/cancel`,
+      {
+        method: "POST",
+        body: {},
+        idempotencyKey,
+      }
+    );
+    return coreOperationSchema.parse(data.operation);
   }
 
   private async collectPages<T>(

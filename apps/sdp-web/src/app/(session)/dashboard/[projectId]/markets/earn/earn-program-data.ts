@@ -14,31 +14,20 @@ import {
   type EarnProgramWithdrawalPreviewResponse,
   type EarnProgramWithdrawalRecord,
   type EarnProgramWithdrawalResponse,
-  type EarnStrategy,
-  type EarnVaultAsyncWithdrawalTermsRequest,
   type EarnVaultDepositRecord,
-  type EarnVaultDepositRequest,
   type EarnVaultDirectMovementStatus,
   type EarnVaultMovementStatus,
-  type EarnVaultParRedemptionPreview,
-  type EarnVaultParRedemptionTermsRequest,
   type EarnVaultPosition,
-  type EarnVaultQueuedWithdrawalPreview,
-  type EarnVaultQueuedWithdrawalTermsRequest,
   type EarnVaultWithdrawal,
-  type EarnVaultWithdrawalOptions,
-  type EarnVaultWithdrawalRequest,
   type EarnVaultWithdrawalRequestRecord,
   type EarnVaultWithdrawalRequestStatus,
   type ListEarnProgramsResponse,
   type ListEarnProgramWithdrawalsResponse,
-  type ListEarnStrategiesResponse,
 } from "@sdp/types/earn";
-import { EARN_PROVIDER_REDEMPTION_MODES } from "@sdp/types/earn-provider-orders";
+import type { EarnCoreStrategy } from "@sdp/types/earn-core";
 import {
   earnBalanceReadContextSchema,
   earnVaultDepositRecordSchema,
-  earnVaultDepositSchema,
   earnVaultWithdrawalSchema,
 } from "@sdp/types/earn-wire";
 import {
@@ -53,30 +42,14 @@ import { z } from "zod";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { type DashboardFetchResult, dashboardFetch, dashboardRequest } from "@/lib/dashboard-fetch";
+import { earnCoreClient } from "@/lib/earn-core-data";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import { useCadencedSWR } from "@/lib/use-cadenced-swr";
 import { earnQueryKeys } from "./earn-query-key";
 import { earnVaultHoldingValue } from "./earn-vault-holding";
 import { isEarnVaultQueuedWithdrawalTerminal } from "./earn-vault-queued-withdrawal-presentation";
 
-/**
- * Live Earn data access for the dashboard, over the /api/dashboard/markets/earn
- * BFF proxies.
- *
- * **No provider id is spelled in this file.** Which providers are offered, and
- * which of those hold money through a program, are both derived from the single
- * declaration in `@sdp/types` (`EARN_PROVIDER_SURFACING`) via `./earn-surfacing`.
- * Reads are provider-agnostic on purpose — the Positions surface must show every
- * program the organization holds, including one whose provider is no longer
- * offered.
- *
- * The API returns a LIST of programs since PRO-1670 — an organization may hold
- * several, each pinned to one vault — and every surface here is program-scoped:
- * deposits, previews, withdrawals and the outcome watcher all take a programId.
- * The list is ordered oldest-first by the API, so the cached collection keeps
- * a stable head. The overview sorts a copy newest-first only at its card-render
- * boundary, after every page has loaded.
- */
+/** Core strategy/position reads plus compatibility history and existing program exits. */
 
 /**
  * Program read outcome. `ready` carries the list and MAY be empty — an empty
@@ -284,24 +257,20 @@ export function useEarnPrograms() {
 }
 
 /**
- * The whole active catalogue. The list endpoint has no provider filter and
- * offers no sort control, so callers filter and order client-side — which only
- * works if every page is actually fetched. Requesting one page of 100 silently
- * dropped everything past it once a second provider synced.
+ * Read the complete strategy catalogue for the shelf. Tables sort locally, so
+ * every page is required before rendering catalogue totals or ordering.
  *
  * `cluster` is the PRO-1742 opt-in: omitted, the API answers the environment's
  * own shelf (the one a caller can act on); named, it browses that cluster's
  * sub-shelf — in practice the sandbox toggle reading the mirrored mainnet
  * catalogue, whose rows arrive `fundable: false`.
  */
-export async function fetchEarnStrategies(cluster?: SolanaCluster): Promise<EarnStrategy[]> {
-  const strategies: EarnStrategy[] = [];
+export async function fetchEarnStrategies(cluster?: SolanaCluster): Promise<EarnCoreStrategy[]> {
+  const strategies: EarnCoreStrategy[] = [];
 
   for (let page = 1; page <= EARN_PAGE_LIMIT; page += 1) {
-    const clusterParam = cluster ? `&cluster=${cluster}` : "";
-    const body = await requestJsonOk<{ data: ListEarnStrategiesResponse }>(
-      `/api/dashboard/markets/earn/strategies?page=${page}&pageSize=${EARN_PAGE_SIZE}${clusterParam}`
-    );
+    const discovery = await earnCoreClient.discovery({ page, pageSize: EARN_PAGE_SIZE, cluster });
+    const body = { data: discovery };
 
     strategies.push(...body.data.strategies);
     if (strategies.length >= body.data.total) {
@@ -437,12 +406,21 @@ export async function fetchEarnVaultPositions(
   afterMovementIds: readonly string[] = [],
   observeMinimumSlot?: (slot: number) => void
 ): Promise<EarnVaultPosition[]> {
-  return fetchAllPositionPages<EarnVaultPosition>(
-    (query) => `/api/dashboard/markets/earn/vault-positions?${query}`,
+  const positions = await fetchAllPositionPages<import("@sdp/types/earn-core").EarnCorePosition>(
+    (query) => `/api/dashboard/markets/earn/positions?ownerKind=custody&${query}`,
     "Vault positions",
     afterMovementIds,
     observeMinimumSlot
   );
+  return positions.map((position) => {
+    if (!("walletId" in position.source)) throw new Error("Invalid custody position identity");
+    if (position.createdAt === null) throw new Error("Unexpected untracked custody position");
+    return {
+      ...position,
+      createdAt: position.createdAt,
+      custodyWalletId: position.source.walletId,
+    };
+  });
 }
 
 /** A positions snapshot and client read times, used to refresh after confirmation. */
@@ -641,12 +619,22 @@ export function useEarnVaultPositions() {
  */
 export async function fetchEarnExternalWalletPositions(
   ownerAddress: string
-): Promise<EarnExternalWalletPosition[]> {
-  return fetchAllPositionPages<EarnExternalWalletPosition>(
+): Promise<Array<Omit<EarnExternalWalletPosition, "createdAt"> & { createdAt: string | null }>> {
+  const positions = await fetchAllPositionPages<import("@sdp/types/earn-core").EarnCorePosition>(
     (query) =>
-      `/api/dashboard/markets/earn/external-wallet/positions/${encodeURIComponent(ownerAddress)}?${query}`,
+      `/api/dashboard/markets/earn/positions?ownerKind=external&ownerAddress=${encodeURIComponent(ownerAddress)}&discover=true&${query}`,
     "External-wallet positions"
   );
+  return positions.map((position) => {
+    if (!("ownerAddress" in position.source) || position.source.ownerAddress !== ownerAddress) {
+      throw new Error("Invalid external position identity");
+    }
+    return {
+      ...position,
+      createdAt: position.createdAt,
+      ownerAddress: position.source.ownerAddress,
+    };
+  });
 }
 
 /** One per-token aggregate; `tokenValue` is absent when any position is unavailable. */
@@ -713,19 +701,16 @@ const earnExternalWalletPositionSummarySchema: z.ZodType<EarnExternalWalletPosit
     totalsByToken: z.array(earnExternalWalletTokenTotalSchema),
   });
 
-const earnExternalWalletSummaryResponseSchema = z.object({
-  data: z.object({ summary: earnExternalWalletPositionSummarySchema }),
-});
-
 export async function fetchEarnExternalWalletPositionSummary(): Promise<EarnExternalWalletPositionSummary> {
-  const body = await requestJsonOk<unknown>(
-    "/api/dashboard/markets/earn/external-wallet/positions/summary"
-  );
-  const parsed = earnExternalWalletSummaryResponseSchema.safeParse(body);
-  if (!parsed.success) {
-    throw new Error("Invalid external-wallet position summary response");
-  }
-  return parsed.data.data.summary;
+  const response = await earnCoreClient.positions({
+    ownerKind: "external",
+    includeSummary: true,
+    includeOwnerAddresses: true,
+    includePositions: true,
+    limit: 1,
+  });
+  if (!response.summary) throw new Error("Missing external-wallet position summary");
+  return earnExternalWalletPositionSummarySchema.parse(response.summary);
 }
 
 export function earnExternalWalletSummaryRefreshInterval(
@@ -755,65 +740,6 @@ export function useEarnExternalWalletPositionSummary({
     isInitialLoading: isLoading && data === undefined,
     refresh: () => void mutate(),
   };
-}
-
-/**
- * The envelope a 2xx vault deposit answers with, parsed at the boundary rather
- * than narrowed by hand, so the deposit RECORD is checked too — the previous
- * `as unknown as EarnVaultDeposit` asserted a movement id and signature that
- * were never looked at.
- *
- * The record schema is annotated `z.ZodType<EarnVaultDeposit>` rather than left
- * to inference, so a field added or renamed in `@sdp/types` fails typecheck
- * here instead of being silently stripped from a parsed deposit.
- */
-
-const earnVaultDepositOutcomeSchema = z
-  .object({ data: earnVaultDepositSchema })
-  .transform(({ data }) => ({ kind: "submitted" as const, deposit: data }));
-
-export type EarnVaultDepositOutcome = z.infer<typeof earnVaultDepositOutcomeSchema>;
-
-/**
- * Deposits from an SDP custody wallet into a non-custodial vault. The caller's
- * idempotency key is transport metadata and is never copied into the JSON body.
- */
-export async function createEarnVaultDeposit(
-  input: EarnVaultDepositRequest,
-  idempotencyKey: string,
-  signal?: AbortSignal
-): Promise<DashboardFetchResult<EarnVaultDepositOutcome>> {
-  // Rebuild the body field-by-field so even an untyped caller cannot smuggle
-  // requestId (the legacy custodial-program contract) or arbitrary fields into
-  // this value-moving request.
-  const body: EarnVaultDepositRequest = {
-    strategyId: input.strategyId,
-    custodyWalletId: input.custodyWalletId,
-    amount: input.amount,
-    ...(input.minSharesOut === undefined ? {} : { minSharesOut: input.minSharesOut }),
-    ...(input.sourceTokenMint === undefined ? {} : { sourceTokenMint: input.sourceTokenMint }),
-    ...(input.swapSlippageBps === undefined ? {} : { swapSlippageBps: input.swapSlippageBps }),
-  };
-  const result = await dashboardFetch<unknown>("/api/dashboard/markets/earn/vault-deposits", {
-    method: "POST",
-    headers: { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
-    body,
-    signal,
-  });
-
-  if (!result.ok) return result;
-
-  const invalid = {
-    ok: false,
-    error: "Invalid vault deposit response",
-    status: result.status,
-    body: result.data,
-  } as const;
-
-  const parsed = earnVaultDepositOutcomeSchema.safeParse(result.data);
-  if (!parsed.success) return invalid;
-
-  return { ok: true, status: result.status, data: parsed.data };
 }
 
 /**
@@ -920,98 +846,7 @@ async function fetchEarnVaultDeposits(
 }
 
 /** Why a quote declines to price a request; both preview envelopes carry it. */
-const vaultPreviewBlockingIssues = z.array(z.object({ code: z.string(), message: z.string() }));
-
-const earnVaultDepositPreviewEnvelopeSchema = z.object({
-  data: z.object({
-    strategyId: z.string(),
-    /** Shares at the provider's live rate, decimal string at share scale. */
-    sharesOut: z.string().regex(/^\d+(\.\d+)?$/),
-    shareDecimals: z.number().int().min(0).max(38),
-    blockingIssues: vaultPreviewBlockingIssues,
-    /**
-     * SDP intends to sponsor this movement's network fee and rent. Optional
-     * for deploy skew against an older API; absent renders wallet-pays copy,
-     * the safe prior. Swap-funded deposits force wallet-pays client-side.
-     */
-    feeSponsored: z.boolean().optional(),
-  }),
-});
-
-export type EarnVaultDepositPreview = z.infer<typeof earnVaultDepositPreviewEnvelopeSchema>["data"];
-
-export type EarnVaultDepositPreviewResult =
-  | { kind: "quoted"; preview: EarnVaultDepositPreview }
-  | { kind: "unavailable" };
-
-/**
- * What the vault would mint for this amount right now — the live rate the
- * deposit modal derives its `minSharesOut` floor from. `unavailable` covers
- * every failure the same way: a floor must come from a quote or not exist, so
- * an unreadable quote DISABLES the deposit rather than falling back to
- * arithmetic on the amount (which is only correct while the rate is 1:1).
- */
-export async function fetchEarnVaultDepositPreview(
-  input: { strategyId: string; amount: string },
-  signal?: AbortSignal
-): Promise<EarnVaultDepositPreviewResult> {
-  const result = await dashboardFetch<unknown>(
-    "/api/dashboard/markets/earn/vault-deposit-previews",
-    {
-      method: "POST",
-      body: { strategyId: input.strategyId, amount: input.amount },
-      signal,
-    }
-  );
-  if (!result.ok) return { kind: "unavailable" };
-  const parsed = earnVaultDepositPreviewEnvelopeSchema.safeParse(result.data);
-  if (!parsed.success) return { kind: "unavailable" };
-  return { kind: "quoted", preview: parsed.data.data };
-}
-
-const earnVaultWithdrawalPreviewEnvelopeSchema = z.object({
-  data: z.object({
-    positionId: z.string(),
-    /** Deposit-token amount at the provider's live rate, decimal string. */
-    assetsOut: z.string().regex(/^\d+(\.\d+)?$/),
-    assetDecimals: z.number().int().min(0).max(38),
-    blockingIssues: vaultPreviewBlockingIssues,
-    /** Same sponsorship intent as the deposit preview; exits have no swap. */
-    feeSponsored: z.boolean().optional(),
-  }),
-});
-
-export type EarnVaultWithdrawalPreview = z.infer<
-  typeof earnVaultWithdrawalPreviewEnvelopeSchema
->["data"];
-
-export type EarnVaultWithdrawalPreviewResult =
-  | { kind: "quoted"; preview: EarnVaultWithdrawalPreview }
-  | { kind: "unavailable" };
-
-/**
- * What redeeming these shares would pay right now — the exit twin of
- * `fetchEarnVaultDepositPreview`, with the same fail-closed rule: a floor must
- * come from a quote or not exist, so an unreadable quote DISABLES the exit
- * confirm rather than guessing a number.
- */
-export async function fetchEarnVaultWithdrawalPreview(
-  input: { positionId: string; shares: string },
-  signal?: AbortSignal
-): Promise<EarnVaultWithdrawalPreviewResult> {
-  const result = await dashboardFetch<unknown>(
-    "/api/dashboard/markets/earn/vault-withdrawal-previews",
-    {
-      method: "POST",
-      body: { positionId: input.positionId, shares: input.shares },
-      signal,
-    }
-  );
-  if (!result.ok) return { kind: "unavailable" };
-  const parsed = earnVaultWithdrawalPreviewEnvelopeSchema.safeParse(result.data);
-  if (!parsed.success) return { kind: "unavailable" };
-  return { kind: "quoted", preview: parsed.data.data };
-}
+const _vaultPreviewBlockingIssues = z.array(z.object({ code: z.string(), message: z.string() }));
 
 /**
  * The DISCOVERY tier for in-flight deposits, mirroring `useEarnProgramWithdrawals`.
@@ -1193,65 +1028,6 @@ export function useEarnVaultDepositOutcome(
   });
 }
 
-// ---------------------------------------------------------------------------
-// Vault withdrawals (PRO-1702) — the deposit seam's exit mirror. One
-// deliberate vocabulary difference: this surface speaks the unified LEDGER's
-// own statuses (`requested … finalized`). Customer UI treats `confirmed` as
-// Done, while this background watcher continues through the durable ledger
-// outcome. Everything here therefore keys watcher terminality on
-// `EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct`, never the legacy deposit set.
-// ---------------------------------------------------------------------------
-
-/**
- * Annotated shared withdrawal schemas for the same reason the deposit
- * schemas are: a field added or renamed in `@sdp/types` must fail typecheck
- * here rather than be silently stripped from a parsed leg.
- */
-
-const earnVaultWithdrawalOutcomeSchema = z
-  .object({ data: z.object({ withdrawal: earnVaultWithdrawalSchema }) })
-  .transform(({ data }) => ({ kind: "submitted" as const, withdrawal: data.withdrawal }));
-
-export type EarnVaultWithdrawalOutcome = z.infer<typeof earnVaultWithdrawalOutcomeSchema>;
-
-/**
- * Exit a vault position back to the custody wallet that holds it. Same
- * body-rebuild rule as `createEarnVaultDeposit`: the caller cannot smuggle
- * fields into a value-moving request.
- */
-export async function createEarnVaultWithdrawal(
-  input: EarnVaultWithdrawalRequest,
-  idempotencyKey: string,
-  signal?: AbortSignal
-): Promise<DashboardFetchResult<EarnVaultWithdrawalOutcome>> {
-  const body: EarnVaultWithdrawalRequest = {
-    positionId: input.positionId,
-    shares: input.shares,
-    redemptionMode: input.redemptionMode,
-    ...(input.minAmountOut === undefined ? {} : { minAmountOut: input.minAmountOut }),
-  };
-  const result = await dashboardFetch<unknown>("/api/dashboard/markets/earn/vault-withdrawals", {
-    method: "POST",
-    headers: { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
-    body,
-    signal,
-  });
-
-  if (!result.ok) return result;
-
-  const invalid = {
-    ok: false,
-    error: "Invalid vault withdrawal response",
-    status: result.status,
-    body: result.data,
-  } as const;
-
-  const parsed = earnVaultWithdrawalOutcomeSchema.safeParse(result.data);
-  if (!parsed.success) return invalid;
-
-  return { ok: true, status: result.status, data: parsed.data };
-}
-
 const earnVaultWithdrawalResponseSchema = z.object({
   data: z.object({ withdrawal: earnVaultWithdrawalSchema }),
 });
@@ -1377,74 +1153,6 @@ export function useEarnVaultWithdrawalOutcome(
   });
 }
 
-// ---------------------------------------------------------------------------
-// Queued vault withdrawals — a provider obligation, not a movement. Landing
-// the request escrows shares; only a later solver fulfilment pays assets.
-// ---------------------------------------------------------------------------
-
-const queuedWithdrawalIssueSchema = z.object({ code: z.string(), message: z.string() });
-const queuedWithdrawalTermsSchema = z.object({
-  assetMint: z.string(),
-  allowWithdrawals: z.boolean(),
-  secondsToMaturity: z.number().int().nonnegative(),
-  minimumSecondsToDeadline: z.number().int().nonnegative(),
-  maximumSecondsToDeadline: z.number().int().positive(),
-  minimumDiscountBps: z.number().int().nonnegative(),
-  maximumDiscountBps: z.number().int().nonnegative(),
-  minimumShares: z.string(),
-  shareDecimals: z.number().int().min(0).max(38),
-});
-
-const parRedemptionTermsSchema = z.object({
-  intermediateMint: z.string(),
-  assetMint: z.string(),
-  minimumShares: z.string().nullable(),
-  minimumIntermediateAmount: z.string(),
-  shareDecimals: z.number().int().min(0).max(38),
-  assetDecimals: z.number().int().min(0).max(38),
-  cancelable: z.boolean(),
-  operatorSettled: z.literal(true),
-});
-
-const earnVaultWithdrawalOptionsSchema: z.ZodType<EarnVaultWithdrawalOptions> = z.object({
-  positionId: z.string(),
-  instant: z.boolean(),
-  providerOrder: z.boolean(),
-  providerRedemptionModes: z.array(z.enum(EARN_PROVIDER_REDEMPTION_MODES)).optional(),
-  queued: z.boolean(),
-  withdrawAuthority: z.string().nullable(),
-  queueState: z.string().nullable(),
-  queueAsset: queuedWithdrawalTermsSchema.nullable(),
-  parRedemption: parRedemptionTermsSchema.nullable().default(null),
-});
-
-const earnVaultQueuedWithdrawalPreviewSchema: z.ZodType<EarnVaultQueuedWithdrawalPreview> =
-  z.object({
-    positionId: z.string(),
-    assetMint: z.string(),
-    shares: z.string(),
-    shareDecimals: z.number().int().min(0).max(38),
-    assets: z.string(),
-    assetDecimals: z.number().int().min(0).max(38),
-    discountBps: z.number().int().nonnegative(),
-    maturityTimestamp: z.string().regex(/^\d+$/),
-    deadlineTimestamp: z.string().regex(/^\d+$/),
-    blockingIssues: z.array(queuedWithdrawalIssueSchema),
-  });
-
-const earnVaultParRedemptionPreviewSchema: z.ZodType<EarnVaultParRedemptionPreview> = z.object({
-  positionId: z.string(),
-  mechanism: z.literal("operatorRedemption"),
-  shares: z.string(),
-  shareDecimals: z.number().int().min(0).max(38),
-  intermediateMint: z.string(),
-  intermediateAmount: z.string(),
-  assetMint: z.string(),
-  assets: z.string(),
-  assetDecimals: z.number().int().min(0).max(38),
-  blockingIssues: z.array(queuedWithdrawalIssueSchema),
-});
-
 const EARN_VAULT_WITHDRAWAL_REQUEST_STATUSES = [
   "creating",
   "pending",
@@ -1492,116 +1200,9 @@ const earnVaultWithdrawalRequestRecordSchema: z.ZodType<EarnVaultWithdrawalReque
     replayed: z.boolean().optional(),
   });
 
-type QueuedReadResult<T> = { kind: "ready"; value: T } | { kind: "unavailable" };
-
-/** Read settlement routes independently. No client-side provider list chooses one. */
-export async function fetchEarnVaultWithdrawalOptions(
-  positionId: string,
-  signal?: AbortSignal
-): Promise<QueuedReadResult<EarnVaultWithdrawalOptions>> {
-  const result = await dashboardFetch<unknown>(
-    "/api/dashboard/markets/earn/vault-withdrawal-options",
-    { method: "POST", body: { positionId }, signal }
-  );
-  if (!result.ok) return { kind: "unavailable" };
-  const parsed = z.object({ data: earnVaultWithdrawalOptionsSchema }).safeParse(result.data);
-  return parsed.success ? { kind: "ready", value: parsed.data.data } : { kind: "unavailable" };
-}
-
-export async function fetchEarnVaultQueuedWithdrawalPreview(
-  input: EarnVaultQueuedWithdrawalTermsRequest,
-  signal?: AbortSignal
-): Promise<QueuedReadResult<EarnVaultQueuedWithdrawalPreview>> {
-  const result = await dashboardFetch<unknown>(
-    "/api/dashboard/markets/earn/vault-queued-withdrawal-previews",
-    { method: "POST", body: input, signal }
-  );
-  if (!result.ok) return { kind: "unavailable" };
-  const parsed = z.object({ data: earnVaultQueuedWithdrawalPreviewSchema }).safeParse(result.data);
-  return parsed.success ? { kind: "ready", value: parsed.data.data } : { kind: "unavailable" };
-}
-
-export async function fetchEarnVaultParRedemptionPreview(
-  input: EarnVaultParRedemptionTermsRequest,
-  signal?: AbortSignal
-): Promise<QueuedReadResult<EarnVaultParRedemptionPreview>> {
-  const result = await dashboardFetch<unknown>(
-    "/api/dashboard/markets/earn/vault-queued-withdrawal-previews",
-    { method: "POST", body: input, signal }
-  );
-  if (!result.ok) return { kind: "unavailable" };
-  const parsed = z.object({ data: earnVaultParRedemptionPreviewSchema }).safeParse(result.data);
-  return parsed.success ? { kind: "ready", value: parsed.data.data } : { kind: "unavailable" };
-}
-
 const queuedMutationEnvelopeSchema = z.object({
   data: z.object({ withdrawalRequest: earnVaultWithdrawalRequestRecordSchema }),
 });
-
-const earnVaultQueuedWithdrawalOutcomeSchema = queuedMutationEnvelopeSchema.transform(
-  ({ data }) => ({
-    kind: "submitted" as const,
-    withdrawalRequest: data.withdrawalRequest,
-  })
-);
-
-export type EarnVaultQueuedWithdrawalOutcome = z.infer<
-  typeof earnVaultQueuedWithdrawalOutcomeSchema
->;
-
-export async function createEarnVaultWithdrawalRequest(
-  input: EarnVaultAsyncWithdrawalTermsRequest,
-  idempotencyKey: string
-): Promise<DashboardFetchResult<EarnVaultQueuedWithdrawalOutcome>> {
-  const body: EarnVaultAsyncWithdrawalTermsRequest =
-    input.mechanism === "operatorRedemption"
-      ? input.intermediateAmount === undefined
-        ? { positionId: input.positionId, shares: input.shares, mechanism: "operatorRedemption" }
-        : {
-            positionId: input.positionId,
-            intermediateAmount: input.intermediateAmount,
-            mechanism: "operatorRedemption",
-          }
-      : {
-          positionId: input.positionId,
-          shares: input.shares,
-          discountBps: input.discountBps,
-          deadlineSeconds: input.deadlineSeconds,
-          ...(input.mechanism ? { mechanism: input.mechanism } : {}),
-        };
-  const result = await dashboardFetch<unknown>(
-    "/api/dashboard/markets/earn/vault-withdrawal-requests",
-    {
-      method: "POST",
-      headers: { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
-      body,
-    }
-  );
-  if (!result.ok) return result;
-  const parsed = earnVaultQueuedWithdrawalOutcomeSchema.safeParse(result.data);
-  if (!parsed.success) {
-    return {
-      ok: false,
-      error: "Invalid queued withdrawal response",
-      status: result.status,
-      body: result.data,
-    };
-  }
-  if (
-    (input.mechanism === "operatorRedemption" &&
-      parsed.data.withdrawalRequest.mechanism !== "operatorRedemption") ||
-    (input.mechanism !== "operatorRedemption" &&
-      parsed.data.withdrawalRequest.mechanism === "operatorRedemption")
-  ) {
-    return {
-      ok: false,
-      error: "Invalid queued withdrawal response",
-      status: result.status,
-      body: result.data,
-    };
-  }
-  return { ok: true, status: result.status, data: parsed.data };
-}
 
 export async function cancelEarnVaultWithdrawalRequest(
   withdrawalRequestId: string,

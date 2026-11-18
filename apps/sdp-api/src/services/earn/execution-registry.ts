@@ -146,9 +146,14 @@ export function resolveVaultWithdrawClient(
   // deliberately checked here so every custody and external-wallet entry
   // point, plus withdrawal-options discovery, agrees on the default par-only
   // posture.
-  if (provider === "hastra" && !isEarnHastraDexExitConfigured(env)) return null;
+  if (!isEarnDirectWithdrawalConfigured(env, provider)) return null;
 
   return resolveRecordedVaultWithdrawClient(env, provider, deadline);
+}
+
+/** Apply direct-exit rollout policy without constructing a second client. */
+export function isEarnDirectWithdrawalConfigured(env: Env, provider: string): boolean {
+  return provider !== "hastra" || isEarnHastraDexExitConfigured(env);
 }
 
 /**

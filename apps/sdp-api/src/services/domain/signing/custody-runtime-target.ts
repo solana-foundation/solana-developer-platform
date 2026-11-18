@@ -13,7 +13,8 @@ import {
   isProviderCredentialRevoked,
   type ProviderCredentialStatus,
 } from "@sdp/types/custody";
-import type { MovementId } from "@sdp/types/movements";
+import type { MovementId, WaistMovement } from "@sdp/types/movements";
+import type { OperationProposalBinding } from "@sdp/types/operations";
 import type { OrganizationProviderAvailabilityResponse } from "@sdp/types/provider-access";
 import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import type { Address, TransactionSigner } from "@solana/kit";
@@ -28,7 +29,6 @@ import {
   decideMovement,
   decideWalletPurpose,
   type MoneyAdmissionDecision,
-  MoneyMovementRefusedError,
   readMovementFactsWith,
 } from "@/lib/money-admission";
 import { getLogger } from "@/runtime/logger";
@@ -80,8 +80,13 @@ import {
   proposalCanceller,
   proposalReader,
   proposalRecovery,
+  rethrowProposalAdmissionError,
   type TransferProposalIntent,
 } from "./admitted-proposer";
+import {
+  admittedTransactionProposer,
+  type CustodyTransactionProposer,
+} from "./admitted-transaction-proposer";
 import { privyWalletExternalId } from "./provider-wallet-lifecycle";
 import { boundSigningTime, custodySigningTimeoutMs } from "./signing-timeout";
 
@@ -821,6 +826,55 @@ export class CustodyRuntimeTargets {
     );
   }
 
+  /** Earn-only async transaction capability; other custody providers retain their existing signer. */
+  async getTransactionProposerForWalletRecord(
+    organizationId: string,
+    projectId: string,
+    custodyWalletId: string,
+    movement: WaistMovement<"earn">
+  ): Promise<CustodyTransactionProposer | null> {
+    const target = await this.resolveExactWalletRecord(organizationId, projectId, custodyWalletId);
+    if (!isProposingTarget(target)) return null;
+    const ids = { organizationId, projectId, custodyWalletId, movement };
+    const exact = async () => {
+      const current = await this.resolveExactWalletRecord(
+        organizationId,
+        projectId,
+        custodyWalletId
+      );
+      if (!isProposingTarget(current)) throw conflict("Custody transaction account changed");
+      return current;
+    };
+    const live = async () => {
+      const current = await exact();
+      this.assertRuntimeExecutionAllowed(current, custodyWalletId);
+      return this.loadProposalAccess(current, null);
+    };
+    return admittedTransactionProposer(
+      {
+        prepare: async () => {
+          const current = await exact();
+          this.assertRuntimeExecutionAllowed(current, custodyWalletId);
+          await this.admitWalletRecord(current, ids);
+          return this.loadProposalAccess(current, null);
+        },
+        live,
+        recovery: async (binding: OperationProposalBinding) =>
+          this.loadProposalAccess(await exact(), binding),
+      },
+      async () => {
+        const current = await exact();
+        if (current.wallet.status !== "active")
+          throw new ProposalAdmissionRefusedError(
+            RUNTIME_EXECUTION_UNAVAILABLE_REASON,
+            conflict("Custody Connection is unavailable")
+          );
+        return (await this.admitWalletRecord(current, ids))();
+      },
+      { ...ids, address: target.wallet.publicKey }
+    );
+  }
+
   /**
    * Read-only recovery for a recorded proposal. It skips admission and runtime availability on
    * purpose: disabling a Connection cannot cancel a transfer the provider already accepted, so
@@ -930,15 +984,7 @@ export class CustodyRuntimeTargets {
               reason: RUNTIME_EXECUTION_UNAVAILABLE_REASON,
             });
         } catch (error) {
-          if (error instanceof MoneyMovementRefusedError)
-            throw new ProposalAdmissionRefusedError(error.reason, error);
-          if (
-            error instanceof AppError &&
-            error.code === "FORBIDDEN" &&
-            error.details?.reason === "provider_not_entitled"
-          )
-            throw new ProposalAdmissionRefusedError("provider_not_entitled", error);
-          throw error;
+          rethrowProposalAdmissionError(error);
         }
       }
     );

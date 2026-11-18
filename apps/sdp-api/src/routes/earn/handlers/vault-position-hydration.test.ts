@@ -15,6 +15,7 @@ import {
   hydratedHoldingTokenValue,
   hydrateVaultPositions as hydrateUnscoped,
   markVaultPositionRowsRead,
+  vaultPositionDiscoveryScope,
 } from "./vault-position-hydration";
 
 /** One hydration in the cluster scope its request opens for `environment`. */
@@ -249,6 +250,88 @@ describe("hydrateVaultPositions shares identical provider reads in flight", () =
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.resolveClient.mockReturnValue({ readVaultPositions: mocks.readVaultPositions });
+  });
+
+  it("discovers one provider-owner scope without zero-filling absent known holdings", async () => {
+    const transport: RpcTransport = async <T>() =>
+      ({ jsonrpc: "2.0", id: 1, result: { context: { slot: 201 }, value: null } }) as T;
+    const rpc = createRpcFromTransport(transport, { wrapTransport: withRpcReadContext });
+    mocks.readVaultPositions.mockImplementation(async () => {
+      await getAccountInfo(rpc, OWNER as Address);
+      return [
+        {
+          providerReference: "vault-a",
+          owner: OWNER,
+          cluster: "devnet",
+          tokenMint: TOKEN,
+          shareMint: SHARE,
+          ...VALUE,
+        },
+      ];
+    });
+    const observations = {
+      completedScopes: new Set<string>(),
+      rejectedPositionIds: new Set<string>(),
+    };
+    const live = await hydrateVaultPositions(
+      context(),
+      "sandbox",
+      [holding("p1", "vault-a"), holding("p2", "vault-b")],
+      {
+        ownerKind: "custody",
+        rowsReadAt: markVaultPositionRowsRead(),
+        discoverAll: true,
+        discoveryObservations: observations,
+        minimumSlotByPositionId: new Map([
+          ["p1", 100],
+          ["p2", 200],
+        ]),
+      }
+    );
+    expect(mocks.readVaultPositions).toHaveBeenCalledTimes(1);
+    expect(mocks.readVaultPositions).toHaveBeenCalledWith(expect.anything(), {
+      owner: OWNER,
+      providerReferences: [],
+    });
+    expect(live.get("p1")).toEqual(VALUE);
+    expect(live.has("p2")).toBe(false);
+    expect(observations.completedScopes.has(vaultPositionDiscoveryScope("kamino", OWNER))).toBe(
+      true
+    );
+    expect(observations.rejectedPositionIds.size).toBe(0);
+  });
+
+  it("keeps failed and mismatched discovery observations unavailable", async () => {
+    const observations = {
+      completedScopes: new Set<string>(),
+      rejectedPositionIds: new Set<string>(),
+    };
+    mocks.readVaultPositions.mockResolvedValue([
+      {
+        providerReference: "vault-a",
+        owner: OTHER_OWNER,
+        cluster: "devnet",
+        tokenMint: TOKEN,
+        shareMint: SHARE,
+        ...VALUE,
+      },
+    ]);
+    const options = {
+      ownerKind: "custody" as const,
+      rowsReadAt: markVaultPositionRowsRead(),
+      discoverAll: true,
+      discoveryObservations: observations,
+    };
+    expect(
+      (await hydrateVaultPositions(context(), "sandbox", [holding("p1", "vault-a")], options)).size
+    ).toBe(0);
+    expect(observations.rejectedPositionIds.has("p1")).toBe(true);
+    observations.completedScopes.clear();
+    mocks.readVaultPositions.mockRejectedValue(new Error("Provider unavailable"));
+    expect(
+      (await hydrateVaultPositions(context(), "sandbox", [holding("p1", "vault-a")], options)).size
+    ).toBe(0);
+    expect(observations.completedScopes.size).toBe(0);
   });
 
   it("serves overlapping identical refreshes, in any reference order, from one provider read", async () => {

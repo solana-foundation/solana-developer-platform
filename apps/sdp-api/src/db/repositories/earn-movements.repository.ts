@@ -93,6 +93,12 @@ export function assertMovementIsOwnReplay(
 
 export interface EarnPositionRow {
   id: string;
+  /** Canonical strategy link; older holdings can resolve it by instrument. */
+  strategy_id?: string | null;
+  /** Canonical instrument identity; vault_address is the rolling-compat alias. */
+  strategy_reference?: string | null;
+  /** False for imported holdings whose acquisition history is unknown. */
+  cost_basis_known?: boolean;
   organization_id: string;
   project_id: string | null;
   environment: SdpEnvironment;
@@ -132,6 +138,8 @@ export interface EarnMovementRow {
   project_id: string | null;
   environment: SdpEnvironment;
   provider: string;
+  /** Instrument reference, distinct from provider_reference (order identity). */
+  strategy_reference?: string | null;
   execution_model: EarnExecutionModel;
   direction: EarnMovementDirection;
   position_id: string;
@@ -1042,7 +1050,8 @@ function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
     payout_token: row.payout_token as string | null,
     custody_wallet_id: row.custody_wallet_id as string | null,
     owner_address: row.owner_address as string | null,
-    vault_address: row.vault_address as string | null,
+    strategy_reference: (row.strategy_reference ?? row.vault_address) as string | null,
+    vault_address: (row.strategy_reference ?? row.vault_address) as string | null,
     source_address: row.source_address as string | null,
     destination_address: row.destination_address as string | null,
     provider_reference: row.provider_reference as string | null,
@@ -1204,8 +1213,9 @@ async function getFulfilledQueueMovement(
 
 /**
  * What makes a custody vault claim VISIBLE to the org: the exact predicate
- * behind `GET /vault-positions` (activated, open or re-entered, live movement
- * evidence, wallet-scoped). `listVaultClaimsForReconciliation` shares it by
+ * behind `GET /vault-positions` (activated, open or re-entered, signed ledger
+ * evidence, wallet-scoped). Queued discoveries have signed request evidence
+ * without a fabricated deposit. `listVaultClaimsForReconciliation` shares it by
  * construction, because the reconciliation report's meaning is "relative to
  * what the positions read serves": a claim matched by a broader predicate
  * would mark a holding recorded while `/vault-positions` still hides it, and
@@ -1228,12 +1238,16 @@ const CUSTODY_VAULT_CLAIM_VISIBILITY_SQL = `organization_id = ?
                  )
                )
                AND custody_wallet_id = ANY (?::text[])
-               AND EXISTS (
+               AND (EXISTS (
                  SELECT 1
                  FROM earn_movements movement
                  WHERE movement.position_id = earn_positions.id
                    AND movement.status IN ('requested', 'submitted', 'confirmed', 'finalized')
-               )`;
+               ) OR EXISTS (
+                 SELECT 1 FROM earn_vault_withdrawal_requests request
+                 WHERE request.position_id = earn_positions.id
+                   AND request.creation_signature IS NOT NULL
+               ))`;
 
 export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsRepository {
   return {
@@ -1403,7 +1417,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
     async getPositionById(params) {
       return db
         .prepare(
-          `SELECT * FROM earn_positions
+          `SELECT *, COALESCE(strategy_reference, vault_address) AS strategy_reference FROM earn_positions
              WHERE id = ? AND organization_id = ? AND environment = ?`
         )
         .bind(params.positionId, params.organizationId, params.environment)
@@ -1420,7 +1434,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       const beforeValues = params.before ? [params.before.createdAt, params.before.id] : [];
       const result = await db
         .prepare(
-          `SELECT * FROM earn_positions
+          `SELECT *, COALESCE(strategy_reference, vault_address) AS strategy_reference FROM earn_positions
              WHERE ${CUSTODY_VAULT_CLAIM_VISIBILITY_SQL}
                ${beforeClause}
              ORDER BY created_at DESC, id DESC
@@ -1599,7 +1613,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       const ownerValues = params.ownerAddress ? [params.ownerAddress] : [];
       const result = await db
         .prepare(
-          `SELECT * FROM earn_positions
+          `SELECT *, COALESCE(strategy_reference, vault_address) AS strategy_reference FROM earn_positions
              WHERE organization_id = ?
                AND project_id = ?
                AND environment = ?
@@ -1616,12 +1630,16 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                      AND reentry.status IN ('requested', 'submitted')
                  )
                )
-               AND EXISTS (
+               AND (EXISTS (
                  SELECT 1
                  FROM earn_movements movement
                  WHERE movement.position_id = earn_positions.id
                    AND movement.status IN ('requested', 'submitted', 'confirmed', 'finalized')
-               )
+               ) OR EXISTS (
+                 SELECT 1 FROM earn_vault_withdrawal_requests request
+                 WHERE request.position_id = earn_positions.id
+                   AND request.creation_signature IS NOT NULL
+               ))
                ${ownerClause}
                ${beforeClause}
              ORDER BY created_at DESC, id DESC
@@ -3042,7 +3060,7 @@ async function requireMovementPosition(
 ): Promise<EarnPositionRow> {
   const position = await db
     .prepare(
-      `SELECT * FROM earn_positions WHERE id = ? AND organization_id = ? AND environment = ?`
+      `SELECT *, COALESCE(strategy_reference, vault_address) AS strategy_reference FROM earn_positions WHERE id = ? AND organization_id = ? AND environment = ?`
     )
     .bind(movement.position_id, movement.organization_id, movement.environment)
     .first<EarnPositionRow>();
@@ -3191,9 +3209,79 @@ async function consumeExternalWalletTransaction(
  * scope to validate because SDP holds nothing here — the owner address IS the
  * holder. A mint-identity mismatch returns nothing and answers 409.
  */
+type VaultPositionClaimInput = Pick<
+  CreateSignedVaultDepositIntentInput,
+  | "organizationId"
+  | "projectId"
+  | "environment"
+  | "provider"
+  | "vaultAddress"
+  | "shareMint"
+  | "tokenMint"
+  | "label"
+  | "createdBy"
+  | "custodyWalletId"
+>;
+type ExternalPositionClaimInput = Omit<VaultPositionClaimInput, "custodyWalletId"> & {
+  ownerAddress: string;
+};
+
+/** Metadata already authorized and verified by the signed withdrawal submit. */
+export interface ClaimDiscoveredStrategyPositionInput {
+  organizationId: string;
+  projectId: string;
+  environment: SdpEnvironment;
+  provider: string;
+  strategyId: string;
+  strategyReference: string;
+  tokenMint: string;
+  shareMint: string;
+  label: string;
+  source: { walletId: string } | { ownerAddress: string };
+  createdBy?: string | null;
+}
+
+/**
+ * Claim a live holding only after verifying its signed withdrawal. The caller
+ * must use the transaction that persists that withdrawal's signed movement.
+ * This writes no deposit, amount, cost basis, or synthetic movement history.
+ */
+export async function claimDiscoveredStrategyPosition(
+  input: ClaimDiscoveredStrategyPositionInput,
+  executor: DatabaseExecutor
+): Promise<EarnPositionRow> {
+  const db = asTransactionalClient(executor);
+  const metadata = { ...input, vaultAddress: input.strategyReference };
+  const position =
+    "walletId" in input.source
+      ? await claimVaultPosition(db, { ...metadata, custodyWalletId: input.source.walletId })
+      : await claimExternalWalletVaultPosition(db, {
+          ...metadata,
+          ownerAddress: input.source.ownerAddress,
+        });
+  const row = await db
+    .prepare(`UPDATE earn_positions
+    SET strategy_id = ?, cost_basis_known = FALSE,
+        closed_at = NULL, updated_at = sdp_iso_now()
+    WHERE id = ? AND (strategy_id IS NULL OR strategy_id = ?)
+      AND EXISTS (
+        SELECT 1 FROM earn_strategies strategy
+        WHERE strategy.id = ? AND strategy.environment = earn_positions.environment
+          AND strategy.provider = earn_positions.provider
+          AND strategy.provider_reference = earn_positions.vault_address
+          AND strategy.share_mint = earn_positions.share_mint
+          AND strategy.deposit_mints @> jsonb_build_array(earn_positions.token_mint)
+      )
+    RETURNING *`)
+    .bind(input.strategyId, position.id, input.strategyId, input.strategyId)
+    .first<EarnPositionRow>();
+  if (!row) throw conflict("Position strategy identity does not match the signed withdrawal");
+  return row;
+}
+
 async function claimExternalWalletVaultPosition(
   db: AppDb,
-  input: CreateSignedExternalWalletDepositIntentInput
+  input: ExternalPositionClaimInput
 ): Promise<EarnPositionRow> {
   const row = await db
     .prepare(
@@ -3350,7 +3438,7 @@ async function insertExternalWalletWithdrawalMovement(
 
 async function claimVaultPosition(
   db: AppDb,
-  input: CreateSignedVaultDepositIntentInput
+  input: VaultPositionClaimInput
 ): Promise<EarnPositionRow> {
   const row = await db
     .prepare(

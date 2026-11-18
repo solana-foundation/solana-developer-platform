@@ -122,6 +122,27 @@ describe("savings summary", () => {
     });
   });
 
+  it.each([true, false])(
+    "does not call pre-existing principal earned interest after tracking changes (discovered=%s)",
+    (discovered) => {
+      const summary = summarizeSavings(
+        { amount: "10" },
+        position({
+          discovered,
+          costBasisKnown: false,
+          createdAt: null,
+          shares: "50",
+          withdrawableShares: "50",
+          tokenValue: "50",
+        }),
+        []
+      );
+      expect(summary.balance).toBe("50");
+      expect(summary.total).toBe("60");
+      expect(summary.earned).toBeUndefined();
+    }
+  );
+
   it("leaves totals undefined while the valuation is unavailable", () => {
     expect(summarizeSavings({ amount: "19.35" }, position({}), [])).toEqual({
       balance: undefined,
@@ -306,9 +327,7 @@ function strategy(overrides: Partial<YieldStrategy>): YieldStrategy {
   };
 }
 
-function position(
-  overrides: Pick<YieldPosition, "shares" | "withdrawableShares" | "tokenValue">
-): YieldPosition {
+function position(overrides: Partial<YieldPosition>): YieldPosition {
   return {
     id: "position",
     ownerAddress: "owner",

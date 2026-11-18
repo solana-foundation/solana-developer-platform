@@ -21,6 +21,15 @@ export interface FireblocksTransferRequest {
   note: string;
 }
 
+/** Earn's admitted transaction waist uses sign-only proposals; SDP owns broadcast. */
+export interface FireblocksProgramCallRequest {
+  operation: "PROGRAM_CALL";
+  externalTxId: string;
+  assetId: string;
+  source: { type: "VAULT_ACCOUNT"; id: string };
+  extraParameters: { programCallData: string; signOnly: true; useDurableNonce: false };
+}
+
 const optionalText = z
   .string()
   .max(256)
@@ -54,6 +63,16 @@ const transferResultSchema = z.object({
     .object({ networkFee: optionalAmount })
     .nullish()
     .transform((value) => value ?? undefined),
+  signedMessages: z
+    .array(
+      z.object({
+        signature: z.object({ fullSig: z.string().regex(/^[a-fA-F0-9]{128}$/) }),
+      })
+    )
+    .max(16)
+    .nullish()
+    .transform((value) => value ?? undefined)
+    .optional(),
 });
 export type FireblocksTransferResult = z.infer<typeof transferResultSchema>;
 const assetSchema = z.object({
@@ -145,6 +164,23 @@ export async function createFireblocksTransfer(
       method: "POST",
       uri: "/v1/transactions",
       body,
+    })
+  );
+}
+
+/** One POST behind the admitted Earn waist; external identity is persisted before this call. */
+export async function createFireblocksProgramCall(
+  runtime: CustodyProvisioningRuntime,
+  access: FireblocksTransferAccess,
+  body: FireblocksProgramCallRequest
+): Promise<FireblocksTransferResult> {
+  return result(
+    await fireblocksRequest(runtime, {
+      ...config(access),
+      method: "POST",
+      uri: "/v1/transactions",
+      body,
+      idempotencyKey: body.externalTxId,
     })
   );
 }

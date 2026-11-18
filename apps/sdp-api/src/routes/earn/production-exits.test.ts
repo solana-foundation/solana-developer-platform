@@ -11,6 +11,7 @@ import { isEarnExitOrRead } from "./exits";
  * among the exits in `index.ts`, is a deliberate choice this test forces.
  */
 const EARN_ENTRY_ROUTES = [
+  "POST /v1/earn/deposit",
   "POST /v1/earn/onboarding/wisdomtree/:counterpartyId/wallets",
   "POST /v1/earn/onboarding/wisdomtree/:counterpartyId",
   "POST /v1/earn/onboarding/wisdomtree/:counterpartyId/documents",

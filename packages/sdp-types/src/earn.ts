@@ -200,13 +200,13 @@ export interface EarnStrategySlippagePolicy {
 export interface EarnStrategy {
   id: string;
   /**
-   * Vault-infra provider id. Open string on the read model: catalogue rows
+   * Strategy provider ID. Open string on the read model: catalogue rows
    * persist as open TEXT and may reference a provider this deployment no
    * longer (or does not yet) register, so dispatch always resolves fail-closed
    * server-side.
    */
   provider: string;
-  /** Provider-side identifier for the vault/strategy. */
+  /** Provider-side identifier for the strategy. */
   providerReference: string;
   name: string;
   sourceKind: EarnStrategySourceKind;
@@ -1036,6 +1036,7 @@ export interface EarnExternalWalletMovementResponse {
  * positions' earned. The exited history stays on the movements list.
  */
 export type EarnExternalWalletEarnedUnavailableReason =
+  | "cost_basis_unknown"
   | "live_value_unavailable"
   | "movements_pending"
   | "withdrawals_pending"

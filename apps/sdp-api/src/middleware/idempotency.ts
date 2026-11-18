@@ -59,6 +59,7 @@ export interface IdempotencyOptions {
    *   Only for a route whose handler writes its own row under a unique key
    *   before it moves anything, and replays that row on a retry, because that
    *   row is what recovers the earlier attempt.
+   * A committed domain write always stores the response, including a 5xx.
    *
    * A `rerun` route also lets a retry take over a claim whose lease lapsed
    * without an outcome (a crash, a failed write of the outcome); see
@@ -485,6 +486,7 @@ export async function runIdempotency(
       );
     } else if (
       response.status >= 500 &&
+      c.get("idempotencyCommitted") !== true &&
       (options.serverErrors === "rerun" || c.get("idempotencyRerunnable") === true)
     ) {
       await release(() => repository.unlock(id, claimToken));

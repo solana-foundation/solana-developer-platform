@@ -986,6 +986,40 @@ describe("external-wallet earnings", () => {
     expect(token).not.toHaveProperty("currentValue");
   });
 
+  it("withholds earned when a discovered position has unknown acquisition cost", async () => {
+    const position = await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "outside-holding",
+      tokenMint: USDC,
+      label: "Outside holding",
+    });
+    await getDb(env)
+      .prepare("UPDATE earn_positions SET cost_basis_known = FALSE WHERE id = ?")
+      .bind(position)
+      .run();
+    await seedMovement({
+      positionId: position,
+      ownerAddress: OWNER_A,
+      vaultAddress: "outside-holding",
+      direction: "withdrawal",
+      status: "finalized",
+      amount: "1",
+      denomination: SHARE,
+      createdAt: "2026-08-27T00:00:00.000Z",
+    });
+    liveValue({ "outside-holding": "100" });
+    const body = (await (
+      await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+    ).json()) as {
+      data: { earnings: { totalsByToken: Array<Record<string, unknown>> } };
+    };
+    expect(body.data.earnings.totalsByToken[0]).toMatchObject({
+      currentValue: "100",
+      earnedUnavailableReason: "cost_basis_unknown",
+    });
+    expect(body.data.earnings.totalsByToken[0]).not.toHaveProperty("earned");
+  });
+
   it("withholds earned while a movement is still settling", async () => {
     const position = await seedPosition({
       ownerAddress: OWNER_A,

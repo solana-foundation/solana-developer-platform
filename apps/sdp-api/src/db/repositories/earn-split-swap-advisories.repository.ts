@@ -5,9 +5,9 @@ import type { DatabaseClient as AppDb } from "@/db/client";
  * Orphaned split-swap advisories (PRO-1864): the record that SDP handed a
  * partner a standalone swap to broadcast itself.
  *
- * NOT part of the movement ledger, NOT a consumable build, and deliberately its
- * own repository: a row here says "a swap was handed out", never that money
- * moved. The detector that reads it writes nothing but back to this table.
+ * The advisory retains the exact unsigned prerequisite and chain observations
+ * for operations. Signed bytes stay in the operation attempt, the sole outbox.
+ * A prerequisite never creates a deposit movement or promises deposited shares.
  *
  * Every amount here is a BASE-UNIT integer string of the deposit mint except
  * the two `*_amount` columns, which are the decimal strings the partner was
@@ -18,6 +18,15 @@ const EARN_SPLIT_SWAP_ADVISORY_ID_PREFIX = "earn_split_swap_advisory_";
 
 export function generateEarnSplitSwapAdvisoryId(): string {
   return `${EARN_SPLIT_SWAP_ADVISORY_ID_PREFIX}${crypto.randomUUID()}`;
+}
+
+export type EarnSwapChainStatus = "submitted" | "finalized" | "failed";
+
+export interface EarnSwapOperationScope {
+  organizationId: string;
+  projectId: string;
+  environment: SdpEnvironment;
+  custodyWalletId: string | null;
 }
 
 type EarnSplitSwapAdvisoryResolution = "deposit_observed" | "unfunded" | "acknowledged";
@@ -31,6 +40,12 @@ export interface EarnSplitSwapAdvisoryRow {
   strategy_id: string;
   vault_address: string;
   owner_address: string;
+  custody_wallet_id: string | null;
+  unsigned_transaction: string | null;
+  swap_signature: string | null;
+  swap_chain_status: EarnSwapChainStatus | null;
+  swap_observed_slot: string | null;
+  swap_failure_reason: string | null;
   source_token_mint: string;
   deposit_token_mint: string;
   deposit_token_decimals: number;
@@ -63,6 +78,8 @@ interface CreateEarnSplitSwapAdvisoryInput {
   strategyId: string;
   vaultAddress: string;
   ownerAddress: string;
+  custodyWalletId?: string;
+  unsignedTransaction?: string;
   sourceTokenMint: string;
   depositTokenMint: string;
   depositTokenDecimals: number;
@@ -78,6 +95,25 @@ interface CreateEarnSplitSwapAdvisoryInput {
 
 export interface EarnSplitSwapAdvisoriesRepository {
   create(input: CreateEarnSplitSwapAdvisoryInput): Promise<EarnSplitSwapAdvisoryRow>;
+  getForOperation(
+    scope: EarnSwapOperationScope,
+    advisoryId: string
+  ): Promise<EarnSplitSwapAdvisoryRow | null>;
+  recordOperationSignature(
+    scope: EarnSwapOperationScope,
+    advisoryId: string,
+    signature: string
+  ): Promise<{ row: EarnSplitSwapAdvisoryRow; replayed: boolean } | null>;
+  recordOperationObservation(
+    scope: EarnSwapOperationScope,
+    input: {
+      advisoryId: string;
+      signature: string;
+      status: EarnSwapChainStatus;
+      slot: string;
+      failureReason: string | null;
+    }
+  ): Promise<EarnSplitSwapAdvisoryRow | null>;
   /**
    * The detector's batch: one environment's open rows, least-recently-visited
    * first, and every returned row's `last_checked_at` advanced in the same
@@ -134,6 +170,12 @@ function mapRow(row: Record<string, unknown>): EarnSplitSwapAdvisoryRow {
     strategy_id: row.strategy_id as string,
     vault_address: row.vault_address as string,
     owner_address: row.owner_address as string,
+    custody_wallet_id: (row.custody_wallet_id as string | null) ?? null,
+    unsigned_transaction: (row.unsigned_transaction as string | null) ?? null,
+    swap_signature: (row.swap_signature as string | null) ?? null,
+    swap_chain_status: (row.swap_chain_status as EarnSwapChainStatus | null) ?? null,
+    swap_observed_slot: row.swap_observed_slot == null ? null : String(row.swap_observed_slot),
+    swap_failure_reason: (row.swap_failure_reason as string | null) ?? null,
     source_token_mint: row.source_token_mint as string,
     deposit_token_mint: row.deposit_token_mint as string,
     deposit_token_decimals: Number(row.deposit_token_decimals),
@@ -166,11 +208,11 @@ export function createPostgresEarnSplitSwapAdvisoriesRepository(
         .prepare(
           `INSERT INTO earn_split_swap_advisories (
              id, organization_id, project_id, environment, provider, strategy_id,
-             vault_address, owner_address, source_token_mint, deposit_token_mint,
+             vault_address, owner_address, custody_wallet_id, unsigned_transaction, source_token_mint, deposit_token_mint,
              deposit_token_decimals, swap_source_amount, swap_min_out_amount,
              swap_min_out_atoms, swap_last_valid_block_height, fee_payer,
              baseline_deposit_token_atoms, created_by, initiated_by_key_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            RETURNING *`
         )
         .bind(
@@ -182,6 +224,8 @@ export function createPostgresEarnSplitSwapAdvisoriesRepository(
           input.strategyId,
           input.vaultAddress,
           input.ownerAddress,
+          input.custodyWalletId ?? null,
+          input.unsignedTransaction ?? null,
           input.sourceTokenMint,
           input.depositTokenMint,
           input.depositTokenDecimals,
@@ -199,6 +243,80 @@ export function createPostgresEarnSplitSwapAdvisoriesRepository(
         throw new Error("Failed to record the earn split-swap advisory");
       }
       return mapRow(row);
+    },
+
+    async getForOperation(scope, advisoryId) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM earn_split_swap_advisories
+         WHERE id = ? AND organization_id = ? AND project_id = ?
+           AND environment = ? AND custody_wallet_id IS NOT DISTINCT FROM ?`
+        )
+        .bind(
+          advisoryId,
+          scope.organizationId,
+          scope.projectId,
+          scope.environment,
+          scope.custodyWalletId
+        )
+        .first<Record<string, unknown>>();
+      return row === null ? null : mapRow(row);
+    },
+
+    async recordOperationSignature(scope, advisoryId, signature) {
+      const row = await db
+        .prepare(
+          `WITH prior AS (
+           SELECT id, swap_signature FROM earn_split_swap_advisories
+           WHERE id = ? AND organization_id = ? AND project_id = ?
+             AND environment = ? AND custody_wallet_id IS NOT DISTINCT FROM ?
+             AND unsigned_transaction IS NOT NULL FOR UPDATE
+         )
+         UPDATE earn_split_swap_advisories advisory
+            SET swap_signature = ?, swap_chain_status = COALESCE(advisory.swap_chain_status, 'submitted')
+           FROM prior
+          WHERE advisory.id = prior.id
+            AND (prior.swap_signature IS NULL OR prior.swap_signature = ?)
+         RETURNING advisory.*, prior.swap_signature IS NOT NULL AS signature_replayed`
+        )
+        .bind(
+          advisoryId,
+          scope.organizationId,
+          scope.projectId,
+          scope.environment,
+          scope.custodyWalletId,
+          signature,
+          signature
+        )
+        .first<Record<string, unknown>>();
+      return row === null ? null : { row: mapRow(row), replayed: row.signature_replayed === true };
+    },
+
+    async recordOperationObservation(scope, input) {
+      const row = await db
+        .prepare(
+          `UPDATE earn_split_swap_advisories
+            SET swap_chain_status = ?,
+                swap_observed_slot = GREATEST(COALESCE(swap_observed_slot, 0), ?::numeric),
+                swap_failure_reason = ?
+          WHERE id = ? AND organization_id = ? AND project_id = ? AND environment = ?
+            AND custody_wallet_id IS NOT DISTINCT FROM ? AND swap_signature = ?
+            AND swap_chain_status = 'submitted'
+         RETURNING *`
+        )
+        .bind(
+          input.status,
+          input.slot,
+          input.failureReason,
+          input.advisoryId,
+          scope.organizationId,
+          scope.projectId,
+          scope.environment,
+          scope.custodyWalletId,
+          input.signature
+        )
+        .first<Record<string, unknown>>();
+      return row === null ? null : mapRow(row);
     },
 
     async claimOpenForDetection({ environment, limit }) {

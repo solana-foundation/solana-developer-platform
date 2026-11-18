@@ -2,6 +2,8 @@ import { type Context, Hono, type Next } from "hono";
 import { presentsApiKey } from "@/lib/api-key-format";
 import { AppError } from "@/lib/errors";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
+import { authorize } from "@/middleware/authorize";
+import { idempotent } from "@/middleware/idempotency";
 import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { requestGate } from "@/middleware/request-gate";
@@ -9,13 +11,18 @@ import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
 import { createEarnOnboardingRoutes } from "@/routes/earn-onboarding";
 import type { Env } from "@/types/env";
+import {
+  authorizeEarnDeposit,
+  authorizeEarnWithdrawal,
+  prepareEarnOperation,
+} from "./core/prepare";
+import { listEarnDiscovery, listEarnPositions } from "./core/read";
+import { prepareEarnDepositSchema, prepareEarnWithdrawalSchema } from "./core/schemas";
 import { isEarnExitOrRead } from "./exits";
 import {
   createEarnExternalWalletDeposit,
-  createEarnExternalWalletDepositTransaction,
   createEarnExternalWalletWithdrawal,
   createEarnExternalWalletWithdrawalPreview,
-  createEarnExternalWalletWithdrawalTransaction,
   getEarnExternalWalletEarnings,
   getEarnExternalWalletMovement,
   getEarnExternalWalletPositionSummary,
@@ -24,7 +31,6 @@ import {
 } from "./handlers/external-wallet";
 import { listEarnMovements } from "./handlers/movements";
 import {
-  createEarnProgram,
   createEarnProgramWithdrawal,
   extractEarnProgramWithdrawal,
   getEarnProgram,
@@ -33,7 +39,6 @@ import {
   listEarnPrograms,
   listEarnProgramWithdrawals,
   previewEarnProgramWithdrawal,
-  retargetEarnProgram,
 } from "./handlers/program";
 import {
   cancelEarnVaultWithdrawalRequest,
@@ -41,11 +46,7 @@ import {
   createEarnExternalWalletWithdrawalRequest,
   createEarnExternalWalletWithdrawalRequestCancellation,
   createEarnExternalWalletWithdrawalRequestCancelTransaction,
-  createEarnExternalWalletWithdrawalRequestTransaction,
   createEarnVaultQueuedWithdrawalPreview,
-  createEarnVaultWithdrawalRequest,
-  extractEarnVaultWithdrawalRequest,
-  findEarnVaultWithdrawalRequestIdempotentKeyReplay,
   getEarnExternalWalletWithdrawalOptions,
   getEarnExternalWalletWithdrawalRequest,
   getEarnVaultWithdrawalOptions,
@@ -55,17 +56,7 @@ import {
 } from "./handlers/queued-withdrawals";
 import { getEarnStrategy, listEarnStrategies } from "./handlers/strategies";
 import {
-  admitEarnVaultDeposit,
-  admitEarnVaultRuntimeExecution,
-  assertEarnVaultWithdrawalFloor,
-  createEarnVaultDeposit,
-  createEarnVaultDepositPreview,
-  createEarnVaultWithdrawal,
   createEarnVaultWithdrawalPreview,
-  extractEarnVaultDeposit,
-  extractEarnVaultWithdrawal,
-  findEarnVaultDepositIdempotentKeyReplay,
-  findEarnVaultWithdrawalIdempotentKeyReplay,
   getEarnVaultDeposit,
   getEarnVaultWithdrawal,
   listEarnVaultDeposits,
@@ -75,30 +66,46 @@ import {
 import { getEarnVaultShareReconciliation } from "./handlers/vault-reconciliation";
 import { providerActions } from "./provider-actions";
 import {
-  earnExternalWalletDepositTransactionSchema,
   earnExternalWalletQueuedWithdrawalPreviewSchema,
   earnExternalWalletSubmitSchema,
   earnExternalWalletWithdrawalOptionsSchema,
   earnExternalWalletWithdrawalPreviewSchema,
   earnExternalWalletWithdrawalRequestCancelTransactionSchema,
-  earnExternalWalletWithdrawalRequestTransactionSchema,
-  earnExternalWalletWithdrawalTransactionSchema,
-  earnProgramCreateSchema,
-  earnProgramRetargetSchema,
   earnProgramWithdrawalCreateSchema,
   earnProgramWithdrawalPreviewSchema,
-  earnVaultDepositPreviewSchema,
-  earnVaultDepositSchema,
   earnVaultQueuedWithdrawalPreviewSchema,
   earnVaultWithdrawalOptionsSchema,
   earnVaultWithdrawalPreviewSchema,
   earnVaultWithdrawalRequestCancelSchema,
-  earnVaultWithdrawalRequestSchema,
-  earnVaultWithdrawalSchema,
 } from "./schemas";
 
 export const earnRoutes = new Hono<{ Bindings: Env }>();
 const earn = new Hono<{ Bindings: Env }>();
+
+function retiredEarnDeposit(c: Context<{ Bindings: Env }>) {
+  return c.json(
+    {
+      error: {
+        code: "NOT_IMPLEMENTED",
+        message: "This deposit endpoint is retired. Prepare a deposit with the core Earn API.",
+      },
+    },
+    410
+  );
+}
+
+function retiredEarnWithdrawal(c: Context<{ Bindings: Env }>) {
+  return c.json(
+    {
+      error: {
+        code: "NOT_IMPLEMENTED",
+        message:
+          "This withdrawal endpoint is retired. Prepare a withdrawal with the core Earn API.",
+      },
+    },
+    410
+  );
+}
 
 const earnProjectContextOptions = {
   allowUnentitledProduction: (c: Context<{ Bindings: Env }>) =>
@@ -154,6 +161,32 @@ earn.use("*", projectContextMiddleware(earnProjectContextOptions));
 // deposit build are metered.
 earn.route("/provider-actions", providerActions);
 
+// The same strategy catalogue and holdings contract serves every Earn client.
+earn.get("/discovery", requireAction("earn.read"), cacheEarnCatalogue, listEarnDiscovery);
+earn.get(
+  "/positions",
+  requireAction("earn.read"),
+  meteredQuota(EARN_CHAIN_READ_QUOTA),
+  listEarnPositions
+);
+earn.post(
+  "/deposit",
+  requireAction("earn.execute"),
+  validateBody(prepareEarnDepositSchema),
+  authorize(authorizeEarnDeposit),
+  idempotent({ key: "required", serverErrors: "rerun" }),
+  meteredQuota(EARN_PROVIDER_READ_QUOTA),
+  prepareEarnOperation
+);
+earn.post(
+  "/withdraw",
+  requireAction("earn.execute"),
+  validateBody(prepareEarnWithdrawalSchema),
+  authorize(authorizeEarnWithdrawal),
+  idempotent({ key: "required", serverErrors: "rerun" }),
+  prepareEarnOperation
+);
+
 // Strategy catalogue (source: DB, admitted only by the sync cron), read in
 // the caller's project environment.
 earn.get("/strategies", requireAction("earn.read"), cacheEarnCatalogue, listEarnStrategies);
@@ -168,13 +201,7 @@ earn.get(
 // BEFORE the meter: the counter is shared by the whole organization, so a
 // malformed request must not spend the pool that later valid quotes and builds
 // draw from.
-earn.post(
-  "/vault-deposit-previews",
-  requireAction("earn.read"),
-  validateBody(earnVaultDepositPreviewSchema),
-  meteredQuota(EARN_PROVIDER_READ_QUOTA),
-  createEarnVaultDepositPreview
-);
+earn.post("/vault-deposit-previews", requireAction("earn.read"), retiredEarnDeposit);
 
 // B2B2C live holdings (PRO-1724). The owner is a REQUIRED query filter on
 // every per-owner read of this surface (positions, movements, earnings) — one
@@ -215,8 +242,7 @@ earn.get(
 earn.post(
   "/external-wallet/withdrawal-request-transactions",
   requireAction("earn.execute"),
-  validateBody(earnExternalWalletWithdrawalRequestTransactionSchema),
-  createEarnExternalWalletWithdrawalRequestTransaction
+  retiredEarnWithdrawal
 );
 earn.post(
   "/external-wallet/withdrawal-request-cancel-transactions",
@@ -248,22 +274,7 @@ earn.get(
 // `createOrgSignerForCustodyWallet` and broadcasts a value-moving transaction,
 // so the gate must sit AFTER `requireAction` and `validateBody`, and immediately before the handler, so a refusal is
 // decided before any KMS or relay access.
-earn.post(
-  "/vault-deposits",
-  requireAction("earn.execute"),
-  validateBody(earnVaultDepositSchema),
-  requestGate({
-    extract: extractEarnVaultDeposit,
-    findIdempotentKeyReplay: findEarnVaultDepositIdempotentKeyReplay,
-    // The money-in gates run AFTER the completed-replay exit so a recorded
-    // deposit stays replayable when its strategy pauses or a policy flips.
-    admit: async (c, extraction) => {
-      await admitEarnVaultDeposit(c, extraction);
-      await admitEarnVaultRuntimeExecution(c, extraction);
-    },
-  }),
-  createEarnVaultDeposit
-);
+earn.post("/vault-deposits", requireAction("earn.execute"), retiredEarnDeposit);
 // The deposit READS take no request gate and no provider gate — they move no
 // money and report on money that already left the wallet. They are what makes a
 // signed-but-unconfirmed deposit answerable: `POST` records before broadcast,
@@ -276,30 +287,10 @@ earn.post(
 // Idempotency-Key when the original response was lost.
 earn.get("/vault-deposits", requireAction("earn.read"), listEarnVaultDeposits);
 earn.get("/vault-deposits/:movementId", requireAction("earn.read"), getEarnVaultDeposit);
-// The EXIT half (PRO-1702): redeem a position's shares back to the custody
-// wallet that holds them. Request-gated for the same reason the deposit is —
-// it reaches `createOrgSignerForCustodyWallet` and broadcasts value-moving
-// transactions. Beyond it this route takes only the capability answer (501 when the
-// provider cannot build an exit): ADR 0002 exit safety forbids money-out
-// inheriting surfacing, entitlement, availability, environment capability, or
-// any catalogue dependency — the position row names the instrument, so a
-// delisted vault stays exitable.
-earn.post(
-  "/vault-withdrawals",
-  requireAction("earn.execute"),
-  validateBody(earnVaultWithdrawalSchema),
-  requestGate({
-    extract: extractEarnVaultWithdrawal,
-    findIdempotentKeyReplay: findEarnVaultWithdrawalIdempotentKeyReplay,
-    // The floor check runs AFTER the completed-replay exit so a recorded
-    // floor-less withdrawal stays replayable if the provider's policy flips.
-    admit: async (c, extraction) => {
-      await assertEarnVaultWithdrawalFloor(c, extraction);
-      await admitEarnVaultRuntimeExecution(c, extraction);
-    },
-  }),
-  createEarnVaultWithdrawal
-);
+// New exits use the async core operation, which also accepts legacy positions.
+// Recorded movements, existing request cancellation and signed-build recovery
+// remain available through their compatibility routes.
+earn.post("/vault-withdrawals", requireAction("earn.execute"), retiredEarnWithdrawal);
 // The exit QUOTE: a read with EXIT gates only — position scoping (404),
 // capability (501), and deliberately nothing money-in-shaped (ADR 0002 exit
 // safety): no surfacing, no entitlement, no admission, no environment
@@ -327,16 +318,7 @@ earn.post(
   validateBody(earnVaultQueuedWithdrawalPreviewSchema),
   createEarnVaultQueuedWithdrawalPreview
 );
-earn.post(
-  "/vault-withdrawal-requests",
-  requireAction("earn.execute"),
-  validateBody(earnVaultWithdrawalRequestSchema),
-  requestGate({
-    extract: extractEarnVaultWithdrawalRequest,
-    findIdempotentKeyReplay: findEarnVaultWithdrawalRequestIdempotentKeyReplay,
-  }),
-  createEarnVaultWithdrawalRequest
-);
+earn.post("/vault-withdrawal-requests", requireAction("earn.execute"), retiredEarnWithdrawal);
 earn.get("/vault-withdrawal-requests", requireAction("earn.read"), listEarnVaultWithdrawalRequests);
 earn.get(
   "/vault-withdrawal-requests/:withdrawalRequestId",
@@ -387,9 +369,7 @@ earn.get(
 earn.post(
   "/external-wallet/deposit-transactions",
   requireAction("earn.execute"),
-  validateBody(earnExternalWalletDepositTransactionSchema),
-  meteredQuota(EARN_PROVIDER_READ_QUOTA),
-  createEarnExternalWalletDepositTransaction
+  retiredEarnDeposit
 );
 earn.post(
   "/external-wallet/withdrawal-previews",
@@ -400,8 +380,7 @@ earn.post(
 earn.post(
   "/external-wallet/withdrawal-transactions",
   requireAction("earn.execute"),
-  validateBody(earnExternalWalletWithdrawalTransactionSchema),
-  createEarnExternalWalletWithdrawalTransaction
+  retiredEarnWithdrawal
 );
 earn.post(
   "/external-wallet/withdrawal-options",
@@ -463,11 +442,17 @@ earn.get(
   meteredQuota(EARN_PROVIDER_READ_QUOTA),
   listEarnPrograms
 );
-earn.post(
-  "/programs",
-  requireAction("earn.manage"),
-  validateBody(earnProgramCreateSchema),
-  createEarnProgram
+earn.post("/programs", requireAction("earn.manage"), (c) =>
+  c.json(
+    {
+      error: {
+        code: "NOT_IMPLEMENTED",
+        message:
+          "Earn program creation is retired. Discover strategies and prepare deposits with the core Earn API.",
+      },
+    },
+    410
+  )
 );
 earn.get(
   "/programs/:programId",
@@ -475,11 +460,17 @@ earn.get(
   meteredQuota(EARN_PROVIDER_READ_QUOTA),
   getEarnProgram
 );
-earn.put(
-  "/programs/:programId",
-  requireAction("earn.manage"),
-  validateBody(earnProgramRetargetSchema),
-  retargetEarnProgram
+earn.put("/programs/:programId", requireAction("earn.manage"), (c) =>
+  c.json(
+    {
+      error: {
+        code: "NOT_IMPLEMENTED",
+        message:
+          "Earn allocation configuration is retired. Existing positions and withdrawals remain available.",
+      },
+    },
+    410
+  )
 );
 earn.get(
   "/programs/:programId/deposits",

@@ -9,11 +9,14 @@ import type {
   EarnVaultPosition,
   EarnVaultWithdrawal,
 } from "@sdp/types/earn";
+import type { Operation } from "@sdp/types/operations";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { Modal } from "@sdp/ui/modal";
 import { Loader2Icon } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSWRConfig } from "swr";
+import { EarnCoreOperations } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-core-operations";
 import { EARN_TRANSACTION_MODAL_FRAME } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-modal";
 import {
   EarnVaultDepositOutcomeTracker,
@@ -30,7 +33,7 @@ import {
   useEarnVaultWithdrawals,
 } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-program-data";
 import type { EarnProviderAccess } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-surfacing";
-import type { EarnVaultParRedemptionSource } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-vault-par-redemption-modal";
+import type { EarnVaultParRedemptionSource } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-vault-holding";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
@@ -72,17 +75,10 @@ export function EarnTransactionModalLoading() {
   );
 }
 
-const EarnVaultDepositModal = dynamic(
+const EarnCoreActionModal = dynamic(
   () =>
-    import("@/app/(session)/dashboard/[projectId]/markets/earn/earn-vault-deposit-modal").then(
-      (module) => module.EarnVaultDepositModal
-    ),
-  { loading: EarnTransactionModalLoading, ssr: false }
-);
-const EarnVaultExitModal = dynamic(
-  () =>
-    import("@/app/(session)/dashboard/[projectId]/markets/earn/earn-vault-exit-modal").then(
-      (module) => module.EarnVaultExitModal
+    import("@/app/(session)/dashboard/[projectId]/markets/earn/earn-core-action-modal").then(
+      (module) => module.EarnCoreActionModal
     ),
   { loading: EarnTransactionModalLoading, ssr: false }
 );
@@ -182,28 +178,6 @@ function observeIncomingVaultMovements<Movement>(
     ...movement,
     observedOrder: nextOrder(),
   }));
-}
-
-function provisionalVaultPosition(
-  deposit: Pick<EarnVaultDepositRecord, "positionId"> & { createdAt?: string },
-  custodyWalletId: string,
-  strategy: EarnStrategy
-): EarnVaultPosition | undefined {
-  const shareMint = strategy.shareMint;
-  const tokenMint = strategy.depositMints[0];
-  if (!shareMint || !tokenMint) return undefined;
-  return {
-    id: deposit.positionId,
-    provider: strategy.provider,
-    providerReference: strategy.providerReference,
-    label: strategy.name,
-    custodyWalletId,
-    tokenMint,
-    shareMint,
-    createdAt: deposit.createdAt ?? new Date().toISOString(),
-    closedAt: null,
-    feeSponsored: strategy.feeSponsored,
-  };
 }
 
 interface EarnWithdrawalWatch {
@@ -432,7 +406,7 @@ export function TreasurySolutionsWorkspace({
 }: {
   providerAccess: EarnProviderAccess | null;
 }) {
-  const { sdpEnvironment, selectedProjectId } = useDashboardWorkspace();
+  const { sdpEnvironment } = useDashboardWorkspace();
   const {
     catalogueCluster,
     catalogueStrategies,
@@ -553,9 +527,43 @@ export function TreasurySolutionsWorkspace({
     walletsLoading,
     balancesRefreshing,
     balanceOf,
-    beginSubmission,
     refresh: refreshTreasuryBalances,
+    refreshOperation,
   } = useTreasuryBalances(trackedActivities);
+
+  const { mutate: mutateCore } = useSWRConfig();
+  const observedCoreResults = useRef(new Set<string>());
+  const onCoreUpdated = useCallback(
+    (operation: Operation) => {
+      const observation = JSON.stringify([
+        operation.id,
+        operation.status,
+        operation.version,
+        operation.result,
+        operation.updatedAt,
+      ]);
+      if (observedCoreResults.current.has(observation)) return;
+      observedCoreResults.current.add(observation);
+      void mutateCore<Operation[]>(
+        "dashboard-earn-core-operations",
+        (current) => {
+          const found = current?.some((candidate) => candidate.id === operation.id);
+          return found
+            ? current?.map((candidate) => (candidate.id === operation.id ? operation : candidate))
+            : [operation, ...(current ?? [])];
+        },
+        { revalidate: false }
+      );
+      const result = operation.result;
+      if (!result || !("walletId" in result.source)) return;
+      if (operation.status === "completed" && operation.resourceRef?.kind === "earn.movement") {
+        void refreshOperation(operation.resourceRef.id, result.positionId, result.source.walletId);
+      } else if (operation.resourceRef?.kind === "earn.withdrawal_request") {
+        void refreshTreasuryBalances();
+      }
+    },
+    [mutateCore, refreshOperation, refreshTreasuryBalances]
+  );
 
   // A provisional row stands in only until the API lists the position itself.
   useEffect(() => {
@@ -692,43 +700,18 @@ export function TreasurySolutionsWorkspace({
         walletsLoading={walletsLoading}
       />
 
+      <EarnCoreOperations
+        onUpdated={onCoreUpdated}
+        strategies={catalogueStrategies}
+        positions={positions}
+      />
+
       {depositStrategy ? (
-        <EarnVaultDepositModal
-          onClose={() => setDepositStrategy(null)}
-          projectId={selectedProjectId}
-          onDeposited={(deposit, intent) => {
-            // No balance read here: a read before the chain decides cannot show
-            // the moved amount, and the position stays "updating" meanwhile.
-            // The watch below triggers the one read that can, the
-            // confirmation-floored refresh, including when this response is
-            // already confirmed.
-            const authoritativePosition = positions?.find(
-              (position) => position.id === deposit.positionId
-            );
-            const provisionalPosition = authoritativePosition
-              ? undefined
-              : provisionalVaultPosition(deposit, intent.custodyWalletId, depositStrategy);
-            addVaultDepositWatches([
-              {
-                failureReason: deposit.failureReason,
-                movementId: deposit.movementId,
-                positionId: deposit.positionId,
-                provisionalPosition,
-                status: deposit.status,
-                submittedAt: intent.submittedAt,
-                custodyWalletId: intent.custodyWalletId,
-              },
-            ]);
-          }}
-          onSubmissionStart={(custodyWalletId) =>
-            beginSubmission({
-              provider: depositStrategy.provider,
-              providerReference: depositStrategy.providerReference,
-              custodyWalletId,
-            })
-          }
-          onMovementUpdated={updateVaultDepositWatch}
+        <EarnCoreActionModal
+          kind="deposit"
           strategy={depositStrategy}
+          onClose={() => setDepositStrategy(null)}
+          onUpdated={onCoreUpdated}
         />
       ) : null}
 
@@ -745,35 +728,12 @@ export function TreasurySolutionsWorkspace({
       ) : null}
 
       {withdrawPosition ? (
-        <EarnVaultExitModal
-          environment={sdpEnvironment}
-          onClose={() => setWithdrawPosition(null)}
-          onWithdrawn={(withdrawal, intent) => {
-            // Like a deposit, the watch triggers the confirmation-floored read;
-            // a read now would only fetch the pre-exit balance.
-            addVaultWithdrawalWatches([
-              {
-                createdAt: withdrawal.createdAt,
-                failureReason: withdrawal.failureReason,
-                movementId: withdrawal.movementId,
-                positionId: withdrawal.positionId,
-                status: withdrawal.status,
-                submittedAt: intent.submittedAt,
-                custodyWalletId: withdrawPosition.custodyWalletId,
-              },
-            ]);
-          }}
-          onSubmissionStart={() => beginSubmission(withdrawPosition)}
-          onMovementUpdated={updateVaultWithdrawalWatch}
-          onAsyncRequest={() => {
-            // An asynchronous request can move or escrow shares without paying
-            // assets yet. Refresh holdings without projecting an instant exit.
-            void refreshTreasuryBalances();
-          }}
-          onAsyncRequestSettled={refreshHoldings}
-          parSource={withdrawParSource}
+        <EarnCoreActionModal
+          kind="withdraw"
           position={withdrawPosition}
-          projectId={selectedProjectId}
+          intermediate={withdrawParSource === "intermediate"}
+          onClose={() => setWithdrawPosition(null)}
+          onUpdated={onCoreUpdated}
         />
       ) : null}
 

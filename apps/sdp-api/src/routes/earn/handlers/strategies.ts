@@ -13,7 +13,7 @@ import {
   isEarnProviderSurfaced,
   SURFACED_EARN_PROVIDERS,
 } from "@sdp/types/provider-access";
-import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
+import type { EarnStrategyRow, ListEarnStrategiesInput } from "@/db/repositories/earn.repository";
 import { notFound } from "@/lib/errors";
 import { isEarnHastraDexExitConfigured, isEarnVaultSponsorshipEnabled } from "@/lib/feature-flags";
 import { success } from "@/lib/response";
@@ -61,6 +61,11 @@ function isHiddenStrategy(row: EarnStrategyRow): boolean {
     .join("\n")
     .toLowerCase();
   return HIDDEN_STRATEGY_TERMS.some((term) => searchable.includes(term));
+}
+
+/** The reviewed execution shelf, separate from the broader indexed catalogue. */
+export function isEarnStrategyInExecutionShelf(row: EarnStrategyRow): boolean {
+  return !isHiddenStrategy(row);
 }
 
 /**
@@ -140,9 +145,26 @@ async function requireEarnStrategy(
   return resolved;
 }
 
-export const listEarnStrategies = async (c: AppContext) => {
-  const query = parseQuery(c, listEarnStrategiesQuerySchema);
-
+/** Shared catalogue filters; only the core read can include discovery-only rows. */
+export async function readEarnStrategyPage(
+  c: AppContext,
+  query: {
+    page: number;
+    pageSize: number;
+    cluster?: ListEarnStrategiesInput["hostCluster"];
+  } & Pick<
+    ListEarnStrategiesInput,
+    | "id"
+    | "provider"
+    | "depositMint"
+    | "minApy"
+    | "maxApy"
+    | "sourceKind"
+    | "apyType"
+    | "liquidityTerm"
+  >,
+  options: { includeCatalogueOnly?: boolean } = {}
+) {
   const repo = getEarnRepository(c);
   const { environment, cluster: projectCluster } = currentClusterScope();
   // The shelf a caller can act on is the default; `?cluster=` is the explicit
@@ -158,15 +180,28 @@ export const listEarnStrategies = async (c: AppContext) => {
     sourceKind: query.sourceKind,
     apyType: query.apyType,
     liquidityTerm: query.liquidityTerm,
+    id: query.id,
+    provider: query.provider,
+    depositMint: query.depositMint,
+    minApy: query.minApy,
+    maxApy: query.maxApy,
     // Both visibility rules run in SQL so `total` and the page window describe
     // the rows the caller can see. `isHiddenStrategy` applies the same two rules
     // to the detail route, which has no query to push them into.
     providers: SURFACED_EARN_PROVIDERS,
-    excludeProviderKeys: HIDDEN_VAULTS[cluster] ?? [],
-    allowedProviderReferences: CURATED_VAULTS[cluster] ?? {},
-    excludeRelatedTerms: HIDDEN_STRATEGY_TERMS,
+    excludeProviderKeys: options.includeCatalogueOnly ? undefined : (HIDDEN_VAULTS[cluster] ?? []),
+    allowedProviderReferences: options.includeCatalogueOnly
+      ? undefined
+      : (CURATED_VAULTS[cluster] ?? {}),
+    excludeRelatedTerms: options.includeCatalogueOnly ? undefined : HIDDEN_STRATEGY_TERMS,
     ...pageWindow(query),
   });
+  return { rows, total, environment };
+}
+
+export const listEarnStrategies = async (c: AppContext) => {
+  const query = parseQuery(c, listEarnStrategiesQuerySchema);
+  const { rows, total, environment } = await readEarnStrategyPage(c, query);
 
   const response: ListEarnStrategiesResponse = listResponse(query, total, {
     strategies: rows.map((row) => mapToEarnStrategy(row, environment, c.env)),

@@ -2,8 +2,6 @@ import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import {
   earnCursorQueryParams,
   earnExternalWalletDepositResponse,
-  earnExternalWalletDepositTransactionRequest,
-  earnExternalWalletDepositTransactionResponse,
   earnExternalWalletEarningsResponse,
   earnExternalWalletMovementDetailResponse,
   earnExternalWalletMovementsResponse,
@@ -21,19 +19,13 @@ import {
   earnExternalWalletWithdrawalRequestCancelTransactionResponse,
   earnExternalWalletWithdrawalRequestResponse,
   earnExternalWalletWithdrawalRequestsResponse,
-  earnExternalWalletWithdrawalRequestTransactionRequest,
-  earnExternalWalletWithdrawalRequestTransactionResponse,
   earnExternalWalletWithdrawalResponse,
-  earnExternalWalletWithdrawalTransactionRequest,
-  earnExternalWalletWithdrawalTransactionResponse,
   earnMovementIdParam,
   earnMovementStatusQueryParam,
   earnOwnerAddressQueryParam,
   earnStrategiesResponse,
   earnStrategyIdParam,
   earnStrategyResponse,
-  earnVaultDepositPreviewRequest,
-  earnVaultDepositPreviewResponse,
   earnVaultShareReconciliationResponse,
   earnWithdrawalRequestIdParam,
 } from "@/openapi/schemas/earn";
@@ -54,6 +46,7 @@ import {
   earnVaultWithdrawalRequestParamsSchema,
   listEarnStrategiesQuerySchema,
 } from "@/routes/earn/schemas";
+import { registerEarnCorePaths } from "./earn-core";
 import { earnErrorResponses } from "./earn-errors";
 import { EARN_GROUPS } from "./earn-groups";
 import { registerEarnOnboardingPaths } from "./earn-onboarding";
@@ -73,6 +66,7 @@ const earnConfigurationSecurity: EarnSecurity = [{ apiKeyAuth: [] }, { clerkBear
 const earnPublicSecurity: EarnSecurity = [{ apiKeyAuth: [] }];
 
 export function registerEarnPaths(registry: OpenAPIRegistry) {
+  registerEarnCorePaths(registry);
   registerEarnStrategyPaths(registry, earnConfigurationSecurity);
   registerEarnDepositPreviewPath(registry, earnConfigurationSecurity);
   registerEarnExternalWalletPaths(registry, earnConfigurationSecurity);
@@ -159,28 +153,16 @@ function registerEarnDepositPreviewPath(
     tags: ["Earn"],
     [DOCS_GROUP]: EARN_GROUPS.discovery,
     summary: "Preview a deposit",
+    deprecated: true,
     operationId: "createEarnVaultDepositPreview",
     description:
-      "Quotes how many shares a deposit would receive right now, from the provider's live " +
-      "accounting. When the strategy's `depositSlippage` is not null, set `minSharesOut` " +
-      "from this quote: take your tolerance off `sharesOut`. Resolve every `blockingIssues` " +
-      "entry before you build. The preview is read-only, takes no Idempotency-Key, and " +
-      "applies a deposit's access checks, provider activation included. It returns 501 when " +
-      "the provider cannot quote deposits.",
+      "Retired. Returns 410 NOT_IMPLEMENTED without calling a provider. This compatibility path no longer prepares new deposits.",
     security,
     request: {
       headers: projectScopeHeaders,
-      body: {
-        required: true,
-        content: jsonContent(earnVaultDepositPreviewRequest),
-      },
     },
     responses: {
-      200: {
-        description: "Live deposit quote",
-        content: jsonContent(earnVaultDepositPreviewResponse),
-      },
-      ...earnErrorResponses([400, 401, 403, 404, 429, 500, 501, 503]),
+      ...earnErrorResponses([401, 403, 410, 429, 500]),
     },
   });
 }
@@ -375,28 +357,16 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     tags: ["Earn"],
     [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Build a deposit transaction",
+    deprecated: true,
     operationId: "createEarnExternalWalletDepositTransaction",
     description:
-      "Builds an unsigned deposit transaction for the customer's wallet to sign. Nothing " +
-      "moves until you submit the signed transaction. The build applies provider access " +
-      "checks and can name your own `feePayer`, which then signs alongside the customer. A " +
-      "swap-funded deposit that cannot fit in one transaction returns a separate swap and " +
-      "follow-up deposit instead of `transaction`, so check the response before you request " +
-      "a signature.",
+      "Retired. Returns 410 NOT_IMPLEMENTED without building or reserving a transaction. Existing legacy signed builds can still be recovered through the legacy submit endpoint. Operation-only builds must use their operation action.",
     security,
     request: {
       headers: projectScopeHeaders,
-      body: {
-        required: true,
-        content: jsonContent(earnExternalWalletDepositTransactionRequest),
-      },
     },
     responses: {
-      200: {
-        description: "Unsigned deposit transaction",
-        content: jsonContent(earnExternalWalletDepositTransactionResponse),
-      },
-      ...earnErrorResponses([400, 401, 403, 404, 429, 500, 501, 503]),
+      ...earnErrorResponses([401, 403, 410, 429, 500]),
     },
   });
 
@@ -408,7 +378,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     summary: "Submit a deposit",
     operationId: "createEarnExternalWalletDeposit",
     description:
-      "Submits a deposit transaction signed by the customer's wallet. SDP checks that the " +
+      "Recovery only for previously exposed legacy builds. Operation-only builds return 409 operation_execution_required and must use their durable operation action, including after refresh. Submits a deposit transaction signed by the customer's wallet. SDP checks that the " +
       "signed bytes match the built transaction and that every required signature is valid " +
       "(the customer's, plus your fee payer's when the build named one), records the " +
       "movement, then broadcasts. Idempotency-Key is required: a retry with the same key " +
@@ -476,26 +446,17 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Build a withdrawal transaction",
     operationId: "createEarnExternalWalletWithdrawalTransaction",
+    deprecated: true,
     description:
-      "Builds an unsigned withdrawal transaction for a position, for the customer's wallet " +
-      "to sign. Withdrawals keep working after a provider stops taking deposits. Send " +
-      "`minAmountOut` when the strategy's `withdrawalSlippage` is not null, and omit it " +
-      "when null. A provider-order route may not support a preview: it places an order that " +
-      "pays out later, not an instant redemption.",
+      "Retired. Returns 410 NOT_IMPLEMENTED without building a transaction. New withdrawals " +
+      "use the internal core Earn API. Exact already-built legacy transactions retain their " +
+      "signed-submit recovery path; operation-only builds must use their operation action.",
     security,
     request: {
       headers: projectScopeHeaders,
-      body: {
-        required: true,
-        content: jsonContent(earnExternalWalletWithdrawalTransactionRequest),
-      },
     },
     responses: {
-      200: {
-        description: "Unsigned withdrawal transaction",
-        content: jsonContent(earnExternalWalletWithdrawalTransactionResponse),
-      },
-      ...earnErrorResponses([400, 401, 403, 404, 429, 500, 501, 503]),
+      ...earnErrorResponses([401, 403, 410, 429, 500]),
     },
   });
 
@@ -507,7 +468,8 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     summary: "Submit a withdrawal",
     operationId: "createEarnExternalWalletWithdrawal",
     description:
-      "Submits a withdrawal transaction signed by the customer's wallet. It works like a " +
+      "Recovers an exact already-built legacy withdrawal signed by the customer's wallet. " +
+      "Operation-only builds return 409 and must use their operation action. It works like a " +
       "deposit submit: SDP checks every signature against the exact built message, records " +
       "the movement before broadcast, requires an Idempotency-Key, and accepts each built " +
       "transaction once, with the same `409 CONFLICT` answers. Submit the original signed " +
@@ -612,26 +574,17 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     [DOCS_GROUP]: EARN_GROUPS.embeddedYield,
     summary: "Build a withdrawal request transaction",
     operationId: "createEarnExternalWalletWithdrawalRequestTransaction",
+    deprecated: true,
     description:
-      "Builds an unsigned withdrawal request transaction for a position, for the customer's " +
-      "wallet to sign. A solver queue request escrows shares; an operator redemption " +
-      "converts shares into an intermediate token that the operator settles later. Neither " +
-      "transaction pays the customer. Save the `withdrawalRequestId` the submit returns and " +
-      "track the request until it is fulfilled, canceled, or failed.",
+      "Retired. Returns 410 NOT_IMPLEMENTED without building or reserving a request. New " +
+      "withdrawals use the internal core Earn API. Exact already-built legacy signed requests " +
+      "remain recoverable. Existing request cancellation is retained for draining funds.",
     security,
     request: {
       headers: projectScopeHeaders,
-      body: {
-        required: true,
-        content: jsonContent(earnExternalWalletWithdrawalRequestTransactionRequest),
-      },
     },
     responses: {
-      200: {
-        description: "Unsigned withdrawal request transaction",
-        content: jsonContent(earnExternalWalletWithdrawalRequestTransactionResponse),
-      },
-      ...earnErrorResponses([400, 401, 403, 404, 409, 429, 500, 501, 503]),
+      ...earnErrorResponses([401, 403, 410, 429, 500]),
     },
   });
 
@@ -643,7 +596,8 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
     summary: "Submit a withdrawal request",
     operationId: "createEarnExternalWalletWithdrawalRequest",
     description:
-      "Submits a withdrawal request transaction signed by the customer's wallet. SDP checks " +
+      "Recovers an exact already-built legacy withdrawal request signed by the customer's " +
+      "wallet. Operation-only builds return 409 and must use their operation action. SDP checks " +
       "every signature against the exact built message, records the request before broadcast, " +
       "then sends it. Idempotency-Key is required: a retry with the same key returns the " +
       "original request, and each built transaction can be submitted once. Reusing a key with " +
@@ -653,8 +607,8 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
       "successful, so after a `409 CONFLICT` retry the same bytes and key until that shows. A " +
       "late operator redemption whose original cycle already closed is refused for operator " +
       "reconciliation, so it cannot claim a newer request at the same address. A transaction " +
-      "that recovery finds finalized as failed returns `400 TRANSACTION_FAILED`; build a new " +
-      "one. A recovery RPC outage returns `503 PROVIDER_UNAVAILABLE`: retry the original " +
+      "that recovery finds finalized as failed returns `400 TRANSACTION_FAILED`; a fresh " +
+      "withdrawal requires the core API. A recovery RPC outage returns `503 PROVIDER_UNAVAILABLE`: retry the original " +
       "bytes and key. An unresolved 16-signature history window returns `503` and needs " +
       "support to reconcile. An expired operator redemption build whose creation history is " +
       "unavailable also returns `503`: keep and retry the original signed intent rather than " +

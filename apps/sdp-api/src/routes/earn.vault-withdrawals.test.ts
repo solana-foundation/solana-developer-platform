@@ -1,9 +1,12 @@
 import { supportsVaultWithdrawQuote } from "@sdp/earn/capabilities";
-import { SdpEarnError } from "@sdp/earn/errors";
 import { hashString } from "@sdp/payments/hash";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
+import {
+  createPostgresEarnExternalWalletTransactionsRepository,
+  generateEarnExternalWalletTransactionId,
+} from "@/db/repositories/earn-external-wallet-transactions.repository";
 import {
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,
@@ -14,18 +17,13 @@ import {
   createPostgresEarnVaultWithdrawalRequestsRepository,
 } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import { app } from "@/index";
-import { buildEarnVaultWithdrawalFingerprint } from "@/lib/idempotency";
-import { AuditService } from "@/services/audit.service";
 import { resolveEarnExecutionClient } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
-import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
+import type { ExternalWalletWithdrawalBuildInput } from "@/services/earn/vault-external-wallet.service";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { recordCallScopes } from "@/test/helpers/cluster-scope";
 import {
-  activateTestCustodyConnection,
-  insertTestCustodyConnection,
-  insertTestStoredProviderCredential,
   seedTestPrivyConnection,
   writeTestPrivyCredentialSecret,
 } from "@/test/helpers/custody-connections";
@@ -34,16 +32,17 @@ import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
+import type { Env } from "@/types/env";
 
-const withdrawFromVault = vi.hoisted(() => vi.fn());
+const buildWithdrawal = vi.hoisted(() => vi.fn());
 const surfacingEnabled = vi.hoisted(() => ({ value: true }));
 const reconcileEarnVaultMovementReadThrough = vi.hoisted(() =>
   vi.fn(async (_env: unknown, movement: EarnMovementRow) => movement)
 );
 
-vi.mock("@/services/earn/vault-withdraw.service", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/earn/vault-withdraw.service")>()),
-  withdrawFromVault,
+vi.mock("@/services/earn/vault-external-wallet.service", async (original) => ({
+  ...(await original<typeof import("@/services/earn/vault-external-wallet.service")>()),
+  buildExternalWalletWithdrawalTransaction: buildWithdrawal,
 }));
 vi.mock("@/services/earn/vault-movement-reconciliation.service", () => ({
   reconcileEarnVaultMovementReadThrough,
@@ -71,11 +70,15 @@ vi.mock("@sdp/types/release-channels", async (importOriginal) => {
  */
 const vaultWithdrawClientOverride = vi.hoisted(() => ({ current: null as unknown }));
 const parRedemptionClientOverride = vi.hoisted(() => ({ current: null as unknown }));
+const coreClientOverride = vi.hoisted(() => ({ current: null as unknown }));
 
 vi.mock("@/services/earn/execution-registry", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/services/earn/execution-registry")>();
   return {
     ...actual,
+    resolveEarnExecutionClient: (...args: Parameters<typeof actual.resolveEarnExecutionClient>) =>
+      (coreClientOverride.current as ReturnType<typeof actual.resolveEarnExecutionClient> | null) ??
+      actual.resolveEarnExecutionClient(...args),
     resolveVaultWithdrawClient: (...args: Parameters<typeof actual.resolveVaultWithdrawClient>) =>
       (vaultWithdrawClientOverride.current as ReturnType<
         typeof actual.resolveVaultWithdrawClient
@@ -89,18 +92,8 @@ vi.mock("@/services/earn/execution-registry", async (importOriginal) => {
   };
 });
 
-/**
- * `POST /v1/earn/vault-withdrawals` and its reads — the gates, the exit-safety
- * ASYMMETRY, and the signed-movement read contract.
- *
- * The deliberate contrast with `earn.vault.test.ts` (the deposit route) is the
- * point of half of these: the deposit takes surfacing + entitlement +
- * admission + an environment fail-close, and the EXIT takes none of them (ADR
- * 0002 "money out beats money off"). `seedAuth` here grants NO earn provider
- * override on purpose — every succeeding withdrawal in this file is also proof
- * that no entitlement gate crept in.
- */
-
+/** Core withdrawal preparation shares the legacy position identity. History,
+ * provider quotes, and pending request cancellation stay available for recovery. */
 const TEST_ORG = { id: "org_earn_vw", name: "Earn Vault Withdraw Org", slug: "earn-vw" };
 const TEST_PROJECT = { id: "prj_test_earn_vw", slug: "test-earn-vw-project" };
 const TEST_PRODUCTION_PROJECT = { id: "prj_test_earn_vw_prod", slug: "test-earn-vw-prod" };
@@ -124,7 +117,6 @@ const SHARE_MINT = "So11111111111111111111111111111111111111112";
 const VAULT = "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx";
 const WALLET_ADDRESS = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 const CUSTODY_WALLET_ID = "cwlt_earn_vw";
-const CONNECTION_ID = "cconn_earn_vw";
 
 let originalEncryptionKey: string | undefined;
 
@@ -193,59 +185,6 @@ async function seedAuth(): Promise<void> {
   ]);
 }
 
-async function useConnectionWallet(): Promise<void> {
-  env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 41).toString("base64");
-  const db = getDb(env);
-  await insertTestStoredProviderCredential(db, {
-    id: "pcred_earn_vw",
-    organizationId: TEST_ORG.id,
-    projectId: TEST_PROJECT.id,
-    provider: "privy",
-    label: "Exit BYOK",
-    stored: await writeTestPrivyCredentialSecret(env, {
-      organizationId: TEST_ORG.id,
-      credentialId: "pcred_earn_vw",
-      appId: "earn-vw-connection-app",
-      appSecret: "earn-vw-connection-secret",
-    }),
-    displayMetadata: {},
-    status: "active",
-    credentialVersion: 1,
-    rotatedFromProviderCredentialId: null,
-    lastValidatedAt: null,
-    deactivatedAt: null,
-    createdBy: TEST_USER.id,
-  });
-  await insertTestCustodyConnection(db, {
-    id: CONNECTION_ID,
-    organizationId: TEST_ORG.id,
-    projectId: TEST_PROJECT.id,
-    provider: "privy",
-    credential: { id: "pcred_earn_vw", projectId: TEST_PROJECT.id },
-    status: "pending",
-    setupMetadata: {},
-    providerAccountFingerprint: "sha256:test",
-    lastCheckStatus: null,
-    lastCheckAt: null,
-    lastCheckFailureCode: null,
-    activatedAt: null,
-    deactivatedAt: null,
-    createdBy: TEST_USER.id,
-    createdAt: new Date().toISOString(),
-  });
-  await db
-    .prepare(
-      "UPDATE custody_wallets SET custody_config_id = NULL, custody_connection_id = ? WHERE id = ?"
-    )
-    .bind(CONNECTION_ID, CUSTODY_WALLET_ID)
-    .run();
-  await activateTestCustodyConnection(db, {
-    connectionId: CONNECTION_ID,
-    custodyWalletId: CUSTODY_WALLET_ID,
-    providerAccountFingerprint: "sha256:test",
-  });
-}
-
 async function seedPosition(
   overrides: Partial<{
     id: string;
@@ -284,85 +223,13 @@ async function seedPosition(
   return id;
 }
 
-function movementRow(overrides: Partial<EarnMovementRow> = {}): EarnMovementRow {
-  return {
-    id: `earn_movement_${crypto.randomUUID()}`,
-    organization_id: TEST_ORG.id,
-    project_id: TEST_PROJECT.id,
-    environment: "sandbox",
-    provider: "kamino",
-    execution_model: "vault_direct",
-    direction: "withdrawal",
-    position_id: "earn_position_mock",
-    status: "submitted",
-    failure_reason: null,
-    confirmed_at: null,
-    chain_finalized_at: null,
-    settled_at: null,
-    denomination: SHARE_MINT,
-    amount_requested: "10",
-    amount_settled: null,
-    fee_amount: null,
-    token_amount_settled: null,
-    min_shares_out: null,
-    shares_out: null,
-    payout_token: null,
-    custody_wallet_id: CUSTODY_WALLET_ID,
-    owner_address: null,
-    vault_address: VAULT,
-    source_address: VAULT,
-    destination_address: WALLET_ADDRESS,
-    provider_reference: null,
-    signature: `sig_${crypto.randomUUID()}`,
-    signed_transaction: "AQ==",
-    last_valid_block_height: "12345",
-    request_id: crypto.randomUUID(),
-    idempotency_fingerprint: "{}",
-    provider_data: {},
-    created_by: null,
-    initiated_by_key_id: null,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    creates_share_account: false,
-    share_ata_rent_funder: null,
-    unknown_signature_observed_at: null,
-    ...overrides,
-  };
-}
-
-function recordConnectionWithdrawal(positionId: string, requestId: string) {
-  return createPostgresEarnMovementsRepository(getDb(env)).createSignedVaultWithdrawalIntent({
-    organizationId: TEST_ORG.id,
-    projectId: TEST_PROJECT.id,
-    environment: "sandbox",
-    provider: "kamino",
-    positionId,
-    vaultAddress: VAULT,
-    custodyWalletId: CUSTODY_WALLET_ID,
-    shareMint: SHARE_MINT,
-    requestedShares: "10",
-    walletAddress: WALLET_ADDRESS,
-    signature: "sig_recorded_withdrawal",
-    signedTransaction: "AQ==",
-    lastValidBlockHeight: "12345",
-    requestId,
-    idempotencyFingerprint: buildEarnVaultWithdrawalFingerprint({
-      environment: "sandbox",
-      provider: "kamino",
-      positionId,
-      shares: "10",
-      minAmountOut: null,
-    }),
-  });
-}
-
 function postVaultWithdrawal(
   body: Record<string, unknown>,
   options: { idempotencyKey?: string | null; apiKey?: string } = {}
 ) {
   const key = options.idempotencyKey === undefined ? crypto.randomUUID() : options.idempotencyKey;
   return app.request(
-    "/v1/earn/vault-withdrawals",
+    "/v1/earn/withdraw",
     {
       method: "POST",
       headers: {
@@ -370,7 +237,11 @@ function postVaultWithdrawal(
         "Content-Type": "application/json",
         ...(key === null ? {} : { "Idempotency-Key": key }),
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        positionId: body.positionId,
+        amount: { kind: "shares", value: body.shares },
+        ...(body.requestId === undefined ? {} : { requestId: body.requestId }),
+      }),
     },
     env
   );
@@ -391,69 +262,114 @@ beforeEach(async () => {
   await seedTestDatabase(env);
   await clearKVStores(env);
   vi.clearAllMocks();
-  withdrawFromVault.mockImplementation(async (_env, input) => ({
-    position: { id: input.positionId },
-    movement: movementRow({ position_id: input.positionId, request_id: input.requestId }),
-    replayed: false,
-  }));
+  coreClientOverride.current = {
+    provider: "kamino",
+    buildVaultDeposit: vi.fn(),
+    buildVaultWithdrawal: vi.fn(),
+    readVaultPositions: vi.fn(),
+    sponsoredPrograms: () => [],
+    quoteVaultWithdrawal: vi.fn().mockResolvedValue({
+      assetsOut: "9.9",
+      assetDecimals: 6,
+      blockingIssues: [],
+    }),
+  };
+  buildWithdrawal.mockImplementation(
+    async (binding: Env, input: ExternalWalletWithdrawalBuildInput) =>
+      createPostgresEarnExternalWalletTransactionsRepository(getDb(binding)).create({
+        id: generateEarnExternalWalletTransactionId(),
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        environment: input.projectId === TEST_PRODUCTION_PROJECT.id ? "production" : "sandbox",
+        direction: "withdrawal",
+        provider: input.provider,
+        positionId: input.positionId,
+        custodyWalletId: input.custodyWalletId,
+        ownerAddress: input.ownerAddress,
+        vaultAddress: input.vaultAddress,
+        tokenMint: input.tokenMint,
+        shareMint: input.shareMint,
+        label: input.label,
+        denomination: input.shareMint,
+        amountRequested: input.shares,
+        createsShareAccount: false,
+        unsignedTransaction: "AQ==",
+        lastValidBlockHeight: "100",
+        createdBy: input.userId,
+        initiatedByKeyId: input.apiKeyId,
+      })
+  );
 });
 
 afterEach(() => {
   env.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
   vaultWithdrawClientOverride.current = null;
+  coreClientOverride.current = null;
   vi.restoreAllMocks();
 });
 
-describe("POST /v1/earn/vault-withdrawals — custody release channel", () => {
-  it("refuses an out-of-channel wallet before signing a withdrawal", async () => {
-    await seedAuth();
-    await useConnectionWallet();
-    const positionId = await seedPosition();
-    custodyReleaseChannel.outOfChannelMode = "byok";
-
-    const response = await postVaultWithdrawal({ positionId, shares: "10" });
-
-    expect(response.status).toBe(403);
-    expect(await response.json()).toEqual({
-      error: {
-        code: "FORBIDDEN",
-        message: custodyProviderNotInReleaseChannel("privy", "byok").message,
-        details: { reason: "custody_provider_not_in_release_channel" },
-      },
-      meta: { requestId: expect.any(String) },
-    });
-    expect(withdrawFromVault).not.toHaveBeenCalled();
-  });
-
-  it("returns an ordinary recorded withdrawal while the BYOK pair is out of channel", async () => {
-    await seedAuth();
-    await useConnectionWallet();
-    const positionId = await seedPosition();
-    const recorded = await recordConnectionWithdrawal(positionId, "recorded-withdrawal");
-    custodyReleaseChannel.outOfChannelMode = "byok";
-
-    const response = await postVaultWithdrawal(
-      { positionId, shares: "10" },
-      { idempotencyKey: "recorded-withdrawal" }
-    );
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
-      data: {
-        withdrawal: {
-          movementId: recorded.movement.id,
-          replayed: true,
-          signature: "sig_recorded_withdrawal",
+describe("operation wallet scope", () => {
+  it.each(["execute", "refresh", "cancel"].map((action) => ({ action })))(
+    "refuses $action with wallet_out_of_scope before changing an operation",
+    async ({ action }) => {
+      await seedAuth();
+      const positionId = await seedPosition();
+      const prepared = await postVaultWithdrawal({ positionId, shares: "10" });
+      expect(prepared.status, await prepared.clone().text()).toBe(202);
+      const payload: {
+        data: { operation: { id: string; actionId: string; version: number } };
+      } = await prepared.json();
+      const operation = payload.data.operation;
+      const before = await getDb(env).queryOne<Record<string, unknown>>(
+        "SELECT * FROM operations WHERE id = ?",
+        [operation.id]
+      );
+      await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
+        ...TEST_SEEDED_API_KEY,
+        walletScope: "selected",
+        walletIds: [],
+      });
+      buildWithdrawal.mockClear();
+      const idempotencyKey = `outside-wallet-${action}`;
+      const response = await app.request(
+        `/v1/operations/${operation.id}/${action}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "Content-Type": "application/json",
+            "Idempotency-Key": idempotencyKey,
+          },
+          body: JSON.stringify(
+            action === "execute" ? { actionId: operation.actionId, version: operation.version } : {}
+          ),
         },
-      },
-    });
-    expect(withdrawFromVault).not.toHaveBeenCalled();
-  });
+        env
+      );
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({
+        error: { details: { reason: "wallet_out_of_scope" } },
+      });
+      expect(buildWithdrawal).not.toHaveBeenCalled();
+      expect(
+        await getDb(env).queryOne("SELECT * FROM operations WHERE id = ?", [operation.id])
+      ).toEqual(before);
+      expect(
+        await getDb(env).queryOne(
+          "SELECT count(*)::int AS count FROM operation_attempts WHERE operation_id = ?",
+          [operation.id]
+        )
+      ).toEqual({ count: 0 });
+      expect(
+        await getDb(env).queryOne(
+          "SELECT count(*)::int AS count FROM idempotency_keys WHERE idempotency_key = ?",
+          [idempotencyKey]
+        )
+      ).toEqual({ count: 0 });
+    }
+  );
 });
 
-// HOO-2099: the custody signer refuses a wallet outside a selected key's scope
-// for exits too; these routes refuse it first, so no movement or request row
-// exists for the Idempotency-Key to replay once the scope is fixed.
 describe("vault exits outside the key's wallet scope", () => {
   async function exitRows(): Promise<Record<string, unknown[]>> {
     const db = getDb(env);
@@ -477,84 +393,6 @@ describe("vault exits outside the key's wallet scope", () => {
       walletIds: [],
     });
   }
-
-  it("refuses a withdrawal with wallet_out_of_scope before recording a movement", async () => {
-    await seedAuth();
-    const positionId = await seedPosition();
-    await scopeKeyToNoWallets();
-    const before = await exitRows();
-
-    const response = await postVaultWithdrawal({ positionId, shares: "10" });
-
-    expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({
-      error: { code: "FORBIDDEN", details: { reason: "wallet_out_of_scope" } },
-    });
-    expect(withdrawFromVault).not.toHaveBeenCalled();
-    expect(await exitRows()).toEqual(before);
-  });
-
-  it("refuses a withdrawal request with wallet_out_of_scope before recording it", async () => {
-    await seedAuth();
-    const positionId = await seedPosition({ provider: "hastra" });
-    await scopeKeyToNoWallets();
-    const before = await exitRows();
-
-    const response = await app.request(
-      "/v1/earn/vault-withdrawal-requests",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          "Content-Type": "application/json",
-          "Idempotency-Key": "par-out-of-scope",
-        },
-        body: JSON.stringify({ positionId, mechanism: "operatorRedemption", shares: "10" }),
-      },
-      env
-    );
-
-    expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({
-      error: { code: "FORBIDDEN", details: { reason: "wallet_out_of_scope" } },
-    });
-    expect(await exitRows()).toEqual(before);
-  });
-
-  it("refuses a narrowed key's replay of a recorded withdrawal with wallet_out_of_scope", async () => {
-    await seedAuth();
-    const positionId = await seedPosition();
-    await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
-      ...TEST_SEEDED_API_KEY,
-      walletScope: "selected",
-      walletIds: [CUSTODY_WALLET_ID],
-    });
-    // The real service records the movement under the Idempotency-Key; the
-    // stub does the same so the retry has a stored 200 to replay.
-    withdrawFromVault.mockImplementationOnce(async (_env, input) => {
-      const recorded = await recordConnectionWithdrawal(input.positionId, input.requestId);
-      return { position: { id: input.positionId }, movement: recorded.movement, replayed: false };
-    });
-    const first = await postVaultWithdrawal(
-      { positionId, shares: "10" },
-      { idempotencyKey: "narrowed-replay" }
-    );
-    expect(first.status).toBe(200);
-    await scopeKeyToNoWallets();
-    const before = await exitRows();
-
-    const replay = await postVaultWithdrawal(
-      { positionId, shares: "10" },
-      { idempotencyKey: "narrowed-replay" }
-    );
-
-    expect(replay.status).toBe(403);
-    await expect(replay.json()).resolves.toMatchObject({
-      error: { code: "FORBIDDEN", details: { reason: "wallet_out_of_scope" } },
-    });
-    expect(withdrawFromVault).toHaveBeenCalledTimes(1);
-    expect(await exitRows()).toEqual(before);
-  });
 
   it("refuses a withdrawal request cancellation with wallet_out_of_scope, leaving the request unchanged", async () => {
     await seedAuth();
@@ -630,13 +468,13 @@ describe("vault exits outside the key's wallet scope", () => {
   });
 });
 
-describe("POST /v1/earn/vault-withdrawals — request validation", () => {
+describe("POST /v1/earn/withdraw request validation", () => {
   it("requires an Idempotency-Key header, because the chain has no dedupe of its own", async () => {
     await seedAuth();
     const positionId = await seedPosition();
     const res = await postVaultWithdrawal({ positionId, shares: "10" }, { idempotencyKey: null });
     expect(res.status).toBe(400);
-    expect(withdrawFromVault).not.toHaveBeenCalled();
+    expect(buildWithdrawal).not.toHaveBeenCalled();
   });
 
   it("rejects the retired body requestId source even when the canonical header is present", async () => {
@@ -648,7 +486,7 @@ describe("POST /v1/earn/vault-withdrawals — request validation", () => {
       requestId: crypto.randomUUID(),
     });
     expect(res.status).toBe(400);
-    expect(withdrawFromVault).not.toHaveBeenCalled();
+    expect(buildWithdrawal).not.toHaveBeenCalled();
   });
 
   it("rejects non-positive shares", async () => {
@@ -658,7 +496,7 @@ describe("POST /v1/earn/vault-withdrawals — request validation", () => {
       const res = await postVaultWithdrawal({ positionId, shares });
       expect(res.status, `shares=${JSON.stringify(shares)}`).toBe(400);
     }
-    expect(withdrawFromVault).not.toHaveBeenCalled();
+    expect(buildWithdrawal).not.toHaveBeenCalled();
   });
 
   it("404s an unknown position rather than leaking whether the id exists elsewhere", async () => {
@@ -710,7 +548,7 @@ describe("POST /v1/earn/vault-withdrawals — request validation", () => {
 
     const res = await postVaultWithdrawal({ positionId: foreign, shares: "10" });
     expect(res.status).toBe(404);
-    expect(withdrawFromVault).not.toHaveBeenCalled();
+    expect(buildWithdrawal).not.toHaveBeenCalled();
   });
 
   it("404s a production position presented by a sandbox key", async () => {
@@ -752,7 +590,7 @@ describe("POST /v1/earn/vault-withdrawals — request validation", () => {
   });
 });
 
-describe("POST /v1/earn/vault-withdrawals — exit safety (ADR 0002)", () => {
+describe("POST /v1/earn/withdraw exit safety (ADR 0002)", () => {
   it("withdraws WITHOUT entitlement, surfacing, or a catalogue row", async () => {
     // Everything the deposit route requires is deliberately absent here: the
     // org has no earn provider override, `earn_strategies` holds no row for
@@ -764,13 +602,19 @@ describe("POST /v1/earn/vault-withdrawals — exit safety (ADR 0002)", () => {
 
     const res = await postVaultWithdrawal({ positionId, shares: "10" });
 
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      data: { withdrawal: { positionId: string; signature: string; replayed: boolean } };
-    };
-    expect(body.data.withdrawal.positionId).toBe(positionId);
-    expect(body.data.withdrawal.signature).toBeTruthy();
-    expect(withdrawFromVault).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(202);
+    expect(await res.json()).toMatchObject({
+      data: {
+        operation: {
+          kind: "earn.withdraw",
+          status: "prepared",
+          intent: { positionId },
+          resourceRef: null,
+          result: null,
+        },
+      },
+    });
+    expect(buildWithdrawal).toHaveBeenCalledTimes(1);
   });
 
   it("withdraws from a PAUSED strategy — admission stops money in, never money out", async () => {
@@ -800,8 +644,8 @@ describe("POST /v1/earn/vault-withdrawals — exit safety (ADR 0002)", () => {
 
     const res = await postVaultWithdrawal({ positionId, shares: "10" });
 
-    expect(res.status).toBe(200);
-    expect(withdrawFromVault).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(202);
+    expect(buildWithdrawal).toHaveBeenCalledTimes(1);
   });
 
   it("withdraws from a vault AT its exposure cap while caps are enforced (ADR 0004)", async () => {
@@ -842,8 +686,8 @@ describe("POST /v1/earn/vault-withdrawals — exit safety (ADR 0002)", () => {
 
       const res = await postVaultWithdrawal({ positionId, shares: "10" });
 
-      expect(res.status).toBe(200);
-      expect(withdrawFromVault).toHaveBeenCalledTimes(1);
+      expect(res.status).toBe(202);
+      expect(buildWithdrawal).toHaveBeenCalledTimes(1);
     } finally {
       env.EARN_VOLUME_CAPS_ENFORCED = originalCapsEnforced;
     }
@@ -852,7 +696,7 @@ describe("POST /v1/earn/vault-withdrawals — exit safety (ADR 0002)", () => {
   it("withdraws in PRODUCTION even while vault deposits are environment-closed there", async () => {
     // The deposit route fail-closes production; an exit must work wherever a
     // position exists, or the fail-close itself would trap funds.
-    const scopes = recordCallScopes(withdrawFromVault);
+    const scopes = recordCallScopes(buildWithdrawal);
     const prodKeyHash = await hashString(PROD_API_KEY.raw, env.API_KEY_PEPPER);
     await seedApiKeyRow(env, prodKeyHash, {
       ...TEST_SEEDED_API_KEY,
@@ -899,97 +743,108 @@ describe("POST /v1/earn/vault-withdrawals — exit safety (ADR 0002)", () => {
       { apiKey: PROD_API_KEY.raw }
     );
 
-    expect(res.status).toBe(200);
-    expect(withdrawFromVault).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(202);
+    expect(buildWithdrawal).toHaveBeenCalledTimes(1);
     expect(scopes).toEqual([expect.objectContaining({ environment: "production" })]);
   });
 
-  it("answers 501 when the provider cannot build an exit — capability, never permission", async () => {
+  it("refuses an unsupported withdrawal adapter before building", async () => {
     await seedAuth();
+    coreClientOverride.current = null;
     const positionId = await seedPosition({ provider: "upshift" });
-    withdrawFromVault.mockRejectedValue(
-      new SdpEarnError("NOT_IMPLEMENTED", "upshift vault withdrawals is not implemented yet")
-    );
-
     const res = await postVaultWithdrawal({ positionId, shares: "10" });
-    expect(res.status).toBe(501);
+    expect(res.status).toBe(400);
+    expect(buildWithdrawal).not.toHaveBeenCalled();
   });
 });
 
-describe("POST /v1/earn/vault-withdrawals — response shape", () => {
-  it("serves one movement with its transaction signature", async () => {
+describe("POST /v1/earn/withdraw operation identity", () => {
+  it("checks current wallet scope before creating a prepared withdrawal", async () => {
     await seedAuth();
     const positionId = await seedPosition();
-    withdrawFromVault.mockResolvedValue({
-      position: { id: positionId },
-      movement: movementRow({
-        position_id: positionId,
-        status: "submitted",
-        amount_requested: "10",
-      }),
-      replayed: false,
+    await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
+      ...TEST_SEEDED_API_KEY,
+      walletScope: "selected",
+      walletIds: [],
     });
-
     const res = await postVaultWithdrawal({ positionId, shares: "10" });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      data: {
-        withdrawal: {
-          movementId: string;
-          shares: string;
-          shareMint: string;
-          signature: string;
-        };
-      };
-    };
-    expect(body.data.withdrawal.shares).toBe("10");
-    expect(body.data.withdrawal.shareMint).toBe(SHARE_MINT);
-    expect(body.data.withdrawal.signature).toBeTruthy();
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({
+      error: { details: { reason: "wallet_out_of_scope" } },
+    });
+    expect(buildWithdrawal).not.toHaveBeenCalled();
   });
 
-  it("returns 409 when replaying a failed withdrawal", async () => {
+  it("rechecks the wallet grant before replaying an existing prepared action", async () => {
     await seedAuth();
     const positionId = await seedPosition();
-    const requestId = "vw-failed-replay";
-    const repository = createPostgresEarnMovementsRepository(getDb(env));
-    const recorded = await repository.createSignedVaultWithdrawalIntent({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT.id,
-      environment: "sandbox",
-      provider: "kamino",
-      positionId,
-      vaultAddress: VAULT,
-      custodyWalletId: CUSTODY_WALLET_ID,
-      shareMint: SHARE_MINT,
-      requestedShares: "10",
-      walletAddress: WALLET_ADDRESS,
-      signature: "sig_failed_replay",
-      signedTransaction: "AQ==",
-      lastValidBlockHeight: "12345",
-      requestId,
-      idempotencyFingerprint: buildEarnVaultWithdrawalFingerprint({
-        environment: "sandbox",
-        provider: "kamino",
-        positionId,
-        shares: "10",
-        minAmountOut: null,
-      }),
-    });
-    await repository.advanceVaultMovement({
-      movementId: recorded.movement.id,
-      organizationId: TEST_ORG.id,
-      toStatus: "failed",
-      failureReason: "expired",
-    });
-
-    const res = await postVaultWithdrawal(
-      { positionId, shares: "10" },
-      { idempotencyKey: requestId }
+    const body = { positionId, shares: "10" };
+    expect((await postVaultWithdrawal(body, { idempotencyKey: "scoped-withdrawal" })).status).toBe(
+      202
     );
-
-    expect(res.status).toBe(409);
-    expect(withdrawFromVault).not.toHaveBeenCalled();
+    await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
+      ...TEST_SEEDED_API_KEY,
+      walletScope: "selected",
+      walletIds: [],
+    });
+    expect((await postVaultWithdrawal(body, { idempotencyKey: "scoped-withdrawal" })).status).toBe(
+      403
+    );
+    expect(buildWithdrawal).toHaveBeenCalledTimes(1);
   });
+
+  it("derives the enforced minimum from the live quote and requested tolerance", async () => {
+    await seedAuth();
+    const positionId = await seedPosition({ provider: "veda" });
+    const res = await app.request(
+      "/v1/earn/withdraw",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Content-Type": "application/json",
+          "Idempotency-Key": "quoted-exit",
+        },
+        body: JSON.stringify({
+          positionId,
+          amount: { kind: "shares", value: "5" },
+          slippageBps: 100,
+        }),
+      },
+      env
+    );
+    expect(res.status, await res.clone().text()).toBe(202);
+    expect(buildWithdrawal).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ positionId, shares: "5", minAmountOut: "9.801" })
+    );
+    expect(await res.json()).toMatchObject({
+      data: { operation: { terms: { minimum: { mint: USDC_MINT, value: "9.801" } } } },
+    });
+  });
+
+  it.each(["vault-withdrawals", "vault-withdrawal-requests"])(
+    "retires fresh %s while preserving recorded history",
+    async (path) => {
+      await seedAuth();
+      const positionId = await seedPosition();
+      const res = await app.request(
+        `/v1/earn/${path}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "Content-Type": "application/json",
+            "Idempotency-Key": `retired-${path}`,
+          },
+          body: JSON.stringify({ positionId, shares: "10", mechanism: "operatorRedemption" }),
+        },
+        env
+      );
+      expect(res.status).toBe(410);
+      expect(buildWithdrawal).not.toHaveBeenCalled();
+    }
+  );
 });
 
 describe("GET /v1/earn/vault-withdrawals — recorded movements", () => {
@@ -1195,64 +1050,6 @@ describe("GET /v1/earn/vault-withdrawals — recorded movements", () => {
   });
 });
 
-describe("POST /v1/earn/vault-withdrawals — the exit slippage floor", () => {
-  it("passes the caller's minAmountOut through to the service verbatim", async () => {
-    await seedAuth();
-    const positionId = await seedPosition({ provider: "veda" });
-    const requestId = crypto.randomUUID();
-
-    const res = await postVaultWithdrawal(
-      { positionId, shares: "5", minAmountOut: "4.99" },
-      { idempotencyKey: requestId }
-    );
-
-    expect(res.status).toBe(200);
-    expect(withdrawFromVault).toHaveBeenCalledTimes(1);
-    expect(withdrawFromVault.mock.calls[0]?.[1]).toMatchObject({
-      positionId,
-      shares: "5",
-      minAmountOut: "4.99",
-      requestId,
-    });
-  });
-
-  // The policy half of the wire contract (EARN-003 / PRO-1861): a provider
-  // whose `withdrawalSlippage` policy is non-null refuses a floor-less exit
-  // with a 400, while a null-policy provider stays floor-less. Both read the
-  // REAL policy table — the provider-access mock above overrides surfacing
-  // only.
-  it("refuses a floor-less exit for a provider with a withdrawal slippage policy", async () => {
-    await seedAuth();
-    await useConnectionWallet();
-    const positionId = await seedPosition({ provider: "jupiter_lend" });
-
-    const res = await postVaultWithdrawal({ positionId, shares: "5" });
-
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: { message: string } };
-    expect(body.error.message).toContain("minAmountOut");
-    expect(body.error.message).toContain("jupiter_lend");
-    expect(withdrawFromVault).not.toHaveBeenCalled();
-  });
-
-  it("keeps a null-policy provider's exit floor-less (kamino)", async () => {
-    await seedAuth();
-    const positionId = await seedPosition();
-
-    const res = await postVaultWithdrawal({ positionId, shares: "5" });
-
-    expect(res.status).toBe(200);
-    expect(withdrawFromVault).toHaveBeenCalledTimes(1);
-  });
-});
-
-/**
- * `POST /v1/earn/vault-withdrawal-previews` — the exit quote. EXIT gates only:
- * position scoping (404) and capability (501), nothing money-in-shaped — plus
- * `wallets:read`, which is not a money-in gate: it backs the binding check the
- * read scopes through, and for a key with no wallet bindings that check is a
- * documented no-op.
- */
 describe("POST /v1/earn/vault-withdrawal-previews", () => {
   function postVaultWithdrawalPreview(body: Record<string, unknown>) {
     return app.request(
@@ -1322,6 +1119,7 @@ describe("POST /v1/earn/vault-withdrawal-previews", () => {
 
   /** The real Kamino client, as the registry builds it, now clears the exit-quote guard. */
   it("measures the real Kamino client as withdrawal-quote capable", () => {
+    coreClientOverride.current = null;
     const client = resolveEarnExecutionClient(env, "kamino", createVaultDeadline());
     if (!client) throw new Error("the registry must build a Kamino client");
     expect(supportsVaultWithdrawQuote(client)).toBe(true);
@@ -1365,134 +1163,5 @@ describe("POST /v1/earn/vault-withdrawal-previews", () => {
     // documented no-op for a key with NO wallet bindings.
     expect(res.status).toBe(403);
     expect(await res.json()).toMatchObject({ error: { details: { action: "earn.read" } } });
-  });
-});
-
-describe("POST /v1/earn/vault-withdrawals: audit ledger parity (PRO-1866)", () => {
-  function auditRows() {
-    return getDb(env)
-      .prepare(
-        "SELECT * FROM audit_logs WHERE action = 'withdraw' AND resource_type = 'earn_movement'"
-      )
-      .all<Record<string, unknown>>()
-      .then(({ results }) => results ?? []);
-  }
-
-  it("records the exit with the movement's own attribution", async () => {
-    await seedAuth();
-    const positionId = await seedPosition();
-    withdrawFromVault.mockImplementation(async (_env, input) => ({
-      position: { id: input.positionId },
-      movement: movementRow({
-        id: "earn_movement_audit_exit",
-        position_id: input.positionId,
-        request_id: input.requestId,
-        initiated_by_key_id: TEST_API_KEY.id,
-      }),
-      replayed: false,
-    }));
-
-    const res = await postVaultWithdrawal({ positionId, shares: "10" });
-    expect(res.status).toBe(200);
-
-    const rows = await auditRows();
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
-      resource_id: "earn_movement_audit_exit",
-      organization_id: TEST_ORG.id,
-      api_key_id: TEST_API_KEY.id,
-      user_id: null,
-    });
-  });
-
-  it("never fails the exit when the audit ledger is unavailable (ADR 0002)", async () => {
-    // The audit write is post-effect and best-effort on money OUT: a
-    // fail-closed write here would let an audit-store outage trap funds, the
-    // same shape that keeps metered quotas off every exit route.
-    await seedAuth();
-    const positionId = await seedPosition();
-    vi.spyOn(AuditService.prototype, "log").mockRejectedValue(new Error("audit ledger locked"));
-
-    const res = await postVaultWithdrawal({ positionId, shares: "10" });
-
-    expect(res.status).toBe(200);
-    expect(withdrawFromVault).toHaveBeenCalledTimes(1);
-  });
-
-  it("enforces one withdraw event per movement at the database (migration 0083)", async () => {
-    // The atomic form of the backfill's existence check: two writers that
-    // both pass the SELECT still cannot append twice.
-    await seedAuth();
-    const insert = () =>
-      getDb(env)
-        .prepare(
-          `INSERT INTO audit_logs (id, organization_id, action, resource_type, resource_id, status)
-           VALUES (?, ?, 'withdraw', 'earn_movement', 'earn_movement_uq_test', 'success')`
-        )
-        .bind(`aud_${crypto.randomUUID()}`, TEST_ORG.id)
-        .run();
-
-    await insert();
-    await expect(insert()).rejects.toThrow(/unique|duplicate/i);
-  });
-
-  it("backfills a missing audit on replay, exactly once", async () => {
-    // The crash-window repair: the movement exists (replay) but the original
-    // attempt died before its audit write. The retry writes the one missing
-    // row; a further retry finds it and writes nothing.
-    await seedAuth();
-    const positionId = await seedPosition();
-    withdrawFromVault.mockImplementation(async (_env, input) => ({
-      position: { id: input.positionId },
-      movement: movementRow({
-        id: "earn_movement_audit_backfill",
-        position_id: input.positionId,
-        request_id: input.requestId,
-        initiated_by_key_id: TEST_API_KEY.id,
-      }),
-      replayed: true,
-    }));
-
-    const first = await postVaultWithdrawal({ positionId, shares: "10" });
-    expect(first.status).toBe(200);
-    const rows = await auditRows();
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
-      resource_id: "earn_movement_audit_backfill",
-      api_key_id: TEST_API_KEY.id,
-    });
-    expect(String(rows[0]?.metadata)).toContain("backfilledOnReplay");
-
-    const second = await postVaultWithdrawal({ positionId, shares: "10" });
-    expect(second.status).toBe(200);
-    await expect(auditRows()).resolves.toHaveLength(1);
-  });
-});
-
-describe("POST /v1/earn/vault-withdrawal-requests: a par request", () => {
-  it("refuses a request naming both shares and a held intermediate amount", async () => {
-    await seedAuth();
-    const positionId = await seedPosition({ provider: "hastra" });
-
-    const response = await app.request(
-      "/v1/earn/vault-withdrawal-requests",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          "Content-Type": "application/json",
-          "Idempotency-Key": "par-both-sources",
-        },
-        body: JSON.stringify({
-          positionId,
-          mechanism: "operatorRedemption",
-          shares: "10",
-          intermediateAmount: "2000",
-        }),
-      },
-      env
-    );
-
-    expect(response.status).toBe(400);
   });
 });

@@ -10,11 +10,16 @@ import {
   isVaultDirectDepositEnabled,
 } from "@sdp/types/provider-access";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
+import { getDb } from "@/db/client";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
 import { badRequest, forbidden } from "@/lib/errors";
 import type { AppContext } from "@/routes/earn/context";
 import { assertVaultExposureWithinCap } from "@/services/earn/vault-exposure";
-import { assertProviderAvailable } from "@/services/provider-availability.service";
+import {
+  assertProjectProviderAdmitted,
+  assertProviderAvailable,
+} from "@/services/provider-availability.service";
+import type { Env } from "@/types/env";
 
 /**
  * The ONE money-in admission predicate for an Earn catalogue row.
@@ -36,7 +41,10 @@ import { assertProviderAvailable } from "@/services/provider-availability.servic
  * separate, earlier gates with their own error codes, because "SDP does not
  * offer this" and "this instrument is halted" are different answers.
  */
-function assertStrategyDepositable(strategy: EarnStrategyRow, environment: SdpEnvironment): void {
+export function assertStrategyDepositable(
+  strategy: EarnStrategyRow,
+  environment: SdpEnvironment
+): void {
   if (strategy.environment !== environment) {
     // Phrased as "not found" upstream; reaching here means a caller crossed
     // project environments with a valid id from the other one.
@@ -60,6 +68,24 @@ function assertStrategyDepositable(strategy: EarnStrategyRow, environment: SdpEn
       { strategyId: strategy.id, hostCluster: strategy.host_cluster, environment }
     );
   }
+}
+
+/** Re-admit a recorded strategy before starting asynchronous custody approval. */
+export async function assertRecordedStrategyDepositAdmitted(
+  env: Env,
+  scope: { organizationId: string; projectId: string },
+  strategy: EarnStrategyRow
+): Promise<void> {
+  const { environment } = currentClusterScope();
+  assertVaultDirectDepositStyle(strategy.provider);
+  if (!isEarnProviderId(strategy.provider))
+    throw providerNotConfigured("Strategy provider is unavailable");
+  assertVaultDepositEnvironmentOpen(environment, strategy.provider);
+  await assertProjectProviderAdmitted(env, getDb(env), scope, {
+    family: "earn",
+    provider: strategy.provider,
+  });
+  assertStrategyDepositable(strategy, environment);
 }
 
 /**

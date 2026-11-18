@@ -123,7 +123,10 @@ export function summarizeSavings(
   return {
     balance,
     withdrawable: position ? withdrawableAmount(position) : "0",
-    earned: earnedFromLedger(balance, movements),
+    earned:
+      position?.discovered || position?.costBasisKnown === false
+        ? undefined
+        : earnedFromLedger(balance, movements),
     total:
       balance === undefined
         ? undefined

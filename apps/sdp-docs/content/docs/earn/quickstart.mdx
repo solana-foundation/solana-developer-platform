@@ -1,11 +1,15 @@
 ---
 module: earn
 title: Quickstart
-description: Deposit test USDC into a strategy from a sandbox wallet, then read the position, in about ten minutes.
+description: Review the legacy sandbox setup and recover existing Earn positions.
 ---
 
-Everything here runs in your sandbox project on devnet, with a local test
-wallet standing in for your customer's wallet. Nothing touches real funds.
+New movement preparation on the legacy contract is retired. Deposit preview
+and deposit/withdrawal/request build endpoints return `410 NOT_IMPLEMENTED`.
+The sandbox setup and sequence below are historical references for existing
+integrations. Existing positions remain readable, and exact previously built
+signed transactions remain recoverable. New exits use the replacement internal
+core contract pending security sign-off.
 
 ## Before you begin
 

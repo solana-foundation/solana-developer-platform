@@ -1,8 +1,9 @@
-import { supportsProviderRedemptionModes } from "@sdp/earn/capabilities";
+import { supportsProviderRedemptionModes, supportsVaultDepositQuote } from "@sdp/earn/capabilities";
 import { notImplemented } from "@sdp/earn/errors";
-import type { EarnVaultTransactionPlan } from "@sdp/earn/types";
+import type { EarnVaultDepositQuote, EarnVaultTransactionPlan } from "@sdp/earn/types";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import type { EarnProviderId } from "@sdp/types/provider-access";
+import { earnDepositSlippagePolicy } from "@sdp/types/provider-access";
 import {
   address,
   bytesEqual,
@@ -28,7 +29,7 @@ import {
   createPostgresEarnSplitSwapAdvisoriesRepository,
   generateEarnSplitSwapAdvisoryId,
 } from "@/db/repositories/earn-split-swap-advisories.repository";
-import { badRequest, internalError, notFound } from "@/lib/errors";
+import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
 import {
   buildEarnExternalWalletDepositFingerprint,
   buildEarnExternalWalletWithdrawalFingerprint,
@@ -50,6 +51,7 @@ import {
 } from "./jupiter-swap.service";
 import { readOwnerMintBalance } from "./owner-token-balance";
 import { earnRuntime } from "./runtime";
+import { strategyOutputFloor } from "./strategy-terms";
 import { createVaultDeadline } from "./vault-deadline";
 import { requireAcceptedPlan } from "./vault-deposit.service";
 import {
@@ -68,6 +70,35 @@ import { rethrowVaultProviderFailure } from "./vault-refusals";
 import { rawSimulationDetails } from "./vault-simulation-error";
 import { type VaultFeeMode, vaultRentPayer } from "./vault-sponsorship";
 import { requireAcceptedWithdrawalPlan } from "./vault-withdraw.service";
+
+async function quotePreparedStrategyDeposit(
+  client: NonNullable<ReturnType<typeof resolveVaultDirectClient>>,
+  runtime: ReturnType<typeof earnRuntime>,
+  input: ExternalWalletDepositBuildInput,
+  amount: string
+): Promise<{ quote?: EarnVaultDepositQuote; minSharesOut?: string }> {
+  if (input.slippageBps === undefined) return { minSharesOut: input.minSharesOut };
+  const { environment, cluster } = currentClusterScope();
+  const policy = earnDepositSlippagePolicy(input.provider, environment, cluster);
+  if (!supportsVaultDepositQuote(client)) {
+    if (policy !== null) throw notImplemented(input.provider, "protected strategy deposit quotes");
+    return { minSharesOut: input.minSharesOut };
+  }
+  const quote = await client.quoteVaultDeposit(runtime, {
+    providerReference: input.providerReference,
+    amount,
+  });
+  if (quote.blockingIssues.length > 0) {
+    throw badRequest(quote.blockingIssues.map((issue) => issue.message).join("; "));
+  }
+  return {
+    quote,
+    minSharesOut:
+      policy === null
+        ? input.minSharesOut
+        : strategyOutputFloor(quote.sharesOut, quote.shareDecimals, input.slippageBps),
+  };
+}
 
 /**
  * The external-wallet (caller-signed) vault flows: SDP moves money for a wallet it
@@ -90,6 +121,47 @@ export interface ExternalWalletBuildContext {
   projectId: string;
   userId?: string | null;
   apiKeyId?: string | null;
+  /** Trusted core preparation; legacy routes cannot submit this build. */
+  asyncOperation?: boolean;
+  /** Present only for preparation through the shared custody execution path. */
+  custodyWalletId?: string;
+  /** Trusted fee mode resolved through the shared sponsorship boundary. */
+  fee?: VaultFeeMode;
+}
+
+/** Custody and owner-signed strategy plans share one fee and rent decision. */
+function preparedStrategyFee(
+  context: ExternalWalletBuildContext,
+  feePayer: string | undefined
+): VaultFeeMode {
+  if (context.fee !== undefined) {
+    if (context.custodyWalletId === undefined) {
+      throw internalError("Custody fee mode requires a custody wallet");
+    }
+    if (feePayer !== undefined) {
+      throw badRequest("A custody strategy operation cannot override its fee payer");
+    }
+    return context.fee;
+  }
+  return feePayer === undefined
+    ? { kind: "wallet-pays" }
+    : { kind: "caller-provided", feePayer: address(feePayer) };
+}
+
+function preparedFeePayer(fee: VaultFeeMode): { feePayer?: ReturnType<typeof address> } {
+  const payer = vaultRentPayer(fee);
+  return payer === undefined ? {} : { feePayer: address(payer) };
+}
+
+function storedFeeMode(fee: VaultFeeMode): "wallet" | "partner" | "sponsored" {
+  switch (fee.kind) {
+    case "wallet-pays":
+      return "wallet";
+    case "caller-provided":
+      return "partner";
+    case "sponsored":
+      return "sponsored";
+  }
 }
 
 /**
@@ -101,6 +173,9 @@ export type ExternalWalletBuiltTransaction = Pick<
   | "id"
   | "environment"
   | "provider"
+  | "strategy_id"
+  | "custody_wallet_id"
+  | "fee_mode"
   | "direction"
   | "owner_address"
   | "vault_address"
@@ -148,6 +223,8 @@ export type ExternalWalletDepositBuildInput = ExternalWalletBuildContext & {
   amount: string;
   /** Slippage floor, decimal string. */
   minSharesOut?: string;
+  /** Core strategy preparations derive the floor from one live quote after swap sizing. */
+  slippageBps?: number;
   /** Fund the deposit by swapping another stablecoin first (Jupiter). */
   swap?: {
     /** Validated by the route: a supported swap-source mint on this cluster. */
@@ -203,6 +280,7 @@ export type ExternalWalletDepositBuildResult =
       built: ExternalWalletBuiltTransaction;
       /** The swap leg composed into the transaction, when the build was swap-funded. */
       swap?: JupiterSwapLeg;
+      quote?: EarnVaultDepositQuote;
     }
   | {
       /**
@@ -216,6 +294,7 @@ export type ExternalWalletDepositBuildResult =
       kind: "swap_required";
       swap: JupiterSwapLeg;
       swapTransaction: UnsignedVaultTransaction;
+      advisoryId: string;
     };
 
 type ExternalWalletDepositAttempt =
@@ -226,6 +305,7 @@ type ExternalWalletDepositAttempt =
       depositAmount: string;
       minSharesOut: string | null;
       swapLeg?: JupiterSwapLeg;
+      quote?: EarnVaultDepositQuote;
     }
   | { fit: false; swapLeg: JupiterSwapLeg };
 
@@ -282,9 +362,7 @@ export async function buildExternalWalletDepositTransaction(
   // the same three-places-must-agree rule sponsorship follows
   // (vault-sponsorship.ts).
   const feePayer = input.feePayer === input.ownerAddress ? undefined : input.feePayer;
-  const fee: VaultFeeMode = feePayer
-    ? { kind: "caller-provided", feePayer: address(feePayer) }
-    : { kind: "wallet-pays" };
+  const fee = preparedStrategyFee(input, feePayer);
   const rentPayer = vaultRentPayer(fee);
 
   // Provider-side KYC/eligibility for the END-USER wallet, before the build.
@@ -322,7 +400,7 @@ export async function buildExternalWalletDepositTransaction(
         outputMint: input.tokenMint,
         sourceAmount: input.amount,
         owner: input.ownerAddress,
-        ...(fee.kind === "caller-provided" ? { payer: fee.feePayer } : {}),
+        ...(rentPayer === undefined ? {} : { payer: rentPayer }),
         slippageBps: input.swap.slippageBps,
         ...(maxAccounts === undefined ? {} : { maxAccounts }),
       });
@@ -332,13 +410,19 @@ export async function buildExternalWalletDepositTransaction(
       depositAmount = swapLeg.minOutAmount;
     }
 
+    const { quote, minSharesOut } = await quotePreparedStrategyDeposit(
+      client,
+      runtime,
+      input,
+      depositAmount
+    );
     let plan: EarnVaultTransactionPlan;
     try {
       const built = await client.buildVaultDeposit(runtime, {
         providerReference: input.providerReference,
         owner: input.ownerAddress,
         amount: depositAmount,
-        minSharesOut: input.minSharesOut,
+        minSharesOut,
         // The partner fee payer funds account rent too, or nobody but the
         // owner does — the one-identity rule from vault-sponsorship.ts. This
         // is the CALLER's wallet co-signing, not Kora: SDP-side sponsorship
@@ -360,7 +444,7 @@ export async function buildExternalWalletDepositTransaction(
         `Vault builder returned a ${plan.cluster} plan for the configured ${cluster} cluster`
       );
     }
-    const accepted = requireAcceptedPlan(plan, { ...input, amount: depositAmount });
+    const accepted = requireAcceptedPlan(plan, { ...input, amount: depositAmount, minSharesOut });
 
     try {
       // Swap-funded plans carry a LOCALLY derived compute-unit limit (see the
@@ -408,7 +492,7 @@ export async function buildExternalWalletDepositTransaction(
         expectedAssetIdentity,
         plan,
         owner: address(input.ownerAddress),
-        ...(fee.kind === "caller-provided" ? { feePayer: fee.feePayer } : {}),
+        ...preparedFeePayer(fee),
         prepared: simulation.prepared,
       });
       return {
@@ -418,6 +502,7 @@ export async function buildExternalWalletDepositTransaction(
         depositAmount,
         minSharesOut: accepted.minSharesOut,
         ...(swapLeg === undefined ? {} : { swapLeg }),
+        ...(quote === undefined ? {} : { quote }),
       };
     } catch (error) {
       // Size is measured before every RPC simulation as well as at the final
@@ -479,13 +564,16 @@ export async function buildExternalWalletDepositTransaction(
         `Split-swap baseline balance reports ${baseline.decimals} decimals for a ${depositTokenDecimals}-decimal deposit token`
       );
     }
+    const advisoryId = generateEarnSplitSwapAdvisoryId();
     await createPostgresEarnSplitSwapAdvisoriesRepository(getDb(env)).create({
-      id: generateEarnSplitSwapAdvisoryId(),
+      id: advisoryId,
       organizationId: input.organizationId,
       projectId: input.projectId,
       environment,
       provider: input.provider,
       strategyId: input.strategyId,
+      custodyWalletId: input.custodyWalletId,
+      unsignedTransaction: Buffer.from(swapTransaction.bytes).toString("base64"),
       vaultAddress: input.providerReference,
       ownerAddress: input.ownerAddress,
       sourceTokenMint,
@@ -500,10 +588,10 @@ export async function buildExternalWalletDepositTransaction(
       createdBy: input.userId ?? null,
       initiatedByKeyId: input.apiKeyId ?? null,
     });
-    return { kind: "swap_required", swap: swapLeg, swapTransaction };
+    return { kind: "swap_required", swap: swapLeg, swapTransaction, advisoryId };
   }
 
-  const { unsigned, plan, depositAmount, minSharesOut, swapLeg } = attempt;
+  const { unsigned, plan, depositAmount, minSharesOut, swapLeg, quote } = attempt;
   const built = await createPostgresEarnExternalWalletTransactionsRepository(getDb(env)).create({
     id: transactionId,
     organizationId: input.organizationId,
@@ -511,6 +599,10 @@ export async function buildExternalWalletDepositTransaction(
     environment,
     provider: input.provider,
     direction: "deposit",
+    operationOnly: input.asyncOperation ?? false,
+    strategyId: input.strategyId,
+    custodyWalletId: input.custodyWalletId,
+    feeMode: storedFeeMode(fee),
     ownerAddress: input.ownerAddress,
     vaultAddress: input.providerReference,
     tokenMint: input.tokenMint,
@@ -523,17 +615,21 @@ export async function buildExternalWalletDepositTransaction(
     amountRequested: depositAmount,
     minSharesOut,
     createsShareAccount: plan.createsShareAccount === true,
-    feePayer: feePayer ?? null,
+    feePayer: vaultRentPayer(fee) ?? null,
     // Carry the planned rent payer onto the movement at submit. An idempotent
     // create can be a no-op; Kamino never uses this claim to authorize a refund.
-    shareAtaRentFunder:
-      plan.createsShareAccount === true && feePayer !== undefined ? feePayer : null,
+    shareAtaRentFunder: plan.createsShareAccount === true ? (vaultRentPayer(fee) ?? null) : null,
     unsignedTransaction: Buffer.from(unsigned.bytes).toString("base64"),
     lastValidBlockHeight: unsigned.lastValidBlockHeight,
     createdBy: input.userId ?? null,
     initiatedByKeyId: input.apiKeyId ?? null,
   });
-  return { kind: "built", built, ...(swapLeg === undefined ? {} : { swap: swapLeg }) };
+  return {
+    kind: "built",
+    built,
+    ...(swapLeg === undefined ? {} : { swap: swapLeg }),
+    ...(quote === undefined ? {} : { quote }),
+  };
 }
 
 /**
@@ -624,17 +720,18 @@ async function compileStandaloneSwapTransaction(input: {
     expectedAssetIdentity: assetIdentity,
     plan,
     owner: address(input.ownerAddress),
-    ...(input.fee.kind === "caller-provided" ? { feePayer: input.fee.feePayer } : {}),
+    ...preparedFeePayer(input.fee),
     prepared: simulation.prepared,
   });
 }
 
 /** An external-wallet exit build. The open cluster scope decides its environment and cluster. */
 export type ExternalWalletWithdrawalBuildInput = ExternalWalletBuildContext & {
+  strategyId?: string;
   redemptionMode?: "standard" | "instant";
   provider: string;
-  /** The EXISTING external-wallet holding being exited. */
-  positionId: string;
+  /** Null only for a live-discovered holding, claimed at signed submission. */
+  positionId: string | null;
   vaultAddress: string;
   tokenMint: string;
   shareMint: string;
@@ -680,9 +777,7 @@ export async function buildExternalWalletWithdrawalTransaction(
   // fee mode drives the provider's rent payer (an exit consolidation can
   // create an account), the simulation fee payer, and the compiled seat.
   const feePayer = input.feePayer === input.ownerAddress ? undefined : input.feePayer;
-  const fee: VaultFeeMode = feePayer
-    ? { kind: "caller-provided", feePayer: address(feePayer) }
-    : { kind: "wallet-pays" };
+  const fee = preparedStrategyFee(input, feePayer);
   const rentPayer = vaultRentPayer(fee);
 
   const buildPlan = async (compactMemo = false): Promise<EarnVaultTransactionPlan> => {
@@ -752,7 +847,7 @@ export async function buildExternalWalletWithdrawalTransaction(
       expectedAssetIdentity,
       plan,
       owner: address(input.ownerAddress),
-      ...(fee.kind === "caller-provided" ? { feePayer: fee.feePayer } : {}),
+      ...preparedFeePayer(fee),
       prepared: simulation.prepared,
     });
   };
@@ -785,6 +880,10 @@ export async function buildExternalWalletWithdrawalTransaction(
     environment,
     provider: input.provider,
     direction: "withdrawal",
+    operationOnly: input.asyncOperation ?? false,
+    strategyId: input.strategyId,
+    custodyWalletId: input.custodyWalletId,
+    feeMode: storedFeeMode(fee),
     ownerAddress: input.ownerAddress,
     vaultAddress: input.vaultAddress,
     tokenMint: input.tokenMint,
@@ -799,10 +898,9 @@ export async function buildExternalWalletWithdrawalTransaction(
     // protection column `min_shares_out`; direction disambiguates the unit.
     minSharesOut: input.minAmountOut ?? null,
     createsShareAccount: plan.createsShareAccount === true,
-    feePayer: feePayer ?? null,
+    feePayer: vaultRentPayer(fee) ?? null,
     // Same planning claim as the deposit build; this is not execution evidence.
-    shareAtaRentFunder:
-      plan.createsShareAccount === true && feePayer !== undefined ? feePayer : null,
+    shareAtaRentFunder: plan.createsShareAccount === true ? (vaultRentPayer(fee) ?? null) : null,
     unsignedTransaction: Buffer.from(unsigned.bytes).toString("base64"),
     lastValidBlockHeight: unsigned.lastValidBlockHeight,
     createdBy: input.userId ?? null,
@@ -822,6 +920,8 @@ export interface ExternalWalletSubmitInput {
   requestId: string;
   userId?: string | null;
   apiKeyId?: string | null;
+  /** Recovery may record externally signed bytes without initiating a send. */
+  broadcast?: boolean;
 }
 
 export interface ExternalWalletSubmitResult {
@@ -904,7 +1004,7 @@ export async function submitExternalWalletDeposit(
     createdBy: input.userId ?? null,
     initiatedByKeyId: input.apiKeyId ?? null,
   });
-  if (result.replayed) return result;
+  if (result.replayed || input.broadcast === false) return result;
 
   return broadcastSubmitResult(env, input, result, signed, "external-wallet deposit");
 }
@@ -967,7 +1067,7 @@ export async function submitExternalWalletWithdrawal(
     createdBy: input.userId ?? null,
     initiatedByKeyId: input.apiKeyId ?? null,
   });
-  if (result.replayed) return result;
+  if (result.replayed || input.broadcast === false) return result;
 
   return broadcastSubmitResult(env, input, result, signed, "external-wallet withdrawal");
 }
@@ -993,10 +1093,15 @@ async function requireSubmittableBuiltTransaction(
     // Exact match: a null project_id means the project was deleted, and a
     // deleted project's builds are unaddressable, not shared.
     built.project_id !== input.projectId ||
+    built.custody_wallet_id !== null ||
     built.direction !== direction
   ) {
     throw notFound("Earn external-wallet transaction");
   }
+  if (built.operation_only === true)
+    throw conflict("Submit this transaction through its operation action", {
+      reason: "operation_execution_required",
+    });
   return built;
 }
 

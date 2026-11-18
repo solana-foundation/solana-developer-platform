@@ -4,6 +4,14 @@ title: Treasury
 description: Put your organization's own funds to work from a custody wallet, then track and withdraw them.
 ---
 
+Treasury is migrating to the shared internal contract in
+[Core Earn API](./core-api.mdx). Preparation and execution use the same endpoints
+as Embedded Yield, and workers perform all signing and broadcast. The legacy
+routes below remain compatibility references while existing obligations settle.
+Legacy deposit and withdrawal writes and new withdrawal requests return 410.
+Their examples are historical. Existing request cancellation and program exits
+retain their previous execution model until those obligations are migrated.
+
 SDP builds each Treasury transaction, signs it through the wallet's custody
 provider, and broadcasts it; the custody wallet holds the shares. To let
 customers earn from their own wallets, use

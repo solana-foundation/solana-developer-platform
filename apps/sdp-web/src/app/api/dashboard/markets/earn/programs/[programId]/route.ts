@@ -11,16 +11,3 @@ export async function GET(
     path: `/v1/earn/programs/${encodeURIComponent(programId)}`,
   });
 }
-
-/** Re-target the program's single vault in place. */
-export async function PUT(
-  request: Request,
-  { params }: { params: Promise<{ programId: string }> }
-) {
-  const { programId } = await params;
-  return proxyToSdpApi({
-    request,
-    traceSource: "route.dashboard.earn.programs.retarget",
-    path: `/v1/earn/programs/${encodeURIComponent(programId)}`,
-  });
-}

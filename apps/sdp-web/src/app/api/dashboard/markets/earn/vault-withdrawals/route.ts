@@ -4,14 +4,6 @@ import {
 } from "@/app/api/dashboard/markets/earn/provider-query";
 import { proxyToSdpApi } from "@/lib/sdp-api";
 
-export async function POST(request: Request) {
-  return proxyToSdpApi({
-    request,
-    traceSource: "route.dashboard.earn.vault_withdrawals.create",
-    path: "/v1/earn/vault-withdrawals",
-  });
-}
-
 /**
  * This workspace's recorded withdrawals, so the dashboard can re-derive what
  * is still in flight after a reload. No `upstreamHeaders`: unlike the

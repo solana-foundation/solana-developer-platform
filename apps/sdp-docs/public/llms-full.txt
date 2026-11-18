@@ -366,12 +366,16 @@ to ship the full integration. Every request field and response is in the
 ### Quickstart
 Source: https://platform.solana.com/docs/earn/quickstart
 
-> Deposit test USDC into a strategy from a sandbox wallet, then read the position, in about ten minutes.
+> Review the legacy sandbox setup and recover existing Earn positions.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-Everything here runs in your sandbox project on devnet, with a local test
-wallet standing in for your customer's wallet. Nothing touches real funds.
+New movement preparation on the legacy contract is retired. Deposit preview
+and deposit/withdrawal/request build endpoints return `410 NOT_IMPLEMENTED`.
+The sandbox setup and sequence below are historical references for existing
+integrations. Existing positions remain readable, and exact previously built
+signed transactions remain recoverable. New exits use the replacement internal
+core contract pending security sign-off.
 
 ## Before you begin
 
@@ -813,7 +817,11 @@ The catalog pages with `page` and `pageSize` (default 20, up to 100). Keep
 reading pages until you have `total` strategies. Narrow the list with
 `sourceKind`, `apyType`, or `liquidityTerm`.
 
-## Check that it takes deposits
+## Interpret deposit metadata
+
+Legacy deposit preview and unsigned-build routes now return
+`410 NOT_IMPLEMENTED`. Catalogue metadata describes the strategy; it does not
+enable new deposits through those retired routes.
 
 | Check | Pass when |
 | --- | --- |
@@ -821,13 +829,12 @@ reading pages until you have `total` strategies. Narrow the list with
 | `fundable` | `true`. The strategy exists on your project's cluster. |
 | `hostCluster` | Matches your project: `devnet` in sandbox, `mainnet-beta` in production. |
 | Deposit token | `depositMints[0]` is the token a deposit takes. Fund the wallet with it. |
-| Preview | A [deposit preview](/docs/reference/api/earn/create-earn-vault-deposit-preview) returns an empty `blockingIssues`. |
 
 In sandbox, `?cluster=mainnet-beta` lists mainnet strategies for browsing.
 They stay `fundable: false`: a sandbox project cannot deposit into them.
 
 Your organization also needs each provider activated, once for all its
-projects. Until it is, previews and builds return `403` with `FORBIDDEN` and
+projects. Execution admission can return `403` with `FORBIDDEN` and
 `details.reason` set to `provider_not_entitled`:
 
 ```json title="Response"
@@ -897,13 +904,18 @@ Next, [make your first deposit](/docs/earn/quickstart).
 ### Deposit funds
 Source: https://platform.solana.com/docs/earn/deposits
 
-> Preview, build, sign, submit, and track a deposit request by request, in cURL or TypeScript.
+> Recover previously prepared legacy deposits and track their settlement.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-A deposit takes six requests and one signature. This page shows each request
-and its response, so you can build the flow in any language. For the shortest
-path, start with the [Quickstart](/docs/earn/quickstart).
+The legacy deposit preview and unsigned-build endpoints now return
+`410 NOT_IMPLEMENTED`. They cannot prepare new deposits. Existing signed legacy
+builds remain recoverable through the submit endpoint with their original bytes
+and idempotency key. Operation-only builds cannot use that compatibility submit.
+
+The preparation examples below are historical references for existing
+integrations. Do not run them to initiate new deposits. Reads, recovery and
+withdrawals remain available.
 
 ## Before you begin
 
@@ -1445,14 +1457,15 @@ rounding can leave it slightly below zero. When it is left out,
 | `withdrawals_pending` | An open withdrawal request holds shares that have not paid out yet. |
 | `deposits_not_valued` | SDP did not observe a finalized deposit's amount. |
 | `withdrawals_not_valued` | SDP did not observe a finalized withdrawal's payout. |
+| `cost_basis_unknown` | Acquisition history is incomplete, so the live balance cannot establish earned yield. |
 
 Show a dash, never `$0`, while `earned` is missing. Three limits apply:
 
 - **Only held positions count.** A fully withdrawn position drops out of
   earnings but stays in the movement history.
-- **Outside transfers count.** The live value reads the wallet's whole balance
-  in the strategy, including shares acquired outside SDP, while deposits and
-  withdrawals come only from SDP's records.
+- **Outside acquisition can leave earnings unknown.** Live value includes the
+  wallet's whole strategy balance. Unknown acquisition history withholds earned
+  amounts rather than treating transferred shares as profit.
 - **It is not an accounting ledger.** It gives no lifetime realized returns or
   daily accrual history. Reconcile against your own records for statements.
 
@@ -1492,13 +1505,19 @@ take their cursor as `before`.
 ### Withdraw funds
 Source: https://platform.solana.com/docs/earn/withdrawals
 
-> Choose a live withdrawal route, withdraw instantly or by request, and confirm the payout reached the customer's wallet.
+> Recover existing legacy withdrawals and follow their recorded settlement.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
+Legacy withdrawal and withdrawal-request build endpoints now return
+`410 NOT_IMPLEMENTED`. The examples below describe historical builds; they cannot
+start a new withdrawal. Existing exact signed-build submissions, request
+cancellation, history and settlement reads remain available. The replacement
+core contract is internal pending security sign-off.
+
 A withdrawal spends shares from a position and pays the deposit token back to
-the wallet that owns it. Some routes pay in the same transaction; others pay
-later. Read the live routes first, then follow the one your customer chooses.
+its owner. A submitted request may settle later. Continue tracking existing
+requests until payout or cancellation is confirmed.
 
 Set `SDP_API_URL` and `SDP_API_KEY` as shown in the
 [Quickstart](/docs/earn/quickstart#before-you-begin).
@@ -1782,7 +1801,7 @@ token, not the original shares. Refresh holdings before another withdrawal.
 ### Embedded Yield
 Source: https://platform.solana.com/docs/guides/embedded-yield
 
-> Build customer-signed deposits, balances, and withdrawals into your app, from first request to go-live.
+> Maintain existing customer-wallet holdings and recover legacy pending movements.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
@@ -1791,8 +1810,12 @@ app. Your backend calls SDP with your API key, your app asks the customer's
 wallet to sign, and SDP verifies, broadcasts, and tracks every movement. SDP
 never holds the customer's key.
 
-New to Earn? Run the [Quickstart](/docs/earn/quickstart) first, then come
-back to build the full integration.
+Legacy deposit preview and deposit/withdrawal/request build endpoints now return
+`410 NOT_IMPLEMENTED`. Their examples below describe historical builds and
+cannot initiate new movements. Existing reads, exact signed-build recovery and
+existing request cancellation remain available. The replacement core contract
+is internal pending security sign-off. Never send an operation-only build to a
+legacy submit endpoint.
 
 ## How the pieces fit
 
@@ -37522,13 +37545,15 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Preview a deposit
 Source: https://platform.solana.com/docs/reference/api/earn/create-earn-vault-deposit-preview
 
-> Quotes how many shares a deposit would receive right now, from the provider's live accounting.
+> Retired.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
 `POST /v1/earn/vault-deposit-previews`
 
-When the strategy's `depositSlippage` is not null, set `minSharesOut` from this quote: take your tolerance off `sharesOut`. Resolve every `blockingIssues` entry before you build. The preview is read-only, takes no Idempotency-Key, and applies a deposit's access checks, provider activation included. It returns 501 when the provider cannot quote deposits.
+**Deprecated.**
+
+Returns 410 NOT_IMPLEMENTED without calling a provider. This compatibility path no longer prepares new deposits.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
 
@@ -37538,59 +37563,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
   Required for dashboard sessions. API keys use their assigned project.
 
-## Request body
-
-`application/json` · required
-
-Quote one direct vault deposit against the provider's live accounting. Read-only: nothing is built and nothing is persisted.
-
-- **`strategyId`** · `string` · required · min length 1 · example `earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e`
-
-- **`amount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
-
-  Deposit amount in deposit-token units.
-
 ## Responses
 
-- **`200`** Live deposit quote
-
-  - **`data`** · `object` · required
-
-    - **`strategyId`** · `string` · required · example `earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e`
-
-    - **`sharesOut`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `24.98`
-
-      Shares the deposit would mint at the live rate. Derive `minSharesOut` from this value minus the chosen tolerance, quantized to `shareDecimals`.
-
-    - **`shareDecimals`** · `integer` · required · example `6`
-
-      The share mint's decimals, which the floor must be quantized to.
-
-    - **`blockingIssues`** · `object[]` · required
-
-      Conditions the provider reports would block this deposit; empty when none.
-
-      - **`code`** · `string` · required · example `SHARE_LOCKED`
-
-      - **`message`** · `string` · required
-
-    - **`feeSponsored`** · `boolean` · required
-
-      Whether SDP pays network fees for Treasury movements on this cluster. It does not apply to customer wallets: to sponsor an Embedded Yield transaction, pass `feePayer` when you build it.
-
-  - **`meta`** · `object` · required
-
-    Response metadata.
-
-    - **`requestId`** · `string` · required · min length 1 · example `req_example`
-
-      Request identifier for tracing.
-
-    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
-
-      ISO 8601 timestamp.
-
-- **`400`** Bad Request
+- **`401`** Unauthorized
 
   - **`error`** · `object` · required
 
@@ -37616,77 +37591,35 @@ Quote one direct vault deposit against the provider's live accounting. Read-only
 
       Request identifier for tracing.
 
-- **`401`** Unauthorized
-
-  Same fields as `400`.
-
 - **`403`** Forbidden. Requires the `earn.read` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
 
-  Same fields as `400`.
+  Same fields as `401`.
 
-- **`404`** Not Found
+- **`410`** Gone
 
-  Same fields as `400`.
+  Same fields as `401`.
 
 - **`429`** Too Many Requests
 
-  Same fields as `400`.
+  Same fields as `401`.
 
 - **`500`** Internal Server Error
 
-  Same fields as `400`.
-
-- **`501`** The provider does not support this operation.
-
-  - **`error`** · `object` · required
-
-    Standard error payload.
-
-    - **`code`** · `string` · required
-
-    - **`message`** · `string` · required
-
-      Human-readable error message.
-
-    - **`details`** · `object`
-
-      Optional error details for debugging.
-
-      - **`*`** · `any`
-
-  - **`meta`** · `object`
-
-    - **`requestId`** · `string` · min length 1 · example `req_example`
-
-      Request identifier for tracing.
-
-- **`503`** Service Unavailable
-
-  Same fields as `400`.
+  Same fields as `401`.
 
 ## Example request
 
 ```bash tab="cURL"
 curl -X POST 'https://api.solana.com/v1/earn/vault-deposit-previews' \
-  -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "strategyId": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
-    "amount": "25"
-  }'
+  -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
 const res = await fetch("https://api.solana.com/v1/earn/vault-deposit-previews", {
   method: "POST",
   headers: {
-    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Content-Type": "application/json"
-  },
-  body: JSON.stringify({
-    "strategyId": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
-    "amount": "25"
-  })
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`
+  }
 });
 ```
 
@@ -37694,30 +37627,10 @@ const res = await fetch("https://api.solana.com/v1/earn/vault-deposit-previews",
 import os, requests
 
 r = requests.post("https://api.solana.com/v1/earn/vault-deposit-previews",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
-  json={
-    "strategyId": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
-    "amount": "25"
-  })
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
 ## Example responses
-
-```json tab="200"
-{
-  "data": {
-    "strategyId": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
-    "sharesOut": "24.975",
-    "shareDecimals": 6,
-    "blockingIssues": [],
-    "feeSponsored": false
-  },
-  "meta": {
-    "requestId": "req_example",
-    "timestamp": "2025-01-01T00:00:00.000Z"
-  }
-}
-```
 
 ```json tab="403"
 {
@@ -38829,9 +38742,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
           `currentValue + totalWithdrawn - totalDeposited`, present only when exact and never zero-filled. The live value reads the wallet's whole balance in the strategy, so shares acquired outside SDP raise this figure.
 
-        - **`earnedUnavailableReason`** · `string` · one of `live_value_unavailable`, `movements_pending`, `withdrawals_pending`, `deposits_not_valued`, `withdrawals_not_valued`
+        - **`earnedUnavailableReason`** · `string` · one of `live_value_unavailable`, `movements_pending`, `withdrawals_pending`, `deposits_not_valued`, `withdrawals_not_valued`, `cost_basis_unknown`
 
-          Why `earned` is absent: `live_value_unavailable` (a live value could not be read), `movements_pending` (a movement is still settling), `withdrawals_pending` (a held position has an open withdrawal request, whose shares leave the wallet before its payout, which can take days), or `deposits_not_valued` and `withdrawals_not_valued` (SDP did not observe a finalized deposit or withdrawal, so `totalDeposited` or `totalWithdrawn` is incomplete).
+          Why `earned` is absent: `live_value_unavailable` (a live value could not be read), `movements_pending` (a movement is still settling), `withdrawals_pending` (a held position has an open withdrawal request, whose shares leave the wallet before its payout, which can take days), or `deposits_not_valued` and `withdrawals_not_valued` (SDP did not observe a finalized deposit or withdrawal, so `totalDeposited` or `totalWithdrawn` is incomplete), or `cost_basis_unknown` (shares were acquired outside recorded history).
 
   - **`meta`** · `object` · required
 
@@ -38965,13 +38878,15 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Build a deposit transaction
 Source: https://platform.solana.com/docs/reference/api/earn/create-earn-external-wallet-deposit-transaction
 
-> Builds an unsigned deposit transaction for the customer's wallet to sign.
+> Retired.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
 `POST /v1/earn/external-wallet/deposit-transactions`
 
-Nothing moves until you submit the signed transaction. The build applies provider access checks and can name your own `feePayer`, which then signs alongside the customer. A swap-funded deposit that cannot fit in one transaction returns a separate swap and follow-up deposit instead of `transaction`, so check the response before you request a signature.
+**Deprecated.**
+
+Returns 410 NOT_IMPLEMENTED without building or reserving a transaction. Existing legacy signed builds can still be recovered through the legacy submit endpoint. Operation-only builds must use their operation action.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.execute` action.
 
@@ -38981,211 +38896,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.e
 
   Required for dashboard sessions. API keys use their assigned project.
 
-## Request body
-
-`application/json` · required
-
-Build one unsigned deposit transaction for an external wallet.
-
-- **`strategyId`** · `string` · required · min length 1 · example `earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e`
-
-- **`ownerAddress`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
-
-  The customer's wallet address: an external wallet, so SDP holds no key for it. It signs, owns the shares, and pays the network fee unless the build names a `feePayer`. It must decode to a 32-byte public key; a base58 string that matches the pattern but does not decode returns 400.
-
-- **`feePayer`** · `string` · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF`
-
-  Pay for this transaction from a wallet your backend controls instead of the customer's. The named address becomes the fee payer: it pays the network fee, funds any share-account rent, and must sign alongside the customer. Co-sign on your backend before you submit. The build returns 400, naming the fee payer, when it cannot pay. Sending the customer's own address keeps the default: the customer pays and signs alone.
-
-- **`amount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
-
-  The deposit amount as a decimal string, in deposit-token units. For a swap-funded build (`sourceTokenMint`), it is in source-token units instead: the swap spends all of it, and the deposit is sized to the swap's guaranteed output.
-
-- **`minSharesOut`** · `string` · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `24.9`
-
-  Slippage floor in share units. Required exactly when the selected strategy's `depositSlippage` is non-null. Derive it from `POST /v1/earn/vault-deposit-previews`, never from the deposit amount.
-
-- **`sourceTokenMint`** · `string` · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo`
-
-  Fund the deposit in a different supported stablecoin (USDC, USDG, PYUSD or USDT on the environment's cluster): a Jupiter swap to the vault's own token is prepended inside the same transaction, so both legs land atomically or not at all. Equal to the strategy's deposit mint it is a no-op, so pickers may always send their selection.
-
-- **`swapSlippageBps`** · `integer` · min 1 · max 500 · example `2`
-
-  Swap slippage tolerance in basis points (default 2, accepted 1-500). Valid only with `sourceTokenMint`. The deposit is sized to the swap's worst-case output, so a wider tolerance can leave more of the deposit token in the customer's account instead of failing the transaction.
-
 ## Responses
 
-- **`200`** Unsigned deposit transaction
-
-  - **`data`** · `object` · required
-
-    Any of:
-
-    - **object**
-
-      - **`transaction`** · `object` · required
-
-        The built deposit transaction plus the strategy it targets.
-
-        - **`transactionId`** · `string` · required · example `earn_external_wallet_transaction_e7a88258-1d19-48f3-8d0e-81fefa4bf3b3`
-
-        - **`transaction`** · `string` · required
-
-          Base64 wire bytes of the unsigned transaction. Add every required signature without changing the message, then submit through SDP. The blockhash bounds when the network can first accept it; retain the original signed bytes for recovery.
-
-        - **`lastValidBlockHeight`** · `string` · required · example `361186610`
-
-          Last block height at which the network can first accept this transaction. This is a block height, not a slot or timestamp.
-
-        - **`sponsored`** · `boolean` · required · example `false`
-
-          Always false: SDP does not pay an external wallet's fees. The customer's wallet pays, or the `feePayer` you name.
-
-        - **`ownerAddress`** · `string` · required · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
-
-          The customer's wallet address.
-
-        - **`feePayer`** · `string` · example `3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF`
-
-          The `feePayer` your build request named. When present, the transaction needs the fee payer's signature as well as the customer's: co-sign on your backend before you submit, or the submit refuses it. When omitted, the customer signs alone and pays the fee.
-
-        - **`provider`** · `string` · required · example `kamino`
-
-        - **`providerReference`** · `string` · required · example `7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx`
-
-          The strategy's onchain address at the provider. It identifies the instrument; never send funds to it.
-
-        - **`tokenMint`** · `string` · required · example `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`
-
-        - **`shareMint`** · `string` · required · example `hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2`
-
-        - **`amount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
-
-          Positive decimal string with at least one non-zero digit; never a float.
-
-        - **`minSharesOut`** · `string | null` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
-
-          Positive decimal string with at least one non-zero digit; never a float.
-
-        - **`swap`** · `object`
-
-          Present when the build was swap-funded: the swap is prepended inside this same transaction and `amount` equals `swap.depositAmount`.
-
-          - **`sourceTokenMint`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo`
-
-            Mint the owner pays with.
-
-          - **`sourceAmount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
-
-            What the swap spends, in source-token units.
-
-          - **`depositAmount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
-
-            The deposit amount the transaction encodes, in deposit-token units: the swap's guaranteed minimum output. Any output above it stays in the customer's token account.
-
-          - **`quotedAmount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
-
-            The swap's quoted output at the live rate, in deposit-token units.
-
-          - **`slippageBps`** · `integer` · required · example `2`
-
-          - **`priceImpactPct`** · `string` · required · example `0.0001`
-
-            Quoted price impact as a decimal ratio string.
-
-          - **`routeLabels`** · `string[]` · required
-
-            Venue labels along the quoted route.
-
-        - **`strategy`** · `object` · required
-
-          - **`id`** · `string` · required · example `earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e`
-
-          - **`name`** · `string` · required · example `Allez USDC`
-
-          - **`provider`** · `string` · required · example `kamino`
-
-          - **`providerReference`** · `string` · required · example `7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx`
-
-          - **`hostCluster`** · `string` · required · example `devnet`
-
-    - **Returned instead of a built transaction when the swap and the deposit cannot fit in one Solana transaction (1,232 bytes), even on a compact route. SDP saves no build or movement for it.**
-
-      - **`requiresSeparateSwap`** · `boolean` · required · always `true`
-
-        Discriminates from the atomic answer, which carries `transaction`.
-
-      - **`sponsored`** · `boolean` · required · always `false`
-
-        Split swap transactions are never sponsored by SDP.
-
-      - **`swap`** · `object` · required
-
-        The Jupiter swap leg attached to (or split out of) a swap-funded deposit.
-
-        - **`sourceTokenMint`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo`
-
-          Mint the owner pays with.
-
-        - **`sourceAmount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
-
-          What the swap spends, in source-token units.
-
-        - **`depositAmount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
-
-          The deposit amount the transaction encodes, in deposit-token units: the swap's guaranteed minimum output. Any output above it stays in the customer's token account.
-
-        - **`quotedAmount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
-
-          The swap's quoted output at the live rate, in deposit-token units.
-
-        - **`slippageBps`** · `integer` · required · example `2`
-
-        - **`priceImpactPct`** · `string` · required · example `0.0001`
-
-          Quoted price impact as a decimal ratio string.
-
-        - **`routeLabels`** · `string[]` · required
-
-          Venue labels along the quoted route.
-
-        - **`transaction`** · `string` · required
-
-          Base64 wire bytes of the unsigned swap-only transaction. The fee payer is the customer, or your request's `feePayer`, which then co-signs it too. You broadcast it yourself: it moves only the customer's own funds, so SDP records nothing for it.
-
-        - **`lastValidBlockHeight`** · `string` · required · example `361186610`
-
-      - **`followUp`** · `object` · required
-
-        The ordinary (unswapped) deposit build to request once the swap is confirmed.
-
-        - **`strategyId`** · `string` · required · example `earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e`
-
-        - **`amount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
-
-          Positive decimal string with at least one non-zero digit; never a float.
-
-        - **`minSharesOut`** · `string` · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
-
-          The original request's share floor, carried through so the follow-up build keeps the protection the caller asked for. Absent only when the original request carried none.
-
-        - **`feePayer`** · `string` · example `3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF`
-
-          The original request's fee payer, carried through so the follow-up build does not silently bill the customer's wallet. Absent when none was named.
-
-  - **`meta`** · `object` · required
-
-    Response metadata.
-
-    - **`requestId`** · `string` · required · min length 1 · example `req_example`
-
-      Request identifier for tracing.
-
-    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
-
-      ISO 8601 timestamp.
-
-- **`400`** Bad Request
+- **`401`** Unauthorized
 
   - **`error`** · `object` · required
 
@@ -39211,79 +38924,35 @@ Build one unsigned deposit transaction for an external wallet.
 
       Request identifier for tracing.
 
-- **`401`** Unauthorized
-
-  Same fields as `400`.
-
 - **`403`** Forbidden. Requires the `earn.execute` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
 
-  Same fields as `400`.
+  Same fields as `401`.
 
-- **`404`** Not Found
+- **`410`** Gone
 
-  Same fields as `400`.
+  Same fields as `401`.
 
 - **`429`** Too Many Requests
 
-  Same fields as `400`.
+  Same fields as `401`.
 
 - **`500`** Internal Server Error
 
-  Same fields as `400`.
-
-- **`501`** The provider does not support this operation.
-
-  - **`error`** · `object` · required
-
-    Standard error payload.
-
-    - **`code`** · `string` · required
-
-    - **`message`** · `string` · required
-
-      Human-readable error message.
-
-    - **`details`** · `object`
-
-      Optional error details for debugging.
-
-      - **`*`** · `any`
-
-  - **`meta`** · `object`
-
-    - **`requestId`** · `string` · min length 1 · example `req_example`
-
-      Request identifier for tracing.
-
-- **`503`** Service Unavailable
-
-  Same fields as `400`.
+  Same fields as `401`.
 
 ## Example request
 
 ```bash tab="cURL"
 curl -X POST 'https://api.solana.com/v1/earn/external-wallet/deposit-transactions' \
-  -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "strategyId": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
-    "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
-    "amount": "25"
-  }'
+  -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
 const res = await fetch("https://api.solana.com/v1/earn/external-wallet/deposit-transactions", {
   method: "POST",
   headers: {
-    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Content-Type": "application/json"
-  },
-  body: JSON.stringify({
-    "strategyId": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
-    "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
-    "amount": "25"
-  })
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`
+  }
 });
 ```
 
@@ -39291,46 +38960,10 @@ const res = await fetch("https://api.solana.com/v1/earn/external-wallet/deposit-
 import os, requests
 
 r = requests.post("https://api.solana.com/v1/earn/external-wallet/deposit-transactions",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
-  json={
-    "strategyId": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
-    "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
-    "amount": "25"
-  })
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
 ## Example responses
-
-```json tab="200"
-{
-  "data": {
-    "transaction": {
-      "transactionId": "earn_external_wallet_transaction_e7a88258-1d19-48f3-8d0e-81fefa4bf3b3",
-      "transaction": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-      "lastValidBlockHeight": "361186610",
-      "sponsored": false,
-      "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
-      "provider": "kamino",
-      "providerReference": "C7N2fqV2GvhFghDf5PJSwstyjedjLNCY1cm2Ak7TeU83",
-      "tokenMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
-      "shareMint": "CeirL1mAehaM6g2EccgMUQwohNfnuyicskVQ4r9ekXk6",
-      "amount": "25",
-      "minSharesOut": null,
-      "strategy": {
-        "id": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
-        "name": "Kamino Vault USDC",
-        "provider": "kamino",
-        "providerReference": "C7N2fqV2GvhFghDf5PJSwstyjedjLNCY1cm2Ak7TeU83",
-        "hostCluster": "devnet"
-      }
-    }
-  },
-  "meta": {
-    "requestId": "req_example",
-    "timestamp": "2025-01-01T00:00:00.000Z"
-  }
-}
-```
 
 ```json tab="403"
 {
@@ -39354,13 +38987,13 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Submit a deposit
 Source: https://platform.solana.com/docs/reference/api/earn/create-earn-external-wallet-deposit
 
-> Submits a deposit transaction signed by the customer's wallet.
+> Recovery only for previously exposed legacy builds.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
 `POST /v1/earn/external-wallet/deposits`
 
-SDP checks that the signed bytes match the built transaction and that every required signature is valid (the customer's, plus your fee payer's when the build named one), records the movement, then broadcasts. Idempotency-Key is required: a retry with the same key returns the original movement with `replayed: true`, and each built transaction can be submitted once. Reusing a key with a different body, or submitting one build under a second key, returns `409 CONFLICT`. Submit the original signed bytes even after the blockhash expires, since the wallet may already have broadcast them. After an uncertain response, retry with the same key and body, then read the movement; never replace a signed transaction whose outcome is unknown.
+Operation-only builds return 409 operation_execution_required and must use their durable operation action, including after refresh. Submits a deposit transaction signed by the customer's wallet. SDP checks that the signed bytes match the built transaction and that every required signature is valid (the customer's, plus your fee payer's when the build named one), records the movement, then broadcasts. Idempotency-Key is required: a retry with the same key returns the original movement with `replayed: true`, and each built transaction can be submitted once. Reusing a key with a different body, or submitting one build under a second key, returns `409 CONFLICT`. Submit the original signed bytes even after the blockhash expires, since the wallet may already have broadcast them. After an uncertain response, retry with the same key and body, then read the movement; never replace a signed transaction whose outcome is unknown.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.execute` action.
 
@@ -39843,13 +39476,15 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Build a withdrawal transaction
 Source: https://platform.solana.com/docs/reference/api/earn/create-earn-external-wallet-withdrawal-transaction
 
-> Builds an unsigned withdrawal transaction for a position, for the customer's wallet to sign.
+> Retired.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
 `POST /v1/earn/external-wallet/withdrawal-transactions`
 
-Withdrawals keep working after a provider stops taking deposits. Send `minAmountOut` when the strategy's `withdrawalSlippage` is not null, and omit it when null. A provider-order route may not support a preview: it places an order that pays out later, not an instant redemption.
+**Deprecated.**
+
+Returns 410 NOT_IMPLEMENTED without building a transaction. New withdrawals use the internal core Earn API. Exact already-built legacy transactions retain their signed-submit recovery path; operation-only builds must use their operation action.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.execute` action.
 
@@ -39859,97 +39494,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.e
 
   Required for dashboard sessions. API keys use their assigned project.
 
-## Request body
-
-`application/json` · required
-
-Build one unsigned withdrawal transaction for a position. SDP reads the strategy and mints from the position.
-
-- **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
-
-  The position's ID, from the positions list or the deposit submit response.
-
-- **`redemptionMode`** · `string` · one of `standard`, `instant`
-
-  The redemption route to build: `standard` queues a provider-managed order for a later payout, `instant` is the provider's faster route but still waits for cross-chain delivery — chain confirmation alone is not payout, so treat the exit as complete only at the movement's verified `delivered` outcome. Defaults to `standard`; a provider without the requested route refuses the build.
-
-- **`shares`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `10`
-
-  Shares to redeem, decimal string in share units.
-
-- **`minAmountOut`** · `string` · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `19.98`
-
-  Withdrawal slippage floor: the minimum deposit-token amount to accept, as a decimal string. Derive it from the withdrawal preview's `assetsOut` minus your tolerance. Required when the strategy's `withdrawalSlippage` is not null; refused with 400 when it is null, because the transaction cannot enforce it.
-
-- **`feePayer`** · `string` · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF`
-
-  Pay for this transaction from a wallet your backend controls instead of the customer's. The named address becomes the fee payer: it pays the network fee, funds any share-account rent, and must sign alongside the customer. Co-sign on your backend before you submit. The build returns 400, naming the fee payer, when it cannot pay. Sending the customer's own address keeps the default: the customer pays and signs alone.
-
 ## Responses
 
-- **`200`** Unsigned withdrawal transaction
-
-  - **`data`** · `object` · required
-
-    - **`transaction`** · `object` · required
-
-      The common fields of one built withdrawal transaction.
-
-      - **`transactionId`** · `string` · required · example `earn_external_wallet_transaction_e7a88258-1d19-48f3-8d0e-81fefa4bf3b3`
-
-      - **`transaction`** · `string` · required
-
-        Base64 wire bytes of the unsigned transaction. Add every required signature without changing the message, then submit through SDP. The blockhash bounds when the network can first accept it; retain the original signed bytes for recovery.
-
-      - **`lastValidBlockHeight`** · `string` · required · example `361186610`
-
-        Last block height at which the network can first accept this transaction. This is a block height, not a slot or timestamp.
-
-      - **`sponsored`** · `boolean` · required · example `false`
-
-        Always false: SDP does not pay an external wallet's fees. The customer's wallet pays, or the `feePayer` you name.
-
-      - **`ownerAddress`** · `string` · required · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
-
-        The customer's wallet address.
-
-      - **`feePayer`** · `string` · example `3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF`
-
-        The `feePayer` your build request named. When present, the transaction needs the fee payer's signature as well as the customer's: co-sign on your backend before you submit, or the submit refuses it. When omitted, the customer signs alone and pays the fee.
-
-      - **`provider`** · `string` · required · example `kamino`
-
-      - **`providerReference`** · `string` · required · example `7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx`
-
-        The strategy's onchain address at the provider. It identifies the instrument; never send funds to it.
-
-      - **`tokenMint`** · `string` · required · example `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`
-
-      - **`shareMint`** · `string` · required · example `hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2`
-
-      - **`shares`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
-
-        Positive decimal string with at least one non-zero digit; never a float.
-
-      - **`minAmountOut`** · `string | null` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
-
-        The floor encoded in the transaction, or null when the request carried none.
-
-      - **`positionId`** · `string` · required · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
-
-  - **`meta`** · `object` · required
-
-    Response metadata.
-
-    - **`requestId`** · `string` · required · min length 1 · example `req_example`
-
-      Request identifier for tracing.
-
-    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
-
-      ISO 8601 timestamp.
-
-- **`400`** Bad Request
+- **`401`** Unauthorized
 
   - **`error`** · `object` · required
 
@@ -39975,77 +39522,35 @@ Build one unsigned withdrawal transaction for a position. SDP reads the strategy
 
       Request identifier for tracing.
 
-- **`401`** Unauthorized
-
-  Same fields as `400`.
-
 - **`403`** Forbidden. Requires the `earn.execute` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
 
-  Same fields as `400`.
+  Same fields as `401`.
 
-- **`404`** Not Found
+- **`410`** Gone
 
-  Same fields as `400`.
+  Same fields as `401`.
 
 - **`429`** Too Many Requests
 
-  Same fields as `400`.
+  Same fields as `401`.
 
 - **`500`** Internal Server Error
 
-  Same fields as `400`.
-
-- **`501`** The provider does not support this operation.
-
-  - **`error`** · `object` · required
-
-    Standard error payload.
-
-    - **`code`** · `string` · required
-
-    - **`message`** · `string` · required
-
-      Human-readable error message.
-
-    - **`details`** · `object`
-
-      Optional error details for debugging.
-
-      - **`*`** · `any`
-
-  - **`meta`** · `object`
-
-    - **`requestId`** · `string` · min length 1 · example `req_example`
-
-      Request identifier for tracing.
-
-- **`503`** Service Unavailable
-
-  Same fields as `400`.
+  Same fields as `401`.
 
 ## Example request
 
 ```bash tab="cURL"
 curl -X POST 'https://api.solana.com/v1/earn/external-wallet/withdrawal-transactions' \
-  -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "positionId": "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
-    "shares": "10"
-  }'
+  -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
 const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdrawal-transactions", {
   method: "POST",
   headers: {
-    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Content-Type": "application/json"
-  },
-  body: JSON.stringify({
-    "positionId": "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
-    "shares": "10"
-  })
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`
+  }
 });
 ```
 
@@ -40053,39 +39558,10 @@ const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdraw
 import os, requests
 
 r = requests.post("https://api.solana.com/v1/earn/external-wallet/withdrawal-transactions",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
-  json={
-    "positionId": "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
-    "shares": "10"
-  })
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
 ## Example responses
-
-```json tab="200"
-{
-  "data": {
-    "transaction": {
-      "transactionId": "earn_external_wallet_transaction_0ebe7320-4b8e-4d1a-a5f0-6c2d9e8b1f47",
-      "transaction": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-      "lastValidBlockHeight": "361186972",
-      "sponsored": false,
-      "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
-      "provider": "kamino",
-      "providerReference": "C7N2fqV2GvhFghDf5PJSwstyjedjLNCY1cm2Ak7TeU83",
-      "tokenMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
-      "shareMint": "CeirL1mAehaM6g2EccgMUQwohNfnuyicskVQ4r9ekXk6",
-      "positionId": "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
-      "shares": "10",
-      "minAmountOut": null
-    }
-  },
-  "meta": {
-    "requestId": "req_example",
-    "timestamp": "2025-01-01T00:00:00.000Z"
-  }
-}
-```
 
 ```json tab="403"
 {
@@ -40109,13 +39585,13 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Submit a withdrawal
 Source: https://platform.solana.com/docs/reference/api/earn/create-earn-external-wallet-withdrawal
 
-> Submits a withdrawal transaction signed by the customer's wallet.
+> Recovers an exact already-built legacy withdrawal signed by the customer's wallet.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
 `POST /v1/earn/external-wallet/withdrawals`
 
-It works like a deposit submit: SDP checks every signature against the exact built message, records the movement before broadcast, requires an Idempotency-Key, and accepts each built transaction once, with the same `409 CONFLICT` answers. Submit the original signed bytes even after the blockhash expires, since the wallet may already have broadcast them. After an uncertain response, retry with the same key and body, then read the movement instead of building a new withdrawal. Withdrawals stay available while Earn is disabled.
+Operation-only builds return 409 and must use their operation action. It works like a deposit submit: SDP checks every signature against the exact built message, records the movement before broadcast, requires an Idempotency-Key, and accepts each built transaction once, with the same `409 CONFLICT` answers. Submit the original signed bytes even after the blockhash expires, since the wallet may already have broadcast them. After an uncertain response, retry with the same key and body, then read the movement instead of building a new withdrawal. Withdrawals stay available while Earn is disabled.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.execute` action.
 
@@ -41012,13 +40488,15 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Build a withdrawal request transaction
 Source: https://platform.solana.com/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-transaction
 
-> Builds an unsigned withdrawal request transaction for a position, for the customer's wallet to sign.
+> Retired.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
 `POST /v1/earn/external-wallet/withdrawal-request-transactions`
 
-A solver queue request escrows shares; an operator redemption converts shares into an intermediate token that the operator settles later. Neither transaction pays the customer. Save the `withdrawalRequestId` the submit returns and track the request until it is fulfilled, canceled, or failed.
+**Deprecated.**
+
+Returns 410 NOT_IMPLEMENTED without building or reserving a request. New withdrawals use the internal core Earn API. Exact already-built legacy signed requests remain recoverable. Existing request cancellation is retained for draining funds.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.execute` action.
 
@@ -41028,217 +40506,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.e
 
   Required for dashboard sessions. API keys use their assigned project.
 
-## Request body
-
-`application/json` · required
-
-Build a keyed asynchronous withdrawal request. A solver request escrows shares; an operator redemption converts them into the provider's intermediate token, or delegates intermediate the owner already holds. Neither action pays assets.
-
-Any of:
-
-- **object**
-
-  - **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
-
-    The position's ID, from the positions list or the deposit submit response.
-
-  - **`shares`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `10`
-
-    Shares to place in the withdrawal request, in share units.
-
-  - **`mechanism`** · `string` · always `solverQueue`
-
-    Selects the solver queue, which is also the default when omitted. Operator redemptions must set `mechanism` explicitly.
-
-  - **`discountBps`** · `integer` · required · min 0 · max 10000 · example `25`
-
-    Discount offered to a solver, in basis points. It must stay inside the live queueAsset minimum and maximum.
-
-  - **`deadlineSeconds`** · `integer` · required · greater than 0 · max 7776000 · example `86400`
-
-    Solver window after maturity, in seconds. It must stay inside the live queueAsset minimum and maximum.
-
-  - **`feePayer`** · `string` · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF`
-
-    Pay for this transaction from a wallet your backend controls instead of the customer's. The named address becomes the fee payer: it pays the network fee, funds any share-account rent, and must sign alongside the customer. Co-sign on your backend before you submit. The build returns 400, naming the fee payer, when it cannot pay. Sending the customer's own address keeps the default: the customer pays and signs alone.
-
-- **object**
-
-  - **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
-
-    The position's ID, from the positions list or the deposit submit response.
-
-  - **`shares`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `10`
-
-    Shares to place in the withdrawal request, in share units.
-
-  - **`mechanism`** · `string` · required · always `operatorRedemption`
-
-    Selects an operator redemption, which takes no solver discount or deadline.
-
-  - **`feePayer`** · `string` · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF`
-
-    Pay for this transaction from a wallet your backend controls instead of the customer's. The named address becomes the fee payer: it pays the network fee, funds any share-account rent, and must sign alongside the customer. Co-sign on your backend before you submit. The build returns 400, naming the fee payer, when it cannot pay. Sending the customer's own address keeps the default: the customer pays and signs alone.
-
-- **object**
-
-  - **`positionId`** · `string` · required · min length 1 · max length 128 · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
-
-    The position's ID, from the positions list or the deposit submit response.
-
-  - **`intermediateAmount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `2000`
-
-    Intermediate token the owner already holds outside any request (such as a cancelled request's wYLDS) to redeem at par, in that token's units. Send instead of `shares`, never with it.
-
-  - **`mechanism`** · `string` · required · always `operatorRedemption`
-
-    Selects an operator redemption, which takes no solver discount or deadline.
-
-  - **`feePayer`** · `string` · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF`
-
-    Pay for this transaction from a wallet your backend controls instead of the customer's. The named address becomes the fee payer: it pays the network fee, funds any share-account rent, and must sign alongside the customer. Co-sign on your backend before you submit. The build returns 400, naming the fee payer, when it cannot pay. Sending the customer's own address keeps the default: the customer pays and signs alone.
-
 ## Responses
 
-- **`200`** Unsigned withdrawal request transaction
-
-  - **`data`** · `object` · required
-
-    - **`transaction`** · `object` · required
-
-      Any of:
-
-      - **mechanism: "solverQueue"**
-
-        - **`transactionId`** · `string` · required · example `earn_external_wallet_transaction_e7a88258-1d19-48f3-8d0e-81fefa4bf3b3`
-
-        - **`transaction`** · `string` · required
-
-          Base64 wire bytes of the unsigned transaction. Add every required signature without changing the message, then submit through SDP. The blockhash bounds when the network can first accept it; retain the original signed bytes for recovery.
-
-        - **`lastValidBlockHeight`** · `string` · required · example `361186610`
-
-          Last block height at which the network can first accept this transaction. This is a block height, not a slot or timestamp.
-
-        - **`sponsored`** · `boolean` · required · example `false`
-
-          Always false: SDP does not pay an external wallet's fees. The customer's wallet pays, or the `feePayer` you name.
-
-        - **`ownerAddress`** · `string` · required · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
-
-          The customer's wallet address.
-
-        - **`feePayer`** · `string` · example `3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF`
-
-          The `feePayer` your build request named. When present, the transaction needs the fee payer's signature as well as the customer's: co-sign on your backend before you submit, or the submit refuses it. When omitted, the customer signs alone and pays the fee.
-
-        - **`provider`** · `string` · required · example `kamino`
-
-        - **`providerReference`** · `string` · required · example `7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx`
-
-          The strategy's onchain address at the provider. It identifies the instrument; never send funds to it.
-
-        - **`tokenMint`** · `string` · required · example `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`
-
-        - **`shareMint`** · `string` · required · example `hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2`
-
-        - **`positionId`** · `string` · required · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
-
-        - **`action`** · `string` · required · always `request`
-
-        - **`mechanism`** · `string` · required · always `solverQueue`
-
-        - **`requestAddress`** · `string` · required
-
-          Provider request account address.
-
-        - **`shares`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
-
-          Positive decimal string with at least one non-zero digit; never a float.
-
-        - **`assets`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
-
-          Positive decimal string with at least one non-zero digit; never a float.
-
-        - **`discountBps`** · `integer` · required · min 0 · max 10000
-
-        - **`maturityTimestamp`** · `string` · required · pattern `^\d+$`
-
-        - **`deadlineTimestamp`** · `string` · required · pattern `^\d+$`
-
-      - **mechanism: "operatorRedemption"**
-
-        - **`transactionId`** · `string` · required · example `earn_external_wallet_transaction_e7a88258-1d19-48f3-8d0e-81fefa4bf3b3`
-
-        - **`transaction`** · `string` · required
-
-          Base64 wire bytes of the unsigned transaction. Add every required signature without changing the message, then submit through SDP. The blockhash bounds when the network can first accept it; retain the original signed bytes for recovery.
-
-        - **`lastValidBlockHeight`** · `string` · required · example `361186610`
-
-          Last block height at which the network can first accept this transaction. This is a block height, not a slot or timestamp.
-
-        - **`sponsored`** · `boolean` · required · example `false`
-
-          Always false: SDP does not pay an external wallet's fees. The customer's wallet pays, or the `feePayer` you name.
-
-        - **`ownerAddress`** · `string` · required · example `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`
-
-          The customer's wallet address.
-
-        - **`feePayer`** · `string` · example `3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF`
-
-          The `feePayer` your build request named. When present, the transaction needs the fee payer's signature as well as the customer's: co-sign on your backend before you submit, or the submit refuses it. When omitted, the customer signs alone and pays the fee.
-
-        - **`provider`** · `string` · required · example `kamino`
-
-        - **`providerReference`** · `string` · required · example `7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx`
-
-          The strategy's onchain address at the provider. It identifies the instrument; never send funds to it.
-
-        - **`tokenMint`** · `string` · required · example `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`
-
-        - **`shareMint`** · `string` · required · example `hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2`
-
-        - **`positionId`** · `string` · required · example `earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b`
-
-        - **`action`** · `string` · required · always `request`
-
-        - **`mechanism`** · `string` · required · always `operatorRedemption`
-
-        - **`requestAddress`** · `string` · required
-
-          Provider request account address.
-
-        - **`shares`** · `string` · required · max length 128 · pattern `^\d+(\.\d+)?$` · example `10`
-
-          Position shares the request burns, in share units; "0" when it redeems intermediate the owner already holds.
-
-        - **`assets`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
-
-          Positive decimal string with at least one non-zero digit; never a float.
-
-        - **`intermediateMint`** · `string` · required · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo`
-
-          Base58 Solana mint address.
-
-        - **`intermediateAmount`** · `string` · required · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `25`
-
-          Positive decimal string with at least one non-zero digit; never a float.
-
-  - **`meta`** · `object` · required
-
-    Response metadata.
-
-    - **`requestId`** · `string` · required · min length 1 · example `req_example`
-
-      Request identifier for tracing.
-
-    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
-
-      ISO 8601 timestamp.
-
-- **`400`** Bad Request
+- **`401`** Unauthorized
 
   - **`error`** · `object` · required
 
@@ -41264,87 +40534,35 @@ Any of:
 
       Request identifier for tracing.
 
-- **`401`** Unauthorized
-
-  Same fields as `400`.
-
 - **`403`** Forbidden. Requires the `earn.execute` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
 
-  Same fields as `400`.
+  Same fields as `401`.
 
-- **`404`** Not Found
+- **`410`** Gone
 
-  Same fields as `400`.
-
-- **`409`** Conflict
-
-  Same fields as `400`.
+  Same fields as `401`.
 
 - **`429`** Too Many Requests
 
-  Same fields as `400`.
+  Same fields as `401`.
 
 - **`500`** Internal Server Error
 
-  Same fields as `400`.
-
-- **`501`** The provider does not support this operation.
-
-  - **`error`** · `object` · required
-
-    Standard error payload.
-
-    - **`code`** · `string` · required
-
-    - **`message`** · `string` · required
-
-      Human-readable error message.
-
-    - **`details`** · `object`
-
-      Optional error details for debugging.
-
-      - **`*`** · `any`
-
-  - **`meta`** · `object`
-
-    - **`requestId`** · `string` · min length 1 · example `req_example`
-
-      Request identifier for tracing.
-
-- **`503`** Service Unavailable
-
-  Same fields as `400`.
+  Same fields as `401`.
 
 ## Example request
 
 ```bash tab="cURL"
 curl -X POST 'https://api.solana.com/v1/earn/external-wallet/withdrawal-request-transactions' \
-  -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "positionId": "earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc",
-    "mechanism": "solverQueue",
-    "shares": "15",
-    "discountBps": 10,
-    "deadlineSeconds": 60
-  }'
+  -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
 const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdrawal-request-transactions", {
   method: "POST",
   headers: {
-    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Content-Type": "application/json"
-  },
-  body: JSON.stringify({
-    "positionId": "earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc",
-    "mechanism": "solverQueue",
-    "shares": "15",
-    "discountBps": 10,
-    "deadlineSeconds": 60
-  })
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`
+  }
 });
 ```
 
@@ -41352,48 +40570,10 @@ const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdraw
 import os, requests
 
 r = requests.post("https://api.solana.com/v1/earn/external-wallet/withdrawal-request-transactions",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
-  json={
-    "positionId": "earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc",
-    "mechanism": "solverQueue",
-    "shares": "15",
-    "discountBps": 10,
-    "deadlineSeconds": 60
-  })
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
 ## Example responses
-
-```json tab="200"
-{
-  "data": {
-    "transaction": {
-      "transactionId": "earn_external_wallet_withdrawal_request_transaction_54c50679-1b52-494d-84fa-106df66452ff",
-      "transaction": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-      "lastValidBlockHeight": "361187340",
-      "sponsored": false,
-      "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
-      "provider": "veda",
-      "providerReference": "3wbKP5UGLT7gAZBAsLjvPC1NbfnWKtT3Dq7cniMWkzfU",
-      "tokenMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
-      "shareMint": "CdV7pjj6WANsdasKsBvdKAn7qJL7cQ2Q3CJMBEe13WAV",
-      "positionId": "earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc",
-      "requestAddress": "DKw4pYcvXNLs91RssedGFznWRpbvPttp2AAwNCG7fQRz",
-      "action": "request",
-      "mechanism": "solverQueue",
-      "shares": "15",
-      "assets": "14.985",
-      "discountBps": 10,
-      "maturityTimestamp": "1793991049",
-      "deadlineTimestamp": "1793991109"
-    }
-  },
-  "meta": {
-    "requestId": "req_example",
-    "timestamp": "2025-01-01T00:00:00.000Z"
-  }
-}
-```
 
 ```json tab="403"
 {
@@ -41417,13 +40597,13 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Submit a withdrawal request
 Source: https://platform.solana.com/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request
 
-> Submits a withdrawal request transaction signed by the customer's wallet.
+> Recovers an exact already-built legacy withdrawal request signed by the customer's wallet.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
 `POST /v1/earn/external-wallet/withdrawal-requests`
 
-SDP checks every signature against the exact built message, records the request before broadcast, then sends it. Idempotency-Key is required: a retry with the same key returns the original request, and each built transaction can be submitted once. Reusing a key with a different body, or submitting one build under a second key, returns `409 CONFLICT`. An expired build can still be submitted late. If its reservation was released or replaced, SDP accepts it only once the exact signed transaction is finalized as successful, so after a `409 CONFLICT` retry the same bytes and key until that shows. A late operator redemption whose original cycle already closed is refused for operator reconciliation, so it cannot claim a newer request at the same address. A transaction that recovery finds finalized as failed returns `400 TRANSACTION_FAILED`; build a new one. A recovery RPC outage returns `503 PROVIDER_UNAVAILABLE`: retry the original bytes and key. An unresolved 16-signature history window returns `503` and needs support to reconcile. An expired operator redemption build whose creation history is unavailable also returns `503`: keep and retry the original signed intent rather than signing a replacement.
+Operation-only builds return 409 and must use their operation action. SDP checks every signature against the exact built message, records the request before broadcast, then sends it. Idempotency-Key is required: a retry with the same key returns the original request, and each built transaction can be submitted once. Reusing a key with a different body, or submitting one build under a second key, returns `409 CONFLICT`. An expired build can still be submitted late. If its reservation was released or replaced, SDP accepts it only once the exact signed transaction is finalized as successful, so after a `409 CONFLICT` retry the same bytes and key until that shows. A late operator redemption whose original cycle already closed is refused for operator reconciliation, so it cannot claim a newer request at the same address. A transaction that recovery finds finalized as failed returns `400 TRANSACTION_FAILED`; a fresh withdrawal requires the core API. A recovery RPC outage returns `503 PROVIDER_UNAVAILABLE`: retry the original bytes and key. An unresolved 16-signature history window returns `503` and needs support to reconcile. An expired operator redemption build whose creation history is unavailable also returns `503`: keep and retry the original signed intent rather than signing a replacement.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.execute` action.
 
@@ -44260,7 +43440,7 @@ Access is checked before the key on every request, so a retry passes exactly the
 | A recurring-payment action failed | An action refused before it sent anything leaves the schedule as it was, except that a collection with an unavailable counterparty or account pauses it with `pausedReason: "destination_unavailable"` and returns `409` without signing. If a cancel sent its transaction and confirming it then failed, SDP keeps the attempt and the schedule stays `canceling` until the attempt is recovered; poll `GET /v1/payments/recurring-payments/{id}`. A `400`, `401`, `403`, `409` or `429` (such as `TRANSACTION_FAILED`) is not stored, and a `5xx` is not replayed, so a same-key retry runs the action again. Any other `4xx`, such as `422 SIGNING_REJECTED` or `404`, is stored and replayed with `Idempotent-Replayed: true` for 24 hours; send a new key to try again sooner. |
 | A recurring-payment action meets another key's unfinished attempt on the schedule | Cancel and collect return `409` (already processing), not stored; read the schedule with `GET`. An interrupted collect finishes on its own from the transaction SDP saved before sending it. Resume sends nothing on chain and commits in one step, so it is never left half-done. An interrupted activate or cancel is resumed in the background from the last step SDP recorded; SDP first reads each step it may already have sent from the chain, and a step is not sent again when the chain shows it landed. An interrupted `PATCH` resumes only when that `PATCH` is retried with its key (see below). A `PATCH` may finish that attempt and then applies its own change. |
 | A keyed recurring-payment cancel, resume or `PATCH` changes nothing (such as canceling a canceled schedule) | It still records its attempt, so a same-key retry, even after 24 hours, is answered from it and never runs over a later change. |
-| Original returned a `5xx` | Stored and replayed: use a new key to try again. The routes that move money are the exception: a same-key retry runs again and answers from the record the first attempt wrote, so it never sends twice. That answer also carries `Idempotent-Replayed: true`. A same-key retry of a payment request cancel also runs again, and so does a `POST /v1/wallets` whose provider dedupes on the request ID (see [Creating wallets](#creating-wallets)). |
+| Original returned a `5xx` | Once the request commits its resource, the error is stored and replayed. Read current state with `GET` before making a deliberate new request. Before commitment, routes with durable recovery may rerun the same key and recover the original record. A same-key retry of a payment request cancel also runs again, and so does a `POST /v1/wallets` whose provider dedupes on the request ID (see [Creating wallets](#creating-wallets)). |
 
 "Same request" means the same path, query parameters, body and credential. Recipient order in a transfer batch, and `"1.0"` versus `"1"` for an amount, do not change the request.
 
@@ -44271,6 +43451,10 @@ An organization that has been deleted or has lost production access is refused b
 ## Replays are snapshots
 
 A replay returns the response as it was first sent: a transfer stored as `processing` replays as `processing`. To see current state, read the resource with `GET`. Never re-send a request to learn its outcome.
+
+This also applies when the response failed after the resource committed: a
+replayed `5xx` does not prove the resource failed. Keep its ID and read its
+current status instead of treating a new key as a recovery action.
 
 An answer from the original record (a same-key retry after a `5xx` or the 24-hour window) reflects its current state. A recurring-payment lifecycle action may still be mid-transition; poll `GET /v1/payments/recurring-payments/{id}` until it settles.
 

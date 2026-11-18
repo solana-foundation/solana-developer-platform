@@ -34,6 +34,9 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
   const movementWalletIds = useRef(new Map<string, string>());
   // Outstanding verification is independent of the bounded activity display.
   const pendingPairs = useRef(new Map<string, VaultActivity>());
+  const operationTargets = useRef(
+    new Map<string, { positionId: string; custodyWalletId: string }>()
+  );
   const [unpairedPositionIds, setUnpairedPositionIds] = useState<ReadonlySet<string>>(
     () => new Set()
   );
@@ -56,12 +59,16 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
         ...pendingPairs.current,
         ...activities.map((activity) => [activity.movement.movementId, activity] as const),
       ]);
-      const movements = new Map(
-        [...currentActivities.values()].map(({ movement }) => [movement.movementId, movement])
-      );
+      const movements = new Map<string, { positionId: string; custodyWalletId?: string }>([
+        ...[...currentActivities.values()].map(
+          ({ movement }) => [movement.movementId, movement] as const
+        ),
+        ...operationTargets.current,
+      ]);
       const request = {
         movementIds: new Set([
           ...pendingPairs.current.keys(),
+          ...operationTargets.current.keys(),
           ...(movementIds ??
             activities
               .filter(
@@ -83,7 +90,10 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
       for (const activity of requestedActivities)
         pendingPairs.current.set(activity.movement.movementId, activity);
       setUnpairedPositionIds(
-        new Set([...pendingPairs.current.values()].map(({ movement }) => movement.positionId))
+        new Set([
+          ...[...pendingPairs.current.values()].map(({ movement }) => movement.positionId),
+          ...[...operationTargets.current.values()].map(({ positionId }) => positionId),
+        ])
       );
       // Capture submission metadata before a full withdrawal removes its position.
       for (const { movement } of requestedActivities) {
@@ -98,10 +108,13 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
             ? vaults.refresh(
                 ids,
                 new Map(
-                  requestedActivities.map(({ movement }) => [
-                    movement.movementId,
-                    movement.positionId,
-                  ])
+                  requestedActivities
+                    .map(({ movement }) => [movement.movementId, movement.positionId] as const)
+                    .concat(
+                      [...operationTargets.current].map(
+                        ([id, target]) => [id, target.positionId] as const
+                      )
+                    )
                 )
               )
             : vaults.refresh(ids.length > 0 ? ids : undefined)
@@ -141,9 +154,15 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
             failed ? new Error("Treasury balances could not be refreshed") : undefined
           );
           if (!failed) {
-            for (const id of request.movementIds) pendingPairs.current.delete(id);
+            for (const id of request.movementIds) {
+              pendingPairs.current.delete(id);
+              operationTargets.current.delete(id);
+            }
             setUnpairedPositionIds(
-              new Set([...pendingPairs.current.values()].map(({ movement }) => movement.positionId))
+              new Set([
+                ...[...pendingPairs.current.values()].map(({ movement }) => movement.positionId),
+                ...[...operationTargets.current.values()].map(({ positionId }) => positionId),
+              ])
             );
             setPairedMovementIds((previous) => new Set([...previous, ...request.movementIds]));
           }
@@ -159,7 +178,7 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
     const currentIds = new Set(activities.map(({ movement }) => movement.movementId));
     requested.current = new Set([...requested.current].filter((id) => currentIds.has(id)));
     for (const id of movementWalletIds.current.keys()) {
-      if (!currentIds.has(id) && !pendingPairs.current.has(id))
+      if (!currentIds.has(id) && !pendingPairs.current.has(id) && !operationTargets.current.has(id))
         movementWalletIds.current.delete(id);
     }
     const confirmed = activities.filter(
@@ -257,5 +276,10 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
     balanceOf,
     beginSubmission,
     refresh,
+    refreshOperation: (movementId: string, positionId: string, custodyWalletId: string) => {
+      operationTargets.current.set(movementId, { positionId, custodyWalletId });
+      movementWalletIds.current.set(movementId, custodyWalletId);
+      return refresh([movementId]);
+    },
   };
 }

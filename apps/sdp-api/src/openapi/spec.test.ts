@@ -389,44 +389,24 @@ describe("OpenAPI spec", () => {
       }
     }
 
-    const depositPreviewRequest = getJsonSchema(
-      publicDocument.paths?.["/v1/earn/vault-deposit-previews"]?.post?.requestBody
-    );
-    expect(depositPreviewRequest.required).toEqual(
-      expect.arrayContaining(["strategyId", "amount"])
-    );
-    expect(
-      JSON.stringify(
-        publicDocument.paths?.["/v1/earn/vault-deposit-previews"]?.post?.responses?.["200"]
-      )
-    ).toContain("sharesOut");
-
-    const withdrawalBuildRequest = getJsonSchema(
-      publicDocument.paths?.["/v1/earn/external-wallet/withdrawal-transactions"]?.post?.requestBody
-    );
-    expect(withdrawalBuildRequest.required).toEqual(
-      expect.arrayContaining(["positionId", "shares"])
-    );
-    expect(withdrawalBuildRequest.properties).not.toHaveProperty("strategyId");
-    expect(withdrawalBuildRequest.properties?.redemptionMode?.enum).toEqual([
-      "standard",
-      "instant",
-    ]);
+    for (const path of [
+      "/v1/earn/vault-deposit-previews",
+      "/v1/earn/external-wallet/deposit-transactions",
+      "/v1/earn/external-wallet/withdrawal-transactions",
+      "/v1/earn/external-wallet/withdrawal-request-transactions",
+    ]) {
+      const retired = publicDocument.paths?.[path]?.post;
+      expect(retired?.deprecated).toBe(true);
+      expect(retired?.responses?.["410"]).toBeDefined();
+      expect(retired?.responses?.["200"]).toBeUndefined();
+      expect(retired?.requestBody).toBeUndefined();
+    }
 
     expect(
       JSON.stringify(
         publicDocument.paths?.["/v1/earn/external-wallet/positions"]?.get?.responses?.["200"]
       )
     ).toContain('"unlockTimestamp"');
-
-    for (const path of [
-      "/v1/earn/external-wallet/deposit-transactions",
-      "/v1/earn/external-wallet/withdrawal-transactions",
-    ]) {
-      expect(JSON.stringify(publicDocument.paths?.[path]?.post?.responses?.["200"])).toContain(
-        '"sponsored"'
-      );
-    }
 
     const submitRequest = getJsonSchema(
       publicDocument.paths?.["/v1/earn/external-wallet/deposits"]?.post?.requestBody
@@ -458,7 +438,7 @@ describe("OpenAPI spec", () => {
       .filter((file) => file.endsWith(".mdx"))
       .map((file) => readFileSync(new URL(file, guideDirectory), "utf8"))
       .join("\n");
-    const partnerPaths = literalEarnPaths(`${guide}\n${guides}\n${generatedModule}`);
+    const partnerPaths = literalEarnPaths(`${guide}\n${guides}`);
     expect(partnerPaths).toEqual(
       expect.arrayContaining([
         "/v1/earn/external-wallet/withdrawal-options",
@@ -478,7 +458,9 @@ describe("OpenAPI spec", () => {
       .filter((file) => file.endsWith(".mdx"))
       .map((file) => readFileSync(new URL(file, draftDirectory), "utf8"))
       .join("\n");
-    const draftPaths = literalEarnPaths(drafts);
+    // Dashboard snippets can use internal routes; their source is not a
+    // publication decision for the partner OpenAPI contract.
+    const draftPaths = literalEarnPaths(`${drafts}\n${generatedModule}`);
     expect(draftPaths.length).toBeGreaterThan(0);
     for (const path of draftPaths) {
       expect(
@@ -488,34 +470,8 @@ describe("OpenAPI spec", () => {
     }
   });
 
-  it("publishes both asynchronous withdrawal mechanisms with their exact row shapes", () => {
+  it("retains both legacy withdrawal mechanisms in reads and previews", () => {
     const doc = createPublicOpenApiDocument(EXPERIMENTAL);
-    const requestPath = doc.paths?.["/v1/earn/external-wallet/withdrawal-request-transactions"];
-
-    const buildRequest = getJsonSchema(requestPath?.post?.requestBody);
-    expect(buildRequest.anyOf).toHaveLength(3);
-    const operatorRequests =
-      buildRequest.anyOf?.filter((variant) =>
-        variant.properties?.mechanism?.enum?.includes("operatorRedemption")
-      ) ?? [];
-    expect(operatorRequests).toHaveLength(2);
-    const operatorRequest = operatorRequests.find((variant) => variant.properties?.shares);
-    expect(operatorRequest?.required).toEqual(
-      expect.arrayContaining(["positionId", "shares", "mechanism"])
-    );
-    // A par request over held intermediate names its amount instead of shares.
-    const intermediateRequest = operatorRequests.find(
-      (variant) => variant.properties?.intermediateAmount
-    );
-    expect(intermediateRequest?.required).toEqual(
-      expect.arrayContaining(["positionId", "intermediateAmount", "mechanism"])
-    );
-    expect(intermediateRequest?.properties).not.toHaveProperty("shares");
-    for (const variant of operatorRequests) {
-      expect(variant.properties).not.toHaveProperty("strategyId");
-      expect(variant.properties).not.toHaveProperty("discountBps");
-      expect(variant.properties).not.toHaveProperty("deadlineSeconds");
-    }
 
     const options = getJsonSchema(
       doc.paths?.["/v1/earn/external-wallet/withdrawal-options"]?.post?.responses?.["200"]
@@ -556,20 +512,6 @@ describe("OpenAPI spec", () => {
     expect(operatorRecord?.properties?.discountBps?.nullable).toBe(true);
     expect(operatorRecord?.properties?.maturityTimestamp?.nullable).toBe(true);
     expect(operatorRecord?.properties?.deadlineTimestamp?.nullable).toBe(true);
-
-    const buildResponse = getJsonSchema(requestPath?.post?.responses?.["200"]);
-    const buildVariants = buildResponse.properties?.data?.properties?.transaction?.anyOf ?? [];
-    const operatorBuild = buildVariants.find(
-      (variant) =>
-        variant.properties?.action?.enum?.includes("request") &&
-        variant.properties?.mechanism?.enum?.includes("operatorRedemption")
-    );
-    expect(operatorBuild?.required).toEqual(
-      expect.arrayContaining(["mechanism", "intermediateMint", "intermediateAmount"])
-    );
-    expect(operatorBuild?.properties).not.toHaveProperty("discountBps");
-    expect(operatorBuild?.properties).not.toHaveProperty("maturityTimestamp");
-    expect(operatorBuild?.properties).not.toHaveProperty("deadlineTimestamp");
   });
 
   it("documents allowlist search/label filters and the labels endpoint", () => {

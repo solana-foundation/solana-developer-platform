@@ -77,7 +77,7 @@ const IDEMPOTENCY_CONTRACT =
 const SERVER_ERROR_RETRY = {
   store: "A 5xx is stored and replayed like any other answer; retry it with a new key.",
   rerun:
-    "After a 5xx, a retry with the same key runs again and answers from the original record instead of acting twice; that answer also carries `Idempotent-Replayed: true`.",
+    "Before the request commits its resource, a same-key retry after a 5xx may run again and recover from the original record instead of acting twice. Once committed, the 5xx is stored and replayed; read current state with GET.",
 } as const satisfies Record<IdempotencyDocumentation["serverErrors"], string>;
 
 const UNRECORDED_OUTCOME = {
@@ -87,7 +87,7 @@ const UNRECORDED_OUTCOME = {
 } as const satisfies Record<"record" | "none", string>;
 
 const ANSWER_AFTER_RECORD =
-  "Once the request has written its record, any answer below 500 is stored: a transfer that fails after that (such as 400 `TRANSACTION_FAILED` or a 409 signer mismatch) answers a same-key retry with the same error and `Idempotent-Replayed: true`, and after 24 hours the record answers with the same status and code. A 5xx is not stored: a same-key retry runs again and is answered from the record. To try again after a failure, send the request with a new key.";
+  "Once the request commits its record, every status is stored, including 5xx: a same-key retry returns the same status and body with `Idempotent-Replayed: true`. Read current state with GET before deciding whether to make a new request. After 24 hours the durable record answers a retry according to its current state.";
 
 const PROVIDER_DEDUPE_RETRY =
   "On a custody provider that returns the same wallet for the same request ID, a 5xx is not stored: a same-key retry runs again and gets back the wallet the first attempt made. The Idempotency guide lists those providers and how long each keeps the request ID. On any other provider, a 5xx is stored and replayed like any other answer; check `GET /v1/wallets` before retrying with a new key.";

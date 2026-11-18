@@ -1,0 +1,6 @@
+ALTER TABLE earn_external_wallet_withdrawal_request_transactions
+  VALIDATE CONSTRAINT earn_queued_build_custody_wallet_fkey;
+ALTER TABLE earn_external_wallet_withdrawal_request_transactions
+  VALIDATE CONSTRAINT earn_queued_build_strategy_fkey;
+ALTER TABLE earn_external_wallet_withdrawal_request_transactions
+  VALIDATE CONSTRAINT earn_external_wallet_withdrawal_request_transactions_request_shape_check;

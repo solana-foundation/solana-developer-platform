@@ -29,7 +29,8 @@ import type {
   YieldMovement,
   YieldWithdrawalRequest,
 } from "@/types";
-import { arrivalCopy, TransferDialog } from "./transfer-dialog";
+import { OperationActivity } from "./operation-activity";
+import { TransferDialog } from "./transfer-dialog";
 
 interface OverviewDashboardProps {
   data: DashboardData;
@@ -119,7 +120,6 @@ export function OverviewDashboard({
             symbol={token.symbol}
             available={checking.balance}
             strategy={strategy}
-            feesPaidBy={wallet.feesPaidBy}
             busy={busy}
             disabledReason={depositDisabledReason(
               strategy.fundable && strategy.status === "active",
@@ -131,17 +131,17 @@ export function OverviewDashboard({
             direction="to-checking"
             variant="outline"
             symbol={token.symbol}
-            available={savings.withdrawable}
+            available={savings.balance}
             strategy={strategy}
-            withdrawalOptions={savings.withdrawalOptions}
-            feesPaidBy={wallet.feesPaidBy}
             busy={busy}
-            disabledReason={withdrawalDisabledReason(savings)}
-            onSubmit={(input) =>
-              input.route === "deposit"
-                ? Promise.reject(new Error("Invalid withdrawal route"))
-                : onWithdraw(input)
+            disabledReason={
+              !savings.position
+                ? "Savings is empty"
+                : savings.balance === undefined
+                  ? "Savings balance is unavailable"
+                  : undefined
             }
+            onSubmit={onWithdraw}
           />
         </div>
       </section>
@@ -157,7 +157,11 @@ export function OverviewDashboard({
         <AccountCard
           icon={PiggyBankIcon}
           name="Savings"
-          badge={formatApy(strategy.currentApy)}
+          badge={formatApy(
+            strategy.rate
+              ? (strategy.rate.value ?? undefined)
+              : strategy.currentApy
+          )}
           amount={savingsBalance(savings.balance, token.symbol)}
           {...savingsDetail(savings, token.symbol, earningsUpdating)}
           footer={savingsFooter(savings)}
@@ -171,8 +175,21 @@ export function OverviewDashboard({
         onCancel={onCancelQueuedWithdrawal}
       />
 
+      <OperationActivity
+        operations={data.operations ?? []}
+        strategyName={strategy.name}
+        symbol={token.symbol}
+        tokenMint={token.mint}
+        onUpdated={onRefresh}
+      />
+
       <RecentActivity
-        movements={data.movements}
+        movements={data.movements.filter(
+          (movement) =>
+            !data.operations?.some(
+              (operation) => operation.result?.signature === movement.signature
+            )
+        )}
         symbol={token.symbol}
         cluster={wallet.cluster}
       />
@@ -226,41 +243,19 @@ function depositDisabledReason(
   return undefined;
 }
 
-function withdrawalDisabledReason(
-  savings: DashboardData["savings"]
-): string | undefined {
-  if (savings.position === null) return "Nothing in savings yet";
-  if (savings.balance === undefined || savings.withdrawable === undefined)
-    return "Savings balance is still updating";
-  if (savings.withdrawable === "0")
-    return "Nothing available to move right now";
-  if (!savings.withdrawalOptions)
-    return "Withdrawal routes are temporarily unavailable";
-  if (
-    !savings.withdrawalOptions.instant &&
-    !savings.withdrawalOptions.providerOrder &&
-    !(
-      savings.withdrawalOptions.queued &&
-      savings.withdrawalOptions.queueAsset?.allowWithdrawals
-    )
-  ) {
-    return "No supported withdrawal route is available right now";
-  }
-  return undefined;
-}
-
 function savingsBalance(balance: string | undefined, symbol: string): string {
   return balance === undefined ? "—" : formatAmount(balance, symbol);
 }
 
 function savingsFooter(savings: DashboardData["savings"]): string {
-  const { strategy, withdrawalOptions } = savings;
-  let availability = "Withdrawal routes updating";
-  if (withdrawalOptions?.instant) availability = "Withdraw anytime";
-  else if (withdrawalOptions?.providerOrder) {
-    availability = `Withdrawals arrive ${arrivalCopy(strategy).toLowerCase()}`;
-  } else if (withdrawalOptions?.queued) availability = "Queued withdrawals";
-  return `${strategy.name} · ${availability}`;
+  const { strategy } = savings;
+  const timestamp = strategy.rate?.observedAt
+    ? Date.parse(strategy.rate.observedAt)
+    : Number.NaN;
+  const observation = Number.isFinite(timestamp)
+    ? `observed ${formatDate(new Date(timestamp).toISOString())}`
+    : "observation time unavailable";
+  return `${strategy.name} · Provider-reported APY, ${observation}`;
 }
 
 function QueuedWithdrawals({

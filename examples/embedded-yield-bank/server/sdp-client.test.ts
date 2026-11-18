@@ -13,42 +13,6 @@ const config: DemoConfig = {
 describe("EmbeddedYieldClient", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("passes the sponsor through without exposing the API key in the body", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      Response.json({
-        data: {
-          transaction: {
-            transactionId: "transaction",
-            transaction: "base64",
-            lastValidBlockHeight: "100",
-            ownerAddress: "customer",
-            feePayer: "northstar",
-            provider: "provider",
-          },
-        },
-      })
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    await new EmbeddedYieldClient(config).buildDeposit({
-      strategyId: "strategy",
-      ownerAddress: "customer",
-      feePayer: "northstar",
-      amount: "1",
-      sourceTokenMint: "usdc",
-    });
-
-    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    expect(JSON.parse(request.body as string)).toMatchObject({
-      ownerAddress: "customer",
-      feePayer: "northstar",
-    });
-    expect(new Headers(request.headers).get("Authorization")).toBe(
-      "Bearer test-api-key"
-    );
-    expect(request.body).not.toContain("test-api-key");
-  });
-
   it("reads a movement through the chain-aware detail endpoint", async () => {
     const movement = {
       movementId: "movement/with space",
@@ -87,8 +51,8 @@ describe("EmbeddedYieldClient", () => {
       new EmbeddedYieldClient(config).listStrategies()
     ).resolves.toHaveLength(101);
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
-      "http://127.0.0.1:8787/v1/earn/strategies?page=1&pageSize=100",
-      "http://127.0.0.1:8787/v1/earn/strategies?page=2&pageSize=100",
+      "http://127.0.0.1:8787/v1/earn/discovery?page=1&pageSize=100",
+      "http://127.0.0.1:8787/v1/earn/discovery?page=2&pageSize=100",
     ]);
   });
 
@@ -128,25 +92,9 @@ describe("EmbeddedYieldClient", () => {
     expect(fetchMock).toHaveBeenCalledTimes(100);
   });
 
-  it("builds and submits keyed queued-withdrawal actions", async () => {
+  it("resumes an already-built request and builds its keyed cancellation", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(
-        Response.json({
-          data: {
-            transaction: {
-              transactionId: "request-build",
-              transaction: "base64",
-              lastValidBlockHeight: "100",
-              ownerAddress: "customer",
-              provider: "veda",
-              positionId: "position",
-              action: "request",
-              requestAddress: "request-address",
-            },
-          },
-        })
-      )
       .mockResolvedValueOnce(
         Response.json({
           data: { withdrawalRequest: { withdrawalRequestId: "request" } },
@@ -177,12 +125,6 @@ describe("EmbeddedYieldClient", () => {
     vi.stubGlobal("fetch", fetchMock);
     const client = new EmbeddedYieldClient(config);
 
-    await client.buildQueuedWithdrawalRequest({
-      positionId: "position",
-      shares: "2",
-      discountBps: 25,
-      deadlineSeconds: 600,
-    });
     await client.submitQueuedWithdrawalRequest(
       "request-build",
       "signed",
@@ -198,15 +140,14 @@ describe("EmbeddedYieldClient", () => {
     );
 
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
-      "http://127.0.0.1:8787/v1/earn/external-wallet/withdrawal-request-transactions",
       "http://127.0.0.1:8787/v1/earn/external-wallet/withdrawal-requests",
       "http://127.0.0.1:8787/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
       "http://127.0.0.1:8787/v1/earn/external-wallet/withdrawal-request-cancellations",
     ]);
-    const requestSubmit = fetchMock.mock.calls[1]?.[1] as
+    const requestSubmit = fetchMock.mock.calls[0]?.[1] as
       | RequestInit
       | undefined;
-    const cancelSubmit = fetchMock.mock.calls[3]?.[1] as
+    const cancelSubmit = fetchMock.mock.calls[2]?.[1] as
       | RequestInit
       | undefined;
     expect(new Headers(requestSubmit?.headers).get("Idempotency-Key")).toBe(

@@ -1469,6 +1469,7 @@ const earnExternalWalletTokenEarningsSchema = z
         "withdrawals_pending",
         "deposits_not_valued",
         "withdrawals_not_valued",
+        "cost_basis_unknown",
       ])
       .optional()
       .openapi({
@@ -1479,7 +1480,7 @@ const earnExternalWalletTokenEarningsSchema = z
           "whose shares leave the wallet before its payout, which can take days), " +
           "or `deposits_not_valued` and `withdrawals_not_valued` (SDP did not " +
           "observe a finalized deposit or withdrawal, so `totalDeposited` or " +
-          "`totalWithdrawn` is incomplete).",
+          "`totalWithdrawn` is incomplete), or `cost_basis_unknown` (shares were acquired outside recorded history).",
       }),
   })
   .openapi({ description: "Earnings for one deposit token across the wallet's positions." });

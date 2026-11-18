@@ -5,6 +5,35 @@ the fail-closed registry and check capabilities — no provider-id branches
 anywhere. See `packages/sdp-earn/README.md` for architecture; ADR 0002 for
 invariants (the 2026-08-11 addendum owns the ledger-vs-live rules below).
 
+## Core strategy operations
+
+New preparation uses `/discovery`, `/positions`, `/deposit` and `/withdraw`.
+Treasury and Embedded Yield share those routes. The generic `/v1/operations`
+lifecycle is initially Earn-owned and stays outside public OpenAPI pending
+named security sign-off. The existing 21 partner paths are pinned compatibility
+routes, including explicit 410 responses for retired preparation paths.
+
+Preparation stores immutable intent and an authorized private source identity.
+Execute verifies the current action ID/version, durably queues the attempt and
+returns 202. Every signer, provider proposal and broadcast runs in the worker.
+New direct and queued builds persist `operation_only=true`; legacy submits
+cannot consume them, even after a refresh replaces the parent action.
+
+Fresh legacy custody withdrawals/requests and external withdrawal/request
+builds return 410. Core `/withdraw` accepts their existing direct positions.
+The sections below preserve historical implementation context; they do not
+re-enable retired writers. Read-only quotes/options, exact already-built signed
+submits, existing request cancellation and legacy program exits remain drain
+compatibility. Cancellation and program exit keep their old execution model
+until their obligations are migrated.
+
+Operations coordinate existing movements and provider obligations. They do not
+replace the ledger. Preserve exact signed bytes, durable dispatch identity and
+irreversible observation-only restrictions across restarts. Cancellation intent
+is sticky and is not terminal evidence. The worker restores only the currently
+leased attempt's recorded principal, then rechecks live authority at the shared
+signing and sponsorship waists.
+
 ## The unified movement ledger (PRO-1705)
 
 `earn_movements` is the single authoritative record of every Earn money movement —

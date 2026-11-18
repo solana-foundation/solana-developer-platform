@@ -14,6 +14,8 @@ import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { address, type Signature } from "@solana/kit";
 import { type DatabaseClient as AppDb, getDb } from "@/db/client";
+import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
+import type { ClaimDiscoveredStrategyPositionInput } from "@/db/repositories/earn-movements.repository";
 import {
   type CreateSignedQueuedWithdrawalRequestInput,
   createPostgresEarnVaultWithdrawalRequestsRepository,
@@ -108,6 +110,10 @@ export interface ExternalQueuedWithdrawalBuiltTransaction {
   id: string;
   environment: SdpEnvironment;
   provider: string;
+  custody_wallet_id?: string | null;
+  fee_mode?: "wallet" | "partner" | "sponsored";
+  operation_only?: boolean;
+  strategy_id?: string | null;
   position_id: string | null;
   withdrawal_request_id: string | null;
   action: "request" | "cancel";
@@ -796,11 +802,15 @@ async function compileExternalPlan(input: {
   position: QueuedWithdrawalPosition;
   plan: EarnVaultTransactionPlan;
   feePayer?: string;
+  fee?: VaultFeeMode;
 }) {
   const deadline = createVaultDeadline();
-  const fee: VaultFeeMode = input.feePayer
-    ? { kind: "caller-provided", feePayer: address(input.feePayer) }
-    : { kind: "wallet-pays" };
+  const fee: VaultFeeMode =
+    input.fee ??
+    (input.feePayer
+      ? { kind: "caller-provided", feePayer: address(input.feePayer) }
+      : { kind: "wallet-pays" });
+  const payer = vaultRentPayer(fee);
   const expectedAssetIdentity = {
     depositTokenMint: input.position.tokenMint,
     shareMint: input.position.shareMint,
@@ -822,7 +832,7 @@ async function compileExternalPlan(input: {
     expectedAssetIdentity,
     plan: input.plan,
     owner: address(input.position.ownerAddress),
-    ...(input.feePayer ? { feePayer: address(input.feePayer) } : {}),
+    ...(payer ? { feePayer: address(payer) } : {}),
     prepared: simulation.prepared,
   });
 }
@@ -834,10 +844,20 @@ export async function buildExternalQueuedWithdrawalRequest(
     position: QueuedWithdrawalPosition;
     terms: AsyncWithdrawalTermsInput;
     feePayer?: string;
+    custodyWalletId?: string;
+    fee?: VaultFeeMode;
+    /** A verified discovery selector is claimed only after signed submission. */
+    discoveredStrategyId?: string;
+    asyncOperation?: boolean;
   }
 ): Promise<ExternalQueuedWithdrawalBuiltTransaction> {
   const transactionId = generateEarnExternalWalletWithdrawalRequestTransactionId();
-  const feePayer = input.feePayer === input.position.ownerAddress ? undefined : input.feePayer;
+  const feePayer =
+    input.fee === undefined
+      ? input.feePayer === input.position.ownerAddress
+        ? undefined
+        : input.feePayer
+      : vaultRentPayer(input.fee);
   const { quote, plan, mechanism } = await quoteAndBuildRequest(env, {
     position: input.position,
     terms: input.terms,
@@ -849,13 +869,17 @@ export async function buildExternalQueuedWithdrawalRequest(
     actor: input.actor,
     position: input.position,
     plan,
+    fee: input.fee,
     ...(feePayer ? { feePayer } : {}),
   });
   const built: ExternalQueuedWithdrawalBuiltTransaction = {
     id: transactionId,
     environment: currentClusterScope().environment,
     provider: input.position.provider,
-    position_id: input.position.id,
+    custody_wallet_id: input.custodyWalletId ?? null,
+    fee_mode: input.fee?.kind === "sponsored" ? "sponsored" : feePayer ? "partner" : "wallet",
+    position_id: input.discoveredStrategyId === undefined ? input.position.id : null,
+    strategy_id: input.discoveredStrategyId ?? null,
     withdrawal_request_id: null,
     action: "request",
     mechanism,
@@ -886,6 +910,10 @@ export async function buildExternalQueuedWithdrawalRequest(
     projectId: input.actor.projectId,
     environment: built.environment,
     provider: built.provider,
+    custodyWalletId: built.custody_wallet_id,
+    feeMode: built.fee_mode,
+    operationOnly: input.asyncOperation ?? false,
+    strategyId: built.strategy_id,
     positionId: built.position_id,
     action: "request",
     mechanism: built.mechanism,
@@ -921,6 +949,9 @@ export async function buildExternalQueuedWithdrawalCancel(
     request: EarnVaultWithdrawalRequestRow;
     requestAddress: string;
     feePayer?: string;
+    custodyWalletId?: string;
+    asyncOperation?: boolean;
+    fee?: VaultFeeMode;
   }
 ): Promise<ExternalQueuedWithdrawalBuiltTransaction> {
   const { environment, cluster } = currentClusterScope();
@@ -966,17 +997,25 @@ export async function buildExternalQueuedWithdrawalCancel(
       `Queued cancellation builder returned a ${plan.cluster} plan for the configured ${cluster} cluster`
     );
   }
-  const feePayer = input.feePayer === input.position.ownerAddress ? undefined : input.feePayer;
+  const feePayer =
+    input.fee === undefined
+      ? input.feePayer === input.position.ownerAddress
+        ? undefined
+        : input.feePayer
+      : vaultRentPayer(input.fee);
   const unsigned = await compileExternalPlan({
     actor: input.actor,
     position: input.position,
     plan,
+    fee: input.fee,
     ...(feePayer ? { feePayer } : {}),
   });
   const built: ExternalQueuedWithdrawalBuiltTransaction = {
     id: transactionId,
     environment,
     provider: input.position.provider,
+    custody_wallet_id: input.custodyWalletId ?? null,
+    fee_mode: input.fee?.kind === "sponsored" ? "sponsored" : feePayer ? "partner" : "wallet",
     position_id: input.position.id,
     withdrawal_request_id: input.request.id,
     action: "cancel",
@@ -1007,6 +1046,9 @@ export async function buildExternalQueuedWithdrawalCancel(
     projectId: input.actor.projectId,
     environment: built.environment,
     provider: built.provider,
+    custodyWalletId: built.custody_wallet_id,
+    feeMode: built.fee_mode,
+    operationOnly: input.asyncOperation ?? false,
     positionId: built.position_id,
     withdrawalRequestId: input.request.id,
     action: "cancel",
@@ -1030,6 +1072,8 @@ async function requireExternalBuild(
     actor: QueuedWithdrawalActor;
     transactionId: string;
     action: "request" | "cancel";
+    custodyWalletId?: string | null;
+    allowOperationBuild?: boolean;
   }
 ): Promise<EarnExternalWalletWithdrawalRequestTransactionRow> {
   const build = await createPostgresEarnVaultWithdrawalRequestsRepository(
@@ -1042,11 +1086,55 @@ async function requireExternalBuild(
     !build ||
     build.project_id !== input.actor.projectId ||
     build.environment !== currentClusterScope().environment ||
-    build.action !== input.action
+    build.action !== input.action ||
+    (build.custody_wallet_id ?? null) !== (input.custodyWalletId ?? null)
   ) {
     throw notFound("Earn external-wallet queued withdrawal transaction");
   }
+  if (build.operation_only === true && input.allowOperationBuild !== true)
+    throw conflict("Submit this transaction through its operation action", {
+      reason: "operation_execution_required",
+    });
   return build;
+}
+
+/** Signed bytes prove the owner; retained catalogue metadata proves the instrument. */
+async function resolveSignedDiscoveredQueueClaim(
+  env: Env,
+  build: EarnExternalWalletWithdrawalRequestTransactionRow,
+  input: { actor: QueuedWithdrawalActor; allowDiscoveredPosition?: boolean }
+): Promise<ClaimDiscoveredStrategyPositionInput | undefined> {
+  if (build.position_id !== null) return undefined;
+  if (!input.allowDiscoveredPosition || !build.strategy_id)
+    throw notFound("Earn queued withdrawal position");
+  const strategy = await createPostgresEarnRepository(getDb(env)).getStrategyById(
+    build.strategy_id
+  );
+  if (
+    strategy === null ||
+    strategy.environment !== build.environment ||
+    strategy.host_cluster !== currentClusterScope().cluster ||
+    strategy.provider !== build.provider ||
+    strategy.provider_reference !== build.vault_address ||
+    strategy.share_mint !== build.share_mint ||
+    !strategy.deposit_mints.includes(build.token_mint)
+  )
+    throw notFound("Earn queued withdrawal strategy");
+  return {
+    organizationId: input.actor.organizationId,
+    projectId: input.actor.projectId,
+    environment: build.environment,
+    provider: build.provider,
+    strategyId: strategy.id,
+    strategyReference: strategy.provider_reference,
+    tokenMint: build.token_mint,
+    shareMint: build.share_mint,
+    label: strategy.name,
+    source: build.custody_wallet_id
+      ? { walletId: build.custody_wallet_id }
+      : { ownerAddress: build.owner_address },
+    createdBy: input.actor.userId,
+  };
 }
 
 export async function submitExternalQueuedWithdrawalAction(
@@ -1057,6 +1145,12 @@ export async function submitExternalQueuedWithdrawalAction(
     signedTransaction: string;
     clientRequestId: string;
     action: "request" | "cancel";
+    custodyWalletId?: string | null;
+    allowDiscoveredPosition?: boolean;
+    /** Only the durable operation worker may consume operation-only builds. */
+    allowOperationBuild?: boolean;
+    /** Observation recovery may persist bytes already seen on chain. */
+    broadcast?: boolean;
   }
 ): Promise<QueuedWithdrawalMutationResult> {
   const build = await requireExternalBuild(env, input);
@@ -1064,8 +1158,10 @@ export async function submitExternalQueuedWithdrawalAction(
   const repository = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
   let result: QueuedWithdrawalMutationResult;
   if (input.action === "request") {
+    const discoveredPosition = await resolveSignedDiscoveredQueueClaim(env, build, input);
+    const positionId = build.position_id ?? `discovered:${build.strategy_id}`;
     if (
-      !build.position_id ||
+      (!build.position_id && discoveredPosition === undefined) ||
       build.shares === null ||
       build.quoted_assets === null ||
       build.share_decimals === null ||
@@ -1097,7 +1193,7 @@ export async function submitExternalQueuedWithdrawalAction(
     const fingerprint = requestFingerprint({
       environment: build.environment,
       provider: build.provider,
-      positionId: build.position_id,
+      positionId,
       terms,
       transactionId: build.id,
     });
@@ -1108,7 +1204,9 @@ export async function submitExternalQueuedWithdrawalAction(
       projectId: input.actor.projectId,
       environment: build.environment,
       provider: build.provider,
-      positionId: build.position_id,
+      custodyWalletId: build.custody_wallet_id ?? null,
+      positionId,
+      discoveredPosition,
       ownerAddress: build.owner_address,
       vaultAddress: build.vault_address,
       tokenMint: build.token_mint,
@@ -1167,7 +1265,7 @@ export async function submitExternalQueuedWithdrawalAction(
       initiatedByKeyId: input.actor.apiKeyId ?? null,
     });
   }
-  return broadcastQueuedAction(env, result);
+  return input.broadcast === false ? result : broadcastQueuedAction(env, result);
 }
 
 /**

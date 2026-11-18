@@ -118,6 +118,31 @@ export interface VaultPositionHydrationOptions {
   minimumSlotByPositionId?: ReadonlyMap<string, number>;
   /** `markVaultPositionRowsRead()`, taken once the positions' rows were read. */
   rowsReadAt: number;
+  /** Read provider-owned holdings once; absence never synthesizes a zero balance. */
+  discoverAll?: boolean;
+  discoveryObservations?: { completedScopes: Set<string>; rejectedPositionIds: Set<string> };
+}
+
+/** Internal read coverage, never an owner claim or an authorization token. */
+export function vaultPositionDiscoveryScope(provider: string, owner: string): string {
+  return JSON.stringify([provider, owner]);
+}
+
+function recordDiscoveryObservations(
+  options: VaultPositionHydrationOptions,
+  provider: string,
+  owner: string,
+  positions: readonly HydratableVaultPosition[],
+  snapshots: readonly EarnVaultPositionSnapshot[],
+  live: ReadonlyMap<string, HydratedVaultPositionValue>
+): void {
+  if (!options.discoverAll || !options.discoveryObservations) return;
+  options.discoveryObservations.completedScopes.add(vaultPositionDiscoveryScope(provider, owner));
+  const observed = new Set(snapshots.map((snapshot) => snapshot.providerReference));
+  for (const position of positions) {
+    if (observed.has(position.providerReference) && !live.has(position.id))
+      options.discoveryObservations.rejectedPositionIds.add(position.id);
+  }
 }
 
 /**
@@ -166,10 +191,13 @@ export async function hydrateVaultPositions(
       const minimumSlot = options.minimumSlotByPositionId?.get(position.id);
       // A transfer in one vault must not constrain another holding, even when
       // both belong to the same owner and provider.
-      const key = JSON.stringify([position.ownerAddress, minimumSlot]);
+      const key = JSON.stringify([position.ownerAddress, options.discoverAll ? null : minimumSlot]);
       const batch = byOwner.get(key);
-      if (batch) batch.positions.push(position);
-      else byOwner.set(key, { owner: position.ownerAddress, minimumSlot, positions: [position] });
+      if (batch) {
+        batch.positions.push(position);
+        if (options.discoverAll && minimumSlot !== undefined)
+          batch.minimumSlot = Math.max(batch.minimumSlot ?? 0, minimumSlot);
+      } else byOwner.set(key, { owner: position.ownerAddress, minimumSlot, positions: [position] });
     }
 
     for (const { owner, minimumSlot, positions: ownerPositions } of byOwner.values()) {
@@ -187,7 +215,7 @@ export async function hydrateVaultPositions(
           const client = resolveVaultDirectClient(c.env, provider, hydrationDeadline);
           if (!client) return;
           const runtime = earnRuntime(c.env);
-          const providerReferences = [...trustedByReference.keys()];
+          const providerReferences = options.discoverAll ? [] : [...trustedByReference.keys()];
           const read = () => client.readVaultPositions(runtime, { owner, providerReferences });
           // The whole scoped read is shared, never the inner one: a joiner's
           // own minimum-slot scope would observe no RPC context and fail.
@@ -261,6 +289,7 @@ export async function hydrateVaultPositions(
               );
             }
           }
+          recordDiscoveryObservations(options, provider, owner, ownerPositions, snapshots, live);
         },
       });
     }

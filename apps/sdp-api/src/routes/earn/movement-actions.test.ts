@@ -55,6 +55,7 @@ describe("Earn routes declare an action their movement admits (HOO-2099)", () =>
 
   it("classifies every start route", () => {
     expect(routes.map(({ route }) => route).sort()).toEqual([
+      "POST /v1/earn/deposit",
       "POST /v1/earn/external-wallet/deposit-transactions",
       "POST /v1/earn/external-wallet/deposits",
       "POST /v1/earn/provider-actions/cancellations",

@@ -119,6 +119,18 @@ describe("Treasury balance coordinator", () => {
     expect(result.current.balancesRefreshing).toBe(false);
   });
 
+  it("refreshes the exact funding wallet after a core operation closes its last position", async () => {
+    mocks.positions = [];
+    const { result } = renderHook(() => useTreasuryBalances([]));
+    await act(async () => {
+      await result.current.refreshOperation("operation-movement", "closed-position", "wallet");
+    });
+    expect(mocks.refreshPositions).toHaveBeenCalledWith(["operation-movement"]);
+    expect(mocks.refreshWallets).toHaveBeenCalledWith(101, ["wallet"]);
+    expect(result.current.walletsError).toBeUndefined();
+    expect(result.current.balancesRefreshing).toBe(false);
+  });
+
   it("does not let an old submission's completion clear a newer pending attempt", () => {
     const { result } = renderHook(() => useTreasuryBalances([]));
     let first: () => void = () => {};
@@ -357,7 +369,7 @@ it("recovers more than 100 outstanding pairs through bounded HTTP reads", async 
       if (ids.length > 100) return Response.json({}, { status: 400 });
       return Response.json({
         data: {
-          positions: [position],
+          positions: [{ ...position, source: { walletId: position.custodyWalletId } }],
           hasMore: false,
           nextCursor: null,
           balanceReadContext: { afterMovementIds: ids, minimumSlot: 101 },

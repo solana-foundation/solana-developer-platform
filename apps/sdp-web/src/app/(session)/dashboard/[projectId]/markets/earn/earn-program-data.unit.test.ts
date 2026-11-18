@@ -2,19 +2,16 @@ import type {
   EarnExternalWalletPosition,
   EarnProgramWithdrawalRecord,
   EarnProgramWithdrawalRecordStatus,
-  EarnStrategy,
   EarnVaultDepositRecord,
-  EarnVaultDepositRequest,
   EarnVaultPosition,
   EarnVaultWithdrawal,
   EarnVaultWithdrawalRequestRecord,
 } from "@sdp/types/earn";
+import type { EarnCoreStrategy } from "@sdp/types/earn-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setWindowPathname } from "@/test/window-location";
 import {
   appendVaultPositionsRead,
-  createEarnVaultDeposit,
-  createEarnVaultWithdrawalRequest,
   createEarnWithdrawal,
   type EarnVaultPositionsRead,
   earnExternalWalletSummaryRefreshInterval,
@@ -27,7 +24,6 @@ import {
   fetchEarnProgramsState,
   fetchEarnProgramWithdrawals,
   fetchEarnStrategies,
-  fetchEarnVaultParRedemptionPreview,
   fetchEarnVaultPositions,
   fetchEarnVaultWithdrawalRequests,
   isEarnVaultDepositInFlight,
@@ -78,7 +74,7 @@ describe("last verified vault values", () => {
   });
 });
 
-function strategy(id: string): EarnStrategy {
+function strategy(id: string): EarnCoreStrategy {
   return {
     id,
     provider: "kamino",
@@ -97,6 +93,14 @@ function strategy(id: string): EarnStrategy {
     feeSponsored: false,
     createdAt: TIMESTAMP,
     updatedAt: TIMESTAMP,
+    rate: {
+      value: "0.05",
+      measure: "apy",
+      basis: "provider_reported",
+      observedAt: null,
+      source: { provider: "kamino", providerReference: `${id}-ref` },
+    },
+    capabilities: { deposit: true, withdraw: true, admission: "evaluated_on_prepare" },
   };
 }
 
@@ -299,6 +303,7 @@ describe("fetchEarnStrategies", () => {
         return {
           ok: false,
           status: 503,
+          headers: new Headers(),
           json: async () => ({ error: { message: "Kamino is not configured for sandbox mode." } }),
         } as unknown as Response;
       })
@@ -310,13 +315,17 @@ describe("fetchEarnStrategies", () => {
   });
 });
 
-function vaultPosition(id: string, provider = "kamino"): EarnVaultPosition {
+function vaultPosition(
+  id: string,
+  provider = "kamino"
+): EarnVaultPosition & { source: { walletId: string } } {
   return {
     id,
     provider,
     providerReference: `${id}-ref`,
     label: id,
     custodyWalletId: "cwlt_1",
+    source: { walletId: "cwlt_1" },
     tokenMint: USDC,
     shareMint: `${id}-share-mint`,
     createdAt: TIMESTAMP,
@@ -385,10 +394,10 @@ describe("fetchEarnVaultPositions", () => {
     );
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "/api/dashboard/markets/earn/vault-positions?limit=100"
+      "/api/dashboard/markets/earn/positions?ownerKind=custody&limit=100"
     );
     expect(fetchMock.mock.calls[1]?.[0]).toBe(
-      "/api/dashboard/markets/earn/vault-positions?limit=100&before=cursor_1"
+      "/api/dashboard/markets/earn/positions?ownerKind=custody&limit=100&before=cursor_1"
     );
   });
 
@@ -411,10 +420,14 @@ describe("fetchEarnVaultPositions", () => {
   });
 });
 
-function externalWalletPosition(id: string): EarnExternalWalletPosition {
+function externalWalletPosition(
+  id: string
+): EarnExternalWalletPosition & { source: { ownerAddress: string }; feeSponsored: boolean } {
   return {
     id,
     ownerAddress: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+    source: { ownerAddress: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM" },
+    feeSponsored: false,
     provider: "kamino",
     providerReference: `${id}-ref`,
     label: id,
@@ -531,7 +544,13 @@ describe("external-wallet position reads", () => {
           new Response(
             JSON.stringify({
               data: {
+                positions: [],
+                hasMore: false,
+                nextCursor: null,
+                coverage: "sdp_tracked_positions",
                 summary: {
+                  costBasisCoverage: "complete",
+                  unknownCostBasisPositionCount: 0,
                   walletCount: 2,
                   positionCount: 3,
                   unavailablePositionCount: 0,
@@ -625,93 +644,24 @@ describe("external-wallet position reads", () => {
       "fetch",
       vi.fn(
         async () =>
-          new Response(JSON.stringify({ data: { summary } }), {
-            headers: { "Content-Type": "application/json" },
-          })
+          new Response(
+            JSON.stringify({
+              data: {
+                positions: [],
+                hasMore: false,
+                nextCursor: null,
+                coverage: "sdp_tracked_positions",
+                summary,
+              },
+            }),
+            {
+              headers: { "Content-Type": "application/json" },
+            }
+          )
       )
     );
 
-    await expect(fetchEarnExternalWalletPositionSummary()).rejects.toThrow(
-      "Invalid external-wallet position summary response"
-    );
-  });
-});
-
-describe("createEarnVaultDeposit", () => {
-  it("sends idempotency only as a header and allowlists the JSON body", async () => {
-    const deposit = {
-      positionId: "position_1",
-      movementId: "movement_1",
-      status: "submitted",
-      signature: "signature_1",
-      failureReason: null,
-      replayed: false,
-      strategy: {
-        id: "strategy_1",
-        name: "Vault one",
-        provider: "kamino",
-        providerReference: "vault_1",
-        hostCluster: "devnet",
-      },
-    } as const;
-    const fetchMock = vi.fn(
-      async (_input: RequestInfo | URL, _init?: RequestInit) =>
-        new Response(JSON.stringify({ data: deposit }), {
-          status: 201,
-          headers: { "Content-Type": "application/json" },
-        })
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    const untypedInput = {
-      strategyId: "strategy_1",
-      custodyWalletId: "cwlt_1",
-      amount: "10",
-      minSharesOut: "9.9",
-      requestId: "must-not-be-forwarded",
-    } as EarnVaultDepositRequest & { requestId: string };
-
-    const result = await createEarnVaultDeposit(untypedInput, "deposit-key");
-
-    expect(result).toEqual({
-      ok: true,
-      status: 201,
-      data: { kind: "submitted", deposit },
-    });
-    const [, options] = fetchMock.mock.calls[0] ?? [];
-    const headers = new Headers(options?.headers);
-    expect(headers.get("Idempotency-Key")).toBe("deposit-key");
-    expect(headers.get("x-project-id")).toBe("prj_test_sandbox");
-    expect(JSON.parse(String(options?.body))).toEqual({
-      strategyId: "strategy_1",
-      custodyWalletId: "cwlt_1",
-      amount: "10",
-      minSharesOut: "9.9",
-    });
-    expect(String(options?.body)).not.toContain("requestId");
-  });
-
-  it("rejects a success envelope whose deposit record is incomplete", async () => {
-    // The `as unknown as EarnVaultDeposit` this replaced asserted the record
-    // rather than checking it, so a movement with no signature type-checked as
-    // a settled deposit and failed further downstream.
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        async () =>
-          new Response(JSON.stringify({ data: { positionId: "position_1" } }), {
-            status: 201,
-            headers: { "Content-Type": "application/json" },
-          })
-      )
-    );
-
-    const result = await createEarnVaultDeposit(
-      { strategyId: "strategy_1", custodyWalletId: "cwlt_1", amount: "10" },
-      "deposit-key"
-    );
-
-    expect(result.ok).toBe(false);
-    expect(result).toMatchObject({ error: "Invalid vault deposit response", status: 201 });
+    await expect(fetchEarnExternalWalletPositionSummary()).rejects.toThrow();
   });
 });
 
@@ -1153,63 +1103,6 @@ describe("fetchEarnVaultWithdrawalRequests", () => {
       "Queued withdrawal requests pagination returned a short page while reporting more"
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("preserves the operator-redemption discriminant in preview and request bodies", async () => {
-    const bodies: unknown[] = [];
-    const fetchMock = vi.fn(async (_input: string, init?: RequestInit) => {
-      bodies.push(JSON.parse(String(init?.body)));
-      const isPreview = bodies.length === 1;
-      return new Response(
-        JSON.stringify(
-          isPreview
-            ? {
-                data: {
-                  positionId: "position_1",
-                  mechanism: "operatorRedemption",
-                  shares: "2500",
-                  shareDecimals: 6,
-                  intermediateMint: "wylds",
-                  intermediateAmount: "2501.25",
-                  assetMint: USDC,
-                  assets: "2501.25",
-                  assetDecimals: 6,
-                  blockingIssues: [],
-                },
-              }
-            : {
-                data: {
-                  withdrawalRequest: {
-                    ...queuedWithdrawalRequest("par_request"),
-                    mechanism: "operatorRedemption",
-                    intermediateMint: "wylds",
-                    intermediateAmount: "2501.25",
-                    discountBps: null,
-                    maturityTimestamp: null,
-                    deadlineTimestamp: null,
-                  },
-                },
-              }
-        ),
-        { status: 200, headers: { "Content-Type": "application/json" } }
-      );
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    const input = {
-      positionId: "position_1",
-      shares: "2500",
-      mechanism: "operatorRedemption" as const,
-    };
-
-    const preview = await fetchEarnVaultParRedemptionPreview(input);
-    const created = await createEarnVaultWithdrawalRequest(input, "par-request-key");
-
-    expect(preview).toMatchObject({
-      kind: "ready",
-      value: { mechanism: "operatorRedemption", intermediateMint: "wylds" },
-    });
-    expect(created.ok).toBe(true);
-    expect(bodies).toEqual([input, input]);
   });
 });
 

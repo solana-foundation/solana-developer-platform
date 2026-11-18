@@ -1,7 +1,7 @@
 ---
 module: earn
 title: Embedded Yield
-description: Build customer-signed deposits, balances, and withdrawals into your app, from first request to go-live.
+description: Maintain existing customer-wallet holdings and recover legacy pending movements.
 breadcrumbParent: /docs/earn
 ---
 
@@ -10,8 +10,12 @@ app. Your backend calls SDP with your API key, your app asks the customer's
 wallet to sign, and SDP verifies, broadcasts, and tracks every movement. SDP
 never holds the customer's key.
 
-New to Earn? Run the [Quickstart](/docs/earn/quickstart) first, then come
-back to build the full integration.
+Legacy deposit preview and deposit/withdrawal/request build endpoints now return
+`410 NOT_IMPLEMENTED`. Their examples below describe historical builds and
+cannot initiate new movements. Existing reads, exact signed-build recovery and
+existing request cancellation remain available. The replacement core contract
+is internal pending security sign-off. Never send an operation-only build to a
+legacy submit endpoint.
 
 ## How the pieces fit
 

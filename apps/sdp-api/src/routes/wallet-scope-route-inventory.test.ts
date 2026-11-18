@@ -37,6 +37,7 @@ const SPONSOR_ONLY =
   "the caller's own wallet signs; SDP signs at most as fee sponsor, which is outside wallet scope";
 const CUSTODY_404 =
   "signs nothing; a wallet outside a selected key's scope answers 404 in its authorize step";
+const RETIRED = "returns 410 before preparing, signing or broadcasting";
 
 const TRANSFERS = "routes/payments.transfers.idempotency.test.ts";
 const RECURRING = "routes/payments.recurring.test.ts";
@@ -164,24 +165,39 @@ const WALLET_SCOPE_ROUTES = {
   "POST /v1/dvp/trades/:tradeId/cancel": { refusedEarly: { file: DVP, test: DVP_ACTIONS } },
 
   // Earn
-  "POST /v1/earn/vault-deposits": {
+  "POST /v1/earn/deposit": {
     refusedEarly: {
       file: "routes/earn.vault.test.ts",
-      test: "refuses a wallet outside the key's scope before opening an audit intent or deposit",
+      test: "rejects a wallet outside the authenticated key's scope",
     },
   },
-  "POST /v1/earn/vault-withdrawals": {
+  "POST /v1/earn/withdraw": {
     refusedEarly: {
       file: EARN_EXITS,
-      test: "refuses a withdrawal with wallet_out_of_scope before recording a movement",
+      test: "checks current wallet scope before creating a prepared withdrawal",
     },
   },
-  "POST /v1/earn/vault-withdrawal-requests": {
+  "POST /v1/operations/:operationId/execute": {
     refusedEarly: {
       file: EARN_EXITS,
-      test: "refuses a withdrawal request with wallet_out_of_scope before recording it",
+      test: "refuses $action with wallet_out_of_scope before changing an operation",
     },
   },
+  "POST /v1/operations/:operationId/refresh": {
+    refusedEarly: {
+      file: EARN_EXITS,
+      test: "refuses $action with wallet_out_of_scope before changing an operation",
+    },
+  },
+  "POST /v1/operations/:operationId/cancel": {
+    refusedEarly: {
+      file: EARN_EXITS,
+      test: "refuses $action with wallet_out_of_scope before changing an operation",
+    },
+  },
+  "POST /v1/earn/vault-deposits": { exempt: RETIRED },
+  "POST /v1/earn/vault-withdrawals": { exempt: RETIRED },
+  "POST /v1/earn/vault-withdrawal-requests": { exempt: RETIRED },
   "POST /v1/earn/vault-withdrawal-requests/:withdrawalRequestId/cancel": {
     refusedEarly: {
       file: EARN_EXITS,
@@ -194,13 +210,13 @@ const WALLET_SCOPE_ROUTES = {
       test: "refuses a wallet-scoped key on the payout, before the provider is driven",
     },
   },
-  "POST /v1/earn/programs": { exempt: "links a provider account; signs nothing" },
-  "PUT /v1/earn/programs/:programId": { exempt: "edits a provider account link; signs nothing" },
-  "POST /v1/earn/external-wallet/deposit-transactions": { exempt: SPONSOR_ONLY },
+  "POST /v1/earn/programs": { exempt: RETIRED },
+  "PUT /v1/earn/programs/:programId": { exempt: RETIRED },
+  "POST /v1/earn/external-wallet/deposit-transactions": { exempt: RETIRED },
   "POST /v1/earn/external-wallet/deposits": { exempt: SPONSOR_ONLY },
-  "POST /v1/earn/external-wallet/withdrawal-transactions": { exempt: SPONSOR_ONLY },
+  "POST /v1/earn/external-wallet/withdrawal-transactions": { exempt: RETIRED },
   "POST /v1/earn/external-wallet/withdrawals": { exempt: SPONSOR_ONLY },
-  "POST /v1/earn/external-wallet/withdrawal-request-transactions": { exempt: SPONSOR_ONLY },
+  "POST /v1/earn/external-wallet/withdrawal-request-transactions": { exempt: RETIRED },
   "POST /v1/earn/external-wallet/withdrawal-requests": { exempt: SPONSOR_ONLY },
   "POST /v1/earn/external-wallet/withdrawal-request-cancel-transactions": {
     exempt: SPONSOR_ONLY,

@@ -1,7 +1,7 @@
 # Northstar Bank
 
 Northstar is a self-contained Next.js App Router example of a bank that offers
-**Checking** and **Savings**, where Savings is one SDP Embedded Yield strategy.
+**Checking** and **Savings**, where Savings is one SDP Earn strategy.
 The React UI and its server routes deploy together, while SDP builds the
 transactions and keeps the movement and queued-withdrawal ledgers.
 
@@ -23,94 +23,67 @@ affordances for the example.
 
 ## How the bank maps to SDP
 
-| Northstar                    | SDP                                                                                                                                                                                     |
-| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Checking balance             | The demo wallet's balance of the strategy's deposit token, read over RPC                                                                                                                |
-| Savings account              | One `/v1/earn/strategies` entry: `DEMO_STRATEGY_ID`, or the first fundable DeFi USDC strategy on `SOLANA_CLUSTER` (with none qualifying, every page load fails until fixed)             |
-| Savings balance and earnings | The wallet's open position plus valued shares held in a queued request; earnings use SDP's formula (value + finalized payouts - finalized deposits) over that strategy's movements only |
-| Move to savings              | Deposit preview when the strategy requires a floor, then build, server-side sign, submit                                                                                                |
-| Move to checking             | Discover live withdrawal routes, then use the selected direct or queued flow without silent fallback                                                                                    |
-| Queued withdrawals           | Preview live limits, escrow shares, restore every unfinished request after refresh, and offer owner-signed recovery only after `expiredCancelable`                                      |
-| Recent activity              | External-wallet movements whose provider and vault match the strategy, shown in the deposit token, kept after the position closes                                                       |
+| Northstar             | SDP                                                                                                                     |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Savings strategy      | `/v1/earn/discovery`, selected by `DEMO_STRATEGY_ID` or the first fundable DeFi USDC strategy on the configured cluster |
+| Savings holding       | `/v1/earn/positions?ownerAddress=...&discover=true`, including verified pre-existing holdings in integrated strategies  |
+| Move to savings       | `/v1/earn/deposit` prepares an operation for review                                                                     |
+| Move to checking      | `/v1/earn/withdraw` prepares an operation using the position ID and token amount                                        |
+| Approval and progress | `/v1/operations/{id}/execute`, then operation reads until verified completion                                           |
+| Cancellation          | `/v1/operations/{id}/cancel`, followed by any returned signature action and continued polling                           |
 
-The customer never sees shares or providers. For a queued exit they do see the
-financial choices that matter: accepted discount, maturity, solver window, and
-the fact that the first transaction escrows shares rather than paying assets.
-Northstar submits signed transactions to SDP and reads the resulting tenant
-movements, positions, and durable withdrawal requests with its project's API
-key, like every Earn integration. Queue builds and recovery go through SDP so
-the durable status needed to get the customer's shares back is never lost.
+Preparing shows current estimates, minimum proceeds, fees and withdrawal options.
+It does not sign or broadcast. **Approve execution** signs the exact transaction
+returned by SDP and submits the reviewed action ID and version. Execute returns
+`202` when work is durably accepted. SDP's worker handles submission, custody
+approval and settlement asynchronously. A queue request escrows shares; completion
+requires a verified payout or return of shares.
 
-The SDP client lives in [`server/sdp-client.ts`](server/sdp-client.ts), the
-bank rules (strategy choice, amount to shares) in
-[`server/savings.ts`](server/savings.ts), the transaction orchestration in
-[`server/embedded-yield.ts`](server/embedded-yield.ts), and the Next.js route
-handlers in [`src/app/api`](src/app/api).
+Checking is the wallet's observed token balance. Savings uses SDP's observed
+position value, with unavailable values left unknown. Discovery cannot establish
+an acquisition date or cost basis for pre-existing holdings, so their earnings
+remain unknown. APY is a decimal fraction with provider provenance and an
+observation timestamp, which can also be unknown.
+
+The four Earn endpoints serve this bank and the Treasury dashboard. The demo
+uses external owner addresses, without registering custody wallets. Historical
+movement and withdrawal-request reads remain internal compatibility sources for
+older accounting and recovery. New actions use operations.
+
+The HTTP client is in [`server/sdp-client.ts`](server/sdp-client.ts), server-side
+signing in [`server/embedded-yield.ts`](server/embedded-yield.ts), and operation
+recovery in [`src/lib/core-api.ts`](src/lib/core-api.ts).
 
 ## Architecture and security
 
-- Next.js serves both the dashboard and `/api` route handlers from one origin.
-- `SDP_API_KEY`, wallet private keys, and fee-payer keys are read only by
-  modules guarded with `server-only`.
-- The deployment, including signing routes, fails closed behind HTTP Basic
-  auth using `DEMO_ACCESS_USERNAME` and `DEMO_ACCESS_PASSWORD`.
-- Known link unfurlers (Slack, iMessage, X, Discord) may read the page shell
-  at `/` without credentials so shared links render a card. The shell holds
-  branding and metadata only; every API route still requires Basic auth. See
-  [`server/link-preview.ts`](server/link-preview.ts).
-- The favicon, social card, and `robots.txt` are public. Robots are asked not
-  to index the demo.
-- Deposit and withdrawal routes accept same-origin JSON requests only, before
-  any request body can reach the server-side signer.
-- Every unsigned transaction is decoded before signing. Its compiled fee payer
-  must match the configured customer or sponsor, and signing must preserve the
-  exact message bytes SDP built.
-- No secret uses a `NEXT_PUBLIC_` prefix and no secret is serialized into page
-  props or API responses.
-- Transfer routes submit promptly. The browser polls every second until
-  Solana confirms the transfer, then returns to a 30-second background refresh.
-  It gives up after two minutes and backs off for exactly the `Retry-After` SDP
-  sends on a 429. This avoids holding a serverless function open.
-- Active refreshes are single-flight and silent. A slow RPC read cannot fan out
-  overlapping requests, flash a loading skeleton, or animate the manual refresh
-  control. The transfer dialog closes as soon as SDP accepts the movement while
-  balances and activity update in place.
-- A normal refresh with an open position costs four SDP calls (positions,
-  movements, queued requests, and withdrawal routes) plus one RPC read.
-  While a transfer submitted from this browser tab awaits confirmation, one
-  chain-aware detail read makes the UI reflect Solana confirmation immediately.
-  Historical unresolved movements do not restart fast polling. The strategy
-  catalogue is cached server-side for five minutes.
-- Atomic transfers show `Done` at `confirmed`; SDP keeps reconciling finality
-  in the background. Provider orders remain pending until fulfillment, using
-  the API's `settlement` field. Missing settlement semantics stay unknown.
-- Balance reads begin after movement observations. The page uses observed
-  checking, savings and withdrawable amounts, with no requested-amount arithmetic.
-  A requested withdrawal amount may appear in activity labeled `requested`;
-  it never replaces an unknown payout or changes an available balance.
-- Outstanding queued withdrawals are restored with `settled=false` across
-  every cursor page and refreshed every ten seconds. Their quoted payout is
-  labeled expected on the request card; savings totals and earnings remain
-  unavailable while escrow cannot be valued. Only `expiredCancelable` exposes
-  the share-recovery action.
-- API responses and outbound SDP reads use `no-store` caching.
-- Transfer preparation builds and signs without broadcasting. The browser saves
-  the signed envelope in `localStorage` before calling `/api/intents/submit`.
-  Submit retries reuse the exact build, signed bytes and `Idempotency-Key`, even
-  after a reload or server restart. Web Locks serialize this journal across tabs.
-  Storage/lock refusal prevents submission; malformed responses and HTTP errors
-  retain intent. The page retries saved intent on load and every 30 seconds.
-- A parsed acknowledgment releases the journal. A new intentional transfer gets
-  a new key even when the vault and amount are unchanged. If a previous response
-  is still uncertain, resolve that intent before starting another. Clearing site
-  data removes this browser recovery record; production integrations should use
-  an authenticated durable server journal and provide intent recovery across devices.
-- Signed envelopes can authorize only their exact transaction. The submit route
-  never signs client-provided bytes; SDP checks tenant ownership, the complete
-  stored message and all signatures. Browser scripts can read localStorage, so
-  the example's same-origin checks and access protection remain required.
-- Quote-derived slippage floors and the amount-to-shares conversion use exact
-  `BigInt` arithmetic.
+- The API key and wallet keys stay in `server-only` modules. The page and API
+  routes require the configured HTTP Basic credentials. Known link unfurlers
+  can read the public page shell, which contains no account data.
+- Mutations accept same-origin JSON. Before signing, the server checks the
+  operation's wallet owner, the configured cluster and the expected fee payer.
+  It signs SDP's exact stored message, including the optional partner fee payer.
+- Preparation keys are saved before sending. The browser saves the reviewed
+  operation action and idempotency key before asking the server to sign. Web
+  Locks serialize execution across tabs. Storage refusal blocks a new action.
+- Uncertain submissions retain the same action ID, version, signed bytes and
+  idempotency key. Reload retries the accepted action, without preparing a new
+  financial instruction. A parsed acknowledgement releases the local journal.
+- Browser storage is only the example's recovery journal. A production app
+  needs authenticated durable recovery across devices. Legacy saved signed
+  intents can still be replayed through the compatibility submit route.
+- Active operation reads are single-flight and poll every second. Idle reads
+  run every 30 seconds. HTTP 429 pauses polling for the server's retry interval.
+  The server caches discovery for five minutes; live balances are never inferred
+  from requested transfer amounts.
+- A normal refresh reads operations, positions, historical movements and legacy
+  withdrawal requests, plus the checking token balance over RPC. Historical
+  movement detail reads cover unresolved submissions. Position discovery covers
+  integrated strategies only; unavailable observations never count as empty.
+- Pending withdrawal quotes never count as delivered assets. Earnings and
+  portfolio totals remain unknown while escrow cannot be valued. Completed
+  activity displays only verified settled amounts.
+- API responses and SDP requests use `no-store`. No secret uses a
+  `NEXT_PUBLIC_` variable or appears in browser props or API responses.
 
 ## Run locally
 
@@ -227,7 +200,7 @@ uncommitted changes ship too. Run the [validation](#validation) commands before 
 | Variable                     | Required | Purpose                                                                                                                                                                    |
 | ---------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `SDP_API_BASE_URL`           | No       | SDP API origin. Defaults to local port `8787`; Vercel needs a reachable origin.                                                                                            |
-| `SDP_API_KEY`                | Yes      | Project key with Embedded Yield read and write permissions. Use a sandbox key for devnet or production key for mainnet.                                                    |
+| `SDP_API_KEY`                | Yes      | Project key with Earn read and execute grants; manage is needed for cancellation. Use a sandbox key for devnet or production key for mainnet.                              |
 | `DEMO_ACCESS_USERNAME`       | No       | HTTP Basic username. Defaults to `northstar`.                                                                                                                              |
 | `DEMO_ACCESS_PASSWORD`       | Yes      | HTTP Basic password protecting the page and all API routes.                                                                                                                |
 | `DEMO_WALLET_PRIVATE_KEY`    | Yes      | Base58 or JSON-array Solana keypair used only by the server. Its token balance is checking.                                                                                |
@@ -249,9 +222,9 @@ low-balance keys and the smallest provider-supported amount.
 3. Configure Northstar with `SOLANA_CLUSTER=mainnet-beta`, the same mainnet RPC,
    and an `sk_live_` key from that local production project.
 4. Fund only the dedicated Treasury wallet and Northstar owner/fee-payer
-   addresses. Preview first, deposit a tiny USDC canary, verify the movement and
-   position, discover its live withdrawal routes, then use the available direct
-   or queued exit and verify final settlement. For a queue canary, also verify
+   addresses. Prepare and review a tiny USDC deposit, approve execution, then
+   verify the completed operation and position. Prepare a withdrawal, review its
+   current terms and verify final settlement. For a queue canary, also verify
    request restoration and post-deadline share recovery.
 
 The app verifies the RPC genesis hash before reading balances or building a
@@ -268,10 +241,9 @@ transaction. It also refuses to select a strategy from the wrong cluster.
 - Positions in strategies other than the featured one are hidden. Set
   `DEMO_STRATEGY_ID` to the strategy you deposited into if a balance seems to
   be missing.
-- Wait for a submitted transfer to show `Settled` before comparing balances.
-  `Settled` begins at Solana confirmation; SDP records protocol finalization in
-  the background. The dashboard refreshes automatically for up to two minutes,
-  then pauses and prompts for a manual refresh if confirmation is unresolved.
+- Wait for an operation to show `Completed` before treating the payout as
+  delivered. Approval, submission and provider settlement remain separate states.
+  Refreshing or closing the page does not cancel accepted work.
 
 ## Validation
 

@@ -80,6 +80,16 @@ describe("CRON_DEFINITIONS", () => {
     expect(cron?.enabled({ ...env, SDP_RELEASE_CHANNEL: "stable" })).toBe(true);
   });
 
+  it("keeps recorded operation recovery enabled every 15 seconds in each environment", () => {
+    const cron = CRON_DEFINITIONS.find((definition) => definition.name === "reconcile-operations");
+    expect(cron).toMatchObject({
+      schedule: "*/15 * * * * *",
+      scope: "cluster",
+      effect: "finishes",
+    });
+    expect(cron?.enabled({ ...env, SDP_RELEASE_CHANNEL: "stable" })).toBe(true);
+  });
+
   it("gives every definition a schedule node-cron accepts", () => {
     const invalid = CRON_DEFINITIONS.filter((definition) => !validate(definition.schedule)).map(
       (definition) => definition.name

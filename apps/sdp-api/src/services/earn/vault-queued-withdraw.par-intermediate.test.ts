@@ -1,6 +1,8 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
+import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
+import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { createPostgresEarnVaultWithdrawalRequestsRepository } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import { buildEarnVaultParRedemptionFingerprint } from "@/lib/idempotency";
 import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
@@ -196,6 +198,155 @@ beforeEach(async () => {
 });
 
 describe("a par request over held intermediate", () => {
+  it("keeps operation queue builds out of legacy submit independently of discovery permission", async () => {
+    const actor = { organizationId: ORG, projectId: PROJECT, userId: USER };
+    buildParRedemptionRequest.mockResolvedValue(heldIntermediatePlan(EXTERNAL_REQUEST));
+    const built = await buildExternalQueuedWithdrawalRequest(env, {
+      actor,
+      position: position(EXTERNAL_POSITION, EXTERNAL_OWNER, null),
+      terms,
+      asyncOperation: true,
+    });
+    await expect(
+      submitExternalQueuedWithdrawalAction(env, {
+        actor,
+        transactionId: built.id,
+        signedTransaction: "CQk=",
+        clientRequestId: "legacy-blocked",
+        action: "request",
+        allowDiscoveredPosition: true,
+      })
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      details: { reason: "operation_execution_required" },
+    });
+    expect(verifySignedExternalWalletTransaction).not.toHaveBeenCalled();
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+    const submitted = await submitExternalQueuedWithdrawalAction(env, {
+      actor,
+      transactionId: built.id,
+      signedTransaction: "CQk=",
+      clientRequestId: "operation-worker",
+      action: "request",
+      allowOperationBuild: true,
+      broadcast: false,
+    });
+    expect(submitted.request.position_id).toBe(EXTERNAL_POSITION);
+  });
+
+  it.each([false, true])(
+    "claims discovered holdings only with signed submission (custody=%s)",
+    async (custody) => {
+      const db = getDb(env);
+      const positionId = custody ? CUSTODY_POSITION : EXTERNAL_POSITION;
+      await db.prepare("DELETE FROM earn_positions WHERE id = ?").bind(positionId).run();
+      const strategy = await createPostgresEarnRepository(db).upsertStrategy({
+        provider: "hastra",
+        providerReference: PRIME_MINT,
+        name: "Hastra PRIME",
+        sourceKind: "rwa",
+        underlyingSource: null,
+        depositMints: [USDC_MINT],
+        shareMint: PRIME_MINT,
+        apyType: "variable",
+        currentApy: null,
+        liquidityTerm: "delayed",
+        redemptionDelayDays: null,
+        riskMetadata: {},
+        status: "deprecated",
+        hostCluster: "devnet",
+        environment: "sandbox",
+      });
+      if (strategy === null) throw new Error("Missing strategy");
+      const actor = { organizationId: ORG, projectId: PROJECT, userId: USER };
+      const requestAddress = custody ? CUSTODY_REQUEST : EXTERNAL_REQUEST;
+      const custodyWalletId = custody ? WALLET_ROW_ID : undefined;
+      buildParRedemptionRequest.mockResolvedValue(heldIntermediatePlan(requestAddress));
+      const built = await buildExternalQueuedWithdrawalRequest(env, {
+        actor,
+        position: position(
+          "unclaimed-selector",
+          custody ? WALLET_ADDRESS : EXTERNAL_OWNER,
+          custodyWalletId ?? null
+        ),
+        terms,
+        custodyWalletId,
+        discoveredStrategyId: strategy.id,
+      });
+      expect(built).toMatchObject({ position_id: null, strategy_id: strategy.id });
+      expect(
+        await db.prepare("SELECT id FROM earn_positions WHERE id = ?").bind(positionId).first()
+      ).toBeNull();
+      await expect(
+        submitExternalQueuedWithdrawalAction(env, {
+          actor,
+          transactionId: built.id,
+          signedTransaction: "CQk=",
+          clientRequestId: "legacy-refused",
+          action: "request",
+          custodyWalletId,
+        })
+      ).rejects.toThrow("Earn queued withdrawal position");
+      const submitted = await submitExternalQueuedWithdrawalAction(env, {
+        actor,
+        transactionId: built.id,
+        signedTransaction: "CQk=",
+        clientRequestId: "signed-discovery-key",
+        action: "request",
+        custodyWalletId,
+        allowDiscoveredPosition: true,
+        broadcast: false,
+      });
+      expect(
+        await db
+          .prepare("SELECT cost_basis_known, strategy_id FROM earn_positions WHERE id = ?")
+          .bind(submitted.request.position_id)
+          .first()
+      ).toEqual({ cost_basis_known: false, strategy_id: strategy.id });
+      expect(submitted.request).toMatchObject({
+        custody_wallet_id: custodyWalletId ?? null,
+        shares: "0",
+        intermediate_amount: "2000",
+      });
+      const movements = createPostgresEarnMovementsRepository(db);
+      const page = custody
+        ? await movements.listVaultPositions({
+            organizationId: ORG,
+            environment: "sandbox",
+            custodyWalletIds: [WALLET_ROW_ID],
+            before: null,
+            limit: 100,
+          })
+        : await movements.listExternalWalletPositions({
+            organizationId: ORG,
+            projectId: PROJECT,
+            environment: "sandbox",
+            ownerAddress: EXTERNAL_OWNER,
+            before: null,
+            limit: 100,
+          });
+      expect(page.rows.some((row) => row.id === submitted.request.position_id)).toBe(true);
+      const replay = await submitExternalQueuedWithdrawalAction(env, {
+        actor,
+        transactionId: built.id,
+        signedTransaction: "CQk=",
+        clientRequestId: "signed-discovery-key",
+        action: "request",
+        custodyWalletId,
+        allowDiscoveredPosition: true,
+        broadcast: false,
+      });
+      expect(replay.request.id).toBe(submitted.request.id);
+      expect(
+        await db
+          .prepare("SELECT COUNT(*)::int AS count FROM earn_movements WHERE direction = 'deposit'")
+          .first()
+      ).toEqual({ count: 0 });
+      expect(signVaultPlan).not.toHaveBeenCalled();
+      expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+    }
+  );
+
   it("builds, signs and records a custody request that burns no shares", async () => {
     buildParRedemptionRequest.mockResolvedValue(heldIntermediatePlan(CUSTODY_REQUEST));
 

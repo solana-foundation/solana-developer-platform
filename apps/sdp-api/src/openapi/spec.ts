@@ -48,6 +48,7 @@ import { registerIntegrationPaths } from "./paths/integrations";
 import { registerIssuancePaths } from "./paths/issuance";
 import { registerMemberPaths } from "./paths/members";
 import { registerOnboardingPaths } from "./paths/onboarding";
+import { registerOperationsPaths } from "./paths/operations";
 import { registerOrganizationPaths } from "./paths/organizations";
 import { registerPaymentsPaths } from "./paths/payments";
 import { registerPrivateChannelsPaths } from "./paths/private-channels";
@@ -113,6 +114,10 @@ const OPENAPI_TAG = {
   EARN: {
     name: "Earn",
     description: EARN_TAG_DESCRIPTION,
+  },
+  OPERATIONS: {
+    name: "Operations",
+    description: "Durable asynchronous execution and recovery for prepared intents.",
   },
   ADMIN: { name: "Admin", description: "Administrative allowlist management." },
   ONBOARDING: { name: "Onboarding", description: "Clerk organization sync status." },
@@ -186,6 +191,7 @@ const OPENAPI_TAGS = [
   OPENAPI_TAG.COUNTERPARTIES,
   OPENAPI_TAG.ASSET_PROFILES,
   OPENAPI_TAG.EARN,
+  OPENAPI_TAG.OPERATIONS,
   OPENAPI_TAG.DVP,
   OPENAPI_TAG.ADMIN,
   OPENAPI_TAG.ONBOARDING,
@@ -241,6 +247,9 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerCustodyAdministrationPaths(registry);
   registerCustodyPaths(registry);
   registerEarnPaths(registry);
+  // The public branch calls registerPublicPaths instead. Keep the replacement
+  // lifecycle internal until its named security sign-off approves publication.
+  registerOperationsPaths(registry);
   registerDvpPaths(registry);
   registerProjectPaths(registry);
   registerIntegrationPaths(registry);

@@ -59,9 +59,9 @@
 - [Asset Profiles](https://platform.solana.com/docs/reference/api/asset-profiles): Issued-asset identity and metadata profiles, plus the public token metadata URI.
 - [Earn](https://platform.solana.com/docs/reference/api/earn): Strategy reads, previews, withdrawal-route discovery, unsigned builds, submission, queued actions, and tenant tracking. Availability follows the deployment's release channel.
 - [Earn](https://platform.solana.com/docs/earn): Offer stablecoin yield in your app, from your customers' own wallets, through one API.
-- [Quickstart](https://platform.solana.com/docs/earn/quickstart): Deposit test USDC into a strategy from a sandbox wallet, then read the position, in about ten minutes.
+- [Quickstart](https://platform.solana.com/docs/earn/quickstart): Review the legacy sandbox setup and recover existing Earn positions.
 - [How Earn works](https://platform.solana.com/docs/earn/concepts): Strategies, positions and shares, who signs, and how each deposit and withdrawal settles.
-- [Embedded Yield](https://platform.solana.com/docs/guides/embedded-yield): Build customer-signed deposits, balances, and withdrawals into your app, from first request to go-live.
+- [Embedded Yield](https://platform.solana.com/docs/guides/embedded-yield): Maintain existing customer-wallet holdings and recover legacy pending movements.
 
 ## AI guide
 - [Docs for AI](https://platform.solana.com/docs/reference/docs-for-ai): Human-readable landing page for machine-readable SDP docs resources, usage guidance, and public AI scope.

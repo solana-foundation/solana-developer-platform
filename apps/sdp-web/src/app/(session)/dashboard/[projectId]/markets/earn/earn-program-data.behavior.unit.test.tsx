@@ -47,7 +47,13 @@ function stubPositionReads() {
               status === 200
                 ? Response.json({
                     data: {
-                      positions: [position],
+                      positions: [
+                        {
+                          ...position,
+                          source: { walletId: position.custodyWalletId },
+                          costBasisKnown: true,
+                        },
+                      ],
                       hasMore: false,
                       nextCursor: null,
                       ...(ids.length > 0
@@ -84,7 +90,7 @@ describe("shared vault position reads", () => {
     await act(async () => requests[0]?.answer());
     const [firstRead, secondRead] = await Promise.all([first, second]);
     expect(firstRead).toBe(secondRead);
-    expect(result.current.positions).toEqual([position]);
+    expect(result.current.positions).toMatchObject([position]);
   });
 
   it("never lets a floored refresh join an unfloored read", async () => {

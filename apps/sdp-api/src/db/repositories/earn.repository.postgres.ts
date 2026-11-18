@@ -51,6 +51,7 @@ function mapStrategyRow(row: Record<string, unknown>): EarnStrategyRow {
     share_mint: row.share_mint as string | null,
     apy_type: row.apy_type as EarnApyType,
     current_apy: row.current_apy as string | null,
+    rate_observed_at: (row.rate_observed_at as string | null | undefined) ?? null,
     liquidity_term: row.liquidity_term as EarnLiquidityTerm,
     redemption_delay_days: row.redemption_delay_days as number | null,
     risk_metadata: row.risk_metadata as EarnStrategyRiskMetadata,
@@ -140,6 +141,12 @@ const STRATEGY_UPSERT_CONFLICT_SQL = `ON CONFLICT (provider, provider_reference,
     share_mint = EXCLUDED.share_mint,
     apy_type = EXCLUDED.apy_type,
     current_apy = EXCLUDED.current_apy,
+    rate_observed_at = CASE
+      WHEN EXCLUDED.current_apy IS NULL THEN NULL
+      WHEN EXCLUDED.rate_observed_at IS NOT NULL THEN EXCLUDED.rate_observed_at
+      WHEN EXCLUDED.current_apy IS DISTINCT FROM earn_strategies.current_apy THEN NULL
+      ELSE earn_strategies.rate_observed_at
+    END,
     liquidity_term = EXCLUDED.liquidity_term,
     redemption_delay_days = EXCLUDED.redemption_delay_days,
     risk_metadata = EXCLUDED.risk_metadata,
@@ -171,6 +178,7 @@ function strategyBatchRecord(input: UpsertEarnStrategyInput) {
     share_mint: input.shareMint,
     apy_type: input.apyType,
     current_apy: input.currentApy,
+    rate_observed_at: input.currentApy === null ? null : (input.rateObservedAt ?? null),
     liquidity_term: input.liquidityTerm,
     redemption_delay_days: input.redemptionDelayDays,
     risk_metadata: input.riskMetadata ?? {},
@@ -186,8 +194,39 @@ function metricsBatchRecord(input: UpdateEarnStrategyMetricsInput) {
     provider_reference: input.providerReference,
     environment: input.environment,
     current_apy: input.currentApy,
+    rate_observed_at: input.currentApy === null ? null : (input.rateObservedAt ?? null),
     risk_metadata: input.riskMetadata ?? {},
   };
+}
+
+function discoveryFilters(input: ListEarnStrategiesInput) {
+  const conditions: string[] = [];
+  const bindings: unknown[] = [];
+  if (input.id !== undefined) {
+    conditions.push("id = ?");
+    bindings.push(input.id);
+  }
+  if (input.provider !== undefined) {
+    conditions.push("provider = ?");
+    bindings.push(input.provider);
+  }
+  if (input.depositMint !== undefined) {
+    conditions.push("deposit_mints @> ?::jsonb");
+    bindings.push(JSON.stringify([input.depositMint]));
+  }
+  for (const [bound, comparison] of [
+    [input.minApy, ">="],
+    [input.maxApy, "<="],
+  ] as const) {
+    if (bound === undefined) continue;
+    // CASE guards the cast even when the planner reorders predicates.
+    conditions.push(
+      `CASE WHEN current_apy ~ '^[0-9]+([.][0-9]+)?$' THEN current_apy::numeric END ${comparison} ?::numeric`
+    );
+    bindings.push(bound);
+  }
+
+  return { conditions, bindings };
 }
 
 export function createPostgresEarnRepository(db: AppDb): EarnRepository {
@@ -200,9 +239,9 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
           `INSERT INTO earn_strategies (
              id, provider, provider_reference, name,
              source_kind, underlying_source, deposit_mints, share_mint,
-             apy_type, current_apy, liquidity_term, redemption_delay_days,
+             apy_type, current_apy, rate_observed_at, liquidity_term, redemption_delay_days,
              risk_metadata, status, host_cluster, environment
-           ) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
+           ) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
            ${STRATEGY_UPSERT_CONFLICT_SQL}
            RETURNING *`
         )
@@ -217,6 +256,7 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
           input.shareMint,
           input.apyType,
           input.currentApy,
+          input.currentApy === null ? null : (input.rateObservedAt ?? null),
           input.liquidityTerm,
           input.redemptionDelayDays,
           JSON.stringify(input.riskMetadata ?? {}),
@@ -246,6 +286,7 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
                  share_mint TEXT,
                  apy_type TEXT,
                  current_apy TEXT,
+                 rate_observed_at TEXT,
                  liquidity_term TEXT,
                  redemption_delay_days INTEGER,
                  risk_metadata JSONB,
@@ -257,13 +298,13 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
              INSERT INTO earn_strategies (
                id, provider, provider_reference, name,
                source_kind, underlying_source, deposit_mints, share_mint,
-               apy_type, current_apy, liquidity_term, redemption_delay_days,
+               apy_type, current_apy, rate_observed_at, liquidity_term, redemption_delay_days,
                risk_metadata, status, host_cluster, environment
              )
              SELECT
                id, provider, provider_reference, name,
                source_kind, underlying_source, deposit_mints, share_mint,
-               apy_type, current_apy, liquidity_term, redemption_delay_days,
+               apy_type, current_apy, rate_observed_at, liquidity_term, redemption_delay_days,
                risk_metadata, status, host_cluster, environment
              FROM incoming
              ${STRATEGY_UPSERT_CONFLICT_SQL}
@@ -289,13 +330,23 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
       const row = await db
         .prepare(
           `UPDATE earn_strategies
-              SET current_apy = ?,
+              SET rate_observed_at = CASE
+                    WHEN ?::text IS NULL THEN NULL
+                    WHEN ?::text IS NOT NULL THEN ?::text
+                    WHEN current_apy IS DISTINCT FROM ?::text THEN NULL
+                    ELSE rate_observed_at
+                  END,
+                  current_apy = ?,
                   risk_metadata = risk_metadata || ?::jsonb,
                   updated_at = sdp_iso_now()
             WHERE provider = ? AND provider_reference = ? AND environment = ?
             RETURNING id`
         )
         .bind(
+          input.currentApy,
+          input.rateObservedAt ?? null,
+          input.rateObservedAt ?? null,
+          input.currentApy,
           input.currentApy,
           JSON.stringify(input.riskMetadata ?? {}),
           input.provider,
@@ -317,11 +368,18 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
                  provider_reference TEXT,
                  environment TEXT,
                  current_apy TEXT,
+                 rate_observed_at TEXT,
                  risk_metadata JSONB
                )
            ), updated AS (
              UPDATE earn_strategies strategy
-                SET current_apy = incoming.current_apy,
+                SET rate_observed_at = CASE
+                      WHEN incoming.current_apy IS NULL THEN NULL
+                      WHEN incoming.rate_observed_at IS NOT NULL THEN incoming.rate_observed_at
+                      WHEN incoming.current_apy IS DISTINCT FROM strategy.current_apy THEN NULL
+                      ELSE strategy.rate_observed_at
+                    END,
+                    current_apy = incoming.current_apy,
                     risk_metadata = strategy.risk_metadata || incoming.risk_metadata,
                     updated_at = sdp_iso_now()
                FROM incoming
@@ -426,6 +484,10 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
     async listStrategies(input: ListEarnStrategiesInput): Promise<ListEarnStrategiesResult> {
       const conditions = ["environment = ?"];
       const bindings: unknown[] = [input.environment];
+
+      const filters = discoveryFilters(input);
+      conditions.push(...filters.conditions);
+      bindings.push(...filters.bindings);
 
       if (!input.includeInactive) {
         conditions.push("status = 'active'");

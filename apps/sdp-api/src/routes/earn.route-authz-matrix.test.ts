@@ -14,6 +14,10 @@ import { clearKVStores } from "@/test/mocks/kv";
  * cancels and program setup `manage`, builds, submits and movements `execute`).
  */
 const EARN_ROUTE_ACTIONS = {
+  "GET /discovery": "earn.read",
+  "GET /positions": "earn.read",
+  "POST /deposit": "earn.execute",
+  "POST /withdraw": "earn.execute",
   "GET /provider-actions/:actionId": "earn.read",
   "POST /provider-actions/preparations": "earn.execute",
   "POST /provider-actions/cancellations": "earn.manage",

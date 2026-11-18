@@ -1,12 +1,17 @@
 ---
 module: earn
 title: Deposit funds
-description: Preview, build, sign, submit, and track a deposit request by request, in cURL or TypeScript.
+description: Recover previously prepared legacy deposits and track their settlement.
 ---
 
-A deposit takes six requests and one signature. This page shows each request
-and its response, so you can build the flow in any language. For the shortest
-path, start with the [Quickstart](/docs/earn/quickstart).
+The legacy deposit preview and unsigned-build endpoints now return
+`410 NOT_IMPLEMENTED`. They cannot prepare new deposits. Existing signed legacy
+builds remain recoverable through the submit endpoint with their original bytes
+and idempotency key. Operation-only builds cannot use that compatibility submit.
+
+The preparation examples below are historical references for existing
+integrations. Do not run them to initiate new deposits. Reads, recovery and
+withdrawals remain available.
 
 ## Before you begin
 

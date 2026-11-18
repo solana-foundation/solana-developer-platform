@@ -1,12 +1,18 @@
 ---
 module: earn
 title: Withdraw funds
-description: Choose a live withdrawal route, withdraw instantly or by request, and confirm the payout reached the customer's wallet.
+description: Recover existing legacy withdrawals and follow their recorded settlement.
 ---
 
+Legacy withdrawal and withdrawal-request build endpoints now return
+`410 NOT_IMPLEMENTED`. The examples below describe historical builds; they cannot
+start a new withdrawal. Existing exact signed-build submissions, request
+cancellation, history and settlement reads remain available. The replacement
+core contract is internal pending security sign-off.
+
 A withdrawal spends shares from a position and pays the deposit token back to
-the wallet that owns it. Some routes pay in the same transaction; others pay
-later. Read the live routes first, then follow the one your customer chooses.
+its owner. A submitted request may settle later. Continue tracking existing
+requests until payout or cancellation is confirmed.
 
 Set `SDP_API_URL` and `SDP_API_KEY` as shown in the
 [Quickstart](/docs/earn/quickstart#before-you-begin).

@@ -2,12 +2,13 @@
 
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
+  type EarnStrategy as BaseEarnStrategy,
   type EarnPortfolioWalletStatus,
   type EarnProgram,
-  type EarnStrategy,
   type EarnVaultPosition,
   isEarnVaultHoldingEmpty,
 } from "@sdp/types/earn";
+import type { EarnCoreStrategy } from "@sdp/types/earn-core";
 import {
   earnProgramSolanaPayoutTokens,
   isVaultDirectDepositEnabled,
@@ -64,8 +65,8 @@ import {
   EARN_TABLE,
   EARN_TABLE_FRAME,
 } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-table-layout";
+import type { EarnVaultParRedemptionSource } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-vault-holding";
 import { earnVaultHoldingValue } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-vault-holding";
-import type { EarnVaultParRedemptionSource } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-vault-par-redemption-modal";
 import {
   type EarnVaultPositionUiStatus,
   earnVaultDepositUiState,
@@ -128,6 +129,8 @@ type TrackedVaultActivity = ReturnType<
 type NumericSortDirection = "ascending" | "descending";
 type NumericSortState = NumericSortDirection | "none";
 type StrategySortField = "apy" | "tvl";
+
+type EarnStrategy = BaseEarnStrategy & Partial<Pick<EarnCoreStrategy, "rate" | "capabilities">>;
 
 const TREASURY_AVAILABILITY_LABELS = {
   available: "DashboardMarkets.treasury.depositAvailable",
@@ -1134,6 +1137,34 @@ function StrategyAction({
   );
 }
 
+function strategyRateValue(strategy: EarnStrategy): string | undefined {
+  return strategy.rate ? (strategy.rate.value ?? undefined) : strategy.currentApy;
+}
+
+function StrategyRate({ strategy }: { strategy: EarnStrategy }) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const observedAt = strategy.rate?.observedAt;
+  const timestamp = observedAt ? Date.parse(observedAt) : Number.NaN;
+  const observation = Number.isFinite(timestamp)
+    ? t("DashboardEarn.core.rateObserved", {
+        timestamp: new Intl.DateTimeFormat(locale, {
+          dateStyle: "medium",
+          timeStyle: "short",
+        }).format(timestamp),
+      })
+    : t("DashboardEarn.core.rateObservationUnknown");
+  const provenance = t("DashboardEarn.core.rateProviderReported", {
+    provider: earnProviderLabel(strategy.rate?.source.provider ?? strategy.provider),
+  });
+  return (
+    <span className="inline-flex items-center justify-end gap-1.5">
+      {formatProviderApy(strategyRateValue(strategy), locale)}
+      <InfoHint text={`${provenance} ${observation}`} />
+    </span>
+  );
+}
+
 function StrategyTable({
   environment,
   kaminoAllocations,
@@ -1161,7 +1192,7 @@ function StrategyTable({
     const sortedByMetric = sortByOptionalDecimal(
       strategies,
       strategySort.field === "apy"
-        ? (strategy) => knownWireDecimal(strategy.currentApy)
+        ? (strategy) => knownWireDecimal(strategyRateValue(strategy))
         : (strategy) => knownWireDecimal(strategyTvlUsd(strategy)),
       strategySort.direction
     );
@@ -1246,7 +1277,7 @@ function StrategyTable({
                     "text-primary tabular-nums"
                   )}
                 >
-                  {formatProviderApy(strategy.currentApy, locale)}
+                  <StrategyRate strategy={strategy} />
                 </TableCell>
                 <TableCell
                   className={cn(

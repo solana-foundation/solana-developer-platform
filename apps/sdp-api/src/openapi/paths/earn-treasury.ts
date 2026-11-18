@@ -89,6 +89,7 @@ export function registerEarnTreasuryPaths(
       idempotency?: TreasuryIdempotency;
       signs?: true;
       created?: boolean;
+      retired?: boolean;
       description: string;
     }
   ) {
@@ -98,6 +99,7 @@ export function registerEarnTreasuryPaths(
       path: `/v1/earn/${path}`,
       operationId,
       summary,
+      ...(options.retired ? { deprecated: true } : {}),
       tags: ["Earn"],
       [DOCS_GROUP]: path.startsWith("programs") ? EARN_GROUPS.programs : EARN_GROUPS.treasury,
       security,
@@ -109,7 +111,11 @@ export function registerEarnTreasuryPaths(
         ...(options.body ? { body: { required: true, content: jsonContent(options.body) } } : {}),
       },
       responses: {
-        200: { description: "Result", content: jsonContent(response) },
+        ...(options.retired
+          ? earnErrorResponses([410])
+          : {
+              200: { description: "Result", content: jsonContent(response) },
+            }),
         ...(options.created
           ? { 201: { description: "Created", content: jsonContent(response) } }
           : {}),
@@ -149,16 +155,9 @@ export function registerEarnTreasuryPaths(
     "Deposit from a custody wallet",
     deposit,
     {
-      body: requests.earnVaultDepositSchema
-        .omit({ requestId: true })
-        .openapi({ not: { required: ["requestId"] } }),
-      idempotency: "required",
-      signs: true,
+      retired: true,
       description:
-        "Builds, signs and broadcasts a deposit from an authorized custody wallet. Quote " +
-        "first when the strategy requires minSharesOut. Swap-funded deposits stay atomic; " +
-        "if the combined transaction cannot fit, the request is refused without sending. " +
-        "Convert funds separately or deposit the vault's own token before retrying.",
+        "Retired. Returns 410 NOT_IMPLEMENTED without signing or broadcast. Existing deposit reads and reconciliation remain available.",
     }
   );
   route(
@@ -217,16 +216,11 @@ export function registerEarnTreasuryPaths(
     "Withdraw from a custody position",
     withdrawal,
     {
-      body: requests.earnVaultWithdrawalSchema
-        .omit({ requestId: true })
-        .openapi({ not: { required: ["requestId"] } }),
-      idempotency: "required",
-      signs: true,
+      retired: true,
       description:
-        "Redeems a position's shares into the custody wallet that owns them. Call " +
-        "vault-withdrawal-options first to select a supported route, then quote the direct " +
-        "exit when minAmountOut is required. A strategy disabled for new deposits remains " +
-        "exitable. Provider-order exits finish only when the provider completes the payout.",
+        "Retired. Returns 410 NOT_IMPLEMENTED without signing or broadcasting. Prepare " +
+        "new withdrawals through the internal core Earn API, which also accepts existing " +
+        "legacy positions. Recorded withdrawals remain readable.",
     }
   );
   route(
@@ -310,21 +304,11 @@ export function registerEarnTreasuryPaths(
     "Create a custody withdrawal request",
     earnExternalWalletWithdrawalRequestResponse,
     {
-      body: z
-        .union(
-          requests.earnVaultWithdrawalRequestSchema.options.map((option) => {
-            const { requestId: _requestId, ...shape } = option.shape;
-            return z.strictObject(shape);
-          })
-        )
-        .openapi({ not: { required: ["requestId"] } }),
-      idempotency: "required",
-      signs: true,
+      retired: true,
       description:
-        "Signs and submits a durable asynchronous withdrawal request. Solver queues escrow " +
-        "shares; operator redemptions convert shares into delegated intermediate tokens, or " +
-        "delegate intermediate tokens already held. The request transaction is not a payout. " +
-        "Track withdrawalRequestId until fulfilled, cancelled or failed.",
+        "Retired. Returns 410 NOT_IMPLEMENTED without preparing, signing or submitting a " +
+        "new request. Use the internal core Earn withdrawal operation. Existing request " +
+        "reads and cancellation remain available for recovery.",
     }
   );
   route(
@@ -392,14 +376,9 @@ export function registerEarnTreasuryPaths(
     }
   );
   route("post", "programs", "createEarnProgram", "Create a program", program, {
-    body: requests.earnProgramCreateSchema,
-    idempotency: "either",
-    created: true,
+    retired: true,
     description:
-      "Creates and links a provider-managed wallet for the project, without funding it. " +
-      "Fund wallet.solanaDepositAddress separately after creation. Each supplied token group " +
-      "currently requires one allocation at 100 percent. Returns 201 for a new program and " +
-      "200 for an idempotent replay.",
+      "Retired. Returns 410 NOT_IMPLEMENTED without creating a provider program. Discover strategies and prepare deposits with the internal core Earn API. Existing linked programs, history and withdrawals remain readable.",
   });
   route("get", "programs/{programId}", "getEarnProgram", "Get a program", program, {
     params: requests.earnProgramParamsSchema,
@@ -416,12 +395,9 @@ export function registerEarnTreasuryPaths(
     program,
     {
       params: requests.earnProgramParamsSchema,
-      body: requests.earnProgramRetargetSchema,
-      idempotency: "optional-either",
+      retired: true,
       description:
-        "Updates the provider program's allocation in place and returns fresh live state. " +
-        "Each supplied token group currently requires one allocation at 100 percent; " +
-        "omitted token groups keep their existing allocation. The program label is unchanged.",
+        "Retired. Returns 410 NOT_IMPLEMENTED without changing provider allocation. Existing holdings and exits remain available.",
     }
   );
   route(

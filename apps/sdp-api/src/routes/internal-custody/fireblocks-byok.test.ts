@@ -366,6 +366,62 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
       ).rejects.toThrow();
     });
   });
+  it("recovers the original Earn approval after runtime withdrawal without admitting new proposals", async () => {
+    const fetch = providerResponse();
+    const connected = await connect();
+    const wallet = await getDb(env).queryOne<{ id: string }>(
+      "SELECT id FROM custody_wallets WHERE custody_connection_id = ?",
+      [connected.connectionId]
+    );
+    if (wallet === null) throw new Error("Missing connected wallet");
+    await inSandboxScope(async () => {
+      const targets = new CustodyRuntimeTargets(getDb(env), testEnv, new Map());
+      const proposer = await targets.getTransactionProposerForWalletRecord(
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        wallet.id,
+        "earn.deposit"
+      );
+      if (proposer === null) throw new Error("Expected async transaction capability");
+      fetch.mockClear();
+      const binding = await proposer.prepare("attempt_earn");
+      expect(fetch).not.toHaveBeenCalled();
+      await getDb(env).execute(
+        "UPDATE custody_connections SET status = 'deactivated', deactivated_at = sdp_iso_now() WHERE id = ?",
+        [connected.connectionId]
+      );
+      testEnv.SDP_RELEASE_CHANNEL = "stable";
+      fetch.mockImplementation(async (url) =>
+        Response.json(
+          String(url).endsWith("/cancel")
+            ? { success: true }
+            : {
+                id: "proposal_earn",
+                status: "PENDING_AUTHORIZATION",
+                externalTxId: binding.externalId,
+                operation: "PROGRAM_CALL",
+                assetId: binding.assetId,
+                source: { type: "VAULT_ACCOUNT", id: binding.vaultAccountId },
+              }
+        )
+      );
+      expect(
+        (await proposer.read({ binding, unsignedTransaction: "not-needed-until-signed" }))?.phase
+      ).toBe("pending");
+      expect(await proposer.cancel(binding)).toBe(true);
+      await expect(proposer.prepare("another-attempt")).rejects.toThrow();
+      const count = fetch.mock.calls.length;
+      await getDb(env).execute(
+        "UPDATE custody_connections SET provider_account_fingerprint = 'different-account' WHERE id = ?",
+        [connected.connectionId]
+      );
+      await expect(
+        proposer.read({ binding, unsignedTransaction: "not-needed-until-signed" })
+      ).rejects.toThrow("does not match");
+      expect(fetch).toHaveBeenCalledTimes(count);
+    });
+  });
+
   it("provisions an additional vault with tenant credentials and reuses its fetched address", async () => {
     const fetch = providerResponse();
     const connected = await connect();

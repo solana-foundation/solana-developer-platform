@@ -1,0 +1,108 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { OperationScope } from "@/db/repositories/operations.repository";
+import { conflict } from "@/lib/errors";
+import { OPERATION_WORKER_BUDGET_MS } from "@/services/earn/operation-worker-budget";
+import { env } from "@/test/helpers/env";
+import type { Env } from "@/types/env";
+import { reconcileOperations } from "./reconcile-operations";
+
+const mocks = vi.hoisted(() => ({
+  candidates: vi.fn(),
+  claim: vi.fn(),
+  advance: vi.fn(),
+  release: vi.fn(),
+  get: vi.fn(),
+  getAttempt: vi.fn(),
+  transition: vi.fn(),
+  log: vi.fn(),
+}));
+vi.mock("@/db/client", () => ({ getDb: () => ({ queryMany: mocks.candidates }) }));
+vi.mock("@/services/operations.service", () => ({
+  createOperationsService: () => ({
+    repository: {
+      claimRecovery: mocks.claim,
+      release: mocks.release,
+      get: mocks.get,
+      getAttempt: mocks.getAttempt,
+    },
+    transition: mocks.transition,
+  }),
+}));
+vi.mock("@/services/earn/strategy-operations.service", () => ({
+  advanceEarnOperation: mocks.advance,
+}));
+vi.mock("@/services/operations-principal", () => ({
+  runAsRecordedOperationPrincipal: (
+    _env: Env,
+    _scope: OperationScope,
+    _claim: unknown,
+    work: () => Promise<void>
+  ) => work(),
+}));
+vi.mock("@/runtime/logger", () => ({ getLogger: () => ({ error: mocks.log }) }));
+
+let now: number;
+const scoped = () =>
+  runInClusterScope({ projectId: null, environment: "sandbox" }, () => reconcileOperations(env));
+beforeEach(() => {
+  vi.resetAllMocks();
+  now = 1_000;
+  vi.spyOn(Date, "now").mockImplementation(() => now);
+  mocks.candidates.mockResolvedValue(
+    ["one", "two", "three"].map((id) => ({ id, organization_id: "org", project_id: "project" }))
+  );
+  mocks.claim.mockImplementation(async (_scope: OperationScope, id: string) => ({
+    operation: { id },
+    token: id,
+    fence: 1,
+  }));
+  mocks.get.mockResolvedValue(null);
+});
+afterEach(() => vi.restoreAllMocks());
+
+describe("operation worker run budget", () => {
+  it("finishes the current action and leaves later candidates unclaimed when the budget expires", async () => {
+    mocks.advance.mockImplementation(async () => {
+      now += OPERATION_WORKER_BUDGET_MS;
+    });
+    await scoped();
+    expect(mocks.claim).toHaveBeenCalledTimes(1);
+    expect(mocks.advance).toHaveBeenCalledTimes(1);
+    expect(mocks.release).toHaveBeenCalledTimes(1);
+  });
+
+  it("continues other recoveries when both advancement and its error projection fail", async () => {
+    mocks.advance.mockRejectedValueOnce(new Error("Provider unavailable"));
+    mocks.get.mockRejectedValueOnce(new Error("Projection unavailable"));
+    await expect(scoped()).rejects.toThrow("1 operation recovery attempts failed");
+    expect(mocks.advance).toHaveBeenCalledTimes(3);
+    expect(mocks.release).toHaveBeenCalledTimes(3);
+    expect(mocks.log).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { signedTransaction: null, dispatchStartedAt: null, action: "refresh" },
+    {
+      signedTransaction: "retained-signed-bytes",
+      dispatchStartedAt: "already-started",
+      action: "wait",
+    },
+  ])(
+    "offers $action after expiry only with current durable attempt evidence",
+    async ({ signedTransaction, dispatchStartedAt, action }) => {
+      mocks.advance.mockRejectedValueOnce(conflict("Expired", { reason: "transaction_expired" }));
+      mocks.get.mockResolvedValueOnce({
+        claimToken: "one",
+        operation: { status: "queued", resourceRef: null },
+      });
+      mocks.getAttempt.mockResolvedValueOnce({ signedTransaction, dispatchStartedAt });
+      await expect(scoped()).rejects.toThrow("1 operation recovery attempts failed");
+      expect(mocks.transition).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.objectContaining({ nextAction: expect.objectContaining({ type: action }) })
+      );
+    }
+  );
+});

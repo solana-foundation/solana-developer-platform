@@ -81,6 +81,8 @@ export interface ProviderStrategySnapshot {
   shareMint?: string;
   apyType: EarnApyType;
   currentApy?: string;
+  /** When SDP observed this provider-reported rate, preserved across mirrors. */
+  rateObservedAt?: string;
   liquidityTerm: EarnLiquidityTerm;
   redemptionDelayDays?: number;
   riskMetadata?: EarnStrategyRiskMetadata;

@@ -1,0 +1,7 @@
+ALTER TABLE earn_positions VALIDATE CONSTRAINT earn_positions_strategy_fk;
+ALTER TABLE earn_external_wallet_transactions
+  VALIDATE CONSTRAINT earn_prepared_strategy_fk;
+ALTER TABLE earn_external_wallet_transactions
+  VALIDATE CONSTRAINT earn_prepared_custody_wallet_fk;
+ALTER TABLE earn_external_wallet_transactions
+  VALIDATE CONSTRAINT earn_prepared_fee_mode_check;
