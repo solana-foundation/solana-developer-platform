@@ -32,6 +32,7 @@ import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedProcessingBatchChunk } from "@/test/helpers/transfer-batches";
 import { seedTestDatabase } from "@/test/mocks/db";
+import * as proposalRecovery from "./reconcile-pending-proposals";
 import { trackPendingTransfers } from "./track-pending-transfers";
 
 const TEST_SIG_1 =
@@ -281,6 +282,33 @@ describe("trackPendingTransfers", () => {
     await seedOrg();
     rpc.answer("getEpochInfo", finalizedTipAt(1_000));
     rpc.respondSignatureStatusesAt(FLOOR_SLOT, () => null);
+  });
+
+  it("settles chain transfers independently of the proposal recovery job", async () => {
+    const recovery = vi
+      .spyOn(proposalRecovery, "reconcilePendingProposals")
+      .mockRejectedValue(new Error("Provider recovery unavailable"));
+    onTestFinished(() => recovery.mockRestore());
+    rpc.respondSignatureStatuses(() => ({
+      slot: 99999,
+      confirmations: null,
+      confirmationStatus: "finalized",
+      err: null,
+    }));
+    await insertTransfer(
+      signedSubmission({
+        id: "xfr_chain_independent_of_proposals",
+        signature: TEST_SIG_1,
+        submissionStartedAt: minutesAgo(1),
+        updatedAt: minutesAgo(1),
+      })
+    );
+    await trackSandboxTransfers();
+    expect(recovery).not.toHaveBeenCalled();
+    expect(await getTransfer("xfr_chain_independent_of_proposals")).toMatchObject({
+      status: "finalized",
+      slot: 99999,
+    });
   });
 
   describe("recoverStuckProcessingTransfers", () => {
