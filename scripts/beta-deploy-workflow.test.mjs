@@ -7,6 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(here, "..");
 const workflowsDir = path.resolve(here, "../.github/workflows");
 const stageDeployFile = "deploy-sdp-api-gcp-stage.yml";
 const betaDeployFile = "deploy-sdp-api-gcp-beta.yml";
@@ -71,7 +72,7 @@ function runBlock(step) {
     .join("\n");
 }
 
-function runScript(script, { stubs, env, cwd = path.resolve(here, "..") }) {
+function runScript(script, { stubs, env, cwd }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "beta-deploy-"));
   const output = path.join(dir, "output");
   const summary = path.join(dir, "summary.md");
@@ -333,6 +334,7 @@ const missingServices = (...names) =>
 
 test("the beta deploy skips without failing while a beta resource is not found", () => {
   const run = runScript(findScript(), {
+    cwd: repoRoot,
     stubs: { gcloud: missingServices("sdp-beta-cron", "sdp-beta-worker") },
     env: findEnv,
   });
@@ -348,7 +350,7 @@ test("the beta deploy finds the cron service under its new name or its old one",
     ["exit 0", "sdp-beta-cron"],
     [missingServices("sdp-beta-cron"), "sdp-beta-worker"],
   ]) {
-    const run = runScript(findScript(), { stubs: { gcloud: stub }, env: findEnv });
+    const run = runScript(findScript(), { cwd: repoRoot, stubs: { gcloud: stub }, env: findEnv });
     assert.equal(run.code, 0, run.stderr);
     assert.equal(run.output, "present=true\n");
     assert.equal(run.githubEnv, `BETA_CRON_SERVICE=${name}\n`);
@@ -357,6 +359,7 @@ test("the beta deploy finds the cron service under its new name or its old one",
 
 test("the beta deploy refuses an image_sha that is not a full commit SHA", () => {
   const run = runScript(findScript(), {
+    cwd: repoRoot,
     stubs: { gcloud: "exit 0" },
     env: { ...findEnv, DEPLOY_IMAGE_SHA: "main" },
   });
@@ -367,6 +370,7 @@ test("the beta deploy refuses an image_sha that is not a full commit SHA", () =>
 
 test("the beta deploy fails on any other describe error", () => {
   const run = runScript(findScript(), {
+    cwd: repoRoot,
     stubs: { gcloud: `echo "ERROR: PERMISSION_DENIED" >&2; exit 1` },
     env: findEnv,
   });
@@ -377,6 +381,7 @@ test("the beta deploy fails on any other describe error", () => {
 
 test("the beta deploy records the digest it replaces", () => {
   const run = runScript(findScript(), {
+    cwd: repoRoot,
     stubs: {
       gcloud: `case "$*" in
   *"revisions describe"*) echo "sha256:previous" ;;
@@ -400,6 +405,7 @@ function runGate({ serving, ghExitCode = 0 }) {
     ? `printf '%s' '${JSON.stringify({ status: "ready", revision: serving })}'`
     : "exit 22";
   const run = runScript(runBlock(stepBlock(betaJob(), "Post the sdp-web beta gate status")), {
+    cwd: repoRoot,
     stubs: { curl, gh: `exit ${ghExitCode}` },
     env: {
       BETA_ORIGIN: "https://api-beta.solana.com",

@@ -33,6 +33,13 @@ jobs:
     outputs:
       revision: ${{ steps.rollback.outputs.revision }}
     steps:
+      # TEMPORARY (PRO-2519): sdp-prod-worker is being renamed to sdp-prod-cron. Once it is, set
+      # CRON_SERVICE: sdp-prod-cron in the workflow env and delete this checkout and the resolve
+      # step; the checkout is here only for the script. It runs before authentication because a
+      # checkout clears the workspace, where the credentials file is written.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+
       - name: Authenticate to GCP
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
@@ -41,12 +48,6 @@ jobs:
 
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
-
-      # TEMPORARY (PRO-2519): sdp-prod-worker is being renamed to sdp-prod-cron. Once it is, set
-      # CRON_SERVICE: sdp-prod-cron in the workflow env and delete these two steps; the checkout
-      # is here only for the script.
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
 
       - name: Resolve the cron service
         run: |
