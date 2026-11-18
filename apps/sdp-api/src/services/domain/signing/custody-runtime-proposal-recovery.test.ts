@@ -46,7 +46,7 @@ const privateKey = generateKeyPairSync("rsa", { modulusLength: 2048 })
   .toString();
 const testEnv: Env = {
   ...env,
-  SDP_RELEASE_CHANNEL: "beta",
+  SDP_RELEASE_CHANNEL: "experimental",
   CUSTODY_ENCRYPTION_KEY: Buffer.alloc(32, 11).toString("base64"),
   FIREBLOCKS_API_BASE_URL: "https://fireblocks.recovery.test",
 };
@@ -57,7 +57,7 @@ aroundEach((runTest) =>
 afterEach(() => vi.restoreAllMocks());
 
 beforeEach(async () => {
-  testEnv.SDP_RELEASE_CHANNEL = "beta";
+  testEnv.SDP_RELEASE_CHANNEL = "experimental";
   await seedTestDatabase(env);
   const db = getDb(env);
   await db.execute(
@@ -329,7 +329,7 @@ describe("retained proposal recovery waist", () => {
       details: { reason: "custody_provider_not_in_release_channel" },
     });
     await expect(admission).rejects.not.toBeInstanceOf(ProposalAdmissionRefusedError);
-    testEnv.SDP_RELEASE_CHANNEL = "beta";
+    testEnv.SDP_RELEASE_CHANNEL = "experimental";
     await expect(asKey(() => controller.admit())).resolves.toBeUndefined();
     expect(secretRead).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();

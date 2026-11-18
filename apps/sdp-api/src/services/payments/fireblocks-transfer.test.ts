@@ -110,7 +110,7 @@ async function newRegistration(projectId = PROJECT_ID) {
 }
 
 beforeEach(async () => {
-  testEnv.SDP_RELEASE_CHANNEL = "beta";
+  testEnv.SDP_RELEASE_CHANNEL = "experimental";
   testEnv.CREDENTIAL_SECRET_STORE_BACKEND = "encrypted_db";
   await seedTestDatabase(env);
   await clearKVStores(env);
@@ -1489,7 +1489,7 @@ describe("native Fireblocks pending proposal recovery (PRO-2435 D4)", () => {
     expect(pending.status).toBe("processing");
     expect(pending.provider_data.proposalRefusal).toBeUndefined();
     expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(0);
-    testEnv.SDP_RELEASE_CHANNEL = "beta";
+    testEnv.SDP_RELEASE_CHANNEL = "experimental";
     providerStatus = "COMPLETED";
     expect(await recoverPendingProposal(transfer.id)).toMatchObject({
       status: "confirmed",

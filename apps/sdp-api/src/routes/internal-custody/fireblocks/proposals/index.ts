@@ -3,6 +3,7 @@ import {
   isFireblocksProposalCancellable,
 } from "@sdp/types/fireblocks";
 import { Hono } from "hono";
+import { z } from "zod";
 import { getDb } from "@/db/client";
 import {
   FireblocksProposalsRepository,
@@ -72,6 +73,8 @@ function signingSummary(row: FireblocksSigningProposalRow): FireblocksProposalSu
       (row.status === "SUBMITTING" || isFireblocksProposalCancellable(row.status)),
   };
 }
+const cancellationRequestedAtSchema = z.iso.datetime();
+
 async function transferSummary(
   c: AppContext,
   row: PaymentTransferRow
@@ -84,8 +87,9 @@ async function transferSummary(
     proposal?.state.cancelRequestedAt,
     row.provider_data.fireblocksCancelRequestedAt,
   ].reduce<string | null>((latest, candidate) => {
-    if (typeof candidate !== "string" || !Number.isFinite(Date.parse(candidate))) return latest;
-    return latest === null || Date.parse(candidate) > Date.parse(latest) ? candidate : latest;
+    const parsed = cancellationRequestedAtSchema.safeParse(candidate);
+    if (!parsed.success) return latest;
+    return latest === null || Date.parse(parsed.data) > Date.parse(latest) ? parsed.data : latest;
   }, null);
   const status =
     typeof row.provider_data.fireblocksStatus === "string"
