@@ -22,6 +22,7 @@ jobs:
       REGION: us-central1
       REPO: sdp-stage
       SERVICE: sdp-stage-api-public
+      CRON_SERVICE: sdp-stage-cron
       MIGRATE_JOB: sdp-stage-api-public-migrate
     steps:
       - name: Checkout
@@ -84,10 +85,6 @@ jobs:
         run: |
           # The cron service is the only scheduler (ADR 0011): a missing service means no Money
           # Exit runs, so this fails the deploy instead of skipping.
-          set -euo pipefail
-          # TEMPORARY (PRO-2519): sdp-stage-worker is being renamed to sdp-stage-cron. Once it is, set
-          # CRON_SERVICE: sdp-stage-cron in this job's env and delete the next line.
-          CRON_SERVICE="$(.github/scripts/resolve-cron-service.sh sdp-stage)"
           gcloud run services update "${CRON_SERVICE}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
 

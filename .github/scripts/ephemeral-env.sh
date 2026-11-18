@@ -13,6 +13,7 @@ set -euo pipefail
 PROJECT="${PROJECT_ID:-solana-developer-platform-dev}"
 REGION="${REGION:-us-central1}"
 BASE_API_SERVICE="sdp-dev-api-public"
+BASE_CRON_SERVICE="sdp-dev-cron"
 BASE_MIGRATE_JOB="sdp-dev-api-public-migrate"
 
 cmd="${1:?usage: ephemeral-env.sh <deploy|teardown> <pr-number> [image]}"
@@ -75,14 +76,6 @@ export_json() { # <services|jobs> <name>
   run "$1" describe "$2" --format=export | yaml_to_json
 }
 
-# TEMPORARY (PRO-2519): dev's cron service is sdp-dev-worker until its Terraform
-# apply renames it. Once it is sdp-dev-cron, replace this with
-# BASE_CRON_SERVICE="sdp-dev-cron" beside the other two.
-base_cron_service() {
-  PROJECT_ID="${PROJECT}" REGION="${REGION}" \
-    "$(dirname "${BASH_SOURCE[0]}")/resolve-cron-service.sh" sdp-dev
-}
-
 ephemeral_env_json() {
   jq -n --arg db "${db_name}" --arg redis "${redis_db}" \
     '[{name: "EPHEMERAL_DB_NAME", value: $db}, {name: "EPHEMERAL_REDIS_DB", value: $redis}]'
@@ -91,7 +84,6 @@ ephemeral_env_json() {
 deploy() {
   local image="${1:?image is required}"
   local tmp; tmp="$(mktemp -d)"
-  local base_cron; base_cron="$(base_cron_service)"
 
   redis_db="$(allocate_redis_db)"
 
@@ -139,7 +131,7 @@ deploy() {
   run services add-iam-policy-binding "${api_service}" \
     --member allUsers --role roles/run.invoker >/dev/null
 
-  export_json services "${base_cron}" | jq \
+  export_json services "${BASE_CRON_SERVICE}" | jq \
     --arg name "${cron_service}" --arg pr "${pr}" --arg image "${image}" \
     --argjson extra "$(ephemeral_env_json)" \
     '.metadata.name = $name

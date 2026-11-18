@@ -50,6 +50,7 @@ env:
   PROJECT_ID: solana-developer-platform
   REGION: us-central1
   SERVICE: sdp-prod-api-public
+  CRON_SERVICE: sdp-prod-cron
   MIGRATE_JOB: sdp-prod-api-public-migrate
 
 jobs:
@@ -98,7 +99,6 @@ jobs:
       canary_passed: ${{ steps.canary.outcome == 'success' }}
       candidate_tag: ${{ steps.candidate.outputs.tag }}
       previous_traffic: ${{ steps.capture.outputs.traffic }}
-      cron_service: ${{ steps.cron.outputs.name }}
       previous_cron_image: ${{ steps.capture.outputs.cron_image }}
       breaking_migrations: ${{ steps.breaking.outputs.migrations }}
     name: Deploy production image
@@ -409,17 +409,6 @@ jobs:
           ORIGIN_IMAGE="ghcr.io/${{ github.repository_owner }}/sdp/sdp-api@${IMAGE##*@}"
           cosign verify "${ORIGIN_IMAGE}" "${verify_flags[@]}"
 
-      # TEMPORARY (PRO-2519): sdp-prod-worker is being renamed to sdp-prod-cron. Once it is, set
-      # CRON_SERVICE: sdp-prod-cron in the workflow env and delete this step, its cron_service
-      # output and the finish job's CRON_SERVICE.
-      - name: Resolve the cron service
-        id: cron
-        run: |
-          set -euo pipefail
-          cron_service="$(.github/scripts/resolve-cron-service.sh sdp-prod)"
-          echo "CRON_SERVICE=${cron_service}" >> "${GITHUB_ENV}"
-          echo "name=${cron_service}" >> "${GITHUB_OUTPUT}"
-
       - name: Capture rollback state
         id: capture
         run: |
@@ -657,7 +646,6 @@ jobs:
       CANARY_PASSED: ${{ needs.deploy.outputs.canary_passed }}
       BREAKING_MIGRATIONS: ${{ needs.deploy.outputs.breaking_migrations }}
       PREVIOUS_TRAFFIC: ${{ needs.deploy.outputs.previous_traffic }}
-      CRON_SERVICE: ${{ needs.deploy.outputs.cron_service }}
       PREVIOUS_CRON_IMAGE: ${{ needs.deploy.outputs.previous_cron_image }}
       CANDIDATE_TAG: ${{ needs.deploy.outputs.candidate_tag }}
     steps:

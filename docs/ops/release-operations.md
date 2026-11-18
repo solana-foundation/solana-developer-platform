@@ -90,8 +90,6 @@ The release GitHub App needs `contents: write` and `pull_requests: write`, and i
 
 All resources currently use `us-central1`.
 
-The cron service was named `sdp-<env>-worker` before PRO-2519. Until an environment's Terraform apply renames it, the deploy, rollback and restore steps find it under either name (`.github/scripts/resolve-cron-service.sh`), and a command run by hand needs the name that environment has at the time.
-
 The workflows update images only. Runtime environment variables, Secret Manager references, service accounts, networking, and scaling must already exist on the Cloud Run resources.
 
 Configure `PUBLIC_API_ORIGIN` directly on each API service before deployment:

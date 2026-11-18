@@ -155,8 +155,6 @@ test("cancellation-safe rollback restores resolved traffic and the cron image to
   for (const [output, step, key] of [
     ["previous_traffic", "capture", "traffic"],
     ["previous_cron_image", "capture", "cron_image"],
-    // TEMPORARY (PRO-2519): the name the deploy job resolved; delete with the fallback.
-    ["cron_service", "cron", "name"],
     ["candidate_tag", "candidate", "tag"],
     ["breaking_migrations", "breaking", "migrations"],
   ]) {
@@ -343,7 +341,7 @@ test("the approval workflow waits outside the deploy concurrency groups", () => 
   );
   assert.match(
     approval,
-    /select\(\.name \| \(startswith\("sdp-api \+ cron — stage \+ smoke"\) or startswith\("sdp-api \+ worker \+ cron — stage \+ smoke"\)\)\)\] \| length > 0 and all\(\.conclusion == "success"\)/
+    /select\(\.name \| startswith\("sdp-api \+ cron — stage \+ smoke"\)\)\] \| length > 0 and all\(\.conclusion == "success"\)/
   );
   assert.match(approval, /^permissions:\n\s+actions: read\n/m);
   assert.match(

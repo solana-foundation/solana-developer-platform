@@ -7,7 +7,6 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(here, "..");
 const workflowsDir = path.resolve(here, "../.github/workflows");
 const stageDeployFile = "deploy-sdp-api-gcp-stage.yml";
 const betaDeployFile = "deploy-sdp-api-gcp-beta.yml";
@@ -77,8 +76,7 @@ function runScript(script, { stubs, env, cwd }) {
   const output = path.join(dir, "output");
   const summary = path.join(dir, "summary.md");
   const calls = path.join(dir, "calls.log");
-  const githubEnv = path.join(dir, "github-env");
-  for (const file of [output, summary, calls, githubEnv]) fs.writeFileSync(file, "");
+  for (const file of [output, summary, calls]) fs.writeFileSync(file, "");
   for (const [name, body] of Object.entries({ sleep: "exit 0", ...stubs })) {
     fs.writeFileSync(
       path.join(dir, name),
@@ -92,7 +90,6 @@ function runScript(script, { stubs, env, cwd }) {
     env: {
       PATH: `${dir}:${process.env.PATH}`,
       GITHUB_OUTPUT: output,
-      GITHUB_ENV: githubEnv,
       GITHUB_STEP_SUMMARY: summary,
       ...env,
     },
@@ -103,7 +100,6 @@ function runScript(script, { stubs, env, cwd }) {
     stdout: result.stdout,
     stderr: result.stderr,
     output: fs.readFileSync(output, "utf8"),
-    githubEnv: fs.readFileSync(githubEnv, "utf8"),
     summary: fs.readFileSync(summary, "utf8"),
     calls: fs
       .readFileSync(calls, "utf8")
@@ -120,6 +116,7 @@ test("the beta workflow runs the beta steps in order", () => {
   assertLine(beta, "      PROJECT_ID: solana-developer-platform-beta");
   assertLine(beta, "      REPO: sdp-beta");
   assertLine(beta, "      BETA_SERVICE: sdp-beta-api-public");
+  assertLine(beta, "      BETA_CRON_SERVICE: sdp-beta-cron");
   assertLine(beta, "      BETA_MIGRATE_JOB: sdp-beta-api-public-migrate");
   assertLine(beta, "      BETA_ORIGIN: https://api-beta.solana.com");
   assert.deepEqual(
@@ -326,40 +323,24 @@ const findEnv = {
   REGION: "us-central1",
   PROJECT_ID: "example-project",
   BETA_SERVICE: "sdp-beta-api-public",
+  BETA_CRON_SERVICE: "sdp-beta-cron",
   BETA_MIGRATE_JOB: "sdp-beta-api-public-migrate",
 };
 
-const missingServices = (...names) =>
-  `case "$4" in ${names.join("|")}) echo "ERROR: (gcloud.run.services.describe) Cannot find service [$4]" >&2; exit 1 ;; esac; exit 0`;
-
 test("the beta deploy skips without failing while a beta resource is not found", () => {
   const run = runScript(findScript(), {
-    cwd: repoRoot,
-    stubs: { gcloud: missingServices("sdp-beta-cron", "sdp-beta-worker") },
+    stubs: {
+      gcloud: `if [[ "$4" == sdp-beta-cron ]]; then echo "ERROR: (gcloud.run.services.describe) Cannot find service [sdp-beta-cron]" >&2; exit 1; fi; exit 0`,
+    },
     env: findEnv,
   });
   assert.equal(run.code, 0, run.stderr);
   assert.equal(run.output, "present=false\n");
-  assert.equal(run.githubEnv, "");
   assert.match(run.stdout, /missing: sdp-beta-cron/);
-});
-
-// TEMPORARY (PRO-2519): delete with the fallback in .github/scripts/resolve-cron-service.sh.
-test("the beta deploy finds the cron service under its new name or its old one", () => {
-  for (const [stub, name] of [
-    ["exit 0", "sdp-beta-cron"],
-    [missingServices("sdp-beta-cron"), "sdp-beta-worker"],
-  ]) {
-    const run = runScript(findScript(), { cwd: repoRoot, stubs: { gcloud: stub }, env: findEnv });
-    assert.equal(run.code, 0, run.stderr);
-    assert.equal(run.output, "present=true\n");
-    assert.equal(run.githubEnv, `BETA_CRON_SERVICE=${name}\n`);
-  }
 });
 
 test("the beta deploy refuses an image_sha that is not a full commit SHA", () => {
   const run = runScript(findScript(), {
-    cwd: repoRoot,
     stubs: { gcloud: "exit 0" },
     env: { ...findEnv, DEPLOY_IMAGE_SHA: "main" },
   });
@@ -370,7 +351,6 @@ test("the beta deploy refuses an image_sha that is not a full commit SHA", () =>
 
 test("the beta deploy fails on any other describe error", () => {
   const run = runScript(findScript(), {
-    cwd: repoRoot,
     stubs: { gcloud: `echo "ERROR: PERMISSION_DENIED" >&2; exit 1` },
     env: findEnv,
   });
@@ -381,7 +361,6 @@ test("the beta deploy fails on any other describe error", () => {
 
 test("the beta deploy records the digest it replaces", () => {
   const run = runScript(findScript(), {
-    cwd: repoRoot,
     stubs: {
       gcloud: `case "$*" in
   *"revisions describe"*) echo "sha256:previous" ;;
@@ -405,7 +384,6 @@ function runGate({ serving, ghExitCode = 0 }) {
     ? `printf '%s' '${JSON.stringify({ status: "ready", revision: serving })}'`
     : "exit 22";
   const run = runScript(runBlock(stepBlock(betaJob(), "Post the sdp-web beta gate status")), {
-    cwd: repoRoot,
     stubs: { curl, gh: `exit ${ghExitCode}` },
     env: {
       BETA_ORIGIN: "https://api-beta.solana.com",

@@ -43,6 +43,7 @@ jobs:
       REGION: us-central1
       REPO: sdp-beta
       BETA_SERVICE: sdp-beta-api-public
+      BETA_CRON_SERVICE: sdp-beta-cron
       BETA_MIGRATE_JOB: sdp-beta-api-public-migrate
       BETA_ORIGIN: https://api-beta.solana.com
       DEPLOY_IMAGE_SHA: ${{ inputs.image_sha }}
@@ -98,15 +99,7 @@ jobs:
           }
           describe jobs describe "${BETA_MIGRATE_JOB}"
           describe services describe "${BETA_SERVICE}"
-          # TEMPORARY (PRO-2519): sdp-beta-worker is being renamed to sdp-beta-cron. Once it is, set
-          # BETA_CRON_SERVICE: sdp-beta-cron in this job's env and describe it like the two above.
-          cron_status=0
-          cron_service="$(.github/scripts/resolve-cron-service.sh sdp-beta)" || cron_status=$?
-          case "${cron_status}" in
-            0) echo "BETA_CRON_SERVICE=${cron_service}" >> "${GITHUB_ENV}" ;;
-            3) missing+=("sdp-beta-cron") ;;
-            *) exit 1 ;;
-          esac
+          describe services describe "${BETA_CRON_SERVICE}"
           if [[ "${#missing[@]}" -gt 0 ]]; then
             echo "::notice::Beta not created yet (missing: ${missing[*]}); skipping the beta deploy."
             echo "present=false" >> "${GITHUB_OUTPUT}"
