@@ -490,7 +490,7 @@ Remove these together in that contract change:
 - The old JSON decoder in `lib/fireblocks-proposal-compatibility.ts` and
   transition projection in `services/payments/fireblocks-proposal-compatibility.ts`,
   the legacy submission claim in
-  `custody-proposal-ledger.ts`, and legacy poll timestamp reads.
+  `custody-proposal-ledger.ts`, and legacy poll timestamps.
 - Payment-status decision guards in `custody-proposal-ledger.ts`,
   `pollFireblocksTransfer` (including viewer refresh),
   `reconcileRecordedProposalOutcome`, and
@@ -547,10 +547,15 @@ prior refusal,
 their completion raises no critical event even if the initiating principal was
 revoked. Delivery is at least once: deduplicate on transfer ID. Configure on-call
 routing for this event before rollout; this repository does not deploy that rule.
-Monitor `proposal_recovery_unavailable` for stalled mitigation. Each recovery
-failure includes `pending_age_seconds` from the durable payment creation time,
-plus organization, project and transfer IDs. Route repeated failures for aging
-payments to on-call before rollout; a newly failed old payment can alert too.
+Monitor `proposal_recovery_unavailable` for stalled mitigation. Every ordinary
+recovery failure emits this event, whether the rest of its page succeeds or fails. It includes the
+environment, `pending_age_seconds` from the durable payment creation time, and
+organization, project and transfer IDs. Ordinary row failures do not fail the cron;
+selection, legacy adoption and critical-alert delivery failures still do.
+
+Route this event by environment and pending age before rollout, independently of
+cron success. For example, select `pending_age_seconds >= 300` and deduplicate by
+organization, project and transfer ID. A newly failed old payment can alert too.
 Recovery cannot use a revoked provider credential; restore account-bound
 read/cancel access or act directly in Fireblocks.
 
@@ -568,6 +573,8 @@ result receipt stores only a validated SDP transfer ID, never a provider respons
 Organization administrators can use **Wallets → Overview → Fireblocks approvals** for
 both native transfers and sign-only requests. The internal dashboard list and cancellation
 routes require `wallets.configure` and a human session; they are not public API-key routes.
+Native cancellation uses the same pending statuses in the worker and dashboard,
+including `PENDING_ENRICHMENT`.
 Each cancellation validates project and wallet access before the shared required
 `Idempotency-Key` step. Audit intent is written before provider cancellation.
 
@@ -596,7 +603,10 @@ extra status GET before cancellation. Further contention returns a conflict for
 an explicit retry. The paginated list reads at most 20 pending proposals per
 page, throttled to one status GET per proposal per 15 seconds across concurrent requests.
 Terminal rows need no provider read. SDK tracking writes on status transitions, not each
-identical poll. List pages show the last known status during provider outages. Historical
+identical poll. Malformed legacy rows record the failed poll time before returning
+an error, so they rotate behind other pending rows. Failed adoption adds one scoped
+DB write and no provider or Solana calls. List pages show the last known
+status during provider outages. Historical
 rows are paginated; a retention policy remains follow-up work.
 
 ## Scheduled reconciliation and metrics

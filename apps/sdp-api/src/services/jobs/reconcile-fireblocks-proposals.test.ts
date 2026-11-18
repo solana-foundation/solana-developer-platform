@@ -7,6 +7,7 @@ import { runWithDatabaseIdentity } from "@/db/identity";
 import { FireblocksProposalsRepository } from "@/db/repositories/fireblocks-proposals.repository";
 import { FireblocksReconciliationRepository } from "@/db/repositories/fireblocks-reconciliation.repository";
 import * as events from "@/runtime/money-path-events";
+import * as signingProposals from "@/services/custody/fireblocks-proposal-reconciliation";
 import { systemProposalLedger } from "@/services/jobs/proposal-recovery-ledger";
 import * as transfers from "@/services/payments/fireblocks-transfer";
 import { env } from "@/test/helpers/env";
@@ -223,6 +224,58 @@ describe("Fireblocks reconciliation queue", () => {
       "error",
       expect.objectContaining({ failed: 1, polled: 2, pending: 3 })
     );
+  });
+
+  it("rotates malformed native intents so a full failed page cannot starve signing proposals", async () => {
+    await seedTransfers(100);
+    await db().execute(
+      "UPDATE payment_transfers SET custody_wallet_id = 'cwlt_queue' WHERE organization_id = ?",
+      [org]
+    );
+    await db().execute(
+      `INSERT INTO fireblocks_signing_proposals
+      (id, organization_id, project_id, custody_wallet_id, connection_id, account_fingerprint, vault_account_id, source_address, asset_id, operation, created_at, updated_at)
+      VALUES ('fbp_after_malformed', ?, ?, 'cwlt_queue', 'conn_queue', 'account', '0', ?, 'SOL_TEST', 'RAW', ?, ?)`,
+      [org, projects.sandbox, address, old, "2026-01-02T00:00:00.000Z"]
+    );
+    const ledger = systemProposalLedger(env);
+    const identity = {
+      transferId: "sandbox_processing_true_1",
+      organizationId: org,
+      projectId: projects.sandbox,
+    };
+    const transfer = await ledger.repo.getTransferById(identity);
+    if (transfer === null) throw new Error("Missing malformed transfer");
+    const canonical = await ledger.proposals.ensureForTransfer({
+      transfer,
+      provider: "fireblocks",
+      binding: {},
+      state: createCustodyProposalState(),
+      now: old,
+    });
+    const signingPoll = vi
+      .spyOn(signingProposals, "pollFireblocksSigningProposal")
+      .mockImplementation(async (_env, _repo, row) => ({ row, polled: true }));
+    const provider = vi.spyOn(globalThis, "fetch");
+    const log = vi.spyOn(events, "logEvent").mockImplementation(() => undefined);
+    await expect(run()).rejects.toThrow("Fireblocks proposal reconciliation failed");
+    expect(signingPoll).not.toHaveBeenCalled();
+    expect(await ledger.proposals.getForTransfer(identity)).toEqual(canonical);
+    expect(await db().queryOne("SELECT COUNT(*)::int AS count FROM custody_proposals")).toEqual({
+      count: 1,
+    });
+    expect((await ledger.repo.getTransferById(identity))?.provider_data).toMatchObject({
+      fireblocksTransfer: {},
+      fireblocksLastPolledAt: expect.any(String),
+    });
+    expect(log).toHaveBeenLastCalledWith(
+      "error",
+      expect.objectContaining({ failed: 100, polled: 0, pending: 101 })
+    );
+    expect((await queue().list("sandbox", 100))[0]?.id).toBe("fbp_after_malformed");
+    await expect(run()).rejects.toThrow("Fireblocks proposal reconciliation failed");
+    expect(signingPoll).toHaveBeenCalledOnce();
+    expect(provider).not.toHaveBeenCalled();
   });
 
   it("records a lease skip separately from a provider failure", async () => {

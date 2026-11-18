@@ -87,8 +87,20 @@ export function fireblocksPaymentStatus(
   }
 }
 
-/** Signing and provider-broadcast proposals cannot be cancelled once they start broadcasting. */
-export const FIREBLOCKS_CANCELLABLE_PROPOSAL_STATUSES = [
+/** Signing and provider-broadcast proposals share the same pre-broadcast cancellation rules. */
+export const FIREBLOCKS_CANCELLABLE_PROPOSAL_STATUSES = FIREBLOCKS_CANCELLABLE_TRANSACTION_STATUSES;
+export function isFireblocksProposalCancellable(status: string): boolean {
+  return isFireblocksTransactionCancellable(status);
+}
+
+/**
+ * The status column of a sign-only proposal: SDP's pre-acceptance state, then the provider
+ * transaction statuses it can store. This contract stays independent of runtime cancellation
+ * rules: adding a cancellable provider state must not widen the table's CHECK in
+ * `0229_fireblocks_signing_proposals.sql` without a migration.
+ */
+export const FIREBLOCKS_SIGNING_PROPOSAL_STATUSES = [
+  "SUBMITTING",
   "SUBMITTED",
   "QUEUED",
   "PENDING_AML_SCREENING",
@@ -96,21 +108,6 @@ export const FIREBLOCKS_CANCELLABLE_PROPOSAL_STATUSES = [
   "PENDING_SIGNATURE",
   "PENDING_3RD_PARTY_MANUAL_APPROVAL",
   "PENDING_3RD_PARTY",
-] as const;
-const cancellableProposals: ReadonlySet<string> = new Set(FIREBLOCKS_CANCELLABLE_PROPOSAL_STATUSES);
-export function isFireblocksProposalCancellable(status: string): boolean {
-  return cancellableProposals.has(status);
-}
-
-/**
- * The status column of a sign-only proposal: SDP's pre-acceptance state, then the provider
- * transaction statuses it can observe (the cancellable set, the advancing signature states, the
- * documented pending states and the failed set). Pinned by the table's CHECK in
- * `0229_fireblocks_signing_proposals.sql`.
- */
-export const FIREBLOCKS_SIGNING_PROPOSAL_STATUSES = [
-  "SUBMITTING",
-  ...FIREBLOCKS_CANCELLABLE_PROPOSAL_STATUSES,
   "PENDING_STATUS_UPDATE",
   "SIGNED",
   "BROADCASTING",

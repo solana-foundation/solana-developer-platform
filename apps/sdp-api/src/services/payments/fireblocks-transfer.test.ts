@@ -1461,11 +1461,19 @@ describe("native Fireblocks pending proposal recovery (PRO-2435 D4)", () => {
         "UPDATE custody_connections SET status = ?, last_check_status = ?, activated_at = NULL WHERE organization_id = ?",
         [check === "running" ? "checking" : "failed", check, ORGANIZATION_ID]
       );
-      await expect(recoverPendingProposal(transfer.id)).rejects.toThrow();
-      const pending = await recordedProposal(transfer.id);
+      const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
+      const pending = await recoverPendingProposal(transfer.id);
       expect(pending.status).toBe("processing");
       expect(pending.provider_data.proposalRefusal).toBeUndefined();
       expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(0);
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "proposal_recovery_unavailable",
+          environment: "sandbox",
+          pending_age_seconds: expect.any(Number),
+        }),
+        "proposal_recovery_unavailable"
+      );
       await getDb(env).execute(
         "UPDATE custody_connections SET status = 'active', last_check_status = 'success', activated_at = sdp_iso_now() WHERE organization_id = ?",
         [ORGANIZATION_ID]
@@ -1484,11 +1492,19 @@ describe("native Fireblocks pending proposal recovery (PRO-2435 D4)", () => {
     expect(response.status, await response.clone().text()).toBe(200);
     const transfer = (await response.json()).data.transfer;
     testEnv.SDP_RELEASE_CHANNEL = "stable";
-    await expect(recoverPendingProposal(transfer.id)).rejects.toThrow();
-    const pending = await recordedProposal(transfer.id);
+    const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
+    const pending = await recoverPendingProposal(transfer.id);
     expect(pending.status).toBe("processing");
     expect(pending.provider_data.proposalRefusal).toBeUndefined();
     expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(0);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "proposal_recovery_unavailable",
+        environment: "sandbox",
+        pending_age_seconds: expect.any(Number),
+      }),
+      "proposal_recovery_unavailable"
+    );
     testEnv.SDP_RELEASE_CHANNEL = "experimental";
     providerStatus = "COMPLETED";
     expect(await recoverPendingProposal(transfer.id)).toMatchObject({
@@ -1617,6 +1633,27 @@ describe("native Fireblocks pending proposal recovery (PRO-2435 D4)", () => {
 });
 
 describe("manual native Fireblocks cancellation", () => {
+  it("offers and sends cancellation for pending enrichment", async () => {
+    const mock = await ready();
+    providerStatus = "PENDING_ENRICHMENT";
+    const submitted = await send();
+    expect(submitted.status, await submitted.clone().text()).toBe(200);
+    const transfer = (await submitted.json()).data.transfer;
+    const listed = await request(`/fireblocks/proposals?walletId=${walletId}&kind=transfer`);
+    expect(listed.status, await listed.clone().text()).toBe(200);
+    expect((await listed.json()).data.proposals).toMatchObject([
+      { id: transfer.id, status: "PENDING_ENRICHMENT", canCancel: true },
+    ]);
+    const cancelled = await request(`/fireblocks/proposals/transfer/${transfer.id}/cancel`, {});
+    expect(cancelled.status, await cancelled.clone().text()).toBe(200);
+    expect((await cancelled.json()).data).toMatchObject({
+      acknowledged: true,
+      proposal: { status: "PENDING_ENRICHMENT", cancellationRequestedAt: expect.any(String) },
+    });
+    expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(1);
+    expect(await recordedProposal(transfer.id)).toMatchObject({ status: "processing" });
+  });
+
   it.each(["earlier", "later", "invalid"] as const)(
     "shows the latest valid cancellation time when the manual marker is %s",
     async (ordering) => {

@@ -40,6 +40,13 @@ const RECOVERY_CONCURRENCY = 5;
 const RECOVERY_PASSES = 2;
 const CANCELLATION_RESULT_WRITE_ATTEMPTS = 5;
 
+class ProposalRefusalAlertDeliveryError extends Error {
+  constructor(cause: unknown) {
+    super("Custody proposal refusal alert delivery failed", { cause });
+    this.name = "ProposalRefusalAlertDeliveryError";
+  }
+}
+
 function identity(proposal: CustodyProposalRow) {
   return {
     transferId: proposal.payment_transfer_id,
@@ -64,11 +71,8 @@ async function recoverProposal(env: Env, ledger: ProposalLedger, snapshot: Custo
 
 async function finishTerminalProposal(ledger: ProposalLedger, proposal: CustodyProposalRow) {
   if (!isTerminalCustodyProposalPhase(proposal.state.providerPhase)) return false;
-  if (hasUnalertedCustodyProposalRefusal(proposal.state)) {
-    const transfer = await ledger.repo.getTransferById(identity(proposal));
-    if (transfer === null) throw internalError("Custody proposal payment is missing");
-    await emitRefusalAlert(ledger, transfer, proposal);
-  }
+  if (hasUnalertedCustodyProposalRefusal(proposal.state))
+    await emitRefusalAlert(ledger, null, proposal);
   return true;
 }
 
@@ -214,6 +218,7 @@ async function recoverClaimedProposals(
   input: ClaimCustodyProposalsInput
 ) {
   const proposals = await ledger.proposals.claimDue(input);
+  // Row failures use age-based alerts regardless of the rest of the page.
   const outcomes = await mapSettledWithConcurrency(
     proposals,
     RECOVERY_CONCURRENCY,
@@ -221,9 +226,11 @@ async function recoverClaimedProposals(
       try {
         await recoverProposal(env, ledger, proposal);
       } catch (error) {
+        if (error instanceof ProposalRefusalAlertDeliveryError) throw error;
         getLogger().warn(
           {
             event: "proposal_recovery_unavailable",
+            environment: input.environment,
             ...identity(proposal),
             pending_age_seconds: Math.max(
               0,
@@ -237,32 +244,41 @@ async function recoverClaimedProposals(
       }
     }
   );
-  if (outcomes.length > 0 && outcomes.every((outcome) => outcome.status === "rejected")) {
-    rethrowFailures(outcomes);
-  }
+  rethrowFailures(
+    outcomes.filter(
+      (outcome) =>
+        outcome.status === "rejected" && outcome.reason instanceof ProposalRefusalAlertDeliveryError
+    )
+  );
 }
 
 async function emitRefusalAlert(
   ledger: ProposalLedger,
-  transfer: PaymentTransferRow,
+  transfer: PaymentTransferRow | null,
   proposal: CustodyProposalRow
 ) {
-  const refusal = proposal.state.refusal;
-  if (refusal === null) throw internalError("Custody proposal alert has no recorded refusal");
-  getLogger().fatal(
-    {
-      event: "fireblocks_transfer_committed_after_refusal",
-      ...identity(proposal),
-      refusalReason: refusal.reason,
-      refusedAt: refusal.at,
-      signature: transfer.signature,
-    },
-    "fireblocks_transfer_committed_after_refusal"
-  );
-  await applyProposalEvent(ledger, transfer, proposal, {
-    type: "alert_delivered",
-    at: new Date().toISOString(),
-  });
+  try {
+    transfer ??= await ledger.repo.getTransferById(identity(proposal));
+    if (transfer === null) throw internalError("Custody proposal payment is missing");
+    const refusal = proposal.state.refusal;
+    if (refusal === null) throw internalError("Custody proposal alert has no recorded refusal");
+    getLogger().fatal(
+      {
+        event: "fireblocks_transfer_committed_after_refusal",
+        ...identity(proposal),
+        refusalReason: refusal.reason,
+        refusedAt: refusal.at,
+        signature: transfer.signature,
+      },
+      "fireblocks_transfer_committed_after_refusal"
+    );
+    await applyProposalEvent(ledger, transfer, proposal, {
+      type: "alert_delivered",
+      at: new Date().toISOString(),
+    });
+  } catch (error) {
+    throw new ProposalRefusalAlertDeliveryError(error);
+  }
 }
 
 function rethrowFailures(outcomes: readonly PromiseSettledResult<void>[]) {
@@ -284,9 +300,7 @@ async function drainAlerts(ledger: ProposalLedger, scope: CustodyProposalRecover
     RECOVERY_CONCURRENCY,
     async (proposal) => {
       try {
-        const transfer = await ledger.repo.getTransferById(identity(proposal));
-        if (transfer === null) throw internalError("Custody proposal payment is missing");
-        await emitRefusalAlert(ledger, transfer, proposal);
+        await emitRefusalAlert(ledger, null, proposal);
       } catch (error) {
         getLogger().warn(
           {

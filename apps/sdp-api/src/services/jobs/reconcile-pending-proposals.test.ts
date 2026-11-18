@@ -474,8 +474,8 @@ describe("reconcilePendingProposals", () => {
         if (result instanceof Error) throw result;
         return result;
       });
-      if (result instanceof Error) await expect(runRecovery()).rejects.toBe(result);
-      else await runRecovery();
+      await runRecovery();
+      expect(h.warn).toHaveBeenCalledTimes(result instanceof Error ? 1 : 0);
       expect(h.state().state).toMatchObject({
         authorizationState: "cancel_requested",
         cancelAttempt: 2,
@@ -501,7 +501,14 @@ describe("reconcilePendingProposals", () => {
         expect(observeDuringCancellation(h, phase)).not.toBeNull();
         throw unavailable;
       });
-      await expect(runRecovery()).rejects.toBe(unavailable);
+      await runRecovery();
+      expect(h.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "proposal_recovery_unavailable",
+          error_name: unavailable.name,
+        }),
+        "proposal_recovery_unavailable"
+      );
       expect(h.recovery.cancel).toHaveBeenCalledOnce();
       expect(h.state().state).toMatchObject({
         providerPhase: phase,
@@ -549,7 +556,7 @@ describe("reconcilePendingProposals", () => {
     }
   );
 
-  it("reports both an ambiguous provider result and its failed persistence", async () => {
+  it("signals a combined provider and persistence failure without repeating cancellation", async () => {
     const h = harness();
     const unavailable = new Error("Ambiguous cancellation timeout");
     const persistenceError = new Error("Cancellation state database unavailable");
@@ -559,9 +566,14 @@ describe("reconcilePendingProposals", () => {
       if (input.event.type === "cancel_ambiguous") throw persistenceError;
       return h.apply(input);
     });
-    await expect(runRecovery()).rejects.toMatchObject({
-      errors: [unavailable, persistenceError],
-    });
+    await runRecovery();
+    expect(h.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "proposal_recovery_unavailable",
+        error_name: "AggregateError",
+      }),
+      "proposal_recovery_unavailable"
+    );
     expect(h.recovery.cancel).toHaveBeenCalledOnce();
     expect(h.state().state.authorizationState).toBe("cancel_requested");
     expect(h.entries).toHaveLength(2);
@@ -614,8 +626,8 @@ describe("reconcilePendingProposals", () => {
         }
         return null;
       });
-      if (terminalOnLastConflict) await runRecovery();
-      else await expect(runRecovery()).rejects.toThrow("cancellation result changed concurrently");
+      await runRecovery();
+      expect(h.warn).toHaveBeenCalledTimes(terminalOnLastConflict ? 0 : 1);
       expect(conflicts).toBe(5);
       expect(h.recovery.cancel).toHaveBeenCalledOnce();
       expect(h.state().state.cancelAcknowledgedAt).toBeNull();
@@ -629,7 +641,8 @@ describe("reconcilePendingProposals", () => {
     const h = harness();
     h.recovery.admit.mockRejectedValueOnce(revoke()).mockResolvedValue(undefined);
     h.recovery.cancel.mockRejectedValueOnce(new Error("Ambiguous cancellation timeout"));
-    await expect(runRecovery()).rejects.toThrow("Ambiguous cancellation timeout");
+    await runRecovery();
+    expect(h.warn).toHaveBeenCalledOnce();
     const first = h.state().state;
     expect(first.authorizationState).toBe("cancel_ambiguous");
     expect(first.cancelAttempt).toBe(1);
@@ -770,7 +783,14 @@ describe("reconcilePendingProposals", () => {
       h.states.set(row.payment_transfer_id, { ...row, recheck_requested_at: NOW });
       return observation();
     });
-    await expect(runRecovery()).rejects.toThrow("Custody proposal recovery changed concurrently");
+    await runRecovery();
+    expect(h.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "proposal_recovery_unavailable",
+        error_code: "INTERNAL_ERROR",
+      }),
+      "proposal_recovery_unavailable"
+    );
     expect(h.recovery.read).toHaveBeenCalledTimes(2);
     expect(h.recovery.admit).not.toHaveBeenCalled();
     expect(h.recovery.cancel).not.toHaveBeenCalled();
@@ -850,31 +870,94 @@ describe("reconcilePendingProposals", () => {
     expect(h.recovery.cancel).not.toHaveBeenCalled();
   });
 
+  it.each(["emission", "acknowledgment"])(
+    "fails a mixed page when new completion-after-refusal alert %s fails outside the drain snapshot",
+    async (failure) => {
+      const h = harness([transfer(), transfer({ id: "xfr_second" })]);
+      refuse(h);
+      h.alerts.mockResolvedValue([]);
+      h.warn.mockImplementation(() => {
+        throw new Error("Ordinary recovery warnings are unavailable");
+      });
+      h.recovery.read.mockImplementation(async (id) =>
+        id === "xfr_recovery"
+          ? {
+              ...observation("COMPLETED"),
+              txHash:
+                "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy",
+              destinationAddress: h.payment().destination_address ?? undefined,
+              amountInfo: { amount: "1", netAmount: "1", requestedAmount: "1" },
+            }
+          : observation("PENDING_AUTHORIZATION", id)
+      );
+      const unavailable = new Error("Alert delivery unavailable");
+      if (failure === "emission") {
+        h.alert.mockImplementationOnce(() => {
+          throw unavailable;
+        });
+      } else {
+        h.transition.mockImplementation(async (input) => {
+          if (input.event.type === "alert_delivered") throw unavailable;
+          return h.apply(input);
+        });
+      }
+      await expect(runRecovery()).rejects.toMatchObject({
+        name: "ProposalRefusalAlertDeliveryError",
+        cause: unavailable,
+      });
+      expect(h.state().state).toMatchObject({
+        providerPhase: "completed",
+        authorizationState: "committed_after_refusal",
+        alertedAt: null,
+      });
+      expect(h.state("xfr_second").state.authorizationState).toBe("authorized");
+      expect(h.recovery.admit).toHaveBeenCalledOnce();
+      expect(h.recovery.cancel).not.toHaveBeenCalled();
+      expect(h.warn).not.toHaveBeenCalled();
+    }
+  );
+
   it("never cancels on a temporary admission failure or provider read failure", async () => {
     const h = harness();
     h.recovery.admit.mockRejectedValue(new Error("Admission database unavailable"));
-    await expect(runRecovery()).rejects.toThrow("Admission database unavailable");
+    await runRecovery();
     h.recovery.read.mockRejectedValue(new Error("Provider unavailable"));
-    await expect(runRecovery()).rejects.toThrow("Provider unavailable");
+    await runRecovery();
     expect(h.state().state.refusal).toBeNull();
     expect(h.recovery.cancel).not.toHaveBeenCalled();
     expect(h.warn).toHaveBeenCalledTimes(2);
   });
 
-  it("fails the run when every selected proposal fails", async () => {
+  it("signals every aged row failure when the entire page is unavailable", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime("2026-11-12T00:05:00.000Z");
     const h = harness([transfer(), transfer({ id: "xfr_second" })]);
     const firstError = new Error("First provider unavailable");
     const secondError = new Error("Second provider unavailable");
     h.recovery.read.mockImplementation(async (id) => {
       throw id === "xfr_recovery" ? firstError : secondError;
     });
-    await expect(runRecovery()).rejects.toMatchObject({ errors: [firstError, secondError] });
+    await runRecovery();
     expect(h.recovery.read).toHaveBeenCalledTimes(2);
     expect(h.warn).toHaveBeenCalledTimes(2);
+    for (const transferId of ["xfr_recovery", "xfr_second"]) {
+      expect(h.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "proposal_recovery_unavailable",
+          environment: "sandbox",
+          transferId,
+          pending_age_seconds: 300,
+          error_name: "Error",
+        }),
+        "proposal_recovery_unavailable"
+      );
+    }
     expect(h.recovery.cancel).not.toHaveBeenCalled();
   });
 
-  it("keeps a mixed recovery page successful while recording individual failures", async () => {
+  it("keeps the same aged failure signal when another row recovers", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime("2026-11-12T00:05:00.000Z");
     const h = harness([transfer(), transfer({ id: "xfr_second" })]);
     h.recovery.read.mockRejectedValueOnce(new Error("First provider unavailable"));
     h.recovery.admit.mockRejectedValue(revoke());
@@ -882,7 +965,16 @@ describe("reconcilePendingProposals", () => {
     expect(h.state().state.refusal).toBeNull();
     expect(h.state("xfr_second").state.authorizationState).toBe("cancel_acknowledged");
     expect(h.recovery.cancel).toHaveBeenCalledExactlyOnceWith("xfr_second");
-    expect(h.warn).toHaveBeenCalledOnce();
+    expect(h.warn).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        event: "proposal_recovery_unavailable",
+        environment: "sandbox",
+        transferId: "xfr_recovery",
+        pending_age_seconds: 300,
+        error_name: "Error",
+      }),
+      "proposal_recovery_unavailable"
+    );
   });
 
   it("drains terminal alerts even when every selected recovery fails", async () => {
@@ -898,7 +990,8 @@ describe("reconcilePendingProposals", () => {
       },
     });
     h.recovery.read.mockRejectedValue(new Error("Provider unavailable"));
-    await expect(runRecovery()).rejects.toThrow("Provider unavailable");
+    await runRecovery();
+    expect(h.warn).toHaveBeenCalledOnce();
     expect(h.alert).toHaveBeenCalledOnce();
     expect(h.state("xfr_alert").state.alertedAt).toEqual(expect.any(String));
   });
@@ -915,10 +1008,14 @@ describe("reconcilePendingProposals", () => {
         authorizationState: "committed_after_refusal",
       },
     });
+    const unavailable = new Error("Alert delivery failed");
     h.alert.mockImplementationOnce(() => {
-      throw new Error("Alert delivery failed");
+      throw unavailable;
     });
-    await expect(runRecovery()).rejects.toThrow("Alert delivery failed");
+    await expect(runRecovery()).rejects.toMatchObject({
+      name: "ProposalRefusalAlertDeliveryError",
+      cause: unavailable,
+    });
     expect(h.state().state.alertedAt).toBeNull();
     await runRecovery();
     expect(h.alert).toHaveBeenCalledTimes(2);
@@ -939,10 +1036,14 @@ describe("reconcilePendingProposals", () => {
         },
       });
     }
+    const unavailable = new Error("First alert unavailable");
     h.alert.mockImplementationOnce(() => {
-      throw new Error("First alert unavailable");
+      throw unavailable;
     });
-    await expect(runRecovery()).rejects.toThrow("First alert unavailable");
+    await expect(runRecovery()).rejects.toMatchObject({
+      name: "ProposalRefusalAlertDeliveryError",
+      cause: unavailable,
+    });
     expect(h.state().state.alertedAt).toBeNull();
     expect(h.state("xfr_second").state.alertedAt).toEqual(expect.any(String));
   });

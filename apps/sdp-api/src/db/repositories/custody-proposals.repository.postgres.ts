@@ -208,7 +208,7 @@ export function createPostgresCustodyProposalsRepository(
            (id, organization_id, project_id, custody_wallet_id, payment_transfer_id, provider,
             binding, ${STATE_COLUMNS.join(", ")}, next_check_at, created_at, updated_at)
          SELECT ?, pt.organization_id, pt.project_id, pt.custody_wallet_id, pt.id, ?, ?::jsonb,
-                ${STATE_COLUMNS.map(() => "?").join(", ")}, ?, ?, ?
+                ${STATE_COLUMNS.map(() => "?").join(", ")}, ?, pt.created_at, ?
            FROM payment_transfers pt
           WHERE pt.id = ? AND pt.organization_id = ? AND pt.project_id = ?
             AND pt.custody_wallet_id IS NOT DISTINCT FROM ?
@@ -219,7 +219,6 @@ export function createPostgresCustodyProposalsRepository(
           provider,
           JSON.stringify(binding),
           ...stateValues(state),
-          now,
           now,
           now,
           identity.transferId,

@@ -155,6 +155,27 @@ describe("CustodyProposalsRepository", () => {
     repo = createPostgresCustodyProposalsRepository(db);
   });
 
+  it("retains the payment age when adopting an old transfer", async () => {
+    const createdAt = "2026-11-10T10:00:00.000Z";
+    const transfer = await seedTransfer({ id: "historical", createdAt });
+    const state = pendingState();
+    const proposal = await repo.ensureForTransfer({
+      transfer,
+      provider: "fireblocks",
+      binding: BINDING,
+      state,
+      now: NOW,
+    });
+    expect(proposal).toMatchObject({
+      created_at: createdAt,
+      updated_at: NOW,
+      next_check_at: NOW,
+      version: 0,
+      state,
+    });
+    expect(await repo.getForTransfer(identity(transfer.id))).toEqual(proposal);
+  });
+
   it("creates once and refuses rebinding, including when JSON key order changes", async () => {
     const { transfer, proposal } = await seedProposal("immutable");
     expect(

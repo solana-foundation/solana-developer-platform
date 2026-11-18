@@ -397,7 +397,21 @@ export async function pollFireblocksTransfer(
   )
     return { row, polled: false };
   const now = Date.now();
-  await ensureTransferProposal(ledger, row, now);
+  try {
+    await ensureTransferProposal(ledger, row, now);
+  } catch (error) {
+    // A malformed legacy row may have no proposal clock. Rotate its failed
+    // attempt through the rollout marker so it cannot starve the status queue.
+    await repo.updateTransfer({
+      transferId: row.id,
+      organizationId: row.organization_id,
+      projectId: row.project_id,
+      expectedStatus: "processing",
+      providerData: { fireblocksLastPolledAt: new Date(now).toISOString() },
+      updatedAt: new Date(now).toISOString(),
+    });
+    throw error;
+  }
   const claimed = await ledger.proposals.claimForPoll({
     transferId: row.id,
     organizationId: row.organization_id,
