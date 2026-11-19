@@ -305,8 +305,18 @@ function pruneNode(node: Json, context: Context): Json | typeof EMPTY {
   if (module !== undefined && !context.modules.has(module)) return EMPTY;
   const custodyMode = custodyModeGateSchema.parse(node[CUSTODY_MODE_GATE]);
   if (custodyMode !== undefined) {
-    const published = context.published;
     const { releaseChannel } = context;
+    // A mode no published provider serves leaves the node nothing to describe.
+    if (
+      !CUSTODY_PROVIDERS.some(
+        (provider) =>
+          isCustodyProviderPublished(releaseChannel, provider) &&
+          isCustodyProviderInReleaseChannel(releaseChannel, provider, custodyMode)
+      )
+    )
+      return EMPTY;
+    // Provider-owned values stay published only for providers serving this mode.
+    const published = context.published;
     context = {
       ...context,
       published: (value) => {
@@ -405,7 +415,6 @@ export function pruneUnpublishedValues(
   // The generator's output is plain JSON; checking it as such types every node.
   const json = jsonSchema.parse(JSON.parse(JSON.stringify(document)));
   const pruned = pruneNode(json, {
-    releaseChannel,
     // Only strings name modules; numbers, booleans and null are always kept.
     published: (value) =>
       typeof value !== "string" || isValuePublished(value, modules, releaseChannel),
