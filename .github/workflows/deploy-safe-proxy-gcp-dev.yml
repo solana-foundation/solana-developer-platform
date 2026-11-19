@@ -9,7 +9,10 @@ on:
       - apps/sdp-safe-proxy/**
       - packages/sdp-safe-proxy-catalog/**
       - packages/sdp-service-call/**
+      - package.json
       - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - tsconfig.json
       - .github/workflows/deploy-safe-proxy-gcp-dev.yml
   workflow_dispatch:
 
@@ -65,10 +68,17 @@ jobs:
           gcloud run services update "${SERVICE}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
 
-      - name: Confirm the new image is serving
+      - name: Confirm the new image takes all traffic
         run: |
           set -euo pipefail
-          SERVING="$(gcloud run services describe "${SERVICE}" \
+          # The revision that receives traffic, not the one the update asked for.
+          TRAFFIC="$(gcloud run services describe "${SERVICE}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --format json \
+            | jq -c '[.status.traffic[] | select(.percent > 0)]')"
+          test "$(jq 'length' <<<"${TRAFFIC}")" = 1
+          test "$(jq '.[0].percent' <<<"${TRAFFIC}")" = 100
+          REVISION="$(jq -r '.[0].revisionName' <<<"${TRAFFIC}")"
+          SERVING="$(gcloud run revisions describe "${REVISION}" \
             --region "${REGION}" --project "${PROJECT_ID}" \
-            --format 'value(spec.template.spec.containers[0].image)')"
+            --format 'value(spec.containers[0].image)')"
           test "${SERVING}" = "${IMAGE}"
