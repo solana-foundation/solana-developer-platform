@@ -48,6 +48,13 @@ const MODULE_METADATA = [
     ],
   },
   {
+    name: "@sdp/safe-proxy",
+    directory: "apps/sdp-safe-proxy",
+    purpose:
+      "Safe Proxy: the private service that checks its caller and performs the catalog's operations.",
+    allowedDependencies: ["@sdp/safe-proxy-catalog", "@sdp/service-call"],
+  },
+  {
     name: "sdp-docs",
     directory: "apps/sdp-docs",
     purpose: "Public documentation site and generated API reference.",

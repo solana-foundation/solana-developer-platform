@@ -1,0 +1,27 @@
+{
+  "name": "@sdp/safe-proxy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "SAFE_PROXY_CALLER_AUTH=local PORT=8791 tsx watch src/server.ts",
+    "build": "node scripts/build-node.mjs",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "lint": "biome check src/"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.5",
+    "@sdp/safe-proxy-catalog": "workspace:*",
+    "@sdp/service-call": "workspace:*",
+    "hono": "4.13.14",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "esbuild": "0.28.2",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3"
+  }
+}

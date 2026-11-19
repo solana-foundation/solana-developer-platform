@@ -1,0 +1,32 @@
+node_modules
+dist
+coverage
+.turbo
+
+apps/sdp-safe-proxy/src/**/*.test.ts
+
+# Workspace siblings the runner never copies. Re-include @sdp/safe-proxy's
+# workspace dependencies.
+apps/sdp-api
+apps/sdp-web
+apps/sdp-docs
+packages/*
+!packages/sdp-safe-proxy-catalog
+!packages/sdp-service-call
+docs
+infra
+scripts
+skills
+
+.env
+.env.*
+
+.git
+.gitignore
+.claude
+.vscode
+.idea
+.DS_Store
+
+apps/sdp-safe-proxy/Dockerfile
+apps/sdp-safe-proxy/Dockerfile.dockerignore
