@@ -2545,17 +2545,28 @@ describe("TreasurySolutionsWorkspace", () => {
     ).toBe(false);
   });
 
-  it("keeps sandbox-only vault deposits disabled when another provider is open in production", () => {
-    // Kamino deposits open in production since PRO-1986; Veda is the provider
-    // the deposit-environment map still leaves sandbox-only (PRO-1777).
+  it("opens Veda vault deposits in production once its mainnet vault is live", () => {
+    // Kamino opened in PRO-1986; PRO-1777 filled Veda's mainnet deployment, so
+    // the deposit-environment map opens its rows to Production projects too —
+    // each provider's own deployment table decides, never a global switch.
     mocks.environment = "production";
-    renderWorkspace();
+    render(
+      <EnglishTestI18n>
+        <TreasurySolutionsWorkspace
+          providerAccess={{
+            kamino: { entitled: true, configured: true, enabled: true },
+            veda: { entitled: true, configured: true, enabled: true },
+          }}
+        />
+      </EnglishTestI18n>
+    );
 
     const row = screen.getByText("Veda Treasury Fund").closest("tr");
     if (!row) throw new Error("Expected vault strategy row");
-    // The reason it cannot be funded, as words, never a dead button.
-    expect(within(row).queryByRole("button", { name: "Deposit" })).toBeNull();
-    expect(within(row).getByText("Sandbox only")).toBeTruthy();
+    expect(within(row).queryByText("Sandbox only")).toBeNull();
+    expect(
+      (within(row).getByRole("button", { name: "Deposit" }) as HTMLButtonElement).disabled
+    ).toBe(false);
     expect(screen.getByLabelText(/Rates are provider-reported and variable/)).toBeTruthy();
   });
 
@@ -2786,7 +2797,7 @@ describe("TreasurySolutionsWorkspace — combined strategy catalogue (PRO-1742)"
     // offers, from the same provider.
     expect(devnetStrategyRow("Steakhouse USDC")).toBeDefined();
     expect(devnetStrategyRow("Allez USDC")).toBeDefined();
-    // Veda is devnet-only, so its strategies skip the intersection entirely.
+    // Veda is exempt by provider, so its strategies skip the intersection.
     expect(catalogue.getByText("Veda Treasury Fund")).toBeTruthy();
     // A devnet vault with no mainnet counterpart stays off the shelf.
     expect(catalogue.queryByText("Kamino Vault USDC")).toBeNull();

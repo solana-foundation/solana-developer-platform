@@ -51,6 +51,11 @@ function inSandbox<T>(work: () => Promise<T>): Promise<T> {
   return runInClusterScope({ projectId: null, environment: "sandbox" }, work);
 }
 
+/** Provider work in the cluster scope a Production request opens. */
+function inProduction<T>(work: () => Promise<T>): Promise<T> {
+  return runInClusterScope({ projectId: null, environment: "production" }, work);
+}
+
 /** A fetch spy that fails the test on any request: resolution must stay I/O-free. */
 function forbidFetch() {
   const fetchSpy = vi.fn(async () => {
@@ -115,27 +120,37 @@ describe("resolveVaultDirectClient", () => {
   });
 
   /**
-   * SDP has no confirmed PRODUCTION Veda deployment (devnet is deployed;
-   * mainnet waits on PRO-1777), so a production deposit fails on THAT rather
-   * than on an RPC — and it fails before any endpoint work, because an
-   * unconfigured deployment is a fact about SDP that should not depend on a
-   * node being reachable.
+   * The mainnet Veda deployment is configured (PRO-1777), so production work
+   * no longer dies on the deployment table. The first missing fact for this
+   * test process is the mainnet managed pool, and that refusal must still
+   * precede any RPC: a pool nobody configured is a fact about SDP that should
+   * not depend on a node being reachable.
    */
-  it("refuses Veda work on the missing mainnet deployment, before any RPC", async () => {
+  it("refuses Veda production work on the unconfigured mainnet pool, before any RPC", async () => {
     const fetchSpy = forbidFetch();
     const productionRuntime = { env: {}, environment: "production" } as const;
     const client = resolveVaultDirectClient(executionEnv, "veda", createVaultDeadline());
     if (!client) throw new Error("expected a Veda vault-direct client");
 
     await expect(
-      client.buildVaultDeposit(productionRuntime, { ...depositInput, minSharesOut: "1" })
-    ).rejects.toMatchObject({ code: "DEPLOYMENT_NOT_CONFIGURED" });
+      inProduction(() =>
+        client.buildVaultDeposit(productionRuntime, { ...depositInput, minSharesOut: "1" })
+      )
+    ).rejects.toMatchObject({
+      code: "PROVIDER_NOT_CONFIGURED",
+      message: expect.stringContaining("SOLANA_RPC_<PROVIDER>_MAINNET_API_KEY_URL"),
+    });
     await expect(
-      client.readVaultPositions(productionRuntime, {
-        owner: depositInput.owner,
-        providerReferences: [depositInput.providerReference],
-      })
-    ).rejects.toMatchObject({ code: "DEPLOYMENT_NOT_CONFIGURED" });
+      inProduction(() =>
+        client.readVaultPositions(productionRuntime, {
+          owner: depositInput.owner,
+          providerReferences: [depositInput.providerReference],
+        })
+      )
+    ).rejects.toMatchObject({
+      code: "PROVIDER_NOT_CONFIGURED",
+      message: expect.stringContaining("SOLANA_RPC_<PROVIDER>_MAINNET_API_KEY_URL"),
+    });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 

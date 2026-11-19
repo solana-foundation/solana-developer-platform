@@ -827,11 +827,11 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
     expect(scopes).toEqual([expect.objectContaining({ environment: "production" })]);
   });
 
-  it("keeps production closed for a provider the deposit-environment map leaves sandbox-only", async () => {
+  it("keeps production closed for a provider the deposit-environment map does not open", async () => {
     await seedAuth();
     const strategy = await seedStrategy({
-      provider: "veda",
-      underlyingSource: "veda",
+      provider: "upshift",
+      underlyingSource: "upshift",
       environment: "production",
       hostCluster: "mainnet-beta",
     });

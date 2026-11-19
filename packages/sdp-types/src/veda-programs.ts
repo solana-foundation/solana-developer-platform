@@ -1,5 +1,5 @@
 import type { EarnDepositTokenSymbol } from "./earn";
-import { type SolanaCluster, wellKnownMint } from "./well-known-tokens";
+import { type SolanaCluster, type WellKnownTokenSymbol, wellKnownMint } from "./well-known-tokens";
 
 /**
  * Veda's on-chain deployment, per cluster.
@@ -72,29 +72,57 @@ export const VEDA_DEPOSIT_TOKEN_SYMBOLS = [
  * Production vault identities supplied by Veda for SDP (November 2026).
  * Names are provider-supplied; asset selection is pinned per vault so adding
  * OUSD never makes a multi-asset vault's deposit or position ambiguous.
+ *
+ * The asset is pinned by SYMBOL and resolved through the well-known token
+ * catalogue, per the code standards: a mint address is written exactly once,
+ * in `WELL_KNOWN_TOKENS`, and these pins read it from there.
  */
-export const VEDA_MAINNET_VAULTS = [
+const VEDA_MAINNET_VAULT_IDENTITIES = [
   {
     name: "USDC PRIME",
+    assetSymbol: "USDC",
     // biome-ignore lint/security/noSecrets: public vault state account.
     vaultStateAddress: "7PjRdSecsdyUaasPqsQSDyBz67FMJPZT82KCkpXCb1sy",
     vaultId: 4,
-    // biome-ignore lint/security/noSecrets: public USDC mint.
-    assetMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     // biome-ignore lint/security/noSecrets: public vault share mint.
     shareMint: "78gitz5xcQUuV7CfYDBMSKpYVqazDWyRZ2KhQjqFZMjh",
   },
   {
     name: "OUSD PRIME",
+    assetSymbol: "OUSD",
     // biome-ignore lint/security/noSecrets: public vault state account.
     vaultStateAddress: "5qXvYYBRWwW9JYgFAfu3TpWLRaeJ31sEWNWW2cSvU8ZV",
     vaultId: 5,
-    // biome-ignore lint/security/noSecrets: public OUSD mint.
-    assetMint: "ousd2mJsPEckLHcSCDxyKD7NDGARZcfLbDZkKiatYHB",
     // biome-ignore lint/security/noSecrets: public vault share mint.
     shareMint: "DZZa8WVtkDv281vg8nKawhBjpmTxtNkKJdmciw71ZcP9",
   },
-] as const;
+] as const satisfies readonly {
+  name: string;
+  assetSymbol: WellKnownTokenSymbol;
+  vaultStateAddress: string;
+  vaultId: number;
+  shareMint: string;
+}[];
+
+/**
+ * The mainnet mint the well-known catalogue carries for a pinned vault asset.
+ *
+ * Throws rather than returning `undefined` on purpose: a vault pin naming a
+ * token the registry does not deploy on mainnet is a programmer error that
+ * must fail loudly at module load, not silently widen into "accepts no mints".
+ */
+function mainnetVaultMint(symbol: WellKnownTokenSymbol): string {
+  const mint = wellKnownMint(symbol, "mainnet-beta");
+  if (mint === undefined) {
+    throw new Error(`The well-known token registry carries no mainnet-beta mint for ${symbol}`);
+  }
+  return mint;
+}
+
+export const VEDA_MAINNET_VAULTS = VEDA_MAINNET_VAULT_IDENTITIES.map((vault) => ({
+  ...vault,
+  assetMint: mainnetVaultMint(vault.assetSymbol),
+}));
 
 export function vedaVaultMetadata(cluster: SolanaCluster, vault: string) {
   return cluster === "mainnet-beta"

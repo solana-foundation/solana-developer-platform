@@ -66,8 +66,8 @@ const productionOnlyStrategy: EarnStrategy = {
   withdrawalSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
 };
 
-/** Veda deposits stay sandbox-only until it names a production vault (PRO-1777). */
-const sandboxOnlyStrategy: EarnStrategy = {
+/** Veda's USDC PRIME mainnet vault is live (PRO-1777); its devnet Test Vault row stays fundable too. */
+const vedaPrimeStrategy: EarnStrategy = {
   ...liveStrategy,
   id: "earn_strategy_veda",
   provider: "veda",
@@ -99,7 +99,7 @@ vi.mock("./earn-program-data", () => ({
         ? mocks.mainnetLoading
           ? undefined
           : [mainnetStrategy]
-        : [liveStrategy, secondLiveStrategy, productionOnlyStrategy, sandboxOnlyStrategy],
+        : [liveStrategy, secondLiveStrategy, productionOnlyStrategy, vedaPrimeStrategy],
       error: undefined,
       isLoading: mainnet && mocks.mainnetLoading,
     };
@@ -395,7 +395,9 @@ describe("EarnIntegrationGuide", () => {
     expect(screen.queryByRole("option", { name: /Jupiter Lend USDT.*Sandbox only/ })).toBeNull();
   });
 
-  it("refuses a deep link when the selected environment cannot fund the strategy", () => {
+  it("opens a production deep link to Veda once its mainnet vault is live", () => {
+    // The environment gate refused this exact deep link until PRO-1777 filled
+    // Veda's mainnet deployment; now the guide renders end to end.
     mocks.environment = "production";
     renderWithEnglish(
       <EarnIntegrationGuide
@@ -403,13 +405,13 @@ describe("EarnIntegrationGuide", () => {
           ...providerAccess,
           veda: { entitled: true, configured: true, enabled: true },
         }}
-        strategyId={sandboxOnlyStrategy.id}
+        strategyId={vedaPrimeStrategy.id}
       />
     );
 
-    expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
-    expect(screen.getByText(/Sandbox projects only/)).toBeTruthy();
-    expect(screen.queryByText("2. Set up the server code")).toBeNull();
+    expect(screen.queryByText("Strategy deposits unavailable")).toBeNull();
+    expect(screen.getByText("2. Set up the server code")).toBeTruthy();
+    expect(screen.getByText(/STRATEGY_ID = "earn_strategy_veda"/)).toBeTruthy();
   });
 
   it("names provider setup as the reason an otherwise live strategy cannot be integrated", () => {

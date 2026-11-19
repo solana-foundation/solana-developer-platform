@@ -572,24 +572,24 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
     expect(scopes).toEqual([expect.objectContaining({ environment: "production" })]);
   });
 
-  it("keeps production closed for a provider the deposit-environment map leaves sandbox-only", async () => {
+  it("keeps production closed for a provider the deposit-environment map does not open", async () => {
     await seedAuth();
     await seedProductionConnectionWallet({
-      connectionId: "cconn_earn_vault_veda_prod",
-      credentialId: "pcred_earn_vault_veda_prod",
-      custodyWalletId: "cwlt_earn_vault_veda_prod",
-      providerWalletId: "privy_earn_vault_veda_prod",
+      connectionId: "cconn_earn_vault_upshift_prod",
+      credentialId: "pcred_earn_vault_upshift_prod",
+      custodyWalletId: "cwlt_earn_vault_upshift_prod",
+      providerWalletId: "privy_earn_vault_upshift_prod",
     });
     const strategy = await seedStrategy({
-      provider: "veda",
-      underlyingSource: "veda",
+      provider: "upshift",
+      underlyingSource: "upshift",
       hostCluster: "mainnet-beta",
       environment: "production",
     });
     const res = await postVaultDeposit(
       {
         strategyId: strategy.id,
-        custodyWalletId: "cwlt_earn_vault_veda_prod",
+        custodyWalletId: "cwlt_earn_vault_upshift_prod",
         amount: "10",
         minSharesOut: "9.99",
       },

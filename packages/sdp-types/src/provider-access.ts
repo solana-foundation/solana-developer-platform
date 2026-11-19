@@ -524,7 +524,7 @@ function deployedClusters(
  * Clusters each `vault_direct` provider has a deployment SDP can execute
  * against, DERIVED from the provider's own program or deployment table so this
  * can never disagree with it. Filling `VEDA_DEPLOYMENTS["mainnet-beta"]`
- * (PRO-1777) opens Veda to production here with no second edit; Jupiter Lend
+ * (PRO-1777) opened Veda to production here with no second edit; Jupiter Lend
  * and Ondo stay mainnet-only for as long as their tables say so.
  *
  * Upshift and Perena are registered placeholders with no client and no
