@@ -109,7 +109,7 @@ export function defineDashboardFlags({
     identify,
     defaultValue: flagDefault("SDP_FLAG_SANDBOX_ON_BETA", false),
     description:
-      "Link to the hosted sandbox (platform-beta) from the homepage, sign-in, the workspace switcher and the mainnet request page. Turn on where the deployment serves mainnet only.",
+      "Link to the hosted sandbox (platform-devnet) from the homepage, sign-in, the workspace switcher and the mainnet request page. Turn on where the deployment serves mainnet only.",
     options: [
       { value: false, label: "No sandbox link" },
       { value: true, label: "Link to the sandbox" },
@@ -122,7 +122,7 @@ export function defineDashboardFlags({
     identify,
     defaultValue: flagDefault("SDP_FLAG_BETA_LABEL", false),
     description:
-      "Show a Devnet badge beside the product name on the homepage and the sign-in, sign-up, terms and mainnet request pages. Turn on for the hosted Devnet sandbox (platform-beta).",
+      "Show a Devnet badge beside the product name on the homepage and the sign-in, sign-up, terms and mainnet request pages. Turn on for the hosted Devnet sandbox (platform-devnet).",
     options: [
       { value: false, label: "No badge" },
       { value: true, label: "Devnet badge" },

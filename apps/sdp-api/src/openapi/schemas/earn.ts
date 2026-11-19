@@ -96,7 +96,9 @@ const earnStrategySchema = z
       example: "kamino",
     }),
     depositMints: z.array(z.string()).openapi({
-      description: "Mints the strategy accepts directly. The first is the deposit token.",
+      description:
+        "Mints the strategy accepts directly. The first is the deposit token. " +
+        "Veda's mainnet USDC PRIME and OUSD PRIME each pin their own asset, USDC and OUSD respectively.",
       example: ["4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"],
     }),
     shareMint: z.string().optional().openapi({
@@ -190,7 +192,7 @@ export const earnStrategyResponse = successResponseSchema(
 
 // ---------------------------------------------------------------------------
 // External-wallet (caller-signed) vault flows (PRO-1722): SDP builds an
-// unsigned transaction for a wallet it does not custody, and the caller submits
+// unsigned transaction for the wallet owner to sign, and the caller submits
 // it back for durable tracking and SDP broadcast.
 // ---------------------------------------------------------------------------
 
@@ -275,7 +277,7 @@ export const earnExternalWalletDepositTransactionRequest = z
       description:
         "Slippage floor in share units. Required exactly when the selected strategy's " +
         "`depositSlippage` is non-null. Derive it " +
-        "from `POST /v1/earn/vault-deposit-previews`, never from the deposit amount.",
+        "from `POST /v1/earn/deposits/preview`, never from the deposit amount.",
       example: "24.9",
     }),
     sourceTokenMint: earnSolanaMintSchema.optional().openapi({

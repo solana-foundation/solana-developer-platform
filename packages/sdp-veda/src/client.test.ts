@@ -187,7 +187,7 @@ describe("VedaVaultDirectClient capabilities", () => {
   it("still catalogues — the execution client is a superset, not a replacement", () => {
     expect(client.provider).toBe("veda");
     expect(client.declaredSupport.sourceKinds).toEqual(["defi"]);
-    expect(client.declaredSupport.depositTokens).toEqual(["USDC"]);
+    expect(client.declaredSupport.depositTokens).toEqual(["USDC", "OUSD"]);
     expect(typeof client.listStrategies).toBe("function");
   });
 });
@@ -489,18 +489,10 @@ describe("readVaultPositions", () => {
   });
 });
 
-describe("an unconfigured deployment", () => {
-  /**
-   * The real registry has no MAINNET entry (devnet is confirmed; mainnet waits
-   * for Veda to name a production vault), so a client built against it refuses
-   * every mainnet chain call. Asserted with the mock bypassed so this is the
-   * genuine `@sdp/types` state, not the fixture's.
-   */
-  it("refuses both chain capabilities with a typed error", async () => {
+describe("the deployment registry", () => {
+  it("resolves the production deployment through the real registry", async () => {
     const { vedaClusterConfig } = await vi.importActual<typeof import("./programs")>("./programs");
-    expect(() => vedaClusterConfig("mainnet-beta")).toThrowError(
-      expect.objectContaining({ code: "DEPLOYMENT_NOT_CONFIGURED" })
-    );
+    expect(vedaClusterConfig("mainnet-beta").vaultStateAddresses).toHaveLength(2);
   });
 
   it("still exposes the fixture-driven config helper the builder uses", () => {

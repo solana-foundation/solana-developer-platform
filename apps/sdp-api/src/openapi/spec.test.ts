@@ -340,25 +340,25 @@ describe("OpenAPI spec", () => {
       [
         "GET /v1/earn/strategies",
         "GET /v1/earn/strategies/{strategyId}",
-        "POST /v1/earn/vault-deposit-previews",
-        "GET /v1/earn/external-wallet/positions/summary",
-        "GET /v1/earn/external-wallet/positions",
-        "GET /v1/earn/external-wallet/movements",
-        "GET /v1/earn/external-wallet/movements/{movementId}",
-        "GET /v1/earn/external-wallet/earnings",
-        "POST /v1/earn/external-wallet/deposit-transactions",
-        "POST /v1/earn/external-wallet/deposits",
-        "POST /v1/earn/external-wallet/withdrawal-previews",
-        "POST /v1/earn/external-wallet/withdrawal-transactions",
-        "POST /v1/earn/external-wallet/withdrawals",
-        "POST /v1/earn/external-wallet/withdrawal-options",
-        "POST /v1/earn/external-wallet/queued-withdrawal-previews",
-        "POST /v1/earn/external-wallet/withdrawal-request-transactions",
-        "POST /v1/earn/external-wallet/withdrawal-requests",
-        "GET /v1/earn/external-wallet/withdrawal-requests",
-        "GET /v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}",
-        "POST /v1/earn/external-wallet/withdrawal-request-cancel-transactions",
-        "POST /v1/earn/external-wallet/withdrawal-request-cancellations",
+        "POST /v1/earn/deposits/preview",
+        "GET /v1/earn/positions/caller-signed/project-summary",
+        "GET /v1/earn/positions/caller-signed",
+        "GET /v1/earn/movements/caller-signed",
+        "GET /v1/earn/movements/caller-signed/{movementId}",
+        "GET /v1/earn/earnings/caller-signed",
+        "POST /v1/earn/deposits/build-unsigned-transaction",
+        "POST /v1/earn/deposits/submit-signed-transaction",
+        "POST /v1/earn/withdrawals/caller-signed/preview",
+        "POST /v1/earn/withdrawals/build-unsigned-transaction",
+        "POST /v1/earn/withdrawals/submit-signed-transaction",
+        "POST /v1/earn/withdrawals/caller-signed/options",
+        "POST /v1/earn/withdrawal-requests/caller-signed/preview",
+        "POST /v1/earn/withdrawal-requests/build-unsigned-transaction",
+        "POST /v1/earn/withdrawal-requests/submit-signed-transaction",
+        "GET /v1/earn/withdrawal-requests/caller-signed",
+        "GET /v1/earn/withdrawal-requests/caller-signed/{withdrawalRequestId}",
+        "POST /v1/earn/withdrawal-requests/cancel/build-unsigned-transaction",
+        "POST /v1/earn/withdrawal-requests/cancel/submit-signed-transaction",
       ].sort()
     );
     expect(Object.keys(publicDocument.paths["/v1/transactions"])).toEqual(["get"]);
@@ -390,19 +390,17 @@ describe("OpenAPI spec", () => {
     }
 
     const depositPreviewRequest = getJsonSchema(
-      publicDocument.paths?.["/v1/earn/vault-deposit-previews"]?.post?.requestBody
+      publicDocument.paths?.["/v1/earn/deposits/preview"]?.post?.requestBody
     );
     expect(depositPreviewRequest.required).toEqual(
       expect.arrayContaining(["strategyId", "amount"])
     );
     expect(
-      JSON.stringify(
-        publicDocument.paths?.["/v1/earn/vault-deposit-previews"]?.post?.responses?.["200"]
-      )
+      JSON.stringify(publicDocument.paths?.["/v1/earn/deposits/preview"]?.post?.responses?.["200"])
     ).toContain("sharesOut");
 
     const withdrawalBuildRequest = getJsonSchema(
-      publicDocument.paths?.["/v1/earn/external-wallet/withdrawal-transactions"]?.post?.requestBody
+      publicDocument.paths?.["/v1/earn/withdrawals/build-unsigned-transaction"]?.post?.requestBody
     );
     expect(withdrawalBuildRequest.required).toEqual(
       expect.arrayContaining(["positionId", "shares"])
@@ -415,13 +413,13 @@ describe("OpenAPI spec", () => {
 
     expect(
       JSON.stringify(
-        publicDocument.paths?.["/v1/earn/external-wallet/positions"]?.get?.responses?.["200"]
+        publicDocument.paths?.["/v1/earn/positions/caller-signed"]?.get?.responses?.["200"]
       )
     ).toContain('"unlockTimestamp"');
 
     for (const path of [
-      "/v1/earn/external-wallet/deposit-transactions",
-      "/v1/earn/external-wallet/withdrawal-transactions",
+      "/v1/earn/deposits/build-unsigned-transaction",
+      "/v1/earn/withdrawals/build-unsigned-transaction",
     ]) {
       expect(JSON.stringify(publicDocument.paths?.[path]?.post?.responses?.["200"])).toContain(
         '"sponsored"'
@@ -429,7 +427,7 @@ describe("OpenAPI spec", () => {
     }
 
     const submitRequest = getJsonSchema(
-      publicDocument.paths?.["/v1/earn/external-wallet/deposits"]?.post?.requestBody
+      publicDocument.paths?.["/v1/earn/deposits/submit-signed-transaction"]?.post?.requestBody
     );
     const signedTransactionExample = submitRequest.properties?.signedTransaction?.example;
     expect(signedTransactionExample).toEqual(expect.any(String));
@@ -461,13 +459,14 @@ describe("OpenAPI spec", () => {
     const partnerPaths = literalEarnPaths(`${guide}\n${guides}\n${generatedModule}`);
     expect(partnerPaths).toEqual(
       expect.arrayContaining([
-        "/v1/earn/external-wallet/withdrawal-options",
-        "/v1/earn/external-wallet/queued-withdrawal-previews",
-        "/v1/earn/external-wallet/withdrawal-request-transactions",
-        "/v1/earn/external-wallet/withdrawal-requests",
-        "/v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}",
-        "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
-        "/v1/earn/external-wallet/withdrawal-request-cancellations",
+        "/v1/earn/withdrawals/caller-signed/options",
+        "/v1/earn/withdrawal-requests/caller-signed/preview",
+        "/v1/earn/withdrawal-requests/build-unsigned-transaction",
+        "/v1/earn/withdrawal-requests/submit-signed-transaction",
+        "/v1/earn/withdrawal-requests/caller-signed",
+        "/v1/earn/withdrawal-requests/caller-signed/{withdrawalRequestId}",
+        "/v1/earn/withdrawal-requests/cancel/build-unsigned-transaction",
+        "/v1/earn/withdrawal-requests/cancel/submit-signed-transaction",
       ])
     );
     for (const path of partnerPaths) {
@@ -490,7 +489,7 @@ describe("OpenAPI spec", () => {
 
   it("publishes both asynchronous withdrawal mechanisms with their exact row shapes", () => {
     const doc = createPublicOpenApiDocument(EXPERIMENTAL);
-    const requestPath = doc.paths?.["/v1/earn/external-wallet/withdrawal-request-transactions"];
+    const requestPath = doc.paths?.["/v1/earn/withdrawal-requests/build-unsigned-transaction"];
 
     const buildRequest = getJsonSchema(requestPath?.post?.requestBody);
     expect(buildRequest.anyOf).toHaveLength(3);
@@ -518,7 +517,7 @@ describe("OpenAPI spec", () => {
     }
 
     const options = getJsonSchema(
-      doc.paths?.["/v1/earn/external-wallet/withdrawal-options"]?.post?.responses?.["200"]
+      doc.paths?.["/v1/earn/withdrawals/caller-signed/options"]?.post?.responses?.["200"]
     );
     expect(options.properties?.data?.properties?.parRedemption).toMatchObject({
       nullable: true,
@@ -533,7 +532,7 @@ describe("OpenAPI spec", () => {
     });
 
     const preview = getJsonSchema(
-      doc.paths?.["/v1/earn/external-wallet/queued-withdrawal-previews"]?.post?.responses?.["200"]
+      doc.paths?.["/v1/earn/withdrawal-requests/caller-signed/preview"]?.post?.responses?.["200"]
     );
     const operatorPreview = preview.properties?.data?.anyOf?.find((variant) =>
       variant.properties?.mechanism?.enum?.includes("operatorRedemption")
@@ -543,7 +542,7 @@ describe("OpenAPI spec", () => {
     );
 
     const record = getJsonSchema(
-      doc.paths?.["/v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}"]?.get
+      doc.paths?.["/v1/earn/withdrawal-requests/caller-signed/{withdrawalRequestId}"]?.get
         ?.responses?.["200"]
     );
     const recordVariants = record.properties?.data?.properties?.withdrawalRequest?.anyOf ?? [];
@@ -695,12 +694,18 @@ describe("OpenAPI spec", () => {
       ["/v1/dvp/trades/{tradeId}/settle", "post"],
     ] as const;
     for (const [path, method] of sponsored) {
-      expect(doc.paths?.[path]?.[method]?.responses, path).toHaveProperty("422");
+      const responses = doc.paths?.[path]?.[method]?.responses;
+      expect(responses, path).toHaveProperty("422");
+      // The 422's own envelope must allow SIGNING_REJECTED: the code enum lives
+      // inline on each error response, and no shared component schema holds it.
+      const envelope = errorEnvelopeResponseSchema.safeParse(responses?.["422"]);
+      expect(envelope.success, `${path} 422 must be a JSON error envelope`).toBe(true);
+      if (!envelope.success) continue;
+      expect(
+        envelope.data.content["application/json"].schema.properties.error.properties.code.enum,
+        path
+      ).toContain("SIGNING_REJECTED");
     }
-    const codes = (doc.components?.schemas?.ApiErrorCode ?? doc.components?.schemas?.ErrorCode) as
-      | { enum?: string[] }
-      | undefined;
-    if (codes?.enum) expect(codes.enum).toContain("SIGNING_REJECTED");
   });
 
   it("documents exact-one wallet ownership and request-time runtime admission", () => {
@@ -886,6 +891,16 @@ describe("OpenAPI spec", () => {
     for (const doc of documents) {
       const lists = errorEnvelopeCodes(doc);
       expect(lists.length).toBeGreaterThan(0);
+      // The 501 rule needs a 501 to police: a document that publishes Earn
+      // operations must carry at least one, or the narrowing below would pass
+      // with nothing to check. Stable hides Earn, so this is per document.
+      const publishesEarn = Object.keys(doc.paths).some((path) => path.startsWith("/v1/earn"));
+      if (publishesEarn) {
+        expect(
+          lists.some(({ status }) => status === "501"),
+          "a 501 envelope exists"
+        ).toBe(true);
+      }
       for (const { status, codes } of lists) {
         if (status === "501") expect(codes).toEqual(["NOT_IMPLEMENTED"]);
         else expect(codes).toEqual(ERROR_CODES);

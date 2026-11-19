@@ -1,7 +1,7 @@
 # ADR 0003: Managed reconciliation cadence and monitor identity
 
 > **Note (2026-10-19):** Superseded by [ADR 0011](./0011-cron-definitions.md). The
-> always-on worker replaced the managed Cloud Run Job, which is deleted along
+> always-on cron service replaced the managed Cloud Run Job, which is deleted along
 > with `job.ts`, the `sdp-api-managed-*` monitor namespace, and the Sentry
 > check-in lifecycle described below. Kept for history.
 - **Status:** Superseded by ADR 0011

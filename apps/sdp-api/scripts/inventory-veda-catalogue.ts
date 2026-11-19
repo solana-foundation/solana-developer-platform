@@ -44,6 +44,7 @@ import {
   isVedaDepositMint,
   VEDA_DEPOSIT_TOKEN_SYMBOLS,
   vedaDeployment,
+  vedaVaultMetadata,
 } from "@sdp/types/veda-programs";
 import {
   SDP_ENVIRONMENT_BY_CLUSTER,
@@ -155,7 +156,8 @@ async function inventoryCluster(cluster: SolanaCluster): Promise<ClusterInventor
         symbol: WELL_KNOWN_TOKEN_BY_MINT.get(asset.assetMint)?.symbol ?? null,
         allowDeposits: asset.allowDeposits,
         allowWithdrawals: asset.allowWithdrawals,
-        admitted: asset.allowDeposits && isVedaDepositMint(asset.assetMint, cluster),
+        admitted:
+          asset.allowDeposits && isVedaDepositMint(asset.assetMint, cluster, entry.vault.address),
       }))
       .sort((left, right) => left.mint.localeCompare(right.mint));
 
@@ -165,7 +167,9 @@ async function inventoryCluster(cluster: SolanaCluster): Promise<ClusterInventor
     return {
       address: entry.vault.address,
       vaultId: entry.vault.vaultId.toString(),
-      name: vedaVaultName(entry.vault.baseAsset, entry.vault.vaultId),
+      name:
+        vedaVaultMetadata(cluster, entry.vault.address)?.name ??
+        vedaVaultName(entry.vault.baseAsset, entry.vault.vaultId),
       shareMint: entry.vault.shareMint,
       baseAsset: entry.vault.baseAsset,
       baseAssetSymbol: WELL_KNOWN_TOKEN_BY_MINT.get(entry.vault.baseAsset)?.symbol ?? null,

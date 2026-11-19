@@ -28,17 +28,20 @@ describe("earnVaultDepositAvailability", () => {
         kamino: { entitled: true, configured: true, enabled: true },
       })
     ).toBe("available");
-    // Kamino deposits open in production too (PRO-1986); the environment gate
-    // now bites a sandbox-only provider, Veda, until PRO-1777.
+    // Kamino and Veda deposits open in production too (PRO-1986, PRO-1777);
+    // the environment gate now bites a mainnet-only provider, Jupiter Lend,
+    // from a sandbox project.
     expect(
       earnVaultDepositAvailability({ ...strategy, hostCluster: "mainnet-beta" }, "production", {
         kamino: { entitled: true, configured: true, enabled: true },
       })
     ).toBe("available");
     expect(
-      earnVaultDepositAvailability({ ...strategy, provider: "veda" }, "production", {
-        veda: { entitled: true, configured: true, enabled: true },
-      })
+      earnVaultDepositAvailability(
+        { ...strategy, provider: "jupiter_lend", hostCluster: "mainnet-beta" },
+        "sandbox",
+        { jupiter_lend: { entitled: true, configured: true, enabled: true } }
+      )
     ).toBe("environment_unavailable");
     expect(earnVaultDepositAvailability(strategy, "sandbox", null)).toBe("access_unavailable");
     expect(

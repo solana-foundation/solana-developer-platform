@@ -96,6 +96,17 @@ describe("Health routes", () => {
       });
     });
 
+    // Pins the derivation independently of the implementation map: if a
+    // serving state were silently dropped from EGRESS_READINESS_SERVES_TRAFFIC,
+    // the cases below would register zero tests and stay green (mirrors
+    // money-admission.test.ts's "exempts exactly the reviewed exits").
+    it("serves traffic in exactly the reviewed egress states", () => {
+      const servingStates = EGRESS_READINESS_STATES.filter(
+        (state) => EGRESS_READINESS_SERVES_TRAFFIC[state]
+      );
+      expect(servingStates).toEqual(["ok", "unverified"]);
+    });
+
     it.each(EGRESS_READINESS_STATES.filter((state) => EGRESS_READINESS_SERVES_TRAFFIC[state]))(
       "reports ready once egress is %s",
       async (egress) => {

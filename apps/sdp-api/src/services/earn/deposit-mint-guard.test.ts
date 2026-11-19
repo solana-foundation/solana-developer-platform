@@ -227,26 +227,36 @@ describe("guardDepositMints", () => {
     }
   );
 
-  it("emits one drift event per changed field, naming cluster, symbol and mint", async () => {
-    accountFor.mockImplementation((mint) =>
-      mint === PYUSD_MAINNET
-        ? mintAccount({ hookProgram: "Hook111111111111111111111111111111111111111" })
-        : mintAccount({})
-    );
+  it.each(token2022DepositMints("mainnet-beta"))(
+    "emits a drift event for $symbol without reporting other issuers as drift",
+    async ({ symbol, mint: changedMint }) => {
+      accountFor.mockImplementation((mint) => {
+        const pinned = PINNED_TOKEN_2022_DEPOSIT_MINTS[mint];
+        if (!pinned) throw new Error(`Missing mint fixture for ${mint}`);
+        return mintAccount({
+          hookProgram:
+            mint === changedMint
+              ? "Hook111111111111111111111111111111111111111"
+              : pinned.transferHookProgram,
+          hookAuthority: pinned.transferHookAuthority,
+          delegate: pinned.permanentDelegate,
+        });
+      });
 
-    await expect(guardIn("production", env)).resolves.toBe(1);
+      await expect(guardIn("production", env)).resolves.toBe(1);
 
-    expect(mocks.logEvent).toHaveBeenCalledTimes(1);
-    expect(mocks.logEvent).toHaveBeenCalledWith("error", {
-      event: EARN_DEPOSIT_MINT_DRIFT_EVENT,
-      cluster: "mainnet-beta",
-      symbol: "PYUSD",
-      mint: PYUSD_MAINNET,
-      field: "transfer_hook_program",
-      expected: null,
-      actual: "Hook111111111111111111111111111111111111111",
-    });
-  });
+      expect(mocks.logEvent).toHaveBeenCalledTimes(1);
+      expect(mocks.logEvent).toHaveBeenCalledWith("error", {
+        event: EARN_DEPOSIT_MINT_DRIFT_EVENT,
+        cluster: "mainnet-beta",
+        symbol,
+        mint: changedMint,
+        field: "transfer_hook_program",
+        expected: null,
+        actual: "Hook111111111111111111111111111111111111111",
+      });
+    }
+  );
 
   it.each([
     ["error", "enabled", earnEnabledEnv],

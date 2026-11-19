@@ -473,11 +473,10 @@ const vaultAssetsSchema = z.array(z.looseObject({ mint: z.string() }));
  * flag live on the asset's own account (`assetTakesDeposits`) and refuses with
  * its own typed error.
  *
- * AMBIGUITY IS REFUSED, not resolved. Identity is cluster-exact, so while SDP
- * declares one deposit symbol there can be at most one match; if the symbol
- * list ever widens, "pick the first" is the kind of silent choice that spends
- * or values the wrong token. Widening `VEDA_DEPOSIT_TOKEN_SYMBOLS` therefore
- * means carrying a mint on the provider contract first; this error says so.
+ * Production PRIME vaults pin one asset per vault in the shared predicate.
+ * Other vaults refuse ambiguity rather than picking the first supported asset:
+ * their provider contract needs an explicit asset identity before admitting
+ * multiple deposit assets.
  */
 async function resolveVaultAssetMint(
   config: VedaClusterConfig,
@@ -492,7 +491,7 @@ async function resolveVaultAssetMint(
   }
 
   const candidates = assets
-    .filter((asset) => isVedaDepositMint(asset.mint, config.cluster))
+    .filter((asset) => isVedaDepositMint(asset.mint, config.cluster, vault))
     .sort((left, right) => left.mint.localeCompare(right.mint));
 
   const [only, ...rest] = candidates;

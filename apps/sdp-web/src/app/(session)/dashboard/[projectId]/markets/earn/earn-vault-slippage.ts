@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { compareUnsignedDecimals } from "./earn-decimal";
+
 /**
  * Slippage-floor machinery shared by the vault DEPOSIT and WITHDRAW modals.
  *
@@ -205,6 +207,50 @@ export const VAULT_QUOTE_TTL_MS = 30_000;
 /** True when a quote is older than the TTL — too old to derive a floor from. */
 export function isExpiredQuote<T>(quote: VaultQuoteState<T>): boolean {
   return quote.kind === "quoted" && Date.now() - quote.quotedAt > VAULT_QUOTE_TTL_MS;
+}
+
+/** What an expired floor's revalidation decided, before a submission proceeds. */
+export type ExpiredFloorVerdict =
+  | "still_satisfiable"
+  | "floor_exceeded"
+  | "quote_unavailable"
+  | "aborted";
+
+/**
+ * EXPIRY BACKSTOP (PRO-1691), the read half: the floor on screen came from a
+ * quote that aged past the TTL, so ask the vault again before sending it. The
+ * floor the user REVIEWED is what a passing verdict submits, never a weaker
+ * floor re-derived from the fresh rate (that would accept up to double the
+ * chosen tolerance).
+ *
+ * Shared by the DEPOSIT and WITHDRAW modals: each names its own quote read
+ * (`requote` — the same fetch the quote hook runs) and its own quoted-output
+ * field (`quantity` — the deposit's `sharesOut`, the withdrawal's `assetsOut`)
+ * to compare against the reviewed `floor`. A re-read that fails or reports
+ * blocking issues answers `quote_unavailable` — the same fail-closed posture
+ * as an unavailable standing quote — and an aborted read answers `aborted`
+ * rather than a verdict from a submission that is already leaving. A throw
+ * from the provider read propagates: the caller's submit reports it like any
+ * other failed attempt.
+ */
+export async function revalidateExpiredFloor<
+  Preview extends { blockingIssues: readonly unknown[] },
+>(
+  requote: (
+    signal: AbortSignal
+  ) => Promise<{ kind: "quoted"; preview: Preview } | { kind: "unavailable" }>,
+  quantity: (preview: Preview) => string,
+  floor: string,
+  signal: AbortSignal
+): Promise<ExpiredFloorVerdict> {
+  const fresh = await requote(signal);
+  if (signal.aborted) return "aborted";
+  if (fresh.kind !== "quoted" || fresh.preview.blockingIssues.length > 0) {
+    return "quote_unavailable";
+  }
+  return compareUnsignedDecimals(quantity(fresh.preview), floor) === -1
+    ? "floor_exceeded"
+    : "still_satisfiable";
 }
 
 /**

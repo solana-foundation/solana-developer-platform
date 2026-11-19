@@ -206,6 +206,24 @@ export interface IdempotencyKeyStore {
   /** Whether a key is kept for this request: an earlier attempt left it unretired. */
   has(fingerprint: string): boolean;
   /**
+   * Every unretired entry in this scope, oldest claim first — a read-only view
+   * for a caller that must SCAN kept keys rather than look one up: an entry
+   * whose fingerprint an upgrade RENAMED (the request identity changed shape
+   * under the same store key) is kept but unreachable through `has`, and the
+   * scanner is how it is found and adopted. An entry with no claim time — an
+   * earlier build wrote it, and no claim has touched it since — sorts as the
+   * oldest there is; the fingerprint breaks ties so a scan's pick is
+   * deterministic.
+   */
+  keptEntries(): ReadonlyArray<{
+    /** The request fingerprint the key is kept under. */
+    fingerprint: string;
+    /** The key itself. */
+    key: string;
+    /** When the key was first claimed, epoch ms; absent on an earlier build's entry. */
+    claimedAt: number | undefined;
+  }>;
+  /**
    * The request's key: the one kept for it, or a new one minted the first
    * time, and written to storage either way. `persisted: false` means the
    * browser refused the write, so a reload would lose the key; a money route
@@ -247,6 +265,19 @@ export function createIdempotencyKeyStore(storeKey: string): IdempotencyKeyStore
   return {
     has(fingerprint) {
       return readEntries(scopedKey(storeKey)).some((entry) => entry.id === fingerprint);
+    },
+
+    keptEntries() {
+      return readEntries(scopedKey(storeKey))
+        .map((entry) => ({ fingerprint: entry.id, key: entry.value, claimedAt: entry.claimedAt }))
+        .sort((left, right) => {
+          const leftAt = left.claimedAt ?? Number.NEGATIVE_INFINITY;
+          const rightAt = right.claimedAt ?? Number.NEGATIVE_INFINITY;
+          if (leftAt !== rightAt) return leftAt < rightAt ? -1 : 1;
+          if (left.fingerprint < right.fingerprint) return -1;
+          if (left.fingerprint > right.fingerprint) return 1;
+          return 0;
+        });
     },
 
     claim(fingerprint, mint = () => crypto.randomUUID()) {

@@ -10,10 +10,8 @@ import type { VedaRuntime } from "./types";
  * this package is pure and offline, per the repo rule that package tests touch
  * no network.
  *
- * It is also the ONLY thing in this repository that can prove the Veda
- * integration works end to end. It takes its deployment from the environment
- * rather than `VEDA_DEPLOYMENTS`, so it can exercise a candidate deployment
- * (mainnet, when Veda names a production vault) before it is committed.
+ * Read-only candidate-deployment diagnostic; sdk.surfpool.test.ts is the
+ * value-moving proof. It takes addresses from the environment.
  *
  *   VEDA_SMOKE_RPC_URL=https://api.devnet.solana.com \
  *   VEDA_SMOKE_VAULT_PROGRAM=<address> \
@@ -26,9 +24,8 @@ import type { VedaRuntime } from "./types";
  * Run it INSIDE the toolchain container, like every other node command in this
  * repository, and against DEVNET. Nothing here signs or submits — it builds an
  * unsigned plan and reads state — but Veda's own integration checklist requires
- * their separate approval for any value-moving mainnet test, and
- * `VEDA_DEPLOYMENTS["mainnet-beta"]` stays null for the same reason, which is
- * what keeps Veda sandbox-only in `EARN_PROVIDER_DEPLOYED_CLUSTERS`.
+ * their separate approval for any value-moving mainnet test. Surfpool proofs
+ * run only on local forks and never submit to a remote cluster.
  *
  * What this proves that the offline tests cannot: the deployment validates, the
  * vault's PDAs derive as the SDK expects, a deposit plan actually builds against

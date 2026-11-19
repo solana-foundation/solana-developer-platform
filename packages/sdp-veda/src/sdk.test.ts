@@ -3,7 +3,7 @@ import {
   VEDA_ASSET_DATA_LAYOUT,
 } from "@sdp/earn/providers/veda/vault-state";
 import { prepareRpcRead, withMinimumRpcSlot } from "@sdp/rpc/read-context";
-import type { VedaDeployment } from "@sdp/types/veda-programs";
+import { VEDA_MAINNET_VAULTS, type VedaDeployment } from "@sdp/types/veda-programs";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { type Address, address, getAddressEncoder, getBase64Decoder } from "@solana/kit";
 import { findAssetDataPda } from "@vedatech/svm-sdk";
@@ -641,6 +641,41 @@ describe("position reads reuse the client and the vault's static facts", () => {
 });
 
 describe("asset resolution is cluster-exact", () => {
+  it.each(VEDA_MAINNET_VAULTS)(
+    "reads $name using its pinned asset even when both assets exist and deposits are paused",
+    async (vault) => {
+      primeVault(
+        VEDA_MAINNET_VAULTS.map((entry) => ({ mint: entry.assetMint, allowDeposits: false }))
+      );
+      const position = await readVedaPosition(
+        { ...runtime, cluster: "mainnet-beta" },
+        toClusterConfig("mainnet-beta", DEPLOYMENT),
+        { vault: address(vault.vaultStateAddress), owner: OWNER }
+      );
+      expect(position.tokenMint).toBe(vault.assetMint);
+      expect(position.shares).toBe("2.5");
+    }
+  );
+
+  it.each(VEDA_MAINNET_VAULTS)(
+    "refuses $name when only the other PRIME asset is configured",
+    async (vault) => {
+      primeVault(
+        VEDA_MAINNET_VAULTS.filter((entry) => entry.assetMint !== vault.assetMint).map((entry) => ({
+          mint: entry.assetMint,
+          allowDeposits: true,
+        }))
+      );
+      await expect(
+        readVedaPosition(
+          { ...runtime, cluster: "mainnet-beta" },
+          toClusterConfig("mainnet-beta", DEPLOYMENT),
+          { vault: address(vault.vaultStateAddress), owner: OWNER }
+        )
+      ).rejects.toMatchObject({ code: "UNSUPPORTED_VAULT" });
+    }
+  );
+
   /**
    * Mainnet USDC and devnet USDC share a symbol but are different mints. A
    * devnet vault whose asset config names the mainnet mint must be refused as
