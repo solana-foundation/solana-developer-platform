@@ -97,6 +97,7 @@ import {
   isSlippageExceededRefusal,
   parseSlippageToleranceState,
   quoteForKey,
+  revalidateExpiredFloor,
   useDebouncedVaultQuote,
   type VaultFloorReplay,
   type VaultQuoteState,
@@ -317,31 +318,6 @@ function resolveDepositSubmission(
     outcome: { kind: "deposit", amount, movement: deposit, walletName },
     deposited: deposit,
   };
-}
-
-type ExpiredFloorVerdict = "still_satisfiable" | "floor_exceeded" | "quote_unavailable" | "aborted";
-
-/**
- * EXPIRY BACKSTOP (PRO-1691), the read half: the floor on screen came from a
- * quote that aged past the TTL, so ask the vault again before sending it. The
- * floor the user REVIEWED is what a passing verdict submits, never a weaker
- * floor re-derived from the fresh rate (that would accept up to double the
- * chosen tolerance).
- */
-async function revalidateExpiredFloor(
-  strategyId: string,
-  amount: string,
-  floor: string,
-  signal: AbortSignal
-): Promise<ExpiredFloorVerdict> {
-  const fresh = await fetchEarnVaultDepositPreview({ strategyId, amount }, signal);
-  if (signal.aborted) return "aborted";
-  if (fresh.kind !== "quoted" || fresh.preview.blockingIssues.length > 0) {
-    return "quote_unavailable";
-  }
-  return compareUnsignedDecimals(fresh.preview.sharesOut, floor) === -1
-    ? "floor_exceeded"
-    : "still_satisfiable";
 }
 
 type Translation = ReturnType<typeof useTranslations>;
@@ -1247,7 +1223,12 @@ export function EarnVaultDepositModal({
     floor: string | null
   ): Promise<boolean> {
     if (replay.kind !== "fresh" || floor === null || !isExpiredQuote(quote)) return true;
-    const verdict = await revalidateExpiredFloor(strategy.id, amount, floor, controller.signal);
+    const verdict = await revalidateExpiredFloor(
+      (signal) => fetchEarnVaultDepositPreview({ strategyId: strategy.id, amount }, signal),
+      (preview) => preview.sharesOut,
+      floor,
+      controller.signal
+    );
     if (verdict === "still_satisfiable") return true;
     if (verdict === "aborted") return false;
     if (verdict === "floor_exceeded") setSlippageOpen(true);
