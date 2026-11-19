@@ -23,7 +23,7 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/dvp` | Generated @solana/kit client for the DvP atomic swap program. | None | None |
 | `@sdp/earn` | Earn domain services, yield strategies, and vault-infra providers. | `@sdp/payments`, `@sdp/redaction`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` | None |
 | `@sdp/env-config` | Runtime environment configuration and validation. | None | None |
-| `@sdp/fee-payment` | Fee-payment port, the Kora adapter, Kora endpoint selection, and the Fee Payer's chain reads. | `@sdp/rpc`, `@sdp/types` | None |
+| `@sdp/fee-payment` | Fee-payment port, the Kora adapter, Kora endpoint selection, and the Fee Payer's chain reads. | `@sdp/rpc`, `@sdp/service-call`, `@sdp/types` | None |
 | `@sdp/hastra` | Hastra PRIME mint/stake, Jupiter DEX exit, par-redemption lifecycle, and position plans. | `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` | `@sdp/custody` |
 | `@sdp/helius-rings` | Helius Rings shielded-wallet domain types, state machine, and gateway port (devnet). | `@sdp/types` | None |
 | `@sdp/helius-rings-sdk` | Helius Rings gateway adapter running the Zolana SDK in process: health, identity provisioning, and shielded balance reads. | `@sdp/helius-rings` | None |
@@ -37,6 +37,7 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/private-channels` | Solana Private Channels gateway, auth, and instance clients. | `@sdp/rpc`, `@sdp/types` | None |
 | `@sdp/redaction` | Central PII and credential denylist plus the scrubbers every log, Sentry, and audit boundary applies. | None | None |
 | `@sdp/rpc` | Solana RPC clients, errors, and transport helpers. | `@sdp/types` | None |
+| `@sdp/service-call` | Identity tokens for calls between SDP's private services: fetching one, checking the destination, and verifying a caller's. | None | None |
 | `@sdp/solana` | Solana transaction and token-program services. | `@sdp/rpc`, `@sdp/types` | None |
 | `@sdp/spc-escrow` | Generated @solana/kit client for the Private Channels escrow program. | None | None |
 | `@sdp/spc-withdraw` | Generated @solana/kit client for the Private Channels withdraw program. | None | None |
@@ -58,7 +59,7 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/dvp` -> None
 - `@sdp/earn` -> `@sdp/redaction`, `@sdp/types`
 - `@sdp/env-config` -> None
-- `@sdp/fee-payment` -> `@sdp/rpc`, `@sdp/types`
+- `@sdp/fee-payment` -> `@sdp/rpc`, `@sdp/service-call`, `@sdp/types`
 - `@sdp/hastra` -> `@sdp/custody`, `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/helius-rings` -> `@sdp/types`
 - `@sdp/helius-rings-sdk` -> `@sdp/helius-rings`
@@ -72,6 +73,7 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/private-channels` -> `@sdp/rpc`, `@sdp/types`
 - `@sdp/redaction` -> None
 - `@sdp/rpc` -> `@sdp/types`
+- `@sdp/service-call` -> None
 - `@sdp/solana` -> `@sdp/rpc`
 - `@sdp/spc-escrow` -> None
 - `@sdp/spc-withdraw` -> None

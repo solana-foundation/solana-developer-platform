@@ -724,6 +724,9 @@ importers:
       '@sdp/rpc':
         specifier: workspace:*
         version: link:../sdp-rpc
+      '@sdp/service-call':
+        specifier: workspace:*
+        version: link:../sdp-service-call
       '@sdp/types':
         specifier: workspace:*
         version: link:../sdp-types
@@ -1099,6 +1102,25 @@ importers:
       tsx:
         specifier: 4.23.15
         version: 4.23.15
+
+  packages/sdp-service-call:
+    dependencies:
+      jose:
+        specifier: 6.2.13
+        version: 6.2.13
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@types/node':
+        specifier: 26.6.5
+        version: 26.6.5
+      tsx:
+        specifier: 4.23.15
+        version: 4.23.15
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
 
   packages/sdp-solana:
     dependencies:
