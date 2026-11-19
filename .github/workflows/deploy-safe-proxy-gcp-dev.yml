@@ -1,0 +1,74 @@
+name: Deploy Safe Proxy to Cloud Run (dev)
+
+# Runs as its own workflow, never called from another: the Safe Proxy deploy account accepts a
+# sign-in from this workflow file on main only.
+on:
+  push:
+    branches: [main]
+    paths:
+      - apps/sdp-safe-proxy/**
+      - packages/sdp-safe-proxy-catalog/**
+      - packages/sdp-service-call/**
+      - pnpm-lock.yaml
+      - .github/workflows/deploy-safe-proxy-gcp-dev.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: safe-proxy-gcp-deploy-dev
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and deploy
+    if: github.repository == 'solana-foundation/solana-developer-platform' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PROJECT_ID: solana-developer-platform-dev
+      REGION: us-central1
+      REPO: sdp-dev-safe-proxy
+      SERVICE: sdp-dev-safe-proxy
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.SAFE_PROXY_DEV_DEPLOY_WIF_PROVIDER }}
+          service_account: ${{ vars.SAFE_PROXY_DEV_DEPLOY_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      - name: Build and push image
+        run: |
+          set -euo pipefail
+          TAG="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/sdp-safe-proxy:${GITHUB_SHA}"
+          docker build -f apps/sdp-safe-proxy/Dockerfile --build-arg GIT_SHA="${GITHUB_SHA}" -t "${TAG}" .
+          docker push "${TAG}"
+          # Deploy the pushed digest, so the revision cannot follow a moved tag.
+          IMAGE="$(docker inspect --format '{{index .RepoDigests 0}}' "${TAG}")"
+          echo "IMAGE=${IMAGE}" >> "${GITHUB_ENV}"
+
+      - name: Deploy service
+        run: |
+          # Returns once the new revision has passed its startup probe (/health/ready) and takes
+          # traffic; a revision that fails to start fails the deploy and the old one keeps serving.
+          gcloud run services update "${SERVICE}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
+
+      - name: Confirm the new image is serving
+        run: |
+          set -euo pipefail
+          SERVING="$(gcloud run services describe "${SERVICE}" \
+            --region "${REGION}" --project "${PROJECT_ID}" \
+            --format 'value(spec.template.spec.containers[0].image)')"
+          test "${SERVING}" = "${IMAGE}"
