@@ -56,7 +56,6 @@ import {
   quoteForKey,
   revalidateExpiredFloor,
   useDebouncedVaultQuote,
-  type VaultFloorReplay,
   type VaultQuoteState,
 } from "./earn-vault-slippage";
 import { VaultQuoteNotices, VaultSlippageSection } from "./earn-vault-slippage-section";
@@ -85,7 +84,6 @@ import {
   rememberVaultWithdrawalFloor,
   rememberVaultWithdrawalShares,
   resolveVaultWithdrawalKeptKey,
-  type VaultWithdrawalRecovery,
   vaultWithdrawalIdempotencyKeyStore,
   vaultWithdrawalRequestFingerprint,
 } from "./earn-vault-withdraw-tracking";
@@ -161,6 +159,52 @@ function sharesForSubmission(
   if (adoptedShares !== undefined) return adoptedShares;
   if (settlement === "provider_order") return quantity;
   return reused ? (recallVaultWithdrawalShares(fingerprint) ?? undefined) : derivedShares;
+}
+
+/**
+ * What a confirm on this review sends when the exit's typed-quantity key is
+ * KEPT — this build's own earlier attempt, still unanswered: its minted share
+ * intent and floor, which the submit replays verbatim (the API's fingerprint
+ * pins both, so the retry cannot re-derive either). The review resolves the
+ * kept request for display the same way the submit resolves it for sending,
+ * so what the notice names is exactly what a confirm sends — an atomic exit's
+ * saved shares are generally NOT the live derivation the rows above show.
+ * `undefined` for either term means the memo LOST it: the attempt cannot be
+ * replayed exactly and the submit will send nothing.
+ *
+ * An atomic exit only: a provider order's saved shares ARE its typed input —
+ * the rows already show them — and its floor is deliberately none.
+ */
+type VaultWithdrawalKeptRetry = {
+  /** The minted floor: a string, `null` for "deliberately none", `undefined` when lost. */
+  floor: string | null | undefined;
+  /** The minted share intent, `undefined` when the memo lost it. */
+  shares: string | undefined;
+};
+
+/**
+ * The resolved request a confirm SENDS: the key fingerprint it claims under,
+ * the replayed or freshly derived floor, and the shares. A `replay.kind` of
+ * "replay" is a kept key's attempt, which must go out verbatim.
+ */
+type ResolvedWithdrawalIntent = {
+  /** Set when the resolved key was an ADOPTED legacy attempt. */
+  adoptedShares: string | undefined;
+  fingerprint: string;
+  replay: { floor: string | null; kind: "fresh" | "replay" };
+  shares: string;
+};
+
+function keptWithdrawalRetry(input: {
+  fingerprint: string;
+  settlement: EarnVaultWithdrawalSettlement;
+}): VaultWithdrawalKeptRetry | undefined {
+  if (input.settlement !== "atomic") return undefined;
+  if (!vaultWithdrawalIdempotencyKeyStore.has(input.fingerprint)) return undefined;
+  return {
+    floor: recallVaultWithdrawalFloor(input.fingerprint),
+    shares: recallVaultWithdrawalShares(input.fingerprint) ?? undefined,
+  };
 }
 
 function resolveWithdrawalSubmission(
@@ -586,10 +630,11 @@ interface WithdrawalReviewStepProps {
   onBack: () => void;
   onSlippageChange: (value: string) => void;
   onSlippageToggle: () => void;
-  onSubmit: () => void;
+  /** The saved request this review promises a confirm will resubmit, if any. */
+  onSubmit: (savedTerms: VaultWithdrawalKeptRetry | undefined) => void;
   position: EarnVaultPosition;
   quote: VaultQuoteState<EarnVaultWithdrawalPreview>;
-  recovery: VaultWithdrawalRecovery | undefined;
+  savedTerms: VaultWithdrawalKeptRetry | undefined;
   slippageBps: number | null;
   slippageInput: string;
   slippageInvalid: boolean;
@@ -679,43 +724,55 @@ function ReviewAmountRows({
 }
 
 /**
- * The review-step notice for an ADOPTED previous-build attempt (see
- * `recallLegacyVaultWithdrawalKeptKey`): what a confirm here submits is the
- * RECOVERED shares and floor, which are generally not the amount the form is
- * showing, so the review must say so before the submit, not after. When the
- * recovered floor was LOST (`undefined`) the attempt cannot be replayed
- * exactly and nothing will be sent — the notice says that instead of a
- * confirm that could only fail or double-exit.
+ * The review-step notice for a confirm that RESUBMITS A SAVED REQUEST — an
+ * adopted previous-build attempt (see `recallLegacyVaultWithdrawalKeptKey`)
+ * or this build's own kept key (see `keptWithdrawalRetry`): the shares and
+ * floor it will send are generally not the amount the form is showing, so
+ * the review must say so before the submit, not after. When either saved
+ * term was LOST (`undefined`) the attempt cannot be replayed exactly and
+ * nothing will be sent — the notice says that instead of a confirm that
+ * could only fail or double-exit.
  */
-function VaultWithdrawalRecoveryNotice({
+function VaultWithdrawalKeptRetryNotice({
+  floor,
   locale,
   position,
-  recovery,
+  shares,
 }: {
+  floor: string | null | undefined;
   locale: string;
   position: EarnVaultPosition;
-  recovery: VaultWithdrawalRecovery;
+  shares: string | undefined;
 }) {
   const t = useTranslations();
-  const shares = formatTokenValue(recovery.shares, position.shareMint, locale);
-  if (recovery.floor === undefined) {
+  if (shares === undefined) {
     return (
       <Callout className="mt-4" variant="warning">
-        {t("DashboardEarn.vaultWithdraw.legacyAttemptUnrecoverable", { shares })}
+        {t("DashboardEarn.vaultWithdraw.keptAttemptRequestLost")}
       </Callout>
     );
   }
-  if (recovery.floor === null) {
+  const sharesLabel = formatTokenValue(shares, position.shareMint, locale);
+  if (floor === undefined) {
     return (
       <Callout className="mt-4" variant="warning">
-        {t("DashboardEarn.vaultWithdraw.legacyAttemptReviewNote", { shares })}
+        {t("DashboardEarn.vaultWithdraw.keptAttemptUnrecoverable", { shares: sharesLabel })}
       </Callout>
     );
   }
-  const floor = formatTokenValue(recovery.floor, position.tokenMint, locale);
+  if (floor === null) {
+    return (
+      <Callout className="mt-4" variant="warning">
+        {t("DashboardEarn.vaultWithdraw.keptAttemptReviewNote", { shares: sharesLabel })}
+      </Callout>
+    );
+  }
   return (
     <Callout className="mt-4" variant="warning">
-      {t("DashboardEarn.vaultWithdraw.legacyAttemptReviewNoteWithFloor", { shares, floor })}
+      {t("DashboardEarn.vaultWithdraw.keptAttemptReviewNoteWithFloor", {
+        floor: formatTokenValue(floor, position.tokenMint, locale),
+        shares: sharesLabel,
+      })}
     </Callout>
   );
 }
@@ -731,7 +788,7 @@ function WithdrawalReviewStep(props: WithdrawalReviewStepProps) {
     onSubmit,
     position,
     quote,
-    recovery,
+    savedTerms,
     slippageBps,
     slippageInput,
     slippageInvalid,
@@ -761,8 +818,13 @@ function WithdrawalReviewStep(props: WithdrawalReviewStepProps) {
         />
       </DetailList>
 
-      {recovery ? (
-        <VaultWithdrawalRecoveryNotice locale={locale} position={position} recovery={recovery} />
+      {savedTerms ? (
+        <VaultWithdrawalKeptRetryNotice
+          floor={savedTerms.floor}
+          locale={locale}
+          position={position}
+          shares={savedTerms.shares}
+        />
       ) : null}
 
       {settlement === "provider_order" ? null : (
@@ -813,7 +875,7 @@ function WithdrawalReviewStep(props: WithdrawalReviewStepProps) {
           className="flex-[2]"
           disabled={submitBlocked}
           loading={submitting}
-          onClick={onSubmit}
+          onClick={() => onSubmit(savedTerms)}
         >
           {t("DashboardEarn.vaultWithdraw.submit")}
         </Button>
@@ -946,23 +1008,49 @@ export function EarnVaultWithdrawModal({
   );
   const submitBlocked = continueBlocked || (slippagePolicy !== null && minAmountOut === undefined);
 
+  // The typed-quantity fingerprint, ONE definition for the review's saved-terms
+  // read and the submit's key resolution: whatever the review resolves from it,
+  // the submit resolves the same.
+  function typedQuantityFingerprint(quantity: string): string {
+    return vaultWithdrawalRequestFingerprint({
+      projectId,
+      positionId: position.id,
+      quantity,
+      toleranceBps: slippagePolicy === null ? null : slippageBps,
+      redemptionMode,
+    });
+  }
+
+  // The saved request THIS build's kept key would replay, read fresh each
+  // render (see `keptWithdrawalRetry`): the review presents it, and the confirm
+  // hands it back to the submit — the button approves the terms it displayed.
+  const keptRetry = keptWithdrawalRetry({
+    fingerprint: typedQuantityFingerprint(
+      amountValidation.kind === "valid" ? amountValidation.canonicalAmount : amountInput
+    ),
+    settlement,
+  });
+  // The legacy adoption outranks this build's own kept key (the resolver adopts
+  // it first), so it is the terms the review shows when both are kept.
+  const savedTerms = recovery ?? keptRetry;
+
   /**
    * EXPIRY BACKSTOP (PRO-1691), the state half. The quote hook re-quotes on
    * its own, but timers throttle in background tabs, so the floor on screen
-   * can be older than the TTL at submit. A replayed floor — a kept key's
-   * minted floor, which must go out verbatim — or a fresh one passes straight
-   * through. An expired one is revalidated first; a rate that moved beyond it
-   * stops the submission on THIS side of the API, through the same copy and
-   * control as a blown floor, and either way the displayed quote re-syncs.
-   * Returns whether to proceed.
+   * can be older than the TTL at submit. Only a FRESH floor reaches here — a
+   * replayed one (a kept key's minted floor, which must go out verbatim)
+   * passes straight through without yielding (see the call site). An expired
+   * one is revalidated first; a rate that moved beyond it stops the
+   * submission on THIS side of the API, through the same copy and control as
+   * a blown floor, and either way the displayed quote re-syncs. Returns
+   * whether to proceed.
    */
   async function floorSafeToSubmit(
     controller: AbortController,
     shares: string,
-    replay: VaultFloorReplay,
     floor: string | null
   ): Promise<boolean> {
-    if (replay.kind !== "fresh" || floor === null || !isExpiredQuote(quote)) return true;
+    if (floor === null || !isExpiredQuote(quote)) return true;
     const verdict = await revalidateExpiredFloor(
       (signal) => fetchEarnVaultWithdrawalPreview({ positionId: position.id, shares }, signal),
       (preview) => preview.assetsOut,
@@ -1013,7 +1101,18 @@ export function EarnVaultWithdrawModal({
     return true;
   }
 
-  async function submitResolvedIntent(controller: AbortController, quantity: string) {
+  /**
+   * Everything between the confirm click and the money-moving POST that can
+   * stop the submission, resolved WITHOUT yielding: the kept-key resolution
+   * (the typed-quantity fingerprint and any legacy adoption), the
+   * approved-terms guard, and the shares and floor the submission sends.
+   * Returns that intent, or undefined when the submission stopped (its own
+   * error is already on the surface).
+   */
+  function resolveSubmitIntent(
+    quantity: string,
+    approvedTerms: VaultWithdrawalKeptRetry | undefined
+  ): ResolvedWithdrawalIntent | undefined {
     // Keyed by the user's TYPED quantity, never the derived share intent:
     // the atomic exit derives its shares from the live position value, which
     // the positions polls keep moving — a fingerprint on them drifts under a
@@ -1028,16 +1127,26 @@ export function EarnVaultWithdrawModal({
     // shares, and minted floor, so the API answers the first attempt either
     // way and the answer retires the legacy key.
     const { fingerprint, reused, adoptedShares, recoverySpent } = resolveVaultWithdrawalKeptKey({
-      fingerprint: vaultWithdrawalRequestFingerprint({
-        projectId,
-        positionId: position.id,
-        quantity,
-        toleranceBps: slippagePolicy === null ? null : slippageBps,
-        redemptionMode,
-      }),
+      fingerprint: typedQuantityFingerprint(quantity),
       recovery,
     });
-    if (stopOnSpentRecovery(recoverySpent)) return;
+    if (stopOnSpentRecovery(recoverySpent)) return undefined;
+
+    // The confirm was approved against the review AS RENDERED: when it showed
+    // a saved request (`approvedTerms`), it promised to resubmit THAT attempt
+    // — never a fresh exit over it. A key retired between the review and this
+    // confirm (the first attempt's late answer lands) resolves `reused: false`
+    // below, and minting under the typed quantity then would be exactly the
+    // second exit the notice promised not to do — the attempt the key stood
+    // for was answered, possibly executed. The submission stops instead; the
+    // error re-render reads the memos fresh (they went with the key), so the
+    // notice is gone and the next confirm is re-reviewed against current
+    // terms. An adopted legacy attempt never reaches this guard unresolved:
+    // its spent snapshot stops above, its live key resolves `reused`.
+    if (approvedTerms && !reused) {
+      setSubmitError(t("DashboardEarn.vaultWithdraw.floorUnavailable"));
+      return undefined;
+    }
 
     // A KEPT key — one an earlier attempt left unretired (a lost answer, a 5xx,
     // a refusal that settled nothing) — must replay the request it was MINTED
@@ -1066,7 +1175,7 @@ export function EarnVaultWithdrawModal({
       // Reachable only on a reuse whose shares memo was lost — submit() gates
       // the fresh path. The same posture as a lost floor below.
       setSubmitError(t("DashboardEarn.vaultWithdraw.floorUnavailable"));
-      return;
+      return undefined;
     }
     const replay = floorToReplay(
       { reused },
@@ -1076,15 +1185,38 @@ export function EarnVaultWithdrawModal({
     );
     if (replay.kind === "unavailable") {
       setSubmitError(t("DashboardEarn.vaultWithdraw.floorUnavailable"));
-      return;
+      return undefined;
     }
-    if (!(await floorSafeToSubmit(controller, shares, replay, replay.floor))) return;
-    rememberVaultWithdrawalFloor(fingerprint, replay.floor);
-    rememberVaultWithdrawalShares(fingerprint, shares);
+    return { adoptedShares, fingerprint, replay, shares };
+  }
+
+  async function submitResolvedIntent(
+    controller: AbortController,
+    quantity: string,
+    approvedTerms: VaultWithdrawalKeptRetry | undefined
+  ) {
+    const intent = resolveSubmitIntent(quantity, approvedTerms);
+    if (!intent) return;
+
+    // THE REPLAY PATH MUST NOT YIELD between the resolution above and the
+    // claim below: a kept key's confirm (replay.kind "replay") is a promise
+    // to resubmit THAT attempt, and an await here is a gap in which the first
+    // attempt's late answer can retire the key — the claim would then mint a
+    // second one under the saved shares and the API would see a new
+    // withdrawal: the double exit. resolve → claim therefore runs in one
+    // synchronous block on that path (an `await floorSafeToSubmit` yields
+    // even when it answers true immediately). Only a FRESH floor reaches the
+    // revalidation await, and a fresh key has nothing to lose across it — it
+    // was not kept when resolved.
+    if (intent.replay.kind === "fresh") {
+      if (!(await floorSafeToSubmit(controller, intent.shares, intent.replay.floor))) return;
+    }
+    rememberVaultWithdrawalFloor(intent.fingerprint, intent.replay.floor);
+    rememberVaultWithdrawalShares(intent.fingerprint, intent.shares);
 
     // No abort signal on the value-moving POST — see the deposit modal.
     const submittedAt = Date.now();
-    const { key, persisted } = vaultWithdrawalIdempotencyKeyStore.claim(fingerprint);
+    const { key, persisted } = vaultWithdrawalIdempotencyKeyStore.claim(intent.fingerprint);
     if (!persisted) {
       setSubmitError(t("DashboardEarn.intentStorageUnavailable"));
       return;
@@ -1092,9 +1224,9 @@ export function EarnVaultWithdrawModal({
     const result = await createEarnVaultWithdrawal(
       {
         positionId: position.id,
-        shares,
+        shares: intent.shares,
         redemptionMode,
-        ...(replay.floor === null ? {} : { minAmountOut: replay.floor }),
+        ...(intent.replay.floor === null ? {} : { minAmountOut: intent.replay.floor }),
       },
       key
     );
@@ -1104,20 +1236,20 @@ export function EarnVaultWithdrawModal({
     // (`moneyAnswerRetiresKey`).
     const retired = settleMoneyIdempotencyKey(
       vaultWithdrawalIdempotencyKeyStore,
-      fingerprint,
+      intent.fingerprint,
       key,
       fetchResultAnswer(result)
     );
     // A slippage refusal comes from simulation, run only after no movement was
     // found under this key: the retry is a new request (see the deposit modal).
     const slippageRefused = !result.ok && isSlippageExceededRefusal(result.body);
-    if (slippageRefused) vaultWithdrawalIdempotencyKeyStore.release(fingerprint, key);
+    if (slippageRefused) vaultWithdrawalIdempotencyKeyStore.release(intent.fingerprint, key);
     // A retired key can never be replayed, so its remembered floor and shares
     // are dead weight the next fresh derivation must not inherit.
     if (retired || slippageRefused) {
-      forgetVaultWithdrawalFloor(fingerprint);
-      forgetVaultWithdrawalShares(fingerprint);
-      rescanAdoptedRecovery(adoptedShares);
+      forgetVaultWithdrawalFloor(intent.fingerprint);
+      forgetVaultWithdrawalShares(intent.fingerprint);
+      rescanAdoptedRecovery(intent.adoptedShares);
     }
     if (controller.signal.aborted) return;
     const resolution = resolveWithdrawalSubmission(
@@ -1146,7 +1278,7 @@ export function EarnVaultWithdrawModal({
     }
   }
 
-  async function submit() {
+  async function submit(approvedTerms: VaultWithdrawalKeptRetry | undefined) {
     if (
       submittingRef.current ||
       submitBlocked ||
@@ -1165,7 +1297,7 @@ export function EarnVaultWithdrawModal({
     setSubmitError(null);
 
     try {
-      await submitResolvedIntent(controller, amountValidation.canonicalAmount);
+      await submitResolvedIntent(controller, amountValidation.canonicalAmount, approvedTerms);
     } catch (cause) {
       if (!controller.signal.aborted) {
         setSubmitError(
@@ -1276,10 +1408,10 @@ export function EarnVaultWithdrawModal({
                 setSubmitError(null);
               }}
               onSlippageToggle={() => setSlippageOpen((open) => !open)}
-              onSubmit={() => void submit()}
+              onSubmit={(approvedTerms) => void submit(approvedTerms)}
               position={position}
               quote={quote}
-              recovery={recovery}
+              savedTerms={savedTerms}
               slippageBps={slippageBps}
               slippageInput={slippageInput}
               slippageInvalid={slippageInvalid}

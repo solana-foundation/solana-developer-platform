@@ -770,6 +770,172 @@ describe("exit slippage floors (quote-derived)", () => {
     });
   });
 
+  it("surfaces a current-build kept retry's saved terms on the review, like a legacy one's", async () => {
+    mocks.fetchEarnVaultWithdrawalPreview
+      .mockResolvedValueOnce({
+        kind: "quoted",
+        preview: {
+          positionId: vedaPosition.id,
+          assetsOut: "4.997",
+          assetDecimals: 6,
+          blockingIssues: [],
+        },
+      })
+      .mockResolvedValue({
+        kind: "quoted",
+        preview: {
+          positionId: vedaPosition.id,
+          assetsOut: "2.5",
+          assetDecimals: 6,
+          blockingIssues: [],
+        },
+      });
+    // A 5xx is the ambiguous case: the API may have recorded and broadcast the
+    // exit, and the key stays live in the store either way.
+    mocks.createEarnVaultWithdrawal.mockResolvedValueOnce({
+      ok: false,
+      error: "Bad gateway",
+      status: 503,
+      body: null,
+    });
+
+    const first = renderModal(vi.fn(), vedaPosition);
+    await enterVedaShares("5");
+    await vi.waitFor(() => expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(1));
+    first.unmount();
+
+    // The position's live value moved between the arms: the review re-derives
+    // the typed $5 into a DIFFERENT share intent at the moved rate. The kept
+    // key's memos still hold the first attempt's shares and floor, and a
+    // confirm here resubmits THOSE — the review must name them for a
+    // this-build kept retry exactly as it does for an adopted legacy one.
+    vi.useFakeTimers();
+    renderModal(vi.fn(), { ...vedaPosition, tokenValue: "12.5" });
+    await armVedaShares("5");
+
+    expect(
+      screen.getByText(
+        /An earlier attempt to withdraw 5 SOL .*guaranteed minimum of \$4\.99\..*not the amount shown above/
+      )
+    ).toBeTruthy();
+    // The rows above still show the live derivation of the typed $5 — which is
+    // exactly why the notice exists: it, not the rows, names the saved request.
+    expect(screen.getByText("$5.00")).toBeTruthy();
+  });
+
+  it("stops a confirm whose kept attempt was answered while the review sat open", async () => {
+    primeQuote("4.997");
+    // The first attempt's POST hangs: its key stays kept, and the second
+    // arm's review promises to resubmit it while the answer is still out.
+    let resolveFirst: ((answer: unknown) => void) | undefined;
+    mocks.createEarnVaultWithdrawal.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFirst = resolve;
+        })
+    );
+
+    const first = renderModal(vi.fn(), vedaPosition);
+    await enterVedaShares("5");
+    await vi.waitFor(() => expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(1));
+    first.unmount();
+
+    vi.useFakeTimers();
+    renderModal(vi.fn(), vedaPosition);
+    await armVedaShares("5");
+    // The review names the kept attempt it promises to resubmit…
+    expect(
+      screen.getByText(/An earlier attempt to withdraw 5 SOL .*guaranteed minimum of \$4\.99\./)
+    ).toBeTruthy();
+
+    // …and then the first attempt's answer lands. The bookkeeping outlives the
+    // unmounted first modal: the key retires and its memos go with it.
+    resolveFirst?.({
+      ok: true,
+      status: 200,
+      data: { kind: "submitted", withdrawal: withdrawal("submitted") },
+    });
+    await flushSubmission();
+
+    // The confirm was approved as a replay of THAT attempt — never a fresh
+    // exit over it. The stale review must not mint a new key now: the attempt
+    // it stood for was answered, possibly executed.
+    vi.useRealTimers();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm withdrawal" }));
+    await flushSubmission();
+
+    expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toMatch(/could not confirm the exact terms/);
+    });
+    // The error's re-render read the memos fresh: the review no longer
+    // promises a replay, so the notice is gone and the next confirm is
+    // re-reviewed against current terms.
+    expect(screen.queryByText(/An earlier attempt to withdraw/)).toBeNull();
+  });
+
+  it("claims the kept key without yielding: the retry reuses it while the first answer is out", async () => {
+    primeQuote("4.997");
+    // The first attempt's POST hangs — the key is live and unanswered when the
+    // retry confirms.
+    let resolveFirst: ((answer: unknown) => void) | undefined;
+    mocks.createEarnVaultWithdrawal
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          })
+      )
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        data: { kind: "submitted", withdrawal: withdrawal("submitted") },
+      });
+
+    const first = renderModal(vi.fn(), vedaPosition);
+    await enterVedaShares("5");
+    await vi.waitFor(() => expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(1));
+    first.unmount();
+
+    vi.useFakeTimers();
+    renderModal(vi.fn(), vedaPosition);
+    await armVedaShares("5");
+    expect(
+      screen.getByText(/An earlier attempt to withdraw 5 SOL .*guaranteed minimum of \$4\.99\./)
+    ).toBeTruthy();
+
+    // Resolve → claim must run in one synchronous block on this path: an await
+    // between them is the gap in which the first attempt's late answer can
+    // retire the key and turn the claim into a SECOND minted key — the double
+    // exit. The retry therefore goes out under the SAME key, with the request
+    // that key was minted with, while the first attempt is still unanswered.
+    vi.useRealTimers();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm withdrawal" }));
+    await flushSubmission();
+
+    expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(2);
+    expect(mocks.createEarnVaultWithdrawal.mock.calls[1][0]).toEqual({
+      positionId: vedaPosition.id,
+      shares: "5",
+      minAmountOut: "4.992003",
+    });
+    expect(mocks.createEarnVaultWithdrawal.mock.calls[1][1]).toBe(
+      mocks.createEarnVaultWithdrawal.mock.calls[0][1]
+    );
+
+    // Both answers then land: the key retires and nothing kept remains.
+    resolveFirst?.({
+      ok: true,
+      status: 200,
+      data: { kind: "submitted", withdrawal: withdrawal("submitted") },
+    });
+    await flushSubmission();
+    expect(sessionStorage.getItem("sdp:earn:vault-withdrawal:idempotency:v1")).not.toContain(
+      mocks.createEarnVaultWithdrawal.mock.calls[0][1]
+    );
+    expect(sessionStorage.getItem("sdp:earn:vault-withdrawal:floor:v1")).not.toContain("4.992003");
+  });
+
   it("re-quotes an exit floor older than the TTL at submit, then sends the reviewed floor", async () => {
     mocks.fetchEarnVaultWithdrawalPreview
       .mockResolvedValueOnce({
