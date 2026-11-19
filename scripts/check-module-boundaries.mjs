@@ -257,6 +257,13 @@ const MODULE_METADATA = [
     allowedDependencies: ["@sdp/types"],
   },
   {
+    name: "@sdp/safe-proxy-catalog",
+    directory: "packages/sdp-safe-proxy-catalog",
+    purpose:
+      "The request contract between sdp-api and Safe Proxy: every operation, the envelope, the error codes, and the client and handler types.",
+    allowedDependencies: [],
+  },
+  {
     name: "@sdp/service-call",
     directory: "packages/sdp-service-call",
     purpose:

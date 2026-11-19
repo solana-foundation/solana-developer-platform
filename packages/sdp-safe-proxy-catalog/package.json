@@ -1,0 +1,46 @@
+{
+  "name": "@sdp/safe-proxy-catalog",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./catalog": {
+      "types": "./src/catalog.ts",
+      "import": "./src/catalog.ts",
+      "default": "./src/catalog.ts"
+    },
+    "./client": {
+      "types": "./src/client.ts",
+      "import": "./src/client.ts",
+      "default": "./src/client.ts"
+    },
+    "./envelope": {
+      "types": "./src/envelope.ts",
+      "import": "./src/envelope.ts",
+      "default": "./src/envelope.ts"
+    },
+    "./errors": {
+      "types": "./src/errors.ts",
+      "import": "./src/errors.ts",
+      "default": "./src/errors.ts"
+    },
+    "./handlers": {
+      "types": "./src/handlers.ts",
+      "import": "./src/handlers.ts",
+      "default": "./src/handlers.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "lint": "biome check src/"
+  },
+  "dependencies": {
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3"
+  }
+}

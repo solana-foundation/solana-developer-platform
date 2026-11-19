@@ -36,6 +36,7 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/private-channels` | Solana Private Channels gateway, auth, and instance clients. | `@sdp/rpc`, `@sdp/types` |
 | `@sdp/redaction` | Central PII and credential denylist plus the scrubbers every log, Sentry, and audit boundary applies. | None |
 | `@sdp/rpc` | Solana RPC clients, errors, and transport helpers. | `@sdp/types` |
+| `@sdp/safe-proxy-catalog` | The request contract between sdp-api and Safe Proxy: every operation, the envelope, the error codes, and the client and handler types. | None |
 | `@sdp/service-call` | Identity tokens for calls between SDP's private services: fetching one, checking the destination, and verifying a caller's. | None |
 | `@sdp/solana` | Solana transaction and token-program services. | `@sdp/rpc`, `@sdp/types` |
 | `@sdp/spc-escrow` | Generated @solana/kit client for the Private Channels escrow program. | None |
@@ -72,6 +73,7 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/private-channels` -> `@sdp/rpc`, `@sdp/types`
 - `@sdp/redaction` -> None
 - `@sdp/rpc` -> `@sdp/types`
+- `@sdp/safe-proxy-catalog` -> None
 - `@sdp/service-call` -> None
 - `@sdp/solana` -> `@sdp/rpc`
 - `@sdp/spc-escrow` -> None
