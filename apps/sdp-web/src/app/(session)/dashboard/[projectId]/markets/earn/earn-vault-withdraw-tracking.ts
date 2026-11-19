@@ -1,5 +1,7 @@
 "use client";
 
+import { z } from "zod";
+
 import {
   createFloorMemo,
   createIdempotencyKeyStore,
@@ -106,20 +108,63 @@ const FINGERPRINT_FORMAT = "typed-quantity-1";
 
 /**
  * One kept entry the PREVIOUS build wrote, parsed back out of its stored
- * fingerprint: the identity that build serialized was
+ * fingerprint. The identity that build serialized was
  * `[projectId, positionId, shares, toleranceBps, redemptionMode?]` — the
- * DERIVED shares where this build keeps the typed quantity, no tag — so the
- * identity itself carries the shares the first attempt went out with, which
- * is what makes an exact replay of that attempt possible. `undefined` for an
- * entry this build wrote (it leads with the format tag) or could not have
- * written.
+ * DERIVED shares where this build keeps the typed quantity, no format tag —
+ * so the identity itself carries the shares the first attempt went out with,
+ * which is what makes an exact replay of that attempt possible. Parsed by
+ * schema (saved input is external input), never by hand; the two tuple shapes
+ * that build could write collapse to one record.
  */
 type LegacyWithdrawalIdentity = {
   projectId: string | null;
   positionId: string;
-  redemptionMode?: "standard" | "instant";
+  redemptionMode: "standard" | "instant" | undefined;
   shares: string;
+  toleranceBps: number | null;
 };
+
+const legacyIdentitySchema = z.union([
+  z
+    .tuple([
+      z.union([z.string(), z.null()]),
+      z.string().min(1),
+      z.string().min(1),
+      z.union([z.number(), z.null()]),
+    ])
+    .transform(
+      ([projectId, positionId, shares, toleranceBps]): LegacyWithdrawalIdentity => ({
+        projectId,
+        positionId,
+        redemptionMode: undefined,
+        shares,
+        toleranceBps,
+      })
+    ),
+  z
+    .tuple([
+      z.union([z.string(), z.null()]),
+      z.string().min(1),
+      z.string().min(1),
+      z.union([z.number(), z.null()]),
+      z.enum(["standard", "instant"]),
+    ])
+    .transform(
+      ([
+        projectId,
+        positionId,
+        shares,
+        toleranceBps,
+        redemptionMode,
+      ]): LegacyWithdrawalIdentity => ({
+        projectId,
+        positionId,
+        redemptionMode,
+        shares,
+        toleranceBps,
+      })
+    ),
+]);
 
 function legacyWithdrawalIdentity(fingerprint: string): LegacyWithdrawalIdentity | undefined {
   let parsed: unknown;
@@ -128,21 +173,28 @@ function legacyWithdrawalIdentity(fingerprint: string): LegacyWithdrawalIdentity
   } catch {
     return undefined;
   }
-  if (!Array.isArray(parsed)) return undefined;
-  if (parsed[0] === FINGERPRINT_FORMAT) return undefined;
-  if (parsed.length !== 4 && parsed.length !== 5) return undefined;
-  const [projectId, positionId, shares, toleranceBps, redemptionMode] = parsed;
-  if (projectId !== null && typeof projectId !== "string") return undefined;
-  if (typeof positionId !== "string" || typeof shares !== "string" || shares === "") {
-    return undefined;
-  }
-  if (toleranceBps !== null && typeof toleranceBps !== "number") return undefined;
-  if (parsed.length === 5) {
-    if (redemptionMode !== "standard" && redemptionMode !== "instant") return undefined;
-    return { projectId, positionId, redemptionMode, shares };
-  }
-  return { projectId, positionId, shares };
+  // This build's own entries lead with the format tag, which no legacy
+  // identity could — the previous build led with the project. The tag check
+  // runs before the schema so a this-build entry under a different typed
+  // amount is refused even where its shape would parse.
+  if (Array.isArray(parsed) && parsed[0] === FINGERPRINT_FORMAT) return undefined;
+  const candidate = legacyIdentitySchema.safeParse(parsed);
+  return candidate.success ? candidate.data : undefined;
 }
+
+/**
+ * What adopting the previous build's unresolved attempt means concretely: the
+ * key's legacy fingerprint, the shares parsed out of that identity, and the
+ * floor the attempt was minted with, from the floor memo — `null` when it
+ * deliberately sent none, `undefined` when the memo LOST it, which makes the
+ * attempt unreplayable exactly (the caller must neither adopt it nor mint a
+ * fresh key over it).
+ */
+export type VaultWithdrawalRecovery = {
+  fingerprint: string;
+  floor: string | null | undefined;
+  shares: string;
+};
 
 /**
  * The PREVIOUS build's unresolved attempt on this exit, if one is kept — the
@@ -150,60 +202,77 @@ function legacyWithdrawalIdentity(fingerprint: string): LegacyWithdrawalIdentity
  * that may already have executed and was never answered; submitting this
  * exit without adopting it would mint a second key and can exit AGAIN. The
  * caller replays the adopted attempt's OWN request instead: its key (the
- * store answers `claim` under the legacy fingerprint), its shares (parsed
- * from the legacy identity), and the floor the floor memo still holds under
- * the legacy fingerprint. Whichever way the API answers, it answers the
- * FIRST attempt, and the answer retires the legacy key.
+ * store answers `claim` under the legacy fingerprint), its shares, and its
+ * minted floor. Whichever way the API answers, it answers the FIRST attempt,
+ * and the answer retires the legacy key.
  *
- * The OLDEST match comes back first (see `keptEntries`): several legacy
- * attempts can be kept at once — "raise the tolerance and retry" minted a
- * fresh key in the previous build too — and each submit resolves one, oldest
- * first, until none is left and typed-quantity keys flow normally. Only the
- * project, position, and redemption mode must match: the typed quantity
- * cannot be compared across the two builds (dollars against shares, at a
- * rate neither recorded), and the tolerance cannot either — the replay
- * carries the legacy attempt's own minted floor, whatever tolerance it came
- * from. `undefined` when nothing legacy is kept: the caller submits under
- * its own fingerprint as usual.
+ * The adoption is a DECISION the caller surfaces for review before it sends —
+ * the recovered shares and floor are exactly what a confirm will submit, and
+ * they are generally NOT the amount the form is showing (see the modals'
+ * recovery notice). The OLDEST match comes back first (see `keptEntries`):
+ * several legacy attempts can be kept at once — "raise the tolerance and
+ * retry" minted a fresh key in the previous build too — and each adopted
+ * replay resolves one, oldest first, until none is left and typed-quantity
+ * keys flow normally. Only the project, position, and redemption mode must
+ * match: the typed quantity cannot be compared across the two builds
+ * (dollars against shares, at a rate neither recorded), and the tolerance
+ * cannot either — the replay carries the legacy attempt's own minted floor,
+ * whatever tolerance it came from. `undefined` when nothing legacy is kept.
  */
 export function recallLegacyVaultWithdrawalKeptKey(input: {
   redemptionMode?: "standard" | "instant";
   projectId: string | null;
   positionId: string;
-}): { fingerprint: string; shares: string } | undefined {
+}): VaultWithdrawalRecovery | undefined {
   for (const entry of vaultWithdrawalIdempotencyKeyStore.keptEntries()) {
     const legacy = legacyWithdrawalIdentity(entry.fingerprint);
     if (!legacy) continue;
     if (legacy.projectId !== input.projectId || legacy.positionId !== input.positionId) continue;
     if (legacy.redemptionMode !== input.redemptionMode) continue;
-    return { fingerprint: entry.fingerprint, shares: legacy.shares };
+    return {
+      fingerprint: entry.fingerprint,
+      floor: vaultWithdrawalFloorMemo.recall(entry.fingerprint),
+      shares: legacy.shares,
+    };
   }
   return undefined;
 }
 
 /**
  * Which kept key a withdrawal submission runs under, decided ONCE at submit:
- * the typed-quantity fingerprint's own kept key, or — when no entry answers
- * to it — the previous build's unresolved attempt on this position, ADOPTED
- * ({@link recallLegacyVaultWithdrawalKeptKey}) so the submit replays that
- * attempt exactly under its legacy fingerprint instead of minting a second
- * key over it. `adoptedShares` is set for an adoption only: the shares parsed
- * out of the legacy identity, which the caller must send instead of any fresh
- * derivation — the first attempt's body, verbatim, is the only request the
- * legacy key may carry.
+ * the recovery the review surfaced (an ADOPTED previous-build attempt — the
+ * submit then runs under the legacy fingerprint and replays that attempt
+ * exactly, its own key, shares, and minted floor, so the API answers the
+ * first attempt either way), or the typed-quantity fingerprint's own kept
+ * key. The adoption only stands while the recovered key is STILL kept: once
+ * the adopted replay's own answer retired it, the recovery is spent and this
+ * resolves like any other submission. `adoptedShares` is set for an adoption
+ * only — the shares the caller must send instead of any fresh derivation,
+ * because the first attempt's body, verbatim, is the only request the legacy
+ * key may carry.
  */
 export function resolveVaultWithdrawalKeptKey(input: {
   fingerprint: string;
-  redemptionMode?: "standard" | "instant";
-  projectId: string | null;
-  positionId: string;
+  recovery?: VaultWithdrawalRecovery | undefined;
 }): { fingerprint: string; reused: boolean; adoptedShares?: string } {
-  if (vaultWithdrawalIdempotencyKeyStore.has(input.fingerprint)) {
-    return { fingerprint: input.fingerprint, reused: true };
+  const recovery = input.recovery;
+  if (recovery && vaultWithdrawalIdempotencyKeyStore.has(recovery.fingerprint)) {
+    if (recovery.floor === undefined) {
+      // The recovered attempt's floor was lost, so its key cannot be replayed
+      // exactly — and a fresh key over it is the double exit. The reuse
+      // resolves to nothing sendable: the caller stops on the missing shares.
+      return { fingerprint: recovery.fingerprint, reused: true };
+    }
+    return {
+      adoptedShares: recovery.shares,
+      fingerprint: recovery.fingerprint,
+      reused: true,
+    };
   }
-  const legacy = recallLegacyVaultWithdrawalKeptKey(input);
-  if (!legacy) return { fingerprint: input.fingerprint, reused: false };
-  return { fingerprint: legacy.fingerprint, reused: true, adoptedShares: legacy.shares };
+  return {
+    fingerprint: input.fingerprint,
+    reused: vaultWithdrawalIdempotencyKeyStore.has(input.fingerprint),
+  };
 }
 
 /** The exit twin of the deposit's floor memo — see `createFloorMemo`. */

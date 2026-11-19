@@ -378,11 +378,17 @@ nothing else; the program create still sends the body `requestId` form.
   fingerprint pins both `shares` and `minAmountOut`) under its own versioned
   `sessionStorage` key. The tag is the upgrade bridge: the previous build
   keyed its entries on the DERIVED shares, so no fingerprint this build
-  computes finds them again, and `recallLegacyVaultWithdrawalKeptKey` adopts
-  such an entry at submit — the replay goes out under the legacy key with the
-  shares parsed out of the legacy identity and the memo'd minted floor,
-  oldest entry first — instead of minting a second key over an attempt that
-  may already have executed.
+  computes finds them again, and `recallLegacyVaultWithdrawalKeptKey` is the
+  recovery — a MOUNT-TIME snapshot the modal keeps in state and surfaces on
+  the review step as a warning notice (the recovered shares and floor are
+  generally not the amount the form shows), which the submit's resolver
+  consumes: the adoption replays the legacy attempt exactly, under the legacy
+  key with the shares parsed out of the legacy identity and the memo'd minted
+  floor, oldest entry first — instead of minting a second key over an attempt
+  that may already have executed. A re-scan only runs once an adopted replay
+  has retired its own key; a floor memo the scan finds LOST stops the submit
+  (nothing sendable), and a legacy entry that appears after mount is never
+  silently adopted.
 - `earn-vault-slippage.ts` — the slippage-floor machinery BOTH vault modals
   share: `parseSlippageToleranceBps`, `floorForTolerance` (BigInt at the quoted
   mint's scale, floored, one-atom minimum; a quote FINER than that scale is a

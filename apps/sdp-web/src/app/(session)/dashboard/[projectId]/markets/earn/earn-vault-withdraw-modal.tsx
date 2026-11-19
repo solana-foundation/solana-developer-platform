@@ -10,6 +10,7 @@ import { earnWithdrawSlippageFloor } from "@sdp/types/provider-access";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import type { BadgeVariant } from "@sdp/ui/badge";
 import { Button } from "@sdp/ui/button";
+import { Callout } from "@sdp/ui/callout";
 import { DetailList, DetailRow } from "@sdp/ui/detail-list";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
@@ -78,11 +79,13 @@ import {
 import {
   forgetVaultWithdrawalFloor,
   forgetVaultWithdrawalShares,
+  recallLegacyVaultWithdrawalKeptKey,
   recallVaultWithdrawalFloor,
   recallVaultWithdrawalShares,
   rememberVaultWithdrawalFloor,
   rememberVaultWithdrawalShares,
   resolveVaultWithdrawalKeptKey,
+  type VaultWithdrawalRecovery,
   vaultWithdrawalIdempotencyKeyStore,
   vaultWithdrawalRequestFingerprint,
 } from "./earn-vault-withdraw-tracking";
@@ -586,6 +589,7 @@ interface WithdrawalReviewStepProps {
   onSubmit: () => void;
   position: EarnVaultPosition;
   quote: VaultQuoteState<EarnVaultWithdrawalPreview>;
+  recovery: VaultWithdrawalRecovery | undefined;
   slippageBps: number | null;
   slippageInput: string;
   slippageInvalid: boolean;
@@ -674,6 +678,48 @@ function ReviewAmountRows({
   );
 }
 
+/**
+ * The review-step notice for an ADOPTED previous-build attempt (see
+ * `recallLegacyVaultWithdrawalKeptKey`): what a confirm here submits is the
+ * RECOVERED shares and floor, which are generally not the amount the form is
+ * showing, so the review must say so before the submit, not after. When the
+ * recovered floor was LOST (`undefined`) the attempt cannot be replayed
+ * exactly and nothing will be sent — the notice says that instead of a
+ * confirm that could only fail or double-exit.
+ */
+function VaultWithdrawalRecoveryNotice({
+  locale,
+  position,
+  recovery,
+}: {
+  locale: string;
+  position: EarnVaultPosition;
+  recovery: VaultWithdrawalRecovery;
+}) {
+  const t = useTranslations();
+  const shares = formatTokenValue(recovery.shares, position.shareMint, locale);
+  if (recovery.floor === undefined) {
+    return (
+      <Callout className="mt-4" variant="warning">
+        {t("DashboardEarn.vaultWithdraw.legacyAttemptUnrecoverable", { shares })}
+      </Callout>
+    );
+  }
+  if (recovery.floor === null) {
+    return (
+      <Callout className="mt-4" variant="warning">
+        {t("DashboardEarn.vaultWithdraw.legacyAttemptReviewNote", { shares })}
+      </Callout>
+    );
+  }
+  const floor = formatTokenValue(recovery.floor, position.tokenMint, locale);
+  return (
+    <Callout className="mt-4" variant="warning">
+      {t("DashboardEarn.vaultWithdraw.legacyAttemptReviewNoteWithFloor", { shares, floor })}
+    </Callout>
+  );
+}
+
 function WithdrawalReviewStep(props: WithdrawalReviewStepProps) {
   const {
     amount,
@@ -685,6 +731,7 @@ function WithdrawalReviewStep(props: WithdrawalReviewStepProps) {
     onSubmit,
     position,
     quote,
+    recovery,
     slippageBps,
     slippageInput,
     slippageInvalid,
@@ -695,6 +742,7 @@ function WithdrawalReviewStep(props: WithdrawalReviewStepProps) {
     submitError,
     submitting,
   } = props;
+  const locale = useLocale();
   const t = useTranslations();
 
   return (
@@ -712,6 +760,10 @@ function WithdrawalReviewStep(props: WithdrawalReviewStepProps) {
           tokenMint={position.tokenMint}
         />
       </DetailList>
+
+      {recovery ? (
+        <VaultWithdrawalRecoveryNotice locale={locale} position={position} recovery={recovery} />
+      ) : null}
 
       {settlement === "provider_order" ? null : (
         <VaultQuoteNotices
@@ -802,6 +854,16 @@ export function EarnVaultWithdrawModal({
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<WithdrawalOutcome | null>(null);
+  // Mount-time SNAPSHOT of the previous build's unresolved attempt on this
+  // exit (see `recallLegacyVaultWithdrawalKeptKey`): the scan runs once, so
+  // what the review surfaces and what the submit adopts is the same attempt —
+  // never a silent mid-session re-scan that could submit shares the customer
+  // never saw. The review notice presents it; the submit's resolver consumes
+  // the snapshot only. `undefined` server-side and when nothing legacy is
+  // kept.
+  const [recovery, setRecovery] = useState(() =>
+    recallLegacyVaultWithdrawalKeptKey({ projectId, positionId: position.id, redemptionMode })
+  );
   const submittingRef = useRef(false);
   const requestControllerRef = useRef<AbortController | null>(null);
   const observedWithdrawal = useEarnVaultWithdrawalOutcome(
@@ -919,6 +981,18 @@ export function EarnVaultWithdrawModal({
     return false;
   }
 
+  // An adopted legacy attempt's own answer retires ITS key — which spent this
+  // recovery — so re-scan for the next-oldest kept legacy attempt, if any,
+  // before the next submit. The re-scan only ever runs after the customer
+  // watched the adopted replay resolve; a key kept under a UNKNOWN answer
+  // leaves the snapshot alone, so a retry re-adopts the same attempt.
+  function rescanAdoptedRecovery(adoptedShares: string | undefined): void {
+    if (adoptedShares === undefined) return;
+    setRecovery(
+      recallLegacyVaultWithdrawalKeptKey({ projectId, positionId: position.id, redemptionMode })
+    );
+  }
+
   async function submitResolvedIntent(controller: AbortController, quantity: string) {
     // Keyed by the user's TYPED quantity, never the derived share intent:
     // the atomic exit derives its shares from the live position value, which
@@ -928,11 +1002,11 @@ export function EarnVaultWithdrawModal({
     // tracking module documents the fingerprint's other terms — including the
     // UPGRADE RECOVERY: the previous build keyed its kept entries on the
     // derived shares, so a retry of such an attempt resolves to nothing this
-    // build computed, and `resolveVaultWithdrawalKeptKey` adopts it instead —
-    // the submission then runs under the LEGACY fingerprint and replays THAT
-    // attempt exactly, its own key, shares, and minted floor, so the API
-    // answers the first attempt either way and the answer retires the legacy
-    // key.
+    // build computed. The adoption surfaced for review (the mount-time
+    // recovery state) decides instead — the submission then runs under the
+    // LEGACY fingerprint and replays THAT attempt exactly, its own key,
+    // shares, and minted floor, so the API answers the first attempt either
+    // way and the answer retires the legacy key.
     const { fingerprint, reused, adoptedShares } = resolveVaultWithdrawalKeptKey({
       fingerprint: vaultWithdrawalRequestFingerprint({
         projectId,
@@ -941,9 +1015,7 @@ export function EarnVaultWithdrawModal({
         toleranceBps: slippagePolicy === null ? null : slippageBps,
         redemptionMode,
       }),
-      projectId,
-      positionId: position.id,
-      redemptionMode,
+      recovery,
     });
 
     // A KEPT key — one an earlier attempt left unretired (a lost answer, a 5xx,
@@ -1024,6 +1096,7 @@ export function EarnVaultWithdrawModal({
     if (retired || slippageRefused) {
       forgetVaultWithdrawalFloor(fingerprint);
       forgetVaultWithdrawalShares(fingerprint);
+      rescanAdoptedRecovery(adoptedShares);
     }
     if (controller.signal.aborted) return;
     const resolution = resolveWithdrawalSubmission(
@@ -1185,6 +1258,7 @@ export function EarnVaultWithdrawModal({
               onSubmit={() => void submit()}
               position={position}
               quote={quote}
+              recovery={recovery}
               slippageBps={slippageBps}
               slippageInput={slippageInput}
               slippageInvalid={slippageInvalid}

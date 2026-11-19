@@ -4,10 +4,20 @@ import type { EarnVaultPosition, EarnVaultWithdrawal } from "@sdp/types/earn";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { EnglishTestI18n } from "@/app/(session)/dashboard/[projectId]/markets/test-i18n";
 import { VAULT_QUOTE_DEBOUNCE_MS, VAULT_QUOTE_TTL_MS } from "./earn-vault-slippage";
 import { EarnVaultWithdrawModal } from "./earn-vault-withdraw-modal";
 import { resetVaultWithdrawalTrackingStateForTests } from "./earn-vault-withdraw-tracking";
+
+/** The store's raw entry shape, parsed rather than cast — saved input is external input. */
+const storedEntriesSchema = z.array(
+  z.object({
+    id: z.string(),
+    value: z.string(),
+    claimedAt: z.number().optional(),
+  })
+);
 
 const mocks = vi.hoisted(() => ({
   createEarnVaultWithdrawal: vi.fn(),
@@ -895,7 +905,7 @@ describe("exit slippage floors (quote-derived)", () => {
     sessionStorage.setItem(
       storeName,
       JSON.stringify([
-        ...(entries ? (JSON.parse(entries) as unknown[]) : []),
+        ...(entries ? storedEntriesSchema.parse(JSON.parse(entries)) : []),
         { id: fingerprint, value: input.key, claimedAt: input.claimedAt },
       ])
     );
@@ -937,7 +947,17 @@ describe("exit slippage floors (quote-derived)", () => {
       renderModal(vi.fn(), vedaPosition);
       // The retry types the same $5 — which this build can only look up under
       // the typed-quantity identity the legacy entry does not carry.
-      await enterVedaShares("5");
+      await armVedaShares("5");
+      // The adoption is SURFACED, never silent: the review names the recovered
+      // shares and minted floor the confirm will actually send — not the $5
+      // typed above.
+      expect(
+        screen.getByText(
+          /An earlier attempt to withdraw 4 SOL .*guaranteed minimum of \$4\.31\..*not the amount shown above/
+        )
+      ).toBeTruthy();
+      vi.useRealTimers();
+      fireEvent.click(screen.getByRole("button", { name: "Confirm withdrawal" }));
       await flushSubmission();
 
       // The submit must NOT mint a second key over the unresolved attempt:
@@ -959,6 +979,37 @@ describe("exit slippage floors (quote-derived)", () => {
         "legacy-key"
       );
       expect(sessionStorage.getItem("sdp:earn:vault-withdrawal:floor:v1")).not.toContain("4.31");
+    });
+
+    it("never adopts a legacy entry that appeared AFTER mount (the recovery is a snapshot)", async () => {
+      primeQuote("4.997");
+      mocks.createEarnVaultWithdrawal.mockResolvedValue({
+        ok: true,
+        status: 200,
+        data: { kind: "submitted", withdrawal: withdrawal("submitted") },
+      });
+
+      // Mounted with NOTHING legacy kept, and the previous build's entry only
+      // then turns up underneath it (another tab's replay, a late write). The
+      // recovery the review surfaces is the MOUNT-TIME scan's, so the submit
+      // must not silently switch to an attempt the customer was never shown —
+      // and the review has no notice to warn about.
+      renderModal(vi.fn(), vedaPosition);
+      seedLegacyKeptKey({
+        identity: legacyIdentity("4"),
+        key: "legacy-late",
+        claimedAt: Date.now() - 60_000,
+        floor: "4.31",
+      });
+      await enterVedaShares("5");
+
+      expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(1);
+      expect(mocks.createEarnVaultWithdrawal.mock.calls[0][0]).toMatchObject({ shares: "5" });
+      expect(mocks.createEarnVaultWithdrawal.mock.calls[0][1]).not.toBe("legacy-late");
+      // The late entry is untouched — still kept for its own review.
+      expect(sessionStorage.getItem("sdp:earn:vault-withdrawal:idempotency:v1")).toContain(
+        "legacy-late"
+      );
     });
 
     it("adopts the OLDEST legacy attempt first when the previous build left several", async () => {
