@@ -156,9 +156,9 @@ sweep finishes an ambiguous or interrupted submission. Vault deposits open
 where the provider is DEPLOYED (`EARN_PROVIDER_DEPLOYED_CLUSTERS` in
 `@sdp/types`, derived from each provider's program table and mapped through
 `CLUSTER_BY_SDP_ENVIRONMENT`): Kamino from sandbox and production; Jupiter Lend,
-Ondo, and Hastra from production only; Veda from sandbox until PRO-1777 fills
-its mainnet deployment. WisdomTree is registered but deposit-disabled until its
-launch gates pass. The exit route itself takes no environment gate because money
+Ondo, and Hastra from production only; Veda from sandbox and production
+(PRO-1777 filled its mainnet deployment). WisdomTree is registered but
+deposit-disabled until its launch gates pass. The exit route itself takes no environment gate because money
 out beats money off.
 
 Hastra exposes two exit contracts without collapsing their settlement

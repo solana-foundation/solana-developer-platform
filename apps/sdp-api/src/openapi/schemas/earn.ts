@@ -96,7 +96,9 @@ const earnStrategySchema = z
       example: "kamino",
     }),
     depositMints: z.array(z.string()).openapi({
-      description: "Mints the strategy accepts directly. The first is the deposit token.",
+      description:
+        "Mints the strategy accepts directly. The first is the deposit token. " +
+        "Veda's mainnet USDC PRIME and OUSD PRIME each pin their own asset, USDC and OUSD respectively.",
       example: ["4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"],
     }),
     shareMint: z.string().optional().openapi({

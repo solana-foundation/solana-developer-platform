@@ -20,7 +20,7 @@ describe("EARN_PROVIDER_DEPLOYED_CLUSTERS", () => {
   it("follows each provider's deployment table (PRO-1986)", () => {
     expect(EARN_PROVIDER_DEPLOYED_CLUSTERS).toEqual({
       kamino: ["devnet", "mainnet-beta"],
-      veda: ["devnet"],
+      veda: ["devnet", "mainnet-beta"],
       upshift: [],
       perena: [],
       jupiter_lend: ["mainnet-beta"],
@@ -40,7 +40,7 @@ describe("EARN_PROVIDER_DEPLOYED_CLUSTERS", () => {
     expect(isVaultDirectDepositEnabled("sandbox", "kamino")).toBe(true);
     expect(isVaultDirectDepositEnabled("production", "kamino")).toBe(true);
     expect(isVaultDirectDepositEnabled("sandbox", "veda")).toBe(true);
-    expect(isVaultDirectDepositEnabled("production", "veda")).toBe(false);
+    expect(isVaultDirectDepositEnabled("production", "veda")).toBe(true);
     expect(isVaultDirectDepositEnabled("sandbox", "jupiter_lend")).toBe(false);
     expect(isVaultDirectDepositEnabled("production", "jupiter_lend")).toBe(true);
     expect(isVaultDirectDepositEnabled("sandbox", "ondo")).toBe(false);

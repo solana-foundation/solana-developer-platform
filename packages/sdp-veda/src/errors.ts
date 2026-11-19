@@ -87,8 +87,7 @@ export function amountOutOfRange(field: string, value: string): SdpVedaError {
 /**
  * SDP has no confirmed Veda deployment for this cluster.
  *
- * Not an outage and not a bug: `VEDA_DEPLOYMENTS` in `@sdp/types` has a devnet
- * deployment but no approved mainnet deployment. Building against an
+ * A missing entry in `VEDA_DEPLOYMENTS` is a configuration error. Building against an
  * unverified address is the failure this refuses to risk.
  */
 export function deploymentNotConfigured(cluster: SolanaCluster): SdpVedaError {

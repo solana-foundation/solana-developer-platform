@@ -615,7 +615,7 @@ transaction signed by the organization custody wallet or external owner.
     environment's cluster carries one of its deployments, DERIVED from the
     provider's own program table (`EARN_PROVIDER_DEPLOYED_CLUSTERS`): today
     Jupiter Lend and Ondo on production/mainnet, Kamino on both (PRO-1986),
-    Veda on sandbox/devnet until `VEDA_DEPLOYMENTS["mainnet-beta"]` is filled
+    Veda on both now that `VEDA_DEPLOYMENTS["mainnet-beta"]` is filled
     (PRO-1777). One gate, `assertVaultDepositEnvironmentOpen` (admission.ts),
     inside `assertVaultDepositAdmissible` and the preview. The dashboard reads
     the same predicate, so it never advertises an action the API will refuse.
