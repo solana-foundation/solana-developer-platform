@@ -26,7 +26,21 @@ describe("dashboard links", () => {
   it("name their Project wherever a page writes one", () => {
     expect(SCANNED_ROOTS.filter((root) => !existsSync(`${SRC}${root}`))).toEqual([]);
 
-    const unscoped = SCANNED_ROOTS.flatMap((root) => sourceFiles(`${SRC}${root}`)).flatMap((file) =>
+    const files = SCANNED_ROOTS.flatMap((root) => sourceFiles(`${SRC}${root}`));
+    // An empty scan cannot tell "clean" from "scanned nothing": the roots hold
+    // far more files than this floor, so a scanner that stopped finding them
+    // (a broken path, recursion dropped) fails here instead of passing vacuously.
+    expect(files.length, "source files scanned").toBeGreaterThan(50);
+
+    // The scanner must still see the violation it polices: a literal unscoped
+    // target matches, and bare `/dashboard`, the one allowed target, does not.
+    const scanner = new RegExp(UNSCOPED_TARGET.source, UNSCOPED_TARGET.flags);
+    expect('[… href={"/dashboard/payments"} router.push("/dashboard/settings") …]').toMatch(
+      scanner
+    );
+    expect('href="/dashboard"').not.toMatch(scanner);
+
+    const unscoped = files.flatMap((file) =>
       [...readFileSync(file, "utf8").matchAll(UNSCOPED_TARGET)].map(
         ([target]) => `${file.slice(SRC.length)}: ${target}`
       )
