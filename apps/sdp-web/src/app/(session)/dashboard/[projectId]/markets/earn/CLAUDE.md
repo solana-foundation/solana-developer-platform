@@ -368,15 +368,21 @@ nothing else; the program create still sends the body `requestId` form.
   detail through terminal state. An expired request exposes an idempotent cancel
   action that recovers escrowed shares; closing the create modal never hides it.
 - `earn-vault-withdraw-tracking.ts` — the withdrawal idempotency-key store
-  (fingerprint: project, position, the TYPED quantity — the dollar amount an
-  atomic exit starts from, the shares a provider order starts from — and the
-  user's tolerance; the DERIVED share intent and the derived exit floor move
-  with the live positions polls and live quotes, so neither is in the
-  fingerprint, and each is remembered beside the key instead —
+  (fingerprint: the format tag, project, position, the TYPED quantity — the
+  dollar amount an atomic exit starts from, the shares a provider order starts
+  from — and the user's tolerance; the DERIVED share intent and the derived
+  exit floor move with the live positions polls and live quotes, so neither is
+  in the fingerprint, and each is remembered beside the key instead —
   `rememberVaultWithdrawalShares` / `rememberVaultWithdrawalFloor` — to be
   replayed verbatim for a kept key, because the API's own idempotency
   fingerprint pins both `shares` and `minAmountOut`) under its own versioned
-  `sessionStorage` key.
+  `sessionStorage` key. The tag is the upgrade bridge: the previous build
+  keyed its entries on the DERIVED shares, so no fingerprint this build
+  computes finds them again, and `recallLegacyVaultWithdrawalKeptKey` adopts
+  such an entry at submit — the replay goes out under the legacy key with the
+  shares parsed out of the legacy identity and the memo'd minted floor,
+  oldest entry first — instead of minting a second key over an attempt that
+  may already have executed.
 - `earn-vault-slippage.ts` — the slippage-floor machinery BOTH vault modals
   share: `parseSlippageToleranceBps`, `floorForTolerance` (BigInt at the quoted
   mint's scale, floored, one-atom minimum; a quote FINER than that scale is a

@@ -58,7 +58,8 @@ function withdrawal(status: EarnVaultWithdrawal["status"]): EarnVaultWithdrawal 
 function renderModal(
   onWithdrawn = vi.fn(),
   modalPosition: EarnVaultPosition = position,
-  settlement?: React.ComponentProps<typeof EarnVaultWithdrawModal>["settlement"]
+  settlement?: React.ComponentProps<typeof EarnVaultWithdrawModal>["settlement"],
+  redemptionMode?: React.ComponentProps<typeof EarnVaultWithdrawModal>["redemptionMode"]
 ) {
   return {
     onWithdrawn,
@@ -70,6 +71,7 @@ function renderModal(
           onWithdrawn={onWithdrawn}
           position={modalPosition}
           projectId="prj_1"
+          redemptionMode={redemptionMode}
           settlement={settlement}
         />
       </EnglishTestI18n>
@@ -869,5 +871,292 @@ describe("exit slippage floors (quote-derived)", () => {
       shares: "5",
     });
     expect(screen.queryByText(/Slippage tolerance:/)).toBeNull();
+  });
+
+  /**
+   * The PREVIOUS build keyed its kept entries on the DERIVED shares and wrote
+   * no format tag, so no fingerprint this build computes can ever find one
+   * again — the retry of such an attempt must ADOPT it and replay its exact
+   * request instead of minting a second key over it (which can exit again
+   * while the first attempt may already have executed). Seeded here verbatim:
+   * an entry in the key store under a shares-keyed identity, plus the floor
+   * that build remembered under the same identity.
+   */
+  function seedLegacyKeptKey(input: {
+    identity: unknown[];
+    key: string;
+    claimedAt: number;
+    /** The legacy floor memo entry; omitted when that memo lost it. */
+    floor?: string | null;
+  }) {
+    const fingerprint = JSON.stringify(input.identity);
+    const storeName = "sdp:earn:vault-withdrawal:idempotency:v1";
+    const entries = sessionStorage.getItem(storeName);
+    sessionStorage.setItem(
+      storeName,
+      JSON.stringify([
+        ...(entries ? (JSON.parse(entries) as unknown[]) : []),
+        { id: fingerprint, value: input.key, claimedAt: input.claimedAt },
+      ])
+    );
+    if (input.floor !== undefined) {
+      const floorName = "sdp:earn:vault-withdrawal:floor:v1";
+      const floors = sessionStorage.getItem(floorName);
+      sessionStorage.setItem(
+        floorName,
+        JSON.stringify({ ...(floors ? JSON.parse(floors) : {}), [fingerprint]: input.floor })
+      );
+    }
+  }
+
+  describe("a kept key the PREVIOUS build left (the fingerprint upgrade)", () => {
+    /** The previous build's atomic identity: [project, position, DERIVED shares, tolerance, mode?]. */
+    function legacyIdentity(shares: string, mode?: "standard" | "instant") {
+      return mode === undefined
+        ? ["prj_1", vedaPosition.id, shares, 10]
+        : ["prj_1", vedaPosition.id, shares, 10, mode];
+    }
+
+    it("adopts the previous build's unresolved exit and replays it exactly", async () => {
+      primeQuote("4.997");
+      mocks.createEarnVaultWithdrawal.mockResolvedValue({
+        ok: true,
+        status: 200,
+        data: { kind: "submitted", withdrawal: withdrawal("submitted") },
+      });
+      // An unanswered $5 attempt from before the upgrade redeemed 4 shares at
+      // tolerance 10: its key is kept under the shares-keyed identity, and the
+      // floor it was minted with is still in the floor memo.
+      seedLegacyKeptKey({
+        identity: legacyIdentity("4"),
+        key: "legacy-key",
+        claimedAt: Date.now() - 60_000,
+        floor: "4.31",
+      });
+
+      renderModal(vi.fn(), vedaPosition);
+      // The retry types the same $5 — which this build can only look up under
+      // the typed-quantity identity the legacy entry does not carry.
+      await enterVedaShares("5");
+      await flushSubmission();
+
+      // The submit must NOT mint a second key over the unresolved attempt:
+      // the replay carries the legacy key, the shares that key went out with
+      // (parsed out of the legacy identity), and the floor it was minted with
+      // — the first attempt's request, verbatim, which the API answers as a
+      // replay either way.
+      expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(1);
+      expect(mocks.createEarnVaultWithdrawal.mock.calls[0][0]).toEqual({
+        positionId: vedaPosition.id,
+        shares: "4",
+        minAmountOut: "4.31",
+      });
+      expect(mocks.createEarnVaultWithdrawal.mock.calls[0][1]).toBe("legacy-key");
+      expect(await screen.findByText("Withdrawal submitted")).toBeTruthy();
+
+      // The answer retired the adopted key, and its memos went with it.
+      expect(sessionStorage.getItem("sdp:earn:vault-withdrawal:idempotency:v1")).not.toContain(
+        "legacy-key"
+      );
+      expect(sessionStorage.getItem("sdp:earn:vault-withdrawal:floor:v1")).not.toContain("4.31");
+    });
+
+    it("adopts the OLDEST legacy attempt first when the previous build left several", async () => {
+      primeQuote("4.997");
+      mocks.createEarnVaultWithdrawal.mockResolvedValue({
+        ok: true,
+        status: 200,
+        data: { kind: "submitted", withdrawal: withdrawal("submitted") },
+      });
+      // "Raise the tolerance and retry" minted a fresh key in the previous
+      // build too, so several legacy attempts can be kept at once. Each submit
+      // resolves one, oldest first.
+      seedLegacyKeptKey({
+        identity: legacyIdentity("4"),
+        key: "legacy-older",
+        claimedAt: Date.now() - 120_000,
+        floor: "4.31",
+      });
+      seedLegacyKeptKey({
+        identity: legacyIdentity("4.5"),
+        key: "legacy-newer",
+        claimedAt: Date.now() - 60_000,
+        floor: "4.4",
+      });
+
+      const first = renderModal(vi.fn(), vedaPosition);
+      await enterVedaShares("5");
+      await flushSubmission();
+      expect(mocks.createEarnVaultWithdrawal.mock.calls[0][1]).toBe("legacy-older");
+
+      // The first replay retired the older key; the next submit resolves the
+      // remaining one the same way.
+      first.unmount();
+      vi.useFakeTimers();
+      renderModal(vi.fn(), vedaPosition);
+      await enterVedaShares("5");
+      await flushSubmission();
+      expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(2);
+      expect(mocks.createEarnVaultWithdrawal.mock.calls[1][1]).toBe("legacy-newer");
+      expect(mocks.createEarnVaultWithdrawal.mock.calls[1][0]).toMatchObject({ shares: "4.5" });
+    });
+
+    it("stops instead of minting over a legacy attempt whose floor memo was lost", async () => {
+      primeQuote("4.997");
+      seedLegacyKeptKey({
+        identity: legacyIdentity("4"),
+        key: "legacy-key",
+        claimedAt: Date.now() - 60_000,
+        // No floor memo entry: an evicted or refused write lost it.
+      });
+
+      renderModal(vi.fn(), vedaPosition);
+      await enterVedaShares("5");
+      await flushSubmission();
+
+      // The adopted attempt cannot be replayed without its minted floor, and
+      // a fresh floor under its live key is the changed-request refusal that
+      // unlocks a second exit. The submission stops, key untouched.
+      expect(mocks.createEarnVaultWithdrawal).not.toHaveBeenCalled();
+      await vi.waitFor(() => {
+        expect(screen.getByRole("alert").textContent).toMatch(/could not confirm the exact terms/);
+      });
+      expect(sessionStorage.getItem("sdp:earn:vault-withdrawal:idempotency:v1")).toContain(
+        "legacy-key"
+      );
+    });
+
+    it("mints a fresh key when the legacy attempt was for another position", async () => {
+      primeQuote("4.997");
+      mocks.createEarnVaultWithdrawal.mockResolvedValue({
+        ok: true,
+        status: 200,
+        data: { kind: "submitted", withdrawal: withdrawal("submitted") },
+      });
+      seedLegacyKeptKey({
+        identity: ["prj_1", "earn_position_other", "4", 10],
+        key: "legacy-key",
+        claimedAt: Date.now() - 60_000,
+        floor: "4.31",
+      });
+
+      renderModal(vi.fn(), vedaPosition);
+      await enterVedaShares("5");
+      await flushSubmission();
+
+      // Another position's kept attempt is not this exit's first attempt: the
+      // submit mints fresh, and the unrelated key is left alone.
+      expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(1);
+      expect(mocks.createEarnVaultWithdrawal.mock.calls[0][1]).not.toBe("legacy-key");
+      expect(mocks.createEarnVaultWithdrawal.mock.calls[0][0]).toMatchObject({ shares: "5" });
+      expect(sessionStorage.getItem("sdp:earn:vault-withdrawal:idempotency:v1")).toContain(
+        "legacy-key"
+      );
+    });
+
+    it("mints a fresh key when only the redemption mode differs", async () => {
+      primeQuote("4.997");
+      mocks.createEarnVaultWithdrawal.mockResolvedValue({
+        ok: true,
+        status: 200,
+        data: { kind: "submitted", withdrawal: withdrawal("submitted") },
+      });
+      seedLegacyKeptKey({
+        identity: legacyIdentity("4", "instant"),
+        key: "legacy-key",
+        claimedAt: Date.now() - 60_000,
+        floor: "4.31",
+      });
+
+      // The body a standard-mode submit would send under the adopted key
+      // carries THIS modal's mode — a changed request under a live key, whose
+      // 422 would retire it while the instant attempt may have executed. The
+      // mode is part of what the replay must match, so no adoption.
+      renderModal(vi.fn(), vedaPosition, undefined, "standard");
+      await enterVedaShares("5");
+      await flushSubmission();
+
+      expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(1);
+      expect(mocks.createEarnVaultWithdrawal.mock.calls[0][1]).not.toBe("legacy-key");
+      expect(mocks.createEarnVaultWithdrawal.mock.calls[0][0]).toMatchObject({ shares: "5" });
+    });
+
+    it("never mistakes this build's kept key, tagged or not, for a legacy one", async () => {
+      primeQuote("4.997");
+      mocks.createEarnVaultWithdrawal
+        .mockResolvedValueOnce({
+          ok: false,
+          error: "Bad gateway",
+          status: 503,
+          body: null,
+        })
+        .mockResolvedValue({
+          ok: true,
+          status: 200,
+          data: { kind: "submitted", withdrawal: withdrawal("submitted") },
+        });
+
+      // A THIS-build attempt ($5, its key kept by the 5xx), then the customer
+      // edits the amount and submits $6: a different withdrawal, whose submit
+      // must mint fresh — the kept entry carries the format tag, so the legacy
+      // scan refuses it.
+      const first = renderModal(vi.fn(), vedaPosition);
+      await enterVedaShares("5");
+      await vi.waitFor(() => expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(1));
+      first.unmount();
+
+      vi.useFakeTimers();
+      renderModal(vi.fn(), vedaPosition);
+      await enterVedaShares("6");
+      await flushSubmission();
+
+      expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(2);
+      expect(mocks.createEarnVaultWithdrawal.mock.calls[1][1]).not.toBe(
+        mocks.createEarnVaultWithdrawal.mock.calls[0][1]
+      );
+      expect(mocks.createEarnVaultWithdrawal.mock.calls[1][0]).toMatchObject({ shares: "6" });
+      // The first attempt's key is still kept for ITS retry.
+      expect(sessionStorage.getItem("sdp:earn:vault-withdrawal:idempotency:v1")).toContain(
+        mocks.createEarnVaultWithdrawal.mock.calls[0][1]
+      );
+    });
+
+    it("adopts a legacy provider-order key and replays its typed shares", async () => {
+      const exactShares = "10.123456789";
+      mocks.createEarnVaultWithdrawal.mockResolvedValue({
+        ok: true,
+        status: 200,
+        data: { kind: "submitted", withdrawal: withdrawal("submitted") },
+      });
+      // A provider order keyed on its typed shares and kept with a
+      // deliberately floorless memo (the provider declares no floor policy).
+      seedLegacyKeptKey({
+        identity: ["prj_1", vedaPosition.id, exactShares, null],
+        key: "legacy-key",
+        claimedAt: Date.now() - 60_000,
+        floor: null,
+      });
+
+      renderModal(
+        vi.fn(),
+        { ...position, provider: "wisdomtree", label: "WisdomTree WTGXX", tokenValue: undefined },
+        "provider_order"
+      );
+      screen.getByRole("dialog");
+      fireEvent.change(screen.getByLabelText("Shares"), { target: { value: "6" } });
+      vi.useRealTimers();
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Confirm withdrawal" }));
+      await flushSubmission();
+
+      // The typed 6 must not mint over the unresolved order: the replay goes
+      // out under the legacy key with the order's own shares and no floor.
+      expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(1);
+      expect(mocks.createEarnVaultWithdrawal.mock.calls[0][0]).toEqual({
+        positionId: vedaPosition.id,
+        shares: exactShares,
+      });
+      expect(mocks.createEarnVaultWithdrawal.mock.calls[0][1]).toBe("legacy-key");
+    });
   });
 });

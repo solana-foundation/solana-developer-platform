@@ -82,6 +82,7 @@ import {
   recallVaultWithdrawalShares,
   rememberVaultWithdrawalFloor,
   rememberVaultWithdrawalShares,
+  resolveVaultWithdrawalKeptKey,
   vaultWithdrawalIdempotencyKeyStore,
   vaultWithdrawalRequestFingerprint,
 } from "./earn-vault-withdraw-tracking";
@@ -137,20 +138,24 @@ type WithdrawalSubmissionResolution =
 
 /**
  * The share intent a submission sends, decided once from the key resolution:
- * a provider order's intent is its typed input itself; a FRESH atomic key
- * sends the live derivation; a KEPT atomic key replays the MINTED intent from
- * the shares memo — the API's fingerprint pins `shares`, so a fresh
- * re-derivation from a moved live position would be a changed request under a
- * live key. `undefined` for a reuse whose memo lost the intent: the caller
- * stops, submitting nothing, rather than pair the live key with a guess.
+ * an ADOPTED legacy key sends the shares parsed out of the legacy fingerprint
+ * (the first attempt's intent, whatever the form now says); a provider
+ * order's intent is its typed input itself; a FRESH atomic key sends the live
+ * derivation; a KEPT atomic key replays the MINTED intent from the shares
+ * memo — the API's fingerprint pins `shares`, so a fresh re-derivation from a
+ * moved live position would be a changed request under a live key.
+ * `undefined` for a reuse whose memo lost the intent: the caller stops,
+ * submitting nothing, rather than pair the live key with a guess.
  */
 function sharesForSubmission(
   settlement: EarnVaultWithdrawalSettlement,
   reused: boolean,
   quantity: string,
   derivedShares: string | undefined,
-  fingerprint: string
+  fingerprint: string,
+  adoptedShares?: string
 ): string | undefined {
+  if (adoptedShares !== undefined) return adoptedShares;
   if (settlement === "provider_order") return quantity;
   return reused ? (recallVaultWithdrawalShares(fingerprint) ?? undefined) : derivedShares;
 }
@@ -920,15 +925,26 @@ export function EarnVaultWithdrawModal({
     // the positions polls keep moving — a fingerprint on them drifts under a
     // kept key, the retry misses it and mints a SECOND key whose submit can
     // exit again while the first attempt may already have executed. The
-    // tracking module documents the fingerprint's other terms.
-    const fingerprint = vaultWithdrawalRequestFingerprint({
+    // tracking module documents the fingerprint's other terms — including the
+    // UPGRADE RECOVERY: the previous build keyed its kept entries on the
+    // derived shares, so a retry of such an attempt resolves to nothing this
+    // build computed, and `resolveVaultWithdrawalKeptKey` adopts it instead —
+    // the submission then runs under the LEGACY fingerprint and replays THAT
+    // attempt exactly, its own key, shares, and minted floor, so the API
+    // answers the first attempt either way and the answer retires the legacy
+    // key.
+    const { fingerprint, reused, adoptedShares } = resolveVaultWithdrawalKeptKey({
+      fingerprint: vaultWithdrawalRequestFingerprint({
+        projectId,
+        positionId: position.id,
+        quantity,
+        toleranceBps: slippagePolicy === null ? null : slippageBps,
+        redemptionMode,
+      }),
       projectId,
       positionId: position.id,
-      quantity,
-      toleranceBps: slippagePolicy === null ? null : slippageBps,
       redemptionMode,
     });
-    const reused = vaultWithdrawalIdempotencyKeyStore.has(fingerprint);
 
     // A KEPT key — one an earlier attempt left unretired (a lost answer, a 5xx,
     // a refusal that settled nothing) — must replay the request it was MINTED
@@ -941,10 +957,18 @@ export function EarnVaultWithdrawModal({
     // share intent from a MOVED live position — the fingerprint now keys on
     // the typed quantity, so the kept key is found and the minted shares must
     // be remembered (`rememberVaultWithdrawalShares`) and replayed. A provider
-    // order's shares are its typed input itself. A reuse whose memos LOST
-    // either value cannot resubmit safely at all — it stops here, submitting
-    // nothing, rather than pair the live key with a changed request.
-    const shares = sharesForSubmission(settlement, reused, quantity, sharesToRedeem, fingerprint);
+    // order's shares are its typed input itself. An ADOPTED legacy key's
+    // shares came out of the legacy fingerprint itself. A reuse whose memos
+    // LOST either value cannot resubmit safely at all — it stops here,
+    // submitting nothing, rather than pair the live key with a changed request.
+    const shares = sharesForSubmission(
+      settlement,
+      reused,
+      quantity,
+      sharesToRedeem,
+      fingerprint,
+      adoptedShares
+    );
     if (shares === undefined) {
       // Reachable only on a reuse whose shares memo was lost — submit() gates
       // the fresh path. The same posture as a lost floor below.
