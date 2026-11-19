@@ -981,16 +981,36 @@ export function EarnVaultWithdrawModal({
     return false;
   }
 
-  // An adopted legacy attempt's own answer retires ITS key — which spent this
-  // recovery — so re-scan for the next-oldest kept legacy attempt, if any,
-  // before the next submit. The re-scan only ever runs after the customer
-  // watched the adopted replay resolve; a key kept under a UNKNOWN answer
-  // leaves the snapshot alone, so a retry re-adopts the same attempt.
-  function rescanAdoptedRecovery(adoptedShares: string | undefined): void {
-    if (adoptedShares === undefined) return;
+  // Re-scan for the next-oldest kept legacy attempt, if any. Only ever runs
+  // after a resolution the customer watched — never silently ahead of an
+  // unreviewed submit (see the mount-time snapshot above).
+  function rescanLegacyRecovery(): void {
     setRecovery(
       recallLegacyVaultWithdrawalKeptKey({ projectId, positionId: position.id, redemptionMode })
     );
+  }
+
+  // An adopted legacy attempt's own answer retires ITS key — which spent this
+  // recovery — so re-scan once that answer resolves. A key kept under an
+  // UNKNOWN answer leaves the snapshot alone, so a retry re-adopts the same
+  // attempt.
+  function rescanAdoptedRecovery(adoptedShares: string | undefined): void {
+    if (adoptedShares !== undefined) rescanLegacyRecovery();
+  }
+
+  // A confirm whose recovered key was answered between the mount-time
+  // snapshot and the confirm — an adopted replay sent from a previous visit,
+  // retired by its late answer — stops here: that confirm was approved as a
+  // REPLAY of the earlier attempt, never a fresh exit over it, and minting
+  // under the typed quantity would be exactly the second exit the adoption
+  // exists to prevent. The spent snapshot is re-scanned away (nothing legacy
+  // is kept any more), so the next confirm — re-reviewed, notice gone — is a
+  // normal typed-quantity submission.
+  function stopOnSpentRecovery(recoverySpent: boolean | undefined): boolean {
+    if (!recoverySpent) return false;
+    rescanLegacyRecovery();
+    setSubmitError(t("DashboardEarn.vaultWithdraw.floorUnavailable"));
+    return true;
   }
 
   async function submitResolvedIntent(controller: AbortController, quantity: string) {
@@ -1007,7 +1027,7 @@ export function EarnVaultWithdrawModal({
     // LEGACY fingerprint and replays THAT attempt exactly, its own key,
     // shares, and minted floor, so the API answers the first attempt either
     // way and the answer retires the legacy key.
-    const { fingerprint, reused, adoptedShares } = resolveVaultWithdrawalKeptKey({
+    const { fingerprint, reused, adoptedShares, recoverySpent } = resolveVaultWithdrawalKeptKey({
       fingerprint: vaultWithdrawalRequestFingerprint({
         projectId,
         positionId: position.id,
@@ -1017,6 +1037,7 @@ export function EarnVaultWithdrawModal({
       }),
       recovery,
     });
+    if (stopOnSpentRecovery(recoverySpent)) return;
 
     // A KEPT key — one an earlier attempt left unretired (a lost answer, a 5xx,
     // a refusal that settled nothing) — must replay the request it was MINTED

@@ -244,19 +244,29 @@ export function recallLegacyVaultWithdrawalKeptKey(input: {
  * submit then runs under the legacy fingerprint and replays that attempt
  * exactly, its own key, shares, and minted floor, so the API answers the
  * first attempt either way), or the typed-quantity fingerprint's own kept
- * key. The adoption only stands while the recovered key is STILL kept: once
- * the adopted replay's own answer retired it, the recovery is spent and this
- * resolves like any other submission. `adoptedShares` is set for an adoption
- * only — the shares the caller must send instead of any fresh derivation,
- * because the first attempt's body, verbatim, is the only request the legacy
- * key may carry.
+ * key. `adoptedShares` is set for an adoption only — the shares the caller
+ * must send instead of any fresh derivation, because the first attempt's
+ * body, verbatim, is the only request the legacy key may carry.
+ *
+ * The adoption only stands while the recovered key is STILL kept. When it is
+ * gone — its own answer arrived between the mount-time snapshot and this
+ * confirm (a replay sent from a previous visit, retired late) — the
+ * resolution reports `recoverySpent` and resolves to NOTHING sendable: the
+ * confirm was approved as a REPLAY of that attempt, so turning it into a
+ * fresh typed submission would be the second exit the adoption exists to
+ * prevent. The caller stops, refreshes its recovery (the re-scan finds
+ * nothing kept), and the next confirm — re-reviewed, notice gone — is a
+ * normal typed-quantity submission.
  */
 export function resolveVaultWithdrawalKeptKey(input: {
   fingerprint: string;
   recovery?: VaultWithdrawalRecovery | undefined;
-}): { fingerprint: string; reused: boolean; adoptedShares?: string } {
+}): { adoptedShares?: string; fingerprint: string; recoverySpent?: boolean; reused: boolean } {
   const recovery = input.recovery;
-  if (recovery && vaultWithdrawalIdempotencyKeyStore.has(recovery.fingerprint)) {
+  if (recovery) {
+    if (!vaultWithdrawalIdempotencyKeyStore.has(recovery.fingerprint)) {
+      return { fingerprint: recovery.fingerprint, recoverySpent: true, reused: true };
+    }
     if (recovery.floor === undefined) {
       // The recovered attempt's floor was lost, so its key cannot be replayed
       // exactly — and a fresh key over it is the double exit. The reuse

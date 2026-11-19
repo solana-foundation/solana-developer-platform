@@ -387,8 +387,10 @@ nothing else; the program create still sends the body `requestId` form.
   floor, oldest entry first — instead of minting a second key over an attempt
   that may already have executed. A re-scan only runs once an adopted replay
   has retired its own key; a floor memo the scan finds LOST stops the submit
-  (nothing sendable), and a legacy entry that appears after mount is never
-  silently adopted.
+  (nothing sendable), a recovered key answered between mount and confirm
+  stops the submit too — that confirm was approved as a replay, never a
+  fresh exit over it, so the review refreshes instead — and a legacy entry
+  that appears after mount is never silently adopted.
 - `earn-vault-slippage.ts` — the slippage-floor machinery BOTH vault modals
   share: `parseSlippageToleranceBps`, `floorForTolerance` (BigInt at the quoted
   mint's scale, floored, one-atom minimum; a quote FINER than that scale is a

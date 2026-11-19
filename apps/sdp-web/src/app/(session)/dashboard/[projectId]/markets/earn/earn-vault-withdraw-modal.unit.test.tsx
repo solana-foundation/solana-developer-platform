@@ -1077,6 +1077,47 @@ describe("exit slippage floors (quote-derived)", () => {
       );
     });
 
+    it("stops instead of minting when the recovered key was answered after mount", async () => {
+      primeQuote("4.997");
+      mocks.createEarnVaultWithdrawal.mockResolvedValue({
+        ok: true,
+        status: 200,
+        data: { kind: "submitted", withdrawal: withdrawal("submitted") },
+      });
+      seedLegacyKeptKey({
+        identity: legacyIdentity("4"),
+        key: "legacy-key",
+        claimedAt: Date.now() - 60_000,
+        floor: "4.31",
+      });
+
+      // Mounted on the kept legacy attempt — and then its answer arrives,
+      // retiring it the way a PREVIOUS visit's adopted replay does when its
+      // late answer lands after the customer navigated away and back.
+      renderModal(vi.fn(), vedaPosition);
+      const storeName = "sdp:earn:vault-withdrawal:idempotency:v1";
+      const entries = storedEntriesSchema.parse(
+        JSON.parse(sessionStorage.getItem(storeName) ?? "[]")
+      );
+      sessionStorage.setItem(
+        storeName,
+        JSON.stringify(entries.filter((entry) => entry.value !== "legacy-key"))
+      );
+
+      await enterVedaShares("5");
+
+      // The confirm was approved as a REPLAY of the 4-share attempt — never a
+      // fresh exit over it. The spent recovery stops the submission instead
+      // of minting a new key under the typed quantity.
+      expect(mocks.createEarnVaultWithdrawal).not.toHaveBeenCalled();
+      await vi.waitFor(() => {
+        expect(screen.getByRole("alert").textContent).toMatch(/could not confirm the exact terms/);
+      });
+      // The stale snapshot is refreshed away: the review no longer promises a
+      // replay, so the next confirm is a normal, re-reviewed typed submit.
+      expect(screen.queryByText(/An earlier attempt to withdraw/)).toBeNull();
+    });
+
     it("mints a fresh key when the legacy attempt was for another position", async () => {
       primeQuote("4.997");
       mocks.createEarnVaultWithdrawal.mockResolvedValue({
