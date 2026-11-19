@@ -23,8 +23,9 @@ jobs:
       SMOKE_TARGET: stage
       E2E_CLERK_TICKET_AUTH: "1"
       PLAYWRIGHT_API_URL: https://api-preview.solana.com
-      # The deployed stage dashboard (same solana.com domain as the production Clerk cookie).
-      # A locally started dashboard on localhost can never finish the pk_live sign-in.
+      # The deployed stage dashboard. Stage signs in on the SDP Stage Clerk application,
+      # whose production instance lives on this host (never the production instance's key);
+      # a locally started dashboard on localhost can never finish the pk_live sign-in.
       PLAYWRIGHT_BASE_URL: https://app-preview.solana.com
       PLAYWRIGHT_USE_EXTERNAL_API: "1"
       NEXT_PUBLIC_DISABLE_SENTRY: "1"
