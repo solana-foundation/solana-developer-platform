@@ -8,7 +8,7 @@ export async function POST(request: Request) {
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.earn.vault_withdrawals.create",
-    path: "/v1/earn/vault-withdrawals",
+    path: "/v1/earn/withdrawals/execute",
   });
 }
 
@@ -24,6 +24,6 @@ export async function GET(request: Request) {
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.earn.vault_withdrawals.list",
-    path: `/v1/earn/vault-withdrawals${validated.query}`,
+    path: `/v1/earn/withdrawals/provider-signed${validated.query}`,
   });
 }

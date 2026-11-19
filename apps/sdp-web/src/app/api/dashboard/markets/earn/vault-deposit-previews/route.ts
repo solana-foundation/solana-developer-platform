@@ -10,6 +10,6 @@ export async function POST(request: Request) {
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.earn.vault_deposit_previews.create",
-    path: "/v1/earn/vault-deposit-previews",
+    path: "/v1/earn/deposits/preview",
   });
 }

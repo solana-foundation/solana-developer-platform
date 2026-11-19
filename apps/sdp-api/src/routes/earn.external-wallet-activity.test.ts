@@ -364,7 +364,7 @@ describe("external-wallet activity", () => {
       denomination: USDC,
       createdAt: "2026-08-27T00:00:00.000Z",
     });
-    expect((await getAsProduction(`/v1/earn/external-wallet/movements/${movementId}`)).status).toBe(
+    expect((await getAsProduction(`/v1/earn/movements/caller-signed/${movementId}`)).status).toBe(
       404
     );
   });
@@ -393,9 +393,7 @@ describe("external-wallet activity", () => {
       provider: "wisdomtree",
     });
 
-    const detail = (await (
-      await get(`/v1/earn/external-wallet/movements/${movementId}`)
-    ).json()) as {
+    const detail = (await (await get(`/v1/earn/movements/caller-signed/${movementId}`)).json()) as {
       data: { movement: { status: string; settledAt: string | null; confirmedAt: string | null } };
     };
     expect(detail.data.movement).toMatchObject({
@@ -438,7 +436,7 @@ describe("external-wallet activity", () => {
       createdAt: "2026-08-29T00:00:00.000Z",
     });
 
-    const response = await get(`/v1/earn/external-wallet/movements?ownerAddress=${OWNER_A}`);
+    const response = await get(`/v1/earn/movements/caller-signed?ownerAddress=${OWNER_A}`);
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
       data: {
@@ -469,12 +467,12 @@ describe("external-wallet activity", () => {
     expect(body.data.movements[0]).not.toHaveProperty("replayed");
 
     const deposits = (await (
-      await get(`/v1/earn/external-wallet/movements?ownerAddress=${OWNER_A}&direction=deposit`)
+      await get(`/v1/earn/movements/caller-signed?ownerAddress=${OWNER_A}&direction=deposit`)
     ).json()) as { data: { movements: Array<Record<string, unknown>> } };
     expect(deposits.data.movements).toHaveLength(2);
 
     const finalized = (await (
-      await get(`/v1/earn/external-wallet/movements?ownerAddress=${OWNER_A}&status=finalized`)
+      await get(`/v1/earn/movements/caller-signed?ownerAddress=${OWNER_A}&status=finalized`)
     ).json()) as { data: { movements: Array<Record<string, unknown>> } };
     expect(finalized.data.movements).toHaveLength(2);
   });
@@ -512,7 +510,7 @@ describe("external-wallet activity", () => {
       const query: string = cursor
         ? `ownerAddress=${OWNER_A}&limit=1&before=${encodeURIComponent(cursor)}`
         : `ownerAddress=${OWNER_A}&limit=1`;
-      const page = (await (await get(`/v1/earn/external-wallet/movements?${query}`)).json()) as {
+      const page = (await (await get(`/v1/earn/movements/caller-signed?${query}`)).json()) as {
         data: { movements: Array<{ movementId: string }>; nextCursor: string | null };
       };
       seen.push(...page.data.movements.map((movement) => movement.movementId));
@@ -537,15 +535,15 @@ describe("external-wallet activity", () => {
       tokenMint: USDC,
       label: "USDC vault",
     });
-    expect((await get(`/v1/earn/external-wallet/movements${query}`)).status).toBe(400);
+    expect((await get(`/v1/earn/movements/caller-signed${query}`)).status).toBe(400);
   });
 
   /** The empty answers every per-owner read gives a wallet with nothing in scope. */
   async function expectEmptyReads(ownerAddress: string) {
     const [movements, positions, earnings] = await Promise.all([
-      get(`/v1/earn/external-wallet/movements?ownerAddress=${ownerAddress}`),
-      get(`/v1/earn/external-wallet/positions?ownerAddress=${ownerAddress}`),
-      get(`/v1/earn/external-wallet/earnings?ownerAddress=${ownerAddress}`),
+      get(`/v1/earn/movements/caller-signed?ownerAddress=${ownerAddress}`),
+      get(`/v1/earn/positions/caller-signed?ownerAddress=${ownerAddress}`),
+      get(`/v1/earn/earnings/caller-signed?ownerAddress=${ownerAddress}`),
     ]);
     expect(movements.status).toBe(200);
     expect(positions.status).toBe(200);
@@ -599,8 +597,8 @@ describe("external-wallet activity", () => {
     });
     // The closed position is hidden; the failed movement stays on the feed
     // because history is history, so only positions and earnings are empty.
-    const positions = await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_B}`);
-    const earnings = await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_B}`);
+    const positions = await get(`/v1/earn/positions/caller-signed?ownerAddress=${OWNER_B}`);
+    const earnings = await get(`/v1/earn/earnings/caller-signed?ownerAddress=${OWNER_B}`);
     expect(positions.status).toBe(200);
     expect(earnings.status).toBe(200);
     expect(((await positions.json()) as { data: { positions: unknown[] } }).data.positions).toEqual(
@@ -632,7 +630,7 @@ describe("external-wallet activity", () => {
       createdAt: "2026-08-27T00:00:00.000Z",
     });
     const body = (await (
-      await get(`/v1/earn/external-wallet/movements?ownerAddress=${OWNER_A}`)
+      await get(`/v1/earn/movements/caller-signed?ownerAddress=${OWNER_A}`)
     ).json()) as { data: { movements: Array<{ providerReference: string }> } };
     expect(body.data.movements).toHaveLength(1);
     expect(body.data.movements[0]?.providerReference).toBe("vault-usdc");
@@ -696,7 +694,7 @@ describe("external-wallet activity", () => {
       createdAt: "2026-08-27T00:00:00.000Z",
     });
 
-    const response = await get(`/v1/earn/external-wallet/movements/${movementId}`);
+    const response = await get(`/v1/earn/movements/caller-signed/${movementId}`);
     expect(response.status).toBe(200);
     const body = (await response.json()) as { data: { movement: Record<string, unknown> } };
     expect(body.data.movement).toMatchObject({
@@ -765,10 +763,8 @@ describe("external-wallet activity", () => {
           `fingerprint_${custodyMovementId}`
         ),
     ]);
-    expect((await get(`/v1/earn/external-wallet/movements/${custodyMovementId}`)).status).toBe(404);
-    expect((await get("/v1/earn/external-wallet/movements/earn_movement_missing")).status).toBe(
-      404
-    );
+    expect((await get(`/v1/earn/movements/caller-signed/${custodyMovementId}`)).status).toBe(404);
+    expect((await get("/v1/earn/movements/caller-signed/earn_movement_missing")).status).toBe(404);
     // Scope decides before the chain read: a guessed or foreign id must not be
     // able to use RPC timing as an existence oracle.
     expect(reconcileEarnVaultMovementReadThrough).not.toHaveBeenCalled();
@@ -809,7 +805,7 @@ describe("external-wallet earnings", () => {
       }
       liveValue({ "vault-capped": "3.1" });
       const earnings = (await (
-        await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+        await get(`/v1/earn/earnings/caller-signed?ownerAddress=${OWNER_A}`)
       ).json()) as {
         data: { earnings: { totalsByToken: Array<Record<string, unknown>> } };
       };
@@ -821,7 +817,7 @@ describe("external-wallet earnings", () => {
         expect(total).not.toHaveProperty("earned");
       }
       const detail = (await (
-        await get(`/v1/earn/external-wallet/movements/${movementId}`)
+        await get(`/v1/earn/movements/caller-signed/${movementId}`)
       ).json()) as {
         data: { movement: Record<string, unknown> };
       };
@@ -869,7 +865,7 @@ describe("external-wallet earnings", () => {
     }
     liveValue({ "vault-usdc-one": "66", "vault-usdc-two": "44.5", "vault-usdt": "9" });
 
-    const response = await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`);
+    const response = await get(`/v1/earn/earnings/caller-signed?ownerAddress=${OWNER_A}`);
     expect(response.status).toBe(200);
     const body = (await response.json()) as { data: { earnings: Record<string, unknown> } };
     expect(body.data.earnings).toMatchObject({
@@ -934,7 +930,7 @@ describe("external-wallet earnings", () => {
     );
 
     const body = (await (
-      await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+      await get(`/v1/earn/earnings/caller-signed?ownerAddress=${OWNER_A}`)
     ).json()) as { data: { earnings: { totalsByToken: Array<Record<string, unknown>> } } };
     expect(body.data.earnings.totalsByToken).toEqual([
       expect.objectContaining({
@@ -966,7 +962,7 @@ describe("external-wallet earnings", () => {
     readVaultPositions.mockRejectedValue(new Error("RPC unavailable"));
 
     const body = (await (
-      await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+      await get(`/v1/earn/earnings/caller-signed?ownerAddress=${OWNER_A}`)
     ).json()) as {
       data: {
         earnings: {
@@ -1016,7 +1012,7 @@ describe("external-wallet earnings", () => {
     liveValue({ "vault-usdc": "61" });
 
     const body = (await (
-      await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+      await get(`/v1/earn/earnings/caller-signed?ownerAddress=${OWNER_A}`)
     ).json()) as {
       data: { earnings: { totalsByToken: Array<Record<string, unknown>> } };
     };
@@ -1069,7 +1065,7 @@ describe("external-wallet earnings", () => {
       liveValue({ "vault-usdc": "20.2" });
 
       const body = (await (
-        await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+        await get(`/v1/earn/earnings/caller-signed?ownerAddress=${OWNER_A}`)
       ).json()) as {
         data: { earnings: { totalsByToken: Array<Record<string, unknown>> } };
       };
@@ -1132,7 +1128,7 @@ describe("external-wallet earnings", () => {
     liveValue({ "vault-usdc-settling": "40", "vault-usdc-queued": "20.2" });
 
     const body = (await (
-      await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+      await get(`/v1/earn/earnings/caller-signed?ownerAddress=${OWNER_A}`)
     ).json()) as {
       data: { earnings: { totalsByToken: Array<Record<string, unknown>> } };
     };
@@ -1192,7 +1188,7 @@ describe("external-wallet earnings", () => {
     liveValue({ "vault-kamino-unobserved": "10", "vault-veda-queued": "20" });
 
     const body = (await (
-      await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+      await get(`/v1/earn/earnings/caller-signed?ownerAddress=${OWNER_A}`)
     ).json()) as {
       data: { earnings: { totalsByToken: Array<Record<string, unknown>> } };
     };
@@ -1246,7 +1242,7 @@ describe("external-wallet earnings", () => {
     liveValue({ "vault-usdc": "15" });
 
     const body = (await (
-      await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+      await get(`/v1/earn/earnings/caller-signed?ownerAddress=${OWNER_A}`)
     ).json()) as {
       data: { earnings: { totalsByToken: Array<Record<string, unknown>> } };
     };
@@ -1292,7 +1288,7 @@ describe("external-wallet earnings", () => {
       liveValue({ "vault-usdc": "61" });
 
       const body = (await (
-        await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+        await get(`/v1/earn/earnings/caller-signed?ownerAddress=${OWNER_A}`)
       ).json()) as {
         data: { earnings: { totalsByToken: Array<Record<string, unknown>> } };
       };
@@ -1337,7 +1333,7 @@ describe("external-wallet earnings", () => {
     liveValue({ "vault-usdc": "58" });
 
     const body = (await (
-      await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+      await get(`/v1/earn/earnings/caller-signed?ownerAddress=${OWNER_A}`)
     ).json()) as {
       data: { earnings: { totalsByToken: Array<Record<string, unknown>> } };
     };
@@ -1354,7 +1350,7 @@ describe("external-wallet earnings", () => {
     // The feed renders one unit: the withdrawal's on-chain quantity stays in
     // shares while tokenAmount/tokenMint carry the observed payout.
     const activity = (await (
-      await get(`/v1/earn/external-wallet/movements?ownerAddress=${OWNER_A}`)
+      await get(`/v1/earn/movements/caller-signed?ownerAddress=${OWNER_A}`)
     ).json()) as { data: { movements: Array<Record<string, unknown>> } };
     expect(activity.data.movements).toHaveLength(2);
     expect(activity.data.movements[0]).toMatchObject({
@@ -1417,7 +1413,7 @@ describe("external-wallet earnings", () => {
     liveValue({ "vault-usdc": "58" });
 
     const body = (await (
-      await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+      await get(`/v1/earn/earnings/caller-signed?ownerAddress=${OWNER_A}`)
     ).json()) as {
       data: { earnings: { totalsByToken: Array<Record<string, unknown>> } };
     };
@@ -1432,7 +1428,7 @@ describe("external-wallet earnings", () => {
     expect(token).not.toHaveProperty("earned");
 
     const activity = (await (
-      await get(`/v1/earn/external-wallet/movements?ownerAddress=${OWNER_A}`)
+      await get(`/v1/earn/movements/caller-signed?ownerAddress=${OWNER_A}`)
     ).json()) as { data: { movements: Array<Record<string, unknown>> } };
     expect(activity.data.movements[0]).toMatchObject({
       movementId: unvalued,
@@ -1495,7 +1491,7 @@ describe("external-wallet earnings", () => {
     liveValue({ "vault-usdc-open": "44" });
 
     const body = (await (
-      await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+      await get(`/v1/earn/earnings/caller-signed?ownerAddress=${OWNER_A}`)
     ).json()) as {
       data: { earnings: Record<string, unknown> };
     };
@@ -1513,7 +1509,7 @@ describe("external-wallet earnings", () => {
     });
     // The exited vault's movements stay fully visible on the activity feed.
     const activity = (await (
-      await get(`/v1/earn/external-wallet/movements?ownerAddress=${OWNER_A}`)
+      await get(`/v1/earn/movements/caller-signed?ownerAddress=${OWNER_A}`)
     ).json()) as { data: { movements: Array<Record<string, unknown>> } };
     expect(activity.data.movements).toHaveLength(3);
   });
@@ -1548,7 +1544,7 @@ describe("external-wallet earnings", () => {
     liveValue({ "vault-usdc": "66" });
 
     const body = (await (
-      await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+      await get(`/v1/earn/earnings/caller-signed?ownerAddress=${OWNER_A}`)
     ).json()) as {
       data: { earnings: { totalsByToken: Array<Record<string, unknown>> } };
     };
@@ -1567,7 +1563,7 @@ describe("external-wallet earnings", () => {
       label: "USDC vault",
     });
     expect(
-      (await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}${query}`)).status
+      (await get(`/v1/earn/earnings/caller-signed?ownerAddress=${OWNER_A}${query}`)).status
     ).toBe(400);
   });
 });

@@ -467,7 +467,7 @@ export async function waitForMovement(movementId: string, timeoutMs = 300_000) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     const { movement } = await earnRequest(
-      `/v1/earn/external-wallet/movements/${encodeURIComponent(movementId)}`,
+      `/v1/earn/movements/caller-signed/${encodeURIComponent(movementId)}`,
     );
     if (movement.status === "finalized" || movement.status === "failed") return movement;
     const delayMs = Date.now() - startedAt < 60_000 ? 1_000 : 5_000;
@@ -507,7 +507,7 @@ const strategy = strategies.find(
 if (!strategy) throw new Error("No devnet USDC strategy is open for deposits");
 const amount = "25"; // in the deposit token, depositMints[0]
 
-const preview = await earnRequest("/v1/earn/vault-deposit-previews", {
+const preview = await earnRequest("/v1/earn/deposits/preview", {
   strategyId: strategy.id,
   amount,
 });
@@ -516,7 +516,7 @@ if (preview.blockingIssues.length > 0) {
 }
 
 const { transaction: built } = await earnRequest(
-  "/v1/earn/external-wallet/deposit-transactions",
+  "/v1/earn/deposits/build-unsigned-transaction",
   { strategyId: strategy.id, ownerAddress, amount },
 );
 ```
@@ -532,7 +532,7 @@ const signedTransaction = await signWithTestWallet(built.transaction);
 // and retry an uncertain response with both unchanged.
 const idempotencyKey = randomUUID();
 const { deposit } = await earnRequest(
-  "/v1/earn/external-wallet/deposits",
+  "/v1/earn/deposits/submit-signed-transaction",
   { transactionId: built.transactionId, signedTransaction },
   idempotencyKey,
 );
@@ -552,7 +552,7 @@ const movement = await waitForMovement(deposit.movementId);
 if (movement.status === "failed") throw new Error(movement.failureReason ?? "Deposit failed");
 
 const { positions } = await earnRequest(
-  `/v1/earn/external-wallet/positions?${new URLSearchParams({ ownerAddress })}`,
+  `/v1/earn/positions/caller-signed?${new URLSearchParams({ ownerAddress })}`,
 );
 console.log(JSON.stringify(positions, null, 2));
 ```
@@ -1020,13 +1020,13 @@ const amount = "25"; // in the deposit token
 
 ## 2. Preview the deposit
 
-[`POST /v1/earn/vault-deposit-previews`](/docs/reference/api/earn/create-earn-vault-deposit-preview)
+[`POST /v1/earn/deposits/preview`](/docs/reference/api/earn/create-earn-vault-deposit-preview)
 quotes the shares the deposit would receive right now. It moves nothing.
 
 **cURL**
 
 ```bash title="Terminal"
-curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/vault-deposit-previews" \
+curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/deposits/preview" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d "$(jq -nc --arg strategyId "$STRATEGY_ID" --arg amount "$AMOUNT" \
@@ -1038,7 +1038,7 @@ jq -e '.data.blockingIssues == []' preview.json || echo "Resolve blockingIssues 
 **TypeScript**
 
 ```typescript title="deposit.ts (continued)"
-const preview = await earnRequest("/v1/earn/vault-deposit-previews", {
+const preview = await earnRequest("/v1/earn/deposits/preview", {
   strategyId: strategy.id,
   amount,
 });
@@ -1068,13 +1068,13 @@ movements, and your customer's wallet pays its own fees unless you set a
 
 ## 3. Build the transaction
 
-[`POST /v1/earn/external-wallet/deposit-transactions`](/docs/reference/api/earn/create-earn-external-wallet-deposit-transaction)
+[`POST /v1/earn/deposits/build-unsigned-transaction`](/docs/reference/api/earn/create-earn-external-wallet-deposit-transaction)
 returns an unsigned transaction for the customer's wallet.
 
 **cURL**
 
 ```bash title="Terminal"
-curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/deposit-transactions" \
+curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/deposits/build-unsigned-transaction" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d "$(jq -nc --arg strategyId "$STRATEGY_ID" --arg ownerAddress "$OWNER_ADDRESS" \
@@ -1087,7 +1087,7 @@ curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wall
 
 ```typescript title="deposit.ts (continued)"
 const { transaction: built } = await earnRequest(
-  "/v1/earn/external-wallet/deposit-transactions",
+  "/v1/earn/deposits/build-unsigned-transaction",
   { strategyId: strategy.id, ownerAddress, amount },
 );
 ```
@@ -1139,7 +1139,7 @@ const signedTransaction = await signWithTestWallet(built.transaction);
 
 ## 5. Submit it
 
-[`POST /v1/earn/external-wallet/deposits`](/docs/reference/api/earn/create-earn-external-wallet-deposit)
+[`POST /v1/earn/deposits/submit-signed-transaction`](/docs/reference/api/earn/create-earn-external-wallet-deposit)
 takes the signed transaction. SDP checks it against the build, records the
 deposit, then broadcasts it. The `Idempotency-Key` header is required.
 
@@ -1151,7 +1151,7 @@ export IDEMPOTENCY_KEY="$(node -e 'console.log(crypto.randomUUID())')"
 jq -nc --arg transactionId "$TRANSACTION_ID" --arg signedTransaction "$SIGNED_TRANSACTION" \
   '{transactionId: $transactionId, signedTransaction: $signedTransaction}' > submit.json
 
-curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/deposits" \
+curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/deposits/submit-signed-transaction" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
@@ -1164,7 +1164,7 @@ curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wall
 // Save the idempotency key with the signed body before the first send; retry with both.
 const idempotencyKey = randomUUID();
 const { deposit } = await earnRequest(
-  "/v1/earn/external-wallet/deposits",
+  "/v1/earn/deposits/submit-signed-transaction",
   { transactionId: built.transactionId, signedTransaction },
   idempotencyKey,
 );
@@ -1204,7 +1204,7 @@ cases.
 
 ## 6. Track it to finality
 
-Poll [`GET /v1/earn/external-wallet/movements/{movementId}`](/docs/reference/api/earn/get-earn-external-wallet-movement)
+Poll [`GET /v1/earn/movements/caller-signed/{movementId}`](/docs/reference/api/earn/get-earn-external-wallet-movement)
 until the status is `finalized` or `failed`.
 
 **cURL**
@@ -1213,7 +1213,7 @@ until the status is `finalized` or `failed`.
 MOVEMENT_ID="$(jq -r '.data.deposit.movementId' deposit.json)"
 # Every second for a minute, then every five seconds, for up to three minutes.
 for attempt in $(seq 84); do
-  curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/movements/$MOVEMENT_ID" \
+  curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/movements/caller-signed/$MOVEMENT_ID" \
     -H "Authorization: Bearer $SDP_API_KEY" > movement.json
   jq -e '.data.movement.status | IN("finalized", "failed")' movement.json >/dev/null && break
   if [ "$attempt" -le 60 ]; then sleep 1; else sleep 5; fi
@@ -1255,13 +1255,13 @@ while you keep tracking to `finalized`. A `provider_order` deposit stays
 
 ## 7. Read the position
 
-[`GET /v1/earn/external-wallet/positions`](/docs/reference/api/earn/list-earn-external-wallet-positions)
+[`GET /v1/earn/positions/caller-signed`](/docs/reference/api/earn/list-earn-external-wallet-positions)
 returns the wallet's live positions.
 
 **cURL**
 
 ```bash title="Terminal"
-curl --fail-with-body -sS --get "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/positions" \
+curl --fail-with-body -sS --get "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/positions/caller-signed" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   --data-urlencode "ownerAddress=$OWNER_ADDRESS"
 ```
@@ -1270,7 +1270,7 @@ curl --fail-with-body -sS --get "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/externa
 
 ```typescript title="deposit.ts (continued)"
 const { positions } = await earnRequest(
-  `/v1/earn/external-wallet/positions?${new URLSearchParams({ ownerAddress })}`,
+  `/v1/earn/positions/caller-signed?${new URLSearchParams({ ownerAddress })}`,
 );
 console.log(JSON.stringify(positions, null, 2));
 ```
@@ -1335,11 +1335,11 @@ Set `SDP_API_URL` and `SDP_API_KEY` as shown in the
 
 ## Positions
 
-[`GET /v1/earn/external-wallet/positions`](/docs/reference/api/earn/list-earn-external-wallet-positions)
+[`GET /v1/earn/positions/caller-signed`](/docs/reference/api/earn/list-earn-external-wallet-positions)
 returns the wallet's live positions.
 
 ```bash title="Terminal"
-curl --fail-with-body -sS --get "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/positions" \
+curl --fail-with-body -sS --get "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/positions/caller-signed" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   --data-urlencode "ownerAddress=$OWNER_ADDRESS"
 ```
@@ -1373,12 +1373,12 @@ same position.
 ## Movements
 
 Each deposit and withdrawal is a movement. Read one with
-[`GET /v1/earn/external-wallet/movements/{movementId}`](/docs/reference/api/earn/get-earn-external-wallet-movement),
+[`GET /v1/earn/movements/caller-signed/{movementId}`](/docs/reference/api/earn/get-earn-external-wallet-movement),
 or list a wallet's history, newest first, with
-[`GET /v1/earn/external-wallet/movements`](/docs/reference/api/earn/list-earn-external-wallet-movements).
+[`GET /v1/earn/movements/caller-signed`](/docs/reference/api/earn/list-earn-external-wallet-movements).
 
 ```bash title="Terminal"
-curl --fail-with-body -sS --get "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/movements" \
+curl --fail-with-body -sS --get "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/movements/caller-signed" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   --data-urlencode "ownerAddress=$OWNER_ADDRESS"
 ```
@@ -1418,11 +1418,11 @@ each status and `settlement`.
 
 ## Earnings
 
-[`GET /v1/earn/external-wallet/earnings`](/docs/reference/api/earn/get-earn-external-wallet-earnings)
+[`GET /v1/earn/earnings/caller-signed`](/docs/reference/api/earn/get-earn-external-wallet-earnings)
 returns the wallet's balance and earnings for each deposit token.
 
 ```bash title="Terminal"
-curl --fail-with-body -sS --get "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/earnings" \
+curl --fail-with-body -sS --get "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/earnings/caller-signed" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   --data-urlencode "ownerAddress=$OWNER_ADDRESS"
 ```
@@ -1475,12 +1475,12 @@ Show a dash, never `$0`, while `earned` is missing. Three limits apply:
 
 ## Position totals
 
-[`GET /v1/earn/external-wallet/positions/summary`](/docs/reference/api/earn/get-earn-external-wallet-position-summary)
+[`GET /v1/earn/positions/caller-signed/project-summary`](/docs/reference/api/earn/get-earn-external-wallet-position-summary)
 returns live totals across every customer wallet in your project, by token and
 by strategy. It takes no `ownerAddress`.
 
 ```bash title="Terminal"
-curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/positions/summary" \
+curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/positions/caller-signed/project-summary" \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
@@ -1522,11 +1522,11 @@ Set `SDP_API_URL` and `SDP_API_KEY` as shown in the
 
 ## 1. Choose a route
 
-[`POST /v1/earn/external-wallet/withdrawal-options`](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-options)
+[`POST /v1/earn/withdrawals/caller-signed/options`](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-options)
 reads each route from live provider state.
 
 ```bash title="Terminal"
-curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/external-wallet/withdrawal-options" \
+curl --fail-with-body -sS "${SDP_API_URL:?Set SDP_API_URL}/v1/earn/withdrawals/caller-signed/options" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"positionId": "earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc"}'
@@ -1576,10 +1576,10 @@ does not check the wallet's balance.
 
 | Step | Request |
 | --- | --- |
-| Preview | [`POST /v1/earn/external-wallet/withdrawal-previews`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-preview) |
-| Build | [`POST /v1/earn/external-wallet/withdrawal-transactions`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-transaction) |
-| Submit | [`POST /v1/earn/external-wallet/withdrawals`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal), with an `Idempotency-Key` |
-| Track | [`GET /v1/earn/external-wallet/movements/{movementId}`](/docs/reference/api/earn/get-earn-external-wallet-movement) |
+| Preview | [`POST /v1/earn/withdrawals/caller-signed/preview`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-preview) |
+| Build | [`POST /v1/earn/withdrawals/build-unsigned-transaction`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-transaction) |
+| Submit | [`POST /v1/earn/withdrawals/submit-signed-transaction`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal), with an `Idempotency-Key` |
+| Track | [`GET /v1/earn/movements/caller-signed/{movementId}`](/docs/reference/api/earn/get-earn-external-wallet-movement) |
 
 The example uses the Quickstart's `earn-api.ts` and `test-wallet.ts`, and
 `floor.ts` from [Slippage floors](/docs/earn/integration-details#slippage-floors).
@@ -1605,7 +1605,7 @@ export async function withdraw(savedPosition: SavedPosition, shares: string) {
     const query = new URLSearchParams({ ownerAddress, limit: "100" });
     if (before !== null) query.set("before", before);
     const page: { positions: Position[]; nextCursor: string | null } = await earnRequest(
-      `/v1/earn/external-wallet/positions?${query}`,
+      `/v1/earn/positions/caller-signed?${query}`,
     );
     position = page.positions.find((p) => p.id === savedPosition.positionId);
     before = page.nextCursor;
@@ -1614,7 +1614,7 @@ export async function withdraw(savedPosition: SavedPosition, shares: string) {
     throw new Error("The saved position cannot withdraw right now");
   }
 
-  const preview = await earnRequest("/v1/earn/external-wallet/withdrawal-previews", {
+  const preview = await earnRequest("/v1/earn/withdrawals/caller-signed/preview", {
     positionId: position.id,
     shares,
   });
@@ -1629,13 +1629,13 @@ export async function withdraw(savedPosition: SavedPosition, shares: string) {
     : undefined;
 
   const { transaction: built } = await earnRequest(
-    "/v1/earn/external-wallet/withdrawal-transactions",
+    "/v1/earn/withdrawals/build-unsigned-transaction",
     { positionId: position.id, shares, minAmountOut },
   );
   const signedTransaction = await signWithTestWallet(built.transaction);
 
   const { withdrawal } = await earnRequest(
-    "/v1/earn/external-wallet/withdrawals",
+    "/v1/earn/withdrawals/submit-signed-transaction",
     { transactionId: built.transactionId, signedTransaction },
     randomUUID(),
   );
@@ -1724,9 +1724,9 @@ reports a blocking issue.
 
 | Step | Request |
 | --- | --- |
-| Preview | [`POST /v1/earn/external-wallet/queued-withdrawal-previews`](/docs/reference/api/earn/create-earn-external-wallet-queued-withdrawal-preview) |
-| Build | [`POST /v1/earn/external-wallet/withdrawal-request-transactions`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-transaction) |
-| Submit | [`POST /v1/earn/external-wallet/withdrawal-requests`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request), with an `Idempotency-Key` |
+| Preview | [`POST /v1/earn/withdrawal-requests/caller-signed/preview`](/docs/reference/api/earn/create-earn-external-wallet-queued-withdrawal-preview) |
+| Build | [`POST /v1/earn/withdrawal-requests/build-unsigned-transaction`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-transaction) |
+| Submit | [`POST /v1/earn/withdrawal-requests/submit-signed-transaction`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request), with an `Idempotency-Key` |
 
 Resolve every `blockingIssues` entry in the preview, then build, sign, and
 submit as for an instant withdrawal. Save the returned `withdrawalRequestId`.
@@ -1743,7 +1743,7 @@ build expires:
 
 ### Track a request
 
-Poll [`GET /v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}`](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-request)
+Poll [`GET /v1/earn/withdrawal-requests/caller-signed/{withdrawalRequestId}`](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-request)
 every minute or two. Status values spell it `cancelled`.
 
 | Status | Meaning | What to show |
@@ -1765,7 +1765,7 @@ stays `fulfillable` until its deadline, then becomes `expiredCancelable`, and
 its shares stay escrowed until the customer cancels it.
 
 On startup and after reconnecting, restore every open request:
-[`GET /v1/earn/external-wallet/withdrawal-requests?ownerAddress=<wallet>&settled=false`](/docs/reference/api/earn/list-earn-external-wallet-withdrawal-requests),
+[`GET /v1/earn/withdrawal-requests/caller-signed?ownerAddress=<wallet>&settled=false`](/docs/reference/api/earn/list-earn-external-wallet-withdrawal-requests),
 reading every page.
 
 **warn**
@@ -1783,8 +1783,8 @@ it. Refresh the request first: a fulfillment can race the cancellation.
 
 | Step | Request |
 | --- | --- |
-| Build | [`POST /v1/earn/external-wallet/withdrawal-request-cancel-transactions`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancel-transaction) |
-| Submit | [`POST /v1/earn/external-wallet/withdrawal-request-cancellations`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancellation) |
+| Build | [`POST /v1/earn/withdrawal-requests/cancel/build-unsigned-transaction`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancel-transaction) |
+| Submit | [`POST /v1/earn/withdrawal-requests/cancel/submit-signed-transaction`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancellation) |
 
 Both steps take `earn.manage`, and cancellation stays available after
 production access is removed or new deposits are disabled. Use a new
@@ -1886,15 +1886,17 @@ Prefer raw requests? Every function maps to one endpoint in
 [Deposit funds](/docs/earn/deposits) and
 [Withdraw funds](/docs/earn/withdrawals).
 
+`caller-signed` identifies reads and previews for transactions signed by your customer's wallet. `provider-signed` identifies the connected-wallet flow, where SDP requests signing through your project's connected signing provider. These names describe signing responsibility. Provider-managed portfolio accounts have their own `/portfolio-accounts` family; existing `programId` parameters and payload fields keep their names.
+
 ## Make a deposit
 
 | Step | Module function | Endpoint |
 | --- | --- | --- |
-| 1. Quote | `previewEarnDeposit` | [`POST /v1/earn/vault-deposit-previews`](/docs/reference/api/earn/create-earn-vault-deposit-preview) |
-| 2. Build | `buildEarnDepositTransaction` | [`POST /v1/earn/external-wallet/deposit-transactions`](/docs/reference/api/earn/create-earn-external-wallet-deposit-transaction) |
+| 1. Quote | `previewEarnDeposit` | [`POST /v1/earn/deposits/preview`](/docs/reference/api/earn/create-earn-vault-deposit-preview) |
+| 2. Build | `buildEarnDepositTransaction` | [`POST /v1/earn/deposits/build-unsigned-transaction`](/docs/reference/api/earn/create-earn-external-wallet-deposit-transaction) |
 | 3. Sign | `signEarnTransaction` | In the customer's wallet |
-| 4. Submit | `submitEarnDeposit` | [`POST /v1/earn/external-wallet/deposits`](/docs/reference/api/earn/create-earn-external-wallet-deposit) |
-| 5. Track | `waitForEarnMovement` | [`GET /v1/earn/external-wallet/movements/{movementId}`](/docs/reference/api/earn/get-earn-external-wallet-movement) |
+| 4. Submit | `submitEarnDeposit` | [`POST /v1/earn/deposits/submit-signed-transaction`](/docs/reference/api/earn/create-earn-external-wallet-deposit) |
+| 5. Track | `waitForEarnMovement` | [`GET /v1/earn/movements/caller-signed/{movementId}`](/docs/reference/api/earn/get-earn-external-wallet-movement) |
 
 `buildEarnDepositTransaction` previews the deposit itself when the strategy
 needs a floor; call `previewEarnDeposit` too when you want to show your
@@ -1940,13 +1942,13 @@ covers every field. Two rules matter most:
 
 | Step | Module function | Endpoint |
 | --- | --- | --- |
-| Choose a route | `getEarnWithdrawalOptions` | [`POST /v1/earn/external-wallet/withdrawal-options`](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-options) |
-| Withdraw instantly | `buildEarnWithdrawalTransaction`, `submitEarnWithdrawal` | [`POST /v1/earn/external-wallet/withdrawal-transactions`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-transaction), [`POST /v1/earn/external-wallet/withdrawals`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal) |
-| Preview a request | `previewEarnQueuedWithdrawal` | [`POST /v1/earn/external-wallet/queued-withdrawal-previews`](/docs/reference/api/earn/create-earn-external-wallet-queued-withdrawal-preview) |
-| Build a request | `buildEarnQueuedWithdrawalRequest` | [`POST /v1/earn/external-wallet/withdrawal-request-transactions`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-transaction) |
-| Submit a request | `submitEarnWithdrawalRequest` | [`POST /v1/earn/external-wallet/withdrawal-requests`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request) |
-| Track a request | `getEarnWithdrawalRequest` | [`GET /v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}`](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-request) |
-| Cancel a request | `buildEarnWithdrawalRequestCancellation`, `submitEarnWithdrawalRequestCancellation` | [`POST /v1/earn/external-wallet/withdrawal-request-cancel-transactions`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancel-transaction), [`POST /v1/earn/external-wallet/withdrawal-request-cancellations`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancellation) |
+| Choose a route | `getEarnWithdrawalOptions` | [`POST /v1/earn/withdrawals/caller-signed/options`](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-options) |
+| Withdraw instantly | `buildEarnWithdrawalTransaction`, `submitEarnWithdrawal` | [`POST /v1/earn/withdrawals/build-unsigned-transaction`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-transaction), [`POST /v1/earn/withdrawals/submit-signed-transaction`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal) |
+| Preview a request | `previewEarnQueuedWithdrawal` | [`POST /v1/earn/withdrawal-requests/caller-signed/preview`](/docs/reference/api/earn/create-earn-external-wallet-queued-withdrawal-preview) |
+| Build a request | `buildEarnQueuedWithdrawalRequest` | [`POST /v1/earn/withdrawal-requests/build-unsigned-transaction`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-transaction) |
+| Submit a request | `submitEarnWithdrawalRequest` | [`POST /v1/earn/withdrawal-requests/submit-signed-transaction`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request) |
+| Track a request | `getEarnWithdrawalRequest` | [`GET /v1/earn/withdrawal-requests/caller-signed/{withdrawalRequestId}`](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-request) |
+| Cancel a request | `buildEarnWithdrawalRequestCancellation`, `submitEarnWithdrawalRequestCancellation` | [`POST /v1/earn/withdrawal-requests/cancel/build-unsigned-transaction`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancel-transaction), [`POST /v1/earn/withdrawal-requests/cancel/submit-signed-transaction`](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancellation) |
 
 A withdrawal spends shares, not a dollar amount, and a request transaction
 is not a payout. [Withdraw funds](/docs/earn/withdrawals) covers each route.
@@ -36924,30 +36926,30 @@ Source: https://platform.solana.com/docs/reference/api/earn
 | --- | --- | --- |
 | `GET` | `/v1/earn/strategies` | [List strategies](/docs/reference/api/earn/list-earn-strategies.md) |
 | `GET` | `/v1/earn/strategies/{strategyId}` | [Get a strategy](/docs/reference/api/earn/get-earn-strategy.md) |
-| `POST` | `/v1/earn/vault-deposit-previews` | [Preview a deposit](/docs/reference/api/earn/create-earn-vault-deposit-preview.md) |
+| `POST` | `/v1/earn/deposits/preview` | [Preview a deposit](/docs/reference/api/earn/create-earn-vault-deposit-preview.md) |
 
 ## Embedded Yield
 
 | Method | Endpoint | Summary |
 | --- | --- | --- |
-| `GET` | `/v1/earn/external-wallet/positions/summary` | [Get position totals](/docs/reference/api/earn/get-earn-external-wallet-position-summary.md) |
-| `GET` | `/v1/earn/external-wallet/positions` | [List positions](/docs/reference/api/earn/list-earn-external-wallet-positions.md) |
-| `GET` | `/v1/earn/external-wallet/movements` | [List movements](/docs/reference/api/earn/list-earn-external-wallet-movements.md) |
-| `GET` | `/v1/earn/external-wallet/movements/{movementId}` | [Get a movement](/docs/reference/api/earn/get-earn-external-wallet-movement.md) |
-| `GET` | `/v1/earn/external-wallet/earnings` | [Get earnings](/docs/reference/api/earn/get-earn-external-wallet-earnings.md) |
-| `POST` | `/v1/earn/external-wallet/deposit-transactions` | [Build a deposit transaction](/docs/reference/api/earn/create-earn-external-wallet-deposit-transaction.md) |
-| `POST` | `/v1/earn/external-wallet/deposits` | [Submit a deposit](/docs/reference/api/earn/create-earn-external-wallet-deposit.md) |
-| `POST` | `/v1/earn/external-wallet/withdrawal-previews` | [Preview a withdrawal](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-preview.md) |
-| `POST` | `/v1/earn/external-wallet/withdrawal-transactions` | [Build a withdrawal transaction](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-transaction.md) |
-| `POST` | `/v1/earn/external-wallet/withdrawals` | [Submit a withdrawal](/docs/reference/api/earn/create-earn-external-wallet-withdrawal.md) |
-| `POST` | `/v1/earn/external-wallet/withdrawal-options` | [List withdrawal options](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-options.md) |
-| `POST` | `/v1/earn/external-wallet/queued-withdrawal-previews` | [Preview a withdrawal request](/docs/reference/api/earn/create-earn-external-wallet-queued-withdrawal-preview.md) |
-| `POST` | `/v1/earn/external-wallet/withdrawal-request-transactions` | [Build a withdrawal request transaction](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-transaction.md) |
-| `POST` | `/v1/earn/external-wallet/withdrawal-requests` | [Submit a withdrawal request](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request.md) |
-| `GET` | `/v1/earn/external-wallet/withdrawal-requests` | [List withdrawal requests](/docs/reference/api/earn/list-earn-external-wallet-withdrawal-requests.md) |
-| `GET` | `/v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}` | [Get a withdrawal request](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-request.md) |
-| `POST` | `/v1/earn/external-wallet/withdrawal-request-cancel-transactions` | [Build a cancellation transaction](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancel-transaction.md) |
-| `POST` | `/v1/earn/external-wallet/withdrawal-request-cancellations` | [Submit a cancellation](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancellation.md) |
+| `GET` | `/v1/earn/positions/caller-signed/project-summary` | [Get caller-signed project position totals](/docs/reference/api/earn/get-earn-external-wallet-position-summary.md) |
+| `GET` | `/v1/earn/positions/caller-signed` | [List one caller-signed wallet's positions](/docs/reference/api/earn/list-earn-external-wallet-positions.md) |
+| `GET` | `/v1/earn/movements/caller-signed` | [List one caller-signed wallet's activity](/docs/reference/api/earn/list-earn-external-wallet-movements.md) |
+| `GET` | `/v1/earn/movements/caller-signed/{movementId}` | [Get one caller-signed movement](/docs/reference/api/earn/get-earn-external-wallet-movement.md) |
+| `GET` | `/v1/earn/earnings/caller-signed` | [Get one caller-signed wallet's balance and earnings](/docs/reference/api/earn/get-earn-external-wallet-earnings.md) |
+| `POST` | `/v1/earn/deposits/build-unsigned-transaction` | [Build an unsigned deposit transaction](/docs/reference/api/earn/create-earn-external-wallet-deposit-transaction.md) |
+| `POST` | `/v1/earn/deposits/submit-signed-transaction` | [Submit a caller-signed deposit](/docs/reference/api/earn/create-earn-external-wallet-deposit.md) |
+| `POST` | `/v1/earn/withdrawals/caller-signed/preview` | [Preview a caller-signed withdrawal](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-preview.md) |
+| `POST` | `/v1/earn/withdrawals/build-unsigned-transaction` | [Build an unsigned withdrawal transaction](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-transaction.md) |
+| `POST` | `/v1/earn/withdrawals/submit-signed-transaction` | [Submit a caller-signed withdrawal](/docs/reference/api/earn/create-earn-external-wallet-withdrawal.md) |
+| `POST` | `/v1/earn/withdrawals/caller-signed/options` | [Discover caller-signed withdrawal routes](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-options.md) |
+| `POST` | `/v1/earn/withdrawal-requests/caller-signed/preview` | [Preview an asynchronous caller-signed withdrawal](/docs/reference/api/earn/create-earn-external-wallet-queued-withdrawal-preview.md) |
+| `POST` | `/v1/earn/withdrawal-requests/build-unsigned-transaction` | [Build a withdrawal request transaction](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-transaction.md) |
+| `POST` | `/v1/earn/withdrawal-requests/submit-signed-transaction` | [Submit a withdrawal request](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request.md) |
+| `GET` | `/v1/earn/withdrawal-requests/caller-signed` | [List a caller-signed wallet's asynchronous withdrawals](/docs/reference/api/earn/list-earn-external-wallet-withdrawal-requests.md) |
+| `GET` | `/v1/earn/withdrawal-requests/caller-signed/{withdrawalRequestId}` | [Get a withdrawal request](/docs/reference/api/earn/get-earn-external-wallet-withdrawal-request.md) |
+| `POST` | `/v1/earn/withdrawal-requests/cancel/build-unsigned-transaction` | [Build a cancellation transaction](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancel-transaction.md) |
+| `POST` | `/v1/earn/withdrawal-requests/cancel/submit-signed-transaction` | [Submit a cancellation](/docs/reference/api/earn/create-earn-external-wallet-withdrawal-request-cancellation.md) |
 
 ---
 
@@ -37543,7 +37545,7 @@ Source: https://platform.solana.com/docs/reference/api/earn/create-earn-vault-de
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-`POST /v1/earn/vault-deposit-previews`
+`POST /v1/earn/deposits/preview`
 
 When the strategy's `depositSlippage` is not null, set `minSharesOut` from this quote: take your tolerance off `sharesOut`. Resolve every `blockingIssues` entry before you build. The preview is read-only, takes no Idempotency-Key, and applies a deposit's access checks, provider activation included. It returns 501 when the provider cannot quote deposits.
 
@@ -37684,7 +37686,7 @@ Quote one direct vault deposit against the provider's live accounting. Read-only
 ## Example request
 
 ```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/earn/vault-deposit-previews' \
+curl -X POST 'https://api.solana.com/v1/earn/deposits/preview' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -37694,7 +37696,7 @@ curl -X POST 'https://api.solana.com/v1/earn/vault-deposit-previews' \
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/earn/vault-deposit-previews", {
+const res = await fetch("https://api.solana.com/v1/earn/deposits/preview", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -37710,7 +37712,7 @@ const res = await fetch("https://api.solana.com/v1/earn/vault-deposit-previews",
 ```python tab="Python"
 import os, requests
 
-r = requests.post("https://api.solana.com/v1/earn/vault-deposit-previews",
+r = requests.post("https://api.solana.com/v1/earn/deposits/preview",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "strategyId": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
@@ -37757,14 +37759,14 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ## Earn: Embedded Yield
 
-### Get position totals
+### Get caller-signed project position totals
 Source: https://platform.solana.com/docs/reference/api/earn/get-earn-external-wallet-position-summary
 
 > Gets live position totals across every customer wallet in your project, grouped by strategy and token.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-`GET /v1/earn/external-wallet/positions/summary`
+`GET /v1/earn/positions/caller-signed/project-summary`
 
 Wallet addresses are left out unless you pass `includeOwnerAddresses=true`; add `includePositions=true` to also receive each wallet's positions, which saves one read per wallet. A total that depends on an unavailable live value is left out, never reported as zero or partial.
 
@@ -37965,12 +37967,12 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 ## Example request
 
 ```bash tab="cURL"
-curl 'https://api.solana.com/v1/earn/external-wallet/positions/summary' \
+curl 'https://api.solana.com/v1/earn/positions/caller-signed/project-summary' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/earn/external-wallet/positions/summary", {
+const res = await fetch("https://api.solana.com/v1/earn/positions/caller-signed/project-summary", {
   method: "GET",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`
@@ -37981,7 +37983,7 @@ const res = await fetch("https://api.solana.com/v1/earn/external-wallet/position
 ```python tab="Python"
 import os, requests
 
-r = requests.get("https://api.solana.com/v1/earn/external-wallet/positions/summary",
+r = requests.get("https://api.solana.com/v1/earn/positions/caller-signed/project-summary",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
@@ -38049,14 +38051,14 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
-### List positions
+### List one caller-signed wallet's positions
 Source: https://platform.solana.com/docs/reference/api/earn/list-earn-external-wallet-positions
 
 > Lists one customer wallet's live positions, one page at a time.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-`GET /v1/earn/external-wallet/positions`
+`GET /v1/earn/positions/caller-signed`
 
 `ownerAddress` is required. A wallet with no positions in your project (never deposited, fully withdrawn, or held under another organization) returns an empty `positions` list, not 404. Live fields are left out, never set to zero, when the provider read is unavailable.
 
@@ -38219,12 +38221,12 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 ## Example request
 
 ```bash tab="cURL"
-curl 'https://api.solana.com/v1/earn/external-wallet/positions?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM' \
+curl 'https://api.solana.com/v1/earn/positions/caller-signed?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/earn/external-wallet/positions?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM", {
+const res = await fetch("https://api.solana.com/v1/earn/positions/caller-signed?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM", {
   method: "GET",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`
@@ -38235,7 +38237,7 @@ const res = await fetch("https://api.solana.com/v1/earn/external-wallet/position
 ```python tab="Python"
 import os, requests
 
-r = requests.get("https://api.solana.com/v1/earn/external-wallet/positions?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+r = requests.get("https://api.solana.com/v1/earn/positions/caller-signed?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
@@ -38290,14 +38292,14 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
-### List movements
+### List one caller-signed wallet's activity
 Source: https://platform.solana.com/docs/reference/api/earn/list-earn-external-wallet-movements
 
 > Lists one customer wallet's deposits and withdrawals, newest first, one page at a time.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-`GET /v1/earn/external-wallet/movements`
+`GET /v1/earn/movements/caller-signed`
 
 Movement statuses are `requested`, `submitted`, `confirmed`, `finalized` and `failed`; only `finalized` and `failed` are final. `ownerAddress` is required, and a wallet with no movements returns an empty `movements` list, not 404. Show `tokenAmount` in `tokenMint` units: on a withdrawal it is the observed payout once finalized, while `amount` and `denomination` carry the onchain quantity, which is shares. Reads keep working after a provider stops taking deposits.
 
@@ -38470,12 +38472,12 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 ## Example request
 
 ```bash tab="cURL"
-curl 'https://api.solana.com/v1/earn/external-wallet/movements?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM' \
+curl 'https://api.solana.com/v1/earn/movements/caller-signed?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/earn/external-wallet/movements?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM", {
+const res = await fetch("https://api.solana.com/v1/earn/movements/caller-signed?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM", {
   method: "GET",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`
@@ -38486,7 +38488,7 @@ const res = await fetch("https://api.solana.com/v1/earn/external-wallet/movement
 ```python tab="Python"
 import os, requests
 
-r = requests.get("https://api.solana.com/v1/earn/external-wallet/movements?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+r = requests.get("https://api.solana.com/v1/earn/movements/caller-signed?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
@@ -38546,14 +38548,14 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
-### Get a movement
+### Get one caller-signed movement
 Source: https://platform.solana.com/docs/reference/api/earn/get-earn-external-wallet-movement
 
 > Gets one deposit or withdrawal and refreshes its onchain status when it can.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-`GET /v1/earn/external-wallet/movements/{movementId}`
+`GET /v1/earn/movements/caller-signed/{movementId}`
 
 Use it to track a movement after submit, or to recover a submit whose response was lost. If the chain read fails, you get the last recorded status while SDP keeps reconciling in the background. An atomic movement can show as done at `confirmed`, but only `finalized` and `failed` are final. For `settlement: provider_order`, chain confirmation is not payout: the provider still has to complete the order.
 
@@ -38708,12 +38710,12 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 ## Example request
 
 ```bash tab="cURL"
-curl 'https://api.solana.com/v1/earn/external-wallet/movements/earn_movement_a6aed3f5-4f89-4dc6-9d4b-0864021bd80d' \
+curl 'https://api.solana.com/v1/earn/movements/caller-signed/earn_movement_a6aed3f5-4f89-4dc6-9d4b-0864021bd80d' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/earn/external-wallet/movements/earn_movement_a6aed3f5-4f89-4dc6-9d4b-0864021bd80d", {
+const res = await fetch("https://api.solana.com/v1/earn/movements/caller-signed/earn_movement_a6aed3f5-4f89-4dc6-9d4b-0864021bd80d", {
   method: "GET",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`
@@ -38724,7 +38726,7 @@ const res = await fetch("https://api.solana.com/v1/earn/external-wallet/movement
 ```python tab="Python"
 import os, requests
 
-r = requests.get("https://api.solana.com/v1/earn/external-wallet/movements/earn_movement_a6aed3f5-4f89-4dc6-9d4b-0864021bd80d",
+r = requests.get("https://api.solana.com/v1/earn/movements/caller-signed/earn_movement_a6aed3f5-4f89-4dc6-9d4b-0864021bd80d",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
@@ -38779,14 +38781,14 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
-### Get earnings
+### Get one caller-signed wallet's balance and earnings
 Source: https://platform.solana.com/docs/reference/api/earn/get-earn-external-wallet-earnings
 
 > Gets one customer wallet's live balance and earnings per deposit token.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-`GET /v1/earn/external-wallet/earnings`
+`GET /v1/earn/earnings/caller-signed`
 
 `earned` is live value plus observed withdrawal payouts (`totalWithdrawn`) minus finalized deposits (`totalDeposited`), and appears only when it is exact. Otherwise it is left out with an `earnedUnavailableReason`, such as a live value that is unavailable, movements that are still settling, or a withdrawal payout SDP did not observe; never show it as zero. A wallet with no positions returns `positionCount: 0` and an empty `totalsByToken`, not 404. Totals cover the positions the wallet holds now: a fully withdrawn position drops out here but stays in the movements list. Live value reads the wallet's whole balance in the strategy, so shares acquired outside SDP raise it.
 
@@ -38911,12 +38913,12 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 ## Example request
 
 ```bash tab="cURL"
-curl 'https://api.solana.com/v1/earn/external-wallet/earnings?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM' \
+curl 'https://api.solana.com/v1/earn/earnings/caller-signed?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/earn/external-wallet/earnings?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM", {
+const res = await fetch("https://api.solana.com/v1/earn/earnings/caller-signed?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM", {
   method: "GET",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`
@@ -38927,7 +38929,7 @@ const res = await fetch("https://api.solana.com/v1/earn/external-wallet/earnings
 ```python tab="Python"
 import os, requests
 
-r = requests.get("https://api.solana.com/v1/earn/external-wallet/earnings?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+r = requests.get("https://api.solana.com/v1/earn/earnings/caller-signed?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
@@ -38979,14 +38981,14 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
-### Build a deposit transaction
+### Build an unsigned deposit transaction
 Source: https://platform.solana.com/docs/reference/api/earn/create-earn-external-wallet-deposit-transaction
 
 > Builds an unsigned deposit transaction for the customer's wallet to sign.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-`POST /v1/earn/external-wallet/deposit-transactions`
+`POST /v1/earn/deposits/build-unsigned-transaction`
 
 Nothing moves until you submit the signed transaction. The build applies provider access checks and can name your own `feePayer`, which then signs alongside the customer. A swap-funded deposit that cannot fit in one transaction returns a separate swap and follow-up deposit instead of `transaction`, so check the response before you request a signature.
 
@@ -39020,7 +39022,7 @@ Build one unsigned deposit transaction for an external wallet.
 
 - **`minSharesOut`** · `string` · max length 128 · pattern `^(?=.*[1-9])\d+(\.\d+)?$` · example `24.9`
 
-  Slippage floor in share units. Required exactly when the selected strategy's `depositSlippage` is non-null. Derive it from `POST /v1/earn/vault-deposit-previews`, never from the deposit amount.
+  Slippage floor in share units. Required exactly when the selected strategy's `depositSlippage` is non-null. Derive it from `POST /v1/earn/deposits/preview`, never from the deposit amount.
 
 - **`sourceTokenMint`** · `string` · min length 32 · max length 44 · pattern `^[1-9A-HJ-NP-Za-km-z]{32,44}$` · example `2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo`
 
@@ -39279,7 +39281,7 @@ Build one unsigned deposit transaction for an external wallet.
 ## Example request
 
 ```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/earn/external-wallet/deposit-transactions' \
+curl -X POST 'https://api.solana.com/v1/earn/deposits/build-unsigned-transaction' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -39290,7 +39292,7 @@ curl -X POST 'https://api.solana.com/v1/earn/external-wallet/deposit-transaction
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/earn/external-wallet/deposit-transactions", {
+const res = await fetch("https://api.solana.com/v1/earn/deposits/build-unsigned-transaction", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -39307,7 +39309,7 @@ const res = await fetch("https://api.solana.com/v1/earn/external-wallet/deposit-
 ```python tab="Python"
 import os, requests
 
-r = requests.post("https://api.solana.com/v1/earn/external-wallet/deposit-transactions",
+r = requests.post("https://api.solana.com/v1/earn/deposits/build-unsigned-transaction",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "strategyId": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
@@ -39368,14 +39370,14 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
-### Submit a deposit
+### Submit a caller-signed deposit
 Source: https://platform.solana.com/docs/reference/api/earn/create-earn-external-wallet-deposit
 
 > Submits a deposit transaction signed by the customer's wallet.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-`POST /v1/earn/external-wallet/deposits`
+`POST /v1/earn/deposits/submit-signed-transaction`
 
 SDP checks that the signed bytes match the built transaction and that every required signature is valid (the customer's, plus your fee payer's when the build named one), records the movement, then broadcasts. Idempotency-Key is required: a retry with the same key returns the original movement with `replayed: true`, and each built transaction can be submitted once. Reusing a key with a different body, or submitting one build under a second key, returns `409 CONFLICT`. Submit the original signed bytes even after the blockhash expires, since the wallet may already have broadcast them. After an uncertain response, retry with the same key and body, then read the movement; never replace a signed transaction whose outcome is unknown.
 
@@ -39547,7 +39549,7 @@ Submit the signed bytes back. Requires the Idempotency-Key header; a retry with 
 
 ```bash tab="cURL"
 IDEMPOTENCY_KEY=$(uuidgen)
-curl -X POST 'https://api.solana.com/v1/earn/external-wallet/deposits' \
+curl -X POST 'https://api.solana.com/v1/earn/deposits/submit-signed-transaction' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
@@ -39560,7 +39562,7 @@ curl -X POST 'https://api.solana.com/v1/earn/external-wallet/deposits' \
 ```ts tab="TypeScript"
 // Reuse this key when you retry this request.
 const idempotencyKey = crypto.randomUUID();
-const res = await fetch("https://api.solana.com/v1/earn/external-wallet/deposits", {
+const res = await fetch("https://api.solana.com/v1/earn/deposits/submit-signed-transaction", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -39579,7 +39581,7 @@ import os, requests, uuid
 
 # Reuse this key when you retry this request.
 idempotency_key = str(uuid.uuid4())
-r = requests.post("https://api.solana.com/v1/earn/external-wallet/deposits",
+r = requests.post("https://api.solana.com/v1/earn/deposits/submit-signed-transaction",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "transactionId": "earn_external_wallet_transaction_e7a88258-1d19-48f3-8d0e-81fefa4bf3b3",
@@ -39639,14 +39641,14 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
-### Preview a withdrawal
+### Preview a caller-signed withdrawal
 Source: https://platform.solana.com/docs/reference/api/earn/create-earn-external-wallet-withdrawal-preview
 
 > Quotes what withdrawing these shares would pay right now, from the strategy's live accounting.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-`POST /v1/earn/external-wallet/withdrawal-previews`
+`POST /v1/earn/withdrawals/caller-signed/preview`
 
 When the strategy's `withdrawalSlippage` is not null, set `minAmountOut` from this quote: take your tolerance off `assetsOut`, rounded down to `assetDecimals`. The preview is read-only, takes no Idempotency-Key, and still works after a strategy is deprecated or its provider stops taking deposits. It does not check the wallet's balance, so keep `shares` within the position's `withdrawableShares`. It returns 501 when the provider cannot quote withdrawals.
 
@@ -39787,7 +39789,7 @@ Quote one withdrawal from a position against the strategy's live accounting. Rea
 ## Example request
 
 ```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/earn/external-wallet/withdrawal-previews' \
+curl -X POST 'https://api.solana.com/v1/earn/withdrawals/caller-signed/preview' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -39797,7 +39799,7 @@ curl -X POST 'https://api.solana.com/v1/earn/external-wallet/withdrawal-previews
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdrawal-previews", {
+const res = await fetch("https://api.solana.com/v1/earn/withdrawals/caller-signed/preview", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -39813,7 +39815,7 @@ const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdraw
 ```python tab="Python"
 import os, requests
 
-r = requests.post("https://api.solana.com/v1/earn/external-wallet/withdrawal-previews",
+r = requests.post("https://api.solana.com/v1/earn/withdrawals/caller-signed/preview",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "positionId": "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
@@ -39857,14 +39859,14 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
-### Build a withdrawal transaction
+### Build an unsigned withdrawal transaction
 Source: https://platform.solana.com/docs/reference/api/earn/create-earn-external-wallet-withdrawal-transaction
 
 > Builds an unsigned withdrawal transaction for a position, for the customer's wallet to sign.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-`POST /v1/earn/external-wallet/withdrawal-transactions`
+`POST /v1/earn/withdrawals/build-unsigned-transaction`
 
 Withdrawals keep working after a provider stops taking deposits. Send `minAmountOut` when the strategy's `withdrawalSlippage` is not null, and omit it when null. A provider-order route may not support a preview: it places an order that pays out later, not an instant redemption.
 
@@ -40043,7 +40045,7 @@ Build one unsigned withdrawal transaction for a position. SDP reads the strategy
 ## Example request
 
 ```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/earn/external-wallet/withdrawal-transactions' \
+curl -X POST 'https://api.solana.com/v1/earn/withdrawals/build-unsigned-transaction' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -40053,7 +40055,7 @@ curl -X POST 'https://api.solana.com/v1/earn/external-wallet/withdrawal-transact
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdrawal-transactions", {
+const res = await fetch("https://api.solana.com/v1/earn/withdrawals/build-unsigned-transaction", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -40069,7 +40071,7 @@ const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdraw
 ```python tab="Python"
 import os, requests
 
-r = requests.post("https://api.solana.com/v1/earn/external-wallet/withdrawal-transactions",
+r = requests.post("https://api.solana.com/v1/earn/withdrawals/build-unsigned-transaction",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "positionId": "earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b",
@@ -40123,14 +40125,14 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
-### Submit a withdrawal
+### Submit a caller-signed withdrawal
 Source: https://platform.solana.com/docs/reference/api/earn/create-earn-external-wallet-withdrawal
 
 > Submits a withdrawal transaction signed by the customer's wallet.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-`POST /v1/earn/external-wallet/withdrawals`
+`POST /v1/earn/withdrawals/submit-signed-transaction`
 
 It works like a deposit submit: SDP checks every signature against the exact built message, records the movement before broadcast, requires an Idempotency-Key, and accepts each built transaction once, with the same `409 CONFLICT` answers. Submit the original signed bytes even after the blockhash expires, since the wallet may already have broadcast them. After an uncertain response, retry with the same key and body, then read the movement instead of building a new withdrawal. Withdrawals stay available while Earn is disabled.
 
@@ -40302,7 +40304,7 @@ Submit the signed bytes back. Requires the Idempotency-Key header; a retry with 
 
 ```bash tab="cURL"
 IDEMPOTENCY_KEY=$(uuidgen)
-curl -X POST 'https://api.solana.com/v1/earn/external-wallet/withdrawals' \
+curl -X POST 'https://api.solana.com/v1/earn/withdrawals/submit-signed-transaction' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
@@ -40315,7 +40317,7 @@ curl -X POST 'https://api.solana.com/v1/earn/external-wallet/withdrawals' \
 ```ts tab="TypeScript"
 // Reuse this key when you retry this request.
 const idempotencyKey = crypto.randomUUID();
-const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdrawals", {
+const res = await fetch("https://api.solana.com/v1/earn/withdrawals/submit-signed-transaction", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -40334,7 +40336,7 @@ import os, requests, uuid
 
 # Reuse this key when you retry this request.
 idempotency_key = str(uuid.uuid4())
-r = requests.post("https://api.solana.com/v1/earn/external-wallet/withdrawals",
+r = requests.post("https://api.solana.com/v1/earn/withdrawals/submit-signed-transaction",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "transactionId": "earn_external_wallet_transaction_0ebe7320-4b8e-4d1a-a5f0-6c2d9e8b1f47",
@@ -40394,14 +40396,14 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
-### List withdrawal options
+### Discover caller-signed withdrawal routes
 Source: https://platform.solana.com/docs/reference/api/earn/get-earn-external-wallet-withdrawal-options
 
 > Lists the withdrawal routes a position supports right now: instant, provider order, solver queue and operator redemption, each read from live provider state.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-`POST /v1/earn/external-wallet/withdrawal-options`
+`POST /v1/earn/withdrawals/caller-signed/options`
 
 A position offers instant or provider order, never both; the withdrawal endpoints build whichever it offers. Call this when the customer starts a withdrawal, and let them choose when more than one route is available. Never infer a route from the strategy's `liquidityTerm`.
 
@@ -40610,7 +40612,7 @@ List the withdrawal routes a position supports right now.
 ## Example request
 
 ```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/earn/external-wallet/withdrawal-options' \
+curl -X POST 'https://api.solana.com/v1/earn/withdrawals/caller-signed/options' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -40619,7 +40621,7 @@ curl -X POST 'https://api.solana.com/v1/earn/external-wallet/withdrawal-options'
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdrawal-options", {
+const res = await fetch("https://api.solana.com/v1/earn/withdrawals/caller-signed/options", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -40634,7 +40636,7 @@ const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdraw
 ```python tab="Python"
 import os, requests
 
-r = requests.post("https://api.solana.com/v1/earn/external-wallet/withdrawal-options",
+r = requests.post("https://api.solana.com/v1/earn/withdrawals/caller-signed/options",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "positionId": "earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc"
@@ -40691,14 +40693,14 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
-### Preview a withdrawal request
+### Preview an asynchronous caller-signed withdrawal
 Source: https://platform.solana.com/docs/reference/api/earn/create-earn-external-wallet-queued-withdrawal-preview
 
 > Previews a withdrawal request: a solver queue's discounted payout and timing, or an operator redemption's intermediate-token conversion and payout.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-`POST /v1/earn/external-wallet/queued-withdrawal-previews`
+`POST /v1/earn/withdrawal-requests/caller-signed/preview`
 
 Check the mechanism against the position's withdrawal options first, and resolve every `blockingIssues` entry before the customer confirms. The preview is read-only and safe to retry. It does not check the wallet's balance, so keep `shares` within the position's `withdrawableShares`.
 
@@ -40941,7 +40943,7 @@ Any of:
 ## Example request
 
 ```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/earn/external-wallet/queued-withdrawal-previews' \
+curl -X POST 'https://api.solana.com/v1/earn/withdrawal-requests/caller-signed/preview' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -40954,7 +40956,7 @@ curl -X POST 'https://api.solana.com/v1/earn/external-wallet/queued-withdrawal-p
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/earn/external-wallet/queued-withdrawal-previews", {
+const res = await fetch("https://api.solana.com/v1/earn/withdrawal-requests/caller-signed/preview", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -40973,7 +40975,7 @@ const res = await fetch("https://api.solana.com/v1/earn/external-wallet/queued-w
 ```python tab="Python"
 import os, requests
 
-r = requests.post("https://api.solana.com/v1/earn/external-wallet/queued-withdrawal-previews",
+r = requests.post("https://api.solana.com/v1/earn/withdrawal-requests/caller-signed/preview",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "positionId": "earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc",
@@ -41033,7 +41035,7 @@ Source: https://platform.solana.com/docs/reference/api/earn/create-earn-external
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-`POST /v1/earn/external-wallet/withdrawal-request-transactions`
+`POST /v1/earn/withdrawal-requests/build-unsigned-transaction`
 
 A solver queue request escrows shares; an operator redemption converts shares into an intermediate token that the operator settles later. Neither transaction pays the customer. Save the `withdrawalRequestId` the submit returns and track the request until it is fulfilled, canceled, or failed.
 
@@ -41336,7 +41338,7 @@ Any of:
 ## Example request
 
 ```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/earn/external-wallet/withdrawal-request-transactions' \
+curl -X POST 'https://api.solana.com/v1/earn/withdrawal-requests/build-unsigned-transaction' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -41349,7 +41351,7 @@ curl -X POST 'https://api.solana.com/v1/earn/external-wallet/withdrawal-request-
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdrawal-request-transactions", {
+const res = await fetch("https://api.solana.com/v1/earn/withdrawal-requests/build-unsigned-transaction", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -41368,7 +41370,7 @@ const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdraw
 ```python tab="Python"
 import os, requests
 
-r = requests.post("https://api.solana.com/v1/earn/external-wallet/withdrawal-request-transactions",
+r = requests.post("https://api.solana.com/v1/earn/withdrawal-requests/build-unsigned-transaction",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "positionId": "earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc",
@@ -41438,7 +41440,7 @@ Source: https://platform.solana.com/docs/reference/api/earn/create-earn-external
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-`POST /v1/earn/external-wallet/withdrawal-requests`
+`POST /v1/earn/withdrawal-requests/submit-signed-transaction`
 
 SDP checks every signature against the exact built message, records the request before broadcast, then sends it. Idempotency-Key is required: a retry with the same key returns the original request, and each built transaction can be submitted once. Reusing a key with a different body, or submitting one build under a second key, returns `409 CONFLICT`. An expired build can still be submitted late. If its reservation was released or replaced, SDP accepts it only once the exact signed transaction is finalized as successful, so after a `409 CONFLICT` retry the same bytes and key until that shows. A late operator redemption whose original cycle already closed is refused for operator reconciliation, so it cannot claim a newer request at the same address. A transaction that recovery finds finalized as failed returns `400 TRANSACTION_FAILED`; build a new one. A recovery RPC outage returns `503 PROVIDER_UNAVAILABLE`: retry the original bytes and key. An unresolved 16-signature history window returns `503` and needs support to reconcile. An expired operator redemption build whose creation history is unavailable also returns `503`: keep and retry the original signed intent rather than signing a replacement.
 
@@ -41744,7 +41746,7 @@ Submit the signed bytes back. Requires the Idempotency-Key header; a retry with 
 
 ```bash tab="cURL"
 IDEMPOTENCY_KEY=$(uuidgen)
-curl -X POST 'https://api.solana.com/v1/earn/external-wallet/withdrawal-requests' \
+curl -X POST 'https://api.solana.com/v1/earn/withdrawal-requests/submit-signed-transaction' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
@@ -41757,7 +41759,7 @@ curl -X POST 'https://api.solana.com/v1/earn/external-wallet/withdrawal-requests
 ```ts tab="TypeScript"
 // Reuse this key when you retry this request.
 const idempotencyKey = crypto.randomUUID();
-const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdrawal-requests", {
+const res = await fetch("https://api.solana.com/v1/earn/withdrawal-requests/submit-signed-transaction", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -41776,7 +41778,7 @@ import os, requests, uuid
 
 # Reuse this key when you retry this request.
 idempotency_key = str(uuid.uuid4())
-r = requests.post("https://api.solana.com/v1/earn/external-wallet/withdrawal-requests",
+r = requests.post("https://api.solana.com/v1/earn/withdrawal-requests/submit-signed-transaction",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "transactionId": "earn_external_wallet_withdrawal_request_transaction_54c50679-1b52-494d-84fa-106df66452ff",
@@ -41848,14 +41850,14 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
-### List withdrawal requests
+### List a caller-signed wallet's asynchronous withdrawals
 Source: https://platform.solana.com/docs/reference/api/earn/list-earn-external-wallet-withdrawal-requests
 
 > Lists one customer wallet's withdrawal requests, one page at a time.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-`GET /v1/earn/external-wallet/withdrawal-requests`
+`GET /v1/earn/withdrawal-requests/caller-signed`
 
 `ownerAddress` is required. On startup and after reconnecting, pass `settled=false` to restore every request that still needs fulfillment, classification or cancellation, and page until `hasMore` is false.
 
@@ -42156,12 +42158,12 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 ## Example request
 
 ```bash tab="cURL"
-curl 'https://api.solana.com/v1/earn/external-wallet/withdrawal-requests?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM' \
+curl 'https://api.solana.com/v1/earn/withdrawal-requests/caller-signed?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdrawal-requests?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM", {
+const res = await fetch("https://api.solana.com/v1/earn/withdrawal-requests/caller-signed?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM", {
   method: "GET",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`
@@ -42172,7 +42174,7 @@ const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdraw
 ```python tab="Python"
 import os, requests
 
-r = requests.get("https://api.solana.com/v1/earn/external-wallet/withdrawal-requests?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+r = requests.get("https://api.solana.com/v1/earn/withdrawal-requests/caller-signed?ownerAddress=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
@@ -42251,7 +42253,7 @@ Source: https://platform.solana.com/docs/reference/api/earn/get-earn-external-wa
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-`GET /v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}`
+`GET /v1/earn/withdrawal-requests/caller-signed/{withdrawalRequestId}`
 
 Creating a request escrows shares or converts them to an intermediate token; it does not pay out. Only `fulfilled`, `cancelled` and `failed` are final. Keep polling a `closedOrUnknown` request: SDP has not yet confirmed whether it paid out or returned the customer's tokens.
 
@@ -42540,12 +42542,12 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 ## Example request
 
 ```bash tab="cURL"
-curl 'https://api.solana.com/v1/earn/external-wallet/withdrawal-requests/earn_vault_withdrawal_request_3c905ad2-c92c-4258-9675-1899c41569b9' \
+curl 'https://api.solana.com/v1/earn/withdrawal-requests/caller-signed/earn_vault_withdrawal_request_3c905ad2-c92c-4258-9675-1899c41569b9' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdrawal-requests/earn_vault_withdrawal_request_3c905ad2-c92c-4258-9675-1899c41569b9", {
+const res = await fetch("https://api.solana.com/v1/earn/withdrawal-requests/caller-signed/earn_vault_withdrawal_request_3c905ad2-c92c-4258-9675-1899c41569b9", {
   method: "GET",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`
@@ -42556,7 +42558,7 @@ const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdraw
 ```python tab="Python"
 import os, requests
 
-r = requests.get("https://api.solana.com/v1/earn/external-wallet/withdrawal-requests/earn_vault_withdrawal_request_3c905ad2-c92c-4258-9675-1899c41569b9",
+r = requests.get("https://api.solana.com/v1/earn/withdrawal-requests/caller-signed/earn_vault_withdrawal_request_3c905ad2-c92c-4258-9675-1899c41569b9",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
@@ -42631,7 +42633,7 @@ Source: https://platform.solana.com/docs/reference/api/earn/create-earn-external
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-`POST /v1/earn/external-wallet/withdrawal-request-cancel-transactions`
+`POST /v1/earn/withdrawal-requests/cancel/build-unsigned-transaction`
 
 A solver queue request can be canceled only at `expiredCancelable`, because a solver may fulfill it until its deadline; before then the build returns `409 CONFLICT`. An operator redemption that allows cancellation can be canceled while `pending`, which leaves the customer holding the intermediate token, not the original shares. Requires `earn.manage`. Cancellation stays available without production access and while Earn is disabled; a suspended organization still cannot authenticate.
 
@@ -42802,7 +42804,7 @@ Build a cancellation for the customer's wallet to sign. A solver queue request b
 ## Example request
 
 ```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/earn/external-wallet/withdrawal-request-cancel-transactions' \
+curl -X POST 'https://api.solana.com/v1/earn/withdrawal-requests/cancel/build-unsigned-transaction' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -42811,7 +42813,7 @@ curl -X POST 'https://api.solana.com/v1/earn/external-wallet/withdrawal-request-
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdrawal-request-cancel-transactions", {
+const res = await fetch("https://api.solana.com/v1/earn/withdrawal-requests/cancel/build-unsigned-transaction", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -42826,7 +42828,7 @@ const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdraw
 ```python tab="Python"
 import os, requests
 
-r = requests.post("https://api.solana.com/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
+r = requests.post("https://api.solana.com/v1/earn/withdrawal-requests/cancel/build-unsigned-transaction",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "withdrawalRequestId": "earn_vault_withdrawal_request_3c905ad2-c92c-4258-9675-1899c41569b9"
@@ -42888,7 +42890,7 @@ Source: https://platform.solana.com/docs/reference/api/earn/create-earn-external
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-`POST /v1/earn/external-wallet/withdrawal-request-cancellations`
+`POST /v1/earn/withdrawal-requests/cancel/submit-signed-transaction`
 
 SDP verifies it, records it before broadcast, and returns the withdrawal request. Idempotency-Key is required, with the same `409 CONFLICT` answers as the other submits. Requires `earn.manage`, and stays available without production access and while Earn is disabled; a suspended organization still cannot authenticate. Keep polling until the request is `cancelled`, `fulfilled` or `failed`, because a fulfillment can race the cancellation.
 
@@ -43194,7 +43196,7 @@ Submit the signed bytes back. Requires the Idempotency-Key header; a retry with 
 
 ```bash tab="cURL"
 IDEMPOTENCY_KEY=$(uuidgen)
-curl -X POST 'https://api.solana.com/v1/earn/external-wallet/withdrawal-request-cancellations' \
+curl -X POST 'https://api.solana.com/v1/earn/withdrawal-requests/cancel/submit-signed-transaction' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
@@ -43207,7 +43209,7 @@ curl -X POST 'https://api.solana.com/v1/earn/external-wallet/withdrawal-request-
 ```ts tab="TypeScript"
 // Reuse this key when you retry this request.
 const idempotencyKey = crypto.randomUUID();
-const res = await fetch("https://api.solana.com/v1/earn/external-wallet/withdrawal-request-cancellations", {
+const res = await fetch("https://api.solana.com/v1/earn/withdrawal-requests/cancel/submit-signed-transaction", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -43226,7 +43228,7 @@ import os, requests, uuid
 
 # Reuse this key when you retry this request.
 idempotency_key = str(uuid.uuid4())
-r = requests.post("https://api.solana.com/v1/earn/external-wallet/withdrawal-request-cancellations",
+r = requests.post("https://api.solana.com/v1/earn/withdrawal-requests/cancel/submit-signed-transaction",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "transactionId": "earn_external_wallet_withdrawal_request_transaction_9a3c1e27-5d84-4f0b-b6e2-7f19c4a8d035",

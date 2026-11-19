@@ -26,7 +26,7 @@ describe("POST queued-withdrawal cancellation proxy", () => {
     expect(mocks.proxyToSdpApi).toHaveBeenCalledWith({
       request,
       traceSource: "route.dashboard.earn.vault_withdrawal_requests.cancel",
-      path: "/v1/earn/vault-withdrawal-requests/request%2Fwith%20slash/cancel",
+      path: "/v1/earn/withdrawal-requests/request%2Fwith%20slash/cancel/execute",
     });
   });
 });

@@ -9,6 +9,6 @@ export async function POST(
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.earn.vault_withdrawal_requests.cancel",
-    path: `/v1/earn/vault-withdrawal-requests/${encodeURIComponent(withdrawalRequestId)}/cancel`,
+    path: `/v1/earn/withdrawal-requests/${encodeURIComponent(withdrawalRequestId)}/cancel/execute`,
   });
 }
