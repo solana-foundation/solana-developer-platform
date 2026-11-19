@@ -49,27 +49,30 @@ export const SAFE_PROXY_ERROR_HTTP_STATUS = {
   proxy_unreachable: 503,
 } as const satisfies Record<SafeProxyErrorCode, number>;
 
-export type SafeProxyFailure = {
-  [Code in SafeProxyErrorCode]: {
-    code: Code;
-    outcome: (typeof SAFE_PROXY_ERROR_OUTCOMES)[Code][number];
-  };
-}[SafeProxyErrorCode];
+function failureVariant<Code extends SafeProxyErrorCode>(code: Code) {
+  return z.object({ code: z.literal(code), outcome: z.enum(SAFE_PROXY_ERROR_OUTCOMES[code]) });
+}
+
+export const safeProxyFailureSchema = z.discriminatedUnion("code", [
+  failureVariant("invalid_request"),
+  failureVariant("unknown_operation"),
+  failureVariant("caller_not_allowed"),
+  failureVariant("credential_not_found"),
+  failureVariant("credential_mismatch"),
+  failureVariant("provider_refused"),
+  failureVariant("provider_unavailable"),
+  failureVariant("deadline_exceeded"),
+  failureVariant("internal"),
+  failureVariant("proxy_unreachable"),
+]);
+export type SafeProxyFailure = z.infer<typeof safeProxyFailureSchema>;
 
 export function isSafeProxyFailure(failure: {
   code: SafeProxyErrorCode;
   outcome: SafeProxyOutcome;
 }): failure is SafeProxyFailure {
-  const allowed: readonly SafeProxyOutcome[] = SAFE_PROXY_ERROR_OUTCOMES[failure.code];
-  return allowed.includes(failure.outcome);
+  return safeProxyFailureSchema.safeParse(failure).success;
 }
-
-export const safeProxyFailureSchema = z
-  .object({
-    code: z.enum(SAFE_PROXY_ERROR_CODES),
-    outcome: z.enum(SAFE_PROXY_OUTCOMES),
-  })
-  .refine(isSafeProxyFailure, "outcome is not one this code can carry");
 
 /** The only error that crosses between sdp-api and Safe Proxy. It carries no provider text. */
 export class SafeProxyError extends Error {
