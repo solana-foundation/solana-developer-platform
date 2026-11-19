@@ -98,7 +98,7 @@ Read the position's live `withdrawableShares`, then:
 | --- | --- | --- |
 | Choose a route | [`POST /v1/earn/withdrawals/provider-signed/options`](/docs/reference/api/earn/get-earn-vault-withdrawal-options) | `positionId` |
 | Preview | [`POST /v1/earn/withdrawals/provider-signed/preview`](/docs/reference/api/earn/create-earn-vault-withdrawal-preview) | `positionId`, `shares` |
-| Withdraw instantly | [`POST /v1/earn/withdrawals/provider-signed`](/docs/reference/api/earn/create-earn-vault-withdrawal) | `positionId`, `shares`, and `minAmountOut` when `withdrawalSlippage` requires it |
+| Withdraw instantly | [`POST /v1/earn/withdrawals/execute`](/docs/reference/api/earn/create-earn-vault-withdrawal) | `positionId`, `shares`, and `minAmountOut` when `withdrawalSlippage` requires it |
 
 `withdrawalSlippage` lives on the strategy: match the position's `provider`
 and `providerReference` to the catalog, or keep the `strategy.id` from the
@@ -124,7 +124,7 @@ explains each route's terms, timing, and statuses.
 | Step | Request |
 | --- | --- |
 | Preview | [`POST /v1/earn/withdrawal-requests/provider-signed/preview`](/docs/reference/api/earn/create-earn-vault-queued-withdrawal-preview) |
-| Create | [`POST /v1/earn/withdrawal-requests/provider-signed`](/docs/reference/api/earn/create-earn-vault-withdrawal-request), with an `Idempotency-Key` |
+| Create | [`POST /v1/earn/withdrawal-requests/execute`](/docs/reference/api/earn/create-earn-vault-withdrawal-request), with an `Idempotency-Key` |
 | Track | [`GET /v1/earn/withdrawal-requests/provider-signed/{withdrawalRequestId}`](/docs/reference/api/earn/get-earn-vault-withdrawal-request) |
 | Restore | [`GET /v1/earn/withdrawal-requests/provider-signed?settled=false`](/docs/reference/api/earn/list-earn-vault-withdrawal-requests), every page |
 
