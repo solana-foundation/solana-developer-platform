@@ -58,7 +58,9 @@ test("a beta build links its own dashboard and names its host", () => {
   const signUp = linkTree("https://platform.solana.com", "platform.solana.com");
   transform(signUp);
   assert.equal(linkOf(signUp).url, "https://platform-devnet.solana.com/");
-  assert.deepEqual(linkOf(signUp).children, [{ type: "text", value: "platform-devnet.solana.com" }]);
+  assert.deepEqual(linkOf(signUp).children, [
+    { type: "text", value: "platform-devnet.solana.com" },
+  ]);
 
   const signIn = linkTree("https://platform.solana.com/sign-in?redirect_url=x", "sign in");
   transform(signIn);
