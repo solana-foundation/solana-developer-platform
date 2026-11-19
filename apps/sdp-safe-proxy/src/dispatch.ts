@@ -75,11 +75,13 @@ export async function dispatch(
   request: DispatchRequest
 ): Promise<DispatchAnswer> {
   const startedAt = performance.now();
+  const operation = findSafeProxyOperation(request.section, request.name);
   const line: RequestLogLine = {
     requestId: null,
     caller: null,
-    provider: request.section,
-    operation: request.name,
+    // A path is caller-chosen until it matches the catalog, so only catalog names are logged.
+    provider: operation === undefined ? "unknown" : request.section,
+    operation: operation === undefined ? "unknown" : request.name,
     organizationId: null,
     projectId: null,
     outcome: "ok",
@@ -93,11 +95,7 @@ export async function dispatch(
     const caller = await dependencies.resolveCaller(request.credentials);
     line.caller = caller;
 
-    const operation = findSafeProxyOperation(request.section, request.name);
     if (operation === undefined) {
-      // The path is caller-chosen until it matches the catalog, so it is not logged as given.
-      line.provider = "unknown";
-      line.operation = "unknown";
       throw new SafeProxyError({ code: "unknown_operation", outcome: "rejected" });
     }
     if (!operation.callers.includes(caller)) {

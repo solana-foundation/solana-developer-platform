@@ -2,7 +2,7 @@ import { z } from "zod";
 
 const port = z.coerce.number().int().min(1).max(65535);
 
-const settingsSchema = z.discriminatedUnion("SAFE_PROXY_CALLER_AUTH", [
+const environmentSchema = z.discriminatedUnion("SAFE_PROXY_CALLER_AUTH", [
   z.object({
     SAFE_PROXY_CALLER_AUTH: z.literal("google"),
     PORT: port,
@@ -20,33 +20,30 @@ const settingsSchema = z.discriminatedUnion("SAFE_PROXY_CALLER_AUTH", [
   }),
 ]);
 
-export type Settings =
-  | {
-      callerAuth: "google";
-      port: number;
-      audience: string;
-      callerEmails: { api: string; cron: string };
-    }
-  | { callerAuth: "local"; port: number };
+const settingsSchema = environmentSchema
+  .refine(
+    (environment) =>
+      environment.SAFE_PROXY_CALLER_AUTH === "local" ||
+      environment.SAFE_PROXY_API_CALLER_EMAIL !== environment.SAFE_PROXY_CRON_CALLER_EMAIL,
+    "SAFE_PROXY_API_CALLER_EMAIL and SAFE_PROXY_CRON_CALLER_EMAIL must name different accounts"
+  )
+  .transform((environment) =>
+    environment.SAFE_PROXY_CALLER_AUTH === "local"
+      ? { callerAuth: "local" as const, port: environment.PORT }
+      : {
+          callerAuth: "google" as const,
+          port: environment.PORT,
+          audience: environment.SAFE_PROXY_AUDIENCE,
+          callerEmails: {
+            api: environment.SAFE_PROXY_API_CALLER_EMAIL,
+            cron: environment.SAFE_PROXY_CRON_CALLER_EMAIL,
+          },
+        }
+  );
+
+export type Settings = z.infer<typeof settingsSchema>;
 
 /** Reads the settings once at start-up. A missing or wrong setting throws, which stops the start. */
 export function readSettings(env: NodeJS.ProcessEnv): Settings {
-  const parsed = settingsSchema.parse(env);
-  if (parsed.SAFE_PROXY_CALLER_AUTH === "local") {
-    return { callerAuth: "local", port: parsed.PORT };
-  }
-  if (parsed.SAFE_PROXY_API_CALLER_EMAIL === parsed.SAFE_PROXY_CRON_CALLER_EMAIL) {
-    throw new Error(
-      "SAFE_PROXY_API_CALLER_EMAIL and SAFE_PROXY_CRON_CALLER_EMAIL must name different accounts"
-    );
-  }
-  return {
-    callerAuth: "google",
-    port: parsed.PORT,
-    audience: parsed.SAFE_PROXY_AUDIENCE,
-    callerEmails: {
-      api: parsed.SAFE_PROXY_API_CALLER_EMAIL,
-      cron: parsed.SAFE_PROXY_CRON_CALLER_EMAIL,
-    },
-  };
+  return settingsSchema.parse(env);
 }
