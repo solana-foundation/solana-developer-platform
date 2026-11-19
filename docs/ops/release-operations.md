@@ -223,7 +223,7 @@ The workflow validates the SHA, resolves its tag to an immutable digest, verifie
 
 ## Beta
 
-Beta (`https://api-beta.solana.com`) is a devnet-only environment in its own GCP project, `solana-developer-platform-beta`, with its own registry, services, migration job and database. It runs the signed merge image of every merge that passes the stage smoke, the same gate production sits behind, reports `releaseChannel: beta` on `/health`, and never gates production.
+Beta (`https://api-devnet.solana.com`) is a devnet-only environment in its own GCP project, `solana-developer-platform-beta`, with its own registry, services, migration job and database. It runs the signed merge image of every merge that passes the stage smoke, the same gate production sits behind, reports `releaseChannel: beta` on `/health`, and never gates production.
 
 ### Beta deploy
 
@@ -235,7 +235,7 @@ Once the stage deploy and smoke pass, the merge deploy's `Dispatch the beta depl
 4. Refuses a migration marked `-- sdp:migration-compat: breaking` until beta serves the commit before its last edit, as the production deploy does. It reads that commit from the serving image's `SDP_BUILD_SHA`, not from `/health/ready`, so a beta that fails readiness can still be repaired. A beta run can skip merges (a failed or queued run), so the serving build may still read what the migration drops; deploy that parent to beta first. While beta serves no image from `sdp-beta`, nothing reads its schema and the check passes.
 5. Updates and executes the beta migration job with that image.
 6. Updates `sdp-beta-api-public` and waits for the revision to be Ready.
-7. Checks that `https://api-beta.solana.com/health` reports `releaseChannel: beta`.
+7. Checks that `https://api-devnet.solana.com/health` reports `releaseChannel: beta`.
 8. Updates `sdp-beta-cron`.
 9. Posts the `sdp-web beta gate` commit status once `/health/ready` reports the deployed revision, the same way `release-web` posts the production gate.
 

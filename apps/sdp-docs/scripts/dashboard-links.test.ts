@@ -52,22 +52,24 @@ function linkOf(tree: Root): Link {
 }
 
 test("a beta build links its own dashboard and names its host", () => {
-  deploy({ webUrl: "https://platform-beta.solana.com" });
+  deploy({ webUrl: "https://platform-devnet.solana.com" });
   const transform = remarkDashboardLinks();
 
   const signUp = linkTree("https://platform.solana.com", "platform.solana.com");
   transform(signUp);
-  assert.equal(linkOf(signUp).url, "https://platform-beta.solana.com/");
-  assert.deepEqual(linkOf(signUp).children, [{ type: "text", value: "platform-beta.solana.com" }]);
+  assert.equal(linkOf(signUp).url, "https://platform-devnet.solana.com/");
+  assert.deepEqual(linkOf(signUp).children, [
+    { type: "text", value: "platform-devnet.solana.com" },
+  ]);
 
   const signIn = linkTree("https://platform.solana.com/sign-in?redirect_url=x", "sign in");
   transform(signIn);
-  assert.equal(linkOf(signIn).url, "https://platform-beta.solana.com/sign-in?redirect_url=x");
+  assert.equal(linkOf(signIn).url, "https://platform-devnet.solana.com/sign-in?redirect_url=x");
   assert.deepEqual(linkOf(signIn).children, [{ type: "text", value: "sign in" }]);
 });
 
 test("docs and dashboard pages, other sites and the production build keep their links", () => {
-  deploy({ webUrl: "https://platform-beta.solana.com" });
+  deploy({ webUrl: "https://platform-devnet.solana.com" });
   for (const url of [
     "https://platform.solana.com/docs/guides/go-to-mainnet",
     "https://platform.solana.com/dashboard",
