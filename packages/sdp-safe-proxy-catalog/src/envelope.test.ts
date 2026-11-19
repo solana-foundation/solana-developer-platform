@@ -37,16 +37,23 @@ const CREDENTIAL = { id: "cred_1", version: "1", organizationId: "org_1", projec
 const BASE = { requestId: "req_1", budgetMs: 1_000, input: { id: "a" } };
 const READS_NONE = operation({ kind: "reads", credential: "none" });
 
+type EnvelopeCase = typeof BASE & {
+  credential?: typeof CREDENTIAL;
+  idempotencyKey?: string;
+};
+
 describe("safeProxyRequestEnvelopeSchema", () => {
   it("requires credential and idempotencyKey exactly when the operation declares them", () => {
     for (const op of OPERATIONS) {
       for (const withCredential of [true, false]) {
         for (const withKey of [true, false]) {
-          const envelope = {
-            ...BASE,
-            ...(withCredential ? { credential: CREDENTIAL } : {}),
-            ...(withKey ? { idempotencyKey: "key_1" } : {}),
-          };
+          const envelope: EnvelopeCase = { ...BASE };
+          if (withCredential) {
+            envelope.credential = CREDENTIAL;
+          }
+          if (withKey) {
+            envelope.idempotencyKey = "key_1";
+          }
           const expected =
             withCredential === (op.credential === "customer") &&
             withKey === (op.kind === "changes");
