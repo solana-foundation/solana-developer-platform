@@ -9,7 +9,11 @@ import type {
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EnglishTestI18n } from "@/app/(session)/dashboard/[projectId]/markets/test-i18n";
-import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
+
+import {
+  resetAsyncWithdrawalTrackingStateForTests,
+  vaultAsyncWithdrawalIdempotencyKeyStore,
+} from "./earn-vault-async-withdrawal-tracking";
 
 const mocks = vi.hoisted(() => ({
   cancelRequest: vi.fn(),
@@ -148,7 +152,7 @@ async function openReview(amount = "5") {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  resetIdempotencyKeyStoresForTests();
+  resetAsyncWithdrawalTrackingStateForTests();
   sessionStorage.clear();
   mocks.fetchPreview.mockImplementation(async (input: { shares: string }) => ({
     kind: "ready",
@@ -295,6 +299,127 @@ describe("EarnVaultQueuedWithdrawModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Request withdrawal" }));
     await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledTimes(2));
     expect(mocks.createRequest.mock.calls.map((call) => call[1])).toEqual([FIRST_KEY, FIRST_KEY]);
+  });
+
+  it("replays a kept key's minted shares when the live position value drifts", async () => {
+    mocks.createRequest.mockResolvedValue({
+      ok: false,
+      status: 503,
+      error: "Queue temporarily unavailable",
+      body: null,
+    });
+    const view = renderModal();
+
+    await openReview();
+    fireEvent.click(screen.getByRole("button", { name: "Request withdrawal" }));
+    await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledTimes(1));
+    expect(mocks.createRequest).toHaveBeenLastCalledWith(
+      expect.objectContaining({ shares: "5" }),
+      FIRST_KEY
+    );
+
+    // The polled position revalues while the key stays kept: the same typed
+    // $5 now derives 4 shares from the live value.
+    view.props.position = { ...position, tokenValue: "12.5" };
+    view.rerender(view.renderUi());
+    await waitFor(() => expect(mocks.fetchPreview).toHaveBeenCalledTimes(2));
+    expect(mocks.fetchPreview).toHaveBeenLastCalledWith(
+      expect.objectContaining({ shares: "4" }),
+      expect.any(AbortSignal)
+    );
+    // The review discloses the attempt the kept key would replay.
+    expect((await screen.findByText(/An earlier attempt to withdraw/)).textContent).toMatch(
+      /withdraw 5\s/
+    );
+
+    const confirm = (await screen.findByRole("button", {
+      name: "Request withdrawal",
+    })) as HTMLButtonElement;
+    await waitFor(() => expect(confirm.disabled).toBe(false));
+    fireEvent.click(confirm);
+    await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledTimes(2));
+    // The FIRST attempt's share intent, verbatim, under the FIRST key: the
+    // drifted derivation would be a changed body the API's fingerprint
+    // refuses with a 422 — which retires the key and lets the next submit
+    // escrow a second request beside the first.
+    expect(mocks.createRequest.mock.calls[1]).toEqual([
+      { positionId: position.id, shares: "5", discountBps: 25, deadlineSeconds: 360 },
+      FIRST_KEY,
+    ]);
+  });
+
+  it("sends nothing when a kept key's minted shares were lost", async () => {
+    mocks.createRequest.mockResolvedValue({
+      ok: false,
+      status: 503,
+      error: "Queue temporarily unavailable",
+      body: null,
+    });
+    renderModal();
+
+    await openReview();
+    fireEvent.click(screen.getByRole("button", { name: "Request withdrawal" }));
+    await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledTimes(1));
+
+    // The shares memo's storage is gone (cleared, another writer): the kept
+    // key can no longer be replayed exactly, so the press must send nothing
+    // rather than pair the kept key with a changed request.
+    sessionStorage.removeItem("sdp:earn:vault-queued-withdrawal:shares:v1");
+
+    fireEvent.click(screen.getByRole("button", { name: "Request withdrawal" }));
+    await screen.findAllByText(/could not be recovered, so nothing was sent/);
+    expect(mocks.createRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("adopts the previous build's unresolved attempt and replays it exactly", async () => {
+    // The previous build keyed this exit on the DERIVED shares; its kept
+    // entry is unreachable through this build's fingerprint and must be
+    // adopted, never minted over.
+    const LEGACY_FINGERPRINT = JSON.stringify(["project_1", "position_1", "7", "queue", 50, 600]);
+    const LEGACY_KEY = "99999999-9999-4999-8999-999999999999";
+    vaultAsyncWithdrawalIdempotencyKeyStore.claim(LEGACY_FINGERPRINT, () => LEGACY_KEY);
+    mocks.createRequest.mockResolvedValue({
+      ok: true,
+      status: 201,
+      data: { kind: "submitted", withdrawalRequest: request() },
+    });
+    renderModal();
+
+    await openReview();
+    // The review discloses the ADOPTED attempt: its own 7 shares, whatever
+    // the form's live derivation shows.
+    expect((await screen.findByText(/An earlier attempt to withdraw/)).textContent).toMatch(
+      /withdraw 7\s/
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Request withdrawal" }));
+    await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledTimes(1));
+    // The legacy attempt's OWN body and key — not the form's 5 at 0.25%/6min.
+    expect(mocks.createRequest.mock.calls[0]).toEqual([
+      { positionId: position.id, shares: "7", discountBps: 50, deadlineSeconds: 600 },
+      LEGACY_KEY,
+    ]);
+  });
+
+  it("stops when an adopted attempt was answered before the confirm", async () => {
+    const LEGACY_FINGERPRINT = JSON.stringify(["project_1", "position_1", "7", "queue", 50, 600]);
+    const LEGACY_KEY = "99999999-9999-4999-8999-999999999999";
+    vaultAsyncWithdrawalIdempotencyKeyStore.claim(LEGACY_FINGERPRINT, () => LEGACY_KEY);
+    renderModal();
+
+    await openReview();
+    await screen.findByText(/An earlier attempt to withdraw/);
+
+    // The first attempt's answer arrives from a previous visit's replay and
+    // retires the legacy key between the mount-time snapshot and this confirm.
+    vaultAsyncWithdrawalIdempotencyKeyStore.release(LEGACY_FINGERPRINT, LEGACY_KEY);
+
+    fireEvent.click(screen.getByRole("button", { name: "Request withdrawal" }));
+    expect(await screen.findByText(/answered in the meantime, so nothing was sent/)).toBeTruthy();
+    expect(mocks.createRequest).not.toHaveBeenCalled();
+    // The stale adoption is re-scanned away: the notice is gone, and the next
+    // confirm — re-reviewed — is a normal typed-quantity submission.
+    expect(screen.queryByText(/An earlier attempt to withdraw/)).toBeNull();
   });
 
   it("refuses a deadline above the provider maximum before previewing", () => {

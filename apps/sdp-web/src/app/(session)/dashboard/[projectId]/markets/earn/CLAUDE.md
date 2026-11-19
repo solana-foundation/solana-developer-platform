@@ -391,6 +391,27 @@ nothing else; the program create still sends the body `requestId` form.
   stops the submit too — that confirm was approved as a replay, never a
   fresh exit over it, so the review refreshes instead — and a legacy entry
   that appears after mount is never silently adopted.
+- `earn-vault-async-withdrawal-tracking.ts` — the ASYNCHRONOUS exits'
+  idempotency-key store (queued withdrawals and par redemptions; fingerprint:
+  the format tag, project, position, the TYPED dollar amount, and the queue's
+  own discount and deadline — both share routes DERIVE their shares from the
+  live position value, so the derived shares are not in the fingerprint and
+  are remembered beside the key instead — `rememberAsyncWithdrawalShares` —
+  to be replayed verbatim for a kept key, because the API's own idempotency
+  fingerprint pins `shares`). The held-intermediate par route is the exception:
+  its typed input IS the wire quantity, so its identity keeps the previous
+  build's shape (no tag, no memo) and its kept keys stay reachable through
+  `has`. The format tag is the upgrade bridge: the previous build keyed both
+  share routes on the DERIVED shares, and `recallLegacyAsyncWithdrawalKeptKey`
+  is the recovery — a MOUNT-TIME snapshot the modal keeps in state and
+  surfaces on the review step through the shared `KeptAsyncAttemptNotice`
+  (`earn-vault-kept-attempt-notice.tsx`, one copy for both async modals), which
+  the submit's resolver consumes: the adoption replays the legacy attempt
+  exactly, under the legacy key with the shares and queue terms parsed out of
+  the legacy identity, oldest entry first. The same stops as the instant exit:
+  a lost memo stops the submit (nothing sendable), a recovered key answered
+  between mount and confirm stops it too, and a re-scan only runs after a
+  resolution the customer watched.
 - `earn-vault-slippage.ts` — the slippage-floor machinery BOTH vault modals
   share: `parseSlippageToleranceBps`, `floorForTolerance` (BigInt at the quoted
   mint's scale, floored, one-atom minimum; a quote FINER than that scale is a
