@@ -270,11 +270,13 @@ export function createIdempotencyKeyStore(storeKey: string): IdempotencyKeyStore
     keptEntries() {
       return readEntries(scopedKey(storeKey))
         .map((entry) => ({ fingerprint: entry.id, key: entry.value, claimedAt: entry.claimedAt }))
-        .sort((a, b) => {
-          const aAt = a.claimedAt ?? Number.NEGATIVE_INFINITY;
-          const bAt = b.claimedAt ?? Number.NEGATIVE_INFINITY;
-          if (aAt !== bAt) return aAt < bAt ? -1 : 1;
-          return a.fingerprint < b.fingerprint ? -1 : a.fingerprint > b.fingerprint ? 1 : 0;
+        .sort((left, right) => {
+          const leftAt = left.claimedAt ?? Number.NEGATIVE_INFINITY;
+          const rightAt = right.claimedAt ?? Number.NEGATIVE_INFINITY;
+          if (leftAt !== rightAt) return leftAt < rightAt ? -1 : 1;
+          if (left.fingerprint < right.fingerprint) return -1;
+          if (left.fingerprint > right.fingerprint) return 1;
+          return 0;
         });
     },
 

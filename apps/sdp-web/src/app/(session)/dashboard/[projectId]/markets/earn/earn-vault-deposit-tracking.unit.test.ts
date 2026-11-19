@@ -23,11 +23,17 @@ import {
 
 const IDEMPOTENCY_STORE_KEY = "sdp:earn:vault-deposit:idempotency:v1";
 
-const withdrawalRequest = {
+/** The withdrawal request the fingerprint specs spread and override. */
+const withdrawalRequest: {
+  projectId: string;
+  positionId: string;
+  quantity: string;
+  toleranceBps: number | null;
+} = {
   projectId: "prj_1",
   positionId: "pos_1",
   quantity: "1",
-  toleranceBps: null as number | null,
+  toleranceBps: null,
 };
 
 const request = {
