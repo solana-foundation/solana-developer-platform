@@ -1,7 +1,8 @@
 {
-  "fetchedAt": "2026-09-01T00:54:16.428Z",
+  "fetchedAt": "2026-11-19T14:47:42.717Z",
   "declaredDepositTokens": [
-    "USDC"
+    "USDC",
+    "OUSD"
   ],
   "clusters": [
     {
@@ -45,9 +46,74 @@
     },
     {
       "cluster": "mainnet-beta",
-      "skipped": "SDP has no confirmed Veda deployment for this cluster",
-      "configuredVaults": 0,
-      "rows": []
+      "skipped": null,
+      "configuredVaults": 2,
+      "rows": [
+        {
+          "address": "7PjRdSecsdyUaasPqsQSDyBz67FMJPZT82KCkpXCb1sy",
+          "vaultId": "4",
+          "name": "USDC PRIME",
+          "shareMint": "78gitz5xcQUuV7CfYDBMSKpYVqazDWyRZ2KhQjqFZMjh",
+          "baseAsset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "baseAssetSymbol": "USDC",
+          "shareDecimals": 6,
+          "accountingPaused": false,
+          "tellerPaused": false,
+          "complianceMode": false,
+          "withdrawAuthority": "3PniWB1uPfXhwS2a9RVUKG1Kt6c9nFQFdFSY9aPbDnqS",
+          "lockDurationSeconds": "0",
+          "platformFeeBps": 0,
+          "performanceFeeBps": 500,
+          "assets": [
+            {
+              "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+              "symbol": "USDC",
+              "allowDeposits": true,
+              "allowWithdrawals": true,
+              "admitted": true
+            }
+          ],
+          "outcome": "catalogued",
+          "dropReason": null,
+          "depositMints": [
+            "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+          ],
+          "liquidityTerm": "delayed",
+          "redemptionDelayDays": null
+        },
+        {
+          "address": "5qXvYYBRWwW9JYgFAfu3TpWLRaeJ31sEWNWW2cSvU8ZV",
+          "vaultId": "5",
+          "name": "OUSD PRIME",
+          "shareMint": "DZZa8WVtkDv281vg8nKawhBjpmTxtNkKJdmciw71ZcP9",
+          "baseAsset": "ousd2mJsPEckLHcSCDxyKD7NDGARZcfLbDZkKiatYHB",
+          "baseAssetSymbol": "OUSD",
+          "shareDecimals": 6,
+          "accountingPaused": false,
+          "tellerPaused": false,
+          "complianceMode": false,
+          "withdrawAuthority": "7e4czPaC2JNKH7vDesFPLdDHrNZP1enjXgr6GTvurx1D",
+          "lockDurationSeconds": "0",
+          "platformFeeBps": 0,
+          "performanceFeeBps": 500,
+          "assets": [
+            {
+              "mint": "ousd2mJsPEckLHcSCDxyKD7NDGARZcfLbDZkKiatYHB",
+              "symbol": "OUSD",
+              "allowDeposits": true,
+              "allowWithdrawals": true,
+              "admitted": true
+            }
+          ],
+          "outcome": "catalogued",
+          "dropReason": null,
+          "depositMints": [
+            "ousd2mJsPEckLHcSCDxyKD7NDGARZcfLbDZkKiatYHB"
+          ],
+          "liquidityTerm": "delayed",
+          "redemptionDelayDays": null
+        }
+      ]
     }
   ]
 }

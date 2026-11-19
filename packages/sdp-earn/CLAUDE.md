@@ -158,9 +158,8 @@ that is correct, not a bug. Grant the override in the **local** DB to proceed.
 **Kamino, Veda, Jupiter Lend, and Ondo are offered. WisdomTree is registered
 pre-launch; Upshift and Perena remain stubs.** The sandbox catalogue's own lane
 shows Kamino's devnet shelf plus Veda's devnet Test Vault. Its explicit mainnet
-mirror can also show browse-only Jupiter Lend and Ondo rows. Production has no
-Veda row because `VEDA_DEPLOYMENTS` is devnet-only until Veda names a production
-vault. The Ground integration that previously served the custodial program flow
+mirror can also show browse-only Jupiter Lend and Ondo rows. Production offers Veda's USDC PRIME and OUSD PRIME vaults from `VEDA_DEPLOYMENTS`;
+the mainnet mirror exposes them read-only in sandbox. The Ground integration that previously served the custodial program flow
 was removed, so no registered provider is portfolio-capable today; the program
 routes stay and answer 501 for providers without that capability.
 `EARN_PROVIDER_SURFACING`

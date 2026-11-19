@@ -143,10 +143,9 @@ export const EARN_PROVIDER_SURFACING = {
   // deposits and withdrawals (@sdp/veda).
   //
   // The shelf follows `VEDA_DEPLOYMENTS` (@sdp/types/veda-programs): devnet is
-  // confirmed, so the SANDBOX catalogue carries Veda's devnet Test Vault;
-  // mainnet is deliberately null, so every production pass reports
-  // PROVIDER_NOT_CONFIGURED and the production shelf stays empty until Veda
-  // names a production vault. Surfacing decides whether rows REACH customers,
+  // confirmed, so SANDBOX carries the Test Vault; production carries the
+  // separately deployed USDC PRIME and OUSD PRIME vaults.
+  // Surfacing decides whether rows REACH customers,
   // never whether any exist.
   veda: true,
   // Registered so the sync and the registry-consistency test have an entry, but

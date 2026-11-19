@@ -72,6 +72,12 @@ export interface PinnedToken2022MintState {
  * (`pnpm check:well-known-mints` covers the address, not these fields).
  */
 export const PINNED_TOKEN_2022_DEPOSIT_MINTS: Readonly<Record<string, PinnedToken2022MintState>> = {
+  // OpenUSD, mainnet-beta; observed with getAccountInfo(jsonParsed) on 2026-11-19.
+  ousd2mJsPEckLHcSCDxyKD7NDGARZcfLbDZkKiatYHB: {
+    transferHookProgram: null,
+    transferHookAuthority: "E7JdFMP5AqdndJKstZV2mHdekLwAQbNWRHMpoozyB3qw",
+    permanentDelegate: "Aj2gxCSQ7A7eTnUL2VnyT3KQa79AcZi5x15rPRSnw6RA",
+  },
   // PYUSD, mainnet-beta
   "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo": {
     transferHookProgram: null,

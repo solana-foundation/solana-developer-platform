@@ -12,19 +12,14 @@ IS) and ADR 0002 for the pluggability invariants. `packages/sdp-kamino` is the
 precedent this package mirrors, and the differences from it are the interesting
 part of this file.
 
-## Deployment state: devnet confirmed, mainnet deliberately absent
+## Deployment state: devnet and mainnet confirmed
 
-`VEDA_DEPLOYMENTS` in `@sdp/types/veda-programs` carries the confirmed DEVNET
-Test Vault deployment (2026-08-31: Veda's integration docs, cross-checked by
-SDP's 2026-08-17 on-chain audit — full provenance in that file's header).
-Devnet chain calls resolve; **mainnet stays `null`, so every mainnet call fails
-closed with `DEPLOYMENT_NOT_CONFIGURED`.** The mainnet gap is an offering
-decision, not missing data: the published mainnet addresses point at the same
-shared Test Vault, and cataloguing it would put a test vault on the production
-shelf. Fill mainnet only when Veda names the production vault(s) SDP should
-offer — a pure data change in `@sdp/types/veda-programs` — and run
-`src/sdk.smoke.test.ts` against it before enabling anything (see "Tests"
-below).
+`VEDA_DEPLOYMENTS` in `@sdp/types/veda-programs` carries the separate devnet
+Test Vault and mainnet USDC PRIME (id 4) / OUSD PRIME (id 5) deployments.
+`VEDA_MAINNET_VAULTS` pins Veda's supplied names, state addresses, deposit mints
+and share mints. The catalogue feeds these rows to the dashboard; there is no
+second UI vault list. Production exits use BoringQueue's `request_withdraw`.
+The daily-data feed is separate and is not required for on-chain operations.
 
 The SDK carries no defaults by design: `createVedaClient` takes every program
 address at runtime and "does not include default addresses or infer one
@@ -161,11 +156,10 @@ flag from, which `idl-layout.test.ts` pins to the IDL. An `AssetData` that is
 gone or no longer this vault's asset refuses as the live listing would
 (`UNSUPPORTED_VAULT`) and drops the cached mint.
 
-If more than one asset matches, the call FAILS. While SDP declares one deposit
-symbol there can be at most one per cluster, and "pick the first" is the kind of
-silent choice that spends the wrong token. Widening
-`VEDA_DEPOSIT_TOKEN_SYMBOLS` therefore means carrying a mint on the provider
-contract first.
+Production PRIME vaults pin one asset per vault in the shared metadata. Both
+the catalogue and builder apply that pin, including on position and exit reads
+when deposits are paused. Other vaults still FAIL if more than one asset matches;
+they need an explicit asset identity before admitting multiple deposit assets.
 
 ## Rent: the SDK hardcodes the owner as payer, so `rentPayer` is a payer SWAP
 
@@ -389,8 +383,9 @@ before it is committed. It proves candidate addresses can be reached and read;
 it is not the committed value-moving lifecycle proof.
 
 `sdk.surfpool.test.ts` is the isolated real-program value-moving proof used by
-the Docker Surfpool runner. It clones the confirmed devnet deployment into a local ledger,
-deposits, waits through the share lock, requests the minimum valid queued exit,
+the Docker Surfpool runner. It clones the selected cluster into a local ledger
+and runs independently for every configured vault (both PRIME vaults on mainnet),
+deposits, waits through the share lock, requests an exit for all deposited shares,
 proves shares reached queue escrow, proves early cancellation is refused, warps
 past the deadline, cancels, and proves the shares and escrow balance return. It
 also retains both transaction signatures, fetches their finalized logs, and
@@ -412,8 +407,18 @@ VEDA_SMOKE_OWNER=<wallet address> \
 pnpm --filter @sdp/veda test
 ```
 
-DEVNET only. Veda's own checklist requires their separate approval for any
-value-moving mainnet test, and `VEDA_DEPLOYMENTS["mainnet-beta"]` stays null
-for the same reason: `EARN_PROVIDER_DEPLOYED_CLUSTERS` derives Veda's deposit
-environments from that table, so production deposits open only when PRO-1777
-fills it.
+Run both production vaults against an isolated mainnet fork (never a mainnet send):
+
+```bash
+VEDA_SURFPOOL_CLUSTER=mainnet-beta \
+VEDA_SURFPOOL_MAINNET_RPC_URL=https://api.mainnet-beta.solana.com \
+scripts/kora-surfpool/e2e-veda.sh
+```
+
+The proof checks each production vault's id, asset, share mint and queue-only
+exit; deposits real fork tokens, requests an exit, checks escrow and finalized
+events, refuses cancellation before the deadline, then cancels and proves the
+shares return. Funding uses the mint's live token program (OUSD is Token-2022).
+Only disposable wallet funding and clock control use cheatcodes. Veda's solver
+fulfilment requires its private authority and is not simulated by rewriting
+vault state; this suite proves the complete depositor request/cancel lifecycle.

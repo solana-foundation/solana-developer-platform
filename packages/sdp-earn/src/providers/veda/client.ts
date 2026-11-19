@@ -3,6 +3,7 @@ import {
   VEDA_DEPOSIT_TOKEN_SYMBOLS,
   type VedaDeployment,
   vedaDeployment,
+  vedaVaultMetadata,
 } from "@sdp/types/veda-programs";
 import {
   CLUSTER_BY_SDP_ENVIRONMENT,
@@ -25,7 +26,7 @@ import { readVedaVaults, VEDA_UNSET_AUTHORITY, type VedaVault } from "./vault-st
  * package stays SDK-free so the hourly catalogue cron never loads a chain SDK.
  *
  * Everything here is read from the chain and nothing from a Veda API, because
- * there is no Veda API: the SDK is a client for the programs, so the catalogue
+ * the catalogue needs no daily-data API key: the SDK reads programs, so the catalogue
  * and the builder read the same accounts by different routes.
  */
 
@@ -54,7 +55,7 @@ function depositMints(entry: VedaVault, cluster: SolanaCluster): string[] {
   return entry.assets
     .filter((asset) => asset.allowDeposits)
     .map((asset) => asset.assetMint)
-    .filter((mint) => isVedaDepositMint(mint, cluster))
+    .filter((mint) => isVedaDepositMint(mint, cluster, entry.vault.address))
     .sort();
 }
 
@@ -121,10 +122,8 @@ export class VedaEarnClient extends StubEarnClient {
    *   Veda publishes on-chain, not an inference from what a vault might hold.
    *   Same rule that keeps Kamino's snapshots `defi` (see
    *   `packages/sdp-earn/CLAUDE.md` → the K-vault name trust boundary).
-   * - **USDC only.** The scaffold also claimed USDG and USDT, which no Veda
-   *   material supports. USDT additionally has no devnet mint, so a devnet
-   *   snapshot naming it could never pass `isStrategyWithinDeclaredSupport`
-   *   and would warn on every hourly pass forever.
+   * - **USDC and OUSD.** Production PRIME vaults pin their asset per vault.
+   *   Devnet offers USDC only; OUSD has no confirmed devnet mint.
    *
    * Shared with `@sdp/veda` through `@sdp/types` rather than restated, so the
    * asset the catalogue admits and the asset the builder will spend cannot
@@ -175,10 +174,7 @@ export class VedaEarnClient extends StubEarnClient {
   /**
    * The read and the mapping, with the deployment already resolved.
    *
-   * Split out so tests can exercise the mapping against a deployment SDP does
-   * not yet have (mainnet's, until Veda names a production vault under
-   * PRO-1777), and the mapping is the half that must already be right when
-   * they do. Same shape as Kamino's `_listDevnetStrategies`.
+   * Split out so tests can exercise the mapping against explicit deployments.
    */
   async _listVaultStrategies(
     rpcUrl: string,
@@ -196,7 +192,9 @@ export class VedaEarnClient extends StubEarnClient {
 
       snapshots.push({
         providerReference: entry.vault.address,
-        name: vedaVaultName(entry.vault.baseAsset, entry.vault.vaultId),
+        name:
+          vedaVaultMetadata(cluster, entry.vault.address)?.name ??
+          vedaVaultName(entry.vault.baseAsset, entry.vault.vaultId),
         // The one classification the vault's own mechanics establish. Never
         // `rwa` — see `declaredSupport` above.
         sourceKind: "defi",

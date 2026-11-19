@@ -813,6 +813,23 @@ The catalog pages with `page` and `pageSize` (default 20, up to 100). Keep
 reading pages until you have `total` strategies. Narrow the list with
 `sourceKind`, `apyType`, or `liquidityTerm`.
 
+## Veda PRIME vaults
+
+The mainnet catalog includes Veda's USDC PRIME and OUSD PRIME vaults.
+Each takes its named asset and issues its own share token. OUSD is OpenUSD,
+a six-decimal Token-2022 token; it has no sandbox mint.
+
+| Strategy | Vault address (`providerReference`) | Deposit mint | Share mint |
+| --- | --- | --- | --- |
+| USDC PRIME | `7PjRdSecsdyUaasPqsQSDyBz67FMJPZT82KCkpXCb1sy` | `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v` | `78gitz5xcQUuV7CfYDBMSKpYVqazDWyRZ2KhQjqFZMjh` |
+| OUSD PRIME | `5qXvYYBRWwW9JYgFAfu3TpWLRaeJ31sEWNWW2cSvU8ZV` | `ousd2mJsPEckLHcSCDxyKD7NDGARZcfLbDZkKiatYHB` | `DZZa8WVtkDv281vg8nKawhBjpmTxtNkKJdmciw71ZcP9` |
+
+Both use [queued withdrawals](/docs/earn/withdrawals#solver-queues)
+through Veda's BoringQueue. A request escrows shares; it does not establish a
+payout. Read live withdrawal options for the queue's minimum amount, discount
+and deadline. Sandbox retains Veda's separate devnet Test Vault; mainnet PRIME
+rows are browse-only there. APY remains unavailable unless a feed reports it.
+
 ## Check that it takes deposits
 
 | Check | Pass when |
@@ -37001,7 +37018,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
       - **`depositMints`** · `string[]` · required
 
-        Mints the strategy accepts directly. The first is the deposit token.
+        Mints the strategy accepts directly. The first is the deposit token. Veda's mainnet USDC PRIME and OUSD PRIME each pin their own asset, USDC and OUSD respectively.
 
       - **`shareMint`** · `string` · example `hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2`
 
@@ -37294,7 +37311,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
       - **`depositMints`** · `string[]` · required
 
-        Mints the strategy accepts directly. The first is the deposit token.
+        Mints the strategy accepts directly. The first is the deposit token. Veda's mainnet USDC PRIME and OUSD PRIME each pin their own asset, USDC and OUSD respectively.
 
       - **`shareMint`** · `string` · example `hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2`
 

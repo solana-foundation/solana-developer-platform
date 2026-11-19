@@ -19,10 +19,10 @@ something that establishes them.
 return, so the catalogue reports none and the dashboard renders "—" rather than
 a fabricated figure.
 
-- Fetched: `2026-09-01T00:54:16.428Z`
-- Declared deposit tokens: **USDC** (`VEDA_DEPOSIT_TOKEN_SYMBOLS`)
-- Vaults configured across clusters: **1**
-- Clusters read: **1 of 2**
+- Fetched: `2026-11-19T14:47:42.717Z`
+- Declared deposit tokens: **USDC, OUSD** (`VEDA_DEPOSIT_TOKEN_SYMBOLS`)
+- Vaults configured across clusters: **3**
+- Clusters read: **2 of 2**
 
 ## What each column decides
 
@@ -55,4 +55,17 @@ a fabricated figure.
 
 ### mainnet-beta
 
-_Not read: SDP has no confirmed Veda deployment for this cluster._
+- Vaults configured: **2**
+- Catalogued by SDP: **2**
+
+| Vault | Name | Base | Shelf | Deposit assets | Liquidity | Fees (platform/perf) | Flags |
+|---|---|---|---|---|---|---|---|
+| `7PjRdSecsdyUaasPqsQSDyBz67FMJPZT82KCkpXCb1sy` | USDC PRIME | USDC | catalogued | USDC | delayed | 0 / 500 bps | restricted redemption |
+| `5qXvYYBRWwW9JYgFAfu3TpWLRaeJ31sEWNWW2cSvU8ZV` | OUSD PRIME | OUSD | catalogued | OUSD | delayed | 0 / 500 bps | restricted redemption |
+
+#### Asset configuration, as the vault declares it
+
+| Vault | Asset | Deposits | Withdrawals | SDP fronts it |
+|---|---|---|---|---|
+| `7PjRdSecsdyUaasPqsQSDyBz67FMJPZT82KCkpXCb1sy` | USDC | yes | yes | yes |
+| `5qXvYYBRWwW9JYgFAfu3TpWLRaeJ31sEWNWW2cSvU8ZV` | OUSD | yes | yes | yes |
