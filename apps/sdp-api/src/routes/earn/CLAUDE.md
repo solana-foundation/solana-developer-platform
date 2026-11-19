@@ -181,8 +181,10 @@ coordinate execution; provider withdrawal requests own their obligations.
 Canonical wallet transaction tables store new builds and enforce tenant RLS.
 Old build tables remain unused by the replacement, with no copying or dual
 writes. Strategy references retain synchronized aliases where current ledger
-writers still use them. Old physical objects require a separate schema-only
-deployment to remove; HTTP compatibility routes are not required.
+writers still use them. The schema-only companion removes the five unused
+legacy tables after this rewrite is serving, including retired provider-wallet
+positions and movements. Current wallet holdings and async recovery remain.
+HTTP compatibility routes are not required.
 
 Run core routes, operations repository/recovery/worker and affected provider
 service tests. Keep explicit regression coverage for exact-byte retries,

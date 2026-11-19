@@ -101,6 +101,9 @@ Migrations are additive while the previous revision serves traffic. Canonical
 wallet transaction tables start empty, enforce tenant RLS and retain the build
 constraints needed by current operations. Old builds are neither copied nor
 resumed. Strategy references retain synchronized aliases where current ledger
-writers still use them. Old physical objects remain until a separate schema-only
-deployment can remove them. No historical action adoption or compatibility
-execution path is supported.
+writers still use them. A schema-only companion removes five obsolete tables
+and the retired provider-wallet position link after the rewrite is serving.
+Old prelaunch provider positions and movements are deliberately discarded; live
+wallet positions, movements and recovery records remain. The breaking migration
+uses the serving-parent deployment gate and permits only forward recovery. No
+historical action adoption or compatibility execution path is supported.

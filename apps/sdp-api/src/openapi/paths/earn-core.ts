@@ -1,6 +1,6 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { operationResponseSchema } from "@sdp/types/operations";
-import { successResponseSchema } from "@/openapi/schemas/base";
+import { successResponseSchema, withOpenApi } from "@/openapi/schemas/base";
 import {
   earnDiscoveryResponseSchema,
   earnPositionsResponseSchema,
@@ -77,23 +77,24 @@ export function registerEarnCorePaths(registry: OpenAPIRegistry) {
         }),
         body: {
           required: true,
-          content: {
-            "application/json": {
-              schema:
-                direction === "deposit" ? prepareEarnDepositSchema : prepareEarnWithdrawalSchema,
-              example:
-                direction === "deposit"
-                  ? {
-                      strategyId: "strategy_example",
-                      source: { ownerAddress: "<owner-public-key>" },
-                      amount: {
-                        mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
-                        value: "100",
-                      },
-                    }
-                  : { positionId: "position_example", amount: { kind: "all" } },
-            },
-          },
+          content: jsonContent(
+            withOpenApi(
+              direction === "deposit" ? prepareEarnDepositSchema : prepareEarnWithdrawalSchema,
+              {
+                example:
+                  direction === "deposit"
+                    ? {
+                        strategyId: "strategy_example",
+                        source: { ownerAddress: "<owner-public-key>" },
+                        amount: {
+                          mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+                          value: "100",
+                        },
+                      }
+                    : { positionId: "position_example", amount: { kind: "all" } },
+              }
+            )
+          ),
         },
       },
       responses: {

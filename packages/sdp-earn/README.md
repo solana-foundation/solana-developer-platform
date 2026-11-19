@@ -87,7 +87,9 @@ execution path is supported. Current operations use one async lifecycle.
 
 Canonical database access uses `earn_wallet_transactions` and
 `earn_wallet_withdrawal_request_transactions`. New builds use these physical
-tables. Old build tables are unused by the replacement; no data is copied.
+tables. A schema-only companion removes superseded build storage, split-swap
+advisories, provider actions and provider wallets after the rewrite is serving.
+No old builds are copied or resumed.
 
 The replacement contract remains internal pending named security sign-off. Read
 `apps/sdp-docs/content/unpublished/earn/core-api.mdx` for requests and recovery,
@@ -118,7 +120,6 @@ module visibility, not the provider on/off lever — see the ADR 0002 addendum.
 | Provider withdrawal obligations           | `earn_vault_withdrawal_requests` and its actions                 |
 | Dashboard client and polling              | `apps/sdp-web/src/lib/earn-client.ts`, `earn-core-data.ts`       |
 
-`earn_provider_wallets` retains legacy provider accounts, not holdings.
 `CLAUDE.md` describes provider capabilities and the execution invariants.
 
 ## Catalogue data: the sync cron and metrics refresh

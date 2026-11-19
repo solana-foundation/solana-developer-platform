@@ -514,11 +514,10 @@ export function isVaultDirectDepositEnabled(environment: string, provider: strin
 /**
  * Fail-closed surfacing check for an OPEN string.
  *
- * Provider ids reach this from `earn_strategies.provider` and
- * `earn_provider_wallets.provider`, TEXT columns a newer deploy may have
- * written, so an unrecognized id must read as "not offered" rather than index
- * into the map. `Object.hasOwn`, not `in`: a prototype key like "toString" must
- * not defeat the guard — the same rule `isEarnProviderId` follows in @sdp/earn.
+ * Provider ids come from open TEXT columns such as `earn_strategies.provider`.
+ * An unrecognized id must read as "not offered" rather than index into the map.
+ * `Object.hasOwn`, not `in`: a prototype key like "toString" must not defeat
+ * the guard, matching `isEarnProviderId` in @sdp/earn.
  */
 export function isEarnProviderSurfaced(provider: string): boolean {
   return (

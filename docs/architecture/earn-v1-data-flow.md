@@ -4,7 +4,9 @@ Historical companion to
 [ADR 0002](../decisions/0002-earn-provider-pluggability.md). The split product
 routes and synchronous writers below describe the V1 baseline. The
 [core API design](earn-core-api-proposal.md) documents the replacement contract,
-asynchronous execution and retained recovery paths.
+asynchronous execution and retained recovery paths. The
+`earn_external_wallet_transactions` name below is historical; current builds
+use `earn_wallet_transactions` for every wallet source.
 
 This baseline maps which existing SDP components Earn reuses.
 **Earn adds a domain, not a platform**: auth,

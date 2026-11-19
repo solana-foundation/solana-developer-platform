@@ -60,40 +60,22 @@ function mapStrategyRow(row: Record<string, unknown>): EarnStrategyRow {
   };
 }
 
-/**
- * Shared count+page read for the earn list methods (same shape as the
- * payments-family where-builder idiom).
- *
- * `ordering` is a literal ORDER BY body (never caller input) and every value
- * passed must be TOTAL: end it with an `id` tiebreaker, because bulk catalogue
- * syncs write many rows in the same sdp_iso_now() instant and any prefix of the
- * sort can tie — a non-total order makes OFFSET pages repeat and skip rows.
- *
- * REQUIRED rather than defaulted, so a new list states its own order instead of
- * inheriting one silently: the two existing callers want genuinely different
- * orders (strategies rank by TVL, programs oldest-first so the head of that
- * list cannot move when a program is created — migration 0056's header explains
- * what breaks if it does), which is exactly the situation where an invisible
- * default is the wrong answer. `NEWEST_FIRST` stays as the shared tail every
- * total ordering can end with.
- */
 const NEWEST_FIRST = "created_at DESC, id DESC";
 
-async function selectPage<Row>(
+/** Count and page strategies using an internal order with an id tiebreaker. */
+async function selectStrategyPage(
   db: AppDb,
-  table: "earn_strategies" | "earn_provider_wallets",
   conditions: string[],
   bindings: unknown[],
   window: { limit: number; offset: number },
-  mapRow: (row: Record<string, unknown>) => Row,
   ordering: string
-): Promise<{ rows: Row[]; total: number }> {
+): Promise<{ rows: EarnStrategyRow[]; total: number }> {
   const where = conditions.join(" AND ");
 
   const [page, countRow] = await Promise.all([
     db
       .prepare(
-        `SELECT * FROM ${table}
+        `SELECT * FROM earn_strategies
            WHERE ${where}
            ORDER BY ${ordering}
            LIMIT ? OFFSET ?`
@@ -101,13 +83,13 @@ async function selectPage<Row>(
       .bind(...bindings, window.limit, window.offset)
       .all<Record<string, unknown>>(),
     db
-      .prepare(`SELECT COUNT(*)::int AS total FROM ${table} WHERE ${where}`)
+      .prepare(`SELECT COUNT(*)::int AS total FROM earn_strategies WHERE ${where}`)
       .bind(...bindings)
       .first<{ total: number }>(),
   ]);
 
   return {
-    rows: (page.results ?? []).map(mapRow),
+    rows: (page.results ?? []).map(mapStrategyRow),
     total: countRow?.total ?? 0,
   };
 }
@@ -551,13 +533,11 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
       // malformed row — a string `"12M"`, a bool — into a 500 on EVERY
       // `GET /strategies` for that environment, an outage far from the write
       // that caused it. Guarded, such a row reads as unsized and sorts last.
-      return selectPage(
+      return selectStrategyPage(
         db,
-        "earn_strategies",
         conditions,
         bindings,
         input,
-        mapStrategyRow,
         `CASE WHEN jsonb_typeof(risk_metadata->'tvlUsd') = 'number'
               THEN (risk_metadata->>'tvlUsd')::numeric END DESC NULLS LAST, ${NEWEST_FIRST}`
       );

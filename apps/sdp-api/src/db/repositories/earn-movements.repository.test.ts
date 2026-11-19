@@ -592,7 +592,6 @@ describe("Unified earn movement ledger (postgres)", () => {
         vault_address: VAULT,
         token_mint: TOKEN_MINT,
         share_mint: SHARE_MINT,
-        provider_wallet_id: null,
       });
       expect(position.activated_at).not.toBeNull();
 

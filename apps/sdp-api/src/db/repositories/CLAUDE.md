@@ -44,16 +44,18 @@ remain separate.
 Provider cleanup for permission loss or expiry does not reopen this capability.
 
 Deposit acceptance commits verified owner-signed bytes, `audit_intent_id`
-and `execution_requested_at` together (0244). No audit admission means no queued
+and `execution_requested_at` together (0234). No audit admission means no queued
 deposit. Exits retain their durable execution request if auditing is unavailable.
 Neither acceptance nor an operation status proves settlement.
 
 New shared references use `strategy_id` and `strategy_reference`.
-Migration 0238 synchronizes `strategy_reference` with `vault_address` on
+Migration 0236 synchronizes `strategy_reference` with `vault_address` on
 positions, movements and direct builds while previous revisions serve traffic;
 keep the alias until deployment drain. A discovered holding receives unknown
-cost basis (0241), never a synthetic deposit or earnings. Current operations use the same movement ledger and provider obligations;
-do not create a second financial ledger or adopt old prelaunch actions.
+cost basis (0236), never a synthetic deposit or earnings. Current operations
+use the same movement ledger and provider obligations; do not create a second
+financial ledger or adopt old prelaunch actions. The schema-only companion
+removes unused legacy storage after the rewrite is serving.
 
 Things that will bite:
 - **Legal source states come from `EARN_MOVEMENT_TRANSITIONS` (`@sdp/types`),

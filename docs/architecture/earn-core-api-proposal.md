@@ -47,9 +47,10 @@ such as vault, reserve and redemption order.
 
 New database references use `strategy_id` and `strategy_reference`. Canonical
 wallet transaction tables store new operation builds with tenant-enforced RLS.
-They do not import old builds or mirror writes. Old physical tables remain
-untouched so the previous revision can serve during migration. Strategy columns
-retain synchronized aliases where current ledger writers still use them.
+They do not import old builds or mirror writes. A schema-only companion removes
+the two superseded build tables, split-swap advisories, provider actions and
+provider wallets after the rewrite is serving. Strategy columns retain
+synchronized aliases where current ledger writers still use them.
 
 ## Verified baseline
 
@@ -212,10 +213,17 @@ swap-status polling or second deposit preparation is needed.
 
 ## Rollout and remaining gates
 
-Migrations are additive because the previous revision serves during migration.
-New wallet transaction tables start empty. Old physical objects remain unused
-by the replacement; removing them requires a separate schema-only deployment.
-Do not restore HTTP aliases or historical execution paths.
+The rewrite creates canonical wallet transaction tables directly, with no
+legacy-table copies or intermediate alterations. Five migrations replace the
+previous twelve added by this PR.
+
+The schema-only companion then removes five obsolete tables and the retired
+provider-wallet position link. It deliberately discards old prelaunch provider
+positions and movements. Deploy the rewrite first: production and beta require
+the cleanup parent, or a descendant, to be serving before applying the breaking
+migration. Recovery after removal is a forward fix. No production database is
+changed by preparing these PRs. Do not restore HTTP aliases or historical
+execution paths.
 
 See the [threat model](../security/earn-core-api-threat-model.md) and
 [internal contract guide](../../apps/sdp-docs/content/unpublished/earn/core-api.mdx).

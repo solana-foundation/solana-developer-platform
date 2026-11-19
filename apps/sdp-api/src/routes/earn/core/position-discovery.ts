@@ -38,7 +38,6 @@ export function discoveredEarnPositionRow(
     strategy_reference: strategy.provider_reference,
     share_mint: strategy.share_mint,
     token_mint: tokenMint,
-    provider_wallet_id: null,
     label: strategy.name,
     created_by: null,
     created_at: strategy.created_at,

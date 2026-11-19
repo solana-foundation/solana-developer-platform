@@ -1,9 +1,39 @@
--- The prelaunch core starts with canonical build storage. Historical tables
--- remain untouched; no alias, data copy, replay or dual write joins the stores.
--- LIKE retains column types, nullability, defaults and indexes. Foreign keys,
--- checks and tenant policies are explicit because LIKE does not copy them all.
+-- Canonical unsigned build storage starts empty for the prelaunch core.
+-- It has no dependency on, data copy from or dual write to retired build tables.
+-- Movement and provider-request ledgers remain the settlement authority.
 CREATE TABLE earn_wallet_transactions (
-    LIKE earn_external_wallet_transactions INCLUDING DEFAULTS INCLUDING INDEXES,
+    id TEXT PRIMARY KEY,
+    organization_id TEXT NOT NULL,
+    project_id TEXT,
+    environment TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    strategy_id TEXT,
+    custody_wallet_id TEXT,
+    fee_mode TEXT NOT NULL DEFAULT 'wallet',
+    operation_only BOOLEAN NOT NULL DEFAULT FALSE,
+    direction TEXT NOT NULL,
+    owner_address TEXT NOT NULL,
+    vault_address TEXT NOT NULL,
+    strategy_reference TEXT,
+    token_mint TEXT NOT NULL,
+    share_mint TEXT NOT NULL,
+    label TEXT NOT NULL,
+    position_id TEXT,
+    denomination TEXT NOT NULL,
+    amount_requested TEXT NOT NULL,
+    min_shares_out TEXT,
+    creates_share_account BOOLEAN NOT NULL DEFAULT FALSE,
+    fee_payer TEXT,
+    share_ata_rent_funder TEXT,
+    unsigned_transaction TEXT NOT NULL,
+    last_valid_block_height NUMERIC NOT NULL,
+    movement_id TEXT,
+    consumed_at TEXT,
+    created_by TEXT,
+    initiated_by_key_id TEXT,
+    created_at TEXT NOT NULL DEFAULT sdp_iso_now(),
+    updated_at TEXT NOT NULL DEFAULT sdp_iso_now(),
+
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL,
     FOREIGN KEY (direction) REFERENCES earn_movement_directions(id),
@@ -12,6 +42,7 @@ CREATE TABLE earn_wallet_transactions (
     FOREIGN KEY (created_by) REFERENCES users(id),
     FOREIGN KEY (strategy_id) REFERENCES earn_strategies(id) ON DELETE SET NULL,
     FOREIGN KEY (custody_wallet_id) REFERENCES custody_wallets(id),
+    CONSTRAINT earn_wallet_transactions_movement_id_key UNIQUE (movement_id),
     CONSTRAINT earn_wallet_transactions_environment_check
         CHECK (environment IN ('sandbox', 'production')),
     CONSTRAINT earn_wallet_transactions_owner_address_format_check
@@ -39,6 +70,16 @@ CREATE TABLE earn_wallet_transactions (
         CHECK (fee_mode IN ('wallet', 'partner', 'sponsored'))
 );
 
+-- Once restricted to operation execution, a build cannot be downgraded.
+CREATE FUNCTION sdp_earn_operation_only_build() RETURNS TRIGGER
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF OLD.operation_only AND NOT NEW.operation_only THEN
+        RAISE EXCEPTION 'Earn operation-only build restriction is irreversible';
+    END IF;
+    RETURN NEW;
+END;
+$$;
 CREATE TRIGGER earn_transactions_strategy_reference
 BEFORE INSERT OR UPDATE ON earn_wallet_transactions
 FOR EACH ROW EXECUTE FUNCTION sync_earn_strategy_reference();
@@ -47,8 +88,43 @@ BEFORE UPDATE ON earn_wallet_transactions
 FOR EACH ROW EXECUTE FUNCTION sdp_earn_operation_only_build();
 
 CREATE TABLE earn_wallet_withdrawal_request_transactions (
-    LIKE earn_external_wallet_withdrawal_request_transactions
-        INCLUDING DEFAULTS INCLUDING INDEXES,
+    id TEXT PRIMARY KEY,
+    organization_id TEXT NOT NULL,
+    project_id TEXT,
+    environment TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    position_id TEXT,
+    withdrawal_request_id TEXT,
+    custody_wallet_id TEXT,
+    strategy_id TEXT,
+    fee_mode TEXT NOT NULL DEFAULT 'wallet',
+    operation_only BOOLEAN NOT NULL DEFAULT FALSE,
+    action TEXT NOT NULL,
+    owner_address TEXT NOT NULL,
+    vault_address TEXT NOT NULL,
+    token_mint TEXT NOT NULL,
+    share_mint TEXT NOT NULL,
+    request_address TEXT NOT NULL,
+    mechanism TEXT NOT NULL DEFAULT 'solver_queue',
+    shares TEXT,
+    quoted_assets TEXT,
+    share_decimals SMALLINT,
+    asset_decimals SMALLINT,
+    intermediate_mint TEXT,
+    intermediate_amount TEXT,
+    discount_bps INTEGER,
+    maturity_timestamp NUMERIC,
+    deadline_timestamp NUMERIC,
+    fee_payer TEXT,
+    unsigned_transaction TEXT NOT NULL,
+    last_valid_block_height NUMERIC NOT NULL,
+    consumed_action_id TEXT,
+    consumed_at TEXT,
+    created_by TEXT,
+    initiated_by_key_id TEXT,
+    created_at TEXT NOT NULL DEFAULT sdp_iso_now(),
+    updated_at TEXT NOT NULL DEFAULT sdp_iso_now(),
+
     -- An owner-address position stores its owner; a custody position stores
     -- the wallet id and leaves that owner column NULL.
     position_owner_address TEXT GENERATED ALWAYS AS (
@@ -72,6 +148,8 @@ CREATE TABLE earn_wallet_withdrawal_request_transactions (
     FOREIGN KEY (created_by) REFERENCES users(id),
     FOREIGN KEY (custody_wallet_id) REFERENCES custody_wallets(id),
     FOREIGN KEY (strategy_id) REFERENCES earn_strategies(id),
+    CONSTRAINT earn_wallet_withdrawal_request_transactions_consumed_action_key
+        UNIQUE (consumed_action_id),
     CONSTRAINT earn_wallet_withdrawal_request_transactions_environment_check
         CHECK (environment IN ('sandbox', 'production')),
     CONSTRAINT earn_wallet_withdrawal_request_transactions_action_check

@@ -43,13 +43,9 @@ describe("Earn queued withdrawal repository", () => {
   let sequence = 0;
 
   describe("canonical wallet build storage", () => {
-    // Historical storage stays separate from the prelaunch core.
-    const legacyDirect = "earn_external_wallet_transactions";
-    const legacyQueue = "earn_external_wallet_withdrawal_request_transactions";
-
     async function directBuild() {
       return createPostgresEarnWalletTransactionsRepository(getDb(env)).create({
-        id: "earn_wallet_transaction_alias_test",
+        id: "earn_wallet_transaction_storage_test",
         organizationId: ORG,
         projectId: PROJECT,
         environment: "sandbox",
@@ -59,7 +55,7 @@ describe("Earn queued withdrawal repository", () => {
         vaultAddress: VAULT,
         tokenMint: TOKEN_MINT,
         shareMint: SHARE_MINT,
-        label: "Alias test",
+        label: "Storage test",
         denomination: TOKEN_MINT,
         amountRequested: "1",
         createsShareAccount: false,
@@ -72,7 +68,7 @@ describe("Earn queued withdrawal repository", () => {
       input: { positionId?: string; custodyWalletId?: string; ownerAddress?: string } = {}
     ) {
       return repository.createWalletTransaction({
-        id: "earn_wallet_withdrawal_request_transaction_alias_test",
+        id: "earn_wallet_withdrawal_request_transaction_storage_test",
         organizationId: ORG,
         projectId: PROJECT,
         environment: "sandbox",
@@ -84,7 +80,7 @@ describe("Earn queued withdrawal repository", () => {
         vaultAddress: VAULT,
         tokenMint: TOKEN_MINT,
         shareMint: SHARE_MINT,
-        requestAddress: "AliasQueueRequestAddress111111111111111111",
+        requestAddress: "StorageQueueRequestAddress111111111111111111",
         shares: "1",
         quotedAssets: "0.99",
         shareDecimals: 6,
@@ -116,37 +112,23 @@ describe("Earn queued withdrawal repository", () => {
       ).toBe(true);
     });
 
-    it("retains constraints without linking historical build storage", async () => {
-      const db = getDb(env);
-      for (const [current, historical] of [
-        ["earn_wallet_transactions", legacyDirect],
-        ["earn_wallet_withdrawal_request_transactions", legacyQueue],
-      ]) {
-        const definitions = async (table: string) =>
-          (
-            await db.queryMany<{ definition: string }>(
-              `SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
-            WHERE conrelid = ?::regclass AND conname <> 'earn_queued_build_custody_position_fk'`,
-              [table]
-            )
-          )
-            .map((row) => row.definition.replaceAll("position_owner_address", "owner_address"))
-            .sort();
-        expect(await definitions(current)).toEqual(await definitions(historical));
-        const names = await db.queryMany<{ conname: string }>(
-          "SELECT conname FROM pg_constraint WHERE conrelid = ?::regclass",
-          [current]
-        );
-        expect(names.every((row) => !row.conname.includes("external_wallet"))).toBe(true);
-      }
+    it("rejects nonpositive deposits and incomplete consumption claims", async () => {
       const direct = await directBuild();
       const queued = await queuedBuild();
-      expect(
-        await db.queryOne(`SELECT id FROM ${legacyDirect} WHERE id = ?`, [direct.id])
-      ).toBeNull();
-      expect(
-        await db.queryOne(`SELECT id FROM ${legacyQueue} WHERE id = ?`, [queued.id])
-      ).toBeNull();
+      const db = getDb(env);
+      await expect(
+        db.execute("UPDATE earn_wallet_transactions SET amount_requested = '0' WHERE id = ?", [
+          direct.id,
+        ])
+      ).rejects.toThrow(/check constraint/i);
+      for (const [table, id, consumed] of [
+        ["earn_wallet_transactions", direct.id, "movement_id"],
+        ["earn_wallet_withdrawal_request_transactions", queued.id, "consumed_action_id"],
+      ]) {
+        await expect(
+          db.execute(`UPDATE ${table} SET ${consumed} = 'missing' WHERE id = ?`, [id])
+        ).rejects.toThrow(/check constraint/i);
+      }
     });
 
     it("retains the owner position claim in both directions", async () => {

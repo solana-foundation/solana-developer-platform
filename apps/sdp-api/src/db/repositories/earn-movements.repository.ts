@@ -32,10 +32,6 @@ import { conflict } from "@/lib/errors";
  * replaced (`earn_program_withdrawals`, `earn_vault_movements`,
  * `earn_vault_positions`) are gone, dropped by migration 0068 along with the
  * projection views that carried their history across.
- *
- * `earn_provider_wallets` is deliberately NOT among them: it models an ACCOUNT at
- * a provider — the custodial twin of `custody_wallets` — and an account is not a
- * holding. A custodial position is the link row between the two.
  */
 
 /**
@@ -116,8 +112,6 @@ export interface EarnPositionRow {
   vault_address: string | null;
   share_mint: string | null;
   token_mint: string | null;
-  /** custodial only — the program wallet this holding is reached through. */
-  provider_wallet_id: string | null;
   label: string;
   created_by: string | null;
   created_at: string;

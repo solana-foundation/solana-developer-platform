@@ -8,7 +8,11 @@ The [core API replacement](../architecture/earn-core-api-proposal.md) supersedes
 the historical product routes, allocation contracts and split funding flow
 described below. Current deposits combine swap and deposit instructions
 atomically or refuse preparation. Shared `/submit` only queues a reviewed
-transaction; `/refresh` prepares terms or selects an advertised withdrawal route.
+transaction; `/refresh` prepares terms or selects an advertised withdrawal route
+before submission is accepted. Current unsigned builds use
+`earn_wallet_transactions` for every wallet source. References below to
+`earn_external_wallet_transactions` describe the historical schema. The
+schema-only companion removes it after the rewrite is serving.
 
 ## Context
 

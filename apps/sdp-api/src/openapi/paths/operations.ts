@@ -5,7 +5,7 @@ import {
   refreshOperationSchema,
   submitOperationSchema,
 } from "@sdp/types/operations";
-import { successResponseSchema } from "@/openapi/schemas/base";
+import { successResponseSchema, withOpenApi } from "@/openapi/schemas/base";
 import {
   emptyOperationBodySchema,
   operationIdParamsSchema,
@@ -81,26 +81,27 @@ export function registerOperationsPaths(registry: OpenAPIRegistry) {
         params: operationIdParamsSchema,
         body: {
           required: true,
-          content: {
-            "application/json": {
-              schema:
-                action === "submit"
-                  ? submitOperationSchema
-                  : action === "refresh"
-                    ? refreshOperationSchema
-                    : emptyOperationBodySchema,
-              example:
-                action === "submit"
-                  ? {
-                      actionId: "opact_example",
-                      version: 1,
-                      signedTransaction: "<base64-signed-transaction>",
-                    }
-                  : action === "refresh"
-                    ? { actionId: "opact_example", version: 1 }
-                    : {},
-            },
-          },
+          content: jsonContent(
+            withOpenApi(
+              action === "submit"
+                ? submitOperationSchema
+                : action === "refresh"
+                  ? refreshOperationSchema
+                  : emptyOperationBodySchema,
+              {
+                example:
+                  action === "submit"
+                    ? {
+                        actionId: "opact_example",
+                        version: 1,
+                        signedTransaction: "<base64-signed-transaction>",
+                      }
+                    : action === "refresh"
+                      ? { actionId: "opact_example", version: 1 }
+                      : {},
+              }
+            )
+          ),
         },
       },
       responses: {
