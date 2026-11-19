@@ -400,6 +400,9 @@ importers:
       esbuild:
         specifier: 0.28.1
         version: 0.28.1
+      jose:
+        specifier: 6.2.13
+        version: 6.2.13
       tsx:
         specifier: 4.23.15
         version: 4.23.15

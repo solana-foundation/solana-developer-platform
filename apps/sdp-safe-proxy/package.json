@@ -21,6 +21,7 @@
   "devDependencies": {
     "@types/node": "26.6.5",
     "esbuild": "0.28.2",
+    "jose": "6.2.13",
     "tsx": "4.23.15",
     "typescript": "6.0.3"
   }
