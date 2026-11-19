@@ -1,5 +1,6 @@
 "use client";
 
+import type { MovementId } from "@sdp/types/movements";
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
@@ -54,26 +55,42 @@ const CURRENCIES = ["USD", "EUR", "GBP"] as const;
 const NUMERIC = "numeric";
 const ACCESS_ALLOWLIST: DraftAccess = "allowlist";
 
-const AUTHORITIES: { key: AuthorityKey; name: MessageKey; why: MessageKey }[] = [
+/**
+ * Each key with the movement its wallet signs, which decides which wallets its
+ * picker offers (PRO-2435 D1). The mint and metadata wallets sign the deploy
+ * itself (`issuance.authority`, a start the API refuses a held-back wallet
+ * for); the freeze authority and the permanent delegate are only recorded on
+ * the mint, and their own operations are exits the rule never refuses.
+ */
+const AUTHORITIES: {
+  key: AuthorityKey;
+  name: MessageKey;
+  why: MessageKey;
+  movement: MovementId;
+}[] = [
   {
     key: "mint-authority",
     name: "DashboardIssuance.newDesign.permissions.mint",
     why: "DashboardIssuance.newDesign.draft.mintAuthorityWhy",
+    movement: "issuance.authority",
   },
   {
     key: "freeze-authority",
     name: "DashboardIssuance.newDesign.permissions.freeze",
     why: "DashboardIssuance.newDesign.draft.freezeAuthorityWhy",
+    movement: "issuance.control",
   },
   {
     key: "metadata-authority",
     name: "DashboardIssuance.newDesign.permissions.metadata",
     why: "DashboardIssuance.newDesign.draft.metadataAuthorityWhy",
+    movement: "issuance.authority",
   },
   {
     key: "permanent-delegate",
     name: "DashboardIssuance.newDesign.permissions.delegate",
     why: "DashboardIssuance.newDesign.draft.delegateAuthorityWhy",
+    movement: "issuance.control",
   },
 ];
 
@@ -493,9 +510,10 @@ export function PermissionsStep({
 }) {
   const t = useTranslations();
   const projectHref = useProjectHref();
-  // A key's wallet signs the token's starts, so the rule may hold one back (PRO-2435 D1).
-  const offeredWallets = walletsStartingMovement(wallets, "issuance.authority");
-  if (walletsError || offeredWallets.length === 0) {
+  // The mint wallet signs the deploy, so the rule may hold one back (PRO-2435 D1);
+  // without one the step has nothing to offer.
+  const signingWallets = walletsStartingMovement(wallets, "issuance.authority");
+  if (walletsError || signingWallets.length === 0) {
     return (
       <div className="flex flex-col items-start gap-4">
         <p className="max-w-[40em] text-body text-secondary">
@@ -529,7 +547,7 @@ export function PermissionsStep({
                     update({ authorities: { ...draft.authorities, [authority.key]: value } });
                 }}
               >
-                {offeredWallets.map((wallet) => (
+                {walletsStartingMovement(wallets, authority.movement).map((wallet) => (
                   <SelectItem key={wallet.id} value={wallet.id}>
                     {wallet.label?.trim() ||
                       `${wallet.publicKey.slice(0, 5)}…${wallet.publicKey.slice(-4)}`}

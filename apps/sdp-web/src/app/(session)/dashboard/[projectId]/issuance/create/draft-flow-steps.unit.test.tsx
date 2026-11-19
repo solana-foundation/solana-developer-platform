@@ -79,13 +79,27 @@ function renderPermissions(wallets: PaymentsDashboardWallet[]) {
 }
 
 describe("PermissionsStep", () => {
-  it("offers each key a managed Fireblocks wallet and a Privy connection, not a Fireblocks connection", async () => {
+  it("offers the signing keys a managed Fireblocks wallet and a Privy connection, not a Fireblocks connection", async () => {
     const user = userEvent.setup();
     renderPermissions([fireblocksByok, fireblocksManaged, privyByok]);
-    await user.click(screen.getByRole("combobox", { name: "Mint authority" }));
-    const names = (await screen.findAllByRole("option")).map((option) => option.textContent);
-    expect(names).toEqual(["Managed vault", "Privy wallet"]);
+    for (const name of ["Mint authority", "Metadata authority"]) {
+      await user.click(screen.getByRole("combobox", { name }));
+      const names = (await screen.findAllByRole("option")).map((option) => option.textContent);
+      expect(names).toEqual(["Managed vault", "Privy wallet"]);
+      await user.keyboard("{Escape}");
+    }
     expect(screen.queryByText(/send direct payments only/)).toBeNull();
+  });
+
+  it("keeps a Fireblocks connection for the freeze authority and the permanent delegate, which only sign exits", async () => {
+    const user = userEvent.setup();
+    renderPermissions([fireblocksByok, fireblocksManaged, privyByok]);
+    for (const name of ["Freeze authority", "Permanent delegate"]) {
+      await user.click(screen.getByRole("combobox", { name }));
+      const names = (await screen.findAllByRole("option")).map((option) => option.textContent);
+      expect(names).toEqual(["Fireblocks vault", "Managed vault", "Privy wallet"]);
+      await user.keyboard("{Escape}");
+    }
   });
 
   it("explains why no wallet is offered when only Fireblocks connections exist", () => {
