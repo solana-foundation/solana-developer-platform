@@ -30,12 +30,10 @@ describe("EarnRepository (postgres)", () => {
 
   beforeEach(async () => {
     const db = getDb(env);
-    // The ledger references both the withdrawal's holding and the program
-    // wallet, so it is cleared first.
+    // Clear movements before the holdings they reference.
     await db.prepare("DELETE FROM earn_movements").run();
     await db.prepare("DELETE FROM earn_positions").run();
     await db.prepare("DELETE FROM earn_strategies").run();
-    await db.prepare("DELETE FROM earn_provider_wallets").run();
     await db.prepare("DELETE FROM projects").run();
 
     await db
@@ -95,18 +93,12 @@ describe("EarnRepository (postgres)", () => {
     return row;
   }
 
-  type OrderedTable = "earn_strategies" | "earn_movements" | "earn_provider_wallets";
-
-  async function setCreatedAt(table: OrderedTable, id: string, createdAt: string): Promise<void> {
-    await getDb(env)
-      .prepare(`UPDATE ${table} SET created_at = ? WHERE id = ?`)
-      .bind(createdAt, id)
-      .run();
-  }
-
-  async function freezeCreatedAt(table: OrderedTable, ids: readonly string[]): Promise<void> {
+  async function freezeStrategyCreatedAt(ids: readonly string[]): Promise<void> {
     for (const id of ids) {
-      await setCreatedAt(table, id, SHARED_CREATED_AT);
+      await getDb(env)
+        .prepare("UPDATE earn_strategies SET created_at = ? WHERE id = ?")
+        .bind(SHARED_CREATED_AT, id)
+        .run();
     }
   }
 
@@ -800,7 +792,7 @@ describe("EarnRepository (postgres)", () => {
       for (let i = 0; i < 5; i += 1) {
         ids.push((await seedStrategy({ providerReference: `vault-${i}` })).id);
       }
-      await freezeCreatedAt("earn_strategies", ids);
+      await freezeStrategyCreatedAt(ids);
       const expected = [...ids].sort().reverse();
 
       const seen: string[] = [];
@@ -859,7 +851,7 @@ describe("EarnRepository (postgres)", () => {
         providerReference: "vault-small",
         riskMetadata: { tvlUsd: 3_000_000 },
       });
-      await freezeCreatedAt("earn_strategies", [mid.id, unsized.id, big.id, small.id]);
+      await freezeStrategyCreatedAt([mid.id, unsized.id, big.id, small.id]);
 
       const { rows, total } = await repo.listStrategies({
         environment: "sandbox",
@@ -890,7 +882,7 @@ describe("EarnRepository (postgres)", () => {
         providerReference: "vault-bool",
         riskMetadata: { tvlUsd: true },
       });
-      await freezeCreatedAt("earn_strategies", [sized.id, malformed.id, bool.id]);
+      await freezeStrategyCreatedAt([sized.id, malformed.id, bool.id]);
 
       const { rows, total } = await repo.listStrategies({
         environment: "sandbox",
@@ -936,7 +928,7 @@ describe("EarnRepository (postgres)", () => {
         );
       }
       const all = [...tied, top.id, ...unsized];
-      await freezeCreatedAt("earn_strategies", all);
+      await freezeStrategyCreatedAt(all);
 
       const expected = [top.id, ...[...tied].sort().reverse(), ...[...unsized].sort().reverse()];
 
