@@ -644,7 +644,7 @@ jobs:
             -e SAFE_PROXY_CRON_CALLER_EMAIL=cron@ci.iam.gserviceaccount.com \
             sdp-safe-proxy:ci
           trap 'docker logs safe-proxy; docker rm -f safe-proxy' EXIT
-          curl --fail --silent --retry 10 --retry-connrefused --retry-delay 1 \
+          curl --fail --silent --retry 10 --retry-all-errors --retry-delay 1 \
             http://127.0.0.1:8787/health/ready
           answer="$(curl --silent --write-out ' %{http_code}' -X POST \
             -H 'content-type: application/json' -d '{}' \
