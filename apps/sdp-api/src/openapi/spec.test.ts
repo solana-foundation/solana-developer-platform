@@ -895,9 +895,7 @@ describe("OpenAPI spec", () => {
       // The 501 rule needs a 501 to police: a document that publishes Earn
       // operations must carry at least one, or the narrowing below would pass
       // with nothing to check. Stable hides Earn, so this is per document.
-      const publishesEarn = Object.keys(doc.paths ?? {}).some((path) =>
-        path.startsWith("/v1/earn")
-      );
+      const publishesEarn = Object.keys(doc.paths).some((path) => path.startsWith("/v1/earn"));
       if (publishesEarn) {
         expect(
           lists.some(({ status }) => status === "501"),
