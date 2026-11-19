@@ -367,7 +367,7 @@ function postVaultDeposit(
   const key = idempotencyKey;
   delete request.requestId;
   return app.request(
-    "/v1/earn/vault-deposits",
+    "/v1/earn/deposits/execute",
     {
       method: "POST",
       headers: {
@@ -410,7 +410,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
+describe("POST /v1/earn/deposits/execute — custody runtime admission", () => {
   it.each([
     { state: "retired-credential", status: 409, reason: "runtime_execution_unavailable" },
     { state: "inactive-wallet", status: 404, reason: undefined },
@@ -579,7 +579,7 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
   });
 });
 
-describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
+describe("POST /v1/earn/deposits/execute — catalogue admission", () => {
   it("opens Kamino from production and requires the caller's minSharesOut (PRO-1986)", async () => {
     await seedAuth();
     const scopes = recordCallScopes(depositIntoVault);
@@ -606,7 +606,7 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
       error: { code: string; message: string };
     };
     expect(missingFloorBody.error.code).toBe("BAD_REQUEST");
-    expect(missingFloorBody.error.message).toContain("POST /v1/earn/vault-deposit-previews");
+    expect(missingFloorBody.error.message).toContain("POST /v1/earn/deposits/preview");
     expect(depositIntoVault).not.toHaveBeenCalled();
 
     const res = await postVaultDeposit(
@@ -627,24 +627,24 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
     expect(scopes).toEqual([expect.objectContaining({ environment: "production" })]);
   });
 
-  it("keeps production closed for a provider the deposit-environment map leaves sandbox-only", async () => {
+  it("keeps production closed for a provider the deposit-environment map does not open", async () => {
     await seedAuth();
     await seedProductionConnectionWallet({
-      connectionId: "cconn_earn_vault_veda_prod",
-      credentialId: "pcred_earn_vault_veda_prod",
-      custodyWalletId: "cwlt_earn_vault_veda_prod",
-      providerWalletId: "privy_earn_vault_veda_prod",
+      connectionId: "cconn_earn_vault_upshift_prod",
+      credentialId: "pcred_earn_vault_upshift_prod",
+      custodyWalletId: "cwlt_earn_vault_upshift_prod",
+      providerWalletId: "privy_earn_vault_upshift_prod",
     });
     const strategy = await seedStrategy({
-      provider: "veda",
-      underlyingSource: "veda",
+      provider: "upshift",
+      underlyingSource: "upshift",
       hostCluster: "mainnet-beta",
       environment: "production",
     });
     const res = await postVaultDeposit(
       {
         strategyId: strategy.id,
-        custodyWalletId: "cwlt_earn_vault_veda_prod",
+        custodyWalletId: "cwlt_earn_vault_upshift_prod",
         amount: "10",
         minSharesOut: "9.99",
       },
@@ -855,7 +855,7 @@ interface DepositStateChange {
   refusal: { status: number; error: Record<string, unknown> };
 }
 
-describe("POST /v1/earn/vault-deposits: replay before admission (ADR 0009)", () => {
+describe("POST /v1/earn/deposits/execute: replay before admission (ADR 0009)", () => {
   // Each change refuses a NEW deposit. None may refuse the same-key retry of a
   // deposit already recorded: that retry is answered from its movement row.
   it.each<DepositStateChange>([
@@ -919,7 +919,7 @@ describe("POST /v1/earn/vault-deposits: replay before admission (ADR 0009)", () 
   });
 });
 
-describe("POST /v1/earn/vault-deposits — request validation", () => {
+describe("POST /v1/earn/deposits/execute — request validation", () => {
   it("requires an Idempotency-Key header, because the chain has no dedupe of its own", async () => {
     await seedAuth();
     const strategy = await seedStrategy({});
@@ -960,7 +960,7 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
     await seedAuth();
     const strategy = await seedStrategy({});
     const res = await app.request(
-      "/v1/earn/vault-deposits",
+      "/v1/earn/deposits/execute",
       {
         method: "POST",
         headers: {
@@ -1171,7 +1171,7 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
   });
 });
 
-describe("POST /v1/earn/vault-deposits — Veda", () => {
+describe("POST /v1/earn/deposits/execute — Veda", () => {
   const VEDA_SHARE_MINT = "9BEcn9aPEmhSPbPQeFGjidRiEKki46fVQDyPpSQXPA2D";
 
   async function seedVedaStrategy() {
@@ -1329,10 +1329,10 @@ describe("POST /v1/earn/vault-deposits — Veda", () => {
   });
 });
 
-describe("POST /v1/earn/vault-deposit-previews", () => {
+describe("POST /v1/earn/deposits/preview", () => {
   function postVaultDepositPreview(body: Record<string, unknown>) {
     return app.request(
-      "/v1/earn/vault-deposit-previews",
+      "/v1/earn/deposits/preview",
       {
         method: "POST",
         headers: {
@@ -1448,7 +1448,7 @@ describe("POST /v1/earn/vault-deposit-previews", () => {
   });
 });
 
-describe("POST /v1/earn/vault-deposits: audit ledger parity (PRO-1866)", () => {
+describe("POST /v1/earn/deposits/execute: audit ledger parity (PRO-1866)", () => {
   it("records intent and outcome around the deposit, keyed to the movement", async () => {
     await seedAuth();
     const strategy = await seedStrategy({});

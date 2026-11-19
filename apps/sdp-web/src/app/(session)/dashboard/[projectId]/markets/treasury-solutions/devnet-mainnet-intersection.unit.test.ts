@@ -134,7 +134,7 @@ describe("filterSandboxDevnetStrategies", () => {
     expect(filterSandboxDevnetStrategies(unmatched, MAINNET_SHELF)).toEqual([]);
   });
 
-  it("keeps every Veda strategy regardless of name, Veda being devnet-only", () => {
+  it("keeps every Veda strategy regardless of name, Veda exempt by provider", () => {
     const veda = [
       strategy({ id: "a", provider: "veda", name: "Veda USDC vault #0" }),
       strategy({ id: "b", provider: "veda", name: "Veda Treasury Fund" }),

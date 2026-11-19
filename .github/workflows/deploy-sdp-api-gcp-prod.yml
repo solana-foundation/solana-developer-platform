@@ -50,7 +50,7 @@ env:
   PROJECT_ID: solana-developer-platform
   REGION: us-central1
   SERVICE: sdp-prod-api-public
-  WORKER_SERVICE: sdp-prod-worker
+  CRON_SERVICE: sdp-prod-cron
   MIGRATE_JOB: sdp-prod-api-public-migrate
 
 jobs:
@@ -99,7 +99,7 @@ jobs:
       canary_passed: ${{ steps.canary.outcome == 'success' }}
       candidate_tag: ${{ steps.candidate.outputs.tag }}
       previous_traffic: ${{ steps.capture.outputs.traffic }}
-      previous_worker_image: ${{ steps.capture.outputs.worker_image }}
+      previous_cron_image: ${{ steps.capture.outputs.cron_image }}
       breaking_migrations: ${{ steps.breaking.outputs.migrations }}
     name: Deploy production image
     if: >-
@@ -428,16 +428,16 @@ jobs:
             ' <<<"${service_json}"
           )"
           echo "traffic=${previous_traffic}" >> "${GITHUB_OUTPUT}"
-          previous_worker_image="$(
-            gcloud run services describe "${WORKER_SERVICE}" \
+          previous_cron_image="$(
+            gcloud run services describe "${CRON_SERVICE}" \
               --region "${REGION}" --project "${PROJECT_ID}" \
               --format='value(spec.template.spec.containers[0].image)'
           )"
-          if [[ -z "${previous_worker_image}" ]]; then
-            echo "Could not resolve the current worker image." >&2
+          if [[ -z "${previous_cron_image}" ]]; then
+            echo "Could not resolve the current cron image." >&2
             exit 1
           fi
-          echo "worker_image=${previous_worker_image}" >> "${GITHUB_OUTPUT}"
+          echo "cron_image=${previous_cron_image}" >> "${GITHUB_OUTPUT}"
 
       - name: Run database migrations
         if: ${{ env.BUILD_IMAGE == 'true' }}
@@ -547,7 +547,7 @@ jobs:
             sleep 10
           done
 
-      - name: Promote service and worker with rollback
+      - name: Promote service and cron with rollback
         id: promote
         timeout-minutes: 10
         env:
@@ -592,9 +592,9 @@ jobs:
             sleep 10
           done
 
-          # The Worker is the only scheduler (ADR 0011): a missing service means no Money Exit
-          # runs, so this fails the deploy instead of skipping.
-          gcloud run services update "${WORKER_SERVICE}" \
+          # The cron service is the only scheduler (ADR 0011): a missing service means no Money
+          # Exit runs, so this fails the deploy instead of skipping.
+          gcloud run services update "${CRON_SERVICE}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
           echo "revision=${CANDIDATE_REVISION}" >> "${GITHUB_OUTPUT}"
 
@@ -646,7 +646,7 @@ jobs:
       CANARY_PASSED: ${{ needs.deploy.outputs.canary_passed }}
       BREAKING_MIGRATIONS: ${{ needs.deploy.outputs.breaking_migrations }}
       PREVIOUS_TRAFFIC: ${{ needs.deploy.outputs.previous_traffic }}
-      PREVIOUS_WORKER_IMAGE: ${{ needs.deploy.outputs.previous_worker_image }}
+      PREVIOUS_CRON_IMAGE: ${{ needs.deploy.outputs.previous_cron_image }}
       CANDIDATE_TAG: ${{ needs.deploy.outputs.candidate_tag }}
     steps:
       - name: Authenticate to GCP
@@ -690,11 +690,11 @@ jobs:
 
           if [[ -n "${BREAKING_MIGRATIONS:-}" ]]; then
             "${hold[@]}"
-            echo "::error::This run applied breaking migrations (${BREAKING_MIGRATIONS}) that the previous image cannot run on, so it does not restore it. Production keeps its current traffic and worker image and is held; fix forward."
+            echo "::error::This run applied breaking migrations (${BREAKING_MIGRATIONS}) that the previous image cannot run on, so it does not restore it. Production keeps its current traffic and cron image and is held; fix forward."
             exit 1
           fi
 
-          echo "Rollout did not complete; restoring service traffic and the worker image and holding prod." >&2
+          echo "Rollout did not complete; restoring service traffic and the cron image and holding prod." >&2
           rollback_failed=0
           # Traffic first: users are on the failed revision until it moves, and
           # the hold only has to land before this run ends.
@@ -702,9 +702,9 @@ jobs:
             --region "${REGION}" --project "${PROJECT_ID}" \
             --to-revisions "${PREVIOUS_TRAFFIC}" || rollback_failed=1
           "${hold[@]}" || rollback_failed=1
-          gcloud run services update "${WORKER_SERVICE}" \
+          gcloud run services update "${CRON_SERVICE}" \
             --region "${REGION}" --project "${PROJECT_ID}" \
-            --image "${PREVIOUS_WORKER_IMAGE}" || rollback_failed=1
+            --image "${PREVIOUS_CRON_IMAGE}" || rollback_failed=1
           if [[ "${rollback_failed}" -ne 0 ]]; then
             echo "Automatic restore was incomplete; escalate immediately. The quick rollback can finish it." >&2
             exit 1

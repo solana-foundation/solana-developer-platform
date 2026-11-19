@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { afterEach, describe, it, mock } from "node:test";
 import {
   isVedaDeployed,
+  isVedaDepositMint,
   VEDA_DEPLOYMENTS,
   VEDA_DEPOSIT_TOKEN_SYMBOLS,
+  VEDA_MAINNET_VAULTS,
   type VedaDeployment,
   vedaDeployment,
   vedaDepositMints,
@@ -220,8 +222,8 @@ function snapshot(overrides: Partial<ProviderStrategySnapshot>): ProviderStrateg
 }
 
 describe("VedaEarnClient.declaredSupport", () => {
-  it("declares USDC only, sourced from the shared registry", () => {
-    assert.deepEqual(client.declaredSupport.depositTokens, ["USDC"]);
+  it("declares USDC and OUSD, sourced from the shared registry", () => {
+    assert.deepEqual(client.declaredSupport.depositTokens, ["USDC", "OUSD"]);
     assert.deepEqual([...VEDA_DEPOSIT_TOKEN_SYMBOLS], [...client.declaredSupport.depositTokens]);
   });
 
@@ -259,17 +261,7 @@ describe("VedaEarnClient.declaredSupport", () => {
 });
 
 describe("the Veda deployment registry", () => {
-  /**
-   * The load-bearing state of this stack, asserted rather than assumed.
-   * DEVNET is confirmed (Veda's integration docs + SDP's on-chain audit, see
-   * the header in @sdp/types/veda-programs) — these are the exact addresses
-   * from that confirmation, restated here so a typo in the table cannot pass.
-   * MAINNET deliberately stays undeployed: the published mainnet vault state
-   * is Veda's shared Test Vault, and cataloguing it would put a test vault on
-   * the production shelf. When Veda names a production vault, this test is the
-   * one that changes — with the confirmation in the pull request that does.
-   */
-  it("reports the confirmed devnet Test Vault deployment and no mainnet one", () => {
+  it("reports the separate devnet Test Vault and mainnet PRIME deployments", () => {
     assert.deepEqual(vedaDeployment("devnet"), {
       vaultProgramAddress: "ASN8Cz36kQSZf2ZrgUbRShaKUpN4CJoTGdv6C5uMsy3J",
       queueProgramAddress: "fh8uapqMe4GWhep9rt9qZ56Pxi9SYszkuDKXckYMQTT",
@@ -277,8 +269,16 @@ describe("the Veda deployment registry", () => {
       vaultStateAddresses: ["3wbKP5UGLT7gAZBAsLjvPC1NbfnWKtT3Dq7cniMWkzfU"],
     });
     assert.equal(isVedaDeployed("devnet"), true);
-    assert.equal(vedaDeployment("mainnet-beta"), null);
-    assert.equal(isVedaDeployed("mainnet-beta"), false);
+    assert.deepEqual(vedaDeployment("mainnet-beta"), {
+      vaultProgramAddress: "9TWFuaFP1pvx698ANRpiGBHqi6zrTFBQoXwqaAmfd5Jp",
+      queueProgramAddress: "A4g8EPHbe2GgydQcKaEAv6VkB6Tyz6utcADcMtDwnaqy",
+      hookProgramAddress: "4aHAutB42cB5qVuj8BDowezi3EwX6yPasaDmTqMEEtta",
+      vaultStateAddresses: [
+        "7PjRdSecsdyUaasPqsQSDyBz67FMJPZT82KCkpXCb1sy",
+        "5qXvYYBRWwW9JYgFAfu3TpWLRaeJ31sEWNWW2cSvU8ZV",
+      ],
+    });
+    assert.equal(isVedaDeployed("mainnet-beta"), true);
   });
 
   it("states both clusters explicitly, so a missing one is a visible gap", () => {
@@ -287,7 +287,10 @@ describe("the Veda deployment registry", () => {
 
   it("resolves declared deposit symbols to each cluster's own mint", () => {
     assert.deepEqual(vedaDepositMints("devnet"), [USDC_DEVNET]);
-    assert.deepEqual(vedaDepositMints("mainnet-beta"), [USDC_MAINNET]);
+    assert.deepEqual(vedaDepositMints("mainnet-beta"), [
+      USDC_MAINNET,
+      "ousd2mJsPEckLHcSCDxyKD7NDGARZcfLbDZkKiatYHB",
+    ]);
     assert.notEqual(USDC_DEVNET, USDC_MAINNET);
   });
 });
@@ -370,20 +373,47 @@ describe("decodeAssetData", () => {
 });
 
 describe("VedaEarnClient.listStrategies", () => {
-  it("fails closed for production, where SDP has no confirmed deployment", async () => {
-    // Sandbox (devnet) is deployed now, so only production still exercises the
-    // no-deployment guard; devnet's read path is covered by the
-    // `_listVaultStrategies` cases below, against stubbed RPC.
-    await assert.rejects(
-      client.listStrategies({
-        env: {},
-        environment: "production",
-        catalogueRpcUrl: () => RPC_URL,
-      }),
-      {
-        code: "PROVIDER_NOT_CONFIGURED",
+  it("publishes both PRIME vaults with their names, exact assets and queued liquidity", async () => {
+    stubRpc({
+      genesis: GENESIS_HASH_BY_CLUSTER["mainnet-beta"],
+      accounts: VEDA_MAINNET_VAULTS.map((vault) =>
+        encodeBoringVault({
+          vaultId: BigInt(vault.vaultId),
+          shareMint: vault.shareMint,
+          baseAsset: vault.assetMint,
+          withdrawAuthority: NAMED_AUTHORITY,
+        })
+      ),
+      assets: VEDA_MAINNET_VAULTS.flatMap((vault) =>
+        VEDA_MAINNET_VAULTS.map((asset, index) => ({
+          pubkey: fixtureAddress(20 + vault.vaultId * 2 + index),
+          data: encodeAssetData(asset.assetMint, { vaultId: BigInt(vault.vaultId) }),
+        }))
+      ),
+    });
+    const strategies = await client.listStrategies({
+      env: {},
+      environment: "production",
+      catalogueRpcUrl: () => RPC_URL,
+    });
+    assert.equal(strategies.length, 2);
+    for (const vault of VEDA_MAINNET_VAULTS) {
+      const strategy = strategies.find((row) => row.providerReference === vault.vaultStateAddress);
+      assert.ok(strategy);
+      assert.equal(strategy.name, vault.name);
+      assert.equal(strategy.shareMint, vault.shareMint);
+      assert.equal(strategy.hostCluster, "mainnet-beta");
+      assert.equal(strategy.liquidityTerm, "delayed");
+      assert.deepEqual(strategy.depositMints, [vault.assetMint]);
+      assert.equal(isStrategyWithinDeclaredSupport(client.declaredSupport, strategy), true);
+      for (const asset of VEDA_MAINNET_VAULTS) {
+        assert.equal(
+          isVedaDepositMint(asset.assetMint, "mainnet-beta", vault.vaultStateAddress),
+          asset.assetMint === vault.assetMint
+        );
       }
-    );
+      assert.equal(isVedaDepositMint(vault.assetMint, "devnet", vault.vaultStateAddress), false);
+    }
   });
 
   it("maps a vault to a snapshot", async () => {

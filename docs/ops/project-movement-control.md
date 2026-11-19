@@ -48,7 +48,7 @@ available; do not disable them through this command.
 
 ## Stage drill before production use
 
-Deploy the candidate API and Worker to stage and confirm `/health/ready` reports
+Deploy the candidate API and cron service to stage and confirm `/health/ready` reports
 its SHA. The stage deployment runs migration `0189` before replacing either
 service. Use a dedicated Sandbox project and a second project in the same
 organization; do not disable the shared stage smoke project. Use devnet wallets

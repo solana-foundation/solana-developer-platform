@@ -1,4 +1,4 @@
-import { EARN_DEPOSIT_TOKEN_SYMBOLS, type EarnDepositTokenSymbol } from "@sdp/types/earn";
+import type { EarnDepositTokenSymbol } from "@sdp/types/earn";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { providerUnavailable } from "#/errors";
 import { providerFetchJson } from "#/fetch";
@@ -327,7 +327,14 @@ export type KaminoVaultDistillation =
   | { outcome: "catalogued"; snapshot: ProviderStrategySnapshot }
   | { outcome: "dropped"; reason: KaminoCatalogueDropReason };
 
-const KAMINO_DEPOSIT_SYMBOLS: ReadonlySet<string> = new Set(EARN_DEPOSIT_TOKEN_SYMBOLS);
+// A new asset for another Earn provider must not widen Kamino's curated shelf.
+const KAMINO_DEPOSIT_TOKEN_SYMBOLS = [
+  "USDC",
+  "USDG",
+  "USDT",
+  "PYUSD",
+] as const satisfies readonly EarnDepositTokenSymbol[];
+const KAMINO_DEPOSIT_SYMBOLS: ReadonlySet<string> = new Set(KAMINO_DEPOSIT_TOKEN_SYMBOLS);
 
 /**
  * Distill one raw Kamino vault into a catalogue snapshot, or say exactly why it
@@ -474,10 +481,8 @@ export class KaminoEarnClient extends StubEarnClient implements EarnLiveMetricsP
     // kind until a verified source for the other lands.
     sourceKinds: ["defi"],
     // Kamino's vaults span SOL, USDS, cbBTC and more; SDP Earn V1 is a
-    // stablecoin deposit facility, so the envelope stays at exactly the symbols
-    // `EARN_DEPOSIT_TOKEN_SYMBOLS` declares. Widening this is a change to that
-    // shared union, not to this client.
-    depositTokens: [...EARN_DEPOSIT_TOKEN_SYMBOLS] as EarnDepositTokenSymbol[],
+    // stablecoin deposit facility, so the envelope stays at its curated assets.
+    depositTokens: KAMINO_DEPOSIT_TOKEN_SYMBOLS,
   };
 
   /**

@@ -29,7 +29,7 @@ describe("GET /api/dashboard/markets/earn/movements", () => {
       request,
       traceSource: "route.dashboard.earn.movements.list",
       path:
-        "/v1/earn/movements?limit=50&before=abc_DEF-123&direction=deposit" +
+        "/v1/earn/treasury/movements?limit=50&before=abc_DEF-123&direction=deposit" +
         "&status=finalized&provider=kamino&positionId=earn_position_1" +
         "&sourceAddress=Depositor1&destinationAddress=Vault1",
     });
@@ -43,7 +43,7 @@ describe("GET /api/dashboard/markets/earn/movements", () => {
     expect(mocks.proxyToSdpApi).toHaveBeenCalledWith({
       request,
       traceSource: "route.dashboard.earn.movements.list",
-      path: "/v1/earn/movements",
+      path: "/v1/earn/treasury/movements",
     });
   });
 

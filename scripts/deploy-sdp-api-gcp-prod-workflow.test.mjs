@@ -39,7 +39,7 @@ test("a held or restored deploy says so in Slack for approval, manual and merge 
 });
 
 test("promotion and the canary are separate outcomes, and the canary gets three runs", () => {
-  const promote = workflow.indexOf("- name: Promote service and worker with rollback");
+  const promote = workflow.indexOf("- name: Promote service and cron with rollback");
   const canary = workflow.indexOf("- name: Run prod canary against the promoted revision");
   assert.match(
     workflow,
@@ -132,7 +132,7 @@ test("candidate is revision-specific and Cloud Run-ready before promotion", () =
 
   const candidateDeploy = workflow.indexOf("- name: Deploy candidate without production traffic");
   const candidateReadiness = workflow.indexOf("- name: Verify candidate revision readiness");
-  const promotion = workflow.indexOf("- name: Promote service and worker with rollback");
+  const promotion = workflow.indexOf("- name: Promote service and cron with rollback");
   assert.ok(candidateDeploy !== -1 && candidateDeploy < candidateReadiness);
   assert.ok(candidateReadiness < promotion);
 });
@@ -144,17 +144,17 @@ test("candidate traffic tag is always removed", () => {
   );
   assert.match(workflow, /--remove-tags "\$\{CANDIDATE_TAG\}"/);
 
-  const promotion = workflow.indexOf("- name: Promote service and worker with rollback");
+  const promotion = workflow.indexOf("- name: Promote service and cron with rollback");
   const cleanup = workflow.indexOf("- name: Remove candidate traffic tag");
   assert.ok(promotion !== -1 && promotion < cleanup);
 });
 
-test("cancellation-safe rollback restores resolved traffic and the worker together", () => {
+test("cancellation-safe rollback restores resolved traffic and the cron image together", () => {
   assert.match(workflow, /if: >-\n\s+always\(\) &&/);
   assert.match(workflow, /--format='value\(spec\.template\.spec\.containers\[0\]\.image\)'/);
   for (const [output, step, key] of [
     ["previous_traffic", "capture", "traffic"],
-    ["previous_worker_image", "capture", "worker_image"],
+    ["previous_cron_image", "capture", "cron_image"],
     ["candidate_tag", "candidate", "tag"],
     ["breaking_migrations", "breaking", "migrations"],
   ]) {
@@ -178,25 +178,25 @@ test("cancellation-safe rollback restores resolved traffic and the worker togeth
   );
   assert.match(workflow, /--to-revisions "\$\{CANDIDATE_REVISION\}=100"/);
   assert.match(workflow, /--to-revisions "\$\{PREVIOUS_TRAFFIC\}"/);
-  assert.match(workflow, /--image "\$\{PREVIOUS_WORKER_IMAGE\}"/);
+  assert.match(workflow, /--image "\$\{PREVIOUS_CRON_IMAGE\}"/);
 
   const candidateStep = workflow.indexOf("- name: Deploy candidate without production traffic");
   const candidateDeploy = workflow.indexOf("gcloud run services update", candidateStep);
-  const promotionStep = workflow.indexOf("- name: Promote service and worker with rollback");
+  const promotionStep = workflow.indexOf("- name: Promote service and cron with rollback");
   const promotion = workflow.indexOf("--to-revisions", promotionStep);
   const canonicalReadiness = workflow.indexOf('"https://api.solana.com/health/ready"', promotion);
-  const workerUpdate = workflow.indexOf(
-    'gcloud run services update "$' + "{WORKER_SERVICE}",
+  const cronUpdate = workflow.indexOf(
+    'gcloud run services update "$' + "{CRON_SERVICE}",
     canonicalReadiness
   );
   const canary = workflow.indexOf(
     "- name: Run prod canary against the promoted revision",
-    workerUpdate
+    cronUpdate
   );
   const rollback = workflow.indexOf("- name: Restore an incomplete rollout or hold prod", canary);
   assert.ok(candidateStep !== -1 && candidateStep < candidateDeploy);
   assert.ok(candidateDeploy < promotion && promotion < canonicalReadiness);
-  assert.ok(canonicalReadiness < workerUpdate && workerUpdate < canary && canary < rollback);
+  assert.ok(canonicalReadiness < cronUpdate && cronUpdate < canary && canary < rollback);
 });
 
 test("rollback targets resolved pre-candidate revisions instead of LATEST", () => {
@@ -209,19 +209,19 @@ test("rollback targets resolved pre-candidate revisions instead of LATEST", () =
   assert.doesNotMatch(captureStep, /LATEST=/);
 });
 
-test("service and worker use the resolved digest", () => {
+test("service and cron use the resolved digest", () => {
   assert.match(
     workflow,
     /gcloud run services update "\$\{SERVICE\}" \\\n+\s+--region "\$\{REGION\}" --project "\$\{PROJECT_ID\}" --image "\$\{IMAGE\}"/
   );
   assert.match(
     workflow,
-    /gcloud run services update "\$\{WORKER_SERVICE\}" \\\n+\s+--region "\$\{REGION\}" --project "\$\{PROJECT_ID\}" --image "\$\{IMAGE\}"/
+    /gcloud run services update "\$\{CRON_SERVICE\}" \\\n+\s+--region "\$\{REGION\}" --project "\$\{PROJECT_ID\}" --image "\$\{IMAGE\}"/
   );
   assert.match(workflow, /timeout-minutes: 150/);
   assert.match(
     workflow,
-    /- name: Promote service and worker with rollback\n\s+id: promote\n\s+timeout-minutes: 10/
+    /- name: Promote service and cron with rollback\n\s+id: promote\n\s+timeout-minutes: 10/
   );
 });
 
@@ -341,7 +341,7 @@ test("the approval workflow waits outside the deploy concurrency groups", () => 
   );
   assert.match(
     approval,
-    /select\(\.name \| startswith\("sdp-api \+ worker \+ cron — stage \+ smoke"\)\)\] \| length > 0 and all\(\.conclusion == "success"\)/
+    /select\(\.name \| startswith\("sdp-api \+ cron — stage \+ smoke"\)\)\] \| length > 0 and all\(\.conclusion == "success"\)/
   );
   assert.match(approval, /^permissions:\n\s+actions: read\n/m);
   assert.match(
@@ -632,7 +632,7 @@ const deployEnv = {
   PROJECT_ID: "solana-developer-platform",
   REGION: "us-central1",
   SERVICE: "sdp-prod-api-public",
-  WORKER_SERVICE: "sdp-prod-worker",
+  CRON_SERVICE: "sdp-prod-cron",
   MIGRATE_JOB: "sdp-prod-api-public-migrate",
 };
 const deploySha = "d".repeat(40);
@@ -642,7 +642,7 @@ const rollbackEnv = {
   DEPLOY_IMAGE_SHA: deploySha,
   ROLLOUT_STARTED: "true",
   PREVIOUS_TRAFFIC: "sdp-prod-api-public-00041-old=100",
-  PREVIOUS_WORKER_IMAGE: "registry.example/worker@sha256:old",
+  PREVIOUS_CRON_IMAGE: "registry.example/api@sha256:older",
 };
 const scope = "--region us-central1 --project solana-developer-platform";
 
@@ -694,7 +694,7 @@ test("a rollout that fails before its canary is restored, as on main, and held",
   assert.deepEqual(settle.calls, [
     `gcloud run services update-traffic sdp-prod-api-public ${scope} --to-revisions sdp-prod-api-public-00041-old=100`,
     holdCall,
-    `gcloud run services update sdp-prod-worker ${scope} --image registry.example/worker@sha256:old`,
+    `gcloud run services update sdp-prod-cron ${scope} --image registry.example/api@sha256:older`,
     `gcloud run jobs update sdp-prod-api-public-migrate ${scope} --remove-labels sdp_prod_previous_revision`,
   ]);
   assert.equal(settle.output, "rolled_back=true\n");
@@ -1084,7 +1084,7 @@ test("a cancel stops the forward deploy, and the restore or hold runs in its own
 });
 
 test("each promotion records the build it replaced, and a breaking migration retires it", () => {
-  const promoteStep = "Promote service and worker with rollback";
+  const promoteStep = "Promote service and cron with rollback";
   const promoteEnv = {
     ...deployEnv,
     CANDIDATE_REVISION: "sdp-prod-api-public-00042-new",
@@ -1113,10 +1113,8 @@ test("each promotion records the build it replaced, and a breaking migration ret
   ]);
   const switched = recorded.calls.findIndex((call) => call.includes("update-traffic"));
   const labelled = recorded.calls.findIndex((call) => call.includes("sdp_prod_previous_revision"));
-  const worker = recorded.calls.findIndex((call) =>
-    call.includes("services update sdp-prod-worker")
-  );
-  assert.ok(labelled < switched && switched < worker);
+  const cron = recorded.calls.findIndex((call) => call.includes("services update sdp-prod-cron"));
+  assert.ok(labelled < switched && switched < cron);
 
   // The switch lands but the new revision never answers: the target must already be set.
   const unhealthy = runStep(promoteStep, {
@@ -1179,9 +1177,9 @@ test("each promotion records the build it replaced, and a breaking migration ret
   assert.deepEqual(labelCalls(plainRun), []);
 });
 
-test("a missing Worker fails the deploy at capture and at promotion instead of being skipped", () => {
-  const missingWorker =
-    'echo "ERROR: (gcloud.run.services) NOT_FOUND: Service [sdp-prod-worker] could not be found." >&2; exit 1';
+test("a missing cron service fails the deploy at capture and at promotion instead of being skipped", () => {
+  const missingCron =
+    'echo "ERROR: (gcloud.run.services) NOT_FOUND: Service [sdp-prod-cron] could not be found." >&2; exit 1';
   const capture = runStep("Capture rollback state", {
     env: {
       ...deployEnv,
@@ -1189,7 +1187,7 @@ test("a missing Worker fails the deploy at capture and at promotion instead of b
     },
     stubs: {
       gcloud: `case "$*" in
-  "run services describe sdp-prod-worker "*) ${missingWorker} ;;
+  "run services describe sdp-prod-cron "*) ${missingCron} ;;
   *) printf '%s' "$SERVICE_JSON" ;;
 esac`,
     },
@@ -1203,7 +1201,7 @@ esac`,
     revision: candidateRevision,
     checks: { database: "ok", redis: "ok" },
   });
-  const promote = runStep("Promote service and worker with rollback", {
+  const promote = runStep("Promote service and cron with rollback", {
     env: {
       ...deployEnv,
       CANDIDATE_REVISION: candidateRevision,
@@ -1212,14 +1210,14 @@ esac`,
       BREAKING_MIGRATIONS: "",
     },
     stubs: {
-      gcloud: `case "$*" in *" sdp-prod-worker "*) ${missingWorker} ;; esac`,
+      gcloud: `case "$*" in *" sdp-prod-cron "*) ${missingCron} ;; esac`,
       curl: `printf '%s' '${healthy}'`,
     },
   });
   assert.notEqual(promote.code, 0);
   assert.equal(
     promote.calls.at(-1),
-    `gcloud run services update sdp-prod-worker ${scope} --image registry.example/api@sha256:new`
+    `gcloud run services update sdp-prod-cron ${scope} --image registry.example/api@sha256:new`
   );
   assert.equal(promote.output, "");
 });
@@ -1264,7 +1262,7 @@ esac`;
   });
 }
 
-test("the quick rollback moves traffic and the worker back to the previous build and holds prod", () => {
+test("the quick rollback moves traffic and the cron service back to the previous build and holds prod", () => {
   assert.match(rollbackWorkflow, /^on:\n {2}workflow_dispatch:\n/m);
   assert.match(
     rollbackWorkflow,
@@ -1278,7 +1276,7 @@ test("the quick rollback moves traffic and the worker back to the previous build
   assert.deepEqual(mutations, [
     `gcloud run jobs update sdp-prod-api-public-migrate ${scope} --update-labels sdp_prod_hold=rollback-4242`,
     `gcloud run services update-traffic sdp-prod-api-public ${scope} --to-revisions sdp-prod-api-public-00041-old=100`,
-    `gcloud run services update sdp-prod-worker ${scope} --image registry.example/api@sha256:old`,
+    `gcloud run services update sdp-prod-cron ${scope} --image registry.example/api@sha256:old`,
     `gcloud run jobs update sdp-prod-api-public-migrate ${scope} --remove-labels sdp_prod_previous_revision`,
   ]);
   assert.equal(run.output, "revision=sdp-prod-api-public-00041-old\n");
@@ -1314,7 +1312,7 @@ test("the quick rollback refuses instead of guessing", () => {
   assert.ok(!unreached.calls.some((call) => call.includes("--remove-labels")));
 });
 
-test("re-running the quick rollback after a partial failure finishes the worker", () => {
+test("re-running the quick rollback after a partial failure finishes the cron service", () => {
   const run = runQuickRollback({
     hold: "rollback-4241",
     service: serviceJson([{ revisionName: "sdp-prod-api-public-00041-old", percent: 100 }]),
@@ -1327,7 +1325,7 @@ test("re-running the quick rollback after a partial failure finishes the worker"
   const mutations = run.calls.filter((call) => /update|remove-labels/.test(call));
   assert.deepEqual(mutations, [
     `gcloud run services update-traffic sdp-prod-api-public ${scope} --to-revisions sdp-prod-api-public-00041-old=100`,
-    `gcloud run services update sdp-prod-worker ${scope} --image registry.example/api@sha256:old`,
+    `gcloud run services update sdp-prod-cron ${scope} --image registry.example/api@sha256:old`,
     `gcloud run jobs update sdp-prod-api-public-migrate ${scope} --remove-labels sdp_prod_previous_revision`,
   ]);
 });

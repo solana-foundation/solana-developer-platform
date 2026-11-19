@@ -138,8 +138,8 @@ nothing else; the program create still sends the body `requestId` form.
   The guide covers the sectioned **server-side, authenticated**
   EXTERNAL-WALLET flow:
   the WHOLE loop (PRO-1722 + PRO-1772), not just the deposit: build via
-  `POST /v1/earn/external-wallet/deposit-transactions`, the customer's wallet
-  signs, submit via `POST /v1/earn/external-wallet/deposits`, then poll
+  `POST /v1/earn/deposits/build-unsigned-transaction`, the customer's wallet
+  signs, submit via `POST /v1/earn/deposits/submit-signed-transaction`, then poll
   `GET …/movements/:movementId`, read `GET …/earnings?ownerAddress=`
   (balance + earned; `earned` can be ABSENT with `earnedUnavailableReason` —
   render a dash, never $0), list `GET …/movements?ownerAddress=` and
@@ -148,7 +148,7 @@ nothing else; the program create still sends the body `requestId` form.
   `…/withdrawal-transactions` + `…/withdrawals` or through the queued lifecycle:
   options, queued preview, request build/submit, request list/detail, and
   post-deadline cancellation build/submit. The treasury
-  route (`/vault-deposits` + `custodyWalletId`) must not reappear in the
+  route (`/deposits/provider-signed` + `custodyWalletId`) must not reappear in the
   snippets — a B2B2C partner cannot name a custody wallet. The optional
   partner `feePayer` (the implementor sponsoring its customers' fees) is
   documented in
@@ -340,7 +340,7 @@ nothing else; the program create still sends the body `requestId` form.
   - It deliberately does NOT track which deposits are in flight any more. That
     was browser state pretending to be a ledger: it could not see a deposit
     signed in another tab, and it restored the previous project's watches after
-    a workspace switch. `GET /v1/earn/vault-deposits` owns it now and is
+    a workspace switch. `GET /v1/earn/deposits/provider-signed` owns it now and is
     workspace-scoped by construction.
 
 - `earn-vault-withdraw-modal.tsx` — the `vault_direct` EXIT (PRO-1702):
@@ -368,9 +368,29 @@ nothing else; the program create still sends the body `requestId` form.
   detail through terminal state. An expired request exposes an idempotent cancel
   action that recovers escrowed shares; closing the create modal never hides it.
 - `earn-vault-withdraw-tracking.ts` — the withdrawal idempotency-key store
-  (fingerprint: project, position, shares, minAmountOut — the derived exit
-  floor is in there for the same reason the deposit's is) under its own
-  versioned `sessionStorage` key.
+  (fingerprint: the format tag, project, position, the TYPED quantity — the
+  dollar amount an atomic exit starts from, the shares a provider order starts
+  from — and the user's tolerance; the DERIVED share intent and the derived
+  exit floor move with the live positions polls and live quotes, so neither is
+  in the fingerprint, and each is remembered beside the key instead —
+  `rememberVaultWithdrawalShares` / `rememberVaultWithdrawalFloor` — to be
+  replayed verbatim for a kept key, because the API's own idempotency
+  fingerprint pins both `shares` and `minAmountOut`) under its own versioned
+  `sessionStorage` key. The tag is the upgrade bridge: the previous build
+  keyed its entries on the DERIVED shares, so no fingerprint this build
+  computes finds them again, and `recallLegacyVaultWithdrawalKeptKey` is the
+  recovery — a MOUNT-TIME snapshot the modal keeps in state and surfaces on
+  the review step as a warning notice (the recovered shares and floor are
+  generally not the amount the form shows), which the submit's resolver
+  consumes: the adoption replays the legacy attempt exactly, under the legacy
+  key with the shares parsed out of the legacy identity and the memo'd minted
+  floor, oldest entry first — instead of minting a second key over an attempt
+  that may already have executed. A re-scan only runs once an adopted replay
+  has retired its own key; a floor memo the scan finds LOST stops the submit
+  (nothing sendable), a recovered key answered between mount and confirm
+  stops the submit too — that confirm was approved as a replay, never a
+  fresh exit over it, so the review refreshes instead — and a legacy entry
+  that appears after mount is never silently adopted.
 - `earn-vault-slippage.ts` — the slippage-floor machinery BOTH vault modals
   share: `parseSlippageToleranceBps`, `floorForTolerance` (BigInt at the quoted
   mint's scale, floored, one-atom minimum; a quote FINER than that scale is a
@@ -384,9 +404,11 @@ nothing else; the program create still sends the body `requestId` form.
   DISABLES the action rather than guessing. Quotes EXPIRE (PRO-1691): past
   `VAULT_QUOTE_TTL_MS` the hook re-quotes on its own, silently in place (the
   standing quote stays on screen and swaps when the fresh one lands — never a
-  loading flicker or a disarmed confirm), and the deposit modal's
+  loading flicker or a disarmed confirm), and each modal's
   `floorSafeToSubmit` additionally refuses to SUBMIT a floor whose quote aged
-  past the TTL without re-quoting first: still satisfiable proceeds with the
+  past the TTL without re-quoting first (the shared `revalidateExpiredFloor`
+  is the read half; the withdrawal passes its own preview read and its
+  `assetsOut`): still satisfiable proceeds with the
   floor the user reviewed, a rate beyond it stops client-side through the
   blown-floor copy and control. Replayed floors bypass the check — a replay must
   carry the floor its key was minted with, verbatim. The floor POLICY (whether

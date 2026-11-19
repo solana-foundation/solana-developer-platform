@@ -9,6 +9,6 @@ export async function GET(
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.earn.programs.deposits.list",
-    path: `/v1/earn/programs/${encodeURIComponent(programId)}/deposits${programProxyQuery(request, { cursor: true })}`,
+    path: `/v1/earn/portfolio-accounts/${encodeURIComponent(programId)}/deposits${programProxyQuery(request, { cursor: true })}`,
   });
 }

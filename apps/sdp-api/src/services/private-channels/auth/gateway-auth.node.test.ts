@@ -5,9 +5,10 @@ import { rpcHttpError } from "@/test/helpers/rpc-errors";
 import type { Env } from "@/types/env";
 import type { SpcAuthContext } from "./gateway-auth";
 
-// Mock the packages whose runtime graph doesn't resolve in the node pool. gateway-auth
-// imports SolanaRpc as a TYPE only, so @sdp/rpc/solana is never loaded here; the
-// isUnauthorizedRpcError (@sdp/rpc) IS used so the 401 classification is exercised end-to-end.
+// Mock the packages whose runtime graph is heavy or network-bound. gateway-auth
+// imports SolanaRpc as a TYPE only, so @sdp/rpc/solana is never loaded here;
+// PrivateChannelError and isUnauthorizedRpcError (@sdp/rpc) are real, so the
+// 401 classification is exercised end-to-end against the production error class.
 const { createPrivateChannelLocalRpc } = vi.hoisted(() => ({
   // Return a sentinel identifying which token the rpc was built with.
   createPrivateChannelLocalRpc: vi.fn(
@@ -20,18 +21,6 @@ const { createPrivateChannelLocalRpc } = vi.hoisted(() => ({
 vi.mock("@sdp/private-channels/gateway", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@sdp/private-channels/gateway")>()),
   createPrivateChannelLocalRpc,
-}));
-vi.mock("@sdp/private-channels/errors", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/private-channels/errors")>()),
-  PrivateChannelError: class PrivateChannelError extends Error {
-    constructor(
-      public readonly code: string,
-      message?: string
-    ) {
-      super(message ?? code);
-      this.name = "PrivateChannelError";
-    }
-  },
 }));
 vi.mock("@sdp/private-channels/auth", () => ({ createAuthClient: vi.fn() }));
 vi.mock("@/db/repositories/repository-factory", async (importOriginal) => ({

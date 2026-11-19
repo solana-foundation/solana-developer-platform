@@ -164,48 +164,50 @@ const WALLET_SCOPE_ROUTES = {
   "POST /v1/dvp/trades/:tradeId/cancel": { refusedEarly: { file: DVP, test: DVP_ACTIONS } },
 
   // Earn
-  "POST /v1/earn/vault-deposits": {
+  "POST /v1/earn/deposits/execute": {
     refusedEarly: {
       file: "routes/earn.vault.test.ts",
       test: "refuses a wallet outside the key's scope before opening an audit intent or deposit",
     },
   },
-  "POST /v1/earn/vault-withdrawals": {
+  "POST /v1/earn/withdrawals/execute": {
     refusedEarly: {
       file: EARN_EXITS,
       test: "refuses a withdrawal with wallet_out_of_scope before recording a movement",
     },
   },
-  "POST /v1/earn/vault-withdrawal-requests": {
+  "POST /v1/earn/withdrawal-requests/execute": {
     refusedEarly: {
       file: EARN_EXITS,
       test: "refuses a withdrawal request with wallet_out_of_scope before recording it",
     },
   },
-  "POST /v1/earn/vault-withdrawal-requests/:withdrawalRequestId/cancel": {
+  "POST /v1/earn/withdrawal-requests/:withdrawalRequestId/cancel/execute": {
     refusedEarly: {
       file: EARN_EXITS,
       test: "refuses a withdrawal request cancellation with wallet_out_of_scope, leaving the request unchanged",
     },
   },
-  "POST /v1/earn/programs/:programId/withdrawals": {
+  "POST /v1/earn/portfolio-accounts/:programId/withdrawals/execute": {
     refusedEarly: {
       file: "routes/earn-program.test.ts",
       test: "refuses a wallet-scoped key on the payout, before the provider is driven",
     },
   },
-  "POST /v1/earn/programs": { exempt: "links a provider account; signs nothing" },
-  "PUT /v1/earn/programs/:programId": { exempt: "edits a provider account link; signs nothing" },
-  "POST /v1/earn/external-wallet/deposit-transactions": { exempt: SPONSOR_ONLY },
-  "POST /v1/earn/external-wallet/deposits": { exempt: SPONSOR_ONLY },
-  "POST /v1/earn/external-wallet/withdrawal-transactions": { exempt: SPONSOR_ONLY },
-  "POST /v1/earn/external-wallet/withdrawals": { exempt: SPONSOR_ONLY },
-  "POST /v1/earn/external-wallet/withdrawal-request-transactions": { exempt: SPONSOR_ONLY },
-  "POST /v1/earn/external-wallet/withdrawal-requests": { exempt: SPONSOR_ONLY },
-  "POST /v1/earn/external-wallet/withdrawal-request-cancel-transactions": {
+  "POST /v1/earn/portfolio-accounts": { exempt: "links a provider account; signs nothing" },
+  "PUT /v1/earn/portfolio-accounts/:programId/allocation": {
+    exempt: "edits a provider account link; signs nothing",
+  },
+  "POST /v1/earn/deposits/build-unsigned-transaction": { exempt: SPONSOR_ONLY },
+  "POST /v1/earn/deposits/submit-signed-transaction": { exempt: SPONSOR_ONLY },
+  "POST /v1/earn/withdrawals/build-unsigned-transaction": { exempt: SPONSOR_ONLY },
+  "POST /v1/earn/withdrawals/submit-signed-transaction": { exempt: SPONSOR_ONLY },
+  "POST /v1/earn/withdrawal-requests/build-unsigned-transaction": { exempt: SPONSOR_ONLY },
+  "POST /v1/earn/withdrawal-requests/submit-signed-transaction": { exempt: SPONSOR_ONLY },
+  "POST /v1/earn/withdrawal-requests/cancel/build-unsigned-transaction": {
     exempt: SPONSOR_ONLY,
   },
-  "POST /v1/earn/external-wallet/withdrawal-request-cancellations": { exempt: SPONSOR_ONLY },
+  "POST /v1/earn/withdrawal-requests/cancel/submit-signed-transaction": { exempt: SPONSOR_ONLY },
   "POST /v1/earn/onboarding/wisdomtree/:counterpartyId": {
     exempt: "saves a KYC/KYB application with the provider; signs nothing",
   },

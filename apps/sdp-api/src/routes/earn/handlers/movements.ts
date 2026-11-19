@@ -17,11 +17,11 @@ import { parseQuery } from "./shared";
 import { listReadableEarnVaultWallets } from "./vault";
 
 /**
- * GET /v1/earn/movements — every money movement this workspace made through
+ * GET /v1/earn/treasury/movements — every money movement this workspace made through
  * Earn, newest first, across providers and execution models.
  *
- * The read the two per-family lists could not give: `/programs/:id/withdrawals`
- * answers for ONE custodial program and `/vault-deposits` for signed deposits,
+ * The read the two per-family lists could not give: `/portfolio-accounts/:id/withdrawals`
+ * answers for ONE custodial program and `/deposits/provider-signed` for signed deposits,
  * so "what moved on this organization" previously meant paging several endpoints
  * and merging them client-side — and getting the merge right required knowing
  * which vocabulary each one spoke. This is one list, one vocabulary, one cursor.
