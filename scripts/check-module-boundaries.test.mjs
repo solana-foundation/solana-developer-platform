@@ -1,12 +1,19 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import {
+  collectSourceImports,
   findWorkspaceDependencyCycles,
   forbiddenPackageSourceImport,
+  listFiles,
+  readModules,
   validateModuleBoundaries,
   workspaceImportName,
   workspaceImportPath,
 } from "./check-module-boundaries.mjs";
+
+const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const api = {
   name: "@sdp/api",
@@ -168,4 +175,36 @@ test("detects workspace dependency cycles", () => {
   ]);
 
   assert.deepEqual(cycles, [["@sdp/a", "@sdp/b", "@sdp/a"]]);
+});
+
+test("fails closed when a module's source directory is missing", () => {
+  // A declared module whose `src/` was renamed away would otherwise contribute
+  // zero imports and the boundary rules for it would silently stop running.
+  assert.throws(
+    () => listFiles(path.join(repositoryRoot, "packages/sdp-types/renamed-away")),
+    /source directory is missing/
+  );
+});
+
+test("the real walk reads the workspace's imports", () => {
+  // The analysis tests above feed hand-built imports; this floors the real
+  // walk, so a discovery bug (a broken walk, a renamed `src/` nothing
+  // complained about) cannot turn the check into a vacuous pass. The
+  // workspace holds far more imports than this floor.
+  const imports = collectSourceImports(readModules(repositoryRoot));
+  assert.ok(
+    imports.length > 10_000,
+    `expected the walk to read the workspace, got ${imports.length} imports`
+  );
+});
+
+test("only modules that declare no source directory are left unscanned", () => {
+  // A module skips the walk only by saying so in MODULE_METADATA (today, the
+  // vendored root-level `.js` of bigint-buffer); anything else must be found
+  // on disk, and the walk above throws when it is not.
+  const unscanned = readModules(repositoryRoot)
+    .filter((module) => module.sourceDirectory === undefined)
+    .map((module) => module.name);
+
+  assert.deepEqual(unscanned, ["bigint-buffer"]);
 });
