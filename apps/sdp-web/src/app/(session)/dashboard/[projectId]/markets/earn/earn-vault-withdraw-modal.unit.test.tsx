@@ -6,9 +6,14 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { EnglishTestI18n } from "@/app/(session)/dashboard/[projectId]/markets/test-i18n";
+import type { DashboardFetchResult } from "@/lib/dashboard-fetch";
+import type { EarnVaultWithdrawalOutcome } from "./earn-program-data";
 import { VAULT_QUOTE_DEBOUNCE_MS, VAULT_QUOTE_TTL_MS } from "./earn-vault-slippage";
 import { EarnVaultWithdrawModal } from "./earn-vault-withdraw-modal";
 import { resetVaultWithdrawalTrackingStateForTests } from "./earn-vault-withdraw-tracking";
+
+/** The withdrawal POST's full answer — the result `createEarnVaultWithdrawal` resolves. */
+type WithdrawalPostAnswer = DashboardFetchResult<EarnVaultWithdrawalOutcome>;
 
 /** The store's raw entry shape, parsed rather than cast — saved input is external input. */
 const storedEntriesSchema = z.array(
@@ -827,10 +832,10 @@ describe("exit slippage floors (quote-derived)", () => {
     primeQuote("4.997");
     // The first attempt's POST hangs: its key stays kept, and the second
     // arm's review promises to resubmit it while the answer is still out.
-    let resolveFirst: ((answer: unknown) => void) | undefined;
+    let resolveFirst: ((answer: WithdrawalPostAnswer) => void) | undefined;
     mocks.createEarnVaultWithdrawal.mockImplementationOnce(
       () =>
-        new Promise((resolve) => {
+        new Promise<WithdrawalPostAnswer>((resolve) => {
           resolveFirst = resolve;
         })
     );
@@ -878,11 +883,11 @@ describe("exit slippage floors (quote-derived)", () => {
     primeQuote("4.997");
     // The first attempt's POST hangs — the key is live and unanswered when the
     // retry confirms.
-    let resolveFirst: ((answer: unknown) => void) | undefined;
+    let resolveFirst: ((answer: WithdrawalPostAnswer) => void) | undefined;
     mocks.createEarnVaultWithdrawal
       .mockImplementationOnce(
         () =>
-          new Promise((resolve) => {
+          new Promise<WithdrawalPostAnswer>((resolve) => {
             resolveFirst = resolve;
           })
       )
@@ -1050,6 +1055,23 @@ describe("exit slippage floors (quote-derived)", () => {
   });
 
   /**
+   * The previous build's serialized identity —
+   * `[projectId, positionId, DERIVED shares, toleranceBps, redemptionMode?]` —
+   * which `seedLegacyKeptKey` stores as the entry's fingerprint. Mirrors the
+   * tracker's `legacyIdentitySchema` tuple shapes, so a malformed fixture
+   * fails typecheck instead of silently seeding an entry no scan can match.
+   */
+  type LegacyIdentityFixture =
+    | [projectId: string | null, positionId: string, shares: string, toleranceBps: number | null]
+    | [
+        projectId: string | null,
+        positionId: string,
+        shares: string,
+        toleranceBps: number | null,
+        redemptionMode: "standard" | "instant",
+      ];
+
+  /**
    * The PREVIOUS build keyed its kept entries on the DERIVED shares and wrote
    * no format tag, so no fingerprint this build computes can ever find one
    * again — the retry of such an attempt must ADOPT it and replay its exact
@@ -1059,7 +1081,7 @@ describe("exit slippage floors (quote-derived)", () => {
    * that build remembered under the same identity.
    */
   function seedLegacyKeptKey(input: {
-    identity: unknown[];
+    identity: LegacyIdentityFixture;
     key: string;
     claimedAt: number;
     /** The legacy floor memo entry; omitted when that memo lost it. */
@@ -1087,7 +1109,7 @@ describe("exit slippage floors (quote-derived)", () => {
 
   describe("a kept key the PREVIOUS build left (the fingerprint upgrade)", () => {
     /** The previous build's atomic identity: [project, position, DERIVED shares, tolerance, mode?]. */
-    function legacyIdentity(shares: string, mode?: "standard" | "instant") {
+    function legacyIdentity(shares: string, mode?: "standard" | "instant"): LegacyIdentityFixture {
       return mode === undefined
         ? ["prj_1", vedaPosition.id, shares, 10]
         : ["prj_1", vedaPosition.id, shares, 10, mode];
