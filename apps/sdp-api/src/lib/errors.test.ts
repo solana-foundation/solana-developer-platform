@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   AppError,
   badRequest,
+  custodyProviderUnsupportedOperation,
   notFound,
   rateLimited,
   transactionExpired,
@@ -86,6 +87,24 @@ describe("error helper functions", () => {
     const error = rateLimited();
     expect(error.statusCode).toBe(429);
     expect(error.code).toBe("RATE_LIMITED");
+  });
+
+  it("custodyProviderUnsupportedOperation creates a 400 naming the provider, mode and movement", () => {
+    const error = custodyProviderUnsupportedOperation("fireblocks", "byok", "recurring.activate");
+    expect(error.code).toBe("CUSTODY_PROVIDER_UNSUPPORTED_OPERATION");
+    expect(error.statusCode).toBe(400);
+    expect(error.message).toBe(
+      "Fireblocks wallets your organization connected cannot start this operation yet. They send direct payments only for now. Choose a wallet on another custody provider."
+    );
+    expect(error.details).toEqual({
+      provider: "fireblocks",
+      mode: "byok",
+      movement: "recurring.activate",
+    });
+    // A managed wallet is SDP's own account, and the table lists nothing for it.
+    expect(custodyProviderUnsupportedOperation("privy", "managed", "earn.deposit").message).toBe(
+      "Privy wallets cannot start this operation yet. Choose a wallet on another custody provider."
+    );
   });
 
   it("transactionExpired creates a 409 with its own code", () => {

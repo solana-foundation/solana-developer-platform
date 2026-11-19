@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { CustodyWalletSummary } from "@sdp/types/custody";
+import type { CustodyProvider, CustodyWalletSummary } from "@sdp/types/custody";
 import type {
   PrivateChannelMembershipChannelDto,
   PrivateChannelTokenEligibility,
@@ -167,6 +167,36 @@ const sourceWallets: CustodyWalletSummary[] = [
   },
 ];
 
+/** A verified source wallet on a named provider, owned by a config (managed) or a connection (BYOK). */
+function providerWallet(
+  id: string,
+  label: string,
+  provider: CustodyProvider,
+  owner: { custodyConfigId: string } | { custodyConnectionId: string }
+): CustodyWalletSummary {
+  return {
+    ...owner,
+    id: `custody_${id}`,
+    walletId: `wallet_${id}`,
+    label,
+    provider,
+    isRuntimeExecutionAllowed: true,
+    publicKey: `${id}1111111111111111111111111111111111`,
+    purpose: null,
+    status: "active",
+    createdAt: "2026-07-28T00:00:00.000Z",
+  };
+}
+const fireblocksByok = providerWallet("fireblocks_byok", "Fireblocks vault", "fireblocks", {
+  custodyConnectionId: "cconn_fireblocks",
+});
+const fireblocksManaged = providerWallet("fireblocks_managed", "Managed vault", "fireblocks", {
+  custodyConfigId: "cc_fireblocks",
+});
+const privyByok = providerWallet("privy", "Privy wallet", "privy", {
+  custodyConnectionId: "cconn_privy",
+});
+
 const alphaRecipients: PrivateChannelTransferRecipientDto[] = [
   {
     id: "pcvw_alice",
@@ -275,6 +305,31 @@ describe("TransferForm", () => {
     });
 
     expect(screen.getByText(/no verified custody wallet that SDP can sign with/i)).toBeTruthy();
+    expect(mocks.fetchTransferRecipientsAction).not.toHaveBeenCalled();
+  });
+
+  it("offers a managed Fireblocks wallet and a Privy connection as the source, not a Fireblocks connection (PRO-2435 D1)", () => {
+    renderForm({
+      channels,
+      scopeKey: "org_test:project_test:pci_test",
+      sourceWallets: [fireblocksByok, fireblocksManaged, privyByok],
+    });
+
+    const fromWallet = screen.getByLabelText("From wallet");
+    expect(within(fromWallet).getByRole("option", { name: /Managed vault/ })).toBeTruthy();
+    expect(within(fromWallet).getByRole("option", { name: /Privy wallet/ })).toBeTruthy();
+    expect(within(fromWallet).queryByRole("option", { name: /Fireblocks vault/ })).toBeNull();
+  });
+
+  it("explains an empty source list when only Fireblocks connections are verified", () => {
+    renderForm({
+      channels,
+      scopeKey: "org_test:project_test:pci_test",
+      sourceWallets: [fireblocksByok],
+    });
+
+    expect(screen.getByText(/send direct payments only/)).toBeTruthy();
+    expect(screen.queryByText(/no verified custody wallet that SDP can sign with/i)).toBeNull();
     expect(mocks.fetchTransferRecipientsAction).not.toHaveBeenCalled();
   });
 

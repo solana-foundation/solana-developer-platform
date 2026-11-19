@@ -43,12 +43,134 @@ const duplicateAuthorityWallets: PaymentsDashboardWallet[] = [
   },
 ];
 
+// SAFETY: the selection reads only status, the signing wallet and the authority
+// addresses a case sets; every other Token field is never touched by it.
 const token = {
   status: "pending",
   signingCustodyWalletId: "cwlt_b",
 } as Token;
 
 const t = ((key: string) => key) as Parameters<typeof getSignerSelectionForAction>[0]["t"];
+
+const HELD_BACK = "Shared.custodyWallets.fireblocksDirectPaymentsOnly";
+const fireblocksByok: PaymentsDashboardWallet = {
+  id: "cwlt_fireblocks_byok",
+  walletId: "vault_1",
+  isRuntimeExecutionAllowed: true,
+  publicKey: "authority",
+  label: "Fireblocks vault",
+  provider: "fireblocks",
+  custodyConnectionId: "cconn_fireblocks",
+};
+const fireblocksManaged: PaymentsDashboardWallet = {
+  ...fireblocksByok,
+  id: "cwlt_fireblocks_managed",
+  publicKey: "address_managed",
+  label: "Managed vault",
+  custodyConnectionId: undefined,
+  custodyConfigId: "cc_fireblocks",
+};
+const privyByok: PaymentsDashboardWallet = {
+  ...fireblocksByok,
+  id: "cwlt_privy",
+  publicKey: "address_privy",
+  label: "Privy wallet",
+  provider: "privy",
+  custodyConnectionId: "cconn_privy",
+};
+
+describe("issuance signer wallets a custody provider holds back (PRO-2435 D1)", () => {
+  it("offers a managed Fireblocks wallet and a Privy connection to deploy, not a Fireblocks connection", () => {
+    const selection = getSignerSelectionForAction({
+      action: "deploy",
+      token: { ...token, signingCustodyWalletId: null },
+      authorityWallets: [fireblocksByok, fireblocksManaged, privyByok],
+      metadataAuthority: null,
+      t,
+    });
+    expect(selection.wallets.map((wallet) => wallet.id)).toEqual([
+      "cwlt_fireblocks_managed",
+      "cwlt_privy",
+    ]);
+    expect(selection.unavailableReason).toBeNull();
+  });
+
+  it("names the rule when the token's saved deploy signer is a Fireblocks connection", () => {
+    const selection = getSignerSelectionForAction({
+      action: "deploy",
+      token: { ...token, signingCustodyWalletId: fireblocksByok.id },
+      authorityWallets: [fireblocksByok, privyByok],
+      metadataAuthority: null,
+      t,
+    });
+    expect(selection.wallets).toEqual([privyByok]);
+    expect(selection.defaultWalletId).toBe("");
+    expect(selection.unavailableReason).toBe(HELD_BACK);
+  });
+
+  it("names the rule, not a missing authority, when a Fireblocks connection holds the mint authority", () => {
+    const selection = getSignerSelectionForAction({
+      action: "mint",
+      token: { ...token, mintAuthority: "authority" },
+      authorityWallets: [fireblocksByok, privyByok],
+      metadataAuthority: null,
+      t,
+    });
+    expect(selection.wallets).toEqual([]);
+    expect(selection.unavailableReason).toBe(HELD_BACK);
+  });
+
+  it("names the rule when every wallet is a Fireblocks connection, and absence when there are none", () => {
+    const heldBack = getSignerSelectionForAction({
+      action: "mint",
+      token: { ...token, mintAuthority: "authority" },
+      authorityWallets: [fireblocksByok],
+      metadataAuthority: null,
+      t,
+    });
+    expect(heldBack.unavailableReason).toBe(HELD_BACK);
+    const none = getSignerSelectionForAction({
+      action: "mint",
+      token: { ...token, mintAuthority: "authority" },
+      authorityWallets: [],
+      metadataAuthority: null,
+      t,
+    });
+    expect(none.unavailableReason).toBe(
+      "DashboardIssuance.management.noControlledWalletsAvailable"
+    );
+  });
+
+  it("keeps a Fireblocks connection in the shared freeze and pause pickers, whose exits must stay possible", () => {
+    for (const action of ["freeze", "pause", "allowlist"] as const) {
+      const selection = getSignerSelectionForAction({
+        action,
+        token: { ...token, freezeAuthority: "authority" },
+        authorityWallets: [fireblocksByok, privyByok],
+        metadataAuthority: null,
+        pauseAuthority: "authority",
+        allowlistAuthority: "authority",
+        t,
+      });
+      expect(selection.wallets.map((wallet) => wallet.id)).toContain("cwlt_fireblocks_byok");
+      expect(selection.unavailableReason).not.toBe(HELD_BACK);
+    }
+  });
+
+  it("still offers a Fireblocks connection to burn, which only reduces supply", () => {
+    const selection = getSignerSelectionForAction({
+      action: "burn",
+      token,
+      authorityWallets: [fireblocksByok, privyByok],
+      metadataAuthority: null,
+      t,
+    });
+    expect(selection.wallets.map((wallet) => wallet.id)).toEqual([
+      "cwlt_fireblocks_byok",
+      "cwlt_privy",
+    ]);
+  });
+});
 
 describe("issuance exact wallet selection", () => {
   it("keeps a runtime-unavailable sole authority selected but blocks signing", () => {
@@ -148,7 +270,7 @@ describe("issuance exact wallet selection", () => {
   it("blocks deploy when the persisted exact wallet is unavailable", () => {
     const selection = getSignerSelectionForAction({
       action: "deploy",
-      token: { ...token, signingCustodyWalletId: "cwlt_missing" } as Token,
+      token: { ...token, signingCustodyWalletId: "cwlt_missing" },
       authorityWallets: wallets,
       metadataAuthority: null,
       t,
@@ -168,7 +290,7 @@ describe("issuance exact wallet selection", () => {
           ...token,
           signingCustodyWalletId: "cwlt_missing",
           mintAuthority: null,
-        } as Token,
+        },
         role: "mint",
         metadataAuthority: null,
         authorityWallets: wallets,
@@ -192,7 +314,7 @@ describe("issuance exact wallet selection", () => {
         ...token,
         mintAuthority: "authority",
         freezeAuthority: "authority",
-      } as Token,
+      },
       authorityWallets: duplicateAuthorityWallets,
       metadataAuthority: "authority",
       allowlistAuthority: "authority",
@@ -207,7 +329,7 @@ describe("issuance exact wallet selection", () => {
   it("keeps the single matching authority wallet selected", () => {
     const selection = getSignerSelectionForAction({
       action: "mint",
-      token: { ...token, mintAuthority: "authority" } as Token,
+      token: { ...token, mintAuthority: "authority" },
       authorityWallets: [duplicateAuthorityWallets[1]],
       metadataAuthority: null,
       t,
@@ -246,7 +368,7 @@ describe("issuance exact wallet selection", () => {
   it("selects by the list authority rather than the token freeze authority", () => {
     const selection = getSignerSelectionForAction({
       action: "allowlist",
-      token: { ...token, freezeAuthority: "address_b" } as Token,
+      token: { ...token, freezeAuthority: "address_b" },
       authorityWallets: wallets,
       metadataAuthority: null,
       allowlistAuthority: "address_a",

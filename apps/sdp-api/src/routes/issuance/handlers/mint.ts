@@ -679,6 +679,7 @@ export async function extractMintRequest(
   }
   const currentAuthority = assertValidAddress(currentAuthorityRaw, "mintAuthority");
   const { custodyWalletId } = await resolveAuthorityWallet({
+    movement: "issuance.authority",
     env: c.env,
     auth,
     requestedCustodyWalletId: input.signingCustodyWalletId,

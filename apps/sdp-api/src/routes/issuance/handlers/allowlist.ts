@@ -172,6 +172,7 @@ async function resolveAllowlistAuthoritySigner(
 ) {
   const authorityAddress = await resolveAllowlistAuthority(list);
   const authorityWallet = await resolveAuthorityWallet({
+    movement,
     env: c.env,
     auth,
     currentAuthority: authorityAddress,

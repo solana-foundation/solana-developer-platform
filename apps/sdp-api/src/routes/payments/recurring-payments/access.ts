@@ -5,6 +5,7 @@ import { AppError, notFound, walletNotFound } from "@/lib/errors";
 import {
   assertCallerMaySignWith,
   assertCallerWalletInScope,
+  assertCustodyWalletStartsMovement,
   assertWalletPurposeAdmitted,
 } from "@/lib/money-admission";
 import type { AuthorizeInput } from "@/middleware/authorize";
@@ -196,6 +197,9 @@ export async function authorizeRecurringPaymentStart(
   const authorized = await authorizeRecurringPayment(c, input);
   if (authorized.sourceWallet !== null) {
     assertWalletPurposeAdmitted(authorized.scope.auth, authorized.sourceWallet, movement);
+    // A schedule pinned before its provider was held back (PRO-2435 D1) is
+    // refused here too, before the key is claimed and the attempt row written.
+    assertCustodyWalletStartsMovement(authorized.sourceWallet, movement);
   }
   return authorized;
 }
@@ -228,6 +232,8 @@ export async function authorizeRecurringPaymentUpdate(
     nextSourceWallet = named;
   } else if (authorized.sourceWallet !== null) {
     assertWalletPurposeAdmitted(access, authorized.sourceWallet, "recurring.update");
+    // The unchanged source may sign a replacement subscription (PRO-2435 D1).
+    assertCustodyWalletStartsMovement(authorized.sourceWallet, "recurring.update");
   }
   await assertNamedCounterpartyIdsInProject(c, body);
   return { ...authorized, nextSourceWallet };

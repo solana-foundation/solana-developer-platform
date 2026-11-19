@@ -80,6 +80,7 @@ function offrampWizard(overrides: Partial<OfframpWizard>): OfframpWizard {
     liveWallets: [],
     walletsLoading: false,
     liveWalletsError: null,
+    heldBackHint: null,
     selectedWallet: null,
     selectedRampPair: DEFAULT_RAMP_PAIR,
     fields: {

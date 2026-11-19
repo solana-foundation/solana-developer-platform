@@ -229,6 +229,68 @@ describe("DvpCreateWorkspace", () => {
     );
   });
 
+  it("offers a party a managed Fireblocks wallet and a Privy connection, not a Fireblocks connection (PRO-2435 D1)", () => {
+    renderForm({
+      wallets: [
+        ...context.wallets,
+        {
+          id: "cwlt_fireblocks_byok",
+          address: PARTY_B,
+          label: "Fireblocks vault",
+          provider: "fireblocks",
+          custodyConnectionId: "cconn_fireblocks",
+          isRuntimeExecutionAllowed: true,
+          balances: [],
+        },
+        {
+          id: "cwlt_fireblocks_managed",
+          address: REDIRECT,
+          label: "Managed vault",
+          provider: "fireblocks",
+          custodyConfigId: "cc_fireblocks",
+          isRuntimeExecutionAllowed: true,
+          balances: [],
+        },
+        {
+          id: "cwlt_privy",
+          address: ACME,
+          label: "Privy wallet",
+          provider: "privy",
+          custodyConnectionId: "cconn_privy",
+          isRuntimeExecutionAllowed: true,
+          balances: [],
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /delivering the asset/i }));
+    expect(screen.getByText("Managed vault")).toBeTruthy();
+    expect(screen.getByText("Privy wallet")).toBeTruthy();
+    expect(screen.queryByText("Fireblocks vault")).toBeNull();
+    expect(screen.queryByText(/send direct payments only/)).toBeNull();
+  });
+
+  it("explains an empty party wallet list when only Fireblocks connections exist", () => {
+    renderForm({
+      wallets: [
+        {
+          id: "cwlt_fireblocks_byok",
+          address: PARTY_B,
+          label: "Fireblocks vault",
+          provider: "fireblocks",
+          custodyConnectionId: "cconn_fireblocks",
+          isRuntimeExecutionAllowed: true,
+          balances: [],
+        },
+      ],
+    });
+
+    // Both party slots open in wallet mode, so each says why it offers nothing.
+    expect(screen.getAllByText(/send direct payments only/)).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: /delivering the asset/i }));
+    expect(screen.queryByText("Fireblocks vault")).toBeNull();
+  });
+
   it("lists registered counterparties in counterparty mode", () => {
     renderForm();
 

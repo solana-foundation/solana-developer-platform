@@ -104,6 +104,8 @@ export function useOfframpWizard(props: UseRampWizardProps) {
       direction: "offramp",
     },
     selectionSchema: withdrawSelectionSchema,
+    // The quote signs nothing, but the deposit it leads to is funded from this wallet.
+    sourceWalletMovement: "ramps.offramp_quote",
     quoteEndpoint: "/api/dashboard/payments/ramps/offramp/quote",
     buildQuotePayload: ({
       fields,
@@ -231,7 +233,9 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     ...wizard,
     canProceed: wizard.canProceed && !(wizard.currentStepId === "WITHDRAW" && overBalance),
     sourceWalletHint:
-      signingUnavailable && !onchainSendResult ? t("DashboardPayments.signingUnavailable") : null,
+      signingUnavailable && !onchainSendResult
+        ? t("DashboardPayments.signingUnavailable")
+        : wizard.heldBackHint,
     summaryDetails,
     transferStatus,
     transferStatusLoading,

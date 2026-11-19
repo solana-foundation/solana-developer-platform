@@ -25,6 +25,8 @@ const OWNER_CONFIG_ID = "cfg_issuance_project_scope_owner";
 const REQUESTER_CONFIG_ID = "cfg_issuance_project_scope_requester";
 const SHARED_AUTHORITY = TEST_SOLANA_ADDRESSES.wallet1;
 
+const OWNER_CONNECTION_ID = "cconn_issuance_project_scope_owner";
+
 const OWNER_WALLETS = [
   {
     owner: "config",
@@ -33,6 +35,9 @@ const OWNER_WALLETS = [
     custodyWalletId: "cwlt_issuance_scope_owner_config",
     providerWalletId: "wal_issuance_scope_owner_config",
     publicKey: TEST_SOLANA_ADDRESSES.wallet2,
+    provider: "local",
+    custodyConfigId: OWNER_CONFIG_ID,
+    custodyConnectionId: null,
   },
   {
     owner: "connection",
@@ -41,6 +46,9 @@ const OWNER_WALLETS = [
     custodyWalletId: "cwlt_issuance_scope_owner_connection",
     providerWalletId: "wal_issuance_scope_owner_connection",
     publicKey: SHARED_AUTHORITY,
+    provider: "privy",
+    custodyConfigId: null,
+    custodyConnectionId: OWNER_CONNECTION_ID,
   },
 ] as const;
 
@@ -48,6 +56,9 @@ const REQUESTER_WALLET = {
   custodyWalletId: "cwlt_issuance_scope_requester",
   providerWalletId: "wal_issuance_scope_requester",
   publicKey: SHARED_AUTHORITY,
+  provider: "local",
+  custodyConfigId: REQUESTER_CONFIG_ID,
+  custodyConnectionId: null,
 };
 
 function clerkAuth(organizationId: string, projectId: string): ApiKeyContext {
@@ -93,7 +104,7 @@ async function seedOwnerProjectCustody(): Promise<void> {
     seedTestPrivyConnection(tx, {
       organizationId: OWNER_WALLETS[1].organizationId,
       projectId: OWNER_WALLETS[1].projectId,
-      connectionId: "cconn_issuance_project_scope_owner",
+      connectionId: OWNER_CONNECTION_ID,
       credentialId: "pcred_issuance_project_scope_owner",
       createdBy: USER_ID,
       stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "ciphertext" },
@@ -190,20 +201,20 @@ describe("issuance authority resolution across an organization's projects", () =
 
   it.each(OWNER_WALLETS)(
     "resolves a $owner wallet only for the project that owns it",
-    async ({ organizationId, projectId, custodyWalletId, providerWalletId, publicKey }) => {
+    async ({ owner: _owner, organizationId, projectId, ...wallet }) => {
       await expect(
         resolveIssuanceWallet({
           env,
           auth: clerkAuth(organizationId, projectId),
-          custodyWalletId,
+          custodyWalletId: wallet.custodyWalletId,
         })
-      ).resolves.toEqual({ custodyWalletId, providerWalletId, publicKey });
+      ).resolves.toEqual(wallet);
 
       await expect(
         resolveIssuanceWallet({
           env,
           auth: clerkAuth(ORGANIZATION_ID, REQUESTER_PROJECT_ID),
-          custodyWalletId,
+          custodyWalletId: wallet.custodyWalletId,
         })
       ).rejects.toMatchObject({ code: "NOT_FOUND", statusCode: 404 });
     }

@@ -4,8 +4,13 @@
 
 import { redactCredentialSecrets, redactCredentialString } from "@sdp/redaction/credentials";
 import type { Action } from "@sdp/types/actions";
-import { CUSTODY_PROVIDER_CATALOG_BY_ID, type CustodyProvider } from "@sdp/types/custody";
+import {
+  CUSTODY_PROVIDER_CATALOG_BY_ID,
+  type CustodyMode,
+  type CustodyProvider,
+} from "@sdp/types/custody";
 import type { IdempotencyErrorCode } from "@sdp/types/idempotency";
+import { CUSTODY_PROVIDER_START_MOVEMENTS, type MovementId } from "@sdp/types/movements";
 import type { RampDirection } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
 
@@ -54,6 +59,8 @@ export type ErrorCode =
   // A custody provider block that is not a confirmed policy refusal
   | "SIGNING_BLOCKED"
   | "CUSTODY_POLICY_REFUSED"
+  // The wallet's custody provider cannot start this path yet (PRO-2435 D1)
+  | "CUSTODY_PROVIDER_UNSUPPORTED_OPERATION"
   | "PROVIDER_NOT_CONFIGURED"
   | "PROVIDER_UNAVAILABLE"
   | "PROVIDER_RESPONSE_INVALID"
@@ -134,6 +141,9 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   SIGNING_BLOCKED: 400,
   // Policy refusals need a policy review or request change before retrying.
   CUSTODY_POLICY_REFUSED: 422,
+  // 400, before any row or Idempotency-Key claim: the request names a wallet
+  // this path cannot use; the same request with another wallet goes through.
+  CUSTODY_PROVIDER_UNSUPPORTED_OPERATION: 400,
   PROVIDER_NOT_CONFIGURED: 503,
   PROVIDER_UNAVAILABLE: 503,
   // 502, never 503: the provider answered success, so the action may have
@@ -208,6 +218,8 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   SIGNING_BLOCKED: "The custody provider blocked this signing request",
   CUSTODY_POLICY_REFUSED:
     "Your custody provider refused to sign this request because of a wallet policy. Review the wallet's policy or adjust the request before retrying.",
+  CUSTODY_PROVIDER_UNSUPPORTED_OPERATION:
+    "The wallet's custody provider cannot start this operation yet. Choose a wallet on another custody provider.",
   PROVIDER_NOT_CONFIGURED: "Payment provider is not configured for this environment",
   PROVIDER_UNAVAILABLE: "Payment provider is temporarily unavailable",
   PROVIDER_RESPONSE_INVALID: "Payment provider returned a response SDP could not read",
@@ -363,6 +375,36 @@ export function custodyPolicyRefused(cause: Error, provider: CustodyProvider): A
   return new AppError("CUSTODY_POLICY_REFUSED", custodyPolicyRefusalMessage(provider), undefined, {
     cause,
   });
+}
+
+/**
+ * A source wallet whose custody provider cannot start this path yet (PRO-2435
+ * D1): the provider's signing may wait for a human approval the path cannot
+ * hold for. Raised before any row or Idempotency-Key claim, so the same
+ * request goes through with another wallet.
+ *
+ * @param provider - The wallet's custody provider.
+ * @param mode - `byok` for a connection the organization supplied, `managed` for SDP's own.
+ * @param movement - The movement the path would have signed for.
+ * @returns The 400 `CUSTODY_PROVIDER_UNSUPPORTED_OPERATION` error.
+ */
+export function custodyProviderUnsupportedOperation(
+  provider: CustodyProvider,
+  mode: CustodyMode,
+  movement: MovementId
+): AppError {
+  const label = CUSTODY_PROVIDER_CATALOG_BY_ID[provider].label;
+  const wallets =
+    mode === "byok" ? `${label} wallets your organization connected` : `${label} wallets`;
+  const started: Partial<Record<CustodyProvider, readonly MovementId[]>> =
+    CUSTODY_PROVIDER_START_MOVEMENTS[mode];
+  const directOnly = started[provider]?.includes("payments.transfer") === true;
+  const scope = directOnly ? " They send direct payments only for now." : "";
+  return new AppError(
+    "CUSTODY_PROVIDER_UNSUPPORTED_OPERATION",
+    `${wallets} cannot start this operation yet.${scope} Choose a wallet on another custody provider.`,
+    { provider, mode, movement }
+  );
 }
 
 export function rateLimited(message?: string): AppError {

@@ -7,7 +7,9 @@ import { getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";
 import {
   assertCallerWalletInScope,
+  assertCustodyWalletStartsMovement,
   assertMoneyStartAdmitted,
+  custodyWalletMode,
   decideMoneyStart,
   decideMovement,
   decidePrincipal,
@@ -996,6 +998,88 @@ describe("money admission reads the principal in the same statement", () => {
       )
     );
     expect(read?.principal).toEqual({ kind: "api_key", key: null });
+  });
+});
+
+describe("assertCustodyWalletStartsMovement (PRO-2435 D1)", () => {
+  const fireblocksByok = {
+    id: "cwlt_fireblocks_byok",
+    provider: "fireblocks",
+    custodyConnectionId: "cconn_fireblocks",
+  } as const;
+
+  it("derives the custody mode from the wallet's owner", () => {
+    expect(custodyWalletMode({ custodyConnectionId: "cconn" })).toBe("byok");
+    expect(custodyWalletMode({ custodyConfigId: "cust_cfg" })).toBe("managed");
+    expect(custodyWalletMode({})).toBe("managed");
+  });
+
+  it("refuses a Fireblocks BYOK wallet for every start outside its table, with the waist's event", () => {
+    const events = vi.spyOn(moneyPathEvents, "logEvent").mockImplementation(() => {});
+    for (const movement of [
+      "recurring.activate",
+      "recurring.update",
+      "payments.transfer_batch",
+      "ramps.offramp_quote",
+      "earn.deposit",
+      "earn.prepare",
+      "issuance.authority",
+      "dvp.fund",
+      "private_channels.transfer",
+    ] as const) {
+      expect(() => assertCustodyWalletStartsMovement(fireblocksByok, movement)).toThrow(
+        expect.objectContaining({
+          code: "CUSTODY_PROVIDER_UNSUPPORTED_OPERATION",
+          statusCode: 400,
+          details: { provider: "fireblocks", mode: "byok", movement },
+        })
+      );
+      expect(events).toHaveBeenLastCalledWith("info", {
+        event: "sdp_custody_provider_path_refused",
+        surface: "early",
+        movement,
+        module: MOVEMENTS[movement].module,
+        subject_id: "cwlt_fireblocks_byok",
+        provider: "fireblocks",
+        custody_mode: "byok",
+      });
+    }
+    events.mockRestore();
+  });
+
+  it("lets a Fireblocks BYOK wallet send a direct payment, run a signer check, and exit", () => {
+    for (const movement of [
+      "payments.transfer",
+      "custody.signer_check",
+      "earn.withdraw",
+      "recurring.cancel",
+      "dvp.reclaim",
+      "issuance.control",
+    ] as const) {
+      expect(() => assertCustodyWalletStartsMovement(fireblocksByok, movement)).not.toThrow();
+    }
+  });
+
+  it("leaves every other provider and mode, and a wallet read without its provider, alone", () => {
+    const movement = "recurring.activate";
+    expect(() =>
+      assertCustodyWalletStartsMovement(
+        { id: "cwlt_fireblocks_managed", provider: "fireblocks", custodyConfigId: "cust" },
+        movement
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertCustodyWalletStartsMovement(
+        { id: "cwlt_privy_byok", provider: "privy", custodyConnectionId: "cconn" },
+        movement
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertCustodyWalletStartsMovement(
+        { id: "cwlt_retained", custodyConnectionId: "cconn" },
+        movement
+      )
+    ).not.toThrow();
   });
 });
 

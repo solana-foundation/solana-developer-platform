@@ -29,7 +29,10 @@ import {
   buildEarnVaultWithdrawalFingerprint,
 } from "@/lib/idempotency";
 import { decodeKeysetCursor, encodeKeysetCursor } from "@/lib/keyset-cursor";
-import { assertCallerWalletInScope } from "@/lib/money-admission";
+import {
+  assertCallerWalletInScope,
+  assertCustodyWalletStartsMovement,
+} from "@/lib/money-admission";
 import { success } from "@/lib/response";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import { getRequestGateContext, type RequestGateExtraction } from "@/middleware/request-gate";
@@ -345,8 +348,10 @@ export async function extractEarnVaultDeposit(
   const wallet = resolveEarnVaultCustodyWallet(wallets, body.custodyWalletId);
   // The custody signer decides every signature; this is its refusal made
   // before the audit intent, eligibility, sponsorship, build and simulation
-  // (ADR 0007 addendum).
+  // (ADR 0007 addendum). A provider that waits for human approval cannot
+  // start a deposit yet (PRO-2435 D1), refused the same way.
   assertCallerWalletInScope(auth, wallet.id);
+  assertCustodyWalletStartsMovement(wallet, "earn.deposit");
 
   const resolved: EarnVaultDepositResolved = {
     strategy,

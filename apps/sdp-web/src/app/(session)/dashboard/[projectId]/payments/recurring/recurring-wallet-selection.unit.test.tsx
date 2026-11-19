@@ -9,7 +9,7 @@ import {
   RECURRING_PAYMENT_PAUSE_REASONS,
   type RecurringPaymentPauseReason,
 } from "@sdp/types/payments";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
@@ -19,6 +19,7 @@ import { I18nProvider } from "@/i18n/provider";
 import { resetDashboardNavigation, setDashboardUrl } from "@/test/dashboard-navigation";
 import { RecurringPaymentCreateWorkspace } from "./recurring-payment-create-workspace";
 import { RecurringPaymentDetailWorkspace } from "./recurring-payment-detail-workspace";
+import { useRecurringPaymentCreate } from "./use-recurring-payment-create";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
@@ -116,6 +117,148 @@ function wrapper({ children }: { children: ReactNode }) {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+});
+
+const HELD_BACK =
+  "Fireblocks wallets your organization connected send direct payments only. Choose a wallet on another custody provider.";
+const fireblocksByok: PaymentsDashboardWallet = {
+  ...source,
+  id: "cwlt_fireblocks_byok",
+  label: "Fireblocks vault",
+  provider: "fireblocks",
+  custodyConnectionId: "cconn_fireblocks",
+};
+const fireblocksManaged: PaymentsDashboardWallet = {
+  ...source,
+  id: "cwlt_fireblocks_managed",
+  label: "Managed vault",
+  provider: "fireblocks",
+  custodyConfigId: "cc_fireblocks",
+};
+const privyByok: PaymentsDashboardWallet = {
+  ...source,
+  id: "cwlt_privy",
+  label: "Privy wallet",
+  provider: "privy",
+  custodyConnectionId: "cconn_privy",
+};
+
+function stubWalletInventory(inventory: PaymentsDashboardWallet[]) {
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    if (String(input).includes("/wallets?")) return Response.json({ data: { wallets: inventory } });
+    return Response.json({
+      data: { counterparties: [counterparty], accounts: [account], total: 1 },
+    });
+  });
+}
+
+describe("Recurring Payment funding wallets a custody provider holds back (PRO-2435 D1)", () => {
+  it("offers New schedule a managed Fireblocks wallet and a Privy connection, not a Fireblocks connection", async () => {
+    const inventory = [fireblocksByok, fireblocksManaged, privyByok];
+    stubWalletInventory(inventory);
+    const { result } = renderHook(
+      () =>
+        useRecurringPaymentCreate({
+          wallets: inventory,
+          walletsError: null,
+          issuedTokenSymbolsByMint: {},
+          issuedTokensByMint: {},
+          counterpartiesResult: { ok: true, data: [counterparty] },
+        }),
+      { wrapper }
+    );
+    await waitFor(() =>
+      expect(result.current.availableWallets.map((wallet) => wallet.id)).toEqual([
+        "cwlt_fireblocks_managed",
+        "cwlt_privy",
+      ])
+    );
+    expect(result.current.walletOptions.map((option) => option.value)).toEqual([
+      "cwlt_fireblocks_managed",
+      "cwlt_privy",
+    ]);
+    expect(result.current.heldBackWalletsMessage).toBeNull();
+  });
+
+  it("explains an empty New schedule picker when only Fireblocks connections exist", async () => {
+    stubWalletInventory([fireblocksByok]);
+    const { result } = renderHook(
+      () =>
+        useRecurringPaymentCreate({
+          wallets: [fireblocksByok],
+          walletsError: null,
+          issuedTokenSymbolsByMint: {},
+          issuedTokensByMint: {},
+          counterpartiesResult: { ok: true, data: [counterparty] },
+        }),
+      { wrapper }
+    );
+    await waitFor(() => expect(result.current.availableWallets).toEqual([]));
+    expect(result.current.heldBackWalletsMessage).toBe(HELD_BACK);
+    expect(screen.queryByText(HELD_BACK)).toBeNull();
+  });
+
+  it("keeps a project with no wallets on New schedule's own empty state", async () => {
+    stubWalletInventory([]);
+    const { result } = renderHook(
+      () =>
+        useRecurringPaymentCreate({
+          wallets: [],
+          walletsError: null,
+          issuedTokenSymbolsByMint: {},
+          issuedTokensByMint: {},
+          counterpartiesResult: { ok: true, data: [counterparty] },
+        }),
+      { wrapper }
+    );
+    await waitFor(() => expect(result.current.availableWallets).toEqual([]));
+    expect(result.current.heldBackWalletsMessage).toBeNull();
+  });
+
+  it("offers an edit a managed Fireblocks wallet and a Privy connection, not a Fireblocks connection", async () => {
+    const inventory = [fireblocksByok, fireblocksManaged, privyByok];
+    stubWalletInventory(inventory);
+    render(
+      <RecurringPaymentDetailWorkspace
+        recurringPayment={{ ...recurring, sourceCustodyWalletId: fireblocksManaged.id }}
+        wallet={fireblocksManaged}
+        wallets={inventory}
+        issuedTokensByMint={{}}
+        counterpartyAccounts={[account]}
+        counterpartyLabel="Receiver"
+        collectionAttempts={[]}
+        collectionAttemptsTotal={0}
+      />,
+      { wrapper }
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    await user.click(screen.getByRole("button", { name: /Funding wallet/ }));
+    expect(await screen.findByRole("button", { name: /Privy wallet/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Managed vault/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Fireblocks vault/ })).toBeNull();
+    expect(screen.queryByText(HELD_BACK)).toBeNull();
+  });
+
+  it("explains an edit whose only wallets are Fireblocks connections", async () => {
+    stubWalletInventory([fireblocksByok]);
+    render(
+      <RecurringPaymentDetailWorkspace
+        recurringPayment={{ ...recurring, sourceCustodyWalletId: fireblocksByok.id }}
+        wallet={fireblocksByok}
+        wallets={[fireblocksByok]}
+        issuedTokensByMint={{}}
+        counterpartyAccounts={[account]}
+        counterpartyLabel="Receiver"
+        collectionAttempts={[]}
+        collectionAttemptsTotal={0}
+      />,
+      { wrapper }
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    expect(await screen.findByText(HELD_BACK)).toBeTruthy();
+  });
 });
 
 describe("Recurring Payment exact source selection", () => {

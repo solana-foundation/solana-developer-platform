@@ -29,6 +29,10 @@ import {
   walletBalanceAssetOptions,
   walletComboboxOptions,
 } from "@/app/(session)/dashboard/[projectId]/payments/ramps/wallet-options";
+import {
+  heldBackWalletsHint,
+  walletsStartingMovement,
+} from "@/app/(session)/dashboard/[projectId]/payments/wallet-movement-support";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { createRecurringPayment } from "./recurring-payments.data";
@@ -228,10 +232,13 @@ export function useRecurringPaymentCreate({
   const liveCounterparties =
     liveCounterpartiesResult === undefined ? counterpartiesResult : liveCounterpartiesResult;
 
-  const { liveWallets: availableWallets, liveWalletsError } = usePaymentsActionWallets(
-    wallets,
-    walletsError
+  const { liveWallets, liveWalletsError } = usePaymentsActionWallets(wallets, walletsError);
+  // Activating a schedule is a start the rule may hold a wallet back from (PRO-2435 D1).
+  const availableWallets = useMemo(
+    () => walletsStartingMovement(liveWallets, "recurring.activate"),
+    [liveWallets]
   );
+  const heldBackWalletsMessage = heldBackWalletsHint(liveWallets, "recurring.activate", t);
 
   const {
     data: accounts,
@@ -517,6 +524,7 @@ export function useRecurringPaymentCreate({
     liveCounterparties,
     liveWalletsError,
     availableWallets,
+    heldBackWalletsMessage,
     accountsLoading,
     cryptoAccounts,
     resolvedAccountId,

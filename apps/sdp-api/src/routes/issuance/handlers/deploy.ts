@@ -346,6 +346,11 @@ async function resolveDeployAuthorityWallets(
       const custodyWalletId = authorityCustodyWalletIds?.[role];
       return custodyWalletId
         ? resolveIssuanceWallet({
+            // Only the metadata wallet signs in this request (`issuance.authority`,
+            // see createDeployMetadataSigner); the freeze and permanent-delegate
+            // wallets are recorded as authorities and gated by their own
+            // operations later.
+            movement: role === "metadata" ? "issuance.authority" : undefined,
             env,
             auth,
             custodyWalletId,
@@ -426,6 +431,7 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
   }
 
   const deploymentWallet = await resolveIssuanceWallet({
+    movement: "issuance.authority",
     env: c.env,
     auth,
     custodyWalletId: requestedCustodyWalletId,

@@ -54,6 +54,8 @@ const copy = vi.hoisted<Record<string, string>>(() => ({
   "DashboardEarn.deposit.stepProgress": "Step {current} of {total}",
   "DashboardEarn.deposit.walletsLoadError": "Wallets could not be loaded.",
   "DashboardEarn.deposit.walletsEmptyTitle": "No active custody wallets",
+  "Shared.custodyWallets.fireblocksDirectPaymentsOnly":
+    "Fireblocks wallets your organization connected send direct payments only. Choose a wallet on another custody provider.",
   "DashboardEarn.deposit.walletsEmptyBody": "Create a wallet before depositing.",
   "DashboardEarn.deposit.goToWallets": "Open Wallets",
   "DashboardCustody.createWallet": "Create wallet",
@@ -738,6 +740,65 @@ describe("EarnVaultDepositModal", () => {
       true
     );
     expect(mocks.createEarnVaultDeposit).not.toHaveBeenCalled();
+  });
+
+  it("offers a managed Fireblocks wallet and a Privy connection, not a Fireblocks connection (PRO-2435 D1)", async () => {
+    mocks.useEarnFundingWallets.mockReturnValue({
+      wallets: [
+        {
+          ...fundingWallet([]),
+          id: "wallet_fireblocks_byok",
+          label: "Fireblocks vault",
+          provider: "fireblocks",
+          custodyConnectionId: "cconn_fireblocks",
+        },
+        {
+          ...fundingWallet([]),
+          id: "wallet_fireblocks_managed",
+          label: "Managed vault",
+          provider: "fireblocks",
+          custodyConfigId: "cc_fireblocks",
+        },
+        {
+          ...fundingWallet([]),
+          id: "wallet_privy",
+          label: "Privy wallet",
+          provider: "privy",
+          custodyConnectionId: "cconn_privy",
+        },
+      ],
+      error: undefined,
+      isLoading: false,
+    });
+    render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
+
+    await screen.findByRole("dialog");
+    expect(screen.getByRole("radio", { name: /Managed vault/ })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: /Privy wallet/ })).toBeTruthy();
+    expect(screen.queryByRole("radio", { name: /Fireblocks vault/ })).toBeNull();
+  });
+
+  it("explains an empty wallet list when only Fireblocks connections exist, and still offers setup", async () => {
+    mocks.useEarnFundingWallets.mockReturnValue({
+      wallets: [
+        {
+          ...fundingWallet([]),
+          id: "wallet_fireblocks_byok",
+          label: "Fireblocks vault",
+          provider: "fireblocks",
+          custodyConnectionId: "cconn_fireblocks",
+        },
+      ],
+      error: undefined,
+      isLoading: false,
+    });
+    render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
+
+    await screen.findByRole("dialog");
+    expect(screen.getByText(/send direct payments only/)).toBeTruthy();
+    expect(screen.queryByText("No active custody wallets")).toBeNull();
+    expect(screen.queryByRole("radio", { name: /Fireblocks vault/ })).toBeNull();
+    expect(screen.getByRole("link", { name: "Create wallet" })).toBeTruthy();
   });
 
   it("sends an empty wallet state straight to wallet setup", async () => {

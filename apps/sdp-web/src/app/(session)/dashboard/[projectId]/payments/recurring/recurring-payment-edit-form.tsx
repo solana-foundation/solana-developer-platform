@@ -15,6 +15,10 @@ import { type FormEvent, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
 import { shortenAddress } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
+import {
+  heldBackWalletsHint,
+  walletsStartingMovement,
+} from "@/app/(session)/dashboard/[projectId]/payments/wallet-movement-support";
 import { useTranslations } from "@/i18n/provider";
 import {
   getRecurringPaymentDetailState,
@@ -126,6 +130,11 @@ export function RecurringPaymentEditForm({
     setValidationError(null);
   };
   const selectedWallet = liveWallets.find((entry) => entry.id === fields.sourceCustodyWalletId);
+  // An update replaces the subscription, a start the rule may hold a wallet back from
+  // (PRO-2435 D1): the picker offers the others, while the schedule's own wallet still
+  // resolves above for the state of the schedule as it stands.
+  const offeredWallets = walletsStartingMovement(liveWallets, "recurring.update");
+  const heldBackWalletsMessage = heldBackWalletsHint(liveWallets, "recurring.update", t);
   const { editWalletUnavailable, saveDisabled } = getRecurringPaymentDetailState({
     sourceCustodyWalletId: recurringPayment.sourceCustodyWalletId,
     status: recurringPayment.status,
@@ -243,7 +252,7 @@ export function RecurringPaymentEditForm({
           label={t("DashboardPayments.recurring.fundingWallet")}
           value={fields.sourceCustodyWalletId}
           onChange={changeWallet}
-          options={liveWallets.map((entry) => ({
+          options={offeredWallets.map((entry) => ({
             value: entry.id,
             label: walletLabel(entry, entry.walletId),
             description: shortenAddress(entry.publicKey),
@@ -259,11 +268,14 @@ export function RecurringPaymentEditForm({
           }))}
           placeholder={t("DashboardPayments.recurring.selectFundingWallet")}
           searchPlaceholder={t("DashboardPayments.recurring.searchWallets")}
-          disabled={saving || liveWallets.length === 0}
+          disabled={saving || offeredWallets.length === 0}
         />
         <p role="status" hidden={!editWalletUnavailable} className="text-meta text-warning">
           {t("DashboardPayments.signingUnavailable")}
         </p>
+        {heldBackWalletsMessage ? (
+          <p className="text-meta text-warning">{heldBackWalletsMessage}</p>
+        ) : null}
       </div>
       <Combobox
         label={t("DashboardPayments.recurring.receivingWallet")}

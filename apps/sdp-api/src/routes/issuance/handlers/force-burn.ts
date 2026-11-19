@@ -201,6 +201,7 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
   }
 
   const { custodyWalletId } = await resolveAuthorityWallet({
+    movement: "issuance.control",
     env: c.env,
     auth,
     requestedCustodyWalletId: body.signingCustodyWalletId,

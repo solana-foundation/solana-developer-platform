@@ -27,6 +27,7 @@ import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { setOrganizationProviderOverrides } from "@/test/helpers/provider-overrides";
+import { required } from "@/test/helpers/required";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedRateLimit } from "@/test/mocks/kv";
 import { deriveDvpTradeKind } from "./dvp/handlers";
@@ -827,6 +828,68 @@ describe("DvP routes", () => {
       const body = (await res.json()) as { error?: { code?: string } };
       expect(body.error?.code).toBe("FORBIDDEN");
       expect(await fundingClaimCount("dvp_wrong_wallet")).toBe(0);
+    });
+  });
+
+  // PRO-2435 D1: a connected Fireblocks wallet can wait for a human approval the
+  // funding cannot hold for; the leg action refuses it before the reservation row.
+  describe("fund refusal for a custody provider that cannot start it", () => {
+    it("refuses a Fireblocks BYOK wallet holding the party address, writing no request or claim", async () => {
+      const connectionId = "cconn_dvp_fireblocks";
+      const custodyWalletId = "cwlt_dvp_fireblocks";
+      const db = getDb(env);
+      await db.batch([
+        db
+          .prepare(`INSERT INTO provider_credentials
+          (id, organization_id, project_id, provider, label, scope, source,
+           storage_backend, encrypted_secret_payload, status, credential_version, created_by)
+          VALUES ('pcred_dvp_fireblocks', ?, ?, 'fireblocks', 'Fireblocks', 'project', 'stored',
+                  'encrypted_db', 'test-ciphertext', 'active', 1, ?)`)
+          .bind(TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id),
+        db
+          .prepare(`INSERT INTO custody_connections
+          (id, organization_id, project_id, provider, scope, provider_credential_id,
+           provider_credential_scope_key, status, created_by)
+          VALUES (?, ?, ?, 'fireblocks', 'project', 'pcred_dvp_fireblocks', ?, 'pending', ?)`)
+          .bind(connectionId, TEST_ORG.id, TEST_PROJECT.id, TEST_PROJECT.id, TEST_USER.id),
+        db
+          .prepare(`INSERT INTO custody_wallets
+          (id, custody_connection_id, wallet_id, public_key, label, purpose, status)
+          VALUES (?, ?, '0', ?, 'Fireblocks desk', 'transfer', 'active')`)
+          .bind(custodyWalletId, connectionId, PARTY_A_ADDRESS),
+        db
+          .prepare(`UPDATE custody_connections
+          SET status = 'active', default_custody_wallet_id = ?,
+              last_check_status = 'success', last_check_at = sdp_iso_now(),
+              activated_at = sdp_iso_now(), provider_account_fingerprint = 'sha256:dvp-fireblocks'
+          WHERE id = ?`)
+          .bind(custodyWalletId, connectionId),
+      ]);
+      await seedTradeFor({ tradeId: "dvp_fireblocks_byok" });
+
+      const res = await app.request(
+        "/v1/dvp/trades/dvp_fireblocks_byok/fund",
+        {
+          method: "POST",
+          headers: { ...authHeaders(), "Idempotency-Key": "dvp-fireblocks-byok" },
+          body: JSON.stringify({ side: "a", walletId: custodyWalletId }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({
+        error: {
+          code: "CUSTODY_PROVIDER_UNSUPPORTED_OPERATION",
+          details: { provider: "fireblocks", mode: "byok", movement: "dvp.fund" },
+        },
+      });
+      expect(await fundingClaimCount("dvp_fireblocks_byok")).toBe(0);
+      const requests = await getDb(env)
+        .prepare("SELECT COUNT(*)::int AS n FROM dvp_leg_action_requests WHERE trade_id = ?")
+        .bind("dvp_fireblocks_byok")
+        .first<{ n: number }>();
+      expect(required(requests).n).toBe(0);
     });
   });
 

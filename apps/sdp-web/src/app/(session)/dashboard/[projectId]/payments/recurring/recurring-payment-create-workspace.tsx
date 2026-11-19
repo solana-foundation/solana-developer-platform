@@ -185,7 +185,14 @@ function ContactFields({ form }: StepProps) {
 function ScheduleSourceWalletField({ form }: StepProps) {
   const t = useTranslations();
   const locale = useLocale();
-  const { fields, selectWallet, walletOptions, availableWallets, selectedWallet } = form;
+  const {
+    fields,
+    selectWallet,
+    walletOptions,
+    availableWallets,
+    selectedWallet,
+    heldBackWalletsMessage,
+  } = form;
   const total = form.selectedWalletTotal;
   return (
     <SourceWalletField
@@ -204,6 +211,9 @@ function ScheduleSourceWalletField({ form }: StepProps) {
           {t("DashboardPayments.signingUnavailable")}{" "}
           {t("DashboardPayments.recurring.signingDisabledDraft")}
         </FieldHint>
+      ) : null}
+      {heldBackWalletsMessage ? (
+        <FieldHint tone="warning">{heldBackWalletsMessage}</FieldHint>
       ) : null}
     </SourceWalletField>
   );

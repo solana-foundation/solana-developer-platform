@@ -37,6 +37,10 @@ import {
 import { EarnFlowStepper } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-flow-stepper";
 import { EarnFlowTransition } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-flow-transition";
 import { EarnOutcomeMark } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-outcome-mark";
+import {
+  heldBackWalletsHint,
+  walletsStartingMovement,
+} from "@/app/(session)/dashboard/[projectId]/payments/wallet-movement-support";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { fetchResultAnswer } from "@/lib/idempotency";
@@ -340,6 +344,8 @@ function amountValidationMessage(
 interface DepositWalletPickerProps {
   wallets: readonly EarnFundingWallet[] | undefined;
   walletsError: unknown;
+  /** Why the list is empty when wallets exist but none may fund a deposit (PRO-2435 D1). */
+  walletsHeldBackMessage: string | null;
   walletsLoading: boolean;
   selectedWalletId: string | null;
   depositMint: string | undefined;
@@ -351,6 +357,7 @@ interface DepositWalletPickerProps {
 function DepositWalletPicker({
   wallets,
   walletsError,
+  walletsHeldBackMessage,
   walletsLoading,
   selectedWalletId,
   depositMint,
@@ -382,12 +389,18 @@ function DepositWalletPicker({
   } else if ((wallets?.length ?? 0) === 0) {
     walletContent = (
       <div className="rounded-card bg-surface-tile p-4">
-        <p className="text-body font-medium text-primary">
-          {t("DashboardEarn.deposit.walletsEmptyTitle")}
-        </p>
-        <p className="mt-1 text-body text-secondary">
-          {t("DashboardEarn.deposit.walletsEmptyBody")}
-        </p>
+        {walletsHeldBackMessage === null ? (
+          <>
+            <p className="text-body font-medium text-primary">
+              {t("DashboardEarn.deposit.walletsEmptyTitle")}
+            </p>
+            <p className="mt-1 text-body text-secondary">
+              {t("DashboardEarn.deposit.walletsEmptyBody")}
+            </p>
+          </>
+        ) : (
+          <p className="text-body text-secondary">{walletsHeldBackMessage}</p>
+        )}
         {custodyEnabled && canManageCustody ? (
           <Button asChild className="mt-3" size="sm" variant="outline">
             <Link href={href("/dashboard/wallets/setup")}>
@@ -830,6 +843,7 @@ interface DepositDetailsStepProps {
   submitting: boolean;
   wallets: readonly EarnFundingWallet[] | undefined;
   walletsError: unknown;
+  walletsHeldBackMessage: string | null;
   walletsLoading: boolean;
 }
 
@@ -854,6 +868,7 @@ function DepositDetailsStep(props: DepositDetailsStepProps) {
     submitting,
     wallets,
     walletsError,
+    walletsHeldBackMessage,
     walletsLoading,
   } = props;
   const locale = useLocale();
@@ -874,6 +889,7 @@ function DepositDetailsStep(props: DepositDetailsStepProps) {
         submitting={submitting}
         wallets={wallets}
         walletsError={walletsError}
+        walletsHeldBackMessage={walletsHeldBackMessage}
         walletsLoading={walletsLoading}
       />
 
@@ -1078,7 +1094,18 @@ export function EarnVaultDepositModal({
   onMovementUpdated,
 }: EarnVaultDepositModalProps) {
   const t = useTranslations();
-  const { wallets, error: walletsError, isLoading: walletsLoading } = useEarnFundingWallets();
+  const {
+    wallets: allWallets,
+    error: walletsError,
+    isLoading: walletsLoading,
+  } = useEarnFundingWallets();
+  // A vault deposit is a start the rule may hold a wallet back from (PRO-2435 D1).
+  const wallets = useMemo(
+    () =>
+      allWallets === undefined ? undefined : walletsStartingMovement(allWallets, "earn.deposit"),
+    [allWallets]
+  );
+  const walletsHeldBackMessage = heldBackWalletsHint(allWallets ?? [], "earn.deposit", t);
   const [walletId, setWalletId] = useState<string | null>(null);
   const [amountInput, setAmountInput] = useState("");
   // The catalogue row's own answer, published per environment by the API
@@ -1524,6 +1551,7 @@ export function EarnVaultDepositModal({
               submitting={submitting}
               wallets={wallets}
               walletsError={walletsError}
+              walletsHeldBackMessage={walletsHeldBackMessage}
               walletsLoading={walletsLoading}
             />
           ) : (

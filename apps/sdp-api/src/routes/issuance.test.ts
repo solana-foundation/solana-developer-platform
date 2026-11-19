@@ -44,7 +44,13 @@ import {
 } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
-import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
+import { insertTestCustodyWalletRow } from "@/test/helpers/custody";
+import {
+  activateTestCustodyConnection,
+  insertTestCustodyConnection,
+  insertTestStoredProviderCredential,
+  seedTestPrivyConnection,
+} from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
@@ -720,6 +726,231 @@ describe("Issuance Routes", () => {
         expect(await history.json()).toMatchObject({ data: [], meta: { total: 0 } });
       }
     );
+  });
+
+  describe("custody providers that cannot start issuance (PRO-2435 D1)", () => {
+    const headers = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+    };
+    const authority = required(TEST_ACTIVE_TOKEN.mintAuthority);
+    const FIREBLOCKS_BYOK_WALLET = "cwlt_fireblocks_byok_issuer";
+    const FIREBLOCKS_MANAGED_WALLET = "cwlt_fireblocks_managed_issuer";
+    const PRIVY_BYOK_WALLET = "cwlt_privy_byok_issuer";
+
+    /** An active BYOK connection on `provider` owning one wallet that holds the token's authority. */
+    async function seedConnectedWallet(
+      provider: "fireblocks" | "privy",
+      custodyWalletId: string,
+      walletId: string
+    ): Promise<void> {
+      const db = getDb(env);
+      const credentialId = `pcred_${custodyWalletId}`;
+      const connectionId = `cconn_${custodyWalletId}`;
+      const fingerprint = `sha256:${custodyWalletId}`;
+      await insertTestStoredProviderCredential(db, {
+        id: credentialId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        provider,
+        label: provider,
+        stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "not-read" },
+        displayMetadata: {},
+        status: "active",
+        credentialVersion: 1,
+        rotatedFromProviderCredentialId: null,
+        lastValidatedAt: null,
+        deactivatedAt: null,
+        createdBy: TEST_USER.id,
+      });
+      await insertTestCustodyConnection(db, {
+        id: connectionId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        provider,
+        credential: { id: credentialId, projectId: TEST_PROJECT.id },
+        status: "pending",
+        setupMetadata: {},
+        providerAccountFingerprint: fingerprint,
+        lastCheckStatus: null,
+        lastCheckAt: null,
+        lastCheckFailureCode: null,
+        activatedAt: null,
+        deactivatedAt: null,
+        createdBy: TEST_USER.id,
+        createdAt: new Date().toISOString(),
+      });
+      await insertTestCustodyWalletRow(db, {
+        id: custodyWalletId,
+        owner: { kind: "connection", custodyConnectionId: connectionId },
+        walletId,
+        publicKey: authority,
+        label: null,
+        purpose: "transfer",
+        status: "active",
+      });
+      await activateTestCustodyConnection(db, {
+        connectionId,
+        custodyWalletId,
+        providerAccountFingerprint: fingerprint,
+      });
+    }
+
+    /** A managed (config-owned) Fireblocks wallet that holds the token's authority. */
+    async function seedManagedFireblocksWallet(): Promise<void> {
+      await getDb(env).batch([
+        getDb(env)
+          .prepare(
+            `INSERT INTO custody_configs
+               (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
+             VALUES ('cust_cfg_fireblocks_managed', ?, ?, 'fireblocks', 'test-config',
+                     'sdp-custody-encryption-v1', 'active')`
+          )
+          .bind(TEST_ORG.id, TEST_PROJECT.id),
+        getDb(env)
+          .prepare(
+            `INSERT INTO custody_wallets
+               (id, custody_config_id, wallet_id, public_key, label, purpose, status)
+             VALUES (?, 'cust_cfg_fireblocks_managed', 'fb_managed_1', ?, 'Managed Fireblocks',
+                     'transfer', 'active')`
+          )
+          .bind(FIREBLOCKS_MANAGED_WALLET, authority),
+      ]);
+    }
+
+    async function issuanceTransactionCount(): Promise<number> {
+      const row = await getDb(env)
+        .prepare("SELECT COUNT(*)::int AS count FROM issuance_transactions")
+        .first<{ count: number }>();
+      return required(row).count;
+    }
+
+    function mint(tokenId: string, signingCustodyWalletId: string) {
+      return app.request(
+        `/v1/issuance/tokens/${tokenId}/mint`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            mint: { destination: TEST_SOLANA_ADDRESSES.wallet2, amount: "1" },
+            signingCustodyWalletId,
+          }),
+        },
+        env
+      );
+    }
+
+    beforeEach(async () => {
+      // Entitle both providers so only the start gate can refuse them.
+      await getDb(env)
+        .prepare(
+          "UPDATE organizations SET settings = (settings::jsonb || ?::jsonb)::text WHERE id = ?"
+        )
+        .bind(
+          JSON.stringify({
+            providerOverrides: { custody: { local: true, fireblocks: true, privy: true } },
+          }),
+          TEST_ORG.id
+        )
+        .run();
+      vi.spyOn(MosaicService.prototype, "mintTo").mockResolvedValue({
+        signature: "sig_provider_gate_mint",
+        slot: 42n,
+        tokenAccount: address(TEST_SOLANA_ADDRESSES.wallet2),
+      });
+    });
+
+    afterEach(() => vi.restoreAllMocks());
+
+    it("refuses a mint from a connected Fireblocks wallet before any row or signer", async () => {
+      await seedConnectedWallet("fireblocks", FIREBLOCKS_BYOK_WALLET, "fb_1");
+      const token = await seedIssuedToken({ id: "tok_fireblocks_byok_mint" });
+      const signer = vi.mocked(solanaSigner.createOrgSignerForCustodyWallet);
+      signer.mockClear();
+
+      const response = await mint(token.id, FIREBLOCKS_BYOK_WALLET);
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: {
+          code: "CUSTODY_PROVIDER_UNSUPPORTED_OPERATION",
+          details: { provider: "fireblocks", mode: "byok", movement: "issuance.authority" },
+        },
+      });
+      expect(signer).not.toHaveBeenCalled();
+      expect(MosaicService.prototype.mintTo).not.toHaveBeenCalled();
+      expect(await issuanceTransactionCount()).toBe(0);
+    });
+
+    it("lets a connected Fireblocks wallet burn, an exit, through the provider gate", async () => {
+      await seedConnectedWallet("fireblocks", FIREBLOCKS_BYOK_WALLET, "fb_1");
+      const token = await seedIssuedToken({ id: "tok_fireblocks_byok_burn" });
+      const signer = vi.mocked(solanaSigner.createOrgSignerForCustodyWallet);
+      signer.mockClear();
+
+      const response = await app.request(
+        `/v1/issuance/tokens/${token.id}/burn`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            burn: { source: TEST_SOLANA_ADDRESSES.wallet1, amount: "1" },
+            signingCustodyWalletId: FIREBLOCKS_BYOK_WALLET,
+          }),
+        },
+        env
+      );
+
+      // The burn may still fail downstream in this harness; the gate is what is under test.
+      if (response.status !== 200) {
+        expect(await response.json()).not.toMatchObject({
+          error: { code: "CUSTODY_PROVIDER_UNSUPPORTED_OPERATION" },
+        });
+      }
+      expect(signer).toHaveBeenCalledWith(
+        env,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        FIREBLOCKS_BYOK_WALLET,
+        "issuance.control"
+      );
+    });
+
+    it("does not refuse a managed Fireblocks wallet", async () => {
+      await seedManagedFireblocksWallet();
+      const token = await seedIssuedToken({ id: "tok_fireblocks_managed_mint" });
+      const signer = vi.mocked(solanaSigner.createOrgSignerForCustodyWallet);
+      signer.mockClear();
+
+      const response = await mint(token.id, FIREBLOCKS_MANAGED_WALLET);
+
+      expect(response.status).toBe(200);
+      expect(signer).toHaveBeenCalledWith(
+        env,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        FIREBLOCKS_MANAGED_WALLET,
+        "issuance.authority"
+      );
+    });
+
+    it("does not refuse a connected Privy wallet", async () => {
+      await seedConnectedWallet("privy", PRIVY_BYOK_WALLET, "privy_wallet_1");
+      const token = await seedIssuedToken({ id: "tok_privy_byok_mint" });
+      const signer = vi.mocked(solanaSigner.createOrgSignerForCustodyWallet);
+      signer.mockClear();
+
+      const response = await mint(token.id, PRIVY_BYOK_WALLET);
+
+      expect(response.status).toBe(200);
+      expect(signer).toHaveBeenCalledWith(
+        env,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        PRIVY_BYOK_WALLET,
+        "issuance.authority"
+      );
+    });
   });
 
   describe("direct issuance idempotency replay", () => {

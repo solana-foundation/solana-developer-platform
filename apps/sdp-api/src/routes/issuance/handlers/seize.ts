@@ -216,6 +216,7 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
   }
 
   const { custodyWalletId } = await resolveAuthorityWallet({
+    movement: "issuance.seize",
     env: c.env,
     auth,
     requestedCustodyWalletId: body.signingCustodyWalletId,

@@ -45,6 +45,10 @@ import {
   retryTransferBatchUnderKey,
   sendTransferBatchUnderKey,
 } from "@/app/(session)/dashboard/[projectId]/payments/transfer-batch-idempotency";
+import {
+  heldBackWalletsHint,
+  walletsStartingMovement,
+} from "@/app/(session)/dashboard/[projectId]/payments/wallet-movement-support";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
@@ -360,10 +364,17 @@ export function useBatchSendWizard({
   );
   const recovering = unconfirmedSend !== null;
 
-  const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets(
-    wallets,
-    walletsError
+  const {
+    liveWallets: allLiveWallets,
+    walletsLoading,
+    liveWalletsError,
+  } = usePaymentsActionWallets(wallets, walletsError);
+  // A batch is a start the rule may hold a wallet back from (PRO-2435 D1).
+  const liveWallets = useMemo(
+    () => walletsStartingMovement(allLiveWallets, "payments.transfer_batch"),
+    [allLiveWallets]
   );
+  const heldBackHint = heldBackWalletsHint(allLiveWallets, "payments.transfer_batch", t);
 
   const {
     page,
@@ -733,7 +744,7 @@ export function useBatchSendWizard({
     walletsLoading,
     liveWalletsError,
     sourceWalletHint:
-      signingUnavailable && !batchResult ? t("DashboardPayments.signingUnavailable") : null,
+      signingUnavailable && !batchResult ? t("DashboardPayments.signingUnavailable") : heldBackHint,
     walletId,
     selectWallet,
     asset,

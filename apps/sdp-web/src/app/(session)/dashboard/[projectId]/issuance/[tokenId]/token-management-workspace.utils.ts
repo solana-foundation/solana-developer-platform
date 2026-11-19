@@ -1,3 +1,4 @@
+import type { MovementId } from "@sdp/types/movements";
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import type { Token, TokenAllowlistEntry } from "@sdp/types/tokens";
 import { isAddress } from "@solana/kit";
@@ -5,6 +6,10 @@ import {
   type AccessControlMode,
   getTokenAccessControlMode,
 } from "@/app/(session)/dashboard/[projectId]/issuance/access-control.utils";
+import {
+  heldBackWalletsHint,
+  walletsStartingMovement,
+} from "@/app/(session)/dashboard/[projectId]/payments/wallet-movement-support";
 import type { AppLocale } from "@/i18n/config";
 import type { MessageKey } from "@/i18n/messages";
 import type { TranslationValues } from "@/i18n/translate";
@@ -716,7 +721,7 @@ function getPendingAuthoritySignerWallet(
   token: Token,
   authorityWallets: PaymentsDashboardWallet[]
 ): PaymentsDashboardWallet | null {
-  const availableWallets = getAvailableSignerWallets(authorityWallets);
+  const availableWallets = getAvailableSignerWallets(authorityWallets, "issuance.authority");
   if (availableWallets.length === 0) {
     return null;
   }
@@ -792,10 +797,39 @@ export interface SignerSelectionState {
   unavailableReason: string | null;
 }
 
+/**
+ * The movement each signer-aware action signs for, which decides whether a
+ * custody wallet may be offered as its signer (PRO-2435 D1). Freeze and pause
+ * share a selection with thaw and unpause, which open access again, so they
+ * take the start; burn and force-burn only reduce exposure and stay open to
+ * every wallet, as the API keeps them.
+ */
+const SIGNER_ACTION_MOVEMENTS = {
+  deploy: "issuance.authority",
+  mint: "issuance.authority",
+  authority: "issuance.authority",
+  metadata: "issuance.authority",
+  // One picker serves a restricting exit and its reversing start (freeze and
+  // thaw, pause and unpause, allowlist removal and addition), and the direction
+  // is chosen after the wallet. The exit must stay possible for every wallet,
+  // so the picker filters on the exit; the API refuses the start half with
+  // the same message the picker would have shown.
+  allowlist: "issuance.control",
+  freeze: "issuance.control",
+  pause: "issuance.control",
+  seize: "issuance.seize",
+  burn: "issuance.control",
+  "force-burn": "issuance.control",
+} as const satisfies Record<SignerAwareAction, MovementId>;
+
 function getAvailableSignerWallets(
-  authorityWallets: PaymentsDashboardWallet[]
+  authorityWallets: PaymentsDashboardWallet[],
+  movement: MovementId
 ): PaymentsDashboardWallet[] {
-  return authorityWallets.filter((wallet) => wallet.publicKey.trim());
+  return walletsStartingMovement(
+    authorityWallets.filter((wallet) => wallet.publicKey.trim()),
+    movement
+  );
 }
 
 export function getSignerWalletOptionLabel(
@@ -860,6 +894,49 @@ export function resolveAuthorityAddressForRole(
   }
 }
 
+/**
+ * The deploy signer: the wallet the token saved, else the only wallet that may
+ * sign; several leave the choice open. A saved signer the rule holds back
+ * (PRO-2435 D1) is named as such rather than as a wallet the project lacks.
+ */
+function getDeploySignerSelection(
+  token: Token,
+  authorityWallets: PaymentsDashboardWallet[],
+  availableWallets: PaymentsDashboardWallet[],
+  movement: MovementId,
+  t: Translate
+): SignerSelectionState {
+  const preferredWallet = findWalletByCustodyWalletId(
+    availableWallets,
+    token.signingCustodyWalletId
+  );
+  if (token.signingCustodyWalletId && !preferredWallet) {
+    const savedSigner = findWalletByCustodyWalletId(authorityWallets, token.signingCustodyWalletId);
+    return {
+      wallets: availableWallets,
+      defaultWalletId: "",
+      unavailableReason:
+        (savedSigner ? heldBackWalletsHint([savedSigner], movement, t) : null) ??
+        t("DashboardIssuance.management.requiredSignerNotControlled"),
+    };
+  }
+
+  let deployWalletId = "";
+  if (preferredWallet) {
+    deployWalletId = preferredWallet.id;
+  } else if (availableWallets.length === 1) {
+    deployWalletId = availableWallets[0].id;
+  }
+
+  return {
+    wallets: availableWallets,
+    defaultWalletId: deployWalletId,
+    unavailableReason: availableWallets.some((wallet) => wallet.isRuntimeExecutionAllowed === true)
+      ? null
+      : t("DashboardIssuance.management.signingUnavailable"),
+  };
+}
+
 export function getSignerSelectionForAction({
   action,
   token,
@@ -884,45 +961,22 @@ export function getSignerSelectionForAction({
   if (action === "metadata" && metadataAuthorityError) {
     return { wallets: [], defaultWalletId: "", unavailableReason: metadataAuthorityError };
   }
-  const availableWallets = getAvailableSignerWallets(authorityWallets);
+  const movement = SIGNER_ACTION_MOVEMENTS[action];
+  const availableWallets = getAvailableSignerWallets(authorityWallets, movement);
 
   if (availableWallets.length === 0) {
     return {
       wallets: [],
       defaultWalletId: "",
-      unavailableReason: t("DashboardIssuance.management.noControlledWalletsAvailable"),
+      // Wallets that exist but may not sign this action are named as such, not as absent.
+      unavailableReason:
+        heldBackWalletsHint(authorityWallets, movement, t) ??
+        t("DashboardIssuance.management.noControlledWalletsAvailable"),
     };
   }
 
   if (action === "deploy") {
-    const preferredWallet = findWalletByCustodyWalletId(
-      availableWallets,
-      token.signingCustodyWalletId
-    );
-    if (token.signingCustodyWalletId && !preferredWallet) {
-      return {
-        wallets: availableWallets,
-        defaultWalletId: "",
-        unavailableReason: t("DashboardIssuance.management.requiredSignerNotControlled"),
-      };
-    }
-
-    let deployWalletId = "";
-    if (preferredWallet) {
-      deployWalletId = preferredWallet.id;
-    } else if (availableWallets.length === 1) {
-      deployWalletId = availableWallets[0].id;
-    }
-
-    return {
-      wallets: availableWallets,
-      defaultWalletId: deployWalletId,
-      unavailableReason: availableWallets.some(
-        (wallet) => wallet.isRuntimeExecutionAllowed === true
-      )
-        ? null
-        : t("DashboardIssuance.management.signingUnavailable"),
-    };
+    return getDeploySignerSelection(token, authorityWallets, availableWallets, movement, t);
   }
 
   if (action === "burn") {
@@ -997,10 +1051,15 @@ export function getSignerSelectionForAction({
     (wallet) => wallet.publicKey === requiredAuthority
   );
   if (matchedWallets.length === 0) {
+    // The authority may be held by a wallet of this project that may not sign the action.
+    const heldAuthorityWallets = authorityWallets.filter(
+      (wallet) => wallet.publicKey === requiredAuthority
+    );
     return {
       wallets: [],
       defaultWalletId: "",
-      unavailableReason: uncontrolledReason,
+      unavailableReason:
+        heldBackWalletsHint(heldAuthorityWallets, movement, t) ?? uncontrolledReason,
     };
   }
 

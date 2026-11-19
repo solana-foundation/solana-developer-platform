@@ -84,6 +84,7 @@ export const pauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema
   }
 
   const { custodyWalletId } = await resolveAuthorityWallet({
+    movement: "issuance.control",
     env: c.env,
     auth,
     currentAuthority: pauseAuthorityRaw,
@@ -262,6 +263,7 @@ export const unpauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSche
   }
 
   const { custodyWalletId } = await resolveAuthorityWallet({
+    movement: "issuance.authority",
     env: c.env,
     auth,
     currentAuthority: pauseAuthorityRaw,

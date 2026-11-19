@@ -1,11 +1,17 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import { ClassifyStep } from "./draft-flow-steps";
+import { ClassifyStep, PermissionsStep } from "./draft-flow-steps";
 import type { DraftState } from "./draft-model";
+
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
+
+afterEach(() => cleanup());
 
 const messages = getMessages("en");
 
@@ -34,6 +40,83 @@ const stablecoinDraft: DraftState = {
     "permanent-delegate": "wallet-a",
   },
 };
+
+const fireblocksByok: PaymentsDashboardWallet = {
+  id: "cwlt_fireblocks_byok",
+  walletId: "vault_1",
+  publicKey: "FbByok1111111111111111111111111111111111111",
+  label: "Fireblocks vault",
+  provider: "fireblocks",
+  custodyConnectionId: "cconn_fireblocks",
+  isRuntimeExecutionAllowed: true,
+};
+const fireblocksManaged: PaymentsDashboardWallet = {
+  ...fireblocksByok,
+  id: "cwlt_fireblocks_managed",
+  label: "Managed vault",
+  custodyConnectionId: undefined,
+  custodyConfigId: "cc_fireblocks",
+};
+const privyByok: PaymentsDashboardWallet = {
+  ...fireblocksByok,
+  id: "cwlt_privy",
+  label: "Privy wallet",
+  provider: "privy",
+  custodyConnectionId: "cconn_privy",
+};
+
+function renderPermissions(wallets: PaymentsDashboardWallet[]) {
+  return render(
+    <I18nProvider locale="en" messages={messages}>
+      <PermissionsStep
+        draft={stablecoinDraft}
+        wallets={wallets}
+        walletsError={null}
+        update={vi.fn()}
+      />
+    </I18nProvider>
+  );
+}
+
+describe("PermissionsStep", () => {
+  it("offers the signing keys a managed Fireblocks wallet and a Privy connection, not a Fireblocks connection", async () => {
+    const user = userEvent.setup();
+    renderPermissions([fireblocksByok, fireblocksManaged, privyByok]);
+    for (const name of ["Mint authority", "Metadata authority"]) {
+      await user.click(screen.getByRole("combobox", { name }));
+      const names = (await screen.findAllByRole("option")).map((option) => option.textContent);
+      expect(names).toEqual(["Managed vault", "Privy wallet"]);
+      await user.keyboard("{Escape}");
+    }
+    expect(screen.queryByText(/send direct payments only/)).toBeNull();
+  });
+
+  it("keeps a Fireblocks connection for the freeze authority and the permanent delegate, which only sign exits", async () => {
+    const user = userEvent.setup();
+    renderPermissions([fireblocksByok, fireblocksManaged, privyByok]);
+    for (const name of ["Freeze authority", "Permanent delegate"]) {
+      await user.click(screen.getByRole("combobox", { name }));
+      const names = (await screen.findAllByRole("option")).map((option) => option.textContent);
+      expect(names).toEqual(["Fireblocks vault", "Managed vault", "Privy wallet"]);
+      await user.keyboard("{Escape}");
+    }
+  });
+
+  it("explains why no wallet is offered when only Fireblocks connections exist", () => {
+    renderPermissions([fireblocksByok]);
+    expect(screen.getByText(/send direct payments only/)).toBeTruthy();
+    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(screen.getByRole("link", { name: /wallet/i }).getAttribute("href")).toBe(
+      "/dashboard/prj_test_sandbox/wallets/setup"
+    );
+  });
+
+  it("keeps a project with no wallets on its own words", () => {
+    renderPermissions([]);
+    expect(screen.getByText(/this project has none yet/)).toBeTruthy();
+    expect(screen.queryByText(/send direct payments only/)).toBeNull();
+  });
+});
 
 describe("ClassifyStep", () => {
   it("drops a stablecoin's controls when the draft becomes another kind of token", () => {

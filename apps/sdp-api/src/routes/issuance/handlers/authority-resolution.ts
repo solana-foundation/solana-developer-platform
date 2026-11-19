@@ -2,6 +2,7 @@ import { getTemplateInfo } from "@sdp/issuance/templates";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { toSdkRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
+import type { CustodyProvider } from "@sdp/types/custody";
 import type { MovementOf } from "@sdp/types/movements";
 import type { TokenTransaction, TokenTransactionType } from "@sdp/types/tokens";
 import { type TransactionSigner, unwrapOption } from "@solana/kit";
@@ -11,7 +12,10 @@ import { fetchMaybeMint } from "@solana-program/token-2022";
 import { getDb } from "@/db/client";
 import { type ApiKeyContext, requireAuthProjectId } from "@/lib/auth";
 import { AppError, badRequest, conflict, walletNotFound } from "@/lib/errors";
-import { assertCallerWalletInScope } from "@/lib/money-admission";
+import {
+  assertCallerWalletInScope,
+  assertCustodyWalletStartsMovement,
+} from "@/lib/money-admission";
 import { rethrowRpcUnavailable } from "@/lib/rpc-unavailable";
 import { createSigningService } from "@/services/domain/signing.service";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
@@ -26,6 +30,35 @@ export interface ResolvedIssuanceWallet {
   custodyWalletId: string;
   providerWalletId: string;
   publicKey: string;
+  /** The owner row's custody provider; with the owner, decides what the wallet may start. */
+  provider: CustodyProvider;
+  /** The custody config that owns the wallet (managed custody), or null. */
+  custodyConfigId: string | null;
+  /** The custody connection that owns the wallet (BYOK), or null. */
+  custodyConnectionId: string | null;
+}
+
+/**
+ * Refuses a wallet whose custody provider cannot start `movement` yet
+ * (PRO-2435 D1), before the token transaction row or any provider request. The
+ * signing waist makes the same refusal when the signer is created; this is the
+ * pre-write half. Called only after {@link assertCallerWalletInScope}, so a key
+ * out of scope never learns the provider.
+ */
+function assertIssuanceWalletStartsMovement(
+  wallet: ResolvedIssuanceWallet,
+  movement: IssuanceMovement | undefined
+): void {
+  if (movement === undefined) return;
+  assertCustodyWalletStartsMovement(
+    {
+      id: wallet.custodyWalletId,
+      provider: wallet.provider,
+      custodyConfigId: wallet.custodyConfigId,
+      custodyConnectionId: wallet.custodyConnectionId,
+    },
+    movement
+  );
 }
 
 /** Shared live list authority for both signer selection and execution. */
@@ -113,6 +146,9 @@ interface IssuanceWalletRow {
   custody_wallet_id: string;
   wallet_id: string;
   public_key: string;
+  provider: CustodyProvider;
+  custody_config_id: string | null;
+  custody_connection_id: string | null;
 }
 
 function tokenMayHavePermanentDelegate(token: TokenRecord): boolean {
@@ -310,7 +346,8 @@ async function findIssuanceWallets(params: {
   const projectId = requireAuthProjectId(auth);
   const scopeParams = [auth.organizationId, projectId, ...walletParams];
   const rows = await getDb(env).queryMany<IssuanceWalletRow>(
-    `SELECT w.id AS custody_wallet_id, w.wallet_id, w.public_key
+    `SELECT w.id AS custody_wallet_id, w.wallet_id, w.public_key,
+            c.provider AS provider, w.custody_config_id, w.custody_connection_id
      FROM custody_wallets w
      JOIN custody_configs c ON c.id = w.custody_config_id
      WHERE c.organization_id = ?
@@ -319,7 +356,8 @@ async function findIssuanceWallets(params: {
 
      UNION ALL
 
-     SELECT w.id AS custody_wallet_id, w.wallet_id, w.public_key
+     SELECT w.id AS custody_wallet_id, w.wallet_id, w.public_key,
+            c.provider AS provider, w.custody_config_id, w.custody_connection_id
      FROM custody_wallets w
      JOIN custody_connections c ON c.id = w.custody_connection_id
      WHERE c.organization_id = ?
@@ -334,14 +372,22 @@ async function findIssuanceWallets(params: {
     custodyWalletId: row.custody_wallet_id,
     providerWalletId: row.wallet_id,
     publicKey: row.public_key,
+    provider: row.provider,
+    custodyConfigId: row.custody_config_id,
+    custodyConnectionId: row.custody_connection_id,
   }));
 }
 
-/** Resolve one exact tenant-scoped wallet for draft or direct-deploy selection. */
+/**
+ * Resolve one exact tenant-scoped wallet for draft or direct-deploy selection.
+ * With `movement`, also refuses a wallet whose custody provider cannot start it
+ * (PRO-2435 D1); a replay or a read passes none.
+ */
 export async function resolveIssuanceWallet(params: {
   env: Env;
   auth: ApiKeyContext;
   custodyWalletId: string;
+  movement?: IssuanceMovement;
 }): Promise<ResolvedIssuanceWallet> {
   const matches = await findIssuanceWallets(params);
   const wallet = matches[0];
@@ -351,22 +397,29 @@ export async function resolveIssuanceWallet(params: {
   // The custody signer refuses a wallet outside the key's scope (HOO-2099);
   // refusing here as well stops the action before its token transaction row.
   assertCallerWalletInScope(params.auth, wallet.custodyWalletId);
+  assertIssuanceWalletStartsMovement(wallet, params.movement);
   return wallet;
 }
 
-/** Resolve exactly one tenant-scoped wallet that controls the current authority. */
+/**
+ * Resolve exactly one tenant-scoped wallet that controls the current authority.
+ * With `movement`, also refuses a wallet whose custody provider cannot start it
+ * (PRO-2435 D1).
+ */
 export async function resolveAuthorityWallet(params: {
   env: Env;
   auth: ApiKeyContext;
   requestedCustodyWalletId?: string | null;
   currentAuthority: string;
+  movement?: IssuanceMovement;
 }): Promise<ResolvedIssuanceWallet> {
-  const { env, auth, requestedCustodyWalletId, currentAuthority } = params;
+  const { env, auth, requestedCustodyWalletId, currentAuthority, movement } = params;
   if (requestedCustodyWalletId) {
     const wallet = await resolveIssuanceWallet({
       env,
       auth,
       custodyWalletId: requestedCustodyWalletId,
+      movement,
     });
     if (wallet.publicKey !== currentAuthority) {
       throw badRequest("Selected custody wallet does not control the current authority");
@@ -384,6 +437,7 @@ export async function resolveAuthorityWallet(params: {
   const [wallet] = matches;
   // As above: refused before the token transaction row is written.
   assertCallerWalletInScope(auth, wallet.custodyWalletId);
+  assertIssuanceWalletStartsMovement(wallet, movement);
   return wallet;
 }
 
@@ -429,6 +483,8 @@ export async function resolveAuthoritySigner(params: {
   currentAuthority: string;
   movement: IssuanceMovement;
 }): Promise<ResolvedIssuanceWallet & IssuanceAuthority> {
+  // `params.movement` reaches the wallet resolution, so the provider gate runs
+  // before the signer is created.
   const resolved = await resolveAuthorityWallet(params);
   const signer = await loadResolvedAuthoritySigner({
     env: params.env,
@@ -449,6 +505,8 @@ export async function createResolvedAuthoritySigner(params: {
   currentAuthority: string;
   movement: IssuanceMovement;
 }): Promise<IssuanceAuthority> {
+  // `params.movement` reaches the wallet resolution, so the provider gate runs
+  // before the signer is created.
   const wallet = await resolveIssuanceWallet(params);
   if (wallet.publicKey !== params.currentAuthority) {
     throw badRequest("Selected custody wallet does not control the current authority");
@@ -473,6 +531,10 @@ export async function createResolvedAuthoritySigner(params: {
  * @param params.expectedCustodyWalletId - The exact Config wallet row pinned on the token, if any.
  * @returns The signer for the named Config wallet.
  * @throws 400 when no signing wallet was named.
+ *
+ * The wallet comes from `CustodyConfigStore`, so it is always managed custody,
+ * never a BYOK connection: the provider start gate (PRO-2435 D1) has nothing to
+ * refuse here, and the signing waist still decides on the row it reads.
  */
 export async function createLegacyResolvedAuthoritySigner(params: {
   env: Env;

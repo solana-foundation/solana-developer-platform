@@ -1,4 +1,5 @@
 import { badRequest } from "@sdp/payments/errors";
+import type { CustodyProvider } from "@sdp/types/custody";
 import type { MovementOf } from "@sdp/types/movements";
 import { isAddress } from "@solana/addresses";
 import { getDb } from "@/db/client";
@@ -11,13 +12,19 @@ import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { AppContext } from "./context";
 
 /**
+ * A custody wallet as a payments route sees it: the row plus its owner's
+ * provider, which the pre-write refusals read (PRO-2435 D1).
+ */
+export type PaymentScopeWallet = CustodyWallet & { provider: CustodyProvider };
+
+/**
  * A custody wallet of the caller's project by its id, whatever its status: for an
  * access check, where whether the wallet is active is state for the handler.
  */
 export function findRetainedPaymentWallet(
   c: AppContext,
   custodyWalletId: string
-): Promise<CustodyWallet | null> {
+): Promise<PaymentScopeWallet | null> {
   return findProjectPaymentWallet(c, "id", custodyWalletId);
 }
 
@@ -25,7 +32,7 @@ export function findRetainedPaymentWallet(
 export function findRetainedPaymentWalletByWalletId(
   c: AppContext,
   walletId: string
-): Promise<CustodyWallet | null> {
+): Promise<PaymentScopeWallet | null> {
   return findProjectPaymentWallet(c, "wallet_id", walletId);
 }
 
@@ -61,13 +68,14 @@ async function findProjectPaymentWallet(
   c: AppContext,
   column: "id" | "wallet_id",
   value: string
-): Promise<CustodyWallet | null> {
+): Promise<PaymentScopeWallet | null> {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const row = await getDb(c.env)
     .prepare(
       `SELECT w.id, w.custody_config_id, w.custody_connection_id,
-              w.wallet_id, w.public_key, w.label, w.purpose, w.status, w.created_at
+              w.wallet_id, w.public_key, w.label, w.purpose, w.status, w.created_at,
+              COALESCE(cfg.provider, conn.provider) AS provider
        FROM custody_wallets w
        LEFT JOIN custody_configs cfg ON cfg.id = w.custody_config_id
        LEFT JOIN custody_connections conn ON conn.id = w.custody_connection_id
@@ -87,6 +95,7 @@ async function findProjectPaymentWallet(
       purpose: CustodyWallet["purpose"];
       status: CustodyWallet["status"];
       created_at: string;
+      provider: CustodyProvider;
     }>();
 
   if (!row) {
@@ -94,6 +103,7 @@ async function findProjectPaymentWallet(
   }
   const wallet = {
     id: row.id,
+    provider: row.provider,
     walletId: row.wallet_id,
     publicKey: row.public_key,
     label: row.label,
@@ -121,7 +131,7 @@ export async function resolveScope(c: AppContext, retainedCustodyWalletId?: stri
       ? findRetainedPaymentWallet(c, retainedCustodyWalletId)
       : Promise.resolve(null),
   ]);
-  const wallets: CustodyWallet[] = operationalWallets;
+  const wallets: PaymentScopeWallet[] = operationalWallets;
   if (retainedWallet && !wallets.some((wallet) => wallet.id === retainedWallet.id)) {
     wallets.push(retainedWallet);
   }
@@ -163,7 +173,10 @@ export async function resolveWalletFromParams(c: AppContext) {
   return { auth, wallet };
 }
 
-export function resolveWallet(wallets: CustodyWallet[], walletId: string): CustodyWallet {
+export function resolveWallet<Wallet extends CustodyWallet>(
+  wallets: Wallet[],
+  walletId: string
+): Wallet {
   const matches = wallets.filter((entry) => entry.walletId === walletId);
   if (matches.length > 1) {
     throw conflict("Custody wallet ownership is ambiguous");
@@ -175,10 +188,10 @@ export function resolveWallet(wallets: CustodyWallet[], walletId: string): Custo
   return wallet;
 }
 
-export function resolveWalletByCustodyWalletId(
-  wallets: CustodyWallet[],
+export function resolveWalletByCustodyWalletId<Wallet extends CustodyWallet>(
+  wallets: Wallet[],
   custodyWalletId: string
-): CustodyWallet {
+): Wallet {
   const wallet = wallets.find((entry) => entry.id === custodyWalletId);
   if (!wallet) {
     throw walletNotFound();

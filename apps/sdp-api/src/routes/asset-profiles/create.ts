@@ -47,11 +47,14 @@ export const createTokenWithAssetProfile = async (
     throw badRequest("Invalid advanced settings", { errors: settingErrors });
   }
 
+  // The wallet will deploy and mint, so a provider that cannot start an
+  // issuance authority movement yet is refused here (PRO-2435 D1).
   const signingWallet = tokenInput.signingCustodyWalletId
     ? await resolveIssuanceWallet({
         env: c.env,
         auth,
         custodyWalletId: tokenInput.signingCustodyWalletId,
+        movement: "issuance.authority",
       })
     : null;
 

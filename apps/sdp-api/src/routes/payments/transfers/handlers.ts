@@ -66,7 +66,7 @@ import {
   solanaRpcError,
   transactionFailed,
 } from "@/lib/errors";
-import { assertCallerMaySignWith } from "@/lib/money-admission";
+import { assertCallerMaySignWith, assertCustodyWalletStartsMovement } from "@/lib/money-admission";
 import { currentMoneyPrincipal } from "@/lib/money-principal";
 import { appErrorResponse, paginated, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
@@ -443,12 +443,18 @@ export async function authorizeTransfer(
   // The custody signer refuses a wallet outside the key's scope (HOO-2099)
   // or of a purpose that may not send (APE-371). Refusing here as well,
   // before the key is claimed, keeps a refused start from writing a failed
-  // transfer row and an Idempotency-Key that would replay that failure.
-  assertCallerMaySignWith(scope.auth, operation.sourceWallet, "payments.transfer");
+  // transfer row and an Idempotency-Key that would replay that failure. The
+  // scope's wallet carries its provider, so the same call refuses a provider
+  // that cannot start the movement yet (PRO-2435 D1).
+  const sourceWallet = resolveWalletByCustodyWalletId(scope.wallets, body.sourceCustodyWalletId);
+  assertCallerMaySignWith(scope.auth, sourceWallet, "payments.transfer");
   // A ramp deposit the request funds is named by id: it must be in the
   // project before the key is claimed, so a wrong id is never stored as a 404.
   let rampTransfer: TransferRow | null = null;
   if (body.transferId) {
+    // Funding it belongs to the off-ramp flow, which a provider that waits for
+    // human approval cannot start yet (PRO-2435 D1); refused before the claim.
+    assertCustodyWalletStartsMovement(sourceWallet, "ramps.offramp_quote");
     rampTransfer = await getPaymentsRepository(c).getTransferById({
       transferId: body.transferId,
       organizationId: scope.auth.organizationId,
@@ -1231,9 +1237,8 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
   const { proposer, fireblocks } = await resolveTransferProposal(c, operation);
   // Reject unsupported Fireblocks mints before attempting an unused Solana read.
   // Before the row: a too-precise amount is the caller's 400, never a failed transfer.
+  // (A Fireblocks wallet funding a ramp deposit was refused in authorize, before the claim.)
   await parseStaticPaymentAmount(operation.amount, assertValidAddress(operation.token, "token"));
-  if (fireblocks && body.transferId)
-    throw badRequest("Fireblocks native transfers currently support direct wallet payments only");
   // Before the row, so the refusal is unstored and the same key runs again once it clears.
   // Fireblocks builds and sends its own native transfers; SDP reads no chain state for them.
   if (!fireblocks && isNativePaymentToken(operation.token)) {

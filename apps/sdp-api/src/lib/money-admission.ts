@@ -1,7 +1,8 @@
 import { type Action, apiKeyMayPerform, organizationRoleMayPerform } from "@sdp/types/actions";
 import { API_KEY_WALLET_SCOPES, type ApiKeyWalletScope } from "@sdp/types/api-keys";
-import type { CustodyWalletPurpose } from "@sdp/types/custody";
+import type { CustodyMode, CustodyProvider, CustodyWalletPurpose } from "@sdp/types/custody";
 import {
+  custodyProviderStartsMovement,
   MANDATE_MOVEMENT_STATUSES,
   MOVEMENTS,
   type MovementId,
@@ -19,7 +20,7 @@ import { z } from "zod";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import { type ApiKeyLifecycleColumns, apiKeyRowRefusal } from "@/lib/api-key-rotation";
 import { type ApiKeyContext, walletAccessAllows } from "@/lib/auth";
-import { AppError } from "@/lib/errors";
+import { AppError, custodyProviderUnsupportedOperation } from "@/lib/errors";
 import {
   currentMoneyPrincipal,
   describeMoneyPrincipal,
@@ -260,11 +261,73 @@ export function assertCallerWalletInScope(
  */
 export function assertCallerMaySignWith(
   caller: Pick<ApiKeyContext, "walletAccess" | "organizationId" | "projectId">,
-  wallet: { id: string; purpose: CustodyWalletPurpose | null },
+  wallet: {
+    id: string;
+    purpose: CustodyWalletPurpose | null;
+  } & Partial<CustodyWalletProviderFields>,
   movement: MovementId
 ): void {
   assertCallerWalletInScope(caller, wallet.id);
   assertWalletPurposeAdmitted(caller, wallet, movement);
+  // Last, so a key never learns the provider of a wallet it cannot see.
+  assertCustodyWalletStartsMovement(wallet, movement);
+}
+
+/**
+ * The owner and provider a wallet projection carries: a custody config is
+ * managed, a connection BYOK. `provider` is absent on a wallet read without it
+ * (a retained row), which the waist alone decides.
+ */
+export interface CustodyWalletProviderFields {
+  provider?: CustodyProvider;
+  custodyConfigId?: string | null;
+  custodyConnectionId?: string | null;
+}
+
+/**
+ * The custody mode of a wallet from its owner row: a custody connection is a
+ * provider account the project supplied (`byok`), a custody config is SDP's own
+ * (`managed`). The same derivation the waist makes from its target kind.
+ *
+ * @param wallet - The wallet's owner ids.
+ * @returns `byok` for a connection-owned wallet, `managed` otherwise.
+ */
+export function custodyWalletMode(
+  wallet: Pick<CustodyWalletProviderFields, "custodyConfigId" | "custodyConnectionId">
+): CustodyMode {
+  return wallet.custodyConnectionId ? "byok" : "managed";
+}
+
+/**
+ * Refuses, before any work, a source wallet whose custody provider cannot
+ * start the movement yet (PRO-2435 D1): a provider whose signing may wait for
+ * a human approval that the path cannot hold for. The waist makes the same
+ * refusal at signing; a route asks here in its authorize step, before its
+ * Idempotency-Key is claimed and before any row, so the refusal stores
+ * nothing and the same request goes through with another wallet. Exits are
+ * never refused, and a wallet read without its provider is left to the waist.
+ *
+ * @param wallet - The custody wallet the movement would sign with, with its provider and owner.
+ * @param movement - The movement the wallet would sign.
+ * @throws 400 `CUSTODY_PROVIDER_UNSUPPORTED_OPERATION`.
+ */
+export function assertCustodyWalletStartsMovement(
+  wallet: { id: string } & CustodyWalletProviderFields,
+  movement: MovementId
+): void {
+  if (wallet.provider === undefined) return;
+  const mode = custodyWalletMode(wallet);
+  if (custodyProviderStartsMovement(wallet.provider, mode, movement)) return;
+  logEvent("info", {
+    event: "sdp_custody_provider_path_refused",
+    surface: "early",
+    movement,
+    module: MOVEMENTS[movement].module,
+    subject_id: wallet.id,
+    provider: wallet.provider,
+    custody_mode: mode,
+  });
+  throw custodyProviderUnsupportedOperation(wallet.provider, mode, movement);
 }
 
 /**
