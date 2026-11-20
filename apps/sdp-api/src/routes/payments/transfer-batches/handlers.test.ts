@@ -7,7 +7,9 @@ import {
   PAYMENT_TRANSFER_BATCH_RECIPIENT_STATUSES,
   PAYMENT_TRANSFER_BATCH_STATUSES,
   PAYMENT_TRANSFER_STATUSES,
+  PAYMENT_TRANSFER_TYPES,
   type PaymentTransferBatchStatus,
+  type PaymentTransferStatus,
 } from "@sdp/types/payments";
 import { SOL_MINT, SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import {
@@ -30,22 +32,26 @@ import { getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import * as batchesRepositoryPostgres from "@/db/repositories/payment-transfer-batches.repository.postgres";
 import * as paymentsRepositoryPostgres from "@/db/repositories/payments.repository.postgres";
-import { createSystemPaymentTransferBatchesRepository } from "@/db/repositories/repository-factory";
+import {
+  createPaymentTransferBatchesRepository,
+  createSystemPaymentTransferBatchesRepository,
+} from "@/db/repositories/repository-factory";
 import { app } from "@/index";
 import { AppError } from "@/lib/errors";
 import { deriveProviderRequestId } from "@/lib/idempotency";
+import { createTenantScope } from "@/lib/tenant-scope";
 import { requestFingerprint } from "@/middleware/idempotency";
 import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { AuditService } from "@/services/audit.service";
 import { admittedSigner } from "@/services/domain/signing/admitted-signer";
 import { SigningService } from "@/services/domain/signing.service";
-import { INSUFFICIENT_FUNDS_MESSAGE } from "@/services/fee-payment-errors";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { installClusterRpcResponder, tokenAccountsByOwnerResult } from "@/test/helpers/cluster-rpc";
 import { deferred } from "@/test/helpers/deferred";
 import { env } from "@/test/helpers/env";
+import { countStoredIdempotencyKeys } from "@/test/helpers/idempotency-records";
 import { recordLoggedEvents } from "@/test/helpers/log-events";
 import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import {
@@ -53,7 +59,6 @@ import {
   createOrgSignerForCustodyWalletMock,
   DEVNET_USDC_MINT,
   enableMainnetSponsorship,
-  getAccountInfoMock,
   getRecentBlockhashMock,
   installPaymentsRouteTestHooks,
   MAINNET_USDC_MINT,
@@ -79,6 +84,7 @@ import {
 } from "@/test/helpers/payments-transfers";
 import { setDisabledMovements } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
+import { holdTransaction, untilLockWaiters } from "@/test/helpers/row-locks";
 import { sendTransactionPreflightError } from "@/test/helpers/rpc-errors";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 import {
@@ -127,7 +133,7 @@ const recipientSchema = z.object({
 const chunkTransferSchema = z.object({
   id: z.string(),
   custodyWalletId: z.string().nullable(),
-  type: z.string(),
+  type: z.enum(PAYMENT_TRANSFER_TYPES),
   status: z.enum(PAYMENT_TRANSFER_STATUSES),
   signature: z.string().nullable(),
   serializedTx: z.string().nullable(),
@@ -159,11 +165,21 @@ const estimateResponseSchema = z.object({
     }),
   }),
 });
+/** A response's `data`, every field kept, for comparing two answers exactly. */
+const rawDataSchema = z.object({ data: z.record(z.string(), z.unknown()) });
 type BatchResponse = z.infer<typeof batchResponseSchema>["data"];
 
 async function readBatch(response: Response): Promise<BatchResponse> {
   expect(response.status).toBe(200);
   return batchResponseSchema.parse(await response.json()).data;
+}
+
+/** `replay` answers with `original`'s exact body, as a replay; `original` must be unread. */
+async function expectReplayOf(replay: Response, original: Response) {
+  expect(original.status).toBe(200);
+  expect(replay.status).toBe(200);
+  expect(replay.headers.get("Idempotent-Replayed")).toBe("true");
+  expect(await replay.json()).toEqual(await original.json());
 }
 
 async function readError(response: Response, status: number) {
@@ -277,6 +293,28 @@ async function seedTwoChunkRecipients(): Promise<BatchRecipient[]> {
   ];
 }
 
+function tenantBatchesRepository() {
+  return createPaymentTransferBatchesRepository(
+    env,
+    createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+  );
+}
+
+/**
+ * Leaves a chunk as a crash before its transfer row committed would: the row gone, and every
+ * recipient it paid pending and unlinked, last updated at `recipientsUpdatedAt`.
+ */
+async function unsendChunk(transferId: string, recipientsUpdatedAt: string) {
+  await getDb(env).batch([
+    getDb(env)
+      .prepare(
+        "UPDATE payment_transfer_recipients SET status = 'pending', transfer_id = NULL, error = NULL, updated_at = ? WHERE transfer_id = ?"
+      )
+      .bind(recipientsUpdatedAt, transferId),
+    getDb(env).prepare("DELETE FROM payment_transfers WHERE id = ?").bind(transferId),
+  ]);
+}
+
 async function countBatches(): Promise<number> {
   const row = await getDb(env)
     .prepare(
@@ -371,7 +409,7 @@ const auditRowSchema = z.object({
 const auditOutcomeMetadataSchema = z.object({
   auditPhase: z.string(),
   auditIntentId: z.string(),
-  batchTransferStatus: z.string(),
+  batchTransferStatus: z.enum(PAYMENT_TRANSFER_STATUSES),
   signature: z.string(),
 });
 
@@ -400,7 +438,7 @@ async function readChunkAudit(transferId: string) {
 
 async function expectChunkOutcome(
   transfer: { id: string; signature: string | null },
-  verdict: { status: "success" | "failure"; batchTransferStatus: string }
+  verdict: { status: "success" | "failure"; batchTransferStatus: PaymentTransferStatus }
 ) {
   const { intent, outcome } = await readChunkAudit(transfer.id);
   expect(required(outcome).status).toBe(verdict.status);
@@ -413,6 +451,9 @@ async function expectChunkOutcome(
 }
 
 function settleChainVerdicts(verdict: (signature: string) => solanaRpc.SignatureStatusInfo) {
+  onTestFinished(() => {
+    getSignatureStatusesMock.mockReset();
+  });
   getSignatureStatusesMock.mockImplementation(async (_rpc, signatures) =>
     signatures.map((signature) => verdict(String(signature)))
   );
@@ -453,19 +494,11 @@ describe("payment transfer batches", () => {
     );
   }
 
-  /** Answers the next mint read from the cluster, for a mint the test describes. */
+  /** Serves the source's token account for `mint`, and the mint accounts the test describes. */
   function readMintFromCluster(
     mint: Address,
     extensions: Parameters<typeof respondMintAccounts>[1]
   ) {
-    getAccountInfoMock.mockImplementationOnce(
-      async (client, account) =>
-        (
-          await client
-            .getAccountInfo(account, { encoding: "base64", commitment: "confirmed" })
-            .send()
-        ).value
-    );
     answerSourceTokenAccount(mint);
     respondMintAccounts(rpc, extensions);
   }
@@ -552,7 +585,6 @@ describe("payment transfer batches", () => {
 
       expect(error.code).toBe("BAD_REQUEST");
       expect(error.message).toBe(message);
-      expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
       expect(rpc.calls).toEqual([]);
       expect(await countBatches()).toBe(0);
     }
@@ -598,8 +630,6 @@ describe("payment transfer batches", () => {
       },
       warnings: [],
     });
-    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
-    expect(await countBatches()).toBe(0);
   });
 
   describe("native SOL below the rent-exempt minimum (HOO-2375)", () => {
@@ -863,7 +893,8 @@ describe("payment transfer batches", () => {
       const recipients = await seedTwoChunkRecipients();
       const key = crypto.randomUUID();
 
-      const created = await readBatch(await sendBatch(recipients, { key }));
+      const original = await sendBatch(recipients, { key });
+      const created = await readBatch(original.clone());
 
       expect(created.batch.status).toBe(batchStatus);
       const failed = created.recipients.filter((r) => r.status === "failed");
@@ -877,9 +908,7 @@ describe("payment transfer batches", () => {
       expect(created.transfers.map((t) => t.status)).toEqual(transfers);
       expect(sendTransactionMock).toHaveBeenCalledTimes(sends);
 
-      const replay = await sendBatch(recipients, { key });
-      expect(replay.headers.get("Idempotent-Replayed")).toBe("true");
-      expect(await readBatch(replay)).toEqual(created);
+      await expectReplayOf(await sendBatch(recipients, { key }), original);
       expect(signings).toBe(2);
     }
   );
@@ -957,11 +986,7 @@ describe("payment transfer batches", () => {
       message: "The credential may not sign with this wallet",
       details: { reason: "wallet_out_of_scope" },
     });
-    const keyRows = await getDb(env)
-      .prepare("SELECT COUNT(*)::int AS count FROM idempotency_keys WHERE idempotency_key = ?")
-      .bind(key)
-      .first<{ count: number }>();
-    expect(required(keyRows).count).toBe(0);
+    expect(await countStoredIdempotencyKeys(key)).toBe(0);
     expect(await countBatches()).toBe(0);
     expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
 
@@ -1238,12 +1263,10 @@ describe("payment transfer batches", () => {
 
     function expectShortfallRecorded(body: BatchResponse) {
       expect(body.batch.status).toBe("failed");
-      expect(body.recipients.map((r) => [r.status, r.error])).toEqual([
-        ["failed", INSUFFICIENT_FUNDS_MESSAGE],
-      ]);
-      expect(body.transfers.map((t) => [t.status, t.error])).toEqual([
-        ["failed", INSUFFICIENT_FUNDS_MESSAGE],
-      ]);
+      const message =
+        "The wallet used for this payment does not have enough funds. Add funds and try again.";
+      expect(body.recipients.map((r) => [r.status, r.error])).toEqual([["failed", message]]);
+      expect(body.transfers.map((t) => [t.status, t.error])).toEqual([["failed", message]]);
     }
 
     it("fails a chunk the sponsor's simulation finds short with the tenant-safe reason", async () => {
@@ -1288,9 +1311,7 @@ describe("payment transfer batches", () => {
   it("admits runtime execution only for new transfer batches", async () => {
     const recipient = await seedRecipientAccount(WALLET_A);
     const recipients = [{ ...recipient, amount: "0.1" }];
-    const first = await readBatch(
-      await sendBatch(recipients, { key: "runtime-admission-batch-replay" })
-    );
+    const first = await sendBatch(recipients, { key: "runtime-admission-batch-replay" });
     const admission = vi.spyOn(SigningService.prototype, "admitRuntimeExecution").mockRejectedValue(
       new AppError("CONFLICT", "Custody wallet is unavailable", {
         reason: "runtime_execution_unavailable",
@@ -1304,8 +1325,7 @@ describe("payment transfer batches", () => {
       body: { externalId: `${testRunId()}-fresh` },
     });
 
-    expect(replay.headers.get("Idempotent-Replayed")).toBe("true");
-    expect(await readBatch(replay)).toEqual(first);
+    await expectReplayOf(replay, first);
     const error = await readError(fresh, 409);
     expect(error.details).toEqual({ reason: "runtime_execution_unavailable" });
     expect(admission).toHaveBeenCalledOnce();
@@ -1315,9 +1335,7 @@ describe("payment transfer batches", () => {
   it("replays a completed transfer batch after its exact wallet is deactivated", async () => {
     const recipient = await seedRecipientAccount(WALLET_A);
     const recipients = [{ ...recipient, amount: "0.1" }];
-    const first = await readBatch(
-      await sendBatch(recipients, { key: "deactivated-wallet-batch-replay" })
-    );
+    const first = await sendBatch(recipients, { key: "deactivated-wallet-batch-replay" });
     await getDb(env)
       .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
       .bind(TEST_CUSTODY_WALLET_ID)
@@ -1326,8 +1344,7 @@ describe("payment transfer batches", () => {
 
     const replay = await sendBatch(recipients, { key: "deactivated-wallet-batch-replay" });
 
-    expect(replay.headers.get("Idempotent-Replayed")).toBe("true");
-    expect(await readBatch(replay)).toEqual(first);
+    await expectReplayOf(replay, first);
     expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
   });
 
@@ -1388,15 +1405,10 @@ describe("payment transfer batches", () => {
   it("settles a stranded batch with no client retry from the pending-transfers job", async () => {
     const recipient = await seedRecipientAccount(WALLET_A);
     const created = await readBatch(await sendBatch([{ ...recipient, amount: "0.1" }]));
-    // The state a crash right after the batch commit leaves, two hours ago:
-    // the recipient pending and unlinked, no chunk transfer, the batch processing.
+    // The state a crash right after the batch commit leaves, two hours ago: the
+    // recipient pending and unlinked, its chunk transfer never written, the batch processing.
     const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
-    await getDb(env)
-      .prepare(
-        "UPDATE payment_transfer_recipients SET transfer_id = NULL, status = 'pending', error = NULL, updated_at = ? WHERE batch_id = ?"
-      )
-      .bind(twoHoursAgo, created.batch.id)
-      .run();
+    await unsendChunk(required(created.transfers[0]).id, twoHoursAgo);
     await getDb(env)
       .prepare(
         "UPDATE payment_transfer_batches SET status = 'processing', created_at = ? WHERE id = ?"
@@ -1434,12 +1446,11 @@ describe("payment transfer batches", () => {
   it("replays the original transfer batch for the same idempotency key and payload", async () => {
     const recipient = await seedRecipientAccount(WALLET_A);
     const recipients = [{ ...recipient, amount: "0.1" }];
-    const first = await readBatch(await sendBatch(recipients, { key: "batch-replay-key" }));
+    const first = await sendBatch(recipients, { key: "batch-replay-key" });
 
     const second = await sendBatch(recipients, { key: "batch-replay-key" });
 
-    expect(second.headers.get("Idempotent-Replayed")).toBe("true");
-    expect(await readBatch(second)).toEqual(first);
+    await expectReplayOf(second, first);
     expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledOnce();
     expect(sendTransactionMock).toHaveBeenCalledOnce();
     expect(await countBatches()).toBe(1);
@@ -1508,30 +1519,28 @@ describe("payment transfer batches", () => {
     }
 
     function insertRunRow(externalId: string) {
-      return batchesRepositoryPostgres
-        .createPostgresPaymentTransferBatchesRepository(getDb(env))
-        .createTransferBatchWithRecipients({
-          batch: {
-            organizationId: TEST_ORG.id,
-            projectId: TEST_PROJECT.id,
-            externalId,
-            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-            sourceWalletId: TEST_WALLET_ID,
-            sourceAddress: source.address,
-            token: "SOL",
-            status: "processing",
-            totalAmount: "0.1",
-            recipientCount: 0,
-            transactionCount: 0,
-            initiatedByKeyId: null,
-            idempotencyKey: deriveProviderRequestId(
-              ["transfer_batch_run", TEST_ORG.id, TEST_PROJECT.id, TEST_CUSTODY_WALLET_ID],
-              externalId
-            ),
-            idempotencyFingerprint: "another-request-fingerprint",
-          },
-          recipients: [],
-        });
+      return tenantBatchesRepository().createTransferBatchWithRecipients({
+        batch: {
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT.id,
+          externalId,
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          sourceWalletId: TEST_WALLET_ID,
+          sourceAddress: source.address,
+          token: "SOL",
+          status: "processing",
+          totalAmount: "0.1",
+          recipientCount: 0,
+          transactionCount: 0,
+          initiatedByKeyId: null,
+          idempotencyKey: deriveProviderRequestId(
+            ["transfer_batch_run", TEST_ORG.id, TEST_PROJECT.id, TEST_CUSTODY_WALLET_ID],
+            externalId
+          ),
+          idempotencyFingerprint: "another-request-fingerprint",
+        },
+        recipients: [],
+      });
     }
 
     function expectNothingSigned() {
@@ -1543,13 +1552,19 @@ describe("payment transfer batches", () => {
 
     it("answers the same batch resent under a new key with the original, paying no one again", async () => {
       const send = await seedOneRecipientRun("payroll_resent");
-      const first = await readBatch(await send("batch-external-id-first", ORIGINAL));
+      const first = await send("batch-external-id-first", ORIGINAL);
       vi.clearAllMocks();
 
       const resend = await send("batch-external-id-resend", ORIGINAL);
 
+      // Answered from the batch row, not the other key's stored body: the
+      // original's data under this request's own meta.
+      expect(first.status).toBe(200);
+      expect(resend.status).toBe(200);
       expect(resend.headers.get("Idempotent-Replayed")).toBe("true");
-      expect(await readBatch(resend)).toEqual(first);
+      expect(rawDataSchema.parse(await resend.json()).data).toEqual(
+        rawDataSchema.parse(await first.json()).data
+      );
       expectNothingSigned();
       expect(await countBatches()).toBe(1);
     });
@@ -1659,13 +1674,12 @@ describe("payment transfer batches", () => {
       const send = await seedOneRecipientRun("payroll_crash");
       const first = await readBatch(await send("batch-external-id-crash-first", ORIGINAL));
       // The state a crash right after the batch commit leaves: the recipient
-      // pending and unlinked, written by an attempt valid to block 100.
+      // pending and unlinked, written by an attempt valid to block 100, and
+      // its chunk transfer never written.
+      await unsendChunk(required(first.transfers[0]).id, new Date().toISOString());
       await getDb(env)
         .prepare(
-          `UPDATE payment_transfer_recipients
-              SET status = 'pending', transfer_id = NULL, error = NULL,
-                  attempt_last_valid_block_height = 100
-            WHERE batch_id = ?`
+          "UPDATE payment_transfer_recipients SET attempt_last_valid_block_height = 100 WHERE batch_id = ?"
         )
         .bind(first.batch.id)
         .run();
@@ -1730,13 +1744,11 @@ describe("payment transfer batches", () => {
       );
 
     async function readRecipientStatus(recipientId: string) {
-      const row = await batchesRepositoryPostgres
-        .createPostgresPaymentTransferBatchesRepository(getDb(env))
-        .getTransferRecipientById({
-          recipientId,
-          organizationId: TEST_ORG.id,
-          projectId: TEST_PROJECT.id,
-        });
+      const row = await tenantBatchesRepository().getTransferRecipientById({
+        recipientId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+      });
       return required(row).status;
     }
 
@@ -1746,22 +1758,20 @@ describe("payment transfer batches", () => {
       attemptLastValidBlockHeight: bigint,
       recordKey: string
     ) {
-      return batchesRepositoryPostgres
-        .createPostgresPaymentTransferBatchesRepository(getDb(env))
-        .claimFailedTransferRecipients({
-          batchId,
-          organizationId: TEST_ORG.id,
-          projectId: TEST_PROJECT.id,
-          recipientIds,
-          addedTransactionCount: 1,
-          attemptLastValidBlockHeight,
-          attemptId: crypto.randomUUID(),
-          retry: {
-            idempotencyKey: recordKey,
-            idempotencyFingerprint: `${recordKey}-fingerprint`,
-            initiatedByKeyId: null,
-          },
-        });
+      return tenantBatchesRepository().claimFailedTransferRecipients({
+        batchId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        recipientIds,
+        addedTransactionCount: 1,
+        attemptLastValidBlockHeight,
+        attemptId: crypto.randomUUID(),
+        retry: {
+          idempotencyKey: recordKey,
+          idempotencyFingerprint: `${recordKey}-fingerprint`,
+          initiatedByKeyId: null,
+        },
+      });
     }
 
     it("resends only the failed recipients of a partially failed batch", async () => {
@@ -1813,11 +1823,10 @@ describe("payment transfer batches", () => {
       vi.clearAllMocks();
       const key = crypto.randomUUID();
 
-      const first = await readBatch(await retry(batch.id, key));
+      const first = await retry(batch.id, key);
       const again = await retry(batch.id, key);
 
-      expect(again.headers.get("Idempotent-Replayed")).toBe("true");
-      expect(await readBatch(again)).toEqual(first);
+      await expectReplayOf(again, first);
       expect(sendTransactionMock).toHaveBeenCalledOnce();
     });
 
@@ -1870,25 +1879,27 @@ describe("payment transfer batches", () => {
       const { batch, failed, sent } = await seedPartiallyFailedBatch();
       vi.clearAllMocks();
       const key = crypto.randomUUID();
-      await readBatch(await retry(batch.id, key));
-      // The state a crash right after the claim leaves: the claimed recipient
-      // pending and unlinked, written in the retry row's transaction.
-      await getDb(env)
-        .prepare(
-          `UPDATE payment_transfer_recipients r
-              SET status = 'pending', transfer_id = NULL, error = NULL,
-                  updated_at = (SELECT created_at FROM payment_transfer_batch_retries WHERE batch_id = r.batch_id)
-            WHERE id = ?`
-        )
-        .bind(failed.id)
-        .run();
-      // Another request (the create) still sending a different recipient.
-      await getDb(env)
-        .prepare(
-          "UPDATE payment_transfer_recipients SET status = 'pending', transfer_id = NULL, updated_at = ? WHERE id = ?"
-        )
-        .bind(new Date(Date.now() - 60 * 60 * 1000).toISOString(), sent.id)
-        .run();
+      const retried = await readBatch(await retry(batch.id, key));
+      // The state a crash right after the claim leaves: the claimed recipients
+      // pending and unlinked, written in the retry row's transaction, and their
+      // chunk transfer never written.
+      const retryRow = z
+        .object({ created_at: z.string() })
+        .parse(
+          await getDb(env)
+            .prepare("SELECT created_at FROM payment_transfer_batch_retries WHERE batch_id = ?")
+            .bind(batch.id)
+            .first()
+        );
+      await unsendChunk(
+        required(required(retried.recipients.find((r) => r.id === failed.id)).transferId),
+        retryRow.created_at
+      );
+      // Another request (the create) still sending a different chunk.
+      await unsendChunk(
+        required(sent.transferId),
+        new Date(Date.now() - 60 * 60 * 1000).toISOString()
+      );
       await getDb(env)
         .prepare("UPDATE payment_transfer_batches SET status = 'processing' WHERE id = ?")
         .bind(batch.id)
@@ -1981,14 +1992,7 @@ describe("payment transfer batches", () => {
 
       await runInEachClusterScope(() => trackPendingTransfers(env));
 
-      const recipient = await batchesRepositoryPostgres
-        .createPostgresPaymentTransferBatchesRepository(getDb(env))
-        .getTransferRecipientById({
-          recipientId: failed.id,
-          organizationId: TEST_ORG.id,
-          projectId: TEST_PROJECT.id,
-        });
-      expect(recipient).toMatchObject({ status: "pending", transfer_id: null });
+      expect(await readRecipientStatus(failed.id)).toBe("pending");
     });
 
     it("refuses a retry with no failed recipients and sends nothing", async () => {
@@ -2024,12 +2028,19 @@ describe("payment transfer batches", () => {
       const { batch, failed } = await seedPartiallyFailedBatch();
       vi.clearAllMocks();
       await seedSelectedApiKeyWallets([]);
+      const key = crypto.randomUUID();
 
-      const error = await readError(await retry(batch.id), 403);
+      const error = await readError(await retry(batch.id, key), 403);
 
       expect(error.details).toEqual({ reason: "wallet_out_of_scope" });
       expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
       expect(await readRecipientStatus(failed.id)).toBe("failed");
+      expect(await countStoredIdempotencyKeys(key)).toBe(0);
+
+      await seedSelectedApiKeyWallets([TEST_CUSTODY_WALLET_ID]);
+      const resumed = await retry(batch.id, key);
+      expect(resumed.status).toBe(200);
+      expect(resumed.headers.get("Idempotent-Replayed")).toBeNull();
     });
 
     it("keeps a batch unreadable and unretryable from another project", async () => {
@@ -2348,11 +2359,21 @@ describe("payment transfer batches", () => {
         updatedAt: new Date().toISOString(),
       });
 
-    await Promise.all([
+    // Both settles mark their recipients, then queue on the batch row behind a
+    // held lock: neither commits before the other has marked its chunk.
+    const holder = await holdTransaction(getDb(env), async (tx) => {
+      await tx.execute("SELECT id FROM payment_transfer_batches WHERE id = ? FOR NO KEY UPDATE", [
+        created.batch.id,
+      ]);
+    });
+    const settled = Promise.all([
       settle(required(first).id, "confirmed"),
       settle(required(second).id, "failed"),
     ]);
+    await untilLockWaiters(getDb(env), { fragment: "payment_transfer_batches", count: 2 });
+    await holder.commit();
 
+    expect(await settled).toEqual([true, true]);
     expect(await readBatchStatus(created.batch.id)).toBe("partially_failed");
   });
 

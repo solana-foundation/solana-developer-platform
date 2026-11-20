@@ -191,7 +191,8 @@ describe("sendTransferBatchUnderKey", () => {
     expect(again).toBe(first);
   });
 
-  it("names a send whose answer was lost the same run from a new tab", async () => {
+  it("names a send whose answer was lost the same run from a new tab the next day", async () => {
+    today("2026-11-10T12:00:00Z");
     const fetchMock = stubDashboardFetch(() => {
       throw new TypeError("Failed to fetch");
     });
@@ -200,10 +201,11 @@ describe("sendTransferBatchUnderKey", () => {
     // A new tab: the key store is empty, the run's name is not.
     window.sessionStorage.clear();
     resetTransferBatchIdempotencyStateForTests();
+    vi.setSystemTime(new Date("2026-11-11T12:00:00Z"));
     await expect(sendTransferBatchUnderKey(BATCH, t)).rejects.toThrow("Failed to fetch");
 
     const [first, again] = sentRunNames(fetchMock);
-    expect(first).toMatch(/^batch-\d{4}-\d{2}-\d{2}-[0-9a-f]{16}$/);
+    expect(first).toMatch(/^batch-2026-11-10-[0-9a-f]{16}$/);
     expect(again).toBe(first);
   });
 
@@ -263,10 +265,11 @@ describe("sendTransferBatchUnderKey", () => {
 
     await sendTransferBatchUnderKey(BATCH, t);
     await sendTransferBatchUnderKey(BATCH, t);
+    await sendTransferBatchUnderKey(BATCH, t);
     await vi.advanceTimersByTimeAsync(MOVEMENT_POLL_INTERVAL_MS);
     await sendTransferBatchUnderKey(BATCH, t);
 
-    expectSentKeys(fetchMock, ["first", "first", "next"]);
+    expectSentKeys(fetchMock, ["first", "first", "first", "next"]);
     expect(
       sentDashboardRequests(fetchMock)
         .filter((request) => request.method === "GET")
