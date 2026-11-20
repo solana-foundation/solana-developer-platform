@@ -150,7 +150,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Integrati
     expect(minted.data.transaction.status).toBe("confirmed");
     expect(minted.data.transaction.signature).toBeTruthy();
 
-    const transferRes = await scopedRequest("/v1/payments/transfers", {
+    const transferRes = await scopedRequest("/v1/payments/transfers/execute", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

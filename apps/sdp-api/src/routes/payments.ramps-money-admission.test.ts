@@ -29,7 +29,7 @@ async function requestQuote(
   body: Record<string, unknown>
 ): Promise<Response> {
   return app.request(
-    `/v1/payments/ramps/${direction}/quote`,
+    `/v1/payments/ramps/${direction}/start`,
     {
       method: "POST",
       headers: {
