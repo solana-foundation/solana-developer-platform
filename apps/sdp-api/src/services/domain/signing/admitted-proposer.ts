@@ -1,3 +1,4 @@
+import type { ProposalAdapter } from "@sdp/custody/proposals";
 import {
   type FireblocksAddressEntry,
   readFireblocksAddressBook,
@@ -72,7 +73,8 @@ export class ProposalNotSentError extends Error {
  * purpose and provider entitlement. Proposing decides admission again, from live rows, exactly
  * as each signature does.
  */
-export interface CustodyTransferProposer {
+export interface CustodyTransferProposer
+  extends Pick<ProposalAdapter<TransferProposalRequest, FireblocksTransferResult>, "propose"> {
   readonly provider: "fireblocks";
   readonly address: string;
   /** Validates network, token and amount against the provider and binds the intent. Sends nothing. */
@@ -122,9 +124,8 @@ export function destinationState(
 }
 
 /** Read-only recovery for a recorded proposal. It can never create or resubmit a transfer. */
-export interface CustodyProposalReader {
-  read(externalId: string): Promise<FireblocksTransferResult | null>;
-}
+export interface CustodyProposalReader
+  extends Pick<ProposalAdapter<never, FireblocksTransferResult>, "read"> {}
 
 /** A known live-policy refusal, distinct from a temporarily unavailable admission read. */
 export class ProposalAdmissionRefusedError extends Error {
@@ -339,10 +340,8 @@ export function proposalRecovery(
 }
 
 /** Read-and-cancel recovery for a recorded proposal. It can never create or resubmit a transfer. */
-export interface CustodyProposalCanceller {
-  read(externalId: string): Promise<FireblocksTransferResult | null>;
-  cancel(transactionId: string): Promise<boolean>;
-}
+export interface CustodyProposalCanceller
+  extends Pick<ProposalAdapter<never, FireblocksTransferResult>, "read" | "cancel"> {}
 
 /**
  * Cancellation for a recorded proposal, bound to the access the waist resolved for its intent.

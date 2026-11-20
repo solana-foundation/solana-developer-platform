@@ -93,30 +93,6 @@ export function isFireblocksProposalCancellable(status: string): boolean {
   return isFireblocksTransactionCancellable(status);
 }
 
-/**
- * The status column of a sign-only proposal: SDP's pre-acceptance state, then the provider
- * transaction statuses it can store. This contract stays independent of runtime cancellation
- * rules: adding a cancellable provider state must not widen the table's CHECK in
- * `0229_fireblocks_signing_proposals.sql` without a migration.
- */
-export const FIREBLOCKS_SIGNING_PROPOSAL_STATUSES = [
-  "SUBMITTING",
-  "SUBMITTED",
-  "QUEUED",
-  "PENDING_AML_SCREENING",
-  "PENDING_AUTHORIZATION",
-  "PENDING_SIGNATURE",
-  "PENDING_3RD_PARTY_MANUAL_APPROVAL",
-  "PENDING_3RD_PARTY",
-  "PENDING_STATUS_UPDATE",
-  "SIGNED",
-  "BROADCASTING",
-  "CONFIRMING",
-  "COMPLETED",
-  ...FIREBLOCKS_FAILED_TRANSACTION_STATUSES,
-] as const;
-export type FireblocksSigningProposalStatus = (typeof FIREBLOCKS_SIGNING_PROPOSAL_STATUSES)[number];
-
 /** A recovered signature that must never reach a broadcaster the moment it is cancelled. */
 export const FIREBLOCKS_SIGNATURE_ACCEPTED_STATUSES = ["SIGNED", "COMPLETED"] as const;
 const signatureAccepted: ReadonlySet<string> = new Set(FIREBLOCKS_SIGNATURE_ACCEPTED_STATUSES);

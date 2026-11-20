@@ -119,6 +119,11 @@
       "import": "./src/provisioning/fireblocks-credential.ts",
       "default": "./src/provisioning/fireblocks-credential.ts"
     },
+    "./proposals": {
+      "types": "./src/proposals.ts",
+      "import": "./src/proposals.ts",
+      "default": "./src/proposals.ts"
+    },
     "./fireblocks-proposals": {
       "types": "./src/fireblocks-proposals.ts",
       "import": "./src/fireblocks-proposals.ts",

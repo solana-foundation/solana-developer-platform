@@ -185,6 +185,12 @@ export const custodyProposalEventSchema = z.discriminatedUnion("type", [
     reason: z.string().min(1),
     message: z.string().min(1),
   }),
+  z.strictObject({
+    type: z.literal("cancellation_intent_recorded"),
+    at: timestampSchema,
+    reason: z.string().min(1),
+    message: z.string().min(1),
+  }),
   z.strictObject({ type: z.literal("cancel_requested"), at: timestampSchema }),
   z.strictObject({ type: z.literal("cancel_accepted"), at: timestampSchema }),
   z.strictObject({ type: z.literal("cancel_ambiguous"), at: timestampSchema }),
@@ -266,6 +272,7 @@ function continuingAuthorization<State extends CustodyProposalAuthorizationState
     observed: [state, "committed_after_refusal"],
     observed_absent: [state],
     admission_refused: [state],
+    cancellation_intent_recorded: [state],
   } as const;
 }
 
@@ -277,6 +284,7 @@ export const CUSTODY_PROPOSAL_AUTHORIZATION_TRANSITIONS = {
     observed: ["authorized"],
     observed_absent: ["authorized"],
     admission_refused: ["refused"],
+    cancellation_intent_recorded: ["refused"],
   },
   refused: {
     ...continuingAuthorization("refused"),
@@ -333,6 +341,7 @@ function acceptedProviderTransitions<
   return {
     observed: CUSTODY_PROPOSAL_OBSERVED_PHASES,
     observed_absent: [phase],
+    cancellation_intent_recorded: [phase],
     cancel_accepted: [phase],
     cancel_ambiguous: [phase],
     cancel_declined: [phase],
@@ -342,17 +351,23 @@ function acceptedProviderTransitions<
 /** Every provider phase names its legal events and resulting phases. */
 export const CUSTODY_PROPOSAL_PROVIDER_TRANSITIONS = {
   unsent: {
+    admission_refused: ["unsent"],
+    cancellation_intent_recorded: ["unsent"],
     submission_claimed: ["submitting"],
     submission_refused: ["not_sent"],
     observed: CUSTODY_PROPOSAL_OBSERVED_PHASES,
     observed_absent: ["absent"],
   },
   submitting: {
+    admission_refused: ["submitting"],
+    cancellation_intent_recorded: ["submitting"],
     submission_refused: ["not_sent"],
     observed: CUSTODY_PROPOSAL_OBSERVED_PHASES,
     observed_absent: ["absent"],
   },
   absent: {
+    admission_refused: ["absent"],
+    cancellation_intent_recorded: ["absent"],
     submission_refused: ["not_sent"],
     observed: CUSTODY_PROPOSAL_OBSERVED_PHASES,
     observed_absent: CUSTODY_PROPOSAL_MISSING_PHASES,
@@ -742,6 +757,7 @@ function reduceCustodyProposal(
       };
     }
     case "admission_refused":
+    case "cancellation_intent_recorded":
       if (state.authorizationState !== "authorized") return { next: state, effects: [] };
       return {
         next: {

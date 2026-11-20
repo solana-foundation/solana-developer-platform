@@ -11,7 +11,10 @@ import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DatabaseExecutor } from "@/db/client";
 import { currentDatabaseIdentity, runWithSystemDatabaseIdentity } from "@/db/identity";
-import type { CustodyProposalRow } from "@/db/repositories/custody-proposals.repository";
+import type {
+  CustodyProposalRow,
+  SigningProposalRow,
+} from "@/db/repositories/custody-proposals.repository";
 import { createPostgresCustodyProposalsRepository } from "@/db/repositories/custody-proposals.repository.postgres";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
@@ -19,6 +22,7 @@ import { AppError } from "@/lib/errors";
 import { currentMoneyPrincipal, type MoneyPrincipal } from "@/lib/money-principal";
 import { rootLogger } from "@/runtime/logger";
 import type { AuditLogEntry } from "@/services/audit.service";
+import * as signingRecovery from "@/services/custody/signing-proposal-reconciliation";
 import {
   type CustodyProposalRecovery,
   ProposalAdmissionRefusedError,
@@ -89,6 +93,7 @@ function transfer(overrides: Partial<PaymentTransferRow> = {}): PaymentTransferR
 
 function proposal(row: PaymentTransferRow): CustodyProposalRow {
   return {
+    kind: "transfer",
     id: `proposal_${row.id}`,
     organization_id: row.organization_id,
     project_id: row.project_id,
@@ -177,6 +182,17 @@ function harness(initialRows: PaymentTransferRow[] = [transfer()]) {
     state(input.transferId)
   );
   const adopt = vi.spyOn(proposals, "adoptLegacyTransfers").mockResolvedValue(0);
+  vi.spyOn(proposals, "stats").mockImplementation(async () => {
+    const pending = [...states.values()].filter(
+      (row) => !isTerminalCustodyProposalPhase(row.state.providerPhase)
+    );
+    return {
+      pending: pending.length,
+      transfers: pending.length,
+      signing: 0,
+      oldestUnpolledAgeMs: 0,
+    };
+  });
   const recheck = vi.spyOn(proposals, "requestRecheck").mockImplementation(async (input) => {
     const current = state(input.transferId);
     states.set(input.transferId, {
@@ -300,6 +316,131 @@ afterEach(() => {
 });
 
 describe("reconcilePendingProposals", () => {
+  it("recovers transfers and general signing requests from the same claimed page", async () => {
+    const h = harness();
+    const signing: SigningProposalRow = {
+      ...h.state(),
+      id: "proposal_program_call",
+      kind: "signing",
+      payment_transfer_id: null,
+      custody_wallet_id: "cw_recovery",
+      operation: "PROGRAM_CALL",
+      request_id: "request_original",
+      finished_at: null,
+    };
+    h.claim.mockResolvedValue([signing, h.state()]);
+    const recover = vi.spyOn(signingRecovery, "recoverSigningProposal").mockResolvedValue({
+      row: signing,
+      polled: true,
+    });
+    await runRecovery();
+    expect(h.claim).toHaveBeenCalledOnce();
+    expect(recover).toHaveBeenCalledExactlyOnceWith(env, h.proposals, signing);
+    expect(h.recovery.read).toHaveBeenCalledExactlyOnceWith("xfr_recovery");
+    expect(h.recovery.admit).toHaveBeenCalledOnce();
+  });
+
+  it("continues the mixed page before surfacing a signing provider failure", async () => {
+    const h = harness();
+    const signing: SigningProposalRow = {
+      ...h.state(),
+      id: "signing_unavailable",
+      kind: "signing",
+      payment_transfer_id: null,
+      custody_wallet_id: "cw_recovery",
+      operation: "PROGRAM_CALL",
+      request_id: null,
+      finished_at: null,
+    };
+    h.claim.mockResolvedValue([signing, h.state()]);
+    const unavailable = new Error("Signing provider unavailable");
+    vi.spyOn(signingRecovery, "recoverSigningProposal").mockRejectedValue(unavailable);
+    await expect(runRecovery()).rejects.toBe(unavailable);
+    expect(h.recovery.read).toHaveBeenCalledExactlyOnceWith("xfr_recovery");
+    expect(h.recovery.admit).toHaveBeenCalledOnce();
+  });
+
+  it.each([true, false])(
+    "checks a concurrent signing alert acknowledgment (acknowledged=%s)",
+    async (acknowledged) => {
+      const h = harness([]);
+      const signing: SigningProposalRow = {
+        ...proposal(transfer()),
+        id: "signing_alert",
+        kind: "signing",
+        payment_transfer_id: null,
+        custody_wallet_id: "cw_recovery",
+        operation: "PROGRAM_CALL",
+        request_id: null,
+        finished_at: NOW,
+        state: {
+          ...proposal(transfer()).state,
+          providerPhase: "completed",
+          authorizationState: "committed_after_refusal",
+          refusal: { at: NOW, reason: "cancellation_requested", message: "Cancellation requested" },
+        },
+      };
+      h.alerts.mockResolvedValue([signing]);
+      vi.spyOn(h.proposals, "transitionSigning").mockResolvedValue(null);
+      vi.spyOn(h.proposals, "requireSigning").mockResolvedValue(
+        acknowledged
+          ? {
+              ...signing,
+              state: { ...signing.state, authorizationState: "refusal_alerted", alertedAt: NOW },
+            }
+          : signing
+      );
+      if (acknowledged) await expect(runRecovery()).resolves.toBeUndefined();
+      else
+        await expect(runRecovery()).rejects.toMatchObject({
+          name: "ProposalRefusalAlertDeliveryError",
+        });
+      expect(h.alert).toHaveBeenCalledOnce();
+    }
+  );
+
+  it("drains a signing refusal alert without requiring a payment parent", async () => {
+    const h = harness([]);
+    const signing: SigningProposalRow = {
+      ...proposal(transfer()),
+      id: "proposal_program_call",
+      kind: "signing",
+      payment_transfer_id: null,
+      custody_wallet_id: "cw_recovery",
+      operation: "PROGRAM_CALL",
+      request_id: "request_original",
+      finished_at: NOW,
+      state: {
+        ...proposal(transfer()).state,
+        providerPhase: "completed",
+        authorizationState: "committed_after_refusal",
+        refusal: { at: NOW, reason: "cancellation_requested", message: "Cancellation requested" },
+      },
+    };
+    h.alerts.mockResolvedValue([signing]);
+    const transition = vi.spyOn(h.proposals, "transitionSigning").mockResolvedValue({
+      ...signing,
+      state: { ...signing.state, authorizationState: "refusal_alerted", alertedAt: NOW },
+    });
+    await runRecovery();
+    expect(h.alert).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        event: "signing_proposal_completed_after_refusal",
+        proposalId: signing.id,
+      }),
+      "signing_proposal_completed_after_refusal"
+    );
+    expect(transition).toHaveBeenCalledWith(
+      expect.objectContaining({
+        proposalId: signing.id,
+        expectedVersion: signing.version,
+        event: { type: "alert_delivered", at: expect.any(String) },
+      })
+    );
+    expect(h.repo.getTransferById).not.toHaveBeenCalled();
+    expect(h.recovery.read).not.toHaveBeenCalled();
+  });
+
   it("rechecks live authority using only the recorded principal under the dedicated cron identity", async () => {
     const h = harness();
     h.recovery.admit.mockImplementation(async () => {
@@ -316,7 +457,7 @@ describe("reconcilePendingProposals", () => {
     expect(h.adopt).toHaveBeenCalledWith({
       environment: "sandbox",
       now: expect.any(String),
-      limit: 50,
+      limit: 100,
     });
     expect(currentMoneyPrincipal()).toBeNull();
   });
@@ -474,7 +615,8 @@ describe("reconcilePendingProposals", () => {
         if (result instanceof Error) throw result;
         return result;
       });
-      await runRecovery();
+      if (result instanceof Error) await expect(runRecovery()).rejects.toBe(result);
+      else await runRecovery();
       expect(h.warn).toHaveBeenCalledTimes(result instanceof Error ? 1 : 0);
       expect(h.state().state).toMatchObject({
         authorizationState: "cancel_requested",
@@ -501,7 +643,7 @@ describe("reconcilePendingProposals", () => {
         expect(observeDuringCancellation(h, phase)).not.toBeNull();
         throw unavailable;
       });
-      await runRecovery();
+      await expect(runRecovery()).rejects.toBe(unavailable);
       expect(h.warn).toHaveBeenCalledWith(
         expect.objectContaining({
           event: "proposal_recovery_unavailable",
@@ -566,7 +708,7 @@ describe("reconcilePendingProposals", () => {
       if (input.event.type === "cancel_ambiguous") throw persistenceError;
       return h.apply(input);
     });
-    await runRecovery();
+    await expect(runRecovery()).rejects.toMatchObject({ errors: [unavailable, persistenceError] });
     expect(h.warn).toHaveBeenCalledWith(
       expect.objectContaining({
         event: "proposal_recovery_unavailable",
@@ -626,7 +768,11 @@ describe("reconcilePendingProposals", () => {
         }
         return null;
       });
-      await runRecovery();
+      if (terminalOnLastConflict) await runRecovery();
+      else
+        await expect(runRecovery()).rejects.toThrow(
+          "Custody proposal cancellation result changed concurrently"
+        );
       expect(h.warn).toHaveBeenCalledTimes(terminalOnLastConflict ? 0 : 1);
       expect(conflicts).toBe(5);
       expect(h.recovery.cancel).toHaveBeenCalledOnce();
@@ -641,7 +787,7 @@ describe("reconcilePendingProposals", () => {
     const h = harness();
     h.recovery.admit.mockRejectedValueOnce(revoke()).mockResolvedValue(undefined);
     h.recovery.cancel.mockRejectedValueOnce(new Error("Ambiguous cancellation timeout"));
-    await runRecovery();
+    await expect(runRecovery()).rejects.toThrow("Ambiguous cancellation timeout");
     expect(h.warn).toHaveBeenCalledOnce();
     const first = h.state().state;
     expect(first.authorizationState).toBe("cancel_ambiguous");
@@ -783,7 +929,7 @@ describe("reconcilePendingProposals", () => {
       h.states.set(row.payment_transfer_id, { ...row, recheck_requested_at: NOW });
       return observation();
     });
-    await runRecovery();
+    await expect(runRecovery()).rejects.toThrow("Custody proposal recovery changed concurrently");
     expect(h.warn).toHaveBeenCalledWith(
       expect.objectContaining({
         event: "proposal_recovery_unavailable",
@@ -920,9 +1066,9 @@ describe("reconcilePendingProposals", () => {
   it("never cancels on a temporary admission failure or provider read failure", async () => {
     const h = harness();
     h.recovery.admit.mockRejectedValue(new Error("Admission database unavailable"));
-    await runRecovery();
+    await expect(runRecovery()).rejects.toThrow("Admission database unavailable");
     h.recovery.read.mockRejectedValue(new Error("Provider unavailable"));
-    await runRecovery();
+    await expect(runRecovery()).rejects.toThrow("Provider unavailable");
     expect(h.state().state.refusal).toBeNull();
     expect(h.recovery.cancel).not.toHaveBeenCalled();
     expect(h.warn).toHaveBeenCalledTimes(2);
@@ -937,7 +1083,7 @@ describe("reconcilePendingProposals", () => {
     h.recovery.read.mockImplementation(async (id) => {
       throw id === "xfr_recovery" ? firstError : secondError;
     });
-    await runRecovery();
+    await expect(runRecovery()).rejects.toMatchObject({ errors: [firstError, secondError] });
     expect(h.recovery.read).toHaveBeenCalledTimes(2);
     expect(h.warn).toHaveBeenCalledTimes(2);
     for (const transferId of ["xfr_recovery", "xfr_second"]) {
@@ -961,7 +1107,7 @@ describe("reconcilePendingProposals", () => {
     const h = harness([transfer(), transfer({ id: "xfr_second" })]);
     h.recovery.read.mockRejectedValueOnce(new Error("First provider unavailable"));
     h.recovery.admit.mockRejectedValue(revoke());
-    await runRecovery();
+    await expect(runRecovery()).rejects.toThrow("First provider unavailable");
     expect(h.state().state.refusal).toBeNull();
     expect(h.state("xfr_second").state.authorizationState).toBe("cancel_acknowledged");
     expect(h.recovery.cancel).toHaveBeenCalledExactlyOnceWith("xfr_second");
@@ -990,7 +1136,7 @@ describe("reconcilePendingProposals", () => {
       },
     });
     h.recovery.read.mockRejectedValue(new Error("Provider unavailable"));
-    await runRecovery();
+    await expect(runRecovery()).rejects.toThrow("Provider unavailable");
     expect(h.warn).toHaveBeenCalledOnce();
     expect(h.alert).toHaveBeenCalledOnce();
     expect(h.state("xfr_alert").state.alertedAt).toEqual(expect.any(String));
@@ -1097,10 +1243,10 @@ describe("reconcilePendingProposals", () => {
     const scope = { organizationId: "org_recovery", projectId: "prj_recovery", principal };
     await runRecovery(scope);
     expect(h.claim).toHaveBeenCalledWith(
-      expect.objectContaining({ ...scope, environment: "sandbox", limit: 50 })
+      expect.objectContaining({ ...scope, environment: "sandbox", limit: 100 })
     );
     expect(h.alerts).toHaveBeenCalledWith(
-      expect.objectContaining({ ...scope, environment: "sandbox", limit: 50 })
+      expect.objectContaining({ ...scope, environment: "sandbox", limit: 100 })
     );
   });
 });

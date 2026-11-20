@@ -5,13 +5,10 @@ import {
 import { Hono } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db/client";
-import {
-  FireblocksProposalsRepository,
-  type FireblocksSigningProposalRow,
-} from "@/db/repositories/fireblocks-proposals.repository";
+import type { SigningProposalRow } from "@/db/repositories/custody-proposals.repository";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { getAuth, requireProjectId, walletAccessAllows } from "@/lib/auth";
-import { conflict, notFound } from "@/lib/errors";
+import { notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { type AuthorizeInput, authorize, getAuthorized } from "@/middleware/authorize";
 import { idempotent } from "@/middleware/idempotency";
@@ -24,16 +21,14 @@ import { getLogger } from "@/runtime/logger";
 import { describeError } from "@/runtime/money-path-events";
 import { AuditService } from "@/services/audit.service";
 import {
-  fireblocksSigningBinding,
-  pollFireblocksSigningProposal,
-  readFireblocksSigningProposal,
-} from "@/services/custody/fireblocks-proposal-reconciliation";
+  cancelSigningProposal,
+  pollSigningProposal,
+} from "@/services/custody/signing-proposal-reconciliation";
 import {
   cancelPendingFireblocksTransfer,
   isFireblocksTransfer,
   refreshFireblocksTransfer,
 } from "@/services/payments/fireblocks-transfer";
-import { createOrgTransferProposalCanceller } from "@/services/solana/signer";
 import type { Env } from "@/types/env";
 
 import { cancelFireblocksProposalParams, listFireblocksProposalsSchema } from "./schemas";
@@ -45,7 +40,7 @@ function scope(c: AppContext) {
 /** Proposal reads fan out to provider refreshes and cancels reach Fireblocks; one shared budget. */
 const FIREBLOCKS_PROPOSALS_QUOTA = { name: "fireblocks-proposals", actorMax: 10, orgMax: 30 };
 function proposals(c: AppContext) {
-  return new FireblocksProposalsRepository(getDb(c.env), scope(c));
+  return requestProposalLedger(c).proposals;
 }
 
 async function authorizeWallet(c: AppContext, walletId: string): Promise<void> {
@@ -59,18 +54,23 @@ async function authorizeWallet(c: AppContext, walletId: string): Promise<void> {
     throw notFound("Fireblocks wallet");
 }
 
-function signingSummary(row: FireblocksSigningProposalRow): FireblocksProposalSummary {
+function signingSummary(row: SigningProposalRow): FireblocksProposalSummary {
+  const status =
+    row.state.providerPhase === "not_sent" || row.state.providerPhase === "never_accepted"
+      ? "FAILED"
+      : (row.state.providerStatus ?? "SUBMITTING");
   return {
     id: row.id,
     kind: "signing",
     operation: row.operation,
-    status: row.status,
-    transactionId: row.provider_transaction_id,
+    status,
+    transactionId: row.state.providerTransactionId,
     createdAt: row.created_at,
-    cancellationRequestedAt: row.cancel_requested_at,
+    cancellationRequestedAt: row.state.cancelRequestedAt ?? row.state.refusal?.at ?? null,
     canCancel:
       !row.finished_at &&
-      (row.status === "SUBMITTING" || isFireblocksProposalCancellable(row.status)),
+      (row.state.providerStatus === null ||
+        isFireblocksProposalCancellable(row.state.providerStatus)),
   };
 }
 const cancellationRequestedAtSchema = z.iso.datetime();
@@ -109,25 +109,25 @@ async function transferSummary(
   };
 }
 
-async function refreshSigning(c: AppContext, row: FireblocksSigningProposalRow) {
+async function refreshSigning(c: AppContext, row: SigningProposalRow) {
   try {
-    return (await pollFireblocksSigningProposal(c.env, proposals(c), row)).row;
+    return (await pollSigningProposal(c.env, proposals(c), row)).row;
   } catch (error) {
     getLogger().warn(
       { proposalId: row.id, ...describeError(error) },
       "fireblocks_proposal_status_unavailable"
     );
-    return proposals(c).require(row.id);
+    return proposals(c).requireSigning({ ...scope(c), proposalId: row.id });
   }
 }
 
 type Cancellation =
-  | { kind: "signing"; row: FireblocksSigningProposalRow }
+  | { kind: "signing"; row: SigningProposalRow }
   | { kind: "transfer"; row: PaymentTransferRow };
 async function authorizeCancellation(c: AppContext, input: AuthorizeInput): Promise<Cancellation> {
   const { kind, proposalId } = cancelFireblocksProposalParams.parse(input.params);
   if (kind === "signing") {
-    const row = await proposals(c).require(proposalId);
+    const row = await proposals(c).requireSigning({ ...scope(c), proposalId });
     await authorizeWallet(c, row.custody_wallet_id);
     return { kind, row };
   }
@@ -139,42 +139,9 @@ async function authorizeCancellation(c: AppContext, input: AuthorizeInput): Prom
   await authorizeWallet(c, row.custody_wallet_id);
   return { kind, row };
 }
-async function cancelSigning(c: AppContext, row: FireblocksSigningProposalRow) {
-  if (!(await proposals(c).requestCancellation(row.id)))
-    return {
-      acknowledged: false,
-      proposal: signingSummary(await proposals(c).require(row.id)),
-    };
-  // Claim before talking to Fireblocks: even a late SIGNED response must not reach SDP's broadcaster.
-  const canceller = await createOrgTransferProposalCanceller(
-    c.env,
-    row.organization_id,
-    row.project_id,
-    row.custody_wallet_id,
-    fireblocksSigningBinding(row)
-  );
-  const before = await readFireblocksSigningProposal(c.env, proposals(c), row);
-  if (!before) throw conflict("Fireblocks proposal is unavailable; cancellation is unconfirmed");
-  let acknowledged = false;
-  if (isFireblocksProposalCancellable(before.status)) {
-    try {
-      acknowledged = await canceller.cancel(before.id);
-    } catch (error) {
-      getLogger().warn(
-        { proposalId: row.id, ...describeError(error) },
-        "fireblocks_proposal_cancellation_unknown"
-      );
-    }
-    try {
-      await readFireblocksSigningProposal(c.env, proposals(c), row);
-    } catch (error) {
-      getLogger().warn(
-        { proposalId: row.id, ...describeError(error) },
-        "fireblocks_proposal_status_unavailable"
-      );
-    }
-  }
-  return { acknowledged, proposal: signingSummary(await proposals(c).require(row.id)) };
+async function cancelSigning(c: AppContext, row: SigningProposalRow) {
+  const result = await cancelSigningProposal(c.env, proposals(c), row);
+  return { acknowledged: result.acknowledged, proposal: signingSummary(result.row) };
 }
 
 export const fireblocksProposals = new Hono<{ Bindings: Env }>();
@@ -188,7 +155,11 @@ fireblocksProposals.get(
     await authorizeWallet(c, query.walletId);
     c.header("Cache-Control", "no-store");
     if (query.kind === "signing") {
-      const rows = await proposals(c).list(query.walletId, query.offset);
+      const rows = await proposals(c).listSigning({
+        ...scope(c),
+        walletId: query.walletId,
+        offset: query.offset,
+      });
       // Bounded provider reads, sequential here to respect workspace rate limits; leases share concurrent reads.
       const items: FireblocksProposalSummary[] = [];
       for (const row of rows.slice(0, 20)) items.push(signingSummary(await refreshSigning(c, row)));

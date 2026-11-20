@@ -118,6 +118,23 @@ function productState(
 }
 
 describe("custody proposal state transitions", () => {
+  it.each(["unsent", "submitting", "absent", "executing"] as const)(
+    "retains cancellation authority before a late provider observation from %s",
+    (phase) => {
+      const original = productState(phase, "authorized");
+      const refused = apply(original, {
+        type: "cancellation_intent_recorded",
+        at: LATER,
+        reason: "cancellation_requested",
+        message: "Cancellation requested",
+      });
+      expect(refused.next).toMatchObject({ providerPhase: phase, authorizationState: "refused" });
+      const settled = apply(refused.next, observation("completed", LAST));
+      expect(settled.next.authorizationState).toBe("committed_after_refusal");
+      expect(settled.next.refusal).toEqual(refused.next.refusal);
+    }
+  );
+
   it("claims submission once and never turns a definitive pre-send refusal into a retry", () => {
     const claimed = submitting();
     expect(claimed.submissionStartedAt).toBe(START);
@@ -600,6 +617,12 @@ describe("custody proposal state transitions", () => {
         at,
         reason: "principal_revoked",
         message: "The key was revoked",
+      },
+      cancellation_intent_recorded: {
+        type: "cancellation_intent_recorded",
+        at,
+        reason: "cancellation_requested",
+        message: "Cancellation requested",
       },
       cancel_requested: { type: "cancel_requested", at },
       cancel_accepted: { type: "cancel_accepted", at },

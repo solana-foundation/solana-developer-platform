@@ -296,24 +296,40 @@ A removed ramp provider's id moves from `RAMP_PROVIDERS` to
 
 ## Pending proposal recovery (PRO-2435 D4)
 
-`custody-proposals.repository.ts` owns proposal state and scheduling.
+`custody-proposals.repository.ts` owns the canonical `custody_proposals` table,
+state and scheduling for every provider. `kind = transfer` requires a payment
+parent; `kind = signing` keeps an operation and immutable binding without
+creating a payment. Never introduce another provider-specific proposal store.
+The shared worker runs every 30 seconds, claiming at most 100 rows with five
+concurrent recoveries.
+
 `claimDue` is system-only: it clears existing invalidations before external I/O
 and reserves ordinary sweep capacity behind priority revocations. Later flags
 survive the claim. Viewer throttling never advances the worker clock.
 
-The pure reducer in `@sdp/types/custody-proposals` owns legal transitions. Only
-`custody-proposal-ledger.ts` commits them with the payment projection, audit and
-intent closure. Its version CAS rejects stale observations. Lifecycle writes
-lock the payment before its proposal; immutable provider IDs and signatures are
-rechecked after that lock because older revisions do not bump proposal versions.
+The pure reducer in `@sdp/types/custody-proposals` owns legal transitions for
+both kinds. Transfers use `custody-proposal-ledger.ts` to commit state, payment
+projection, audit and intent closure together. These writes lock the payment
+before its proposal and recheck immutable provider IDs and signatures because
+older revisions do not bump proposal versions. Signing callbacks and recovery
+use the same reducer through versioned repository writes; adapters normalize
+provider statuses before those writes.
 
-Refusal is sticky, cancellation intent precedes provider I/O, and cancellation
-acknowledgment remains nonterminal. Completed proposals stay in the independent
+Refusal is sticky. Explicit cancellation intent can precede a provider ID or
+arrive during execution; it blocks late signature delivery. The tracked SDK
+records that intent and defers provider cancellation to shared recovery.
+Cancellation claims retain their cooldown and attempt identity, and
+acknowledgment remains nonterminal. Completed refusals stay in the independent
 critical-alert outbox until emission is acknowledged. Delivery can repeat after
-a crash. Audit failure rolls back every associated state/projection write.
+a crash. Transfer audit failure rolls back associated state and projections.
 
-The rolling bridge adopts older revisions' pending payments and advances only
-previously unsent proposals from their submission facts. Legacy payment JSON and
-its submission guard remain compatibility projections until those revisions
-drain; remove them only in a later contract migration. Principal identity stays
-on the payment and is restored only by the dedicated registered worker.
+The temporary Fireblocks writer bridge preserves old-image observations and
+carries canonical cancellation into old callbacks. Remove it and the old table
+only through the separate migration-only retirement after every API and worker
+revision uses the canonical repository.
+
+The older payment bridge adopts pending transfers and advances only previously
+unsent proposals from their submission facts. Legacy payment JSON and its
+submission guard remain compatibility projections until those revisions drain.
+Principal identity stays on the payment and is restored only by the dedicated
+registered worker.

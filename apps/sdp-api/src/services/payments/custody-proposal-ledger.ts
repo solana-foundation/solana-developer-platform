@@ -221,6 +221,7 @@ function assertPaymentProjection(
 function assertPendingDecision(current: PaymentTransferRow, event: CustodyProposalEvent): void {
   switch (event.type) {
     case "admission_refused":
+    case "cancellation_intent_recorded":
     case "cancel_requested":
       if (current.status !== "processing")
         throw conflict("The payment already has a recorded outcome");

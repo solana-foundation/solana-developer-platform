@@ -14,6 +14,7 @@ import {
 } from "@solana/kit";
 import type { MockInstance } from "vitest";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ProposalTracking } from "#/proposals";
 import { SigningError } from "#/signing";
 import { KeychainFireblocksAdapter } from "./keychain-fireblocks.adapter";
 
@@ -298,7 +299,6 @@ describe.each([
       expect(cleanup).toHaveBeenCalledExactlyOnceWith({
         externalTxId: "sdp-test-request-1",
         providerTransactionId: "tx-1",
-        cancelRequested: success,
       });
     }
   );
@@ -329,8 +329,7 @@ describe.each([
     expect(fetch).toHaveBeenCalledTimes(4);
     expect(cleanup).toHaveBeenCalledExactlyOnceWith({
       externalTxId: "sdp-test-request-1",
-      providerTransactionId: "tx-1",
-      cancelRequested: true,
+      providerTransactionId: undefined,
     });
   });
 
@@ -430,4 +429,174 @@ it("keeps a live proposal pending when the failure lookup itself fails", async (
   }).getTransactionSigner();
   await expect(signTestMessage(signer)).rejects.toThrow("Fireblocks API error: 400");
   expect(failure).not.toHaveBeenCalled();
+});
+
+describe("shared proposal tracking boundary", () => {
+  function tracking(): ProposalTracking {
+    return {
+      create: vi.fn().mockResolvedValue("proposal-1"),
+      observe: vi.fn().mockResolvedValue(true),
+      failUnaccepted: vi.fn().mockResolvedValue(undefined),
+      requestCancellation: vi.fn().mockResolvedValue(undefined),
+    };
+  }
+
+  it("does not submit when the canonical proposal cannot be persisted", async () => {
+    const proposals = tracking();
+    vi.mocked(proposals.create).mockRejectedValue(new Error("proposal write failed"));
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ addresses: [{ address: WALLET_ADDRESS }] }));
+    const signer = await new KeychainFireblocksAdapter({
+      ...CONFIG,
+      proposalTracking: proposals,
+    }).getTransactionSigner("fb_vault-1");
+
+    await expect(signTestMessage(signer)).rejects.toThrow("proposal write failed");
+    expect(proposals.create).toHaveBeenCalledExactlyOnceWith({
+      operation: "RAW",
+      binding: { assetId: "SOL", vaultAccountId: "vault-1" },
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("normalizes provider progress and refuses signature delivery when cancellation wins", async () => {
+    const proposals = tracking();
+    vi.mocked(proposals.observe).mockResolvedValue(false);
+    const wallet = await generateKeyPairSigner();
+    const message = createSignableMessage("cancelled canonical proposal");
+    const [signatures] = await wallet.signMessages([message]);
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ addresses: [{ address: wallet.address }] }))
+      .mockResolvedValueOnce(Response.json({ id: "provider-1", status: "SUBMITTED" }))
+      .mockResolvedValueOnce(
+        Response.json({
+          id: "provider-1",
+          status: "COMPLETED",
+          signedMessages: [
+            { signature: { fullSig: Buffer.from(signatures[wallet.address]).toString("hex") } },
+          ],
+        })
+      )
+      .mockRejectedValueOnce(new TypeError("lookup unavailable"));
+    const signer = await new KeychainFireblocksAdapter({
+      ...CONFIG,
+      proposalTracking: proposals,
+    }).getTransactionSigner();
+
+    await expect(signer.signMessages([message])).rejects.toMatchObject({ code: "INVALID_REQUEST" });
+    expect(proposals.observe).toHaveBeenCalledWith(
+      "proposal-1",
+      expect.objectContaining({
+        type: "observed",
+        providerTransactionId: "provider-1",
+        providerStatus: "COMPLETED",
+        phase: "completed",
+      })
+    );
+  });
+});
+
+it("persists canonical cancellation before SDK cleanup and skips provider cleanup if that write fails", async () => {
+  const cancellation = vi.fn().mockRejectedValue(new Error("cancellation write failed"));
+  const fetch = vi
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(Response.json({ addresses: [{ address: WALLET_ADDRESS }] }))
+    .mockResolvedValueOnce(Response.json({ id: "provider-1", status: "SUBMITTED" }))
+    .mockResolvedValueOnce(Response.json({ id: "provider-1", status: "PENDING_AUTHORIZATION" }));
+  const signer = await new KeychainFireblocksAdapter({
+    ...CONFIG,
+    maxPollAttempts: 1,
+    pollIntervalMs: 1,
+    proposalTracking: {
+      create: vi.fn().mockResolvedValue("proposal-1"),
+      observe: vi.fn().mockResolvedValue(true),
+      failUnaccepted: vi.fn().mockResolvedValue(undefined),
+      requestCancellation: cancellation,
+    },
+  }).getTransactionSigner();
+
+  await expect(signTestMessage(signer)).rejects.toThrow("cancellation write failed");
+  expect(cancellation).toHaveBeenCalledExactlyOnceWith("proposal-1");
+  expect(fetch).toHaveBeenCalledTimes(3);
+  expect(fetch.mock.calls.some(([url]) => String(url).endsWith("/cancel"))).toBe(false);
+});
+
+it("defers tracked SDK cancellation to the shared recovery worker", async () => {
+  const cancellation = vi.fn().mockResolvedValue(undefined);
+  const fetch = vi
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(Response.json({ addresses: [{ address: WALLET_ADDRESS }] }))
+    .mockResolvedValueOnce(Response.json({ id: "provider-1", status: "SUBMITTED" }))
+    .mockResolvedValueOnce(Response.json({ id: "provider-1", status: "PENDING_STATUS_UPDATE" }));
+  const signer = await new KeychainFireblocksAdapter({
+    ...CONFIG,
+    maxPollAttempts: 1,
+    pollIntervalMs: 1,
+    proposalTracking: {
+      create: vi.fn().mockResolvedValue("proposal-1"),
+      observe: vi.fn().mockResolvedValue(true),
+      failUnaccepted: vi.fn().mockResolvedValue(undefined),
+      requestCancellation: cancellation,
+    },
+  }).getTransactionSigner();
+
+  await expect(signTestMessage(signer)).rejects.toMatchObject({
+    context: { cancelRequested: false, externalTxId: "proposal-1" },
+  });
+  expect(cancellation).toHaveBeenCalledExactlyOnceWith("proposal-1");
+  expect(fetch).toHaveBeenCalledTimes(3);
+});
+
+it("requests shared cancellation when a pending signature outlives a failed provider read", async () => {
+  const cancellation = vi.fn().mockResolvedValue(undefined);
+  const failed = vi.fn().mockResolvedValue(undefined);
+  const fetch = vi
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(Response.json({ addresses: [{ address: WALLET_ADDRESS }] }))
+    .mockResolvedValueOnce(Response.json({ id: "provider-1", status: "SUBMITTED" }))
+    .mockResolvedValueOnce(Response.json({ id: "provider-1", status: "PENDING_AUTHORIZATION" }))
+    .mockRejectedValueOnce(new TypeError("provider unavailable"))
+    .mockResolvedValueOnce(Response.json({ id: "provider-1", status: "PENDING_AUTHORIZATION" }));
+  const signer = await new KeychainFireblocksAdapter({
+    ...CONFIG,
+    maxPollAttempts: 2,
+    pollIntervalMs: 1,
+    proposalTracking: {
+      create: vi.fn().mockResolvedValue("proposal-1"),
+      observe: vi.fn().mockResolvedValue(true),
+      failUnaccepted: failed,
+      requestCancellation: cancellation,
+    },
+  }).getTransactionSigner();
+
+  await expect(signTestMessage(signer)).rejects.toThrow("Fireblocks network request failed");
+  expect(cancellation).toHaveBeenCalledExactlyOnceWith("proposal-1");
+  expect(failed).not.toHaveBeenCalled();
+  expect(fetch).toHaveBeenCalledTimes(5);
+  expect(fetch.mock.calls.some(([url]) => String(url).endsWith("/cancel"))).toBe(false);
+});
+
+it("retains an ambiguous create even when its first lookup cannot find the proposal", async () => {
+  const cancellation = vi.fn().mockResolvedValue(undefined);
+  const failed = vi.fn().mockResolvedValue(undefined);
+  const fetch = vi
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(Response.json({ addresses: [{ address: WALLET_ADDRESS }] }))
+    .mockRejectedValueOnce(new TypeError("create outcome unknown"))
+    .mockResolvedValueOnce(Response.json({ message: "missing" }, { status: 404 }));
+  const signer = await new KeychainFireblocksAdapter({
+    ...CONFIG,
+    proposalTracking: {
+      create: vi.fn().mockResolvedValue("proposal-1"),
+      observe: vi.fn().mockResolvedValue(true),
+      failUnaccepted: failed,
+      requestCancellation: cancellation,
+    },
+  }).getTransactionSigner();
+
+  await expect(signTestMessage(signer)).rejects.toThrow("Fireblocks network request failed");
+  expect(cancellation).toHaveBeenCalledExactlyOnceWith("proposal-1");
+  expect(failed).not.toHaveBeenCalled();
+  expect(fetch).toHaveBeenCalledTimes(3);
 });
