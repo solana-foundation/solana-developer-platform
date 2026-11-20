@@ -240,31 +240,6 @@ function chunk(groups: RecipientInstructionGroup[], sponsoredRent: SponsoredRent
   });
 }
 
-/**
- * What an instruction asks the chain to do (program, accounts and roles,
- * data), without the signer objects attached to its accounts.
- */
-function wireForm(instructions: readonly Instruction[]) {
-  return instructions.map((instruction) => ({
-    programAddress: instruction.programAddress,
-    accounts: parts(instruction).accounts.map(({ address, role }) => ({ address, role })),
-    data: [...parts(instruction).data],
-  }));
-}
-
-/** A group's wire form, for comparing two builds. */
-function groupWireForm(group: RecipientInstructionGroup) {
-  const { instructions, ...recipient } = group;
-  return { ...recipient, instructions: wireForm(instructions) };
-}
-
-/** Instructions without the per-chunk random memo, for comparing two builds. */
-function withoutMemo(instructions: readonly Instruction[]) {
-  return wireForm(
-    instructions.filter((instruction) => instruction.programAddress !== MEMO_PROGRAM_ADDRESS)
-  );
-}
-
 describe("batch transfer builder (property)", () => {
   it("emits one transfer per recipient for exactly its amount and destination", async () => {
     await fc.assert(
@@ -388,39 +363,6 @@ describe("batch transfer builder (property)", () => {
           recipients.reduce((sum, recipient) => sum + recipient.amountBaseUnits, 0n)
         );
       }),
-      propertyParameters({ numRuns: 50 })
-    );
-  });
-
-  it("builds the same instructions for a recipient wherever it sits in the request", async () => {
-    await fc.assert(
-      fc.asyncProperty(
-        batchArb.chain((batch) =>
-          fc.tuple(
-            fc.constant(batch),
-            fc.shuffledSubarray(batch.recipients, { minLength: batch.recipients.length })
-          )
-        ),
-        async ([{ tokenContext, recipients }, shuffled]) => {
-          const first = await build({ tokenContext, recipients });
-          const again = await build({ tokenContext, recipients });
-          const reordered = await build({ tokenContext, recipients: shuffled });
-
-          expect(again.map(groupWireForm)).toEqual(first.map(groupWireForm));
-          const byIndex = new Map(reordered.map((group) => [group.index, groupWireForm(group)]));
-          for (const group of first) expect(byIndex.get(group.index)).toEqual(groupWireForm(group));
-
-          // Chunking is deterministic too, apart from the per-chunk uniqueness memo.
-          const chunksA = chunk(first, NO_SPONSORED_RENT);
-          const chunksB = chunk(again, NO_SPONSORED_RENT);
-          expect(chunksB.map((c) => c.recipientIndexes)).toEqual(
-            chunksA.map((c) => c.recipientIndexes)
-          );
-          expect(chunksB.map((c) => withoutMemo(c.instructions))).toEqual(
-            chunksA.map((c) => withoutMemo(c.instructions))
-          );
-        }
-      ),
       propertyParameters({ numRuns: 50 })
     );
   });

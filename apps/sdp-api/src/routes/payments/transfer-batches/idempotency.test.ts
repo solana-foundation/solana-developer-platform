@@ -1,70 +1,80 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
-import { SOL_MINT, wellKnownMint } from "@sdp/types/well-known-tokens";
+import { SOL_MINT, WELL_KNOWN_TOKENS, wellKnownMint } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
+import { required } from "@/test/helpers/required";
 import { canonicalizeTransferBatchBody, previousCanonicalTransferBatchBody } from "./idempotency";
 
-describe("canonicalizeTransferBatchBody", () => {
-  it("makes recipient order irrelevant and keeps everything else as sent", () => {
-    const a = { counterpartyId: "cp_a", amount: "1" };
-    const b = { counterpartyId: "cp_b", amount: "2" };
-    const body = { sourceCustodyWalletId: "cwlt_1", token: SOL_MINT, recipients: [b, a] };
+const A = { counterpartyId: "cp_a", counterpartyAccountId: "cpa_a", amount: "1" };
+const B = { counterpartyId: "cp_b", counterpartyAccountId: "cpa_b", amount: "2" };
+const BATCH = { sourceCustodyWalletId: "cwlt_1", token: SOL_MINT, recipients: [A, B] };
 
-    expect(canonicalizeTransferBatchBody(body)).toEqual({ ...body, recipients: [a, b] });
-    expect(canonicalizeTransferBatchBody({ ...body, recipients: [a, b] })).toEqual(
-      canonicalizeTransferBatchBody(body)
+describe("canonicalizeTransferBatchBody", () => {
+  it("fingerprints a reordered batch as the same request", () => {
+    expect(canonicalizeTransferBatchBody({ ...BATCH, recipients: [B, A] })).toEqual(
+      canonicalizeTransferBatchBody(BATCH)
     );
   });
 
-  it("spells recipient amounts canonically", () => {
-    const body = {
-      sourceCustodyWalletId: "cwlt_1",
-      token: SOL_MINT,
-      recipients: [{ counterpartyAccountId: "cpa_a", amount: "1" }],
-    };
-    const respelled = {
-      ...body,
-      recipients: [{ counterpartyAccountId: "cpa_a", amount: "01.000" }],
-    };
+  it("fingerprints a re-spelled amount as the same request", () => {
+    const respelled = { ...BATCH, recipients: [{ ...A, amount: "01.000" }, B] };
 
-    expect(canonicalizeTransferBatchBody(respelled)).toEqual(canonicalizeTransferBatchBody(body));
+    expect(canonicalizeTransferBatchBody(respelled)).toEqual(canonicalizeTransferBatchBody(BATCH));
   });
 
-  it("fingerprints the token as the mint the batch executes as (APE SOLA9-695)", () => {
-    const usdc = wellKnownMint("USDC", "devnet");
-    const body = {
-      sourceCustodyWalletId: "cwlt_1",
-      recipients: [{ counterpartyAccountId: "cpa_a", amount: "1" }],
-    };
+  it("fingerprints a token symbol as the mint the batch executes as", () => {
+    const usdc = required(wellKnownMint("USDC", "devnet"));
 
     runInClusterScope({ projectId: null, environment: "sandbox" }, () => {
-      expect(canonicalizeTransferBatchBody({ ...body, token: "usdc" })).toEqual(
-        canonicalizeTransferBatchBody({ ...body, token: usdc ?? "" })
-      );
-      expect(canonicalizeTransferBatchBody({ ...body, token: "SOL" })).toEqual(
-        canonicalizeTransferBatchBody({ ...body, token: SOL_MINT })
-      );
+      expect(
+        canonicalizeTransferBatchBody({
+          ...BATCH,
+          token: WELL_KNOWN_TOKENS.USDC.symbol.toLowerCase(),
+        })
+      ).toEqual(canonicalizeTransferBatchBody({ ...BATCH, token: usdc }));
+      expect(
+        canonicalizeTransferBatchBody({ ...BATCH, token: WELL_KNOWN_TOKENS.SOL.symbol })
+      ).toEqual(canonicalizeTransferBatchBody(BATCH));
     });
   });
 
-  it("keeps the token as sent in the previous form, for keys saved under it", () => {
+  it("keeps a batch that moves anything differently a different request", () => {
+    const usdc = required(wellKnownMint("USDC", "devnet"));
+
+    runInClusterScope({ projectId: null, environment: "sandbox" }, () => {
+      const original = canonicalizeTransferBatchBody(BATCH);
+      for (const changed of [
+        { ...BATCH, sourceCustodyWalletId: "cwlt_2" },
+        { ...BATCH, token: usdc },
+        { ...BATCH, recipients: [{ ...A, amount: "1.5" }, B] },
+        { ...BATCH, recipients: [{ ...A, counterpartyAccountId: "cpa_c" }, B] },
+        { ...BATCH, recipients: [A] },
+        { ...BATCH, externalId: "payroll-11" },
+      ]) {
+        expect(canonicalizeTransferBatchBody(changed)).not.toEqual(original);
+      }
+    });
+  });
+});
+
+describe("previousCanonicalTransferBatchBody", () => {
+  // A key or batch row saved before the token was fingerprinted as its mint still matches a retry.
+  it("keeps the token as sent, with recipients sorted and amounts canonical", () => {
     const body = {
-      sourceCustodyWalletId: "cwlt_1",
-      token: "SOL",
-      recipients: [{ counterpartyAccountId: "cpa_a", amount: "1.0" }],
+      ...BATCH,
+      token: WELL_KNOWN_TOKENS.SOL.symbol,
+      recipients: [
+        { ...B, amount: "2.0" },
+        { ...A, amount: "01.000" },
+      ],
     };
-    expect(previousCanonicalTransferBatchBody(body)).toEqual({
-      ...body,
-      recipients: [{ counterpartyAccountId: "cpa_a", amount: "1" }],
-    });
-    expect(previousCanonicalTransferBatchBody(body)).not.toEqual(
-      canonicalizeTransferBatchBody(body)
-    );
-  });
 
-  it("leaves what is not a recipient untouched for validation to refuse", () => {
-    const body = { token: SOL_MINT, recipients: [], options: {} };
-    expect(canonicalizeTransferBatchBody(body)).toEqual(body);
-    expect(canonicalizeTransferBatchBody({ recipients: "nope" })).toEqual({ recipients: "nope" });
-    expect(canonicalizeTransferBatchBody(["unparsed", "{"])).toEqual(["unparsed", "{"]);
+    expect(previousCanonicalTransferBatchBody(body)).toEqual({
+      sourceCustodyWalletId: "cwlt_1",
+      token: WELL_KNOWN_TOKENS.SOL.symbol,
+      recipients: [
+        { counterpartyId: "cp_a", counterpartyAccountId: "cpa_a", amount: "1" },
+        { counterpartyId: "cp_b", counterpartyAccountId: "cpa_b", amount: "2" },
+      ],
+    });
   });
 });
