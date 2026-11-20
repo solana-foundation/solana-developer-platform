@@ -39,7 +39,7 @@ async function simulateClerkWebhook(
     .digest("base64");
   const signature = `v1,${digest}`;
   return app.request(
-    "/webhooks/clerk/link-orgs",
+    "/webhooks/clerk",
     {
       method: "POST",
       headers: {
@@ -845,7 +845,7 @@ describe("Clerk webhooks", () => {
   });
   it("refuses a bad signature without saying why", async () => {
     const response = await app.request(
-      "/webhooks/clerk/link-orgs",
+      "/webhooks/clerk",
       {
         method: "POST",
         headers: {

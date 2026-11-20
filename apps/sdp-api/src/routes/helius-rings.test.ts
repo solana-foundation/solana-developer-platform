@@ -284,7 +284,7 @@ describe("Helius Rings routes", () => {
         }),
       } as unknown as RingsGatewayPort;
 
-      const created = await post("/v1/helius-rings/rings", {
+      const created = await post("/v1/helius-rings/rings/register-and-initialize", {
         name: "treasury",
         ringProgramId: RING_PROGRAM,
       });
@@ -307,7 +307,7 @@ describe("Helius Rings routes", () => {
     });
 
     it("400s a ring program id that is not base58", async () => {
-      const res = await post("/v1/helius-rings/rings", {
+      const res = await post("/v1/helius-rings/rings/register-and-initialize", {
         name: "treasury",
         ringProgramId: "not base58 0OIl",
       });
@@ -316,7 +316,10 @@ describe("Helius Rings routes", () => {
 
     it("400s a name outside the slug shape and the reserved word", async () => {
       for (const name of ["Treasury", "default"]) {
-        const res = await post("/v1/helius-rings/rings", { name, ringProgramId: RING_PROGRAM });
+        const res = await post("/v1/helius-rings/rings/register-and-initialize", {
+          name,
+          ringProgramId: RING_PROGRAM,
+        });
         expect(res.status).toBe(400);
       }
     });
@@ -331,7 +334,10 @@ describe("Helius Rings routes", () => {
   });
 
   it("POST /wallets 404s for an unknown custody wallet", async () => {
-    const res = await post("/v1/helius-rings/wallets", { walletId: "wal_missing", name: "Ops" });
+    const res = await post("/v1/helius-rings/wallets/provision-identity", {
+      walletId: "wal_missing",
+      name: "Ops",
+    });
     expect(res.status).toBe(404);
   });
 
@@ -367,7 +373,7 @@ describe("Helius Rings routes", () => {
     });
 
     it("prepares an operation and fails honestly at the port", async () => {
-      const res = await post("/v1/helius-rings/operations", {
+      const res = await post("/v1/helius-rings/operations/execute", {
         walletId: ringsWalletId,
         opType: "shield",
         asset: { mint: SOL_MINT, amountRaw: "1000000" },
@@ -398,10 +404,10 @@ describe("Helius Rings routes", () => {
         asset: { mint: SOL_MINT, amountRaw: "1000000" },
         clientNonce: "route-nonce-2",
       };
-      const first = (await (await post("/v1/helius-rings/operations", input)).json()) as {
+      const first = (await (await post("/v1/helius-rings/operations/execute", input)).json()) as {
         data: { operation: { id: string } };
       };
-      const replay = (await (await post("/v1/helius-rings/operations", input)).json()) as {
+      const replay = (await (await post("/v1/helius-rings/operations/execute", input)).json()) as {
         data: { operation: { id: string } };
       };
       expect(replay.data.operation.id).toBe(first.data.operation.id);
@@ -427,7 +433,7 @@ describe("Helius Rings routes", () => {
       gatewayOverride.current = gateway;
 
       const failed = (await (
-        await post("/v1/helius-rings/operations", {
+        await post("/v1/helius-rings/operations/execute", {
           walletId: ringsWalletId,
           opType: "shield",
           asset: { mint: SOL_MINT, amountRaw: "1000000" },
@@ -472,7 +478,7 @@ describe("Helius Rings routes", () => {
         .bind(TEST_API_KEY.id, walletIds)
         .run();
 
-      const res = await post("/v1/helius-rings/operations", {
+      const res = await post("/v1/helius-rings/operations/execute", {
         walletId: ringsWalletId,
         opType: "shield",
         asset: { mint: SOL_MINT, amountRaw: "1000000" },
@@ -494,7 +500,7 @@ describe("Helius Rings routes", () => {
       gatewayOverride.current = gateway;
 
       const failed = (await (
-        await post("/v1/helius-rings/operations", {
+        await post("/v1/helius-rings/operations/execute", {
           walletId: ringsWalletId,
           opType: "shield",
           asset: { mint: SOL_MINT, amountRaw: "1000000" },
@@ -524,7 +530,7 @@ describe("Helius Rings routes", () => {
       const refusedCode = async (res: Response) =>
         ((await res.json()) as { error: { code: string } }).error.code;
 
-      const prepared = await restricted("/v1/helius-rings/operations", {
+      const prepared = await restricted("/v1/helius-rings/operations/execute", {
         walletId: ringsWalletId,
         opType: "shield",
         asset: { mint: SOL_MINT, amountRaw: "1000000" },
@@ -541,7 +547,7 @@ describe("Helius Rings routes", () => {
       expect(await refusedCode(retried)).toBe("INSUFFICIENT_PERMISSIONS");
 
       const executed = await restricted(
-        `/v1/helius-rings/operations/${failed.data.operation.id}/execute`,
+        `/v1/helius-rings/operations/${failed.data.operation.id}/resume-execution`,
         {}
       );
       expect(executed.status).toBe(403);
@@ -571,7 +577,7 @@ describe("Helius Rings routes", () => {
 
     it("execute is a no-op on a terminal operation", async () => {
       const failed = (await (
-        await post("/v1/helius-rings/operations", {
+        await post("/v1/helius-rings/operations/execute", {
           walletId: ringsWalletId,
           opType: "shield",
           asset: { mint: SOL_MINT, amountRaw: "1000000" },
@@ -580,7 +586,7 @@ describe("Helius Rings routes", () => {
       ).json()) as { data: { operation: { id: string; state: string } } };
 
       const executed = await post(
-        `/v1/helius-rings/operations/${failed.data.operation.id}/execute`,
+        `/v1/helius-rings/operations/${failed.data.operation.id}/resume-execution`,
         {}
       );
       expect(executed.status).toBe(200);
@@ -600,7 +606,7 @@ describe("Helius Rings routes", () => {
       gatewayOverride.current = gateway;
 
       const failed = (await (
-        await post("/v1/helius-rings/operations", {
+        await post("/v1/helius-rings/operations/execute", {
           walletId: ringsWalletId,
           opType: "shield",
           asset: { mint: SOL_MINT, amountRaw: "1000000" },
@@ -618,7 +624,7 @@ describe("Helius Rings routes", () => {
     });
 
     it("rejects an invalid operation body", async () => {
-      const res = await post("/v1/helius-rings/operations", {
+      const res = await post("/v1/helius-rings/operations/execute", {
         walletId: ringsWalletId,
         opType: "not-a-real-op",
         clientNonce: "route-nonce-5",
@@ -627,7 +633,7 @@ describe("Helius Rings routes", () => {
     });
 
     it("400s a named ring the project never recorded", async () => {
-      const res = await post("/v1/helius-rings/operations", {
+      const res = await post("/v1/helius-rings/operations/execute", {
         walletId: ringsWalletId,
         opType: "shield",
         asset: { mint: SOL_MINT, amountRaw: "1000000" },
@@ -640,7 +646,7 @@ describe("Helius Rings routes", () => {
     // Every enabled op type takes `ring` now, but the value is still a slug:
     // anything else is refused at the schema, never silently stripped.
     it("400s a ring selector outside the slug shape", async () => {
-      const res = await post("/v1/helius-rings/operations", {
+      const res = await post("/v1/helius-rings/operations/execute", {
         walletId: ringsWalletId,
         opType: "withdraw",
         asset: { mint: SOL_MINT, amountRaw: "1000000" },
@@ -652,7 +658,7 @@ describe("Helius Rings routes", () => {
     });
 
     it("400s a withdraw naming a ring the project never recorded", async () => {
-      const res = await post("/v1/helius-rings/operations", {
+      const res = await post("/v1/helius-rings/operations/execute", {
         walletId: ringsWalletId,
         opType: "withdraw",
         asset: { mint: SOL_MINT, amountRaw: "1000000" },
@@ -684,7 +690,7 @@ describe("Helius Rings routes", () => {
       ],
       ["merge", { opType: "merge", asset: { mint: USDC_MINT } }],
     ])("accepts a USDC %s on the default ring", async (label, body) => {
-      const res = await post("/v1/helius-rings/operations", {
+      const res = await post("/v1/helius-rings/operations/execute", {
         walletId: ringsWalletId,
         clientNonce: `route-nonce-usdc-${label.replace(/\s/g, "-")}`,
         ...body,
@@ -703,7 +709,7 @@ describe("Helius Rings routes", () => {
       ],
       ["merge", { opType: "merge", asset: { mint: OTHER_MINT } }],
     ])("400s a %s of a mint outside the two the build settles", async (label, body) => {
-      const res = await post("/v1/helius-rings/operations", {
+      const res = await post("/v1/helius-rings/operations/execute", {
         walletId: ringsWalletId,
         clientNonce: `route-nonce-unknown-${label}`,
         ...body,
@@ -726,7 +732,7 @@ describe("Helius Rings routes", () => {
             lookupTableAddress: LOOKUP_TABLE,
           }),
         } as unknown as RingsGatewayPort;
-        const created = await post("/v1/helius-rings/rings", {
+        const created = await post("/v1/helius-rings/rings/register-and-initialize", {
           name: "treasury",
           ringProgramId: RING_PROGRAM,
         });
@@ -736,7 +742,7 @@ describe("Helius Rings routes", () => {
 
       it("prepares a ring_exit pinned to the active ring and fails honestly at the port", async () => {
         await seedActiveRing();
-        const res = await post("/v1/helius-rings/operations", {
+        const res = await post("/v1/helius-rings/operations/execute", {
           walletId: ringsWalletId,
           opType: "ring_exit",
           asset: { mint: SOL_MINT, amountRaw: "1000000" },
@@ -763,7 +769,7 @@ describe("Helius Rings routes", () => {
 
       it("400s a ring move naming the default ring", async () => {
         for (const opType of ["ring_exit", "ring_entry"]) {
-          const res = await post("/v1/helius-rings/operations", {
+          const res = await post("/v1/helius-rings/operations/execute", {
             walletId: ringsWalletId,
             opType,
             asset: { mint: SOL_MINT, amountRaw: "1000000" },
@@ -776,7 +782,7 @@ describe("Helius Rings routes", () => {
 
       it("400s a ring_entry without a ring, and a ring_exit carrying a `to`", async () => {
         await seedActiveRing();
-        const missingRing = await post("/v1/helius-rings/operations", {
+        const missingRing = await post("/v1/helius-rings/operations/execute", {
           walletId: ringsWalletId,
           opType: "ring_entry",
           asset: { mint: SOL_MINT, amountRaw: "1000000" },
@@ -786,7 +792,7 @@ describe("Helius Rings routes", () => {
 
         // Strict objects: a recipient field on a self-only move is refused,
         // never silently stripped.
-        const withRecipient = await post("/v1/helius-rings/operations", {
+        const withRecipient = await post("/v1/helius-rings/operations/execute", {
           walletId: ringsWalletId,
           opType: "ring_exit",
           asset: { mint: SOL_MINT, amountRaw: "1000000" },
@@ -799,7 +805,7 @@ describe("Helius Rings routes", () => {
 
       it("400s a non-SOL ring move", async () => {
         await seedActiveRing();
-        const res = await post("/v1/helius-rings/operations", {
+        const res = await post("/v1/helius-rings/operations/execute", {
           walletId: ringsWalletId,
           opType: "ring_entry",
           asset: { mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU", amountRaw: "1000000" },
@@ -810,7 +816,7 @@ describe("Helius Rings routes", () => {
       });
 
       it("400s a ring move naming a ring the project never recorded", async () => {
-        const res = await post("/v1/helius-rings/operations", {
+        const res = await post("/v1/helius-rings/operations/execute", {
           walletId: ringsWalletId,
           opType: "ring_entry",
           asset: { mint: SOL_MINT, amountRaw: "1000000" },
@@ -852,7 +858,7 @@ describe("Helius Rings routes", () => {
       gateway.buildOperation = () =>
         Promise.reject(new HeliusRingsError("gateway_unavailable", "port unavailable"));
       gatewayOverride.current = gateway;
-      const failed = await post("/v1/helius-rings/operations", {
+      const failed = await post("/v1/helius-rings/operations/execute", {
         walletId: ringsWalletId,
         opType: "shield",
         asset: { mint: SOL_MINT, amountRaw: "1000000" },
@@ -872,7 +878,7 @@ describe("Helius Rings routes", () => {
     it.each([
       {
         route: "POST /wallets",
-        path: () => "/v1/helius-rings/wallets",
+        path: () => "/v1/helius-rings/wallets/provision-identity",
         body: () => ({ walletId: "wal_hr_route", name: "Ops" }),
       },
       {
@@ -882,7 +888,7 @@ describe("Helius Rings routes", () => {
       },
       {
         route: "POST /wallets/:walletId/rekey",
-        path: () => `/v1/helius-rings/wallets/${ringsWalletId}/rekey`,
+        path: () => `/v1/helius-rings/wallets/${ringsWalletId}/identity/rekey`,
         body: () => ({ confirmation: "Treasury" }),
       },
       {
@@ -892,7 +898,7 @@ describe("Helius Rings routes", () => {
       },
       {
         route: "POST /operations",
-        path: () => "/v1/helius-rings/operations",
+        path: () => "/v1/helius-rings/operations/execute",
         body: () => ({
           walletId: ringsWalletId,
           opType: "shield",
@@ -902,7 +908,7 @@ describe("Helius Rings routes", () => {
       },
       {
         route: "POST /operations/:operationId/execute",
-        path: () => `/v1/helius-rings/operations/${operationId}/execute`,
+        path: () => `/v1/helius-rings/operations/${operationId}/resume-execution`,
         body: () => ({}),
       },
       {
