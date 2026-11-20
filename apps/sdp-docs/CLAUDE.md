@@ -279,6 +279,7 @@ Gates follow module declarations, never sentences:
   it teaches a different body, query, retry key or multi-step flow.
 - Frontmatter (titles, descriptions) of shared pages must stay module-neutral.
 - `check:links` checks the channel in the manifest; CI runs it on `experimental` and `stable`.
+- `check:links` resolves this repository's `tree/main` and `blob/main` GitHub links against the checkout instead of fetching them, so a page can link a file its own PR adds, and a wrong path fails offline.
 - `src/components/docs-shell/home.tsx` lists custody, ramp, compliance and RPC partners from the shared provider registries. Custody and ramp logos follow their release-channel gates; compliance appears only when its module is published. Add a logo mapping when a provider is added.
 - Committed generated files (`public/llms*.txt`, Postman, `reference/api/index.mdx`, `src/generated/public-surface.json`, `src/generated/api-examples.json`) are built at `experimental`; the deployment's build regenerates them for its channel. The root `content/docs/meta.json` is hand-maintained.
 - The docs skill (`public/SKILL.md`, and the same file at the repo's `skills/sdp-docs/SKILL.md`, which `npx skills add` installs from GitHub) is the exception: it names no module, so one copy fits every channel. `generate:ai` links only shared pages from it and fails on a gated or missing one; send readers to `llms.txt` for what a channel publishes.
