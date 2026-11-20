@@ -361,8 +361,9 @@ Earn uses the same `module: earn` frontmatter and release-channel rules as
 every other module, with no separate publication flag or preview override. Its
 guides live in `content/docs/earn`, with Embedded Yield in
 `content/docs/guides/embedded-yield.mdx`. The public contract has four core
-actions and five shared operation routes; the six WisdomTree onboarding
-operations stay internal. OpenAPI owns request and response contracts, and the
+actions and five shared operation routes; the API reference nests the operation
+routes under Earn as their own Operations group (`EARN_GROUPS.operations`), and
+the six WisdomTree onboarding operations stay internal. OpenAPI owns request and response contracts, and the
 guides own the walkthrough. Do not maintain a second hidden core contract.
 
 Guides walk the `source.ownerAddress` flow only: the owner's wallet signs, and

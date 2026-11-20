@@ -12,7 +12,9 @@ import {
   operationsListQuerySchema,
 } from "@/routes/operations/schemas";
 import { earnErrorResponses } from "./earn-errors";
+import { EARN_GROUPS } from "./earn-groups";
 import {
+  DOCS_GROUP,
   jsonContent,
   projectScopeHeaders,
   projectScopeWithDeclaredIdempotencyHeaders,
@@ -23,7 +25,8 @@ export function registerOperationsPaths(registry: OpenAPIRegistry, publicOnly = 
   const security: Array<Record<string, string[]>> = publicOnly
     ? [{ apiKeyAuth: [] }]
     : [{ apiKeyAuth: [] }, { clerkBearerAuth: [] }];
-  const common = { tags: ["Operations"], security };
+  // Operations track Earn's actions, so the reference nests them under Earn as their own group.
+  const common = { tags: ["Earn"], [DOCS_GROUP]: EARN_GROUPS.operations, security };
   const response = successResponseSchema(operationResponseSchema);
   registry.registerPath({
     ...common,

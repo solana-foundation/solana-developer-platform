@@ -1986,12 +1986,7 @@
               }
             }
           }
-        }
-      ]
-    },
-    {
-      "name": "Operations",
-      "item": [
+        },
         {
           "name": "List operations",
           "request": {

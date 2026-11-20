@@ -346,11 +346,11 @@ locally with no key, wallet or funds.
 | [`GET /v1/earn/positions`](/docs/reference/api/earn/list-earn-core-positions) | Reads a wallet's holdings and totals. |
 | [`POST /v1/earn/deposit`](/docs/reference/api/earn/prepare-earn-deposit) | Prepares a deposit into a strategy. |
 | [`POST /v1/earn/withdraw`](/docs/reference/api/earn/prepare-earn-withdrawal) | Prepares a withdrawal from a position. |
-| [`GET /v1/operations`](/docs/reference/api/operations/list-operations) | Lists a wallet's deposits and withdrawals. |
-| [`GET /v1/operations/{operationId}`](/docs/reference/api/operations/get-operation) | Reads one operation's status and next action. |
-| [`POST /v1/operations/{operationId}/submit`](/docs/reference/api/operations/submit-operation) | Sends the signed transaction. |
-| [`POST /v1/operations/{operationId}/refresh`](/docs/reference/api/operations/refresh-operation) | Chooses a withdrawal route before you sign. |
-| [`POST /v1/operations/{operationId}/cancel`](/docs/reference/api/operations/cancel-operation) | Abandons an operation before you sign. |
+| [`GET /v1/operations`](/docs/reference/api/earn/list-operations) | Lists a wallet's deposits and withdrawals. |
+| [`GET /v1/operations/{operationId}`](/docs/reference/api/earn/get-operation) | Reads one operation's status and next action. |
+| [`POST /v1/operations/{operationId}/submit`](/docs/reference/api/earn/submit-operation) | Sends the signed transaction. |
+| [`POST /v1/operations/{operationId}/refresh`](/docs/reference/api/earn/refresh-operation) | Chooses a withdrawal route before you sign. |
+| [`POST /v1/operations/{operationId}/cancel`](/docs/reference/api/earn/cancel-operation) | Abandons an operation before you sign. |
 
 ## Guides
 
@@ -1138,11 +1138,7 @@ Source: https://platform.solana.com/docs/reference/api
 
 - [Earn](/docs/reference/api/earn.md)
 
-  Strategy reads, previews, withdrawal-route discovery, unsigned builds, submission, queued actions, and tenant tracking.
-
-- [Operations](/docs/reference/api/operations.md)
-
-  Durable asynchronous execution and recovery for prepared intents.
+  Discover strategies, read positions, and prepare deposits and withdrawals, then submit and track each one as an operation.
 
 [API conventions](/docs/reference/conventions) cover authentication, environments, idempotency, errors, pagination, rate limits, and versioning.
 
@@ -35782,9 +35778,11 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Earn
 Source: https://platform.solana.com/docs/reference/api/earn
 
-> Strategy reads, previews, withdrawal-route discovery, unsigned builds, submission, queued actions, and tenant tracking. Availability follows the deployment's release channel.
+> Discover strategies, read positions, and prepare deposits and withdrawals, then submit and track each one as an operation. Availability follows the deployment's release channel.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
+
+## Core
 
 | Method | Endpoint | Summary |
 | --- | --- | --- |
@@ -35793,7 +35791,19 @@ Source: https://platform.solana.com/docs/reference/api/earn
 | `POST` | `/v1/earn/deposit` | [Prepare a deposit](/docs/reference/api/earn/prepare-earn-deposit.md) |
 | `POST` | `/v1/earn/withdraw` | [Prepare a withdrawal](/docs/reference/api/earn/prepare-earn-withdrawal.md) |
 
+## Operations
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `GET` | `/v1/operations` | [List operations](/docs/reference/api/earn/list-operations.md) |
+| `GET` | `/v1/operations/{operationId}` | [Get an operation](/docs/reference/api/earn/get-operation.md) |
+| `POST` | `/v1/operations/{operationId}/submit` | [Submit an operation](/docs/reference/api/earn/submit-operation.md) |
+| `POST` | `/v1/operations/{operationId}/refresh` | [Refresh an operation](/docs/reference/api/earn/refresh-operation.md) |
+| `POST` | `/v1/operations/{operationId}/cancel` | [Cancel a preparation](/docs/reference/api/earn/cancel-operation.md) |
+
 ---
+
+## Earn: Core
 
 ### Discover strategies
 Source: https://platform.solana.com/docs/reference/api/earn/discover-earn-strategies
@@ -37994,27 +38004,14 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
-## Operations
-
-### Operations
-Source: https://platform.solana.com/docs/reference/api/operations
-
-> Durable asynchronous execution and recovery for prepared intents.
-
-| Method | Endpoint | Summary |
-| --- | --- | --- |
-| `GET` | `/v1/operations` | [List operations](/docs/reference/api/operations/list-operations.md) |
-| `GET` | `/v1/operations/{operationId}` | [Get an operation](/docs/reference/api/operations/get-operation.md) |
-| `POST` | `/v1/operations/{operationId}/submit` | [Submit an operation](/docs/reference/api/operations/submit-operation.md) |
-| `POST` | `/v1/operations/{operationId}/refresh` | [Refresh an operation](/docs/reference/api/operations/refresh-operation.md) |
-| `POST` | `/v1/operations/{operationId}/cancel` | [Cancel a preparation](/docs/reference/api/operations/cancel-operation.md) |
-
----
+## Earn: Operations
 
 ### List operations
-Source: https://platform.solana.com/docs/reference/api/operations/list-operations
+Source: https://platform.solana.com/docs/reference/api/earn/list-operations
 
 > Lists deposits and withdrawals in the authenticated project and environment, newest first.
+
+> **Earn is under active development.** Features, API endpoints, and docs may change.
 
 `GET /v1/operations`
 
@@ -38515,9 +38512,11 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ---
 
 ### Get an operation
-Source: https://platform.solana.com/docs/reference/api/operations/get-operation
+Source: https://platform.solana.com/docs/reference/api/earn/get-operation
 
 > Returns an operation's status, terms, current actionId and version, nextAction and settlement result.
+
+> **Earn is under active development.** Features, API endpoints, and docs may change.
 
 `GET /v1/operations/{operationId}`
 
@@ -39001,9 +39000,11 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ---
 
 ### Submit an operation
-Source: https://platform.solana.com/docs/reference/api/operations/submit-operation
+Source: https://platform.solana.com/docs/reference/api/earn/submit-operation
 
 > Submits the reviewed transaction for asynchronous broadcast and returns 202.
+
+> **Earn is under active development.** Features, API endpoints, and docs may change.
 
 `POST /v1/operations/{operationId}/submit`
 
@@ -39559,9 +39560,11 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ---
 
 ### Refresh an operation
-Source: https://platform.solana.com/docs/reference/api/operations/refresh-operation
+Source: https://platform.solana.com/docs/reference/api/earn/refresh-operation
 
 > Prepares a new unsigned transaction and terms before submission; it never signs, broadcasts or cancels.
+
+> **Earn is under active development.** Features, API endpoints, and docs may change.
 
 `POST /v1/operations/{operationId}/refresh`
 
@@ -40112,9 +40115,11 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ---
 
 ### Cancel a preparation
-Source: https://platform.solana.com/docs/reference/api/operations/cancel-operation
+Source: https://platform.solana.com/docs/reference/api/earn/cancel-operation
 
 > Cancels a preparation while canCancel is true, before any submission has been accepted.
+
+> **Earn is under active development.** Features, API endpoints, and docs may change.
 
 `POST /v1/operations/{operationId}/cancel`
 

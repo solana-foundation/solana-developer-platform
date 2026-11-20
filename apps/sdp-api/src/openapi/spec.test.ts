@@ -640,7 +640,6 @@ describe("OpenAPI spec", () => {
       "Counterparties",
       "Asset Profiles",
       "Earn",
-      "Operations",
     ]);
 
     expect(doc.paths?.["/v1/organizations/{orgId}"]).toBeUndefined();

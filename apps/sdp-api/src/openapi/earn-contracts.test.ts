@@ -58,7 +58,8 @@ describe("Earn API contract coverage", () => {
     let operationCount = 0;
     const internal = createOpenApiDocument();
     for (const [path, item] of Object.entries(internal.paths)) {
-      if (!path.startsWith("/v1/earn/")) continue;
+      // Operations track Earn's actions and sit in Earn's reference as their own group.
+      if (!path.startsWith("/v1/earn/") && !path.startsWith("/v1/operations")) continue;
       for (const method of ["get", "post", "put"] as const) {
         const operation = item[method];
         if (!operation) continue;
@@ -69,7 +70,7 @@ describe("Earn API contract coverage", () => {
       }
     }
     expect([...groups].sort()).toEqual(Object.values(EARN_GROUPS).sort());
-    expect(operationCount).toBe(10);
+    expect(operationCount).toBe(15);
 
     const corePaths = Object.entries(internal.paths)
       .filter(
