@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@hono/node-server": "2.1.5",
+    "@solana/kit": "8.6.0",
     "hono": "4.13.14",
     "zod": "4.6.7"
   },
