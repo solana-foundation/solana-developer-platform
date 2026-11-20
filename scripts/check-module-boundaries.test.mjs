@@ -169,3 +169,38 @@ test("detects workspace dependency cycles", () => {
 
   assert.deepEqual(cycles, [["@sdp/a", "@sdp/b", "@sdp/a"]]);
 });
+
+for (const [fileName, runtimeDependencies, accepted] of [
+  ["client.test.ts", [], true],
+  ["client.ts", [], false],
+  ["client.test.ts", ["@sdp/custody"], false],
+]) {
+  test(`test-only custody edge: ${fileName}, runtime=${runtimeDependencies.length}`, () => {
+    const custody = {
+      name: "@sdp/custody",
+      directory: "packages/sdp-custody",
+      allowedDependencies: [],
+      declaredDependencies: [],
+    };
+    const provider = {
+      name: "@sdp/provider",
+      directory: "packages/sdp-provider",
+      allowedDependencies: [],
+      allowedTestDependencies: ["@sdp/custody"],
+      declaredDependencies: ["@sdp/custody"],
+      runtimeDependencies,
+    };
+    const errors = validateModuleBoundaries({
+      modules: [custody, provider],
+      appSourceRoots: [],
+      sourceImports: [
+        {
+          module: provider,
+          filePath: `/repo/packages/sdp-provider/src/${fileName}`,
+          specifier: "@sdp/custody/testing/fireblocks-proposal",
+        },
+      ],
+    });
+    assert.equal(errors.length === 0, accepted);
+  });
+}

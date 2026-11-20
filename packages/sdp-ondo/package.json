@@ -27,6 +27,7 @@
     "@sdp/types": "workspace:*"
   },
   "devDependencies": {
+    "@sdp/custody": "workspace:*",
     "@solana/kit": "catalog:",
     "@types/node": "26.6.5",
     "typescript": "6.0.3",

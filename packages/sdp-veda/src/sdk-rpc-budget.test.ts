@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { assertFireblocksProposal } from "@sdp/custody/testing/fireblocks-proposal";
 import { address } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { VedaVaultDirectClient, type VedaVaultOperationRunner } from "./client";
@@ -487,13 +488,11 @@ describe("Veda queued-withdrawal RPC budget (recorded devnet Test Vault)", () =>
     expect(quote).toEqual(QUOTE);
 
     chain.at(slots[3]);
-    const repeat = await settle(
-      client.buildQueuedWithdrawalRequest(sandbox, {
-        providerReference: VAULT,
-        owner: REPEAT_OWNER,
-        ...TERMS,
-      })
-    );
+    const repeat = await client.buildQueuedWithdrawalRequest(sandbox, {
+      providerReference: VAULT,
+      owner: REPEAT_OWNER,
+      ...TERMS,
+    });
     expect(chain.take()).toEqual({
       requests: { getMultipleAccounts: 1, getBlockTime: 1 },
       rounds: 2,
@@ -517,6 +516,7 @@ describe("Veda queued-withdrawal RPC budget (recorded devnet Test Vault)", () =>
       },
     });
     expect(digest(repeat)).toBe("f0abf874f3e5c1fb0bc664815c4dda74aa72cafafbdbc2eca3a8273ce9e37a7a");
+    await assertFireblocksProposal(repeat, REPEAT_OWNER);
 
     // A first request also creates the holder's withdraw state; a sponsored
     // one reads both rent minima live.
@@ -684,7 +684,7 @@ describe("Veda deposit and instant-exit RPC budget (recorded devnet Test Vault)"
     expect(chain.take().unexpected).toEqual([]);
 
     chain.at(slots[1]);
-    const repeat = await build({ owner: HOLDER_A });
+    const repeat = await client.buildVaultDeposit(sandbox, { ...DEPOSIT, owner: HOLDER_A });
     expect(chain.take()).toEqual({
       requests: { getMultipleAccounts: 1, getBlockTime: 1 },
       rounds: 2,
@@ -697,6 +697,7 @@ describe("Veda deposit and instant-exit RPC budget (recorded devnet Test Vault)"
       createsShareAccount: false,
     });
     expect(digest(repeat)).toBe("14ec1fecc13e4a70c4cd51b6a6b80bb4dc3f6f3bba26bb02b43fceacc60b882c");
+    await assertFireblocksProposal(repeat, HOLDER_A);
 
     // The share account and allowed-user record whose existence a sponsored
     // plan reports come from the same read.
@@ -761,7 +762,7 @@ describe("Veda deposit and instant-exit RPC budget (recorded devnet Test Vault)"
 
     // The build's route check reads the queue state too.
     chain.at(slots[2]);
-    const exit = await settle(client.buildVaultWithdrawal(sandbox, EXIT));
+    const exit = await client.buildVaultWithdrawal(sandbox, EXIT);
     expect(chain.take()).toEqual({
       requests: { getMultipleAccounts: 1, getBlockTime: 1 },
       rounds: 2,
@@ -773,6 +774,7 @@ describe("Veda deposit and instant-exit RPC budget (recorded devnet Test Vault)"
       accepted: { shares: "1", minAmountOut: "0.99" },
     });
     expect(digest(exit)).toBe("84e0ef3bf156d6b004c317a086e0bbd14b57fadb0ce1ad88f5e65edfff0b6443");
+    await assertFireblocksProposal(exit, HOLDER_B);
 
     chain.at(slots[3]);
     const sponsored = await settle(
