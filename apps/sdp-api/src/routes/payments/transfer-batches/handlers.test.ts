@@ -7,6 +7,7 @@ import {
   PAYMENT_TRANSFER_BATCH_RECIPIENT_STATUSES,
   PAYMENT_TRANSFER_BATCH_STATUSES,
   PAYMENT_TRANSFER_STATUSES,
+  type PaymentTransferBatchStatus,
 } from "@sdp/types/payments";
 import { SOL_MINT, SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import {
@@ -283,12 +284,12 @@ async function countBatches(): Promise<number> {
   return required(row).count;
 }
 
-async function readBatchStatus(batchId: string): Promise<string> {
+async function readBatchStatus(batchId: string): Promise<PaymentTransferBatchStatus> {
   const row = await getDb(env)
     .prepare("SELECT status FROM payment_transfer_batches WHERE id = ?")
     .bind(batchId)
-    .first<{ status: string }>();
-  return required(row).status;
+    .first();
+  return z.object({ status: z.enum(PAYMENT_TRANSFER_BATCH_STATUSES) }).parse(row).status;
 }
 
 async function readRecipientRows(batchId: string) {
@@ -1163,12 +1164,14 @@ describe("payment transfer batches", () => {
     // The chain confirms, then the ledger refuses the outcome row: the settle
     // rolls back with it, leaving the chunk processing and unaudited.
     const readState = async () => ({
-      transfer: required(
-        await getDb(env)
-          .prepare("SELECT status FROM payment_transfers WHERE id = ?")
-          .bind(transfer.id)
-          .first<{ status: string }>()
-      ).status,
+      transfer: z
+        .object({ status: z.enum(PAYMENT_TRANSFER_STATUSES) })
+        .parse(
+          await getDb(env)
+            .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+            .bind(transfer.id)
+            .first()
+        ).status,
       recipients: (await readRecipientRows(created.batch.id)).map((row) => row.status),
       batch: await readBatchStatus(created.batch.id),
     });
