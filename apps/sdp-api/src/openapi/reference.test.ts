@@ -240,7 +240,8 @@ describe("buildApiReference", () => {
     // body is still the one variant set titled by a pinned value, so the body is
     // grafted onto a test-only API-key operation that names no action.
     const publicDocument = createPublicOpenApiDocument({ releaseChannel: "stable" });
-    const internalInitialize = createOpenApiDocument().paths["/v1/wallets/initialize"]?.post;
+    const internalInitialize =
+      createOpenApiDocument().paths["/v1/wallets/managed-signing/initialize-with-wallet"]?.post;
     if (internalInitialize === undefined) throw new Error("no internal initialize operation");
     const initialize = buildApiReference({
       ...publicDocument,
