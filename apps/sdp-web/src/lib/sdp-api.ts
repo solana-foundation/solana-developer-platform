@@ -532,8 +532,11 @@ export async function proxyToSdpApi({
   organizationScoped?: boolean;
   /**
    * Headers deliberately selected by the route handler for the upstream API.
-   * The proxy never copies the incoming header bag: auth, project and tracing
-   * remain server-owned, while endpoint-specific metadata is opt-in.
+   * The proxy copies no other incoming header: auth, project and tracing stay
+   * server-owned. One piece of client-owned transport metadata is relayed
+   * without an opt-in since HOO-1918 — an inbound `Idempotency-Key` on a
+   * mutation (see {@link withForwardedIdempotencyKey}), which a header this
+   * route sets itself overrides.
    */
   upstreamHeaders?: HeadersInit;
 }): Promise<NextResponse> {

@@ -31,12 +31,14 @@ import {
   type EarnVaultWithdrawalRequestRecord,
   type EarnVaultWithdrawalRequestStatus,
   type ListEarnProgramsResponse,
-  type ListEarnProgramWithdrawalsResponse,
   type ListEarnStrategiesResponse,
 } from "@sdp/types/earn";
 import { EARN_PROVIDER_REDEMPTION_MODES } from "@sdp/types/earn-provider-orders";
 import {
   earnBalanceReadContextSchema,
+  earnPortfolioWithdrawalPreviewSchema,
+  earnPortfolioWithdrawalSchema,
+  earnProgramWithdrawalRecordSchema,
   earnVaultDepositRecordSchema,
   earnVaultDepositSchema,
   earnVaultWithdrawalSchema,
@@ -1748,16 +1750,66 @@ export interface EarnWithdrawalPreviewInput {
   token: EarnPortfolioToken;
 }
 
+/**
+ * The program-withdrawal answers, checked at the boundary like every other
+ * money envelope in this file. A 2xx whose body does not parse — a status
+ * outside the canonical set, a number where a decimal string belongs — is an
+ * INVALID RESPONSE, never a submission result: this surface can be mid-payout
+ * when the answer arrives, and the former `as T` cast let exactly that data
+ * crash the modal instead of failing loudly here.
+ */
+const earnWithdrawalPreviewAnswerSchema = z.object({
+  data: z.object({ preview: earnPortfolioWithdrawalPreviewSchema }),
+});
+
+const earnWithdrawalAnswerSchema = z.object({
+  data: z.object({ withdrawal: earnPortfolioWithdrawalSchema }),
+});
+
+const earnWithdrawalsPageAnswerSchema = z.object({
+  data: z.object({
+    withdrawals: z.array(earnProgramWithdrawalRecordSchema),
+    page: z.number(),
+    pageSize: z.number(),
+    total: z.number(),
+  }),
+});
+
+/**
+ * Waits for the answer, then checks a 2xx against its envelope schema. A
+ * refusal (or transport failure) passes through untouched — a 409's balance
+ * breakdown rides `body` the same as before — while an unparseable 2xx is
+ * reported as an invalid response, which every caller already reads as "no
+ * answer": the key's store keeps the key, the poll keeps polling.
+ */
+async function parseEarnWithdrawalAnswer<Shape>(
+  request: Promise<DashboardFetchResult<unknown>>,
+  schema: z.ZodType<Shape>,
+  error: string
+): Promise<DashboardFetchResult<Shape>> {
+  const result = await request;
+  if (!result.ok) return result;
+  const parsed = schema.safeParse(result.data);
+  if (!parsed.success) {
+    return { ok: false, error, status: result.status, body: result.data };
+  }
+  return { ok: true, status: result.status, data: parsed.data };
+}
+
 export function previewEarnWithdrawal(
   programId: string,
   input: EarnWithdrawalPreviewInput,
   signal?: AbortSignal
 ): Promise<DashboardFetchResult<{ data: EarnProgramWithdrawalPreviewResponse }>> {
-  return dashboardFetch(programPath(programId, "/withdrawal-preview"), {
-    method: "POST",
-    body: input,
-    signal,
-  });
+  return parseEarnWithdrawalAnswer(
+    dashboardFetch(programPath(programId, "/withdrawal-preview"), {
+      method: "POST",
+      body: input,
+      signal,
+    }),
+    earnWithdrawalPreviewAnswerSchema,
+    "Invalid withdrawal preview response"
+  );
 }
 
 export interface EarnWithdrawalCreateInput extends EarnWithdrawalPreviewInput {
@@ -1788,15 +1840,21 @@ export function createEarnWithdrawal(
     token: input.token,
     destinationAddress: input.destinationAddress,
   };
-  return dashboardFetch(programPath(programId, "/withdrawals"), { method: "POST", body });
+  return parseEarnWithdrawalAnswer(
+    dashboardFetch(programPath(programId, "/withdrawals"), { method: "POST", body }),
+    earnWithdrawalAnswerSchema,
+    "Invalid withdrawal response"
+  );
 }
 
 function fetchEarnWithdrawal(
   programId: string,
   withdrawalRef: string
 ): Promise<DashboardFetchResult<{ data: EarnProgramWithdrawalResponse }>> {
-  return dashboardFetch(
-    programPath(programId, `/withdrawals/${encodeURIComponent(withdrawalRef)}`)
+  return parseEarnWithdrawalAnswer(
+    dashboardFetch(programPath(programId, `/withdrawals/${encodeURIComponent(withdrawalRef)}`)),
+    earnWithdrawalAnswerSchema,
+    "Invalid withdrawal response"
   );
 }
 
@@ -1816,11 +1874,16 @@ export async function fetchEarnProgramWithdrawals(
       page: String(page),
       pageSize: String(EARN_PAGE_SIZE),
     });
-    const body = await requestJsonOk<{ data: ListEarnProgramWithdrawalsResponse }>(
-      `${programPath(programId, "/withdrawals")}?${query}`
-    );
+    const body = await requestJsonOk<unknown>(`${programPath(programId, "/withdrawals")}?${query}`);
+    // A ledger row the schema refuses (an unknown status, an amount that is
+    // not a decimal string) fails the whole read: a row that cannot be
+    // presented must not hide the payouts around it.
+    const parsedPage = earnWithdrawalsPageAnswerSchema.safeParse(body);
+    if (!parsedPage.success) {
+      throw new Error("Earn withdrawal ledger returned an invalid page");
+    }
 
-    const ledgerPage = body.data;
+    const ledgerPage = parsedPage.data.data;
     if (ledgerPage.page !== page || ledgerPage.pageSize !== EARN_PAGE_SIZE) {
       throw new Error("Earn withdrawal ledger pagination did not match the requested page");
     }

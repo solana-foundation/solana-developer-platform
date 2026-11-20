@@ -108,13 +108,17 @@ open registry string, so a copy of either list here would need revising every ti
 one grows — and the API already answers an unknown value with an empty page, which
 is the honest result.
 
-`proxyToSdpApi` never copies the inbound header bag — auth, project scope and
-tracing stay server-owned — so a client-set `Idempotency-Key` never reaches the
-API on its own. A route forwards one deliberately, per header, through the
-optional `upstreamHeaders` argument, spelling it `IDEMPOTENCY_KEY_HEADER`
-(`src/lib/idempotency.ts`). `vault-deposits/`, `vault-withdrawals/`, and the
-queued request create/cancel routes opt in, forwarding that single header and
-nothing else; the program create still sends the body `requestId` form.
+`proxyToSdpApi` copies no inbound header on its own — auth, project scope and
+tracing stay server-owned. Since HOO-1918 one piece of client-owned transport
+metadata IS relayed without an opt-in: an inbound `Idempotency-Key` on a
+mutation (`withForwardedIdempotencyKey`, `src/lib/sdp-api.ts`), and the
+browser's fetch layer mints an action key for every mutation without one
+(`takesActionKey` in `src/lib/dashboard-fetch.ts`), so a value-moving route
+receives a key from any dashboard caller — which is how the vault
+deposit/withdrawal routes carry the caller's stored key without any
+`upstreamHeaders` of their own. A route may still set its own upstream header
+key, which wins; the legacy program create uses the body `requestId` form, and
+sdp-api refuses a request carrying both key sources.
 
 ## Routes
 

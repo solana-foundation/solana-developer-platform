@@ -2,7 +2,13 @@
 import { z } from "zod";
 import {
   EARN_MOVEMENT_STATUSES,
+  EARN_PORTFOLIO_TOKENS,
+  EARN_PORTFOLIO_WITHDRAWAL_STATUSES,
+  EARN_PROGRAM_WITHDRAWAL_RECORD_STATUSES,
   EARN_VAULT_MOVEMENT_STATUSES,
+  type EarnPortfolioWithdrawal,
+  type EarnPortfolioWithdrawalPreview,
+  type EarnProgramWithdrawalRecord,
   type EarnVaultDeposit,
   type EarnVaultDepositRecord,
   type EarnVaultWithdrawal,
@@ -62,4 +68,51 @@ export const earnVaultWithdrawalSchema: z.ZodType<EarnVaultWithdrawal> = z.objec
   confirmedAt: z.string().nullable(),
   settledAt: z.string().nullable(),
   replayed: z.boolean().optional(),
+});
+
+/** A custodial program's live provider-read withdrawal (the legacy program flow). */
+export const earnPortfolioWithdrawalSchema: z.ZodType<EarnPortfolioWithdrawal> = z.object({
+  withdrawalRef: z.string(),
+  status: z.enum(EARN_PORTFOLIO_WITHDRAWAL_STATUSES),
+  amountRequestedUsd: z.string().optional(),
+  amountPaidUsd: z.string().optional(),
+  feeUsd: z.string().optional(),
+  token: z.enum(EARN_PORTFOLIO_TOKENS).optional(),
+  destinationAddress: z.string(),
+  failureReason: z.string().optional(),
+  createdAt: z.string(),
+  completedAt: z.string().optional(),
+});
+
+/** What a lane preview answers: the amounts are decimal STRINGS, never numbers. */
+export const earnPortfolioWithdrawalPreviewSchema: z.ZodType<EarnPortfolioWithdrawalPreview> =
+  z.object({
+    amountRequestedUsd: z.string().optional(),
+    feeUsd: z.string(),
+    withdrawableUsd: z.string(),
+    totalUsdAfterWithdrawal: z.string(),
+    processingEstimate: z
+      .object({
+        basis: z.enum(["elapsed_seconds", "banking_days"]),
+        typicalMinDuration: z.string(),
+        typicalMaxDuration: z.string(),
+      })
+      .optional(),
+  });
+
+/** One row of the SDP withdrawal ledger for a custodial program. */
+export const earnProgramWithdrawalRecordSchema: z.ZodType<EarnProgramWithdrawalRecord> = z.object({
+  id: z.string(),
+  provider: z.string(),
+  status: z.enum(EARN_PROGRAM_WITHDRAWAL_RECORD_STATUSES),
+  amountRequestedUsd: z.string(),
+  amountPaidUsd: z.string().optional(),
+  feeUsd: z.string().optional(),
+  token: z.enum(EARN_PORTFOLIO_TOKENS),
+  destinationAddress: z.string(),
+  failureReason: z.string().optional(),
+  withdrawalRef: z.string().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  completedAt: z.string().optional(),
 });
