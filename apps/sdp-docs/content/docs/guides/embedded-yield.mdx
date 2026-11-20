@@ -5,8 +5,10 @@ description: Offer strategy discovery, positions and asynchronous yield actions 
 breadcrumbParent: /docs/earn
 ---
 
-Embedded Yield wraps the same Earn API as Treasury. The replacement contract is
-internal pending named security sign-off.
+[Run the TypeScript example](https://github.com/solana-foundation/solana-developer-platform/tree/codex/earn-core-api/examples/earn-quickstart)
+without an account or funds, then follow the [quickstart](/docs/earn/quickstart).
+Embedded Yield wraps the same Earn API as Treasury. This PR changes the core
+contract; live use requires a deployment running this version.
 
 Discover strategies through `GET /v1/earn/discovery`, read holdings through
 `GET /v1/earn/positions`, and prepare deposits or withdrawals with the core
@@ -14,6 +16,9 @@ mutation endpoints. Your SDP API key and an `ownerAddress` are enough: use any
 compatible Solana wallet to sign the returned unsigned transaction, then send
 the exact signed bytes to `/v1/operations/{operationId}/submit`. The wallet does
 not need to be registered or connected in SDP.
+
+Your app owns wallet connection, signing prompts and review UI. Privy is one
+compatible wallet integration; it does not require an SDP wallet connection.
 
 If the wallet is already connected in SDP, `walletId` is an optional convenience
 that lets SDP request signing through its configured provider.

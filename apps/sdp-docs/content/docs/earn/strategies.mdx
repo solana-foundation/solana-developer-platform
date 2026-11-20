@@ -8,6 +8,15 @@ Use `GET /v1/earn/discovery` to browse the validated strategy catalogue. Filter
 by ID, provider, deposit mint, source kind, APY type, cluster or APY bounds, with
 `page` and `pageSize` for pagination.
 
+Discovery is optional when you already know the strategy ID and supported mint.
+See [discovery filters](/docs/reference/api/earn/discover-earn-strategies) for
+parameter types, allowed values and pagination.
+
+```bash
+curl --fail-with-body -sS "$SDP_API_URL/v1/earn/discovery?pageSize=100" \
+  -H "Authorization: Bearer $SDP_API_KEY"
+```
+
 ## Read rates and capabilities
 
 `rate.value` is an APY decimal fraction: `"0.062"` means 6.2%.

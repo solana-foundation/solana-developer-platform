@@ -85,12 +85,9 @@ function parseOptionalExpiration(value: string): string | null {
   return parsed.toISOString();
 }
 
-function validateAuthoringDraft(draft: ApiKeyAuthoringDraft): "name" | "wallet" | "grants" | null {
+function validateAuthoringDraft(draft: ApiKeyAuthoringDraft): "name" | "grants" | null {
   if (!draft.name.trim()) {
     return "name";
-  }
-  if (draft.walletScope === "selected" && draft.selectedWalletIds.length === 0) {
-    return "wallet";
   }
   if (draft.grants.length === 0) {
     return "grants";
@@ -190,9 +187,6 @@ export async function saveApiKeyAuthoringAction(
   const validationError = validateAuthoringDraft(input.draft);
   if (validationError === "name") {
     return { ok: false, message: t("DashboardCustody.apiKeyNameRequired") };
-  }
-  if (validationError === "wallet") {
-    return { ok: false, message: t("DashboardCustody.apiKeyWalletRequired") };
   }
   if (validationError === "grants") {
     return { ok: false, message: t("DashboardCustody.apiKeyGrantsRequired") };

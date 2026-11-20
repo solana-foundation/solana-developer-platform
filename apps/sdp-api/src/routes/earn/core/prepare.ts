@@ -35,6 +35,7 @@ import { earnRuntime } from "@/services/earn/runtime";
 import { strategyShareDecimals } from "@/services/earn/strategy-mint";
 import {
   type PreparedStrategyWithdrawalChoice,
+  prepareQueuedStrategyRecovery,
   prepareQueuedStrategyWithdrawal,
   prepareStrategyWithdrawalChoices,
   selectStrategyWithdrawalChoice,
@@ -292,7 +293,8 @@ function requireWithdrawalPosition(position: EarnPositionRow | null): Withdrawal
 async function readWithdrawalHolding(
   c: AppContext,
   source: EarnStrategySource,
-  position: WithdrawalPosition
+  position: WithdrawalPosition,
+  allowMissing = false
 ) {
   const deadline = createVaultDeadline();
   const client = resolveEarnExecutionClient(c.env, position.provider, deadline);
@@ -306,7 +308,10 @@ async function readWithdrawalHolding(
     (row) =>
       row.providerReference === position.strategy_reference && row.owner === source.ownerAddress
   );
-  if (holding === undefined) throw badRequest("No redeemable strategy position was found");
+  if (holding === undefined) {
+    if (allowMissing) return null;
+    throw badRequest("No redeemable strategy position was found");
+  }
   if (
     holding.tokenMint !== position.token_mint ||
     holding.shareMint !== position.share_mint ||
@@ -317,7 +322,7 @@ async function readWithdrawalHolding(
 }
 
 function requireHeldIntermediate(
-  holding: Awaited<ReturnType<typeof readWithdrawalHolding>>,
+  holding: NonNullable<Awaited<ReturnType<typeof readWithdrawalHolding>>>,
   amount: { mint: string; value: string }
 ) {
   if (
@@ -327,6 +332,23 @@ function requireHeldIntermediate(
   ) {
     throw badRequest("Held strategy intermediate is unavailable");
   }
+}
+
+async function sharesForTokenWithdrawal(
+  holding: NonNullable<Awaited<ReturnType<typeof readWithdrawalHolding>>>,
+  position: WithdrawalPosition,
+  amount: { mint: string; value: string }
+): Promise<string> {
+  if (amount.mint !== position.token_mint)
+    throw badRequest("Withdrawal amount must use the strategy's deposit token");
+  if (holding.tokenValue === undefined || compareDecimalAmounts(holding.tokenValue, "0") <= 0)
+    throw badRequest("Strategy token value is unavailable");
+  return strategySharesForTokenAmount({
+    shares: holding.shares,
+    tokenValue: holding.tokenValue,
+    tokenAmount: amount.value,
+    shareDecimals: await strategyShareDecimals(position.share_mint),
+  });
 }
 
 async function withdrawalAmounts(
@@ -343,7 +365,17 @@ async function withdrawalAmounts(
   if (intent.amount.kind === "shares" && !discovered) {
     shares = intent.amount.value;
   } else {
-    const holding = await readWithdrawalHolding(c, source, position);
+    const holding = await readWithdrawalHolding(
+      c,
+      source,
+      position,
+      intent.amount.kind === "all" && !discovered
+    );
+    if (holding === null) {
+      // A tracked position may hold only escrow. Its recorded request and
+      // live provider state, rather than a wallet balance, must prove recovery.
+      return { shares, intermediateAmount, intermediateMint, discovered };
+    }
     if (intent.amount.kind === "intermediate") {
       requireHeldIntermediate(holding, intent.amount);
       intermediateAmount = intent.amount.value;
@@ -356,18 +388,11 @@ async function withdrawalAmounts(
         intermediateMint = holding.parIntermediate.mint;
       }
     } else {
-      if (intent.amount.mint !== position.token_mint)
-        throw badRequest("Withdrawal amount must use the strategy's deposit token");
-      if (holding.tokenValue === undefined || compareDecimalAmounts(holding.tokenValue, "0") <= 0)
-        throw badRequest("Strategy token value is unavailable");
-      shares = strategySharesForTokenAmount({
-        shares: holding.shares,
-        tokenValue: holding.tokenValue,
-        tokenAmount: intent.amount.value,
-        shareDecimals: await strategyShareDecimals(position.share_mint),
-      });
+      shares = await sharesForTokenWithdrawal(holding, position, intent.amount);
     }
   }
+  if (intent.amount.kind === "all")
+    return { shares, intermediateAmount, intermediateMint, discovered };
   const redeemable = shares ?? intermediateAmount;
   if (redeemable === undefined || compareDecimalAmounts(redeemable, "0") <= 0)
     throw badRequest("No redeemable strategy balance was found");
@@ -402,6 +427,9 @@ async function prepareWithdrawalAction(
     shares,
     intermediateAmount,
     slippageBps: intent.slippageBps,
+    ...(intent.amount.kind === "all" && !amounts.discovered
+      ? { recovery: { actor: preparationContext(resolved.actor) } }
+      : {}),
   });
   const terms = emptyTerms();
   terms.inputAmount =
@@ -413,7 +441,10 @@ async function prepareWithdrawalAction(
         ? null
         : { mint: intermediateMint, value: intermediateAmount };
   terms.options = choices.options;
-  if (choices.choices.length > 1 && selectedOptionId === undefined) {
+  if (
+    selectedOptionId === undefined &&
+    (choices.choices.length > 1 || choices.choices[0]?.kind === "recovery")
+  ) {
     terms.description = "Choose a withdrawal route before reviewing its transaction";
     return {
       nextAction: { type: "select_option" },
@@ -431,6 +462,48 @@ async function prepareWithdrawalAction(
   return buildSelectedWithdrawalAction(c, resolved, position, amounts, selected, terms);
 }
 
+async function buildRecoveryAction(
+  c: AppContext,
+  resolved: AuthorizedEarnPreparation,
+  position: WithdrawalPosition,
+  selected: PreparedStrategyWithdrawalChoice,
+  terms: OperationTerms
+): Promise<PreparedOperationAction> {
+  const { intent, source, actor } = resolved;
+  if (
+    selected.recovery === undefined ||
+    intent.kind !== "earn.withdraw" ||
+    intent.amount.kind !== "all" ||
+    parseDiscoveredEarnPositionLocator(position.id) !== null
+  )
+    throw internalError("Expired escrow recovery has no authorized tracked request");
+  const context = preparationContext(actor);
+  const fee =
+    source.wallet === null
+      ? undefined
+      : await resolveVaultSponsorship(c.env, {
+          movement: "earn.queued_withdraw_cancel",
+          ...context,
+          walletId: source.wallet.id,
+          deadline: createVaultDeadline(),
+        });
+  const built = await prepareQueuedStrategyRecovery(c.env, {
+    actor: context,
+    position: withdrawalAdapterPosition(position, source),
+    request: selected.recovery,
+    proof: selected.recoveryProof,
+    feePayer: intent.feePayer,
+    ...(source.wallet === null ? {} : { custodyWalletId: source.wallet.id }),
+    ...(fee === undefined ? {} : { fee }),
+  });
+  terms.inputAmount = { mint: selected.recovery.share_mint, value: selected.recovery.shares };
+  return {
+    nextAction: actionFor(source, built.unsignedTransaction, built.lastValidBlockHeight),
+    terms,
+    buildRef: { kind: "earn.queued_transaction", id: built.id },
+  };
+}
+
 async function buildSelectedWithdrawalAction(
   c: AppContext,
   resolved: AuthorizedEarnPreparation,
@@ -445,6 +518,8 @@ async function buildSelectedWithdrawalAction(
   const deadline = createVaultDeadline();
   const queuedPosition = withdrawalAdapterPosition(position, source);
   const { discovered, shares } = amounts;
+  if (selected.kind === "recovery")
+    return buildRecoveryAction(c, resolved, position, selected, terms);
   if (selected.kind === "queued") {
     if (selected.terms === undefined) throw internalError("Queued withdrawal terms are missing");
     const fee =

@@ -29,8 +29,8 @@ describe("GET /llms.txt", () => {
     expect(body).toContain("/v1/wallets");
     expect(body).toContain("/v1/issuance");
     expect(body).toContain("/v1/compliance");
-    expect(body).not.toContain("/v1/earn");
-    expect(body).not.toContain("/v1/operations");
+    expect(body).toContain("/v1/earn");
+    expect(body).toContain("/v1/operations");
     expect(body).not.toContain("/admin/allowlist");
     expect(body).not.toContain("/v1/onboarding");
     expect(body).not.toContain("/v1/organizations");
@@ -45,12 +45,12 @@ describe("GET /llms.txt", () => {
   });
 
   it.each(["experimental", "beta", "stable"])(
-    "%s holds Earn and operations out of public discovery until sign-off",
+    "%s applies the same module release channel to Earn and operations",
     async (releaseChannel) => {
       const body = await llmsBody(releaseChannel);
-      expect(body).not.toContain("/v1/earn");
-      expect(body).not.toContain("/v1/operations");
-      expect(/\bEarn\b/.test(body)).toBe(false);
+      const published = releaseChannel !== "stable";
+      expect(body.includes("/v1/earn")).toBe(published);
+      expect(body.includes("/v1/operations")).toBe(published);
     }
   );
 

@@ -5,6 +5,7 @@ import {
   supportsVaultWithdraw,
   supportsVaultWithdrawQuote,
 } from "@sdp/earn/capabilities";
+import type { EarnVaultQueuedWithdrawalRequestLookup } from "@sdp/earn/types";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { OperationTerms } from "@sdp/types/operations";
@@ -12,6 +13,7 @@ import { earnWithdrawSlippageFloor } from "@sdp/types/provider-access";
 import { getDb } from "@/db/client";
 import {
   createPostgresEarnVaultWithdrawalRequestsRepository,
+  type EarnVaultWithdrawalRequestRow,
   type EarnWalletWithdrawalRequestTransactionRow,
 } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import { badRequest, conflict, notFound } from "@/lib/errors";
@@ -19,9 +21,11 @@ import type { Env } from "@/types/env";
 import { isEarnDirectWithdrawalConfigured, resolveEarnExecutionClient } from "./execution-registry";
 import { earnRuntime } from "./runtime";
 import { strategyOutputFloor } from "./strategy-terms";
+import { readExpiredStrategyWithdrawalRecoveries } from "./strategy-withdrawal-recovery.service";
 import { createVaultDeadline } from "./vault-deadline";
 import {
   type AsyncWithdrawalTermsInput,
+  buildWalletQueuedWithdrawalRecovery,
   buildWalletQueuedWithdrawalRequest,
   type QueuedWithdrawalActor,
   type QueuedWithdrawalPosition,
@@ -32,14 +36,62 @@ import type { VaultFeeMode } from "./vault-sponsorship";
 
 export interface PreparedStrategyWithdrawalChoice {
   id: string;
-  kind: "direct" | "queued";
+  kind: "direct" | "queued" | "recovery";
   option: OperationTerms["options"][number];
   terms?: AsyncWithdrawalTermsInput;
+  recovery?: EarnVaultWithdrawalRequestRow;
+  /** Reuse only the live proof from this call's choice planning. Never store it. */
+  recoveryProof?: EarnVaultQueuedWithdrawalRequestLookup;
 }
 
 export interface PreparedStrategyWithdrawalChoices {
   options: OperationTerms["options"];
   choices: PreparedStrategyWithdrawalChoice[];
+}
+
+function requireWithdrawalQuantity(input: {
+  shares?: string;
+  intermediateAmount?: string;
+  recovery?: { actor: QueuedWithdrawalActor };
+}): void {
+  if (
+    (input.shares !== undefined && input.intermediateAmount !== undefined) ||
+    (input.shares === undefined &&
+      input.intermediateAmount === undefined &&
+      input.recovery === undefined)
+  )
+    throw badRequest("Choose strategy shares, held intermediate or tracked recovery");
+}
+
+async function prepareRecoveryChoices(
+  env: Env,
+  input: { position: QueuedWithdrawalPosition; recovery?: { actor: QueuedWithdrawalActor } },
+  client: Parameters<typeof readExpiredStrategyWithdrawalRecoveries>[2]
+): Promise<PreparedStrategyWithdrawalChoice[]> {
+  if (input.recovery === undefined) return [];
+  const recoveries = await readExpiredStrategyWithdrawalRecoveries(
+    env,
+    { actor: input.recovery.actor, position: input.position },
+    client
+  );
+  return recoveries.map(({ request, proof }) => {
+    const id = `recover_expired_escrow:${request.id}`;
+    return {
+      id,
+      kind: "recovery",
+      recovery: request,
+      recoveryProof: proof,
+      option: {
+        id,
+        label: "Recover expired escrowed shares",
+        settlement: "instant",
+        estimatedSeconds: null,
+        mechanism: "recover_expired_escrow",
+        amount: { mint: request.share_mint, value: request.shares },
+        minimum: { mint: request.share_mint, value: request.shares },
+      },
+    };
+  });
 }
 
 /**
@@ -53,10 +105,10 @@ export async function prepareStrategyWithdrawalChoices(
     shares?: string;
     intermediateAmount?: string;
     slippageBps?: number;
+    recovery?: { actor: QueuedWithdrawalActor };
   }
 ): Promise<PreparedStrategyWithdrawalChoices> {
-  if ((input.shares === undefined) === (input.intermediateAmount === undefined))
-    throw badRequest("Choose strategy shares or held intermediate, exclusively");
+  requireWithdrawalQuantity(input);
   const client = resolveEarnExecutionClient(env, input.position.provider, createVaultDeadline());
   if (client === null) throw badRequest("This strategy has no supported withdrawal adapter");
   const runtime = earnRuntime(env);
@@ -64,12 +116,16 @@ export async function prepareStrategyWithdrawalChoices(
   const queueClient = supportsVaultQueuedWithdraw(client) ? client : null;
   const parClient = supportsVaultParRedemption(client) ? client : null;
   const [queueRead, parRead] = await Promise.allSettled([
-    queueClient?.getWithdrawalOptions(runtime, reference) ?? null,
-    parClient?.getParRedemptionOptions(runtime, reference) ?? null,
+    input.shares === undefined
+      ? null
+      : (queueClient?.getWithdrawalOptions(runtime, reference) ?? null),
+    input.shares === undefined && input.intermediateAmount === undefined
+      ? null
+      : (parClient?.getParRedemptionOptions(runtime, reference) ?? null),
   ]);
   const queue = queueRead.status === "fulfilled" ? queueRead.value : null;
   const par = parRead.status === "fulfilled" ? parRead.value : null;
-  const choices: PreparedStrategyWithdrawalChoice[] = [];
+  const choices = await prepareRecoveryChoices(env, input, queueClient);
   const quotes: Array<Promise<void>> = [];
   if (
     input.shares !== undefined &&
@@ -291,6 +347,18 @@ export async function prepareQueuedStrategyWithdrawal(
   return prepared(await buildWalletQueuedWithdrawalRequest(env, input));
 }
 
+/** A new reviewed exit can recover expired shares without reopening its original operation. */
+export async function prepareQueuedStrategyRecovery(
+  env: Env,
+  input: QueuedStrategyPreparation & {
+    request: EarnVaultWithdrawalRequestRow;
+    proof?: EarnVaultQueuedWithdrawalRequestLookup;
+  }
+): Promise<PreparedQueuedStrategyTransaction> {
+  requirePreparationSource(input);
+  return prepared(await buildWalletQueuedWithdrawalRecovery(env, input));
+}
+
 /** Recover exactly the stored build under the operation's authorized source. */
 export async function requirePreparedQueuedStrategyTransaction(
   env: Env,
@@ -339,6 +407,9 @@ export async function submitPreparedQueuedStrategyAction(
   });
   return {
     ...result,
-    resourceRef: { kind: "earn.withdrawal_request" as const, id: result.request.id },
+    resourceRef:
+      build.action === "cancel"
+        ? { kind: "earn.withdrawal_recovery" as const, id: result.action.id }
+        : { kind: "earn.withdrawal_request" as const, id: result.request.id },
   };
 }

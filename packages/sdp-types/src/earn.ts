@@ -18,13 +18,14 @@ import { WELL_KNOWN_TOKENS } from "./well-known-tokens";
  * Deposit stablecoins for Earn V1. The PRD set is USDC, USDG, PYUSD
  * (PYUSD admitted for the curated Kamino shelf's two Sentora vaults,
  * PRO-1727); USDT remains from the day-one set and still has catalogued
- * vaults behind it.
+ * vaults behind it. OUSD is the asset of Veda's mainnet OUSD PRIME vault.
  */
 export const EARN_DEPOSIT_TOKEN_SYMBOLS = [
   "USDC",
   "USDG",
   "USDT",
   "PYUSD",
+  "OUSD",
 ] as const satisfies readonly WellKnownTokenSymbol[];
 export type EarnDepositTokenSymbol = (typeof EARN_DEPOSIT_TOKEN_SYMBOLS)[number];
 
@@ -34,10 +35,8 @@ export type EarnDepositTokenSymbol = (typeof EARN_DEPOSIT_TOKEN_SYMBOLS)[number]
  * prepended so the vault still receives its own token (PRO: swap-funded
  * deposits). A separate registry from `EARN_DEPOSIT_TOKEN_SYMBOLS` on purpose —
  * that one states what vaults TAKE, this one states what customers may PAY
- * WITH, and the two move independently. They happen to hold the same four
- * symbols since PYUSD was admitted as a deposit token for the curated Kamino
- * shelf (PRO-1727); that is a coincidence of today's shelf, not an invariant,
- * so never derive one list from the other.
+ * WITH, and the two move independently. OUSD is a vault deposit asset, not a
+ * swap funding source. Never derive one list from the other.
  */
 export const EARN_SWAP_SOURCE_TOKEN_SYMBOLS = [
   "USDC",

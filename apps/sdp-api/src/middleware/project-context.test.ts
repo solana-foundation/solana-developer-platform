@@ -1,7 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { Hono } from "hono";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { AppError } from "@/lib/errors";
 import { appErrorResponse } from "@/lib/response";
@@ -20,13 +20,13 @@ import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
-import { projectContextMiddleware } from "./project-context";
+import { type ProjectContextOptions, projectContextMiddleware } from "./project-context";
 
-function buildApp() {
+function buildApp(options: ProjectContextOptions = {}) {
   const app = new Hono<{ Bindings: Env }>();
   app.use("*", kvStoreMiddleware());
   app.use("*", unifiedAuthMiddleware());
-  app.use("*", projectContextMiddleware());
+  app.use("*", projectContextMiddleware(options));
   app.get("/probe", (c) =>
     c.json({
       projectId: c.get("projectId"),
@@ -216,6 +216,30 @@ describe("projectContextMiddleware", () => {
         env
       );
     }
+
+    it.each(["api_key", "clerk"] as const)(
+      "passes the authenticated project scope to a %s entitlement exemption",
+      async (authType) => {
+        const exemption = vi.fn<NonNullable<ProjectContextOptions["allowUnentitledProduction"]>>(
+          () => true
+        );
+        const headers =
+          authType === "api_key"
+            ? { Authorization: `Bearer ${TEST_API_KEY.raw}` }
+            : actor.headers(PRODUCTION_PROJECT_ID);
+        const response = await buildApp({ allowUnentitledProduction: exemption }).request(
+          "/probe",
+          { headers },
+          env
+        );
+        expect(response.status).toBe(200);
+        expect(exemption).toHaveBeenCalledExactlyOnceWith(expect.anything(), {
+          organizationId: TEST_ORG.id,
+          projectId: PRODUCTION_PROJECT_ID,
+          environment: "production",
+        });
+      }
+    );
 
     beforeEach(async () => {
       await seedApiKeyRow(

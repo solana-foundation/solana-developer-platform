@@ -40,6 +40,11 @@ deposit eligibility nor authority over a wallet.
   advertised route or safely replaces unsigned terms, returning a new review.
   It retains the selected route; an unavailable route fails instead of silently
   choosing another.
+- Every new Earn sign, proposal, sponsorship and broadcast requires a fresh
+  `earn.execute` check. API-key grants and member role/project access are read
+  again at the money boundary. Refusal restricts the attempt to observation;
+  known bytes and provider cleanup remain recoverable. This explicit Earn
+  action check preserves the shared admission layer's default exit semantics.
 - Swap-funded deposits contain both swap and deposit instructions in one
   transaction, sized to guaranteed output and simulated together. Oversized
   compositions fail before a build is persisted. No standalone funding swap
@@ -64,6 +69,27 @@ deposit eligibility nor authority over a wallet.
   the operation terminal `failed`; only then can a new request/key create a
   replacement. An uncertain provider response, timeout or missing RPC history
   never permits one. Internal cleanup is observed before resolving an attempt.
+- Solver escrow recovery is a new `earn.withdraw` intent with `earn.execute`
+  and the position's current wallet grants. It does not reopen the accepted
+  operation or grant post-submit `/cancel` authority. Explicit option selection
+  and a fresh review bind the returned shares to the same owner and strategy.
+  Live provider state must match the recorded request address, nonce, creation
+  time, deadline, mints and shares, and prove the deadline passed.
+- Recovery completion requires the exact finalized cancellation action from
+  this operation's attempt and consumed canonical build. Its signature must
+  match both the request's cancellation and authenticated closing signatures.
+  Provider lifecycle evidence must prove the returned share quantity. The
+  result says `recovered` in the share mint, never copies expected asset payout.
+  A different verified closure fails the recovery; unknown outcomes still wait.
+- An independently broadcast recovery can consume its exact operation-only
+  build only after those signed bytes match the authenticated terminal closing
+  transaction. Action persistence and build consumption are atomic; the
+  cancelled request stays terminal. This cannot adopt historical builds.
+- Indexed due-time scans feed at most four workers, which lease only work ready
+  to start. Backoff changes observation timing, never spend authority. Shared
+  RPC observations stay within one run and the exact organization, project,
+  environment and recorded principal; failed or absent signature reads are not
+  cached as outcome evidence.
 - A discovered holding is claimed only with verified signed intent, atomically
   with its first movement. It receives no synthetic deposit, acquisition
   history, cost basis or earnings.
@@ -92,10 +118,18 @@ Catalogue coverage and execution coverage are distinct. A discovery-only
 strategy cannot enter the deposit path. Expanding assets beyond current stable
 token exposure accounting requires appropriate valuation and safety controls.
 
-The four core Earn routes and five operation routes remain internal. The old
-53 non-onboarding routes are removed rather than mounted as compatibility URLs.
-Public promotion requires named security sign-off. No production migration,
-provider sandbox flow or signed-in browser flow is established by local tests.
+Recovery is not complete for every provider mechanism. Hastra's operator
+redemption reuses an owner request address, and its cancellation instruction
+binds neither an amount nor a request cycle. Rechecking history before signing
+cannot prevent that address changing before execution. Earn does not advertise
+that recovery path. A separate current-delegation release design remains in
+PRO-2530 and PRO-2528; pending wYLDS is not recovered PRIME or delivered USDC.
+
+The four core Earn routes and five operation routes follow Earn's existing
+release-channel publication rules. The old 53 non-onboarding routes are removed
+rather than mounted as compatibility URLs. The PR keeps public route inventory
+explicit for security review. No production migration, provider sandbox flow or
+signed-in browser flow is established by local tests.
 
 Migrations are additive while the previous revision serves traffic. Canonical
 wallet transaction tables start empty, enforce tenant RLS and retain the build

@@ -61,9 +61,11 @@ export function EarnCoreOperations({
             {settled ? (
               <p className="mt-2 text-body text-secondary">
                 {t(
-                  operation.result?.settlementOutcome === "cancelled"
-                    ? "DashboardEarn.core.returned"
-                    : "DashboardEarn.core.delivered"
+                  operation.result?.settlementOutcome === "recovered"
+                    ? "DashboardEarn.core.recovered"
+                    : operation.result?.settlementOutcome === "cancelled"
+                      ? "DashboardEarn.core.returned"
+                      : "DashboardEarn.core.delivered"
                 )}
                 : {formatTokenValue(settled.value, settled.mint, locale)}
               </p>

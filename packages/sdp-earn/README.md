@@ -91,8 +91,8 @@ tables. A schema-only companion removes superseded build storage, split-swap
 advisories, provider actions and provider wallets after the rewrite is serving.
 No old builds are copied or resumed.
 
-The replacement contract remains internal pending named security sign-off. Read
-`apps/sdp-docs/content/unpublished/earn/core-api.mdx` for requests and recovery,
+Earn follows the existing module release-channel publication rules. Read
+`apps/sdp-docs/content/docs/earn/integration-details.mdx` for requests and recovery,
 and `docs/architecture/earn-core-api-proposal.md` for the migration boundary.
 
 ## Rollout gating (pre-release)

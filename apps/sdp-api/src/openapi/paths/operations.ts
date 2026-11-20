@@ -18,9 +18,11 @@ import {
   projectScopeWithDeclaredIdempotencyHeaders,
 } from "./helpers";
 
-/** Internal lifecycle contract; publication requires a separate security sign-off. */
-export function registerOperationsPaths(registry: OpenAPIRegistry) {
-  const security: Array<Record<string, string[]>> = [{ apiKeyAuth: [] }, { clerkBearerAuth: [] }];
+/** Shared lifecycle contract; publication follows the owning module's release channel. */
+export function registerOperationsPaths(registry: OpenAPIRegistry, publicOnly = false) {
+  const security: Array<Record<string, string[]>> = publicOnly
+    ? [{ apiKeyAuth: [] }]
+    : [{ apiKeyAuth: [] }, { clerkBearerAuth: [] }];
   const common = { tags: ["Operations"], security };
   const response = successResponseSchema(operationResponseSchema);
   registry.registerPath({
@@ -47,7 +49,7 @@ export function registerOperationsPaths(registry: OpenAPIRegistry) {
     operationId: "getOperation",
     summary: "Get an operation",
     description:
-      "Returns current terms, the exact actionId/version, nextAction and authoritative settlement projection. Poll this route after submission or reload. nextAction sign_transaction asks your wallet to sign the supplied transaction before calling submit. sign_in_provider only applies when an explicitly selected connected wallet requires signing in its provider; follow its instructions and keep polling without submitting again. nextAction refresh rebuilds an unsigned preparation only before submission is accepted; wait retains the same unresolved attempt. queued, awaiting_signature, submitted and settling are nonterminal. completed means verified delivery; cancelled means a verified cancellation outcome. canCancel states whether this preparation can still be cancelled; earn.manage is also required. cancelRequestedAt alone is pending intent. result fields stay null until their authoritative source is known. Requires earn.read and source visibility.",
+      "Returns current terms, the exact actionId/version, nextAction and authoritative settlement projection. Poll this route after submission or reload. nextAction sign_transaction asks your wallet to sign the supplied transaction before calling submit. sign_in_provider only applies when an explicitly selected connected wallet requires signing in its provider; follow its instructions and keep polling without submitting again. nextAction refresh rebuilds an unsigned preparation only before submission is accepted; wait retains the same unresolved attempt. queued, awaiting_signature, submitted and settling are nonterminal. completed means verified delivery or an explicitly selected recovery; result.settlementOutcome recovered identifies returned strategy shares, never withdrawal proceeds; cancelled means a verified cancellation outcome. canCancel states whether this preparation can still be cancelled; earn.manage is also required. cancelRequestedAt alone is pending intent. result fields stay null until their authoritative source is known. Requires earn.read and source visibility.",
     request: { headers: projectScopeHeaders, params: operationIdParamsSchema },
     responses: {
       200: { description: "Current operation", content: jsonContent(response) },
@@ -57,7 +59,7 @@ export function registerOperationsPaths(registry: OpenAPIRegistry) {
   for (const action of ["submit", "refresh", "cancel"] as const) {
     const descriptions = {
       submit:
-        "Submits the exact reviewed transaction for asynchronous processing. Pass actionId and version. Route selection and transaction preparation never happen here. For source.ownerAddress, supply signedTransaction as base64 after signing the prepared transaction in your own wallet; no SDP wallet or provider connection is needed. SDP verifies the exact stored message and required signatures. For source.walletId, omit signedTransaction; the worker requests signing through that connected wallet's configured provider. The request durably records authorization and returns 202. A worker broadcasts and tracks the transaction asynchronously. Provider signing may return sign_in_provider instructions; it never requires a second submit. Stale actions return 409. Requires earn.execute and the current action principal.",
+        "Submits the exact reviewed transaction for asynchronous processing. Pass actionId and version. Route selection and transaction preparation never happen here. For source.ownerAddress, supply signedTransaction as base64 after signing the prepared transaction in your own wallet; no SDP wallet or provider connection is needed. SDP verifies the exact stored message and required signatures. For source.walletId, omit signedTransaction; the worker requests signing through that connected wallet's configured provider. The request durably records authorization and returns 202. A worker broadcasts and tracks the transaction asynchronously. Provider signing may return sign_in_provider instructions; it never requires a second submit. Stale actions return 409. Requires earn.execute and the current action principal. Before a new signing or broadcast effect, the worker rechecks the active credential, current execute permission, project membership and wallet binding. Losing authority stops new effects while observation of existing attempts continues; it never proves a transaction did not execute.",
       refresh:
         "Rebuilds an unsigned transaction and its terms before submission is accepted. It never signs, broadcasts or cancels a transaction. Pass the current actionId and version. For nextAction select_option, also pass an optionId advertised in terms.options; the selected route remains fixed on later refreshes. Review the new action/version and sign it before submit. After any POST /v1/operations/{operationId}/submit acceptance, new refresh requests return 409 CONFLICT with details.reason operation_already_submitted, including definitive failure; track that operation to its outcome, and start a new deposit or withdrawal only after a known failure. An exposed owner transaction without a known outcome returns 409 with details.reason wallet_transaction_outcome_unknown because SDP cannot invalidate bytes held by the caller. Timeout, blockhash expiry and missing RPC history alone never authorize replacement. An exact Idempotency-Key replay returns its original response without rebuilding; GET returns the current operation state. Requires earn.execute and fresh source admission.",
       cancel:
@@ -77,6 +79,7 @@ export function registerOperationsPaths(registry: OpenAPIRegistry) {
         headers: projectScopeWithDeclaredIdempotencyHeaders({
           key: "required",
           serverErrors: "rerun",
+          committedServerErrors: "store",
         }),
         params: operationIdParamsSchema,
         body: {
@@ -94,7 +97,7 @@ export function registerOperationsPaths(registry: OpenAPIRegistry) {
                     ? {
                         actionId: "opact_example",
                         version: 1,
-                        signedTransaction: "<base64-signed-transaction>",
+                        signedTransaction: "AQ==",
                       }
                     : action === "refresh"
                       ? { actionId: "opact_example", version: 1 }

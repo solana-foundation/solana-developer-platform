@@ -196,7 +196,10 @@ export const operationSchema = z.strictObject({
       signature: z.string().nullable(),
       source: operationSourceSchema,
       settledAmount: operationAmountSchema.nullable(),
-      settlementOutcome: z.enum(["delivered", "cancelled"]).nullable(),
+      settlementOutcome: z
+        .enum(["delivered", "cancelled", "recovered"])
+        .nullable()
+        .describe("Recovered means strategy shares returned, not withdrawal proceeds."),
     })
     .nullable(),
   createdAt: z.string().datetime(),

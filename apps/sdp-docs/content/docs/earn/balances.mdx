@@ -9,6 +9,10 @@ holdings. No SDP wallet registration is required. An optional `walletId` filter
 selects an existing connected wallet instead; `sourceType` distinguishes
 `address` and `wallet` sources. Position IDs are the references for withdrawals.
 
+The `ownerAddress` and `walletId` filters are optional; use one, not both.
+Without one, the read covers the caller's visible tracked scope.
+See [position filters](/docs/reference/api/earn/list-earn-core-positions).
+
 ## Discover existing holdings
 
 With one explicit source, `discover=true` reads integrated strategies for

@@ -43,6 +43,11 @@ export interface OperationListFilters {
   allowedWalletIds?: readonly string[];
 }
 
+/** An unclaimed recovery candidate; listing never reserves an execution lease. */
+export interface OperationRecoveryCandidate extends OperationScope {
+  id: string;
+}
+
 /** The current version's execution record; signed bytes and account binding are first-write-wins. */
 export interface OperationAttempt {
   id: string;
@@ -345,6 +350,16 @@ export function createOperationsRepository(db: DatabaseClient) {
     if (row.claimUntil !== null && Date.parse(row.claimUntil) > Date.now())
       throw conflict("Operation submission is in progress", { reason: "operation_in_progress" });
   }
+  async function wakeRecovery(
+    tx: DatabaseExecutor,
+    scope: OperationScope,
+    id: string
+  ): Promise<void> {
+    await tx.execute(
+      `UPDATE operations SET next_check_at = COALESCE(next_check_at, now()) WHERE id = ? AND ${scopeSql}`,
+      [id, ...scopeValues(scope)]
+    );
+  }
   async function writeSignedAttempt(
     tx: DatabaseExecutor,
     scope: OperationScope,
@@ -371,6 +386,7 @@ export function createOperationsRepository(db: DatabaseClient) {
         ...scopeValues(scope),
       ]
     );
+    await wakeRecovery(tx, scope, attempt.operationId);
     return parseAttempt(updated);
   }
   return {
@@ -577,6 +593,39 @@ export function createOperationsRepository(db: DatabaseClient) {
       return currentAttempt(db, scope, record.operation);
     },
 
+    /** Index-backed due scan; every joined attempt has the same tenant and current action. */
+    async listDueRecovery(
+      environment: SdpEnvironment,
+      limit = 100
+    ): Promise<OperationRecoveryCandidate[]> {
+      if (!Number.isInteger(limit) || limit < 1 || limit > 100)
+        throw new Error("Recovery candidate limit must be between 1 and 100");
+      const rows = await db.queryMany<{
+        id: string;
+        organization_id: string;
+        project_id: string;
+      }>(
+        `SELECT operation.id, operation.organization_id, operation.project_id
+         FROM operations operation JOIN operation_attempts attempt
+           ON attempt.operation_id = operation.id
+           AND attempt.organization_id = operation.organization_id
+           AND attempt.project_id = operation.project_id AND attempt.environment = operation.environment
+           AND attempt.action_id = operation.action_id AND attempt.action_version = operation.action_version
+         WHERE operation.environment = ? AND operation.status NOT IN ('completed', 'failed', 'cancelled')
+           AND operation.next_check_at IS NOT NULL AND operation.next_check_at <= now()
+           AND (attempt.execution_requested_at IS NOT NULL OR attempt.dispatch_started_at IS NOT NULL OR attempt.signed_transaction IS NOT NULL)
+           AND (operation.claim_until IS NULL OR operation.claim_until <= now())
+         ORDER BY operation.next_check_at, operation.id LIMIT ?`,
+        [environment, limit]
+      );
+      return rows.map((row) => ({
+        id: row.id,
+        organizationId: row.organization_id,
+        projectId: row.project_id,
+        environment,
+      }));
+    },
+
     /** Lease a previously requested execution or recover its retained effects; never create an attempt. */
     async claimRecovery(scope: OperationScope, id: string): Promise<OperationClaim | null> {
       return db.transaction(async (tx) => {
@@ -594,9 +643,10 @@ export function createOperationsRepository(db: DatabaseClient) {
         const token = randomUUID();
         const changed = await tx.queryOne(
           `UPDATE operations SET claim_token = ?, claim_until = now() + (? * interval '1 second'), fence = fence + 1
-           WHERE id = ? AND ${scopeSql} RETURNING ${OPERATION_COLUMNS}`,
+           WHERE id = ? AND ${scopeSql} AND next_check_at <= now() RETURNING ${OPERATION_COLUMNS}`,
           [token, OPERATION_WORKER_LEASE_MS / 1000, id, ...scopeValues(scope)]
         );
+        if (changed === null) return null;
         const current = parseRecord(changed);
         return {
           operation: current.operation,
@@ -720,6 +770,7 @@ export function createOperationsRepository(db: DatabaseClient) {
          WHERE id = ? AND ${scopeSql}`,
         [auditIntentId, attempt.id, ...scopeValues(scope)]
       );
+      await wakeRecovery(tx, scope, claim.operation.id);
       return true;
     },
 
@@ -745,6 +796,7 @@ export function createOperationsRepository(db: DatabaseClient) {
            WHERE id = ? AND ${scopeSql} RETURNING *`,
           [attempt.id, ...scopeValues(scope)]
         );
+        await wakeRecovery(tx, scope, claim.operation.id);
         return parseAttempt(updated);
       });
     },
@@ -778,6 +830,7 @@ export function createOperationsRepository(db: DatabaseClient) {
         if (attempt.dispatchStartedAt !== null) return false;
         if (attempt.signedTransaction === null && attempt.proposalBinding === null)
           throw conflict("Persist signed bytes or a proposal binding before dispatch");
+        await wakeRecovery(tx, scope, claim.operation.id);
         return (
           (await tx.execute(
             `UPDATE operation_attempts SET dispatch_started_at = sdp_iso_now() WHERE id = ? AND ${scopeSql} AND dispatch_started_at IS NULL`,
@@ -954,6 +1007,28 @@ export function createOperationsRepository(db: DatabaseClient) {
         if (updated === null) throw conflict("Operation changed during refresh");
         return parseRecord(updated).operation;
       });
+    },
+
+    /** Stable pending work backs off; progress restarts prompt observation without changing money state. */
+    async releaseRecovery(scope: OperationScope, claim: OperationClaim): Promise<boolean> {
+      return (
+        (await db.execute(
+          `UPDATE operations SET claim_token = NULL, claim_until = NULL,
+           next_check_at = now() + make_interval(secs => CASE WHEN status <> ? THEN 15 ELSE
+             LEAST(CASE WHEN next_action ->> 'type' = 'sign_in_provider' THEN 60 ELSE 300 END,
+               15 * power(2, LEAST(recovery_check_count, 5))) END),
+           recovery_check_count = CASE WHEN status <> ? THEN 0 ELSE LEAST(recovery_check_count + 1, 5) END
+         WHERE id = ? AND ${scopeSql} AND claim_token = ? AND fence = ? AND claim_until > now()`,
+          [
+            claim.operation.status,
+            claim.operation.status,
+            claim.operation.id,
+            ...scopeValues(scope),
+            claim.token,
+            claim.fence,
+          ]
+        )) === 1
+      );
     },
 
     async release(scope: OperationScope, claim: OperationClaim): Promise<boolean> {

@@ -42,7 +42,7 @@ import { registerCompliancePaths } from "./paths/compliance";
 import { registerCounterpartyPaths } from "./paths/counterparties";
 import { registerCustodyAdministrationPaths, registerCustodyPaths } from "./paths/custody";
 import { registerDvpPaths } from "./paths/dvp";
-import { registerEarnPaths } from "./paths/earn";
+import { registerEarnPaths, registerPublicEarnPaths } from "./paths/earn";
 import { registerHealthPaths } from "./paths/health";
 import { registerIntegrationPaths } from "./paths/integrations";
 import { registerIssuancePaths } from "./paths/issuance";
@@ -175,6 +175,7 @@ const PUBLIC_OPENAPI_TAGS = [
   OPENAPI_TAG.COUNTERPARTIES,
   OPENAPI_TAG.ASSET_PROFILES,
   OPENAPI_TAG.PUBLIC_EARN,
+  OPENAPI_TAG.OPERATIONS,
 ];
 
 const OPENAPI_TAGS = [
@@ -228,6 +229,8 @@ function registerInternalSecuritySchemes(registry: OpenAPIRegistry) {
 function registerPublicPaths(registry: OpenAPIRegistry) {
   registerHealthPaths(registry);
   registerCustodyPaths(registry);
+  registerPublicEarnPaths(registry);
+  registerOperationsPaths(registry, true);
   registerProjectPaths(registry);
   registerIntegrationPaths(registry);
   registerIssuancePaths(registry);
@@ -246,8 +249,6 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerCustodyAdministrationPaths(registry);
   registerCustodyPaths(registry);
   registerEarnPaths(registry);
-  // The public branch calls registerPublicPaths instead. Keep the replacement
-  // lifecycle internal until its named security sign-off approves publication.
   registerOperationsPaths(registry);
   registerDvpPaths(registry);
   registerProjectPaths(registry);

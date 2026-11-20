@@ -315,3 +315,36 @@ it("prepares a selected withdrawal route immediately and requires final review b
   );
   expect(mocks.submit).toHaveBeenCalledWith(prepared);
 });
+
+it("reports recovered shares without presenting them as USDC proceeds", () => {
+  render(
+    <OperationActivity
+      operations={[
+        {
+          ...operation,
+          kind: "earn.withdraw",
+          intent: {
+            kind: "earn.withdraw",
+            positionId: "position",
+            amount: { kind: "all" },
+          },
+          status: "completed",
+          nextAction: null,
+          result: {
+            positionId: "position",
+            signature: "cancel-signature",
+            source: { ownerAddress: "owner" },
+            settledAmount: { mint: "share-token", value: "3" },
+            settlementOutcome: "recovered",
+          },
+        },
+      ]}
+      strategyName="Strategy"
+      symbol="USDC"
+      tokenMint="usdc"
+      onUpdated={vi.fn()}
+    />
+  );
+  expect(screen.getByText(/^Recovered:/).textContent).not.toContain("USDC");
+  expect(screen.queryByText(/^Delivered:/)).toBeNull();
+});

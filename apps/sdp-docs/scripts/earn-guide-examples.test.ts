@@ -32,7 +32,7 @@ describe("Earn core guide examples", () => {
         new URL(`../content/docs/earn/${page}.mdx`, import.meta.url),
         "utf8"
       );
-      const blocks = [...source.matchAll(/```json\n([\s\S]*?)```/g)];
+      const blocks = [...source.matchAll(/```json(?:[ \t][^\n]*)?\n([\s\S]*?)```/g)];
       assert.equal(blocks.length, requests.length, "Validate every request example");
       for (const [index, { path, schema }] of requests.entries()) {
         assert.ok(source.includes(`POST ${path}`), `Expected documented POST ${path}`);

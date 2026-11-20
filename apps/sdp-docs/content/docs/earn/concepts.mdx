@@ -29,3 +29,85 @@ acceptance, refresh and cancellation are unavailable; track the outcome.
 A signature, confirmed request or escrowed share balance is not a payout.
 `completed` requires verified delivery. Unknown outcomes retain their original
 signed bytes and remain unresolved until evidence establishes the outcome.
+
+## Follow the funds
+
+For a share-issuing strategy, the deposit transaction moves assets into the
+provider's accounts and issues shares to the owner's token account:
+
+<EarnFlow>
+
+- **Owner's wallet**
+
+  Signs the reviewed transaction, directly or through its configured provider.
+
+- **Provider's program and asset accounts**
+
+  Receive the deposit and issue the strategy's shares under protocol rules.
+
+- **Owner's share token account**
+
+  Holds the receipt for the position. SDP's database records the activity.
+
+</EarnFlow>
+
+On redemption, the provider redeems the shares under its own withdrawal
+mechanism and delivers assets to the owner. A delayed request can
+escrow shares while it waits; the request transaction alone is not delivery.
+Earn does not introduce an SDP omnibus wallet or pool. The underlying provider
+can pool assets, control program upgrades or restrict redemption.
+
+For example, Kamino's K-Vault program is
+`KvauGMspG5k6rtzrqqn7WNn3oZdyKqLKwK2XWQ8FLjd` on mainnet and
+`devkRngFnfp4gBc5a3LsadgbQKdPo8MSZ4prFiNSVmY` on devnet. The strategy's
+`providerReference` identifies the vault account; its `shareMint` identifies the
+receipt token. A deposit invokes that program to mint shares to the owner;
+redemption burns shares as assets leave the vault for the owner.
+
+Compare these identities with the transaction's program and token accounts
+before signing. The
+[cluster-specific program registry](https://github.com/solana-foundation/solana-developer-platform/blob/main/packages/sdp-types/src/kamino-programs.ts)
+and the confirmed transaction let you trace the program, deposit destination
+and shares received. The deposit and withdrawal plans validate those asset
+identities against the strategy or position.
+
+Provider orders differ from a vault deposit. WisdomTree subscriptions transfer
+USDC to an issuer-operated on-receipt wallet; its transfer agent delivers fund
+tokens later. Redemption transfers fund tokens back to an issuer wallet and
+awaits USDC settlement. Earn does not mint those fund tokens or control their
+backing. The
+[fund and compliance-program registry](https://github.com/solana-foundation/solana-developer-platform/blob/main/packages/sdp-types/src/wisdomtree-programs.ts)
+identifies the supported mints and transfer hook. Always inspect the selected
+strategy's mechanism rather than assuming every RWA uses a vault.
+
+With `ownerAddress`, your wallet integration keeps signing control and sends
+signed bytes to SDP. With `walletId`, you explicitly authorize signing through
+that connected wallet's provider and policies. Preparing a transaction grants
+neither path permission to sign or broadcast it.
+
+## One integration, many customers
+
+One project API key can serve many customer wallets. For each deposit, send
+that customer's address in `source.ownerAddress`; no generic wallet-registration
+call is required. Withdrawals inherit the source from their `positionId`.
+Keep the customer-to-wallet mapping in your backend.
+
+For customer A's activity, your backend selects A's address for both reads:
+
+```http
+GET /v1/earn/positions?ownerAddress=<customer-a-public-key>
+GET /v1/operations?ownerAddress=<customer-a-public-key>
+```
+
+Use `walletId` instead for an existing connected wallet. Without an owner
+filter, positions can include tracked holdings across the project; the
+operations feed defaults to connected-wallet activity. Address-source history
+requires an explicit `ownerAddress` filter.
+
+SDP isolates organization, project and environment data. An address filter is
+not a customer access-control boundary: project credentials can read other
+customers' records within their allowed scope. Earn reads of connected wallets
+cover the project's wallets; signing still requires the caller's wallet grants.
+Keep the project API key on your backend, authenticate each customer there and
+check their allowed wallet before forwarding a request. Public on-chain balance
+discovery is not proof that the caller controls the address.

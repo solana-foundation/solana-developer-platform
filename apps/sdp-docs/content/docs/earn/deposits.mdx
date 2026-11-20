@@ -9,6 +9,10 @@ With your SDP API key, use `source: { "ownerAddress": "<owner-public-key>" }` fo
 any compatible Solana wallet. No SDP wallet registration or provider connection
 is required. Amounts use a mint and decimal-string `value` in that token's units.
 
+See [all deposit parameters](/docs/reference/api/earn/prepare-earn-deposit).
+`ownerAddress` belongs inside `source`; optional `slippageBps` belongs at the
+request top level. `50` means 0.5%, up to a maximum of 500 basis points.
+
 ## Review before submission
 
 Preparation returns `202` with a durable operation, economic terms and its next

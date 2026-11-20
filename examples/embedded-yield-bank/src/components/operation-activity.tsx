@@ -102,9 +102,11 @@ function OperationRow({
       ) : null}
       {settled ? (
         <p className="text-sm">
-          {operation.result?.settlementOutcome === "cancelled"
-            ? "Returned"
-            : "Delivered"}
+          {operation.result?.settlementOutcome === "recovered"
+            ? "Recovered"
+            : operation.result?.settlementOutcome === "cancelled"
+              ? "Returned"
+              : "Delivered"}
           : {format(settled)}
         </p>
       ) : null}

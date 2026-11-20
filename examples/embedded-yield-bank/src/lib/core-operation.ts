@@ -86,7 +86,7 @@ export const coreOperationSchema = z.looseObject({
       source: source.optional(),
       settledAmount: tokenAmount.nullable().optional(),
       settlementOutcome: z
-        .enum(["delivered", "cancelled"])
+        .enum(["delivered", "cancelled", "recovered"])
         .nullable()
         .optional(),
     })

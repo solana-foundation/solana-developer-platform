@@ -1,6 +1,10 @@
 "use client";
 
-import type { EarnStrategy, EarnVaultPosition } from "@sdp/types/earn";
+import {
+  EARN_SWAP_MAX_SLIPPAGE_BPS,
+  type EarnStrategy,
+  type EarnVaultPosition,
+} from "@sdp/types/earn";
 import type { Operation, OperationIntent } from "@sdp/types/operations";
 import { Button } from "@sdp/ui/button";
 import { Callout } from "@sdp/ui/callout";
@@ -97,7 +101,11 @@ function useEarnPreparation(props: ActionProps) {
       return;
     }
     const slippageBps = Number(slippage);
-    if (!Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps > 1_000) {
+    if (
+      !Number.isInteger(slippageBps) ||
+      slippageBps < 0 ||
+      slippageBps > EARN_SWAP_MAX_SLIPPAGE_BPS
+    ) {
       setError(t("DashboardEarn.core.invalidSlippage"));
       return;
     }

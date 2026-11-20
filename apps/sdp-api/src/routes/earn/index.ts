@@ -53,7 +53,7 @@ earn.post(
   requireAction("earn.execute"),
   validateBody(prepareEarnDepositSchema),
   authorize(authorizeEarnDeposit),
-  idempotent({ key: "required", serverErrors: "rerun" }),
+  idempotent({ key: "required", serverErrors: "rerun", committedServerErrors: "store" }),
   meteredQuota({ name: "earn-provider-read", actorMax: 60, orgMax: 240 }),
   prepareEarnOperation
 );
@@ -63,7 +63,7 @@ earn.post(
   requireAction("earn.execute"),
   validateBody(prepareEarnWithdrawalSchema),
   authorize(authorizeEarnWithdrawal),
-  idempotent({ key: "required", serverErrors: "rerun" }),
+  idempotent({ key: "required", serverErrors: "rerun", committedServerErrors: "store" }),
   prepareEarnOperation
 );
 earn.route("/onboarding/wisdomtree", createEarnOnboardingRoutes("wisdomtree"));

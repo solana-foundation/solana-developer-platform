@@ -22,7 +22,8 @@ import type {
   OperationScope,
   OperationUpdate,
 } from "@/db/repositories/operations.repository";
-import { forbidden, serviceUnavailable } from "@/lib/errors";
+import { conflict, forbidden, serviceUnavailable } from "@/lib/errors";
+import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import type { AppContext } from "@/routes/earn/context";
 import {
   ProposalAdmissionRefusedError,
@@ -524,6 +525,30 @@ describe("custody proposal recovery", () => {
     expect(mocks.submit).not.toHaveBeenCalled();
   });
 
+  it("uses one confirmed-height read while preparing and observing a new custody proposal", async () => {
+    const binding = useExistingProposal();
+    mocks.prepareProposal.mockResolvedValue(binding);
+    mocks.recordBinding.mockImplementation(
+      async (
+        _scope: OperationScope,
+        current: OperationClaim,
+        proposalBinding: OperationProposalBinding
+      ) => ({ ...current.attempt, proposalBinding })
+    );
+    claim.attempt.proposalBinding = null;
+    claim.attempt.dispatchStartedAt = null;
+    mocks.propose.mockResolvedValue({
+      phase: "pending",
+      providerTransactionId: "proposal",
+      signedTransaction: null,
+    });
+    await scoped(() => advanceEarnOperation(env, scope, claim));
+    expect(mocks.prepareProposal).toHaveBeenCalledTimes(1);
+    expect(mocks.propose).toHaveBeenCalledTimes(1);
+    expect(mocks.height).toHaveBeenCalledTimes(1);
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
   it("waits for wallet-provider signing and broadcasts its signature without another submission", async () => {
     const binding = useExistingProposal();
     claim.operation.status = "queued";
@@ -888,5 +913,214 @@ describe("operation settlement projection", () => {
       result: { signature: "cancel-signature", settledAmount: null, settlementOutcome: null },
     });
     expect(mocks.submit).not.toHaveBeenCalled();
+  });
+});
+
+describe("live operation exit permission", () => {
+  const exits = [
+    "earn.withdraw",
+    "earn.queued_withdraw_request",
+    "earn.queued_withdraw_cancel",
+  ] as const;
+  beforeEach(() => {
+    claim.operation.kind = "earn.withdraw";
+    claim.operation.intent = {
+      kind: "earn.withdraw",
+      positionId: "position",
+      amount: { kind: "all" },
+    };
+  });
+
+  it.each(exits)("refuses new %s signing after its execute grant is removed", async (movement) => {
+    target.movement = movement;
+    mocks.moneyAdmission.mockRejectedValue(
+      new MoneyMovementRefusedError("action_not_held", "earn.execute")
+    );
+    expect(await scoped(() => advanceEarnOperation(env, scope, claim))).toMatchObject({
+      status: "failed",
+      nextAction: null,
+      error: { code: "SIGNING_REJECTED" },
+    });
+    expect(mocks.moneyAdmission).toHaveBeenCalledWith(
+      env,
+      scope,
+      expect.objectContaining({ movement, requiredAction: "earn.execute" }),
+      { custodyWalletId: "wallet" }
+    );
+    expect(mocks.restrict).toHaveBeenCalledWith(scope, claim);
+    expect(mocks.proposer).not.toHaveBeenCalled();
+    expect(mocks.sign).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("rechecks membership after a slow read before requesting a signature", async () => {
+    target.movement = "earn.queued_withdraw_cancel";
+    mocks.moneyAdmission
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValue(new MoneyMovementRefusedError("principal_not_live"));
+    expect(await scoped(() => advanceEarnOperation(env, scope, claim))).toMatchObject({
+      status: "failed",
+    });
+    expect(mocks.sign).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("refuses a new provider proposal after its reviewed operation loses execute permission", async () => {
+    target.movement = "earn.queued_withdraw_cancel";
+    useExistingProposal();
+    claim.attempt.dispatchStartedAt = null;
+    mocks.moneyAdmission
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValue(new MoneyMovementRefusedError("action_not_held", "earn.execute"));
+    expect(await scoped(() => advanceEarnOperation(env, scope, claim))).toMatchObject({
+      status: "failed",
+      nextAction: null,
+    });
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+    expect(mocks.propose).not.toHaveBeenCalled();
+    expect(mocks.sign).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("retains caller-signed withdrawal bytes after execute permission is removed", async () => {
+    walletBuild();
+    target.movement = "earn.withdraw";
+    claim.operation.intent = {
+      kind: "earn.withdraw",
+      positionId: "position",
+      amount: { kind: "all" },
+    };
+    claim.attempt.signedTransaction = signed;
+    mocks.moneyAdmission.mockRejectedValue(
+      new MoneyMovementRefusedError("action_not_held", "earn.execute")
+    );
+    expect(await scoped(() => advanceEarnOperation(env, scope, claim))).toMatchObject({
+      nextAction: { type: "wait" },
+    });
+    expect(mocks.moneyAdmission).toHaveBeenCalledWith(
+      env,
+      scope,
+      expect.objectContaining({ movement: "earn.withdraw", requiredAction: "earn.execute" }),
+      { custodyWalletId: null }
+    );
+    expect(mocks.restrict).toHaveBeenCalledWith(scope, claim);
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(claim.attempt.signedTransaction).toBe(signed);
+  });
+
+  it.each(["action_not_held", "principal_not_live"] as const)(
+    "keeps provider cleanup available after %s without another proposal",
+    async (reason) => {
+      target.movement = "earn.queued_withdraw_cancel";
+      const binding = useExistingProposal();
+      mocks.moneyAdmission.mockRejectedValue(
+        reason === "action_not_held"
+          ? new MoneyMovementRefusedError(reason, "earn.execute")
+          : new MoneyMovementRefusedError(reason)
+      );
+      mocks.readProposal.mockResolvedValue({
+        phase: "pending",
+        providerTransactionId: "proposal",
+        signedTransaction: null,
+      });
+      expect(await scoped(() => advanceEarnOperation(env, scope, claim))).toMatchObject({
+        status: "awaiting_signature",
+        nextAction: { type: "wait" },
+      });
+      expect(mocks.readProposal).toHaveBeenCalledWith({
+        binding,
+        unsignedTransaction: target.unsigned_transaction,
+      });
+      expect(mocks.cancelProposal).toHaveBeenCalledWith(binding);
+      expect(mocks.propose).not.toHaveBeenCalled();
+      expect(mocks.sign).not.toHaveBeenCalled();
+      expect(mocks.sponsor).not.toHaveBeenCalled();
+      expect(mocks.submit).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(["action_not_held", "principal_not_live"] as const)(
+    "observes persisted recovery bytes after %s without broadcasting",
+    async (reason) => {
+      target.movement = "earn.queued_withdraw_cancel";
+      claim.attempt.signedTransaction = signed;
+      mocks.moneyAdmission.mockRejectedValue(
+        reason === "action_not_held"
+          ? new MoneyMovementRefusedError(reason, "earn.execute")
+          : new MoneyMovementRefusedError(reason)
+      );
+      expect(await scoped(() => advanceEarnOperation(env, scope, claim))).toMatchObject({
+        nextAction: { type: "wait" },
+      });
+      expect(mocks.restrict).toHaveBeenCalledWith(scope, claim);
+      expect(mocks.signatureStatus).toHaveBeenCalledTimes(1);
+      expect(mocks.submit).not.toHaveBeenCalled();
+      expect(mocks.sign).not.toHaveBeenCalled();
+    }
+  );
+
+  it("records an already observed signature after revocation without sending it", async () => {
+    target.movement = "earn.queued_withdraw_cancel";
+    claim.attempt.signedTransaction = signed;
+    mocks.moneyAdmission.mockRejectedValue(
+      new MoneyMovementRefusedError("action_not_held", "earn.execute")
+    );
+    mocks.signatureStatus.mockResolvedValue({ value: [{ slot: 100n }] });
+    await scoped(() => advanceEarnOperation(env, scope, claim));
+    expect(mocks.submit).toHaveBeenCalledExactlyOnceWith(signed, false);
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+    expect(mocks.sign).not.toHaveBeenCalled();
+  });
+
+  it("does not sponsor a proposal signed after its operation loses permission", async () => {
+    target.movement = "earn.queued_withdraw_cancel";
+    target.fee_mode = "sponsored";
+    useExistingProposal();
+    mocks.moneyAdmission
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValue(new MoneyMovementRefusedError("principal_not_live"));
+    mocks.readProposal.mockResolvedValue({
+      phase: "signed",
+      providerTransactionId: "proposal",
+      signedTransaction: signed,
+    });
+    await scoped(() => advanceEarnOperation(env, scope, claim));
+    expect(mocks.restrict).toHaveBeenCalledWith(scope, claim);
+    expect(mocks.sponsor).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+});
+
+describe("withdrawal recovery races", () => {
+  beforeEach(() => {
+    target = { ...target, movement: "earn.queued_withdraw_cancel" };
+    claim.operation.kind = "earn.withdraw";
+    claim.operation.intent = {
+      kind: "earn.withdraw",
+      positionId: "position",
+      amount: { kind: "all" },
+    };
+    claim.attempt.signedTransaction = signed;
+  });
+
+  it("ends only a recovery whose original request was definitively closed", async () => {
+    mocks.submit.mockRejectedValue(
+      conflict("Closed", { reason: "withdrawal_recovery_unavailable" })
+    );
+    expect(await scoped(() => advanceEarnOperation(env, scope, claim))).toMatchObject({
+      status: "failed",
+      nextAction: null,
+      resourceRef: null,
+      error: { code: "TRANSACTION_FAILED" },
+    });
+    expect(mocks.sign).not.toHaveBeenCalled();
+  });
+
+  it("does not turn an uncertain provider conflict into nonexecution", async () => {
+    const error = conflict("Provider state is unknown");
+    mocks.submit.mockRejectedValue(error);
+    await expect(scoped(() => advanceEarnOperation(env, scope, claim))).rejects.toBe(error);
+    expect(mocks.transition).not.toHaveBeenCalled();
   });
 });

@@ -77,18 +77,12 @@ const VALUE_OWNERS = buildOwners();
 /** Values no public document names in any channel: the hidden families' actions. */
 const HIDDEN_VALUES: ReadonlySet<string> = new Set(HIDDEN_ACTION_MODULES.flatMap(actionsInModule));
 
-/** Publishing the replacement Earn contract requires named security sign-off. */
-export const EARN_PUBLIC_SURFACE_PUBLISHED = false;
-
 /**
  * The modules a public document publishes: those in the release channel.
  * Markets follows its sub-modules.
  */
 export function publishedModules(releaseChannel: SdpReleaseChannel): ReadonlySet<SdpModule> {
   const modules = new Set<SdpModule>(SDP_RELEASE_CHANNELS[releaseChannel]);
-  // The old Earn contract is removed. Publishing its replacement requires
-  // named security sign-off; runtime release-channel admission is unchanged.
-  if (!EARN_PUBLIC_SURFACE_PUBLISHED) modules.delete("earn");
   if (modules.has("earn") || modules.has("dvp")) modules.add("markets");
   else modules.delete("markets");
   return modules;

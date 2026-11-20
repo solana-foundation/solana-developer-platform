@@ -1,8 +1,8 @@
 # Earn core API
 
 Status: implementation under review, 18 November 2026. **Critical**: this
-changes fund movement, signing authorization and recovery. The replacement
-contract remains internal pending named security sign-off.
+changes fund movement, signing authorization and recovery. The contract follows
+the existing module tags and release-channel rules.
 
 Earn aggregates provider strategies behind four core actions. Treasury and
 Embedded Yield use the same contract. Providers supply the underlying products;
@@ -70,9 +70,10 @@ middleware, automatic OPTIONS, dashboard proxies and cron routes.
 | **Total**                                           |            **59** | **Remove 53 old routes; retain six eligibility routes.** |
 
 The baseline published 21 partner operations on beta/experimental. Stable
-published none. The replacement restores the publication hold: no Earn or
-operation route is promoted into public OpenAPI, reference, playground, Postman
-or AI resources by this change. Runtime release-channel access remains separate.
+published none. The replacement uses the same publication rules for its four
+core actions and five shared operation routes. Public OpenAPI, reference,
+playground, Postman and AI resources follow the existing module tags and release
+channel; there is no rewrite-specific visibility override.
 
 ## Previous flow
 
@@ -143,6 +144,36 @@ Every mutation uses a persisted `Idempotency-Key`. An uncertain HTTP response
 retries the same request and exact signed bytes. Queue acceptance, share escrow,
 signing and chain inclusion do not establish economic payout.
 
+### Recover expired solver escrow
+
+A new `/v1/earn/withdraw` for a tracked position and `amount.kind="all"` can
+offer **Recover expired escrowed shares**, even when its wallet holds no free
+shares. The caller explicitly selects that option through `/refresh`, reviews
+the new action and follows the normal signing and `/submit` flow. It uses
+`earn.execute` and the inherited source's current wallet grants. The original
+accepted operation is not reopened; its `/cancel` remains unavailable.
+
+One bounded query selects the position's oldest eligible recorded request.
+Live provider proof must match its tenant/source, mints, nonce, creation time,
+deadline and share quantity. The private builder and simulation recheck that
+the expired escrow can return those shares. A different or closed request is
+not proof that a replacement may execute.
+
+The new operation references its exact cancellation action. Completion requires
+that action to finalize, its canonical build to be consumed by that attempt,
+and the request's `cancel_signature` and `closing_signature` to match it.
+Authenticated lifecycle evidence must prove the share return.
+`settlementOutcome="recovered"` reports the share mint and quantity, not the
+original requested asset payout. Exact already-broadcast canonical bytes can be
+recorded atomically without reopening the terminal request. Unknown outcomes
+remain unresolved.
+
+Hastra's operator redemption has different semantics: its owner request address
+is reusable and the cancellation instruction has no amount or cycle argument.
+Preparation-time history cannot bind which cycle executes later. That recovery
+path remains unadvertised pending a separate delegation-release design in
+PRO-2530 and PRO-2528. The solver recovery does not cover it.
+
 ## Replacement boundary
 
 Earn has not launched. This is a breaking replacement, with no compatibility
@@ -162,6 +193,10 @@ not weaken the async lifecycle for new actions.
 - Actions and signed bytes are immutable. An old version cannot authorize a
   replacement. Every worker restores the recorded principal and checks current
   permission, wallet binding and credential status.
+- Earn passes `requiredAction: "earn.execute"` at every new signing, proposal,
+  sponsor and broadcast boundary. Fresh API-key grants and member role/project
+  access must still permit that action. Refusal restricts the attempt to
+  observation and cleanup; shared admission's default exit behavior is unchanged.
 - A durable provider binding precedes its single create. Workers use fenced
   180-second leases with a 120-second action budget. A timeout retains the same
   attempt and its uncertainty; it never authorizes another proposal.
@@ -205,6 +240,29 @@ Token-sized exits add one cold share-mint precision read, zero warm reads;
 concurrent precision reads share work and failures are not cached. Required
 simulation remains before returning unsigned bytes.
 
+Solver recovery adds no provider request read when its bounded lookup finds no
+candidate, and one live request read when it does. Selecting recovery reuses the
+same call's validated choice proof during build admission: two API proof reads
+become one, before the provider builder's existing validation and simulation.
+That proof is never persisted or accepted from a caller; later preparation or
+refresh calls read provider state again. Each review offers at most one recovery
+option; it never scans all owner requests or fans out provider reads across them.
+
+Operation recovery uses the partial index on environment, `next_check_at` and
+ID to read at most 100 due candidates. Four workers claim only work ready to
+start. Unchanged pending states back off from 15 seconds to five minutes;
+`sign_in_provider` waits cap at one minute. Status progress resets the delay to
+15 seconds. Terminal operations are excluded from due scans.
+
+Within one worker run and exact organization/project/environment/principal,
+concurrent signature observations share a lazy RPC client and batch at most
+256 signatures. Four simultaneous same-authority status requests become one;
+two confirmed-height reads during custody proposal handling become one. There
+is no cross-principal sharing or cache across runs. Failed height reads and
+completed signature batches are evicted; missing signatures never become
+durable evidence of nonexecution. Domain-settlement projections read their
+ledger before constructing a transaction or making execution RPC calls.
+
 Successful atomic deposit preparation keeps its existing RPC budget: one
 maximum-compute probe and one final simulation. Size overflow allows one compact
 retry. Removing the split path removes one baseline token-balance read and two
@@ -226,7 +284,6 @@ changed by preparing these PRs. Do not restore HTTP aliases or historical
 execution paths.
 
 See the [threat model](../security/earn-core-api-threat-model.md) and
-[internal contract guide](../../apps/sdp-docs/content/unpublished/earn/core-api.mdx).
-Provider sandbox execution, signed-in browser verification and named publication
-security sign-off remain release gates. Local tests do not establish those
-external outcomes.
+[integration guide](../../apps/sdp-docs/content/docs/earn/integration-details.mdx).
+Provider sandbox execution, signed-in browser verification and security review
+remain release gates. Local tests do not establish those external outcomes.

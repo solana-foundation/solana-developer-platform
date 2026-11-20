@@ -19,9 +19,11 @@ import {
   projectScopeWithDeclaredIdempotencyHeaders,
 } from "./helpers";
 
-/** Internal contract only until the replacement public surface receives named security sign-off. */
-export function registerEarnCorePaths(registry: OpenAPIRegistry) {
-  const security: Array<Record<string, string[]>> = [{ apiKeyAuth: [] }, { clerkBearerAuth: [] }];
+/** Shared core contract; publication follows Earn's release channel. */
+export function registerEarnCorePaths(registry: OpenAPIRegistry, publicOnly = false) {
+  const security: Array<Record<string, string[]>> = publicOnly
+    ? [{ apiKeyAuth: [] }]
+    : [{ apiKeyAuth: [] }, { clerkBearerAuth: [] }];
   const common = {
     tags: ["Earn"],
     [DOCS_GROUP]: EARN_GROUPS.core,
@@ -69,11 +71,12 @@ export function registerEarnCorePaths(registry: OpenAPIRegistry) {
       description:
         direction === "deposit"
           ? "Prepares a deposit using an SDP API key, strategyId, source.ownerAddress and token amount. No SDP wallet registration or provider connection is required. Returns an operation with terms and nextAction sign_transaction containing the unsigned transaction. Sign its exact message with your own wallet, then send signedTransaction with actionId/version to POST /v1/operations/{operationId}/submit. An existing connected wallet may use source.walletId instead; its nextAction submit requests signing through the configured provider. Preparation never signs or broadcasts. Swap-funded deposits compose both legs atomically; an oversized composition is refused before signing rather than split. Reuse the original Idempotency-Key and body after an uncertain response."
-          : "Prepares an exit using a positionId and an explicitly denominated amount: all, shares, token or held intermediate. The position determines its strategy and owner; an owner-address position needs no SDP wallet registration. Sign the returned transaction in that owner's wallet and send signedTransaction to the operation submit endpoint. Connected-wallet positions use their configured signing provider instead. Terms advertise supported direct or delayed options. A multi-route review returns nextAction select_option; operation refresh with the current actionId, version and advertised optionId prepares the selected transaction. Review and submit its new actionId/version separately. Preparation never signs or broadcasts. Queue entry is not payout; track the operation through settlement.",
+          : "Prepares an exit using a positionId and an explicitly denominated amount: all, shares, token or held intermediate. The position determines its strategy and owner; an owner-address position needs no SDP wallet registration. Sign the returned transaction in that owner's wallet and send signedTransaction to the operation submit endpoint. Connected-wallet positions use their configured signing provider instead. Terms advertise supported direct or delayed options. With amount.kind all, an expired solver escrow may advertise an explicit recovery option even when wallet share balance is zero. Selecting it prepares a new share-return transaction; the original withdrawal remains unchanged. Hastra par cancellation is not supported because its reusable request is not cycle-bound. A multi-route review returns nextAction select_option; operation refresh with the current actionId, version and advertised optionId prepares the selected transaction. Review and submit its new actionId/version separately. Preparation never signs or broadcasts. Queue entry is not payout; track the operation through settlement.",
       request: {
         headers: projectScopeWithDeclaredIdempotencyHeaders({
           key: "required",
           serverErrors: "rerun",
+          committedServerErrors: "store",
         }),
         body: {
           required: true,

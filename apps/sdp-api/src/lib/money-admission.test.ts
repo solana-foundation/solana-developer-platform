@@ -878,6 +878,79 @@ describe("money admission reads the principal in the same statement", () => {
 
   const scope = { organizationId: TEST_ORG.id, projectId: TEST_PRODUCTION_PROJECT.id };
 
+  const earnExits = [
+    "earn.withdraw",
+    "earn.queued_withdraw_request",
+    "earn.queued_withdraw_cancel",
+  ] as const;
+  const operationContext = (movement: (typeof earnExits)[number]) =>
+    ({ surface: "job", movement, subjectId: "operation", requiredAction: "earn.execute" }) as const;
+
+  it.each(earnExits)(
+    "%s rechecks a durable operation's live grant while leaving commercial exits open",
+    async (movement) => {
+      await seedProductionKey({ grants: ["earn.execute"] });
+      const advance = () =>
+        asSystem(() =>
+          runAsMoneyPrincipal(PRODUCTION_KEY, () =>
+            assertMoneyStartAdmitted(env, scope, operationContext(movement), NO_WALLET)
+          )
+        );
+      // No production entitlement is granted: this remains an exit.
+      await expect(advance()).resolves.toBeUndefined();
+      await getDb(env).execute("UPDATE api_keys SET grants = '{}' WHERE id = ?", [
+        PRODUCTION_KEY_ID,
+      ]);
+      await expect(advance()).rejects.toMatchObject({
+        reason: "action_not_held",
+        details: { action: "earn.execute" },
+      });
+    }
+  );
+
+  it.each(["project membership", "role"] as const)(
+    "rechecks a queued recovery's live member %s after acceptance",
+    async (change) => {
+      const db = getDb(env);
+      await db.execute(
+        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+         VALUES ('om_earn_operation', ?, ?, 'admin', 'active')`,
+        [TEST_ORG.id, TEST_USER.id]
+      );
+      const advance = () =>
+        asSystem(() =>
+          runAsMoneyPrincipal({ kind: "member", userId: TEST_USER.id }, () =>
+            assertMoneyStartAdmitted(
+              env,
+              scope,
+              operationContext("earn.queued_withdraw_cancel"),
+              NO_WALLET
+            )
+          )
+        );
+      await expect(advance()).resolves.toBeUndefined();
+      if (change === "project membership")
+        await db.execute("DELETE FROM project_members WHERE project_id = ? AND user_id = ?", [
+          scope.projectId,
+          TEST_USER.id,
+        ]);
+      else
+        await db.execute(
+          "UPDATE organization_members SET role = 'viewer' WHERE id = 'om_earn_operation'"
+        );
+      await expect(advance()).rejects.toMatchObject({
+        reason: change === "project membership" ? "principal_not_live" : "action_not_held",
+      });
+    }
+  );
+
+  it("does not admit a durable exit operation without a recorded authenticated principal", () => {
+    expect(decideMovement("earn.queued_withdraw_cancel", null, NO_WALLET, "earn.execute")).toEqual({
+      admitted: false,
+      reason: "principal_missing",
+    });
+  });
+
   it("reads a key's live row, grants and wallet listing", async () => {
     await seedProductionKey({ walletScope: "selected" });
     const read = await asSystem(() =>

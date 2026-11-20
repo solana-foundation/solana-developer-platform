@@ -1572,6 +1572,274 @@ describe("Earn queued withdrawal repository", () => {
     expect(position?.updated_at).not.toBe("2026-09-18T00:00:00.000Z");
   });
 
+  describe("exact finalized escrow recovery", () => {
+    it("filters foreign positions before offering one of more than 32 expired requests", async () => {
+      let addressIndex = 0;
+      const nextAddress = () => `RecoveryQueue${String(addressIndex++).padStart(20, "0")}`;
+      await Promise.all(
+        Array.from({ length: 33 }, async () => {
+          const created = await createRequest({
+            positionId: OWNER_POSITION,
+            custodyWalletId: null,
+            ownerAddress: OWNER_ADDRESS,
+            requestAddress: nextAddress(),
+          });
+          await repository.advanceRequest({
+            organizationId: ORG,
+            withdrawalRequestId: created.request.id,
+            toStatus: "expired_cancelable",
+            nonce: "7",
+            creationTimestamp: "1700000000",
+          });
+        })
+      );
+      const first = await createRequest({ requestAddress: nextAddress() });
+      await repository.advanceRequest({
+        organizationId: ORG,
+        withdrawalRequestId: first.request.id,
+        toStatus: "expired_cancelable",
+        nonce: "7",
+        creationTimestamp: "1700000000",
+      });
+      await Promise.all(
+        Array.from({ length: 33 }, async () => {
+          const created = await createRequest({ requestAddress: nextAddress() });
+          await repository.advanceRequest({
+            organizationId: ORG,
+            withdrawalRequestId: created.request.id,
+            toStatus: "expired_cancelable",
+            nonce: "7",
+            creationTimestamp: "1700000000",
+          });
+        })
+      );
+      expect(
+        await repository.findOldestExpiredEscrow({
+          organizationId: ORG,
+          projectId: PROJECT,
+          environment: "sandbox",
+          positionId: POSITION,
+          ownerAddress: OWNER,
+          custodyWalletId: WALLET,
+          beforeUnixSeconds: "1800000000",
+        })
+      ).toMatchObject({ id: first.request.id });
+    });
+
+    async function recoveryBuild() {
+      const created = await createRequest();
+      await repository.advanceRequest({
+        organizationId: ORG,
+        withdrawalRequestId: created.request.id,
+        toStatus: "expired_cancelable",
+        nonce: "7",
+        creationTimestamp: "1700000000",
+      });
+      const build = await repository.createWalletTransaction({
+        id: "wallet_exact_escrow_recovery",
+        organizationId: ORG,
+        projectId: PROJECT,
+        environment: "sandbox",
+        provider: "veda",
+        custodyWalletId: WALLET,
+        positionId: POSITION,
+        withdrawalRequestId: created.request.id,
+        action: "cancel",
+        mechanism: "solver_queue",
+        operationOnly: true,
+        ownerAddress: OWNER,
+        vaultAddress: VAULT,
+        tokenMint: TOKEN_MINT,
+        shareMint: SHARE_MINT,
+        requestAddress: created.request.request_address,
+        unsignedTransaction: "AQ==",
+        lastValidBlockHeight: "20000",
+      });
+      return {
+        request: created.request,
+        input: {
+          actionId: "action_exact_escrow_recovery",
+          organizationId: ORG,
+          projectId: PROJECT,
+          environment: "sandbox" as const,
+          withdrawalRequestId: created.request.id,
+          signature: "signature_exact_escrow_recovery",
+          signedTransaction: "AQ==",
+          lastValidBlockHeight: "20000",
+          clientRequestId: "attempt_exact_escrow_recovery",
+          idempotencyFingerprint: "fingerprint_exact_escrow_recovery",
+          walletTransactionId: build.id,
+          recoverFinalizedWalletBuild: true,
+        },
+      };
+    }
+
+    it("records the exact already-finalized body without reopening the request", async () => {
+      const { request, input } = await recoveryBuild();
+      await repository.advanceRequest({
+        organizationId: ORG,
+        withdrawalRequestId: request.id,
+        toStatus: "cancelled",
+        nonce: "7",
+        closingSignature: input.signature,
+      });
+      const recovered = await repository.createSignedCancel(input);
+      expect(recovered.action).toMatchObject({
+        id: input.actionId,
+        action: "cancel",
+        status: "finalized",
+        signature: input.signature,
+      });
+      expect(recovered.request).toMatchObject({
+        status: "cancelled",
+        closing_signature: input.signature,
+        cancel_signature: input.signature,
+        assets_paid: null,
+      });
+      expect(recovered.action.settled_at).not.toBeNull();
+      expect(
+        await repository.getWalletTransaction({
+          organizationId: ORG,
+          transactionId: input.walletTransactionId,
+        })
+      ).toMatchObject({ consumed_action_id: input.actionId });
+      expect((await repository.createSignedCancel(input)).replayed).toBe(true);
+    });
+
+    it.each([
+      { projectId: OTHER_PROJECT },
+      { lastValidBlockHeight: "20001" },
+      { walletTransactionId: undefined },
+    ])("refuses finalized recovery without its exact canonical source: %j", async (changed) => {
+      const { request, input } = await recoveryBuild();
+      await repository.advanceRequest({
+        organizationId: ORG,
+        withdrawalRequestId: request.id,
+        toStatus: "cancelled",
+        nonce: "7",
+        closingSignature: input.signature,
+      });
+      await expect(repository.createSignedCancel({ ...input, ...changed })).rejects.toThrow(
+        "canonical build"
+      );
+      expect(
+        await repository.getActionByClientRequestId({
+          organizationId: ORG,
+          clientRequestId: input.clientRequestId,
+        })
+      ).toBeNull();
+    });
+
+    it("marks a different verified closing transaction unavailable", async () => {
+      const { request, input } = await recoveryBuild();
+      await repository.advanceRequest({
+        organizationId: ORG,
+        withdrawalRequestId: request.id,
+        toStatus: "cancelled",
+        nonce: "7",
+        closingSignature: "another_finalized_cancellation",
+      });
+      await expect(repository.createSignedCancel(input)).rejects.toMatchObject({
+        details: { reason: "withdrawal_recovery_unavailable" },
+      });
+    });
+
+    it("does not treat unknown closure as definitive nonexecution", async () => {
+      const { request, input } = await recoveryBuild();
+      await repository.advanceRequest({
+        organizationId: ORG,
+        withdrawalRequestId: request.id,
+        toStatus: "closed_or_unknown",
+      });
+      await expect(repository.createSignedCancel(input)).rejects.toMatchObject({
+        details: undefined,
+      });
+      expect(
+        await repository.getActionByClientRequestId({
+          organizationId: ORG,
+          clientRequestId: input.clientRequestId,
+        })
+      ).toBeNull();
+    });
+
+    it("refuses a second action if the build was already consumed", async () => {
+      const { request, input } = await recoveryBuild();
+      await repository.advanceRequest({
+        organizationId: ORG,
+        withdrawalRequestId: request.id,
+        toStatus: "cancelled",
+        nonce: "7",
+        closingSignature: input.signature,
+      });
+      await repository.createSignedCancel(input);
+      await expect(
+        repository.createSignedCancel({
+          ...input,
+          actionId: "second_recovery_action",
+          clientRequestId: "second_recovery_attempt",
+        })
+      ).rejects.toThrow("different idempotency key");
+      expect(
+        await repository.getActionByClientRequestId({
+          organizationId: ORG,
+          clientRequestId: "second_recovery_attempt",
+        })
+      ).toBeNull();
+      expect(
+        await repository.getById({
+          organizationId: ORG,
+          environment: "sandbox",
+          withdrawalRequestId: request.id,
+        })
+      ).toMatchObject({ status: "cancelled", assets_paid: null });
+    });
+
+    it("rolls back finalized action metadata if canonical build consumption fails", async () => {
+      const { request, input } = await recoveryBuild();
+      await repository.advanceRequest({
+        organizationId: ORG,
+        withdrawalRequestId: request.id,
+        toStatus: "cancelled",
+        nonce: "7",
+        closingSignature: input.signature,
+      });
+      const db = getDb(env);
+      await db
+        .prepare(`ALTER TABLE earn_wallet_withdrawal_request_transactions
+        ADD CONSTRAINT test_exact_recovery_consumption CHECK (consumed_action_id IS NULL) NOT VALID`)
+        .run();
+      try {
+        await expect(repository.createSignedCancel(input)).rejects.toThrow(
+          "test_exact_recovery_consumption"
+        );
+      } finally {
+        await db
+          .prepare(`ALTER TABLE earn_wallet_withdrawal_request_transactions
+          DROP CONSTRAINT test_exact_recovery_consumption`)
+          .run();
+      }
+      expect(
+        await repository.getActionByClientRequestId({
+          organizationId: ORG,
+          clientRequestId: input.clientRequestId,
+        })
+      ).toBeNull();
+      expect(
+        await repository.getById({
+          organizationId: ORG,
+          environment: "sandbox",
+          withdrawalRequestId: request.id,
+        })
+      ).toMatchObject({ status: "cancelled", cancel_signature: null, assets_paid: null });
+      expect(
+        await repository.getWalletTransaction({
+          organizationId: ORG,
+          transactionId: input.walletTransactionId,
+        })
+      ).toMatchObject({ consumed_action_id: null });
+    });
+  });
+
   it("retries operator cancellation, reopens the holding, and embargoes terminal PDA reuse", async () => {
     const requestAddress = "ParRequestAddress11111111111111111111111";
     const created = await createRequest({
