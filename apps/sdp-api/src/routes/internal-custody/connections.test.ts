@@ -276,10 +276,14 @@ describe("internal custody connections", () => {
       projectId: PROJECT_ID,
     });
 
-    const data = await listConnections("");
-    expect(JSON.stringify(data)).not.toContain(SECRET_PAYLOAD);
-    expect(JSON.stringify(data)).not.toContain("encrypted_secret_payload");
-    expect(JSON.stringify(data)).not.toContain("raw_provider_stack");
+    const response = await requestConnections("");
+    expect(response.status).toBe(200);
+    const raw = await response.text();
+    expect(raw).not.toContain(SECRET_PAYLOAD);
+    expect(raw).not.toContain("encrypted_secret_payload");
+    expect(raw).not.toContain("encryptedSecretPayload");
+    expect(raw).not.toContain("raw_provider_stack");
+    const { data } = listSchema.parse(JSON.parse(raw));
     expect(data.connections.map((row) => row.lastCheck)).toEqual([
       { status: "failed", at: "2026-08-01T00:00:00.000Z", failureCode: null },
     ]);

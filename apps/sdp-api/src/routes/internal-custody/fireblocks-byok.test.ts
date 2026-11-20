@@ -7,7 +7,6 @@ import { z } from "zod";
 import { getDb } from "@/db/client";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
 import { FireblocksCsrRepository } from "@/db/repositories/fireblocks-csr.repository";
-import { verifyClerkJwt } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { createCredentialSecretStore } from "@/services/credential-secret-store";
@@ -16,11 +15,10 @@ import { eraseExpiredFireblocksCsrs } from "@/services/custody/fireblocks-regist
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { reconcileFireblocksProposals } from "@/services/jobs/reconcile-fireblocks-proposals";
 import { ProviderCredentialSecretCleanupStore } from "@/services/stores/provider-credential-secret-cleanup.store";
-import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { inSandboxScope } from "@/test/helpers/cluster-rpc";
+import { seedCustodyAdmin } from "@/test/helpers/custody-admin";
 import { env } from "@/test/helpers/env";
 import { syntheticAddress } from "@/test/helpers/parsed-transactions";
-import { seedDefaultProjects } from "@/test/helpers/projects";
 import { setOrganizationProviderOverrides } from "@/test/helpers/provider-overrides";
 import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -110,31 +108,15 @@ beforeEach(async () => {
   testEnv.CREDENTIAL_SECRET_STORE_BACKEND = "encrypted_db";
   await seedTestDatabase(env);
   await clearKVStores(env);
-  const db = getDb(env);
-  await db.execute(
-    "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, 'Fireblocks BYOK', 'fireblocks-byok', 'enterprise', 'active')",
-    [ORGANIZATION_ID]
-  );
-  await db.execute(
-    "INSERT INTO users (id, email, email_verified, status) VALUES (?, 'fireblocks-byok@example.com', 1, 'active')",
-    [USER_ID]
-  );
-  await db.execute(
-    "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES ('mem_fireblocks_byok', ?, ?, 'admin', 'active')",
-    [ORGANIZATION_ID, USER_ID]
-  );
-  await seedDefaultProjects(db, {
+  token = await seedCustodyAdmin(testEnv, {
     organizationId: ORGANIZATION_ID,
-    createdBy: USER_ID,
-    members: [USER_ID],
-    ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+    userId: USER_ID,
+    projectId: PROJECT_ID,
+    tier: "enterprise",
   });
-  await db.execute(
-    "UPDATE organizations SET settings = (settings::jsonb || ?::jsonb)::text WHERE id = ?",
-    [JSON.stringify({ providerOverrides: { custody: { fireblocks: true } } }), ORGANIZATION_ID]
-  );
-  token = await signSeededClerkMember(testEnv, db, USER_ID, ORGANIZATION_ID);
-  await verifyClerkJwt(token, testEnv);
+  await setOrganizationProviderOverrides(getDb(env), ORGANIZATION_ID, {
+    custody: { fireblocks: true },
+  });
   app = new Hono<{ Bindings: Env }>();
   app.use("*", kvStoreMiddleware());
   app.use("*", async (c, next) => {

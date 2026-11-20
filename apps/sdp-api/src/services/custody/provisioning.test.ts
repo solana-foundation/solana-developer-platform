@@ -316,6 +316,7 @@ describe("coinbase account provisioning", () => {
 
 describe("privy wallet provisioning", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -455,6 +456,41 @@ describe("privy wallet provisioning", () => {
       code: "NETWORK_ERROR",
     });
     expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["POST", "GET"]);
+  });
+
+  it("gives up on an unanswered stored-credential create and lookup as a network error", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(AbortSignal, "timeout").mockImplementation((milliseconds) => {
+      const controller = new AbortController();
+      setTimeout(
+        () => controller.abort(new DOMException("timed out", "TimeoutError")),
+        milliseconds
+      );
+      return controller.signal;
+    });
+    // Privy never answers: only a request deadline settles the call.
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(
+      (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal;
+          if (signal) signal.addEventListener("abort", () => reject(signal.reason));
+        })
+    );
+
+    const outcome = provisionTestPrivyWallet(PRIVY_CREATE_OPTIONS).then(
+      () => "resolved",
+      (error) => error
+    );
+    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(await Promise.race([outcome, Promise.resolve("still pending")])).toMatchObject({
+      code: "NETWORK_ERROR",
+    });
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["POST", "GET"]);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(required(required(init).signal).aborted).toBe(true);
+    }
   });
 
   it("classifies a Provider 401 on create as an invalid credential, with no lookup", async () => {

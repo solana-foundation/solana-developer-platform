@@ -298,7 +298,7 @@ describe("retained proposal recovery waist", () => {
     });
   });
 
-  it.each(["failed", null] as const)(
+  it.each(["failed", "success", null] as const)(
     "retries a pending connection whose last check is %s and recovers after activation",
     async (lastCheckStatus) => {
       const controller = await recovery();

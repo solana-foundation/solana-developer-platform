@@ -4,18 +4,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
-import { verifyClerkJwt } from "@/lib/clerk-token";
 import { getLogger } from "@/runtime/logger";
 import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";
 import * as custodyProvisioning from "@/services/custody/provisioning";
-import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey, type TestApiKeyMaterial } from "@/test/helpers/api-keys";
-import { signSeededClerkMember } from "@/test/helpers/clerk-member";
+import { seedCustodyAdmin } from "@/test/helpers/custody-admin";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
-import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 
@@ -31,7 +28,7 @@ const provisionPrivyWalletMock = vi.spyOn(custodyProvisioning, "provisionPrivyWa
 const ORGANIZATION_ID = "org_custody_setup_gate";
 const USER_ID = "usr_custody_setup_gate";
 const PROJECT_IDS = {
-  sandbox: "prj_custody_setup_gate_sandbox",
+  sandbox: "prj_custody_setup_gate",
   production: "prj_custody_setup_gate_production",
 } as const satisfies Record<SdpEnvironment, string>;
 const API_KEYS = {
@@ -86,27 +83,11 @@ function cachedApiKey(environment: SdpEnvironment): SeededApiKey {
 }
 
 async function seedFixture(): Promise<void> {
-  const db = getDb(env);
-  await db.execute(
-    `INSERT INTO organizations (id, name, slug, tier, status)
-     VALUES (?, 'Custody Setup Gate', 'custody-setup-gate', 'individual', 'active')`,
-    [ORGANIZATION_ID]
-  );
-  await db.execute(
-    `INSERT INTO users (id, email, email_verified, status)
-     VALUES (?, 'custody-setup-gate@example.com', 1, 'active')`,
-    [USER_ID]
-  );
-  await db.execute(
-    `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-     VALUES ('mem_custody_setup_gate', ?, ?, 'admin', 'active')`,
-    [ORGANIZATION_ID, USER_ID]
-  );
-  await seedDefaultProjects(db, {
+  clerkToken = await seedCustodyAdmin(env, {
     organizationId: ORGANIZATION_ID,
-    createdBy: USER_ID,
-    members: [USER_ID],
-    ids: PROJECT_IDS,
+    userId: USER_ID,
+    projectId: PROJECT_IDS.sandbox,
+    tier: "individual",
   });
   await seedEnvironmentApiKey("sandbox");
   await seedEnvironmentApiKey("production");
@@ -326,8 +307,6 @@ describe("Custody setup by project environment", () => {
     await seedTestDatabase(env);
     await clearKVStores(env);
     await seedFixture();
-    clerkToken = await signSeededClerkMember(env, getDb(env), USER_ID, ORGANIZATION_ID);
-    await verifyClerkJwt(clerkToken, env);
     vi.stubGlobal("fetch", vi.fn<typeof fetch>());
   });
 
@@ -367,7 +346,8 @@ describe("Custody setup by project environment", () => {
     expect(await response.json()).toEqual({
       error: {
         code: "FORBIDDEN",
-        message: custodyProviderNotInReleaseChannel("privy", "managed").message,
+        message:
+          "The privy custody provider is not available in this release channel for managed custody.",
         details: { reason: "custody_provider_not_in_release_channel" },
       },
       meta: { requestId: expect.any(String) },

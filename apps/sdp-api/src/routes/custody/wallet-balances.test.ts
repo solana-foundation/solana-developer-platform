@@ -1,9 +1,14 @@
-import { createRpc } from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import { SOL_MINT, SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { getAddressDecoder } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { type JsonRpcResult, parseJsonRpcRequest } from "@/test/helpers/cluster-rpc";
+import {
+  inSandboxScope,
+  installClusterRpcStub,
+  type JsonRpcResult,
+  parseJsonRpcRequest,
+} from "@/test/helpers/cluster-rpc";
 import { required } from "@/test/helpers/required";
 import {
   clearWalletBalanceCache,
@@ -25,8 +30,6 @@ function wallet(index: number): WalletBalanceTarget {
   return { id: `cwlt_${index}`, walletId: `provider_${index}`, publicKey: ownerAddress(index) };
 }
 
-const RPC_URL = "https://wallet-balances.rpc.test";
-
 /** A read the test answers with `value`, or fails, once it has seen every read start. */
 interface HeldRead {
   resolve: (answer: { value: readonly JsonRpcResult[] }) => void;
@@ -40,43 +43,35 @@ const tokenAccountsByOwnerParamsSchema = z.tuple(
 );
 
 /**
- * A real RPC client over a stubbed endpoint whose answers the test releases, so it can see
- * which reads start before any of them finish.
+ * The sandbox cluster client over the cluster RPC stub, holding each balance read until the test
+ * releases it, so it can see which reads start before any of them finish. Every other request
+ * (the endpoint's genesis proof) goes to the stub; the stub restores `fetch` after each test.
  */
 function heldRpc() {
   const accountReads: Array<{ addresses: string[] } & HeldRead> = [];
   const tokenReads: Array<{ owner: string; programId: string } & HeldRead> = [];
-  vi.stubGlobal(
-    "fetch",
-    vi.fn<typeof fetch>(
-      async (_input, init) =>
-        new Promise<Response>((settle, fail) => {
-          const { id, method, params } = parseJsonRpcRequest(init);
-          const held: HeldRead = {
-            resolve: ({ value }) =>
-              settle(
-                Response.json({ jsonrpc: "2.0", id, result: { context: { slot: 1 }, value } })
-              ),
-            reject: fail,
-          };
-          switch (method) {
-            case "getMultipleAccounts": {
-              const [addresses] = multipleAccountsParamsSchema.parse(params);
-              accountReads.push({ addresses, ...held });
-              return;
-            }
-            case "getTokenAccountsByOwner": {
-              const [owner, { programId }] = tokenAccountsByOwnerParamsSchema.parse(params);
-              tokenReads.push({ owner, programId, ...held });
-              return;
-            }
-            default:
-              fail(new Error(`Unexpected RPC method ${method}`));
-          }
-        })
-    )
-  );
-  return { rpc: createRpc(RPC_URL), accountReads, tokenReads };
+  const clusterFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const { id, method, params } = parseJsonRpcRequest(init);
+    if (method !== "getMultipleAccounts" && method !== "getTokenAccountsByOwner") {
+      return clusterFetch(input, init);
+    }
+    return new Promise<Response>((settle, fail) => {
+      const held: HeldRead = {
+        resolve: ({ value }) =>
+          settle(Response.json({ jsonrpc: "2.0", id, result: { context: { slot: 1 }, value } })),
+        reject: fail,
+      };
+      if (method === "getMultipleAccounts") {
+        const [addresses] = multipleAccountsParamsSchema.parse(params);
+        accountReads.push({ addresses, ...held });
+        return;
+      }
+      const [owner, { programId }] = tokenAccountsByOwnerParamsSchema.parse(params);
+      tokenReads.push({ owner, programId, ...held });
+    });
+  };
+  return { rpc: inSandboxScope(() => createClusterRpc()), accountReads, tokenReads };
 }
 
 /** Answers every token-program read with no token accounts. */
@@ -111,10 +106,11 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
-  vi.unstubAllGlobals();
 });
 
 describe("readWalletBalances", () => {
+  installClusterRpcStub();
+
   it("reads SOL for every missed wallet in one call and both token programs side by side", async () => {
     const { rpc, accountReads, tokenReads } = heldRpc();
     const wallets = [wallet(1), wallet(2), wallet(3)];

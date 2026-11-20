@@ -34,10 +34,11 @@ const OTHER_ORGANIZATION_ID = "org_setup_status_other";
 const OTHER_ORGANIZATION_PROJECT_ID = "prj_setup_status_other_sandbox";
 const OWN_SCOPE = { organizationId: ORGANIZATION_ID, projectId: PROJECT_ID };
 
+// Strict below the envelope: a key the route adds, such as a connection id, fails the parse.
 const setupStatusSchema = z.object({
-  data: z.object({
+  data: z.strictObject({
     providers: z.array(
-      z.object({
+      z.strictObject({
         provider: z.string(),
         hasLegacyConfig: z.boolean(),
         effectiveTargetType: z.string(),

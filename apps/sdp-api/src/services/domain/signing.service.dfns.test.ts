@@ -1,4 +1,3 @@
-import { Buffer } from "node:buffer";
 import { KeychainDfnsAdapter } from "@sdp/custody/keychain/keychain-dfns.adapter";
 import { isFullSigningPort } from "@sdp/custody/signing";
 import { aroundEach, describe, expect, it } from "vitest";
@@ -6,6 +5,7 @@ import type { SigningConfigRecord } from "@/services/adapters/signing";
 import { createAdapterFromEncryptedConfig } from "@/services/domain/signing/provider-adapter-factory";
 import { createEncryptionService } from "@/services/encryption.service";
 import { inSandboxScope } from "@/test/helpers/cluster-rpc";
+import { TEST_LEGACY_CUSTODY_KEY } from "@/test/helpers/custody-cipher";
 import { env as testEnv } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
 
@@ -14,7 +14,7 @@ const TEST_PROJECT_ID = "prj_dfns";
 
 const env: Env = {
   ...testEnv,
-  CUSTODY_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
+  CUSTODY_ENCRYPTION_KEY: TEST_LEGACY_CUSTODY_KEY,
   DFNS_AUTH_TOKEN: "dfns-auth-token",
   DFNS_CREDENTIAL_ID: "dfns-credential-id",
   DFNS_PRIVATE_KEY: "dfns-test-private-key",

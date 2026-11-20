@@ -25,6 +25,7 @@ const SANDBOX_PROJECT_ID = "prj_custody_wallet_faucet_sandbox";
 const PRODUCTION_PROJECT_ID = `${SANDBOX_PROJECT_ID}_production`;
 const CUSTODY_CONFIG_ID = "cust_cfg_custody_wallet_faucet";
 const CUSTODY_WALLET_ID = "cwlt_custody_wallet_faucet";
+const CONNECTION_WALLET_ID = "cwlt_custody_wallet_faucet_connection";
 const OTHER_PROJECT_WALLET_ID = "cwlt_custody_wallet_faucet_other_project";
 const AIRDROP_SIGNATURE = syntheticSignature(1);
 const CONFIRMED_STATUS = {
@@ -92,6 +93,15 @@ async function seedSandboxWalletAndApiKey(): Promise<void> {
         status: "active",
       },
     ],
+  });
+  // The same Connection wallet type in both projects, so only the project differs.
+  await seedUnreadPrivyWallet(db, {
+    organizationId: ORGANIZATION_ID,
+    projectId: SANDBOX_PROJECT_ID,
+    createdBy: USER_ID,
+    custodyWalletId: CONNECTION_WALLET_ID,
+    walletId: "privy_wallet_custody_wallet_faucet_connection",
+    publicKey: TEST_SOLANA_ADDRESSES.wallet3,
   });
   await seedUnreadPrivyWallet(db, {
     organizationId: ORGANIZATION_ID,
@@ -168,19 +178,23 @@ describe("POST /internal/dashboard/wallets/:walletId/faucet", () => {
     expect(airdropRequests()).toEqual([]);
   });
 
-  it("airdrops devnet SOL to the named wallet's own address", async () => {
-    rpc.answer("requestAirdrop", AIRDROP_SIGNATURE);
-    rpc.respond("getSignatureStatuses", () => signatureStatusesReply([CONFIRMED_STATUS]));
+  it.each([
+    ["Managed", CUSTODY_WALLET_ID, TEST_SOLANA_ADDRESSES.wallet1],
+    ["Connection", CONNECTION_WALLET_ID, TEST_SOLANA_ADDRESSES.wallet3],
+  ])(
+    "airdrops devnet SOL to the project's %s wallet's own address",
+    async (_type, walletId, recipient) => {
+      rpc.answer("requestAirdrop", AIRDROP_SIGNATURE);
+      rpc.respond("getSignatureStatuses", () => signatureStatusesReply([CONFIRMED_STATUS]));
 
-    const response = await requestFaucetAsMember(CUSTODY_WALLET_ID);
+      const response = await requestFaucetAsMember(walletId);
 
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      data: { signature: AIRDROP_SIGNATURE, status: "confirmed", lamports: "1000000000" },
-      meta: { requestId: expect.any(String), timestamp: expect.any(String) },
-    });
-    expect(airdropRequests()).toEqual([
-      { cluster: "devnet", recipient: TEST_SOLANA_ADDRESSES.wallet1 },
-    ]);
-  });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        data: { signature: AIRDROP_SIGNATURE, status: "confirmed", lamports: "1000000000" },
+        meta: { requestId: expect.any(String), timestamp: expect.any(String) },
+      });
+      expect(airdropRequests()).toEqual([{ cluster: "devnet", recipient }]);
+    }
+  );
 });
