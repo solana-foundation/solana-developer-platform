@@ -1,3 +1,4 @@
+import type { CustodyConfigStatus, CustodyProvider } from "@sdp/types/custody";
 import { isValidElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as providerAvailabilityServer from "@/lib/provider-availability.server";
@@ -20,7 +21,7 @@ const fetchAvailability =
   vi.fn<typeof providerAvailabilityServer.fetchProjectProviderAvailability>();
 const memberRole = vi.fn<typeof sdpApi.requestMemberRole>();
 
-function config(provider: string, status: string) {
+function config(provider: CustodyProvider, status: CustodyConfigStatus) {
   return {
     id: `cfg_${provider}`,
     organizationId: "org_test",

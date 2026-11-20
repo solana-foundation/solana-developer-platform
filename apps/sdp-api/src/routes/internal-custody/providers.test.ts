@@ -39,7 +39,7 @@ const setupStatusSchema = z.object({
   data: z.strictObject({
     providers: z.array(
       z.strictObject({
-        provider: z.string(),
+        provider: z.enum(CUSTODY_PROVIDERS),
         hasLegacyConfig: z.boolean(),
         effectiveTargetType: z.string(),
         connectionCounts: z.record(z.string(), z.number()),
