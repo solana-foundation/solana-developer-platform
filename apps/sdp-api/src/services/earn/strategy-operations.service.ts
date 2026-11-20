@@ -1,8 +1,6 @@
-import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import type { Operation, OperationProposalBinding, SubmitOperation } from "@sdp/types/operations";
 import { TERMINAL_OPERATION_STATUSES } from "@sdp/types/operations";
-import { signature } from "@solana/kit";
 import { getDb } from "@/db/client";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
@@ -32,6 +30,10 @@ import { acceptOperationExecution } from "@/services/operation-execution-audit.s
 import { createOperationsService } from "@/services/operations.service";
 import { createOrgTransactionProposerForCustodyWallet } from "@/services/solana/signer";
 import type { Env } from "@/types/env";
+import {
+  createOperationObservationRpc,
+  type OperationObservationRpc,
+} from "./operation-observation-rpc";
 import { createOperationWorkerBudget } from "./operation-worker-budget";
 import { resolveEarnOperationBuild } from "./strategy-operation-build.service";
 import {
@@ -39,7 +41,7 @@ import {
   signPreparedStrategyTransaction,
   sponsorPreparedStrategyTransaction,
 } from "./strategy-transactions.service";
-import { readConfirmedBlockHeight } from "./vault-intent-execution.service";
+import { projectWithdrawalRecovery } from "./strategy-withdrawal-recovery-projection.service";
 import { verifySignedWalletTransaction } from "./vault-wallet.service";
 
 export function isTerminalOperation(operation: Operation): boolean {
@@ -110,6 +112,9 @@ export async function projectEarnOperation(
   scope: OperationScope,
   operation: Operation
 ): Promise<Operation> {
+  if (operation.resourceRef?.kind === "earn.withdrawal_recovery") {
+    return projectWithdrawalRecovery(env, scope, operation, operation.resourceRef.id);
+  }
   if (operation.resourceRef?.kind === "earn.withdrawal_request") {
     return projectQueuedOperation(env, scope, operation, operation.resourceRef.id);
   }
@@ -204,14 +209,8 @@ async function admitRecordedCustodyBroadcast(
   built: Awaited<ReturnType<typeof resolveEarnOperationBuild>>["target"],
   custodyWalletId: string
 ): Promise<boolean> {
+  if (!(await admitOperationEffect(env, scope, claim, built, custodyWalletId))) return false;
   try {
-    await assertMoneyStartAdmitted(
-      env,
-      scope,
-      { surface: "job", movement: built.movement, subjectId: claim.operation.id },
-      { custodyWalletId }
-    );
-    await admitDeposit(env, scope, claim.operation);
     if (claim.attempt.signedTransaction !== null && claim.attempt.proposalBinding !== null) {
       const proposer = await createOrgTransactionProposerForCustodyWallet(
         env,
@@ -240,18 +239,25 @@ async function admitRecordedCustodyBroadcast(
   }
 }
 
-async function admitOwnerOperationBroadcast(
+/** Exits bypass commercial admission, but never the submitted operation's current permission. */
+async function admitOperationEffect(
   env: Env,
   scope: OperationScope,
   claim: OperationClaim,
-  built: PreparedStrategySigningTarget
+  built: PreparedStrategySigningTarget,
+  custodyWalletId: string | null
 ): Promise<boolean> {
   try {
     await assertMoneyStartAdmitted(
       env,
       scope,
-      { surface: "job", movement: built.movement, subjectId: claim.operation.id },
-      { custodyWalletId: null }
+      {
+        surface: "job",
+        movement: built.movement,
+        subjectId: claim.operation.id,
+        requiredAction: "earn.execute",
+      },
+      { custodyWalletId }
     );
     await admitDeposit(env, scope, claim.operation);
     return true;
@@ -270,7 +276,8 @@ async function admitOwnerOperationBroadcast(
 export async function advanceEarnOperation(
   env: Env,
   scope: OperationScope,
-  claim: OperationClaim
+  claim: OperationClaim,
+  observations: OperationObservationRpc = createOperationObservationRpc()
 ): Promise<Operation> {
   if (scope.environment !== currentClusterScope().environment)
     throw internalError("Operation cluster scope changed");
@@ -285,7 +292,8 @@ export async function advanceEarnOperation(
   const update = (change: OperationUpdate) => service.transition(scope, claim, change);
   if (
     claim.operation.resourceRef?.kind === "earn.movement" ||
-    claim.operation.resourceRef?.kind === "earn.withdrawal_request"
+    claim.operation.resourceRef?.kind === "earn.withdrawal_request" ||
+    claim.operation.resourceRef?.kind === "earn.withdrawal_recovery"
   ) {
     const projected = await projectEarnOperation(env, scope, claim.operation);
     return update({
@@ -299,13 +307,29 @@ export async function advanceEarnOperation(
   let signedTransaction = attempt.signedTransaction;
   const stopping = claim.operation.cancelRequestedAt !== null;
   let observeOnly = stopping || attempt.observationOnly;
-  if (
-    transactionScope.custodyWalletId === null &&
-    attempt.dispatchStartedAt === null &&
-    !observeOnly
-  ) {
-    observeOnly = !(await admitOwnerOperationBroadcast(env, scope, claim, built));
+  async function admitNewEffect(): Promise<boolean> {
+    if (observeOnly) return false;
+    const admitted = await admitOperationEffect(
+      env,
+      scope,
+      claim,
+      built,
+      transactionScope.custodyWalletId
+    );
+    observeOnly = !admitted;
+    return admitted;
   }
+  const refuseUnsentSignature = () =>
+    update({
+      status: "failed",
+      nextAction: null,
+      resourceRef: null,
+      error: { code: "SIGNING_REJECTED", message: "Permission was withdrawn before signing" },
+    });
+  if (!observeOnly && signedTransaction === null && transactionScope.custodyWalletId !== null)
+    await admitNewEffect();
+  if (observeOnly && !stopping && signedTransaction === null && attempt.dispatchStartedAt === null)
+    return refuseUnsentSignature();
   if (signedTransaction === null && transactionScope.custodyWalletId === null)
     throw internalError("Accepted wallet submission has no stored signed transaction");
   // These helpers capture the same leased action; extraction does not add a
@@ -316,7 +340,7 @@ export async function advanceEarnOperation(
     observation: TransactionProposalObservation,
     expired: boolean
   ): Promise<Operation> {
-    if (!observeOnly) {
+    if (await admitNewEffect()) {
       try {
         await proposer.admit(binding);
       } catch (error) {
@@ -356,7 +380,7 @@ export async function advanceEarnOperation(
     if (binding === null) {
       if (stopping) throw conflict("Operation cancellation was requested");
       await admitDeposit(env, scope, claim.operation);
-      if ((await readConfirmedBlockHeight()) > BigInt(built.last_valid_block_height)) {
+      if ((await observations.confirmedHeight(scope)) > BigInt(built.last_valid_block_height)) {
         return {
           operation: await update({
             status: "failed",
@@ -374,8 +398,10 @@ export async function advanceEarnOperation(
       attempt = await service.recordProposalBinding(scope, claim, binding);
     }
     workerBudget.assertCanStart();
+    if (attempt.dispatchStartedAt === null && !(await admitNewEffect()))
+      return { operation: await refuseUnsentSignature() };
     const create =
-      attempt.dispatchStartedAt === null && !stopping
+      attempt.dispatchStartedAt === null && !stopping && !observeOnly
         ? await service.markDispatchStarted(scope, claim)
         : false;
     if (create) {
@@ -417,7 +443,7 @@ export async function advanceEarnOperation(
   ): Promise<Operation | undefined> {
     if (observation.signedTransaction === null)
       throw internalError("Signed custody observation has no transaction");
-    if (!observeOnly) {
+    if (await admitNewEffect()) {
       try {
         await proposer.admit(binding);
       } catch (error) {
@@ -468,7 +494,8 @@ export async function advanceEarnOperation(
         error: null,
         nextAction: { type: "wait", reason: "Reconciling the original signing request" },
       });
-    const expired = (await readConfirmedBlockHeight()) > BigInt(built.last_valid_block_height);
+    const expired =
+      (await observations.confirmedHeight(scope)) > BigInt(built.last_valid_block_height);
     if (observation.phase === "pending")
       return pendingCustodyProposal(proposer, binding, observation, expired);
     if (observation.phase === "failed" || observation.phase === "cancelled") {
@@ -501,7 +528,7 @@ export async function advanceEarnOperation(
     if (proposer === null) {
       if (stopping) throw conflict("Operation cancellation was requested");
       await admitDeposit(env, scope, claim.operation);
-      if ((await readConfirmedBlockHeight()) > BigInt(built.last_valid_block_height)) {
+      if ((await observations.confirmedHeight(scope)) > BigInt(built.last_valid_block_height)) {
         return update({
           status: "failed",
           nextAction: null,
@@ -509,6 +536,7 @@ export async function advanceEarnOperation(
           error: { code: "TRANSACTION_EXPIRED", message: "The transaction expired before signing" },
         });
       }
+      if (!(await admitNewEffect())) return refuseUnsentSignature();
       signedTransaction = await signPreparedStrategyTransaction(
         env,
         transactionScope,
@@ -541,16 +569,15 @@ export async function advanceEarnOperation(
       built,
       transactionScope.custodyWalletId
     ));
+  if (!observeOnly && transactionScope.custodyWalletId === null) await admitNewEffect();
   // A late owner signature after cancellation is retained for observation,
   // never used as permission to initiate a fresh broadcast.
   const broadcast = !observeOnly;
   if (!broadcast) {
     await service.repository.restrictToObservation(scope, claim);
     const signed = await verifySignedWalletTransaction(built, signedTransaction);
-    const observed = await createClusterRpc()
-      .getSignatureStatuses([signature(signed.signature)], { searchTransactionHistory: true })
-      .send();
-    if (observed.value[0] === null || observed.value[0] === undefined) {
+    workerBudget.assertCanStart();
+    if (!(await observations.hasSignature(scope, signed.signature))) {
       return update({
         status: "awaiting_signature",
         nextAction: {
@@ -564,7 +591,26 @@ export async function advanceEarnOperation(
   }
   workerBudget.assertCanStart();
   if (broadcast) await service.markDispatchStarted(scope, claim);
-  const resourceRef = await submit(signedTransaction, broadcast);
+  let resourceRef: Operation["resourceRef"];
+  try {
+    resourceRef = await submit(signedTransaction, broadcast);
+  } catch (error) {
+    if (
+      built.movement !== "earn.queued_withdraw_cancel" ||
+      !(error instanceof AppError) ||
+      error.details?.reason !== "withdrawal_recovery_unavailable"
+    )
+      throw error;
+    return update({
+      status: "failed",
+      nextAction: null,
+      resourceRef: null,
+      error: {
+        code: "TRANSACTION_FAILED",
+        message: "The withdrawal settled or was recovered before this recovery was recorded",
+      },
+    });
+  }
   return update({
     status: "submitted",
     nextAction: { type: "wait", reason: "Waiting for transaction confirmation" },

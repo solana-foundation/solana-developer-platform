@@ -27,13 +27,20 @@ import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { generateEarnPositionId } from "@/db/repositories/earn-movements.repository";
 import {
+  createPostgresEarnVaultWithdrawalRequestsRepository,
+  type EarnVaultWithdrawalRequestRow,
+} from "@/db/repositories/earn-vault-withdrawal-requests.repository";
+import {
   createPostgresEarnWalletTransactionsRepository,
   generateEarnWalletTransactionId,
 } from "@/db/repositories/earn-wallet-transactions.repository";
 import { app } from "@/index";
+import { AppError } from "@/lib/errors";
 import { decideMovement, readMoneyAdmissionFacts } from "@/lib/money-admission";
+import * as meteredQuota from "@/middleware/metered-quota";
 import { AuditService } from "@/services/audit.service";
 import { admittedSigner } from "@/services/domain/signing/admitted-signer";
+import type { prepareQueuedStrategyRecovery } from "@/services/earn/strategy-queued-operations.service";
 import type {
   WalletDepositBuildInput,
   WalletWithdrawalBuildInput,
@@ -56,6 +63,10 @@ const mocks = vi.hoisted(() => ({
   build: vi.fn(),
   withdrawBuild: vi.fn(),
   quoteWithdrawal: vi.fn(),
+  readPositions: vi.fn(),
+  choiceReads: vi.fn(),
+  recoveryBuild: vi.fn(),
+  recoveryRequest: null as EarnVaultWithdrawalRequestRow | null,
   withdrawalEnabled: false,
   withdrawalChoices: false,
   directWithdrawalAvailable: true,
@@ -78,7 +89,7 @@ vi.mock("@/services/earn/execution-registry", async (original) => {
             provider: "kamino",
             buildVaultDeposit: vi.fn(),
             buildVaultWithdrawal: vi.fn(),
-            readVaultPositions: vi.fn(),
+            readVaultPositions: mocks.readPositions,
             sponsoredPrograms: () => [],
             quoteVaultWithdrawal: mocks.quoteWithdrawal,
           }
@@ -94,9 +105,30 @@ vi.mock("@/services/earn/strategy-queued-operations.service", async (original) =
     await original<typeof import("@/services/earn/strategy-queued-operations.service")>();
   return {
     ...actual,
+    prepareQueuedStrategyRecovery: mocks.recoveryBuild,
     prepareStrategyWithdrawalChoices: (
       ...args: Parameters<typeof actual.prepareStrategyWithdrawalChoices>
     ) => {
+      mocks.choiceReads(...args);
+      if (mocks.recoveryRequest !== null) {
+        const request = mocks.recoveryRequest;
+        const id = `recover_expired_escrow:${request.id}`;
+        const choice = {
+          id,
+          kind: "recovery" as const,
+          recovery: request,
+          option: {
+            id,
+            label: "Recover expired escrowed shares",
+            settlement: "instant" as const,
+            estimatedSeconds: null,
+            mechanism: "recover_expired_escrow",
+            amount: { mint: request.share_mint, value: request.shares },
+            minimum: { mint: request.share_mint, value: request.shares },
+          },
+        };
+        return Promise.resolve({ choices: [choice], options: [choice.option] });
+      }
       if (!mocks.withdrawalChoices) return actual.prepareStrategyWithdrawalChoices(...args);
       const choices = [
         ...(mocks.directWithdrawalAvailable
@@ -146,6 +178,12 @@ vi.mock("@/services/earn/vault-intent-execution.service", async (original) => ({
   ...(await original<typeof import("@/services/earn/vault-intent-execution.service")>()),
   readConfirmedBlockHeight: async () => 50n,
 }));
+vi.mock("@/services/earn/operation-observation-rpc", () => ({
+  createOperationObservationRpc: () => ({
+    confirmedHeight: async () => 50n,
+    hasSignature: async () => false,
+  }),
+}));
 
 const TOKEN = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SHARE = "So11111111111111111111111111111111111111112";
@@ -157,6 +195,7 @@ let owner: string;
 let keyPair: CryptoKeyPair;
 let unsigned: string;
 let signed: string;
+let requestEnv: Env = env;
 
 async function transaction(message: string) {
   const compiled = compileTransaction(
@@ -216,12 +255,15 @@ async function seedOperationScope(environment: SdpEnvironment) {
 }
 
 beforeEach(async () => {
+  requestEnv = env;
   await seedTestDatabase(env);
   await clearKVStores(env);
   vi.resetAllMocks();
   mocks.withdrawalEnabled = false;
   mocks.withdrawalChoices = false;
   mocks.directWithdrawalAvailable = true;
+  mocks.recoveryRequest = null;
+  mocks.readPositions.mockResolvedValue([]);
   mocks.quoteWithdrawal.mockResolvedValue({
     assetsOut: "9.9",
     assetDecimals: 6,
@@ -304,7 +346,7 @@ function request(
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     },
-    env
+    requestEnv
   );
 }
 
@@ -377,128 +419,405 @@ async function seedOperationCustodyWallet(tag: string, environment: SdpEnvironme
 }
 
 describe("Earn core operation HTTP flow", () => {
-  it("blocks queued production deposits after entitlement loss while reads, cancellation and exits remain available", async () => {
-    await seedOperationScope("production");
-    const walletId = await seedOperationCustodyWallet("production_entitlement", "production");
-    mocks.withdrawalEnabled = true;
-    mocks.proposer.mockResolvedValue(null);
-    const rawSigner = await createSignerFromKeyPair(keyPair);
-    const providerSign = vi.fn(rawSigner.signTransactions);
-    // Keep the actual custody admission wrapper and live database decision;
-    // only the provider's signing port uses the generated test key.
-    mocks.sign.mockImplementation(
-      async (
-        binding: Env,
-        organizationId: string,
-        projectId: string,
-        custodyWalletId: string,
-        movement: MovementId
-      ) => {
-        const scope = { organizationId, projectId };
-        const subject = { custodyWalletId };
-        return admittedSigner(
-          { address: rawSigner.address, signTransactions: providerSign },
-          async () =>
-            decideMovement(
-              movement,
-              await readMoneyAdmissionFacts(binding, scope, movement, subject),
-              subject
-            ),
-          { ...scope, ...subject, movement, provider: "privy", credential: null }
+  it.each(["true", "false"])(
+    "blocks production deposit submissions and refreshes after entitlement loss with sandbox access %s",
+    async (sandboxAllowed) => {
+      requestEnv = { ...env, SDP_ALLOW_SANDBOX_PROJECTS: sandboxAllowed };
+      await seedOperationScope("production");
+      const walletId = await seedOperationCustodyWallet("production_entitlement", "production");
+      mocks.withdrawalEnabled = true;
+      mocks.proposer.mockResolvedValue(null);
+      const rawSigner = await createSignerFromKeyPair(keyPair);
+      const providerSign = vi.fn(rawSigner.signTransactions);
+      // Keep the actual custody admission wrapper and live database decision;
+      // only the provider's signing port uses the generated test key.
+      mocks.sign.mockImplementation(
+        async (
+          binding: Env,
+          organizationId: string,
+          projectId: string,
+          custodyWalletId: string,
+          movement: MovementId
+        ) => {
+          const scope = { organizationId, projectId };
+          const subject = { custodyWalletId };
+          return admittedSigner(
+            { address: rawSigner.address, signTransactions: providerSign },
+            async () =>
+              decideMovement(
+                movement,
+                await readMoneyAdmissionFacts(binding, scope, movement, subject),
+                subject
+              ),
+            { ...scope, ...subject, movement, provider: "privy", credential: null }
+          );
+        }
+      );
+      const depositBody = {
+        strategyId,
+        source: { walletId },
+        amount: { mint: TOKEN, value: "10" },
+      };
+      const prepared = await request("earn/deposit", "POST", depositBody, "production-deposit");
+      expect(prepared.status, await prepared.clone().text()).toBe(202);
+      const deposit = await readOperation(prepared);
+      const accepted = await request(
+        `operations/${deposit.id}/submit`,
+        "POST",
+        { actionId: deposit.actionId, version: deposit.version },
+        "queue-production-deposit"
+      );
+      expect(accepted.status, await accepted.clone().text()).toBe(202);
+      expect((await readOperation(accepted)).status).toBe("queued");
+      const cancellable = await readOperation(
+        await request("earn/deposit", "POST", depositBody, "cancel-production-deposit")
+      );
+      await getDb(env).execute("UPDATE organizations SET settings = ? WHERE id = ?", [
+        JSON.stringify({ enableProductionProject: false }),
+        tenant.org.id,
+      ]);
+
+      const refused = await request("earn/deposit", "POST", depositBody, "production-after-loss");
+      expect(refused.status).toBe(403);
+      expect(await refused.json()).toMatchObject({
+        error: { message: "Production is not enabled for this organization" },
+      });
+      const buildsBeforeRefusal = mocks.build.mock.calls.length;
+      for (const route of ["submit", "refresh"]) {
+        const response = await request(
+          `operations/${cancellable.id}/${route}`,
+          "POST",
+          { actionId: cancellable.actionId, version: cancellable.version },
+          `${route}-after-production-loss`
         );
+        expect(response.status, await response.clone().text()).toBe(403);
+        expect(await response.json()).toMatchObject({
+          error: { message: "Production is not enabled for this organization" },
+        });
       }
-    );
-    const depositBody = {
-      strategyId,
-      source: { walletId },
-      amount: { mint: TOKEN, value: "10" },
-    };
-    const prepared = await request("earn/deposit", "POST", depositBody, "production-deposit");
-    expect(prepared.status, await prepared.clone().text()).toBe(202);
-    const deposit = await readOperation(prepared);
-    const accepted = await request(
-      `operations/${deposit.id}/submit`,
-      "POST",
-      { actionId: deposit.actionId, version: deposit.version },
-      "queue-production-deposit"
-    );
-    expect(accepted.status, await accepted.clone().text()).toBe(202);
-    expect((await readOperation(accepted)).status).toBe("queued");
-    const cancellable = await readOperation(
-      await request("earn/deposit", "POST", depositBody, "cancel-production-deposit")
-    );
-    await getDb(env).execute("UPDATE organizations SET settings = ? WHERE id = ?", [
-      JSON.stringify({ enableProductionProject: false }),
-      tenant.org.id,
-    ]);
+      expect(mocks.build).toHaveBeenCalledTimes(buildsBeforeRefusal);
+      expect(
+        await getDb(env).queryOne(
+          "SELECT count(*)::int AS count FROM operation_attempts WHERE operation_id = ?",
+          [cancellable.id]
+        )
+      ).toEqual({ count: 0 });
+      expect((await request("operations")).status).toBe(200);
+      expect((await readOperation(await request(`operations/${deposit.id}`))).status).toBe(
+        "queued"
+      );
+      const cancelled = await request(
+        `operations/${cancellable.id}/cancel`,
+        "POST",
+        {},
+        "cancel-after-production-loss"
+      );
+      expect(cancelled.status, await cancelled.clone().text()).toBe(200);
+      expect((await readOperation(cancelled)).status).toBe("cancelled");
 
-    const refused = await request("earn/deposit", "POST", depositBody, "production-after-loss");
-    expect(refused.status).toBe(403);
-    expect(await refused.json()).toMatchObject({
-      error: { message: "Production is not enabled for this organization" },
-    });
-    expect((await request("operations")).status).toBe(200);
-    expect((await readOperation(await request(`operations/${deposit.id}`))).status).toBe("queued");
-    const cancelled = await request(
-      `operations/${cancellable.id}/cancel`,
-      "POST",
-      {},
-      "cancel-after-production-loss"
-    );
-    expect(cancelled.status, await cancelled.clone().text()).toBe(200);
-    expect((await readOperation(cancelled)).status).toBe("cancelled");
-
-    const positionId = generateEarnPositionId();
-    await getDb(env).execute(
-      `INSERT INTO earn_positions (id, organization_id, project_id, environment, provider,
+      const positionId = generateEarnPositionId();
+      await getDb(env).execute(
+        `INSERT INTO earn_positions (id, organization_id, project_id, environment, provider,
       kind, custody_wallet_id, vault_address, share_mint, token_mint, label, activated_at)
       VALUES (?, ?, ?, 'production', 'kamino', 'vault_direct', ?, ?, ?, ?, 'Existing holding', sdp_iso_now())`,
-      [positionId, tenant.org.id, tenant.project.id, walletId, VAULT, SHARE, TOKEN]
-    );
-    const exitResponse = await request(
-      "earn/withdraw",
-      "POST",
-      { positionId, amount: { kind: "shares", value: "10" } },
-      "exit-after-production-loss"
-    );
-    expect(exitResponse.status, await exitResponse.clone().text()).toBe(202);
-    const exit = await readOperation(exitResponse);
-    const exitAccepted = await request(
-      `operations/${exit.id}/submit`,
-      "POST",
-      { actionId: exit.actionId, version: exit.version },
-      "queue-exit-after-production-loss"
-    );
-    expect(exitAccepted.status, await exitAccepted.clone().text()).toBe(202);
-    expect(providerSign).not.toHaveBeenCalled();
-    expect(mocks.broadcast).not.toHaveBeenCalled();
+        [positionId, tenant.org.id, tenant.project.id, walletId, VAULT, SHARE, TOKEN]
+      );
+      const exitResponse = await request(
+        "earn/withdraw",
+        "POST",
+        { positionId, amount: { kind: "shares", value: "10" } },
+        "exit-after-production-loss"
+      );
+      expect(exitResponse.status, await exitResponse.clone().text()).toBe(202);
+      const exit = await readOperation(exitResponse);
+      const exitAccepted = await request(
+        `operations/${exit.id}/submit`,
+        "POST",
+        { actionId: exit.actionId, version: exit.version },
+        "queue-exit-after-production-loss"
+      );
+      expect(exitAccepted.status, await exitAccepted.clone().text()).toBe(202);
+      expect(providerSign).not.toHaveBeenCalled();
+      expect(mocks.broadcast).not.toHaveBeenCalled();
 
-    await expect(
-      runWithSystemDatabaseIdentity("cron:reconcile-operations", () =>
-        runInClusterScope({ projectId: null, environment: "production" }, () =>
-          reconcileOperations(env)
+      await expect(
+        runWithSystemDatabaseIdentity("cron:reconcile-operations", () =>
+          runInClusterScope({ projectId: null, environment: "production" }, () =>
+            reconcileOperations(requestEnv)
+          )
         )
+      ).resolves.toBeUndefined();
+      expect(await readOperation(await request(`operations/${deposit.id}`))).toMatchObject({
+        status: "failed",
+        error: { code: "SIGNING_REJECTED" },
+      });
+      expect(
+        await getDb(env).queryOne(
+          "SELECT signed_transaction, dispatch_started_at, observation_only FROM operation_attempts WHERE operation_id = ?",
+          [deposit.id]
+        )
+      ).toEqual({ signed_transaction: null, dispatch_started_at: null, observation_only: true });
+      expect((await readOperation(await request(`operations/${exit.id}`))).status).toBe(
+        "submitted"
+      );
+      expect(providerSign).toHaveBeenCalledTimes(1);
+      expect(mocks.broadcast).toHaveBeenCalledTimes(1);
+      expect(
+        await getDb(env).queryMany("SELECT direction FROM earn_movements WHERE project_id = ?", [
+          tenant.project.id,
+        ])
+      ).toEqual([{ direction: "withdrawal" }]);
+    }
+  );
+
+  it("meters deposit refreshes while withdrawal selection remains available", async () => {
+    const walletId = await seedOperationCustodyWallet("refresh_quota");
+    const deposit = await readOperation(
+      await request(
+        "earn/deposit",
+        "POST",
+        { strategyId, source: { walletId }, amount: { mint: TOKEN, value: "10" } },
+        "prepare-metered-refresh"
       )
-    ).rejects.toThrow("1 operation recovery attempts failed");
-    expect(await readOperation(await request(`operations/${deposit.id}`))).toMatchObject({
-      status: "queued",
-      error: { code: "FORBIDDEN", message: "Production is not enabled for this organization" },
-    });
-    expect(
-      await getDb(env).queryOne(
-        "SELECT signed_transaction, dispatch_started_at FROM operation_attempts WHERE operation_id = ?",
-        [deposit.id]
-      )
-    ).toEqual({ signed_transaction: null, dispatch_started_at: null });
-    expect((await readOperation(await request(`operations/${exit.id}`))).status).toBe("submitted");
-    expect(providerSign).toHaveBeenCalledTimes(1);
-    expect(mocks.broadcast).toHaveBeenCalledTimes(1);
-    expect(
-      await getDb(env).queryMany("SELECT direction FROM earn_movements WHERE project_id = ?", [
-        tenant.project.id,
-      ])
-    ).toEqual([{ direction: "withdrawal" }]);
+    );
+    const quota = vi
+      .spyOn(meteredQuota, "enforceMeteredQuota")
+      .mockRejectedValue(new AppError("RATE_LIMITED", "Provider-read quota exceeded"));
+    try {
+      const response = await request(
+        `operations/${deposit.id}/refresh`,
+        "POST",
+        { actionId: deposit.actionId, version: deposit.version },
+        "metered-deposit-refresh"
+      );
+      expect(response.status, await response.clone().text()).toBe(429);
+      expect(quota).toHaveBeenCalledExactlyOnceWith(expect.anything(), {
+        name: "earn-provider-read",
+        actorMax: 60,
+        orgMax: 240,
+      });
+      expect(mocks.build).toHaveBeenCalledTimes(1);
+
+      mocks.withdrawalChoices = true;
+      const positionId = generateEarnPositionId();
+      await getDb(env).execute(
+        `INSERT INTO earn_positions (id, organization_id, project_id, environment, provider,
+         kind, custody_wallet_id, vault_address, share_mint, token_mint, label, activated_at)
+         VALUES (?, ?, ?, 'sandbox', 'kamino', 'vault_direct', ?, ?, ?, ?, 'Existing holding', sdp_iso_now())`,
+        [positionId, tenant.org.id, tenant.project.id, walletId, VAULT, SHARE, TOKEN]
+      );
+      const withdrawal = await readOperation(
+        await request(
+          "earn/withdraw",
+          "POST",
+          { positionId, amount: { kind: "shares", value: "1" } },
+          "prepare-exit-during-quota"
+        )
+      );
+      expect(withdrawal.nextAction?.type).toBe("select_option");
+      const selected = await request(
+        `operations/${withdrawal.id}/refresh`,
+        "POST",
+        { actionId: withdrawal.actionId, version: withdrawal.version, optionId: "direct" },
+        "select-exit-during-quota"
+      );
+      expect(selected.status, await selected.clone().text()).toBe(202);
+      expect(mocks.withdrawBuild).toHaveBeenCalledTimes(1);
+      expect(quota).toHaveBeenCalledTimes(1);
+    } finally {
+      quota.mockRestore();
+    }
+    const retry = await request(
+      `operations/${deposit.id}/refresh`,
+      "POST",
+      { actionId: deposit.actionId, version: deposit.version },
+      "metered-deposit-refresh"
+    );
+    expect(retry.status, await retry.clone().text()).toBe(202);
+    expect(mocks.build).toHaveBeenCalledTimes(2);
   });
+
+  it.each(["missing", "zero"])(
+    "prepares a separate escrow recovery with a %s wallet balance and retains its custody source",
+    async (walletBalance) => {
+      const walletId = await seedOperationCustodyWallet(`escrow_recovery_${walletBalance}`);
+      const positionId = generateEarnPositionId();
+      const requestId = `request_expired_${walletBalance}`;
+      await getDb(env).execute(
+        `INSERT INTO earn_positions (id, organization_id, project_id, environment, provider,
+         kind, custody_wallet_id, vault_address, share_mint, token_mint, label, activated_at)
+         VALUES (?, ?, ?, 'sandbox', 'kamino', 'vault_direct', ?, ?, ?, ?, 'Escrow holding', sdp_iso_now())`,
+        [positionId, tenant.org.id, tenant.project.id, walletId, VAULT, SHARE, TOKEN]
+      );
+      await getDb(env).execute(
+        `INSERT INTO earn_vault_withdrawal_requests (
+         id, organization_id, project_id, environment, provider, position_id,
+         custody_wallet_id, owner_address, vault_address, token_mint, share_mint,
+         request_address, status, shares, quoted_assets, share_decimals, asset_decimals,
+         discount_bps, nonce, creation_timestamp, provider_state_observed,
+         maturity_timestamp, deadline_timestamp, client_request_id, idempotency_fingerprint,
+         creation_signature)
+         VALUES (?, ?, ?, 'sandbox', 'kamino', ?, ?, ?, ?, ?, ?, ?, 'expired_cancelable',
+                 '10', '9.9', 6, 6, 25, 7, 1700000000, TRUE, 1700000060, 1700000120,
+                 'original-exit', 'original-fingerprint', 'original-signature')`,
+        [
+          requestId,
+          tenant.org.id,
+          tenant.project.id,
+          positionId,
+          walletId,
+          owner,
+          VAULT,
+          TOKEN,
+          SHARE,
+          VAULT,
+        ]
+      );
+      const repository = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
+      const originalRequest = await repository.getById({
+        organizationId: tenant.org.id,
+        environment: "sandbox",
+        withdrawalRequestId: requestId,
+      });
+      if (originalRequest === null) throw new Error("Missing expired request fixture");
+      mocks.recoveryRequest = originalRequest;
+      mocks.withdrawalEnabled = true;
+      mocks.readPositions.mockResolvedValue(
+        walletBalance === "missing"
+          ? []
+          : [
+              {
+                providerReference: VAULT,
+                owner,
+                tokenMint: TOKEN,
+                shareMint: SHARE,
+                cluster: "devnet",
+                shares: "0",
+              },
+            ]
+      );
+      mocks.recoveryBuild.mockImplementation(
+        async (binding: Env, input: Parameters<typeof prepareQueuedStrategyRecovery>[1]) => {
+          const build = await createPostgresEarnVaultWithdrawalRequestsRepository(
+            getDb(binding)
+          ).createWalletTransaction({
+            id: `recovery_build_${walletBalance}`,
+            organizationId: input.actor.organizationId,
+            projectId: input.actor.projectId,
+            environment: "sandbox",
+            provider: input.position.provider,
+            positionId: input.position.id,
+            custodyWalletId: input.custodyWalletId,
+            withdrawalRequestId: input.request.id,
+            action: "cancel",
+            mechanism: "solver_queue",
+            ownerAddress: input.position.ownerAddress,
+            vaultAddress: input.position.vaultAddress,
+            tokenMint: input.position.tokenMint,
+            shareMint: input.position.shareMint,
+            requestAddress: input.request.request_address,
+            unsignedTransaction: unsigned,
+            lastValidBlockHeight: "100",
+            operationOnly: true,
+          });
+          return {
+            id: build.id,
+            unsignedTransaction: unsigned,
+            lastValidBlockHeight: "100",
+            ownerAddress: build.owner_address,
+            custodyWalletId: build.custody_wallet_id ?? null,
+            feeMode: build.fee_mode ?? "wallet",
+            feePayer: build.fee_payer,
+            action: build.action,
+            build,
+          } satisfies Awaited<ReturnType<typeof prepareQueuedStrategyRecovery>>;
+        }
+      );
+
+      const override = await request(
+        "earn/withdraw",
+        "POST",
+        { positionId, amount: { kind: "all" }, source: { walletId: "another_wallet" } },
+        "recovery-source-override"
+      );
+      expect(override.status).toBe(400);
+      const response = await request(
+        "earn/withdraw",
+        "POST",
+        { positionId, amount: { kind: "all" } },
+        "prepare-escrow-recovery"
+      );
+      expect(response.status, await response.clone().text()).toBe(202);
+      const operation = await readOperation(response);
+      const storedSource = () =>
+        getDb(env).queryOne("SELECT source FROM operations WHERE id = ?", [operation.id]);
+      expect(await storedSource()).toEqual({ source: { walletId } });
+      expect(operation.nextAction).toEqual({ type: "select_option" });
+      expect(operation.terms.options).toHaveLength(1);
+      expect(operation.terms.options[0]).toMatchObject({
+        id: `recover_expired_escrow:${requestId}`,
+        mechanism: "recover_expired_escrow",
+        minimum: { mint: SHARE, value: "10" },
+      });
+      expect(mocks.recoveryBuild).not.toHaveBeenCalled();
+      expect(mocks.choiceReads).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          position: expect.objectContaining({
+            id: positionId,
+            custodyWalletId: walletId,
+            ownerAddress: owner,
+          }),
+          shares: undefined,
+          recovery: {
+            actor: expect.objectContaining({
+              organizationId: tenant.org.id,
+              projectId: tenant.project.id,
+            }),
+          },
+        })
+      );
+
+      const selected = await request(
+        `operations/${operation.id}/refresh`,
+        "POST",
+        {
+          actionId: operation.actionId,
+          version: operation.version,
+          optionId: `recover_expired_escrow:${requestId}`,
+        },
+        "select-escrow-recovery"
+      );
+      expect(selected.status, await selected.clone().text()).toBe(202);
+      const reviewed = await readOperation(selected);
+      expect(await storedSource()).toEqual({ source: { walletId } });
+      expect(mocks.recoveryBuild.mock.calls[0]?.[1]).toMatchObject({
+        custodyWalletId: walletId,
+        position: { id: positionId, custodyWalletId: walletId, ownerAddress: owner },
+        request: { id: requestId },
+      });
+      expect(reviewed.nextAction).toEqual({ type: "submit" });
+      expect(reviewed.actionId).not.toBe(operation.actionId);
+      expect(reviewed.version).toBe(operation.version + 1);
+      const submitted = await request(
+        `operations/${operation.id}/submit`,
+        "POST",
+        { actionId: reviewed.actionId, version: reviewed.version },
+        "submit-escrow-recovery"
+      );
+      expect(submitted.status, await submitted.clone().text()).toBe(202);
+      expect((await readOperation(submitted)).status).toBe("queued");
+      expect(mocks.sign).not.toHaveBeenCalled();
+      expect(mocks.broadcast).not.toHaveBeenCalled();
+      expect(
+        await repository.getById({
+          organizationId: tenant.org.id,
+          environment: "sandbox",
+          withdrawalRequestId: requestId,
+        })
+      ).toEqual(originalRequest);
+    }
+  );
 
   it("prepares and submits with only an API key and owner signature, without registering a wallet", async () => {
     const operation = await prepare();

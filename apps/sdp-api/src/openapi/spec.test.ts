@@ -281,19 +281,41 @@ describe("OpenAPI spec", () => {
   });
 
   it.each(["experimental", "beta", "stable"] as const)(
-    "%s holds the replacement Earn contract out of public surfaces",
+    "%s publishes Earn through the normal module release-channel rules",
     (releaseChannel) => {
       const document = createPublicOpenApiDocument({ releaseChannel });
       const manifest = createPublicSurfaceManifest(releaseChannel);
-      expect(
-        Object.keys(document.paths).filter(
-          (path) => path.startsWith("/v1/earn") || path.startsWith("/v1/operations")
-        )
-      ).toEqual([]);
-      expect(document.tags?.some((tag) => tag.name === "Earn")).toBe(false);
-      expect(/earn/i.test(JSON.stringify(document))).toBe(false);
-      expect(manifest.modules).not.toContain("earn");
-      expect(manifest.grantableActions.some(({ module }) => module === "earn")).toBe(false);
+      const paths = Object.entries(document.paths).flatMap(([path, item]) =>
+        path.startsWith("/v1/earn") || path.startsWith("/v1/operations")
+          ? OPERATION_METHODS.filter((method) => item[method]).map(
+              (method) => `${method.toUpperCase()} ${path}`
+            )
+          : []
+      );
+      const published = releaseChannel !== "stable";
+      expect(paths.sort()).toEqual(
+        published
+          ? [
+              "GET /v1/earn/discovery",
+              "GET /v1/earn/positions",
+              "POST /v1/earn/deposit",
+              "POST /v1/earn/withdraw",
+              "GET /v1/operations",
+              "GET /v1/operations/{operationId}",
+              "POST /v1/operations/{operationId}/submit",
+              "POST /v1/operations/{operationId}/refresh",
+              "POST /v1/operations/{operationId}/cancel",
+            ].sort()
+          : []
+      );
+      expect(manifest.modules.includes("earn")).toBe(published);
+      expect(manifest.grantableActions.some(({ module }) => module === "earn")).toBe(published);
+      for (const [path, item] of Object.entries(document.paths)) {
+        if (!path.startsWith("/v1/earn") && !path.startsWith("/v1/operations")) continue;
+        for (const method of OPERATION_METHODS) {
+          if (item[method]) expect(item[method]?.security).toEqual([{ apiKeyAuth: [] }]);
+        }
+      }
     }
   );
 
@@ -307,8 +329,6 @@ describe("OpenAPI spec", () => {
         )
       )
       .sort();
-    // SECURITY REVIEW GATE (PRO-1872): publication of these replacements
-    // requires named sign-off. Do not promote routes to fix a drift test.
     expect(operations).toEqual(
       [
         "GET /v1/earn/discovery",
@@ -619,6 +639,8 @@ describe("OpenAPI spec", () => {
       "Compliance",
       "Counterparties",
       "Asset Profiles",
+      "Earn",
+      "Operations",
     ]);
 
     expect(doc.paths?.["/v1/organizations/{orgId}"]).toBeUndefined();

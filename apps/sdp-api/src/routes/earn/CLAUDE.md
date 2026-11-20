@@ -26,19 +26,17 @@ use `earn.execute`; safe preparation cancellation uses `earn.manage`.
 
 ### Public OpenAPI promotion
 
-`EARN_PUBLIC_SURFACE_PUBLISHED=false` in
-`openapi/release-channel-values.ts` holds Earn out of every public surface,
-including provider availability and grantable-action discovery. The runtime's
-release-channel gate remains separate. The four core and five operation routes
-are internal until named security sign-off (PRO-1872/PRO-2038). Do not widen a
-publication test or publish a replacement merely because its predecessor was
-public. `openapi/spec.test.ts` pins the internal inventory and public exclusion.
+Earn and shared operations follow the same module release channel as the
+runtime. The public contract contains four core actions and five operation
+routes; provider eligibility stays internal. Keep the explicit public inventory
+in `openapi/spec.test.ts` aligned with the router and normal publication rules.
+Do not add rewrite-specific flags or preview visibility exceptions.
 
 Update OpenAPI descriptions, authored guides and dashboard clients together.
 Regenerate OpenAPI, route actions, served paths, playground, API reference,
 Postman, AI resources and module map using their owning generators. Generated
-files must not be edited manually. The internal consumer guide lives at
-`apps/sdp-docs/content/unpublished/earn/core-api.mdx`.
+files must not be edited manually. The consumer integration guide lives at
+`apps/sdp-docs/content/docs/earn/integration-details.mdx`.
 
 ## Preparation and authority
 
@@ -105,6 +103,10 @@ and `createSponsorshipFeePayment`, with the movement from `MOVEMENTS`. Every
 worker reconstructs the original action principal and rechecks its current
 credential, action grant, wallet binding and admission before a new effect.
 Revocation does not become permission merely because an operation is queued.
+Pass `requiredAction: "earn.execute"` at each new sign, proposal, sponsor and
+broadcast boundary, including exits. Re-read API-key grants and member role and
+project access there. Refusal permits only observation of known bytes and
+provider cleanup. Keep the shared admission layer's default exit semantics.
 
 A durable provider account/proposal identity precedes the single create.
 Fenced leases prevent takeover from racing a possibly active worker. The lease
@@ -169,6 +171,30 @@ identical concurrent work only within exact authorized scope, cache static facts
 without caching failures, and do not fetch an account twice. Fresh reads after
 movement confirmation cannot join work begun before their freshness boundary.
 State before/after request counts when changing read or quote behavior.
+
+Operation recovery scans the `(environment, next_check_at, id)` partial index
+for at most 100 due candidates. Run at most four workers and lease only work
+ready to start. Stable pending work backs off from 15 to 300 seconds, capped
+at 60 seconds for `sign_in_provider`; status progress resets it to 15 seconds.
+Observe existing movement/request ledgers before resolving transaction builds.
+Within one worker run, share a lazy RPC client and observations only for the
+exact organization, project, environment and recorded principal. Four concurrent
+same-authority status requests become one batch; two custody-proposal height
+reads become one. Batch at most 256 signatures, evict finished status batches
+and failed heights, and never treat absence or a cached failure as nonexecution.
+
+Expired solver recovery adds zero provider reads without an eligible recorded
+request and one live proof read for the position's oldest candidate. Reusing
+that call's validated proof in build admission reduces selection from two API
+proof reads to one, before existing provider validation and simulation. Never
+persist that evidence or accept it from a caller; every later preparation or
+refresh must read fresh provider state.
+Offer one recovery choice, not an owner-wide scan or one read per old request.
+Returning shares is `settlementOutcome: recovered`, not delivered asset payout.
+The new reviewed withdrawal retains source grants and leaves the original
+operation's post-submit cancellation barrier intact. Do not restore Hastra par
+cancellation as recovery: its reusable request has no amount/cycle binding.
+PRO-2530 and PRO-2528 track that separate authority-release design.
 
 Atomic swap-funded builds retain one compute probe and one final simulation per
 attempt. An oversized request no longer reads a split baseline balance or runs

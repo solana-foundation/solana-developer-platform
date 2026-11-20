@@ -135,19 +135,9 @@ describe("buildApiReference", () => {
     });
   }
 
-  it("renders the internal Earn action's responses without publishing it", () => {
-    const internal = createOpenApiDocument();
-    const published = createPublicOpenApiDocument({ releaseChannel: "experimental" });
-    expect(published.paths["/v1/earn/deposit"]).toBeUndefined();
-    const deposit = internal.paths["/v1/earn/deposit"]?.post;
-    if (deposit === undefined) throw new Error("The internal Earn deposit is missing");
-    // Render an API-key-only fixture without changing the publication hold.
-    const document: OpenAPIObject = {
-      ...internal,
-      paths: {
-        "/v1/earn/deposit": { post: { ...deposit, security: [{ apiKeyAuth: [] }] } },
-      },
-    };
+  it("renders the Earn action's responses through its module release channel", () => {
+    const document = createPublicOpenApiDocument({ releaseChannel: "experimental" });
+    expect(document.paths["/v1/earn/deposit"]).toBeDefined();
     const reference = apiReferenceSchema.parse(buildApiReference(document));
     const earn = reference.families.find((family) => family.name === "Earn");
     if (!earn) throw new Error("The Earn family is missing");

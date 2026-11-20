@@ -1,8 +1,8 @@
 import { currentClusterScope } from "@sdp/rpc/scope";
-import { getDb } from "@/db/client";
 import type { OperationClaim, OperationScope } from "@/db/repositories/operations.repository";
 import { AppError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
+import { createOperationObservationRpc } from "@/services/earn/operation-observation-rpc";
 import { OPERATION_WORKER_BUDGET_MS } from "@/services/earn/operation-worker-budget";
 import {
   advanceEarnOperation,
@@ -40,51 +40,49 @@ async function recordRecoveryFailure(
 export async function reconcileOperations(env: Env): Promise<void> {
   const runExpiresAt = Date.now() + OPERATION_WORKER_BUDGET_MS;
   const { environment } = currentClusterScope();
-  const candidates = await getDb(env).queryMany<{
-    id: string;
-    organization_id: string;
-    project_id: string;
-  }>(
-    `SELECT operation.id, operation.organization_id, operation.project_id
-     FROM operations operation JOIN operation_attempts attempt
-       ON attempt.operation_id = operation.id AND attempt.action_id = operation.action_id
-       AND attempt.action_version = operation.action_version
-     WHERE operation.environment = ? AND operation.status NOT IN ('completed', 'failed', 'cancelled')
-       AND (attempt.execution_requested_at IS NOT NULL OR attempt.dispatch_started_at IS NOT NULL OR attempt.signed_transaction IS NOT NULL)
-       AND (operation.claim_until IS NULL OR operation.claim_until <= now())
-     ORDER BY operation.updated_at, operation.id LIMIT 100`,
-    [environment]
-  );
   const service = createOperationsService(env);
+  const candidates = await service.repository.listDueRecovery(environment);
+  const observations = createOperationObservationRpc();
   let failures = 0;
-  // Each provider wake is bounded by its own execution lease. Keep pressure
-  // bounded too; a slow custody account must not fan out unbounded RPC work.
-  for (const candidate of candidates) {
-    if (Date.now() >= runExpiresAt) break;
-    const scope = {
-      organizationId: candidate.organization_id,
-      projectId: candidate.project_id,
-      environment,
-    };
-    const claim = await service.repository.claimRecovery(scope, candidate.id);
-    if (claim === null) continue;
-    try {
-      await runAsRecordedOperationPrincipal(env, scope, claim, () =>
-        advanceEarnOperation(env, scope, claim)
-      );
-    } catch (error) {
-      failures += 1;
-      getLogger().error({ error, operationId: candidate.id }, "Operation recovery failed");
+  let cursor = 0;
+  async function recoverNext(): Promise<void> {
+    while (Date.now() < runExpiresAt) {
+      const candidate = candidates[cursor++];
+      if (candidate === undefined) return;
+      const scope = {
+        organizationId: candidate.organizationId,
+        projectId: candidate.projectId,
+        environment,
+      };
+      // Lease only work that can start now, never the whole candidate page.
+      const claim = await service.repository.claimRecovery(scope, candidate.id);
+      if (claim === null) continue;
       try {
-        await recordRecoveryFailure(service, scope, claim, error);
-      } catch (projectionError) {
-        getLogger().error(
-          { error: projectionError, operationId: candidate.id },
-          "Operation failure projection failed"
+        if (Date.now() >= runExpiresAt) return;
+        await runAsRecordedOperationPrincipal(env, scope, claim, () =>
+          advanceEarnOperation(env, scope, claim, observations)
         );
+      } catch (error) {
+        failures += 1;
+        getLogger().error({ error, operationId: candidate.id }, "Operation recovery failed");
+        try {
+          await recordRecoveryFailure(service, scope, claim, error);
+        } catch (projectionError) {
+          getLogger().error(
+            { error: projectionError, operationId: candidate.id },
+            "Operation failure projection failed"
+          );
+        }
+      } finally {
+        await service.repository.releaseRecovery(scope, claim);
       }
-    } finally {
-      await service.repository.release(scope, claim);
+    }
+  }
+  const workers = await Promise.allSettled(Array.from({ length: 4 }, recoverNext));
+  for (const outcome of workers) {
+    if (outcome.status === "rejected") {
+      failures += 1;
+      getLogger().error({ error: outcome.reason }, "Operation recovery worker failed");
     }
   }
   if (failures > 0) throw new Error(`${failures} operation recovery attempts failed`);

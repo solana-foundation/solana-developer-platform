@@ -244,10 +244,12 @@ async function seedGraph(): Promise<void> {
   await client.query(
     `INSERT INTO operations
       (id, organization_id, project_id, environment, kind, status, intent, source,
-       principal, action_principal, request_key, fingerprint, action_id, terms, resource_ref)
+       principal, action_principal, request_key, fingerprint, action_id, terms, resource_ref,
+       next_check_at, recovery_check_count)
      VALUES ('live_operation', $1, $2, 'sandbox', 'earn.deposit', 'submitted',
        '{"kind":"earn.deposit"}', '{}', '{}', '{}', 'operation-key', 'test',
-       'test-action', '{}', '{"type":"movement","id":"movement_live_owner"}')`,
+       'test-action', '{}', '{"type":"movement","id":"movement_live_owner"}',
+       '2026-11-20T12:00:00.000Z', 3)`,
     [org, project]
   );
   await client.query(

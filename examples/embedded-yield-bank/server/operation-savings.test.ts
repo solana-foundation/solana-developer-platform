@@ -65,6 +65,26 @@ describe("operation savings adapter", () => {
       )
     ).toMatchObject({ balance: "0", earned: "5", total: "105" });
   });
+  it("does not treat recovered shares as an earnings payout or an unknown cash flow", () => {
+    const recovered = operation("earn.withdraw", {
+      result: {
+        positionId: "position",
+        signature: "recovery",
+        strategyId: "strategy",
+        settledAmount: { mint: "shares", value: "3" },
+        settlementOutcome: "recovered",
+      },
+    });
+    expect(
+      summarizeSavingsOperations(
+        { amount: "105" },
+        null,
+        [operation("earn.deposit"), operation("earn.withdraw"), recovered],
+        mint
+      )
+    ).toMatchObject({ earned: "5", total: "105" });
+  });
+
   it("keeps closed-position withdrawals scoped by their recorded strategy", () => {
     const exit = operation("earn.withdraw");
     expect(operationsForSavingsStrategy([exit], "strategy", [])).toEqual([

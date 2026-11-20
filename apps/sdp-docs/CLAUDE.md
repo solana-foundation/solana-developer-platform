@@ -161,7 +161,7 @@ Name a provider only to explain its specific behavior or show an API value.
 
 ## Sidebar Components
 
-`src/components/docs-shell/sidebar.tsx`: `"use client"`, receives `tree` (the page tree cut to what the sidebar draws, `sidebarTreeOf`, since every page ships it), `sectionOverrides`, optional `dashboardUrl` and `agentSetup`. Search sits above the compact Dashboard link and **Agent setup** menu (`agent-setup.tsx`): one tab per coding agent, each a copyable `npx skills add` command. The layout builds the commands with `getAgentSetupOptions()` (`src/lib/agent-setup.ts`). Nothing unreleased is offered on any deployment: the docs skill always installs, and a module skill in `MODULE_SKILLS` shows only while its `listed` toggle is true, its module is stable, and the deployment publishes that module (`isModulePublished`, which applies a hold such as Earn's). The MCP tab's toggle is `DOCS_MCP_COMMAND`: null hides it until the docs MCP ships. The footer holds one environment-status line (its mainnet half links Go to mainnet) and the Fumadocs `ThemeSwitch` (light, dark, system); AI resources link to `llms.txt`. The top-level entry a page sits under stays highlighted like the page: its breadcrumb's first page, which the layout passes for the pages whose path does not say it (`sidebarSectionOverrides`, `src/lib/breadcrumbs.ts`), else the longest top-level URL its path extends (`sectionByPath`, `src/lib/sidebar-section.ts`).
+`src/components/docs-shell/sidebar.tsx`: `"use client"`, receives `tree` (the page tree cut to what the sidebar draws, `sidebarTreeOf`, since every page ships it), `sectionOverrides`, optional `dashboardUrl` and `agentSetup`. Search sits above the compact Dashboard link and **Agent setup** menu (`agent-setup.tsx`): one tab per coding agent, each a copyable `npx skills add` command. The layout builds the commands with `getAgentSetupOptions()` (`src/lib/agent-setup.ts`). Nothing unreleased is offered on any deployment: the docs skill always installs, and a module skill in `MODULE_SKILLS` shows only while its `listed` toggle is true, its module is stable, and the deployment publishes that module (`isModulePublished`). The MCP tab's toggle is `DOCS_MCP_COMMAND`: null hides it until the docs MCP ships. The footer holds one environment-status line (its mainnet half links Go to mainnet) and the Fumadocs `ThemeSwitch` (light, dark, system); AI resources link to `llms.txt`. The top-level entry a page sits under stays highlighted like the page: its breadcrumb's first page, which the layout passes for the pages whose path does not say it (`sidebarSectionOverrides`, `src/lib/breadcrumbs.ts`), else the longest top-level URL its path extends (`sectionByPath`, `src/lib/sidebar-section.ts`).
 
 **Do not add new navigation patterns outside the page tree.** Navigation is auto-generated from `source.pageTree` via Fumadocs. To add pages to the sidebar, add MDX files to `content/docs/` and update `meta.json`.
 
@@ -362,18 +362,13 @@ Yield in `content/docs/guides/embedded-yield.mdx`. The public API reference,
 Postman, playground and AI resources regenerate from the channel's public
 OpenAPI document. No branch or deployment-preview override admits content.
 
-The replacement contract lives in `content/unpublished/earn/core-api.mdx`.
-Its four core Earn routes and five shared operation routes remain internal;
-public reference, playground, Postman and AI generators must not include them.
-Publishing those routes requires named security sign-off. The Treasury and
-provider-integration guides also remain under `content/unpublished/earn`.
-
-Earn has four core actions and five shared operation lifecycle operations.
-Six independent WisdomTree onboarding operations remain for eligibility. Old
-catalogue, product, preview, transaction and program routes are removed. Guides
-must use the core contract for holdings, history, pending actions and exits.
-`EARN_PUBLIC_SURFACE_PUBLISHED=false` also holds Earn out of the public manifest;
-publication of the replacements requires named security sign-off.
+Earn guides live in `content/docs/earn` with `module: earn`, and follow the
+normal release-channel gate. Its public contract has four core actions and five
+shared operation routes. Six independent WisdomTree onboarding operations stay
+internal. Old catalogue, product, preview, transaction and program routes are
+removed. Do not add a separate Earn publication flag or preview-only override.
+OpenAPI owns request and response contracts; public Earn guides own the
+integration walkthrough. Do not maintain a second hidden core contract.
 
 ## Do's and Don'ts
 

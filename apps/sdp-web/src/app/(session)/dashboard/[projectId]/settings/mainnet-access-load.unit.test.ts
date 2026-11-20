@@ -39,7 +39,12 @@ function answer(mainnetAccess: unknown) {
     if (url.endsWith("/v1/organizations/org_sdp")) {
       return Response.json({ data: { name: "Acme" } });
     }
-    return Response.json({ data: mainnetAccess });
+    // The mainnet-access read names its path: a catch-all answer here would let
+    // a typo'd or moved path pass with the same body.
+    if (url.endsWith("/v1/organizations/org_sdp/mainnet-access")) {
+      return Response.json({ data: mainnetAccess });
+    }
+    throw new Error(`unexpected fetch: ${url}`);
   });
 }
 

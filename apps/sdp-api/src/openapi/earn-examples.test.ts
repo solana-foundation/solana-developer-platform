@@ -1,11 +1,31 @@
+import { refreshOperationSchema, submitOperationSchema } from "@sdp/types/operations";
 import { describe, expect, it } from "vitest";
 import { prepareEarnDepositSchema, prepareEarnWithdrawalSchema } from "@/routes/earn/core/schemas";
+import { emptyOperationBodySchema } from "@/routes/operations/schemas";
 import { earnDiscoveryResponseSchema, earnPositionsResponseSchema } from "./schemas/earn-core";
 import { EARN_STRATEGY_EXAMPLE } from "./schemas/earn-examples";
+import { createOpenApiDocument } from "./spec";
 
 const meta = { requestId: "req_example", timestamp: "2026-11-06T18:00:00.000Z" };
 
 describe("Earn core contract examples", () => {
+  const document = createOpenApiDocument();
+
+  it.each([
+    ["/v1/earn/deposit", prepareEarnDepositSchema],
+    ["/v1/earn/withdraw", prepareEarnWithdrawalSchema],
+    ["/v1/operations/{operationId}/submit", submitOperationSchema],
+    ["/v1/operations/{operationId}/refresh", refreshOperationSchema],
+    ["/v1/operations/{operationId}/cancel", emptyOperationBodySchema],
+  ] as const)("validates the actual OpenAPI request example for %s", (path, schema) => {
+    const request = document.paths[path]?.post?.requestBody;
+    if (request === undefined || "$ref" in request) throw new Error(`Missing request for ${path}`);
+    const published = request.content["application/json"]?.schema;
+    if (published === undefined || "$ref" in published || published.example === undefined)
+      throw new Error(`Missing request example for ${path}`);
+    expect(schema.safeParse(published.example)).toMatchObject({ success: true });
+  });
+
   it("keeps unknown observation times explicit in discovery", () => {
     const result = earnDiscoveryResponseSchema.parse({
       data: {

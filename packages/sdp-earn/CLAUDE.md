@@ -21,11 +21,11 @@ integrator's SDP API key.
 
 Earn guides live in `apps/sdp-docs/content/docs/earn` and
 `apps/sdp-docs/content/docs/guides/embedded-yield.mdx`. The normal docs generators render the
-public contract for the deployment's release channel. Earn's publication hold
-keeps every Earn and shared operation route internal pending named security
-sign-off, independently of runtime channel access. Programs and provider-action
-routes are removed. The core contract is
-documented in `apps/sdp-docs/content/unpublished/earn/core-api.mdx`.
+public contract for the deployment's release channel. Earn and its shared
+operation routes follow the existing module tags and channel rules; do not add
+a rewrite-specific visibility flag. Programs and provider-action routes are
+removed. The core contract is
+documented in `apps/sdp-docs/content/docs/earn/integration-details.mdx`.
 
 ## Local development — the whole Earn stack
 

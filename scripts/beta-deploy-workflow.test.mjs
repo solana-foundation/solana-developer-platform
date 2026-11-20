@@ -118,7 +118,7 @@ test("the beta workflow runs the beta steps in order", () => {
   assertLine(beta, "      BETA_SERVICE: sdp-beta-api-public");
   assertLine(beta, "      BETA_CRON_SERVICE: sdp-beta-cron");
   assertLine(beta, "      BETA_MIGRATE_JOB: sdp-beta-api-public-migrate");
-  assertLine(beta, "      BETA_ORIGIN: https://api-beta.solana.com");
+  assertLine(beta, "      BETA_ORIGIN: https://api-devnet.solana.com");
   assert.deepEqual(
     steps(beta).map(({ name }) => name),
     [
@@ -386,7 +386,7 @@ function runGate({ serving, ghExitCode = 0 }) {
   const run = runScript(runBlock(stepBlock(betaJob(), "Post the sdp-web beta gate status")), {
     stubs: { curl, gh: `exit ${ghExitCode}` },
     env: {
-      BETA_ORIGIN: "https://api-beta.solana.com",
+      BETA_ORIGIN: "https://api-devnet.solana.com",
       GITHUB_REPOSITORY: repository,
       IMAGE_SHA: imageSha,
       DEPLOYED_REVISION: deployedRevision,

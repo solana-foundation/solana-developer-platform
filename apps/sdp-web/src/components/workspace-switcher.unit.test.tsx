@@ -168,8 +168,8 @@ describe("WorkspaceSwitcher", () => {
     await openSwitcher();
 
     const sandbox = screen.getByRole("menuitem", { name: /^Sandbox/ });
-    expect(within(sandbox).getByText("Devnet · platform-beta.solana.com")).toBeDefined();
-    expect(sandbox.getAttribute("href")).toBe("https://platform-beta.solana.com");
+    expect(within(sandbox).getByText("Devnet · platform-devnet.solana.com")).toBeDefined();
+    expect(sandbox.getAttribute("href")).toBe("https://platform-devnet.solana.com");
     expect(sandbox.getAttribute("target")).toBe("_blank");
   });
 

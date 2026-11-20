@@ -3,6 +3,7 @@ import type {
   EarnVaultParRedemptionQuote,
   EarnVaultParRedemptionRequestPlan,
   EarnVaultQueuedWithdrawalQuote,
+  EarnVaultQueuedWithdrawalRequestLookup,
   EarnVaultQueuedWithdrawalRequestPlan,
   EarnVaultTransactionPlan,
 } from "@sdp/earn/types";
@@ -42,6 +43,10 @@ import {
   resolveVaultQueuedWithdrawClient,
 } from "./execution-registry";
 import { earnRuntime } from "./runtime";
+import {
+  assertExpiredStrategyEscrow,
+  assertStrategyRecoverySource,
+} from "./strategy-withdrawal-recovery.service";
 import { createVaultDeadline } from "./vault-deadline";
 import {
   appendVaultRequestMemo,
@@ -387,7 +392,7 @@ async function broadcastQueuedAction(
   env: Env,
   result: QueuedWithdrawalMutationResult
 ): Promise<QueuedWithdrawalMutationResult> {
-  if (result.replayed) return result;
+  if (result.replayed || result.action.status === "finalized") return result;
   try {
     await broadcastVaultTransaction({
       deadline: createVaultDeadline(),
@@ -545,6 +550,109 @@ export async function buildWalletQueuedWithdrawalRequest(
     lastValidBlockHeight: built.last_valid_block_height,
     currentBlockHeight: currentBlockHeight.toString(),
     reservationExpiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+    createdBy: input.actor.userId ?? null,
+    initiatedByKeyId: input.actor.apiKeyId ?? null,
+  });
+}
+
+/** Return proven expired queue escrow; this never cancels a live withdrawal. */
+export async function buildWalletQueuedWithdrawalRecovery(
+  env: Env,
+  input: {
+    actor: QueuedWithdrawalActor;
+    position: QueuedWithdrawalPosition;
+    request: EarnVaultWithdrawalRequestRow;
+    /** Same-call evidence from choice planning, never read from a stored action. */
+    proof?: EarnVaultQueuedWithdrawalRequestLookup;
+    feePayer?: string;
+    custodyWalletId?: string;
+    fee?: VaultFeeMode;
+  }
+): Promise<WalletQueuedWithdrawalBuiltTransaction> {
+  const { environment, cluster } = currentClusterScope();
+  const repository = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
+  const request = await repository.getById({
+    organizationId: input.actor.organizationId,
+    environment,
+    withdrawalRequestId: input.request.id,
+  });
+  if (request === null) throw notFound("Expired withdrawal escrow");
+  assertStrategyRecoverySource(request, input.actor, input.position);
+  if ((input.custodyWalletId ?? null) !== request.custody_wallet_id)
+    throw conflict("Expired escrow signing wallet changed");
+  const client = resolveVaultQueuedWithdrawClient(env, request.provider, createVaultDeadline());
+  if (client === null) throw notImplemented(request.provider, "expired withdrawal escrow recovery");
+  const runtime = earnRuntime(env);
+  const lookup =
+    input.proof ??
+    (await client.readQueuedWithdrawalRequest(runtime, {
+      providerReference: request.vault_address,
+      requestAddress: request.request_address,
+    }));
+  assertExpiredStrategyEscrow(request, lookup);
+  const transactionId = generateEarnWalletWithdrawalRequestTransactionId();
+  const plan = appendVaultRequestMemo(
+    await client.buildQueuedWithdrawalCancel(runtime, {
+      providerReference: request.vault_address,
+      owner: request.owner_address,
+      requestAddress: request.request_address,
+    }),
+    "strategy-withdrawal-cancel",
+    transactionId
+  );
+  if (
+    plan.cluster !== cluster ||
+    plan.assetIdentity.depositTokenMint !== request.token_mint ||
+    plan.assetIdentity.shareMint !== request.share_mint ||
+    plan.accepted?.shares === undefined ||
+    compareDecimalAmounts(plan.accepted.shares, request.shares) !== 0
+  )
+    throw conflict("Escrow recovery builder changed the reviewed asset identity or shares");
+  const feePayer =
+    input.fee === undefined
+      ? input.feePayer === input.position.ownerAddress
+        ? undefined
+        : input.feePayer
+      : vaultRentPayer(input.fee);
+  const unsigned = await compileWalletPlan({
+    actor: input.actor,
+    position: input.position,
+    plan,
+    fee: input.fee,
+    ...(feePayer ? { feePayer } : {}),
+  });
+  // Persist a live observation, not cancellation intent. The signed action's
+  // existing compare-and-set still decides whether submission can proceed.
+  const observed = await repository.advanceRequest({
+    organizationId: request.organization_id,
+    withdrawalRequestId: request.id,
+    toStatus: "expired_cancelable",
+    nonce: request.nonce,
+    creationTimestamp: request.creation_timestamp,
+  });
+  if (observed?.status !== "expired_cancelable")
+    throw conflict("Withdrawal escrow changed while preparing recovery");
+  return repository.createWalletTransaction({
+    id: transactionId,
+    organizationId: input.actor.organizationId,
+    projectId: input.actor.projectId,
+    environment,
+    provider: request.provider,
+    custodyWalletId: request.custody_wallet_id,
+    feeMode: input.fee?.kind === "sponsored" ? "sponsored" : feePayer ? "partner" : "wallet",
+    operationOnly: true,
+    positionId: request.position_id,
+    withdrawalRequestId: request.id,
+    action: "cancel",
+    mechanism: "solver_queue",
+    ownerAddress: request.owner_address,
+    vaultAddress: request.vault_address,
+    tokenMint: request.token_mint,
+    shareMint: request.share_mint,
+    requestAddress: request.request_address,
+    feePayer: feePayer ?? null,
+    unsignedTransaction: Buffer.from(unsigned.bytes).toString("base64"),
+    lastValidBlockHeight: unsigned.lastValidBlockHeight,
     createdBy: input.actor.userId ?? null,
     initiatedByKeyId: input.actor.apiKeyId ?? null,
   });
@@ -727,6 +835,23 @@ export async function submitWalletQueuedWithdrawalAction(
     if (!build.withdrawal_request_id) {
       throw internalError(`Queued cancellation build ${build.id} names no request`);
     }
+    const request = await repository.getById({
+      organizationId: input.actor.organizationId,
+      environment: build.environment,
+      withdrawalRequestId: build.withdrawal_request_id,
+    });
+    if (request === null || build.position_id === null) throw notFound("Expired withdrawal escrow");
+    assertStrategyRecoverySource(request, input.actor, {
+      id: build.position_id,
+      provider: build.provider,
+      ownerAddress: build.owner_address,
+      custodyWalletId: build.custody_wallet_id,
+      vaultAddress: build.vault_address,
+      tokenMint: build.token_mint,
+      shareMint: build.share_mint,
+    });
+    const recoverFinalizedWalletBuild =
+      request.status === "cancelled" && request.closing_signature === signed.signature;
     const fingerprint = buildEarnVaultQueuedWithdrawalCancelFingerprint({
       environment: build.environment,
       withdrawalRequestId: build.withdrawal_request_id,
@@ -745,6 +870,7 @@ export async function submitWalletQueuedWithdrawalAction(
       clientRequestId: input.clientRequestId,
       idempotencyFingerprint: fingerprint,
       walletTransactionId: build.id,
+      recoverFinalizedWalletBuild,
       createdBy: input.actor.userId ?? null,
       initiatedByKeyId: input.actor.apiKeyId ?? null,
     });

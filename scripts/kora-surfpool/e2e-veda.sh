@@ -2,10 +2,15 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-REMOTE_RPC_URL="${VEDA_SURFPOOL_DEVNET_RPC_URL:-${SURFPOOL_REMOTE_RPC_URL:-}}"
+CLUSTER="${VEDA_SURFPOOL_CLUSTER:-devnet}"
+case "${CLUSTER}" in
+  devnet) REMOTE_RPC_URL="${VEDA_SURFPOOL_DEVNET_RPC_URL:-${SURFPOOL_REMOTE_RPC_URL:-}}" ;;
+  mainnet-beta) REMOTE_RPC_URL="${VEDA_SURFPOOL_MAINNET_RPC_URL:-${SURFPOOL_REMOTE_RPC_URL:-}}" ;;
+  *) echo "VEDA_SURFPOOL_CLUSTER must be devnet or mainnet-beta." >&2; exit 1 ;;
+esac
 
 if [ -z "${REMOTE_RPC_URL}" ]; then
-  echo "VEDA_SURFPOOL_DEVNET_RPC_URL is required (Surfpool clones Veda's devnet deployment from it)." >&2
+  echo "Set VEDA_SURFPOOL_DEVNET_RPC_URL or VEDA_SURFPOOL_MAINNET_RPC_URL for ${CLUSTER}." >&2
   exit 1
 fi
 
@@ -25,12 +30,14 @@ if [ "${SDP_VEDA_SURFPOOL_IN_CONTAINER:-}" != "1" ]; then
   exec docker run --rm --init \
     --platform linux/amd64 \
     --env SDP_VEDA_SURFPOOL_IN_CONTAINER=1 \
-    --env VEDA_SURFPOOL_DEVNET_RPC_URL="${REMOTE_RPC_URL}" \
+    --env VEDA_SURFPOOL_CLUSTER="${CLUSTER}" \
+    --env SURFPOOL_REMOTE_RPC_URL="${REMOTE_RPC_URL}" \
     --env VEDA_SURFPOOL_E2E=true \
     "${IMAGE}"
 fi
 
 export SURFPOOL_REMOTE_RPC_URL="${REMOTE_RPC_URL}"
+export VEDA_SURFPOOL_CLUSTER="${CLUSTER}"
 export VEDA_SURFPOOL_E2E=true
 export KORA_SURFPOOL_MODE=shim
 export KORA_SURFPOOL_RUNTIME=embedded

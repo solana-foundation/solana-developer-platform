@@ -230,7 +230,7 @@ export function isAuthoringStepComplete(
     case "permissions":
       return draft.grants.length > 0;
     case "wallets":
-      return draft.walletScope === "all" || draft.selectedWalletIds.length > 0;
+      return true;
     case "review":
       return true;
     default: {

@@ -51,12 +51,25 @@ export async function resolveEarnOperationBuild(
   };
   if (queued) {
     const row = await requirePreparedQueuedStrategyTransaction(env, transactionScope, reference.id);
-    if (row.action !== "request" || claim.operation.intent.kind !== "earn.withdraw")
+    if (
+      claim.operation.intent.kind !== "earn.withdraw" ||
+      (row.action === "cancel" &&
+        (claim.operation.intent.amount.kind !== "all" ||
+          row.position_id !== claim.operation.intent.positionId ||
+          row.mechanism !== "solver_queue" ||
+          row.withdrawal_request_id === null ||
+          !claim.operation.terms.options.some(
+            (option) =>
+              option.id === `recover_expired_escrow:${row.withdrawal_request_id}` &&
+              option.mechanism === "recover_expired_escrow"
+          )))
+    )
       throw conflict("Prepared transaction does not match the operation action");
     const target: PreparedStrategySigningTarget = {
       ...row,
       fee_mode: row.fee_mode ?? "wallet",
-      movement: "earn.queued_withdraw_request",
+      movement:
+        row.action === "cancel" ? "earn.queued_withdraw_cancel" : "earn.queued_withdraw_request",
     };
     return {
       target,

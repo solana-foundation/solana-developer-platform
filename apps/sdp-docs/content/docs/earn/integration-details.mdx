@@ -41,6 +41,31 @@ call. SDP cannot revoke a signature or pull a broadcast transaction from Solana.
 Internal provider cleanup for lost permissions or expiry is a safety mechanism,
 not an API cancellation flow.
 
+## Recover expired withdrawal escrow
+
+If a solver withdrawal misses its deadline, its shares can remain in the
+provider's escrow. Prepare a new `POST /v1/earn/withdraw` for that tracked
+`positionId` with `amount: { "kind": "all" }`. When the provider proves that
+the recorded request still holds those expired shares, the operation offers
+**Recover expired escrowed shares** through `select_option`.
+
+Select that option with `/refresh`, review its new action, then use the normal
+signing and `/submit` flow. This action returns shares to the same owner; it
+does not pay the originally requested deposit token. Its result uses
+`settlementOutcome: "recovered"` with the returned share mint and amount only
+after the exact recovery transaction and provider outcome are verified.
+
+Each review offers at most one expired request. After its shares return, prepare
+another withdrawal if the position has more expired requests to recover.
+
+The original accepted operation is not reopened, and its `/cancel` remains
+unavailable. Expiry alone or a missing provider request does not authorize
+recovery. Hastra operator redemptions use a reusable owner request address and
+delegated wYLDS. Their cancellation instruction cannot bind a reviewed amount
+or request cycle. Earn does not offer recovery for that mechanism; it needs a
+separate design for releasing current delegation safely. Do not treat its
+pending intermediate tokens as delivered USDC or recovered PRIME shares.
+
 ## Reviewed signatures
 
 The prepared owner and every required fee payer must sign the unchanged
@@ -71,8 +96,58 @@ A definitive signing rejection or proven nonexecution ends the operation as
 withdrawal with a new idempotency key. A timeout, unknown provider response or
 missing RPC history never authorizes a new operation.
 
+## Fees and rates
+
+Distinguish these costs when presenting a strategy:
+
+| Cost | What the integration can establish |
+| --- | --- |
+| Solana network fees and account rent | The prepared transaction names the fee payer. An address source pays from the owner unless you supply a separate `feePayer`, which must also sign. A connected wallet uses its configured fee policy; sponsorship is not universal. |
+| Provider costs | Management, performance, swap or redemption charges depend on the selected product and route. Show provider-reported metadata and reviewed estimates; a queue discount also changes expected proceeds. |
+| SDP commercial pricing | The Earn response does not establish a commercial price or revenue share. Confirm applicable SDP pricing separately; do not infer a zero fee from an absent field. |
+
+Show `terms.fees` when supplied. `null` means the breakdown is unavailable,
+not that the transaction is free. It is not a complete invoice for ongoing
+provider costs. `rate.value` is provider-reported APY, not a promise of the
+customer's return after every cost; the API does not normalize every provider
+rate into a universally comparable net yield.
+
+## Permissioned tokens and transfer hooks
+
+Earn integrates specific provider instruments and their admitted token
+programs. For example, WisdomTree fund tokens use Token-2022 and an issuer
+compliance hook. Its adapter validates the pinned program and supplies the
+hook accounts required by the transfer. The wallet provider must permit the
+programs and instructions in the reviewed transaction.
+
+This does not provide generic support for every transfer hook, gated mint or
+Token ACL policy. A strategy listing is not proof that an arbitrary token can
+be deposited or transferred. Issuer freeze, delegate and transfer restrictions
+can still affect holdings and exits. Monitoring supported deposit-mint
+extensions does not remove those authorities or guarantee execution.
+
+SDP's [tokenization tools](/docs/tokens/tokenize-an-asset) are a separate module
+for issuance and token controls, subject to their own availability. Using Earn
+does not issue a token, configure its access list or enroll a new issuer policy.
+
 ## Provider eligibility
 
-Permissioned assets can require separate KYC, KYB and wallet registration.
-The internal provider eligibility routes establish those requirements; they do
-not replace the core deposit, withdrawal or operation endpoints.
+An SDP API key authorizes API access, not investment eligibility. For each
+customer and wallet, confirm the issuer's current jurisdiction, investor
+qualification or accreditation, KYC/AML, subscription and redemption rules.
+These requirements differ by product; there is no universal Earn compliance
+approval or jurisdiction screen.
+
+Where an integrated provider supports an eligibility check, Earn performs it
+before building the deposit. WisdomTree requires a customer mapping in the
+same project, an approved wallet and access to the selected fund. Its separate
+KYC/KYB, document and wallet-registration routes support that issuer workflow;
+they do not replace deposit, withdrawal or operation endpoints. Current wallet
+registration on that rail requires an active business customer; submitting a
+retail application alone does not establish deposit eligibility.
+
+Providers without that capability do not receive a universal eligibility
+check from SDP. Apply the required customer screening in your integration and
+confirm the issuer's terms before offering a strategy. Earn does not apply a
+new deposit-eligibility gate to an exit, but issuer hooks, freezes, liquidity
+and redemption decisions can still prevent or delay delivery.

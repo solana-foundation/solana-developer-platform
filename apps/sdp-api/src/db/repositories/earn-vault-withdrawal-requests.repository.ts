@@ -226,6 +226,8 @@ interface CreateSignedQueuedWithdrawalCancelInput {
   clientRequestId: string;
   idempotencyFingerprint: string;
   walletTransactionId?: string;
+  /** Exact verified wallet bytes already match the authenticated terminal closing transaction. */
+  recoverFinalizedWalletBuild?: boolean;
   createdBy?: string | null;
   initiatedByKeyId?: string | null;
 }
@@ -310,6 +312,15 @@ export interface EarnVaultWithdrawalRequestsRepository {
     environment: SdpEnvironment;
     provider: string;
     requestAddress: string;
+  }): Promise<EarnVaultWithdrawalRequestRow | null>;
+  findOldestExpiredEscrow(params: {
+    organizationId: string;
+    projectId: string;
+    environment: SdpEnvironment;
+    positionId: string;
+    ownerAddress: string;
+    custodyWalletId: string | null;
+    beforeUnixSeconds: string;
   }): Promise<EarnVaultWithdrawalRequestRow | null>;
   list(params: {
     organizationId: string;
@@ -920,6 +931,30 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
       return row ? mapRequest(row) : null;
     },
 
+    async findOldestExpiredEscrow(params) {
+      const row = await db.queryOne<Record<string, unknown>>(
+        `SELECT * FROM earn_vault_withdrawal_requests
+         WHERE organization_id = ? AND project_id = ? AND environment = ?
+           AND position_id = ? AND owner_address = ?
+           AND custody_wallet_id IS NOT DISTINCT FROM ?::text
+           AND mechanism = 'solver_queue'
+           AND status IN ('pending', 'fulfillable', 'expired_cancelable')
+           AND nonce IS NOT NULL AND creation_timestamp IS NOT NULL
+           AND deadline_timestamp IS NOT NULL AND deadline_timestamp::numeric < ?::numeric
+         ORDER BY created_at ASC, id ASC LIMIT 1`,
+        [
+          params.organizationId,
+          params.projectId,
+          params.environment,
+          params.positionId,
+          params.ownerAddress,
+          params.custodyWalletId,
+          params.beforeUnixSeconds,
+        ]
+      );
+      return row === null ? null : mapRequest(row);
+    },
+
     async list(params) {
       const conditions = ["organization_id = ?", "environment = ?"];
       const bindings: unknown[] = [params.organizationId, params.environment];
@@ -1136,12 +1171,12 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
         const built = input.walletTransactionId
           ? await tx
               .prepare(
-                `SELECT id, consumed_action_id
+                `SELECT *
                    FROM earn_wallet_withdrawal_request_transactions
                   WHERE id = ? AND organization_id = ? FOR UPDATE`
               )
               .bind(input.walletTransactionId, input.organizationId)
-              .first<{ id: string; consumed_action_id: string | null }>()
+              .first<Record<string, unknown>>()
           : null;
         if (input.walletTransactionId && !built) {
           throw new Error(`Missing queued withdrawal build ${input.walletTransactionId}`);
@@ -1176,6 +1211,10 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
           return { request: mapRequest(request), action: existingAction, replayed: true };
         }
 
+        if (built?.consumed_action_id != null)
+          throw conflict(
+            "This transaction was already submitted under a different idempotency key"
+          );
         const locked = await tx
           .prepare(
             `SELECT * FROM earn_vault_withdrawal_requests
@@ -1186,10 +1225,44 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
           .first<Record<string, unknown>>();
         if (!locked) throw new Error(`Missing queued withdrawal ${input.withdrawalRequestId}`);
         const request = mapRequest(locked);
+        const finalizedRecovery =
+          input.recoverFinalizedWalletBuild === true &&
+          request.status === "cancelled" &&
+          request.closing_signature === input.signature;
+        if (finalizedRecovery) {
+          const build = built === null ? null : mapWalletBuild(built);
+          if (
+            build === null ||
+            build.operation_only !== true ||
+            build.action !== "cancel" ||
+            build.mechanism !== "solver_queue" ||
+            build.organization_id !== input.organizationId ||
+            build.project_id !== input.projectId ||
+            build.environment !== input.environment ||
+            build.withdrawal_request_id !== request.id ||
+            build.position_id !== request.position_id ||
+            build.provider !== request.provider ||
+            build.custody_wallet_id !== request.custody_wallet_id ||
+            build.owner_address !== request.owner_address ||
+            build.vault_address !== request.vault_address ||
+            build.request_address !== request.request_address ||
+            build.token_mint !== request.token_mint ||
+            build.share_mint !== request.share_mint ||
+            build.last_valid_block_height !== input.lastValidBlockHeight ||
+            request.project_id !== input.projectId
+          )
+            throw conflict("Finalized escrow recovery does not match its canonical build");
+        }
         const cancelFromStatus =
           request.mechanism === "operator_redemption" ? "pending" : "expired_cancelable";
-        if (request.status !== cancelFromStatus) {
-          throw conflict(`Queued withdrawal cannot be cancelled while status is ${request.status}`);
+        if (!finalizedRecovery && request.status !== cancelFromStatus) {
+          throw conflict(
+            `Queued withdrawal cannot be cancelled while status is ${request.status}`,
+            request.closing_signature !== null &&
+              (request.status === "fulfilled" || request.status === "cancelled")
+              ? { reason: "withdrawal_recovery_unavailable" }
+              : undefined
+          );
         }
 
         const actionRow = await tx
@@ -1197,8 +1270,11 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
             `INSERT INTO earn_vault_withdrawal_request_actions (
                id, organization_id, project_id, environment, withdrawal_request_id,
                action, status, signature, signed_transaction, last_valid_block_height,
-               client_request_id, idempotency_fingerprint, created_by, initiated_by_key_id
-             ) VALUES (?, ?, ?, ?, ?, 'cancel', 'requested', ?, ?, ?, ?, ?, ?, ?)
+               client_request_id, idempotency_fingerprint, created_by, initiated_by_key_id,
+               settled_at, confirmed_at
+             ) VALUES (?, ?, ?, ?, ?, 'cancel', ?, ?, ?, ?, ?, ?, ?, ?,
+                       CASE WHEN ? THEN sdp_iso_now() ELSE NULL END,
+                       CASE WHEN ? THEN sdp_iso_now() ELSE NULL END)
              RETURNING *`
           )
           .bind(
@@ -1207,16 +1283,37 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
             input.projectId,
             input.environment,
             input.withdrawalRequestId,
+            finalizedRecovery ? "finalized" : "requested",
             input.signature,
             input.signedTransaction,
             input.lastValidBlockHeight,
             input.clientRequestId,
             input.idempotencyFingerprint,
             input.createdBy ?? null,
-            input.initiatedByKeyId ?? null
+            input.initiatedByKeyId ?? null,
+            finalizedRecovery,
+            finalizedRecovery
           )
           .first<Record<string, unknown>>();
         if (!actionRow) throw new Error("Failed to record queued withdrawal cancellation");
+        if (finalizedRecovery) {
+          const recovered = await tx
+            .prepare(
+              `UPDATE earn_vault_withdrawal_requests SET cancel_signature = ?, updated_at = sdp_iso_now()
+               WHERE id = ? AND organization_id = ? AND status = 'cancelled'
+                 AND closing_signature = ? RETURNING *`
+            )
+            .bind(input.signature, request.id, input.organizationId, input.signature)
+            .first<Record<string, unknown>>();
+          if (recovered === null) throw conflict("Finalized withdrawal recovery changed");
+          await consumeWalletBuild(
+            tx,
+            input.walletTransactionId,
+            input.organizationId,
+            input.actionId
+          );
+          return { request: mapRequest(recovered), action: mapAction(actionRow), replayed: false };
+        }
         const updated = await tx
           .prepare(
             `UPDATE earn_vault_withdrawal_requests

@@ -103,7 +103,7 @@ describe("mainnet request page", () => {
     expect(screen.getByRole("button", { name: "Request mainnet access" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Sign out" })).toBeTruthy();
     const sandbox = screen.getByRole("link", { name: "Try the sandbox" });
-    expect(sandbox.getAttribute("href")).toBe("https://platform-beta.solana.com");
+    expect(sandbox.getAttribute("href")).toBe("https://platform-devnet.solana.com");
     expect(sandbox.getAttribute("target")).toBe("_blank");
   });
 

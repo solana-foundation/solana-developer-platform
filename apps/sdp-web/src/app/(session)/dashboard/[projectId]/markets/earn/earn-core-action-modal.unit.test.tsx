@@ -101,6 +101,15 @@ afterEach(() => {
 });
 
 describe("Earn operation review", () => {
+  it("rejects slippage beyond the API limit before preparing a transaction", async () => {
+    render(<EarnCoreActionModal kind="deposit" strategy={strategy} onClose={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("amount"), { target: { value: "10" } });
+    fireEvent.change(screen.getByLabelText("slippage"), { target: { value: "501" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
+    expect(screen.getByText("invalidSlippage")).toBeDefined();
+    expect(mocks.deposit).not.toHaveBeenCalled();
+  });
+
   it("lets the same withdrawal choice retry a failed preparation with the same key", async () => {
     mocks.refresh.mockRejectedValueOnce(new Error("Preparation unavailable"));
     mocks.refresh.mockResolvedValueOnce(operation({ actionId: "selected", version: 2 }));

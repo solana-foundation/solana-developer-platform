@@ -40,10 +40,12 @@ const BLOCK_HEIGHT_READ_TIMEOUT_MS = 2_000;
  * The scope cluster's confirmed block height, the same commitment the build's
  * `lastValidBlockHeight` was quoted at and the reconciler compares against.
  */
-export async function readConfirmedBlockHeight(): Promise<bigint> {
-  return createClusterRpc({ timeoutMs: BLOCK_HEIGHT_READ_TIMEOUT_MS })
-    .getBlockHeight({ commitment: "confirmed" })
-    .send();
+export async function readConfirmedBlockHeight(
+  rpc: ReturnType<typeof createClusterRpc> = createClusterRpc({
+    timeoutMs: BLOCK_HEIGHT_READ_TIMEOUT_MS,
+  })
+): Promise<bigint> {
+  return rpc.getBlockHeight({ commitment: "confirmed" }).send();
 }
 
 /**

@@ -29,6 +29,8 @@ CREATE TABLE operations (
     claim_token TEXT,
     claim_until TIMESTAMPTZ,
     fence INTEGER NOT NULL DEFAULT 0 CHECK (fence >= 0),
+    next_check_at TIMESTAMPTZ,
+    recovery_check_count INTEGER NOT NULL DEFAULT 0 CHECK (recovery_check_count >= 0),
     created_at TEXT NOT NULL DEFAULT sdp_iso_now(),
     updated_at TEXT NOT NULL DEFAULT sdp_iso_now(),
     CONSTRAINT operations_request_unique UNIQUE
@@ -41,6 +43,11 @@ CREATE TABLE operations (
 
 CREATE INDEX operations_project_history ON operations
     (organization_id, project_id, environment, created_at DESC, id DESC);
+
+-- Due work stays bounded even while completed operation history grows.
+CREATE INDEX operations_recovery_due ON operations
+    (environment, next_check_at, id)
+    WHERE next_check_at IS NOT NULL AND status NOT IN ('completed', 'failed', 'cancelled');
 
 CREATE TABLE operation_attempts (
     id TEXT PRIMARY KEY,

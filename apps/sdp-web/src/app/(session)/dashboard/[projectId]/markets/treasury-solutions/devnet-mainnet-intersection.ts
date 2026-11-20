@@ -56,11 +56,12 @@ import type { EarnStrategy } from "@sdp/types/earn";
  * honour, and a hardcoded table cannot silently grow to admit them the way a
  * fuzzy matcher would.
  *
- * Veda is exempt by PROVIDER, not by name: its catalogue is devnet-only today
- * (`VEDA_DEPLOYMENTS` names no mainnet deployment, so there is no mainnet
- * shelf to intersect with) and its devnet strategies must stay visible
- * regardless. Every other provider — current and future — goes through the
- * same name table; a provider with no devnet rows is simply unaffected.
+ * Veda is exempt by PROVIDER, not by name: its devnet Test Vault is a
+ * different instrument from the mainnet PRIME vaults (`VEDA_DEPLOYMENTS`
+ * keeps the clusters' deployments separate), so no name mapping could be
+ * honest about it, and its devnet strategies must stay visible regardless.
+ * Every other provider — current and future — goes through the same name
+ * table; a provider with no devnet rows is simply unaffected.
  *
  * This is a BROWSE filter for the Sandbox treasury page's combined catalogue
  * only, never a money gate: positions, the allocation summary and the

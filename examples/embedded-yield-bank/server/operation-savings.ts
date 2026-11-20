@@ -38,9 +38,13 @@ export function summarizeSavingsOperations(
   operations: readonly EarnOperation[],
   tokenMint: string
 ) {
+  // Returning strategy shares changes control, not cash flow or earnings.
+  const cashFlows = operations.filter(
+    (operation) => operation.result?.settlementOutcome !== "recovered"
+  );
   const entries: SavingsLedgerEntry[] = [];
   let pendingWithdrawal = false;
-  for (const operation of operations) {
+  for (const operation of cashFlows) {
     // A cancelled exit returns its original asset; it is never an earnings payout.
     if (operation.status === "cancelled") continue;
     const active = isOperationActive(operation);
@@ -74,7 +78,7 @@ export function summarizeSavingsOperations(
     pendingWithdrawal
   );
   const deposits = new Set(
-    operations.flatMap((operation) =>
+    cashFlows.flatMap((operation) =>
       operation.kind === "earn.deposit" &&
       operation.status === "completed" &&
       operation.result
@@ -84,7 +88,7 @@ export function summarizeSavingsOperations(
   );
   // A first exit from an imported holding has no acquisition cost to subtract.
   if (
-    operations.some(
+    cashFlows.some(
       (operation) =>
         operation.intent.kind === "earn.withdraw" &&
         operation.status === "completed" &&

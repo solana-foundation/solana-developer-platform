@@ -176,6 +176,8 @@ export interface MoneyStartContext {
   movement: MovementId;
   /** The row the movement belongs to, such as a recurring payment id. */
   subjectId: string;
+  /** Durable user operations recheck their ingress action even for an exit. */
+  requiredAction?: Action;
 }
 
 const REFUSAL_MESSAGES: Record<Exclude<MoneyAdmissionRefusal, "action_not_held">, string> = {
@@ -378,11 +380,25 @@ function statusAdmits(
 export function decidePrincipal(
   movement: MovementId,
   facts: Pick<MoneyAdmissionFacts, "principal" | "readAt">,
-  subject: MoneyAdmissionSubject
+  subject: MoneyAdmissionSubject,
+  requiredAction?: Action
 ): MoneyAdmissionDecision {
-  // An exit's actions are null: the route already required one.
-  const actions = movementActions(movement);
   const principal = facts.principal;
+  // A durable user operation adds its route permission without replacing the
+  // movement's own requirements or its commercial exit classification.
+  if (requiredAction !== undefined) {
+    const required: readonly [Action] = [requiredAction];
+    const actionDecision =
+      principal.kind === "api_key"
+        ? decideApiKey(principal.key, facts.readAt, required, subject)
+        : principal.kind === "member"
+          ? decideMember(principal.member, required)
+          : principal.kind === "none"
+            ? refuse("principal_missing")
+            : refuseActionNotHeld(required);
+    if (!actionDecision.admitted) return actionDecision;
+  }
+  const actions = movementActions(movement);
   switch (principal.kind) {
     case "none":
       return actions === null ? ADMITTED : refuse("principal_missing");
@@ -490,16 +506,21 @@ function mayActInStatus(
 export function decideMovement(
   movement: MovementId,
   facts: MoneyAdmissionFacts | null,
-  subject: MoneyAdmissionSubject
+  subject: MoneyAdmissionSubject,
+  requiredAction?: Action
 ): MoneyAdmissionDecision {
   if (MOVEMENTS[movement].kind === "exit") {
-    return facts ? decidePrincipal(movement, facts, subject) : ADMITTED;
+    return facts
+      ? decidePrincipal(movement, facts, subject, requiredAction)
+      : requiredAction === undefined
+        ? ADMITTED
+        : refuse("principal_missing");
   }
   const organization = decideMoneyStart(facts);
   if (!organization.admitted || !facts) {
     return organization;
   }
-  const principal = decidePrincipal(movement, facts, subject);
+  const principal = decidePrincipal(movement, facts, subject, requiredAction);
   if (!principal.admitted) return principal;
   return facts.disabledMovements.includes(movement) ? refuse("movement_disabled") : ADMITTED;
 }
@@ -784,7 +805,8 @@ export async function checkMoneyStart(
   const decision = decideMovement(
     context.movement,
     await readMovementFactsWith(getDb(env), env, scope, context.movement, subject),
-    subject
+    subject,
+    context.requiredAction
   );
   if (!decision.admitted) {
     logMoneyRefused(decision.reason, { ...context, ...scope });

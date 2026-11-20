@@ -4,7 +4,6 @@ import { getDb } from "@/db/client";
 import { getAuth } from "@/lib/auth";
 import { success } from "@/lib/response";
 import { isProjectProviderEntryInChannel } from "@/middleware/require-module";
-import { EARN_PUBLIC_SURFACE_PUBLISHED } from "@/openapi/release-channel-values";
 import { getProjectProviderAvailability } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
 
@@ -30,11 +29,7 @@ function publishedProviderAvailability(
     // Custody uses "offered", not the document's `isCustodyProviderPublished`: that
     // never names `local`, which a self-hosted dashboard sets up through this route.
     // The document's custody response enums are open, so a `local` entry still validates.
-    providers: availability.providers.filter(
-      (entry) =>
-        (entry.family !== "earn" || EARN_PUBLIC_SURFACE_PUBLISHED) &&
-        isProjectProviderEntryInChannel(c, entry)
-    ),
+    providers: availability.providers.filter((entry) => isProjectProviderEntryInChannel(c, entry)),
   };
 }
 
