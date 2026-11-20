@@ -1,3 +1,7 @@
+import {
+  type ClosedPaymentRequestStatus,
+  PAYMENT_REQUEST_CLOSED_STATUSES,
+} from "@sdp/types/payments";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
@@ -428,14 +432,17 @@ describe("PaymentRequestsRepository (postgres)", () => {
       expired: (request: PaymentRequestRow) => markExpired(request),
       canceled: (request: PaymentRequestRow) =>
         repo.cancelPaymentRequest(cancelInput(request, null)),
-    };
+    } satisfies Record<
+      ClosedPaymentRequestStatus,
+      (request: PaymentRequestRow, transferId: string) => Promise<PaymentRequestRow | null>
+    >;
     const refusedWrites = {
       paid: ["pay", "expire", "cancel", "payExpired", "payCanceled"],
       expired: ["pay", "expire", "cancel", "payCanceled"],
       canceled: ["pay", "expire", "cancel", "payExpired"],
-    } as const;
+    } as const satisfies Record<ClosedPaymentRequestStatus, readonly string[]>;
 
-    it.each(["paid", "expired", "canceled"] as const)(
+    it.each(PAYMENT_REQUEST_CLOSED_STATUSES)(
       "leaves a %s request unchanged under every write that does not start from it",
       async (status) => {
         const request = await repo.createPaymentRequest(createInput({}));

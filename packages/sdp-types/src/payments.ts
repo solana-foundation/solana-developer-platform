@@ -1383,6 +1383,32 @@ export function isPaymentRequestPayableAt(
   );
 }
 
+/** Whether each status closes a payment request: it was paid, or closed without a payment. */
+export const PAYMENT_REQUEST_STATUS_CLOSED = {
+  awaiting_payment: false,
+  paid: true,
+  canceled: true,
+  expired: true,
+} as const satisfies Record<PaymentRequestStatus, boolean>;
+
+/** The statuses that close a payment request. */
+export type ClosedPaymentRequestStatus = {
+  [Status in PaymentRequestStatus]: (typeof PAYMENT_REQUEST_STATUS_CLOSED)[Status] extends true
+    ? Status
+    : never;
+}[PaymentRequestStatus];
+
+/** Reports whether a payment request is closed: no longer awaiting its payment. */
+export function isClosedPaymentRequestStatus(
+  status: PaymentRequestStatus
+): status is ClosedPaymentRequestStatus {
+  return PAYMENT_REQUEST_STATUS_CLOSED[status];
+}
+
+export const PAYMENT_REQUEST_CLOSED_STATUSES = PAYMENT_REQUEST_STATUSES.filter(
+  isClosedPaymentRequestStatus
+);
+
 /**
  * Whether each status closes a payment request without a payment: a payer who signed before it
  * closed can still land the transfer, and the reconciler records that money as a late payment.

@@ -65,7 +65,9 @@ import * as moneyPathEvents from "@/runtime/money-path-events";
 import * as paymentAmounts from "@/services/payments/token-amount";
 import { TEST_CUSTODY_PUBLIC_KEY } from "@/test/fixtures/custody";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
+import { seedProjectCryptoWalletCounterparty } from "@/test/helpers/counterparties";
 import { env } from "@/test/helpers/env";
 import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import {
@@ -292,8 +294,19 @@ describe("reconcilePaymentRequest", () => {
   it("settles an awaiting request and links an inbound transfer attributed to no counterparty", async () => {
     mockSettlementSucceeds(null);
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+    await seedProjectCryptoWalletCounterparty(getDb(env), {
+      organizationId: tenant.organizationId,
+      projectId: tenant.projectId,
+      createdBy: TEST_USER.id,
+      counterpartyId: "cp_preq_handler_saved_payer",
+      counterpartyAccountId: "cpa_preq_handler_saved_payer",
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet1,
+    });
+    await setPaymentRequestColumns(env, request.id, {
+      counterparty_id: "cp_preq_handler_saved_payer",
+    });
 
-    const settled = await reconcileOnSandbox(request);
+    const settled = await reconcileOnSandbox(await readStored(request.id));
 
     expect(settled).toMatchObject({ status: "paid", paid_late: false });
     expect(await listInboundTransfers()).toMatchObject([
