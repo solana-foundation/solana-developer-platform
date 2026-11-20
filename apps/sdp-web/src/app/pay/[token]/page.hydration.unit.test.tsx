@@ -11,6 +11,7 @@ import { TimeZoneProvider } from "@/i18n/time-zone";
 import { resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { TEST_PAYMENT_REQUEST_RECIPIENT } from "@/test/payment-requests";
 import { resetRequestProject } from "@/test/request-project";
+import { required } from "@/test/required";
 import PayPage from "./page";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
@@ -77,10 +78,11 @@ describe("PayPage on a payer's first visit", () => {
     const container = document.createElement("div");
     container.innerHTML = html;
     document.body.append(container);
-    const serverExpiry = [...container.querySelectorAll("span")].find((span) =>
-      /10:14\sPM/.test(String(span.textContent))
+    const serverExpiry = required(
+      [...container.querySelectorAll("span")].find((span) =>
+        /10:14\sPM/.test(String(span.textContent))
+      )
     );
-    if (serverExpiry === undefined) throw new Error("the server rendered no expiry");
     const recoverableErrors: unknown[] = [];
     await act(async () => {
       root = hydrateRoot(container, page, {
