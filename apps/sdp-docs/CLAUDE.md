@@ -358,18 +358,18 @@ the same filtered page map.
 ### Earn docs
 
 Earn uses the same `module: earn` frontmatter and release-channel rules as
-every other module. Its guides live in `content/docs/earn`, with Embedded
-Yield in `content/docs/guides/embedded-yield.mdx`. The public API reference,
-Postman, playground and AI resources regenerate from the channel's public
-OpenAPI document. No branch or deployment-preview override admits content.
+every other module, with no separate publication flag or preview override. Its
+guides live in `content/docs/earn`, with Embedded Yield in
+`content/docs/guides/embedded-yield.mdx`. The public contract has four core
+actions and five shared operation routes; the six WisdomTree onboarding
+operations stay internal. OpenAPI owns request and response contracts, and the
+guides own the walkthrough. Do not maintain a second hidden core contract.
 
-Earn guides live in `content/docs/earn` with `module: earn`, and follow the
-normal release-channel gate. Its public contract has four core actions and five
-shared operation routes. Six independent WisdomTree onboarding operations stay
-internal. Old catalogue, product, preview, transaction and program routes are
-removed. Do not add a separate Earn publication flag or preview-only override.
-OpenAPI owns request and response contracts; public Earn guides own the
-integration walkthrough. Do not maintain a second hidden core contract.
+Guides walk the `source.ownerAddress` flow only: the owner's wallet signs, and
+SDP never needs it registered. An SDP custody wallet (`source.walletId`) gets
+one note, at the end of the quickstart. `earn-guide-examples.test.ts` parses
+each titled request block (`deposit.json`, `submission.json`,
+`withdrawal.json`) with the API's own schemas.
 
 ## Do's and Don'ts
 

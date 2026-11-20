@@ -4,31 +4,40 @@ title: Earn
 description: Offer stablecoin yield in your app, from your customers' own wallets, through one API.
 ---
 
-Earn aggregates strategies from integrated providers. A strategy may be a vault,
-lending market or RWA product. Treasury and Embedded Yield use the same
-catalogue, positions and asynchronous operations.
+Earn puts vault, lending and real-world-asset yield strategies behind one API.
+You prepare a deposit, your customer's wallet signs it, and SDP broadcasts it
+and tracks it to settlement. Funds move between the customer's wallet and the
+provider's program; SDP never holds them ([follow the funds](/docs/earn/concepts#follow-the-funds)).
 
-[Run the TypeScript example](https://github.com/solana-foundation/solana-developer-platform/tree/codex/earn-core-api/examples/earn-quickstart)
-or follow the [quickstart](/docs/earn/quickstart). The local dry-run needs no
-account or funds. These pages describe this PR's core contract; deployment
-availability follows the normal release channel and serving version.
+```text
+POST /v1/earn/deposit                     → an operation with an unsigned transaction
+     ...your customer's wallet signs it...
+POST /v1/operations/{operationId}/submit  → SDP broadcasts the exact signed bytes
+GET  /v1/operations/{operationId}         → poll until completed
+```
 
-Use your SDP API key with any compatible Solana wallet: prepare with
-`ownerAddress`, sign the returned transaction through your wallet integration,
-then submit the signed bytes. You do not need a wallet registered in SDP.
-An existing connected wallet's `walletId` is an optional alternative.
+Any Solana wallet can sign, and none needs registering in SDP. Start with the
+[quickstart](/docs/earn/quickstart), or
+[run the example](https://github.com/solana-foundation/solana-developer-platform/tree/main/examples/earn-quickstart)
+locally with no key, wallet or funds.
 
-## Core actions
+## Endpoints
 
-- `GET /v1/earn/discovery` lists strategies, rates and supported actions.
-- `GET /v1/earn/positions` reads holdings and optional portfolio totals.
-- `POST /v1/earn/deposit` prepares a deposit using a strategy ID.
-- `POST /v1/earn/withdraw` prepares a withdrawal using a position ID.
+| Endpoint | What it does |
+| --- | --- |
+| `GET /v1/earn/discovery` | Lists strategies, their rates and what each supports. |
+| `GET /v1/earn/positions` | Reads a wallet's holdings and totals. |
+| `POST /v1/earn/deposit` | Prepares a deposit into a strategy. |
+| `POST /v1/earn/withdraw` | Prepares a withdrawal from a position. |
+| `GET /v1/operations`, `GET /v1/operations/{operationId}` | Track deposits and withdrawals. |
+| `POST /v1/operations/{operationId}/submit` | Sends the signed transaction. |
+| `POST /v1/operations/{operationId}/refresh` | Chooses a withdrawal route before you sign. |
+| `POST /v1/operations/{operationId}/cancel` | Abandons an operation before you sign. |
 
-Every deposit or withdrawal returns an operation. Review its terms, submit its
-current action and track its next action until delivery is verified. A worker
-coordinates configured-wallet signing and broadcast.
+## Guides
 
-Start with the [quickstart](/docs/earn/quickstart), then read about
-[strategies](/docs/earn/strategies), [deposits](/docs/earn/deposits),
-[positions](/docs/earn/balances) and [withdrawals](/docs/earn/withdrawals).
+- [How Earn works](/docs/earn/concepts): strategies, positions, operations and where funds go.
+- [Strategies](/docs/earn/strategies), [deposits](/docs/earn/deposits),
+  [balances](/docs/earn/balances) and [withdrawals](/docs/earn/withdrawals).
+- [Embedded Yield](/docs/guides/embedded-yield): put Earn inside your app.
+- [Integration details](/docs/earn/integration-details): retries, recovery, fees and eligibility.

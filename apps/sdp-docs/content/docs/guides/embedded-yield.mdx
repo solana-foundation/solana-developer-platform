@@ -1,32 +1,34 @@
 ---
 module: earn
 title: Embedded Yield
-description: Offer strategy discovery, positions and asynchronous yield actions in your app.
+description: Offer yield inside your app, with your customers' own wallets signing every deposit and withdrawal.
 breadcrumbParent: /docs/earn
 ---
 
-[Run the TypeScript example](https://github.com/solana-foundation/solana-developer-platform/tree/codex/earn-core-api/examples/earn-quickstart)
-without an account or funds, then follow the [quickstart](/docs/earn/quickstart).
-Embedded Yield wraps the same Earn API as Treasury. This PR changes the core
-contract; live use requires a deployment running this version.
+Embedded Yield puts Earn inside your app: customers browse strategies, deposit
+from their own wallets and watch their balances, while your backend calls SDP.
+[Run the example](https://github.com/solana-foundation/solana-developer-platform/tree/main/examples/earn-quickstart)
+to see the flow, then follow the [quickstart](/docs/earn/quickstart).
 
-Discover strategies through `GET /v1/earn/discovery`, read holdings through
-`GET /v1/earn/positions`, and prepare deposits or withdrawals with the core
-mutation endpoints. Your SDP API key and an `ownerAddress` are enough: use any
-compatible Solana wallet to sign the returned unsigned transaction, then send
-the exact signed bytes to `/v1/operations/{operationId}/submit`. The wallet does
-not need to be registered or connected in SDP.
+## Who does what
 
-Your app owns wallet connection, signing prompts and review UI. Privy is one
-compatible wallet integration; it does not require an SDP wallet connection.
+- **Your backend** holds the SDP API key and makes every Earn call. Never send
+  the key to the browser.
+- **Your app** connects the customer's wallet (Privy, Wallet Standard or any
+  other), shows the terms and asks the wallet to sign.
+- **SDP** prepares each transaction, checks the signed bytes, broadcasts them
+  and tracks settlement.
 
-If the wallet is already connected in SDP, `walletId` is an optional convenience
-that lets SDP request signing through its configured provider.
+## The flow
 
-Review the operation's economic terms before submitting. The worker coordinates
-configured-wallet signing and broadcast asynchronously. Poll the operation,
-render its next action, and keep tracking through verified delivery.
+1. List strategies with `GET /v1/earn/discovery` and show the ones accepting
+   deposits.
+2. Prepare the deposit with the customer's wallet as `source.ownerAddress`.
+3. Show `terms`, have the wallet sign `nextAction.transaction`, and submit it.
+4. Poll the operation until it is `completed`, then show the customer's
+   `GET /v1/earn/positions?ownerAddress=...`.
 
-The [quickstart](/docs/earn/quickstart) covers the shared flow. Read
-[recovery rules](/docs/earn/integration-details) before handling retries,
-refresh or cancellation.
+Withdrawals follow the same steps with a `positionId`. Before you handle
+retries, refresh or cancellation, read [integration details](/docs/earn/integration-details);
+to scope reads per customer, see
+[one integration, many customers](/docs/earn/concepts#one-integration-many-customers).

@@ -1,64 +1,70 @@
 # Earn quickstart
 
-Run the flow without an account, API key, wallet, dependencies or funds:
+Prepare, sign, submit and poll one Earn deposit with native `fetch`, in one
+function: [`earn.ts`](./earn.ts). The
+[quickstart guide](https://platform-devnet.solana.com/docs/earn/quickstart)
+walks through the same calls with curl.
+
+## Run it locally
+
+`dry-run.ts` answers with local fake responses and a fake signature, so it
+needs no API key, wallet, dependencies or funds:
 
 ```bash
-git clone --branch codex/earn-core-api https://github.com/solana-foundation/solana-developer-platform.git
+git clone https://github.com/solana-foundation/solana-developer-platform.git
 cd solana-developer-platform/examples/earn-quickstart
 node dry-run.ts
-node dry-run.ts --connected-wallet
 ```
 
-Use Node.js 24.22.1 or newer. Both commands use local fake responses and a fake
-signature. They never contact SDP or Solana. The second shows optional BYOK
-signing through an existing connected wallet. Expected final output:
+It needs Node.js 24.22.1 or newer, and ends with:
 
 ```text
-Result: completed; 2 saved mutation requests.
+Result: completed
 ```
 
-This PR changes the core contract. The examples describe this branch, not a
-claim that its routes are already deployed. Earn follows normal release-channel
-rules. The canonical devnet API is `https://api-devnet.solana.com`; use live
-requests only after your target deployment runs this version.
+## Use it with your wallet
 
-## Use your own wallet
+[Create a devnet API key](https://platform-devnet.solana.com/dashboard?return_to=%2Fdashboard%2Fapi-keys%2Fnew)
+with Earn Execute, which includes Read, and keep it on your server. Then:
 
-[Create a devnet project key](https://platform-devnet.solana.com/dashboard?return_to=%2Fdashboard%2Fapi-keys%2Fnew)
-with Earn Execute (which includes Read). Creating a key requires sign-in;
-reading docs and running the dry-run do not. Keep the key on your server.
+```ts
+import {
+  createKeyPairFromBytes,
+  getBase64EncodedWireTransaction,
+  getBase64Encoder,
+  getTransactionDecoder,
+  signTransaction,
+} from "@solana/kit";
+import { deposit } from "./earn.ts";
 
-[`earn.ts`](./earn.ts) uses native `fetch`: prepare a deposit, sign outside SDP,
-submit its exact bytes, then poll the operation. Your app owns wallet connection
-and review UI. Any compatible Solana wallet works, including a wallet from
-your Privy integration. No SDP wallet registration is required.
+const keyPair = await createKeyPairFromBytes(secretKey); // The owner's 64-byte keypair.
+const operation = await deposit({
+  apiUrl: "https://api-devnet.solana.com",
+  apiKey: process.env.SDP_API_KEY,
+  deposit: {
+    strategyId: "<strategy-id>",
+    source: { ownerAddress: "<your-wallet-address>" },
+    amount: { mint: "<token-mint>", value: "10" },
+  },
+  idempotencyKey: savedKey,
+  sign: async (transaction) => {
+    const unsigned = getTransactionDecoder().decode(getBase64Encoder().encode(transaction));
+    return getBase64EncodedWireTransaction(await signTransaction([keyPair], unsigned));
+  },
+});
+```
 
-The signing callback accepts SDP's base64 unsigned transaction and returns the
-complete signed transaction as base64. Adapt your wallet SDK at that boundary;
-this example does not hold wallet keys or implement connection UI.
+`sign` gets the unsigned transaction and the operation: show `operation.terms`
+to the customer, then return the owner's signed transaction, base64-encoded. In
+a browser app, hand the transaction to your wallet's `signTransaction` instead;
+any Solana wallet works, and SDP never needs it registered.
 
-`dry-run.ts` supplies runnable callbacks. In your application, replace its fake
-transport with native `fetch`, use a real strategy and supported mint, and
-supply your real review, signing and durable-storage callbacks. Keep
-`source: { ownerAddress }` for caller signing.
+Generate `idempotencyKey` once per deposit and save it before calling. If the
+process dies or a response is lost, call `deposit` again with the same key: it
+replays the same requests instead of depositing twice. Replaying a submit needs
+the same signed bytes, which a local keypair reproduces; if your signer's bytes
+can differ, save what `sign` returns and return the saved bytes on a retry.
 
-For optional BYOK signing, use `source: { walletId }` for a wallet already
-connected in SDP and omit the signing callback. Submission omits signed bytes;
-SDP requests the configured provider's signature. If `sign_in_provider` is
-returned, show its instructions and keep polling. Do not submit again.
-
-## Recovery and status
-
-The dry-run's fake signature, review and in-memory storage are for local
-experimentation only. A live app must durably save request bodies, keys and
-signed bytes before sending. After a lost response, recover the same operation
-and exact saved request. Do not rerun the whole deposit with new keys.
-
-`202` means accepted. `queued`, `awaiting_signature`, `submitted` and `settling`
-are pending. Only `completed` establishes verified delivery. A queued redemption
-request is not payout. After submit acceptance, refresh and cancellation are
-unavailable. A definitive failure is terminal; uncertain outcomes keep the same
-operation. This example adds neither refresh nor cancel to a normal deposit.
-
-Run `node --test earn.test.ts`. These local tests do not verify a live wallet,
-provider, chain settlement or production environment.
+`deposit` returns when the operation is `completed`, `failed` or `cancelled`,
+or after 60 polls; a pending result means keep polling the same operation.
+Run the tests with `node --test earn.test.ts`.

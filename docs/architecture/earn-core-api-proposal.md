@@ -40,7 +40,7 @@ API clients normally supply an SDP API key and `source: { ownerAddress }`, using
 any compatible Solana wallet. Preparation returns an unsigned transaction; the
 caller signs its unchanged message with the prepared owner and submits base64
 `signedTransaction`. No SDP wallet record or provider connection is required.
-An existing connected wallet's `source: { walletId }` is optional and uses its
+An SDP custody wallet's `source: { walletId }` is optional and uses its
 configured signing policy. Neither source creates another API family or
 synchronous execution path. Provider adapters can retain exact protocol terms
 such as vault, reserve and redemption order.
@@ -103,7 +103,7 @@ the dashboard and demo to the core contract.
 3. Review the estimate, enforceable minimum and known fees. The caller signs the
    exact returned transaction with the prepared owner and submits its signed
    bytes. Submit returns `202` after durable acceptance and never prepares
-   another action. An optional connected wallet instead authorizes the worker
+   another action. An optional SDP custody wallet instead authorizes the worker
    to request signing through its configured provider.
 4. The worker broadcasts and tracks the same transaction. Poll the operation
    through submission and settlement. Delayed settlement needs no separate claim

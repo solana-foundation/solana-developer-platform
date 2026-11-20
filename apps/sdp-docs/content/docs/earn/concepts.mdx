@@ -1,45 +1,41 @@
 ---
 module: earn
 title: How Earn works
-description: Strategies, positions and shares, who signs, and how each deposit and withdrawal settles.
+description: Strategies, positions and operations, who signs, and where the funds go on every deposit and withdrawal.
 ---
 
-## Strategy
+## Strategies, positions and operations
 
-A strategy is an entry in the Earn catalogue. Its provider may implement a
-vault, lending market or RWA product. A protocol can expose several strategies
-with different assets, rates and withdrawal terms.
+- A **strategy** is one yield product: a vault, a lending market or a
+  real-world-asset fund. One protocol can list several, with different assets,
+  rates and withdrawal terms. [Discovery](/docs/earn/strategies) lists them.
+- A **position** is one wallet's holding in one strategy. A deposit creates it;
+  a [withdrawal](/docs/earn/withdrawals) names it by `positionId`.
+- An **operation** is one deposit or withdrawal, from preparation through
+  signing, broadcast and settlement. Every write returns one, and you poll it
+  for progress.
 
-## Position
+## Who signs
 
-A position is a wallet's holding in a strategy. Its source normally identifies
-the signing wallet by `ownerAddress`, without registering it in SDP. An existing
-connected wallet can instead use its `walletId`. Both use the same API.
+SDP prepares each transaction, and the wallet you name as `source.ownerAddress`
+signs it: SDP never holds its keys. The wallet signs the exact bytes SDP
+prepared, and SDP rejects any change to them. Preparing grants no permission to
+send: only your `/submit` call does, and only for the transaction you reviewed.
 
-Imported holdings have unknown acquisition history and cost basis. A current
-balance alone does not establish earned yield.
-
-## Operation
-
-An operation tracks one deposit or withdrawal through preparation, wallet
-signing, chain submission and economic delivery. Before submit acceptance,
-replacing unsigned terms requires a new action identity and review. After
-acceptance, refresh and cancellation are unavailable; track the outcome.
-
-A signature, confirmed request or escrowed share balance is not a payout.
-`completed` requires verified delivery. Unknown outcomes retain their original
-signed bytes and remain unresolved until evidence establishes the outcome.
+A signature, a confirmed request or escrowed shares are not a payout.
+`completed` means SDP verified delivery. When an outcome is unknown, the
+operation keeps its signed bytes and stays pending until evidence settles it.
 
 ## Follow the funds
 
-For a share-issuing strategy, the deposit transaction moves assets into the
-provider's accounts and issues shares to the owner's token account:
+For a share-issuing strategy, the deposit moves assets into the provider's
+accounts and issues shares to the owner's token account:
 
 <EarnFlow>
 
 - **Owner's wallet**
 
-  Signs the reviewed transaction, directly or through its configured provider.
+  Signs the reviewed transaction.
 
 - **Provider's program and asset accounts**
 
@@ -51,63 +47,48 @@ provider's accounts and issues shares to the owner's token account:
 
 </EarnFlow>
 
-On redemption, the provider redeems the shares under its own withdrawal
-mechanism and delivers assets to the owner. A delayed request can
-escrow shares while it waits; the request transaction alone is not delivery.
-Earn does not introduce an SDP omnibus wallet or pool. The underlying provider
-can pool assets, control program upgrades or restrict redemption.
+On redemption, the provider redeems the shares under its own withdrawal rules
+and delivers assets to the owner. A delayed request can hold shares in escrow
+while it waits; the request alone is not delivery. Earn adds no SDP omnibus
+wallet or pool, but the underlying provider can pool assets, upgrade its
+program or restrict redemption.
 
 For example, Kamino's K-Vault program is
 `KvauGMspG5k6rtzrqqn7WNn3oZdyKqLKwK2XWQ8FLjd` on mainnet and
 `devkRngFnfp4gBc5a3LsadgbQKdPo8MSZ4prFiNSVmY` on devnet. The strategy's
-`providerReference` identifies the vault account; its `shareMint` identifies the
-receipt token. A deposit invokes that program to mint shares to the owner;
-redemption burns shares as assets leave the vault for the owner.
+`providerReference` is the vault account and its `shareMint` is the receipt
+token. A deposit invokes that program to mint shares to the owner; redemption
+burns them as assets leave the vault for the owner.
 
-Compare these identities with the transaction's program and token accounts
-before signing. The
+Before signing, compare those identities with the transaction's program and
+token accounts. The
 [cluster-specific program registry](https://github.com/solana-foundation/solana-developer-platform/blob/main/packages/sdp-types/src/kamino-programs.ts)
-and the confirmed transaction let you trace the program, deposit destination
-and shares received. The deposit and withdrawal plans validate those asset
-identities against the strategy or position.
+and the confirmed transaction let you trace the program, the deposit
+destination and the shares received. SDP checks the same asset identities
+against the strategy or position when it plans each transaction.
 
-Provider orders differ from a vault deposit. WisdomTree subscriptions transfer
-USDC to an issuer-operated on-receipt wallet; its transfer agent delivers fund
-tokens later. Redemption transfers fund tokens back to an issuer wallet and
-awaits USDC settlement. Earn does not mint those fund tokens or control their
-backing. The
+Provider orders work differently from a vault. A WisdomTree subscription sends
+USDC to an issuer-operated wallet, and its transfer agent delivers fund tokens
+later. Redemption sends fund tokens back to an issuer wallet and waits for USDC.
+Earn neither mints those tokens nor controls their backing. The
 [fund and compliance-program registry](https://github.com/solana-foundation/solana-developer-platform/blob/main/packages/sdp-types/src/wisdomtree-programs.ts)
-identifies the supported mints and transfer hook. Always inspect the selected
-strategy's mechanism rather than assuming every RWA uses a vault.
-
-With `ownerAddress`, your wallet integration keeps signing control and sends
-signed bytes to SDP. With `walletId`, you explicitly authorize signing through
-that connected wallet's provider and policies. Preparing a transaction grants
-neither path permission to sign or broadcast it.
+lists the supported mints and transfer hook. Check each strategy's mechanism
+rather than assuming every real-world asset is a vault.
 
 ## One integration, many customers
 
-One project API key can serve many customer wallets. For each deposit, send
-that customer's address in `source.ownerAddress`; no generic wallet-registration
-call is required. Withdrawals inherit the source from their `positionId`.
-Keep the customer-to-wallet mapping in your backend.
-
-For customer A's activity, your backend selects A's address for both reads:
+One API key serves all your customers. Send each customer's wallet as
+`source.ownerAddress` when you prepare their deposit; there is no registration
+call. Withdrawals take the owner from the position. Keep the mapping from
+customer to wallet in your backend, and filter reads by owner:
 
 ```http
-GET /v1/earn/positions?ownerAddress=<customer-a-public-key>
-GET /v1/operations?ownerAddress=<customer-a-public-key>
+GET /v1/earn/positions?ownerAddress=<customer-a-wallet>
+GET /v1/operations?ownerAddress=<customer-a-wallet>
 ```
 
-Use `walletId` instead for an existing connected wallet. Without an owner
-filter, positions can include tracked holdings across the project; the
-operations feed defaults to connected-wallet activity. Address-source history
-requires an explicit `ownerAddress` filter.
-
-SDP isolates organization, project and environment data. An address filter is
-not a customer access-control boundary: project credentials can read other
-customers' records within their allowed scope. Earn reads of connected wallets
-cover the project's wallets; signing still requires the caller's wallet grants.
-Keep the project API key on your backend, authenticate each customer there and
-check their allowed wallet before forwarding a request. Public on-chain balance
-discovery is not proof that the caller controls the address.
+SDP isolates data by organization, project and environment, but the owner
+filter is not an access boundary: your key can read every customer's records in
+its project. Keep the key on your backend, authenticate each customer there and
+check they own the wallet before you forward a request. A public onchain balance
+does not prove the caller controls the address.

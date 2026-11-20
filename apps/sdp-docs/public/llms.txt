@@ -61,9 +61,9 @@
 - [Earn](https://platform.solana.com/docs/reference/api/earn): Strategy reads, previews, withdrawal-route discovery, unsigned builds, submission, queued actions, and tenant tracking. Availability follows the deployment's release channel.
 - [Operations](https://platform.solana.com/docs/reference/api/operations): Durable asynchronous execution and recovery for prepared intents.
 - [Earn](https://platform.solana.com/docs/earn): Offer stablecoin yield in your app, from your customers' own wallets, through one API.
-- [Quickstart](https://platform.solana.com/docs/earn/quickstart): Run a local example, then prepare, sign and submit your first Earn deposit.
-- [How Earn works](https://platform.solana.com/docs/earn/concepts): Strategies, positions and shares, who signs, and how each deposit and withdrawal settles.
-- [Embedded Yield](https://platform.solana.com/docs/guides/embedded-yield): Offer strategy discovery, positions and asynchronous yield actions in your app.
+- [Quickstart](https://platform.solana.com/docs/earn/quickstart): Deposit into a yield strategy with three calls, prepare, submit and poll, and one wallet signature.
+- [How Earn works](https://platform.solana.com/docs/earn/concepts): Strategies, positions and operations, who signs, and where the funds go on every deposit and withdrawal.
+- [Embedded Yield](https://platform.solana.com/docs/guides/embedded-yield): Offer yield inside your app, with your customers' own wallets signing every deposit and withdrawal.
 
 ## AI guide
 - [Docs for AI](https://platform.solana.com/docs/reference/docs-for-ai): Human-readable landing page for machine-readable SDP docs resources, usage guidance, and public AI scope.

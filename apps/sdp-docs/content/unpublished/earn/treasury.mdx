@@ -1,23 +1,15 @@
 ---
 module: earn
 title: Treasury
-description: Discover strategies and manage your organization's holdings through the shared Earn operation flow.
+description: Put your organization's idle stablecoins to work through the same Earn API and operation flow.
 ---
 
-Treasury uses the [Earn integration guide](/docs/earn/integration-details). It has no separate yield
-endpoints or program-allocation model.
+Treasury uses the same Earn API as Embedded Yield, with no separate yield
+endpoints. Your organization's wallet is the `ownerAddress`: prepare a deposit,
+sign it with that wallet, submit it and poll the operation, as in the
+[quickstart](/docs/earn/quickstart).
 
-With an SDP API key, use `source: { "ownerAddress": "<owner-public-key>" }` and
-your preferred compatible Solana wallet. Sign the returned transaction through
-your integration, then submit its exact signed bytes. No SDP wallet record or
-provider connection is required.
-
-An existing connected wallet's `walletId` is an optional convenience. It keeps
-its signing and fee policies while the worker requests its provider signature.
-Both sources use the same asynchronous operation flow.
-
-Discovery, position reads, operation history and withdrawals use the shared
-contract. Signing progress survives the request and browser session. Once
-`/submit` is accepted, refresh and cancellation are unavailable; track the same
-operation through signing and settlement. Only a known terminal failure permits
-a new deposit or withdrawal with a new idempotency key.
+If the treasury wallet is an SDP custody wallet, pass its `walletId` instead.
+SDP then requests the signature from the wallet's custody provider and keeps
+its signing and fee policies; signing progress survives the request and browser
+session.

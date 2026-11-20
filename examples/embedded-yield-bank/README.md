@@ -49,10 +49,9 @@ observation timestamp, which can also be unknown.
 
 The four Earn endpoints serve this bank and the Treasury dashboard. The demo
 uses `source: { ownerAddress }`, without creating or registering an SDP wallet.
-Any compatible Solana wallet can sign the returned transaction. Integrations
-with an existing connected SDP wallet can optionally pass `source: { walletId }`
-and let its configured provider sign instead. Both use the same `/submit`
-endpoint and operation lifecycle.
+Any compatible Solana wallet can sign the returned transaction. An SDP custody
+wallet can pass `source: { walletId }` instead, and its custody provider signs;
+both use the same `/submit` endpoint and operation lifecycle.
 
 Cancellation and refresh are unavailable once `/submit` is accepted, including
 while waiting for a signature. Cancellation never revokes an onchain transaction

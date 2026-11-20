@@ -1,153 +1,132 @@
 ---
 module: earn
 title: Integration details
-description: Use scoped sources, review terms and recover asynchronous actions safely.
+description: Next actions, retries, refresh and cancellation, escrow recovery, fees, permissioned tokens and eligibility.
 ---
 
-Use your SDP API key and any compatible Solana wallet. You do not need to
-register a wallet or connect its provider in SDP. Connected wallets are an
-optional convenience over the same API.
+## Next actions
 
-## When each input or call is needed
+Every operation says what to do next in `nextAction`:
 
-| Input or call | Use it when | Skip it when |
-| --- | --- | --- |
-| `source.ownerAddress` | Your wallet integration signs the returned unsigned transaction. This is the normal API flow. | You choose an existing connected wallet's `walletId` instead. |
-| `source.walletId` | An existing SDP wallet connection should handle signing through its configured provider. | You sign through your own wallet integration. No wallet connection is required. |
-| `signedTransaction` | An address source returns `sign_transaction`. Submit the complete signed transaction as base64. | A connected wallet returns `submit`; SDP requests its signature. |
-| `sign_in_provider` | The operation asks for signing in the connected wallet's provider. Show its instructions and handoff URL. | Your own wallet integration signs an address-source transaction. |
-| `/submit` | The address-source transaction is signed, or the user reviewed a connected-wallet action. Send its current `actionId` and `version`. | You only want to discover strategies, read holdings or prepare terms. |
-| `/refresh` | Before submit acceptance, `select_option` needs an advertised `optionId`, or preparation can safely replace unsigned bytes and terms. Include the current `actionId` and `version`, then review the new transaction. | Any `/submit` has been accepted, a normal deposit is already prepared, or an exposed signature outcome remains uncertain. It never signs, broadcasts or revokes a transaction. |
-| `/cancel` | `operation.canCancel` is true and you want to abandon preparation before any `/submit` has been accepted. | `canCancel` is false, including after submit acceptance or while an exposed owner transaction has an unknown outcome. |
+| `nextAction.type` | What to do |
+| --- | --- |
+| `sign_transaction` | Have the owner, and any `feePayer`, sign `transaction` unchanged. Call `/submit` with `signedTransaction` and the current `actionId` and `version`. |
+| `select_option` | Choose an `id` from `terms.options` and call `/refresh` with it as `optionId`. Review the new transaction. |
+| `wait` | Keep polling. `reason` says what SDP is waiting for. |
+| `null` | Nothing left to do: the operation is final. |
 
-These operation mutations use `/v1/operations/{operationId}`. Refresh only
-prepares; submit authorizes processing. Later refreshes preserve the selected
-withdrawal route. There is no separate Earn approval endpoint or approval mode.
+These calls live under `/v1/operations/{operationId}`. Only `/submit` lets SDP
+send anything; there is no separate approval step.
 
-## What cancellation can stop
+## Refresh and cancel
 
-Use `operation.canCancel` to decide whether cancellation is available. It is a
-state capability; the caller still needs `earn.manage`. Do not infer it from
-the operation's status, wallet kind or elapsed time.
+Both work only before you submit:
 
-Both `/cancel` and `/refresh` are preparation-only. After any `/submit`
-acceptance, they return `409 CONFLICT`; track the same operation's outcome.
-Waiting for a provider signature, chain confirmation or queued withdrawal does
-not reopen either action. An exposed owner transaction with an unknown outcome
-also cannot be refreshed or cancelled, even before submission to SDP.
+- **Refresh** picks a withdrawal route and prepares its transaction. It never
+  signs, sends or cancels anything, and the chosen route stays fixed.
+- **Cancel** abandons the operation while `canCancel` is `true`, and needs the
+  `earn.manage` grant. Read `canCancel`; don't infer it from `status` or time.
 
-Dismiss your own wallet's signing prompt locally; that does not need an SDP
-call. SDP cannot revoke a signature or pull a broadcast transaction from Solana.
-Internal provider cleanup for lost permissions or expiry is a safety mechanism,
-not an API cancellation flow.
+After SDP accepts a `/submit`, both return `409 CONFLICT` with `details.reason`
+`operation_already_submitted`, even if the operation later fails. Track it to
+the end instead.
+
+SDP can't take back a transaction it handed you to sign, because you could still
+sign and broadcast it yourself. Once an operation shows `sign_transaction`,
+refresh and cancel return `409` with `details.reason`
+`wallet_transaction_outcome_unknown`. If the customer declines to sign, close
+the prompt: nothing executes and no SDP call is needed. SDP can't revoke a
+signature or pull a broadcast transaction from Solana.
 
 ## Recover expired withdrawal escrow
 
-If a solver withdrawal misses its deadline, its shares can remain in the
-provider's escrow. Prepare a new `POST /v1/earn/withdraw` for that tracked
-`positionId` with `amount: { "kind": "all" }`. When the provider proves that
-the recorded request still holds those expired shares, the operation offers
-**Recover expired escrowed shares** through `select_option`.
+A solver withdrawal that misses its deadline can leave its shares in the
+provider's escrow. To get them back, prepare `POST /v1/earn/withdraw` for the
+same tracked `positionId` with `amount: { "kind": "all" }`. When the provider
+proves the recorded request still holds those expired shares, `terms.options`
+offers **Recover expired escrowed shares** through `select_option`.
 
-Select that option with `/refresh`, review its new action, then use the normal
-signing and `/submit` flow. This action returns shares to the same owner; it
-does not pay the originally requested deposit token. Its result uses
-`settlementOutcome: "recovered"` with the returned share mint and amount only
-after the exact recovery transaction and provider outcome are verified.
+Select it with `/refresh`, review the new transaction, then sign and submit as
+usual. Recovery returns the shares to the same owner, not the deposit token.
+After SDP verifies the transaction and the provider's outcome, the result has
+`settlementOutcome: "recovered"` with the returned share mint and amount.
 
-Each review offers at most one expired request. After its shares return, prepare
-another withdrawal if the position has more expired requests to recover.
+Each review recovers at most one expired request; prepare another withdrawal
+for the next. The original operation is not reopened, and its `/cancel` stays
+unavailable. Expiry alone, or a missing provider request, does not authorize
+recovery.
 
-The original accepted operation is not reopened, and its `/cancel` remains
-unavailable. Expiry alone or a missing provider request does not authorize
-recovery. Hastra operator redemptions use a reusable owner request address and
-delegated wYLDS. Their cancellation instruction cannot bind a reviewed amount
-or request cycle. Earn does not offer recovery for that mechanism; it needs a
-separate design for releasing current delegation safely. Do not treat its
-pending intermediate tokens as delivered USDC or recovered PRIME shares.
+Hastra operator redemptions can't be recovered this way. They reuse one owner
+request address with delegated wYLDS, and their cancellation instruction can't
+bind a reviewed amount or request cycle, so recovery needs a separate design.
+Don't treat their pending intermediate tokens as delivered USDC or recovered
+PRIME shares.
 
-## Reviewed signatures
+## Retries and idempotency
 
-The prepared owner and every required fee payer must sign the unchanged
-transaction message. A different wallet cannot replace that owner. Connected
-wallet policies can require provider-side approvals, but those are part of
-signing and use `awaiting_signature`, not a separate Earn approval stage.
+Save a fresh `Idempotency-Key` with each request body before you send it. After
+an uncertain response, such as a timeout or a `5xx`, resend the same body with
+the same key, including the same signed bytes, and SDP returns the original
+response. To pick up work you already started, list
+`GET /v1/operations?ownerAddress=...` and continue from its `nextAction`
+instead of preparing another deposit or withdrawal.
 
-## Idempotency and recovery
+Replaying a refresh with its original key returns the original response, even
+after a later submit; it builds nothing new. Read
+`GET /v1/operations/{operationId}` for the current state.
 
-Persist a fresh `Idempotency-Key` and request body before every mutation. Reuse
-both after an uncertain response, including the same signed bytes. Find accepted
-work with `GET /v1/operations?ownerAddress=...` and recover its next action
-instead of creating another deposit or withdrawal.
-
-Replaying a successful pre-submit refresh with its original key returns the
-original cached response, even after a later submit was accepted. It creates no
-new build or mutation. Read `GET /v1/operations/{operationId}` for the current
-`canCancel` and `nextAction`; fresh refresh and cancel requests still reject
-after submit acceptance.
-
-Timeout, blockhash expiry and missing RPC history do not prove non-execution.
-An exposed owner transaction may have been broadcast independently even before
-SDP receives a signature. Cancellation cannot revoke those bytes. Keep the
-operation pending until the outcome is known.
-
-A definitive signing rejection or proven nonexecution ends the operation as
-`failed`. Only after that known failure may you prepare a new deposit or
-withdrawal with a new idempotency key. A timeout, unknown provider response or
-missing RPC history never authorizes a new operation.
+Once you submit, prepare a new operation, with a new key, only after the first
+is `failed`. A timeout, blockhash expiry, an unknown provider response or
+missing RPC history doesn't prove a submitted transaction never executed: keep
+tracking it until SDP establishes the outcome. A transaction you never submitted
+or sent can no longer land once the network passes its `lastValidBlockHeight`,
+so you can prepare again.
 
 ## Fees and rates
 
-Distinguish these costs when presenting a strategy:
-
-| Cost | What the integration can establish |
+| Cost | What you can know |
 | --- | --- |
-| Solana network fees and account rent | The prepared transaction names the fee payer. An address source pays from the owner unless you supply a separate `feePayer`, which must also sign. A connected wallet uses its configured fee policy; sponsorship is not universal. |
-| Provider costs | Management, performance, swap or redemption charges depend on the selected product and route. Show provider-reported metadata and reviewed estimates; a queue discount also changes expected proceeds. |
-| SDP commercial pricing | The Earn response does not establish a commercial price or revenue share. Confirm applicable SDP pricing separately; do not infer a zero fee from an absent field. |
+| Network fees and rent | The owner pays them, unless you set a separate `feePayer`, which must also sign. |
+| Provider costs | Management, performance, swap and redemption charges depend on the strategy and route. Show the provider's metadata and the reviewed estimate; a queue discount also lowers proceeds. |
+| SDP pricing | Not part of the Earn response. Confirm SDP pricing separately, and don't read a missing field as zero. |
 
-Show `terms.fees` when supplied. `null` means the breakdown is unavailable,
-not that the transaction is free. It is not a complete invoice for ongoing
-provider costs. `rate.value` is provider-reported APY, not a promise of the
-customer's return after every cost; the API does not normalize every provider
-rate into a universally comparable net yield.
+`terms.fees` lists known fees for the transaction: `null` means unavailable, not
+free, and it is not an invoice for ongoing provider costs. `rate.value` is the
+provider-reported APY, not a promise of returns after every cost, and Earn
+doesn't normalize rates across providers into one comparable net yield.
 
 ## Permissioned tokens and transfer hooks
 
-Earn integrates specific provider instruments and their admitted token
-programs. For example, WisdomTree fund tokens use Token-2022 and an issuer
-compliance hook. Its adapter validates the pinned program and supplies the
-hook accounts required by the transfer. The wallet provider must permit the
-programs and instructions in the reviewed transaction.
+Earn supports specific provider instruments and their token programs.
+WisdomTree fund tokens, for example, use Token-2022 with an issuer compliance
+hook: Earn pins that program and supplies the hook's accounts in the
+transaction. The signing wallet must allow every program and instruction in the
+reviewed transaction.
 
-This does not provide generic support for every transfer hook, gated mint or
-Token ACL policy. A strategy listing is not proof that an arbitrary token can
-be deposited or transferred. Issuer freeze, delegate and transfer restrictions
-can still affect holdings and exits. Monitoring supported deposit-mint
-extensions does not remove those authorities or guarantee execution.
+This is not generic support for any transfer hook, gated mint or Token ACL
+policy, and a listing doesn't prove an arbitrary token can be deposited or
+moved. Issuer freezes, delegates and transfer restrictions can still affect
+holdings and exits.
 
-SDP's [tokenization tools](/docs/tokens/tokenize-an-asset) are a separate module
-for issuance and token controls, subject to their own availability. Using Earn
-does not issue a token, configure its access list or enroll a new issuer policy.
+SDP's [tokenization tools](/docs/tokens/tokenize-an-asset) are a separate
+module, with their own availability. Using Earn doesn't issue a token,
+configure its access list or enroll an issuer policy.
 
 ## Provider eligibility
 
-An SDP API key authorizes API access, not investment eligibility. For each
-customer and wallet, confirm the issuer's current jurisdiction, investor
-qualification or accreditation, KYC/AML, subscription and redemption rules.
-These requirements differ by product; there is no universal Earn compliance
-approval or jurisdiction screen.
+An SDP API key grants API access, not investment eligibility. For each customer
+and wallet, confirm the issuer's rules on jurisdiction, investor qualification
+or accreditation, KYC/AML, subscriptions and redemptions. They differ by
+product, and Earn has no universal compliance approval or jurisdiction screen.
 
-Where an integrated provider supports an eligibility check, Earn performs it
-before building the deposit. WisdomTree requires a customer mapping in the
-same project, an approved wallet and access to the selected fund. Its separate
-KYC/KYB, document and wallet-registration routes support that issuer workflow;
-they do not replace deposit, withdrawal or operation endpoints. Current wallet
-registration on that rail requires an active business customer; submitting a
-retail application alone does not establish deposit eligibility.
+Where a provider supports an eligibility check, Earn runs it before building the
+deposit. WisdomTree requires a customer mapping in the same project, an approved
+wallet and access to the selected fund. Its onboarding (KYC/KYB, documents and
+wallet registration) is a separate issuer workflow. Only an active business
+customer can register a wallet; a retail application alone doesn't make a
+wallet eligible.
 
-Providers without that capability do not receive a universal eligibility
-check from SDP. Apply the required customer screening in your integration and
-confirm the issuer's terms before offering a strategy. Earn does not apply a
-new deposit-eligibility gate to an exit, but issuer hooks, freezes, liquidity
-and redemption decisions can still prevent or delay delivery.
+For other providers, screen customers in your integration and confirm the
+issuer's terms before you offer a strategy. Withdrawals get no new eligibility
+gate, but issuer hooks, freezes, liquidity and redemption decisions can still
+delay or block delivery.

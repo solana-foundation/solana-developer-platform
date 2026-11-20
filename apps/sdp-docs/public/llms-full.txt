@@ -315,256 +315,363 @@ Source: https://platform.solana.com/docs/earn
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-Earn aggregates strategies from integrated providers. A strategy may be a vault,
-lending market or RWA product. Treasury and Embedded Yield use the same
-catalogue, positions and asynchronous operations.
+Earn puts vault, lending and real-world-asset yield strategies behind one API.
+You prepare a deposit, your customer's wallet signs it, and SDP broadcasts it
+and tracks it to settlement. Funds move between the customer's wallet and the
+provider's program; SDP never holds them ([follow the funds](/docs/earn/concepts#follow-the-funds)).
 
-[Run the TypeScript example](https://github.com/solana-foundation/solana-developer-platform/tree/codex/earn-core-api/examples/earn-quickstart)
-or follow the [quickstart](/docs/earn/quickstart). The local dry-run needs no
-account or funds. These pages describe this PR's core contract; deployment
-availability follows the normal release channel and serving version.
+```text
+POST /v1/earn/deposit                     → an operation with an unsigned transaction
+     ...your customer's wallet signs it...
+POST /v1/operations/{operationId}/submit  → SDP broadcasts the exact signed bytes
+GET  /v1/operations/{operationId}         → poll until completed
+```
 
-Use your SDP API key with any compatible Solana wallet: prepare with
-`ownerAddress`, sign the returned transaction through your wallet integration,
-then submit the signed bytes. You do not need a wallet registered in SDP.
-An existing connected wallet's `walletId` is an optional alternative.
+Any Solana wallet can sign, and none needs registering in SDP. Start with the
+[quickstart](/docs/earn/quickstart), or
+[run the example](https://github.com/solana-foundation/solana-developer-platform/tree/main/examples/earn-quickstart)
+locally with no key, wallet or funds.
 
-## Core actions
+## Endpoints
 
-- `GET /v1/earn/discovery` lists strategies, rates and supported actions.
-- `GET /v1/earn/positions` reads holdings and optional portfolio totals.
-- `POST /v1/earn/deposit` prepares a deposit using a strategy ID.
-- `POST /v1/earn/withdraw` prepares a withdrawal using a position ID.
+| Endpoint | What it does |
+| --- | --- |
+| `GET /v1/earn/discovery` | Lists strategies, their rates and what each supports. |
+| `GET /v1/earn/positions` | Reads a wallet's holdings and totals. |
+| `POST /v1/earn/deposit` | Prepares a deposit into a strategy. |
+| `POST /v1/earn/withdraw` | Prepares a withdrawal from a position. |
+| `GET /v1/operations`, `GET /v1/operations/{operationId}` | Track deposits and withdrawals. |
+| `POST /v1/operations/{operationId}/submit` | Sends the signed transaction. |
+| `POST /v1/operations/{operationId}/refresh` | Chooses a withdrawal route before you sign. |
+| `POST /v1/operations/{operationId}/cancel` | Abandons an operation before you sign. |
 
-Every deposit or withdrawal returns an operation. Review its terms, submit its
-current action and track its next action until delivery is verified. A worker
-coordinates configured-wallet signing and broadcast.
+## Guides
 
-Start with the [quickstart](/docs/earn/quickstart), then read about
-[strategies](/docs/earn/strategies), [deposits](/docs/earn/deposits),
-[positions](/docs/earn/balances) and [withdrawals](/docs/earn/withdrawals).
+- [How Earn works](/docs/earn/concepts): strategies, positions, operations and where funds go.
+- [Strategies](/docs/earn/strategies), [deposits](/docs/earn/deposits),
+  [balances](/docs/earn/balances) and [withdrawals](/docs/earn/withdrawals).
+- [Embedded Yield](/docs/guides/embedded-yield): put Earn inside your app.
+- [Integration details](/docs/earn/integration-details): retries, recovery, fees and eligibility.
 
 ---
 
 ### Quickstart
 Source: https://platform.solana.com/docs/earn/quickstart
 
-> Run a local example, then prepare, sign and submit your first Earn deposit.
+> Deposit into a yield strategy with three calls, prepare, submit and poll, and one wallet signature.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-[Run the TypeScript example on GitHub](https://github.com/solana-foundation/solana-developer-platform/tree/codex/earn-core-api/examples/earn-quickstart)
-first. Its local dry-run needs Node.js 24.22.1, no login, API key, wallet or funds.
+A deposit takes three API calls (prepare, submit, poll) and one wallet
+signature. Each step shows curl and TypeScript: follow either one. To try the
+flow offline first, the
+[example](https://github.com/solana-foundation/solana-developer-platform/tree/main/examples/earn-quickstart)
+runs it against fake responses, with no key, wallet or funds.
 
-This PR changes the core contract. These examples describe this version; they
-do not mean its routes are already running on the hosted API. Earn follows the
-normal release-channel rules. Use live calls after your target deployment runs
-this version.
+## Before you start
 
-## Get a project key
+- **An API key.** [Create a devnet key](https://platform-devnet.solana.com/dashboard?return_to=%2Fdashboard%2Fapi-keys%2Fnew)
+  with **Earn Execute**, which includes Read. Keep it on your server.
+- **A devnet keypair** with a little SOL for network fees, such as the
+  `~/.config/solana/id.json` that `solana-keygen new` writes. In your app, any
+  Solana wallet can sign instead, and SDP never needs it registered.
+- **Node.js 24** and `@solana/kit`, to sign. The TypeScript tabs add up to one
+  ES module script, `deposit.mjs`.
 
-The devnet API is `https://api-devnet.solana.com`.
-[Create a devnet API key](https://platform-devnet.solana.com/dashboard?return_to=%2Fdashboard%2Fapi-keys%2Fnew)
-with Earn Execute, which includes Read. Creating a key requires sign-in; reading
-docs and running the local example do not. All Earn API calls, including reads,
-require authentication. Keep the key on your server.
+```bash
+export SDP_API_URL=https://api-devnet.solana.com
+export SDP_API_KEY='<your-api-key>'
+export KEYPAIR=~/.config/solana/id.json
+export PREPARE_KEY=$(uuidgen) SUBMIT_KEY=$(uuidgen)
+npm install @solana/kit
+```
 
-Use any compatible Solana wallet, including a wallet from your Privy integration.
-Your app owns wallet connection and signing UI. No wallet registration or
-signing-provider setup in SDP is required.
-For a live deposit, fund that wallet with the chosen token and enough SOL for
-network fees, and choose a strategy currently accepting deposits.
+Every write requires an `Idempotency-Key`, any unique string. To retry a request
+whose response you lost, send it again with the same key and body: SDP returns
+the original response instead of creating a second deposit. Reusing a key with
+a different body returns `422`, so use a new key when you change the body.
 
-## Prepare, sign, submit
+## 1. Pick a strategy
 
-A normal deposit needs two writes and a status read that repeats while pending.
-Discovery is optional when you already know the strategy ID and supported mint.
-Use [discovery](/docs/earn/strategies) otherwise.
+**curl**
 
-Set `SDP_API_URL=https://api-devnet.solana.com` and `SDP_API_KEY` in your server
-process. Save separate `PREPARE_KEY` and `SUBMIT_KEY` idempotency values before
-sending; preserve the same keys and bodies for uncertain retries.
+```bash
+curl -sS "$SDP_API_URL/v1/earn/discovery?pageSize=100" \
+  -H "Authorization: Bearer $SDP_API_KEY" |
+  jq '.data.strategies[] | select(.capabilities.deposit and .fundable) | {id, name, depositMints}'
+```
 
-Create `deposit.json`, replacing the strategy, owner and mint with real values:
+**TypeScript**
+
+```ts
+import { readFile } from "node:fs/promises";
+
+const api = process.env.SDP_API_URL;
+const headers = {
+  Authorization: `Bearer ${process.env.SDP_API_KEY}`,
+  "Content-Type": "application/json",
+};
+const discovery = await fetch(`${api}/v1/earn/discovery?pageSize=100`, { headers });
+const { strategies } = (await discovery.json()).data;
+console.table(
+  strategies
+    .filter((strategy) => strategy.capabilities.deposit && strategy.fundable)
+    .map(({ id, name, depositMints }) => ({ id, name, depositMints }))
+);
+```
+
+Choose one, and fund your keypair on devnet with one of its `depositMints`.
+[Strategies](/docs/earn/strategies) explains rates and the other fields.
+
+## 2. Prepare the deposit
+
+Write `deposit.json` with the strategy's `id`, your keypair's address (from
+`solana address`) and the amount, then send `POST /v1/earn/deposit`:
 
 ```json title="deposit.json"
 {
-  "strategyId": "YOUR_STRATEGY_ID",
-  "source": { "ownerAddress": "YOUR_OWNER_PUBLIC_KEY" },
-  "amount": { "mint": "YOUR_SUPPORTED_TOKEN_MINT", "value": "10" },
+  "strategyId": "<strategy-id>",
+  "source": { "ownerAddress": "<your-wallet-address>" },
+  "amount": { "mint": "<deposit-mint>", "value": "10" },
   "slippageBps": 50
 }
 ```
 
-`source.ownerAddress` is the public key of the wallet that will sign and own the
-position. `slippageBps` is top-level: `50` means 0.5%; the maximum is 500.
-Amounts are decimal strings in token units. See the
-[deposit parameters](/docs/reference/api/earn/prepare-earn-deposit).
-
-### 1. Prepare
-
-Send `POST /v1/earn/deposit`.
+**curl**
 
 ```bash
-curl --fail-with-body -sS "$SDP_API_URL/v1/earn/deposit" \
+curl -sS --fail-with-body "$SDP_API_URL/v1/earn/deposit" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $PREPARE_KEY" \
-  --data-binary @deposit.json > prepared.json
+  --data-binary @deposit.json -o prepared.json || cat prepared.json
+jq .data.operation prepared.json
 ```
 
-`202` returns `data.operation` with reviewed `terms`, `id`, `actionId`, `version`
-and `nextAction.transaction`. Preparation does not sign or broadcast.
+**TypeScript**
 
-### 2. Sign, then submit
+```ts
+const prepared = await fetch(`${api}/v1/earn/deposit`, {
+  method: "POST",
+  headers: { ...headers, "Idempotency-Key": process.env.PREPARE_KEY },
+  body: await readFile("deposit.json", "utf8"),
+});
+if (!prepared.ok) throw new Error(await prepared.text());
+let { operation } = (await prepared.json()).data;
+console.log(operation.terms);
+```
 
-Show the returned terms and have the same owner sign the unchanged transaction
-through your wallet SDK. Encode the complete signed transaction as base64.
-Send it to `POST /v1/operations/{operationId}/submit`. Create
-`submission.json` with the returned action ID and version:
+`ownerAddress` is the wallet that signs and owns the position. `amount.value`
+is a decimal string in token units; another mint adds a swap to the same
+transaction. `slippageBps` is optional: `50` is 0.5%, the maximum is `500`, and
+omitting it uses the strategy's default.
 
-```json title="submission.json"
+SDP returns `202` with an operation. It quotes, builds and simulates the
+transaction, but never signs or sends it:
+
+```json title="202 response (trimmed)"
 {
-  "actionId": "ACTION_ID_FROM_PREPARATION",
-  "version": 1,
-  "signedTransaction": "<base64-signed-transaction>"
+  "data": {
+    "operation": {
+      "id": "op_…",
+      "status": "prepared",
+      "actionId": "opa_…",
+      "version": 1,
+      "terms": {
+        "estimate": { "mint": "<share-mint>", "value": "9.84" },
+        "minimum": { "mint": "<share-mint>", "value": "9.79" },
+        "fees": null
+      },
+      "nextAction": {
+        "type": "sign_transaction",
+        "transaction": "<base64-unsigned-transaction>",
+        "lastValidBlockHeight": "312345678",
+        "expiresAt": null
+      }
+    }
+  }
 }
 ```
 
+Show your customer `terms` before they sign. `estimate` is the quoted share
+amount and `minimum` is the least the transaction accepts. A `null` value is
+unknown, not zero.
+
+## 3. Sign and submit
+
+Sign `nextAction.transaction` with the owner's keypair without changing it, and
+submit it before the network passes `lastValidBlockHeight`, about a minute after
+you prepared. Past that height the transaction can never land: if you didn't
+submit it, prepare a new deposit with new keys.
+
+**curl**
+
+```js title="sign.mjs"
+import { readFile, writeFile } from "node:fs/promises";
+import {
+  createKeyPairFromBytes,
+  getBase64EncodedWireTransaction,
+  getBase64Encoder,
+  getTransactionDecoder,
+  signTransaction,
+} from "@solana/kit";
+
+const secretKey = new Uint8Array(JSON.parse(await readFile(process.env.KEYPAIR, "utf8")));
+const keyPair = await createKeyPairFromBytes(secretKey);
+const { operation } = JSON.parse(await readFile("prepared.json", "utf8")).data;
+const bytes = getBase64Encoder().encode(operation.nextAction.transaction);
+const signed = await signTransaction([keyPair], getTransactionDecoder().decode(bytes));
+const submission = {
+  actionId: operation.actionId,
+  version: operation.version,
+  signedTransaction: getBase64EncodedWireTransaction(signed),
+};
+await writeFile("submission.json", JSON.stringify(submission));
+```
+
 ```bash
-curl --fail-with-body -sS "$SDP_API_URL/v1/operations/$OPERATION_ID/submit" \
+node sign.mjs
+OPERATION_ID=$(jq -r .data.operation.id prepared.json)
+curl -sS --fail-with-body "$SDP_API_URL/v1/operations/$OPERATION_ID/submit" \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $SUBMIT_KEY" \
   --data-binary @submission.json
 ```
 
-`OPERATION_ID` is `data.operation.id` from preparation. Submission returns `202`;
-SDP broadcasts and tracks the exact signed transaction. See the
-[submission fields](/docs/reference/api/operations/submit-operation).
-
-### 3. Track
-
-```bash
-curl --fail-with-body -sS "$SDP_API_URL/v1/operations/$OPERATION_ID" \
-  -H "Authorization: Bearer $SDP_API_KEY"
-```
-
-Repeat while pending. `submitted` means broadcast; `completed` means verified
-delivery. A queued withdrawal request is not payout. After submit acceptance,
-refresh and cancellation are unavailable. Track uncertain outcomes instead of
-starting another deposit.
-
-## The same calls in TypeScript
-
-This is the caller-signed path. `signTransaction` is your existing wallet
-integration: it receives base64 unsigned bytes and returns base64 signed bytes.
-`review` waits for your customer's confirmation. Keep these requests on your
-server; bridge review and signing to your app's wallet UI without exposing the
-project API key to the browser. Persist each request before
-sending, as the [runnable example](https://github.com/solana-foundation/solana-developer-platform/tree/codex/earn-core-api/examples/earn-quickstart)
-demonstrates. Check HTTP errors before reading successful response fields.
+**TypeScript**
 
 ```ts
-const headers = {
-  Authorization: `Bearer ${apiKey}`,
-  "Content-Type": "application/json",
-};
-const deposit = {
-  strategyId,
-  source: { ownerAddress },
-  amount: { mint: depositMint, value: "10" },
-  slippageBps: 50,
-};
-await savePreparationDurably(deposit, savedPrepareKey);
-const preparedResponse = await fetch(`${apiUrl}/v1/earn/deposit`, {
+import {
+  createKeyPairFromBytes,
+  getBase64EncodedWireTransaction,
+  getBase64Encoder,
+  getTransactionDecoder,
+  signTransaction,
+} from "@solana/kit";
+
+const secretKey = new Uint8Array(JSON.parse(await readFile(process.env.KEYPAIR, "utf8")));
+const keyPair = await createKeyPairFromBytes(secretKey);
+const bytes = getBase64Encoder().encode(operation.nextAction.transaction);
+const signed = await signTransaction([keyPair], getTransactionDecoder().decode(bytes));
+
+const submitted = await fetch(`${api}/v1/operations/${operation.id}/submit`, {
   method: "POST",
-  headers: { ...headers, "Idempotency-Key": savedPrepareKey },
-  body: JSON.stringify(deposit),
+  headers: { ...headers, "Idempotency-Key": process.env.SUBMIT_KEY },
+  body: JSON.stringify({
+    actionId: operation.actionId,
+    version: operation.version,
+    signedTransaction: getBase64EncodedWireTransaction(signed),
+  }),
 });
-if (!preparedResponse.ok) throw new Error(`SDP ${preparedResponse.status}`);
-const { data: { operation } } = await preparedResponse.json();
-await review(operation.terms);
-const signedTransaction = await signTransaction(operation.nextAction.transaction);
-const submission = {
-  actionId: operation.actionId,
-  version: operation.version,
-  signedTransaction,
-};
-await saveSubmissionDurably(submission, savedSubmitKey);
-const submittedResponse = await fetch(`${apiUrl}/v1/operations/${operation.id}/submit`, {
-  method: "POST",
-  headers: { ...headers, "Idempotency-Key": savedSubmitKey },
-  body: JSON.stringify(submission),
-});
-if (!submittedResponse.ok) throw new Error(`SDP ${submittedResponse.status}`);
-const statusResponse = await fetch(`${apiUrl}/v1/operations/${operation.id}`, { headers });
-if (!statusResponse.ok) throw new Error(`SDP ${statusResponse.status}`);
-const status = await statusResponse.json(); // Repeat this read while pending.
+if (!submitted.ok) throw new Error(await submitted.text());
+({ operation } = (await submitted.json()).data);
 ```
 
-## Optional connected wallet
+Either way, `POST /v1/operations/{operationId}/submit` takes the action you
+reviewed and the signed bytes:
 
-If you already connected a wallet in SDP through BYOK, replace the source with
-`{ "walletId": "cwlt_example" }`. Review the terms and submit the returned
-`actionId` and `version` without `signedTransaction`. SDP requests signing
-through that wallet's configured provider. Show any `sign_in_provider`
-instructions and keep polling; do not submit again.
+```json title="submission.json"
+{
+  "actionId": "opa_…",
+  "version": 1,
+  "signedTransaction": "<base64-signed-transaction>"
+}
+```
 
-## Holdings and withdrawals
+`202` means SDP matched your signed bytes to the transaction it prepared. It
+broadcasts them and tracks the outcome. In a browser app, pass the same
+transaction to your wallet's `signTransaction` (Privy, Wallet Standard or any
+other): your server keeps the key and makes the calls, and only the transaction
+and its signed bytes cross to the browser.
 
-[Positions](/docs/earn/balances) optionally filter by `ownerAddress` or `walletId`.
-Add `discover=true` with one explicit source to include supported pre-existing
-holdings. To exit, [prepare a withdrawal](/docs/earn/withdrawals) using its
-`positionId`, then sign, submit and track the same way. Some withdrawals need
-one additional route-selection preparation before signing.
+## 4. Poll until it finishes
 
-[Integration details](/docs/earn/integration-details) covers recovery, eligibility
-and the cases that need refresh or cancellation before submission.
+**curl**
+
+```bash
+while :; do
+  STATUS=$(curl -sS "$SDP_API_URL/v1/operations/$OPERATION_ID" \
+    -H "Authorization: Bearer $SDP_API_KEY" | jq -r .data.operation.status)
+  echo "$STATUS"
+  case "$STATUS" in completed | failed | cancelled) break ;; esac
+  sleep 3
+done
+```
+
+**TypeScript**
+
+```ts
+while (!["completed", "failed", "cancelled"].includes(operation.status)) {
+  await new Promise((resolve) => setTimeout(resolve, 3000));
+  const current = await fetch(`${api}/v1/operations/${operation.id}`, { headers });
+  operation = (await current.json()).data.operation;
+  console.log(operation.status);
+}
+console.log(operation.result ?? operation.error);
+```
+
+| `status` | Meaning |
+| --- | --- |
+| `completed` | Delivery verified. `result.positionId` is the new position. |
+| `failed` | It didn't go through; `error` says why. Prepare a new deposit with new keys. |
+| `cancelled` | Stopped before anything was deposited. |
+| Anything else | Still in progress, such as `queued`, `submitted` or `settling`. Keep polling, and don't start another deposit. |
+
+## Next steps
+
+- [Read positions and balances](/docs/earn/balances).
+- [Withdraw](/docs/earn/withdrawals) using the `positionId`.
+- [Integration details](/docs/earn/integration-details) cover retries, refresh,
+  cancellation, fees and eligibility.
+
+**Note**
+
+**Using an [SDP custody wallet](/docs/wallet-operations)?** Send
+`source: { "walletId": "<wallet-id>" }` instead of `ownerAddress`, and submit
+without `signedTransaction`. SDP requests the signature from the wallet's
+custody provider; keep polling, and show any `sign_in_provider` instructions to
+the signer.
 
 ---
 
 ### How Earn works
 Source: https://platform.solana.com/docs/earn/concepts
 
-> Strategies, positions and shares, who signs, and how each deposit and withdrawal settles.
+> Strategies, positions and operations, who signs, and where the funds go on every deposit and withdrawal.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-## Strategy
+## Strategies, positions and operations
 
-A strategy is an entry in the Earn catalogue. Its provider may implement a
-vault, lending market or RWA product. A protocol can expose several strategies
-with different assets, rates and withdrawal terms.
+- A **strategy** is one yield product: a vault, a lending market or a
+  real-world-asset fund. One protocol can list several, with different assets,
+  rates and withdrawal terms. [Discovery](/docs/earn/strategies) lists them.
+- A **position** is one wallet's holding in one strategy. A deposit creates it;
+  a [withdrawal](/docs/earn/withdrawals) names it by `positionId`.
+- An **operation** is one deposit or withdrawal, from preparation through
+  signing, broadcast and settlement. Every write returns one, and you poll it
+  for progress.
 
-## Position
+## Who signs
 
-A position is a wallet's holding in a strategy. Its source normally identifies
-the signing wallet by `ownerAddress`, without registering it in SDP. An existing
-connected wallet can instead use its `walletId`. Both use the same API.
+SDP prepares each transaction, and the wallet you name as `source.ownerAddress`
+signs it: SDP never holds its keys. The wallet signs the exact bytes SDP
+prepared, and SDP rejects any change to them. Preparing grants no permission to
+send: only your `/submit` call does, and only for the transaction you reviewed.
 
-Imported holdings have unknown acquisition history and cost basis. A current
-balance alone does not establish earned yield.
-
-## Operation
-
-An operation tracks one deposit or withdrawal through preparation, wallet
-signing, chain submission and economic delivery. Before submit acceptance,
-replacing unsigned terms requires a new action identity and review. After
-acceptance, refresh and cancellation are unavailable; track the outcome.
-
-A signature, confirmed request or escrowed share balance is not a payout.
-`completed` requires verified delivery. Unknown outcomes retain their original
-signed bytes and remain unresolved until evidence establishes the outcome.
+A signature, a confirmed request or escrowed shares are not a payout.
+`completed` means SDP verified delivery. When an outcome is unknown, the
+operation keeps its signed bytes and stays pending until evidence settles it.
 
 ## Follow the funds
 
-For a share-issuing strategy, the deposit transaction moves assets into the
-provider's accounts and issues shares to the owner's token account:
+For a share-issuing strategy, the deposit moves assets into the provider's
+accounts and issues shares to the owner's token account:
 
 - **Owner's wallet**
 
-  Signs the reviewed transaction, directly or through its configured provider.
+  Signs the reviewed transaction.
 
 - **Provider's program and asset accounts**
 
@@ -574,255 +681,251 @@ provider's accounts and issues shares to the owner's token account:
 
   Holds the receipt for the position. SDP's database records the activity.
 
-On redemption, the provider redeems the shares under its own withdrawal
-mechanism and delivers assets to the owner. A delayed request can
-escrow shares while it waits; the request transaction alone is not delivery.
-Earn does not introduce an SDP omnibus wallet or pool. The underlying provider
-can pool assets, control program upgrades or restrict redemption.
+On redemption, the provider redeems the shares under its own withdrawal rules
+and delivers assets to the owner. A delayed request can hold shares in escrow
+while it waits; the request alone is not delivery. Earn adds no SDP omnibus
+wallet or pool, but the underlying provider can pool assets, upgrade its
+program or restrict redemption.
 
 For example, Kamino's K-Vault program is
 `KvauGMspG5k6rtzrqqn7WNn3oZdyKqLKwK2XWQ8FLjd` on mainnet and
 `devkRngFnfp4gBc5a3LsadgbQKdPo8MSZ4prFiNSVmY` on devnet. The strategy's
-`providerReference` identifies the vault account; its `shareMint` identifies the
-receipt token. A deposit invokes that program to mint shares to the owner;
-redemption burns shares as assets leave the vault for the owner.
+`providerReference` is the vault account and its `shareMint` is the receipt
+token. A deposit invokes that program to mint shares to the owner; redemption
+burns them as assets leave the vault for the owner.
 
-Compare these identities with the transaction's program and token accounts
-before signing. The
+Before signing, compare those identities with the transaction's program and
+token accounts. The
 [cluster-specific program registry](https://github.com/solana-foundation/solana-developer-platform/blob/main/packages/sdp-types/src/kamino-programs.ts)
-and the confirmed transaction let you trace the program, deposit destination
-and shares received. The deposit and withdrawal plans validate those asset
-identities against the strategy or position.
+and the confirmed transaction let you trace the program, the deposit
+destination and the shares received. SDP checks the same asset identities
+against the strategy or position when it plans each transaction.
 
-Provider orders differ from a vault deposit. WisdomTree subscriptions transfer
-USDC to an issuer-operated on-receipt wallet; its transfer agent delivers fund
-tokens later. Redemption transfers fund tokens back to an issuer wallet and
-awaits USDC settlement. Earn does not mint those fund tokens or control their
-backing. The
+Provider orders work differently from a vault. A WisdomTree subscription sends
+USDC to an issuer-operated wallet, and its transfer agent delivers fund tokens
+later. Redemption sends fund tokens back to an issuer wallet and waits for USDC.
+Earn neither mints those tokens nor controls their backing. The
 [fund and compliance-program registry](https://github.com/solana-foundation/solana-developer-platform/blob/main/packages/sdp-types/src/wisdomtree-programs.ts)
-identifies the supported mints and transfer hook. Always inspect the selected
-strategy's mechanism rather than assuming every RWA uses a vault.
-
-With `ownerAddress`, your wallet integration keeps signing control and sends
-signed bytes to SDP. With `walletId`, you explicitly authorize signing through
-that connected wallet's provider and policies. Preparing a transaction grants
-neither path permission to sign or broadcast it.
+lists the supported mints and transfer hook. Check each strategy's mechanism
+rather than assuming every real-world asset is a vault.
 
 ## One integration, many customers
 
-One project API key can serve many customer wallets. For each deposit, send
-that customer's address in `source.ownerAddress`; no generic wallet-registration
-call is required. Withdrawals inherit the source from their `positionId`.
-Keep the customer-to-wallet mapping in your backend.
-
-For customer A's activity, your backend selects A's address for both reads:
+One API key serves all your customers. Send each customer's wallet as
+`source.ownerAddress` when you prepare their deposit; there is no registration
+call. Withdrawals take the owner from the position. Keep the mapping from
+customer to wallet in your backend, and filter reads by owner:
 
 ```http
-GET /v1/earn/positions?ownerAddress=<customer-a-public-key>
-GET /v1/operations?ownerAddress=<customer-a-public-key>
+GET /v1/earn/positions?ownerAddress=<customer-a-wallet>
+GET /v1/operations?ownerAddress=<customer-a-wallet>
 ```
 
-Use `walletId` instead for an existing connected wallet. Without an owner
-filter, positions can include tracked holdings across the project; the
-operations feed defaults to connected-wallet activity. Address-source history
-requires an explicit `ownerAddress` filter.
-
-SDP isolates organization, project and environment data. An address filter is
-not a customer access-control boundary: project credentials can read other
-customers' records within their allowed scope. Earn reads of connected wallets
-cover the project's wallets; signing still requires the caller's wallet grants.
-Keep the project API key on your backend, authenticate each customer there and
-check their allowed wallet before forwarding a request. Public on-chain balance
-discovery is not proof that the caller controls the address.
+SDP isolates data by organization, project and environment, but the owner
+filter is not an access boundary: your key can read every customer's records in
+its project. Keep the key on your backend, authenticate each customer there and
+check they own the wallet before you forward a request. A public onchain balance
+does not prove the caller controls the address.
 
 ---
 
 ### Strategies
 Source: https://platform.solana.com/docs/earn/strategies
 
-> Find a strategy your project can deposit into, then check its slippage policy, rate, eligibility, and withdrawal terms.
+> Find a strategy that accepts deposits, then read its rate, slippage default and withdrawal terms.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-Use `GET /v1/earn/discovery` to browse the validated strategy catalogue. Filter
-by ID, provider, deposit mint, source kind, APY type, cluster or APY bounds, with
-`page` and `pageSize` for pagination.
-
-Discovery is optional when you already know the strategy ID and supported mint.
-See [discovery filters](/docs/reference/api/earn/discover-earn-strategies) for
-parameter types, allowed values and pagination.
+`GET /v1/earn/discovery` lists the strategies on your environment's cluster:
 
 ```bash
-curl --fail-with-body -sS "$SDP_API_URL/v1/earn/discovery?pageSize=100" \
+curl -sS "$SDP_API_URL/v1/earn/discovery?depositMint=<token-mint>&pageSize=100" \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
-## Read rates and capabilities
+Filter by `id`, `provider`, `depositMint`, `sourceKind`, `apyType`,
+`liquidityTerm`, `cluster`, `minApy` or `maxApy`, and page with `page` and
+`pageSize` (at most 100). [Discovery filters](/docs/reference/api/earn/discover-earn-strategies)
+lists every allowed value.
 
-`rate.value` is an APY decimal fraction: `"0.062"` means 6.2%.
-`rate.observedAt` is null when the observation time is unknown. Missing rates
-are unknown, not zero.
+## Pick one that accepts deposits
 
-Check `capabilities.deposit` and its unavailable reason. Discovery coverage can
-exceed execution coverage; preparation and execution still check the wallet's
-current admission. Provider liquidity, issuer requirements and signing policy
-apply independently of the catalogue listing.
+Choose a strategy whose `capabilities.deposit` and `fundable` are both `true`,
+and pass its `id` as `strategyId` when you [prepare a deposit](/docs/earn/deposits).
+When `capabilities.deposit` is `false`, `depositUnavailableReason` says why:
+`catalogue_only` or `adapter_unavailable`. Preparation still checks admission
+live, so provider limits, issuer requirements and liquidity can refuse a listed
+strategy.
 
-Pass the returned `id` as `strategyId` when preparing a deposit. Discovery
-covers integrated provider sources; it does not claim every ecosystem strategy.
+## Read the terms
+
+- `rate.value` is the provider-reported APY as a decimal fraction: `"0.062"` is
+  6.2%. `null` means unknown, not zero. `rate.observedAt` is when the provider
+  observed it, or `null` if that time is unknown.
+- `depositSlippage.defaultToleranceBps` is the slippage a deposit uses when you
+  omit `slippageBps`; when it is `null`, the default is 50 (0.5%).
+- `liquidityTerm` is `instant` or `delayed`. A delayed strategy's
+  `redemptionDelayDays` estimates how long a withdrawal takes to settle.
+
+A rate is not a promise of returns after costs; see
+[fees and rates](/docs/earn/integration-details#fees-and-rates). Discovery
+covers the providers Earn integrates, not every strategy on Solana.
 
 ---
 
 ### Deposit funds
 Source: https://platform.solana.com/docs/earn/deposits
 
-> Prepare and review strategy deposits, then follow signing and settlement.
+> Prepare a deposit, review its terms, sign it in your customer's wallet and track it to settlement.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-Send `POST /v1/earn/deposit` with `strategyId`, a source and token amount.
-With your SDP API key, use `source: { "ownerAddress": "<owner-public-key>" }` for
-any compatible Solana wallet. No SDP wallet registration or provider connection
-is required. Amounts use a mint and decimal-string `value` in that token's units.
+The [quickstart](/docs/earn/quickstart) walks through one deposit end to end.
+This page covers the details.
 
+## Prepare
+
+`POST /v1/earn/deposit` takes the strategy, the owner's wallet and the amount.
 See [all deposit parameters](/docs/reference/api/earn/prepare-earn-deposit).
-`ownerAddress` belongs inside `source`; optional `slippageBps` belongs at the
-request top level. `50` means 0.5%, up to a maximum of 500 basis points.
 
-## Review before submission
+| Field | Notes |
+| --- | --- |
+| `strategyId` | From [discovery](/docs/earn/strategies). |
+| `source.ownerAddress` | The wallet that signs and owns the position. It needs no registration in SDP. |
+| `amount` | The `mint` you fund with and a decimal-string `value` in that token's units. |
+| `slippageBps` | Optional, at the top level. `50` is 0.5%, at most `500`. Defaults to the strategy's `depositSlippage.defaultToleranceBps`, else 50. |
+| `feePayer` | Optional address that pays network fees instead of the owner. It must also sign. |
 
-Preparation returns `202` with a durable operation, economic terms and its next
-action. It quotes, plans and simulates without starting wallet signing or
-broadcasting. Show the estimate, enforceable minimum and fees.
-Unknown fees are not zero fees.
+Funding with a token other than the strategy's deposit token puts the swap and
+the deposit in one transaction, so a deposit never half-executes. If the two
+don't fit in one transaction, preparation fails before anything is signed:
+fund the deposit token directly and try again.
 
-For `sign_transaction`, use your wallet integration to sign the exact advertised
-transaction. Its owner must match the prepared `ownerAddress`; any required fee
-payer must co-sign. Keep the message unchanged and encode the signed transaction
-as base64.
-Call `POST /v1/operations/{operationId}/submit` with the current action ID and
-version and `signedTransaction`. Submission authorizes and queues
-that exact transaction; it does not prepare another action.
+## Review
 
-If you already have a wallet connected in SDP, `source: { "walletId": "..." }`
-is an optional alternative. For its `submit` action, send the action ID/version
-without signed bytes. The worker requests signing through the configured wallet
-provider; there is no separate API flow.
+Preparation returns `202` with an operation. SDP quotes, plans and simulates
+the transaction, but signs and sends nothing. Show your customer:
 
-Funding with another supported token combines the swap and deposit into one
-transaction. If they cannot fit together after a compact-route retry, preparation
-refuses before signing. Fund the strategy's deposit token and retry; SDP never
-returns a standalone funding swap.
+- `terms.estimate`: the quoted shares.
+- `terms.minimum`: the least the transaction accepts.
+- `terms.fees`: the known fees. `null` means unknown, not free.
 
-The worker coordinates signing and broadcast. Poll
-`GET /v1/operations/{operationId}` and display its next action. For
-`sign_in_provider`, show the signing instructions and handoff URL when present.
-A queued or submitted operation has not yet established delivery.
+## Sign and submit
 
-After submit acceptance, refresh and cancellation are unavailable. Track the
-operation until its outcome is known. A definitive failure requires a new
-deposit request and idempotency key; an uncertain outcome does not permit one.
+The owner, and the `feePayer` if you set one, sign `nextAction.transaction`
+without changing it. Send the signed transaction, base64-encoded, with the
+operation's current `actionId` and `version` to
+`POST /v1/operations/{operationId}/submit`. SDP checks the bytes match what it
+prepared, then broadcasts them. If the customer declines to sign, nothing
+executes and no SDP call is needed.
 
-Persist an `Idempotency-Key` before each mutation. Recover uncertain responses
-by reading the operation and retrying the same body with its original key.
+## Track
+
+Poll `GET /v1/operations/{operationId}` until `status` is `completed`, `failed`
+or `cancelled`; anything else is still in progress. A submitted deposit can't
+be refreshed or cancelled, so keep tracking it. Only a `failed` deposit lets you
+prepare a new one, with a new `Idempotency-Key`. A timeout or an unknown outcome
+does not:
+[retry the same request](/docs/earn/integration-details#retries-and-idempotency)
+instead.
 
 ---
 
 ### Balances and earnings
 Source: https://platform.solana.com/docs/earn/balances
 
-> Read holdings and complete-scope totals while preserving unavailable values.
+> Read a wallet's positions, find holdings opened outside SDP, and total its balances and earnings.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-Use `GET /v1/earn/positions?ownerAddress=<owner-public-key>` for your wallet's
-holdings. No SDP wallet registration is required. An optional `walletId` filter
-selects an existing connected wallet instead; `sourceType` distinguishes
-`address` and `wallet` sources. Position IDs are the references for withdrawals.
+```bash
+curl -sS "$SDP_API_URL/v1/earn/positions?ownerAddress=<wallet-address>" \
+  -H "Authorization: Bearer $SDP_API_KEY"
+```
 
-The `ownerAddress` and `walletId` filters are optional; use one, not both.
-Without one, the read covers the caller's visible tracked scope.
-See [position filters](/docs/reference/api/earn/list-earn-core-positions).
+Each position's `id` is the `positionId` you [withdraw](/docs/earn/withdrawals)
+with. Without `ownerAddress`, the read covers every position your key can see in
+the project. See [position filters](/docs/reference/api/earn/list-earn-core-positions).
 
-## Discover existing holdings
+## Holdings opened outside SDP
 
-With one explicit source, `discover=true` reads integrated strategies for
-holdings opened outside SDP. The response states coverage and unavailable
-strategy counts. Missing provider observations remain unavailable, not zero.
-Reads do not import ownership or invent acquisition history.
+Add `discover=true` to an `ownerAddress` read to include the wallet's holdings
+in integrated strategies that SDP didn't open. You can withdraw from them the
+same way. `discovery.unavailableStrategyCount` counts strategies SDP couldn't
+read: their balances are unknown, not zero. Discovered holdings have no
+acquisition history, so their `costBasisKnown` is `false`.
 
-## Summaries and earnings
+## Totals and earnings
 
-`includeSummary=true` aggregates the full selected scope. Owner-address details
-require `includeOwnerAddresses=true`; individual positions additionally require
-`includePositions=true`.
+`includeSummary=true` totals the whole selected scope, not only the current
+page. Add `includeOwnerAddresses=true` for totals per owner, and
+`includePositions=true`, which needs it, for each position.
 
-Respect `costBasisKnown` and `costBasisCoverage`. Display earned yield only when
-history and current observations establish it. Keep pending queue shares and
-held intermediate tokens visible while settlement is unresolved.
+Show earned yield only where `costBasisKnown` is `true`; `summary.costBasisCoverage`
+is `complete` when that holds for every position. Keep pending queue shares and
+intermediate tokens visible until they settle.
 
 ## Activity
 
-Read `GET /v1/operations` with the source filter to recover activity and pending
-actions created through the core API. Read an individual operation for its
-current next action and result.
+`GET /v1/operations?ownerAddress=<wallet-address>` lists the wallet's deposits
+and withdrawals, newest first, each with its current `nextAction`. Always pass
+the owner: without a filter, the list leaves out owner-address operations.
 
 ---
 
 ### Withdraw funds
 Source: https://platform.solana.com/docs/earn/withdrawals
 
-> Prepare position exits and track verified delivery.
+> Prepare a withdrawal from a position, choose its exit route when offered, and track the payout.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-Prepare an exit with `POST /v1/earn/withdraw` using a position ID:
+Send `POST /v1/earn/withdraw` with a position from
+[`GET /v1/earn/positions`](/docs/earn/balances):
 
-```json
+```json title="withdrawal.json"
 {
-  "positionId": "earn_position_example",
+  "positionId": "<position-id>",
   "amount": { "kind": "all" }
 }
 ```
 
-The position determines its strategy and owner. For a wallet you sign through
-your own integration, obtain its position ID with
-`GET /v1/earn/positions?ownerAddress=<owner-public-key>`. No SDP wallet record is
-required. Other quantity kinds are
-`shares`, `token` and held `intermediate`; each quantity carries its own units.
-Payout returns to that owner.
+The position fixes the strategy and the owner, and the payout goes back to that
+owner. `slippageBps` is optional and sits at the top level. See
+[all withdrawal parameters](/docs/reference/api/earn/prepare-earn-withdrawal).
 
-See [all withdrawal parameters](/docs/reference/api/earn/prepare-earn-withdrawal).
-The position supplies the owner; `slippageBps`, when provided, stays at the
-request top level.
+| `amount.kind` | Withdraws |
+| --- | --- |
+| `all` | The whole position. |
+| `shares` | `value` shares. |
+| `token` | Shares worth `value` of the strategy's deposit token `mint`. |
+| `intermediate` | `value` of a held intermediate token `mint`, for strategies that redeem through one. |
 
-## Choose and review an exit
+## Choose an exit route
 
-For `nextAction.type="select_option"`, choose an advertised exit from
-`terms.options`. Call `POST /v1/operations/{operationId}/refresh` with its
-`optionId`, the current `actionId` and `version`, then review the newly prepared
-transaction. Selection does not authorize execution. Later refreshes retain the
-selected route instead of switching between instant and delayed exits. Refresh
-is available only before submit acceptance.
+Some strategies offer more than one exit, such as an instant swap and a delayed
+redemption. Then `nextAction.type` is `select_option`, and `terms.options` lists
+each route with its `settlement`, `estimatedSeconds` and `amount`. Call
+`POST /v1/operations/{operationId}/refresh` with the chosen `optionId` and the
+current `actionId` and `version`. SDP prepares that route's transaction for you
+to review, and the route stays fixed on later refreshes.
 
-Sign the returned transaction with the position's owner and any required fee
-payer through your wallet integration. Call
-`POST /v1/operations/{operationId}/submit` with the new action ID/version and
-base64 `signedTransaction`. An existing connected-wallet position may instead
-request provider signing. The same worker tracks broadcast and settlement.
+While the withdrawal waits for your choice, `canCancel` is `true` and
+`POST /v1/operations/{operationId}/cancel` abandons it. Cancel needs the
+`earn.manage` grant.
 
-## Track delivery
+## Sign, submit and track
 
-Poll the same operation through request and settlement. A provider request ID
-or escrowed shares is not payout evidence. There is no separate claim endpoint.
+Sign and submit as for a [deposit](/docs/earn/deposits#sign-and-submit), then
+poll the operation. A delayed redemption stays in progress until the provider
+pays out: a request ID or escrowed shares are not a payout, and there is no
+separate claim step. `completed` means SDP verified the payout; a `null`
+`result.settledAmount` is unknown, not zero.
 
-Only when `operation.canCancel` is true can
-`POST /v1/operations/{operationId}/cancel` with `earn.manage` abandon preparation.
-After any submit acceptance, cancellation is unavailable, including for queued
-withdrawals and pending provider signing. Refresh is also unavailable. Keep
-tracking the operation. A definitive failure is terminal; only then may you
-prepare another withdrawal with a new idempotency key. Null settled amounts
-remain unknown.
+Once submitted, a withdrawal can't be refreshed or cancelled, even while
+queued. Only a `failed` withdrawal lets you prepare a new one, with a new
+`Idempotency-Key`. If shares end up stuck in an expired queue request,
+[recover them](/docs/earn/integration-details#recover-expired-withdrawal-escrow).
 
 ---
 
@@ -831,192 +934,173 @@ remain unknown.
 ### Embedded Yield
 Source: https://platform.solana.com/docs/guides/embedded-yield
 
-> Offer strategy discovery, positions and asynchronous yield actions in your app.
+> Offer yield inside your app, with your customers' own wallets signing every deposit and withdrawal.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-[Run the TypeScript example](https://github.com/solana-foundation/solana-developer-platform/tree/codex/earn-core-api/examples/earn-quickstart)
-without an account or funds, then follow the [quickstart](/docs/earn/quickstart).
-Embedded Yield wraps the same Earn API as Treasury. This PR changes the core
-contract; live use requires a deployment running this version.
+Embedded Yield puts Earn inside your app: customers browse strategies, deposit
+from their own wallets and watch their balances, while your backend calls SDP.
+[Run the example](https://github.com/solana-foundation/solana-developer-platform/tree/main/examples/earn-quickstart)
+to see the flow, then follow the [quickstart](/docs/earn/quickstart).
 
-Discover strategies through `GET /v1/earn/discovery`, read holdings through
-`GET /v1/earn/positions`, and prepare deposits or withdrawals with the core
-mutation endpoints. Your SDP API key and an `ownerAddress` are enough: use any
-compatible Solana wallet to sign the returned unsigned transaction, then send
-the exact signed bytes to `/v1/operations/{operationId}/submit`. The wallet does
-not need to be registered or connected in SDP.
+## Who does what
 
-Your app owns wallet connection, signing prompts and review UI. Privy is one
-compatible wallet integration; it does not require an SDP wallet connection.
+- **Your backend** holds the SDP API key and makes every Earn call. Never send
+  the key to the browser.
+- **Your app** connects the customer's wallet (Privy, Wallet Standard or any
+  other), shows the terms and asks the wallet to sign.
+- **SDP** prepares each transaction, checks the signed bytes, broadcasts them
+  and tracks settlement.
 
-If the wallet is already connected in SDP, `walletId` is an optional convenience
-that lets SDP request signing through its configured provider.
+## The flow
 
-Review the operation's economic terms before submitting. The worker coordinates
-configured-wallet signing and broadcast asynchronously. Poll the operation,
-render its next action, and keep tracking through verified delivery.
+1. List strategies with `GET /v1/earn/discovery` and show the ones accepting
+   deposits.
+2. Prepare the deposit with the customer's wallet as `source.ownerAddress`.
+3. Show `terms`, have the wallet sign `nextAction.transaction`, and submit it.
+4. Poll the operation until it is `completed`, then show the customer's
+   `GET /v1/earn/positions?ownerAddress=...`.
 
-The [quickstart](/docs/earn/quickstart) covers the shared flow. Read
-[recovery rules](/docs/earn/integration-details) before handling retries,
-refresh or cancellation.
+Withdrawals follow the same steps with a `positionId`. Before you handle
+retries, refresh or cancellation, read [integration details](/docs/earn/integration-details);
+to scope reads per customer, see
+[one integration, many customers](/docs/earn/concepts#one-integration-many-customers).
 
 ---
 
 ### Integration details
 Source: https://platform.solana.com/docs/earn/integration-details
 
-> Use scoped sources, review terms and recover asynchronous actions safely.
+> Next actions, retries, refresh and cancellation, escrow recovery, fees, permissioned tokens and eligibility.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-Use your SDP API key and any compatible Solana wallet. You do not need to
-register a wallet or connect its provider in SDP. Connected wallets are an
-optional convenience over the same API.
+## Next actions
 
-## When each input or call is needed
+Every operation says what to do next in `nextAction`:
 
-| Input or call | Use it when | Skip it when |
-| --- | --- | --- |
-| `source.ownerAddress` | Your wallet integration signs the returned unsigned transaction. This is the normal API flow. | You choose an existing connected wallet's `walletId` instead. |
-| `source.walletId` | An existing SDP wallet connection should handle signing through its configured provider. | You sign through your own wallet integration. No wallet connection is required. |
-| `signedTransaction` | An address source returns `sign_transaction`. Submit the complete signed transaction as base64. | A connected wallet returns `submit`; SDP requests its signature. |
-| `sign_in_provider` | The operation asks for signing in the connected wallet's provider. Show its instructions and handoff URL. | Your own wallet integration signs an address-source transaction. |
-| `/submit` | The address-source transaction is signed, or the user reviewed a connected-wallet action. Send its current `actionId` and `version`. | You only want to discover strategies, read holdings or prepare terms. |
-| `/refresh` | Before submit acceptance, `select_option` needs an advertised `optionId`, or preparation can safely replace unsigned bytes and terms. Include the current `actionId` and `version`, then review the new transaction. | Any `/submit` has been accepted, a normal deposit is already prepared, or an exposed signature outcome remains uncertain. It never signs, broadcasts or revokes a transaction. |
-| `/cancel` | `operation.canCancel` is true and you want to abandon preparation before any `/submit` has been accepted. | `canCancel` is false, including after submit acceptance or while an exposed owner transaction has an unknown outcome. |
+| `nextAction.type` | What to do |
+| --- | --- |
+| `sign_transaction` | Have the owner, and any `feePayer`, sign `transaction` unchanged. Call `/submit` with `signedTransaction` and the current `actionId` and `version`. |
+| `select_option` | Choose an `id` from `terms.options` and call `/refresh` with it as `optionId`. Review the new transaction. |
+| `wait` | Keep polling. `reason` says what SDP is waiting for. |
+| `null` | Nothing left to do: the operation is final. |
 
-These operation mutations use `/v1/operations/{operationId}`. Refresh only
-prepares; submit authorizes processing. Later refreshes preserve the selected
-withdrawal route. There is no separate Earn approval endpoint or approval mode.
+These calls live under `/v1/operations/{operationId}`. Only `/submit` lets SDP
+send anything; there is no separate approval step.
 
-## What cancellation can stop
+## Refresh and cancel
 
-Use `operation.canCancel` to decide whether cancellation is available. It is a
-state capability; the caller still needs `earn.manage`. Do not infer it from
-the operation's status, wallet kind or elapsed time.
+Both work only before you submit:
 
-Both `/cancel` and `/refresh` are preparation-only. After any `/submit`
-acceptance, they return `409 CONFLICT`; track the same operation's outcome.
-Waiting for a provider signature, chain confirmation or queued withdrawal does
-not reopen either action. An exposed owner transaction with an unknown outcome
-also cannot be refreshed or cancelled, even before submission to SDP.
+- **Refresh** picks a withdrawal route and prepares its transaction. It never
+  signs, sends or cancels anything, and the chosen route stays fixed.
+- **Cancel** abandons the operation while `canCancel` is `true`, and needs the
+  `earn.manage` grant. Read `canCancel`; don't infer it from `status` or time.
 
-Dismiss your own wallet's signing prompt locally; that does not need an SDP
-call. SDP cannot revoke a signature or pull a broadcast transaction from Solana.
-Internal provider cleanup for lost permissions or expiry is a safety mechanism,
-not an API cancellation flow.
+After SDP accepts a `/submit`, both return `409 CONFLICT` with `details.reason`
+`operation_already_submitted`, even if the operation later fails. Track it to
+the end instead.
+
+SDP can't take back a transaction it handed you to sign, because you could still
+sign and broadcast it yourself. Once an operation shows `sign_transaction`,
+refresh and cancel return `409` with `details.reason`
+`wallet_transaction_outcome_unknown`. If the customer declines to sign, close
+the prompt: nothing executes and no SDP call is needed. SDP can't revoke a
+signature or pull a broadcast transaction from Solana.
 
 ## Recover expired withdrawal escrow
 
-If a solver withdrawal misses its deadline, its shares can remain in the
-provider's escrow. Prepare a new `POST /v1/earn/withdraw` for that tracked
-`positionId` with `amount: { "kind": "all" }`. When the provider proves that
-the recorded request still holds those expired shares, the operation offers
-**Recover expired escrowed shares** through `select_option`.
+A solver withdrawal that misses its deadline can leave its shares in the
+provider's escrow. To get them back, prepare `POST /v1/earn/withdraw` for the
+same tracked `positionId` with `amount: { "kind": "all" }`. When the provider
+proves the recorded request still holds those expired shares, `terms.options`
+offers **Recover expired escrowed shares** through `select_option`.
 
-Select that option with `/refresh`, review its new action, then use the normal
-signing and `/submit` flow. This action returns shares to the same owner; it
-does not pay the originally requested deposit token. Its result uses
-`settlementOutcome: "recovered"` with the returned share mint and amount only
-after the exact recovery transaction and provider outcome are verified.
+Select it with `/refresh`, review the new transaction, then sign and submit as
+usual. Recovery returns the shares to the same owner, not the deposit token.
+After SDP verifies the transaction and the provider's outcome, the result has
+`settlementOutcome: "recovered"` with the returned share mint and amount.
 
-Each review offers at most one expired request. After its shares return, prepare
-another withdrawal if the position has more expired requests to recover.
+Each review recovers at most one expired request; prepare another withdrawal
+for the next. The original operation is not reopened, and its `/cancel` stays
+unavailable. Expiry alone, or a missing provider request, does not authorize
+recovery.
 
-The original accepted operation is not reopened, and its `/cancel` remains
-unavailable. Expiry alone or a missing provider request does not authorize
-recovery. Hastra operator redemptions use a reusable owner request address and
-delegated wYLDS. Their cancellation instruction cannot bind a reviewed amount
-or request cycle. Earn does not offer recovery for that mechanism; it needs a
-separate design for releasing current delegation safely. Do not treat its
-pending intermediate tokens as delivered USDC or recovered PRIME shares.
+Hastra operator redemptions can't be recovered this way. They reuse one owner
+request address with delegated wYLDS, and their cancellation instruction can't
+bind a reviewed amount or request cycle, so recovery needs a separate design.
+Don't treat their pending intermediate tokens as delivered USDC or recovered
+PRIME shares.
 
-## Reviewed signatures
+## Retries and idempotency
 
-The prepared owner and every required fee payer must sign the unchanged
-transaction message. A different wallet cannot replace that owner. Connected
-wallet policies can require provider-side approvals, but those are part of
-signing and use `awaiting_signature`, not a separate Earn approval stage.
+Save a fresh `Idempotency-Key` with each request body before you send it. After
+an uncertain response, such as a timeout or a `5xx`, resend the same body with
+the same key, including the same signed bytes, and SDP returns the original
+response. To pick up work you already started, list
+`GET /v1/operations?ownerAddress=...` and continue from its `nextAction`
+instead of preparing another deposit or withdrawal.
 
-## Idempotency and recovery
+Replaying a refresh with its original key returns the original response, even
+after a later submit; it builds nothing new. Read
+`GET /v1/operations/{operationId}` for the current state.
 
-Persist a fresh `Idempotency-Key` and request body before every mutation. Reuse
-both after an uncertain response, including the same signed bytes. Find accepted
-work with `GET /v1/operations?ownerAddress=...` and recover its next action
-instead of creating another deposit or withdrawal.
-
-Replaying a successful pre-submit refresh with its original key returns the
-original cached response, even after a later submit was accepted. It creates no
-new build or mutation. Read `GET /v1/operations/{operationId}` for the current
-`canCancel` and `nextAction`; fresh refresh and cancel requests still reject
-after submit acceptance.
-
-Timeout, blockhash expiry and missing RPC history do not prove non-execution.
-An exposed owner transaction may have been broadcast independently even before
-SDP receives a signature. Cancellation cannot revoke those bytes. Keep the
-operation pending until the outcome is known.
-
-A definitive signing rejection or proven nonexecution ends the operation as
-`failed`. Only after that known failure may you prepare a new deposit or
-withdrawal with a new idempotency key. A timeout, unknown provider response or
-missing RPC history never authorizes a new operation.
+Once you submit, prepare a new operation, with a new key, only after the first
+is `failed`. A timeout, blockhash expiry, an unknown provider response or
+missing RPC history doesn't prove a submitted transaction never executed: keep
+tracking it until SDP establishes the outcome. A transaction you never submitted
+or sent can no longer land once the network passes its `lastValidBlockHeight`,
+so you can prepare again.
 
 ## Fees and rates
 
-Distinguish these costs when presenting a strategy:
-
-| Cost | What the integration can establish |
+| Cost | What you can know |
 | --- | --- |
-| Solana network fees and account rent | The prepared transaction names the fee payer. An address source pays from the owner unless you supply a separate `feePayer`, which must also sign. A connected wallet uses its configured fee policy; sponsorship is not universal. |
-| Provider costs | Management, performance, swap or redemption charges depend on the selected product and route. Show provider-reported metadata and reviewed estimates; a queue discount also changes expected proceeds. |
-| SDP commercial pricing | The Earn response does not establish a commercial price or revenue share. Confirm applicable SDP pricing separately; do not infer a zero fee from an absent field. |
+| Network fees and rent | The owner pays them, unless you set a separate `feePayer`, which must also sign. |
+| Provider costs | Management, performance, swap and redemption charges depend on the strategy and route. Show the provider's metadata and the reviewed estimate; a queue discount also lowers proceeds. |
+| SDP pricing | Not part of the Earn response. Confirm SDP pricing separately, and don't read a missing field as zero. |
 
-Show `terms.fees` when supplied. `null` means the breakdown is unavailable,
-not that the transaction is free. It is not a complete invoice for ongoing
-provider costs. `rate.value` is provider-reported APY, not a promise of the
-customer's return after every cost; the API does not normalize every provider
-rate into a universally comparable net yield.
+`terms.fees` lists known fees for the transaction: `null` means unavailable, not
+free, and it is not an invoice for ongoing provider costs. `rate.value` is the
+provider-reported APY, not a promise of returns after every cost, and Earn
+doesn't normalize rates across providers into one comparable net yield.
 
 ## Permissioned tokens and transfer hooks
 
-Earn integrates specific provider instruments and their admitted token
-programs. For example, WisdomTree fund tokens use Token-2022 and an issuer
-compliance hook. Its adapter validates the pinned program and supplies the
-hook accounts required by the transfer. The wallet provider must permit the
-programs and instructions in the reviewed transaction.
+Earn supports specific provider instruments and their token programs.
+WisdomTree fund tokens, for example, use Token-2022 with an issuer compliance
+hook: Earn pins that program and supplies the hook's accounts in the
+transaction. The signing wallet must allow every program and instruction in the
+reviewed transaction.
 
-This does not provide generic support for every transfer hook, gated mint or
-Token ACL policy. A strategy listing is not proof that an arbitrary token can
-be deposited or transferred. Issuer freeze, delegate and transfer restrictions
-can still affect holdings and exits. Monitoring supported deposit-mint
-extensions does not remove those authorities or guarantee execution.
+This is not generic support for any transfer hook, gated mint or Token ACL
+policy, and a listing doesn't prove an arbitrary token can be deposited or
+moved. Issuer freezes, delegates and transfer restrictions can still affect
+holdings and exits.
 
-SDP's [tokenization tools](/docs/tokens/tokenize-an-asset) are a separate module
-for issuance and token controls, subject to their own availability. Using Earn
-does not issue a token, configure its access list or enroll a new issuer policy.
+SDP's [tokenization tools](/docs/tokens/tokenize-an-asset) are a separate
+module, with their own availability. Using Earn doesn't issue a token,
+configure its access list or enroll an issuer policy.
 
 ## Provider eligibility
 
-An SDP API key authorizes API access, not investment eligibility. For each
-customer and wallet, confirm the issuer's current jurisdiction, investor
-qualification or accreditation, KYC/AML, subscription and redemption rules.
-These requirements differ by product; there is no universal Earn compliance
-approval or jurisdiction screen.
+An SDP API key grants API access, not investment eligibility. For each customer
+and wallet, confirm the issuer's rules on jurisdiction, investor qualification
+or accreditation, KYC/AML, subscriptions and redemptions. They differ by
+product, and Earn has no universal compliance approval or jurisdiction screen.
 
-Where an integrated provider supports an eligibility check, Earn performs it
-before building the deposit. WisdomTree requires a customer mapping in the
-same project, an approved wallet and access to the selected fund. Its separate
-KYC/KYB, document and wallet-registration routes support that issuer workflow;
-they do not replace deposit, withdrawal or operation endpoints. Current wallet
-registration on that rail requires an active business customer; submitting a
-retail application alone does not establish deposit eligibility.
+Where a provider supports an eligibility check, Earn runs it before building the
+deposit. WisdomTree requires a customer mapping in the same project, an approved
+wallet and access to the selected fund. Its onboarding (KYC/KYB, documents and
+wallet registration) is a separate issuer workflow. Only an active business
+customer can register a wallet; a retail application alone doesn't make a
+wallet eligible.
 
-Providers without that capability do not receive a universal eligibility
-check from SDP. Apply the required customer screening in your integration and
-confirm the issuer's terms before offering a strategy. Earn does not apply a
-new deposit-eligibility gate to an exit, but issuer hooks, freezes, liquidity
-and redemption decisions can still prevent or delay delivery.
+For other providers, screen customers in your integration and confirm the
+issuer's terms before you offer a strategy. Withdrawals get no new eligibility
+gate, but issuer hooks, freezes, liquidity and redemption decisions can still
+delay or block delivery.
 
 ---
 
@@ -35764,13 +35848,11 @@ Source: https://platform.solana.com/docs/reference/api/earn
 ### Discover strategies
 Source: https://platform.solana.com/docs/reference/api/earn/discover-earn-strategies
 
-> Lists the validated strategy catalogue with provider and asset filters.
+> Lists the strategies you can deposit into, with their rates and capabilities. rate.value is the provider-reported APY as a decimal fraction; null means unknown, not zero. capabilities.deposit is false for discovery-only rows, and preparation still checks admission live for each wallet.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
 `GET /v1/earn/discovery`
-
-Rates are decimal APY fractions, with their provider source and nullable observation time. Adapter capability is separate from live wallet admission; discovery-only rows cannot accept deposits.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
 
@@ -36101,13 +36183,13 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### List positions
 Source: https://platform.solana.com/docs/reference/api/earn/list-earn-core-positions
 
-> Lists holdings for ownerAddress without requiring a wallet registered in SDP.
+> Lists positions, filtered by ownerAddress; the wallet needs no registration in SDP.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
 `GET /v1/earn/positions`
 
-Use walletId instead for an existing connected wallet. sourceType=wallet selects configured wallets; sourceType=address selects owner-address holdings. Omit sourceType to include both authorized scopes. discover=true requires one owner and reads supported integrated strategies without importing ownership or inventing acquisition history. Missing live observations stay unavailable. Optional summary covers the full selected scope; costBasisKnown and costBasisCoverage distinguish unknown earnings history. Pending queue shares and intermediate-token balances remain visible.
+Without a filter, the page covers every position the key can see, and sourceType=address or sourceType=wallet narrows it. walletId filters to one SDP custody wallet instead. discover=true, with one owner filter, adds holdings in integrated strategies that SDP did not open, without importing ownership or inventing acquisition history. Unavailable live reads stay unavailable, never zero. includeSummary=true totals the whole selected scope; costBasisKnown and costBasisCoverage mark unknown earnings history. Pending queue shares and intermediate-token balances stay visible.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
 
@@ -36211,13 +36293,13 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
           - **`ownerAddress`** · `string` · required · min length 1 · max length 256
 
-            Your wallet address. Sign the returned transaction yourself; no SDP wallet registration or signing-provider configuration is required.
+            The wallet that signs and owns the position. It needs no registration in SDP.
 
         - **object**
 
           - **`walletId`** · `string` · required · min length 1 · max length 256
 
-            Optional alternative: an SDP wallet with configured signing.
+            Alternative to ownerAddress: an SDP custody wallet, signed through its custody provider.
 
       - **`strategyId`** · `string`
 
@@ -36577,13 +36659,13 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Prepare a deposit
 Source: https://platform.solana.com/docs/reference/api/earn/prepare-earn-deposit
 
-> Prepares a deposit using an SDP API key, strategyId, source.ownerAddress and token amount.
+> Prepares a deposit and returns an operation to review, sign and submit.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
 `POST /v1/earn/deposit`
 
-No SDP wallet registration or provider connection is required. Returns an operation with terms and nextAction sign_transaction containing the unsigned transaction. Sign its exact message with your own wallet, then send signedTransaction with actionId/version to POST /v1/operations/\{operationId\}/submit. An existing connected wallet may use source.walletId instead; its nextAction submit requests signing through the configured provider. Preparation never signs or broadcasts. Swap-funded deposits compose both legs atomically; an oversized composition is refused before signing rather than split. Reuse the original Idempotency-Key and body after an uncertain response.
+Send strategyId, source.ownerAddress and the amount; the wallet needs no registration in SDP. nextAction sign_transaction carries the unsigned transaction: sign its exact message in the owner's wallet, then send signedTransaction with actionId and version to POST /v1/operations/\{operationId\}/submit. Preparation never signs or broadcasts. Funding with another token puts the swap and the deposit in one transaction; a pair too large for one transaction is refused before signing, never split. An SDP custody wallet can use source.walletId instead: nextAction is then submit, and SDP requests the signature from its custody provider. After an uncertain response, retry with the original Idempotency-Key and body.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.execute` action.
 
@@ -36611,13 +36693,13 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.e
 
     - **`ownerAddress`** · `string` · required · min length 1 · max length 256
 
-      Your wallet address. Sign the returned transaction yourself; no SDP wallet registration or signing-provider configuration is required.
+      The wallet that signs and owns the position. It needs no registration in SDP.
 
   - **object**
 
     - **`walletId`** · `string` · required · min length 1 · max length 256
 
-      Optional alternative: an SDP wallet with configured signing.
+      Alternative to ownerAddress: an SDP custody wallet, signed through its custody provider.
 
 - **`amount`** · `object` · required
 
@@ -36663,13 +36745,13 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.e
 
               - **`ownerAddress`** · `string` · required · min length 1 · max length 256
 
-                Your wallet address. Sign the returned transaction yourself; no SDP wallet registration or signing-provider configuration is required.
+                The wallet that signs and owns the position. It needs no registration in SDP.
 
             - **object**
 
               - **`walletId`** · `string` · required · min length 1 · max length 256
 
-                Optional alternative: an SDP wallet with configured signing.
+                Alternative to ownerAddress: an SDP custody wallet, signed through its custody provider.
 
           - **`amount`** · `object` · required
 
@@ -36865,13 +36947,13 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.e
 
             - **`ownerAddress`** · `string` · required · min length 1 · max length 256
 
-              Your wallet address. Sign the returned transaction yourself; no SDP wallet registration or signing-provider configuration is required.
+              The wallet that signs and owns the position. It needs no registration in SDP.
 
           - **object**
 
             - **`walletId`** · `string` · required · min length 1 · max length 256
 
-              Optional alternative: an SDP wallet with configured signing.
+              Alternative to ownerAddress: an SDP custody wallet, signed through its custody provider.
 
         - **`settledAmount`** · `object | null` · required
 
@@ -36994,9 +37076,9 @@ curl -X POST 'https://api.solana.com/v1/earn/deposit' \
   -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "strategyId": "strategy_example",
+    "strategyId": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
     "source": {
-      "ownerAddress": "<owner-public-key>"
+      "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
     },
     "amount": {
       "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
@@ -37016,9 +37098,9 @@ const res = await fetch("https://api.solana.com/v1/earn/deposit", {
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
-    "strategyId": "strategy_example",
+    "strategyId": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
     "source": {
-      "ownerAddress": "<owner-public-key>"
+      "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
     },
     "amount": {
       "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
@@ -37036,9 +37118,9 @@ idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/earn/deposit",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
-    "strategyId": "strategy_example",
+    "strategyId": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
     "source": {
-      "ownerAddress": "<owner-public-key>"
+      "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
     },
     "amount": {
       "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
@@ -37273,13 +37355,13 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Prepare a withdrawal
 Source: https://platform.solana.com/docs/reference/api/earn/prepare-earn-withdrawal
 
-> Prepares an exit using a positionId and an explicitly denominated amount: all, shares, token or held intermediate.
+> Prepares a withdrawal from a position and returns an operation to review, sign and submit.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
 `POST /v1/earn/withdraw`
 
-The position determines its strategy and owner; an owner-address position needs no SDP wallet registration. Sign the returned transaction in that owner's wallet and send signedTransaction to the operation submit endpoint. Connected-wallet positions use their configured signing provider instead. Terms advertise supported direct or delayed options. With amount.kind all, an expired solver escrow may advertise an explicit recovery option even when wallet share balance is zero. Selecting it prepares a new share-return transaction; the original withdrawal remains unchanged. Hastra par cancellation is not supported because its reusable request is not cycle-bound. A multi-route review returns nextAction select_option; operation refresh with the current actionId, version and advertised optionId prepares the selected transaction. Review and submit its new actionId/version separately. Preparation never signs or broadcasts. Queue entry is not payout; track the operation through settlement.
+The position fixes the strategy and owner; amount.kind is all, shares, token or intermediate. When the strategy offers more than one exit route, nextAction is select_option: call POST /v1/operations/\{operationId\}/refresh with an advertised optionId to prepare that route's transaction, then review and submit its new actionId and version. With amount.kind all, an expired solver escrow can advertise a recovery option even at a zero share balance; it prepares a new transaction that returns the escrowed shares and leaves the original withdrawal unchanged. Hastra par cancellation is not supported, because its reusable request is not bound to a cycle. Preparation never signs or broadcasts, and a queued request is not a payout: track the operation through settlement.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.execute` action.
 
@@ -37367,13 +37449,13 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.e
 
               - **`ownerAddress`** · `string` · required · min length 1 · max length 256
 
-                Your wallet address. Sign the returned transaction yourself; no SDP wallet registration or signing-provider configuration is required.
+                The wallet that signs and owns the position. It needs no registration in SDP.
 
             - **object**
 
               - **`walletId`** · `string` · required · min length 1 · max length 256
 
-                Optional alternative: an SDP wallet with configured signing.
+                Alternative to ownerAddress: an SDP custody wallet, signed through its custody provider.
 
           - **`amount`** · `object` · required
 
@@ -37569,13 +37651,13 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.e
 
             - **`ownerAddress`** · `string` · required · min length 1 · max length 256
 
-              Your wallet address. Sign the returned transaction yourself; no SDP wallet registration or signing-provider configuration is required.
+              The wallet that signs and owns the position. It needs no registration in SDP.
 
           - **object**
 
             - **`walletId`** · `string` · required · min length 1 · max length 256
 
-              Optional alternative: an SDP wallet with configured signing.
+              Alternative to ownerAddress: an SDP custody wallet, signed through its custody provider.
 
         - **`settledAmount`** · `object | null` · required
 
@@ -37698,7 +37780,7 @@ curl -X POST 'https://api.solana.com/v1/earn/withdraw' \
   -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "positionId": "position_example",
+    "positionId": "earn_position_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
     "amount": {
       "kind": "all"
     }
@@ -37716,7 +37798,7 @@ const res = await fetch("https://api.solana.com/v1/earn/withdraw", {
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
-    "positionId": "position_example",
+    "positionId": "earn_position_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
     "amount": {
       "kind": "all"
     }
@@ -37732,7 +37814,7 @@ idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/earn/withdraw",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
-    "positionId": "position_example",
+    "positionId": "earn_position_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
     "amount": {
       "kind": "all"
     }
@@ -37982,11 +38064,11 @@ Source: https://platform.solana.com/docs/reference/api/operations
 ### List operations
 Source: https://platform.solana.com/docs/reference/api/operations/list-operations
 
-> Lists operation history in the exact authenticated project and environment.
+> Lists deposits and withdrawals in the authenticated project and environment, newest first.
 
 `GET /v1/operations`
 
-Pass ownerAddress to list your wallet's operations; no SDP wallet registration is required. Use walletId instead for an existing connected wallet. With neither filter, the feed contains visible connected-wallet operations. Filters apply before cursor pagination. Requires earn.read for the initially supported Earn operation kinds. Reading never starts execution.
+Pass ownerAddress to list a wallet's operations; the wallet needs no registration in SDP. Without a filter, the list holds only SDP custody wallet operations, and walletId narrows it to one. Filters apply before cursor pagination. Requires earn.read. Reading never starts execution.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
 
@@ -38046,13 +38128,13 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
               - **`ownerAddress`** · `string` · required · min length 1 · max length 256
 
-                Your wallet address. Sign the returned transaction yourself; no SDP wallet registration or signing-provider configuration is required.
+                The wallet that signs and owns the position. It needs no registration in SDP.
 
             - **object**
 
               - **`walletId`** · `string` · required · min length 1 · max length 256
 
-                Optional alternative: an SDP wallet with configured signing.
+                Alternative to ownerAddress: an SDP custody wallet, signed through its custody provider.
 
           - **`amount`** · `object` · required
 
@@ -38248,13 +38330,13 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
             - **`ownerAddress`** · `string` · required · min length 1 · max length 256
 
-              Your wallet address. Sign the returned transaction yourself; no SDP wallet registration or signing-provider configuration is required.
+              The wallet that signs and owns the position. It needs no registration in SDP.
 
           - **object**
 
             - **`walletId`** · `string` · required · min length 1 · max length 256
 
-              Optional alternative: an SDP wallet with configured signing.
+              Alternative to ownerAddress: an SDP custody wallet, signed through its custody provider.
 
         - **`settledAmount`** · `object | null` · required
 
@@ -38485,11 +38567,11 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Get an operation
 Source: https://platform.solana.com/docs/reference/api/operations/get-operation
 
-> Returns current terms, the exact actionId/version, nextAction and authoritative settlement projection.
+> Returns an operation's status, terms, current actionId and version, nextAction and settlement result.
 
 `GET /v1/operations/{operationId}`
 
-Poll this route after submission or reload. nextAction sign_transaction asks your wallet to sign the supplied transaction before calling submit. sign_in_provider only applies when an explicitly selected connected wallet requires signing in its provider; follow its instructions and keep polling without submitting again. nextAction refresh rebuilds an unsigned preparation only before submission is accepted; wait retains the same unresolved attempt. queued, awaiting_signature, submitted and settling are nonterminal. completed means verified delivery or an explicitly selected recovery; result.settlementOutcome recovered identifies returned strategy shares, never withdrawal proceeds; cancelled means a verified cancellation outcome. canCancel states whether this preparation can still be cancelled; earn.manage is also required. cancelRequestedAt alone is pending intent. result fields stay null until their authoritative source is known. Requires earn.read and source visibility.
+Poll it after submitting. Each nextAction type says what to do next: sign_transaction asks the owner to sign, select_option asks you to choose a route with refresh, and wait means keep polling the same attempt. queued, awaiting_signature, submitted and settling are in progress. completed means verified delivery; for a selected recovery, result.settlementOutcome recovered means returned strategy shares, never withdrawal proceeds. cancelled means a verified cancellation. canCancel says whether the preparation can still be cancelled, which also needs earn.manage; cancelRequestedAt alone is pending intent. result fields stay null until their source is known. Requires earn.read and source visibility.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
 
@@ -38537,13 +38619,13 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
               - **`ownerAddress`** · `string` · required · min length 1 · max length 256
 
-                Your wallet address. Sign the returned transaction yourself; no SDP wallet registration or signing-provider configuration is required.
+                The wallet that signs and owns the position. It needs no registration in SDP.
 
             - **object**
 
               - **`walletId`** · `string` · required · min length 1 · max length 256
 
-                Optional alternative: an SDP wallet with configured signing.
+                Alternative to ownerAddress: an SDP custody wallet, signed through its custody provider.
 
           - **`amount`** · `object` · required
 
@@ -38739,13 +38821,13 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
             - **`ownerAddress`** · `string` · required · min length 1 · max length 256
 
-              Your wallet address. Sign the returned transaction yourself; no SDP wallet registration or signing-provider configuration is required.
+              The wallet that signs and owns the position. It needs no registration in SDP.
 
           - **object**
 
             - **`walletId`** · `string` · required · min length 1 · max length 256
 
-              Optional alternative: an SDP wallet with configured signing.
+              Alternative to ownerAddress: an SDP custody wallet, signed through its custody provider.
 
         - **`settledAmount`** · `object | null` · required
 
@@ -38971,11 +39053,11 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Submit an operation
 Source: https://platform.solana.com/docs/reference/api/operations/submit-operation
 
-> Submits the exact reviewed transaction for asynchronous processing.
+> Submits the reviewed transaction for asynchronous broadcast and returns 202.
 
 `POST /v1/operations/{operationId}/submit`
 
-Pass actionId and version. Route selection and transaction preparation never happen here. For source.ownerAddress, supply signedTransaction as base64 after signing the prepared transaction in your own wallet; no SDP wallet or provider connection is needed. SDP verifies the exact stored message and required signatures. For source.walletId, omit signedTransaction; the worker requests signing through that connected wallet's configured provider. The request durably records authorization and returns 202. A worker broadcasts and tracks the transaction asynchronously. Provider signing may return sign_in_provider instructions; it never requires a second submit. Stale actions return 409. Requires earn.execute and the current action principal. Before a new signing or broadcast effect, the worker rechecks the active credential, current execute permission, project membership and wallet binding. Losing authority stops new effects while observation of existing attempts continues; it never proves a transaction did not execute.
+Pass the current actionId and version and, for an ownerAddress source, signedTransaction: the prepared transaction signed in the owner's wallet, base64-encoded. SDP verifies the exact stored message and required signatures and records the authorization; a worker then broadcasts and tracks the transaction, so poll GET /v1/operations/\{operationId\}. Stale actions return 409. Requires earn.execute and the current action principal. Before each new signing or broadcast effect, the worker rechecks the credential, execute permission, project membership and wallet binding; losing authority stops new effects but never proves a transaction did not execute. For an SDP custody wallet, omit signedTransaction: the worker requests the custody provider's signature, which can return sign_in_provider instructions but never needs a second submit.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.execute` action.
 
@@ -39003,7 +39085,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.e
 
 - **`signedTransaction`** · `string` · min length 1 · max length 1700 · pattern `^[A-Za-z0-9+/]+={0,2}$`
 
-  Required for an ownerAddress source: the exact prepared transaction, base64 encoded and signed by its required signers. Omit for a connected walletId source, whose configured signer signs asynchronously.
+  Required for an ownerAddress source: the prepared transaction, unchanged, signed by its required signers and base64-encoded. Omit it for an SDP custody wallet, whose custody provider signs.
 
 ## Responses
 
@@ -39039,13 +39121,13 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.e
 
               - **`ownerAddress`** · `string` · required · min length 1 · max length 256
 
-                Your wallet address. Sign the returned transaction yourself; no SDP wallet registration or signing-provider configuration is required.
+                The wallet that signs and owns the position. It needs no registration in SDP.
 
             - **object**
 
               - **`walletId`** · `string` · required · min length 1 · max length 256
 
-                Optional alternative: an SDP wallet with configured signing.
+                Alternative to ownerAddress: an SDP custody wallet, signed through its custody provider.
 
           - **`amount`** · `object` · required
 
@@ -39241,13 +39323,13 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.e
 
             - **`ownerAddress`** · `string` · required · min length 1 · max length 256
 
-              Your wallet address. Sign the returned transaction yourself; no SDP wallet registration or signing-provider configuration is required.
+              The wallet that signs and owns the position. It needs no registration in SDP.
 
           - **object**
 
             - **`walletId`** · `string` · required · min length 1 · max length 256
 
-              Optional alternative: an SDP wallet with configured signing.
+              Alternative to ownerAddress: an SDP custody wallet, signed through its custody provider.
 
         - **`settledAmount`** · `object | null` · required
 
@@ -39366,7 +39448,7 @@ curl -X POST 'https://api.solana.com/v1/operations/operation_example/submit' \
   -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "actionId": "opact_example",
+    "actionId": "opa_example",
     "version": 1,
     "signedTransaction": "AQ=="
   }'
@@ -39383,7 +39465,7 @@ const res = await fetch("https://api.solana.com/v1/operations/operation_example/
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
-    "actionId": "opact_example",
+    "actionId": "opa_example",
     "version": 1,
     "signedTransaction": "AQ=="
   })
@@ -39398,7 +39480,7 @@ idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/operations/operation_example/submit",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
-    "actionId": "opact_example",
+    "actionId": "opa_example",
     "version": 1,
     "signedTransaction": "AQ=="
   })
@@ -39529,11 +39611,11 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Refresh an operation
 Source: https://platform.solana.com/docs/reference/api/operations/refresh-operation
 
-> Rebuilds an unsigned transaction and its terms before submission is accepted.
+> Prepares a new unsigned transaction and terms before submission; it never signs, broadcasts or cancels.
 
 `POST /v1/operations/{operationId}/refresh`
 
-It never signs, broadcasts or cancels a transaction. Pass the current actionId and version. For nextAction select_option, also pass an optionId advertised in terms.options; the selected route remains fixed on later refreshes. Review the new action/version and sign it before submit. After any POST /v1/operations/\{operationId\}/submit acceptance, new refresh requests return 409 CONFLICT with details.reason operation_already_submitted, including definitive failure; track that operation to its outcome, and start a new deposit or withdrawal only after a known failure. An exposed owner transaction without a known outcome returns 409 with details.reason wallet_transaction_outcome_unknown because SDP cannot invalidate bytes held by the caller. Timeout, blockhash expiry and missing RPC history alone never authorize replacement. An exact Idempotency-Key replay returns its original response without rebuilding; GET returns the current operation state. Requires earn.execute and fresh source admission.
+Pass the current actionId and version, plus an optionId from terms.options when nextAction is select_option; the chosen route stays fixed on later refreshes. Review the returned action and sign it before submitting. After any accepted submit, refresh returns 409 CONFLICT with details.reason operation_already_submitted, even after a definitive failure: track that operation, and start a new deposit or withdrawal only after a known failure. Once an owner transaction is exposed for signing, refresh returns 409 with details.reason wallet_transaction_outcome_unknown, because SDP cannot invalidate bytes the owner holds. Timeout, blockhash expiry and missing RPC history never authorize a replacement. Replaying the original Idempotency-Key returns the original response without rebuilding; GET returns the current state. Requires earn.execute and fresh source admission.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.execute` action.
 
@@ -39595,13 +39677,13 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.e
 
               - **`ownerAddress`** · `string` · required · min length 1 · max length 256
 
-                Your wallet address. Sign the returned transaction yourself; no SDP wallet registration or signing-provider configuration is required.
+                The wallet that signs and owns the position. It needs no registration in SDP.
 
             - **object**
 
               - **`walletId`** · `string` · required · min length 1 · max length 256
 
-                Optional alternative: an SDP wallet with configured signing.
+                Alternative to ownerAddress: an SDP custody wallet, signed through its custody provider.
 
           - **`amount`** · `object` · required
 
@@ -39797,13 +39879,13 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.e
 
             - **`ownerAddress`** · `string` · required · min length 1 · max length 256
 
-              Your wallet address. Sign the returned transaction yourself; no SDP wallet registration or signing-provider configuration is required.
+              The wallet that signs and owns the position. It needs no registration in SDP.
 
           - **object**
 
             - **`walletId`** · `string` · required · min length 1 · max length 256
 
-              Optional alternative: an SDP wallet with configured signing.
+              Alternative to ownerAddress: an SDP custody wallet, signed through its custody provider.
 
         - **`settledAmount`** · `object | null` · required
 
@@ -39922,7 +40004,7 @@ curl -X POST 'https://api.solana.com/v1/operations/operation_example/refresh' \
   -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "actionId": "opact_example",
+    "actionId": "opa_example",
     "version": 1
   }'
 ```
@@ -39938,7 +40020,7 @@ const res = await fetch("https://api.solana.com/v1/operations/operation_example/
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
-    "actionId": "opact_example",
+    "actionId": "opa_example",
     "version": 1
   })
 });
@@ -39952,7 +40034,7 @@ idempotency_key = str(uuid.uuid4())
 r = requests.post("https://api.solana.com/v1/operations/operation_example/refresh",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
-    "actionId": "opact_example",
+    "actionId": "opa_example",
     "version": 1
   })
 ```
@@ -40082,11 +40164,11 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Cancel a preparation
 Source: https://platform.solana.com/docs/reference/api/operations/cancel-operation
 
-> Cancels a preparation only before any submission has been accepted.
+> Cancels a preparation while canCancel is true, before any submission has been accepted.
 
 `POST /v1/operations/{operationId}/cancel`
 
-After POST /v1/operations/\{operationId\}/submit is accepted, new cancellation requests return 409 CONFLICT with details.reason operation_already_submitted, including while queued or waiting for a provider signature. It never cancels an onchain transaction, revokes a signature or cancels a previously submitted queued withdrawal. An owner-address transaction already exposed for signing returns 409 with details.reason wallet_transaction_outcome_unknown because SDP cannot invalidate bytes held by the caller. Closing your own wallet signing prompt needs no API cancellation. A successful cancellation marks only an undispatched preparation cancelled. Requires earn.manage and current source authority.
+Otherwise it returns 409 CONFLICT: details.reason operation_already_submitted after an accepted submit, including while queued or waiting for a signature; wallet_transaction_outcome_unknown once an owner transaction is exposed for signing, because SDP cannot invalidate bytes the owner holds; operation_not_cancellable for any other state. It never cancels an onchain transaction, revokes a signature or cancels a submitted queued withdrawal, and closing your own wallet's signing prompt needs no API call. Success marks only an undispatched preparation cancelled. Requires earn.manage and current source authority.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.manage` action.
 
@@ -40142,13 +40224,13 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.m
 
               - **`ownerAddress`** · `string` · required · min length 1 · max length 256
 
-                Your wallet address. Sign the returned transaction yourself; no SDP wallet registration or signing-provider configuration is required.
+                The wallet that signs and owns the position. It needs no registration in SDP.
 
             - **object**
 
               - **`walletId`** · `string` · required · min length 1 · max length 256
 
-                Optional alternative: an SDP wallet with configured signing.
+                Alternative to ownerAddress: an SDP custody wallet, signed through its custody provider.
 
           - **`amount`** · `object` · required
 
@@ -40344,13 +40426,13 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.m
 
             - **`ownerAddress`** · `string` · required · min length 1 · max length 256
 
-              Your wallet address. Sign the returned transaction yourself; no SDP wallet registration or signing-provider configuration is required.
+              The wallet that signs and owns the position. It needs no registration in SDP.
 
           - **object**
 
             - **`walletId`** · `string` · required · min length 1 · max length 256
 
-              Optional alternative: an SDP wallet with configured signing.
+              Alternative to ownerAddress: an SDP custody wallet, signed through its custody provider.
 
         - **`settledAmount`** · `object | null` · required
 

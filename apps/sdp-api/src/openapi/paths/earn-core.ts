@@ -5,6 +5,7 @@ import {
   earnDiscoveryResponseSchema,
   earnPositionsResponseSchema,
 } from "@/openapi/schemas/earn-core";
+import { EARN_EXAMPLE_IDS, EARN_OWNER_ADDRESS_EXAMPLE } from "@/openapi/schemas/earn-examples";
 import {
   earnDiscoveryQuerySchema,
   earnPositionsQuerySchema,
@@ -36,7 +37,7 @@ export function registerEarnCorePaths(registry: OpenAPIRegistry, publicOnly = fa
     operationId: "discoverEarnStrategies",
     summary: "Discover strategies",
     description:
-      "Lists the validated strategy catalogue with provider and asset filters. Rates are decimal APY fractions, with their provider source and nullable observation time. Adapter capability is separate from live wallet admission; discovery-only rows cannot accept deposits.",
+      "Lists the strategies you can deposit into, with their rates and capabilities. rate.value is the provider-reported APY as a decimal fraction; null means unknown, not zero. capabilities.deposit is false for discovery-only rows, and preparation still checks admission live for each wallet.",
     request: { headers: projectScopeHeaders, query: earnDiscoveryQuerySchema },
     responses: {
       200: { description: "One catalogue page", content: jsonContent(earnDiscoveryResponseSchema) },
@@ -50,7 +51,7 @@ export function registerEarnCorePaths(registry: OpenAPIRegistry, publicOnly = fa
     operationId: "listEarnCorePositions",
     summary: "List positions",
     description:
-      "Lists holdings for ownerAddress without requiring a wallet registered in SDP. Use walletId instead for an existing connected wallet. sourceType=wallet selects configured wallets; sourceType=address selects owner-address holdings. Omit sourceType to include both authorized scopes. discover=true requires one owner and reads supported integrated strategies without importing ownership or inventing acquisition history. Missing live observations stay unavailable. Optional summary covers the full selected scope; costBasisKnown and costBasisCoverage distinguish unknown earnings history. Pending queue shares and intermediate-token balances remain visible.",
+      "Lists positions, filtered by ownerAddress; the wallet needs no registration in SDP. Without a filter, the page covers every position the key can see, and sourceType=address or sourceType=wallet narrows it. walletId filters to one SDP custody wallet instead. discover=true, with one owner filter, adds holdings in integrated strategies that SDP did not open, without importing ownership or inventing acquisition history. Unavailable live reads stay unavailable, never zero. includeSummary=true totals the whole selected scope; costBasisKnown and costBasisCoverage mark unknown earnings history. Pending queue shares and intermediate-token balances stay visible.",
     request: { headers: projectScopeHeaders, query: earnPositionsQuerySchema },
     responses: {
       200: {
@@ -70,8 +71,8 @@ export function registerEarnCorePaths(registry: OpenAPIRegistry, publicOnly = fa
       summary: direction === "deposit" ? "Prepare a deposit" : "Prepare a withdrawal",
       description:
         direction === "deposit"
-          ? "Prepares a deposit using an SDP API key, strategyId, source.ownerAddress and token amount. No SDP wallet registration or provider connection is required. Returns an operation with terms and nextAction sign_transaction containing the unsigned transaction. Sign its exact message with your own wallet, then send signedTransaction with actionId/version to POST /v1/operations/{operationId}/submit. An existing connected wallet may use source.walletId instead; its nextAction submit requests signing through the configured provider. Preparation never signs or broadcasts. Swap-funded deposits compose both legs atomically; an oversized composition is refused before signing rather than split. Reuse the original Idempotency-Key and body after an uncertain response."
-          : "Prepares an exit using a positionId and an explicitly denominated amount: all, shares, token or held intermediate. The position determines its strategy and owner; an owner-address position needs no SDP wallet registration. Sign the returned transaction in that owner's wallet and send signedTransaction to the operation submit endpoint. Connected-wallet positions use their configured signing provider instead. Terms advertise supported direct or delayed options. With amount.kind all, an expired solver escrow may advertise an explicit recovery option even when wallet share balance is zero. Selecting it prepares a new share-return transaction; the original withdrawal remains unchanged. Hastra par cancellation is not supported because its reusable request is not cycle-bound. A multi-route review returns nextAction select_option; operation refresh with the current actionId, version and advertised optionId prepares the selected transaction. Review and submit its new actionId/version separately. Preparation never signs or broadcasts. Queue entry is not payout; track the operation through settlement.",
+          ? "Prepares a deposit and returns an operation to review, sign and submit. Send strategyId, source.ownerAddress and the amount; the wallet needs no registration in SDP. nextAction sign_transaction carries the unsigned transaction: sign its exact message in the owner's wallet, then send signedTransaction with actionId and version to POST /v1/operations/{operationId}/submit. Preparation never signs or broadcasts. Funding with another token puts the swap and the deposit in one transaction; a pair too large for one transaction is refused before signing, never split. An SDP custody wallet can use source.walletId instead: nextAction is then submit, and SDP requests the signature from its custody provider. After an uncertain response, retry with the original Idempotency-Key and body."
+          : "Prepares a withdrawal from a position and returns an operation to review, sign and submit. The position fixes the strategy and owner; amount.kind is all, shares, token or intermediate. When the strategy offers more than one exit route, nextAction is select_option: call POST /v1/operations/{operationId}/refresh with an advertised optionId to prepare that route's transaction, then review and submit its new actionId and version. With amount.kind all, an expired solver escrow can advertise a recovery option even at a zero share balance; it prepares a new transaction that returns the escrowed shares and leaves the original withdrawal unchanged. Hastra par cancellation is not supported, because its reusable request is not bound to a cycle. Preparation never signs or broadcasts, and a queued request is not a payout: track the operation through settlement.",
       request: {
         headers: projectScopeWithDeclaredIdempotencyHeaders({
           key: "required",
@@ -87,14 +88,14 @@ export function registerEarnCorePaths(registry: OpenAPIRegistry, publicOnly = fa
                 example:
                   direction === "deposit"
                     ? {
-                        strategyId: "strategy_example",
-                        source: { ownerAddress: "<owner-public-key>" },
+                        strategyId: EARN_EXAMPLE_IDS.strategy,
+                        source: { ownerAddress: EARN_OWNER_ADDRESS_EXAMPLE },
                         amount: {
                           mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
                           value: "100",
                         },
                       }
-                    : { positionId: "position_example", amount: { kind: "all" } },
+                    : { positionId: EARN_EXAMPLE_IDS.position, amount: { kind: "all" } },
               }
             )
           ),
