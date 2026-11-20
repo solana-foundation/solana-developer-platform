@@ -244,46 +244,51 @@ const WALLET_SCOPE_ROUTES = {
   "POST /v1/earn/provider-actions/external/cancellations": { exempt: SPONSOR_ONLY },
 
   // Issuance
-  "POST /v1/issuance/tokens/:tokenId/burn": { refusedEarly: ISSUANCE_BURN },
+  "POST /v1/issuance/tokens/:tokenId/burn/execute": { refusedEarly: ISSUANCE_BURN },
   "POST /v1/issuance/tokens": { refusedEarly: ISSUANCE_BURN, via: ISSUANCE_RESOLVER },
   "PATCH /v1/issuance/tokens/:tokenId": { refusedEarly: ISSUANCE_BURN, via: ISSUANCE_RESOLVER },
-  "POST /v1/issuance/tokens/:tokenId/deploy": {
+  "POST /v1/issuance/tokens/:tokenId/deploy/execute": {
     refusedEarly: ISSUANCE_BURN,
     via: ISSUANCE_RESOLVER,
   },
-  "POST /v1/issuance/tokens/:tokenId/deploy/prepare": { gap: LEGACY_DEPLOY },
-  "POST /v1/issuance/tokens/:tokenId/deploy/prepare-metadata": { gap: LEGACY_DEPLOY },
-  "POST /v1/issuance/tokens/:tokenId/deploy/confirm": { gap: LEGACY_DEPLOY },
-  "POST /v1/issuance/tokens/:tokenId/mint": { refusedEarly: ISSUANCE_BURN, via: ISSUANCE_RESOLVER },
-  "POST /v1/issuance/tokens/:tokenId/mint/prepare": {
+  "POST /v1/issuance/tokens/:tokenId/deploy/build-unsigned-transaction": { gap: LEGACY_DEPLOY },
+  "POST /v1/issuance/tokens/:tokenId/deploy/metadata/build-unsigned-transaction": {
+    gap: LEGACY_DEPLOY,
+  },
+  "POST /v1/issuance/tokens/:tokenId/deploy/confirm-submitted-transaction": { gap: LEGACY_DEPLOY },
+  "POST /v1/issuance/tokens/:tokenId/mint/execute": {
     refusedEarly: ISSUANCE_BURN,
     via: ISSUANCE_RESOLVER,
   },
-  "POST /v1/issuance/tokens/:tokenId/burn/prepare": {
+  "POST /v1/issuance/tokens/:tokenId/mint/build-unsigned-transaction": {
     refusedEarly: ISSUANCE_BURN,
     via: ISSUANCE_RESOLVER,
   },
-  "POST /v1/issuance/tokens/:tokenId/seize": {
+  "POST /v1/issuance/tokens/:tokenId/burn/build-unsigned-transaction": {
     refusedEarly: ISSUANCE_BURN,
     via: ISSUANCE_RESOLVER,
   },
-  "POST /v1/issuance/tokens/:tokenId/seize/prepare": {
+  "POST /v1/issuance/tokens/:tokenId/seize/execute": {
     refusedEarly: ISSUANCE_BURN,
     via: ISSUANCE_RESOLVER,
   },
-  "POST /v1/issuance/tokens/:tokenId/force-burn": {
+  "POST /v1/issuance/tokens/:tokenId/seize/build-unsigned-transaction": {
     refusedEarly: ISSUANCE_BURN,
     via: ISSUANCE_RESOLVER,
   },
-  "POST /v1/issuance/tokens/:tokenId/force-burn/prepare": {
+  "POST /v1/issuance/tokens/:tokenId/force-burn/execute": {
     refusedEarly: ISSUANCE_BURN,
     via: ISSUANCE_RESOLVER,
   },
-  "POST /v1/issuance/tokens/:tokenId/authority": {
+  "POST /v1/issuance/tokens/:tokenId/force-burn/build-unsigned-transaction": {
     refusedEarly: ISSUANCE_BURN,
     via: ISSUANCE_RESOLVER,
   },
-  "POST /v1/issuance/tokens/:tokenId/authority/prepare": {
+  "POST /v1/issuance/tokens/:tokenId/authority/update/execute": {
+    refusedEarly: ISSUANCE_BURN,
+    via: ISSUANCE_RESOLVER,
+  },
+  "POST /v1/issuance/tokens/:tokenId/authority/update/build-unsigned-transaction": {
     refusedEarly: ISSUANCE_BURN,
     via: ISSUANCE_RESOLVER,
   },
@@ -295,24 +300,29 @@ const WALLET_SCOPE_ROUTES = {
     refusedEarly: ISSUANCE_BURN,
     via: ISSUANCE_RESOLVER,
   },
-  "POST /v1/issuance/tokens/:tokenId/freeze": {
+  "POST /v1/issuance/tokens/:tokenId/freeze-account": {
     refusedEarly: ISSUANCE_BURN,
     via: ISSUANCE_RESOLVER,
   },
-  "POST /v1/issuance/tokens/:tokenId/unfreeze": {
+  "POST /v1/issuance/tokens/:tokenId/unfreeze-account": {
     refusedEarly: ISSUANCE_BURN,
     via: ISSUANCE_RESOLVER,
   },
-  "POST /v1/issuance/tokens/:tokenId/allowlist": {
+  "POST /v1/issuance/tokens/:tokenId/control-list": {
     refusedEarly: ISSUANCE_BURN,
     via: ISSUANCE_RESOLVER,
   },
-  "DELETE /v1/issuance/tokens/:tokenId/allowlist/:entryId": {
+  "DELETE /v1/issuance/tokens/:tokenId/control-list/:entryId": {
     refusedEarly: ISSUANCE_BURN,
     via: ISSUANCE_RESOLVER,
   },
-  "POST /v1/issuance/tokens/:tokenId/holders": { exempt: "enrolls a KYC holder; signs nothing" },
-  "POST /v1/issuance/asset-profiles": { refusedEarly: ISSUANCE_BURN, via: ISSUANCE_RESOLVER },
+  "POST /v1/issuance/tokens/:tokenId/holder-enrollments": {
+    exempt: "enrolls a KYC holder; signs nothing",
+  },
+  "POST /v1/issuance/tokens/create-with-asset-profile": {
+    refusedEarly: ISSUANCE_BURN,
+    via: ISSUANCE_RESOLVER,
+  },
   "PATCH /v1/issuance/asset-profiles/:profileId": { exempt: SIGNS_NOTHING },
   "DELETE /v1/issuance/asset-profiles/:profileId": { exempt: SIGNS_NOTHING },
 
@@ -534,9 +544,9 @@ describe("wallet-scope route inventory", () => {
         .filter(([, classification]) => "gap" in classification)
         .map(([route]) => route)
     ).toEqual([
-      "POST /v1/issuance/tokens/:tokenId/deploy/prepare",
-      "POST /v1/issuance/tokens/:tokenId/deploy/prepare-metadata",
-      "POST /v1/issuance/tokens/:tokenId/deploy/confirm",
+      "POST /v1/issuance/tokens/:tokenId/deploy/build-unsigned-transaction",
+      "POST /v1/issuance/tokens/:tokenId/deploy/metadata/build-unsigned-transaction",
+      "POST /v1/issuance/tokens/:tokenId/deploy/confirm-submitted-transaction",
       "POST /v1/helius-rings/rings",
     ]);
   });

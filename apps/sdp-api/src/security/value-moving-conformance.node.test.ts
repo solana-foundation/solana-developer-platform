@@ -104,7 +104,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
-      section: '"/tokens/:tokenId/authority",',
+      section: '"/tokens/:tokenId/authority/update/execute",',
       before: 'requireAction("issuance.authority")',
       through: "requestGate(",
       after: "executeUpdateAuthority",
@@ -125,7 +125,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
-      section: '"/tokens/:tokenId/freeze",',
+      section: '"/tokens/:tokenId/freeze-account",',
       before: 'requireAction("issuance.enforce")',
       after: "freezeAccount",
     },
@@ -146,7 +146,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
-      section: '"/tokens/:tokenId/unfreeze",',
+      section: '"/tokens/:tokenId/unfreeze-account",',
       before: 'requireAction("issuance.enforce")',
       after: "unfreezeAccount",
     },
@@ -206,7 +206,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
-      section: '"/tokens/:tokenId/seize",',
+      section: '"/tokens/:tokenId/seize/execute",',
       before: 'requireAction("issuance.enforce")',
       after: "executeSeize",
     },
@@ -226,7 +226,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
-      section: '"/tokens/:tokenId/force-burn",',
+      section: '"/tokens/:tokenId/force-burn/execute",',
       before: 'requireAction("issuance.enforce")',
       after: "executeForceBurn",
     },
@@ -246,7 +246,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
-      section: '"/tokens/:tokenId/burn",',
+      section: '"/tokens/:tokenId/burn/execute",',
       before: 'requireAction("issuance.execute")',
       after: "executeBurn",
     },
@@ -313,7 +313,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
-      section: '"/tokens/:tokenId/deploy",',
+      section: '"/tokens/:tokenId/deploy/execute",',
       before: 'requireAction("issuance.execute")',
       after: "  deployToken",
     },
@@ -333,7 +333,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
-      section: '"/tokens/:tokenId/allowlist",',
+      section: '"/tokens/:tokenId/control-list",',
       before: 'requireAction("issuance.enforce")',
       after: "addAllowlistEntry",
     },
@@ -353,7 +353,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
-      section: '"/tokens/:tokenId/allowlist/:entryId",',
+      section: '"/tokens/:tokenId/control-list/:entryId",',
       before: 'requireAction("issuance.enforce")',
       after: "removeAllowlistEntry",
     },

@@ -29,16 +29,17 @@ describe("Issuance exact wallet OpenAPI contract", () => {
   it("documents exact action selectors and keeps legacy confirm unchanged", () => {
     const doc = createOpenApiDocument();
     const mint = requestSchema(
-      doc.paths?.["/v1/issuance/tokens/{tokenId}/mint"]?.post?.requestBody
+      doc.paths?.["/v1/issuance/tokens/{tokenId}/mint/execute"]?.post?.requestBody
     );
     const burn = requestSchema(
-      doc.paths?.["/v1/issuance/tokens/{tokenId}/burn"]?.post?.requestBody
+      doc.paths?.["/v1/issuance/tokens/{tokenId}/burn/execute"]?.post?.requestBody
     );
     const deploy = requestSchema(
-      doc.paths?.["/v1/issuance/tokens/{tokenId}/deploy"]?.post?.requestBody
+      doc.paths?.["/v1/issuance/tokens/{tokenId}/deploy/execute"]?.post?.requestBody
     );
     const confirm = requestSchema(
-      doc.paths?.["/v1/issuance/tokens/{tokenId}/deploy/confirm"]?.post?.requestBody
+      doc.paths?.["/v1/issuance/tokens/{tokenId}/deploy/confirm-submitted-transaction"]?.post
+        ?.requestBody
     );
 
     expect(mint.properties).toHaveProperty("signingCustodyWalletId");
@@ -65,14 +66,14 @@ describe("Issuance exact wallet OpenAPI contract", () => {
     for (const [method, path] of [
       ["post", "/v1/issuance/tokens/{tokenId}/pause"],
       ["post", "/v1/issuance/tokens/{tokenId}/unpause"],
-      ["post", "/v1/issuance/tokens/{tokenId}/allowlist"],
+      ["post", "/v1/issuance/tokens/{tokenId}/control-list"],
       ["patch", "/v1/issuance/tokens/{tokenId}"],
     ] as const) {
       const schema = requestSchema(doc.paths?.[path]?.[method]?.requestBody);
       expect(schema.properties).toHaveProperty("signingCustodyWalletId");
       expect(schema.required ?? []).not.toContain("signingCustodyWalletId");
     }
-    const removal = doc.paths?.["/v1/issuance/tokens/{tokenId}/allowlist/{entryId}"]?.delete;
+    const removal = doc.paths?.["/v1/issuance/tokens/{tokenId}/control-list/{entryId}"]?.delete;
     expect(removal?.parameters).toContainEqual(
       expect.objectContaining({ name: "signingCustodyWalletId", in: "query", required: false })
     );
@@ -100,26 +101,26 @@ describe("Issuance exact wallet OpenAPI contract", () => {
     const doc = createOpenApiDocument();
     const operations = [
       ["patch", "/v1/issuance/tokens/{tokenId}"],
-      ["post", "/v1/issuance/tokens/{tokenId}/deploy"],
-      ["post", "/v1/issuance/tokens/{tokenId}/deploy/prepare"],
-      ["post", "/v1/issuance/tokens/{tokenId}/deploy/confirm"],
-      ["post", "/v1/issuance/tokens/{tokenId}/deploy/prepare-metadata"],
-      ["post", "/v1/issuance/tokens/{tokenId}/mint/prepare"],
-      ["post", "/v1/issuance/tokens/{tokenId}/mint"],
-      ["post", "/v1/issuance/tokens/{tokenId}/burn/prepare"],
-      ["post", "/v1/issuance/tokens/{tokenId}/burn"],
-      ["post", "/v1/issuance/tokens/{tokenId}/seize/prepare"],
-      ["post", "/v1/issuance/tokens/{tokenId}/seize"],
-      ["post", "/v1/issuance/tokens/{tokenId}/force-burn/prepare"],
-      ["post", "/v1/issuance/tokens/{tokenId}/force-burn"],
-      ["post", "/v1/issuance/tokens/{tokenId}/authority/prepare"],
-      ["post", "/v1/issuance/tokens/{tokenId}/authority"],
+      ["post", "/v1/issuance/tokens/{tokenId}/deploy/execute"],
+      ["post", "/v1/issuance/tokens/{tokenId}/deploy/build-unsigned-transaction"],
+      ["post", "/v1/issuance/tokens/{tokenId}/deploy/confirm-submitted-transaction"],
+      ["post", "/v1/issuance/tokens/{tokenId}/deploy/metadata/build-unsigned-transaction"],
+      ["post", "/v1/issuance/tokens/{tokenId}/mint/build-unsigned-transaction"],
+      ["post", "/v1/issuance/tokens/{tokenId}/mint/execute"],
+      ["post", "/v1/issuance/tokens/{tokenId}/burn/build-unsigned-transaction"],
+      ["post", "/v1/issuance/tokens/{tokenId}/burn/execute"],
+      ["post", "/v1/issuance/tokens/{tokenId}/seize/build-unsigned-transaction"],
+      ["post", "/v1/issuance/tokens/{tokenId}/seize/execute"],
+      ["post", "/v1/issuance/tokens/{tokenId}/force-burn/build-unsigned-transaction"],
+      ["post", "/v1/issuance/tokens/{tokenId}/force-burn/execute"],
+      ["post", "/v1/issuance/tokens/{tokenId}/authority/update/build-unsigned-transaction"],
+      ["post", "/v1/issuance/tokens/{tokenId}/authority/update/execute"],
       ["post", "/v1/issuance/tokens/{tokenId}/pause"],
       ["post", "/v1/issuance/tokens/{tokenId}/unpause"],
-      ["post", "/v1/issuance/tokens/{tokenId}/freeze"],
-      ["post", "/v1/issuance/tokens/{tokenId}/unfreeze"],
-      ["post", "/v1/issuance/tokens/{tokenId}/allowlist"],
-      ["delete", "/v1/issuance/tokens/{tokenId}/allowlist/{entryId}"],
+      ["post", "/v1/issuance/tokens/{tokenId}/freeze-account"],
+      ["post", "/v1/issuance/tokens/{tokenId}/unfreeze-account"],
+      ["post", "/v1/issuance/tokens/{tokenId}/control-list"],
+      ["delete", "/v1/issuance/tokens/{tokenId}/control-list/{entryId}"],
     ] as const;
 
     const undocumented = operations
