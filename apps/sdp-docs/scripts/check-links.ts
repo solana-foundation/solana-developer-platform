@@ -200,21 +200,20 @@ function stripQueryAndFragment(destination: string): string {
  * link a file its own change adds, and a wrong path fails without a network call.
  */
 async function findMissingRepoMainPaths(links: LinkReference[]): Promise<string[]> {
-  const findings: string[] = [];
-  for (const link of links) {
-    const repoPath = repoMainLink.exec(link.destination.trim())?.[1];
-    if (repoPath === undefined) continue;
-    const exists = await fs.access(path.join(repoRoot, decodeURIComponent(repoPath))).then(
-      () => true,
-      () => false
-    );
-    if (!exists) {
-      findings.push(
-        `${link.sourcePath}:${link.line} links "${repoPath}", which is not in this checkout`
+  const findings = await Promise.all(
+    links.map(async (link) => {
+      const repoPath = repoMainLink.exec(link.destination.trim())?.[1];
+      if (repoPath === undefined) return null;
+      const exists = await fs.access(path.join(repoRoot, decodeURIComponent(repoPath))).then(
+        () => true,
+        () => false
       );
-    }
-  }
-  return findings;
+      return exists
+        ? null
+        : `${link.sourcePath}:${link.line} links "${repoPath}", which is not in this checkout`;
+    })
+  );
+  return findings.filter((finding): finding is string => finding !== null);
 }
 
 function shouldIgnoreExternalUrl(url: URL, config: LinkCheckConfig): boolean {
