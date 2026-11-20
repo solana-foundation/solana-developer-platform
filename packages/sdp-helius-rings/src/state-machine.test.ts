@@ -12,9 +12,26 @@ describe("nextState", () => {
   });
 
   it("advances every guarded transition when the guard matches", () => {
-    const guarded = TRANSITIONS.filter((t) => t.guard);
-    for (const transition of guarded) {
-      expect(nextState(transition.from, transition.guard)).toBe(transition.to);
+    // Each edge's target is pinned as a literal, not read back from
+    // TRANSITIONS: nextState answers out of that same table, so iterating it
+    // would bless a rewired edge (e.g. proving jumping straight to completed,
+    // past signing) as long as the table stayed self-consistent.
+    const pinnedEdges: ReadonlyArray<{
+      from: OperationState;
+      guard: TransitionGuard;
+      to: OperationState;
+    }> = [
+      { from: "preparing", guard: "prepared", to: "proving" },
+      { from: "proving", guard: "proof_received", to: "ready_to_sign" },
+      { from: "ready_to_sign", guard: "signed", to: "submitted" },
+      { from: "submitted", guard: "submitted", to: "indexing" },
+      { from: "indexing", guard: "indexed", to: "completed" },
+    ];
+    // Every guarded transition in the table must be pinned above, so a newly
+    // added edge fails here until the flow's required target is written down.
+    expect(TRANSITIONS.filter((t) => t.guard)).toHaveLength(pinnedEdges.length);
+    for (const edge of pinnedEdges) {
+      expect(nextState(edge.from, edge.guard)).toBe(edge.to);
     }
   });
 
