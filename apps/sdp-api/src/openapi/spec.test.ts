@@ -360,7 +360,7 @@ describe("OpenAPI spec", () => {
     }
   });
 
-  it("keeps authored Earn guides aligned with the internal replacement contract", () => {
+  it("keeps authored Earn guides aligned with the current core contract", () => {
     const internal = createOpenApiDocument();
     const directories = [
       new URL("../../../sdp-docs/content/docs/earn/", import.meta.url),

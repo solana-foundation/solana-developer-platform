@@ -143,7 +143,7 @@ const VALUE_GATES = new Map(
  * or undefined. This is the playground's allowlist: the proxy route refuses
  * anything it does not return and the forms offer nothing it does not return,
  * so the two cannot disagree. The catalog holds only the dashboard's existing
- * playground sections from the public document (Earn held out), so an internal,
+ * playground sections from the public document, so an internal,
  * admin or undocumented route is never reachable through the playground.
  *
  * @param method - The HTTP method.
