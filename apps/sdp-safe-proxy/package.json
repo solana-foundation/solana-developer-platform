@@ -4,9 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "SDP_SAFE_PROXY_PORT=8788 node --import tsx src/server.ts",
+    "start": "node --import tsx src/server.ts",
     "typecheck": "tsc --noEmit",
-    "lint": "biome check src/",
-    "start": "node --import tsx src/server.ts"
+    "lint": "biome check src/"
   },
   "dependencies": {
     "@hono/node-server": "2.1.5",

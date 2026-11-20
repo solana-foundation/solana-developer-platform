@@ -1,24 +1,15 @@
 import { z } from "zod";
 
 const settingsSchema = z.object({
-  PORT: z.coerce.number().int().min(1).max(65535),
+  SDP_SAFE_PROXY_PORT: z.coerce.number().int().min(1).max(65535),
 });
 
-export type Settings = {
-  port: number;
-};
-
-export class SettingsError extends Error {
-  constructor(setting: string, problem: "missing" | "invalid") {
-    // Names the setting, never its value.
-    super(`${setting} is ${problem}`);
-    this.name = "SettingsError";
-  }
-}
+export type Settings = z.infer<typeof settingsSchema>;
 
 export function parseSettings(env: Record<string, string | undefined>): Settings {
-  if (env.PORT === undefined || env.PORT === "") throw new SettingsError("PORT", "missing");
   const parsed = settingsSchema.safeParse(env);
-  if (!parsed.success) throw new SettingsError("PORT", "invalid");
-  return { port: parsed.data.PORT };
+  if (parsed.success) return parsed.data;
+  // Names the settings that failed, never Zod's message or the value.
+  const names = [...new Set(parsed.error.issues.map((issue) => issue.path.join(".")))];
+  throw new Error(`invalid settings: ${names.join(", ")}`);
 }

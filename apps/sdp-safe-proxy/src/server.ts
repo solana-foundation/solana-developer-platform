@@ -1,20 +1,17 @@
 import { serve } from "@hono/node-server";
 
 import { createApp } from "./app";
-import { parseSettings, SettingsError } from "./settings";
+import { parseSettings, type Settings } from "./settings";
 
-function main(): void {
-  let settings: ReturnType<typeof parseSettings>;
+function readSettings(): Settings {
   try {
-    settings = parseSettings(process.env);
+    return parseSettings(process.env);
   } catch (error) {
-    if (!(error instanceof SettingsError)) throw error;
-    process.stderr.write(`${error.message}\n`);
+    process.stderr.write(`${error instanceof Error ? error.message : "invalid settings"}\n`);
     process.exit(1);
   }
-
-  const server = serve({ fetch: createApp().fetch, port: settings.port });
-  process.on("SIGTERM", () => server.close());
 }
 
-main();
+const settings = readSettings();
+const server = serve({ fetch: createApp().fetch, port: settings.SDP_SAFE_PROXY_PORT });
+process.on("SIGTERM", () => server.close());
