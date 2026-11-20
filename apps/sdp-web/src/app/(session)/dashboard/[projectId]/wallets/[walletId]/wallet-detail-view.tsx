@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useMemo } from "react";
+import { ProviderPolicyCallout } from "@/app/(session)/dashboard/[projectId]/wallets/provider-policy-callout";
 import { WalletFavoriteStar } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-favorite-button";
 import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-provider-mark";
 import { DashboardPageTitle } from "@/components/dashboard-page-title";
@@ -66,6 +67,7 @@ export function WalletDetailView({
   return (
     <DashboardWorkspaceOverviewPanel data-wallet-detail={tab}>
       <DashboardPageTitle title={wallet.name} mark={mark} actions={actions} />
+      <ProviderPolicyCallout check={wallet.providerPolicy} provider={wallet.provider} />
       <Suspense fallback={<TabSkeleton />}>
         {tab === "overview" ? (
           <WalletOverviewTab

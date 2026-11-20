@@ -1,4 +1,4 @@
-import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
+import type { CustodyWalletTokenBalance, ProviderPolicyCheck } from "@sdp/types/custody";
 import type { KnownCustodyProvider } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
 /** The Transactions ledger narrowed to one wallet, where its whole history pages. */
 export function walletTransactionsHref(custodyWalletId: string): string {
@@ -13,6 +13,7 @@ export function activityDisplayId(id: string): string {
 
 /** What the wallet's page shows about the wallet itself, resolved on the server. */
 export interface WalletPageView {
+  providerPolicy?: ProviderPolicyCheck;
   walletId: string;
   /** The custody record's own id, which the Transactions ledger filters by. */
   custodyWalletId: string;

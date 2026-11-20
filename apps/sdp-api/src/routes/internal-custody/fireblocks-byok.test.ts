@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { verify } from "node:crypto";
 import { runInClusterScope } from "@sdp/rpc/scope";
+import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { type Context, Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -13,6 +14,7 @@ import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { createCredentialSecretStore } from "@/services/credential-secret-store";
 import { trackFireblocksProposals } from "@/services/custody/fireblocks-proposal-tracking";
 import { eraseExpiredFireblocksCsrs } from "@/services/custody/fireblocks-registration.service";
+import { checkDueProviderPolicies } from "@/services/custody/provider-policy";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { reconcileFireblocksProposals } from "@/services/jobs/reconcile-fireblocks-proposals";
 import { ProviderCredentialSecretCleanupStore } from "@/services/stores/provider-credential-secret-cleanup.store";
@@ -76,10 +78,26 @@ function request(
   );
 }
 
+/** The token-catalogue entry resolveFireblocksTransferAsset matches for the sandbox USDC mint. */
+function usdcCatalogueEntry() {
+  const mint = wellKnownMint("USDC", "devnet");
+  if (!mint) throw new Error("The devnet USDC mint is missing from the well-known tokens");
+  return {
+    id: "USDC_TEST",
+    type: "SOL_ASSET",
+    nativeAsset: "SOL_TEST",
+    issuerAddress: mint,
+    decimals: 6,
+  };
+}
+
 function providerResponse(address = ADDRESS) {
-  return vi
-    .spyOn(globalThis, "fetch")
-    .mockImplementation(async () => Response.json({ addresses: [{ address }] }));
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+    const path = new URL(String(url)).pathname;
+    if (path === "/v1/tap/active_policy") return Response.json({ policy: { rules: [] } });
+    if (path === "/v1/supported_assets") return Response.json([usdcCatalogueEntry()]);
+    return Response.json({ addresses: [{ address }] });
+  });
 }
 
 async function connect(projectId = PROJECT_ID) {
@@ -131,6 +149,11 @@ beforeEach(async () => {
     "UPDATE organizations SET settings = (settings::jsonb || ?::jsonb)::text WHERE id = ?",
     [JSON.stringify({ providerOverrides: { custody: { fireblocks: true } } }), ORGANIZATION_ID]
   );
+  // Each test gets its own Fireblocks API key: resolveFireblocksTransferAsset
+  // caches the supported-assets catalogue per key for five minutes, so a shared
+  // key would make one test's provider-read counts depend on another's.
+  fields.apiKey = `tenant-fireblocks-key-${crypto.randomUUID()}`;
+  body.fields.apiKey = fields.apiKey;
   token = await signSeededClerkMember(testEnv, db, USER_ID, ORGANIZATION_ID);
   await verifyClerkJwt(token, testEnv);
   app = new Hono<{ Bindings: Env }>();
@@ -152,10 +175,12 @@ beforeEach(async () => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("Fireblocks BYOK lifecycle on experimental", () => {
-  it("encrypts credentials, attaches the vault with one read and replays completion", async () => {
+  it("encrypts credentials, attaches the vault and checks its policy and replays completion", async () => {
     const fetch = providerResponse();
     const connected = await connect();
-    expect(fetch).toHaveBeenCalledTimes(1);
+    // The observation follows setup in the background; the periodic queue does the same work.
+    await inSandboxScope(() => checkDueProviderPolicies(testEnv));
+    expect(fetch).toHaveBeenCalledTimes(2);
     expect(fetch).toHaveBeenCalledWith(
       `${testEnv.FIREBLOCKS_API_BASE_URL}/v1/vault/accounts/0/SOL_TEST/addresses_paginated`,
       expect.objectContaining({
@@ -163,6 +188,11 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
         headers: expect.objectContaining({ "X-API-Key": fields.apiKey }),
       })
     );
+    const detail = await request(`/connections/${connected.connectionId}`);
+    expect((await detail.json()).data.connection.providerPolicy).toMatchObject({
+      status: "missing",
+      reason: "no_policy",
+    });
     const credential = await getDb(env).queryOne<{ encrypted_secret_payload: string }>(
       "SELECT encrypted_secret_payload FROM provider_credentials WHERE id = ?",
       [connected.providerCredential.id]
@@ -190,7 +220,7 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
     ).toEqual({ encrypted_private_key: null });
     const replay = await request(`/connections/${connected.connectionId}/complete`, {});
     expect(replay.status).toBe(200);
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledTimes(2);
     const listed = await request("/connections?provider=fireblocks");
     const serialized = JSON.stringify(await listed.json());
     expect(serialized).toContain("fireblocks");
@@ -201,6 +231,102 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
       [connected.connectionId]
     );
     expect(wallet).toEqual({ wallet_id: "fb_0", public_key: ADDRESS });
+  });
+
+  it("reports missing coverage when the USDC rule lets the credential move funds alone", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const path = new URL(String(url)).pathname;
+      if (path === "/v1/tap/active_policy")
+        return Response.json({
+          policy: {
+            rules: [
+              {
+                type: "TRANSFER",
+                asset: "SOL_TEST",
+                src: { ids: [["*", "VAULT", "*"]] },
+                action: "2-TIER",
+              },
+              {
+                type: "TRANSFER",
+                asset: "USDC_TEST",
+                src: { ids: [["*", "VAULT", "*"]] },
+                action: "ALLOW",
+              },
+            ],
+          },
+        });
+      if (path === "/v1/supported_assets") return Response.json([usdcCatalogueEntry()]);
+      return Response.json({ addresses: [{ address: ADDRESS }] });
+    });
+    const connected = await connect();
+    await inSandboxScope(() => checkDueProviderPolicies(testEnv));
+    const detail = await request(`/connections/${connected.connectionId}`);
+    expect((await detail.json()).data.connection.providerPolicy).toMatchObject({
+      status: "missing",
+      reason: "no_policy",
+    });
+  });
+
+  it("detects a gated USDC rule despite an unrelated asset's allow rule", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const path = new URL(String(url)).pathname;
+      if (path === "/v1/tap/active_policy")
+        return Response.json({
+          policy: {
+            rules: [
+              {
+                type: "TRANSFER",
+                asset: "ETH",
+                src: { ids: [["*", "VAULT", "*"]] },
+                action: "ALLOW",
+              },
+              {
+                type: "TRANSFER",
+                asset: "USDC_TEST",
+                src: { ids: [["*", "VAULT", "*"]] },
+                action: "2-TIER",
+              },
+            ],
+          },
+        });
+      if (path === "/v1/supported_assets") return Response.json([usdcCatalogueEntry()]);
+      return Response.json({ addresses: [{ address: ADDRESS }] });
+    });
+    const connected = await connect();
+    await inSandboxScope(() => checkDueProviderPolicies(testEnv));
+    const detail = await request(`/connections/${connected.connectionId}`);
+    expect((await detail.json()).data.connection.providerPolicy).toMatchObject({
+      status: "present",
+      reason: "policy_detected",
+    });
+  });
+
+  it("keeps an unreadable USDC rule from reporting missing coverage", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const path = new URL(String(url)).pathname;
+      if (path === "/v1/tap/active_policy")
+        return Response.json({
+          policy: {
+            rules: [
+              {
+                type: "TRANSFER",
+                asset: "USDC_TEST",
+                src: { ids: [["*", "VAULT", "*"]] },
+                action: "MAYBE",
+              },
+            ],
+          },
+        });
+      if (path === "/v1/supported_assets") return Response.json([usdcCatalogueEntry()]);
+      return Response.json({ addresses: [{ address: ADDRESS }] });
+    });
+    const connected = await connect();
+    await inSandboxScope(() => checkDueProviderPolicies(testEnv));
+    const detail = await request(`/connections/${connected.connectionId}`);
+    expect((await detail.json()).data.connection.providerPolicy).toMatchObject({
+      status: "unknown",
+      reason: "unsupported_response",
+    });
   });
 
   it("pins production to SOL and rejects browser URL or asset overrides", async () => {
@@ -315,6 +441,8 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
   it("resolves only the owned wallet through the keychain Fireblocks signer", async () => {
     const fetch = providerResponse();
     const connected = await connect();
+    // The observation follows setup in the background; the periodic queue does the same work.
+    await inSandboxScope(() => checkDueProviderPolicies(testEnv));
     const wallet = await getDb(env).queryOne<{ id: string }>(
       "SELECT id FROM custody_wallets WHERE custody_connection_id = ?",
       [connected.connectionId]
@@ -332,7 +460,7 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
       );
       expect(signer.address).toBe(ADDRESS);
       expect(managedAdapter).not.toHaveBeenCalled();
-      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(fetch).toHaveBeenCalledTimes(3);
       await resolver.getTransactionSignerForWalletRecord(
         ORGANIZATION_ID,
         PROJECT_ID,
@@ -340,7 +468,7 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
         "payments.transfer",
         managedAdapter
       );
-      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(fetch).toHaveBeenCalledTimes(3);
       await expect(
         resolver.getTransactionSignerForWalletRecord(
           ORGANIZATION_ID,
@@ -350,7 +478,7 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
           managedAdapter
         )
       ).rejects.toThrow();
-      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(fetch).toHaveBeenCalledTimes(3);
       fetch.mockImplementation(async () =>
         Response.json({ addresses: [{ address: OTHER_ADDRESS }] })
       );
@@ -683,6 +811,8 @@ describe("Fireblocks vault discovery and selection", () => {
     return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       expect(init?.method).toBe("GET");
       const path = new URL(String(input)).pathname;
+      if (path === "/v1/tap/active_policy") return Response.json({ policy: { rules: [] } });
+      if (path === "/v1/supported_assets") return Response.json([usdcCatalogueEntry()]);
       if (path.endsWith("/addresses_paginated"))
         return Response.json({
           addresses: [{ address: path.includes("/7/") ? OTHER_ADDRESS : ADDRESS }],
@@ -893,7 +1023,9 @@ describe("Fireblocks vault discovery and selection", () => {
     const { connectionId } = (await submitted.json()).data;
     const complete = await request(`/connections/${connectionId}/complete`, {});
     expect((await complete.json()).data.completion.status).toBe("success");
-    expect(fetch).toHaveBeenCalledTimes(4);
+    // The observation follows setup in the background; the periodic queue does the same work.
+    await inSandboxScope(() => checkDueProviderPolicies(testEnv));
+    expect(fetch).toHaveBeenCalledTimes(5);
     const wallets = await getDb(env).queryMany(
       "SELECT wallet_id, public_key, label, purpose FROM custody_wallets WHERE custody_connection_id = ? ORDER BY wallet_id",
       [connectionId]
@@ -906,7 +1038,7 @@ describe("Fireblocks vault discovery and selection", () => {
     expect(
       (await request("/provider-credentials", payload, PROJECT_ID, idempotencyKey)).status
     ).toBe(201);
-    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(fetch).toHaveBeenCalledTimes(5);
     expect(
       (await request("/provider-credentials", selectedPayload(["0"]), PROJECT_ID, idempotencyKey))
         .status
