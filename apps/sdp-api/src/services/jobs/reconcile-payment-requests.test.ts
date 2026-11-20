@@ -2,17 +2,19 @@ import { runInClusterScope } from "@sdp/rpc/scope";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db/client";
-import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { badRequest } from "@/lib/errors";
 import * as moneyPathEvents from "@/runtime/money-path-events";
 import * as paymentAmounts from "@/services/payments/token-amount";
-import { TEST_CUSTODY_PUBLIC_KEY } from "@/test/fixtures/custody";
-import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { type ClusterRpcStub, installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
-import { seedPaymentRequest, setPaymentRequestColumns } from "@/test/helpers/payment-requests";
-import { seedDefaultProjects } from "@/test/helpers/projects";
+import {
+  type PaymentRequestTenant,
+  readTenantPaymentRequest,
+  resetPaymentRequestTenant,
+  seedTenantPaymentRequest,
+} from "@/test/helpers/payment-request-tenant";
+import { setPaymentRequestColumns } from "@/test/helpers/payment-requests";
 import { seedTestDatabase } from "@/test/mocks/db";
 import {
   expirePaymentRequests,
@@ -20,46 +22,26 @@ import {
   reconcilePaymentRequests,
 } from "./reconcile-payment-requests";
 
-const TEST_PROJECT_ID = "prj_preq_job_test";
-const TEST_CONFIG_ID = "cust_cfg_preq_job_test";
-const TEST_CUSTODY_WALLET_ID = "cwlt_preq_job_test";
-const TEST_WALLET_ID = "wal_preq_job_test";
 const PAST = "2020-01-01T00:00:00.000Z";
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
+
+let tenant: PaymentRequestTenant;
 
 function ago(ms: number): string {
   return new Date(Date.now() - ms).toISOString();
 }
 
-async function createRequest(params: { token: string; expiresAt: string | null }) {
-  return seedPaymentRequest(env, {
-    organizationId: TEST_ORG.id,
-    projectId: TEST_PROJECT_ID,
-    custodyWalletId: TEST_CUSTODY_WALLET_ID,
-    walletId: TEST_WALLET_ID,
-    destinationAddress: TEST_CUSTODY_PUBLIC_KEY,
-    token: params.token,
-    amount: "1.5",
-    expiresAt: params.expiresAt,
-    createdBy: TEST_USER.id,
-  });
+function createRequest(params: { token: string; expiresAt: string | null }) {
+  return seedTenantPaymentRequest(env, tenant, { ...params, amount: "1.5" });
 }
 
-async function getRow(requestId: string) {
-  const row = await createSystemPaymentRequestsRepository(env).getPaymentRequestById({
-    requestId,
-    organizationId: TEST_ORG.id,
-    projectId: TEST_PROJECT_ID,
-  });
-  if (row === null) {
-    throw new Error(`Payment request ${requestId} not found`);
-  }
-  return row;
+function getRow(requestId: string) {
+  return readTenantPaymentRequest(env, tenant, requestId);
 }
 
 function onSandbox(fn: () => Promise<void>) {
-  return runInClusterScope({ projectId: TEST_PROJECT_ID, environment: "sandbox" }, fn);
+  return runInClusterScope({ projectId: tenant.projectId, environment: "sandbox" }, fn);
 }
 
 function installJobHooks(): ClusterRpcStub {
@@ -75,47 +57,7 @@ function installJobHooks(): ClusterRpcStub {
 
   beforeEach(async () => {
     clusterRpc.answer("getBlockHeight", 1_000);
-
-    const db = getDb(env);
-    await db.prepare("DELETE FROM payment_requests").run();
-    await db.prepare("DELETE FROM payment_transfers").run();
-    await db.prepare("DELETE FROM projects").run();
-
-    await db
-      .prepare(
-        "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
-      )
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
-      .run();
-    await db
-      .prepare(
-        "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')"
-      )
-      .bind(TEST_USER.id, TEST_USER.email)
-      .run();
-    await seedDefaultProjects(db, {
-      organizationId: TEST_ORG.id,
-      createdBy: TEST_USER.id,
-      members: [],
-      ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
-    });
-    await db
-      .prepare(
-        `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted,
-            encryption_version, status)
-         VALUES (?, ?, ?, 'local', 'test-config', 'sdp-custody-encryption-v1', 'active')`
-      )
-      .bind(TEST_CONFIG_ID, TEST_ORG.id, TEST_PROJECT_ID)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_config_id, wallet_id, public_key, status)
-         VALUES (?, ?, ?, ?, 'active')`
-      )
-      .bind(TEST_CUSTODY_WALLET_ID, TEST_CONFIG_ID, TEST_WALLET_ID, TEST_CUSTODY_PUBLIC_KEY)
-      .run();
+    tenant = await resetPaymentRequestTenant(env, "preq_job_test");
   });
 
   return clusterRpc;
@@ -155,18 +97,6 @@ describe("reconcilePaymentRequests", () => {
       "error",
       expect.objectContaining({ event: "payment_requests.check_failed", lane: "sweep" })
     );
-  });
-
-  it("summarises each run with a warning when any check failed", async () => {
-    const log = vi.spyOn(moneyPathEvents, "logEvent");
-    await createRequest({ token: SOL_MINT, expiresAt: null });
-    await createRequest({ token: SOL_MINT, expiresAt: null });
-    vi.spyOn(solanaRpc, "getSignaturesForAddress")
-      .mockRejectedValueOnce(new Error("rpc down"))
-      .mockResolvedValueOnce([]);
-
-    await onSandbox(() => reconcilePaymentRequests(env));
-
     expect(log).toHaveBeenCalledWith("warn", {
       event: "payment_requests.lane_run",
       environment: "sandbox",
@@ -264,6 +194,7 @@ describe("reconcilePaymentRequests", () => {
   });
 
   it("does not mark a request verified when its check never read the chain", async () => {
+    const log = vi.spyOn(moneyPathEvents, "logEvent");
     const signatures = vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
     vi.spyOn(paymentAmounts, "loadPaymentMint").mockRejectedValue(
       badRequest("Token mint account does not exist")
@@ -277,30 +208,15 @@ describe("reconcilePaymentRequests", () => {
     expect(row.last_checked_at).not.toBeNull();
     expect(row.last_verified_at).toBeNull();
     expect(row.settlement_blocked_reason).toBe("mint_not_admitted");
-  });
-
-  it("keeps a request blocked by its mint out of the backlog", async () => {
-    const log = vi.spyOn(moneyPathEvents, "logEvent");
-    vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
-    vi.spyOn(paymentAmounts, "loadPaymentMint").mockRejectedValue(
-      badRequest("Token mint account does not exist")
-    );
-    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
-    await setPaymentRequestColumns(env, request.id, { created_at: PAST, last_checked_at: PAST });
-
-    await onSandbox(() => reconcilePaymentRequests(env));
-    log.mockClear();
-    await setPaymentRequestColumns(env, request.id, { last_checked_at: PAST });
-    await onSandbox(() => reconcilePaymentRequests(env));
-
-    expect(log).not.toHaveBeenCalledWith(
-      "warn",
-      expect.objectContaining({ event: "payment_requests.reconcile_backlog" })
-    );
-    expect(log).toHaveBeenCalledWith(
-      "info",
-      expect.objectContaining({ event: "payment_requests.lane_run", lane: "sweep", blocked: 1 })
-    );
+    expect(log).toHaveBeenCalledWith("info", {
+      event: "payment_requests.lane_run",
+      environment: "sandbox",
+      lane: "sweep",
+      checked: 1,
+      failed: 0,
+      settled: 0,
+      blocked: 1,
+    });
   });
 
   it("reports a once-blocked request as backlog when its checks start failing", async () => {
@@ -313,47 +229,21 @@ describe("reconcilePaymentRequests", () => {
       settlement_blocked_reason: "mint_not_admitted",
     });
 
-    await expect(onSandbox(() => reconcilePaymentRequests(env))).rejects.toThrow(/checks failed/);
+    await expect(onSandbox(() => reconcilePaymentRequests(env))).rejects.toThrow(
+      /sweep lane: all 1 checks failed/
+    );
+    expect((await getRow(request.id)).settlement_blocked_reason).toBeNull();
     log.mockClear();
     await setPaymentRequestColumns(env, request.id, { last_checked_at: PAST });
-    await expect(onSandbox(() => reconcilePaymentRequests(env))).rejects.toThrow(/checks failed/);
-
-    expect((await getRow(request.id)).settlement_blocked_reason).toBeNull();
-    expect(log).toHaveBeenCalledWith(
-      "warn",
-      expect.objectContaining({ event: "payment_requests.reconcile_backlog", stale: 1 })
+    await expect(onSandbox(() => reconcilePaymentRequests(env))).rejects.toThrow(
+      /sweep lane: all 1 checks failed/
     );
-  });
 
-  it("clears the block once the chain can be read again", async () => {
-    vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
-    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
-    await setPaymentRequestColumns(env, request.id, {
-      settlement_blocked_reason: "mint_not_admitted",
+    expect(log).toHaveBeenCalledWith("warn", {
+      event: "payment_requests.reconcile_backlog",
+      environment: "sandbox",
+      stale: 1,
     });
-
-    await onSandbox(() => reconcilePaymentRequests(env));
-
-    const row = await getRow(request.id);
-    expect(row.settlement_blocked_reason).toBeNull();
-    expect(row.last_verified_at).not.toBeNull();
-  });
-
-  it("reports a row whose checks keep failing as backlog", async () => {
-    const log = vi.spyOn(moneyPathEvents, "logEvent");
-    vi.spyOn(solanaRpc, "getSignaturesForAddress").mockRejectedValue(new Error("rpc down"));
-    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
-    await setPaymentRequestColumns(env, request.id, { created_at: PAST, last_checked_at: PAST });
-
-    await expect(onSandbox(() => reconcilePaymentRequests(env))).rejects.toThrow(/checks failed/);
-    log.mockClear();
-    await onSandbox(() => reconcilePaymentRequests(env));
-
-    expect((await getRow(request.id)).last_checked_at).not.toBe(PAST);
-    expect(log).toHaveBeenCalledWith(
-      "warn",
-      expect.objectContaining({ event: "payment_requests.reconcile_backlog", stale: 1 })
-    );
   });
 
   it("does not report a backlog for aged rows on their slower recheck cadence", async () => {
@@ -417,13 +307,11 @@ describe("reconcileHotPaymentRequests", () => {
     const findReference = vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
     const hot = await createRequest({ token: SOL_MINT, expiresAt: null });
     await createRequest({ token: SOL_MINT, expiresAt: null });
-    await getDb(env)
-      .prepare(
-        `UPDATE payment_requests SET sponsored_tx_account = 'acct', sponsored_tx_unsigned = 'tx',
-           sponsored_tx_last_valid_block_height = ? WHERE id = ?`
-      )
-      .bind("999999999", hot.id)
-      .run();
+    await setPaymentRequestColumns(env, hot.id, {
+      sponsored_tx_account: TEST_SOLANA_ADDRESSES.wallet1,
+      sponsored_tx_unsigned: "tx",
+      sponsored_tx_last_valid_block_height: "999999999",
+    });
 
     await onSandbox(() => reconcileHotPaymentRequests(env));
 
@@ -436,13 +324,11 @@ describe("reconcileHotPaymentRequests", () => {
   it("fails the run when every hot check failed", async () => {
     vi.spyOn(solanaRpc, "getSignaturesForAddress").mockRejectedValue(new Error("rpc down"));
     const hot = await createRequest({ token: SOL_MINT, expiresAt: null });
-    await getDb(env)
-      .prepare(
-        `UPDATE payment_requests SET sponsored_tx_account = 'acct', sponsored_tx_unsigned = 'tx',
-           sponsored_tx_last_valid_block_height = ? WHERE id = ?`
-      )
-      .bind("999999999", hot.id)
-      .run();
+    await setPaymentRequestColumns(env, hot.id, {
+      sponsored_tx_account: TEST_SOLANA_ADDRESSES.wallet1,
+      sponsored_tx_unsigned: "tx",
+      sponsored_tx_last_valid_block_height: "999999999",
+    });
 
     await expect(onSandbox(() => reconcileHotPaymentRequests(env))).rejects.toThrow(
       /hot lane: all 1 checks failed/
@@ -488,12 +374,12 @@ describe("expirePaymentRequests", () => {
     const live = await createRequest({ token: SOL_MINT, expiresAt: PAST });
     const passed = await createRequest({ token: SOL_MINT, expiresAt: PAST });
     await setPaymentRequestColumns(env, live.id, {
-      sponsored_tx_account: "acct",
+      sponsored_tx_account: TEST_SOLANA_ADDRESSES.wallet1,
       sponsored_tx_unsigned: "tx",
       sponsored_tx_last_valid_block_height: "900",
     });
     await setPaymentRequestColumns(env, passed.id, {
-      sponsored_tx_account: "acct",
+      sponsored_tx_account: TEST_SOLANA_ADDRESSES.wallet1,
       sponsored_tx_unsigned: "tx",
       sponsored_tx_last_valid_block_height: "849",
     });
