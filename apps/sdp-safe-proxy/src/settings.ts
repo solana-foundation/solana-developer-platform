@@ -1,3 +1,9 @@
+import { z } from "zod";
+
+const settingsSchema = z.object({
+  PORT: z.coerce.number().int().min(1).max(65535),
+});
+
 export type Settings = {
   port: number;
 };
@@ -11,11 +17,8 @@ export class SettingsError extends Error {
 }
 
 export function parseSettings(env: Record<string, string | undefined>): Settings {
-  const rawPort = env.PORT;
-  if (rawPort === undefined || rawPort === "") throw new SettingsError("PORT", "missing");
-  const port = Number(rawPort);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new SettingsError("PORT", "invalid");
-  }
-  return { port };
+  if (env.PORT === undefined || env.PORT === "") throw new SettingsError("PORT", "missing");
+  const parsed = settingsSchema.safeParse(env);
+  if (!parsed.success) throw new SettingsError("PORT", "invalid");
+  return { port: parsed.data.PORT };
 }
