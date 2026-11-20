@@ -1383,26 +1383,18 @@ export function isPaymentRequestPayableAt(
   );
 }
 
-/** Whether each status closes a payment request: it was paid, or closed without a payment. */
-export const PAYMENT_REQUEST_STATUS_CLOSED = {
-  awaiting_payment: false,
-  paid: true,
-  canceled: true,
-  expired: true,
-} as const satisfies Record<PaymentRequestStatus, boolean>;
-
-/** The statuses that close a payment request. */
+/** The statuses that close a payment request: every status that no longer admits a payment. */
 export type ClosedPaymentRequestStatus = {
-  [Status in PaymentRequestStatus]: (typeof PAYMENT_REQUEST_STATUS_CLOSED)[Status] extends true
-    ? Status
-    : never;
+  [Status in PaymentRequestStatus]: (typeof PAYMENT_REQUEST_STATUS_PAYABLE)[Status] extends true
+    ? never
+    : Status;
 }[PaymentRequestStatus];
 
-/** Reports whether a payment request is closed: no longer awaiting its payment. */
+/** Reports whether a payment request is closed: paid, or closed without a payment. */
 export function isClosedPaymentRequestStatus(
   status: PaymentRequestStatus
 ): status is ClosedPaymentRequestStatus {
-  return PAYMENT_REQUEST_STATUS_CLOSED[status];
+  return !isPayablePaymentRequestStatus(status);
 }
 
 export const PAYMENT_REQUEST_CLOSED_STATUSES = PAYMENT_REQUEST_STATUSES.filter(

@@ -14,6 +14,7 @@ import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
 import { stubClipboard } from "@/test/clipboard";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { TEST_PAYMENT_REQUEST_RECIPIENT } from "@/test/payment-requests";
+import { required } from "@/test/required";
 import { requiredWellKnownMint } from "@/test/well-known-mints";
 import { createdRequestLinkCopied, forgetCreatedRequestLink } from "./created-request-link";
 import { PaymentRequestCreateWorkspace } from "./payment-request-create-workspace";
@@ -55,9 +56,7 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 function readsAs(): string | null {
-  const sentence = screen.getByText("Reads as").nextElementSibling;
-  if (sentence === null) throw new Error("no sentence follows Reads as");
-  return sentence.textContent;
+  return required(screen.getByText("Reads as").nextElementSibling).textContent;
 }
 
 beforeEach(() => {
@@ -125,8 +124,7 @@ describe("New request page", () => {
         expiresAt: null,
       },
     ]);
-    const [copied] = clipboard.writes;
-    if (copied === undefined) throw new Error("no clipboard write started");
+    const copied = required(clipboard.writes[0]);
     await expect(copied.then((blob) => blob.text())).resolves.toBe(
       `${window.location.origin}/pay/tok_1`
     );

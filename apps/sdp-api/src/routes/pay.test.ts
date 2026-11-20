@@ -42,7 +42,6 @@ import {
   cancelSeededPaymentRequest,
   seedPaymentRequest,
   seedPaymentRequestTransfer,
-  setPaymentRequestColumns,
 } from "@/test/helpers/payment-requests";
 import {
   createKoraAdapterMock,
@@ -136,7 +135,11 @@ describe("Public payment request routes", () => {
     return createAwaitingTokenPaymentRequest(wallet, SOL_MINT);
   }
 
-  function createAwaitingTokenPaymentRequest(wallet: RequestWallet, token: string) {
+  function createAwaitingTokenPaymentRequest(
+    wallet: RequestWallet,
+    token: string,
+    expiresAt: string | null = null
+  ) {
     return seedPaymentRequest(env, {
       organizationId: TEST_ORG.id,
       projectId: wallet.projectId,
@@ -145,7 +148,7 @@ describe("Public payment request routes", () => {
       destinationAddress: wallet.publicKey,
       token,
       amount: "1.5",
-      expiresAt: null,
+      expiresAt,
       createdBy: TEST_USER.id,
     });
   }
@@ -628,18 +631,92 @@ describe("Public payment request routes", () => {
       expect(sponsorship).not.toHaveBeenCalled();
     });
 
-    it("does not replay the stored transaction once the request passes its deadline", async () => {
-      stubSponsorship();
-      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
-      expect((await postTransaction(request.public_token)).status).toBe(200);
+    /**
+     * An open request due in ten minutes, so `/pay` admits it, and the call that moves the API's
+     * clock just past that deadline for the rest of the test.
+     */
+    async function createRequestDueSoon() {
+      const deadline = new Date(Date.now() + 600_000).toISOString();
+      const request = await createAwaitingTokenPaymentRequest(
+        SANDBOX_REQUEST_WALLET,
+        SOL_MINT,
+        deadline
+      );
+      onTestFinished(() => {
+        vi.useRealTimers();
+      });
+      const passDeadline = () => {
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(Date.parse(deadline) + 1_000);
+      };
+      return { request, passDeadline };
+    }
 
-      await setPaymentRequestColumns(env, request.id, { expires_at: "2020-01-01T00:00:00.000Z" });
+    /** The deadline passes as the post admitted before it reads the block height. */
+    function passDeadlineOnBlockHeightRead(passDeadline: () => void) {
+      rpc.respond("getBlockHeight", () => {
+        passDeadline();
+        return { result: 900 };
+      });
+    }
+
+    const NO_LONGER_PAYABLE = {
+      error: { code: "BAD_REQUEST", message: "Payment request is no longer payable" },
+      meta: { requestId: expect.any(String) },
+    };
+
+    it("does not replay the stored transaction once the request passes its deadline after admission", async () => {
+      const sign = stubCountedSponsorship(sponsorSignTestTransaction);
+      const { request, passDeadline } = await createRequestDueSoon();
+      expect((await postTransaction(request.public_token)).status).toBe(200);
+      passDeadlineOnBlockHeightRead(passDeadline);
 
       const replay = await postTransaction(request.public_token);
+
       expect(replay.status).toBe(400);
-      expect(await replay.json()).toMatchObject({
-        error: { code: "BAD_REQUEST", message: "Payment request is no longer payable" },
-      });
+      expect(await replay.json()).toEqual(NO_LONGER_PAYABLE);
+      expect(sign).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not sign a fresh claim once the request passes its deadline after admission", async () => {
+      const sign = stubCountedSponsorship(sponsorSignTestTransaction);
+      const { request, passDeadline } = await createRequestDueSoon();
+      passDeadlineOnBlockHeightRead(passDeadline);
+
+      const response = await postTransaction(request.public_token);
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual(NO_LONGER_PAYABLE);
+      expect(sign).not.toHaveBeenCalled();
+    });
+
+    it("does not serve the payer's concurrently signed claim once the request passes its deadline while signing", async () => {
+      stubCountedSponsorship(sponsorSignTestTransaction);
+      const { request, passDeadline } = await createRequestDueSoon();
+      const systemRepository = repositoryFactory.createSystemPaymentRequestsRepository;
+      const factory = vi
+        .spyOn(repositoryFactory, "createSystemPaymentRequestsRepository")
+        .mockImplementation((bindings) => {
+          const repository = systemRepository(bindings);
+          // Another post from the same payer stores its signature first, then the deadline passes.
+          vi.spyOn(repository, "storeSponsoredTransactionSignature").mockImplementationOnce(
+            async (params) => {
+              await systemRepository(bindings).storeSponsoredTransactionSignature({
+                ...params,
+                signedTransaction: "c2lnbmVkLWVsc2V3aGVyZQ==",
+              });
+              passDeadline();
+              return false;
+            }
+          );
+          return repository;
+        });
+      onTestFinished(() => factory.mockRestore());
+
+      const response = await postTransaction(request.public_token);
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual(NO_LONGER_PAYABLE);
     });
 
     it("answers no longer payable when the claim is lost to a cancel", async () => {
