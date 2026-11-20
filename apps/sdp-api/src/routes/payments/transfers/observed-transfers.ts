@@ -251,6 +251,8 @@ function readTokenAmountInfo(
     };
   }
 
+  // SAFETY: a non-array object; every RpcTokenBalanceAmount field is optional and each read
+  // below checks its value's type before using it.
   const tokenAmountRecord = rawTokenAmount as RpcTokenBalanceAmount;
 
   const amountValue =

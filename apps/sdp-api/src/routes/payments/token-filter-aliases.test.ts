@@ -1,9 +1,9 @@
-import { SOL_MINT, tokenFilterAliases } from "@sdp/types/well-known-tokens";
+import { SOL_MINT, tokenFilterAliases, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
 
-const DEVNET_USDC = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
-const MAINNET_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-const JITO_MINT = "J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn";
+const DEVNET_USDC = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
+const MAINNET_USDC = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address;
+const JITO_MINT = WELL_KNOWN_TOKENS.JITOSOL.mints["mainnet-beta"].address;
 
 // A token list filter matches every form `payment_transfers.token` may hold for the asset:
 // the input, its catalogue key, its display symbol and each cluster's mint.

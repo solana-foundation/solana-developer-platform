@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { getDb } from "@/db/client";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
-import { env } from "@/test/helpers/env";
+import { countStoredIdempotencyKeys } from "@/test/helpers/idempotency-records";
 import {
   createOrgSignerForCustodyWalletMock,
   installPaymentsRouteTestHooks,
@@ -44,10 +43,6 @@ describe("Payments routes — custody wallets of another project", () => {
     });
     expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
     expect(await countTransferRows()).toBe(0);
-    const storedKeys = await getDb(env)
-      .prepare("SELECT COUNT(*)::int AS count FROM idempotency_keys WHERE idempotency_key = ?")
-      .bind("payments-other-project")
-      .first<{ count: number }>();
-    expect(storedKeys).toEqual({ count: 0 });
+    expect(await countStoredIdempotencyKeys("payments-other-project")).toBe(0);
   });
 });

@@ -1,7 +1,6 @@
 import { SigningError } from "@sdp/custody/signing";
 import { FeePaymentError } from "@sdp/fee-payment/port";
 import { runInClusterScope } from "@sdp/rpc/scope";
-import type { confirmTransaction } from "@sdp/rpc/solana";
 import {
   generateKeyPairSigner,
   getSignatureFromTransaction,
@@ -23,6 +22,8 @@ import * as signedSubmission from "@/services/payments/signed-submission";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
+import { expireIdempotencyKey } from "@/test/helpers/idempotency-records";
+import { syntheticSignature } from "@/test/helpers/parsed-transactions";
 import {
   confirmTransactionMock,
   createKoraAdapterMock,
@@ -161,7 +162,7 @@ describe("Payments routes — signed submission", () => {
           signed_transaction: Buffer.from(signedBytes).toString("base64"),
           last_valid_block_height: "1000",
         });
-        expect(row?.submission_started_at).not.toBeNull();
+        expect(required(row).submission_started_at).not.toBeNull();
         return signature;
       });
 
@@ -203,12 +204,7 @@ describe("Payments routes — signed submission", () => {
       confirmTransactionMock.mockImplementationOnce(async (_rpc, signature) => {
         await settleProcessingTransfer(signature, { status: "finalized", slot: 200 });
 
-        return {
-          signature,
-          slot: 100n,
-          confirmationStatus: "confirmed",
-          err: null,
-        } as Awaited<ReturnType<typeof confirmTransaction>>;
+        return { signature, slot: 100n, confirmationStatus: "confirmed", err: null };
       });
 
       const res = await transferRequest("0.001");
@@ -540,22 +536,14 @@ describe("Payments routes — signed submission", () => {
       expect(sendTransactionMock).not.toHaveBeenCalled();
     });
 
-    async function expireIdempotencyKey(key: string) {
-      await getDb(env)
-        .prepare("DELETE FROM idempotency_keys WHERE idempotency_key = ?")
-        .bind(key)
-        .run();
-    }
-
     it("stores a 400 raised after the row, and past 24 hours answers it from the row", async () => {
       await mockSignedSubmissionAdapter();
       confirmTransactionMock.mockResolvedValueOnce({
-        signature:
-          "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy",
+        signature: syntheticSignature(1),
         slot: 100n,
         confirmationStatus: "confirmed",
         err: { InstructionError: [0, { Custom: 1 }] },
-      } as unknown as Awaited<ReturnType<typeof confirmTransaction>>);
+      });
       const key = "failed-after-row-400";
 
       const first = await transferRequest("1", key);

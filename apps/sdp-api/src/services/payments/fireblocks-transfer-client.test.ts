@@ -6,8 +6,13 @@ import {
   resolveFireblocksTransferAsset,
 } from "@sdp/custody/provisioning/fireblocks-transfers";
 import type { CustodyProvisioningRuntime } from "@sdp/custody/provisioning/runtime";
+import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { jwtVerify } from "jose";
 import { describe, expect, it, vi } from "vitest";
+import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+
+const USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address;
+const USDT_MINT = WELL_KNOWN_TOKENS.USDT.mints["mainnet-beta"].address;
 
 const rsa = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const access = () => ({
@@ -52,7 +57,7 @@ describe("native Fireblocks HTTP protocol", () => {
       source: { type: "VAULT_ACCOUNT", id: "42" },
       destination: {
         type: "ONE_TIME_ADDRESS",
-        oneTimeAddress: { address: "11111111111111111111111111111111" },
+        oneTimeAddress: { address: TEST_SOLANA_ADDRESSES.wallet2 },
       },
       note: "SDP payment",
     };
@@ -87,21 +92,21 @@ describe("native Fireblocks HTTP protocol", () => {
           id: "wrong-chain",
           type: "SOL_ASSET",
           nativeAsset: "SOL_TEST",
-          issuerAddress: "mint",
+          issuerAddress: USDC_MINT,
           decimals: 6,
         },
         {
           id: "wrong-mint",
           type: "SOL_ASSET",
           nativeAsset: "SOL",
-          issuerAddress: "different",
+          issuerAddress: USDT_MINT,
           decimals: 6,
         },
         {
           id: "SOL_USDC_PTHX",
           type: "SOL_ASSET",
           nativeAsset: "SOL",
-          issuerAddress: "mint",
+          issuerAddress: USDC_MINT,
           decimals: 6,
         },
       ])
@@ -109,14 +114,14 @@ describe("native Fireblocks HTTP protocol", () => {
     const credentials = access();
     const rt = runtime(fetch);
     const results = await Promise.all([
-      resolveFireblocksTransferAsset(rt, credentials, "SOL", "mint"),
-      resolveFireblocksTransferAsset(rt, credentials, "SOL", "mint"),
+      resolveFireblocksTransferAsset(rt, credentials, "SOL", USDC_MINT),
+      resolveFireblocksTransferAsset(rt, credentials, "SOL", USDC_MINT),
     ]);
     expect(results).toEqual([
       { id: "SOL_USDC_PTHX", decimals: 6 },
       { id: "SOL_USDC_PTHX", decimals: 6 },
     ]);
-    await expect(resolveFireblocksTransferAsset(rt, credentials, "SOL", "unknown")).rejects.toThrow(
+    await expect(resolveFireblocksTransferAsset(rt, credentials, "SOL", SOL_MINT)).rejects.toThrow(
       "not uniquely supported"
     );
     expect(fetch).toHaveBeenCalledTimes(1);
@@ -128,13 +133,21 @@ describe("native Fireblocks HTTP protocol", () => {
       .mockResolvedValueOnce(Response.json({}, { status: 503 }))
       .mockResolvedValueOnce(
         Response.json([
-          { id: "usdc", type: "SOL_ASSET", nativeAsset: "SOL", issuerAddress: "mint", decimals: 6 },
+          {
+            id: "usdc",
+            type: "SOL_ASSET",
+            nativeAsset: "SOL",
+            issuerAddress: USDC_MINT,
+            decimals: 6,
+          },
         ])
       );
     const credentials = access();
     const rt = runtime(fetch);
-    await expect(resolveFireblocksTransferAsset(rt, credentials, "SOL", "mint")).rejects.toThrow();
-    expect(await resolveFireblocksTransferAsset(rt, credentials, "SOL", "mint")).toEqual({
+    await expect(
+      resolveFireblocksTransferAsset(rt, credentials, "SOL", USDC_MINT)
+    ).rejects.toThrow();
+    expect(await resolveFireblocksTransferAsset(rt, credentials, "SOL", USDC_MINT)).toEqual({
       id: "usdc",
       decimals: 6,
     });

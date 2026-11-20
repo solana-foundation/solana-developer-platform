@@ -43,6 +43,7 @@ import {
   TEST_USER,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
+import { readErrorResponse } from "@/test/helpers/payments-transfers";
 import { seedRateLimit } from "@/test/mocks/kv";
 
 const observedTransfersResponseSchema = z.object({
@@ -59,6 +60,17 @@ const observedTransfersResponseSchema = z.object({
     })
   ),
   meta: z.object({ total: z.number() }),
+});
+
+const transferIdsSchema = z.object({ data: z.array(z.object({ id: z.string() })) });
+
+const transferPageSchema = z.object({
+  data: z.array(z.looseObject({ id: z.string() })),
+  meta: z.looseObject({ total: z.number() }),
+});
+
+const singleTransferSchema = z.object({
+  data: z.object({ transfer: z.record(z.string(), z.unknown()) }),
 });
 
 const signaturesForAddressParamsSchema = z.tuple([z.string(), z.unknown()]);
@@ -259,7 +271,6 @@ describe("Payments routes — list transfers", () => {
           { method: "GET", headers: { Authorization: `Bearer ${TRANSFERS_ONLY_KEY.raw}` } },
           env
         );
-      const transferIdsSchema = z.object({ data: z.array(z.object({ id: z.string() })) });
 
       beforeEach(async () => {
         await seedProjectApiKey(getDb(env), env, {
@@ -314,7 +325,6 @@ describe("Payments routes — list transfers", () => {
           { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
           { ...env, SDP_RELEASE_CHANNEL: "stable" }
         );
-      const transferIdsSchema = z.object({ data: z.array(z.object({ id: z.string() })) });
 
       beforeEach(async () => {
         await seedTransfer({ id: "xfr_stable_plain", status: "confirmed" });
@@ -361,7 +371,7 @@ describe("Payments routes — list transfers", () => {
         );
 
         expect(res.status).toBe(200);
-        const body = (await res.json()) as { data: Array<{ id: string }> };
+        const body = transferIdsSchema.parse(await res.json());
         expect(body.data.map((row) => row.id).sort()).toEqual(["xfr_tok_mint", "xfr_tok_symbol"]);
       }
     });
@@ -688,10 +698,7 @@ describe("Payments routes — list transfers", () => {
       );
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        data: Array<{ id: string }>;
-        meta: { total: number };
-      };
+      const body = transferPageSchema.parse(await res.json());
       expect(body.data.map((transfer) => transfer.id).sort()).toEqual([
         "xfr_wallet_inbound",
         "xfr_wallet_outbound",
@@ -722,7 +729,7 @@ describe("Payments routes — list transfers", () => {
           env
         );
         expect(res.status).toBe(200);
-        const body = (await res.json()) as { data: Array<{ id: string }> };
+        const body = transferIdsSchema.parse(await res.json());
         return body.data.map((transfer) => transfer.id);
       };
       const lookup = {
@@ -775,10 +782,7 @@ describe("Payments routes — list transfers", () => {
       );
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        data: Array<{ id: string; status: string }>;
-        meta: { total: number };
-      };
+      const body = transferPageSchema.parse(await res.json());
       expect(body.data.map((transfer) => transfer.id).sort()).toEqual([
         "xfr_multi_completed",
         "xfr_multi_confirmed",
@@ -834,10 +838,7 @@ describe("Payments routes — list transfers", () => {
       );
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        data: Array<{ custodyWalletId: string | null; id: string; providerWalletId: string }>;
-        meta: { total: number; page: number; pageSize: number; hasMore: boolean };
-      };
+      const body = transferPageSchema.parse(await res.json());
       expect(body.data).toHaveLength(1);
       expect(body.data[0]).toMatchObject({
         id: "xfr_search_new",
@@ -942,10 +943,7 @@ describe("Payments routes — list transfers", () => {
       );
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        data: Array<{ amount: string; counterpartyDisplayName?: string; id: string }>;
-        meta: { total: number };
-      };
+      const body = transferPageSchema.parse(await res.json());
       expect(body.data).toEqual([
         expect.objectContaining({
           id: "xfr_observed_filter_low",
@@ -978,7 +976,7 @@ describe("Payments routes — list transfers", () => {
       );
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { data: Array<{ id: string }> };
+      const body = transferIdsSchema.parse(await res.json());
       expect(body.data.map((transfer) => transfer.id)).toEqual(["xfr_inactive_wallet_history"]);
       expect(rpc.calls).toEqual([]);
     });
@@ -994,9 +992,7 @@ describe("Payments routes — list transfers", () => {
       );
 
       expect(res.status).toBe(400);
-      const body = (await res.json()) as {
-        error: { code: string; message: string; details?: { errors?: Record<string, string[]> } };
-      };
+      const body = await readErrorResponse(res);
       expect(body.error.code).toBe("BAD_REQUEST");
       expect(body.error.message).toContain("Invalid query parameters");
     });
@@ -1013,7 +1009,7 @@ describe("Payments routes — list transfers", () => {
         env
       );
       expect(blankRes.status).toBe(200);
-      const blankBody = (await blankRes.json()) as { data: Array<{ id: string }> };
+      const blankBody = transferIdsSchema.parse(await blankRes.json());
       expect(blankBody.data.map((transfer) => transfer.id)).toEqual(["xfr_search_contract"]);
 
       const shortRes = await app.request(
@@ -1025,9 +1021,7 @@ describe("Payments routes — list transfers", () => {
         env
       );
       expect(shortRes.status).toBe(400);
-      const shortBody = (await shortRes.json()) as {
-        error: { code: string; message: string };
-      };
+      const shortBody = await readErrorResponse(shortRes);
       expect(shortBody.error.code).toBe("BAD_REQUEST");
       expect(shortBody.error.message).toContain("Invalid query parameters");
     });
@@ -1045,9 +1039,7 @@ describe("Payments routes — list transfers", () => {
       );
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        data: { transfer: Record<string, unknown> };
-      };
+      const body = singleTransferSchema.parse(await res.json());
       expect(body.data.transfer).toEqual({
         id: "xfr_single_1",
         organizationId: TEST_ORG.id,

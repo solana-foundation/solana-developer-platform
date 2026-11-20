@@ -15,6 +15,7 @@ import {
 import { resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { EnglishI18n } from "@/test/i18n";
 import { stubMatchMedia } from "@/test/media-queries";
+import { required } from "@/test/required";
 import { FreshSWRCache } from "@/test/swr";
 import { restoreWindowLocation, setWindowPathname } from "@/test/window-location";
 import { enabledPaymentTransactionKinds } from "./transaction-modules";
@@ -150,7 +151,7 @@ describe("TransactionsWorkspace", () => {
 
     const types = [
       ...container.querySelectorAll('[data-filter-section="type"] [data-filter-option]'),
-    ].map((option) => option.getAttribute("data-filter-option")?.split(":")[0]);
+    ].map((option) => required(option.getAttribute("data-filter-option")).split(":")[0]);
     expect(new Set(types)).toEqual(new Set(["payments"]));
   });
 });

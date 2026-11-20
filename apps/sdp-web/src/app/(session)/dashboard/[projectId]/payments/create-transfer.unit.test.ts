@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 /** What `createTransfer` sends the transfer endpoint, and what it makes of each answer. */
 
+import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { address } from "@solana/kit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -8,6 +9,7 @@ import {
   sentDashboardRequests,
   stubDashboardFetch,
 } from "@/test/dashboard-fetch";
+import { required } from "@/test/required";
 import { createTransfer, TransferRequestError, type Translate } from "./payments-workspace.data";
 
 const t: Translate = (key) => key;
@@ -15,7 +17,7 @@ const t: Translate = (key) => key;
 const SUBMISSION = {
   sourceCustodyWalletId: "cwlt_1",
   destination: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
-  token: address("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"),
+  token: address(WELL_KNOWN_TOKENS.USDC.mints.devnet.address),
   amount: "250",
 };
 
@@ -51,8 +53,8 @@ describe("createTransfer", () => {
     await createTransfer({ ...SUBMISSION, transferId: "xfr_ramp" }, t, null);
 
     const [sent] = sentDashboardRequests(fetchMock);
-    expect(sent?.body).toEqual({ ...SUBMISSION, transferId: "xfr_ramp" });
-    expect(sent?.idempotencyKey).toMatch(
+    expect(required(sent).body).toEqual({ ...SUBMISSION, transferId: "xfr_ramp" });
+    expect(required(sent).idempotencyKey).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
     );
   });

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ISSUED_TOKEN, ISSUED_TOKEN_MINT } from "@/test/issued-tokens";
 
 const flags = vi.hoisted(() => ({ issuance: vi.fn() }));
 
@@ -11,7 +12,7 @@ import {
 } from "./issued-tokens.server";
 
 describe("issued token reads behind the Issuance gate", () => {
-  const symbol = { id: "tok_1", mintAddress: "Mint111", symbol: "ACME", imageUrl: null };
+  const symbol = ISSUED_TOKEN;
   const request = vi.fn(async (_path: string) =>
     Response.json({ data: [symbol], meta: { hasMore: false } })
   );
@@ -39,7 +40,7 @@ describe("issued token reads behind the Issuance gate", () => {
       data: [symbol],
     });
     expect(await fetchIssuedTokensByMintWhenIssuanceEnabled(request)).toEqual({
-      Mint111: symbol,
+      [ISSUED_TOKEN_MINT]: symbol,
     });
     expect(request.mock.calls.map(([path]) => path)).toEqual([
       "/v1/issuance/tokens?page=1&pageSize=100",

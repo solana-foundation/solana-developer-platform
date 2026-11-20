@@ -4,6 +4,7 @@ import { PAYMENT_TRANSFER_STATUSES } from "@sdp/types/payments";
 import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import type { BadgeVariant } from "@sdp/ui/badge";
 import { describe, expect, it } from "vitest";
+import { ISSUED_TOKEN_MINT } from "@/test/issued-tokens";
 import {
   countUnpricedHoldings,
   formatTokenAmount,
@@ -18,8 +19,6 @@ import {
   statusVariant,
 } from "./payments-overview.utils";
 
-const UNCATALOGUED_MINT = "BmA22WnK8p5Ai5mkzJhk64DCxMiUiii69tgSmUGMWPSh";
-
 // Intl groups with a no-break space in French; match both forms it may emit.
 const normalizeSpaces = (value: string) => value.replace(/[\xa0\u202f]/g, " ");
 
@@ -32,11 +31,11 @@ describe("resolveTransferTokenLabel", () => {
   });
 
   it("shortens a mint it cannot name", () => {
-    expect(resolveTransferTokenLabel(UNCATALOGUED_MINT)).toBe("BmA22W…WPSh");
+    expect(resolveTransferTokenLabel(ISSUED_TOKEN_MINT)).toBe("BmA22W…WPSh");
   });
 
   it("prefers a caller-supplied symbol over shortening", () => {
-    expect(resolveTransferTokenLabel(UNCATALOGUED_MINT, { [UNCATALOGUED_MINT]: "ATD" })).toBe(
+    expect(resolveTransferTokenLabel(ISSUED_TOKEN_MINT, { [ISSUED_TOKEN_MINT]: "ATD" })).toBe(
       "ATD"
     );
   });
@@ -45,7 +44,7 @@ describe("resolveTransferTokenLabel", () => {
     // The balances payload echoes the mint when it has no symbol for a token;
     // treating that as a name would defeat the shortened-address fallback.
     expect(
-      resolveTransferTokenLabel(UNCATALOGUED_MINT, { [UNCATALOGUED_MINT]: UNCATALOGUED_MINT })
+      resolveTransferTokenLabel(ISSUED_TOKEN_MINT, { [ISSUED_TOKEN_MINT]: ISSUED_TOKEN_MINT })
     ).toBe("BmA22W…WPSh");
   });
 
@@ -81,16 +80,16 @@ describe("resolveTokenByMint", () => {
   it("resolves an issued mint to its id, symbol, and metadata image", () => {
     const issued = {
       id: "tok_1",
-      mintAddress: UNCATALOGUED_MINT,
+      mintAddress: ISSUED_TOKEN_MINT,
       symbol: "bSGD",
       imageUrl: "https://cdn.example/bsgd.png",
     };
 
-    expect(resolveTokenByMint(UNCATALOGUED_MINT, { [UNCATALOGUED_MINT]: issued })).toEqual({
+    expect(resolveTokenByMint(ISSUED_TOKEN_MINT, { [ISSUED_TOKEN_MINT]: issued })).toEqual({
       tokenId: "tok_1",
       tokenName: "bSGD",
       metadataImageUrl: "https://cdn.example/bsgd.png",
-      mint: UNCATALOGUED_MINT,
+      mint: ISSUED_TOKEN_MINT,
       isWellKnown: false,
     });
   });
@@ -178,7 +177,7 @@ describe("normalizeAggregateBalances", () => {
   };
   const issuedBalance: CustodyWalletTokenBalance = {
     token: "bSGD",
-    mint: UNCATALOGUED_MINT,
+    mint: ISSUED_TOKEN_MINT,
     amount: "50000000",
     uiAmount: "50",
     decimals: 6,
@@ -250,7 +249,7 @@ describe("resolveTotalBalance", () => {
   it("never prices a token by its symbol", () => {
     const spoofed: CustodyWalletTokenBalance = {
       token: "USDC",
-      mint: UNCATALOGUED_MINT,
+      mint: ISSUED_TOKEN_MINT,
       amount: "1000000000000",
       uiAmount: "1000000",
       decimals: 6,
@@ -279,7 +278,7 @@ describe("resolveUsdUnitPrice", () => {
 
   it("has no price for a mint without one", () => {
     expect(resolveUsdUnitPrice(SOL_MINT, [sol])).toBeNull();
-    expect(resolveUsdUnitPrice(UNCATALOGUED_MINT, [])).toBeNull();
+    expect(resolveUsdUnitPrice(ISSUED_TOKEN_MINT, [])).toBeNull();
   });
 });
 

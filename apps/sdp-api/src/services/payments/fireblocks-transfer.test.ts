@@ -1,6 +1,7 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import type { Action } from "@sdp/types/actions";
 import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
+import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -23,11 +24,14 @@ import { systemProposalLedger } from "@/services/jobs/proposal-recovery-ledger";
 import { reconcileFireblocksProposals } from "@/services/jobs/reconcile-fireblocks-proposals";
 import { reconcilePendingProposals } from "@/services/jobs/reconcile-pending-proposals";
 import { applyProposalEvent } from "@/services/payments/custody-proposal-ledger";
+import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { deferred } from "@/test/helpers/deferred";
 import { env } from "@/test/helpers/env";
+import { expireIdempotencyKey } from "@/test/helpers/idempotency-records";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -36,8 +40,9 @@ import { applyProposalObservation } from "./fireblocks-transfer";
 const ORGANIZATION_ID = "org_fireblocks_byok";
 const USER_ID = "usr_fireblocks_byok";
 const PROJECT_ID = "prj_fireblocks_byok";
-const ADDRESS = "11111111111111111111111111111111";
-const OTHER_ADDRESS = "So11111111111111111111111111111111111111112";
+const ADDRESS = TEST_SOLANA_ADDRESSES.wallet1;
+const OTHER_ADDRESS = TEST_SOLANA_ADDRESSES.wallet2;
+const FIREBLOCKS_API_BASE_URL = "https://fireblocks.example.test";
 const fields = {
   apiKey: "tenant-fireblocks-key",
   signingKeyId: "",
@@ -55,7 +60,7 @@ const testEnv: Env = {
   SDP_DEPLOYMENT_MODE: "self_hosted",
   CREDENTIAL_SECRET_STORE_BACKEND: "encrypted_db",
   CUSTODY_ENCRYPTION_KEY: Buffer.alloc(32, 11).toString("base64"),
-  FIREBLOCKS_API_BASE_URL: "https://fireblocks.example.test",
+  FIREBLOCKS_API_BASE_URL,
   FIREBLOCKS_API_KEY: "deployment-key-must-not-be-used",
   FIREBLOCKS_API_SECRET: "deployment-secret-must-not-be-used",
 };
@@ -158,7 +163,7 @@ afterEach(() => vi.restoreAllMocks());
 
 const SIG =
   "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
-const USDC = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+const USDC = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
 /** The custody policy refusal's safe message, shared with signing errors (HOO-2478). */
 const FIREBLOCKS_POLICY_REFUSAL =
   "Fireblocks blocked signing due to a wallet policy. Review the policy in Fireblocks or adjust the request.";
@@ -197,7 +202,7 @@ async function ready(projectId = PROJECT_ID) {
   beforeCancellation = null;
   beforeCreateResponse = null;
   mock.mockImplementation(async (url, init) => {
-    const path = String(url).replace(testEnv.FIREBLOCKS_API_BASE_URL ?? "", "");
+    const path = String(url).replace(FIREBLOCKS_API_BASE_URL, "");
     expect(new Headers(init?.headers).get("X-API-Key")).toBe(fields.apiKey);
     if (path === "/v1/supported_assets")
       return Response.json([
@@ -281,10 +286,6 @@ async function send(
     testEnv
   );
 }
-/** Lets a same-key retry reach the transfer row, as one does once its stored answer expires. */
-async function expireIdempotencyKey(key: string) {
-  await getDb(env).execute("DELETE FROM idempotency_keys WHERE idempotency_key = ?", [key]);
-}
 async function refresh(id: string) {
   await getDb(env).execute(
     "UPDATE custody_proposals SET last_polled_at = NULL WHERE payment_transfer_id = ?",
@@ -302,9 +303,11 @@ async function refresh(id: string) {
 /** The row's open audit intent and the outcomes appended for it, oldest first. */
 async function transferAudit(transferId: string) {
   const db = getDb(env);
-  const row = await db.queryOne<{ audit_intent_id: string | null }>(
-    "SELECT audit_intent_id FROM payment_transfers WHERE id = ?",
-    [transferId]
+  const row = required(
+    await db.queryOne<{ audit_intent_id: string | null }>(
+      "SELECT audit_intent_id FROM payment_transfers WHERE id = ?",
+      [transferId]
+    )
   );
   const outcomes = await db.queryMany<{
     status: string;
@@ -317,7 +320,7 @@ async function transferAudit(transferId: string) {
     [transferId]
   );
   return {
-    openIntent: row?.audit_intent_id != null,
+    openIntent: row.audit_intent_id !== null,
     outcomes: outcomes.map((outcome) => ({
       status: outcome.status,
       metadata:
@@ -683,7 +686,7 @@ describe("native Fireblocks BYOK payment routes", () => {
             "SELECT initiated_by_principal FROM payment_transfers WHERE id = ?",
             [proposal.externalTxId]
           );
-          principalAtSubmission = row?.initiated_by_principal;
+          principalAtSubmission = required(row).initiated_by_principal;
         }
         return provider(url, init);
       });

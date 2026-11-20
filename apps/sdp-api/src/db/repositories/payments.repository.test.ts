@@ -1,5 +1,6 @@
 import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
 import { WALLET_TRANSFER_TYPES } from "@sdp/types/payments";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
@@ -15,6 +16,7 @@ import {
   type SeededDefaultProjects,
   seedDefaultProjects,
 } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { createPostgresPaymentTransferBatchesRepository } from "./payment-transfer-batches.repository.postgres";
 import type { PaymentsRepository } from "./payments.repository";
@@ -123,11 +125,11 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
   let repo: PaymentsRepository;
 
   beforeAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+    await seedTestDatabase(env);
   });
 
   afterAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+    await seedTestDatabase(env);
   });
 
   beforeEach(async () => {
@@ -147,9 +149,9 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
       initiatedByKeyId: "audit_creator",
       initiatedByPrincipal: principal,
     };
-    const created = await repo.createTransfer(input);
-    expect(created?.initiated_by_principal).toEqual(principal);
-    expect(created?.initiated_by_key_id).toBe("audit_creator");
+    const created = required(await repo.createTransfer(input));
+    expect(created.initiated_by_principal).toEqual(principal);
+    expect(created.initiated_by_key_id).toBe("audit_creator");
 
     await repo.updateTransfer({
       transferId: input.id,
@@ -159,14 +161,16 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
       providerData: { observed: true },
       updatedAt: new Date().toISOString(),
     });
-    const replay = await repo.findTransferByIdempotency({
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      idempotencyKey: input.idempotencyKey,
-    });
-    expect(replay?.initiated_by_principal).toEqual(principal);
-    expect(replay?.initiated_by_key_id).toBe("audit_creator");
-    expect(replay?.status).toBe("confirmed");
+    const replay = required(
+      await repo.findTransferByIdempotency({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        idempotencyKey: input.idempotencyKey,
+      })
+    );
+    expect(replay.initiated_by_principal).toEqual(principal);
+    expect(replay.initiated_by_key_id).toBe("audit_creator");
+    expect(replay.status).toBe("confirmed");
   });
 
   it.for([
@@ -372,12 +376,13 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
       .run();
   }
 
+  /** The row's status, or null when no row was written. */
   async function readStatus(id: string): Promise<string | null> {
     const row = await getDb(env)
       .prepare("SELECT status FROM payment_transfers WHERE id = ?")
       .bind(id)
       .first<{ status: string }>();
-    return row?.status ?? null;
+    return row === null ? null : row.status;
   }
 
   it("claims an unoccupied off-ramp row for its on-chain deposit", async () => {
@@ -770,14 +775,12 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
 });
 
 describe("PaymentsRepository.listTransfers token filter (postgres)", () => {
-  const SOL_MINT_ADDRESS = "So11111111111111111111111111111111111111112";
-
   beforeAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+    await seedTestDatabase(env);
   });
 
   afterAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+    await seedTestDatabase(env);
   });
 
   beforeEach(async () => {
@@ -790,7 +793,7 @@ describe("PaymentsRepository.listTransfers token filter (postgres)", () => {
     const repo = createPostgresPaymentsRepository(getDb(env));
     await repo.createTransfer(transferInput({ token: "SOL", suffix: "sym-1" }));
     await repo.createTransfer(transferInput({ token: "SOL", suffix: "sym-2" }));
-    await repo.createTransfer(transferInput({ token: SOL_MINT_ADDRESS, suffix: "mint-1" }));
+    await repo.createTransfer(transferInput({ token: SOL_MINT, suffix: "mint-1" }));
     await repo.createTransfer(transferInput({ token: "USDC", suffix: "usdc-1" }));
     return repo;
   }
@@ -812,7 +815,7 @@ describe("PaymentsRepository.listTransfers token filter (postgres)", () => {
     const sol = ["xfr_mint-1", "xfr_sym-1", "xfr_sym-2"];
 
     expect(await listIds(repo, "SOL")).toEqual(sol);
-    expect(await listIds(repo, SOL_MINT_ADDRESS)).toEqual(sol);
+    expect(await listIds(repo, SOL_MINT)).toEqual(sol);
   });
 
   it("treats a blank token as no filter rather than as a value to match", async () => {
@@ -840,11 +843,11 @@ describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
   const CUSTODY_WALLET_B = "cwlt_allowlist_b";
 
   beforeAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+    await seedTestDatabase(env);
   });
 
   afterAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+    await seedTestDatabase(env);
   });
 
   beforeEach(async () => {
@@ -921,11 +924,11 @@ describe("PaymentsRepository pending-transfer job reads (postgres)", () => {
   } as const satisfies Record<SdpEnvironment, string>;
 
   afterAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+    await seedTestDatabase(env);
   });
 
   beforeEach(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+    await seedTestDatabase(env);
     await resetPaymentFixtures();
     await seedUnreadPrivyWallet(getDb(env), {
       organizationId: TEST_ORG.id,

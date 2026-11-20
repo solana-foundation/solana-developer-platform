@@ -7,6 +7,7 @@ import {
   getTransactionDecoder,
 } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { createApp } from "@/app";
 import { getDb } from "@/db/client";
 import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
@@ -54,6 +55,12 @@ import { TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
  * An off-ramp awaiting its 1-unit deposit to wallet2, as a MoonPay sell leaves it. Defaults to a
  * SOL sale from the Sandbox project's wallet.
  */
+const auditMetadataSchema = z.record(z.string(), z.unknown());
+
+const intentMetadataSchema = z.object({
+  target: z.object({ metadata: z.record(z.string(), z.unknown()) }),
+});
+
 async function seedOfframpDeposit(deposit: {
   transferId: string;
   projectId?: string;
@@ -314,15 +321,17 @@ describe("Payments routes — on-chain transfers", () => {
     expect(res.status).toBe(200);
     const body = await readTransferResponse(res);
 
-    const outcome = await getDb(env)
-      .prepare(
-        `SELECT metadata, status FROM audit_logs
-         WHERE action = 'transfer' AND resource_type = 'payment_transfer' AND resource_id = ?`
-      )
-      .bind(body.data.transfer.id)
-      .first<{ metadata: string; status: string }>();
-    expect(outcome?.status).toBe("success");
-    const outcomeMetadata = JSON.parse(outcome?.metadata ?? "{}") as Record<string, unknown>;
+    const outcome = required(
+      await getDb(env)
+        .prepare(
+          `SELECT metadata, status FROM audit_logs
+           WHERE action = 'transfer' AND resource_type = 'payment_transfer' AND resource_id = ?`
+        )
+        .bind(body.data.transfer.id)
+        .first<{ metadata: string; status: string }>()
+    );
+    expect(outcome.status).toBe("success");
+    const outcomeMetadata = auditMetadataSchema.parse(JSON.parse(outcome.metadata));
     expect(outcomeMetadata).toMatchObject({
       auditPhase: "outcome",
       signature: body.data.transfer.signature,
@@ -344,9 +353,7 @@ describe("Payments routes — on-chain transfers", () => {
         .first<{ resource_id: string; metadata: string }>()
     );
     expect(outcomeMetadata.auditIntentId).toBe(intent.resource_id);
-    const intentTarget = (
-      JSON.parse(intent.metadata) as { target?: { metadata?: Record<string, unknown> } }
-    ).target?.metadata;
+    const intentTarget = intentMetadataSchema.parse(JSON.parse(intent.metadata)).target.metadata;
     expect(intentTarget).toMatchObject({
       custodyWalletId: TEST_CUSTODY_WALLET_ID,
       destination: TEST_SOLANA_ADDRESSES.wallet2,
@@ -390,15 +397,17 @@ describe("Payments routes — on-chain transfers", () => {
     expect(transfers).toEqual([
       expect.objectContaining({ status: "failed", error: "signer unavailable" }),
     ]);
-    const outcome = await getDb(env)
-      .prepare(
-        `SELECT status, metadata FROM audit_logs
-         WHERE action = 'transfer' AND resource_type = 'payment_transfer' AND resource_id = ?`
-      )
-      .bind(required(transfers[0]).id)
-      .first<{ status: string; metadata: string }>();
-    expect(outcome?.status).toBe("failure");
-    expect(JSON.parse(outcome?.metadata ?? "{}").auditPhase).toBe("outcome");
+    const outcome = required(
+      await getDb(env)
+        .prepare(
+          `SELECT status, metadata FROM audit_logs
+           WHERE action = 'transfer' AND resource_type = 'payment_transfer' AND resource_id = ?`
+        )
+        .bind(required(transfers[0]).id)
+        .first<{ status: string; metadata: string }>()
+    );
+    expect(outcome.status).toBe("failure");
+    expect(auditMetadataSchema.parse(JSON.parse(outcome.metadata)).auditPhase).toBe("outcome");
   });
 
   it("funds an off-ramp deposit on its existing row, and answers a second funding from that row", async () => {
@@ -422,7 +431,7 @@ describe("Payments routes — on-chain transfers", () => {
       destination_address: TEST_SOLANA_ADDRESSES.wallet2,
       signature: transfer.signature,
     });
-    expect(row?.signed_transaction).toEqual(expect.any(String));
+    expect(required(row).signed_transaction).toEqual(expect.any(String));
 
     // A second request to fund the same deposit (a retry after a crash, or
     // another key) is answered from the funded row and sends nothing again

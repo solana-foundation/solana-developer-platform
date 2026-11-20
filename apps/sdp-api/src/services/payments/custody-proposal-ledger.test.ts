@@ -16,6 +16,7 @@ import { systemProposalLedger } from "@/services/jobs/proposal-recovery-ledger";
 import { env } from "@/test/helpers/env";
 import { organizationMember, seedOrganizationMembers } from "@/test/helpers/organization-members";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { ProposalLedger } from "./custody-proposal-ledger";
 import { applyProposalEvent } from "./custody-proposal-ledger";
@@ -221,6 +222,7 @@ describe("custody proposal event ledger", () => {
     const stored = await proposal();
     expect(stored.version).toBe(beforeProposal.version + 1);
     expect(stored.state.authorizationState).toBe("refused");
+    const refusal = required(stored.state.refusal);
     const payment = await transfer();
     expect(payment).toMatchObject({ status: "processing", audit_intent_id: auditIntentId });
     expect(payment.provider_data.retainedEvidence).toBe(true);
@@ -235,9 +237,9 @@ describe("custody proposal event ledger", () => {
           projectId,
           proposalId: stored.id,
           provider: "fireblocks",
-          at: stored.state.refusal?.at,
-          reason: stored.state.refusal?.reason,
-          refusedAt: stored.state.refusal?.at,
+          at: refusal.at,
+          reason: refusal.reason,
+          refusedAt: refusal.at,
           providerTransactionId: "provider-transaction",
         }),
       }),

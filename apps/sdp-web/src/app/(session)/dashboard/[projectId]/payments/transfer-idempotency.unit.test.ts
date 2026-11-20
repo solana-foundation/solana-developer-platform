@@ -4,11 +4,13 @@
  * answer settles it, and a new key for a different payment.
  */
 
+import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { address } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { MOVEMENT_POLL_INTERVAL_MS, resetMovementWatchesForTests } from "@/lib/dashboard-fetch";
 import { KEPT_KEY_WINDOW_MS } from "@/lib/idempotency-key-store";
 import { sentDashboardRequests, stubDashboardFetch } from "@/test/dashboard-fetch";
+import { required } from "@/test/required";
 import type { Translate } from "./payments-workspace.data";
 import {
   resetTransferIdempotencyStateForTests,
@@ -18,7 +20,7 @@ import {
 const SUBMISSION = {
   sourceCustodyWalletId: "cwlt_1",
   destination: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
-  token: address("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"),
+  token: address(WELL_KNOWN_TOKENS.USDC.mints.devnet.address),
   amount: "250",
 };
 
@@ -26,11 +28,11 @@ const t: Translate = (key) => key;
 
 const confirmed = () => Response.json({ data: { transfer: { id: "xfr_1", status: "confirmed" } } });
 
-/** The Idempotency-Key each transfer send carried, in order. */
-function sentKeys(fetchMock: Mock<typeof fetch>): (string | null)[] {
+/** The Idempotency-Key each transfer send carried, in order; a send without one fails the test. */
+function sentKeys(fetchMock: Mock<typeof fetch>): string[] {
   return sentDashboardRequests(fetchMock)
     .filter((request) => request.method === "POST")
-    .map((request) => request.idempotencyKey);
+    .map((request) => required(request.idempotencyKey));
 }
 
 beforeEach(() => {
@@ -57,12 +59,12 @@ describe("sendTransferUnderKey", () => {
     );
     await sendTransferUnderKey({ ...SUBMISSION, amount: "1" }, t);
 
-    const sent = sentDashboardRequests(fetchMock);
-    expect(sent.map((request) => request.body)).toEqual([
+    expect(sentDashboardRequests(fetchMock).map((request) => request.body)).toEqual([
       { ...SUBMISSION, amount: "1" },
       { ...SUBMISSION, amount: "1" },
     ]);
-    expect(sent[1]?.idempotencyKey).toBe(sent[0]?.idempotencyKey);
+    const keys = sentKeys(fetchMock);
+    expect(keys[1]).toBe(keys[0]);
   });
 
   it("sends a different amount, destination or memo under a new key", async () => {

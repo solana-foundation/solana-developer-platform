@@ -4,6 +4,7 @@ import * as dashboardFlags from "@/flags/dashboard";
 import * as sdpApi from "@/lib/sdp-api";
 import { expectDashboardNoStore } from "@/test/dashboard-response";
 import { dashboardFlagsAt } from "@/test/release-channel-flags";
+import { required } from "@/test/required";
 import { GET } from "./route";
 
 const request = vi.fn<(path: string) => Promise<Response>>();
@@ -47,12 +48,12 @@ function requestedPaths(): string[] {
   return request.mock.calls.map(([path]) => path);
 }
 
-/** The id column of each CSV line, header first. */
+/** The id column of each CSV line, header first; a line without one fails the test. */
 function exportedIds(csv: string): string[] {
   return csv
     .trimEnd()
     .split("\r\n")
-    .map((line) => line.split(",")[1] ?? "");
+    .map((line) => required(line.split(",")[1]));
 }
 
 /** Lets the route reach its next wait, then moves the clock past it. */
@@ -115,7 +116,9 @@ describe("GET /api/dashboard/payments/transactions/export", () => {
     const response = await GET(exportRequest());
 
     expect(request).toHaveBeenCalledTimes(50);
-    expect(exportedIds(await response.text())).toHaveLength(5_001);
+    const ids = exportedIds(await response.text());
+    expect(ids).toHaveLength(5_001);
+    expect(ids.slice(0, 2)).toEqual(["id", "txn_0"]);
   });
 
   it("waits out a 429's Retry-After and reads the same page again", async () => {
