@@ -1,10 +1,23 @@
-import { getCompiledTransactionMessageDecoder, getTransactionDecoder } from "@solana/kit";
+import assert from "node:assert/strict";
+import type { PaymentSubscription, PaymentSubscriptionPlan } from "@sdp/types/payments";
+import {
+  getBase64Encoder,
+  getCompiledTransactionMessageDecoder,
+  getTransactionDecoder,
+} from "@solana/kit";
+import {
+  getTransferSubscriptionInstructionDataDecoder,
+  identifySubscriptionsInstruction,
+  SUBSCRIPTIONS_PROGRAM_ADDRESS,
+  SubscriptionsInstruction,
+} from "@solana/subscriptions";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
+import { createPostgresCounterpartiesRepository } from "@/db/repositories/counterparty.repository.postgres";
 import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories/payment-subscriptions.repository.postgres";
 import { app } from "@/index";
+import { IDEMPOTENT_REPLAYED_HEADER } from "@/middleware/idempotency";
 import { errorResponseSchema, successResponseSchema } from "@/openapi/schemas/base";
-import { counterpartyResponseSchema } from "@/openapi/schemas/counterparties";
 import {
   paymentSubscriptionListResponseSchema,
   paymentSubscriptionPlanListResponseSchema,
@@ -22,59 +35,175 @@ import {
   DEVNET_USDC_MINT,
   installPaymentsRouteTestHooks,
   MAINNET_USDC_MINT,
+  rehomeTestApiKeyToProduction,
   seedCachedKey,
+  seedCounterparty,
   seedProductionPrivyWallet,
+  TEST_API_KEY,
   TEST_ORG,
   TEST_PRODUCTION_PROJECT_ID,
   TEST_PROJECT,
   TEST_WALLET_ID,
+  updateSeededWalletPublicKey,
 } from "@/test/helpers/payments-routes";
 import { required } from "@/test/helpers/required";
 import { TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 import { mintAccountInfoResult } from "@/test/helpers/token-mints";
 
-const SUBSCRIPTION_HEADERS = {
-  Authorization: "Bearer sk_test_payments_policy",
-  "Content-Type": "application/json",
-};
-
-const TEST_COUNTERPARTY_IDENTITY = {
-  firstName: "Ada",
-  lastName: "Lovelace",
-  dateOfBirth: "1990-01-15",
-  phone: "+14155551234",
-  address: {
-    line1: "1 Market St",
-    city: "San Francisco",
-    countryCode: "US",
-  },
+const PLANS = "/v1/payments/subscription-plans";
+const SUBSCRIPTIONS = "/v1/payments/subscriptions";
+/** The seeded custody wallet's address: the plan owner and puller. */
+const OWNER = TEST_SOLANA_ADDRESSES.wallet1;
+/** An address outside the organization's SDP wallets. */
+const SUBSCRIBER = TEST_SOLANA_ADDRESSES.wallet2;
+const RECEIVER = TEST_SOLANA_ADDRESSES.wallet3;
+const AUTHORIZATION_BODY = {
+  expectedSubscriptionAuthorityInitId: "0",
+  subscriberTokenAccount: RECEIVER,
+  expectedPlanCreatedAt: "1700000000",
+} as const;
+const CUSTODY_SUBSCRIBER_REFUSAL = {
+  code: "CONFLICT",
+  message:
+    "The subscriber is one of this organization's SDP wallets. Use a recurring payment to pay from an SDP wallet.",
 } as const;
 
-function expectPreparedSubscriptionTransaction(
-  preparedTransaction: {
+function get(path: string) {
+  return app.request(path, { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } }, env);
+}
+
+function send(
+  method: "POST" | "PATCH",
+  path: string,
+  body: Record<string, unknown>,
+  idempotencyKey: string | null
+) {
+  const headers = new Headers({
+    Authorization: `Bearer ${TEST_API_KEY.raw}`,
+    "Content-Type": "application/json",
+  });
+  if (idempotencyKey !== null) headers.set("Idempotency-Key", idempotencyKey);
+  return app.request(path, { method, headers, body: JSON.stringify(body) }, env);
+}
+
+async function errorOf(res: Response) {
+  return errorResponseSchema.parse(await res.json()).error;
+}
+
+async function createPlan(): Promise<PaymentSubscriptionPlan> {
+  const res = await send(
+    "POST",
+    PLANS,
+    { ownerWalletId: TEST_WALLET_ID, token: DEVNET_USDC_MINT, amount: "25.00", periodHours: 720 },
+    null
+  );
+  expect(res.status).toBe(201);
+  return successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(await res.json()).data
+    .subscriptionPlan;
+}
+
+async function updatePlan(
+  planId: string,
+  body: Record<string, unknown>
+): Promise<PaymentSubscriptionPlan> {
+  const res = await send("PATCH", `${PLANS}/${planId}`, body, null);
+  expect(res.status).toBe(200);
+  return successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(await res.json()).data
+    .subscriptionPlan;
+}
+
+function postSubscription(
+  body: { planId: string; counterpartyId: string; subscriberAddress: string },
+  idempotencyKey: string | null
+) {
+  return send("POST", SUBSCRIPTIONS, body, idempotencyKey);
+}
+
+async function subscribe(planId: string): Promise<PaymentSubscription> {
+  const res = await postSubscription(
+    { planId, counterpartyId: await seedCounterparty(), subscriberAddress: SUBSCRIBER },
+    null
+  );
+  expect(res.status).toBe(201);
+  return successResponseSchema(paymentSubscriptionResponseSchema).parse(await res.json()).data
+    .subscription;
+}
+
+async function getSubscription(subscriptionId: string): Promise<PaymentSubscription> {
+  const res = await get(`${SUBSCRIPTIONS}/${subscriptionId}`);
+  expect(res.status).toBe(200);
+  return successResponseSchema(paymentSubscriptionResponseSchema).parse(await res.json()).data
+    .subscription;
+}
+
+/** Stands in for the subscriber's authorization landing on chain: no route records it. */
+async function markAuthorized(subscriptionId: string): Promise<void> {
+  const now = new Date().toISOString();
+  required(
+    await createPostgresPaymentSubscriptionsRepository(getDb(env)).updateSubscription({
+      subscriptionId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      status: "active",
+      currentPeriodStartAt: now,
+      nextCollectionDueAt: now,
+      expectedStatus: "pending_authorization",
+      updatedAt: now,
+    })
+  );
+}
+
+async function storedSubscriptionCount(): Promise<number> {
+  const row = required(
+    await getDb(env)
+      .prepare("SELECT COUNT(*)::integer AS count FROM payment_subscriptions WHERE project_id = ?")
+      .bind(TEST_PROJECT.id)
+      .first<{ count: number }>()
+  );
+  return row.count;
+}
+
+/** What the signer is asked to sign: who signs, and each instruction's program and kind. */
+function decodePrepared(prepared: { serialized: string }) {
+  const transaction = getTransactionDecoder().decode(
+    getBase64Encoder().encode(prepared.serialized)
+  );
+  const message = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
+  assert("instructions" in message, "Expected a compiled message with instructions");
+  const instructions = message.instructions.map((instruction) => ({
+    program: required(message.staticAccounts[instruction.programAddressIndex]),
+    data: required(instruction.data),
+  }));
+  return {
+    signers: new Set(Object.keys(transaction.signatures)),
+    instructions,
+    kinds: instructions.map(({ program, data }) => [
+      program,
+      identifySubscriptionsInstruction(data),
+    ]),
+  };
+}
+
+function expectPrepared(
+  prepared: {
     serialized: string;
     blockhash: string;
     lastValidBlockHeight: string;
     requiredSigners: string[];
   },
-  expectedSigners: string[]
-): void {
-  expect(preparedTransaction.serialized).toBeTruthy();
-  expect(preparedTransaction.blockhash).toBe("EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N");
-  expect(preparedTransaction.lastValidBlockHeight).toBe("1000");
-  for (const signer of expectedSigners) {
-    expect(preparedTransaction.requiredSigners).toContain(signer);
-  }
-
-  const transaction = getTransactionDecoder().decode(
-    Buffer.from(preparedTransaction.serialized, "base64")
+  expected: { signer: string; instructions: SubscriptionsInstruction[] }
+) {
+  expect(prepared).toMatchObject({
+    blockhash: "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N",
+    lastValidBlockHeight: "1000",
+    requiredSigners: [expected.signer, TEST_MOCK_FEE_PAYER],
+  });
+  const decoded = decodePrepared(prepared);
+  expect(decoded.signers).toEqual(new Set([expected.signer, TEST_MOCK_FEE_PAYER]));
+  expect(decoded.kinds).toEqual(
+    expected.instructions.map((kind) => [SUBSCRIPTIONS_PROGRAM_ADDRESS, kind])
   );
-  const message = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
-
-  expect(message.staticAccounts.length).toBeGreaterThan(0);
-  for (const signer of expectedSigners) {
-    expect(Object.keys(transaction.signatures)).toContain(signer);
-  }
+  return decoded;
 }
 
 describe("Payments routes — subscriptions", () => {
@@ -97,19 +226,11 @@ describe("Payments routes — subscriptions", () => {
         .first<{ wallet_id: string }>()
     );
 
-    const planRes = await app.request(
-      "/v1/payments/subscription-plans",
-      {
-        method: "POST",
-        headers: { ...SUBSCRIPTION_HEADERS, "Idempotency-Key": "plan-production-usdc" },
-        body: JSON.stringify({
-          ownerWalletId: ownerWallet.wallet_id,
-          token: "USDC",
-          amount: "25.00",
-          periodHours: 720,
-        }),
-      },
-      env
+    const planRes = await send(
+      "POST",
+      PLANS,
+      { ownerWalletId: ownerWallet.wallet_id, token: "USDC", amount: "25.00", periodHours: 720 },
+      "plan-production-usdc"
     );
 
     expect(planRes.status).toBe(201);
@@ -123,23 +244,20 @@ describe("Payments routes — subscriptions", () => {
   });
 
   it("refuses a plan amount finer than USDC's decimals with 400 and stores no plan", async () => {
-    const planRes = await app.request(
-      "/v1/payments/subscription-plans",
+    const planRes = await send(
+      "POST",
+      PLANS,
       {
-        method: "POST",
-        headers: SUBSCRIPTION_HEADERS,
-        body: JSON.stringify({
-          ownerWalletId: TEST_WALLET_ID,
-          token: DEVNET_USDC_MINT,
-          amount: "1.0000001",
-          periodHours: 720,
-        }),
+        ownerWalletId: TEST_WALLET_ID,
+        token: DEVNET_USDC_MINT,
+        amount: "1.0000001",
+        periodHours: 720,
       },
-      env
+      null
     );
 
     expect(planRes.status).toBe(400);
-    expect(errorResponseSchema.parse(await planRes.json()).error.code).toBe("BAD_REQUEST");
+    expect((await errorOf(planRes)).code).toBe("BAD_REQUEST");
     const stored = await getDb(env)
       .prepare(
         "SELECT COUNT(*)::integer AS count FROM payment_subscription_plans WHERE project_id = ?"
@@ -149,601 +267,439 @@ describe("Payments routes — subscriptions", () => {
     expect(stored).toEqual({ count: 0 });
   });
 
+  it("refuses a second plan with the same on-chain plan id", async () => {
+    const plan = await createPlan();
+
+    const res = await send(
+      "POST",
+      PLANS,
+      {
+        ownerWalletId: TEST_WALLET_ID,
+        token: DEVNET_USDC_MINT,
+        amount: "10.00",
+        periodHours: 24,
+        programPlanId: plan.programPlanId,
+      },
+      null
+    );
+
+    expect(res.status).toBe(409);
+    expect(await errorOf(res)).toEqual({
+      code: "CONFLICT",
+      message: "Subscription plan already exists",
+    });
+  });
+
   // A plan is a record and an unsigned transaction the owner signs; SDP signs
   // nothing, so a key's wallet scope does not limit it (HOO-2099).
   it("lets a key that signs with no wallet archive a project plan", async () => {
-    const planRes = await app.request(
-      "/v1/payments/subscription-plans",
-      {
-        method: "POST",
-        headers: SUBSCRIPTION_HEADERS,
-        body: JSON.stringify({
-          ownerWalletId: TEST_WALLET_ID,
-          token: DEVNET_USDC_MINT,
-          amount: "25.00",
-          periodHours: 720,
-        }),
-      },
-      env
-    );
-    expect(planRes.status).toBe(201);
-    const planBody = successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(
-      await planRes.json()
-    );
-
+    const plan = await createPlan();
     await seedCachedKey({ walletScope: "selected", walletIds: [] });
 
-    const updateRes = await app.request(
-      `/v1/payments/subscription-plans/${planBody.data.subscriptionPlan.id}`,
-      {
-        method: "PATCH",
-        headers: SUBSCRIPTION_HEADERS,
-        body: JSON.stringify({ status: "archived" }),
-      },
-      env
+    const archived = await updatePlan(plan.id, { status: "archived" });
+
+    expect(archived).toMatchObject({ id: plan.id, status: "archived" });
+  });
+
+  it("replays a plan update with the same key and refuses the key with a different payload", async () => {
+    const plan = await createPlan();
+    const path = `${PLANS}/${plan.id}`;
+
+    const first = await send("PATCH", path, { status: "active" }, "plan-activate-once");
+    const replay = await send("PATCH", path, { status: "active" }, "plan-activate-once");
+    const changed = await send("PATCH", path, { status: "archived" }, "plan-activate-once");
+
+    expect(first.status).toBe(200);
+    expect(replay.status).toBe(200);
+    expect(replay.headers.get(IDEMPOTENT_REPLAYED_HEADER)).toBe("true");
+    expect(await replay.json()).toEqual(await first.json());
+    expect(changed.status).toBe(422);
+    expect((await errorOf(changed)).code).toBe("IDEMPOTENCY_KEY_REUSED");
+    expect((await updatePlan(plan.id, { metadataUri: "https://sdp.dev/plan.json" })).status).toBe(
+      "active"
+    );
+  });
+
+  it("activates a draft plan and prepares its on-chain creation for the owner to sign", async () => {
+    const plan = await createPlan();
+    expect(plan).toMatchObject({
+      ownerWalletId: TEST_WALLET_ID,
+      ownerAddress: OWNER,
+      token: DEVNET_USDC_MINT,
+      amount: "25.00",
+      periodHours: 720,
+      planPda: null,
+      pullerWalletId: null,
+      status: "draft",
+    });
+    expect(
+      await updatePlan(plan.id, { status: "active", pullerWalletId: TEST_WALLET_ID })
+    ).toMatchObject({ status: "active", pullerWalletId: TEST_WALLET_ID, pullerAddress: OWNER });
+
+    const res = await send(
+      "POST",
+      `${PLANS}/${plan.id}/create/build-unsigned-transaction`,
+      { destinations: [RECEIVER], endTs: "1770000000" },
+      null
     );
 
-    expect(updateRes.status).toBe(200);
-    const updated = successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(
-      await updateRes.json()
+    expect(res.status).toBe(200);
+    const prepared = successResponseSchema(preparePaymentSubscriptionPlanResponseSchema).parse(
+      await res.json()
+    ).data;
+    expectPrepared(prepared.preparedTransaction, {
+      signer: OWNER,
+      instructions: [SubscriptionsInstruction.CreatePlan],
+    });
+    const listed = successResponseSchema(paymentSubscriptionPlanListResponseSchema).parse(
+      await (await get(`${PLANS}?status=active`)).json()
     );
-    expect(updated.data.subscriptionPlan.status).toBe("archived");
+    expect(listed.data.subscriptionPlans.map(({ id, planPda }) => [id, planPda])).toEqual([
+      [plan.id, prepared.planPda],
+    ]);
+  });
+
+  it("reads a plan of this project by id and lists plans by status", async () => {
+    const draft = await createPlan();
+    const active = await updatePlan((await createPlan()).id, { status: "active" });
+    const listedIds = async (query: string) =>
+      successResponseSchema(paymentSubscriptionPlanListResponseSchema)
+        .parse(await (await get(`${PLANS}?${query}`)).json())
+        .data.subscriptionPlans.map(({ id }) => id);
+
+    const res = await get(`${PLANS}/${draft.id}`);
+
+    expect(res.status).toBe(200);
+    expect(
+      successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(await res.json()).data
+        .subscriptionPlan
+    ).toEqual(draft);
+    expect(await listedIds("status=draft")).toEqual([draft.id]);
+    expect(await listedIds("status=active")).toEqual([active.id]);
   });
 
   it("rejects archived counterparties when creating subscriptions", async () => {
-    const counterpartyRes = await app.request(
-      "/v1/counterparties",
-      {
-        method: "POST",
-        headers: SUBSCRIPTION_HEADERS,
-        body: JSON.stringify({
-          externalId: "subscription_archived_counterparty",
-          entityType: "individual",
-          displayName: "Archived Subscription Counterparty",
-          email: "subscription-archived-counterparty@example.com",
-          identity: TEST_COUNTERPARTY_IDENTITY,
-        }),
-      },
-      env
-    );
-    expect(counterpartyRes.status).toBe(201);
-    const counterpartyBody = successResponseSchema(counterpartyResponseSchema).parse(
-      await counterpartyRes.json()
+    const plan = await createPlan();
+    const counterpartyId = await seedCounterparty();
+    required(
+      await createPostgresCounterpartiesRepository(getDb(env)).archiveCounterparty({
+        counterpartyId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+      })
     );
 
-    const planRes = await app.request(
-      "/v1/payments/subscription-plans",
-      {
-        method: "POST",
-        headers: SUBSCRIPTION_HEADERS,
-        body: JSON.stringify({
-          ownerWalletId: TEST_WALLET_ID,
-          token: DEVNET_USDC_MINT,
-          amount: "25.00",
-          periodHours: 720,
-        }),
-      },
-      env
-    );
-    expect(planRes.status).toBe(201);
-    const planBody = successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(
-      await planRes.json()
+    const res = await postSubscription(
+      { planId: plan.id, counterpartyId, subscriberAddress: SUBSCRIBER },
+      null
     );
 
-    const archiveRes = await app.request(
-      `/v1/counterparties/${counterpartyBody.data.counterparty.id}`,
-      {
-        method: "DELETE",
-        headers: SUBSCRIPTION_HEADERS,
-      },
-      env
-    );
-    expect(archiveRes.status).toBe(204);
+    expect(res.status).toBe(404);
+    expect(await errorOf(res)).toEqual({ code: "NOT_FOUND", message: "Counterparty not found" });
+    expect(await storedSubscriptionCount()).toBe(0);
+  });
 
-    const subscriptionRes = await app.request(
-      "/v1/payments/subscriptions",
-      {
-        method: "POST",
-        headers: SUBSCRIPTION_HEADERS,
-        body: JSON.stringify({
-          planId: planBody.data.subscriptionPlan.id,
-          counterpartyId: counterpartyBody.data.counterparty.id,
-          subscriberAddress: TEST_SOLANA_ADDRESSES.wallet2,
-        }),
-      },
-      env
+  it("refuses a subscription for an archived plan", async () => {
+    const plan = await createPlan();
+    await updatePlan(plan.id, { status: "archived" });
+
+    const res = await postSubscription(
+      { planId: plan.id, counterpartyId: await seedCounterparty(), subscriberAddress: SUBSCRIBER },
+      null
     );
 
-    expect(subscriptionRes.status).toBe(404);
-    const subscriptionBody = errorResponseSchema.parse(await subscriptionRes.json());
-    expect(subscriptionBody.error.code).toBe("NOT_FOUND");
-    expect(subscriptionBody.error.message).toContain("Counterparty not found");
+    expect(res.status).toBe(400);
+    expect(await errorOf(res)).toEqual({
+      code: "BAD_REQUEST",
+      message: "Cannot create a subscription for an archived plan",
+    });
+    expect(await storedSubscriptionCount()).toBe(0);
+  });
+
+  it("refuses a second subscription for the same counterparty and plan", async () => {
+    const plan = await createPlan();
+    const first = await subscribe(plan.id);
+
+    const res = await postSubscription(
+      { planId: plan.id, counterpartyId: first.counterpartyId, subscriberAddress: RECEIVER },
+      null
+    );
+
+    expect(res.status).toBe(409);
+    expect(await errorOf(res)).toEqual({
+      code: "CONFLICT",
+      message: "Counterparty already has a subscription for this plan",
+    });
+    expect(await storedSubscriptionCount()).toBe(1);
+  });
+
+  it("replays a subscription create with the same key and refuses the key with a different payload", async () => {
+    const plan = await createPlan();
+    const body = {
+      planId: plan.id,
+      counterpartyId: await seedCounterparty(),
+      subscriberAddress: SUBSCRIBER,
+    };
+
+    const first = await postSubscription(body, "subscription-create-once");
+    const replay = await postSubscription(body, "subscription-create-once");
+    const changed = await postSubscription(
+      { ...body, subscriberAddress: RECEIVER },
+      "subscription-create-once"
+    );
+
+    expect(first.status).toBe(201);
+    expect(replay.status).toBe(201);
+    expect(replay.headers.get(IDEMPOTENT_REPLAYED_HEADER)).toBe("true");
+    expect(await replay.json()).toEqual(await first.json());
+    expect(changed.status).toBe(422);
+    expect((await errorOf(changed)).code).toBe("IDEMPOTENCY_KEY_REUSED");
+    expect(await storedSubscriptionCount()).toBe(1);
   });
 
   it("refuses a subscription paid from one of the organization's SDP wallets", async () => {
-    const counterpartyRes = await app.request(
-      "/v1/counterparties",
-      {
-        method: "POST",
-        headers: SUBSCRIPTION_HEADERS,
-        body: JSON.stringify({
-          externalId: "subscription_custody_subscriber",
-          entityType: "individual",
-          displayName: "Custody Subscriber Counterparty",
-          email: "subscription-custody-subscriber@example.com",
-          identity: TEST_COUNTERPARTY_IDENTITY,
-        }),
-      },
-      env
-    );
-    expect(counterpartyRes.status).toBe(201);
-    const counterpartyId = successResponseSchema(counterpartyResponseSchema).parse(
-      await counterpartyRes.json()
-    ).data.counterparty.id;
-    const planRes = await app.request(
-      "/v1/payments/subscription-plans",
-      {
-        method: "POST",
-        headers: SUBSCRIPTION_HEADERS,
-        body: JSON.stringify({
-          ownerWalletId: TEST_WALLET_ID,
-          token: DEVNET_USDC_MINT,
-          amount: "25.00",
-          periodHours: 720,
-        }),
-      },
-      env
-    );
-    expect(planRes.status).toBe(201);
-    const planId = successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(
-      await planRes.json()
-    ).data.subscriptionPlan.id;
+    const plan = await createPlan();
+    const counterpartyId = await seedCounterparty();
 
-    // The seeded custody wallet's address (HOO-2339): its subscription would approve u64::MAX.
-    const subscriptionRes = await app.request(
-      "/v1/payments/subscriptions",
-      {
-        method: "POST",
-        headers: SUBSCRIPTION_HEADERS,
-        body: JSON.stringify({
-          planId,
-          counterpartyId,
-          subscriberAddress: TEST_SOLANA_ADDRESSES.wallet1,
-        }),
-      },
-      env
+    const refused = await postSubscription(
+      { planId: plan.id, counterpartyId, subscriberAddress: OWNER },
+      null
     );
 
-    expect(subscriptionRes.status).toBe(409);
-    const body = errorResponseSchema.parse(await subscriptionRes.json());
-    expect(body.error.message).toContain("Use a recurring payment");
-    const listRes = await app.request(
-      `/v1/payments/subscriptions?planId=${planId}`,
-      { headers: SUBSCRIPTION_HEADERS },
-      env
-    );
-    expect((await listRes.json()).data.total).toBe(0);
+    expect(refused.status).toBe(409);
+    expect(await errorOf(refused)).toEqual(CUSTODY_SUBSCRIBER_REFUSAL);
+    expect(await storedSubscriptionCount()).toBe(0);
 
-    // One created before the check: its authorization is refused before it approves anything.
-    const legacyRes = await app.request(
-      "/v1/payments/subscriptions",
-      {
-        method: "POST",
-        headers: SUBSCRIPTION_HEADERS,
-        body: JSON.stringify({
-          planId,
-          counterpartyId,
-          subscriberAddress: TEST_SOLANA_ADDRESSES.wallet2,
-        }),
-      },
-      env
-    );
-    expect(legacyRes.status).toBe(201);
-    const legacyId = successResponseSchema(paymentSubscriptionResponseSchema).parse(
-      await legacyRes.json()
-    ).data.subscription.id;
-    await getDb(env)
-      .prepare("UPDATE payment_subscriptions SET subscriber_address = ? WHERE id = ?")
-      .bind(TEST_SOLANA_ADDRESSES.wallet1, legacyId)
-      .run();
+    // The subscriber's address becomes one of the organization's SDP wallets after it subscribed:
+    // its authorization and collection are refused too, and nothing is recorded.
+    const created = successResponseSchema(paymentSubscriptionResponseSchema).parse(
+      await (
+        await postSubscription(
+          { planId: plan.id, counterpartyId, subscriberAddress: SUBSCRIBER },
+          null
+        )
+      ).json()
+    ).data.subscription;
+    await updateSeededWalletPublicKey(SUBSCRIBER);
 
-    const authorizeRes = await app.request(
-      `/v1/payments/subscriptions/${legacyId}/authorize/build-unsigned-transaction`,
-      {
-        method: "POST",
-        headers: SUBSCRIPTION_HEADERS,
-        body: JSON.stringify({
-          expectedSubscriptionAuthorityInitId: "0",
-          subscriberTokenAccount: TEST_SOLANA_ADDRESSES.wallet3,
-          expectedPlanCreatedAt: "1700000000",
-        }),
-      },
-      env
+    const authorizeRes = await send(
+      "POST",
+      `${SUBSCRIPTIONS}/${created.id}/authorize/build-unsigned-transaction`,
+      AUTHORIZATION_BODY,
+      null
+    );
+    const collectRes = await send(
+      "POST",
+      `${SUBSCRIPTIONS}/${created.id}/collect/build-unsigned-transaction`,
+      { receiverTokenAccount: RECEIVER },
+      null
     );
 
     expect(authorizeRes.status).toBe(409);
-    expect(errorResponseSchema.parse(await authorizeRes.json()).error.message).toContain(
-      "Use a recurring payment"
-    );
-
-    // One already authorized: its collection is refused too, since a recurring collect from the
-    // wallet resets the shared allowance to zero.
-    await getDb(env)
-      .prepare("UPDATE payment_subscriptions SET status = 'active' WHERE id = ?")
-      .bind(legacyId)
-      .run();
-    const collectRes = await app.request(
-      `/v1/payments/subscriptions/${legacyId}/collect/build-unsigned-transaction`,
-      {
-        method: "POST",
-        headers: SUBSCRIPTION_HEADERS,
-        body: JSON.stringify({ receiverTokenAccount: TEST_SOLANA_ADDRESSES.wallet3 }),
-      },
-      env
-    );
-
+    expect(await errorOf(authorizeRes)).toEqual(CUSTODY_SUBSCRIBER_REFUSAL);
     expect(collectRes.status).toBe(409);
-    expect(errorResponseSchema.parse(await collectRes.json()).error.message).toContain(
-      "Use a recurring payment"
-    );
-  });
-
-  it("exercises the recurring subscription lifecycle through SDP API routes", async () => {
-    const subscriberTokenAccount = TEST_SOLANA_ADDRESSES.wallet3;
-
-    const counterpartyRes = await app.request(
-      "/v1/counterparties",
-      {
-        method: "POST",
-        headers: SUBSCRIPTION_HEADERS,
-        body: JSON.stringify({
-          externalId: "subscription_counterparty_001",
-          entityType: "individual",
-          displayName: "Subscription API Counterparty",
-          email: "subscription-counterparty@example.com",
-          identity: TEST_COUNTERPARTY_IDENTITY,
-        }),
-      },
-      env
-    );
-
-    expect(counterpartyRes.status).toBe(201);
-    const counterpartyBody = successResponseSchema(counterpartyResponseSchema).parse(
-      await counterpartyRes.json()
-    );
-    const counterpartyId = counterpartyBody.data.counterparty.id;
-    expect(counterpartyBody.data.counterparty.status).toBe("active");
-
-    const planRes = await app.request(
-      "/v1/payments/subscription-plans",
-      {
-        method: "POST",
-        headers: SUBSCRIPTION_HEADERS,
-        body: JSON.stringify({
-          ownerWalletId: TEST_WALLET_ID,
-          token: DEVNET_USDC_MINT,
-          amount: "25.00",
-          periodHours: 720,
-          destinationAddress: TEST_SOLANA_ADDRESSES.wallet3,
-          metadataUri: "https://sdp.dev/plan.json",
-        }),
-      },
-      env
-    );
-
-    expect(planRes.status).toBe(201);
-    const planBody = successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(
-      await planRes.json()
-    );
-    const planId = planBody.data.subscriptionPlan.id;
-    expect(planBody.data.subscriptionPlan).toMatchObject({
-      ownerWalletId: TEST_WALLET_ID,
-      ownerAddress: TEST_SOLANA_ADDRESSES.wallet1,
-      amount: "25.00",
-      periodHours: 720,
-      status: "draft",
-      metadataUri: "https://sdp.dev/plan.json",
-    });
-    expect(planBody.data.subscriptionPlan.programPlanId).toMatch(/^\d+$/);
-
-    const duplicatePlanRes = await app.request(
-      "/v1/payments/subscription-plans",
-      {
-        method: "POST",
-        headers: SUBSCRIPTION_HEADERS,
-        body: JSON.stringify({
-          ownerWalletId: TEST_WALLET_ID,
-          token: DEVNET_USDC_MINT,
-          amount: "25.00",
-          periodHours: 720,
-          programPlanId: planBody.data.subscriptionPlan.programPlanId,
-        }),
-      },
-      env
-    );
-    expect(duplicatePlanRes.status).toBe(409);
-
-    const draftPlansRes = await app.request(
-      "/v1/payments/subscription-plans?status=draft",
-      {
-        headers: SUBSCRIPTION_HEADERS,
-      },
-      env
-    );
-
-    expect(draftPlansRes.status).toBe(200);
-    const draftPlansBody = successResponseSchema(paymentSubscriptionPlanListResponseSchema).parse(
-      await draftPlansRes.json()
-    );
-    expect(draftPlansBody.data.subscriptionPlans.map((plan) => plan.id)).toContain(planId);
-    expect(draftPlansBody.data.total).toBe(1);
-
-    const updatePlanRes = await app.request(
-      `/v1/payments/subscription-plans/${planId}`,
-      {
-        method: "PATCH",
-        headers: SUBSCRIPTION_HEADERS,
-        body: JSON.stringify({
-          metadataUri: "https://sdp.dev/plan-active.json",
-          pullerWalletId: TEST_WALLET_ID,
-          status: "active",
-        }),
-      },
-      env
-    );
-
-    expect(updatePlanRes.status).toBe(200);
-    const updatePlanBody = successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(
-      await updatePlanRes.json()
-    );
-    expect(updatePlanBody.data.subscriptionPlan).toMatchObject({
-      id: planId,
-      pullerWalletId: TEST_WALLET_ID,
-      pullerAddress: TEST_SOLANA_ADDRESSES.wallet1,
-      metadataUri: "https://sdp.dev/plan-active.json",
-      status: "active",
-    });
-
-    const getPlanRes = await app.request(
-      `/v1/payments/subscription-plans/${planId}`,
-      {
-        headers: SUBSCRIPTION_HEADERS,
-      },
-      env
-    );
-
-    expect(getPlanRes.status).toBe(200);
-    const getPlanBody = successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(
-      await getPlanRes.json()
-    );
-    expect(getPlanBody.data.subscriptionPlan).toMatchObject({
-      id: planId,
-      status: "active",
-    });
-
-    const preparePlanRes = await app.request(
-      `/v1/payments/subscription-plans/${planId}/create/build-unsigned-transaction`,
-      {
-        method: "POST",
-        headers: SUBSCRIPTION_HEADERS,
-        body: JSON.stringify({
-          destinations: [TEST_SOLANA_ADDRESSES.wallet3],
-          endTs: "1770000000",
-          metadataUri: "https://sdp.dev/plan-chain.json",
-          pullers: [TEST_SOLANA_ADDRESSES.wallet1],
-        }),
-      },
-      env
-    );
-
-    expect(preparePlanRes.status).toBe(200);
-    const preparePlanBody = successResponseSchema(
-      preparePaymentSubscriptionPlanResponseSchema
-    ).parse(await preparePlanRes.json());
-    expect(preparePlanBody.data.planPda).toBeTruthy();
-    expect(preparePlanBody.data.subscriptionPlan.id).toBe(planId);
-    expect(preparePlanBody.data.subscriptionPlan.planPda).toBe(preparePlanBody.data.planPda);
-    expectPreparedSubscriptionTransaction(preparePlanBody.data.preparedTransaction, [
-      TEST_SOLANA_ADDRESSES.wallet1,
-      TEST_MOCK_FEE_PAYER,
-    ]);
-
-    const activePlansRes = await app.request(
-      "/v1/payments/subscription-plans?status=active",
-      {
-        headers: SUBSCRIPTION_HEADERS,
-      },
-      env
-    );
-
-    expect(activePlansRes.status).toBe(200);
-    const activePlansBody = successResponseSchema(paymentSubscriptionPlanListResponseSchema).parse(
-      await activePlansRes.json()
-    );
-    expect(activePlansBody.data.subscriptionPlans).toContainEqual(
-      expect.objectContaining({ id: planId, planPda: preparePlanBody.data.planPda })
-    );
-
-    const subscriptionRes = await app.request(
-      "/v1/payments/subscriptions",
-      {
-        method: "POST",
-        headers: SUBSCRIPTION_HEADERS,
-        body: JSON.stringify({
-          planId,
-          counterpartyId,
-          subscriberAddress: TEST_SOLANA_ADDRESSES.wallet2,
-        }),
-      },
-      env
-    );
-
-    expect(subscriptionRes.status).toBe(201);
-    const subscriptionBody = successResponseSchema(paymentSubscriptionResponseSchema).parse(
-      await subscriptionRes.json()
-    );
-    const subscriptionId = subscriptionBody.data.subscription.id;
-    expect(subscriptionBody.data.subscription).toMatchObject({
-      planId,
-      counterpartyId,
-      subscriberAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    expect(await errorOf(collectRes)).toEqual(CUSTODY_SUBSCRIBER_REFUSAL);
+    expect(await getSubscription(created.id)).toMatchObject({
       subscriberTokenAccount: null,
-      subscriptionPda: null,
       subscriptionAuthorityAddress: null,
       status: "pending_authorization",
     });
-    expect(subscriptionBody.data.subscription.nextCollectionDueAt).toBeNull();
+  });
 
-    const listSubscriptionsRes = await app.request(
-      `/v1/payments/subscriptions?planId=${planId}&counterpartyId=${counterpartyId}&status=pending_authorization`,
-      {
-        headers: SUBSCRIPTION_HEADERS,
-      },
-      env
+  it("creates a subscription awaiting authorization and prepares the subscriber's authorization", async () => {
+    const plan = await createPlan();
+    await updatePlan(plan.id, { status: "active" });
+    const created = await subscribe(plan.id);
+    expect(created).toMatchObject({
+      planId: plan.id,
+      subscriberAddress: SUBSCRIBER,
+      subscriberTokenAccount: null,
+      subscriptionPda: null,
+      subscriptionAuthorityAddress: null,
+      authorizationSignature: null,
+      status: "pending_authorization",
+      nextCollectionDueAt: null,
+    });
+
+    const res = await send(
+      "POST",
+      `${SUBSCRIPTIONS}/${created.id}/authorize/build-unsigned-transaction`,
+      AUTHORIZATION_BODY,
+      null
     );
 
-    expect(listSubscriptionsRes.status).toBe(200);
-    const listSubscriptionsBody = successResponseSchema(
-      paymentSubscriptionListResponseSchema
-    ).parse(await listSubscriptionsRes.json());
-    expect(listSubscriptionsBody.data.subscriptions.map((subscription) => subscription.id)).toEqual(
-      [subscriptionId]
-    );
-    expect(listSubscriptionsBody.data.total).toBe(1);
-
-    const getSubscriptionRes = await app.request(
-      `/v1/payments/subscriptions/${subscriptionId}`,
-      {
-        headers: SUBSCRIPTION_HEADERS,
-      },
-      env
-    );
-
-    expect(getSubscriptionRes.status).toBe(200);
-    const getSubscriptionBody = successResponseSchema(paymentSubscriptionResponseSchema).parse(
-      await getSubscriptionRes.json()
-    );
-    expect(getSubscriptionBody.data.subscription).toMatchObject({
-      id: subscriptionId,
+    expect(res.status).toBe(200);
+    const prepared = successResponseSchema(
+      preparePaymentSubscriptionAuthorizationResponseSchema
+    ).parse(await res.json()).data;
+    expectPrepared(prepared.preparedTransaction, {
+      signer: SUBSCRIBER,
+      instructions: [
+        SubscriptionsInstruction.InitSubscriptionAuthority,
+        SubscriptionsInstruction.Subscribe,
+      ],
+    });
+    // The addresses the authorization creates are recorded; the status waits for it to land.
+    expect(await getSubscription(created.id)).toMatchObject({
+      subscriberTokenAccount: RECEIVER,
+      subscriptionPda: prepared.subscriptionPda,
+      subscriptionAuthorityAddress: prepared.subscriptionAuthorityAddress,
       status: "pending_authorization",
     });
-
-    const prepareAuthorizationRes = await app.request(
-      `/v1/payments/subscriptions/${subscriptionId}/authorize/build-unsigned-transaction`,
-      {
-        method: "POST",
-        headers: SUBSCRIPTION_HEADERS,
-        body: JSON.stringify({
-          expectedSubscriptionAuthorityInitId: "0",
-          subscriberTokenAccount,
-          expectedPlanCreatedAt: "1700000000",
-        }),
-      },
-      env
+    const listed = successResponseSchema(paymentSubscriptionListResponseSchema).parse(
+      await (await get(`${SUBSCRIPTIONS}?planId=${plan.id}&status=pending_authorization`)).json()
     );
+    expect(listed.data.subscriptions.map(({ id }) => id)).toEqual([created.id]);
+  });
 
-    expect(prepareAuthorizationRes.status).toBe(200);
-    const prepareAuthorizationBody = successResponseSchema(
-      preparePaymentSubscriptionAuthorizationResponseSchema
-    ).parse(await prepareAuthorizationRes.json());
-    expect(prepareAuthorizationBody.data.subscription).toMatchObject({
-      id: subscriptionId,
-      subscriberTokenAccount,
-      subscriptionAuthorityAddress: prepareAuthorizationBody.data.subscriptionAuthorityAddress,
-      subscriptionPda: prepareAuthorizationBody.data.subscriptionPda,
+  it("prepares an authorization only for an active plan and a subscription awaiting authorization", async () => {
+    const plan = await createPlan();
+    const subscription = await subscribe(plan.id);
+    const authorize = () =>
+      send(
+        "POST",
+        `${SUBSCRIPTIONS}/${subscription.id}/authorize/build-unsigned-transaction`,
+        AUTHORIZATION_BODY,
+        null
+      );
+
+    const draftRes = await authorize();
+    await updatePlan(plan.id, { status: "active" });
+    await markAuthorized(subscription.id);
+    const activeRes = await authorize();
+
+    expect(draftRes.status).toBe(400);
+    expect(await errorOf(draftRes)).toEqual({
+      code: "BAD_REQUEST",
+      message: "Subscription plan must be active before authorization",
     });
-    expectPreparedSubscriptionTransaction(prepareAuthorizationBody.data.preparedTransaction, [
-      TEST_SOLANA_ADDRESSES.wallet2,
-      TEST_MOCK_FEE_PAYER,
-    ]);
-
-    const authorizedAt = new Date().toISOString();
-    const authorizedSubscription = await createPostgresPaymentSubscriptionsRepository(
-      getDb(env)
-    ).updateSubscription({
-      subscriptionId,
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT.id,
-      authorizationSignature:
-        "4rNhfL5s9hQfCjVxrTQDAZECJ5M99kzF8JRgWEzZEijj73D4Jsiz82cgwxUc71vWR9NBdk2zX9qQREx9UvP4QREe",
+    expect(activeRes.status).toBe(400);
+    expect(await errorOf(activeRes)).toEqual({
+      code: "BAD_REQUEST",
+      message: "Subscription authorization can only be prepared while pending authorization",
+    });
+    expect(await getSubscription(subscription.id)).toMatchObject({
+      subscriberTokenAccount: null,
+      subscriptionAuthorityAddress: null,
       status: "active",
-      currentPeriodStartAt: authorizedAt,
-      nextCollectionDueAt: authorizedAt,
-      expectedStatus: "pending_authorization",
-      updatedAt: authorizedAt,
     });
-    expect(authorizedSubscription).not.toBeNull();
+  });
 
-    const prepareCancelRes = await app.request(
-      `/v1/payments/subscriptions/${subscriptionId}/cancel/build-unsigned-transaction`,
-      {
-        method: "POST",
-        headers: SUBSCRIPTION_HEADERS,
-      },
-      env
+  it("prepares the subscriber's cancel and resume", async () => {
+    const plan = await createPlan();
+    await updatePlan(plan.id, { status: "active" });
+    const subscription = await subscribe(plan.id);
+    await markAuthorized(subscription.id);
+
+    const cancelRes = await send(
+      "POST",
+      `${SUBSCRIPTIONS}/${subscription.id}/cancel/build-unsigned-transaction`,
+      {},
+      null
+    );
+    const resumeRes = await send(
+      "POST",
+      `${SUBSCRIPTIONS}/${subscription.id}/resume/build-unsigned-transaction`,
+      {},
+      null
     );
 
-    expect(prepareCancelRes.status).toBe(200);
-    const prepareCancelBody = successResponseSchema(
-      preparePaymentSubscriptionLifecycleResponseSchema
-    ).parse(await prepareCancelRes.json());
-    expect(prepareCancelBody.data.subscription.id).toBe(subscriptionId);
-    expectPreparedSubscriptionTransaction(prepareCancelBody.data.preparedTransaction, [
-      TEST_SOLANA_ADDRESSES.wallet2,
-      TEST_MOCK_FEE_PAYER,
-    ]);
+    expect(cancelRes.status).toBe(200);
+    expectPrepared(
+      successResponseSchema(preparePaymentSubscriptionLifecycleResponseSchema).parse(
+        await cancelRes.json()
+      ).data.preparedTransaction,
+      { signer: SUBSCRIBER, instructions: [SubscriptionsInstruction.CancelSubscription] }
+    );
+    expect(resumeRes.status).toBe(200);
+    expectPrepared(
+      successResponseSchema(preparePaymentSubscriptionLifecycleResponseSchema).parse(
+        await resumeRes.json()
+      ).data.preparedTransaction,
+      { signer: SUBSCRIBER, instructions: [SubscriptionsInstruction.ResumeSubscription] }
+    );
+  });
 
-    const prepareResumeRes = await app.request(
-      `/v1/payments/subscriptions/${subscriptionId}/resume/build-unsigned-transaction`,
-      {
-        method: "POST",
-        headers: SUBSCRIPTION_HEADERS,
-      },
-      env
+  it("prepares a collection of the plan's amount for the puller, only while subscription and plan are active", async () => {
+    const plan = await createPlan();
+    await updatePlan(plan.id, { status: "active", pullerWalletId: TEST_WALLET_ID });
+    const subscription = await subscribe(plan.id);
+    const collect = (body: Record<string, unknown>) =>
+      send(
+        "POST",
+        `${SUBSCRIPTIONS}/${subscription.id}/collect/build-unsigned-transaction`,
+        body,
+        null
+      );
+
+    const pendingRes = await collect({ receiverTokenAccount: RECEIVER });
+    expect(pendingRes.status).toBe(400);
+    expect(await errorOf(pendingRes)).toEqual({
+      code: "BAD_REQUEST",
+      message: "Subscription must be active before collection",
+    });
+
+    await markAuthorized(subscription.id);
+    const amountRes = await collect({ receiverTokenAccount: RECEIVER, amount: "10.50" });
+    expect(amountRes.status).toBe(400);
+    expect((await errorOf(amountRes)).code).toBe("BAD_REQUEST");
+
+    const res = await collect({ receiverTokenAccount: RECEIVER });
+    expect(res.status).toBe(200);
+    const decoded = expectPrepared(
+      successResponseSchema(preparePaymentSubscriptionCollectionResponseSchema).parse(
+        await res.json()
+      ).data.preparedTransaction,
+      { signer: OWNER, instructions: [SubscriptionsInstruction.TransferSubscription] }
+    );
+    const [transfer] = decoded.instructions;
+    expect(
+      getTransferSubscriptionInstructionDataDecoder().decode(required(transfer).data).transferData
+    ).toEqual({ amount: 25_000_000n, delegator: SUBSCRIBER, mint: DEVNET_USDC_MINT });
+
+    await updatePlan(plan.id, { status: "archived" });
+    const archivedRes = await collect({ receiverTokenAccount: RECEIVER });
+    expect(archivedRes.status).toBe(400);
+    expect(await errorOf(archivedRes)).toEqual({
+      code: "BAD_REQUEST",
+      message: "Subscription plan must be active before collection",
+    });
+  });
+
+  it("answers 404 for another project's plans and subscriptions and lists none of them", async () => {
+    const plan = await createPlan();
+    const subscription = await subscribe(plan.id);
+    await rehomeTestApiKeyToProduction();
+
+    const reads = [
+      await get(`${PLANS}/${plan.id}`),
+      await get(`${SUBSCRIPTIONS}/${subscription.id}`),
+      await get(`${SUBSCRIPTIONS}/${subscription.id}/collection-attempts`),
+      await send(
+        "POST",
+        `${SUBSCRIPTIONS}/${subscription.id}/cancel/build-unsigned-transaction`,
+        {},
+        null
+      ),
+      await postSubscription(
+        {
+          planId: plan.id,
+          counterpartyId: subscription.counterpartyId,
+          subscriberAddress: SUBSCRIBER,
+        },
+        null
+      ),
+    ];
+    const plans = successResponseSchema(paymentSubscriptionPlanListResponseSchema).parse(
+      await (await get(PLANS)).json()
+    );
+    const subscriptions = successResponseSchema(paymentSubscriptionListResponseSchema).parse(
+      await (await get(SUBSCRIPTIONS)).json()
     );
 
-    expect(prepareResumeRes.status).toBe(200);
-    const prepareResumeBody = successResponseSchema(
-      preparePaymentSubscriptionLifecycleResponseSchema
-    ).parse(await prepareResumeRes.json());
-    expect(prepareResumeBody.data.subscription.id).toBe(subscriptionId);
-    expectPreparedSubscriptionTransaction(prepareResumeBody.data.preparedTransaction, [
-      TEST_SOLANA_ADDRESSES.wallet2,
-      TEST_MOCK_FEE_PAYER,
-    ]);
-
-    const amountOverrideRes = await app.request(
-      `/v1/payments/subscriptions/${subscriptionId}/collect/build-unsigned-transaction`,
-      {
-        method: "POST",
-        headers: SUBSCRIPTION_HEADERS,
-        body: JSON.stringify({
-          amount: "10.50",
-          receiverTokenAccount: TEST_SOLANA_ADDRESSES.wallet3,
-        }),
-      },
-      env
-    );
-    expect(amountOverrideRes.status).toBe(400);
-
-    const prepareCollectionRes = await app.request(
-      `/v1/payments/subscriptions/${subscriptionId}/collect/build-unsigned-transaction`,
-      {
-        method: "POST",
-        headers: SUBSCRIPTION_HEADERS,
-        body: JSON.stringify({ receiverTokenAccount: TEST_SOLANA_ADDRESSES.wallet3 }),
-      },
-      env
-    );
-
-    expect(prepareCollectionRes.status).toBe(200);
-    const prepareCollectionBody = successResponseSchema(
-      preparePaymentSubscriptionCollectionResponseSchema
-    ).parse(await prepareCollectionRes.json());
-    expect(prepareCollectionBody.data.subscription.id).toBe(subscriptionId);
-    expectPreparedSubscriptionTransaction(prepareCollectionBody.data.preparedTransaction, [
-      TEST_SOLANA_ADDRESSES.wallet1,
-      TEST_MOCK_FEE_PAYER,
-    ]);
+    expect(reads.map((res) => res.status)).toEqual([404, 404, 404, 404, 404]);
+    expect(plans.data).toMatchObject({ subscriptionPlans: [], total: 0 });
+    expect(subscriptions.data).toMatchObject({ subscriptions: [], total: 0 });
+    expect(await storedSubscriptionCount()).toBe(1);
   });
 });
