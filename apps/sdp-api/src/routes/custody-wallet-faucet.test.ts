@@ -12,6 +12,7 @@ import {
   signatureStatusesReply,
 } from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
+import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { syntheticSignature } from "@/test/helpers/parsed-transactions";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -79,25 +80,8 @@ async function seedSandboxWalletAndApiKey(): Promise<void> {
         configEncrypted: "test-config",
         status: "active",
       },
-      {
-        id: `${CUSTODY_CONFIG_ID}_other_project`,
-        organizationId: ORGANIZATION_ID,
-        projectId: PRODUCTION_PROJECT_ID,
-        provider: "privy",
-        configEncrypted: "test-config",
-        status: "active",
-      },
     ],
     wallets: [
-      {
-        id: OTHER_PROJECT_WALLET_ID,
-        owner: { kind: "config", custodyConfigId: `${CUSTODY_CONFIG_ID}_other_project` },
-        walletId: "privy_wallet_custody_wallet_faucet_other_project",
-        publicKey: TEST_SOLANA_ADDRESSES.wallet2,
-        label: "Other project wallet",
-        purpose: "root",
-        status: "active",
-      },
       {
         id: CUSTODY_WALLET_ID,
         owner: { kind: "config", custodyConfigId: CUSTODY_CONFIG_ID },
@@ -108,6 +92,14 @@ async function seedSandboxWalletAndApiKey(): Promise<void> {
         status: "active",
       },
     ],
+  });
+  await seedUnreadPrivyWallet(db, {
+    organizationId: ORGANIZATION_ID,
+    projectId: PRODUCTION_PROJECT_ID,
+    createdBy: USER_ID,
+    custodyWalletId: OTHER_PROJECT_WALLET_ID,
+    walletId: "privy_wallet_custody_wallet_faucet_other_project",
+    publicKey: TEST_SOLANA_ADDRESSES.wallet2,
   });
 }
 

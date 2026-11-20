@@ -1,3 +1,4 @@
+import type { SdpReleaseChannel } from "@sdp/types/release-channels";
 import type { OrganizationRole } from "@sdp/types/roles";
 import { type Address, address, getBase58Decoder, type Signature, signature } from "@solana/kit";
 import type { ReactNode } from "react";
@@ -34,11 +35,17 @@ export function syntheticWalletSignature(index: number): Signature {
   return signature(getBase58Decoder().decode(syntheticBytes(64, index)));
 }
 
-function WalletsWorkspace({
+/**
+ * The dashboard shell's workspace around a wallets surface on `releaseChannel`, for a suite whose
+ * copy depends on the modules a channel runs; {@link walletsWorkspace} runs every module.
+ */
+export function WalletsWorkspace({
   organizationRole,
+  releaseChannel,
   children,
 }: {
   organizationRole: OrganizationRole;
+  releaseChannel: SdpReleaseChannel;
   children: ReactNode;
 }) {
   return (
@@ -46,7 +53,7 @@ function WalletsWorkspace({
       <DashboardWorkspaceProvider
         scopeRefreshFallback={null}
         dashboardAccess={resolveDashboardAccess(organizationRole)}
-        flags={dashboardFlagsAt("experimental")}
+        flags={dashboardFlagsAt(releaseChannel)}
         serverDashboardCacheScope={{ orgId: SANDBOX_PROJECT.organizationId, userId: "user_test" }}
         projects={[SANDBOX_PROJECT, PRODUCTION_PROJECT]}
       >
@@ -57,15 +64,27 @@ function WalletsWorkspace({
 }
 
 function AdminWalletsWorkspace({ children }: { children: ReactNode }) {
-  return <WalletsWorkspace organizationRole="admin">{children}</WalletsWorkspace>;
+  return (
+    <WalletsWorkspace organizationRole="admin" releaseChannel="experimental">
+      {children}
+    </WalletsWorkspace>
+  );
 }
 
 function MemberWalletsWorkspace({ children }: { children: ReactNode }) {
-  return <WalletsWorkspace organizationRole="member">{children}</WalletsWorkspace>;
+  return (
+    <WalletsWorkspace organizationRole="member" releaseChannel="experimental">
+      {children}
+    </WalletsWorkspace>
+  );
 }
 
 function ViewerWalletsWorkspace({ children }: { children: ReactNode }) {
-  return <WalletsWorkspace organizationRole="viewer">{children}</WalletsWorkspace>;
+  return (
+    <WalletsWorkspace organizationRole="viewer" releaseChannel="experimental">
+      {children}
+    </WalletsWorkspace>
+  );
 }
 
 const WALLETS_WORKSPACE_BY_ROLE = {

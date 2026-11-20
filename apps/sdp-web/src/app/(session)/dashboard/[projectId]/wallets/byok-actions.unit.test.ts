@@ -1,13 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import * as sdpApi from "@/lib/sdp-api";
+import { translateServerMessagesToKeys } from "@/test/i18n-server";
 import { revalidatePath } from "@/test/next-cache";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { setPageRequest } from "@/test/request-project";
+import { type StubSdpApiClient, sentSdpApiRequests, stubSdpApiClient } from "@/test/sdp-api-client";
 
 vi.mock("next/cache", () => import("@/test/next-cache"));
-vi.mock("@/i18n/server", () => ({
-  getTranslations: vi.fn(async () => (key: string) => key),
-}));
 vi.mock("next/headers", () => import("@/test/next-headers"));
 
 import { recheckPrivyCredentialAction, submitPrivyCredentialAction } from "./byok-actions";
@@ -21,12 +19,13 @@ const credential = {
   displayMetadata: { appIdSuffix: "1234" },
 };
 
-const client = { request: vi.fn(), fetch: vi.fn() };
+let client: StubSdpApiClient;
 
 beforeEach(() => {
   vi.clearAllMocks();
   setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/setup`);
-  vi.spyOn(sdpApi, "createSdpApiClient").mockResolvedValue(client);
+  translateServerMessagesToKeys();
+  client = stubSdpApiClient();
 });
 
 function completionResult(status: string, code?: string) {
@@ -36,14 +35,6 @@ function completionResult(status: string, code?: string) {
     connectionId: "conn_test",
     completion: code === undefined ? { status, attemptedAt } : { status, attemptedAt, code },
   };
-}
-
-/** Each request the action sent to sdp-api, with its JSON body parsed. */
-function sentRequests(): { path: string; headers: unknown; body: unknown }[] {
-  return client.fetch.mock.calls.map(([path, init]) => {
-    expect(init.method).toBe("POST");
-    return { path, headers: init.headers, body: JSON.parse(init.body) };
-  });
 }
 
 function apiError(status: number, message: string): Error {
@@ -67,9 +58,10 @@ describe("recheckPrivyCredentialAction", () => {
       status: "success",
       connectionId: "conn_test",
     });
-    expect(sentRequests()).toEqual([
+    expect(sentSdpApiRequests(client)).toEqual([
       {
         path: "/internal/dashboard/custody/connections/conn_test/complete",
+        method: "POST",
         headers: undefined,
         body: {},
       },
@@ -188,8 +180,9 @@ describe("submitPrivyCredentialAction outcome classification", () => {
       status: "success",
       connectionId: "conn_test",
     });
-    expect(sentRequests()[0]).toEqual({
+    expect(sentSdpApiRequests(client)[0]).toEqual({
       path: "/internal/dashboard/custody/provider-credentials",
+      method: "POST",
       headers: { "Idempotency-Key": "fireblocks-key" },
       body: {
         provider: "fireblocks",
@@ -244,9 +237,10 @@ describe("submitPrivyCredentialAction outcome classification", () => {
       status: "success",
       connectionId: "conn_test",
     });
-    expect(sentRequests()).toEqual([
+    expect(sentSdpApiRequests(client)).toEqual([
       {
         path: "/internal/dashboard/custody/provider-credentials",
+        method: "POST",
         headers: { "Idempotency-Key": "key_test" },
         body: {
           provider: "privy",
@@ -261,6 +255,7 @@ describe("submitPrivyCredentialAction outcome classification", () => {
       },
       {
         path: "/internal/dashboard/custody/connections/conn_test/complete",
+        method: "POST",
         headers: undefined,
         body: {},
       },
@@ -278,7 +273,7 @@ describe("submitPrivyCredentialAction outcome classification", () => {
       status: "success",
       connectionId: "conn_test",
     });
-    expect(sentRequests().map((request) => request.path)).toEqual([
+    expect(sentSdpApiRequests(client).map((request) => request.path)).toEqual([
       "/internal/dashboard/custody/connections/conn_test/provider-credentials",
       "/internal/dashboard/custody/connections/conn_test/complete",
     ]);

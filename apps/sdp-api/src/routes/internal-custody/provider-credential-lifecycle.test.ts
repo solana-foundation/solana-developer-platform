@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import { AppError } from "@/lib/errors";
+import type { JsonValue } from "@/lib/idempotency";
 import { mapErrorStatusCode } from "@/lib/response";
 import { databaseIdentityBoundary } from "@/middleware/database-identity";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
@@ -136,7 +137,7 @@ async function seedActiveProjectCredential(): Promise<void> {
 
 async function lifecycleRequest(
   path: string,
-  options: { method: "POST"; body?: unknown; key?: string }
+  options: { method: "POST"; body?: JsonValue; key?: string }
 ): Promise<Response> {
   const headers: Record<string, string> = {
     Authorization: `Bearer ${clerkToken}`,

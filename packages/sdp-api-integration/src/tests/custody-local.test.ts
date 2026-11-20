@@ -1,7 +1,6 @@
 import { apiTestSupport } from "@sdp/api/test-support";
-import type { CustodyConfigsResponse } from "@sdp/types/custody";
 import { afterAll, assert, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { TokenApiResponse } from "#/helpers/api-types";
+import { z } from "zod";
 import {
   cleanupIntegrationSuite,
   INTEGRATION_CUSTODY_PROVIDER,
@@ -15,6 +14,16 @@ import {
 import { env } from "#env-impl";
 
 const { getDb } = apiTestSupport;
+
+const configsResponseSchema = z.object({
+  data: z.object({ configs: z.array(z.object({ id: z.string(), provider: z.string() })) }),
+});
+const createdTokenResponseSchema = z.object({
+  data: z.object({ token: z.object({ id: z.string() }) }),
+});
+const deployedTokenResponseSchema = z.object({
+  data: z.object({ token: z.object({ mintAuthority: z.string() }) }),
+});
 
 const describeIfIntegrationConfigured = describe.skipIf(
   !SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS
@@ -44,8 +53,7 @@ describeIfIntegrationConfigured("Custody Access and Explicit Signing", () => {
     const configsRes = await request("/v1/wallets/configs");
 
     expect(configsRes.status).toBe(200);
-    // SAFETY: GET /v1/wallets/configs answers 200 with a CustodyConfigsResponse envelope.
-    const configsBody = (await configsRes.json()) as { data: CustodyConfigsResponse };
+    const configsBody = configsResponseSchema.parse(await configsRes.json());
     const providerConfigs = configsBody.data.configs.filter(
       (config) => config.provider === INTEGRATION_CUSTODY_PROVIDER
     );
@@ -78,8 +86,7 @@ describeIfIntegrationConfigured("Custody Access and Explicit Signing", () => {
     });
 
     expect(createRes.status).toBe(201);
-    // SAFETY: a 201 from POST /v1/issuance/tokens carries the token envelope.
-    const created = (await createRes.json()) as TokenApiResponse;
+    const created = createdTokenResponseSchema.parse(await createRes.json());
     const tokenId = created.data.token.id;
 
     const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
@@ -89,8 +96,7 @@ describeIfIntegrationConfigured("Custody Access and Explicit Signing", () => {
     });
 
     expect(deployRes.status).toBe(200);
-    // SAFETY: a 200 from the deploy route carries the token envelope.
-    const deployed = (await deployRes.json()) as TokenApiResponse;
+    const deployed = deployedTokenResponseSchema.parse(await deployRes.json());
     expect(deployed.data.token.mintAuthority).toBe(custodyWallet.address);
   });
 });

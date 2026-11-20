@@ -20,7 +20,8 @@ import {
 import { resetDashboardNavigation, setDashboardUrl } from "@/test/dashboard-navigation";
 import { stubMatchMedia } from "@/test/media-queries";
 import { SANDBOX_PROJECT } from "@/test/projects";
-import { syntheticWalletAddress, syntheticWalletSignature, walletsWorkspace } from "@/test/wallets";
+import { required } from "@/test/required";
+import { syntheticWalletAddress, syntheticWalletSignature, WalletsWorkspace } from "@/test/wallets";
 import { restoreWindowLocation, setWindowPathname } from "@/test/window-location";
 import type { WalletPageView, WalletTab } from "./wallet-detail.shared";
 import { WalletDetailView } from "./wallet-detail-view";
@@ -122,27 +123,30 @@ async function renderView(
   }
   await act(async () => {
     render(
-      <SWRConfig value={{ provider: () => cache, shouldRetryOnError: false, dedupingInterval: 0 }}>
-        <WalletDetailView
-          wallet={view}
-          balancesPromise={Promise.resolve({
-            balances: [
-              {
-                token: USDC.symbol,
-                mint: USDC_MINT,
-                amount: "4000000000",
-                uiAmount: "4000",
-                decimals: USDC.mints["mainnet-beta"].decimals,
-                usdValue: 4000,
-              },
-            ],
-            error: null,
-          })}
-          issuedTokensPromise={Promise.resolve({})}
-          issuanceEnabled
-        />
-      </SWRConfig>,
-      { wrapper: walletsWorkspace("admin") }
+      <WalletsWorkspace organizationRole="admin" releaseChannel="stable">
+        <SWRConfig
+          value={{ provider: () => cache, shouldRetryOnError: false, dedupingInterval: 0 }}
+        >
+          <WalletDetailView
+            wallet={view}
+            balancesPromise={Promise.resolve({
+              balances: [
+                {
+                  token: USDC.symbol,
+                  mint: USDC_MINT,
+                  amount: "4000000000",
+                  uiAmount: "4000",
+                  decimals: USDC.mints["mainnet-beta"].decimals,
+                  usdValue: 4000,
+                },
+              ],
+              error: null,
+            })}
+            issuedTokensPromise={Promise.resolve({})}
+            issuanceEnabled
+          />
+        </SWRConfig>
+      </WalletsWorkspace>
     );
   });
 }
@@ -153,6 +157,12 @@ async function activityTable(): Promise<HTMLElement> {
   const table = document.querySelector<HTMLElement>("[data-wallet-activity-table]");
   if (table === null) throw new Error("Expected the activity table on the page");
   return table;
+}
+
+/** The wallet's total balance, once its balances have resolved. */
+async function walletBalance(): Promise<HTMLElement> {
+  await screen.findAllByText("$4,000.00");
+  return required(document.querySelector<HTMLElement>("[data-wallet-balance]"));
 }
 
 /** The details under the one open activity row. */
@@ -180,7 +190,7 @@ describe("Overview", () => {
     serveActivity(feed([OUTGOING_ROW, INCOMING_ROW], false));
     await renderView(wallet, "overview", null);
 
-    expect(await screen.findByText("$4,000.00")).toBeTruthy();
+    expect((await walletBalance()).textContent).toBe("$4,000.00");
     expect(screen.getByText("Active")).toBeTruthy();
     const activity = await activityTable();
     expect(within(activity).getByText("−500.00 USDC")).toBeTruthy();
@@ -220,6 +230,7 @@ describe("Overview", () => {
     );
   });
 
+  // Stable runs neither Ramps nor Issuance, so the band names Payments alone.
   it("names the connection the wallet signs through and links it", async () => {
     serveActivity(feed([], false));
     await renderView(

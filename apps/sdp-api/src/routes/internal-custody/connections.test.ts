@@ -307,7 +307,6 @@ describe("internal custody connections", () => {
       activatedAt: expect.any(String),
       lastCheck: { status: "success", at: expect.any(String), failureCode: null },
       pendingWalletLabel: null,
-      projectId: PROJECT_ID,
     });
     expect((await listConnections("")).connections).toEqual([
       activeConnection("ccon_read_second", "2026-08-02T00:00:00.000Z"),

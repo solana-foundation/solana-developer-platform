@@ -4,6 +4,7 @@ import { type ComponentProps, isValidElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as providerAvailability from "@/lib/provider-availability.server";
 import * as sdpApi from "@/lib/sdp-api";
+import { translateServerMessagesToKeys } from "@/test/i18n-server";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { projectProviderAvailability } from "@/test/provider-availability";
 import { setPageRequest } from "@/test/request-project";
@@ -16,9 +17,6 @@ vi.mock("@clerk/nextjs/server", () => ({
 }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("next/headers", () => import("@/test/next-headers"));
-vi.mock("@/i18n/server", () => ({
-  getTranslations: vi.fn(async () => (key: string) => key),
-}));
 // The deployment's Issuance flag.
 vi.mock("@/flags", () => ({ issuance: mockIssuanceFlag }));
 
@@ -97,6 +95,7 @@ function answering(path: string, answer: () => Promise<Response>) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  translateServerMessagesToKeys();
   walletOverrides = {};
   setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/wallet%2Fone`);
   mockIssuanceFlag.mockResolvedValue(true);

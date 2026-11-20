@@ -9,7 +9,7 @@ import {
   type ProviderCredentialStatus,
 } from "@sdp/types/custody";
 import type { MovementId } from "@sdp/types/movements";
-import { address, generateKeyPairSigner, type TransactionPartialSigner } from "@solana/kit";
+import { address, assertIsTransactionPartialSigner, generateKeyPairSigner } from "@solana/kit";
 import { Context } from "hono";
 import { afterEach, aroundEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
@@ -281,8 +281,8 @@ describe("CustodyRuntimeTargets", () => {
         movement,
         createConfigAdapterFactory(CONFIG_PUBLIC_KEY)
       );
-      // SAFETY: the config adapter factory's signer is a partial signer.
-      return signer as TransactionPartialSigner;
+      assertIsTransactionPartialSigner(signer);
+      return signer;
     }
 
     it("refuses to sign a start for a deleted organization's retained Config wallet, and still signs an exit", async () => {
@@ -1013,8 +1013,8 @@ describe("CustodyRuntimeTargets", () => {
         "recurring.cancel",
         createConfigAdapterFactory(CONFIG_PUBLIC_KEY)
       );
-      // SAFETY: the Privy Connection signer is a partial signer.
-      return signer as TransactionPartialSigner;
+      assertIsTransactionPartialSigner(signer);
+      return signer;
     }
 
     const CREDENTIAL_CHANGED = {
@@ -1086,8 +1086,7 @@ describe("CustodyRuntimeTargets", () => {
     it("leaves a Config wallet's signer without a credential fence", async () => {
       const config = await seedConfig({ provider: "privy", projectId: PROJECT_ID });
       const connection = await seedConnection(DEFAULT_CONNECTION);
-      // SAFETY: the config adapter factory's signer is a partial signer.
-      const signer = (await new CustodyRuntimeTargets(
+      const signer = await new CustodyRuntimeTargets(
         getDb(env),
         env,
         new Map()
@@ -1097,7 +1096,8 @@ describe("CustodyRuntimeTargets", () => {
         `cwlt_${config.id}`,
         "recurring.cancel",
         createConfigAdapterFactory(CONFIG_PUBLIC_KEY)
-      )) as TransactionPartialSigner;
+      );
+      assertIsTransactionPartialSigner(signer);
 
       await getDb(env)
         .prepare("UPDATE provider_credentials SET credential_version = 2 WHERE id = ?")

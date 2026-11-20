@@ -1,18 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import * as sdpApi from "@/lib/sdp-api";
 import { SdpApiResponseError } from "@/lib/sdp-api";
+import { translateServerMessagesToKeys } from "@/test/i18n-server";
 import { revalidatePath } from "@/test/next-cache";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { setPageRequest } from "@/test/request-project";
+import {
+  type SentSdpApiRequest,
+  type StubSdpApiClient,
+  sentSdpApiRequests,
+  stubSdpApiClient,
+} from "@/test/sdp-api-client";
 
 vi.mock("@clerk/nextjs/server", () => ({
   auth: vi.fn(async () => ({ userId: "user_test", orgId: "org_test" })),
 }));
 vi.mock("next/cache", () => import("@/test/next-cache"));
 vi.mock("next/headers", () => import("@/test/next-headers"));
-vi.mock("@/i18n/server", () => ({
-  getTranslations: vi.fn(async () => (key: string) => key),
-}));
 
 import {
   checkWalletSignerMemoAction,
@@ -21,13 +24,14 @@ import {
   requestDevnetSolanaFaucetAction,
 } from "./actions";
 
-const client = { request: vi.fn(), fetch: vi.fn() };
 const WALLETS_PATH = `/dashboard/${PRODUCTION_PROJECT.id}/wallets`;
+let client: StubSdpApiClient;
 
 beforeEach(() => {
   vi.clearAllMocks();
   setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/wallet_one`);
-  vi.spyOn(sdpApi, "createSdpApiClient").mockResolvedValue(client);
+  translateServerMessagesToKeys();
+  client = stubSdpApiClient();
 });
 
 function walletForm(fields: Record<string, string>): FormData {
@@ -38,14 +42,13 @@ function walletForm(fields: Record<string, string>): FormData {
   return formData;
 }
 
-/** The one request the action sent to sdp-api, with its JSON body parsed. */
-function sentRequest(): { path: string; method: unknown; headers: unknown; body: unknown } {
-  const [call, ...others] = client.fetch.mock.calls;
-  if (call === undefined || others.length > 0) {
+/** The one request the action sent to sdp-api. */
+function sentRequest(): SentSdpApiRequest {
+  const [request, ...others] = sentSdpApiRequests(client);
+  if (request === undefined || others.length > 0) {
     throw new Error(`Expected exactly one sdp-api request, got ${client.fetch.mock.calls.length}`);
   }
-  const [path, init] = call;
-  return { path, method: init.method, headers: init.headers, body: JSON.parse(init.body) };
+  return request;
 }
 
 describe("initializeCustodySetupAction", () => {
