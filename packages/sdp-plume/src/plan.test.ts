@@ -1,3 +1,7 @@
+import {
+  assertFireblocksProposal,
+  assertFireblocksTransaction,
+} from "@sdp/custody/testing/fireblocks-proposal";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { deriveAssociatedTokenAddress } from "@sdp/solana/address";
 import { PLUME_PROGRAMS, PLUME_VAULTS } from "@sdp/types/plume-programs";
@@ -8,11 +12,13 @@ import {
   address,
   addSignersToTransactionMessage,
   appendTransactionMessageInstruction,
+  assertIsTransactionWithinSizeLimit,
   blockhash,
   compileTransaction,
   createSolanaRpcFromTransport,
   createTransactionMessage,
   generateKeyPairSigner,
+  getTransactionDecoder,
   getTransactionEncoder,
   getU32Encoder,
   getU64Encoder,
@@ -165,6 +171,12 @@ describe("Plume transaction admission", () => {
       f.event.address,
     ]);
     expect(plan.accepted).toEqual({ amount: "1" });
+    const transaction = {
+      ...getTransactionDecoder().decode(f.bytes),
+      lifetimeConstraint: lifetime,
+    };
+    assertIsTransactionWithinSizeLimit(transaction);
+    await assertFireblocksTransaction(transaction, f.owner, plan.cluster);
   });
   it("rejects a provider-selected input amount", async () => {
     const f = await fixture({ atoms: 2_000_000n });
@@ -291,6 +303,7 @@ describe("Plume redemption admission", () => {
         redemptionMode: mode === "cancel" ? undefined : mode,
       });
       expect(plan.providerTransaction).toBeUndefined();
+      await assertFireblocksProposal(plan, input.owner);
     }
   );
   it("rejects an altered redemption payout receiver", async () => {
