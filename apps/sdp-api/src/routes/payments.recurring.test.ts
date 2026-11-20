@@ -8317,7 +8317,11 @@ describe("Payments routes — recurring", () => {
         .prepare("SELECT response_status FROM idempotency_keys WHERE idempotency_key = ?")
         .bind(key)
         .first<{ response_status: number | null }>();
-      expect(record?.response_status ?? null).toBeNull();
+      // The claimed key row must survive the refusal with no outcome recorded:
+      // ?? null would read the same whether the row is gone or merely still
+      // unstored, and a dropped claim is a different failure.
+      expect(record, "the claimed key row survives the retry").not.toBeNull();
+      expect(record?.response_status).toBeNull();
       expect(sendTransactionMock).toHaveBeenCalledTimes(sendsBefore);
     });
 

@@ -585,6 +585,9 @@ describe("runEarnCatalogueSyncIfDue", () => {
       ),
     });
     expect(await runEarnCatalogueSyncIfDue(env)).toBe("synced");
+    // The every() below is vacuously true over no calls at all: the pass owes
+    // exactly one delist decision, the mirror lane's, so pin the count first.
+    expect(mocks.deprecateUnlistedStrategies).toHaveBeenCalledTimes(1);
     expect(mocks.deprecateUnlistedStrategies.mock.calls.every(isMirrorConvergence)).toBe(true);
 
     mocks.deprecateUnlistedStrategies.mockClear();
@@ -599,6 +602,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
     });
 
     expect(await runEarnCatalogueSyncIfDue(env)).toBe("synced");
+    expect(mocks.deprecateUnlistedStrategies).toHaveBeenCalledTimes(1);
     expect(mocks.deprecateUnlistedStrategies.mock.calls.every(isMirrorConvergence)).toBe(true);
   });
 

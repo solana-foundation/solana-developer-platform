@@ -574,8 +574,41 @@ describe("sponsorship construction guard", () => {
     return false;
   }
   it("keeps production Kora adapter construction behind the owned boundary", () => {
+    // The matcher must still see what it polices: a constructor import matches,
+    // while a type-only import and a value import of a non-constructor do not,
+    // so a broken pattern cannot pass the scan below vacuously.
+    expect(
+      constructsFeePaymentAdapter(
+        "services/rogue.ts",
+        `import { createKoraAdapter } from "@sdp/fee-payment";`
+      )
+    ).toBe(true);
+    expect(
+      constructsFeePaymentAdapter(
+        "services/rogue.ts",
+        `import * as feePayment from "@sdp/fee-payment";`
+      )
+    ).toBe(true);
+    expect(
+      constructsFeePaymentAdapter(
+        "services/rogue.ts",
+        `import type { KoraAdapter } from "@sdp/fee-payment";`
+      )
+    ).toBe(false);
+    expect(
+      constructsFeePaymentAdapter(
+        "services/rogue.ts",
+        `import { resolveKoraEndpoint } from "@sdp/fee-payment";`
+      )
+    ).toBe(false);
+
     const apiSourceRoot = path.resolve(import.meta.dirname, "..");
-    const violations = sourceFiles(apiSourceRoot)
+    const files = sourceFiles(apiSourceRoot);
+    // An empty scan cannot tell "clean" from "scanned nothing": src holds far
+    // more files than this floor, so a broken walk fails here instead of
+    // passing vacuously.
+    expect(files.length, "source files scanned").toBeGreaterThan(200);
+    const violations = files
       .map((file) => path.relative(apiSourceRoot, file).split(path.sep).join("/"))
       .filter((relativePath) =>
         constructsFeePaymentAdapter(

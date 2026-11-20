@@ -15,6 +15,26 @@ function sourceFiles(directory: string): string[] {
   });
 }
 
+/**
+ * The walked tree, with a floor: an empty scan cannot tell "clean" from
+ * "scanned nothing", so a scanner that stopped finding files (a broken root,
+ * recursion dropped) fails here instead of passing vacuously.
+ */
+function guardedSourceFiles(directory: string, minimum: number): string[] {
+  const files = sourceFiles(directory);
+  expect(files.length, `source files scanned under ${directory}`).toBeGreaterThan(minimum);
+  return files;
+}
+
+/**
+ * The guarded symbol must still live at its registered location: if it were
+ * renamed or moved, every scan below would go quiet and pass vacuously until
+ * its registry is updated.
+ */
+function expectRegisteredSymbol(file: string, symbol: string): void {
+  expect(readFileSync(file, "utf8"), file).toContain(symbol);
+}
+
 describe("tenant data-access boundary", () => {
   it("limits public system database access to webhooks and payment pages", () => {
     expect(PUBLIC_SYSTEM_PATH_PREFIXES).toEqual([
@@ -23,7 +43,11 @@ describe("tenant data-access boundary", () => {
     ]);
   });
   it("keeps raw TokenService construction out of authenticated issuance handlers", () => {
-    const handlers = sourceFiles(join(sourceRoot, "routes", "issuance", "handlers"));
+    expectRegisteredSymbol(
+      join(sourceRoot, "routes", "issuance", "handlers", "metadata.ts"),
+      "new TokenService("
+    );
+    const handlers = guardedSourceFiles(join(sourceRoot, "routes", "issuance", "handlers"), 10);
     const violations = handlers
       .filter((path) => !path.endsWith(join("handlers", "metadata.ts")))
       .filter((path) => readFileSync(path, "utf8").includes("new TokenService("))
@@ -50,7 +74,11 @@ describe("tenant data-access boundary", () => {
       "services/payments/payment-request-sponsorship.ts",
       "db/repositories/repository-factory.ts",
     ];
-    const violations = sourceFiles(sourceRoot)
+    expectRegisteredSymbol(
+      join(sourceRoot, "db", "repositories", "repository-factory.ts"),
+      "createSystem"
+    );
+    const violations = guardedSourceFiles(sourceRoot, 200)
       .filter((path) => readFileSync(path, "utf8").match(/createSystem[A-Z]\w+Repository/))
       .map((path) => relative(sourceRoot, path))
       .filter((path) => !allowedPrefixes.some((prefix) => path.startsWith(prefix)));
@@ -64,7 +92,8 @@ describe("tenant data-access boundary", () => {
     // The kind-specific wrappers and runWithOperatorDatabaseAccess are the
     // public surface; everything else imports those.
     const allowed = ["db/identity.ts", "db/operator-access.ts", "db/client.ts"];
-    const violations = sourceFiles(sourceRoot)
+    expectRegisteredSymbol(join(sourceRoot, "db", "identity.ts"), "runWithDatabaseIdentity");
+    const violations = guardedSourceFiles(sourceRoot, 200)
       .filter((path) => readFileSync(path, "utf8").includes("runWithDatabaseIdentity"))
       .map((path) => relative(sourceRoot, path))
       .filter((path) => !allowed.includes(path));
@@ -102,7 +131,8 @@ describe("tenant data-access boundary", () => {
       // cron runner gives them in production.
       "test/integration-support.ts",
     ];
-    const violations = sourceFiles(sourceRoot)
+    expectRegisteredSymbol(join(sourceRoot, "db", "identity.ts"), "runWithSystemDatabaseIdentity");
+    const violations = guardedSourceFiles(sourceRoot, 200)
       .filter((path) => readFileSync(path, "utf8").includes("runWithSystemDatabaseIdentity"))
       .map((path) => relative(sourceRoot, path))
       .filter((path) => !allowedPrefixes.some((prefix) => path.startsWith(prefix)));
@@ -113,7 +143,11 @@ describe("tenant data-access boundary", () => {
   it("keeps the audited operator bypass out of application code", () => {
     // runWithOperatorDatabaseAccess is break-glass tooling for operational
     // scripts; nothing in the request/worker paths may import it.
-    const violations = sourceFiles(sourceRoot)
+    expectRegisteredSymbol(
+      join(sourceRoot, "db", "operator-access.ts"),
+      "runWithOperatorDatabaseAccess"
+    );
+    const violations = guardedSourceFiles(sourceRoot, 200)
       .filter((path) => readFileSync(path, "utf8").includes("runWithOperatorDatabaseAccess"))
       .map((path) => relative(sourceRoot, path))
       .filter((path) => path !== join("db", "operator-access.ts"));
@@ -122,7 +156,11 @@ describe("tenant data-access boundary", () => {
   });
 
   it("keeps the test-only default database identity out of production code", () => {
-    const violations = sourceFiles(sourceRoot)
+    expectRegisteredSymbol(
+      join(sourceRoot, "db", "identity.ts"),
+      "setDefaultDatabaseIdentityForTesting"
+    );
+    const violations = guardedSourceFiles(sourceRoot, 200)
       .filter((path) => readFileSync(path, "utf8").includes("setDefaultDatabaseIdentityForTesting"))
       .map((path) => relative(sourceRoot, path))
       .filter((path) => !path.startsWith("test/") && path !== join("db", "identity.ts"));
@@ -132,7 +170,8 @@ describe("tenant data-access boundary", () => {
 
   it("requires transactional payment repositories to receive a tenant scope", () => {
     const allowedSystemFactory = join(sourceRoot, "db", "repositories", "repository-factory.ts");
-    const violations = sourceFiles(sourceRoot)
+    expectRegisteredSymbol(allowedSystemFactory, "createPostgresPaymentsRepository(");
+    const violations = guardedSourceFiles(sourceRoot, 200)
       .filter((path) => path !== allowedSystemFactory)
       .flatMap((path) => {
         const source = readFileSync(path, "utf8");
@@ -146,15 +185,20 @@ describe("tenant data-access boundary", () => {
   });
 
   it("requires authenticated custody handlers to construct scoped signing services", () => {
-    const violations = sourceFiles(join(sourceRoot, "routes", "custody", "handlers")).flatMap(
-      (path) => {
-        const source = readFileSync(path, "utf8");
-        const calls = source.matchAll(/createSigningService\(([^)]*)\)/g);
-        return Array.from(calls)
-          .filter((match) => !match[1]?.includes(","))
-          .map(() => relative(sourceRoot, path));
-      }
+    expectRegisteredSymbol(
+      join(sourceRoot, "routes", "custody", "handlers", "wallets.ts"),
+      "createSigningService("
     );
+    const violations = guardedSourceFiles(
+      join(sourceRoot, "routes", "custody", "handlers"),
+      2
+    ).flatMap((path) => {
+      const source = readFileSync(path, "utf8");
+      const calls = source.matchAll(/createSigningService\(([^)]*)\)/g);
+      return Array.from(calls)
+        .filter((match) => !match[1]?.includes(","))
+        .map(() => relative(sourceRoot, path));
+    });
 
     expect(violations).toEqual([]);
   });

@@ -33,10 +33,14 @@ describe("chartPaths", () => {
     const { line } = chartPaths(values, 0, 10);
     const ys = coordinates(line).map(([, y]) => y);
     const yOf = (value: number) => ((10 - value) / 10) * CHART_VIEW;
+    // The bounds below are meaningless over no points (Math.min of an empty
+    // list is Infinity, which clears any lower bound), so floor the path.
+    expect(ys.length, "path points").toBeGreaterThan(0);
     expect(Math.min(...ys)).toBeGreaterThanOrEqual(Math.round(yOf(9)));
     expect(Math.max(...ys)).toBeLessThanOrEqual(Math.round(yOf(2)));
     // A flat stretch stays flat: its control points sit on the readings.
     const [, second, third] = line.split("C");
+    expect(coordinates(second ?? "").length, "flat segment points").toBeGreaterThan(0);
     expect(coordinates(second ?? "").every(([, y]) => y === Math.round(yOf(5)))).toBe(true);
     expect(coordinates(third ?? "").at(-1)?.[1]).toBe(Math.round(yOf(9)));
   });
