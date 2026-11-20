@@ -39,10 +39,12 @@ import {
   seedCachedKey,
   seedCounterparty,
   seedProductionPrivyWallet,
+  seedProjectPrivyWallet,
   TEST_API_KEY,
   TEST_ORG,
   TEST_PRODUCTION_PROJECT_ID,
   TEST_PROJECT,
+  TEST_USER,
   TEST_WALLET_ID,
   updateSeededWalletPublicKey,
 } from "@/test/helpers/payments-routes";
@@ -52,11 +54,13 @@ import { mintAccountInfoResult } from "@/test/helpers/token-mints";
 
 const PLANS = "/v1/payments/subscription-plans";
 const SUBSCRIPTIONS = "/v1/payments/subscriptions";
-/** The seeded custody wallet's address: the plan owner and puller. */
+/** The seeded custody wallet's address: the plan owner. */
 const OWNER = TEST_SOLANA_ADDRESSES.wallet1;
 /** An address outside the organization's SDP wallets. */
 const SUBSCRIBER = TEST_SOLANA_ADDRESSES.wallet2;
 const RECEIVER = TEST_SOLANA_ADDRESSES.wallet3;
+/** The address of the puller wallet `seedPullerWallet` adds; it shares RECEIVER's, so a collection pays into OWNER. */
+const PULLER = TEST_SOLANA_ADDRESSES.wallet3;
 const AUTHORIZATION_BODY = {
   expectedSubscriptionAuthorityInitId: "0",
   subscriberTokenAccount: RECEIVER,
@@ -164,6 +168,17 @@ async function markAuthorized(subscriptionId: string): Promise<void> {
       updatedAt: now,
     })
   );
+}
+
+/** A second custody wallet in the project, at an address other than the owner's. */
+function seedPullerWallet(): Promise<string> {
+  return seedProjectPrivyWallet({
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT.id,
+    createdBy: TEST_USER.id,
+    custodyWalletId: "cwlt_subscription_puller",
+    publicKey: PULLER,
+  });
 }
 
 async function storedSubscriptionCount(): Promise<number> {
@@ -332,6 +347,7 @@ describe("Payments routes — subscriptions", () => {
   });
 
   it("stores a plan's created and updated fields and prepares its on-chain creation for the owner to sign", async () => {
+    const pullerWalletId = await seedPullerWallet();
     const plan = await createPlan({ metadataUri: "https://sdp.dev/plan.json" });
     expect(plan).toMatchObject({
       ownerWalletId: TEST_WALLET_ID,
@@ -346,13 +362,13 @@ describe("Payments routes — subscriptions", () => {
     });
     const activated = await updatePlan(plan.id, {
       status: "active",
-      pullerWalletId: TEST_WALLET_ID,
+      pullerWalletId,
       metadataUri: "https://sdp.dev/plan-active.json",
     });
     expect(activated).toMatchObject({
       status: "active",
-      pullerWalletId: TEST_WALLET_ID,
-      pullerAddress: OWNER,
+      pullerWalletId,
+      pullerAddress: PULLER,
       metadataUri: "https://sdp.dev/plan-active.json",
     });
     expect(await getPlan(plan.id)).toEqual(activated);
@@ -487,6 +503,7 @@ describe("Payments routes — subscriptions", () => {
 
     // The subscriber's address becomes one of the organization's SDP wallets after it subscribed:
     // its authorization and collection are refused too, and nothing is recorded.
+    await updatePlan(plan.id, { status: "active" });
     const created = successResponseSchema(paymentSubscriptionResponseSchema).parse(
       await (
         await postSubscription(
@@ -503,6 +520,7 @@ describe("Payments routes — subscriptions", () => {
       AUTHORIZATION_BODY,
       null
     );
+    await markAuthorized(created.id);
     const collectRes = await send(
       "POST",
       `${SUBSCRIPTIONS}/${created.id}/prepare-collection`,
@@ -517,7 +535,7 @@ describe("Payments routes — subscriptions", () => {
     expect(await getSubscription(created.id)).toMatchObject({
       subscriberTokenAccount: null,
       subscriptionAuthorityAddress: null,
-      status: "pending_authorization",
+      status: "active",
     });
   });
 
@@ -637,12 +655,12 @@ describe("Payments routes — subscriptions", () => {
 
   it("prepares a collection of the plan's amount for the puller, only while subscription and plan are active", async () => {
     const plan = await createPlan();
-    await updatePlan(plan.id, { status: "active", pullerWalletId: TEST_WALLET_ID });
+    await updatePlan(plan.id, { status: "active", pullerWalletId: await seedPullerWallet() });
     const subscription = await subscribe(plan.id);
     const collect = (body: Record<string, unknown>) =>
       send("POST", `${SUBSCRIPTIONS}/${subscription.id}/prepare-collection`, body, null);
 
-    const pendingRes = await collect({ receiverTokenAccount: RECEIVER });
+    const pendingRes = await collect({ receiverTokenAccount: OWNER });
     expect(pendingRes.status).toBe(400);
     expect(await errorOf(pendingRes)).toEqual({
       code: "BAD_REQUEST",
@@ -650,17 +668,17 @@ describe("Payments routes — subscriptions", () => {
     });
 
     await markAuthorized(subscription.id);
-    const amountRes = await collect({ receiverTokenAccount: RECEIVER, amount: "10.50" });
+    const amountRes = await collect({ receiverTokenAccount: OWNER, amount: "10.50" });
     expect(amountRes.status).toBe(400);
     expect((await errorOf(amountRes)).code).toBe("BAD_REQUEST");
 
-    const res = await collect({ receiverTokenAccount: RECEIVER });
+    const res = await collect({ receiverTokenAccount: OWNER });
     expect(res.status).toBe(200);
     const decoded = expectPrepared(
       successResponseSchema(preparePaymentSubscriptionCollectionResponseSchema).parse(
         await res.json()
       ).data.preparedTransaction,
-      { signer: OWNER, instructions: [SubscriptionsInstruction.TransferSubscription] }
+      { signer: PULLER, instructions: [SubscriptionsInstruction.TransferSubscription] }
     );
     const [transfer] = decoded.instructions;
     expect(
@@ -668,7 +686,7 @@ describe("Payments routes — subscriptions", () => {
     ).toEqual({ amount: 25_000_000n, delegator: SUBSCRIBER, mint: DEVNET_USDC_MINT });
 
     await updatePlan(plan.id, { status: "archived" });
-    const archivedRes = await collect({ receiverTokenAccount: RECEIVER });
+    const archivedRes = await collect({ receiverTokenAccount: OWNER });
     expect(archivedRes.status).toBe(400);
     expect(await errorOf(archivedRes)).toEqual({
       code: "BAD_REQUEST",
