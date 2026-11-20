@@ -342,14 +342,15 @@ locally with no key, wallet or funds.
 
 | Endpoint | What it does |
 | --- | --- |
-| `GET /v1/earn/discovery` | Lists strategies, their rates and what each supports. |
-| `GET /v1/earn/positions` | Reads a wallet's holdings and totals. |
-| `POST /v1/earn/deposit` | Prepares a deposit into a strategy. |
-| `POST /v1/earn/withdraw` | Prepares a withdrawal from a position. |
-| `GET /v1/operations`, `GET /v1/operations/{operationId}` | Track deposits and withdrawals. |
-| `POST /v1/operations/{operationId}/submit` | Sends the signed transaction. |
-| `POST /v1/operations/{operationId}/refresh` | Chooses a withdrawal route before you sign. |
-| `POST /v1/operations/{operationId}/cancel` | Abandons an operation before you sign. |
+| [`GET /v1/earn/discovery`](/docs/reference/api/earn/discover-earn-strategies) | Lists strategies, their rates and what each supports. |
+| [`GET /v1/earn/positions`](/docs/reference/api/earn/list-earn-core-positions) | Reads a wallet's holdings and totals. |
+| [`POST /v1/earn/deposit`](/docs/reference/api/earn/prepare-earn-deposit) | Prepares a deposit into a strategy. |
+| [`POST /v1/earn/withdraw`](/docs/reference/api/earn/prepare-earn-withdrawal) | Prepares a withdrawal from a position. |
+| [`GET /v1/operations`](/docs/reference/api/operations/list-operations) | Lists a wallet's deposits and withdrawals. |
+| [`GET /v1/operations/{operationId}`](/docs/reference/api/operations/get-operation) | Reads one operation's status and next action. |
+| [`POST /v1/operations/{operationId}/submit`](/docs/reference/api/operations/submit-operation) | Sends the signed transaction. |
+| [`POST /v1/operations/{operationId}/refresh`](/docs/reference/api/operations/refresh-operation) | Chooses a withdrawal route before you sign. |
+| [`POST /v1/operations/{operationId}/cancel`](/docs/reference/api/operations/cancel-operation) | Abandons an operation before you sign. |
 
 ## Guides
 
