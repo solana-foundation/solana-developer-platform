@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { type State, SWRConfig, unstable_serialize } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { custodyQueryKeys } from "@/app/(session)/dashboard/[projectId]/wallets/custody-query-key";
@@ -21,7 +21,12 @@ import { resetDashboardNavigation, setDashboardUrl } from "@/test/dashboard-navi
 import { stubMatchMedia } from "@/test/media-queries";
 import { SANDBOX_PROJECT } from "@/test/projects";
 import { required } from "@/test/required";
-import { syntheticWalletAddress, syntheticWalletSignature, WalletsWorkspace } from "@/test/wallets";
+import {
+  syntheticWalletAddress,
+  syntheticWalletSignature,
+  WalletsTestWorkspace,
+} from "@/test/wallets";
+import { requiredWellKnownMint } from "@/test/well-known-mints";
 import { restoreWindowLocation, setWindowPathname } from "@/test/window-location";
 import type { WalletPageView, WalletTab } from "./wallet-detail.shared";
 import { WalletDetailView } from "./wallet-detail-view";
@@ -29,7 +34,8 @@ import { WalletDetailView } from "./wallet-detail-view";
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 const USDC = WELL_KNOWN_TOKENS.USDC;
-const USDC_MINT = USDC.mints["mainnet-beta"].address;
+// A Sandbox Project runs on devnet, where the API prices nothing: USDC is valued by its mint.
+const USDC_MINT = requiredWellKnownMint("USDC", "devnet");
 const WALLET_PATH = `/dashboard/${SANDBOX_PROJECT.id}/wallets/wallet_one`;
 const ACTIVITY_PATH = "/api/dashboard/wallets/wallet_one/activity";
 
@@ -123,7 +129,7 @@ async function renderView(
   }
   await act(async () => {
     render(
-      <WalletsWorkspace organizationRole="admin" releaseChannel="stable">
+      <WalletsTestWorkspace organizationRole="admin" releaseChannel="stable">
         <SWRConfig
           value={{ provider: () => cache, shouldRetryOnError: false, dedupingInterval: 0 }}
         >
@@ -136,8 +142,7 @@ async function renderView(
                   mint: USDC_MINT,
                   amount: "4000000000",
                   uiAmount: "4000",
-                  decimals: USDC.mints["mainnet-beta"].decimals,
-                  usdValue: 4000,
+                  decimals: USDC.mints.devnet.decimals,
                 },
               ],
               error: null,
@@ -146,7 +151,7 @@ async function renderView(
             issuanceEnabled
           />
         </SWRConfig>
-      </WalletsWorkspace>
+      </WalletsTestWorkspace>
     );
   });
 }
@@ -206,7 +211,7 @@ describe("Overview", () => {
     serveActivity(feed([], false));
     await renderView(wallet, "overview", null);
 
-    const mint = await screen.findByText("EPjF...Dt1v");
+    const mint = await screen.findByText("4zMM...ncDU");
     const tokens = mint.closest<HTMLElement>("[data-wallet-tokens]");
     if (tokens === null) throw new Error("Expected the mint inside the tokens table");
     const row = mint.closest<HTMLElement>("tr");
@@ -336,8 +341,8 @@ describe("Activity", () => {
     expect(sentDashboardRequests(fetchMock).map(windowOf)).toContain(120);
   });
 
-  it("keeps the loaded rows when older activity fails, and offers to try again", async () => {
-    stubActivity((window) =>
+  it("keeps the loaded rows when older activity fails, and tries the same window again", async () => {
+    const fetchMock = stubActivity((window) =>
       window === 20
         ? dashboardDataResponse(200, feed(rowsOf(20), true))
         : dashboardErrorResponse(503, "upstream unavailable")
@@ -354,7 +359,21 @@ describe("Activity", () => {
       )
     ).toBeTruthy();
     expect(screen.getAllByText(/xfr_row_/)).toHaveLength(20);
-    expect(screen.getByRole("button", { name: "Try loading older activity again" })).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Try loading older activity again" }));
+    });
+
+    await waitFor(() =>
+      expect(
+        sentDashboardRequests(fetchMock)
+          .map(windowOf)
+          .filter((window) => window !== 20)
+      ).toEqual([120, 120])
+    );
+    expect(
+      await screen.findByRole("button", { name: "Try loading older activity again" })
+    ).toBeTruthy();
   });
 
   it("offers older activity only from the last page of what is loaded", async () => {

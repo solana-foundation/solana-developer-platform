@@ -3,11 +3,13 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import * as csrActions from "@/app/(session)/dashboard/[projectId]/wallets/setup/fireblocks-csr-actions";
 import {
   DashboardPageTitleContext,
   type DashboardPageTitleOverride,
 } from "@/components/dashboard-page-title-context";
 import { stubClerkSession } from "@/test/clerk";
+import { dashboardDataResponse, stubDashboardFetch } from "@/test/dashboard-fetch";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { setPageRequest } from "@/test/request-project";
 import { walletsWorkspace } from "@/test/wallets";
@@ -42,10 +44,10 @@ afterEach(() => {
   shownTitle = null;
 });
 
-function renderFlow() {
+function renderFlow(provider: "privy" | "fireblocks" = "privy") {
   render(
     <DashboardPageTitleContext.Provider value={showTitle}>
-      <AddConnectionFlow provider="privy" />
+      <AddConnectionFlow provider={provider} />
     </DashboardPageTitleContext.Provider>,
     { wrapper: walletsWorkspace("admin") }
   );
@@ -154,4 +156,40 @@ it("blocks leaving during a completion retry and releases it after a refusal", a
   expect(leavePrevented()).toBe(false);
   await user.click(close);
   expect(dashboardRouter.push).toHaveBeenCalledExactlyOnceWith(PROVIDER_HREF);
+});
+
+it("holds Fireblocks' Connect and verify until a vault is chosen, and names the Project", async () => {
+  setPageRequest("/dashboard/prj_test_sandbox/integrations/fireblocks/connections/new");
+  stubDashboardFetch((request) => {
+    if (request.path !== "/api/dashboard/fireblocks/csr") {
+      throw new Error(`Unexpected dashboard request: ${request.path}`);
+    }
+    return dashboardDataResponse(200, {
+      csr: {
+        id: "fbcsr_11111111-1111-4111-8111-111111111111",
+        csrPem: "public-csr",
+        expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+      },
+    });
+  });
+  vi.spyOn(csrActions, "loadFireblocksVaultsAction").mockResolvedValue({
+    status: "success",
+    vaults: [{ id: "0", name: "Treasury", hasSolanaWallet: true }],
+    nextCursor: null,
+  });
+  const user = userEvent.setup();
+  renderFlow("fireblocks");
+  const connect = () => screen.getByRole("button", { name: "Connect and verify" });
+
+  expect(screen.getByText("Connects this Fireblocks account to Sandbox.")).toBeTruthy();
+  await screen.findByRole("button", { name: "Download CSR" });
+  expect(connect()).toHaveProperty("disabled", true);
+  await user.type(screen.getByLabelText("API user ID"), "api-user");
+  await user.click(screen.getByRole("button", { name: "Load vaults" }));
+  const treasury = await screen.findByRole("checkbox", { name: /Treasury/ });
+  await waitFor(() => expect(connect()).toHaveProperty("disabled", true));
+
+  await user.click(treasury);
+
+  await waitFor(() => expect(connect()).toHaveProperty("disabled", false));
 });
