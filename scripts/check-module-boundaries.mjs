@@ -103,9 +103,9 @@ const MODULE_METADATA = [
     allowedDependencies: [],
     // Its sources live at the package root (plain CommonJS `.js`, no `src/`)
     // and import nothing outside the package, so there is no source directory
-    // to walk. `null` says so explicitly: a module whose `src/` disappears
-    // fails the walk, one that never had one has to say it here.
-    sourceDirectory: null,
+    // to walk. `walkSource: false` says so explicitly: a module whose `src/`
+    // disappears fails the walk, one that never had one has to say it here.
+    walkSource: false,
   },
   {
     name: "@sdp/custody",
@@ -317,15 +317,8 @@ function toPosixPath(filePath) {
   return filePath.split(path.sep).join("/");
 }
 
-/** Exported so the sibling test can floor the real walk. */
+/** Exported so the sibling test can pin the fail-closed walk. */
 export function listFiles(directory) {
-  if (!existsSync(directory)) {
-    // Fail closed: a module source directory that cannot be read must fail
-    // the check rather than quietly shrink it — the module's manifest was
-    // found, so a missing `src/` is a rename this walk can no longer follow.
-    throw new Error(`source directory is missing: ${directory}`);
-  }
-
   return readdirSync(directory, { withFileTypes: true })
     .sort((left, right) => left.name.localeCompare(right.name))
     .flatMap((entry) => {
@@ -379,7 +372,7 @@ function discoverWorkspaceDirectories(repositoryRoot) {
   });
 }
 
-export function readModules(repositoryRoot) {
+function readModules(repositoryRoot) {
   return MODULE_METADATA.map((metadata) => {
     const manifestPath = path.join(repositoryRoot, metadata.directory, "package.json");
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
@@ -393,28 +386,37 @@ export function readModules(repositoryRoot) {
     return {
       ...metadata,
       manifestPath,
-      sourceDirectory:
-        metadata.sourceDirectory === null
-          ? undefined
-          : path.join(repositoryRoot, metadata.directory, metadata.sourceDirectory ?? "src"),
+      sourceDirectory: path.join(repositoryRoot, metadata.directory, "src"),
       declaredDependencies: getDeclaredDependencies(manifest),
       runtimeDependencies: getDeclaredDependencies({ ...manifest, devDependencies: {} }),
     };
   });
 }
 
-/** Exported so the sibling test can floor the real walk. */
-export function collectSourceImports(modules) {
-  return modules.flatMap((module) =>
-    (module.sourceDirectory === undefined ? [] : listFiles(module.sourceDirectory)).flatMap(
-      (filePath) =>
-        extractImportSpecifiers(readFileSync(filePath, "utf8")).map((specifier) => ({
-          filePath,
-          module,
-          specifier,
-        }))
-    )
-  );
+function collectSourceImports(modules) {
+  return modules.flatMap((module) => {
+    if (module.walkSource === false) {
+      return [];
+    }
+
+    const files = listFiles(module.sourceDirectory);
+    // Fail closed: a walked module whose scan finds zero files would otherwise
+    // contribute nothing and its boundary rules would silently stop running —
+    // a renamed `src/` must fail the check, not pass it vacuously.
+    if (files.length === 0) {
+      throw new Error(
+        `module ${module.name} walked zero source files in ${toPosixPath(path.relative(REPOSITORY_ROOT, module.sourceDirectory))}.`
+      );
+    }
+
+    return files.flatMap((filePath) =>
+      extractImportSpecifiers(readFileSync(filePath, "utf8")).map((specifier) => ({
+        filePath,
+        module,
+        specifier,
+      }))
+    );
+  });
 }
 
 function isWithin(candidatePath, parentPath) {
@@ -434,14 +436,11 @@ export function workspaceImportPath({ filePath, specifier, modules }) {
   }
 
   const resolvedPath = path.resolve(path.dirname(filePath), specifier);
+  // The owning package is found from its package root (the manifest's
+  // directory), which every module has — even one with no sources to walk.
   return [...modules]
-    .filter(
-      (module) =>
-        module.sourceDirectory && isWithin(resolvedPath, path.dirname(module.sourceDirectory))
-    )
-    .sort(
-      (left, right) => (right.sourceDirectory?.length ?? 0) - (left.sourceDirectory?.length ?? 0)
-    )
+    .filter((module) => isWithin(resolvedPath, path.dirname(module.manifestPath)))
+    .sort((left, right) => right.manifestPath.length - left.manifestPath.length)
     .at(0)?.name;
 }
 
@@ -648,8 +647,7 @@ export function checkModuleBoundaries(repositoryRoot = REPOSITORY_ROOT, { write 
   const moduleMap = renderModuleMap(modules);
   const appSourceRoots = modules
     .filter((module) => module.directory.startsWith("apps/"))
-    .map((module) => module.sourceDirectory)
-    .filter((sourceDirectory) => sourceDirectory !== undefined);
+    .map((module) => module.sourceDirectory);
   const errors = [
     ...validateMetadataCoverage(repositoryRoot),
     ...validateModuleBoundaries({
