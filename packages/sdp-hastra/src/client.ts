@@ -1,5 +1,4 @@
 import { createHash, randomBytes } from "node:crypto";
-import { supportsPortfolioWallets } from "@sdp/earn/capabilities";
 import { HastraEarnClient } from "@sdp/earn/providers/hastra/client";
 import type {
   EarnRuntimeContext,
@@ -2647,16 +2646,5 @@ export class HastraVaultDirectClient
     const config = hastraClusterConfig(cluster);
     this.assertKnownReference(config, input.providerReference);
     return parseParLifecycleEvents(config, input);
-  }
-}
-
-/** A direct token vault must never be mistaken for a provider-custodied wallet. */
-export function assertNotPortfolioProvider(client: HastraVaultDirectClient): void {
-  if (supportsPortfolioWallets(client)) {
-    throw new SdpHastraError(
-      "UNSUPPORTED_VAULT",
-      "Hastra must never report the portfolio-wallet capability: its program addresses and " +
-        "token mints are not fundable customer deposit addresses."
-    );
   }
 }

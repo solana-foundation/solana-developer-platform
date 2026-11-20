@@ -1,29 +1,31 @@
-import { prepareWithdrawal } from "@server/embedded-yield";
-import { apiErrorResponse, apiSuccessResponse } from "@server/http";
+import { prepareCoreWithdrawal } from "@server/embedded-yield";
+import {
+  ApiRequestError,
+  apiErrorResponse,
+  apiSuccessResponse,
+} from "@server/http";
 import { assertTrustedJsonRequest } from "@server/request-security";
 import { z } from "zod";
 
 export const runtime = "nodejs";
 
-const inputSchema = z.discriminatedUnion("route", [
-  z.strictObject({
-    amount: z.string().min(1).max(128),
-    route: z.literal("direct"),
-  }),
-  z.strictObject({
-    amount: z.string().min(1).max(128),
-    route: z.literal("queued"),
-    discountBps: z.number().int().min(0).max(10_000),
-    deadlineSeconds: z.number().int().positive().max(7_776_000),
-  }),
-]);
+const inputSchema = z.strictObject({ amount: z.string().min(1).max(128) });
 
 /** Savings to checking. */
 export async function POST(request: Request) {
   try {
     assertTrustedJsonRequest(request);
     const input = inputSchema.parse(await request.json());
-    return apiSuccessResponse({ intent: await prepareWithdrawal(input) });
+    const key = request.headers.get("Idempotency-Key");
+    if (!key)
+      throw new ApiRequestError(
+        400,
+        "IDEMPOTENCY_KEY_REQUIRED",
+        "Idempotency-Key is required"
+      );
+    return apiSuccessResponse({
+      operation: await prepareCoreWithdrawal(input, key),
+    });
   } catch (error) {
     return apiErrorResponse(error);
   }

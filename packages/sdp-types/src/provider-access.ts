@@ -6,7 +6,7 @@ import {
   CUSTODY_SETUP_REFUSAL_REASONS,
   type CustodyProvider,
 } from "./custody";
-import { EARN_EXECUTION_MODELS, type EarnPortfolioToken } from "./earn";
+import { EARN_EXECUTION_MODELS } from "./earn";
 import { HASTRA_DEPLOYMENTS } from "./hastra-programs";
 import { JUPITER_LEND_EARN_PROGRAM_IDS } from "./jupiter-lend-programs";
 import { KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT, KAMINO_KVAULT_PROGRAM_IDS } from "./kamino-programs";
@@ -54,7 +54,7 @@ export function isRetiredRampProviderId(value: string): value is RetiredRampProv
  * Every executing provider currently uses the **vault-direct** model: Kamino,
  * Veda, Jupiter Lend, Ondo, and the pre-launch WisdomTree integration. They
  * front an on-chain vault or yield-bearing token that an organization custody
- * wallet or an end user's external wallet deposits into. Their catalogue client
+ * wallet or an end user's wallet deposits into. Their catalogue client
  * implements the base `EarnVaultProvider` contract; a separate execution
  * package implements `EarnVaultDirectProvider`.
  *
@@ -76,66 +76,9 @@ export const EARN_PROVIDERS = [
 ] as const;
 export type EarnProviderId = (typeof EARN_PROVIDERS)[number];
 
-/**
- * Portfolio-withdrawal tokens each provider can pay to a Solana address.
- *
- * This is exhaustive and shared because the provider client must reject an
- * impossible rail before calling upstream while the dashboard must never
- * offer that same impossible choice. Empty means SDP exposes no program-style
- * Solana payout capability for the provider.
- */
-export const EARN_PROGRAM_SOLANA_PAYOUT_TOKENS = {
-  veda: [],
-  upshift: [],
-  perena: [],
-  kamino: [],
-  jupiter_lend: [],
-  ondo: [],
-  hastra: [],
-  // Redemptions pay USDC back, but through the vault-direct model (the org's
-  // own wallet sends fund tokens), never through a program-style payout rail.
-  wisdomtree: [],
-  plume: [],
-} as const satisfies Record<EarnProviderId, readonly EarnPortfolioToken[]>;
-
-/** Fail closed for provider ids from open database read models. */
-export function earnProgramSolanaPayoutTokens(provider: string): readonly EarnPortfolioToken[] {
-  return Object.hasOwn(EARN_PROGRAM_SOLANA_PAYOUT_TOKENS, provider)
-    ? EARN_PROGRAM_SOLANA_PAYOUT_TOKENS[provider as EarnProviderId]
-    : [];
-}
-
-/**
- * Whether SDP currently OFFERS a registered Earn provider — the one switch that
- * decides whether it reaches customers at all.
- *
- * Registration and surfacing are separate questions. `EARN_PROVIDERS` above is
- * "what this deployment can talk to"; this is "what we are selling today". A
- * provider flipped to `false` keeps its client, its credentials, its crons and
- * its catalogue rows — it simply stops being offered:
- *
- * - `GET /strategies` list and detail omit its rows. Hiding it once at the API
- *   covers the dashboard AND every partner integration, because the API is the
- *   surface they all read; a browser-side copy would drift.
- * - `POST /programs` refuses to open a NEW position with it.
- * - The dashboard drops its create affordances (`EARN_PROGRAM_CREATION_ENABLED`).
- *
- * What it deliberately does NOT touch, and this is the load-bearing half:
- *
- * - **Every money-OUT and existing-program route ignores it** — reads,
- *   withdrawal previews, withdrawals, the ledger, and re-targeting a program
- *   that already exists. Un-surfacing gates the way IN only, so it can never
- *   trap funds (ADR 0002's exit-safety invariant). An organization holding a
- *   position with an un-surfaced provider keeps full access to it.
- * - **The catalogue sync and metrics refresh keep running**, so `earn_strategies`
- *   stays a truthful provider inventory and re-surfacing takes effect on deploy
- *   rather than after the next hourly pass. Same reasoning as
- *   `HIDDEN_STRATEGY_TERMS` in the API: filter at the policy boundary, never by
- *   refusing to store what a provider reports.
- *
- * Exhaustive over `EarnProviderId` on purpose: a provider added to
- * `EARN_PROVIDERS` without an entry here is a compile error, so "we registered a
- * provider and never decided whether it was public" cannot happen quietly.
+/** Offered providers appear in discovery and accept new deposits.
+ * Existing positions and exits remain readable when a provider is hidden.
+ * Catalogue sync and metrics refresh continue independently of surfacing.
  */
 export const EARN_PROVIDER_SURFACING = {
   // Surfaced 2026-08-31: the Veda vault-direct integration is live — the
@@ -191,7 +134,7 @@ export const EARN_PROVIDER_SURFACING = {
  *   provider deploys on its own rebalance. (No current provider uses this.)
  * - `vault_direct`: the position is non-custodial and reached through an
  *   on-chain transaction signed by the organization's selected custody wallet
- *   or an end user's external wallet. There is no generic provider deposit
+ *   or an end user's wallet. There is no generic provider deposit
  *   address to fund; SDP builds the transaction and either submits the
  *   custody-signed form or verifies and submits the caller-signed form. Every
  *   current provider uses this shape, including the registered but pre-launch
@@ -205,9 +148,7 @@ export const EARN_PROVIDER_SURFACING = {
  *
  * Declared here rather than derived from a provider id at each call site, and
  * exhaustive over `EarnProviderId` so a new provider must state its shape. It
- * mirrors — and must agree with — the server-side `supportsPortfolioWallets`
- * capability, which the dashboard cannot see; a drift test in apps/sdp-api
- * asserts the two never disagree.
+ * records how the provider builds its current on-chain deposit transactions.
  *
  * ── One vocabulary, not two that happen to match (PRO-1705) ───────────────
  * A provider's deposit style IS the execution model every movement through it
@@ -436,9 +377,8 @@ export const EARN_PRODUCTION_DEPOSIT_DEFAULT_TOLERANCE_BPS = 10;
 /**
  * The floor policy a deposit build ENFORCES for one provider in one
  * environment: the one answer to "does this build need `minSharesOut`". The
- * catalogue publishes it as `depositSlippage`, both deposit routes gate on it
- * (`assertDepositFloorPresent`), and the dashboard reads the published field,
- * so none of them can disagree with the others.
+ * catalogue publishes it as `depositSlippage`; core preparation derives the
+ * enforceable floor from the live quote and the selected tolerance.
  *
  * Cluster first: a floor the row's program cannot enforce is no floor, so a
  * Kamino row hosted on a cluster whose kvault build lacks
@@ -573,11 +513,10 @@ export function isVaultDirectDepositEnabled(environment: string, provider: strin
 /**
  * Fail-closed surfacing check for an OPEN string.
  *
- * Provider ids reach this from `earn_strategies.provider` and
- * `earn_provider_wallets.provider`, TEXT columns a newer deploy may have
- * written, so an unrecognized id must read as "not offered" rather than index
- * into the map. `Object.hasOwn`, not `in`: a prototype key like "toString" must
- * not defeat the guard — the same rule `isEarnProviderId` follows in @sdp/earn.
+ * Provider ids come from open TEXT columns such as `earn_strategies.provider`.
+ * An unrecognized id must read as "not offered" rather than index into the map.
+ * `Object.hasOwn`, not `in`: a prototype key like "toString" must not defeat
+ * the guard, matching `isEarnProviderId` in @sdp/earn.
  */
 export function isEarnProviderSurfaced(provider: string): boolean {
   return (

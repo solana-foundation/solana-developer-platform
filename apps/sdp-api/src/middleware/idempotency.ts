@@ -59,12 +59,17 @@ export interface IdempotencyOptions {
    *   Only for a route whose handler writes its own row under a unique key
    *   before it moves anything, and replays that row on a retry, because that
    *   row is what recovers the earlier attempt.
-   *
    * A `rerun` route also lets a retry take over a claim whose lease lapsed
    * without an outcome (a crash, a failed write of the outcome); see
    * {@link IdempotencyOptions.recovery} for a `store` route.
    */
   serverErrors: "store" | "rerun";
+  /**
+   * Store a 5xx after `markIdempotencyCommitted`, overriding `serverErrors`.
+   * Earn operations opt in so accepted requests replay their exact answer.
+   * Otherwise server errors keep the route's normal domain-row recovery.
+   */
+  committedServerErrors?: "store";
   /**
    * `record`: the route mounts `replayFromRecord` after this step, so a retry
    * that takes over a claim whose lease lapsed without an outcome is answered
@@ -473,18 +478,17 @@ export async function runIdempotency(
       await release(() => repository.unlock(id, claimToken));
       return;
     }
-    // Once the handler has written its domain row (markIdempotencyCommitted),
-    // any status is stored: the request changed something, so its retry gets
-    // the same answer. A record mismatch is never stored: binding the key to
-    // this other request would refuse the original request's own retry.
-    const refusedUnchanged =
-      isIdempotencyUnstoredStatus(response.status) && c.get("idempotencyCommitted") !== true;
+    // Committed refusals are stored; server errors follow the route's recovery
+    // policy. A mismatch never binds another request's answer to this key.
+    const committed = c.get("idempotencyCommitted") === true;
+    const refusedUnchanged = isIdempotencyUnstoredStatus(response.status) && !committed;
     if (refusedUnchanged || c.get("idempotencyRecordMismatch") === true) {
       await release(() =>
         freshClaim ? repository.discard(id, claimToken) : repository.unlock(id, claimToken)
       );
     } else if (
       response.status >= 500 &&
+      !(committed && options.committedServerErrors === "store") &&
       (options.serverErrors === "rerun" || c.get("idempotencyRerunnable") === true)
     ) {
       await release(() => repository.unlock(id, claimToken));
@@ -608,11 +612,10 @@ export function deriveIdempotencyRecordKey(
 }
 
 /**
- * Marks that the handler has written its domain row under this request's key,
- * so its response is stored whatever its status: a 400 or 409 raised after the
- * row exists is the request's answer, and a same-key retry replays it instead
- * of being answered from the row with a different status. Call it right after
- * the row is committed; refusals before it stay unstored and run again.
+ * Marks that the handler committed its domain row under this request's key.
+ * A later refusal is stored rather than replaced by a different row response.
+ * Server errors follow `serverErrors`, unless `committedServerErrors` overrides
+ * it. Call immediately after commitment; earlier refusals stay unstored.
  */
 export function markIdempotencyCommitted(c: Context<{ Bindings: Env }>): void {
   c.set("idempotencyCommitted", true);

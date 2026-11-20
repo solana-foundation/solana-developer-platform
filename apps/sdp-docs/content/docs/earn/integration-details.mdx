@@ -1,210 +1,132 @@
 ---
 module: earn
 title: Integration details
-description: Slippage floors, fees and sponsorship, swap-funded deposits, retries, errors, and polling for a production Earn integration.
+description: Next actions, retries, refresh and cancellation, escrow recovery, fees, permissioned tokens and eligibility.
 ---
 
-These rules apply to every Earn integration. Read them before you take real
-deposits.
+## Next actions
 
-## Slippage floors
+Every operation says what to do next in `nextAction`:
 
-A floor is the least a transaction may return: `minSharesOut` on a deposit,
-`minAmountOut` on a withdrawal. A strategy's `depositSlippage` and
-`withdrawalSlippage` say whether it takes one, as
-[Read the slippage policy](/docs/earn/strategies#read-the-slippage-policy)
-shows. When a policy is not null, preview first and send the floor: the build
-refuses the transaction without it.
-
-A null policy means the transaction cannot enforce a floor: a provider order
-is priced later, and some sandbox vaults lack the floor instruction. Omit the
-floor then, because a build refuses one it cannot enforce. In production,
-nearly every deposit takes a floor. A preview quotes the rate; it does not
-reserve it.
-
-Compute the floor in integer base units, never with a JavaScript `number`:
-
-```typescript title="floor.ts"
-/** Takes `toleranceBps` off a decimal quote, rounding down to the mint's scale. */
-export function floorForTolerance(quote: string, decimals: number, toleranceBps: number): string {
-  if (!Number.isInteger(toleranceBps) || toleranceBps < 1 || toleranceBps > 1_000) {
-    throw new Error("Tolerance must be 1 to 1,000 basis points");
-  }
-  const [whole = "", fraction = ""] = quote.split(".");
-  const significant = fraction.replace(/0+$/, "");
-  if (!/^\d+$/.test(whole) || !/^\d*$/.test(fraction) || significant.length > decimals) {
-    throw new Error("The quote is not a decimal at the mint's scale");
-  }
-  const units = BigInt(whole + significant.padEnd(decimals, "0"));
-  if (units === 0n) throw new Error("The quote is zero");
-  const floored = (units * BigInt(10_000 - toleranceBps)) / 10_000n || 1n;
-  const digits = floored.toString().padStart(decimals + 1, "0");
-  if (decimals === 0) return digits;
-  const fractionPart = digits.slice(-decimals).replace(/0+$/, "");
-  return fractionPart ? `${digits.slice(0, -decimals)}.${fractionPart}` : digits.slice(0, -decimals);
-}
-
-// floorForTolerance("50", 6, 10) returns "49.95": a 10 bps floor on 50 shares.
-```
-
-Use the preview's `shareDecimals` for a deposit floor and `assetDecimals` for
-a withdrawal floor. Start from the policy's `defaultToleranceBps`, and let
-your customer choose another; this helper accepts 1 to 1,000 basis points.
-The [backend module](/docs/guides/embedded-yield#get-the-backend-module)
-ships the same function whenever its strategy needs a floor.
-
-## Fees and sponsorship
-
-By default the customer's wallet pays each transaction's network fee and the
-rent for any account it creates:
-
-| Transaction | Accounts it can create |
+| `nextAction.type` | What to do |
 | --- | --- |
-| A first deposit into a strategy | The share account, about 0.002 SOL. Some providers also create an account for the wallet, for up to about 0.0035 SOL in all. |
-| A withdrawal request | The request's own accounts, about 0.0027 SOL. |
+| `sign_transaction` | Have the owner, and any `feePayer`, sign `transaction` unchanged. Call `/submit` with `signedTransaction` and the current `actionId` and `version`. |
+| `select_option` | Choose an `id` from `terms.options` and call `/refresh` with it as `optionId`. Review the new transaction. |
+| `wait` | Keep polling. `reason` says what SDP is waiting for. |
+| `null` | Nothing left to do: the operation is final. |
 
-Rent is separate from the deposit and its yield, and it is not part of
-`earned`. Where a request's rent goes when it closes depends on the provider's
-program; Hastra returns it to the owner. To pay these costs for your
-customer, sponsor the transaction:
+These calls live under `/v1/operations/{operationId}`. Only `/submit` lets SDP
+send anything; there is no separate approval step.
 
-1. Set `feePayer` to a wallet your backend controls when you build.
-2. Have the customer's wallet sign first.
-3. Check that the message is unchanged and that its fee payer is your wallet,
-   then add your signature to the same transaction.
-4. Submit the transaction with both signatures.
+## Refresh and cancel
 
-With raw requests, run step 3 on your backend with your fee payer's key pair:
+Both work only before you submit:
 
-```typescript title="sponsor.ts"
-import {
-  getAddressFromPublicKey,
-  getBase64EncodedWireTransaction,
-  getBase64Encoder,
-  getCompiledTransactionMessageDecoder,
-  getTransactionDecoder,
-  partiallySignTransaction,
-} from "@solana/kit";
+- **Refresh** picks a withdrawal route and prepares its transaction. It never
+  signs, sends or cancels anything, and the chosen route stays fixed.
+- **Cancel** abandons the operation while `canCancel` is `true`, and needs the
+  `earn.manage` grant. Read `canCancel`; don't infer it from `status` or time.
 
-const decode = (base64: string) =>
-  getTransactionDecoder().decode(getBase64Encoder().encode(base64));
+After SDP accepts a `/submit`, both return `409 CONFLICT` with `details.reason`
+`operation_already_submitted`, even if the operation later fails. Track it to
+the end instead.
 
-/** Adds your fee payer's signature to a transaction the customer's wallet signed. */
-export async function cosignAsFeePayer(
-  unsignedBase64: string,
-  customerSignedBase64: string,
-  feePayer: CryptoKeyPair,
-): Promise<string> {
-  const unsigned = decode(unsignedBase64);
-  const signed = decode(customerSignedBase64);
-  const unchanged =
-    signed.messageBytes.length === unsigned.messageBytes.length &&
-    signed.messageBytes.every((byte, index) => byte === unsigned.messageBytes[index]);
-  if (!unchanged) throw new Error("The wallet changed the transaction; build a new one");
+SDP can't take back a transaction it handed you to sign, because you could still
+sign and broadcast it yourself. Once an operation shows `sign_transaction`,
+refresh and cancel return `409` with `details.reason`
+`wallet_transaction_outcome_unknown`. If the customer declines to sign, close
+the prompt: nothing executes and no SDP call is needed. SDP can't revoke a
+signature or pull a broadcast transaction from Solana.
 
-  // The fee payer is the message's first account.
-  const { staticAccounts } = getCompiledTransactionMessageDecoder().decode(signed.messageBytes);
-  if (staticAccounts[0] !== (await getAddressFromPublicKey(feePayer.publicKey))) {
-    throw new Error("This build's fee payer is not your wallet");
-  }
-  return getBase64EncodedWireTransaction(await partiallySignTransaction([feePayer], signed));
-}
-```
+## Recover expired withdrawal escrow
 
-Pass it the build's `transaction` and the customer's signed transaction, then
-submit what it returns. A missing sponsor signature fails the submit with
-`400`, and changing the fee payer means a new build and new signatures. The
-build's `sponsored` field stays `false`: it reports whether SDP paid, and SDP
-never pays for an external wallet. In the
-[backend module](/docs/guides/embedded-yield#get-the-backend-module),
-`signEarnTransaction` runs steps 2 and 3, and `createSponsorSigner` checks
-the fee payer before it signs.
+A solver withdrawal that misses its deadline can leave its shares in the
+provider's escrow. To get them back, prepare `POST /v1/earn/withdraw` for the
+same tracked `positionId` with `amount: { "kind": "all" }`. When the provider
+proves the recorded request still holds those expired shares, `terms.options`
+offers **Recover expired escrowed shares** through `select_option`.
 
-- Sponsor only builds your backend started for an authenticated customer.
-- Keep your sponsor's SOL balance small, rate-limit sponsored requests, and
-  watch the spend.
-- Store the sponsor's key in your secret manager.
+Select it with `/refresh`, review the new transaction, then sign and submit as
+usual. Recovery returns the shares to the same owner, not the deposit token.
+After SDP verifies the transaction and the provider's outcome, the result has
+`settlementOutcome: "recovered"` with the returned share mint and amount.
 
-The catalog's `feeSponsored` describes deposits and withdrawals from a Treasury custody
-wallet. It never applies to a customer's wallet.
+Each review recovers at most one expired request; prepare another withdrawal
+for the next. The original operation is not reopened, and its `/cancel` stays
+unavailable. Expiry alone, or a missing provider request, does not authorize
+recovery.
 
-A full withdrawal from a Kamino strategy leaves the empty share account open.
-The customer's wallet can close it to recover the rent; do not promise an
-automatic refund.
+Hastra operator redemptions can't be recovered this way. They reuse one owner
+request address with delegated wYLDS, and their cancellation instruction can't
+bind a reviewed amount or request cycle, so recovery needs a separate design.
+Don't treat their pending intermediate tokens as delivered USDC or recovered
+PRIME shares.
 
-## Swap-funded deposits
+## Retries and idempotency
 
-Set `sourceTokenMint` to fund a deposit with a different supported
-stablecoin. SDP adds a Jupiter swap to the deposit's deposit token in the
-same transaction, so both happen or neither does. Swap routes need mainnet,
-so you cannot test them in sandbox.
+Save a fresh `Idempotency-Key` with each request body before you send it. After
+an uncertain response, such as a timeout or a `5xx`, resend the same body with
+the same key, including the same signed bytes, and SDP returns the original
+response. To pick up work you already started, list
+`GET /v1/operations?ownerAddress=...` and continue from its `nextAction`
+instead of preparing another deposit or withdrawal.
 
-When the two do not fit in one transaction, the build returns
-`requiresSeparateSwap: true` with a `swap` and a `followUp` instead of
-`transaction`:
+Replaying a refresh with its original key returns the original response, even
+after a later submit; it builds nothing new. Read
+`GET /v1/operations/{operationId}` for the current state.
 
-1. Save the swap's signed bytes, its signature, and the follow-up body.
-2. Broadcast the swap yourself and confirm it.
-3. Build the follow-up deposit with its original floor and fee payer.
+Once you submit, prepare a new operation, with a new key, only after the first
+is `failed`. A timeout, blockhash expiry, an unknown provider response or
+missing RPC history doesn't prove a submitted transaction never executed: keep
+tracking it until SDP establishes the outcome. A transaction you never submitted
+or sent can no longer land once the network passes its `lastValidBlockHeight`,
+so you can prepare again.
 
-SDP does not record the standalone swap as a movement, so your app owns its
-recovery. Resolve an unfinished swap before you start another.
+## Fees and rates
 
-## Retry safely
+| Cost | What you can know |
+| --- | --- |
+| Network fees and rent | The owner pays them, unless you set a separate `feePayer`, which must also sign. |
+| Provider costs | Management, performance, swap and redemption charges depend on the strategy and route. Show the provider's metadata and the reviewed estimate; a queue discount also lowers proceeds. |
+| SDP pricing | Not part of the Earn response. Confirm SDP pricing separately, and don't read a missing field as zero. |
 
-Every Earn submit takes an `Idempotency-Key`. Use a new random UUID for each
-new deposit, withdrawal, request, or cancellation, and save it with the
-signed transaction before the first send. Never put customer data in an
-idempotency key.
+`terms.fees` lists known fees for the transaction: `null` means unavailable, not
+free, and it is not an invoice for ongoing provider costs. `rate.value` is the
+provider-reported APY, not a promise of returns after every cost, and Earn
+doesn't normalize rates across providers into one comparable net yield.
 
-| Situation | What SDP does | What you do |
-| --- | --- | --- |
-| A submit times out or returns `5xx`. | Nothing twice. | Retry with the same idempotency key and body. |
-| You retry with the same idempotency key and `transactionId`. | Returns the original movement in its current state, with `replayed: true`, even if the signed bytes differ. | Track it as usual. |
-| You reuse an idempotency key for a different build. | `409 CONFLICT`. Nothing runs. | Retry the original build, or use a new idempotency key for a new action. |
-| You submit the same build under a new idempotency key. | `409 CONFLICT`. | Find the original action and its idempotency key. |
-| The blockhash expired before you submitted. | Records the original signed bytes, which may already have landed. If they never did, the movement ends `failed` with `Transaction blockhash expired before confirmation`. | Submit the original and track it. Do not rebuild until it fails. |
-| A late withdrawal request returns `409 CONFLICT`. | Waits to see the exact signed transaction finalized. | Retry the same bytes and key. |
-| Recovery finds the transaction finalized as failed. | `400 TRANSACTION_FAILED`. Nothing moved. | Build a new transaction. |
-| An unsigned build expired. | Nothing has moved. | Build again before asking for a signature. |
-| The preview has blocking issues. | Nothing has moved. | Resolve them and preview again. |
+## Permissioned tokens and transfer hooks
 
-Earn's submits keep their own idempotency rules, which replace the shared
-[Idempotency](/docs/developing-with-sdp/idempotency) page's. A submit without
-a key returns `400 BAD_REQUEST`, and a misused key returns `409 CONFLICT`,
-never `422`. A key stays bound to its movement for good, with no 24-hour
-window, so never reuse one for a new action.
+Earn supports specific provider instruments and their token programs.
+WisdomTree fund tokens, for example, use Token-2022 with an issuer compliance
+hook: Earn pins that program and supplies the hook's accounts in the
+transaction. The signing wallet must allow every program and instruction in the
+reviewed transaction.
 
-Submit withdrawal requests and cancellations through SDP promptly. If a
-wallet broadcasts one itself and SDP first sees it after its build expires,
-SDP may be unable to track it. Keep unresolved actions visible, and never
-assume no funds moved.
+This is not generic support for any transfer hook, gated mint or Token ACL
+policy, and a listing doesn't prove an arbitrary token can be deposited or
+moved. Issuer freezes, delegates and transfer restrictions can still affect
+holdings and exits.
 
-## Errors
+SDP's [tokenization tools](/docs/tokens/tokenize-an-asset) are a separate
+module, with their own availability. Using Earn doesn't issue a token,
+configure its access list or enroll an issuer policy.
 
-Every error has the shape `{ "error": { "code", "message", "details" } }`.
-The codes Earn integrations meet most:
+## Provider eligibility
 
-| Status | Code | Meaning | What to do |
-| --- | --- | --- | --- |
-| `400` | `BAD_REQUEST` | A field is invalid, the `Idempotency-Key` is missing, or the signed transaction differs from the build. | Read `message` and `details`, fix the request, and build again when the transaction changed. |
-| `400` | `TRANSACTION_FAILED` | Recovery found the submitted transaction finalized as failed. | Build a new transaction. |
-| `403` | `INSUFFICIENT_PERMISSIONS` | The API key lacks the grant in `details.action`. | Add the grant to the API key. |
-| `403` | `FORBIDDEN` | `details.reason` is `provider_not_entitled`: your organization is not activated for the provider. With `provider_not_offered`, SDP takes no new deposits for it. | Ask your SDP contact to activate it. Withdrawals still work either way. |
-| `404` | `NOT_FOUND` | No such strategy, position, movement, build, or request in your project. | Check the ID and the project. |
-| `409` | `CONFLICT` | An idempotency key or a signed transaction was already used differently, a late withdrawal request awaits proof that it landed, or a request cannot be canceled yet. | See [Retry safely](#retry-safely). Retry a late request with its exact bytes and key; for a cancellation, wait for `expiredCancelable`. |
-| `429` | `RATE_LIMITED` | You are over your rate limit. | Wait for `Retry-After`, then retry. |
-| `501` | `NOT_IMPLEMENTED` | The provider cannot quote this operation. | Continue without the preview when the floor policy is null. |
-| `503` | `PROVIDER_UNAVAILABLE` | SDP could not read the provider's live state or reach a dependency. | Retry with backoff, and show the action as unavailable meanwhile. Retry a submit with the same idempotency key and body. |
+An SDP API key grants API access, not investment eligibility. For each customer
+and wallet, confirm the issuer's rules on jurisdiction, investor qualification
+or accreditation, KYC/AML, subscriptions and redemptions. They differ by
+product, and Earn has no universal compliance approval or jurisdiction screen.
 
-See [Errors](/docs/reference/conventions/errors) for the shared error model.
+Where a provider supports an eligibility check, Earn runs it before building the
+deposit. WisdomTree requires a customer mapping in the same project, an approved
+wallet and access to the selected fund. Its onboarding (KYC/KYB, documents and
+wallet registration) is a separate issuer workflow. Only an active business
+customer can register a wallet; a retail application alone doesn't make a
+wallet eligible.
 
-## Poll politely
-
-Track a movement by polling its `GET` route about once a second for the
-first minute, then every five seconds. Stop at `finalized` or `failed`, and
-treat `429` as a signal to slow down. Withdrawal requests can take hours or
-days, so poll them every minute or two, and restore them on startup instead
-of holding a loop open. The backend module's wait functions follow this
-schedule. See
-[Rate limits](/docs/reference/conventions/rate-limits).
+For other providers, screen customers in your integration and confirm the
+issuer's terms before you offer a strategy. Withdrawals get no new eligibility
+gate, but issuer hooks, freezes, liquidity and redemption decisions can still
+delay or block delivery.

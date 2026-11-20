@@ -22,6 +22,7 @@ import {
   idempotent,
   MAX_STORED_RESPONSE_BYTES,
   markIdempotencyCommitted,
+  markIdempotencyReleased,
   requestFingerprint,
   runIdempotency,
 } from "./idempotency";
@@ -665,6 +666,77 @@ describe("idempotent()", () => {
     expect((await post(app, "/v1/other", { a: 1 }, KEY)).status).toBe(201);
     expect(create).toHaveBeenCalledTimes(2);
     expect(await storedRows()).toMatchObject([{ status: "completed", response_status: 201 }]);
+  });
+
+  it("recovers a committed payment record after a 5xx on a rerun route", async () => {
+    const rows = new Map<string, { payment: { id: string; status: string } }>();
+    const create = vi.fn((c: Context<{ Bindings: Env }>) => {
+      const recordKey = getIdempotencyRecordKey(c);
+      if (recordKey === undefined) throw new Error("expected a claimed key");
+      rows.set(recordKey, { payment: { id: "payment_saved", status: "processing" } });
+      markIdempotencyCommitted(c);
+      throw new Error("response failed after the payment record committed");
+    });
+    const app = testApp();
+    app.post(
+      "/v1/payments/transfers",
+      idempotent({ key: "required", serverErrors: "rerun", recovery: "record" }),
+      replayFromRecord(async (c, _input, recordKey) => {
+        const row = rows.get(recordKey);
+        return row === undefined ? null : { fingerprint: null, respond: () => c.json(row, 202) };
+      }),
+      (c) => create(c)
+    );
+
+    expect((await post(app, "/v1/payments/transfers", { amount: "1" }, KEY)).status).toBe(500);
+    const recovered = await post(app, "/v1/payments/transfers", { amount: "1" }, KEY);
+    expect(recovered.status).toBe(202);
+    expect(await recovered.json()).toEqual({
+      payment: { id: "payment_saved", status: "processing" },
+    });
+    expect(recovered.headers.get(IDEMPOTENT_REPLAYED_HEADER)).toBe("true");
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(rows.size).toBe(1);
+    expect(await storedRows()).toMatchObject([{ status: "completed", response_status: 202 }]);
+  });
+
+  it("replays a committed operation's exact 5xx when the route opts in", async () => {
+    const { app, create } = buildApp(
+      { key: "required", serverErrors: "rerun", committedServerErrors: "store" },
+      (c) => {
+        markIdempotencyCommitted(c);
+        throw new Error("response failed after operation acceptance");
+      }
+    );
+    const first = await post(app, "/v1/other", { actionId: "action", version: 1 }, KEY);
+    expect(first.status).toBe(500);
+    const replay = await post(app, "/v1/other", { actionId: "action", version: 1 }, KEY);
+    expect(replay.status).toBe(500);
+    expect(await replay.text()).toBe(await first.text());
+    expect(replay.headers.get(IDEMPOTENT_REPLAYED_HEADER)).toBe("true");
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(await storedRows()).toMatchObject([{ status: "completed", response_status: 500 }]);
+  });
+
+  it("still reruns a 5xx after the handler rolls its domain write back", async () => {
+    let fail = true;
+    const { app, create } = buildApp(
+      { key: "required", serverErrors: "rerun", committedServerErrors: "store" },
+      (c) => {
+        markIdempotencyCommitted(c);
+        if (fail) {
+          markIdempotencyReleased(c);
+          throw new Error("domain write rolled back");
+        }
+        return c.json({ ok: true }, 201);
+      }
+    );
+    expect((await post(app, "/v1/other", { a: 1 }, KEY)).status).toBe(500);
+    fail = false;
+    const retried = await post(app, "/v1/other", { a: 1 }, KEY);
+    expect(retried.status).toBe(201);
+    expect(retried.headers.get(IDEMPOTENT_REPLAYED_HEADER)).toBeNull();
+    expect(create).toHaveBeenCalledTimes(2);
   });
 
   it("keeps a taken-over key bound to its request when the retry is refused", async () => {

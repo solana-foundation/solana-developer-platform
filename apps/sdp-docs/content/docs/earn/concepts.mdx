@@ -1,112 +1,94 @@
 ---
 module: earn
 title: How Earn works
-description: Strategies, positions and shares, who signs, and how each deposit and withdrawal settles.
+description: Strategies, positions and operations, who signs, and where the funds go on every deposit and withdrawal.
 ---
 
-Earn moves your customer's stablecoins into a strategy and back out again.
-This page explains the pieces you work with and the rules that keep balances
-honest.
+## Strategies, positions and operations
 
-## Key terms
-
-| Term | Meaning |
-| --- | --- |
-| Strategy | A yield source in the catalog: a lending market, a vault, or a yield-bearing token. Each takes one deposit token. |
-| Position | One customer wallet's holding in one strategy. |
-| Shares | The units a position holds. Withdrawals spend shares, not dollars. |
-| Movement | SDP's record of one deposit or withdrawal, from submit to finality. |
-| Withdrawal request | SDP's record of a withdrawal that pays out later, through a solver queue or an operator redemption. |
-| External wallet | A wallet SDP holds no key for, such as your customer's own wallet. The `/external-wallet/` routes and `ownerAddress` refer to it. |
-
-## Strategies
-
-| Source | Where yield comes from |
-| --- | --- |
-| DeFi (`sourceKind: "defi"`) | Onchain lending markets and vaults. Returns move with protocol activity. |
-| Real-world assets (`sourceKind: "rwa"`) | Tokenized investments backed by assets such as US Treasuries. Returns and redemptions follow the issuer's terms. |
-
-`sourceKind` says where yield comes from, not how a withdrawal settles. Read
-each position's [withdrawal options](/docs/earn/withdrawals#1-choose-a-route)
-to see which routes it supports. [Strategies](/docs/earn/strategies) covers
-the catalog and how to choose.
-
-## Positions and shares
-
-Three amounts describe a position:
-
-| Amount | Field | What it tells you |
-| --- | --- | --- |
-| Shares | `shares` | How much of the strategy the wallet owns, in share units. |
-| Share value | `tokenValue` | What those shares are worth now, in the deposit token. |
-| Withdrawable shares | `withdrawableShares` | How many shares can leave right now, after locks and liquidity. |
-
-A withdrawal names a share amount, and its payout depends on the strategy's
-live state. Quote it with a
-[withdrawal preview](/docs/earn/withdrawals#2-withdraw-instantly) instead of
-multiplying by an old rate. A missing live value means unavailable, never
-zero.
+- A **strategy** is one yield product: a vault, a lending market or a
+  real-world-asset fund. One protocol can list several, with different assets,
+  rates and withdrawal terms. [Discovery](/docs/earn/strategies) lists them.
+- A **position** is one wallet's holding in one strategy. A deposit creates it;
+  a [withdrawal](/docs/earn/withdrawals) names it by `positionId`.
+- An **operation** is one deposit or withdrawal, from preparation through
+  signing, broadcast and settlement. Every write returns one, and you poll it
+  for progress.
 
 ## Who signs
 
-SDP never holds your customer's key. Every deposit and withdrawal follows the
-same four steps:
+SDP prepares each transaction, and the wallet you name as `source.ownerAddress`
+signs it: SDP never holds its keys. The wallet signs the exact bytes SDP
+prepared, and SDP rejects any change to them. Preparing grants no permission to
+send: only your `/submit` call does, and only for the transaction you reviewed.
 
-1. Your backend asks SDP to **build** an unsigned transaction.
-2. Your customer's wallet **signs** it, without changing or broadcasting it.
-3. Your backend **submits** the signed transaction to SDP.
-4. SDP verifies it, records a movement, broadcasts it, and tracks it.
+A signature, a confirmed request or escrowed shares are not a payout.
+`completed` means SDP verified delivery. When an outcome is unknown, the
+operation keeps its signed bytes and stays pending until evidence settles it.
 
-Keep your API key on your backend. It can read every position your project
-records, so your backend decides which customer may act on which wallet. See
-[Embedded Yield](/docs/guides/embedded-yield#authenticate-on-your-backend).
+## Follow the funds
 
-## How a movement settles
+For a share-issuing strategy, the deposit moves assets into the provider's
+accounts and issues shares to the owner's token account:
 
-| Status | Meaning |
-| --- | --- |
-| `requested` | SDP recorded the signed transaction and has not seen it onchain yet. |
-| `submitted` | SDP broadcast the transaction. |
-| `confirmed` | The network confirmed it. Final for display only when settlement is `atomic`. |
-| `finalized` | The transaction is final. |
-| `failed` | It did not land. `failureReason` says why. |
+<EarnFlow>
 
-A movement's `settlement` decides when funds have really moved:
+- **Owner's wallet**
 
-- **`atomic`**: the deposit or withdrawal happens in one transaction. You may
-  show it as done at `confirmed` while SDP tracks it to `finalized`.
-- **`provider_order`**: the transaction places an order that the provider
-  completes later. Confirmation proves the order, not the payout: the
-  movement stays `confirmed` until the provider completes it, and only
-  `finalized` means it is done.
+  Signs the reviewed transaction.
 
-Withdrawals through a solver queue or an operator redemption also pay out
-later. Track them as [withdrawal requests](/docs/earn/withdrawals#track-a-request),
-and credit funds only when the payout arrives.
+- **Provider's program and asset accounts**
 
-## Where funds go
+  Receive the deposit and issue the strategy's shares under protocol rules.
 
-A vault or lending deposit exchanges the deposit token for shares in the
-customer's wallet. A token strategy acquires the yield-bearing token itself.
-Either way, the deposited stablecoins go to the protocol or provider, never to
-an SDP-owned account.
+- **Owner's share token account**
 
-<Callout type="warn">
-Never send tokens to a strategy's `providerReference`. It identifies the
-instrument, not a deposit address. Deposit only through a transaction SDP
-builds.
-</Callout>
+  Holds the receipt for the position. SDP's database records the activity.
 
-Holding shares in the customer's own wallet does not remove the provider's
-custody, liquidity, or withdrawal risks. A position's value can rise or fall
-with returns, losses, and fees.
+</EarnFlow>
 
-## Sandbox and production
+On redemption, the provider redeems the shares under its own withdrawal rules
+and delivers assets to the owner. A delayed request can hold shares in escrow
+while it waits; the request alone is not delivery. Earn adds no SDP omnibus
+wallet or pool, but the underlying provider can pool assets, upgrade its
+program or restrict redemption.
 
-Your API key's project decides the network: a sandbox project runs on devnet
-with test tokens, and a production project runs on mainnet with real funds.
-The API host and every request stay the same. See
-[Go to mainnet](/docs/guides/go-to-mainnet) when you are ready to move.
+For example, Kamino's K-Vault program is
+`KvauGMspG5k6rtzrqqn7WNn3oZdyKqLKwK2XWQ8FLjd` on mainnet and
+`devkRngFnfp4gBc5a3LsadgbQKdPo8MSZ4prFiNSVmY` on devnet. The strategy's
+`providerReference` is the vault account and its `shareMint` is the receipt
+token. A deposit invokes that program to mint shares to the owner; redemption
+burns them as assets leave the vault for the owner.
 
-Next, [make your first deposit](/docs/earn/quickstart) or
-[choose a strategy](/docs/earn/strategies).
+Before signing, compare those identities with the transaction's program and
+token accounts. The
+[cluster-specific program registry](https://github.com/solana-foundation/solana-developer-platform/blob/main/packages/sdp-types/src/kamino-programs.ts)
+and the confirmed transaction let you trace the program, the deposit
+destination and the shares received. SDP checks the same asset identities
+against the strategy or position when it plans each transaction.
+
+Provider orders work differently from a vault. A WisdomTree subscription sends
+USDC to an issuer-operated wallet, and its transfer agent delivers fund tokens
+later. Redemption sends fund tokens back to an issuer wallet and waits for USDC.
+Earn neither mints those tokens nor controls their backing. The
+[fund and compliance-program registry](https://github.com/solana-foundation/solana-developer-platform/blob/main/packages/sdp-types/src/wisdomtree-programs.ts)
+lists the supported mints and transfer hook. Check each strategy's mechanism
+rather than assuming every real-world asset is a vault.
+
+## One integration, many customers
+
+One API key serves all your customers. Send each customer's wallet as
+`source.ownerAddress` when you prepare their deposit; there is no registration
+call. Withdrawals take the owner from the position. Keep the mapping from
+customer to wallet in your backend, and filter reads by owner:
+
+```http
+GET /v1/earn/positions?ownerAddress=<customer-a-wallet>
+GET /v1/operations?ownerAddress=<customer-a-wallet>
+```
+
+SDP isolates data by organization, project and environment, but the owner
+filter is not an access boundary: your key can read every customer's records in
+its project. Keep the key on your backend, authenticate each customer there and
+check they own the wallet before you forward a request. A public onchain balance
+does not prove the caller controls the address.

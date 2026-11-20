@@ -48,6 +48,7 @@ import { registerIntegrationPaths } from "./paths/integrations";
 import { registerIssuancePaths } from "./paths/issuance";
 import { registerMemberPaths } from "./paths/members";
 import { registerOnboardingPaths } from "./paths/onboarding";
+import { registerOperationsPaths } from "./paths/operations";
 import { registerOrganizationPaths } from "./paths/organizations";
 import { registerPaymentsPaths } from "./paths/payments";
 import { registerPrivateChannelsPaths } from "./paths/private-channels";
@@ -61,7 +62,7 @@ import {
 import routeActionsJson from "./route-actions.generated.json";
 
 const EARN_TAG_DESCRIPTION =
-  "Strategy reads, previews, withdrawal-route discovery, unsigned builds, submission, queued actions, and tenant tracking. Availability follows the deployment's release channel.";
+  "Discover strategies, read positions, and prepare deposits and withdrawals, then submit and track each one as an operation. Availability follows the deployment's release channel.";
 
 const OPENAPI_TAG = {
   HEALTH: { name: "Health", description: "Service health and readiness endpoints." },
@@ -223,6 +224,7 @@ function registerPublicPaths(registry: OpenAPIRegistry) {
   registerHealthPaths(registry);
   registerCustodyPaths(registry);
   registerPublicEarnPaths(registry);
+  registerOperationsPaths(registry, true);
   registerProjectPaths(registry);
   registerIntegrationPaths(registry);
   registerIssuancePaths(registry);
@@ -241,6 +243,7 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerCustodyAdministrationPaths(registry);
   registerCustodyPaths(registry);
   registerEarnPaths(registry);
+  registerOperationsPaths(registry);
   registerDvpPaths(registry);
   registerProjectPaths(registry);
   registerIntegrationPaths(registry);

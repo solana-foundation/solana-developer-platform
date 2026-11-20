@@ -445,9 +445,8 @@ export function distillKaminoVault(
  * non-custodial: a K-Vault is an on-chain vault the customer's own wallet
  * deposits into, so there is no omnibus wallet for SDP to provision, fund, or
  * pay out from. It therefore implements the base `EarnVaultProvider` contract
- * and NONE of the optional capabilities — every portfolio and withdrawal route
- * answers 501 for it through `supportsPortfolioWallets`, never through a
- * provider-id check.
+ * for catalogue reads. The API composes its separate execution client for
+ * deposit, withdrawal and position reads.
  *
  * Two facts shape everything else here (measured 2026-08-14):
  *

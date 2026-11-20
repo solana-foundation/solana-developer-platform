@@ -4,8 +4,8 @@ import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
-import { createPostgresEarnExternalWalletTransactionsRepository } from "@/db/repositories/earn-external-wallet-transactions.repository";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
+import { createPostgresEarnWalletTransactionsRepository } from "@/db/repositories/earn-wallet-transactions.repository";
 import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
 import {
   type ClusterRpcRequest,
@@ -220,15 +220,15 @@ async function ledgerRow(movementId: string) {
 }
 
 /**
- * An external-wallet (caller-signed) deposit movement: the other signer shape
+ * A wallet (caller-signed) deposit movement: the other signer shape
  * that rides this service, via the detail read's read-through. Same ledger
  * table, `owner_address` instead of a custody wallet, and a consumed build row.
  */
-async function seedExternalWalletMovement(environment: SdpEnvironment) {
+async function seedWalletMovement(environment: SdpEnvironment) {
   const projectId = environment === "sandbox" ? PROJECT : `${PROJECT}_production`;
   const repository = createPostgresEarnMovementsRepository(getDb(env));
   const transactionId = `earn_ewt_${crypto.randomUUID()}`;
-  await createPostgresEarnExternalWalletTransactionsRepository(getDb(env)).create({
+  await createPostgresEarnWalletTransactionsRepository(getDb(env)).create({
     id: transactionId,
     organizationId: ORG,
     projectId,
@@ -246,12 +246,12 @@ async function seedExternalWalletMovement(environment: SdpEnvironment) {
     unsignedTransaction: Buffer.from([7, 8, 9]).toString("base64"),
     lastValidBlockHeight: "100",
   });
-  const built = await createPostgresEarnExternalWalletTransactionsRepository(getDb(env)).getById({
+  const built = await createPostgresEarnWalletTransactionsRepository(getDb(env)).getById({
     organizationId: ORG,
     transactionId,
   });
-  if (!built) throw new Error("external-wallet build row did not persist");
-  return repository.createSignedExternalWalletDepositIntent({
+  if (!built) throw new Error("wallet build row did not persist");
+  return repository.createSignedWalletDepositIntent({
     organizationId: ORG,
     projectId,
     environment,
@@ -267,21 +267,21 @@ async function seedExternalWalletMovement(environment: SdpEnvironment) {
     lastValidBlockHeight: "100",
     requestId: crypto.randomUUID(),
     idempotencyFingerprint: crypto.randomUUID(),
-    externalWalletTransactionId: built.id,
+    walletTransactionId: built.id,
   });
 }
 
-const EXTERNAL_OWNER = "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF";
+const OWNER_ADDRESS = "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF";
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SHARE = "So11111111111111111111111111111111111111112";
 
 /**
- * A finalized external-wallet deposit followed by a SUBMITTED exit of some of
+ * A finalized wallet deposit followed by a SUBMITTED exit of some of
  * its shares: the row whose settlement carries the two 0103 observations.
  */
-async function seedExternalWalletWithdrawal(shares = "1") {
+async function seedWalletWithdrawal(shares = "1") {
   const repository = createPostgresEarnMovementsRepository(getDb(env));
-  const deposit = await seedExternalWalletMovement("sandbox");
+  const deposit = await seedWalletMovement("sandbox");
   const settledAt = new Date().toISOString();
   await repository.advanceVaultMovement({
     movementId: deposit.movement.id,
@@ -291,14 +291,14 @@ async function seedExternalWalletWithdrawal(shares = "1") {
     settledAt,
   });
   const transactionId = `earn_ewt_${crypto.randomUUID()}`;
-  await createPostgresEarnExternalWalletTransactionsRepository(getDb(env)).create({
+  await createPostgresEarnWalletTransactionsRepository(getDb(env)).create({
     id: transactionId,
     organizationId: ORG,
     projectId: PROJECT,
     environment: "sandbox",
     provider: "kamino",
     direction: "withdrawal",
-    ownerAddress: EXTERNAL_OWNER,
+    ownerAddress: OWNER_ADDRESS,
     vaultAddress: deposit.position.vault_address as string,
     tokenMint: USDC,
     shareMint: SHARE,
@@ -309,14 +309,14 @@ async function seedExternalWalletWithdrawal(shares = "1") {
     unsignedTransaction: Buffer.from([10, 11, 12]).toString("base64"),
     lastValidBlockHeight: "100",
   });
-  const withdrawal = await repository.createSignedExternalWalletWithdrawalIntent({
+  const withdrawal = await repository.createSignedWalletWithdrawalIntent({
     organizationId: ORG,
     projectId: PROJECT,
     environment: "sandbox",
     provider: "kamino",
     positionId: deposit.position.id,
     vaultAddress: deposit.position.vault_address as string,
-    ownerAddress: EXTERNAL_OWNER,
+    ownerAddress: OWNER_ADDRESS,
     shareMint: SHARE,
     requestedShares: shares,
     signature: `sig_${crypto.randomUUID()}`,
@@ -324,7 +324,7 @@ async function seedExternalWalletWithdrawal(shares = "1") {
     lastValidBlockHeight: "100",
     requestId: crypto.randomUUID(),
     idempotencyFingerprint: crypto.randomUUID(),
-    externalWalletTransactionId: transactionId,
+    walletTransactionId: transactionId,
   });
   await repository.advanceVaultMovement({
     movementId: withdrawal.movement.id,
@@ -383,7 +383,7 @@ async function positionRow(positionId: string) {
 
 describe("Kamino deposit receipts", () => {
   it("settles the actual debit and minted shares, preserving the requested maximum", async () => {
-    const seeded = await seedExternalWalletMovement("sandbox");
+    const seeded = await seedWalletMovement("sandbox");
     readKaminoDepositReceipt.mockResolvedValue({ amount: "0.4", sharesOut: "0.39" });
     getSignatureStatuses.mockResolvedValue([
       { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
@@ -399,7 +399,7 @@ describe("Kamino deposit receipts", () => {
     expect(readKaminoDepositReceipt).toHaveBeenCalledWith(
       expect.objectContaining({ cluster: "devnet" }),
       expect.objectContaining({
-        owner: EXTERNAL_OWNER,
+        owner: OWNER_ADDRESS,
         vault: seeded.position.vault_address,
         tokenMint: USDC,
         shareMint: SHARE,
@@ -445,12 +445,12 @@ describe("Kamino deposit receipts", () => {
 
 describe("settlement observations (0103): withdrawal payout and empty-holding close", () => {
   it("records the observed token payout and closes a holding left empty", async () => {
-    const seeded = await seedExternalWalletWithdrawal();
+    const seeded = await seedWalletWithdrawal();
     getSignatureStatuses.mockResolvedValue([
       { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
     ]);
-    getTransaction.mockResolvedValue(landedPayout(EXTERNAL_OWNER, "1004500"));
-    readVaultPositions.mockResolvedValue(liveSnapshot(seeded.position, EXTERNAL_OWNER, "0"));
+    getTransaction.mockResolvedValue(landedPayout(OWNER_ADDRESS, "1004500"));
+    readVaultPositions.mockResolvedValue(liveSnapshot(seeded.position, OWNER_ADDRESS, "0"));
 
     const movement = await readThrough(seeded.movement);
 
@@ -464,7 +464,7 @@ describe("settlement observations (0103): withdrawal payout and empty-holding cl
     expect(getTransaction).toHaveBeenCalledWith(expect.anything(), seeded.movement.signature);
     expect(readVaultPositions).toHaveBeenCalledWith(
       { env, environment: "sandbox" },
-      { owner: EXTERNAL_OWNER, providerReferences: [seeded.position.vault_address] }
+      { owner: OWNER_ADDRESS, providerReferences: [seeded.position.vault_address] }
     );
     await expect(positionRow(seeded.position.id)).resolves.toMatchObject({
       closed_at: expect.any(String),
@@ -472,15 +472,15 @@ describe("settlement observations (0103): withdrawal payout and empty-holding cl
   });
 
   it("reads the post-exit balance under a floor stamped for this close", async () => {
-    const seeded = await seedExternalWalletWithdrawal();
+    const seeded = await seedWalletWithdrawal();
     getSignatureStatuses.mockResolvedValue([
       { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
     ]);
-    getTransaction.mockResolvedValue(landedPayout(EXTERNAL_OWNER, "1004500"));
+    getTransaction.mockResolvedValue(landedPayout(OWNER_ADDRESS, "1004500"));
     const floors: Array<number | undefined> = [];
     readVaultPositions.mockImplementation(async () => {
       floors.push(readFloor());
-      return liveSnapshot(seeded.position, EXTERNAL_OWNER, "0");
+      return liveSnapshot(seeded.position, OWNER_ADDRESS, "0");
     });
     const before = readStamp();
 
@@ -491,12 +491,12 @@ describe("settlement observations (0103): withdrawal payout and empty-holding cl
   });
 
   it("leaves the holding open when live shares remain after a partial exit", async () => {
-    const seeded = await seedExternalWalletWithdrawal();
+    const seeded = await seedWalletWithdrawal();
     getSignatureStatuses.mockResolvedValue([
       { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
     ]);
-    getTransaction.mockResolvedValue(landedPayout(EXTERNAL_OWNER, "1000000"));
-    readVaultPositions.mockResolvedValue(liveSnapshot(seeded.position, EXTERNAL_OWNER, "0.5"));
+    getTransaction.mockResolvedValue(landedPayout(OWNER_ADDRESS, "1000000"));
+    readVaultPositions.mockResolvedValue(liveSnapshot(seeded.position, OWNER_ADDRESS, "0.5"));
 
     await readThrough(seeded.movement);
 
@@ -508,7 +508,7 @@ describe("settlement observations (0103): withdrawal payout and empty-holding cl
   });
 
   it("fails soft: an unobservable payout stays NULL and an unreadable balance leaves the row open", async () => {
-    const seeded = await seedExternalWalletWithdrawal();
+    const seeded = await seedWalletWithdrawal();
     getSignatureStatuses.mockResolvedValue([
       { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
     ]);
@@ -527,7 +527,7 @@ describe("settlement observations (0103): withdrawal payout and empty-holding cl
   });
 
   it("repairs an unvalued payout on a later sweep once the transaction can be read", async () => {
-    const seeded = await seedExternalWalletWithdrawal();
+    const seeded = await seedWalletWithdrawal();
     getSignatureStatuses.mockResolvedValue([
       { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
     ]);
@@ -541,7 +541,7 @@ describe("settlement observations (0103): withdrawal payout and empty-holding cl
 
     // The history read recovers; the sweep's repair pass values the row (the
     // read-through never stamped an attempt, so the row is due immediately).
-    getTransaction.mockResolvedValue(landedPayout(EXTERNAL_OWNER, "1000000"));
+    getTransaction.mockResolvedValue(landedPayout(OWNER_ADDRESS, "1000000"));
     await expect(inSandbox(() => repairUnvaluedWithdrawalPayouts(env))).resolves.toEqual({
       claimed: 1,
       repaired: 1,
@@ -558,7 +558,7 @@ describe("settlement observations (0103): withdrawal payout and empty-holding cl
   });
 
   it("spaces repair retries and keeps a still-unreadable payout NULL", async () => {
-    const seeded = await seedExternalWalletWithdrawal();
+    const seeded = await seedWalletWithdrawal();
     getSignatureStatuses.mockResolvedValue([
       { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
     ]);
@@ -582,7 +582,7 @@ describe("settlement observations (0103): withdrawal payout and empty-holding cl
   });
 
   it("never guesses: a payout to another owner, another mint, or a non-positive delta is not recorded", async () => {
-    const seeded = await seedExternalWalletWithdrawal();
+    const seeded = await seedWalletWithdrawal();
     getSignatureStatuses.mockResolvedValue([
       { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
     ]);
@@ -598,7 +598,7 @@ describe("settlement observations (0103): withdrawal payout and empty-holding cl
           amount: "0",
           decimals: 6,
         },
-        { accountIndex: 3, mint: SHARE, owner: EXTERNAL_OWNER, amount: "9", decimals: 6 },
+        { accountIndex: 3, mint: SHARE, owner: OWNER_ADDRESS, amount: "9", decimals: 6 },
       ],
       postTokenBalances: [
         {
@@ -608,12 +608,12 @@ describe("settlement observations (0103): withdrawal payout and empty-holding cl
           amount: "7",
           decimals: 6,
         },
-        { accountIndex: 3, mint: SHARE, owner: EXTERNAL_OWNER, amount: "0", decimals: 6 },
+        { accountIndex: 3, mint: SHARE, owner: OWNER_ADDRESS, amount: "0", decimals: 6 },
       ],
     });
     // A snapshot for the wrong vault must not close this holding either.
     readVaultPositions.mockResolvedValue(
-      liveSnapshot({ vault_address: "some_other_vault" }, EXTERNAL_OWNER, "0")
+      liveSnapshot({ vault_address: "some_other_vault" }, OWNER_ADDRESS, "0")
     );
 
     await readThrough(seeded.movement);
@@ -968,11 +968,11 @@ describe("reconcileEarnVaultMovementReadThrough", () => {
     }
   });
 
-  it("advances an external-wallet (caller-signed) movement the same way", async () => {
+  it("advances a wallet (caller-signed) movement the same way", async () => {
     // The embedded-yield detail read adopted this read-through; an
     // owner-signed row is the same vault_direct ledger shape with a signature
     // recorded at submit, so nothing here may depend on a custody wallet.
-    const seeded = await seedExternalWalletMovement("sandbox");
+    const seeded = await seedWalletMovement("sandbox");
     getSignatureStatuses.mockResolvedValue([
       { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
     ]);
@@ -988,7 +988,7 @@ describe("reconcileEarnVaultMovementReadThrough", () => {
   });
 
   it("short-circuits a terminal movement without touching the RPC", async () => {
-    const seeded = await seedExternalWalletMovement("sandbox");
+    const seeded = await seedWalletMovement("sandbox");
     const repository = createPostgresEarnMovementsRepository(getDb(env));
     await repository.advanceVaultMovement({
       movementId: seeded.movement.id,
@@ -1006,7 +1006,7 @@ describe("reconcileEarnVaultMovementReadThrough", () => {
   });
 
   it("answers a movement from another environment's scope with its durable row, unread", async () => {
-    const seeded = await seedExternalWalletMovement("sandbox");
+    const seeded = await seedWalletMovement("sandbox");
 
     const movement = await runInClusterScope(
       { projectId: `${PROJECT}_production`, environment: "production" },
@@ -1475,10 +1475,8 @@ describe("reconcileEarnVaultMovements: environment scope", () => {
   it.each(ENVIRONMENT_CLUSTER_CASES)(
     "settles only $environment movements, on $cluster",
     async ({ environment, cluster }) => {
-      const own = await seedExternalWalletMovement(environment);
-      const other = await seedExternalWalletMovement(
-        environment === "sandbox" ? "production" : "sandbox"
-      );
+      const own = await seedWalletMovement(environment);
+      const other = await seedWalletMovement(environment === "sandbox" ? "production" : "sandbox");
       getSignatureStatuses.mockResolvedValue([
         { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
       ]);

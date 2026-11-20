@@ -66,7 +66,7 @@ const productionOnlyStrategy: EarnStrategy = {
   withdrawalSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
 };
 
-/** Veda's USDC PRIME mainnet vault is live (PRO-1777); its devnet Test Vault row stays fundable too. */
+/** Veda PRIME supports production; its devnet Test Vault remains fundable. */
 const vedaPrimeStrategy: EarnStrategy = {
   ...liveStrategy,
   id: "earn_strategy_veda",
@@ -90,7 +90,7 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({ sdpEnvironment: mocks.environment }),
 }));
 
-vi.mock("./earn-program-data", () => ({
+vi.mock("./earn-data", () => ({
   useEarnStrategies: (options?: { cluster?: SolanaCluster }) => {
     mocks.strategyClusters.push(options?.cluster);
     const mainnet = options?.cluster === "mainnet-beta";
@@ -166,10 +166,6 @@ describe("EarnIntegrationGuide", () => {
       "/dashboard/prj_test_sandbox/api-keys"
     );
 
-    // The snippet is the REAL B2B2C contract (PRO-1722): build the unsigned
-    // transaction, the customer's wallet signs, submit the signed bytes. The
-    // treasury route (deposits/execute + custodyWalletId) must not appear here —
-    // a B2B2C partner cannot name a custody wallet.
     const snippets: string[] = [];
     for (const navigationName of navigationNames) {
       await user.click(within(serverFlow).getByRole("radio", { name: navigationName }));
@@ -179,71 +175,23 @@ describe("EarnIntegrationGuide", () => {
       snippets.push(figures[1]?.textContent ?? "");
     }
     const code = snippets.join("\n");
-    expect(code).toContain("/v1/earn/deposits/build-unsigned-transaction");
+    expect(code).toContain("/v1/earn/deposit");
+    expect(code).toContain("/v1/earn/withdraw");
+    expect(code).toContain("/v1/earn/positions?");
+    expect(code).toContain("/v1/operations?");
+    expect(code).toContain("/submit");
+    expect(code).toContain("/refresh");
+    expect(code).toContain("/cancel");
     expect(code).toContain('const SDP_API_URL = "http://127.0.0.1:8787"');
-    expect(code).not.toContain('const SDP_API_URL = "https://api.solana.com"');
-    expect(code).toContain("/v1/earn/deposits/submit-signed-transaction");
-    expect(code).toContain('"Idempotency-Key": idempotencyKey');
-    expect(code).not.toContain("crypto.randomUUID()");
     expect(code).toContain('const STRATEGY_ID = "earn_strategy_live"');
-    expect(code).toContain(
-      "new URLSearchParams({ page: String(page), pageSize: String(pageSize) })"
-    );
-    expect(code).toContain("strategy pagination made no progress before the reported total");
-    expect(code).toContain("const maximumPages = 100");
-    expect(code).toContain("strategy pagination exceeded");
-    expect(code).toContain("ownerAddress");
-    // The preview helpers ship for every strategy, but a strategy with no
-    // slippage contract must not compute or send a floor from one.
-    expect(code).toContain("const minSharesOut = undefined");
-    expect(code).toContain("const minAmountOut = undefined");
-    expect(code).not.toContain("floorForTolerance(quote.sharesOut");
-    expect(code).not.toContain("floorForTolerance(quote.assetsOut");
-    expect(code).toContain("signedTransaction");
-    expect(code).toContain("feePayer?: string");
-    // The deposit body names the strategy by id only; the old client-side
-    // strategy object and its source mint are gone from the copied module.
-    expect(code).toContain("strategyId: STRATEGY_ID");
-    expect(code).not.toContain("sourceTokenMint");
-    expect(code).not.toContain("EMBEDDED_YIELD_STRATEGY");
-    expect(code.match(/return data\.transaction;/g)).toHaveLength(5);
-    expect(code).not.toContain("custodyWalletId");
-    expect(code).not.toContain("deposits/execute");
-    expect(code).not.toContain("requestId");
-    // ... and the guide is the WHOLE loop (PRO-1772), not just the deposit:
-    // poll the movement, read balance + earned, list activity, withdraw the
-    // same two-call way money came in.
-    expect(code).toContain("/v1/earn/movements/caller-signed/");
-    expect(code).toContain("/v1/earn/movements/caller-signed?");
-    expect(code).toContain("/v1/earn/earnings/caller-signed?");
-    expect(code).toContain("/v1/earn/positions/caller-signed?");
-    // The path-addressed owner shapes were retired for the query form; a
-    // snippet regression here would hand partners a 404ing example.
-    expect(code).not.toContain("/v1/earn/earnings/caller-signed/");
-    expect(code).not.toContain("/v1/earn/positions/caller-signed/");
-    expect(code).toContain("/v1/earn/withdrawals/build-unsigned-transaction");
-    expect(code).toContain("/v1/earn/withdrawals/submit-signed-transaction");
-    expect(code).toContain("/v1/earn/withdrawal-requests/build-unsigned-transaction");
-    expect(code).toContain("/v1/earn/withdrawal-requests/cancel/build-unsigned-transaction");
-    expect(code).toContain("previewEarnParRedemption");
-    expect(code).toContain("buildEarnParRedemptionRequest");
-    expect(code).toContain('mechanism: "operatorRedemption"');
-    expect(code).toContain("operatorRedemption request is cancellable while pending");
-    expect(code).toContain("waitForEarnMovement");
-    expect(code).toContain("intervalMs = 1_000");
-    expect(code).not.toContain('movement.status === "confirmed"');
-    expect(code).toContain('movement.status === "finalized"');
-    expect(code).toContain("not economic settlement");
-    expect(code).not.toContain("Buffer.from");
-    expect(code).toContain("earnedUnavailableReason");
-    // A non-JSON error body (gateway 502 HTML) must still throw with the
-    // status, not a bare SyntaxError, in the code partners copy-paste.
-    expect(code).toContain("response.status");
-    // The positions helper pages to completion — a short first page must not
-    // hide withdrawable holdings from the copied withdraw flow — and fails
-    // loudly on a cursor that does not advance rather than looping.
-    expect(code).toContain("if (!data.hasMore) return positions;");
-    expect(code).toContain("cursor did not advance");
+    expect(code).toContain('"Idempotency-Key": idempotencyKey');
+    expect(code).toContain("source: { ownerAddress }");
+    expect(code).toContain("signedTransaction?: string");
+    expect(code).toContain("Show returned terms before asking the customer to sign");
+    expect(code).toContain("Submission returns 202");
+    expect(code).toContain("not a completed payout");
+    expect(code).toContain("Pagination did not advance");
+    expect(code).not.toMatch(/\/v1\/earn\/external-wallet\/|vault-deposits|deposit-transactions/);
   });
 
   it("copies the whole server module in one action, not just the active tab", async () => {
@@ -265,9 +213,9 @@ describe("EarnIntegrationGuide", () => {
     expect(copied).toBe(buildEarnServerIntegration(liveStrategy, "http://127.0.0.1:8787"));
     // Every section rides along even though only the Client tab is rendered.
     expect(copied).toContain('const SDP_API_URL = "http://127.0.0.1:8787"');
-    expect(copied).toContain("/v1/earn/deposits/build-unsigned-transaction");
-    expect(copied).toContain("/v1/earn/earnings/caller-signed?");
-    expect(copied).toContain("/v1/earn/withdrawals/submit-signed-transaction");
+    expect(copied).toContain("/v1/earn/deposit");
+    expect(copied).toContain("/v1/earn/positions?");
+    expect(copied).toContain("/v1/earn/withdraw");
     expect(copied).not.toContain("custodyWalletId");
     expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();
   });
@@ -321,23 +269,15 @@ describe("EarnIntegrationGuide", () => {
     expect(screen.queryByText(/STRATEGY_ID = "earn_strategy_mainnet"/)).toBeNull();
   });
 
-  it("generates quote-derived deposit and withdrawal floors for Veda", () => {
-    // The snippet builder reads only the id and the two slippage contracts; the
-    // provider no longer shapes the copied module.
+  it("lets the API derive enforceable floors from caller slippage", () => {
     const sections = buildEarnIntegrationSections({
       id: "earn_strategy_veda",
       depositSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
       withdrawalSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
     });
     const code = [sections.client, sections.deposit, sections.withdraw].join("\n");
-
-    expect(code).toContain("/v1/earn/deposits/preview");
-    expect(code).toContain("/v1/earn/withdrawals/caller-signed/preview");
-    expect(code).toContain("floorForTolerance(quote.sharesOut");
-    expect(code).toContain("floorForTolerance(quote.assetsOut");
-    expect(code).toContain("minSharesOut");
-    expect(code).toContain("minAmountOut");
-    expect(code).toContain("slippageBps = 10");
+    expect(code).toContain("slippageBps?: number");
+    expect(code).not.toMatch(/floorForTolerance|minSharesOut|minAmountOut|vault-deposit-previews/);
   });
 
   it("defaults to the first available strategy without a separate selection step", () => {
@@ -395,9 +335,7 @@ describe("EarnIntegrationGuide", () => {
     expect(screen.queryByRole("option", { name: /Jupiter Lend USDT.*Sandbox only/ })).toBeNull();
   });
 
-  it("opens a production deep link to Veda once its mainnet vault is live", () => {
-    // The environment gate refused this exact deep link until PRO-1777 filled
-    // Veda's mainnet deployment; now the guide renders end to end.
+  it("opens a production deep link to Veda when its mainnet vault is live", () => {
     mocks.environment = "production";
     renderWithEnglish(
       <EarnIntegrationGuide

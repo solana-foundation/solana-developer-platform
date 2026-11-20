@@ -67,6 +67,7 @@ import { llms } from "@/routes/llms";
 import { members } from "@/routes/members";
 import { onboarding } from "@/routes/onboarding";
 import { openapi } from "@/routes/openapi";
+import { operations } from "@/routes/operations";
 import { organizations } from "@/routes/organizations";
 import { pay } from "@/routes/pay";
 import { payments } from "@/routes/payments";
@@ -420,6 +421,8 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/onboarding", onboarding);
   v1.route("/payments", payments);
   v1.route("/transactions", transactions);
+  v1.use("/operations/*", requireModule("earn"));
+  v1.route("/operations", operations);
   // The release channel alone decides Earn and DvP; a module outside it gets the shared refusal.
   v1.use("/earn/*", requireModule("earn"));
   v1.route("/earn", earn);

@@ -1,1755 +1,220 @@
-# /v1/earn routes — agent notes
-
-HTTP surface for SDP Earn. Provider-neutral: handlers resolve clients through
-the fail-closed registry and check capabilities — no provider-id branches
-anywhere. See `packages/sdp-earn/README.md` for architecture; ADR 0002 for
-invariants (the 2026-08-11 addendum owns the ledger-vs-live rules below).
-
-## The unified movement ledger (PRO-1705)
-
-`earn_movements` is the single authoritative record of every Earn money movement —
-both directions, both execution models — and `earn_positions` is the single
-holdings table behind it. Migrations `0062`-`0065`; ADR 0002's 2026-08-19 addendum
-holds the decisions.
-
-The tables it replaced (`earn_program_withdrawals`, `earn_vault_movements`,
-`earn_vault_positions`) are gone, dropped by `0068` along with the
-`earn_projected_*` views that carried their history across.
-**`earn_provider_wallets` is NOT one of them**: it models an ACCOUNT at a provider
-— the custodial twin of `custody_wallets` — and an account is not a holding. A
-custodial position is the link row between the two, minted when the program wallet
-is linked.
-
-Things worth knowing before changing a movement path:
-- **The shared matrix owns initiated movement transitions.** Legal source states
-  come from `EARN_MOVEMENT_TRANSITIONS` (`@sdp/types`), never from the caller, so
-  terminal regression is unrepresentable rather than merely refused. A transition
-  whose row is not in a legal source state returns NULL — the same answer a lost
-  race gives, and the same contract every other guarded write here has. Only an
-  unknown TARGET throws.
-- **Every movement needs a holding, and a missing one must never fail a money
-  write.** `createCustodialMovement` resolves the holding by JOIN — so a movement
-  can never name one outside its program — and OPENS one if the program has none,
-  retrying once before giving up. A program linked by a revision that predates
-  the ledger has no holding through no fault of the caller, and refusing would
-  take that program's whole withdrawal endpoint down until an operator
-  intervened. It still fails loudly when the program wallet itself does not
-  exist, because the alternative there is money moving unrecorded.
-- **Amounts carry a `denomination`** (`usd`, or the token mint) and share counts
-  live only in share-named columns. No read may sum across rows without grouping
-  by it.
-- **`confirmed` is not terminal** (PRO-1716). The reconciliation sweep keeps
-  polling a confirmed movement until the chain says `finalized`. Atomic
-  movements then enter the terminal `finalized` state; provider-order movements
-  remain economically `confirmed` and record the narrower fact in
-  `chain_finalized_at`, which removes them from the chain queue while they await
-  authenticated provider completion. A confirmed row whose signature has aged
-  out of RPC history is left alone rather than expired — the transaction
-  demonstrably landed, and the blockhash rule only ever applied to one that
-  never made it on chain.
-- **The published vault-deposit DTO still speaks the older vocabulary**, through
-  `LEGACY_VAULT_DEPOSIT_STATUS` in `handlers/vault.ts`: `requested` goes out as
-  `pending`, and `finalized` as `confirmed`. `?settled=` is additionally
-  provider-aware: atomic deposits retain the legacy confirmed boundary, while
-  provider-order and unknown-provider success rows remain discoverable until an
-  authenticated provider-completion fact exists; `failed` is terminal for all.
-  Delete the translation when the DTO adopts the ledger vocabulary.
-  `GET /v1/earn/treasury/movements` is the one read that speaks the ledger's own words.
-- **Ids are heterogeneous by design.** New rows are `earn_movement_…`, while
-  history keeps the `earn_vault_movement_…` / `earn_program_withdrawal_…` ids the
-  projection preserved. Nothing may parse an id for its kind — read
-  `execution_model` — and the keyset cursors validate SHAPE rather than a prefix
-  for the same reason.
-- The vocabulary tables `earn_execution_models`, `earn_movement_directions` and
-  `earn_movement_statuses` are seeded reference data, pinned to `@sdp/types` by a
-  conformance test. Never truncate them in a test fixture.
-- `EARN_MOVEMENT_TRANSITIONS` is written to agree with `0062`'s CHECK
-  constraints, not merely with itself. In particular there is no
-  `confirmed → failed`: the schema ties `confirmed_at` and `shares_out` to the
-  commitment states, so recording that transition could only succeed by erasing
-  observations SDP genuinely made. A confirmed transaction dropped by a fork
-  stays in the reconciliation queue as an open question. Do not add the
-  transition without changing the constraint it contradicts.
-- `0064` established history but does NOT converge rows a legacy-only writer
-  ADVANCED during a rollout or rollback window — `ON CONFLICT DO NOTHING` leaves
-  the stale projection, and neither applier revisits a terminal row. `0065` is
-  the same projection re-stated as a guarded upsert, and it is where the
-  convergence guarantee actually lives. Read both headers before assuming a
-  backfill is self-correcting.
-
-## Route map — with each route's single source of truth
-
-`GET /treasury/movements` is the cross-provider feed over `earn_movements`: one
-chronological history spanning both execution models, which no per-family list can
-serve. It takes NO provider gate (ADR 0002 exit safety — it reports on money that
-already moved) and its visibility is the UNION of what the per-family reads grant,
-enforced in the repository query: vault rows stay project-and-wallet scoped,
-custodial rows stay program scoped. A new read over a table that holds every
-movement is the obvious place for a scoping rule to go missing — do not widen it.
-External-wallet rows are deliberately NOT in this union — the vault arm's
-custody-wallet match is unsatisfiable for an owner-signed row — and are served
-by their own per-owner reads instead (PRO-1772, external-wallet section below).
-
-Every route reads exactly ONE source for the STATE it reports (DB or live
-provider) and never blends them; that is an ADR 0002 addendum acceptance
-criterion, not a style choice. The `earn_provider_wallets` row is the link
-record, not state: a route may resolve which provider wallet a program is and
-then read all of its money live — what it may never do is mix a persisted
-balance with a live one.
-- The `/button-configurations/*` routes (saved builder styling + the public
-  engineering-handoff token) were removed with the dashboard UI builder;
-  migration 0074 dropped `earn_button_configurations`. The retired-surfaces
-  test in `../earn.test.ts` pins both paths at 404. The dashboard's
-  integration guide is derived from the strategy catalogue and persists
-  nothing.
-
-- **Public OpenAPI promotion is a security review gate** (PRO-1872, threat
-  model EARN-027). `registerPublicEarnPaths` decides what partners see, and
-  the public/internal split is a publication boundary. Every runtime route
-  requires a credential, under the same `/v1/*` tracing and rate-limit
-  middleware. Moving a route into the public document or
-  changing its published `security` declaration changes partner-facing scope,
-  which is why it needs a human gate. The
-  pinned operation list in `../../openapi/spec.test.ts` ("publishes the
-  caller-signed money routes") is that gate: growing it requires a security
-  sign-off named in the PR (who reviewed, and the threat-model row the route
-  lands under), and the threat model's revisit trigger fires. Never widen the
-  list just to make the test pass.
-  Earn uses the same release-channel publication rule as every other module:
-  its beta maturity publishes the partner operations in beta and experimental,
-  while stable omits them. OpenAPI, the API reference, Postman, the playground,
-  AI discovery and project provider availability follow that channel. The pinned
-  operation list is asserted against
-  `createPublicOpenApiDocument({ releaseChannel: "experimental" })`.
-  Public OpenAPI declares API-key auth on every operation; the internal
-  document additionally accepts Clerk and session auth.
-
-  Internal route parity is checked by `../../openapi/earn-contracts.test.ts`
-  against the mounted router. Treasury registrations live in
-  `../../openapi/paths/earn-treasury.ts` and reuse runtime request schemas.
-  Deposit, deposit-history and direct-withdrawal response schemas come from
-  `@sdp/types/earn-wire`, shared with the dashboard parsers.
-
-### Asynchronous vault withdrawals (Veda queue and Hastra par redemption)
-
-Asynchronous exits are a separate durable resource, not a slow
-`earn_movement`. The `mechanism` column keeps two different economic contracts
-explicit. Veda's solver queue escrows shares; a later solver transaction pays
-assets, and a post-deadline owner-signed cancellation returns shares. Hastra's
-par request instead redeems PRIME to wYLDS and delegates that wYLDS; a Hastra
-administrator later burns it and pays USDC, while an owner cancellation may
-happen at any time and leaves the owner holding wYLDS rather than recreating
-PRIME. That wYLDS stays part of the position: position reads carry it as
-`parIntermediate`, every close-out asks `isEarnVaultHoldingEmpty` (`@sdp/types`:
-shares AND intermediate zero, the same rule the dashboard's open filter uses),
-and `advanceRequest` reopens the holding on every cancellation, not only a
-solver queue's, so a stale zero-share snapshot cannot retire it. Values that
-sum a holding (earnings `currentValue`, the summary totals) add the
-intermediate through `hydratedHoldingTokenValue`; `tokenValue` itself stays the
-shares' value. A par request redeems either shares or that held intermediate
-(`intermediateAmount`, exactly one of the two in every body schema). The
-intermediate source records `shares = '0'` (migration 0120 admits it for
-operator redemptions only), and its idempotency fingerprint adds `intermediateAmount` without
-changing a shares fingerprint by a byte. Persist both lifecycles in `earn_vault_withdrawal_requests` plus their
-signed action rows. Only a provider-authenticated terminal fulfillment is
-projected into movement/activity reads, using the closing transaction's
-signature and payout; request and cancel transactions remain request history
-and must never be labelled payouts.
-
-Fulfillment writes the request and its `earn_movements` payout atomically in
-`earn-vault-withdrawal-requests.repository.ts`. Migration 0119 identifies that
-payout by `withdrawal_request_id`; several requests may share one closing
-signature. Initiated movements keep their signature uniqueness. Caller keys
-still share the existing ledger constraint, so use distinct keys for direct
-and queued intents; ADR 0003 records the unresolved collision and rollout gate.
-
-Every queue route, custody and external-wallet alike, requires a credential,
-so every share escrow has the durable status and recovery surface the public
-contract promises. All cancel routes take `earn.manage` at the edge, so a key
-without it is refused before sponsorship, a build or simulation. Its movement
-is an exit: signing admission retains credential and wallet checks without
-requiring permission to start new movements. A caller with write access to
-the exact org-owned custody wallet may recover a request whose
-initiating project was deleted; list/detail history remains exact-project
-scoped.
-
-The scheduled reconciler independently advances both signed-action finality and
-provider PDA state. Landed request terms and terminal quantities come from the
-selected provider capability's authenticated lifecycle events/PDA reads. Veda
-and Hastra log parsing each accept `Program data:` only inside their configured
-program's active log frame. A closed PDA without a matching finalized close
-event stays `closed_or_unknown`; missing signature history never proves that a
-live obligation failed. See ADR 0003 for the solver-queue state machine and
-`docs/earn/hastra-prime-inventory.md` for the operator-redemption differences.
-
-Nonfinal action errors never fail an async action. Unknown requested or
-submitted actions rebroadcast their original signed bytes while their
-blockhash is valid; confirmed actions remain open when RPC history is absent.
-Provider observations cannot reopen eligibility while a cancel action remains
-active. Atomic failed-action recovery owns that transition. A rejected create
-may leave `closed_or_unknown` as failed only before provider existence is
-established by a nonce, creation timestamp or durable provider observation.
-
-After finalized blockhash expiry, creates with no provider PDA, authenticated
-close event or finalized transaction need two complete observations at least
-30 seconds apart before atomic failure releases their occupancy. Migration
-0212 separates this evidence from older status-cache misses and retains
-`provider_state_observed` after an open account disappears. New creates start
-false; provider-proven states set true; null legacy history stays protected
-unless its row is still creating. A database trigger retains observations from
-the previous image during a rolling deployment. Provider-proven requests and
-incomplete history remain unknown. Both requested and submitted creates use
-this rule, including a crash after persistence but before send.
-
-Each tick releases expired external request reservations using the finalized
-height of their own cluster. It retains unsigned builds, including cancellation
-builds, for independently broadcast transactions. A late verified submit may
-reclaim a missing or replaced transient lease only after the exact transaction
-succeeded at finality; it cannot replace durable occupancy. Queue submits add
-no chain read; reclaim adds one finalized transaction read and skips broadcast.
-Unconsumed par submits add one finalized creation read. A missing creation
-adds one confirmed-height read and refuses expired builds with 503, retaining
-the signed intent for retry. A known successful creation scans closing
-history (one page of at most 16 signatures plus each candidate's transaction,
-at most 18 RPC calls including creation). An
-unresolved full page defers to operator recovery rather than scanning more.
-A same-or-later close refuses adoption of that historical cycle, even while
-its old lease remains. Consumed builds replay directly from the ledger
-without RPC.
-Known finalized failures return `400 TRANSACTION_FAILED` during late recovery
-for both mechanisms. Unknown execution retains the original intent.
-Recovery RPC outages use `vault-refusals.ts` and return a sanitized
-`503 PROVIDER_UNAVAILABLE`, preserving the original intent. This error mapping
-adds no RPC calls or retries.
-Absent-create recovery adds one transaction read after provider history, reused
-for lifecycle projection if found. Hastra rent routing adds no RPC.
-
-The cleanup height is read only while the environment holds an unconsumed
-build reservation, so retained metadata adds no idle RPC. Missing cluster
-configuration defers cleanup; it never borrows the other cluster's height.
-
-Open requests are a durable due queue, not a full-table poll.
-`next_check_at` is both the next useful provider read and a two-minute claim
-lease. `claimOpenRequests` takes only due rows with `FOR UPDATE SKIP LOCKED`.
-After action reconciliation, the worker claims exactly one request, processes
-it, and only then claims the next, up to 128 per tick. Do not pre-claim that
-whole cap: later rows would spend their lease waiting in memory and could be
-reclaimed by another worker. Pending requests wait until maturity or at most 15
-minutes, subject to the normal one-minute minimum, while every other open state
-stays on the one-minute cadence. A failed provider or RPC read records its error
-and moves `next_check_at` forward before the worker claims another row, so an
-expired lease cannot reclaim the same failing request for the rest of the tick.
-That update never shortens a lease another worker may already hold. Terminal
-transitions clear the schedule. A crashed worker becomes retryable when its
-lease expires, so do not replace this with an in-memory timer or scan every open
-request on every tick. Closed-PDA
-history reads fetch transactions in ordered windows of eight, then inspect
-results newest first; the bound protects RPC capacity and the ordered inspection
-preserves the former serial decision and error semantics.
-
-The external-wallet queue routes are part of the supported Embedded Yield public
-contract; custody queue routes remain internal. Any future route or
-security-declaration change remains an EARN-027 security-scope change and
-requires named security sign-off plus the pinned public-operation update; do not
-widen the surface just to make a test pass.
-- `GET /strategies[/:id]` — **DB** (synced catalogue), env-scoped. Rows are
-  admitted only by the hourly sync cron; the 5-minute metrics refresh
-  (`cron/earn-metrics-refresh.ts`) updates figures only and can never insert.
-  Registered in the internal document and public documents whose release
-  channel runs Earn. Partners need the `strategyId` every deposit build takes
-  and the live APY their own UI shows (`openapi/paths/earn.ts`,
-  `registerEarnStrategyPaths`).
-  - **The list is ranked by deposit size** (PRO-1732): TVL descending, read from
-    `riskMetadata.tvlUsd` in SQL, no-TVL rows last (devnet rows carry none by
-    design), with (created_at, id) keeping the order total so paging cannot
-    repeat or skip a row. Lives in the repository's `listStrategies`, beside the
-    filters, so `total` and the window describe the same ordered set.
-  - **FOUR visibility filters, all server-side, enforced in
-    `handlers/strategies.ts`** (the curation DATA lives in
-    `handlers/curation.ts` so route tests can mock today's picks away — the
-    same rule the surfacing mock in `earn-program.test.ts` follows).
-    `EARN_PROVIDER_SURFACING` (@sdp/types) hides every row of a provider SDP does
-    not currently OFFER — Upshift and Perena today, while Kamino, Veda, Jupiter
-    Lend and Ondo are surfaced; `HIDDEN_STRATEGY_TERMS` hides individual
-    Aave/Morpho-related rows. Jupiter Lend is admitted through its dedicated
-    provider, which validates the canonical USDT asset and jlUSDT receipt mints;
-    Ondo's one USDY row passes uncurated (no `CURATED_VAULTS` pin). The list
-    pushes both into SQL (`providers: SURFACED_EARN_PROVIDERS` +
-    `excludeRelatedTerms`) so `total` and the page window describe the rows the
-    caller can see; `isHiddenStrategy` applies the same two rules to the detail
-    route, which has no query to push them into. Keep them in that one predicate
-    — a detail route that drifts from the list route leaks a row by id.
-  - **Per-vault curation** sits beside them, and is the knob for an opinionated
-    shelf: `HIDDEN_VAULTS` (subtractive — drop one vault, the rest keeps flowing
-    in) and `CURATED_VAULTS` (a hand-picked allowlist — a provider listed there
-    shows ONLY those vaults, so a newly created one does not appear until someone
-    adds it). Both push into SQL so `total` moves with the rows. Since PRO-1727
-    the allowlists are POPULATED — the curated V1 Kamino shelf on
-    mainnet-beta, its devnet equivalents for sandbox — so a new Kamino vault
-    does not surface until someone adds it to `handlers/curation.ts`, and
-    every route test seeding an uncurated reference relies on the
-    `earn.test.ts` bypass mock.
-  - **Curation keys on the vault ADDRESS, never the name.** Kamino's registry is
-    permissionless and the name is free text chosen by whoever created the vault,
-    so a name-keyed rule can be dodged by renaming and tripped by impersonating a
-    curated vault's name. `HIDDEN_STRATEGY_TERMS` is name-based only because it
-    can exclusively REMOVE rows; the same trick pointed the other way would be an
-    admission hole.
-  - **`VAULT_EXPOSURE_CAPS` sits beside them but is NOT curation** (ADR 0004
-    layer 1, PRO-1934): it is the SDP-wide exposure ceiling per vault, in
-    deposit-token units, enforced at deposit ADMISSION rather than at browse
-    (`services/earn/vault-exposure.ts`). Same cluster-and-address keying as the
-    lists above. An ABSENT entry gets `DEFAULT_VAULT_EXPOSURE_CAP`; an explicit
-    `null` is uncapped and must read as a deliberate, commented exception in
-    review.
-  - None of these is entitlement and none is `fundable`. The sync keeps STORING
-    everything a provider reports, so the DB stays a truthful inventory and
-    un-curating is a deploy rather than an hour's wait. None is an allocation
-    gate either — `assertKnownYieldSources` reads the stored catalogue, so an
-    existing program pointed at a curated-away vault keeps working.
-  - Each row carries `hostCluster` (the cluster the INSTRUMENT lives on, stored)
-    and `fundable` (derived per request from `hostCluster` against the caller's
-    environment, never stored). **Catalogued is not the same as fundable**, and
-    since PRO-1742 that is a designed steady state: the sync MIRRORS the
-    production mainnet shelf into every non-production environment, written as
-    two cluster-scoped lanes per environment so each sub-shelf converges
-    independently (`cron/earn-catalogue-sync.ts`), so curation can be reviewed
-    outside production. The LIST defaults to the environment's own cluster and
-    takes an explicit `?cluster=` opt-in for the mirrored shelf; the DETAIL
-    read serves an addressed row whatever its cluster. The per-vault curation
-    lists below are keyed by CLUSTER, so the sandbox mirror inherits exactly
-    the curation production applies. `fundable` is the wire-level warning —
-    partners must branch on it rather than assume a listed strategy takes
-    deposits.
-  - **`fundable` answers the CLUSTER question only, and its two sides are not
-    symmetric.** `false` is definitive (the instrument does not exist on your
-    cluster). `true` is necessary but not sufficient: a deposit additionally
-    needs the provider to expose a money-movement surface — a catalogue-only
-    provider like Kamino reads `fundable: true` in production and still answers
-    501 on `POST /portfolio-accounts` — and the org to be entitled. Those are deliberately
-    NOT folded in: the field describes the instrument, while entitlement is a
-    property of the caller, not of a platform-global catalogue row. The
-    capability answer is delivered first and by name (`requirePortfolioClient`),
-    which is what the gate order below exists to guarantee.
-  - `mapToEarnStrategy` therefore takes the environment. It is the only place
-    `fundable` is computed; the rule itself is
-    `isClusterFundableInEnvironment` in `@sdp/earn`.
-
-**Programs — N per (org, environment, provider) since PRO-1670**, each pinned to
-one vault, nothing rebalancing across them; moving money between programs is
-explicit (withdraw from one, deposit into the other). A program is addressed by
-its OWN id — `mapProgram` puts `id` first in the envelope, and every
-`/portfolio-accounts/:programId` route resolves it through `getProviderWalletById`, which
-scopes to organization **and** environment (the old triple lookup made a guessed
-id structurally impossible; an addressable id does not, so the scoping is
-explicit). `provider` therefore appears ONLY on the create body and as a list
-filter; every per-program route takes it from the stored row. The collection
-routes are declared BEFORE the `:programId` ones so a literal segment can never
-be captured as an id. Uniqueness moved to a GLOBAL `UNIQUE (provider,
-provider_wallet_ref)` (migration 0056) — one link row may claim a provider wallet
-platform-wide, because two orgs pointing at one wallet would each read the
-other's balance.
-- `GET /portfolio-accounts` — **DB list** (`earn_provider_wallets`) + a **live provider**
-  wallet snapshot per row, `{programs, total, page, pageSize}`. Optional
-  `provider` filter and page window. Ordered **oldest first** (`created_at ASC,
-  id ASC` — `selectPage`'s `order` param, which every other list leaves at
-  DESC): consumers that track one program across polls need a stable head, and
-  under newest-first, creating a program would re-point them at a different
-  wallet and let a stale busy snapshot meet a fresh ready one — announcing money
-  that never moved (migration 0056's header). A page of N programs is 2N provider
-  round trips (wallet + yield), issued in bounded waves
-  (`LIST_LIVE_READ_CONCURRENCY` = 8) so a 100-row page cannot burst 200
-  concurrent requests at the shared provider account; one failing read fails the
-  whole list rather than silently omitting a program that holds funds.
-  - **The credential gate runs even when the list is EMPTY** (when `provider` is
-    given — an unfiltered list has no provider to check). Deliberate: the
-    pre-PRO-1670 `GET /program` resolved the row first, so "no program AND no
-    credentials" was a 404; a collection cannot 404 for emptiness, so without
-    the assert a missing key would read as "this org has no programs" and the
-    dashboard would show onboarding instead of its 503 notice.
-- `POST /portfolio-accounts` — **explicit create**: provider call + row insert, then a
-  live snapshot. **201** on a real create, **200** when the provider replayed
-  (there is no `created` boolean on the wire any more — the status carries it).
-  Body is `{provider, allocations, label?, requestId?}`.
-  - **An idempotency key is REQUIRED**, exactly one of body `requestId` (UUIDv4)
-    or the `Idempotency-Key` header — both and neither are 400s, same rule and
-    same reasoning as the withdrawal path. Creation became key-required with
-    PRO-1670: while one program per (org, environment, provider) was the cap, a
-    DB unique caught a retried create; with N programs legal nothing downstream
-    can tell a retry from a genuine second program, and an unkeyed retry
-    provisions a duplicate wallet the customer may then fund.
-  - The key is **derived, never forwarded**:
-    `deriveProviderRequestId(["earn_program_create", organizationId,
-    environment, provider], callerKey)` — the same triple whose unique used to
-    catch the retry. Every org shares one provider account, so two orgs pasting
-    the same placeholder UUID would otherwise land on one provider request and
-    the second would be answered with a replay of the FIRST org's wallet.
-    Deliberately NOT in scope: `projectId` (sibling projects share programs), the
-    allocations, and the label.
-  - **Gate ORDER is load-bearing — key resolution runs LAST.** parseBody
-    (schema 400s) → `requirePortfolioClient` (501) →
-    `assertProviderAvailable` (403) →
-    `assertKnownYieldSources` (400) → project scope (500) → key resolution
-    (400). An unentitled caller sending no key still gets 403, and a provider
-    without the portfolio capability still gets 501, rather than a generic
-    "missing idempotency key" that hides why the call could never work.
-  - **Surfacing runs BEFORE entitlement, and says something different.**
-    `assertProviderAvailable` checks release channel → `EARN_PROVIDER_SURFACING`
-    (the platform-level "we do not offer this provider", which no
-    `providerOverrides` can lift) → entitlement → credentials. Un-surfaced
-    answers 403 `details.reason: "provider_not_offered"` ("not currently
-    offered"); unentitled answers `provider_not_entitled` ("requires manual
-    activation"). Order matters because pointing a caller at an activation door
-    that does not exist is worse than a plain refusal.
-  - **`assertKnownYieldSources` validates against the STORED active catalogue.**
-    It matches every requested `yieldSourceId` against `status = 'active'` for
-    the environment, so whatever a provider client admits is allocatable and
-    whatever it refuses 400s with "Unknown or inactive yield sources". It does
-    NOT re-check existing programs either — a wallet's current allocation stands
-    until someone re-targets the program.
-  - **Its keep-set is filtered by `isClusterFundableInEnvironment` too**, and
-    that half is separately load-bearing: a genuinely single-cluster provider's
-    vaults could be catalogued in sandbox, so provider scoping alone would let
-    devnet money be allocated to an instrument that does not exist on this
-    cluster. This is the
-    last gate before a provider mutation on both create and re-target. The route
-    tests pin it with a seeded row whose cluster is flipped — a Kamino reference
-    would pass on provider scoping alone and prove nothing.
-  - **Browse policy is deliberately NOT one of its gates — neither half.**
-    `/strategies` list/detail hide Aave/Morpho-related rows
-    (`HIDDEN_STRATEGY_TERMS`) _and_ every row of an un-surfaced provider
-    (`EARN_PROVIDER_SURFACING`), while the sync keeps storing both, so the DB
-    stays a truthful provider inventory. This gate reads the STORED catalogue,
-    so a hidden row is still a valid allocation target — correct, because hiding
-    is a presentation choice and an existing program may already point at one.
-    That matters most on `PUT` (re-target), which takes no surfacing gate: an
-    org holding an un-surfaced provider's program must still be able to move its
-    allocation, and inheriting the hide here would freeze it. Existing program
-    positions are never filtered either; hiding one could hide real customer
-    money.
-
-  - **A unique violation on the insert is a REPLAY, not a race.** The provider
-    dedupes on the derived key and answers a retried create with the ORIGINAL
-    wallet ref, so a legitimate retry lands on 0056's global unique by design:
-    the handler re-reads via `getProviderWalletByRef` and, if the row is the
-    same org AND environment, serves that program with 200. Answering 409 here
-    would make the required key produce the very double-send it exists to
-    prevent. A ref held by another org or environment should be unreachable
-    given the key's scope; if it happens the provider handed us someone else's
-    wallet, so it 409s (`"already linked to another account"`) rather than
-    adopting it.
-  - Default label when none is supplied:
-    `sdp-earn-<org>-<env>-<derivedRequestId first 8>`. The suffix comes from the
-    DERIVED key, not the row id: the label is part of the create payload, a row
-    id only exists after the provider call, and a retry whose payload differed
-    could turn a replay into a payload conflict.
-  - `label` stays write-once — no repository update path, so the re-target body
-    does not accept one.
-- `PUT /portfolio-accounts/:programId/allocation` — **re-target this program's single vault in
-  place**, body `{allocations, requestId?}` (no provider, no label). 200 with the
-  live snapshot. Money-in, so it takes the full availability gate +
-  `assertKnownYieldSources`. The idempotency key is OPTIONAL here — re-targeting
-  moves no money and re-applying the same allocations is a provider no-op — but
-  it accepts the same two sources as its siblings (body `requestId` or the
-  `Idempotency-Key` header, both → 400): the platform middleware echoes the
-  header on every response, so a route that silently dropped it would look
-  keyed while minting a fresh provider id per attempt. When present the key
-  derives against the wallet (`["earn_program_retarget", providerWalletRef]`),
-  so one caller key used against two of the org's own programs cannot collapse
-  into one provider mutation.
-- **Allocations (create and re-target both).** Earn V1 is single-vault
-  (PRO-1667): each token group accepts exactly ONE allocation entry, which the
-  sum-to-100 rule then pins to `pct: 100` — one vault per deposit token per
-  program. The weighted multi-entry validation (0.1 grid, sum to exactly 100,
-  duplicate check) is dormant, not removed: the API side of re-enabling weights
-  post-V1 is relaxing the group cap in `schemas.ts` — wire shape and provider
-  contract need nothing. Relaxing it alone does NOT ship weights: the dashboard
-  has no weight authoring or share display (removed by design), and the cap is
-  what keeps the API from accepting portfolios the dashboard cannot manage until
-  that work returns. Concurrent exposure to several strategies is what the
-  _programs_ are for. Every `yieldSourceId` must exist as an **active** synced
-  strategy for that provider+environment.
-- `GET /portfolio-accounts/:programId` — **live provider** snapshot (+ best-effort yield);
-  balances/positions/yield are never persisted. A miss is 404 in every case — a
-  foreign org's id, a sandbox id presented by a production session, and a typo
-  are indistinguishable to the caller on purpose.
-- `GET /portfolio-accounts/:programId/deposits` — **live provider** (provider-observed
-  on-chain deposits; cursor passthrough). Deposits are customer-initiated, so SDP
-  never sees them at intent time — they are deliberately NOT ledgered in V1.
-- `POST /portfolio-accounts/:programId/withdrawals/preview` — **live provider**. `amountUsd`
-  is **OPTIONAL** (PRO-1675): omitted, this is the LIQUIDITY read — what the
-  `token` lane can pay right now, answered as `withdrawableUsd` with no
-  `amountRequestedUsd`; present, it also validates that amount and returns its
-  fee and post-withdrawal total. Money-out gate unchanged
-  (`assertEarnProviderConfigured` only), so an un-credentialed provider still
-  503s rather than answering a fabricated figure.
-  - **The create schema no longer extends this one, deliberately.**
-    `earnProgramWithdrawalCreateSchema` used to be
-    `earnProgramWithdrawalPreviewSchema.extend(...)`, which would have carried
-    the new optionality onto the PAYOUT path — a withdrawal with no amount.
-    Each declares its own `amountUsd`; a test pins the create at 400 when it is
-    missing. Do not re-couple them for the two fields they share.
-  - A provider's refusal may be more informative than its success: a provider
-    answers `409 insufficient_funds` with the lane's balance breakdown, which
-    the provider client normalizes onto `SdpEarnError.details.balance` and
-    `app.ts` already serializes into `error.details`. Consumers should read it
-    rather than surfacing the provider's message.
-- **`POST /portfolio-accounts/:programId/withdrawals/execute` — live provider call + SDP ledger
-  write.**
-  **It refuses a wallet-scoped key** (HOO-1559). It pays a
-  caller-supplied `destinationAddress` out of the organization's provider
-  account, so a selected-scope key bound to one low-value wallet must not be
-  able to drain the program to any address.
-  A program is a provider ACCOUNT, not a custody wallet, so no wallet scope
-  can name it and no custody signer decides its payouts: a wallet-scoped key
-  is refused outright (`assertProgramKeyIsNotWalletScoped`) rather than
-  silently treated as unscoped. The same refusal is on `withdrawal-preview`, which discloses live
-  lane liquidity through the identical chain. The route is gated by
-  authentication and the `earn.execute` action, nothing else.
-  **Replay resolution lives in the HANDLER, not in the gate's
-  `findIdempotentKeyReplay` hook**: that hook only runs for callers using the
-  `Idempotency-Key` header, and this route equally accepts the key as body
-  `requestId`. The handler resolves the key over `earn_movements`
-  (`findCustodialMovementByRequestId`, fingerprint-checked) before any
-  provider call, so both key sources are covered by one path.
-  Needs a retry-stable idempotency key and refuses a request carrying none:
-  EXACTLY one of `requestId` (UUIDv4) or the `Idempotency-Key` header — both
-  and neither are 400s, because no precedence rule can tell which of two
-  sources a caller's retry keeps stable, and following the wrong one pays out
-  twice. `deriveProviderRequestId` hashes the key into a stable id scoped by
-  the program wallet (two tenants sharing the provider account cannot collide;
-  providers validate the shape strictly — v4 only, verified 2026-08-05).
-  Since PRO-1628 the defence is TWO-layer: the derived id anchors an SDP
-  intent row in `earn_movements` — unique per (position, request_id), the
-  custodial holding being 1:1 with the program wallet, so this is 0055's wallet
-  scope in the unified shape: sibling projects reach the same program and, since
-  PRO-1670, one caller key used against two of the org's own programs
-  must not collapse into one payout — with a payload
-  fingerprint that answers a replay from our own ledger (200, live state) and
-  409s key-reuse-with-different-payload BEFORE any provider call. The
-  provider's own request-id dedupe closes the crash window between our insert
-  and its acceptance. A ledger write that fails AFTER provider acceptance
-  never fails the response (money moved): it retries, then logs
-  `earn_ledger_write_failed`. Heal semantics are narrow: the detail poll heals
-  only rows that already carry `provider_reference`; a ref-less row heals via
-  a same-key retry or the ledger sweep — never fuzzy matching. NOTE for the
-  sweep (hard requirement, from review): a ref-less `requested` row can also
-  be a definitively-rejected intent (provider 4xx rethrows and leaves the row
-  untouched) — the sweep must discriminate or verify with the provider before
-  re-driving, or it could execute an intent the caller abandoned.
-- `GET /portfolio-accounts/:programId/withdrawals/:withdrawalRef` — **live provider**, and
-  persist-on-observation: the response is always the provider's live object; the
-  matching ledger row (found via the global (provider, provider_reference)
-  unique) is advanced best-effort as a side effect. Unknown refs serve live state
-  and touch nothing (pre-ledger withdrawals must keep polling fine). A **BOLA
-  guard** runs before the provider call, and since PRO-1670 it compares the
-  **program, not the organization**: the movement names its HOLDING, so the
-  guard re-resolves it through `earn_positions` and 404s when
-  `holding.provider_wallet_id !== row.id`. An
-  org-only check was complete while an org held one program; with several,
-  asking program A for program B's ref would pass it and then drive the provider
-  with A's wallet ref and B's withdrawal ref — a mismatch whose answer is
-  entirely the provider's to decide. Program scope is strictly stronger and still
-  lets an unknown ref fall through. Cross-tenant scoping stays SDP's job, never
-  delegated to the provider's own path scoping.
-- `GET /portfolio-accounts/:programId/withdrawals` — **DB ledger list** (custodial
-  `earn_movements` rows), the house `{withdrawals, total, page, pageSize}`
-  envelope, newest first. Scoped to the path program through its holding: every
-  project in the environment reaches the same programs, so one program = one
-  history, and with several programs that scope is also what keeps a sibling
-  program's payouts out of this list. Note it resolves the program WITHOUT
-  `requirePortfolioClient` and takes NO provider gate — not even the credential
-  check — because the audit trail must outlive credential removal, entitlement
-  disablement, and a provider losing its registry entry entirely. There is no
-  provider query param left to registry-gate; the provider comes from the row.
-- The status machine + appliers live in
-  `services/earn-withdrawal-ledger.service.ts` (Hono-free on purpose: the
-  ledger sweep job and future webhooks consume it too). Terminal set is the
-  shared `EARN_TERMINAL_WITHDRAWAL_STATUSES` in `@sdp/types` — also consumed
-  by the dashboard's outcome polling; never redeclare it.
-- Removed by PRO-1628 (do not resurrect without a new decision):
-  `GET /positions|/movements` (empty ledgers nothing wrote),
-  `POST /deposits/quote|/withdrawals/quote` (501 for every provider — no
-  provider ever implemented per-strategy quoting), and
-  `GET /strategies/:id/nav` (no writer, no reachable reader). A regression
-  test in `../earn.test.ts` pins all of them at 404.
-
-## Vault-direct routes (non-custodial positions)
-
-A second money model, first added for Kamino. A `vault_direct` provider
-custodies nothing: the position may be vault shares, a market receipt token, or
-a yield-bearing token, but there is no provider-managed wallet to provision or
-generic deposit address to fund. Money moves only through a provider-built
-transaction signed by the organization custody wallet or external owner.
-- `POST /deposits/execute` — **build + simulate + sign + record + broadcast**, in
-  that order. Body `{strategyId, custodyWalletId, amount, minSharesOut?}` and a
-  required `Idempotency-Key` header; body `requestId` is rejected.
-  Registered as
-  `requireAction("earn.execute")` → `requestGate` → handler.
-  The caller names a CATALOGUE row, never a raw vault address, so the sync's
-  admission gates still bound this path.
-  - **`requestGate`.** `extractEarnVaultDeposit` resolves identity only
-    (strategy, deposit style, swap, wallet and the key's scope over it, the
-    fingerprint), `findEarnVaultDepositIdempotentKeyReplay` answers a recorded
-    key next, and only then does `admitEarnVaultDeposit` run the money-in
-    state gates below (ADR 0009). A same-key retry of a recorded deposit is
-    therefore never refused by state that changed since (a paused strategy, a
-    flipped floor policy, lost entitlement, its own amount counted against
-    the cap). All of it runs BEFORE `createOrgSignerForCustodyWallet` is
-    reached; the handler only ledgers.
-    Registered as the `earn` family in
-    `src/security/value-moving-conformance.node.test.ts`, whose
-    `valueMovingSourceRoots` now includes `src/services/earn` — it did not, which
-    is how a whole money-moving surface stayed invisible to the sink inventory.
-  - **Idempotency is Earn's own.** Repeat detection is the gate's
-    `findIdempotentKeyReplay` over `earn_movements` (unique
-    `(organization_id, request_id)` for vault-direct rows, migration 0059,
-    fingerprint-checked and project-checked). A concurrent duplicate is closed
-    inside `createSignedVaultDepositIntent`: the per-vault advisory lock and the
-    unique index make exactly one insert win, and `executeSignedVaultIntent`
-    never broadcasts the loser's bytes. A request that failed before the signed
-    intent was recorded leaves no row, so the same key simply runs again.
-  - **Provider/environment capability after strategy resolution.**
-    `isVaultDirectDepositEnabled(environment, provider)`
-    (`@sdp/types/provider-access`) opens a provider only where the
-    environment's cluster carries one of its deployments, DERIVED from the
-    provider's own program table (`EARN_PROVIDER_DEPLOYED_CLUSTERS`): today
-    Jupiter Lend and Ondo on production/mainnet, Kamino on both (PRO-1986),
-    Veda on both now that `VEDA_DEPLOYMENTS["mainnet-beta"]` is filled
-    (PRO-1777). One gate, `assertVaultDepositEnvironmentOpen` (admission.ts),
-    inside `assertVaultDepositAdmissible` and the preview. The dashboard reads
-    the same predicate, so it never advertises an action the API will refuse.
-  - `minSharesOut` is required exactly when `earnDepositSlippagePolicy(provider,
-    environment, host_cluster)` (@sdp/types) is non-null: every production
-    deposit, plus any provider whose builder refuses an implicit floor, minus a
-    Kamino row hosted on a cluster whose kvault build lacks the floor
-    instruction (devnet, `KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT`: the chain would
-    answer Anchor 101 to a floored deposit), and minus a next-NAV subscription
-    whose later transfer-agent share price no Solana instruction can enforce.
-    `assertDepositFloorPresent`
-    (handlers/admission.ts) is the ONE guard both deposit routes call, and the
-    catalogue publishes the same answer as `depositSlippage` from the same row
-    cluster, so a row never promises what the build refuses (a mainnet Kamino
-    row reads the 10 bps default, a devnet one reads null; @sdp/kamino refuses a
-    floor on devnet as `DEPOSIT_REFUSED`). Slippage-capable providers quote the live share
-    rate, and their builders encode the caller's exact floor in the provider
-    instruction. Jupiter Lend uses
-    `depositWithMinAmountOut`; its withdrawal twin uses
-    `redeemWithMinAmountOut` with the caller's `minAmountOut`.
-  - `Idempotency-Key` is **REQUIRED** and body `requestId` is rejected. There is
-    no provider-side dedupe to fall back on: the chain will happily accept the
-    same transfer twice. The header value is stored with a canonical
-    `buildEarnVaultDepositFingerprint`, and the replay is resolved BEFORE the
-    position is claimed — reusing a key with a different intent is a **409**, not
-    a silent replay, and writes nothing.
-  - Gate order: schema → strategy resolution → provider registration →
-    deposit-style check → swap normalization → wallet → wallet scope →
-    **replay** → provider-specific production floor → environment capability →
-    surfacing → entitlement → **catalogue admission** → **vault exposure cap**
-    → custody runtime execution.
-    `assertStrategyDepositable` (`handlers/admission.ts`) is shared with the
-    custodial path and asserts `status = 'active'` plus
-    `isClusterFundableInEnvironment`; without it a `paused` row (an
-    operator's deliberate stop) stayed fundable by id. The cap
-    (`assertVaultDepositAdmissible(c, strategy, amount)`, last because it is
-    the one gate that reads the ledger) is ADR 0004 layer 1: SDP-wide money
-    into this vault across every organization, from `earn_movements`
-    (`sumVaultDepositExposure`, non-failed deposits, in-flight included, under
-    the system database identity because the sum is cross-tenant by
-    definition), plus the amount, against
-    `min(maxAbsolute, tvlUsd * bps / 10000)` from `VAULT_EXPOSURE_CAPS`.
-    Refuses with a typed **409 `VAULT_EXPOSURE_CAP`** only when
-    `EARN_VOLUME_CAPS_ENFORCED` is truthy; otherwise (shadow mode, the
-    default) it only emits `sdp_api_earn_volume_cap_evaluated` with
-    `would_block`. The 409's `details` carry only `vaultAddress` and its
-    message is a fixed sentence: `exposure`, `projected` and `limit` are the
-    cross-tenant aggregate and go to the evaluated event ONLY, because a body
-    that named them told one tenant SDP's total position in the vault across
-    every tenant (SOLA9-9; `earn.vault-exposure-cap.test.ts` pins the
-    redaction on a build and a preview). An unreadable exposure is a 503 in
-    BOTH modes. A readable
-    TVL of 0 is NOT unreadable: it drives the share bound to 0, so at flag
-    flip (PRO-1937) expect `would_block` storms on explicitly zero-TVL rows —
-    expected strictness, not a bug. A vault whose metrics have not landed at
-    all is different: `strategyTvlForExposure` reads null, the verdict falls
-    back to the absolute ceiling with reason `absolute_tvl_unavailable`, and
-    no zero bound applies (Kamino rows carry a TVL from catalogue admission,
-    so a missing figure there is drift, not a warm-up state).
-    Two
-    honesty notes: withdrawals are ledgered in SHARES, so the figure is gross
-    inflow (never subtracts exits, so it errs toward refusing); and it is
-    token units against a USD TVL, which is dollar-for-dollar only because V1
-    vaults are stablecoins. Previews read a 30s in-process cache; the
-    ADMISSION always reads the ledger fresh and folds the admitted amount back
-    into the cache, so an enforced verdict is never decided on a stale figure.
-    **The cap is decided twice for ledgered deposits.** Admission is the early
-    half and cannot see a deposit admitted a moment earlier whose row has not
-    landed, so the ledger write decides again: `ledgerVaultExposureGate`
-    (`services/earn/vault-exposure.ts`) is the `admit` hook both
-    `createSignedVaultDepositIntent` and
-    `createSignedExternalWalletDepositIntent` run inside their transaction.
-    The ledger first takes a per-vault `pg_advisory_xact_lock`
-    (`earnVaultDepositWriteLockKey`) and re-checks the idempotency replay
-    under it (a same-key twin that committed while this write waited is a
-    replay, never a 409), then the hook re-reads the aggregate on the SAME
-    connection (`earn_vault_deposit_exposure`, migration 0101, a plpgsql
-    function that stamps the system identity with a transaction-local
-    `set_config` and restores the caller's before returning; never a
-    function-level `SET`, which Cloud SQL cannot apply, and which
-    `tenant-isolation-coverage.test.ts` rejects), and refuses with the same 409; a
-    refusal rolls the write back with nothing recorded or broadcast. Events
-    carry `stage: "preview" | "admission" | "ledger_write"`. Pinned by
-    `services/earn/vault-exposure.ledger-gate.test.ts` (a real two-transaction
-    race on Postgres).
-  - The route takes `earn.execute`; whether the key may sign with the wallet
-    is the custody signer's decision against its wallet scope (HOO-2099),
-    refused early by `assertCallerWalletInScope` before any work.
-    `custodyWalletId` is the exact `custody_wallets.id` (`cwlt_…`) returned by
-    the wallet surface, never the provider-local `walletId` or public key. The
-    latter can repeat across configurations.
-  - Simulates before signing. The instructions come from a third-party SDK built
-    against live vault state, so a stale reserve set surfaces as a readable
-    program error instead of a landed, failed transaction the customer paid for.
-    Provider build, simulation, custody lookup, signing, and broadcast share one
-    absolute `VaultDeadline`; a slow early stage cannot reset the timeout before
-    a later side effect. The verdict surfaces through
-    `describeVaultSimulationError` (services/earn/vault-simulation-error.ts),
-    which turns recognized `TransactionError` variants into fee-mode-aware prose
-    ("the wallet holds no SOL...") and returns the raw variant BESIDE it
-    (`raw`), which callers put in API `details` and structured logs, never in
-    the customer's message; unrecognized shapes fall back to the capped raw JSON
-    as the message. A `Custom` code renders through the pinned Anchor framework
-    table (anchor-framework-errors.ts: 101 is "the program does not recognize
-    this instruction", not a vault refusal), then the program's own
-    `AnchorError occurred … Error Message` log line, then the bare code. Callers
-    holding simulation LOGS pass them too: a bare `Custom: 1` is refined from
-    the failing program's own log line into rent-shortfall prose naming the
-    missing SOL or token-balance prose, because the variant alone is the
-    System program's "insufficient lamports", the Token program's
-    "insufficient funds" and every non-Anchor program's first error code at
-    once. A rent shortfall's ATTRIBUTION follows the failing frame: inside a
-    top-level ATA create or a top-level System transfer the paying account is
-    the plan's own choice (the sponsor under sponsorship, via the provider
-    payer swap and the allowed-user prefund), while a shortfall inside any
-    other program is that program spending the WALLET's lamports, which a
-    sponsored plan should have pre-funded (the Veda allowed-user prefund in
-    `@sdp/veda`). Sponsor faults therefore carry `sponsorCause`: "balance"
-    (broke sponsor wallet) keeps the retryable "retry shortly" 5xx, while
-    "prefund" (a plan defect) gets a 5xx that does not promise a retry will
-    help. Neither leaks sponsor detail in the body, and neither is ever a
-    caller-fault 400.
-  - **The signed outbox is recorded BEFORE broadcast.** `signVaultPlan` signs
-    without sending; one transaction stores the signature, base64 wire bytes,
-    last-valid block height, movement and activated claim while still `pending`.
-    Only the insert winner broadcasts. A send error leaves that row `pending`
-    and never `failed`, because a lost response does not prove the transaction
-    did not land.
-  - **Who pays is configuration, not a literal** (PRO-1736). One
-    `resolveVaultSponsorship` call answers it for deposits and exits alike, and
-    the resolved value drives all three places that must agree: the compile-time
-    fee payer, the `rentPayer` inside the provider's instructions, and the fee
-    payer used to SIMULATE. Simulation matters as much as signing here, because
-    it enforces that the fee payer can pay: a zero-SOL wallet simulated as its
-    own fee payer dies with `AccountNotFound` and no logs, before signing.
-  - **Sponsorship is per cluster, and the cluster gate is exit safety, not
-    caution.** One process serves both clusters and withdrawals are deliberately
-    NOT environment-gated, so a deployment-global flag would sponsor mainnet
-    exits the instant devnet deposits were enabled, against a paymaster the
-    deployment may not have for that cluster. That is a 5xx on a customer's
-    money-OUT path, the one failure ADR 0002 rules out.
-    `isEarnVaultSponsorshipEnabled` therefore takes the cluster and answers
-    from CONFIGURATION: the flag, plus a Kora for that cluster (a private
-    check in `lib/feature-flags.ts`): its `KORA_<CLUSTER>_URL`, with the boot
-    check guaranteeing `KORA_<CLUSTER>_RPC_URL` beside it; there is no built-in
-    default URL and no unsuffixed fallback, so a deployment wires BOTH cluster
-    trios (PRO-2007).
-    The sponsor reads the movement's cluster from the open cluster scope, so
-    the matching Kora signs, the matching budget network is charged and the fee
-    is priced on that cluster's Kora upstream (`priceSponsoredTransaction`). Opening mainnet is wiring
-    the mainnet Kora in after its policy is opened and `sbp_mainnet_global`
-    is enabled (PRO-1738); no code changes either way.
-  - Sponsored signing stays sign-only, so record-before-broadcast survives
-    unchanged. Turning the flag off returns both routes to `wallet-pays` with no
-    code change.
-  - **Kamino exits retain share-ATA rent.** Build-time creation claims cannot
-    prove who paid it, and a close/recreation can invalidate historical claims.
-    Even a same-transaction creation can use lamports pre-funded by another
-    wallet. The adapter ignores refund hints and removes share-account cleanup.
-    Empty accounts stay owner-controlled and their rent remains recoverable
-    through an explicit owner-authorized close.
-- **Swap-funded deposits (both deposit surfaces).** `sourceTokenMint` (+
-  optional `swapSlippageBps`, default 2, enforced 1..500) lets a caller pay in one of
-  the supported swap-source stablecoins (`EARN_SWAP_SOURCE_TOKEN_SYMBOLS` in
-  `@sdp/types`: USDC/USDG/PYUSD/USDT, mint-resolved per cluster by
-  `earnSwapSourceTokens`) while the vault still receives its own token: the
-  API fetches raw instructions from Jupiter's Router
-  (`services/earn/jupiter-swap.service.ts`, `GET {JUPITER_SWAP_API_URL}/build`,
-  keyed by `JUPITER_SWAP_API_KEY`, fail-closed 503 when unset) and PREPENDS
-  them to the provider plan, so swap and deposit land atomically or not at
-  all. The shared normalization is `resolveDepositSwapRequest`
-  (handlers/shared.ts): unsupported mint 400s, source == deposit mint is a
-  no-op, a tolerance without a source 400s. Rules that follow from ExactIn
-  routing: `amount` becomes the SOURCE amount; the deposit is sized to the
-  swap's `otherAmountThreshold` (the guaranteed floor — output above it stays
-  in the owner's token account, bounded by the tolerance); the ledger row
-  records the DEPOSIT amount in the deposit mint, never the source amount,
-  because `denomination` is the deposit mint. The fingerprint gains
-  `swapSourceTokenMint`/`swapSlippageBps` ONLY when swapping (legacy
-  fingerprints stay byte-identical), and it forces `wallet-pays` — Jupiter's
-  programs are not paymaster-allowlisted. External-wallet builds pass a
-  distinct `feePayer` to Jupiter as its `payer`; validation admits that signer
-  only on the exact idempotent ATA-create setup instruction while the swap
-  itself remains owner-only. Any other signer is a provider failure. Size is
-  checked locally before simulation so an oversized base64 transaction does
-  not collapse into an opaque RPC `-32602`. An external-wallet build retries
-  once with a compact 132-bit SHA-256 request memo. If a non-swap plan still only
-  overflows because it has a distinct fee payer, the API returns a clean 400
-  telling the caller to rebuild owner-paid. Swap oversize handling after
-  lookup-table compression (`VaultTransactionTooLargeError`): one re-quote at
-  `RETRY_SWAP_MAX_ACCOUNTS` with the compact request memo, then the custody
-  path refuses (400) while the external-wallet build answers the SPLIT contract:
-  `{ requiresSeparateSwap: true, swap: { transaction, … }, followUp }`, an
-  unsigned swap-only transaction the owner signs and broadcasts itself
-  (persisting no consumable build; it writes only the orphan-detection
-  ADVISORY described in the external-wallet section),
-  followed by an ordinary unswapped build for `followUp.amount`. Jupiter
-  routes MAINNET only: on devnet the mints are pinned per cluster but Jupiter
-  answers "not tradable", surfaced as a 400.
-- `POST /deposits/preview` — the deposit QUOTE: what the vault's own
-  live accounting would mint for `{strategyId, amount}`, from which the
-  dashboard derives its `minSharesOut` floor. A live read SHAPED LIKE MONEY-IN:
-  no wallet, no request gate, no idempotency key — it moves nothing — but it
-  exists only to open a NEW position, so it takes the deposit's own gate order
-  deliberately. The route takes `earn.read`, then the handler applies the
-  environment fail-close (`isVaultDirectDepositEnabled`, 403), catalogue row
-  (404), deposit style (400), provider availability (surfacing and
-  entitlement), admission (`assertStrategyDepositable`), the vault exposure
-  cap evaluated WITHOUT throwing (`checkVaultExposure`; an unreadable exposure
-  still 503s), then capability (`supportsVaultDepositQuote`, 501 for a
-  provider that cannot quote). A vault that will not take the deposit answers
-  200 with
-  `blockingIssues` in the provider's own words; an unusable amount maps through
-  the shared refusal vocabulary (`services/earn/vault-refusals.ts`) to a 400.
-  An ENFORCED cap block is appended to `blockingIssues` as
-  `{ code: "VAULT_EXPOSURE_CAP" }` after the provider's own, so a partner's
-  existing handler covers both; its `message` is the fixed sentence with no
-  figures (SOLA9-9, see the deposit gate above); in shadow mode the preview
-  deliberately reports nothing (the deposit would land, and a preview that
-  says otherwise is a lie) and only the evaluated event records `would_block`.
-  The response also carries `feeSponsored` — sponsorship INTENT
-  (`isEarnVaultSponsorshipEnabled` against the environment's cluster, the same
-  gate `resolveVaultSponsorship` applies at execution). The withdrawal preview
-  carries the same field. **The dashboard does NOT read it from here**: a
-  preview is only fetched for providers with a quote-derived floor, so a flag
-  that travels only with a quote is unreadable for Kamino, and the confirm
-  note claimed wallet-pays on every sponsored Kamino deposit. The dashboard's
-  fee copy reads `feeSponsored` on the STRATEGY row (`mapToEarnStrategy`,
-  derived per request like `fundable`, `false` when not fundable) for
-  deposits and on the VAULT POSITION (`listEarnVaultPositions`) for exits; a
-  swap-funded deposit is always wallet-pays and the client owns that override.
-  POST because the parameters are a body, like the custodial
-  withdrawal-preview. See "Gate asymmetry" for why this preview alone carries
-  money-in gates.
-- `GET /deposits/provider-signed` — this workspace's recorded deposits, **DB only**,
-  newest first, keyset-paged. The DISCOVERY tier: it is what lets a client
-  re-derive which of its deposits are still in flight after losing local state,
-  the way the custodial side re-derives withdrawals from its ledger. Scoped by
-  organization, environment, direction and PROJECT — the same four rules as
-  the detail read. Earn reads are project-scoped (HOO-2099).
-  - `?requestId=` narrows to the caller's own idempotency key, which is how a
-    caller that lost the response finds the deposit recorded under it.
-  - A key is caller-chosen `[\x20-\x7e]{1,255}` (`middleware/idempotency-key.ts`),
-    so it may be one character, and it is **published on chain** in the deposit
-    memo (`services/earn/vault-deposit.service.ts`). It is therefore never a
-    capability: the route re-applies every scoping rule, so a guessed key can
-    only surface a deposit the caller could already read. It is also why the key
-    is a QUERY filter and not a path segment — legal keys contain `/` and `?`.
-  - **The replay decision is project-scoped IN THE REPOSITORY, not only at the
-    route.** `findVaultMovementByRequestId` is keyed on `(organization_id, request_id)`
-    and the server fingerprint (`buildEarnVaultDepositFingerprint`) omits the
-    project, so a key first used by a SIBLING project matched on both and its
-    movement was returned as a replay — the wrong deposit, plus its amount and
-    signature. Reachable because the key is unique per organization, not per
-    project. The rule is ONE exported function —
-    `assertMovementIsOwnReplay` (`db/repositories/earn-movements.repository.ts`) —
-    enforced at EVERY site that resolves a replay: the route guard
-    (`findEarnVaultDepositIdempotentKeyReplay`), `depositIntoVault`'s fast
-    sequential preflight (`services/earn/vault-deposit.service.ts`), the
-    `createSignedDepositIntent` transaction preflight, and the concurrent-insert
-    loser. It kept re-appearing as a bug precisely because it was re-implemented
-    per site — the route guard was fixed and the repository missed; the
-    repository was fixed and the service fast path missed. A new replay site
-    calls the shared function or it is wrong.
-    Deliberately NOT fixed by adding the project to the fingerprint: that value is
-    persisted on `earn_movements.idempotency_fingerprint`, so changing it would
-    409 every in-flight retry across a deploy.
-  - `?settled=false` returns only movements that can still change, and recovery
-    always asks for that. It is not a convenience: a client filtering an
-    unbounded history locally has to page it all, and a workspace busy enough to
-    push an in-flight deposit past the first page would silently stop tracking
-    it. Reconciliation retains ambiguous outcomes; blockhash expiry and nonfinal errors alone are not terminal evidence.
-  - 0062's `idx_earn_movements_direction_created` (`(organization_id,
-    environment, direction, created_at DESC, id DESC)`) is what orders this
-    page; the sweep, replay, chain and per-position lookups each have their own
-    index — none of them can.
-- `GET /deposits/provider-signed/:movementId`: one recorded movement with a scoped,
-  fail-soft read-through of its exact Solana signature. Chain truth advances the
-  same guarded ledger row immediately; an RPC failure returns the last durable
-  row and leaves recovery to the scheduled reconciler. The read never
-  rebroadcasts or expires an unknown signature. `pending` here means "SDP could
-  not establish that this reached the network", never "failed".
-  - **No provider gate**, same ADR 0002 reason as `/positions/provider-signed`: it reports
-    on money that has already left the customer's wallet, so un-offering the
-    provider must not take away the answer to "did my deposit land". Deliberately
-    no strategy lookup either — an un-catalogued strategy must not cost anyone
-    that answer, so the response carries `provider`/`providerReference` off the
-    movement row and leaves the display name to the caller.
-  - **Three scoping rules, all answering 404 rather than 403** — a caller who may
-    not see a movement must not learn it exists. ORGANIZATION (enforced inside
-    the repository query; the BOLA guard, same reasoning as
-    `getEarnProgramWithdrawal`), ENVIRONMENT (a sandbox key must not read a
-    production movement; the row carries its own, so this is a comparison and
-    not a second query), DIRECTION (`withdraw` is not a deposit — the column is
-    the only thing separating the two on a shared table, and it closes the
-    vault-withdraw path before there is anything to leak through it), and
-    PROJECT (an EXACT match — `project_id` is nullable only through
-    `ON DELETE SET NULL`, so a null means the project was DELETED, and accepting
-    it would make a deleted project's deposits addressable through sibling
-    projects' reads).
-  - Wallet-binding scope comes from `listReadableEarnVaultWallets`, **shared with
-    `/positions/provider-signed`**. Keep it shared: a binding that hides a position has to
-    hide that position's deposits too, and two copies of that rule is how they
-    drift. Both routes are pinned together in `../earn.vault-positions.test.ts`.
-- `GET /positions/provider-signed` — DB claim rows **hydrated live from chain**. Shares and
-  value are never persisted: for a non-custodial vault the chain IS the provider.
-  Takes **no provider gate at all** — it is a read of money the org already
-  holds, and hiding it when a provider is un-offered would close the door out.
-  It is project-scoped (HOO-2099): a key's wallet scope narrows only the wallet
-  list and what SDP signs with. Mind the id spaces anyway —
-  `earn_positions.custody_wallet_id` is the `cwlt_…` row id, never a provider
-  `walletId` (`privy_…`).
-  A failed chain read leaves a position UNHYDRATED rather than zero; reporting
-  zero is a claim about someone's money that a failed RPC call cannot support.
-  The "live hydration unavailable" warning carries `causeChain`, the flattened
-  `.cause`/`AggregateError` tree with URLs, query strings and external-wallet
-  owners scrubbed: the top-level message never names the transport failure.
-  Every owner/provider job shares one request-wide `VaultDeadline` and runs in
-  bounded waves of eight. Giving each queued owner a new deadline makes the
-  route's latency ceiling grow with portfolio size. Empty-position close-out
-  writes use the same concurrency bound and remain fail-soft.
-  Jobs in flight together with the same environment, RPC endpoint list (as a
-  hash, never the URL), provider, owner, reference set and minimum slot share
-  one provider read, across custody and external-wallet routes. Each route
-  passes `rowsReadAt: markVaultPositionRowsRead()` taken right after its rows
-  query, and every provider read of that hydration runs under
-  `withReadFloor(rowsReadAt)`. A caller joins only a read whose creator read
-  its rows no earlier than it did, and provider-level request sharing must join
-  only requests stamped after the caller's floor (`packages/sdp-rpc/CLAUDE.md`,
-  "Read floors"), so no read reuses a provider request sent before its rows
-  were read. Close-out trusts the rows' `updated_at`, and an earlier request
-  could return a stale zero for a holding a deposit refilled since. Owners on
-  one page share one floor, so they still share provider requests across
-  waves. It is not a cache: entries are removed on
-  settlement. The read runs on the first caller's deadline; each caller
-  validates the snapshots itself and stops waiting at its own deadline.
-
-- `GET /vault-share-reconciliation` — chain-versus-ledger REPORT for the custody
-  claims above (PRO-1741). The positions read can only serve what SDP recorded,
-  and `self_service` custody credentials make divergence reachable (an org can
-  sign from the same wallet outside SDP). This read enumerates each scoped
-  wallet's SPL balances (`getSplTokenBalances`, both token programs), attributes
-  share mints through the STORED catalogue (`listShareMintedStrategies`: no
-  status filter and no curation — a paused or hidden vault's shares are still
-  money — but cluster-scoped, so the PRO-1742 mirror can never claim a balance
-  read from the environment's own cluster), and reports both disagreements:
-  `unrecordedHoldings` (held shares of a catalogued vault with no visible claim)
-  and `unbackedPositions` (a visible claim whose wallet holds none of its
-  shares; a claim with an unsettled movement is excluded — the ledger already
-  explains that disagreement and the sweep settles it). A zero-share claim
-  with an open queued withdrawal request goes to `queuedWithdrawalPositions`
-  with its request ids instead: the request escrowed or burned only the shares
-  it covers, and no per-claim share total exists to prove it covers them all,
-  so the claim is listed, not judged unbacked or hidden. A CANCELLED operator
-  redemption never recreates the shares it burned, so the intermediate it
-  left (Hastra wYLDS) can back that claim and keep it out of both lists
-  (`redemption_intermediates`). Landed open requests own what they delegated;
-  what remains backs a sole retaining claim even if every `creating` or
-  `closed_or_unknown` request's amount is there too, and claims sharing the
-  mint only when it covers all of them. Anything short of certain is reported
-  with `ambiguousBacking: true`, never guessed; a failed request backs
-  nothing. A duplicated share mint
-  attributes to the active-then-newest row and sets `ambiguousAttribution` when
-  the candidates disagree on the vault identity — `share_mint` carries no
-  uniqueness rule, and a re-listed vault leaves its predecessor row behind.
-  **Report-only in both directions**: it writes, adopts, and closes nothing — a
-  holding does not name the request that produced it, so adoption would guess
-  attribution, and a scan that writes money records fabricates claims the moment it has a
-  bug. Claim visibility is the positions read's EXACT predicate by construction
-  (`CUSTODY_VAULT_CLAIM_VISIBILITY_SQL` — a broader match would mark a holding
-  recorded while `/positions/provider-signed` still hides it), and wallet-binding scope is
-  the same `listReadableEarnVaultWallets`. No provider gate (ADR 0002: money the
-  org already holds). Every balance read goes to the environment's own cluster
-  pool, whose genesis guard refuses a wrong-cluster endpoint before it answers
-  (a wrong chain would report every position unbacked), and a per-wallet read
-  failure, that refusal included, degrades to a named `unreadableWallets` entry
-  whose claims go unjudged, never a zero-share finding. The whole pass runs under one
-  `VaultDeadline`, so a data-driven wallet count bounds what gets READ, never
-  how long the request runs: an over-budget wallet is unreadable, not a hung
-  request and not a silent skip. Registered in the INTERNAL OpenAPI document
-  only — partners hold no custody wallets for this read to reconcile.
-
-- `POST /withdrawals/provider-signed/preview` — the exit QUOTE the dashboard derives its
-  `minAmountOut` floor from (`supportsVaultWithdrawQuote`; 501 for a provider
-  without the capability), the deposit preview's mirror with deliberately
-  DIFFERENT gates: EXIT gates only (ADR 0002) — position scoping (404) — no
-  surfacing, no entitlement, no admission, no environment capability.
-  Registered as `requireAction("earn.read")` and project-scoped, exactly as
-  `GET /positions/provider-signed` answers the same key.
-  The dashboard fingerprints each flow's idempotency key on the USER'S
-  tolerance (reproducible after a reload) and remembers the floor a held key
-  was minted with separately, because the API's own fingerprint includes the
-  floor and refuses a replay that changed it.
-
-Capability dispatch is `supportsVaultDirect` (`@sdp/earn/capabilities`), resolved
-through `services/earn/execution-registry.ts` — the one place a provider id maps
-to an executing client. `EARN_PROVIDER_CLIENTS` stays the CATALOGUE registry so
-the hourly sync keeps its small dependency surface.
-
-Hastra is the exception where one executing client retains two exit builders
-but the API deliberately exposes only one by default. Its native operator par
-redemption remains available with no provider credential; the Jupiter
-wYLDS→USDC quote/build capability requires both the default-off
-`EARN_HASTRA_DEX_EXIT_ENABLED` flag and `JUPITER_SWAP_API_KEY`. Apply that gate
-only to discovery and new DEX quotes/builds. Deposits, position reads, par
-request/cancel/reconciliation, signed-build submission, and reconciliation of
-an already recorded atomic DEX movement must not inherit it. In particular,
-the movement reconciler must classify historical settlement through an ungated
-registered-client path (or equivalent durable contract), or switching the flag
-off would misclassify an atomic movement as a provider order.
-
-The every-minute vault reconciliation worker consumes
-`idx_earn_movements_unsettled` in bounded pages. The cron service's Cron Definition uses the same transition service as the
-interactive detail reads. The sweep additionally rebroadcasts the recorded signed bytes while
-the blockhash remains valid and marks an expired, unlanded movement failed.
-Never rebuild a transaction during recovery.
-
-**The Earn sweeps run once per environment** (HOO-2148, ADR 0011). The vault
-movement sweep (with its queued-withdrawal sibling), split-swap detection and
-the metrics refresh are `cluster` Cron Definitions: each registration runs
-inside its environment's cluster scope, selects only that environment's rows
-(`currentClusterScope().environment` into every claim, repair, backlog and
-cleanup query) and takes its cluster from the scope, never from a row. Each
-tick event carries `environment`, and the sdp-infra rules group by it. The
-chain reads the sweeps make themselves go through `createClusterRpc()`:
-statuses, heights and history, the payout and receipt repairs, the
-queued-withdrawal build cleanup (its height read only when
-`hasUnconsumedExternalBuilds` says something could expire), the split-swap
-height and the deposit-mint guard, and so do the shared services they call
-(rebroadcast, provider position and queue reads). The catalogue sync stays
-`global`, because its sandbox mirror lane writes production's snapshot, and
-runs each lane's provider fetch in that lane's environment's scope
-(`runInEnvironmentClusterScope`); its writes are DB-only.
-
-**The sweep must fail LOUDLY, and that is a correctness property** (PRO-1863,
-threat model EARN-006). A chain read failure used to `return` cleanly, so the
-batch went unjudged while `sdp_cron_run` recorded `ok`: the only trace was an
-error log line, with no alertable event name and no backlog signal anywhere
-that money had stopped settling. Now a completed tick emits
-`sdp_api_earn_vault_reconciliation_tick` (the
-`sdp_api_sponsorship_reconciliation_tick` precedent) carrying the batch outcome
-counts plus the backlog gauges read AFTER the tick, and any failure (a status
-read, a block-height read, or a per-movement error) marks the tick
-error-level and THROWS so the cron service's run event records `status: "error"`.
-Per-movement errors count too, deliberately: reads can answer perfectly while
-the write side is down (pool exhaustion, a send-side RPC outage), and an ok
-tick over a batch where nothing settled is the same silence. The sponsorship
-reconciler takes the identical posture, emitting its tick and then throwing
-when any item failed. The cron service absorbs the throw: it logs the `error` run
-event and `NodeBackgroundRunner.run` attaches its own catch, so later slots
-still run. Do not "helpfully" swallow it.
-
-Three details that look like bugs and are not:
-- **The block-height read is gated on rows that can CONSUME a height**: a null
-  RPC status on a row not already `confirmed`. A `confirmed` row whose
-  signature aged out of RPC history short-circuits to `unchanged` before the
-  height is read, and is a permanent member of the claim set, so gating on the
-  RPC answer alone spent a discarded call every minute and let its failure fail
-  a tick that had done its whole job.
-- **The backlog is dimensioned for the same reason.** Those parked `confirmed`
-  rows never leave the queue, so a total-only age latches and pages forever;
-  `backlog_blockhash_bound` / `oldest_blockhash_bound_age_seconds` are the
-  actionable subset, and the withdrawal split keeps the exit path visible on
-  its own axis (ADR 0002).
-- **"Completed tick" is the honest qualifier.** A rejection from the claim or
-  backlog QUERY skips the event, exactly as the sponsorship reconciler skips
-  its tick when its own candidate read fails. The run is still loud
-  (`sdp_cron_run` error). Do not synthesize a fallback tick: it
-  could only carry a null backlog (invisible to a threshold rule) or a zero,
-  which reads as a drained queue and would CLEAR a firing alert mid-incident.
-  Alert on the ABSENCE of the tick instead.
-
-Pinned by the "sweep telemetry" describe in
-`../../services/jobs/reconcile-earn-vault-movements.test.ts`; the runner logs
-the `sdp_cron_run` error event itself via `logCronRun` (`src/cron/run-event.ts`).
-
-**Expiring an unknown vault movement takes TWO observations.** A broadcast
-response can be lost after landing while the durable row still says `requested`.
-The sweep therefore uses finalized block height, checks finalized transaction
-history after a null signature status, and recovers a historical receipt through
-the normal settlement path only when its execution result is known. Missing
-execution metadata or an unavailable history read leaves the row recoverable and
-fails the tick visibly; neither establishes success, failure, or signature absence.
-
-A null status counts as absence only from a node at least as current as the
-finalized height that proved expiry: the sweep reads height and slot together
-(`getChainHeight`) and re-reads every expired row's status with
-`minContextSlot` at that slot, as sponsorship budget reconciliation does. Per-
-request pool failover can answer the batch statuses from an endpoint behind the
-one that answered the height; a failed re-read leaves those rows unjudged and
-fails the tick. The queued-withdrawal sweep applies the same rule at its
-finalized height before any expired request or cancel recovery; both share
-`reReadExpiredStatuses` (`@sdp/rpc/solana`) with the payments settlement tracker.
-
-When neither status nor history observes the transaction past its window, a
-`requested` row moves conservatively to `submitted` through the guarded writer.
-The sweep records `unknown_signature_observed_at` on that submitted row. Only a
-later tick with another absent status and absent finalized receipt can expire it.
-A positive observation in between advances it normally. The migration 0092
-constraint and single-writer rule remain intact; no migration is required.
-
-A `confirmed` row has positive inclusion evidence and is never expired for an
-absent signature. Interactive GET reads pass no block height and cannot expire
-or mark an unknown signature. Tests live in the ambiguous-broadcast recovery and
-expiry describes of `services/jobs/reconcile-earn-vault-movements.test.ts`.
-
-### Vault withdrawals — the exit half (PRO-1702)
-
-- `POST /vault-withdrawals` — **build + simulate + sign ALL legs + record ALL
-  legs + broadcast in order**. Body `{positionId, shares, minAmountOut?}` and a required
-  `Idempotency-Key` header (body `requestId` rejected, same as deposits).
-  Registered `requireAction("earn.execute")` → `requestGate` (extractor
-  `extractEarnVaultWithdrawal`) → handler. Registered as the second `earn` entry in
-  `value-moving-conformance.node.test.ts`.
-  - **The caller names its own POSITION, never a strategy and never a raw
-    vault address.** The position row carries the vault, the signing wallet
-    and both mints, so the exit has NO catalogue dependency — a delisted vault
-    stays exitable. `expectedAssetIdentity` is the position's stored mints.
-  - **Gates: 404 position scoping (org+environment+kind) and `earn.execute` —
-    and nothing else; the custody signer decides the key's wallet scope, as
-    for every exit (ADR 0007 addendum).** One caller-fixable 400
-    sits beside them without being a gate: a provider whose
-    `withdrawalSlippage` policy is non-null refuses a floor-less
-    `minAmountOut` (PRO-1861 — the wire contract the strategy row documents;
-    the floor comes from the exit preview, so it can never strand a
-    position). No surfacing, no
-    entitlement, no availability, no admission, no environment capability
-    (`isVaultDirectDepositEnabled` deliberately not consulted: an exit works in
-    production today, where deposits are closed). The only provider-shaped
-    answer is capability: `resolveVaultWithdrawClient` narrows on
-    `supportsVaultWithdraw` and a provider without it is a 501 — a statement
-    about SDP's plumbing, never permission. Pinned by the exit-safety describe
-    in `../earn.vault-withdrawals.test.ts`.
-  - **ONE TRANSACTION MODEL.** A vault exit is one `earn_movements` row,
-    denominated in the share mint, with one signature, signed transaction and
-    blockhash window. The complete Kamino instruction sequence is compiled with
-    its lookup table and idempotency memo; plans above Solana's packet limit are
-    rejected. The row is durable before broadcast and uses the same reconciler
-    as a deposit.
-  - The wire exposes the movement signature directly for explorer links.
-    `confirmed` remains non-terminal. Atomic chain finality advances to
-    `finalized`; known provider-order chain finality stamps
-    `chain_finalized_at` without advancing the economic status, so chain polling
-    stops while the movement stays open for authenticated provider completion.
-    `failed` stops every route.
-- `GET /withdrawals/provider-signed` / `GET /withdrawals/provider-signed/:movementId` — the deposit
-  reads mirrored: the list is DB discovery and the scoped detail is a fail-soft
-  signature read-through. Both have NO provider gate (ADR 0002), the same four
-  404 scoping rules with `direction = 'withdrawal'`, and the same wallet-binding
-  scope through `listReadableEarnVaultWallets`. `?requestId=` serves the one
-  logical withdrawal, and `?settled=` uses that provider-aware settlement
-  boundary rather than treating an uncorrelated provider-order share leg as a
-  completed payout.
-
-### External-wallet (caller-signed) routes — the B2B2C money path (PRO-1722)
-
-A third signer, not a third model. An _external wallet_ is a NON-CUSTODIAL
-wallet the partner's platform connects — SDP holds no key for it and its owner
-is not an SDP tenant. Its movements are `vault_direct` rows in the same ledger:
-one signed transaction, recorded before broadcast, settled by the same
-reconciler. The
-signer distinction is a column pair — exactly one of `custody_wallet_id` and
-`owner_address` per vault row (migration 0070) — and every treasury read
-scopes by custody wallet, so external-wallet rows are structurally invisible
-to those surfaces. Full contract: ADR 0002 addendum 2026-08-26.
-
-#### Access
-
-Every external-wallet route, like every other Earn route, requires a
-credential: an API key, or a dashboard session with a project. The request runs
-in that project's environment and cluster scope (`projectContextMiddleware`)
-and takes its declared action (`earn.read`, `earn.execute` or `earn.manage`).
-A strategy row from another environment is 404 (`requireEarnStrategyForCaller`,
-context.ts); the deployment's `ENVIRONMENT` never selects a cluster.
-
-Every direction is BUILD then SUBMIT, so SDP records each movement or queued
-request before broadcast and can guarantee durable status and recovery
-(`handlers/external-wallet.ts`, `handlers/queued-withdrawals.ts`,
-`services/earn/vault-external-wallet.service.ts`):
-- `POST /deposits/build-unsigned-transaction`: **build + simulate + compile,
-  never sign.** Body `{strategyId, ownerAddress, feePayer?, amount,
-  minSharesOut?}`. It enforces environment capability, the share floor
-  (`assertDepositFloorPresent`), surfacing, entitlement, catalogue admission,
-  and the vault exposure cap through the same admission helpers as the custody
-  path. The provider plan is built for the OWNER and returned with
-  `{transactionId, transaction, sponsored}`. The build persists
-  `earn_external_wallet_transactions` so a later submit can prove byte
-  equality and repeat the cap decision under the ledger lock. No idempotency
-  key is accepted because a build moves no money and expires.
-- **`feePayer`: the partner pays.** Optional; committed at
-  BUILD time (it lives in the message bytes, so the submit's message equality
-  makes a swapped fee payer a refused submit, never a substitution). One
-  `caller-provided` fee mode then drives all three places that must agree
-  (`vault-sponsorship.ts` rule): the compiled fee-payer seat (slot 0, one
-  extra required signature the partner adds outside SDP), the SIMULATION fee
-  payer (the funds check moves to the partner wallet — the zero-SOL owners
-  this exists for must not fail it; a broke partner 400s naming the fee
-  payer), and the provider's `rentPayer`, so a first deposit's share-ATA rent
-  can be partner-funded. The movement records the planned payer; Kamino does
-  not treat that claim as proof of payment or use it to authorize a refund.
-  For a swap-funded deposit, the same address is Jupiter's `payer`, but it is
-  accepted only as the idempotent ATA-create payer; the owner remains the sole
-  swap authority.
-  `feePayer === ownerAddress` normalizes to absent (route and service both).
-  Compile asserts the signer set ORDERED AND EXACT — `[feePayer, owner]`, or
-  `[owner]` without one — which both refuses a plan smuggling an extra signer
-  and refuses a fee-payer build whose plan never names the owner as a signer
-  (money must not move on the partner's signature alone). The split-swap
-  answer carries `feePayer` through `followUp` and compiles the standalone
-  swap with the same payer. This is the CALLER's wallet co-signing, not Kora;
-  SDP sponsorship for caller-signed movements stays PRO-1744.
-- **A split answer records an ADVISORY, never a movement** (PRO-1864, threat
-  model EARN-026). The standalone swap is the one transaction this flow hands
-  out that SDP never sees again, so the split branch writes
-  an `earn_split_swap_advisories` row (owner, strategy, the swap floor in ATOMS
-  with the mint's decimals, the swap's last valid block height, and the owner's
-  deposit-token balance read at build time as a baseline) before answering.
-  The insert and baseline read are FAIL-CLOSED: money in may
-  refuse, and a blind advisory could only ever page on any wallet that held
-  the deposit token. `services/jobs/detect-orphaned-earn-split-swaps.ts` then
-  judges each open advisory every minute, once per environment (a `cluster`
-  Cron Definition run by the cron service): an in-flight deposit or
-  an unconsumed follow-up BUILD inside a 30-minute window is the partner still
-  working; once the swap's blockhash is dead and a 30-minute grace has run, the
-  intended follow-up is checked first and is DEFINITIVE: a `confirmed`/`finalized`
-  deposit into this vault for exactly the floor (which is how `followUp.amount`
-  is sized) resolves it as `deposit_observed` whatever else the wallet holds.
-  Otherwise the owner's balance is read with the SAME call as the baseline and
-  is the ground truth: a rise of at least the floor with no other covering
-  same-mint deposit is reported as `sdp_api_earn_split_swap_orphaned` (warn,
-  `escalated` after an hour) on every visit; a rise WITH a covering deposit into
-  a different vault is conflicting evidence and stays open under
-  `sdp_api_earn_split_swap_ambiguous`, never cleared and never paged as an
-  orphan: SDP never sees the swap's signature, so this state is undecidable by
-  machine, and paging it would page every legitimate wallet with other inflows.
-  An hour on it escalates under that same event (`escalated: true`, with
-  `covering_deposit_ids`), the hook for a NON-PAGING alert that puts a human on
-  it; the human's answer is the `acknowledged` resolution. The paging orphan
-  signal stays reserved for what the detector can prove. Once the rise
-  is gone a covering deposit resolves it (one movement discharges at most one
-  advisory, UNIQUE `resolving_movement_id`; a `failed` one never does), no rise
-  is `unfunded`, and a partial rise stays open. The balance is read with
-  `minContextSlot` at the confirmed height's slot (`getChainHeight`): a pool
-  endpoint behind that height could predate a landed swap and make an orphan a
-  permanent `unfunded`, so a node behind the floor fails the read and the
-  advisory waits for the next sweep. It ALERTS and never acts: the funds are
-  the owner's, and only the partner can move them. Detection writes nothing
-  but back to the advisory table. Every amount it compares is atoms to atoms;
-  the decimal `swap_min_out_amount` exists for display only.
-- `POST /external-wallet/deposits` — **verify + record + broadcast.** Body
-  `{transactionId, signedTransaction}` plus a REQUIRED `Idempotency-Key`
-  (body `requestId` rejected). The submit proves the bytes are a transaction
-  SDP built — MESSAGE bytes compared against the stored build, EVERY
-  signature ed25519-verified (owner and fee payer alike, each failure naming
-  its slot) — and takes nothing but signatures from the wire. The recorded
-  ledger `signature` is slot zero: the fee payer's when one was named, which
-  is the on-chain txid either way. The
-  movement is recorded durably, THEN broadcast: record-before-broadcast
-  unchanged, the signature merely became knowable at submit instead of at
-  SDP's signer. Two composed idempotency protections: the key anchors the
-  movement (a partner retry replays the original), and each build is
-  consumable at most once under a row lock (a second key against the same
-  build is a 409, never a second row for one on-chain transaction). The
-  fingerprint includes the build id, so a key reused against a REBUILT
-  transaction conflicts rather than silently replaying (and a rebuilt
-  transaction is also how a different `feePayer` conflicts).
-  - **Expiry does not reject authenticated signed intent.** An owner may have
-    already broadcast the transaction. Verify the exact stored message and
-    every signature, then consume the build and record the original bytes even
-    past `last_valid_block_height`. Async requests additionally apply the
-    finalized lease and par-cycle checks documented above. Replay and
-    consumed-build conflicts still apply. Reconciliation resolves
-    the recorded signature without asking for a replacement transaction.
-  - **A preflight `BlockhashNotFound` leaves the movement reconcilable**, even
-    past its window. `broadcastRecordedVaultMovement` shares this behavior
-    with custody: a refusal describes this attempt, while an external wallet
-    or concurrent reconciler may already have sent the same signed bytes.
-    Every broadcast error leaves the durable row for signature reconciliation
-    instead of immediately recording a terminal failure.
-- `POST /withdrawals/caller-signed/preview`: the exit QUOTE
-  (`supportsVaultWithdrawQuote`, 501 without it): what redeeming the shares
-  would pay from the vault's live accounting, from which the partner derives
-  a truthful `minAmountOut`. Read-only, no idempotency key, and it takes the
-  exit's own gates only. The caller supplies `positionId`, which is
-  404-scoped to its organization and exact project; the position carries the
-  vault and mints, so a delisted strategy stays exitable.
-- `POST /external-wallet/withdrawal-transactions`: the exit build, with the
-  same `positionId` locator and ADR 0002 exit safety. It works while a provider
-  is disabled for new deposits. It may name `feePayer` and persists the build.
-  `minAmountOut` is optional only when the provider has no withdrawal slippage
-  policy. The floor is stored in the build table's shared
-  `min_shares_out` column; direction disambiguates its unit. A floor the
-  provider's plan does not encode (Kamino's kvault withdraw takes only a share
-  amount, so `plan.accepted.minAmountOut` is absent) is a **400**, never
-  stored: recording it would claim a protection nothing on chain enforces.
-- `POST /external-wallet/withdrawals`: the submit mirror; expired signed bytes
-  still establish durable intent for possible independent broadcasts.
-- **NO requestGate and no wallet scope, deliberately** — this is not the
-  vault-deposit cautionary tale repeating. A key's wallet scope governs the org's own
-  custody at `createOrgSignerForCustodyWallet`; these routes never resolve a signer and
-  never touch custody. The owner's own signature
-  IS the authorization, and there is no signing sink here for
-  `value-moving-conformance.node.test.ts` to inventory.
-- **Scoping is org AND project**, stricter than custody vault claims:
-  the external wallet belongs to the partner's project
-  (`idx_earn_positions_external_wallet_claim` includes `project_id`), so a
-  sibling project can neither see nor exit its positions. Position reads for
-  partners are PRO-1724, not here.
-- Who pays: the owner by default, or the partner's `feePayer` when named. The
-  rent funder is
-  recorded as a creation claim, not execution evidence. Kamino retains share-ATA
-  rent for an explicit owner-authorized close.
-  Kora sponsorship for this surface, meaning SDP pays,
-  stays PRO-1744. The response's `sponsored` field is therefore false today.
-
-The per-owner READS (PRO-1772) close the loop the money routes open. All
-three take `earn.read` only. No wallet scope applies (end-user wallets are not custody
-wallets, same as the position reads) and NO provider gate (ADR 0002: they
-report on money that already moved). **None of them 404 an owner**: a wallet
-with nothing in the project's scope (never deposited, fully exited, or claimed
-by another organization) answers 200 with the empty shape (`positions: []`,
-`movements: []`, `positionCount: 0` + `totalsByToken: []`). A partner's balance
-screen must render for a brand-new customer, and every query is already
-org/project/environment scoped, so a foreign claim is the same empty bytes as
-no claim (nothing leaks that the content would not). The old
-`hasExternalWalletPositionOwner` gate is gone; only the path-addressed retired
-shapes and the movement-by-id detail still 404. None of the three is reachable
-through `GET /treasury/movements`, whose vault arm requires a custody-wallet match an
-owner-signed row can never satisfy
-(`idx_earn_movements_external_wallet_owner`, migration 0073, serves all
-three).
-
-`GET /positions/caller-signed/project-summary` is the one read on this surface that
-is project-wide rather than per-owner, and its `totalsByStrategy[].ownerAddresses`
-is the project's entire end-user address book (threat model EARN-028). It is
-OMITTED by default (PRO-1908; PRO-1873 shipped the flag as an opt-out and the
-default was flipped in the same Earn V2 line): a plain call gets totals and
-`walletCount` only, and an `earn.read` key becomes PII-bearing only by passing
-`?includeOwnerAddresses=true`. Omitted, never emptied, so "not requested" cannot
-read as "no owners". Interactive surfaces add `includePositions=true` to receive
-each strategy's already hydrated positions in that same request; it requires
-the EXPLICIT `includeOwnerAddresses=true` (400 otherwise, since positions name
-their owners) and replaces the dashboard's old N-per-owner read fanout. The
-dashboard BFF (`sdp-web` `.../positions/summary/route.ts`) is the one caller
-that opts in, pinned by its unit test. Partner docs steer analytics keys to the
-default shape and detailed surfaces to the explicit opt-in.
-
-Every count and total in the summary skips a holding whose live read is
-exactly empty (`isEarnVaultHoldingEmpty`): a deposit that has not landed, or an
-exit whose close-out waits on an unsettled movement, holds nothing and must
-not read as a live $0 position. An unreadable holding still counts, as
-unavailable, never as zero. The per-owner positions read still returns such a
-holding, so a partner's customer view can show it pending.
-
-Simultaneous summary calls for the same organization, project and environment
-share only their in-flight DB scan and live hydration. This is not a cache: the
-entry is removed on settlement, and each caller applies its own detail/owner
-flags after the shared observation. Migration 0117's partial project/created
-index serves the project-wide keyset scan; keep the older owner-first index for
-the per-owner reads.
-
-The owner is a REQUIRED `?ownerAddress=` query filter on EVERY per-owner read
-(movements, positions, earnings) — one addressing style for one concept, no
-literal segment (`positions/summary`) can collide with a path parameter, and
-the movements collection keeps its `:movementId` detail route unambiguous. The
-retired path-addressed shapes (`positions/:ownerAddress`,
-`earnings/:ownerAddress`) are pinned 404 in
-`../earn.external-wallet-positions.test.ts`.
-- `GET /movements/caller-signed?ownerAddress=…` — **DB ledger list**, one
-  owner's activity newest first in ledger vocabulary, keyset-paged, with
-  `direction`/`status` equality filters. `amount`/`denomination` preserves the
-  requested quantity (token maximum for a Kamino deposit, SHARES for a
-  withdrawal). `tokenMint`/`tokenAmount` is the deposit-token view a feed
-  renders in, with the position's token mint via `listPositionTokenMints`.
-  For Kamino deposits and all withdrawals, `tokenAmount` is the observed
-  `token_amount_settled`, or null until valued. Other providers' deposits
-  retain their requested-amount fallback. A requested maximum must never be
-  presented as a receipt.
-- `GET /movements/caller-signed/:movementId` — the poll that makes the
-  submit's record-before-broadcast answerable on this surface: a scoped,
-  fail-soft read-through of the movement's exact Solana signature (the same
-  `reconcileEarnVaultMovementReadThrough` the treasury detail reads adopted).
-  Chain truth advances the guarded ledger row immediately; an RPC failure
-  returns the last durable row and leaves recovery to the scheduled
-  reconciler; the read never rebroadcasts or expires an unknown signature.
-  Scoping answers 404 across the board BEFORE the chain read (a guessed id
-  must not use RPC timing as an existence oracle): organization, EXACT
-  project, environment, and
-  the external-wallet shape itself (`owner_address IS NOT NULL` — a
-  custody-signed movement guessed by id reads as missing). `replayed` is
-  POST-only and never appears on reads.
-- `GET /earnings/caller-signed?ownerAddress=…` — **DB ledger + live chain**,
-  balance and total earned per deposit token. `earned` = live `currentValue`
-  plus `totalWithdrawn` (Σ observed token payouts of finalized withdrawals)
-  minus `totalDeposited` (Σ finalized SDP deposits), stated ONLY when exact and
-  never coerced to zero; otherwise absent with a named
-  `earnedUnavailableReason`: `live_value_unavailable` (hydration failed),
-  `movements_pending` (a movement is still settling, so chain and ledger
-  describe different moments), `withdrawals_pending` (a held position has an
-  open queued withdrawal request: a Veda queue escrowed or a Hastra
-  redemption burned its shares before the payout, which can take days),
-  `deposits_not_valued` (a finalized deposit has no observed receipt, leaving
-  `totalDeposited` incomplete), or `withdrawals_not_valued` (a finalized
-  withdrawal on a held position has no observed payout, leaving
-  `totalWithdrawn` incomplete). These reasons are listed in priority order.
-  The aggregate (`aggregateExternalWalletMovements`) counts open requests
-  separately from unsettled movements: folded together they answered
-  `movements_pending` for days, breaking that reason's ~90 s window. A terminal
-  request withholds nothing; a cancelled Hastra request's retained wYLDS is
-  valued through `parIntermediate`. Exits are still ledgered in SHARES
-  (0070 pins `payout_token` NULL for vault rows); the deposit-token payout is
-  a SETTLE-TIME observation
-  (`earn_movements.token_amount_settled`, migration 0103): when a withdrawal
-  reaches `finalized`, `vault-movement-reconciliation.service.ts` fetches the
-  landed transaction (`getTransaction`, jsonParsed) and records the receiving
-  wallet's post-minus-pre balance of the position's token mint
-  (`tokenBalanceDelta` in `@sdp/rpc/solana`), formatted at the mint's
-  decimals. A failed read, missing meta, or non-positive delta leaves the
-  column NULL (never a guess), which is exactly what `withdrawals_not_valued`
-  now means. The sweep retries unvalued finalized withdrawals
-  (`repairUnvaluedWithdrawalPayouts`: 25 per tick, 15-minute spacing, rows
-  settled within 14 days); older rows and rows finalized before 0103 stay NULL
-  and keep reporting it. The
-  deposit side now reads finalized Kamino CPI receipts (0119), because its
-  instruction encodes a maximum rather than an exact debit. Unknown receipts
-  leave `amount_settled` and `token_amount_settled` NULL; the bounded repair
-  sweep includes historical rows, prioritizes rows with no recorded reconciliation
-  attempt, and retries at 15-minute intervals.
-  The same settlement hook reads the holding live for that one vault and owner and
-  stamps `closed_at` when shares are "0" (`closeVaultPositionIfEmpty`, fail-soft;
-  a later deposit transition re-opens it), for external-wallet AND custody
-  rows (the custody wallet's public key is the withdrawal's
-  `destination_address`). The position reads run the same close
-  (`closeEmptyHydratedPositions` in `vault-position-hydration.ts`) on any
-  open holding whose live read is an exact "0", so a row exited before the
-  hook existed, or whose settlement chain read failed, retires on the next
-  read; the repository refuses while any movement on the holding is
-  unsettled. Deposits get `token_amount_settled` = their settled
-  amount by the writer.
-  Token-level `earned` is computed as Σlive + Σwithdrawn − Σdeposited, which
-  equals the per-position sum, and is withheld whenever ANY contributing
-  position cannot state it, never partial. **Figures cover CURRENTLY HELD
-  positions only**: a fully exited position drops out entirely (its deposits
-  leave `totalDeposited` along with its withdrawals), so a full exit never
-  withholds the open positions' earned. The exited history stays on the
-  movements list; pinned by the closed-vault test in
-  `../earn.external-wallet-activity.test.ts`. The ADR 0002 hydration caveat
-  applies at full strength: live value reads the owner's WHOLE vault balance,
-  so shares acquired outside SDP inflate `earned`; documented property, not a
-  bug.
-  This read does not blend sources for one figure: `totalDeposited` and
-  `totalWithdrawn` are ledger, `currentValue` is live, and `earned` is openly
-  their arithmetic: that is its definition, not a violation of the one-source
-  rule.
-
-`EARN_PROVIDER_DEPLOYED_CLUSTERS` scopes new deposits to the clusters
-each provider is deployed on; withdrawals remain open independently.
-
-**Per-cluster RPC.** Every Earn read and send runs in a cluster scope and
-goes to that scope's managed pool (`SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL`):
-a request in its project's scope (every Earn route takes an API key), a cron
-in its registration's, the catalogue sync in each lane's. Nothing in Earn takes a cluster to pick an RPC,
-and a cluster with no pool fails closed (`RPC_NOT_CONFIGURED` on
-the pooled client, `PROVIDER_NOT_CONFIGURED` on a provider operation) and never
-reads the other cluster. One-shot reads, simulation and broadcast use
-`createClusterRpc()`, or `createClusterRpc({ timeoutMs })` for a client handed
-to a helper that sends without a signal: per-request failover and the pool's
-genesis guard, a send never failing over once it left SDP. Provider packages
-still build transports from a URL (HOO-1881), so `services/earn/cluster-rpc.ts`,
-the one module allowed to import the URL helpers from `@sdp/rpc/factory`, hands
-them the scope's pool URLs and refuses a provider that asks for the other
-cluster (`CLUSTER_SCOPE_CONFLICT`). Executing provider
-read/build operations instead pin one pool endpoint per attempt
-(`vault-rpc-failover.ts`, until `withConsistentRpcReads` replaces it under
-HOO-2025), so a plan never mixes endpoints; each candidate must prove its
-genesis hash before SDK work, sharing the pool's proof cache. Transient nested transport errors
-may retry the unsigned read/build within the same workflow deadline; deterministic
-refusals and cluster mismatches do not. A per-vault fan-out (Veda and Kamino
-`readVaultPositions` throw an `AggregateError` cause) retries only when every
-member failure is transient, since the all-or-nothing read would fail again. Concurrent operations have independent
-endpoint cursors, and each later operation starts at the primary. Missing history
-remains unknown, never proof of payout or failure. Signing and broadcast are outside
-this retry runner. Infrastructure failures may still occur at those boundaries;
-the durable intent/reconciliation rules apply unchanged.
-
-**Retry recovery.** There is no pre-execution record outside Earn's own
-tables. A custody deposit/direct-withdrawal/queued-request handler that throws
-before its signed intent is durable leaves nothing behind, so the same client
-key runs again. After the durable write, the same key replays the recorded
-movement or queued intent and never signs a second one. Never add a
-side-channel idempotency record: `earn_movements` (unique
-`(organization_id, request_id)` for vault-direct rows),
-`earn_vault_withdrawal_requests` (unique `(organization_id, client_request_id)`
-plus a per-key advisory lock) and, for program withdrawals, the custodial
-`earn_movements` intent row plus the provider's own request-id dedupe are the
-guards.
-
-**External signed submits.** Verify the exact stored message and signatures,
-then preserve intent even if the build's blockhash expired. The owner may have
-broadcast independently. Asynchronous requests follow the finalized lease and
-par-cycle admission rules above. A send error retains the signed bytes and
-original signature for reconciliation; do not instruct the client to sign a
-new intent.
-
-## Metered quotas
-
-The Earn reads that fan out to a PAID upstream carry `meteredQuota`: the
-provider's API on a program read (`GET /portfolio-accounts` is 2N round trips per page
-against the shared provider account), Solana RPC on a live-hydrated one. Two
-counters, `earn-provider-read` (programs list/detail/deposits, the deposit
-quote, the external-wallet deposit build) and `earn-chain-read` (vault
-positions, share reconciliation, the per-owner external-wallet reads).
-
-**No money-OUT route and no EXIT quote carries one, and that is load-bearing.**
-`meteredQuota` fails closed — a counter-store outage answers 503 — and a 5xx on
-a customer's way out of a position is exactly the failure ADR 0002 exit safety
-rules out. A refused read costs a caller a retry; a refused exit traps funds.
-So withdrawals, vault withdrawals, the external-wallet submits, the
-external-wallet exit build, and every preview an exit derives its floor from
-stay unmetered. A fail-OPEN meter on the two external-wallet exit routes was
-weighed and dropped (PRO-1994): a 429 is still a refusal on the way out, so
-exit traffic is bounded by the general per-key tier alone, recorded as
-accepted risk. Money-IN carries no such rule, which is why the deposit quote
-and the external-wallet deposit build are metered and the exit quote is not.
-On both money-in routes the body is
-validated before either meter runs, so a malformed request charges nothing
-against the organization's shared pool. Pinned by the "metered quotas" describe in
-`../earn-program.test.ts`,
-whose second test exhausts both counters and asserts the payout still lands,
-and by the one in `../earn.external-wallet.test.ts`, which also breaks the
-counter store and asserts the deposit build 503s while the exit still builds.
-
-## Audit-ledger parity (PRO-1866)
-
-Every earn money write also lands a hash-chained `audit_logs` event: action
-`deposit`/`withdraw`, resourceType `earn_movement`, resourceId the movement id,
-actor matching the movement's `created_by`/`initiated_by_key_id`. The actor is
-sourced by direction: withdrawals read it off the movement row (post-effect,
-the row exists); deposits are admitted before any row exists, so their intent
-carries the request's own auth, the same values the service writes into the
-row. Passed explicitly in both cases so `log()` never falls back to a context
-naming someone else. Helpers live in
-`handlers/movement-audit.ts`; the five seams are the two custody vault routes,
-the two external-wallet submits, and the program withdrawal.
-
-The failure posture follows the metered-quota asymmetry above, on purpose.
-DEPOSITS are admitted through a fail-closed `beginCritical` intent before the
-money effect: an audit outage refuses money IN, and a replay still logs a
-pair whose outcome says `replayed`. A thrown deposit concludes by ERROR
-CLASS: a 4xx `AppError` is a definitive pre-broadcast refusal and closes the
-intent with a failure outcome, while anything else stays UNRESOLVED: the
-services can 5xx after a successful send (`broadcastRecordedVaultMovement`'s
-post-broadcast ledger transition), where a failure outcome would be a false
-audit record, and unresolved is what pages an operator to reconcile.
-WITHDRAWALS log best-effort AFTER the effect: the audit persist path
-fail-closes on its external checkpoint store, and a store outage must not 5xx
-an exit (ADR 0002). A replayed exit backfills a missing audit row
-(`backfilledOnReplay`) and never duplicates an existing one; migration 0083's
-partial unique index makes the insert itself the atomic existence check, so
-concurrent replays cannot append twice and the losing writer's unique
-violation reads as "already audited". A failed exit audit logs
-`earn_audit_write_failed` and the movement row stays the authoritative money
-record. Each seam's suite pins its half: parity rows in all four route files,
-fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
-- replay backfill in `../earn.vault-withdrawals.test.ts`.
-
-## Gate asymmetry — DO NOT BREAK (ADR 0002 exit-safety)
-
-- **Cancellation**: all routes require `earn.manage`; the movement is an exit,
-  including after production access is removed or starts are disabled.
-  Organization suspension still denies authentication. Credential grants,
-  project ownership and wallet scope remain enforced.
-- **Money-in** (`POST /portfolio-accounts`, `PUT /portfolio-accounts/:programId/allocation`):
-  `assertProviderAvailable` (entitlement + enablement + credentials).
-- **New positions only** (`POST /portfolio-accounts`, vault deposits): surfacing, the
-  `provider_not_offered` check inside `assertProviderAvailable`. `PUT`
-  passes `program: "existing"`, which skips it.
-  Surfacing gates the way IN and nothing else — every read, every money-out
-  route, and `PUT` (re-target) ignore it, so un-surfacing a provider can never
-  strand a position taken while it was offered. `POST /portfolio-accounts` is the only
-  route that opens a _new_ commitment, which is why it is the only one that
-  refuses. Pinned by the "un-surfaced provider" describe in
-  `../earn-program.test.ts`, whose second test asserts read/re-target/withdraw
-  all still work.
-- **Money-out and live reads** (withdrawals create/detail, previews, program
-  get, programs list, deposits list): `assertEarnProviderConfigured` ONLY — a
-  disabled provider must never trap funds. The list resolves capability +
-  credentials ONCE per distinct provider among the listed rows — before any
-  live read, so a de-registered or vault-only provider fails the list with a
-  clean 503/501 instead of mid-fan-out — and once more up front for a
-  `provider` filter so an empty list still 503s (see route map).
-- **The vault exposure cap** (ADR 0004 layer 1) is a money-IN gate and
-  nothing else: it lives inside `assertVaultDepositAdmissible`, which no
-  withdrawal handler calls. A vault over its cap is exit-only, the same
-  posture as `paused`. Pinned by the "AT its exposure cap" case in the
-  exit-safety describe of `../earn.vault-withdrawals.test.ts`; the deposit
-  side is `../earn.vault-exposure-cap.test.ts`.
-- **The vault exit** (`POST /vault-withdrawals`): the strongest form of the
-  asymmetry — no provider gate of ANY kind, not even the credential check
-  (Kamino is keyless; a credentialed vault provider's own client throws
-  `PROVIDER_NOT_CONFIGURED` from inside its build). Capability (501) is the
-  only provider-shaped refusal. It also ignores
-  `assertVaultDepositEnvironmentOpen`: the environment fail-close guards the
-  way IN only.
-- **The vault deposit preview** (`POST /deposits/preview`) is the one
-  deliberate EXCEPTION among previews: a live read shaped like MONEY-IN,
-  because a deposit quote exists only to open a new position. It takes the
-  deposit's own gates — environment fail-close, surfacing, entitlement,
-  admission — rather than the `assertEarnProviderConfigured`-only rule above,
-  and that does not violate the asymmetry: nothing about an EXISTING position
-  is ever answered through it, so refusing it can never trap funds.
-- **The ledger list**: no provider gate at all (see route map).
-- **The production entitlement** (`enableProductionProject`, APE-351) follows
-  the same asymmetry. `projectContextMiddleware` refuses a production project
-  whose organization lacks it, except on the reads and exits
-  `isEarnExitOrRead` (exits.ts) allows: every GET plus an explicit list of
-  withdrawal POSTs. It is an allowlist, so a new route is refused until filed;
-  `production-exits.test.ts` forces every state-changing route to be filed as
-  an exit or an entry. `exits.ts` also files the starts (deposits),
-  and `movement-actions.test.ts` fails any route filed with a
-  start whose declared action that start's `actions` do not admit (HOO-2099).
-- Route tests in `../earn-program.test.ts` encode the asymmetry: the money-in
-  half (create and re-target both refused when the organization is not entitled
-  or credentials are missing) and the money-out half (the "withdrawals (ADR 0002
-  exit safety)" describe, plus the credentials-absent ledger-list case). The
-  per-strategy quote exit-safety tests left with the quotes surface.
-- Money-in also has an ORDER contract, not just a gate: `POST /portfolio-accounts`
-  resolves the idempotency key LAST, so the entitlement 403 and the capability
-  501 both win over the missing-key 400. Keep that pinned by a test — it is the
-  difference between an actionable error and one that hides why the call could
-  never work.
-
-## Conventions
-
-- **Environment and cluster come from the open cluster scope**
-  (`currentClusterScope()`, ADR 0007), never from `c`. The project middleware
-  opens it with the API key's (project-derived) environment or the
-  membership-verified `x-project-id` project's; the deployment's `ENVIRONMENT`
-  never decides. Code outside a scope fails closed (`CLUSTER_SCOPE_MISSING`,
-  500), never defaults to sandbox. Services take neither as a parameter and
-  read the scope where they need it; a provider client gets the scope's
-  environment through `earnRuntime(env)` (`services/earn/runtime.ts`). A read
-  about one recorded row (a queued request re-read before its cancel, the
-  post-exit close-out) keeps the row's own environment, which the URL helpers
-  refuse unless it is the scope's. `services/earn/cluster-rpc.boundary.test.ts`
-  fails an Earn route or service that imports `resolveSdpEnvironment` or
-  `CLUSTER_BY_SDP_ENVIRONMENT`. A production-project dashboard session
-  therefore drives provider production.
-- The release channel gates the whole family: `requireModule("earn")` in
-  `app.ts`. Background work outside a request asks `isEarnEnabled`, the same
-  check. Never add a second gate in a handler.
-- Zod schemas in schemas.ts; parse/paginate/envelope helpers in
-  handlers/shared.ts — don't hand-roll either.
-- Capability gating: `supportsPortfolioWallets(client)` → NOT_IMPLEMENTED for
-  providers lacking the surface. Kamino implements NONE of it, so every
-  **program** route still answers 501 for it by capability, never by a
-  provider-id check — its money moves through the vault-direct routes above
-  instead. The two capabilities are asserted mutually exclusive.
-- Withdrawal approval is a SECOND optional capability
-  (`supportsWithdrawalApprovals`) with **no public route on purpose**: casting
-  a vote needs an account-level signer (platform ops — one shared
-  provider account per environment), so exposing list/request/vote under
-  `/v1/earn` would hand org API keys an approval surface they must never
-  hold. Orgs see a parked withdrawal as `status: pending_approval` on
-  `GET /portfolio-accounts/:programId/withdrawals/:withdrawalRef` (derived by the provider client from payout
-  legs; approval is policy-conditional, not default — see
-  `packages/sdp-earn/README.md` → "Withdrawals unwind in reverse").
-- Provider ids from DB rows are open strings — always dispatch via
-  `resolveEarnProviderClient`.
-- Catalogue rows are admitted ONLY via the sync cron
-  (`src/cron/earn-catalogue-sync.ts`). The metrics refresh
-  (`src/cron/earn-metrics-refresh.ts`) runs every 5 minutes and is UPDATE-only,
-  so it can never admit a row. Cadence and failure behaviour:
-  `packages/sdp-earn/README.md` → "Catalogue data".
-- **Provider-reported figures are diffed, never trusted silently** (PRO-1867,
-  EARN-010). Both passes read the stored shelf first and emit
-  `sdp_api_earn_catalogue_figure_anomaly` for an APY/TVL move past
-  `EARN_FIGURE_BOUNDS`, and `sdp_api_earn_catalogue_shelf_disappeared` when a
-  lane that held rows reliably lists none (`services/earn/catalogue-anomaly.ts`).
-  Events only: the check never blocks a write, and a failed figures read costs
-  the pass its diff, not its write. Do not "fix" an anomaly by clamping the
-  write; the alert exists so a human looks at the provider.
-- **Token-2022 deposit mints are watched, not trusted blindly** (PRO-1962).
-  Kora co-signs PYUSD and USDG movements under `transfer_hook_policy =
-  "allow_all"` (both mints keep a mutable Paxos hook authority), so each
-  environment's metrics refresh ends by reading its cluster's Token-2022
-  deposit mints in one `getMultipleAccounts` through `createClusterRpc()` and
-  emitting `sdp_api_earn_deposit_mint_drift` when the hook program, hook
-  authority or permanent delegate differs from the pins in
-  `services/earn/deposit-mint-guard.ts`. A cluster with no pool cannot be
-  watched, so its skip is `sdp_api_earn_deposit_mint_guard_skipped` at error
-  wherever Earn is enabled, never a quiet info line. Report-only. Adding a Token-2022
-  stablecoin to `EARN_DEPOSIT_TOKEN_SYMBOLS` without pinning it fails the
-  guard's unit suite; adding any deposit token without its devnet mint in
-  `infra/kora/kora.toml` `allowed_tokens` fails
-  `vault-sponsorship-allowlist.test.ts`.
-- Whole-stack local setup (ports, flags, provider credentials, entitlement,
-  troubleshooting): `packages/sdp-earn/CLAUDE.md` → "Local development".
-- **Tests must not depend on which providers are surfaced today.** No registered
-  provider is portfolio-capable today, so `POST /portfolio-accounts` answers 501 in the
-  shipped config. Idempotency, replay, gate order and environment isolation still
-  have to work for whichever provider is offered next. `earn-program.test.ts`
-  therefore installs a portfolio-capable test double under a stub id and
-  partial-mocks `isEarnProviderSurfaced` (a `vi.hoisted` flag, forced on in
-  `beforeEach`), and the gate gets its own describe that flips the flag off and
-  runs against the real map. `earn.test.ts` seeds a SURFACED provider by
-  default for the same reason. When a surfacing change breaks a suite, copy
-  that pattern — do not edit `EARN_PROVIDER_SURFACING` to make a test pass.
-- Tests: vitest; stub provider-client methods with `vi.spyOn`;
-  repository tests use testcontainers. The ledger repository/service suites in
-  `../../db/repositories/earn.repository.test.ts` run against a stub id on
-  purpose — the ledger consumes only the canonical contract, and that suite is
-  the pluggability proof.
-
-
-### Treasury balance confirmation context
-
-Authenticated `GET /positions/provider-signed?afterMovementIds=id1,id2` accepts at most 100
-movement ids. Resolve organization, project, environment and readable custody
-wallet scope before looking up their confirmed/finalized signature slots. A
-finalized status that passed those checks is memoised per (cluster, signature),
-bounded and for 10 minutes, so later polls skip `getSignatureStatuses` for it;
-a confirmed-only one is read on every poll. A poll answered entirely from that
-memo builds no client and sends nothing, not even a genesis probe.
-The response's `balanceReadContext` acknowledges the ids and maximum slot.
-Only affected positions receive their own maximum confirmation slot. Hydration
-batches separate differing bounds even within the same provider and owner.
-`@sdp/rpc/read-context` scopes provider RPC reads to confirmed state, requests
-`minContextSlot` where supported, and rejects missing or older response contexts.
-For `getProgramAccounts`, validate the contextual response before restoring the
-array shape when the SDK requested `withContext: false` (or omitted it). Never
-change the SDK result contract to collect freshness evidence. Both kit transports
-and direct JSON/web3 fetches use this rule across all providers.
-Unscoped execution/reconciliation commitment is unchanged. A failed hydration
-omits value fields. Request timing and unchanged/changed balances prove nothing.
-Treasury forwards the slot to the Payments wallet-balance endpoint; that endpoint
-returns 503 on any SOL/SPL read failure, including stale or unverifiable context.
+# Earn routes
+
+Earn is an aggregation API. Strategies are catalogue items; positions are
+holdings; operations coordinate deposits and withdrawals. Treasury and Embedded
+Yield consume the same contract. Do not add product-specific routes or restore
+program creation, allocation configuration or automation.
+
+## Route contract
+
+`index.ts` mounts four core operations and six WisdomTree eligibility operations:
+
+- `GET /discovery`: a filtered catalogue, rates and execution capabilities.
+- `GET /positions`: selected holdings, discovery and optional complete-scope totals.
+- `POST /deposit`: prepare by strategy, source and token amount.
+- `POST /withdraw`: prepare by position and explicit quantity.
+- `/onboarding/wisdomtree`: independent KYC/KYB, documents, corrections and wallet
+  registration. Onboarding approval does not authorize a deposit.
+
+Shared `/v1/operations` supplies list, detail, submit, refresh and cancellation.
+There are no other Earn catalogue, preview, build, submit, movement or program
+HTTP wrappers. Only current operation history and async recovery belong in operations.
+Protocol-specific builders and ledger repositories remain shared domain code.
+
+Every route declares an action. Reads use `earn.read`; preparation and execution
+use `earn.execute`; safe preparation cancellation uses `earn.manage`.
+
+### Public OpenAPI promotion
+
+Earn and shared operations follow the same module release channel as the
+runtime. The public contract contains four core actions and five operation
+routes; provider eligibility stays internal. Keep the explicit public inventory
+in `openapi/spec.test.ts` aligned with the router and normal publication rules.
+Do not add rewrite-specific flags or preview visibility exceptions.
+
+Update OpenAPI descriptions, authored guides and dashboard clients together.
+Regenerate OpenAPI, route actions, served paths, playground, API reference,
+Postman, AI resources and module map using their owning generators. Generated
+files must not be edited manually. The consumer integration guide lives at
+`apps/sdp-docs/content/docs/earn/integration-details.mdx`.
+
+## Preparation and authority
+
+`core/prepare.ts` resolves source ownership and the position's authoritative
+strategy before idempotency. API clients normally have an SDP API key and use
+`source: { ownerAddress }` with any compatible Solana wallet. This path requires
+no SDP wallet record or provider connection. Return the unsigned transaction,
+then accept its base64 `signedTransaction` through `/submit`. Verify every
+required signature against the prepared owner and unchanged message.
+
+`source: { walletId }` is an optional convenience for an existing connected
+wallet; it delegates signing to that wallet's configured provider. Sources
+contain exactly one identity. Never infer source authority from a provider
+reference, replace it during withdrawal, or accept a caller-selected payout
+destination.
+
+Follow `validate → authorize → idempotent`. Every mutation requires a key.
+Authorization checks resource access, not mutable execution state. Deposit
+admission follows replay. A replay cannot skip fresh credential and wallet
+binding checks. Wallet bindings come from authentication, not an independent
+route read.
+
+Preparation records immutable intent and a versioned action, and returns `202`.
+It quotes, derives protection floors and simulates without signing, opening a
+custody proposal or broadcasting. Token quantities carry a mint and decimal
+string; withdrawal quantities explicitly name all, shares, token or intermediate.
+Keep live balance/precision/minimum checks in domain services, not only the UI.
+
+Each prepared version retains its identity. An accepted attempt and its signed
+bytes stay immutable until a definitive outcome is known; it cannot be refreshed.
+
+Swap-funded deposits return one atomic swap-and-deposit transaction. Retry an
+oversized composition once with a compact route; refuse if both legs still
+cannot fit. Never return a standalone funding swap or a deposit continuation.
+
+`nextAction: select_option` advertises withdrawal choices in `terms.options`.
+`POST /v1/operations/{operationId}/refresh` requires the current `actionId` and
+`version`, plus `optionId` only for that selection. It prepares a new review
+without authorizing execution. Later refreshes retain the selected route and
+fail if it is unavailable.
+Refresh is preparation-only: reject it after any accepted submit in the
+operation's history. Pre-submit replacement still requires proof it is safe;
+an exposed owner transaction with unknown outcome cannot be refreshed.
+
+## Execution and async recovery
+
+The cron service schedules operation workers and financial reconciliation.
+
+`POST /v1/operations/{operationId}/submit` authorizes and durably queues the exact
+reviewed transaction using `actionId`, `version` and required signed bytes. It
+never selects a route or prepares another transaction. `nextAction: submit`
+asks the caller to authorize the configured wallet's worker signing path.
+The worker handles configured signing, provider proposals and broadcast,
+including fast signers. No status read performs money work. A provider URL is a
+signing instruction, not proof of a signature or settlement.
+
+Use `awaiting_signature` while configured-wallet signing is pending and
+`sign_in_provider` when the caller must act there. A provider's own proposal
+and approval policy remain custody internals. Do not add an Earn approval
+endpoint, status or second submit call to acknowledge provider-side signing.
+
+Use existing signing and sponsorship waists, `createOrgSignerForCustodyWallet`
+and `createSponsorshipFeePayment`, with the movement from `MOVEMENTS`. Every
+worker reconstructs the original action principal and rechecks its current
+credential, action grant, wallet binding and admission before a new effect.
+Revocation does not become permission merely because an operation is queued.
+Pass `requiredAction: "earn.execute"` at each new sign, proposal, sponsor and
+broadcast boundary, including exits. Re-read API-key grants and member role and
+project access there. Refusal permits only observation of known bytes and
+provider cleanup. Keep the shared admission layer's default exit semantics.
+
+A durable provider account/proposal identity precedes the single create.
+Fenced leases prevent takeover from racing a possibly active worker. The lease
+is 180 seconds; the action budget is 120 seconds. Reserve time at each external
+boundary. An uncertain timeout never permits a second create.
+
+Owner-signed submissions verify every required signature and the complete
+prepared message. Deposit acceptance atomically commits exact signed bytes,
+execution acceptance and its critical audit intent. Audit failure cannot leave
+a sendable deposit. Exit auditing retains its best-effort posture.
+
+Retry an uncertain submission with its exact signed body and original identity.
+Blockhash expiry, a timeout or missing RPC history alone does not prove
+nonexecution. Exposed owner transactions may have been broadcast independently.
+After submit acceptance, only track the outcome. Refresh and cancellation must
+return `409 CONFLICT`. A definite signing rejection or proven nonexecution is
+terminal `failed`, with no refresh action. Retrying after that known failure
+uses a new deposit/withdrawal request and idempotency key. Unknown outcomes
+retain `wait` and the same attempt. Refresh never signs, broadcasts or revokes
+prior signed bytes.
+
+Expose `canCancel` from durable operation state and history. It is a state
+capability, not a permission grant. The public route checks `earn.manage` and
+permits cancellation only before any submit has been accepted, with no exposed
+owner transaction outcome unknown. Serialize that barrier against submission
+and retain it across action versions. Pending provider signing and queued
+withdrawals have no public refresh or cancellation path after submit.
+
+Permission/expiry cleanup remains an internal worker safety mechanism.
+Observation-only attempts never regain broadcast authority. Only verified
+chain/provider observations establish payout; never copy expected amounts into
+settled fields.
+
+## Replacement boundary
+
+Earn is prelaunch. Do not restore removed product endpoints, create historical
+operation projections, adopt old builds or add saved-intent upgrade logic.
+The current core contract is the only supported flow. Durable recovery applies
+to operations created through that contract.
+
+## Positions and provider reads
+
+Positions are project/environment scoped. Registered wallet visibility and
+owner-address filtering remain distinct access checks. A withdrawal uses the
+position's stored source and strategy even when deposits are paused or the
+strategy is delisted. `discover=true` requires one explicit source and supported
+integrated catalogue coverage; it does not promise all ecosystem holdings.
+
+`vault-position-hydration.ts` owns batched live reads and empty-position closure.
+Do not close a position from an unavailable or insufficiently final read.
+Preserve minimum-slot context from `afterMovementIds`; dashboard balances and
+positions must both observe that context before replacing their paired snapshot.
+Queue escrow and intermediate holdings cannot disappear as zero positions.
+
+Summary totals cover the whole selected scope, not just a position page.
+Unavailable values remain absent; a partial total cannot appear complete.
+Customer drill-down requires explicit owner/position flags. Discovered holdings
+have unknown acquisition time and cost basis. A live balance is not earned yield.
+
+Apply `packages/sdp-earn/CLAUDE.md`'s RPC budget: batch independent inputs, share
+identical concurrent work only within exact authorized scope, cache static facts
+without caching failures, and do not fetch an account twice. Fresh reads after
+movement confirmation cannot join work begun before their freshness boundary.
+State before/after request counts when changing read or quote behavior.
+
+Operation recovery scans the `(environment, next_check_at, id)` partial index
+for at most 100 due candidates. Run at most four workers and lease only work
+ready to start. Stable pending work backs off from 15 to 300 seconds, capped
+at 60 seconds for `sign_in_provider`; status progress resets it to 15 seconds.
+Observe existing movement/request ledgers before resolving transaction builds.
+Within one worker run, share a lazy RPC client and observations only for the
+exact organization, project, environment and recorded principal. Four concurrent
+same-authority status requests become one batch; two custody-proposal height
+reads become one. Batch at most 256 signatures, evict finished status batches
+and failed heights, and never treat absence or a cached failure as nonexecution.
+
+Expired solver recovery adds zero provider reads without an eligible recorded
+request and one live proof read for the position's oldest candidate. Reusing
+that call's validated proof in build admission reduces selection from two API
+proof reads to one, before existing provider validation and simulation. Never
+persist that evidence or accept it from a caller; every later preparation or
+refresh must read fresh provider state.
+Offer one recovery choice, not an owner-wide scan or one read per old request.
+Returning shares is `settlementOutcome: recovered`, not delivered asset payout.
+The new reviewed withdrawal retains source grants and leaves the original
+operation's post-submit cancellation barrier intact. Do not restore Hastra par
+cancellation as recovery: its reusable request has no amount/cycle binding.
+PRO-2530 and PRO-2528 track that separate authority-release design.
+
+Atomic swap-funded builds retain one compute probe and one final simulation per
+attempt. An oversized request no longer reads a split baseline balance or runs
+two standalone-swap simulations. Successful atomic builds make no extra reads.
+
+## Storage and checks
+
+`earn_movements` and `earn_positions` remain financial authority. Operations
+coordinate execution; provider withdrawal requests own their obligations.
+Canonical wallet transaction tables store new builds and enforce tenant RLS.
+Old build tables remain unused by the replacement, with no copying or dual
+writes. Strategy references retain synchronized aliases where current ledger
+writers still use them. The schema-only companion removes the five unused
+legacy tables after this rewrite is serving, including retired provider-wallet
+positions and movements. Current wallet holdings and async recovery remain.
+HTTP compatibility routes are not required.
+
+Run core routes, operations repository/recovery/worker and affected provider
+service tests. Keep explicit regression coverage for exact-byte retries,
+revocation, ambiguous outcomes, cancellation/submission races, tenant isolation, minimum
+slot/finality, unknown amounts and route removal. Also run action inventories,
+production exit policy, typecheck, Biome and generated-artifact drift checks.
+Provider sandbox and signed-in browser outcomes require separate live evidence.

@@ -1,0 +1,1449 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
+import { SdpVedaError } from "@sdp/veda/errors";
+import type { Blockhash } from "@solana/kit";
+import {
+  AccountRole,
+  generateKeyPair,
+  getAddressFromPublicKey,
+  getSignatureFromTransaction,
+  getTransactionDecoder,
+  getTransactionEncoder,
+  partiallySignTransaction,
+  SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
+  SOLANA_ERROR__TRANSACTION_ERROR__BLOCKHASH_NOT_FOUND,
+  SolanaError,
+} from "@solana/kit";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { getDb } from "@/db/client";
+import { generateEarnPositionId } from "@/db/repositories/earn-movements.repository";
+import { installClusterRpcResponder, signatureStatusesReplyAt } from "@/test/helpers/cluster-rpc";
+import { env } from "@/test/helpers/env";
+import {
+  expectProjectScoped,
+  type SeededDefaultProjects,
+  seedDefaultProjects,
+} from "@/test/helpers/projects";
+import { seedTestDatabase } from "@/test/mocks/db";
+import type { Env } from "@/types/env";
+import { submitPreparedStrategyTransaction } from "./strategy-transactions.service";
+import type {
+  WalletBuiltTransaction,
+  WalletDepositBuildInput,
+  WalletWithdrawalBuildInput,
+} from "./vault-wallet.service";
+
+const buildVaultDeposit = vi.hoisted(() => vi.fn());
+const buildVaultWithdrawal = vi.hoisted(() => vi.fn());
+const resolveVaultDirectClient = vi.hoisted(() => vi.fn());
+const resolveVaultWithdrawClient = vi.hoisted(() => vi.fn());
+const simulateVaultPlan = vi.hoisted(() => vi.fn());
+const broadcastVaultTransaction = vi.hoisted(() => vi.fn());
+const fetchJupiterSwapLeg = vi.hoisted(() => vi.fn());
+
+// RPC boundary for the expiry gate and the audit's independently finalized
+// transaction: each cluster's pool, reached through the real factory.
+// Transaction construction, signatures and persistence stay real.
+const clusterRpc = installClusterRpcResponder();
+
+/** A pool that cannot answer the read. */
+const RPC_UNREACHABLE = {
+  error: { code: SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR, message: "rpc unreachable" },
+} as const;
+
+// `prependSwapLegToVaultPlan` stays REAL — instruction ordering is part of
+// what the swap-funded cases prove. Only the Jupiter HTTP boundary is stubbed.
+vi.mock("./jupiter-swap.service", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./jupiter-swap.service")>()),
+  fetchJupiterSwapLeg,
+}));
+
+vi.mock("./execution-registry", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./execution-registry")>()),
+  resolveVaultDirectClient,
+  resolveVaultWithdrawClient,
+}));
+
+// `appendVaultRequestMemo` and `compileUnsignedVaultTransaction` stay REAL:
+// the whole point of these tests is that the service hands out genuinely
+// signable bytes and verifies genuine ed25519 signatures over them. Only the
+// RPC-touching stages are stubbed.
+vi.mock("./vault-execution.service", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./vault-execution.service")>()),
+  simulateVaultPlan,
+  broadcastVaultTransaction,
+}));
+
+const service = await import("./vault-wallet.service");
+
+/** Each call in the cluster scope a sandbox request opens: every case here is on devnet. */
+function inRequestScope<TInput, TResult>(
+  operation: (env: Env, input: TInput) => Promise<TResult>
+): (env: Env, input: TInput) => Promise<TResult> {
+  return (scopedEnv, input) =>
+    runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+      operation(scopedEnv, input)
+    );
+}
+
+const buildWalletDepositTransaction = inRequestScope(service.buildWalletDepositTransaction);
+const buildWalletWithdrawalTransaction = inRequestScope(service.buildWalletWithdrawalTransaction);
+const submitStrategyTransaction = inRequestScope(submitPreparedStrategyTransaction);
+const { VaultTransactionTooLargeError } = await import("./vault-execution.service");
+
+/**
+ * The wallet (caller-signed) flows, end to end minus the chain
+ * (PRO-1722): build persists an unsigned transaction, submit verifies a real
+ * signature through the shared worker writer, records before broadcast,
+ * and answers retries from the ledger.
+ *
+ * The owner is a REAL keypair generated per run: the signature-verification
+ * cases (missing, forged, wrong message) are only proof if the happy path's
+ * signature is genuine.
+ */
+
+const ORG = "org_ext_wallet";
+const PROJECT = "prj_ext_wallet";
+const PRODUCTION_PROJECT = `${PROJECT}_production`;
+const USER = "usr_ext_wallet";
+const TOKEN_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const SHARE_MINT = "So11111111111111111111111111111111111111112";
+const VAULT = "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx";
+// 32 base58 ones decode to 32 zero bytes — a structurally valid blockhash.
+const BLOCKHASH = "11111111111111111111111111111111" as Blockhash;
+
+const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
+
+let ownerKeyPair: CryptoKeyPair;
+let ownerAddress: string;
+let projects: SeededDefaultProjects;
+
+function providerInstruction() {
+  return {
+    programAddress: MEMO_PROGRAM_ADDRESS,
+    accounts: [],
+    data: Buffer.from("provider-instruction", "utf8").toString("base64"),
+  };
+}
+
+function depositPlan(overrides: Record<string, unknown> = {}) {
+  return {
+    cluster: "devnet",
+    instructions: [providerInstruction()],
+    lookupTables: [],
+    assetIdentity: { depositTokenMint: TOKEN_MINT, shareMint: SHARE_MINT },
+    accepted: { amount: "25" },
+    createsShareAccount: true,
+    ...overrides,
+  };
+}
+
+function withdrawalPlan(overrides: Record<string, unknown> = {}) {
+  return {
+    cluster: "devnet",
+    instructions: [providerInstruction()],
+    lookupTables: [],
+    assetIdentity: { depositTokenMint: TOKEN_MINT, shareMint: SHARE_MINT },
+    accepted: { shares: "10" },
+    ...overrides,
+  };
+}
+
+function depositInput(overrides: Partial<WalletDepositBuildInput> = {}): WalletDepositBuildInput {
+  return {
+    organizationId: ORG,
+    projectId: PROJECT,
+    provider: "kamino",
+    strategyId: "strategy_ext_test",
+    providerReference: VAULT,
+    ownerAddress,
+    tokenMint: TOKEN_MINT,
+    shareMint: SHARE_MINT,
+    label: "Test USDC Vault",
+    amount: "25",
+    userId: USER,
+    ...overrides,
+  };
+}
+
+async function seedTenancy(): Promise<void> {
+  const db = getDb(env);
+  await db.batch([
+    db
+      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+      .bind(ORG, "Wallet Org", "ext-wallet", "enterprise", "active"),
+    db
+      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+      .bind(USER, "ext-wallet@example.com"),
+  ]);
+  await db.execute(
+    `INSERT INTO earn_strategies (id, provider, provider_reference, name, source_kind,
+       deposit_mints, share_mint, apy_type, liquidity_term, environment, host_cluster)
+     VALUES ('strategy_ext_test', 'kamino', ?, 'Test strategy', 'defi', ?::jsonb, ?,
+       'variable', 'instant', 'sandbox', 'devnet')`,
+    [VAULT, JSON.stringify([TOKEN_MINT]), SHARE_MINT]
+  );
+  projects = await seedDefaultProjects(db, {
+    organizationId: ORG,
+    createdBy: USER,
+    members: [],
+    ids: { sandbox: PROJECT, production: PRODUCTION_PROJECT },
+  });
+}
+
+async function seedWalletPosition(
+  overrides: Partial<{ projectId: string; ownerAddress: string }> = {}
+): Promise<string> {
+  const id = generateEarnPositionId();
+  await getDb(env)
+    .prepare(
+      `INSERT INTO earn_positions (
+         id, organization_id, project_id, environment, provider, kind,
+         owner_address, vault_address, share_mint, token_mint, label, activated_at
+       ) VALUES (?, ?, ?, 'sandbox', 'kamino', 'vault_direct', ?, ?, ?, ?, 'Exit Vault', sdp_iso_now())`
+    )
+    .bind(
+      id,
+      ORG,
+      overrides.projectId ?? PROJECT,
+      overrides.ownerAddress ?? ownerAddress,
+      VAULT,
+      SHARE_MINT,
+      TOKEN_MINT
+    )
+    .run();
+  return id;
+}
+
+function withdrawalInput(
+  positionId: string,
+  overrides: Partial<WalletWithdrawalBuildInput> = {}
+): WalletWithdrawalBuildInput {
+  return {
+    organizationId: ORG,
+    projectId: PROJECT,
+    provider: "kamino",
+    positionId,
+    vaultAddress: VAULT,
+    tokenMint: TOKEN_MINT,
+    shareMint: SHARE_MINT,
+    ownerAddress,
+    label: "Exit Vault",
+    shareAtaRentFunder: null,
+    shares: "10",
+    userId: USER,
+    ...overrides,
+  };
+}
+
+/** The RPC's own refusal when preflight does not recognize the blockhash. */
+function preflightBlockhashNotFound(): SolanaError {
+  return new SolanaError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE, {
+    accounts: null,
+    fee: null,
+    loadedAccountsDataSize: null,
+    loadedAddresses: null,
+    logs: [],
+    postBalances: null,
+    postTokenBalances: null,
+    preBalances: null,
+    preTokenBalances: null,
+    replacementBlockhash: null,
+    returnData: null,
+    unitsConsumed: null,
+    cause: new SolanaError(SOLANA_ERROR__TRANSACTION_ERROR__BLOCKHASH_NOT_FOUND),
+  });
+}
+
+async function countRows(table: "earn_movements" | "earn_wallet_transactions") {
+  const row = await getDb(env)
+    .prepare(`SELECT COUNT(*)::int AS rows FROM ${table}`)
+    .first<{ rows: number }>();
+  return row?.rows ?? 0;
+}
+
+/** Return the persisted complete deposit transaction. */
+async function buildDepositRow(input: WalletDepositBuildInput): Promise<WalletBuiltTransaction> {
+  const result = await buildWalletDepositTransaction(env, input);
+  return result.built;
+}
+
+async function signBuiltTransaction(
+  built: WalletBuiltTransaction,
+  keyPair: CryptoKeyPair = ownerKeyPair
+): Promise<string> {
+  const transaction = getTransactionDecoder().decode(
+    Uint8Array.from(Buffer.from(built.unsigned_transaction, "base64"))
+  );
+  const signed = await partiallySignTransaction([keyPair], transaction);
+  return Buffer.from(getTransactionEncoder().encode(signed)).toString("base64");
+}
+
+function submitPrepared(
+  built: WalletBuiltTransaction,
+  signedTransaction: string,
+  requestId: string,
+  overrides: Partial<Parameters<typeof submitPreparedStrategyTransaction>[1]> = {}
+) {
+  return submitStrategyTransaction(env, {
+    custodyWalletId: null,
+    apiKeyId: null,
+    organizationId: ORG,
+    projectId: PROJECT,
+    transactionId: built.id,
+    signedTransaction,
+    requestId,
+    userId: USER,
+    ...overrides,
+  });
+}
+
+function submitCore(
+  built: WalletBuiltTransaction,
+  signedTransaction: string,
+  overrides: Partial<Parameters<typeof submitPreparedStrategyTransaction>[1]> = {}
+) {
+  return submitStrategyTransaction(env, {
+    organizationId: ORG,
+    projectId: PROJECT,
+    custodyWalletId: null,
+    transactionId: built.id,
+    signedTransaction,
+    requestId: `operation_${built.id}`,
+    userId: USER,
+    apiKeyId: null,
+    broadcast: false,
+    ...overrides,
+  });
+}
+
+describe("shared asynchronous strategy ledger writer", () => {
+  it("claims discovered holdings only with signed intent, without a synthetic deposit", async () => {
+    const built = await buildWalletWithdrawalTransaction(
+      env,
+      withdrawalInput("discovered", {
+        positionId: null,
+        strategyId: "strategy_ext_test",
+      })
+    );
+    expect(await getDb(env).queryOne("SELECT id FROM earn_positions")).toBeNull();
+    const signedTransaction = await signBuiltTransaction(built);
+    const results = await Promise.all([
+      submitCore(built, signedTransaction),
+      submitCore(built, signedTransaction),
+    ]);
+    expect(results.map((result) => result.replayed).sort()).toEqual([false, true]);
+    expect(results[0]?.position.id).toBe(results[1]?.position.id);
+    const position = await getDb(env).queryOne(
+      "SELECT cost_basis_known, strategy_id, owner_address FROM earn_positions"
+    );
+    expect(position).toEqual({
+      cost_basis_known: false,
+      strategy_id: "strategy_ext_test",
+      owner_address: ownerAddress,
+    });
+    expect(
+      await getDb(env).queryMany("SELECT direction, amount_requested FROM earn_movements")
+    ).toEqual([{ direction: "withdrawal", amount_requested: "10" }]);
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+
+  it("refuses foreign projects and different signed bytes before claiming a discovered holding", async () => {
+    const built = await buildWalletWithdrawalTransaction(
+      env,
+      withdrawalInput("discovered", {
+        positionId: null,
+        strategyId: "strategy_ext_test",
+      })
+    );
+    const other = await buildWalletWithdrawalTransaction(
+      env,
+      withdrawalInput("discovered", {
+        positionId: null,
+        strategyId: "strategy_ext_test",
+      })
+    );
+    await expect(
+      submitCore(built, await signBuiltTransaction(built), { projectId: PRODUCTION_PROJECT })
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(submitCore(built, await signBuiltTransaction(other))).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    });
+    expect(await getDb(env).queryOne("SELECT id FROM earn_positions")).toBeNull();
+    expect(await countRows("earn_movements")).toBe(0);
+    expect(
+      await getDb(env).queryOne("SELECT consumed_at FROM earn_wallet_transactions WHERE id = ?", [
+        built.id,
+      ])
+    ).toEqual({ consumed_at: null });
+  });
+
+  it("uses the custody ledger identity for a custody-funded prepared strategy", async () => {
+    await getDb(env).execute(
+      `INSERT INTO custody_configs
+      (id, organization_id, project_id, provider, config_encrypted, status)
+      VALUES ('cfg_strategy_operation', ?, ?, 'privy', 'test-encrypted', 'active')`,
+      [ORG, PROJECT]
+    );
+    await getDb(env).execute(
+      `INSERT INTO custody_wallets
+      (id, custody_config_id, wallet_id, public_key, status)
+      VALUES ('wallet_strategy_operation', 'cfg_strategy_operation', 'provider_wallet', ?, 'active')`,
+      [ownerAddress]
+    );
+    const built = await buildDepositRow(
+      depositInput({ custodyWalletId: "wallet_strategy_operation" })
+    );
+    const result = await submitCore(built, await signBuiltTransaction(built), {
+      custodyWalletId: "wallet_strategy_operation",
+    });
+    expect(result.position.custody_wallet_id).toBe("wallet_strategy_operation");
+    expect(result.position.owner_address).toBeNull();
+    expect(result.movement.custody_wallet_id).toBe("wallet_strategy_operation");
+    expect(result.movement.owner_address).toBeNull();
+    expect(result.replayed).toBe(false);
+    expect(
+      await getDb(env).queryOne("SELECT strategy_id FROM earn_positions WHERE id = ?", [
+        result.position.id,
+      ])
+    ).toEqual({ strategy_id: "strategy_ext_test" });
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+});
+
+beforeEach(async () => {
+  await seedTestDatabase(env);
+  await seedTenancy();
+  vi.clearAllMocks();
+  ownerKeyPair = await generateKeyPair();
+  ownerAddress = await getAddressFromPublicKey(ownerKeyPair.publicKey);
+
+  resolveVaultDirectClient.mockReturnValue({ buildVaultDeposit });
+  resolveVaultWithdrawClient.mockReturnValue({ buildVaultWithdrawal });
+  buildVaultDeposit.mockResolvedValue(depositPlan());
+  buildVaultWithdrawal.mockResolvedValue(withdrawalPlan());
+  simulateVaultPlan.mockImplementation(async (input) => ({
+    ok: true,
+    prepared: {
+      plan: input.plan,
+      lookupTables: {},
+      blockhash: BLOCKHASH,
+      lastValidBlockHeight: 361n,
+    },
+  }));
+  broadcastVaultTransaction.mockResolvedValue(undefined);
+  // Well inside the stubbed build window (lastValidBlockHeight 361).
+  clusterRpc.answer("getBlockHeight", 100);
+  clusterRpc.respond("getSignatureStatuses", () => signatureStatusesReplyAt(100, [null]));
+});
+
+describe("buildWalletDepositTransaction", () => {
+  it("persists and returns a decodable unsigned transaction for the owner", async () => {
+    const built = await buildDepositRow(depositInput());
+
+    expect(built.direction).toBe("deposit");
+    expect(built.owner_address).toBe(ownerAddress);
+    expect(built.vault_address).toBe(VAULT);
+    expect(built.denomination).toBe(TOKEN_MINT);
+    expect(built.amount_requested).toBe("25");
+    expect(built.creates_share_account).toBe(true);
+    expect(built.last_valid_block_height).toBe("361");
+    const persisted = await getDb(env)
+      .prepare("SELECT movement_id FROM earn_wallet_transactions WHERE id = ?")
+      .bind(built.id)
+      .first<{ movement_id: string | null }>();
+    expect(persisted?.movement_id).toBeNull();
+
+    const decoded = getTransactionDecoder().decode(
+      Uint8Array.from(Buffer.from(built.unsigned_transaction, "base64"))
+    );
+    // The owner is the fee payer and the only required signer, still unsigned.
+    expect(Object.keys(decoded.signatures)).toEqual([ownerAddress]);
+    expect(decoded.signatures[ownerAddress as keyof typeof decoded.signatures]).toBeNull();
+
+    // Simulated with the owner paying its own fee — the shape it will sign.
+    expect(simulateVaultPlan).toHaveBeenCalledWith(
+      expect.objectContaining({ owner: ownerAddress, fee: { kind: "wallet-pays" } })
+    );
+    // The provider build was NOT asked to name a separate rent payer.
+    expect(buildVaultDeposit.mock.calls[0][1]).not.toHaveProperty("rentPayer");
+  });
+
+  it("answers 501 when the provider has no vault-direct capability", async () => {
+    resolveVaultDirectClient.mockReturnValue(null);
+    await expect(buildWalletDepositTransaction(env, depositInput())).rejects.toThrowError(
+      /direct vault deposits/
+    );
+  });
+
+  it("maps shared provider refusals to a caller-facing bad request", async () => {
+    buildVaultDeposit.mockRejectedValue(
+      new SdpVedaError("INVALID_AMOUNT", "Veda deposits require minSharesOut")
+    );
+
+    await expect(buildWalletDepositTransaction(env, depositInput())).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Veda deposits require minSharesOut",
+    });
+  });
+
+  it("refuses a failed simulation before persisting anything", async () => {
+    simulateVaultPlan.mockResolvedValue({ ok: false, error: "InstructionError", logs: [] });
+    await expect(buildWalletDepositTransaction(env, depositInput())).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    });
+    const row = await getDb(env)
+      .prepare("SELECT COUNT(*)::int AS builds FROM earn_wallet_transactions")
+      .first<{ builds: number }>();
+    expect(row?.builds).toBe(0);
+  });
+
+  it.each(["FTokenMinAmountOut", "SharesOutBelowMinimum"])(
+    "names %s as slippage exceeded",
+    async (marker) => {
+      simulateVaultPlan.mockResolvedValue({
+        ok: false,
+        error: "custom program error: 0x1771",
+        logs: [`Program log: AnchorError. Error Code: ${marker}.`],
+      });
+      await expect(buildWalletDepositTransaction(env, depositInput())).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+        details: { reason: "slippage_exceeded" },
+        message: expect.stringContaining("slippage"),
+      });
+    }
+  );
+});
+
+describe("buildWalletDepositTransaction (swap-funded)", () => {
+  // Devnet USDG — any pinned mint works; the route validates membership, the
+  // service only carries it to the (stubbed) Jupiter boundary.
+  const SOURCE_MINT = "4F6PM96JJxngmHnZLBh9n58RH4aTVNWvDs2nuwrT5BP7";
+
+  function swapLeg(overrides: Record<string, unknown> = {}) {
+    return {
+      instructions: [
+        {
+          programAddress: MEMO_PROGRAM_ADDRESS,
+          accounts: [],
+          data: Buffer.from("swap-leg", "utf8").toString("base64"),
+        },
+      ],
+      lookupTableAddresses: [],
+      sourceAmount: "25",
+      quotedAmount: "24.99",
+      minOutAmount: "24.8",
+      priceImpactPct: "0.0001",
+      routeLabels: ["Whirlpool"],
+      slippageBps: 50,
+      ...overrides,
+    };
+  }
+
+  function swapDepositInput() {
+    return depositInput({
+      amount: "25",
+      swap: { sourceTokenMint: SOURCE_MINT, slippageBps: 50 },
+    });
+  }
+
+  it("prepends the swap, sizes the deposit to the floor, and pins a probed CU limit", async () => {
+    fetchJupiterSwapLeg.mockResolvedValue(swapLeg());
+    buildVaultDeposit.mockResolvedValue(depositPlan({ accepted: { amount: "24.8" } }));
+    simulateVaultPlan.mockImplementation(async (input) => ({
+      ok: true,
+      prepared: {
+        plan: input.plan,
+        lookupTables: {},
+        blockhash: BLOCKHASH,
+        lastValidBlockHeight: 361n,
+      },
+      unitsConsumed: 400_000n,
+    }));
+
+    const result = await buildWalletDepositTransaction(env, swapDepositInput());
+
+    // The provider built for the FLOOR, not the request's source amount.
+    expect(buildVaultDeposit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ amount: "24.8" })
+    );
+    expect(fetchJupiterSwapLeg).toHaveBeenCalledWith(
+      env,
+      expect.anything(),
+      expect.objectContaining({
+        inputMint: SOURCE_MINT,
+        outputMint: TOKEN_MINT,
+        sourceAmount: "25",
+        owner: ownerAddress,
+        slippageBps: 50,
+      })
+    );
+
+    // The persisted amount is the DEPOSIT amount in the deposit token, so the
+    // row's denomination stays truthful.
+    expect(result.built.amount_requested).toBe("24.8");
+    expect(result.built.denomination).toBe(TOKEN_MINT);
+    expect(result.swap?.minOutAmount).toBe("24.8");
+
+    // TWO simulations: a probe under the MAXIMUM compute-unit limit, then the
+    // final plan under the buffered consumption — Jupiter's /build carries no
+    // CU limit, so it is derived locally (see jupiter-swap.service.ts).
+    expect(simulateVaultPlan).toHaveBeenCalledTimes(2);
+    const probe = simulateVaultPlan.mock.calls[0]?.[0]?.plan;
+    const probeCu = Buffer.from(probe.instructions[0].data, "base64");
+    expect(probe.instructions[0].programAddress).toBe(
+      "ComputeBudget111111111111111111111111111111"
+    );
+    expect(probeCu.readUInt32LE(1)).toBe(1_400_000);
+
+    // Final (compiled) plan order: locally built CU limit — buffered 15% over
+    // the probe's consumption — then swap leg, provider deposit, memo last.
+    const simulated = simulateVaultPlan.mock.calls[1]?.[0]?.plan;
+    const finalCu = Buffer.from(simulated.instructions[0].data, "base64");
+    expect(finalCu.readUInt8(0)).toBe(2);
+    expect(finalCu.readUInt32LE(1)).toBe(460_001);
+    const datas = simulated.instructions
+      .slice(1)
+      .map((instruction: { data: string }) =>
+        Buffer.from(instruction.data, "base64").toString("utf8")
+      );
+    expect(datas[0]).toBe("swap-leg");
+    expect(datas[1]).toBe("provider-instruction");
+    expect(datas[2]).toMatch(/^sdp:earn:strategy-deposit:/);
+  });
+
+  it("makes the caller-provided fee payer Jupiter's ATA-rent payer too", async () => {
+    fetchJupiterSwapLeg.mockResolvedValue(swapLeg());
+    buildVaultDeposit.mockResolvedValue(
+      depositPlan({
+        accepted: { amount: "24.8" },
+        instructions: [
+          {
+            ...providerInstruction(),
+            accounts: [{ address: ownerAddress, role: AccountRole.READONLY_SIGNER }],
+          },
+        ],
+      })
+    );
+
+    const result = await buildWalletDepositTransaction(env, {
+      ...swapDepositInput(),
+      feePayer: VAULT,
+    });
+
+    expect(fetchJupiterSwapLeg).toHaveBeenCalledWith(
+      env,
+      expect.anything(),
+      expect.objectContaining({ owner: ownerAddress, payer: VAULT })
+    );
+    const decoded = getTransactionDecoder().decode(
+      Uint8Array.from(Buffer.from(result.built.unsigned_transaction, "base64"))
+    );
+    expect(Object.keys(decoded.signatures)).toEqual([VAULT, ownerAddress]);
+  });
+
+  it("retries an oversized route compactly while keeping the swap and deposit together", async () => {
+    fetchJupiterSwapLeg
+      .mockResolvedValueOnce(swapLeg())
+      .mockResolvedValueOnce(swapLeg({ quotedAmount: "24.7", minOutAmount: "24.6" }));
+    buildVaultDeposit.mockImplementation(async (_runtime, input) =>
+      depositPlan({ accepted: { amount: input.amount } })
+    );
+    simulateVaultPlan.mockImplementationOnce(async () => {
+      throw new VaultTransactionTooLargeError(1_300, false);
+    });
+
+    const result = await buildWalletDepositTransaction(env, swapDepositInput());
+
+    expect(fetchJupiterSwapLeg).toHaveBeenCalledTimes(2);
+    expect(fetchJupiterSwapLeg.mock.calls[1]?.[2]).toMatchObject({ maxAccounts: 24 });
+    expect(buildVaultDeposit.mock.calls.map(([, input]) => input.amount)).toEqual(["24.8", "24.6"]);
+    expect(result.built.amount_requested).toBe("24.6");
+    expect(result.swap?.minOutAmount).toBe("24.6");
+    const prepared = simulateVaultPlan.mock.calls.at(-1)?.[0]?.plan;
+    const instructionData = prepared.instructions.map((instruction: { data: string }) =>
+      Buffer.from(instruction.data, "base64").toString("utf8")
+    );
+    expect(instructionData.slice(1, 3)).toEqual(["swap-leg", "provider-instruction"]);
+    expect(instructionData.at(-1)).toMatch(/^sdp:e:sd:[A-Za-z0-9_-]{22}$/);
+    expect(await countRows("earn_wallet_transactions")).toBe(1);
+    expect(await countRows("earn_movements")).toBe(0);
+  });
+
+  it("refuses an oversized composed transaction without persisting or exposing a standalone swap", async () => {
+    fetchJupiterSwapLeg.mockResolvedValue(swapLeg());
+    // Both route widths overflow at final compilation, even though the swap
+    // alone would fit. Preparation must never offer that partial action.
+    buildVaultDeposit.mockResolvedValue(
+      depositPlan({
+        accepted: { amount: "24.8" },
+        instructions: [
+          {
+            programAddress: MEMO_PROGRAM_ADDRESS,
+            accounts: [],
+            data: Buffer.alloc(1300).toString("base64"),
+          },
+        ],
+      })
+    );
+
+    await expect(buildWalletDepositTransaction(env, swapDepositInput())).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message:
+        "This swap and strategy deposit cannot fit in one Solana transaction. " +
+        "Fund the wallet with the strategy's deposit token and retry.",
+      details: {
+        reason: "atomic_swap_deposit_too_large",
+        depositTokenMint: TOKEN_MINT,
+      },
+    });
+
+    // Both attempts include the swap and deposit; there is no standalone build.
+    expect(fetchJupiterSwapLeg).toHaveBeenCalledTimes(2);
+    expect(fetchJupiterSwapLeg.mock.calls[1]?.[2]).toMatchObject({ maxAccounts: 24 });
+    const usedCompactMemo = simulateVaultPlan.mock.calls.some(([input]) =>
+      input.plan.instructions.some((instruction: { data: string }) =>
+        /^sdp:e:sd:[A-Za-z0-9_-]{22}$/.test(
+          Buffer.from(instruction.data, "base64").toString("utf8")
+        )
+      )
+    );
+    expect(usedCompactMemo).toBe(true);
+
+    expect(simulateVaultPlan).toHaveBeenCalledTimes(4);
+    expect(await countRows("earn_wallet_transactions")).toBe(0);
+    expect(await countRows("earn_movements")).toBe(0);
+    const advisory = await getDb(env)
+      .prepare("SELECT COUNT(*)::int AS rows FROM earn_split_swap_advisories")
+      .first<{ rows: number }>();
+    expect(advisory?.rows).toBe(0);
+  });
+
+  it("refuses an oversized composed probe before any partial transaction is persisted", async () => {
+    fetchJupiterSwapLeg.mockResolvedValue(
+      swapLeg({
+        instructions: [
+          {
+            programAddress: MEMO_PROGRAM_ADDRESS,
+            accounts: [{ address: ownerAddress, role: AccountRole.READONLY_SIGNER }],
+            data: Buffer.from("swap-leg", "utf8").toString("base64"),
+          },
+        ],
+      })
+    );
+    buildVaultDeposit.mockResolvedValue(depositPlan({ accepted: { amount: "24.8" } }));
+    simulateVaultPlan.mockImplementation(async () => {
+      throw new VaultTransactionTooLargeError(2_056, "caller-provided");
+    });
+
+    await expect(
+      buildWalletDepositTransaction(env, {
+        ...swapDepositInput(),
+        feePayer: VAULT,
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      details: { reason: "atomic_swap_deposit_too_large", depositTokenMint: TOKEN_MINT },
+    });
+
+    expect(fetchJupiterSwapLeg).toHaveBeenCalledTimes(2);
+    expect(simulateVaultPlan).toHaveBeenCalledTimes(2);
+    expect(await countRows("earn_wallet_transactions")).toBe(0);
+    expect(await countRows("earn_movements")).toBe(0);
+    expect(
+      await getDb(env).queryOne("SELECT COUNT(*)::int AS rows FROM earn_split_swap_advisories")
+    ).toEqual({ rows: 0 });
+  });
+
+  it("returns an actionable refusal when a direct plan cannot fit even with a compact memo", async () => {
+    buildVaultDeposit.mockResolvedValue(
+      depositPlan({
+        instructions: [
+          {
+            programAddress: MEMO_PROGRAM_ADDRESS,
+            accounts: [],
+            data: Buffer.alloc(1300).toString("base64"),
+          },
+        ],
+      })
+    );
+
+    await expect(buildWalletDepositTransaction(env, depositInput())).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message:
+        "This vault deposit cannot fit in one Solana transaction, even with a compact request binding.",
+    });
+    expect(buildVaultDeposit).toHaveBeenCalledTimes(2);
+    expect(fetchJupiterSwapLeg).not.toHaveBeenCalled();
+  });
+});
+
+describe("prepared strategy deposit submission", () => {
+  it("verifies the owner signature, records before broadcast, and claims the position", async () => {
+    const built = await buildDepositRow(depositInput());
+    const signed = await signBuiltTransaction(built);
+    const requestId = crypto.randomUUID();
+
+    const result = await submitPrepared(built, signed, requestId);
+
+    expect(result.replayed).toBe(false);
+    expect(result.movement.status).toBe("submitted");
+    expect(result.movement.direction).toBe("deposit");
+    expect(result.movement.owner_address).toBe(ownerAddress);
+    expect(result.movement.custody_wallet_id).toBeNull();
+    expect(result.movement.source_address).toBe(ownerAddress);
+    expect(result.movement.destination_address).toBe(VAULT);
+    expect(result.movement.denomination).toBe(TOKEN_MINT);
+    expect(result.movement.request_id).toBe(requestId);
+    // The owner funded its own share-account rent: recorded as the NULL funder
+    // so the exit's refund defaults back to the owner.
+    expect(result.movement.creates_share_account).toBe(true);
+    expect(result.movement.share_ata_rent_funder).toBeNull();
+
+    expect(result.position.owner_address).toBe(ownerAddress);
+    expect(result.position.custody_wallet_id).toBeNull();
+    expect(result.position.project_id).toBe(PROJECT);
+    expect(result.position.activated_at).not.toBeNull();
+
+    // The signed bytes that were broadcast are the recorded outbox bytes.
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
+    expect(Buffer.from(broadcastVaultTransaction.mock.calls[0][0].bytes).toString("base64")).toBe(
+      result.movement.signed_transaction
+    );
+
+    // The build is consumed by exactly this movement.
+    const consumed = await getDb(env)
+      .prepare("SELECT movement_id FROM earn_wallet_transactions WHERE id = ?")
+      .bind(built.id)
+      .first<{ movement_id: string | null }>();
+    expect(consumed?.movement_id).toBe(result.movement.id);
+  });
+
+  it("replays the original movement for the same key without re-broadcasting", async () => {
+    const built = await buildDepositRow(depositInput());
+    const signed = await signBuiltTransaction(built);
+    const requestId = crypto.randomUUID();
+
+    const first = await submitPrepared(built, signed, requestId);
+    const replay = await submitPrepared(built, signed, requestId);
+
+    expect(replay.replayed).toBe(true);
+    expect(replay.movement.id).toBe(first.movement.id);
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects the same key used for a different build", async () => {
+    const first = await buildDepositRow(depositInput());
+    const second = await buildDepositRow(depositInput());
+    const requestId = crypto.randomUUID();
+
+    await submitPrepared(first, await signBuiltTransaction(first), requestId);
+    await expect(
+      submitPrepared(second, await signBuiltTransaction(second), requestId)
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  it("replays a consumed build with the same signed bytes under another delivery key", async () => {
+    const built = await buildDepositRow(depositInput());
+    const signed = await signBuiltTransaction(built);
+
+    const first = await submitPrepared(built, signed, crypto.randomUUID());
+    const replay = await submitPrepared(built, signed, crypto.randomUUID());
+    expect(replay.replayed).toBe(true);
+    expect(replay.movement.id).toBe(first.movement.id);
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
+    // One built transaction, one movement — the ledger holds no duplicate.
+    const rows = await getDb(env)
+      .prepare("SELECT COUNT(*)::int AS movements FROM earn_movements")
+      .first<{ movements: number }>();
+    expect(rows?.movements).toBe(1);
+  });
+
+  it("prevents one movement from consuming more than one built transaction", async () => {
+    const first = await buildDepositRow(depositInput());
+    const second = await buildDepositRow(depositInput());
+    const result = await submitPrepared(
+      first,
+      await signBuiltTransaction(first),
+      crypto.randomUUID()
+    );
+
+    await expect(
+      getDb(env)
+        .prepare(
+          `UPDATE earn_wallet_transactions
+           SET movement_id = ?, consumed_at = sdp_iso_now()
+           WHERE id = ?`
+        )
+        .bind(result.movement.id, second.id)
+        .run()
+    ).rejects.toThrow(/earn_wallet_transactions_movement_id_key/i);
+  });
+
+  it("rejects signed bytes whose message is not the built transaction", async () => {
+    // Two builds of the SAME intent still differ by message: each carries its
+    // own transaction id in the memo. Signing build B and submitting it as
+    // build A is exactly the substitution the message comparison exists for.
+    const built = await buildDepositRow(depositInput());
+    const other = await buildDepositRow(depositInput());
+
+    await expect(
+      submitPrepared(built, await signBuiltTransaction(other), crypto.randomUUID())
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects a submit with no owner signature", async () => {
+    const built = await buildDepositRow(depositInput());
+    await expect(
+      submitPrepared(built, built.unsigned_transaction, crypto.randomUUID())
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("rejects a forged owner signature", async () => {
+    const built = await buildDepositRow(depositInput());
+    const transaction = getTransactionDecoder().decode(
+      Uint8Array.from(Buffer.from(built.unsigned_transaction, "base64"))
+    );
+    const forged = {
+      ...transaction,
+      signatures: {
+        ...transaction.signatures,
+        [ownerAddress]: new Uint8Array(64).fill(7),
+      },
+      // biome-ignore lint/suspicious/noExplicitAny: deliberately corrupting the branded signature map to prove verification rejects it.
+    } as any;
+    const bytes = Buffer.from(getTransactionEncoder().encode(forged)).toString("base64");
+
+    await expect(submitPrepared(built, bytes, crypto.randomUUID())).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    });
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+
+  it("scopes the build to its exact project", async () => {
+    const built = await buildDepositRow(depositInput());
+    const signed = await signBuiltTransaction(built);
+    await expectProjectScoped(
+      (projectId) =>
+        submitPrepared(built, signed, crypto.randomUUID(), { projectId }).catch((error: unknown) =>
+          error instanceof Error && "code" in error ? error.code : error
+        ),
+      { own: projects.sandbox, other: projects.production },
+      (result) => result === "NOT_FOUND"
+    );
+  });
+
+  it("enforces the owner-address position's project claim in the database", async () => {
+    const built = await buildDepositRow(depositInput());
+    const result = await submitPrepared(
+      built,
+      await signBuiltTransaction(built),
+      crypto.randomUUID()
+    );
+    await getDb(env)
+      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+      .bind(
+        "org_ext_wallet_unclaimed",
+        "Unclaimed Org",
+        "ext-wallet-unclaimed",
+        "enterprise",
+        "active"
+      )
+      .run();
+    const unclaimed = await seedDefaultProjects(getDb(env), {
+      organizationId: "org_ext_wallet_unclaimed",
+      createdBy: USER,
+      members: [],
+    });
+    await expect(
+      getDb(env)
+        .prepare("UPDATE earn_movements SET project_id = ? WHERE id = ?")
+        .bind(unclaimed.sandbox.id, result.movement.id)
+        .run()
+    ).rejects.toThrow(/earn_movements_external_wallet_claim_fkey/i);
+  });
+
+  it("preserves owner-address position and movement history after project deletion", async () => {
+    const built = await buildDepositRow(depositInput());
+    const result = await submitPrepared(
+      built,
+      await signBuiltTransaction(built),
+      crypto.randomUUID()
+    );
+
+    await getDb(env).prepare("DELETE FROM projects WHERE id = ?").bind(PROJECT).run();
+
+    const movement = await getDb(env)
+      .prepare("SELECT project_id FROM earn_movements WHERE id = ?")
+      .bind(result.movement.id)
+      .first<{ project_id: string | null }>();
+    const position = await getDb(env)
+      .prepare("SELECT project_id FROM earn_positions WHERE id = ?")
+      .bind(result.position.id)
+      .first<{ project_id: string | null }>();
+
+    expect(movement?.project_id).toBeNull();
+    expect(position?.project_id).toBeNull();
+  });
+
+  it("leaves the movement requested and reconcilable when broadcast fails", async () => {
+    broadcastVaultTransaction.mockRejectedValue(new Error("rpc unreachable"));
+    const built = await buildDepositRow(depositInput());
+    const result = await submitPrepared(
+      built,
+      await signBuiltTransaction(built),
+      crypto.randomUUID()
+    );
+
+    expect(result.movement.status).toBe("requested");
+    expect(result.movement.signature).not.toBeNull();
+    expect(result.movement.signed_transaction).not.toBeNull();
+  });
+
+  it("records an expired signed build and leaves broadcast refusal reconcilable", async () => {
+    const built = await buildDepositRow(depositInput());
+    const signed = await signBuiltTransaction(built);
+    clusterRpc.answer("getBlockHeight", 362);
+    broadcastVaultTransaction.mockRejectedValue(preflightBlockhashNotFound());
+
+    const result = await submitPrepared(built, signed, crypto.randomUUID());
+
+    expect(result.movement.status).toBe("requested");
+    expect(result.movement.signature).toBe(
+      getSignatureFromTransaction(
+        getTransactionDecoder().decode(Uint8Array.from(Buffer.from(signed, "base64")))
+      )
+    );
+    expect(result.movement.signed_transaction).toBe(signed);
+    expect(await countRows("earn_movements")).toBe(1);
+    const row = await getDb(env)
+      .prepare("SELECT movement_id FROM earn_wallet_transactions WHERE id = ?")
+      .bind(built.id)
+      .first<{ movement_id: string | null }>();
+    expect(row?.movement_id).toBe(result.movement.id);
+  });
+
+  it("answers a replay from the ledger after the build's blockhash expired", async () => {
+    const built = await buildDepositRow(depositInput());
+    const signed = await signBuiltTransaction(built);
+    const requestId = crypto.randomUUID();
+    const first = await submitPrepared(built, signed, requestId);
+
+    clusterRpc.answer("getBlockHeight", 10_000);
+    const replay = await submitPrepared(built, signed, requestId);
+
+    expect(replay.replayed).toBe(true);
+    expect(replay.movement.id).toBe(first.movement.id);
+    // A replay is a durable read; no chain call decides it.
+    expect(clusterRpc.calls).toEqual([]);
+  });
+
+  it("audit: retains a signed deposit that finalized before its first expired-build submit", async () => {
+    const built = await buildDepositRow(depositInput());
+    const signed = await signBuiltTransaction(built);
+    const signature = getSignatureFromTransaction(
+      getTransactionDecoder().decode(Uint8Array.from(Buffer.from(signed, "base64")))
+    );
+    clusterRpc.answer("getBlockHeight", 362);
+    // The owner broadcast these bytes independently while the build was valid.
+    // This RPC boundary represents that transaction's later finalized receipt.
+    clusterRpc.respond("getSignatureStatuses", () =>
+      signatureStatusesReplyAt(400, [
+        { slot: 350, confirmations: null, err: null, confirmationStatus: "finalized" },
+      ])
+    );
+
+    await submitPrepared(built, signed, crypto.randomUUID()).catch(() => undefined);
+
+    // Whatever HTTP outcome is chosen, preserve the actual signed intent so
+    // accounting and retries can reconcile it instead of starting a new deposit.
+    const recorded = await getDb(env)
+      .prepare("SELECT signature FROM earn_movements WHERE signature = ?")
+      .bind(signature)
+      .first<{ signature: string }>();
+    expect(recorded?.signature).toBe(signature);
+  });
+
+  it("does not refuse when the block height cannot be read", async () => {
+    clusterRpc.respond("getBlockHeight", () => RPC_UNREACHABLE);
+    const built = await buildDepositRow(depositInput());
+    const result = await submitPrepared(
+      built,
+      await signBuiltTransaction(built),
+      crypto.randomUUID()
+    );
+    expect(result.movement.status).toBe("submitted");
+  });
+
+  it("leaves an expired-blockhash refusal reconcilable after an external broadcast", async () => {
+    broadcastVaultTransaction.mockRejectedValue(preflightBlockhashNotFound());
+    clusterRpc.answer("getBlockHeight", 361);
+    const built = await buildDepositRow(depositInput());
+    const result = await submitPrepared(
+      built,
+      await signBuiltTransaction(built),
+      crypto.randomUUID()
+    );
+
+    expect(result.replayed).toBe(false);
+    expect(result.movement.status).toBe("requested");
+    expect(result.movement.failure_reason).toBeNull();
+    const persisted = await getDb(env)
+      .prepare("SELECT status FROM earn_movements WHERE id = ?")
+      .bind(result.movement.id)
+      .first<{ status: string }>();
+    expect(persisted?.status).toBe("requested");
+  });
+
+  it("keeps a preflight blockhash refusal reconcilable while the window is open", async () => {
+    broadcastVaultTransaction.mockRejectedValue(preflightBlockhashNotFound());
+    const built = await buildDepositRow(depositInput());
+    const result = await submitPrepared(
+      built,
+      await signBuiltTransaction(built),
+      crypto.randomUUID()
+    );
+
+    expect(result.movement.status).toBe("requested");
+    expect(result.movement.failure_reason).toBeNull();
+  });
+});
+
+describe("partner fee payer (caller-provided)", () => {
+  let partnerKeyPair: CryptoKeyPair;
+  let partnerAddress: string;
+
+  /**
+   * A provider instruction that names the OWNER as a signer, the way every
+   * real deposit/exit plan does (the owner's tokens move). This matters here
+   * more than anywhere: with the partner in the fee-payer seat, the owner's
+   * authorization comes ONLY from instruction-level signer roles.
+   */
+  function ownerSignerInstruction() {
+    return {
+      programAddress: MEMO_PROGRAM_ADDRESS,
+      accounts: [{ address: ownerAddress, role: AccountRole.READONLY_SIGNER }],
+      data: Buffer.from("provider-instruction", "utf8").toString("base64"),
+    };
+  }
+
+  beforeEach(async () => {
+    partnerKeyPair = await generateKeyPair();
+    partnerAddress = await getAddressFromPublicKey(partnerKeyPair.publicKey);
+    buildVaultDeposit.mockResolvedValue(depositPlan({ instructions: [ownerSignerInstruction()] }));
+    buildVaultWithdrawal.mockResolvedValue(
+      withdrawalPlan({ instructions: [ownerSignerInstruction()] })
+    );
+  });
+
+  it("refuses a fee-payer build whose plan does not require the owner's signature", async () => {
+    // Without the owner in the fee-payer seat, a plan that never names the
+    // owner as a signer would move money on the partner's signature alone —
+    // the compile-time signer assertion is what makes that unrepresentable.
+    buildVaultDeposit.mockResolvedValue(depositPlan());
+    await expect(buildDepositRow(depositInput({ feePayer: partnerAddress }))).rejects.toThrow(
+      "must require exactly the fee-payer and owner signatures"
+    );
+  });
+
+  it("builds a two-signer transaction, funds rent from the partner, and records both facts", async () => {
+    const built = await buildDepositRow(depositInput({ feePayer: partnerAddress }));
+
+    expect(built.fee_payer).toBe(partnerAddress);
+    // The plan creates the share account and the partner was its rent payer,
+    // so the funder is recorded for the exit's refund.
+    expect(built.share_ata_rent_funder).toBe(partnerAddress);
+
+    // Slot order is the on-chain contract: fee payer at zero, owner beside it,
+    // both unsigned.
+    const decoded = getTransactionDecoder().decode(
+      Uint8Array.from(Buffer.from(built.unsigned_transaction, "base64"))
+    );
+    expect(Object.keys(decoded.signatures)).toEqual([partnerAddress, ownerAddress]);
+    expect(Object.values(decoded.signatures)).toEqual([null, null]);
+
+    // The funds check ran against the partner wallet, and the provider was
+    // asked to charge account rent to the same identity.
+    expect(simulateVaultPlan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fee: { kind: "caller-provided", feePayer: partnerAddress },
+      })
+    );
+    expect(buildVaultDeposit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ rentPayer: partnerAddress })
+    );
+  });
+
+  it("retries an oversized partner-paid plan with a compact request binding", async () => {
+    simulateVaultPlan.mockImplementation(async (input) => {
+      const memo = Buffer.from(input.plan.instructions.at(-1)?.data ?? "", "base64").toString(
+        "utf8"
+      );
+      if (memo.startsWith("sdp:earn:strategy-deposit:")) {
+        throw new VaultTransactionTooLargeError(1_290, "caller-provided");
+      }
+      expect(memo).toMatch(/^sdp:e:sd:[A-Za-z0-9_-]{22}$/);
+      return {
+        ok: true,
+        prepared: {
+          plan: input.plan,
+          lookupTables: {},
+          blockhash: BLOCKHASH,
+          lastValidBlockHeight: 361n,
+        },
+      };
+    });
+
+    const built = await buildDepositRow(depositInput({ feePayer: partnerAddress }));
+    const decoded = getTransactionDecoder().decode(
+      Uint8Array.from(Buffer.from(built.unsigned_transaction, "base64"))
+    );
+
+    expect(Object.keys(decoded.signatures)).toEqual([partnerAddress, ownerAddress]);
+    expect(buildVaultDeposit).toHaveBeenCalledTimes(2);
+    expect(simulateVaultPlan).toHaveBeenCalledTimes(2);
+  });
+
+  it("records no rent funder when the plan creates no account", async () => {
+    buildVaultDeposit.mockResolvedValue(
+      depositPlan({ createsShareAccount: false, instructions: [ownerSignerInstruction()] })
+    );
+    const built = await buildDepositRow(depositInput({ feePayer: partnerAddress }));
+    expect(built.fee_payer).toBe(partnerAddress);
+    expect(built.share_ata_rent_funder).toBeNull();
+  });
+
+  it("treats a fee payer equal to the owner as the default", async () => {
+    const built = await buildDepositRow(depositInput({ feePayer: ownerAddress }));
+    expect(built.fee_payer).toBeNull();
+    expect(built.share_ata_rent_funder).toBeNull();
+    const decoded = getTransactionDecoder().decode(
+      Uint8Array.from(Buffer.from(built.unsigned_transaction, "base64"))
+    );
+    expect(Object.keys(decoded.signatures)).toEqual([ownerAddress]);
+    expect(simulateVaultPlan).toHaveBeenCalledWith(
+      expect.objectContaining({ fee: { kind: "wallet-pays" } })
+    );
+  });
+
+  it("accepts a submit signed by both parties and records the fee payer's signature as the txid", async () => {
+    const built = await buildDepositRow(depositInput({ feePayer: partnerAddress }));
+    const transaction = getTransactionDecoder().decode(
+      Uint8Array.from(Buffer.from(built.unsigned_transaction, "base64"))
+    );
+    const signed = await partiallySignTransaction([ownerKeyPair, partnerKeyPair], transaction);
+    const signedBase64 = Buffer.from(getTransactionEncoder().encode(signed)).toString("base64");
+
+    const result = await submitPrepared(built, signedBase64, crypto.randomUUID());
+
+    expect(result.movement.status).toBe("submitted");
+    // Slot zero is the partner's signature — the on-chain txid the ledger and
+    // the reconciler poll by.
+    expect(result.movement.signature).toBe(getSignatureFromTransaction(signed));
+    expect(result.movement.creates_share_account).toBe(true);
+    expect(result.movement.share_ata_rent_funder).toBe(partnerAddress);
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
+
+    // The projection carries the funder onto the position, where the exit
+    // build reads it as `rentRefundTo`.
+    const position = await getDb(env)
+      .prepare("SELECT share_ata_rent_funder FROM earn_positions WHERE id = ?")
+      .bind(result.position.id)
+      .first<{ share_ata_rent_funder: string | null }>();
+    expect(position?.share_ata_rent_funder).toBeNull();
+  });
+
+  it("rejects a submit the fee payer has not co-signed", async () => {
+    const built = await buildDepositRow(depositInput({ feePayer: partnerAddress }));
+    // Owner-only signature: the partner slot stays null.
+    const ownerOnly = await signBuiltTransaction(built);
+
+    await expect(submitPrepared(built, ownerOnly, crypto.randomUUID())).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: expect.stringContaining("fee-payer signature"),
+    });
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects a forged fee-payer signature by name", async () => {
+    const built = await buildDepositRow(depositInput({ feePayer: partnerAddress }));
+    const transaction = getTransactionDecoder().decode(
+      Uint8Array.from(Buffer.from(built.unsigned_transaction, "base64"))
+    );
+    const ownerSigned = await partiallySignTransaction([ownerKeyPair], transaction);
+    const forged = {
+      ...ownerSigned,
+      signatures: {
+        ...ownerSigned.signatures,
+        [partnerAddress]: new Uint8Array(64).fill(9),
+      },
+      // biome-ignore lint/suspicious/noExplicitAny: deliberately corrupting the branded signature map to prove verification rejects it.
+    } as any;
+    const bytes = Buffer.from(getTransactionEncoder().encode(forged)).toString("base64");
+
+    await expect(submitPrepared(built, bytes, crypto.randomUUID())).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: expect.stringContaining("invalid fee-payer signature"),
+    });
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+
+  it("builds the exit with the partner paying and refunds the recorded funder", async () => {
+    const positionId = await seedWalletPosition();
+    const built = await buildWalletWithdrawalTransaction(
+      env,
+      withdrawalInput(positionId, {
+        feePayer: partnerAddress,
+        // The deposit recorded the partner as the funder; the exit must refund
+        // THAT address, independent of who pays this exit's fee.
+        shareAtaRentFunder: partnerAddress,
+      })
+    );
+
+    expect(built.fee_payer).toBe(partnerAddress);
+    expect(buildVaultWithdrawal).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ rentPayer: partnerAddress, rentRefundTo: partnerAddress })
+    );
+    const decoded = getTransactionDecoder().decode(
+      Uint8Array.from(Buffer.from(built.unsigned_transaction, "base64"))
+    );
+    expect(Object.keys(decoded.signatures)).toEqual([partnerAddress, ownerAddress]);
+  });
+});
+
+describe("wallet withdrawals", () => {
+  it("builds and submits the exit against the recorded position", async () => {
+    const positionId = await seedWalletPosition();
+    const built = await buildWalletWithdrawalTransaction(env, withdrawalInput(positionId));
+    expect(built.direction).toBe("withdrawal");
+    expect(built.position_id).toBe(positionId);
+    expect(built.denomination).toBe(SHARE_MINT);
+    expect(built.amount_requested).toBe("10");
+
+    const result = await submitStrategyTransaction(env, {
+      custodyWalletId: null,
+      apiKeyId: null,
+      organizationId: ORG,
+      projectId: PROJECT,
+      transactionId: built.id,
+      signedTransaction: await signBuiltTransaction(built),
+      requestId: crypto.randomUUID(),
+      userId: USER,
+    });
+
+    expect(result.replayed).toBe(false);
+    expect(result.movement.direction).toBe("withdrawal");
+    expect(result.movement.status).toBe("submitted");
+    expect(result.movement.position_id).toBe(positionId);
+    expect(result.movement.denomination).toBe(SHARE_MINT);
+    // The mirror image of the deposit: out of the instrument, back to the owner.
+    expect(result.movement.source_address).toBe(VAULT);
+    expect(result.movement.destination_address).toBe(ownerAddress);
+    expect(result.movement.owner_address).toBe(ownerAddress);
+    expect(result.movement.custody_wallet_id).toBeNull();
+  });
+
+  it("carries the caller's withdrawal floor through the shared provider plan", async () => {
+    const positionId = await seedWalletPosition();
+    buildVaultWithdrawal.mockResolvedValue(
+      withdrawalPlan({ accepted: { shares: "10", minAmountOut: "9.5" } })
+    );
+
+    const built = await buildWalletWithdrawalTransaction(
+      env,
+      withdrawalInput(positionId, { minAmountOut: "9.5" })
+    );
+
+    expect(buildVaultWithdrawal).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ shares: "10", minAmountOut: "9.5" })
+    );
+    expect(built.min_shares_out).toBe("9.5");
+  });
+
+  it("refuses a floor the provider's exit plan cannot enforce, persisting nothing", async () => {
+    const positionId = await seedWalletPosition();
+    // The default plan reports shares only, the way Kamino's kvault exit does.
+    await expect(
+      buildWalletWithdrawalTransaction(env, withdrawalInput(positionId, { minAmountOut: "9.5" }))
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: expect.stringContaining("minAmountOut is not supported for kamino exits"),
+    });
+    expect(simulateVaultPlan).not.toHaveBeenCalled();
+    expect(await countRows("earn_wallet_transactions")).toBe(0);
+  });
+
+  it("fails closed when the plan echoes a floor other than the one requested", async () => {
+    const positionId = await seedWalletPosition();
+    buildVaultWithdrawal.mockResolvedValue(
+      withdrawalPlan({ accepted: { shares: "10", minAmountOut: "9.0" } })
+    );
+    await expect(
+      buildWalletWithdrawalTransaction(env, withdrawalInput(positionId, { minAmountOut: "9.5" }))
+    ).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+    expect(simulateVaultPlan).not.toHaveBeenCalled();
+  });
+
+  it("retains an expired signed exit when broadcast cannot establish execution", async () => {
+    const positionId = await seedWalletPosition();
+    const built = await buildWalletWithdrawalTransaction(env, withdrawalInput(positionId));
+    clusterRpc.answer("getBlockHeight", 362);
+
+    broadcastVaultTransaction.mockRejectedValue(preflightBlockhashNotFound());
+    const result = await submitStrategyTransaction(env, {
+      custodyWalletId: null,
+      apiKeyId: null,
+      organizationId: ORG,
+      projectId: PROJECT,
+      transactionId: built.id,
+      signedTransaction: await signBuiltTransaction(built),
+      requestId: crypto.randomUUID(),
+      userId: USER,
+    });
+    expect(result.movement.status).toBe("requested");
+    expect(result.movement.signature).not.toBeNull();
+    expect(await countRows("earn_movements")).toBe(1);
+  });
+
+  it("answers 501 when the provider cannot build an exit", async () => {
+    resolveVaultWithdrawClient.mockReturnValue(null);
+    const positionId = await seedWalletPosition();
+    await expect(
+      buildWalletWithdrawalTransaction(env, withdrawalInput(positionId))
+    ).rejects.toThrowError(/vault withdrawals/);
+  });
+
+  it("maps shared withdrawal refusals to a caller-facing bad request", async () => {
+    buildVaultWithdrawal.mockRejectedValue(
+      new SdpVedaError("WITHDRAW_REFUSED", "The Veda vault is temporarily paused")
+    );
+    const positionId = await seedWalletPosition();
+
+    await expect(
+      buildWalletWithdrawalTransaction(env, withdrawalInput(positionId))
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "The Veda vault is temporarily paused",
+    });
+  });
+
+  it("takes the movement direction from the prepared build", async () => {
+    const positionId = await seedWalletPosition();
+    const built = await buildWalletWithdrawalTransaction(env, withdrawalInput(positionId));
+    const result = await submitPrepared(
+      built,
+      await signBuiltTransaction(built),
+      crypto.randomUUID()
+    );
+    expect(result.movement.direction).toBe("withdrawal");
+    expect(result.movement.position_id).toBe(positionId);
+    expect(await getDb(env).queryOne("SELECT direction FROM earn_movements")).toEqual({
+      direction: "withdrawal",
+    });
+  });
+});

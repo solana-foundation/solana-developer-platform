@@ -29,7 +29,7 @@ export const projectScopeWithIdempotencyHeaders = projectScopeHeaders.extend({
 
 /**
  * For routes where the header is the ONLY accepted idempotency source and the
- * runtime refuses a request without it (the vault and external-wallet money
+ * runtime refuses a request without it (the vault and wallet money
  * movers). Marking it optional here would let a generated client omit a header
  * the API 400s on.
  */
@@ -53,9 +53,11 @@ export interface IdempotencyDocumentation {
   recovery?: "record";
   /**
    * The handler marks its domain row written (`markIdempotencyCommitted`), so
-   * from then on any status is stored: transfers and transfer batches.
+   * from then on known statuses below 500 are stored: transfers and batches.
    */
   storesAnswerAfterRecord?: boolean;
+  /** Preserve the exact answer after an operation mutation commits. */
+  committedServerErrors?: "store";
   /**
    * The route's authorize step marks a 5xx rerunnable when the custody
    * provider dedupes on the request id (`markIdempotencyRerunnable`,
@@ -98,6 +100,7 @@ function idempotencyKeyDescription({
   serverErrors,
   recovery,
   storesAnswerAfterRecord,
+  committedServerErrors,
   rerunsWhenProviderDedupes,
 }: IdempotencyDocumentation) {
   const lead =
@@ -106,9 +109,12 @@ function idempotencyKeyDescription({
       : "Optional, and honored when sent.";
   const afterRecord = storesAnswerAfterRecord ? ` ${ANSWER_AFTER_RECORD}` : "";
   const unrecorded = UNRECORDED_OUTCOME[recovery ?? "none"];
-  const serverErrorRetry = rerunsWhenProviderDedupes
-    ? PROVIDER_DEDUPE_RETRY
-    : SERVER_ERROR_RETRY[serverErrors];
+  const serverErrorRetry =
+    committedServerErrors === "store"
+      ? "Before commitment a same-key retry after a 5xx can recover from the original record. After commitment the exact 5xx is stored and replayed; read the operation with GET or recover it from the operations feed. Never send a new money request to recover an uncertain response."
+      : rerunsWhenProviderDedupes
+        ? PROVIDER_DEDUPE_RETRY
+        : SERVER_ERROR_RETRY[serverErrors];
   return `${lead} ${IDEMPOTENCY_CONTRACT} ${unrecorded}${afterRecord} ${serverErrorRetry}`;
 }
 

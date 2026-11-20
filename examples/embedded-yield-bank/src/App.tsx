@@ -31,7 +31,6 @@ export function App() {
         onRefresh={dashboard.refresh}
         onDeposit={dashboard.deposit}
         onWithdraw={dashboard.withdraw}
-        onCancelQueuedWithdrawal={dashboard.cancelQueuedWithdrawal}
       />
       <Toaster richColors position="bottom-right" />
     </>
@@ -48,7 +47,6 @@ function BankShell({
   onRefresh,
   onDeposit,
   onWithdraw,
-  onCancelQueuedWithdrawal,
 }: {
   loading: boolean;
   error?: string;
@@ -59,7 +57,6 @@ function BankShell({
   onRefresh: () => void;
   onDeposit: (amount: string) => Promise<void>;
   onWithdraw: (input: WithdrawalIntent) => Promise<void>;
-  onCancelQueuedWithdrawal: (withdrawalRequestId: string) => Promise<void>;
 }) {
   return (
     <div className="min-h-svh bg-app lg:flex lg:h-svh lg:overflow-hidden">
@@ -77,7 +74,6 @@ function BankShell({
               onRefresh={onRefresh}
               onDeposit={onDeposit}
               onWithdraw={onWithdraw}
-              onCancelQueuedWithdrawal={onCancelQueuedWithdrawal}
             />
           ) : null}
         </main>

@@ -25,7 +25,7 @@ import {
 import type { SigningPort } from "@sdp/custody/signing";
 import { SigningError } from "@sdp/custody/signing";
 import type { CustodyProvider } from "@sdp/types/custody";
-import type { MovementId } from "@sdp/types/movements";
+import type { MovementId, WaistMovement } from "@sdp/types/movements";
 import { getBase58Codec } from "@solana/codecs";
 import type { Address, TransactionSigner } from "@solana/kit";
 import { createKeyPairSignerFromPrivateKeyBytes } from "@solana/signers";
@@ -48,6 +48,7 @@ import type {
   CustodyTransferProposer,
   TransferProposalIntent,
 } from "@/services/domain/signing/admitted-proposer";
+import type { CustodyTransactionProposer } from "@/services/domain/signing/admitted-transaction-proposer";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createAdapterFromEncryptedConfig } from "@/services/domain/signing/provider-adapter-factory";
 import {
@@ -1293,6 +1294,21 @@ export class SigningService {
   }
 
   /** The proposing half of the custody waist; `null` for a wallet that signs (PRO-2435 D2). */
+  async getTransactionProposerForWalletRecord(
+    orgId: string,
+    projectId: string,
+    custodyWalletId: string,
+    movement: WaistMovement<"earn">
+  ): Promise<CustodyTransactionProposer | null> {
+    return this.runtimeTargets.getTransactionProposerForWalletRecord(
+      orgId,
+      projectId,
+      custodyWalletId,
+      movement
+    );
+  }
+
+  /** The proposing half of the custody waist; `null` for a wallet that signs (PRO-2435 D2). */
   async getTransferProposerForWalletRecord(
     orgId: string,
     projectId: string,
@@ -1406,6 +1422,7 @@ export function createSigningService(env: Env, scope?: TenantScope): SigningServ
     "admitRuntimeExecution",
     "getTransactionSignerForWalletRecord",
     "getTransferProposerForWalletRecord",
+    "getTransactionProposerForWalletRecord",
     "getTransferProposalReaderForWalletRecord",
     // biome-ignore lint/security/noSecrets: tenant-scoped method name, not a credential.
     "getTransferProposalRecoveryForWalletRecord",

@@ -1,4 +1,3 @@
-import { supportsPortfolioWallets } from "@sdp/earn/capabilities";
 import { OndoEarnClient } from "@sdp/earn/providers/ondo/client";
 import type {
   EarnRuntimeContext,
@@ -683,20 +682,5 @@ export class OndoVaultDirectClient
       seen.add(accountAddress);
       return { address: accountAddress, atoms: BigInt(raw), frozen: info.state === "frozen" };
     });
-  }
-}
-
-/**
- * Guard asserted at construction rather than trusted, same as Kamino/Veda: a
- * client answering yes to both money models would let a portfolio route render
- * a token mint as a fundable deposit address.
- */
-export function assertNotPortfolioProvider(client: OndoVaultDirectClient): void {
-  if (supportsPortfolioWallets(client)) {
-    throw new SdpOndoError(
-      "UNSUPPORTED_VAULT",
-      "Ondo must never report the portfolio-wallet capability: it custodies nothing, and the " +
-        "USDY mint is not a fundable address."
-    );
   }
 }

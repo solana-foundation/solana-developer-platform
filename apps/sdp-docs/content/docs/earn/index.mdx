@@ -4,56 +4,81 @@ title: Earn
 description: Offer stablecoin yield in your app, from your customers' own wallets, through one API.
 ---
 
-Earn lets your customers earn yield on stablecoins without handing over their
-keys. Your backend builds each deposit and withdrawal through SDP, your
-customer's wallet signs it, and SDP broadcasts it and tracks it to settlement.
-
-<ActionLinks>
-
-[Start the quickstart](/docs/earn/quickstart)
-
-[API reference](/docs/reference/api/earn)
-
-</ActionLinks>
-
-## What you can build
-
-| Capability | What Earn gives you |
-| --- | --- |
-| [Strategies](/docs/earn/strategies) | A catalog of DeFi and real-world-asset strategies with live rates, deposit tokens, and withdrawal terms. |
-| [Deposits](/docs/earn/deposits) | Live quotes, unsigned transactions for your customer's wallet, and tracking from submit to finality. |
-| [Balances and earnings](/docs/earn/balances) | Live positions, recorded movements, and exact earnings for each customer wallet. |
-| [Withdrawals](/docs/earn/withdrawals) | Instant withdrawals, plus provider orders, solver queues, and operator redemptions that pay out later. |
-
-Returns, losses, fees, and withdrawal timing depend on the strategy. An APY is
-a rate, not a promise.
-
-## How it works
+Earn puts vault, lending and real-world-asset yield strategies behind one API.
+Your customer's wallet signs every deposit and withdrawal, and SDP broadcasts it
+and tracks it to settlement. Funds move between the customer's wallet and the
+provider's program; SDP never holds them
+([follow the funds](/docs/earn/concepts#follow-the-funds)).
 
 <EarnFlow>
 
-- **Customer's wallet**
+- **Prepare**
 
-  Signs a deposit of the strategy's deposit token.
+  `POST /v1/earn/deposit` returns an operation with an unsigned transaction.
 
-- **Strategy**
+- **Sign and submit**
 
-  Issues shares or a yield-bearing token to the customer's wallet.
+  Your customer's wallet signs it, and `/submit` hands SDP the exact bytes.
 
-- **Customer's wallet**
+- **Track**
 
-  Receives the payout when a withdrawal settles.
+  Poll `GET /v1/operations/{operationId}` until it completes.
 
 </EarnFlow>
 
-SDP never holds your customer's keys or pools their funds in an SDP account.
-Funds sit with the strategy's protocol or provider, whose custody and
-withdrawal risks still apply. [How Earn works](/docs/earn/concepts) explains
-shares, signing, and settlement.
+Any Solana wallet can sign, and none needs registering in SDP. Start with the
+[quickstart](/docs/earn/quickstart), or
+[run the example](https://github.com/solana-foundation/solana-developer-platform/tree/main/examples/earn-quickstart)
+locally with no key, wallet or funds.
 
-## Start building
+## Endpoints
 
-Run the [Quickstart](/docs/earn/quickstart) to make your first sandbox deposit
-through the Earn API, then follow [Embedded Yield](/docs/guides/embedded-yield)
-to ship the full integration. Every request field and response is in the
-[Earn API reference](/docs/reference/api/earn).
+| Endpoint | What it does |
+| --- | --- |
+| [`GET /v1/earn/discovery`](/docs/reference/api/earn/discover-earn-strategies) | Lists strategies, their rates and what each supports. |
+| [`GET /v1/earn/positions`](/docs/reference/api/earn/list-earn-core-positions) | Reads a wallet's holdings and totals. |
+| [`POST /v1/earn/deposit`](/docs/reference/api/earn/prepare-earn-deposit) | Prepares a deposit into a strategy. |
+| [`POST /v1/earn/withdraw`](/docs/reference/api/earn/prepare-earn-withdrawal) | Prepares a withdrawal from a position. |
+| [`GET /v1/operations`](/docs/reference/api/earn/list-operations) | Lists a wallet's deposits and withdrawals. |
+| [`GET /v1/operations/{operationId}`](/docs/reference/api/earn/get-operation) | Reads one operation's status and next action. |
+| [`POST /v1/operations/{operationId}/submit`](/docs/reference/api/earn/submit-operation) | Sends the signed transaction. |
+| [`POST /v1/operations/{operationId}/refresh`](/docs/reference/api/earn/refresh-operation) | Chooses a withdrawal route before you sign. |
+| [`POST /v1/operations/{operationId}/cancel`](/docs/reference/api/earn/cancel-operation) | Abandons an operation before you sign. |
+
+## Guides
+
+<GuideCards>
+
+- [Quickstart](/docs/earn/quickstart)
+
+  Make a first deposit in three calls.
+
+- [How Earn works](/docs/earn/concepts)
+
+  Strategies, positions, operations and where funds go.
+
+- [Strategies](/docs/earn/strategies)
+
+  Find a strategy and read its rate and terms.
+
+- [Deposit funds](/docs/earn/deposits)
+
+  Prepare, review, sign and track a deposit.
+
+- [Balances and earnings](/docs/earn/balances)
+
+  Read holdings, totals and earned yield.
+
+- [Withdraw funds](/docs/earn/withdrawals)
+
+  Choose an exit route and track the payout.
+
+- [Embedded Yield](/docs/guides/embedded-yield)
+
+  Put yield inside your app.
+
+- [Integration details](/docs/earn/integration-details)
+
+  Retries, recovery, fees and eligibility.
+
+</GuideCards>

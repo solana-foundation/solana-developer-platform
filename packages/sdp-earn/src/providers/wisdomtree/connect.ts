@@ -431,9 +431,8 @@ export interface WisdomTreeDepositEligibility {
 
 /**
  * Deliberately shared by every valid-but-ineligible admission outcome. The
- * external-wallet build route can be called without authentication, so naming
- * whether the wallet is absent, pending, or approved-but-unentitled would turn
- * it into a public KYC/tradability oracle.
+ * authenticated partner must not learn whether another wallet is absent,
+ * pending, or approved-but-unentitled from a build refusal.
  */
 export const WISDOMTREE_DEPOSIT_INELIGIBLE_REASON =
   "This WisdomTree deposit is unavailable for the selected wallet and fund.";

@@ -1,5 +1,4 @@
 import {
-  supportsPortfolioWallets,
   supportsVaultDirect,
   supportsVaultParRedemption,
   supportsVaultWithdraw,
@@ -13,7 +12,6 @@ describe("API Earn provider registry", () => {
 
     expect(client).toBe(EARN_PROVIDER_CLIENTS.kamino);
     expect(supportsVaultDirect(client)).toBe(true);
-    expect(supportsPortfolioWallets(client)).toBe(false);
   });
 
   it("keeps the non-Kamino provider singletons", () => {
@@ -27,6 +25,5 @@ describe("API Earn provider registry", () => {
     expect(supportsVaultDirect(client)).toBe(true);
     expect(supportsVaultWithdraw(client)).toBe(true);
     expect(supportsVaultParRedemption(client)).toBe(true);
-    expect(supportsPortfolioWallets(client)).toBe(false);
   });
 });

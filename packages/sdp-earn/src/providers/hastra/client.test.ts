@@ -7,7 +7,6 @@ import {
   isHastraDepositMint,
 } from "@sdp/types/hastra-programs";
 import {
-  EARN_PROGRAM_SOLANA_PAYOUT_TOKENS,
   EARN_PROVIDER_DEPLOYED_CLUSTERS,
   EARN_PROVIDER_DEPOSIT_FLOOR_SUPPORT,
   EARN_PROVIDER_DEPOSIT_SETTLEMENT,
@@ -75,7 +74,6 @@ describe("Hastra provider policy", () => {
     assert.equal(EARN_PROVIDER_SURFACING.hastra, false);
     assert.equal(EARN_PROVIDER_DEPOSIT_STYLE.hastra, "vault_direct");
     assert.deepEqual(EARN_PROVIDER_DEPLOYED_CLUSTERS.hastra, ["mainnet-beta"]);
-    assert.deepEqual(EARN_PROGRAM_SOLANA_PAYOUT_TOKENS.hastra, []);
   });
 
   it("states atomic ordinary settlement and the executable slippage contracts", () => {

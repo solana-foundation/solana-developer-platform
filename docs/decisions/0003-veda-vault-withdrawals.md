@@ -2,11 +2,11 @@
 
 Date: 2026-08-19
 Status: Implemented for the configured devnet deployment (2026-09-18) and
-published for external-wallet Embedded Yield integrations (2026-09-22).
+published for wallet Embedded Yield integrations (2026-09-22).
 
 The context below is retained as the decision record. The implementation now
 includes the separate queued-withdraw capability, live options and previews,
-custody and external-wallet request/cancel flows, durable request/action/build
+custody and wallet request/cancel flows, durable request/action/build
 tables, and a closing-event reconciler that distinguishes fulfillment from
 cancellation and records the provider-paid asset amount. Treasury and Embedded
 Yield expose both exit routes without choosing between them.
@@ -29,7 +29,7 @@ failed and its shares remained escrowed.
 
 The EARN-027 publication gate completed in
 [PR #1987](https://github.com/solana-foundation/solana-developer-platform/pull/1987):
-`cutbow7` approved exact head `b2d313803` before merge. External-wallet route
+`cutbow7` approved exact head `b2d313803` before merge. Wallet route
 discovery, queued previews, request/cancellation builds, submits, and history
 all require an API key. Custody queue routes remain internal.
 Production remains fail-closed until Veda names approved mainnet vaults for SDP
@@ -37,7 +37,7 @@ rather than the shared Test Vault.
 
 ## 2026-09-29 withdrawal audit
 
-Scope: the SDP Veda adapter, custody and external-wallet queue routes,
+Scope: the SDP Veda adapter, custody and wallet queue routes,
 signed-transaction verification, durable request/action storage, reconciliation,
 payout projection, and dashboard recovery. Base: main commit
 `f31813d81d8b0a1cfcf40886cd2ba67e100d8fce`. This is a Critical-tier change because

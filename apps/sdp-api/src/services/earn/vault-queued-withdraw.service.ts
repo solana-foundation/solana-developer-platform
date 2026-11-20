@@ -3,6 +3,7 @@ import type {
   EarnVaultParRedemptionQuote,
   EarnVaultParRedemptionRequestPlan,
   EarnVaultQueuedWithdrawalQuote,
+  EarnVaultQueuedWithdrawalRequestLookup,
   EarnVaultQueuedWithdrawalRequestPlan,
   EarnVaultTransactionPlan,
 } from "@sdp/earn/types";
@@ -13,19 +14,20 @@ import { MAX_SUPPORTED_TRANSACTION_VERSION } from "@sdp/rpc/transaction-version"
 import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { address, type Signature } from "@solana/kit";
-import { type DatabaseClient as AppDb, getDb } from "@/db/client";
+import { getDb } from "@/db/client";
+import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
+import type { ClaimDiscoveredStrategyPositionInput } from "@/db/repositories/earn-movements.repository";
 import {
   type CreateSignedQueuedWithdrawalRequestInput,
   createPostgresEarnVaultWithdrawalRequestsRepository,
-  type EarnExternalWalletWithdrawalRequestTransactionRow,
   type EarnVaultWithdrawalMechanism,
   type EarnVaultWithdrawalRequestActionRow,
   type EarnVaultWithdrawalRequestRow,
   type EarnVaultWithdrawalRequestsRepository,
-  generateEarnExternalWalletWithdrawalRequestTransactionId,
+  type EarnWalletWithdrawalRequestTransactionRow,
   generateEarnVaultWithdrawalRequestActionId,
   generateEarnVaultWithdrawalRequestId,
-  generateEarnVaultWithdrawalRequestReservationId,
+  generateEarnWalletWithdrawalRequestTransactionId,
   QueuedWithdrawalLeaseConflictError,
 } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import { AppError, badRequest, conflict, internalError, notFound } from "@/lib/errors";
@@ -35,28 +37,29 @@ import {
   buildEarnVaultQueuedWithdrawalFingerprint,
 } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
-import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import type { Env } from "@/types/env";
 import {
   resolveVaultParRedemptionClient,
   resolveVaultQueuedWithdrawClient,
 } from "./execution-registry";
 import { earnRuntime } from "./runtime";
+import {
+  assertExpiredStrategyEscrow,
+  assertStrategyRecoverySource,
+} from "./strategy-withdrawal-recovery.service";
 import { createVaultDeadline } from "./vault-deadline";
 import {
   appendVaultRequestMemo,
   broadcastVaultTransaction,
   compileUnsignedVaultTransaction,
-  type SignedVaultTransaction,
-  signVaultPlan,
   simulateVaultPlan,
 } from "./vault-execution.service";
-import { verifySignedExternalWalletTransaction } from "./vault-external-wallet.service";
 import { readConfirmedBlockHeight } from "./vault-intent-execution.service";
 import { findClosingParEventInHistoryPage } from "./vault-queued-withdrawal-reconciliation.service";
 import { rethrowVaultProviderFailure } from "./vault-refusals";
 import { rawSimulationDetails } from "./vault-simulation-error";
-import { resolveVaultSponsorship, type VaultFeeMode, vaultRentPayer } from "./vault-sponsorship";
+import { type VaultFeeMode, vaultRentPayer } from "./vault-sponsorship";
+import { verifySignedWalletTransaction } from "./vault-wallet.service";
 
 export interface QueuedWithdrawalPosition {
   id: string;
@@ -74,11 +77,6 @@ export interface QueuedWithdrawalActor {
   projectId: string;
   userId?: string | null;
   apiKeyId?: string | null;
-}
-
-export interface CustodyQueuedWithdrawalActor extends QueuedWithdrawalActor {
-  custodyWalletId: string;
-  custodyWalletPublicKey: string;
 }
 
 export interface QueuedWithdrawalTermsInput {
@@ -104,10 +102,14 @@ export interface QueuedWithdrawalMutationResult {
   replayed: boolean;
 }
 
-export interface ExternalQueuedWithdrawalBuiltTransaction {
+export interface WalletQueuedWithdrawalBuiltTransaction {
   id: string;
   environment: SdpEnvironment;
   provider: string;
+  custody_wallet_id?: string | null;
+  fee_mode?: "wallet" | "partner" | "sponsored";
+  operation_only?: boolean;
+  strategy_id?: string | null;
   position_id: string | null;
   withdrawal_request_id: string | null;
   action: "request" | "cancel";
@@ -130,8 +132,6 @@ export interface ExternalQueuedWithdrawalBuiltTransaction {
   unsigned_transaction: string;
   last_valid_block_height: string;
 }
-
-const QUEUED_REQUEST_RESERVATION_MS = 5 * 60 * 1_000;
 
 export function assertQueuePlan(
   plan: EarnVaultQueuedWithdrawalRequestPlan,
@@ -252,7 +252,6 @@ async function quoteAndBuildRequest(
     terms: AsyncWithdrawalTermsInput;
     memoId: string;
     rentPayer?: string;
-    memoKind: "vault-withdrawal-request" | "external-withdrawal-request";
   }
 ): Promise<{
   quote: NormalizedAsyncWithdrawalQuote;
@@ -381,7 +380,7 @@ async function quoteAndBuildRequest(
     quote,
     plan: {
       ...built,
-      ...appendVaultRequestMemo(built, input.memoKind, input.memoId),
+      ...appendVaultRequestMemo(built, "strategy-withdrawal-request", input.memoId),
       requestAddress: built.requestAddress,
       expectedRequest: built.expectedRequest,
     },
@@ -389,68 +388,11 @@ async function quoteAndBuildRequest(
   };
 }
 
-/** Signs a custody cancellation; requests sign in `createCustodyQueuedWithdrawal`. */
-async function prepareCustodyTransaction(
-  env: Env,
-  input: {
-    actor: CustodyQueuedWithdrawalActor;
-    position: QueuedWithdrawalPosition;
-    plan: EarnVaultTransactionPlan;
-  }
-): Promise<{ signed: SignedVaultTransaction; fee: VaultFeeMode }> {
-  const deadline = createVaultDeadline();
-  const fee = await resolveVaultSponsorship(env, {
-    movement: "earn.queued_withdraw_cancel",
-    organizationId: input.actor.organizationId,
-    projectId: input.actor.projectId,
-    walletId: input.actor.custodyWalletId,
-    deadline,
-  });
-  const expectedAssetIdentity = {
-    depositTokenMint: input.position.tokenMint,
-    shareMint: input.position.shareMint,
-  };
-  const simulation = await simulateVaultPlan({
-    deadline,
-    expectedAssetIdentity,
-    plan: input.plan,
-    owner: address(input.actor.custodyWalletPublicKey),
-    fee,
-  });
-  if (!simulation.ok) {
-    throw badRequest(
-      `Asynchronous withdrawal simulation failed: ${simulation.error}`,
-      rawSimulationDetails(simulation.raw)
-    );
-  }
-  const signer = await deadline.run("Resolving the queued withdrawal signer", () =>
-    createOrgSignerForCustodyWallet<"earn">(
-      env,
-      input.actor.organizationId,
-      input.actor.projectId,
-      input.actor.custodyWalletId,
-      "earn.queued_withdraw_cancel"
-    )
-  );
-  if (signer.address !== input.actor.custodyWalletPublicKey) {
-    throw badRequest("Resolved signing wallet does not match the queued withdrawal position");
-  }
-  const signed = await signVaultPlan({
-    deadline,
-    expectedAssetIdentity,
-    plan: input.plan,
-    owner: signer,
-    fee,
-    prepared: simulation.prepared,
-  });
-  return { signed, fee };
-}
-
 async function broadcastQueuedAction(
   env: Env,
   result: QueuedWithdrawalMutationResult
 ): Promise<QueuedWithdrawalMutationResult> {
-  if (result.replayed) return result;
+  if (result.replayed || result.action.status === "finalized") return result;
   try {
     await broadcastVaultTransaction({
       deadline: createVaultDeadline(),
@@ -473,334 +415,20 @@ async function broadcastQueuedAction(
   return { ...result, action: advanced ?? result.action };
 }
 
-export async function createCustodyQueuedWithdrawal(
-  env: Env,
-  input: {
-    actor: CustodyQueuedWithdrawalActor;
-    position: QueuedWithdrawalPosition;
-    terms: AsyncWithdrawalTermsInput;
-    clientRequestId: string;
-  }
-): Promise<QueuedWithdrawalMutationResult> {
-  const { environment } = currentClusterScope();
-  const repository = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
-  const fingerprint = requestFingerprint({
-    environment,
-    provider: input.position.provider,
-    positionId: input.position.id,
-    terms: input.terms,
-  });
-  const prior = await repository.findByClientRequestId({
-    organizationId: input.actor.organizationId,
-    clientRequestId: input.clientRequestId,
-  });
-  if (prior) {
-    if (
-      prior.idempotency_fingerprint !== fingerprint ||
-      prior.project_id !== input.actor.projectId
-    ) {
-      throw conflict("Idempotency key already used with different request payload");
-    }
-    const action = await repository.getLatestAction({
-      withdrawalRequestId: prior.id,
-      action: "request",
-    });
-    if (!action) throw internalError(`Asynchronous withdrawal ${prior.id} has no request action`);
-    return { request: prior, action, replayed: true };
-  }
-
-  const requestId = generateEarnVaultWithdrawalRequestId();
-  const actionId = generateEarnVaultWithdrawalRequestActionId();
-  const deadline = createVaultDeadline();
-  const fee = await resolveVaultSponsorship(env, {
-    movement: "earn.queued_withdraw_request",
-    organizationId: input.actor.organizationId,
-    projectId: input.actor.projectId,
-    walletId: input.actor.custodyWalletId,
-    deadline,
-  });
-  const { quote, plan, mechanism } = await quoteAndBuildRequest(env, {
-    position: input.position,
-    terms: input.terms,
-    memoId: input.clientRequestId,
-    rentPayer: vaultRentPayer(fee),
-    memoKind: "vault-withdrawal-request",
-  });
-  const reservationId = generateEarnVaultWithdrawalRequestReservationId();
-  await repository.acquireRequestReservation({
-    id: reservationId,
-    organizationId: input.actor.organizationId,
-    projectId: input.actor.projectId,
-    environment,
-    provider: input.position.provider,
-    vaultAddress: input.position.vaultAddress,
-    ownerAddress: input.position.ownerAddress,
-    requestAddress: plan.requestAddress,
-    clientRequestId: input.clientRequestId,
-    idempotencyFingerprint: fingerprint,
-    expiresAt: new Date(Date.now() + QUEUED_REQUEST_RESERVATION_MS).toISOString(),
-    mechanism,
-  });
-  try {
-    // Reuse the already resolved sponsorship identity in signing. Resolving it
-    // twice could put a different payer in the message than in the plan.
-    const executionDeadline = createVaultDeadline();
-    const expectedAssetIdentity = {
-      depositTokenMint: input.position.tokenMint,
-      shareMint: input.position.shareMint,
-    };
-    const simulation = await simulateVaultPlan({
-      deadline: executionDeadline,
-      expectedAssetIdentity,
-      plan,
-      owner: address(input.actor.custodyWalletPublicKey),
-      fee,
-    });
-    if (!simulation.ok) {
-      throw badRequest(
-        `Asynchronous withdrawal simulation failed: ${simulation.error}`,
-        rawSimulationDetails(simulation.raw)
-      );
-    }
-    const signer = await executionDeadline.run("Resolving the queued withdrawal signer", () =>
-      createOrgSignerForCustodyWallet<"earn">(
-        env,
-        input.actor.organizationId,
-        input.actor.projectId,
-        input.actor.custodyWalletId,
-        "earn.queued_withdraw_request"
-      )
-    );
-    if (signer.address !== input.actor.custodyWalletPublicKey) {
-      throw badRequest("Resolved signing wallet does not match the queued withdrawal position");
-    }
-    const signed = await signVaultPlan({
-      deadline: executionDeadline,
-      expectedAssetIdentity,
-      plan,
-      owner: signer,
-      fee,
-      prepared: simulation.prepared,
-    });
-    const persist = (db: AppDb) =>
-      createPostgresEarnVaultWithdrawalRequestsRepository(db).createSignedRequest({
-        requestId,
-        actionId,
-        organizationId: input.actor.organizationId,
-        projectId: input.actor.projectId,
-        environment,
-        provider: input.position.provider,
-        positionId: input.position.id,
-        custodyWalletId: input.actor.custodyWalletId,
-        ownerAddress: input.position.ownerAddress,
-        vaultAddress: input.position.vaultAddress,
-        tokenMint: input.position.tokenMint,
-        shareMint: input.position.shareMint,
-        requestAddress: plan.requestAddress,
-        mechanism,
-        shares: plan.expectedRequest.shares,
-        quotedAssets: plan.expectedRequest.assets,
-        shareDecimals: quote.shareDecimals,
-        assetDecimals: quote.assetDecimals,
-        intermediateMint: plan.expectedRequest.intermediateMint,
-        intermediateAmount: plan.expectedRequest.intermediateAmount,
-        discountBps: plan.expectedRequest.discountBps,
-        maturityTimestamp: plan.expectedRequest.maturityTimestamp,
-        deadlineTimestamp: plan.expectedRequest.deadlineTimestamp,
-        signature: signed.signature,
-        signedTransaction: Buffer.from(signed.bytes).toString("base64"),
-        lastValidBlockHeight: signed.lastValidBlockHeight,
-        clientRequestId: input.clientRequestId,
-        idempotencyFingerprint: fingerprint,
-        pdaLeaseToken: reservationId,
-        createdBy: input.actor.userId ?? null,
-        initiatedByKeyId: input.actor.apiKeyId ?? null,
-      });
-    const result = await persist(getDb(env));
-    return broadcastQueuedAction(env, result);
-  } finally {
-    try {
-      await repository.releaseRequestReservation({
-        id: reservationId,
-        organizationId: input.actor.organizationId,
-      });
-    } catch (error) {
-      getLogger().warn(
-        { reservationId, requestAddress: plan.requestAddress, error },
-        "queued withdrawal reservation release failed; expiry will recover it"
-      );
-    }
-  }
-}
-
-async function requireCancelableProviderRequest(
-  env: Env,
-  request: EarnVaultWithdrawalRequestRow,
-  expectedOwner: string
-): Promise<void> {
-  if (request.mechanism === "operator_redemption") {
-    const client = resolveVaultParRedemptionClient(env, request.provider, createVaultDeadline());
-    if (!client) throw notImplemented(request.provider, "par redemptions");
-    let lookup: Awaited<ReturnType<typeof client.readParRedemptionRequest>>;
-    try {
-      lookup = await client.readParRedemptionRequest(
-        { env, environment: request.environment },
-        { providerReference: request.vault_address, requestAddress: request.request_address }
-      );
-    } catch (error) {
-      rethrowVaultProviderFailure(error);
-    }
-    if (lookup.status === "closedOrUnknown") {
-      throw conflict("Par redemption is already closed; refresh its status before cancelling");
-    }
-    if (
-      lookup.requestAddress !== request.request_address ||
-      lookup.request.requestAddress !== request.request_address ||
-      lookup.request.owner !== expectedOwner ||
-      lookup.request.providerReference !== request.vault_address ||
-      lookup.request.intermediateMint !== request.intermediate_mint ||
-      lookup.request.intermediateAmount !== request.intermediate_amount
-    ) {
-      throw internalError("Par-redemption owner or intermediate amount no longer matches");
-    }
-    await createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env)).advanceRequest({
-      withdrawalRequestId: request.id,
-      organizationId: request.organization_id,
-      toStatus: "pending",
-    });
-    return;
-  }
-  const client = resolveVaultQueuedWithdrawClient(env, request.provider, createVaultDeadline());
-  if (!client) throw notImplemented(request.provider, "queued vault withdrawals");
-  let lookup: Awaited<ReturnType<typeof client.readQueuedWithdrawalRequest>>;
-  try {
-    lookup = await client.readQueuedWithdrawalRequest(
-      { env, environment: request.environment },
-      { providerReference: request.vault_address, requestAddress: request.request_address }
-    );
-  } catch (error) {
-    rethrowVaultProviderFailure(error);
-  }
-  if (lookup.status === "closedOrUnknown") {
-    throw conflict("Queued withdrawal is already closed; refresh its status before cancelling");
-  }
-  if (
-    lookup.requestAddress !== request.request_address ||
-    lookup.request.requestAddress !== request.request_address ||
-    lookup.request.owner !== expectedOwner ||
-    lookup.request.providerReference !== request.vault_address ||
-    lookup.request.assetMint !== request.token_mint
-  ) {
-    throw internalError("Queued withdrawal owner no longer matches recorded request identity");
-  }
-  if (lookup.status !== "expiredCancelable") {
-    throw conflict(`Queued withdrawal cannot be cancelled while status is ${lookup.status}`);
-  }
-  await createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env)).advanceRequest({
-    withdrawalRequestId: request.id,
-    organizationId: request.organization_id,
-    toStatus: "expired_cancelable",
-    creationTimestamp: lookup.request.creationTimestamp,
-  });
-}
-
-export async function cancelCustodyQueuedWithdrawal(
-  env: Env,
-  input: {
-    actor: CustodyQueuedWithdrawalActor;
-    position: QueuedWithdrawalPosition;
-    request: EarnVaultWithdrawalRequestRow;
-    clientRequestId: string;
-  }
-): Promise<QueuedWithdrawalMutationResult> {
-  const { environment } = currentClusterScope();
-  const repository = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
-  const fingerprint = buildEarnVaultQueuedWithdrawalCancelFingerprint({
-    environment,
-    withdrawalRequestId: input.request.id,
-    requestAddress: input.request.request_address,
-  });
-  const prior = await repository.getActionByClientRequestId({
-    organizationId: input.actor.organizationId,
-    clientRequestId: input.clientRequestId,
-  });
-  if (prior) {
-    if (
-      prior.idempotency_fingerprint !== fingerprint ||
-      prior.withdrawal_request_id !== input.request.id ||
-      prior.action !== "cancel"
-    ) {
-      throw conflict("Idempotency key already used with different request payload");
-    }
-    return { request: input.request, action: prior, replayed: true };
-  }
-  await requireCancelableProviderRequest(env, input.request, input.position.ownerAddress);
-  let plan: EarnVaultTransactionPlan;
-  try {
-    const runtime = earnRuntime(env);
-    const cancelInput = {
-      providerReference: input.request.vault_address,
-      owner: input.position.ownerAddress,
-      requestAddress: input.request.request_address,
-    };
-    const built =
-      input.request.mechanism === "operator_redemption"
-        ? await (() => {
-            const parClient = resolveVaultParRedemptionClient(
-              env,
-              input.request.provider,
-              createVaultDeadline()
-            );
-            if (!parClient) throw notImplemented(input.request.provider, "par redemptions");
-            return parClient.buildParRedemptionCancel(runtime, cancelInput);
-          })()
-        : await (() => {
-            const queueClient = resolveVaultQueuedWithdrawClient(
-              env,
-              input.request.provider,
-              createVaultDeadline()
-            );
-            if (!queueClient) {
-              throw notImplemented(input.request.provider, "queued vault withdrawals");
-            }
-            return queueClient.buildQueuedWithdrawalCancel(runtime, cancelInput);
-          })();
-    plan = appendVaultRequestMemo(built, "vault-withdrawal-cancel", input.clientRequestId);
-  } catch (error) {
-    rethrowVaultProviderFailure(error);
-  }
-  const { signed } = await prepareCustodyTransaction(env, {
-    actor: input.actor,
-    position: input.position,
-    plan,
-  });
-  const result = await repository.createSignedCancel({
-    actionId: generateEarnVaultWithdrawalRequestActionId(),
-    organizationId: input.actor.organizationId,
-    projectId: input.actor.projectId,
-    environment,
-    withdrawalRequestId: input.request.id,
-    signature: signed.signature,
-    signedTransaction: Buffer.from(signed.bytes).toString("base64"),
-    lastValidBlockHeight: signed.lastValidBlockHeight,
-    clientRequestId: input.clientRequestId,
-    idempotencyFingerprint: fingerprint,
-    createdBy: input.actor.userId ?? null,
-    initiatedByKeyId: input.actor.apiKeyId ?? null,
-  });
-  return broadcastQueuedAction(env, result);
-}
-
-async function compileExternalPlan(input: {
+async function compileWalletPlan(input: {
   actor: QueuedWithdrawalActor;
   position: QueuedWithdrawalPosition;
   plan: EarnVaultTransactionPlan;
   feePayer?: string;
+  fee?: VaultFeeMode;
 }) {
   const deadline = createVaultDeadline();
-  const fee: VaultFeeMode = input.feePayer
-    ? { kind: "caller-provided", feePayer: address(input.feePayer) }
-    : { kind: "wallet-pays" };
+  const fee: VaultFeeMode =
+    input.fee ??
+    (input.feePayer
+      ? { kind: "caller-provided", feePayer: address(input.feePayer) }
+      : { kind: "wallet-pays" });
+  const payer = vaultRentPayer(fee);
   const expectedAssetIdentity = {
     depositTokenMint: input.position.tokenMint,
     shareMint: input.position.shareMint,
@@ -822,40 +450,52 @@ async function compileExternalPlan(input: {
     expectedAssetIdentity,
     plan: input.plan,
     owner: address(input.position.ownerAddress),
-    ...(input.feePayer ? { feePayer: address(input.feePayer) } : {}),
+    ...(payer ? { feePayer: address(payer) } : {}),
     prepared: simulation.prepared,
   });
 }
 
-export async function buildExternalQueuedWithdrawalRequest(
+export async function buildWalletQueuedWithdrawalRequest(
   env: Env,
   input: {
     actor: QueuedWithdrawalActor;
     position: QueuedWithdrawalPosition;
     terms: AsyncWithdrawalTermsInput;
     feePayer?: string;
+    custodyWalletId?: string;
+    fee?: VaultFeeMode;
+    /** A verified discovery selector is claimed only after signed submission. */
+    discoveredStrategyId?: string;
   }
-): Promise<ExternalQueuedWithdrawalBuiltTransaction> {
-  const transactionId = generateEarnExternalWalletWithdrawalRequestTransactionId();
-  const feePayer = input.feePayer === input.position.ownerAddress ? undefined : input.feePayer;
+): Promise<WalletQueuedWithdrawalBuiltTransaction> {
+  const transactionId = generateEarnWalletWithdrawalRequestTransactionId();
+  const feePayer =
+    input.fee === undefined
+      ? input.feePayer === input.position.ownerAddress
+        ? undefined
+        : input.feePayer
+      : vaultRentPayer(input.fee);
   const { quote, plan, mechanism } = await quoteAndBuildRequest(env, {
     position: input.position,
     terms: input.terms,
     memoId: transactionId,
     rentPayer: feePayer,
-    memoKind: "external-withdrawal-request",
   });
-  const unsigned = await compileExternalPlan({
+  const unsigned = await compileWalletPlan({
     actor: input.actor,
     position: input.position,
     plan,
+    fee: input.fee,
     ...(feePayer ? { feePayer } : {}),
   });
-  const built: ExternalQueuedWithdrawalBuiltTransaction = {
+  const built: WalletQueuedWithdrawalBuiltTransaction = {
     id: transactionId,
     environment: currentClusterScope().environment,
     provider: input.position.provider,
-    position_id: input.position.id,
+    custody_wallet_id: input.custodyWalletId ?? null,
+    fee_mode: input.fee?.kind === "sponsored" ? "sponsored" : feePayer ? "partner" : "wallet",
+    position_id: input.discoveredStrategyId === undefined ? input.position.id : null,
+    strategy_id: input.discoveredStrategyId ?? null,
     withdrawal_request_id: null,
     action: "request",
     mechanism,
@@ -878,14 +518,16 @@ export async function buildExternalQueuedWithdrawalRequest(
     last_valid_block_height: unsigned.lastValidBlockHeight,
   };
   const currentBlockHeight = await readConfirmedBlockHeight();
-  return createPostgresEarnVaultWithdrawalRequestsRepository(
-    getDb(env)
-  ).createExternalWalletTransaction({
+  return createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env)).createWalletTransaction({
     id: built.id,
     organizationId: input.actor.organizationId,
     projectId: input.actor.projectId,
     environment: built.environment,
     provider: built.provider,
+    custodyWalletId: built.custody_wallet_id,
+    feeMode: built.fee_mode,
+    operationOnly: true,
+    strategyId: built.strategy_id,
     positionId: built.position_id,
     action: "request",
     mechanism: built.mechanism,
@@ -913,128 +555,122 @@ export async function buildExternalQueuedWithdrawalRequest(
   });
 }
 
-export async function buildExternalQueuedWithdrawalCancel(
+/** Return proven expired queue escrow; this never cancels a live withdrawal. */
+export async function buildWalletQueuedWithdrawalRecovery(
   env: Env,
   input: {
     actor: QueuedWithdrawalActor;
     position: QueuedWithdrawalPosition;
     request: EarnVaultWithdrawalRequestRow;
-    requestAddress: string;
+    /** Same-call evidence from choice planning, never read from a stored action. */
+    proof?: EarnVaultQueuedWithdrawalRequestLookup;
     feePayer?: string;
+    custodyWalletId?: string;
+    fee?: VaultFeeMode;
   }
-): Promise<ExternalQueuedWithdrawalBuiltTransaction> {
+): Promise<WalletQueuedWithdrawalBuiltTransaction> {
   const { environment, cluster } = currentClusterScope();
+  const repository = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
+  const request = await repository.getById({
+    organizationId: input.actor.organizationId,
+    environment,
+    withdrawalRequestId: input.request.id,
+  });
+  if (request === null) throw notFound("Expired withdrawal escrow");
+  assertStrategyRecoverySource(request, input.actor, input.position);
+  if ((input.custodyWalletId ?? null) !== request.custody_wallet_id)
+    throw conflict("Expired escrow signing wallet changed");
+  const client = resolveVaultQueuedWithdrawClient(env, request.provider, createVaultDeadline());
+  if (client === null) throw notImplemented(request.provider, "expired withdrawal escrow recovery");
   const runtime = earnRuntime(env);
-  const parClient = resolveVaultParRedemptionClient(
-    env,
-    input.position.provider,
-    createVaultDeadline()
+  const lookup =
+    input.proof ??
+    (await client.readQueuedWithdrawalRequest(runtime, {
+      providerReference: request.vault_address,
+      requestAddress: request.request_address,
+    }));
+  assertExpiredStrategyEscrow(request, lookup);
+  const transactionId = generateEarnWalletWithdrawalRequestTransactionId();
+  const plan = appendVaultRequestMemo(
+    await client.buildQueuedWithdrawalCancel(runtime, {
+      providerReference: request.vault_address,
+      owner: request.owner_address,
+      requestAddress: request.request_address,
+    }),
+    "strategy-withdrawal-cancel",
+    transactionId
   );
-  const mechanism = input.request.mechanism;
-  await requireCancelableProviderRequest(env, input.request, input.position.ownerAddress);
-  const transactionId = generateEarnExternalWalletWithdrawalRequestTransactionId();
-  let plan: EarnVaultTransactionPlan;
-  try {
-    const cancelInput = {
-      providerReference: input.position.vaultAddress,
-      owner: input.position.ownerAddress,
-      requestAddress: input.requestAddress,
-    };
-    const built =
-      mechanism === "operator_redemption"
-        ? await (() => {
-            if (!parClient) throw notImplemented(input.position.provider, "par redemptions");
-            return parClient.buildParRedemptionCancel(runtime, cancelInput);
-          })()
-        : await (() => {
-            const queueClient = resolveVaultQueuedWithdrawClient(
-              env,
-              input.position.provider,
-              createVaultDeadline()
-            );
-            if (!queueClient) {
-              throw notImplemented(input.position.provider, "queued vault withdrawals");
-            }
-            return queueClient.buildQueuedWithdrawalCancel(runtime, cancelInput);
-          })();
-    plan = appendVaultRequestMemo(built, "external-withdrawal-cancel", transactionId);
-  } catch (error) {
-    rethrowVaultProviderFailure(error);
-  }
-  if (plan.cluster !== cluster) {
-    throw internalError(
-      `Queued cancellation builder returned a ${plan.cluster} plan for the configured ${cluster} cluster`
-    );
-  }
-  const feePayer = input.feePayer === input.position.ownerAddress ? undefined : input.feePayer;
-  const unsigned = await compileExternalPlan({
+  if (
+    plan.cluster !== cluster ||
+    plan.assetIdentity.depositTokenMint !== request.token_mint ||
+    plan.assetIdentity.shareMint !== request.share_mint ||
+    plan.accepted?.shares === undefined ||
+    compareDecimalAmounts(plan.accepted.shares, request.shares) !== 0
+  )
+    throw conflict("Escrow recovery builder changed the reviewed asset identity or shares");
+  const feePayer =
+    input.fee === undefined
+      ? input.feePayer === input.position.ownerAddress
+        ? undefined
+        : input.feePayer
+      : vaultRentPayer(input.fee);
+  const unsigned = await compileWalletPlan({
     actor: input.actor,
     position: input.position,
     plan,
+    fee: input.fee,
     ...(feePayer ? { feePayer } : {}),
   });
-  const built: ExternalQueuedWithdrawalBuiltTransaction = {
+  // Persist a live observation, not cancellation intent. The signed action's
+  // existing compare-and-set still decides whether submission can proceed.
+  const observed = await repository.advanceRequest({
+    organizationId: request.organization_id,
+    withdrawalRequestId: request.id,
+    toStatus: "expired_cancelable",
+    nonce: request.nonce,
+    creationTimestamp: request.creation_timestamp,
+  });
+  if (observed?.status !== "expired_cancelable")
+    throw conflict("Withdrawal escrow changed while preparing recovery");
+  return repository.createWalletTransaction({
     id: transactionId,
-    environment,
-    provider: input.position.provider,
-    position_id: input.position.id,
-    withdrawal_request_id: input.request.id,
-    action: "cancel",
-    mechanism,
-    owner_address: input.position.ownerAddress,
-    vault_address: input.position.vaultAddress,
-    token_mint: input.position.tokenMint,
-    share_mint: input.position.shareMint,
-    request_address: input.requestAddress,
-    shares: null,
-    quoted_assets: null,
-    share_decimals: null,
-    asset_decimals: null,
-    intermediate_mint: null,
-    intermediate_amount: null,
-    discount_bps: null,
-    maturity_timestamp: null,
-    deadline_timestamp: null,
-    fee_payer: feePayer ?? null,
-    unsigned_transaction: Buffer.from(unsigned.bytes).toString("base64"),
-    last_valid_block_height: unsigned.lastValidBlockHeight,
-  };
-  return createPostgresEarnVaultWithdrawalRequestsRepository(
-    getDb(env)
-  ).createExternalWalletTransaction({
-    id: built.id,
     organizationId: input.actor.organizationId,
     projectId: input.actor.projectId,
-    environment: built.environment,
-    provider: built.provider,
-    positionId: built.position_id,
-    withdrawalRequestId: input.request.id,
+    environment,
+    provider: request.provider,
+    custodyWalletId: request.custody_wallet_id,
+    feeMode: input.fee?.kind === "sponsored" ? "sponsored" : feePayer ? "partner" : "wallet",
+    operationOnly: true,
+    positionId: request.position_id,
+    withdrawalRequestId: request.id,
     action: "cancel",
-    mechanism: built.mechanism,
-    ownerAddress: built.owner_address,
-    vaultAddress: built.vault_address,
-    tokenMint: built.token_mint,
-    shareMint: built.share_mint,
-    requestAddress: built.request_address,
-    feePayer: built.fee_payer,
-    unsignedTransaction: built.unsigned_transaction,
-    lastValidBlockHeight: built.last_valid_block_height,
+    mechanism: "solver_queue",
+    ownerAddress: request.owner_address,
+    vaultAddress: request.vault_address,
+    tokenMint: request.token_mint,
+    shareMint: request.share_mint,
+    requestAddress: request.request_address,
+    feePayer: feePayer ?? null,
+    unsignedTransaction: Buffer.from(unsigned.bytes).toString("base64"),
+    lastValidBlockHeight: unsigned.lastValidBlockHeight,
     createdBy: input.actor.userId ?? null,
     initiatedByKeyId: input.actor.apiKeyId ?? null,
   });
 }
 
-async function requireExternalBuild(
+async function requireWalletBuild(
   env: Env,
   input: {
     actor: QueuedWithdrawalActor;
     transactionId: string;
     action: "request" | "cancel";
+    custodyWalletId?: string | null;
+    allowOperationBuild?: boolean;
   }
-): Promise<EarnExternalWalletWithdrawalRequestTransactionRow> {
+): Promise<EarnWalletWithdrawalRequestTransactionRow> {
   const build = await createPostgresEarnVaultWithdrawalRequestsRepository(
     getDb(env)
-  ).getExternalWalletTransaction({
+  ).getWalletTransaction({
     organizationId: input.actor.organizationId,
     transactionId: input.transactionId,
   });
@@ -1042,14 +678,58 @@ async function requireExternalBuild(
     !build ||
     build.project_id !== input.actor.projectId ||
     build.environment !== currentClusterScope().environment ||
-    build.action !== input.action
+    build.action !== input.action ||
+    (build.custody_wallet_id ?? null) !== (input.custodyWalletId ?? null)
   ) {
-    throw notFound("Earn external-wallet queued withdrawal transaction");
+    throw notFound("Earn wallet queued withdrawal transaction");
   }
+  if (build.operation_only === true && input.allowOperationBuild !== true)
+    throw conflict("Submit this transaction through its operation action", {
+      reason: "operation_execution_required",
+    });
   return build;
 }
 
-export async function submitExternalQueuedWithdrawalAction(
+/** Signed bytes prove the owner; retained catalogue metadata proves the instrument. */
+async function resolveSignedDiscoveredQueueClaim(
+  env: Env,
+  build: EarnWalletWithdrawalRequestTransactionRow,
+  input: { actor: QueuedWithdrawalActor; allowDiscoveredPosition?: boolean }
+): Promise<ClaimDiscoveredStrategyPositionInput | undefined> {
+  if (build.position_id !== null) return undefined;
+  if (!input.allowDiscoveredPosition || !build.strategy_id)
+    throw notFound("Earn queued withdrawal position");
+  const strategy = await createPostgresEarnRepository(getDb(env)).getStrategyById(
+    build.strategy_id
+  );
+  if (
+    strategy === null ||
+    strategy.environment !== build.environment ||
+    strategy.host_cluster !== currentClusterScope().cluster ||
+    strategy.provider !== build.provider ||
+    strategy.provider_reference !== build.vault_address ||
+    strategy.share_mint !== build.share_mint ||
+    !strategy.deposit_mints.includes(build.token_mint)
+  )
+    throw notFound("Earn queued withdrawal strategy");
+  return {
+    organizationId: input.actor.organizationId,
+    projectId: input.actor.projectId,
+    environment: build.environment,
+    provider: build.provider,
+    strategyId: strategy.id,
+    strategyReference: strategy.provider_reference,
+    tokenMint: build.token_mint,
+    shareMint: build.share_mint,
+    label: strategy.name,
+    source: build.custody_wallet_id
+      ? { walletId: build.custody_wallet_id }
+      : { ownerAddress: build.owner_address },
+    createdBy: input.actor.userId,
+  };
+}
+
+export async function submitWalletQueuedWithdrawalAction(
   env: Env,
   input: {
     actor: QueuedWithdrawalActor;
@@ -1057,15 +737,23 @@ export async function submitExternalQueuedWithdrawalAction(
     signedTransaction: string;
     clientRequestId: string;
     action: "request" | "cancel";
+    custodyWalletId?: string | null;
+    allowDiscoveredPosition?: boolean;
+    /** Only the durable operation worker may consume operation-only builds. */
+    allowOperationBuild?: boolean;
+    /** Observation recovery may persist bytes already seen on chain. */
+    broadcast?: boolean;
   }
 ): Promise<QueuedWithdrawalMutationResult> {
-  const build = await requireExternalBuild(env, input);
-  const signed = await verifySignedExternalWalletTransaction(build, input.signedTransaction);
+  const build = await requireWalletBuild(env, input);
+  const signed = await verifySignedWalletTransaction(build, input.signedTransaction);
   const repository = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
   let result: QueuedWithdrawalMutationResult;
   if (input.action === "request") {
+    const discoveredPosition = await resolveSignedDiscoveredQueueClaim(env, build, input);
+    const positionId = build.position_id ?? `discovered:${build.strategy_id}`;
     if (
-      !build.position_id ||
+      (!build.position_id && discoveredPosition === undefined) ||
       build.shares === null ||
       build.quoted_assets === null ||
       build.share_decimals === null ||
@@ -1097,7 +785,7 @@ export async function submitExternalQueuedWithdrawalAction(
     const fingerprint = requestFingerprint({
       environment: build.environment,
       provider: build.provider,
-      positionId: build.position_id,
+      positionId,
       terms,
       transactionId: build.id,
     });
@@ -1108,7 +796,9 @@ export async function submitExternalQueuedWithdrawalAction(
       projectId: input.actor.projectId,
       environment: build.environment,
       provider: build.provider,
-      positionId: build.position_id,
+      custodyWalletId: build.custody_wallet_id ?? null,
+      positionId,
+      discoveredPosition,
       ownerAddress: build.owner_address,
       vaultAddress: build.vault_address,
       tokenMint: build.token_mint,
@@ -1130,7 +820,7 @@ export async function submitExternalQueuedWithdrawalAction(
       clientRequestId: input.clientRequestId,
       idempotencyFingerprint: fingerprint,
       pdaLeaseToken: build.id,
-      externalWalletTransactionId: build.id,
+      walletTransactionId: build.id,
       createdBy: input.actor.userId ?? null,
       initiatedByKeyId: input.actor.apiKeyId ?? null,
     } satisfies CreateSignedQueuedWithdrawalRequestInput;
@@ -1138,13 +828,30 @@ export async function submitExternalQueuedWithdrawalAction(
     const recorded =
       build.consumed_action_id !== null
         ? { ...(await repository.createSignedRequest(persistenceInput)), alreadyFinalized: false }
-        : await recordSignedExternalQueuedRequest(env, repository, persistenceInput);
+        : await recordSignedWalletQueuedRequest(env, repository, persistenceInput);
     result = recorded;
     if (recorded.alreadyFinalized) return result;
   } else {
     if (!build.withdrawal_request_id) {
       throw internalError(`Queued cancellation build ${build.id} names no request`);
     }
+    const request = await repository.getById({
+      organizationId: input.actor.organizationId,
+      environment: build.environment,
+      withdrawalRequestId: build.withdrawal_request_id,
+    });
+    if (request === null || build.position_id === null) throw notFound("Expired withdrawal escrow");
+    assertStrategyRecoverySource(request, input.actor, {
+      id: build.position_id,
+      provider: build.provider,
+      ownerAddress: build.owner_address,
+      custodyWalletId: build.custody_wallet_id,
+      vaultAddress: build.vault_address,
+      tokenMint: build.token_mint,
+      shareMint: build.share_mint,
+    });
+    const recoverFinalizedWalletBuild =
+      request.status === "cancelled" && request.closing_signature === signed.signature;
     const fingerprint = buildEarnVaultQueuedWithdrawalCancelFingerprint({
       environment: build.environment,
       withdrawalRequestId: build.withdrawal_request_id,
@@ -1162,12 +869,13 @@ export async function submitExternalQueuedWithdrawalAction(
       lastValidBlockHeight: build.last_valid_block_height,
       clientRequestId: input.clientRequestId,
       idempotencyFingerprint: fingerprint,
-      externalWalletTransactionId: build.id,
+      walletTransactionId: build.id,
+      recoverFinalizedWalletBuild,
       createdBy: input.actor.userId ?? null,
       initiatedByKeyId: input.actor.apiKeyId ?? null,
     });
   }
-  return broadcastQueuedAction(env, result);
+  return input.broadcast === false ? result : broadcastQueuedAction(env, result);
 }
 
 /**
@@ -1175,7 +883,7 @@ export async function submitExternalQueuedWithdrawalAction(
  * A released or replaced transient lease can be reclaimed only with successful
  * finalized execution of the exact message verified against the retained build.
  */
-export async function recordSignedExternalQueuedRequest(
+export async function recordSignedWalletQueuedRequest(
   env: Env,
   repository: Pick<EarnVaultWithdrawalRequestsRepository, "createSignedRequest">,
   input: CreateSignedQueuedWithdrawalRequestInput
@@ -1241,7 +949,7 @@ export async function recordSignedExternalQueuedRequest(
     }
     const recorded = await repository.createSignedRequest({
       ...input,
-      recoverFinalizedExternalBuild: true,
+      recoverFinalizedWalletBuild: true,
     });
     return { ...recorded, alreadyFinalized: true };
   }

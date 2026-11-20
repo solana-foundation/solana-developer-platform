@@ -135,15 +135,16 @@ describe("buildApiReference", () => {
     });
   }
 
-  it("builds the Earn reference with every documented response, including shared 501 errors", () => {
-    const document = createPublicOpenApiDocument({
-      releaseChannel: "experimental",
-    });
+  it("renders the Earn action's responses through its module release channel", () => {
+    const document = createPublicOpenApiDocument({ releaseChannel: "experimental" });
+    expect(document.paths["/v1/earn/deposit"]).toBeDefined();
     const reference = apiReferenceSchema.parse(buildApiReference(document));
     const earn = reference.families.find((family) => family.name === "Earn");
     if (!earn) throw new Error("The Earn family is missing");
     const documented = new Map(
-      [...documentOperations(document)].filter(([operation]) => operation.includes("/v1/earn/"))
+      [...documentOperations(document)].filter(([operation]) =>
+        /\/v1\/(earn|operations)\b/.test(operation)
+      )
     );
     expect(
       earn.operations.map((operation) => `${operation.method} ${operation.path}`).sort()

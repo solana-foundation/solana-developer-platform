@@ -161,7 +161,7 @@ Name a provider only to explain its specific behavior or show an API value.
 
 ## Sidebar Components
 
-`src/components/docs-shell/sidebar.tsx`: `"use client"`, receives `tree` (the page tree cut to what the sidebar draws, `sidebarTreeOf`, since every page ships it), `sectionOverrides`, optional `dashboardUrl` and `agentSetup`. Search sits above the compact Dashboard link and **Agent setup** menu (`agent-setup.tsx`): one tab per coding agent, each a copyable `npx skills add` command. The layout builds the commands with `getAgentSetupOptions()` (`src/lib/agent-setup.ts`). Nothing unreleased is offered on any deployment: the docs skill always installs, and a module skill in `MODULE_SKILLS` shows only while its `listed` toggle is true, its module is stable, and the deployment publishes that module (`isModulePublished`, which applies a hold such as Earn's). The MCP tab's toggle is `DOCS_MCP_COMMAND`: null hides it until the docs MCP ships. The footer holds one environment-status line (its mainnet half links Go to mainnet) and the Fumadocs `ThemeSwitch` (light, dark, system); AI resources link to `llms.txt`. The top-level entry a page sits under stays highlighted like the page: its breadcrumb's first page, which the layout passes for the pages whose path does not say it (`sidebarSectionOverrides`, `src/lib/breadcrumbs.ts`), else the longest top-level URL its path extends (`sectionByPath`, `src/lib/sidebar-section.ts`).
+`src/components/docs-shell/sidebar.tsx`: `"use client"`, receives `tree` (the page tree cut to what the sidebar draws, `sidebarTreeOf`, since every page ships it), `sectionOverrides`, optional `dashboardUrl` and `agentSetup`. Search sits above the compact Dashboard link and **Agent setup** menu (`agent-setup.tsx`): one tab per coding agent, each a copyable `npx skills add` command. The layout builds the commands with `getAgentSetupOptions()` (`src/lib/agent-setup.ts`). Nothing unreleased is offered on any deployment: the docs skill always installs, and a module skill in `MODULE_SKILLS` shows only while its `listed` toggle is true, its module is stable, and the deployment publishes that module (`isModulePublished`). The MCP tab's toggle is `DOCS_MCP_COMMAND`: null hides it until the docs MCP ships. The footer holds one environment-status line (its mainnet half links Go to mainnet) and the Fumadocs `ThemeSwitch` (light, dark, system); AI resources link to `llms.txt`. The top-level entry a page sits under stays highlighted like the page: its breadcrumb's first page, which the layout passes for the pages whose path does not say it (`sidebarSectionOverrides`, `src/lib/breadcrumbs.ts`), else the longest top-level URL its path extends (`sectionByPath`, `src/lib/sidebar-section.ts`).
 
 **Do not add new navigation patterns outside the page tree.** Navigation is auto-generated from `source.pageTree` via Fumadocs. To add pages to the sidebar, add MDX files to `content/docs/` and update `meta.json`.
 
@@ -279,6 +279,7 @@ Gates follow module declarations, never sentences:
   it teaches a different body, query, retry key or multi-step flow.
 - Frontmatter (titles, descriptions) of shared pages must stay module-neutral.
 - `check:links` checks the channel in the manifest; CI runs it on `experimental` and `stable`.
+- `check:links` resolves this repository's `tree/main` and `blob/main` GitHub links against the checkout instead of fetching them, so a page can link a file its own PR adds, and a wrong path fails offline.
 - `src/components/docs-shell/home.tsx` lists custody, ramp, compliance and RPC partners from the shared provider registries. Custody and ramp logos follow their release-channel gates; compliance appears only when its module is published. Add a logo mapping when a provider is added.
 - Committed generated files (`public/llms*.txt`, Postman, `reference/api/index.mdx`, `src/generated/public-surface.json`, `src/generated/api-examples.json`) are built at `experimental`; the deployment's build regenerates them for its channel. The root `content/docs/meta.json` is hand-maintained.
 - The docs skill (`public/SKILL.md`, and the same file at the repo's `skills/sdp-docs/SKILL.md`, which `npx skills add` installs from GitHub) is the exception: it names no module, so one copy fits every channel. `generate:ai` links only shared pages from it and fails on a gated or missing one; send readers to `llms.txt` for what a channel publishes.
@@ -357,17 +358,22 @@ the same filtered page map.
 ### Earn docs
 
 Earn uses the same `module: earn` frontmatter and release-channel rules as
-every other module. Its guides live in `content/docs/earn`, with Embedded
-Yield in `content/docs/guides/embedded-yield.mdx`. The public API reference,
-Postman, playground and AI resources regenerate from the channel's public
-OpenAPI document. No branch or deployment-preview override admits content.
+every other module, with no separate publication flag or preview override. Its
+guides live in `content/docs/earn`, with Embedded Yield in
+`content/docs/guides/embedded-yield.mdx`. The public contract has four core
+actions and five shared operation routes; the API reference nests the operation
+routes under Earn as their own Operations group (`EARN_GROUPS.operations`), and
+the six WisdomTree onboarding operations stay internal. OpenAPI owns request and response contracts, and the
+guides own the walkthrough. Do not maintain a second hidden core contract.
 
-The Treasury and provider-integration guides remain under
-`content/unpublished/earn` because they describe internal operations. Treasury, Programs and provider administration
-stay outside the pinned public API contract. A change to that contract needs
-security review; publication follows module maturity.
-
----
+Guides walk the `source.ownerAddress` flow only: the owner's wallet signs, and
+SDP never needs it registered. An SDP custody wallet (`source.walletId`) gets
+one note, at the end of the quickstart. Guides document the Earn API and how to
+integrate it, nothing more: assume readers know Solana signing and wallets, show
+no signing or environment setup code, and link Solana's docs instead. Code
+examples are TypeScript first, with curl as the second tab. `earn-guide-examples.test.ts` parses
+each titled request block (`deposit.json`, `submission.json`,
+`withdrawal.json`) with the API's own schemas.
 
 ## Do's and Don'ts
 

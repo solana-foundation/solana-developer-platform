@@ -24,7 +24,7 @@
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "lucide-react": "1.35.0",
-    "next": "16.4.1",
+    "next": "16.4.5",
     "radix-ui": "1.6.7",
     "react": "19.2.8",
     "react-dom": "19.2.8",
@@ -36,7 +36,7 @@
     "zod": "4.6.6"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.11",
+    "@biomejs/biome": "2.6.3",
     "@testing-library/react": "16.3.3",
     "@types/node": "26.4.0",
     "@types/react": "19.2.18",

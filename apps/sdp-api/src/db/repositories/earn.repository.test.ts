@@ -1,39 +1,16 @@
-import type { EarnPortfolioWithdrawal } from "@sdp/types/earn";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
-import { isPostgresUniqueViolation } from "@/db/postgres-utils";
-import {
-  applyEarnWithdrawalObservationByReference,
-  applyEarnWithdrawalObservationToRow,
-} from "@/services/earn-withdrawal-ledger.service";
+
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
-import {
-  expectProjectScoped,
-  type SeededDefaultProjects,
-  seedDefaultProjects,
-} from "@/test/helpers/projects";
+import { type SeededDefaultProjects, seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import type {
-  EarnProviderWalletRow,
-  EarnRepository,
-  EarnStrategyRow,
-  InsertEarnProviderWalletInput,
-  ListEarnProviderWalletsInput,
-  ListEarnProviderWalletsResult,
-  UpsertEarnStrategyInput,
-} from "./earn.repository";
+import type { EarnRepository, EarnStrategyRow, UpsertEarnStrategyInput } from "./earn.repository";
 import { createPostgresEarnRepository } from "./earn.repository.postgres";
-import {
-  type CreateCustodialMovementInput,
-  createPostgresEarnMovementsRepository,
-  type EarnMovementRow,
-  type EarnMovementsRepository,
-} from "./earn-movements.repository";
 
 const TEST_PROJECT_ID = "prj_earn_repo_test";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-const DESTINATION = "4Nd1mYzL3T2fLGV1kZQcQq5o5FQMYuu1v6oCTKW6PYt5";
+const _DESTINATION = "4Nd1mYzL3T2fLGV1kZQcQq5o5FQMYuu1v6oCTKW6PYt5";
 // Bulk catalogue syncs land many rows on one sdp_iso_now() value, so every
 // list ORDER BY carries an id tiebreaker (see 0048_earn.sql). Pinning
 // created_at reproduces that case deterministically.
@@ -41,7 +18,7 @@ const SHARED_CREATED_AT = "2026-01-01T00:00:00.000Z";
 
 describe("EarnRepository (postgres)", () => {
   let repo: EarnRepository;
-  let projects: SeededDefaultProjects;
+  let _projects: SeededDefaultProjects;
 
   beforeAll(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
@@ -75,7 +52,7 @@ describe("EarnRepository (postgres)", () => {
       .bind(TEST_USER.id, TEST_USER.email)
       .run();
 
-    projects = await seedDefaultProjects(db, {
+    _projects = await seedDefaultProjects(db, {
       organizationId: TEST_ORG.id,
       createdBy: TEST_USER.id,
       members: [],
@@ -698,6 +675,125 @@ describe("EarnRepository (postgres)", () => {
     });
   });
 
+  describe("core discovery filters and rate provenance", () => {
+    it("intersects caller filters with visibility before pagination and counts", async () => {
+      const target = await seedStrategy({ providerReference: "core-first", currentApy: "0.06" });
+      await seedStrategy({ providerReference: "core-second", currentApy: "0.02" });
+      await seedStrategy({ providerReference: "core-unknown", currentApy: null });
+      await seedStrategy({
+        provider: "kamino",
+        providerReference: "core-other-provider",
+        currentApy: "0.08",
+      });
+      const page = await repo.listStrategies({
+        environment: "sandbox",
+        provider: "veda",
+        depositMint: USDC_MINT,
+        minApy: "0.04",
+        maxApy: "0.07",
+        providers: ["veda"],
+        limit: 1,
+        offset: 0,
+      });
+      expect(page.total).toBe(1);
+      expect(page.rows.map((row) => row.id)).toEqual([target.id]);
+      expect(
+        (
+          await repo.listStrategies({
+            environment: "sandbox",
+            id: target.id,
+            providers: [],
+            limit: 10,
+            offset: 0,
+          })
+        ).total
+      ).toBe(0);
+      expect(
+        (
+          await repo.listStrategies({
+            environment: "sandbox",
+            depositMint: "absent-mint",
+            limit: 10,
+            offset: 0,
+          })
+        ).total
+      ).toBe(0);
+    });
+
+    it("does not invent a rate observation on metadata updates", async () => {
+      const observedAt = "2026-11-18T10:00:00.000Z";
+      const first = await seedStrategy({ rateObservedAt: observedAt });
+      const metadataUpdate = await repo.upsertStrategy(strategyInput({ name: "New label" }));
+      expect(metadataUpdate?.id).toBe(first.id);
+      expect(metadataUpdate?.rate_observed_at).toBe(observedAt);
+      await repo.updateStrategyMetrics({
+        provider: "veda",
+        providerReference: "vault-usdc-prime",
+        environment: "sandbox",
+        currentApy: "0.052",
+        riskMetadata: { tvlUsd: 100 },
+      });
+      expect((await repo.getStrategyById(first.id))?.rate_observed_at).toBe(observedAt);
+      await repo.updateStrategyMetrics({
+        provider: "veda",
+        providerReference: "vault-usdc-prime",
+        environment: "sandbox",
+        currentApy: "0.08",
+        riskMetadata: {},
+      });
+      expect((await repo.getStrategyById(first.id))?.rate_observed_at).toBeNull();
+      await repo.updateStrategyMetrics({
+        provider: "veda",
+        providerReference: "vault-usdc-prime",
+        environment: "sandbox",
+        currentApy: "0.08",
+        rateObservedAt: observedAt,
+        riskMetadata: {},
+      });
+      await getDb(env)
+        .prepare("UPDATE earn_strategies SET current_apy = ? WHERE id = ?")
+        .bind("0.09", first.id)
+        .run();
+      expect((await repo.getStrategyById(first.id))?.rate_observed_at).toBeNull();
+    });
+
+    it("keeps batch rate observations separate from null and malformed rates", async () => {
+      const observedAt = "2026-11-18T10:01:00.000Z";
+      await repo.upsertStrategies([
+        strategyInput({ providerReference: "core-batch", rateObservedAt: observedAt }),
+      ]);
+      const first = await repo.getStrategyByReference({
+        provider: "veda",
+        providerReference: "core-batch",
+        environment: "sandbox",
+      });
+      expect(first?.rate_observed_at).toBe(observedAt);
+      await repo.updateStrategyMetricsBatch([
+        {
+          provider: "veda",
+          providerReference: "core-batch",
+          environment: "sandbox",
+          currentApy: null,
+          rateObservedAt: observedAt,
+          riskMetadata: {},
+        },
+      ]);
+      if (!first) throw new Error("missing strategy");
+      expect((await repo.getStrategyById(first.id))?.rate_observed_at).toBeNull();
+      await getDb(env)
+        .prepare("UPDATE earn_strategies SET current_apy = ? WHERE id = ?")
+        .bind("not-a-rate", first.id)
+        .run();
+      const page = await repo.listStrategies({
+        environment: "sandbox",
+        minApy: "0",
+        limit: 10,
+        offset: 0,
+      });
+      expect(page.total).toBe(0);
+    });
+  });
+
   describe("listStrategies pagination", () => {
     it("windows by limit/offset with a stable total and the id tiebreaker", async () => {
       const ids: string[] = [];
@@ -1002,796 +1098,6 @@ describe("EarnRepository (postgres)", () => {
 
       expect(total).toBe(1);
       expect(rows.map((row) => row.id)).toEqual([uncurated.id]);
-    });
-  });
-
-  describe("provider wallets (earn_provider_wallets)", () => {
-    const WALLET_REF = "1b6d5a1e-8f4c-4c1a-9e2b-3d7f6a8c9e01";
-    const OTHER_ORG = {
-      id: "org_earn_repo_other",
-      name: "Sibling Org",
-      slug: "org-earn-repo-other",
-    };
-    const OTHER_ORG_PROJECT_ID = "prj_earn_repo_other_org";
-
-    async function seedProviderWallet(
-      overrides: Partial<InsertEarnProviderWalletInput> = {}
-    ): Promise<EarnProviderWalletRow> {
-      const row = await repo.insertProviderWallet({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        environment: "sandbox",
-        provider: "upshift",
-        // A FRESH ref per call by default. (provider, provider_wallet_ref) is
-        // globally unique since migration 0056, so a shared default would make
-        // every test that seeds a second program fail on the unique instead of
-        // on its own assertion. Tests that care about the ref pass one.
-        providerWalletRef: crypto.randomUUID(),
-        label: null,
-        createdBy: TEST_USER.id,
-        ...overrides,
-      });
-      if (!row) {
-        throw new Error("failed to seed provider wallet");
-      }
-      return row;
-    }
-
-    async function seedSiblingOrg(): Promise<void> {
-      const db = getDb(env);
-      await db
-        .prepare(
-          "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
-        )
-        .bind(OTHER_ORG.id, OTHER_ORG.name, OTHER_ORG.slug)
-        .run();
-      await seedDefaultProjects(db, {
-        organizationId: OTHER_ORG.id,
-        createdBy: TEST_USER.id,
-        members: [],
-        ids: {
-          sandbox: OTHER_ORG_PROJECT_ID,
-          production: `${OTHER_ORG_PROJECT_ID}_production`,
-        },
-      });
-    }
-
-    function listPrograms(
-      overrides: Partial<ListEarnProviderWalletsInput> = {}
-    ): Promise<ListEarnProviderWalletsResult> {
-      return repo.listProviderWallets({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        environment: "sandbox",
-        limit: 20,
-        offset: 0,
-        ...overrides,
-      });
-    }
-
-    describe("getProviderWalletById", () => {
-      it("round-trips a program by its own id, scoped to (organization, environment)", async () => {
-        const inserted = await seedProviderWallet({
-          providerWalletRef: WALLET_REF,
-          label: "Shared Upshift portfolio",
-        });
-        expect(inserted.id).toMatch(/^earn_provider_wallet_/);
-
-        const fetched = await repo.getProviderWalletById({
-          organizationId: TEST_ORG.id,
-          environment: "sandbox",
-          walletId: inserted.id,
-        });
-
-        expect(fetched).toEqual(inserted);
-        expect(fetched?.provider_wallet_ref).toBe(WALLET_REF);
-        expect(fetched?.label).toBe("Shared Upshift portfolio");
-        expect(fetched?.project_id).toBe(TEST_PROJECT_ID);
-        expect(fetched?.created_by).toBe(TEST_USER.id);
-      });
-
-      it("misses a sibling organization's program id", async () => {
-        await seedSiblingOrg();
-        const ours = await seedProviderWallet();
-        const theirs = await seedProviderWallet({
-          organizationId: OTHER_ORG.id,
-          projectId: OTHER_ORG_PROJECT_ID,
-        });
-        expect(theirs.id).not.toBe(ours.id);
-
-        await expect(
-          repo.getProviderWalletById({
-            organizationId: TEST_ORG.id,
-            environment: "sandbox",
-            walletId: theirs.id,
-          })
-        ).resolves.toBeNull();
-
-        // …and resolves for its owner, so the miss above is the organization
-        // clause doing its job rather than an id that never existed.
-        await expect(
-          repo.getProviderWalletById({
-            organizationId: OTHER_ORG.id,
-            environment: "sandbox",
-            walletId: theirs.id,
-          })
-        ).resolves.toMatchObject({ id: theirs.id });
-      });
-
-      it("misses the right id in the WRONG environment", async () => {
-        // A real security property, not a formality. Before PRO-1670 the lookup
-        // was keyed on (organization, environment, provider), so environment
-        // scoping was structural and a sandbox row could not be reached from a
-        // production session by construction. Addressing a program by its own id
-        // removes that guarantee, so the clause is now explicit — and a
-        // production dashboard session must never resolve a sandbox program.
-        const sandboxProgram = await seedProviderWallet();
-
-        await expect(
-          repo.getProviderWalletById({
-            organizationId: TEST_ORG.id,
-            environment: "production",
-            walletId: sandboxProgram.id,
-          })
-        ).resolves.toBeNull();
-
-        await expect(
-          repo.getProviderWalletById({
-            organizationId: TEST_ORG.id,
-            environment: "sandbox",
-            walletId: sandboxProgram.id,
-          })
-        ).resolves.toMatchObject({ id: sandboxProgram.id });
-      });
-
-      it("returns null for an unknown id", async () => {
-        await seedProviderWallet();
-
-        await expect(
-          repo.getProviderWalletById({
-            organizationId: TEST_ORG.id,
-            environment: "sandbox",
-            walletId: "earn_provider_wallet_missing",
-          })
-        ).resolves.toBeNull();
-      });
-    });
-
-    describe("listProviderWallets", () => {
-      it("returns every program for the (organization, environment), OLDEST first", async () => {
-        // Oldest-first is a stability requirement, not a preference (migration
-        // 0056's header): consumers that track "the first program" across polls
-        // must not be silently re-pointed at a different wallet — and therefore
-        // at a different balance — the moment another program is created.
-        const first = await seedProviderWallet({ label: "first" });
-        const second = await seedProviderWallet({ label: "second" });
-        const third = await seedProviderWallet({ label: "third" });
-        await setCreatedAt("earn_provider_wallets", first.id, "2026-01-01T00:00:00.000Z");
-        await setCreatedAt("earn_provider_wallets", second.id, "2026-02-01T00:00:00.000Z");
-        await setCreatedAt("earn_provider_wallets", third.id, "2026-03-01T00:00:00.000Z");
-
-        const { rows, total } = await listPrograms();
-
-        expect(total).toBe(3);
-        expect(rows.map((row) => row.id)).toEqual([first.id, second.id, third.id]);
-      });
-
-      it("breaks a created_at tie by id ASC so windows tile the collection exactly", async () => {
-        // Programs created in one burst share sdp_iso_now() exactly as bulk
-        // catalogue rows do, so created_at alone leaves the order (and therefore
-        // the head of the list) undefined. Five programs for ONE
-        // org+environment+provider is itself only legal since PRO-1670.
-        const ids: string[] = [];
-        for (let i = 0; i < 5; i += 1) {
-          ids.push((await seedProviderWallet()).id);
-        }
-        await freezeCreatedAt("earn_provider_wallets", ids);
-        // ASC — the mirror of the DESC history lists above.
-        const expected = [...ids].sort();
-
-        const seen: string[] = [];
-        for (let offset = 0; offset < expected.length; offset += 2) {
-          const { rows, total } = await listPrograms({ limit: 2, offset });
-          expect(total).toBe(expected.length);
-          seen.push(...rows.map((row) => row.id));
-        }
-        expect(seen).toEqual(expected);
-      });
-
-      it("filters by provider and excludes sibling orgs and the sibling environment", async () => {
-        await seedSiblingOrg();
-        const upshiftA = await seedProviderWallet();
-        const upshiftB = await seedProviderWallet();
-        const veda = await seedProviderWallet({ provider: "veda" });
-        const production = await seedProviderWallet({
-          projectId: projects.production.id,
-          environment: "production",
-        });
-        const sibling = await seedProviderWallet({
-          organizationId: OTHER_ORG.id,
-          projectId: OTHER_ORG_PROJECT_ID,
-        });
-
-        // Unfiltered: every provider's programs for this (org, environment).
-        const all = await listPrograms();
-        expect(all.total).toBe(3);
-        expect(new Set(all.rows.map((row) => row.id))).toEqual(
-          new Set([upshiftA.id, upshiftB.id, veda.id])
-        );
-        expect(all.rows.map((row) => row.id)).not.toContain(production.id);
-        expect(all.rows.map((row) => row.id)).not.toContain(sibling.id);
-
-        // The optional filter narrows rows AND total together.
-        const upshift = await listPrograms({ provider: "upshift" });
-        expect(upshift.total).toBe(2);
-        expect(new Set(upshift.rows.map((row) => row.id))).toEqual(
-          new Set([upshiftA.id, upshiftB.id])
-        );
-
-        // The sibling environment and the sibling org each see only their own.
-        await expect(
-          listPrograms({ projectId: projects.production.id, environment: "production" })
-        ).resolves.toMatchObject({ total: 1 });
-        const theirs = await listPrograms({
-          organizationId: OTHER_ORG.id,
-          projectId: OTHER_ORG_PROJECT_ID,
-        });
-        expect(theirs.rows.map((row) => row.id)).toEqual([sibling.id]);
-      });
-
-      it("answers an organization with no programs with an empty envelope", async () => {
-        // A collection cannot 404 for emptiness — the handler leans on this to
-        // tell "no programs" apart from "provider not configured".
-        await expect(listPrograms()).resolves.toEqual({ rows: [], total: 0 });
-      });
-    });
-
-    describe("getProviderWalletByRef", () => {
-      it("finds the claiming row across organizations — the lookup is GLOBAL", async () => {
-        await seedSiblingOrg();
-        const theirs = await seedProviderWallet({
-          organizationId: OTHER_ORG.id,
-          projectId: OTHER_ORG_PROJECT_ID,
-          providerWalletRef: WALLET_REF,
-        });
-
-        // No organization to scope by: the create path resolves a provider
-        // replay before it knows whose row the insert collided with, and asserts
-        // ownership afterwards (which is what turns THIS case into a 409).
-        await expect(
-          repo.getProviderWalletByRef({ provider: "upshift", providerWalletRef: WALLET_REF })
-        ).resolves.toMatchObject({ id: theirs.id, organization_id: OTHER_ORG.id });
-      });
-
-      it("returns null for an unknown ref and for the same ref under another provider", async () => {
-        await seedProviderWallet({ providerWalletRef: WALLET_REF });
-
-        await expect(
-          repo.getProviderWalletByRef({
-            provider: "upshift",
-            providerWalletRef: "44f0f6a1-0000-4000-8000-000000000000",
-          })
-        ).resolves.toBeNull();
-        // Keyed on the PAIR: provider ids namespace refs, so one provider's
-        // wallet id can never resolve another provider's program.
-        await expect(
-          repo.getProviderWalletByRef({ provider: "veda", providerWalletRef: WALLET_REF })
-        ).resolves.toBeNull();
-      });
-    });
-
-    it("allows N programs per org+environment+provider (PRO-1670)", async () => {
-      // The inverse of the pre-PRO-1670 rule. 0049's UNIQUE
-      // (organization_id, environment, provider) capped an org at ONE program
-      // per provider; 0056 drops it, so a second program with its own
-      // provider-side ref is now a legitimate second strategy.
-      const first = await seedProviderWallet();
-      const second = await seedProviderWallet();
-      expect(second.id).not.toBe(first.id);
-
-      // Sibling environments and providers were always open and stay open.
-      await expect(
-        seedProviderWallet({ projectId: projects.production.id, environment: "production" })
-      ).resolves.toMatchObject({ environment: "production" });
-      await expect(seedProviderWallet({ provider: "veda" })).resolves.toMatchObject({
-        provider: "veda",
-      });
-      const { total } = await listPrograms({ provider: "upshift" });
-      expect(total).toBe(2);
-    });
-
-    it("lists programs only for their project", async () => {
-      await seedProviderWallet();
-      await expectProjectScoped(
-        (projectId) => listPrograms({ projectId }),
-        { own: projects.sandbox, other: projects.production },
-        ({ total }) => total === 0
-      );
-    });
-
-    it("still allows ONE link row per provider wallet — globally (migration 0056)", async () => {
-      // The uniqueness did not disappear, it MOVED: a provider-side wallet holds
-      // real funds, so exactly one link row may claim it platform-wide. Two rows
-      // pointing at one provider wallet would each read the other's balance.
-      await seedSiblingOrg();
-      await seedProviderWallet({ providerWalletRef: WALLET_REF });
-
-      await expect(seedProviderWallet({ providerWalletRef: WALLET_REF })).rejects.toSatisfy(
-        (err: unknown) => isPostgresUniqueViolation(err)
-      );
-
-      // Across ORGANIZATIONS — the constraint is not tenant-scoped, which is the
-      // whole point (provider-side identifiers never are).
-      await expect(
-        seedProviderWallet({
-          organizationId: OTHER_ORG.id,
-          projectId: OTHER_ORG_PROJECT_ID,
-          providerWalletRef: WALLET_REF,
-        })
-      ).rejects.toSatisfy((err: unknown) => isPostgresUniqueViolation(err));
-
-      // …and across ENVIRONMENTS, for the same reason: the provider wallet is
-      // one object, whatever SDP environment reached for it.
-      await expect(
-        seedProviderWallet({
-          projectId: projects.production.id,
-          environment: "production",
-          providerWalletRef: WALLET_REF,
-        })
-      ).rejects.toSatisfy((err: unknown) => isPostgresUniqueViolation(err));
-
-      // The pair is (provider, ref): the same string under a DIFFERENT provider
-      // names a different provider's wallet and stays insertable.
-      await expect(
-        seedProviderWallet({ provider: "veda", providerWalletRef: WALLET_REF })
-      ).resolves.toMatchObject({ provider: "veda", provider_wallet_ref: WALLET_REF });
-    });
-  });
-
-  // The whole ledger suite runs against a stub provider on purpose:
-  // the ledger consumes only the canonical contract, so any registered
-  // provider id must exercise it identically (ADR 0002 pluggability).
-  describe("custodial movement ledger (earn_movements)", () => {
-    let wallet: EarnProviderWalletRow;
-    // The withdrawal ledger is `earn_movements`; `repo` still owns the ACCOUNT
-    // table (`earn_provider_wallets`), which the unification deliberately left
-    // alone — an account is not a holding.
-    let ledger: EarnMovementsRepository;
-
-    beforeEach(async () => {
-      const row = await repo.insertProviderWallet({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        environment: "sandbox",
-        provider: "veda",
-        providerWalletRef: "aa7d5a1e-8f4c-4c1a-9e2b-3d7f6a8c9e02",
-        label: null,
-        createdBy: TEST_USER.id,
-      });
-      if (!row) {
-        throw new Error("failed to seed program wallet");
-      }
-      wallet = row;
-      ledger = createPostgresEarnMovementsRepository(getDb(env));
-    });
-
-    function withdrawalInput(
-      overrides: Partial<CreateCustodialMovementInput> = {}
-    ): CreateCustodialMovementInput {
-      return {
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        providerWalletId: wallet.id,
-        environment: "sandbox",
-        provider: "veda",
-        amountRequestedUsd: "125.50",
-        payoutToken: "usdc",
-        destinationAddress: DESTINATION,
-        requestId: crypto.randomUUID(),
-        idempotencyFingerprint: '{"scope":"earn_program_withdrawal"}',
-        providerData: {},
-        createdBy: TEST_USER.id,
-        initiatedByKeyId: null,
-        ...overrides,
-      };
-    }
-
-    async function seedWithdrawal(
-      overrides: Partial<CreateCustodialMovementInput> = {}
-    ): Promise<EarnMovementRow> {
-      return ledger.createCustodialMovement(withdrawalInput(overrides));
-    }
-
-    function observed(overrides: Partial<EarnPortfolioWithdrawal> = {}): EarnPortfolioWithdrawal {
-      return {
-        withdrawalRef: "wd-provider-ref-1",
-        status: "processing",
-        amountRequestedUsd: "125.5",
-        destinationAddress: DESTINATION,
-        createdAt: "2026-08-11T00:00:00.000Z",
-        ...overrides,
-      };
-    }
-
-    async function readRow(id: string): Promise<EarnMovementRow | null> {
-      const raw = await getDb(env)
-        .prepare("SELECT * FROM earn_movements WHERE id = ?")
-        .bind(id)
-        .first<Record<string, unknown>>();
-      if (!raw) {
-        return null;
-      }
-      // The repository has no unscoped get-by-id on purpose; a raw read keeps
-      // assertions independent of the code under test.
-      return raw as unknown as EarnMovementRow;
-    }
-
-    it("inserts an intent row: status 'requested', no provider reference, fingerprint stored", async () => {
-      const row = await seedWithdrawal();
-
-      // One id space for every movement now; only migrated history keeps a
-      // per-family prefix, which is why nothing may parse an id for its kind.
-      expect(row.id).toMatch(/^earn_movement_/);
-      expect(row.status).toBe("requested");
-      expect(row.provider_reference).toBeNull();
-      expect(row.idempotency_fingerprint).toBe('{"scope":"earn_program_withdrawal"}');
-      expect(row.amount_requested).toBe("125.50");
-      expect(row.amount_settled).toBeNull();
-      expect(row.provider_data).toEqual({});
-      expect(row.created_by).toBe(TEST_USER.id);
-    });
-
-    it("locks one intent row per (wallet, request_id) — the SDP-side idempotency anchor", async () => {
-      const requestId = crypto.randomUUID();
-      await seedWithdrawal({ requestId });
-
-      await expect(seedWithdrawal({ requestId })).rejects.toSatisfy((err: unknown) =>
-        isPostgresUniqueViolation(err)
-      );
-
-      // The anchor is the WALLET, so the same derived id under another wallet
-      // (impossible in practice — derivation mixes the wallet ref — but the
-      // index must not over-lock) stays insertable.
-      const otherWallet = await repo.insertProviderWallet({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        environment: "sandbox",
-        provider: "upshift",
-        providerWalletRef: "bb8e6b2f-9a5d-4d2b-8f3c-4e8a7b9d0f13",
-        label: null,
-        createdBy: TEST_USER.id,
-      });
-      // A movement names its HOLDING, and the holding is 1:1 with the program
-      // wallet — so the sibling program resolves through it rather than through a
-      // wallet column the ledger does not carry.
-      const sibling = await seedWithdrawal({
-        requestId,
-        providerWalletId: otherWallet?.id,
-        provider: "upshift",
-      });
-      await expect(
-        ledger.getPositionById({
-          organizationId: TEST_ORG.id,
-          environment: "sandbox",
-          positionId: sibling.position_id,
-        })
-      ).resolves.toMatchObject({ provider_wallet_id: otherWallet?.id });
-    });
-
-    it("resolves replays by (org, wallet, request_id) and misses foreign orgs", async () => {
-      const requestId = crypto.randomUUID();
-      const row = await seedWithdrawal({ requestId });
-
-      await expect(
-        ledger.findCustodialMovementByRequestId({
-          organizationId: TEST_ORG.id,
-          providerWalletId: wallet.id,
-          requestId,
-        })
-      ).resolves.toMatchObject({ id: row.id });
-      await expect(
-        ledger.findCustodialMovementByRequestId({
-          organizationId: "org_someone_else",
-          providerWalletId: wallet.id,
-          requestId,
-        })
-      ).resolves.toBeNull();
-    });
-
-    describe("updateProgramWithdrawalStatusGuarded", () => {
-      it("transitions when the current status is in fromStatuses and stamps the provider reference", async () => {
-        const row = await seedWithdrawal();
-
-        const updated = await ledger.updateCustodialMovementGuarded({
-          selector: { movementId: row.id },
-          organizationId: TEST_ORG.id,
-          toStatus: "processing",
-          providerReference: "wd-provider-ref-1",
-          providerData: { lastObservation: { status: "processing" } },
-        });
-
-        expect(updated?.status).toBe("processing");
-        expect(updated?.provider_reference).toBe("wd-provider-ref-1");
-        expect(updated?.provider_data).toEqual({ lastObservation: { status: "processing" } });
-      });
-
-      it("is a no-op returning null when the status moved out of fromStatuses (the race)", async () => {
-        const row = await seedWithdrawal();
-        await ledger.updateCustodialMovementGuarded({
-          selector: { movementId: row.id },
-          organizationId: TEST_ORG.id,
-          toStatus: "completed",
-          providerReference: "wd-provider-ref-1",
-          settledAt: "2026-08-11T01:00:00.000Z",
-        });
-
-        const regressed = await ledger.updateCustodialMovementGuarded({
-          selector: { movementId: row.id },
-          organizationId: TEST_ORG.id,
-          toStatus: "processing",
-        });
-
-        expect(regressed).toBeNull();
-        const current = await readRow(row.id);
-        expect(current?.status).toBe("completed");
-        expect(current?.settled_at).toBe("2026-08-11T01:00:00.000Z");
-      });
-
-      it("returns null for a missing row and for a foreign organization", async () => {
-        const row = await seedWithdrawal();
-
-        await expect(
-          ledger.updateCustodialMovementGuarded({
-            selector: { movementId: "earn_program_withdrawal_missing" },
-            organizationId: TEST_ORG.id,
-            toStatus: "processing",
-          })
-        ).resolves.toBeNull();
-
-        await expect(
-          ledger.updateCustodialMovementGuarded({
-            selector: { movementId: row.id },
-            organizationId: "org_someone_else",
-            toStatus: "processing",
-          })
-        ).resolves.toBeNull();
-        await expect(readRow(row.id)).resolves.toMatchObject({ status: "requested" });
-      });
-
-      it("supports the (provider, provider_reference) selector for observation paths", async () => {
-        const row = await seedWithdrawal();
-        await ledger.updateCustodialMovementGuarded({
-          selector: { movementId: row.id },
-          organizationId: TEST_ORG.id,
-          toStatus: "processing",
-          providerReference: "wd-provider-ref-9",
-        });
-
-        const updated = await ledger.updateCustodialMovementGuarded({
-          selector: { provider: "veda", providerReference: "wd-provider-ref-9" },
-          organizationId: TEST_ORG.id,
-          toStatus: "completed",
-          amountSettled: "124.9",
-          feeAmount: "0.6",
-          settledAt: "2026-08-11T02:00:00.000Z",
-        });
-
-        expect(updated?.id).toBe(row.id);
-        expect(updated?.status).toBe("completed");
-        expect(updated?.amount_settled).toBe("124.9");
-        expect(updated?.fee_amount).toBe("0.6");
-      });
-
-      it("self-transitions refresh fields without changing status", async () => {
-        const row = await seedWithdrawal();
-        await ledger.updateCustodialMovementGuarded({
-          selector: { movementId: row.id },
-          organizationId: TEST_ORG.id,
-          toStatus: "processing",
-          providerReference: "wd-provider-ref-2",
-          providerData: { first: true },
-        });
-
-        const refreshed = await ledger.updateCustodialMovementGuarded({
-          selector: { movementId: row.id },
-          organizationId: TEST_ORG.id,
-          toStatus: "processing",
-          feeAmount: "0.55",
-          providerData: { second: true },
-        });
-
-        expect(refreshed?.status).toBe("processing");
-        expect(refreshed?.fee_amount).toBe("0.55");
-        // JSONB shallow merge: both observations survive.
-        expect(refreshed?.provider_data).toEqual({ first: true, second: true });
-      });
-
-      it("serializes concurrent terminal transitions — exactly one wins", async () => {
-        const row = await seedWithdrawal();
-        await ledger.updateCustodialMovementGuarded({
-          selector: { movementId: row.id },
-          organizationId: TEST_ORG.id,
-          toStatus: "processing",
-          providerReference: "wd-provider-ref-3",
-        });
-
-        const [completed, failed] = await Promise.all([
-          ledger.updateCustodialMovementGuarded({
-            selector: { movementId: row.id },
-            organizationId: TEST_ORG.id,
-            toStatus: "completed",
-            amountSettled: "125.5",
-            settledAt: "2026-08-11T03:00:00.000Z",
-          }),
-          ledger.updateCustodialMovementGuarded({
-            selector: { movementId: row.id },
-            organizationId: TEST_ORG.id,
-            toStatus: "failed",
-            failureReason: "declined",
-          }),
-        ]);
-
-        // Either order can win the row lock; the loser's fromStatuses guard
-        // must miss. The stored row must be internally consistent with the
-        // winner, never a blend of both writes.
-        expect([completed, failed].filter(Boolean)).toHaveLength(1);
-        const current = await readRow(row.id);
-        if (current?.status === "completed") {
-          expect(current.amount_settled).toBe("125.5");
-          expect(current.failure_reason).toBeNull();
-        } else {
-          expect(current?.status).toBe("failed");
-          expect(current?.failure_reason).toBe("declined");
-          expect(current?.amount_settled).toBeNull();
-        }
-      });
-    });
-
-    describe("ledger service appliers", () => {
-      it("applyToRow advances a requested row and stamps its provider reference", async () => {
-        const row = await seedWithdrawal();
-
-        const updated = await applyEarnWithdrawalObservationToRow({
-          repo: ledger,
-          row,
-          observed: observed({ status: "processing", feeUsd: "0.5" }),
-        });
-
-        expect(updated?.status).toBe("processing");
-        expect(updated?.provider_reference).toBe("wd-provider-ref-1");
-        expect(updated?.fee_amount).toBe("0.5");
-        expect(updated?.provider_data).toMatchObject({
-          lastObservation: { status: "processing" },
-        });
-      });
-
-      it("applyToRow is a no-op on a terminal row (belt before the SQL braces)", async () => {
-        const row = await seedWithdrawal();
-        await applyEarnWithdrawalObservationToRow({
-          repo: ledger,
-          row,
-          observed: observed({ status: "failed", failureReason: "declined" }),
-        });
-        const terminal = await readRow(row.id);
-
-        const result = await applyEarnWithdrawalObservationToRow({
-          repo: ledger,
-          row: terminal as EarnMovementRow,
-          observed: observed({ status: "processing" }),
-        });
-
-        expect(result?.status).toBe("failed");
-        await expect(readRow(row.id)).resolves.toMatchObject({
-          status: "failed",
-          failure_reason: "declined",
-        });
-      });
-
-      it("applyByReference persists an observation and completes the lifecycle", async () => {
-        const row = await seedWithdrawal();
-        await applyEarnWithdrawalObservationToRow({
-          repo: ledger,
-          row,
-          observed: observed({ status: "pending_approval" }),
-        });
-
-        const completed = await applyEarnWithdrawalObservationByReference({
-          repo: ledger,
-          provider: "veda",
-          organizationId: TEST_ORG.id,
-          observed: observed({
-            status: "completed",
-            amountPaidUsd: "124.9",
-            feeUsd: "0.6",
-            completedAt: "2026-08-11T04:00:00.000Z",
-          }),
-        });
-
-        expect(completed?.id).toBe(row.id);
-        expect(completed?.status).toBe("completed");
-        expect(completed?.settled_at).toBe("2026-08-11T04:00:00.000Z");
-
-        // Terminal rows never regress, even through the reference path.
-        const after = await applyEarnWithdrawalObservationByReference({
-          repo: ledger,
-          provider: "veda",
-          organizationId: TEST_ORG.id,
-          observed: observed({ status: "processing" }),
-        });
-        expect(after?.status).toBe("completed");
-      });
-
-      it("applyByReference no-ops cleanly on an unknown reference (pre-ledger withdrawals)", async () => {
-        await expect(
-          applyEarnWithdrawalObservationByReference({
-            repo: ledger,
-            provider: "veda",
-            organizationId: TEST_ORG.id,
-            observed: observed({ withdrawalRef: "wd-never-seen" }),
-          })
-        ).resolves.toBeNull();
-      });
-
-      it("applyByReference refuses to write across organizations", async () => {
-        const row = await seedWithdrawal();
-        await applyEarnWithdrawalObservationToRow({
-          repo: ledger,
-          row,
-          observed: observed({ status: "processing" }),
-        });
-
-        const result = await applyEarnWithdrawalObservationByReference({
-          repo: ledger,
-          provider: "veda",
-          organizationId: "org_someone_else",
-          observed: observed({ status: "completed" }),
-        });
-
-        expect(result).toBeNull();
-        await expect(readRow(row.id)).resolves.toMatchObject({ status: "processing" });
-      });
-    });
-
-    describe("listProgramWithdrawals", () => {
-      it("windows by limit/offset with a stable total, scoped to the wallet", async () => {
-        const ids: string[] = [];
-        for (let i = 0; i < 5; i += 1) {
-          ids.push((await seedWithdrawal()).id);
-        }
-        await freezeCreatedAt("earn_movements", ids);
-        const expected = [...ids].sort().reverse();
-
-        // A sibling PROGRAM's history must never leak into the window or total —
-        // and since PRO-1670 the sibling is the hard case: same organization,
-        // same environment, same provider, differing only by wallet_id. Before
-        // 0056 this row could not exist, so wallet scoping was never tested
-        // against anything a weaker (org, environment, provider) scope would
-        // have merged.
-        const siblingProgram = await repo.insertProviderWallet({
-          organizationId: TEST_ORG.id,
-          projectId: TEST_PROJECT_ID,
-          environment: "sandbox",
-          provider: "veda",
-          providerWalletRef: "cc9f7c30-ab6e-4e3c-9a4d-5f9b8c0e1a24",
-          label: null,
-          createdBy: TEST_USER.id,
-        });
-        expect(siblingProgram?.id).not.toBe(wallet.id);
-        await seedWithdrawal({ providerWalletId: siblingProgram?.id });
-
-        const seen: string[] = [];
-        for (let offset = 0; offset < expected.length; offset += 2) {
-          const { rows, total } = await ledger.listCustodialMovements({
-            organizationId: TEST_ORG.id,
-            providerWalletId: wallet.id,
-            limit: 2,
-            offset,
-          });
-          expect(total).toBe(expected.length);
-          seen.push(...rows.map((row) => row.id));
-        }
-        expect(seen).toEqual(expected);
-      });
     });
   });
 });

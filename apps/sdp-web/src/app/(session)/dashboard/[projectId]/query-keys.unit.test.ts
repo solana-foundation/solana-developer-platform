@@ -12,10 +12,7 @@ const plainKeys = [
   paymentsQueryKeys.counterpartyFieldOptions(),
   custodyQueryKeys.walletCardBalances(),
   issuanceQueryKeys.createTokenSignerWallets(),
-  earnQueryKeys.programs(),
   earnQueryKeys.vaultPositions(),
-  earnQueryKeys.vaultDepositsInFlight(),
-  earnQueryKeys.vaultWithdrawalsInFlight(),
   earnQueryKeys.fundingWallets(),
 ];
 
@@ -47,10 +44,6 @@ const parameterizedKeys: [key: readonly unknown[], params: unknown[]][] = [
   [issuanceQueryKeys.tokens({ query: DEFAULT_ISSUANCE_LIST_QUERY }), [DEFAULT_ISSUANCE_LIST_QUERY]],
   [issuanceQueryKeys.authorityWallets({ tokenId: "token_1" }), ["token_1"]],
   [earnQueryKeys.strategies({ cluster: "devnet" }), ["devnet"]],
-  [earnQueryKeys.vaultDeposit({ movementId: "mov_1" }), ["mov_1"]],
-  [earnQueryKeys.vaultWithdrawal({ movementId: "mov_2" }), ["mov_2"]],
-  [earnQueryKeys.programWithdrawals({ programId: "prg_2" }), ["prg_2"]],
-  [earnQueryKeys.withdrawal({ programId: "prg_3", withdrawalRef: "wd_1" }), ["prg_3", "wd_1"]],
 ];
 
 describe("dashboard query-key factories", () => {

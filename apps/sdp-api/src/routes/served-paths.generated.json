@@ -24,6 +24,7 @@
   "/v1/issuance": "prefix",
   "/v1/members": "prefix",
   "/v1/onboarding": "prefix",
+  "/v1/operations": "prefix",
   "/v1/organizations": "prefix",
   "/v1/payments/ramps": "prefix",
   "/v1/payments/recurring-payments": "prefix",

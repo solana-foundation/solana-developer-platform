@@ -31,7 +31,6 @@ const EARN_API_FILES = [
     .filter((file) => file.startsWith("earn-") && !file.includes(".test."))
     .map((file) => join(API_SRC, "cron", file)),
   join(API_SRC, "services/earn-provider-registry.ts"),
-  join(API_SRC, "services/jobs/detect-orphaned-earn-split-swaps.ts"),
   join(API_SRC, "services/jobs/reconcile-earn-vault-movements.ts"),
   // Operator-run catalogue inventories read the chain like the catalogue sync does.
   ...readdirSync(join(API_SRC, "../scripts"))
@@ -88,7 +87,7 @@ describe("Earn's cluster RPC boundary", () => {
   it("covers the files it claims to", () => {
     expect(EARN_API_FILES).toContain(DOOR);
     expect(EARN_API_FILES.length).toBeGreaterThan(20);
-    expect(EARN_SCOPED_FILES).toContain(join(API_SRC, "routes/earn/handlers/vault.ts"));
+    expect(EARN_SCOPED_FILES).toContain(join(API_SRC, "routes/earn/core/read.ts"));
     expect(RPC_PACKAGE_FILES).toContain(join(REPO, "packages/sdp-rpc/src/factory.ts"));
   });
 
