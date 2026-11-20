@@ -1,3 +1,7 @@
+import {
+  type ClosedPaymentRequestStatus,
+  PAYMENT_REQUEST_CLOSED_STATUSES,
+} from "@sdp/types/payments";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ZodError } from "zod";
@@ -104,19 +108,25 @@ describe("PayPage open requests", () => {
     expect(html).not.toContain("javascript:");
   });
 
-  it.each([
-    ["paid", "Payment received"],
-    ["expired", "Link expired"],
-    ["canceled", "Request canceled"],
-  ])("tells the payer a %s request is closed, with no way to pay it", async (status, title) => {
-    fetchMock.mockResolvedValue(Response.json({ ...openRequest, status, solanaPayUrl: null }));
+  const closedTitle = {
+    paid: "Payment received",
+    expired: "Link expired",
+    canceled: "Request canceled",
+  } as const satisfies Record<ClosedPaymentRequestStatus, string>;
 
-    const html = renderToStaticMarkup(await renderPage("AbCdEfGh12345-xy"));
+  it.each(PAYMENT_REQUEST_CLOSED_STATUSES)(
+    "tells the payer a %s request is closed, with no way to pay it",
+    async (status) => {
+      const title = closedTitle[status];
+      fetchMock.mockResolvedValue(Response.json({ ...openRequest, status, solanaPayUrl: null }));
 
-    expect(html).toContain(title);
-    expect(html).not.toContain("Scan with a Solana wallet to pay");
-    expect(html).not.toContain("Payment unavailable");
-  });
+      const html = renderToStaticMarkup(await renderPage("AbCdEfGh12345-xy"));
+
+      expect(html).toContain(title);
+      expect(html).not.toContain("Scan with a Solana wallet to pay");
+      expect(html).not.toContain("Payment unavailable");
+    }
+  );
 });
 
 describe("payTokenSchema", () => {
