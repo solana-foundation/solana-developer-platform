@@ -1,6 +1,6 @@
 import { getDb } from "@/db/client";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
-import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
+import { createPostgresPaymentRequestsRepository } from "@/db/repositories/payment-requests.repository.postgres";
 import { TEST_CUSTODY_PUBLIC_KEY } from "@/test/fixtures/custody";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
@@ -125,7 +125,7 @@ export async function readTenantPaymentRequest(
   requestId: string
 ): Promise<PaymentRequestRow> {
   return required(
-    await createSystemPaymentRequestsRepository(env).getPaymentRequestById({
+    await createPostgresPaymentRequestsRepository(getDb(env)).getPaymentRequestById({
       requestId,
       organizationId: tenant.organizationId,
       projectId: tenant.projectId,
