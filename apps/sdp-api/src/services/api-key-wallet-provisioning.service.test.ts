@@ -294,6 +294,38 @@ describe("provisionApiKeyWallet", () => {
     ).toEqual({ custody_wallet_id: "cwlt_api_key_provisioning_default" });
     expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
   });
+
+  it.each(["/v1/api-keys", `/v1/projects/${PROJECT_ID}/api-keys`])(
+    "refuses provisionWallet on POST %s without writing a key or a wallet",
+    async (path) => {
+      const countRows = async () => ({
+        apiKeys: await getDb(env).queryOne("SELECT COUNT(*) AS count FROM api_keys"),
+        wallets: await getDb(env).queryOne("SELECT COUNT(*) AS count FROM custody_wallets"),
+      });
+      const before = await countRows();
+
+      const response = await app.request(
+        path,
+        {
+          method: "POST",
+          headers: adminHeaders(),
+          body: JSON.stringify({
+            name: "Provisioning key",
+            grants: ["transfers.read"],
+            walletScope: "selected",
+            walletIds: ["cwlt_api_key_provisioning_default"],
+            provisionWallet: { connectionId: CONNECTION_ID },
+          }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(400);
+      expect(await response.text()).toContain("provisionWallet is no longer accepted");
+      expect(await countRows()).toEqual(before);
+      expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
+    }
+  );
 });
 
 /** Keys are created by a signed-in organization admin, never a key (HOO-2099). */

@@ -398,8 +398,8 @@ describe("Custody wallet by ID route", () => {
     expect(await res.json()).toEqual(WALLET_NOT_FOUND);
   });
 
-  // HOO-2099: a selected key reaches only the wallets it lists, for writes as
-  // for reads (the wallet detail above), refused before the key is claimed.
+  // HOO-2099: a selected key writes only the wallets it lists, refused before
+  // the Idempotency-Key is claimed.
   it.each([
     ["deletes", "DELETE", "/v1/wallets", { walletId: "para_wallet_a" }],
     ["relabels", "PATCH", "/v1/wallets/para_wallet_a", { label: "taken" }],

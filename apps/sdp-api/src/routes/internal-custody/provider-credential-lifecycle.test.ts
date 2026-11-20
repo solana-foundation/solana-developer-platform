@@ -1150,28 +1150,34 @@ describe("provider credential lifecycle", () => {
     });
   });
 
-  it("refuses rotation before provider calls when its quota is exhausted", async () => {
-    vi.spyOn(Date, "now").mockReturnValue(Date.now());
-    await seedRateLimit(env, `metered:credential-rotation:org:${ORGANIZATION_ID}`, 20);
-    const providerFetch = vi.fn().mockResolvedValue(Response.json({ data: [] }));
-    vi.stubGlobal("fetch", providerFetch);
+  it.each([
+    ["actor", `metered:credential-rotation:org:${ORGANIZATION_ID}:user:${USER_ID}`, 5],
+    ["organization", `metered:credential-rotation:org:${ORGANIZATION_ID}`, 20],
+  ] as const)(
+    "refuses rotation before provider calls when the %s quota is exhausted",
+    async (_scope, quotaKey, used) => {
+      vi.spyOn(Date, "now").mockReturnValue(Date.now());
+      await seedRateLimit(env, quotaKey, used);
+      const providerFetch = vi.fn().mockResolvedValue(Response.json({ data: [] }));
+      vi.stubGlobal("fetch", providerFetch);
 
-    const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
-      method: "POST",
-      key: "rotate-quota-exhausted",
-      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
-    });
+      const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
+        method: "POST",
+        key: "rotate-quota-exhausted",
+        body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
+      });
 
-    expect(response.status).toBe(429);
-    expect(response.headers.get("Retry-After")).not.toBeNull();
-    expect(await response.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
-    expect(providerFetch).not.toHaveBeenCalled();
-    const state = await readConnectionCredential();
-    expect(state.status).toBe(200);
-    expect(await state.json()).toMatchObject({
-      data: { providerCredential: { id: CREDENTIAL_ID }, rotationCandidate: null },
-    });
-  });
+      expect(response.status).toBe(429);
+      expect(response.headers.get("Retry-After")).not.toBeNull();
+      expect(await response.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
+      expect(providerFetch).not.toHaveBeenCalled();
+      const state = await readConnectionCredential();
+      expect(state.status).toBe(200);
+      expect(await state.json()).toMatchObject({
+        data: { providerCredential: { id: CREDENTIAL_ID }, rotationCandidate: null },
+      });
+    }
+  );
 
   it.each(["complete-rotation", "rollback", "deactivate"])(
     "refuses %s before provider calls or state changes when its quota is exhausted",
@@ -1251,6 +1257,10 @@ describe("provider credential lifecycle", () => {
     const foreign = await db.queryOne("SELECT * FROM provider_credentials WHERE id = ?", [
       credentialId,
     ]);
+    const secretLookup = vi.spyOn(
+      ProviderCredentialStore.prototype,
+      "findLifecycleCredentialWithSecret"
+    );
     const providerFetch = vi.fn();
     vi.stubGlobal("fetch", providerFetch);
 
@@ -1261,6 +1271,7 @@ describe("provider credential lifecycle", () => {
 
     expect(response.status).toBe(404);
     expect(await response.json()).toMatchObject({ error: { code: "NOT_FOUND" } });
+    expect(secretLookup).not.toHaveBeenCalled();
     expect(providerFetch).not.toHaveBeenCalled();
     expect(
       await db.queryOne("SELECT * FROM provider_credentials WHERE id = ?", [credentialId])
@@ -2400,7 +2411,7 @@ describe("provider credential lifecycle", () => {
   });
 
   it.each(["complete-rotation", "rollback"] as const)(
-    "blocks %s before provider calls or state changes when its audit intent is unavailable",
+    "blocks %s before secret access, provider calls or state changes when its audit intent is unavailable",
     async (operation) => {
       const providerFetch = vi
         .fn()
@@ -2421,6 +2432,10 @@ describe("provider credential lifecycle", () => {
       const db = getDb(env);
       const before = await db.queryMany("SELECT * FROM provider_credentials ORDER BY id");
       const connectionsBefore = await activeConnectionCredentialIds();
+      const secretLookup = vi.spyOn(
+        ProviderCredentialStore.prototype,
+        "findLifecycleCredentialWithSecret"
+      );
       await db.execute(`ALTER TABLE audit_logs ADD CONSTRAINT sdp_test_fail_check_audit
         CHECK (action <> 'maintenance') NOT VALID`);
       try {
@@ -2429,6 +2444,7 @@ describe("provider credential lifecycle", () => {
             method: "POST",
           })
         ).rejects.toThrow("Required audit record could not be persisted");
+        expect(secretLookup).not.toHaveBeenCalled();
         expect(providerFetch).toHaveBeenCalledTimes(2);
         expect(await db.queryMany("SELECT * FROM provider_credentials ORDER BY id")).toEqual(
           before

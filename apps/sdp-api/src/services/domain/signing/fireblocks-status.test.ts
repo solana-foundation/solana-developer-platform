@@ -1,11 +1,10 @@
 import {
-  FIREBLOCKS_CANCELLABLE_TRANSACTION_STATUSES,
-  FIREBLOCKS_CANCELLED_TRANSACTION_STATUSES,
   FIREBLOCKS_FAILED_TRANSACTION_STATUSES,
   FIREBLOCKS_SIGNING_PROPOSAL_STATUSES,
   isFireblocksProposalCancellable,
   isFireblocksTransactionCancellable,
   isFireblocksTransactionCancelled,
+  isFireblocksTransactionFailed,
 } from "@sdp/types/fireblocks";
 import { describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
@@ -14,18 +13,19 @@ import { required } from "@/test/helpers/required";
 
 // Provider states: https://developers.fireblocks.com/reference/transaction-statuses
 describe("Fireblocks cancellation states", () => {
-  it("offers a cancellation request while the provider awaits approval", () => {
-    expect(isFireblocksTransactionCancellable("PENDING_AUTHORIZATION")).toBe(true);
-    expect(isFireblocksProposalCancellable("PENDING_AUTHORIZATION")).toBe(true);
+  it.each([
+    "SUBMITTED",
+    "QUEUED",
+    "PENDING_AML_SCREENING",
+    "PENDING_SIGNATURE",
+    "PENDING_3RD_PARTY_MANUAL_APPROVAL",
+    "PENDING_3RD_PARTY",
+    "PENDING_AUTHORIZATION",
+    "PENDING_ENRICHMENT",
+  ])("offers a cancellation request in the pre-broadcast state %s", (status) => {
+    expect(isFireblocksTransactionCancellable(status)).toBe(true);
+    expect(isFireblocksProposalCancellable(status)).toBe(true);
   });
-
-  it.each(FIREBLOCKS_CANCELLABLE_TRANSACTION_STATUSES)(
-    "offers a cancellation request in the pre-broadcast state %s",
-    (status) => {
-      expect(isFireblocksTransactionCancellable(status)).toBe(true);
-      expect(isFireblocksProposalCancellable(status)).toBe(true);
-    }
-  );
 
   it.each(FIREBLOCKS_FAILED_TRANSACTION_STATUSES)(
     "never offers a cancellation request in the terminal state %s",
@@ -45,14 +45,11 @@ describe("Fireblocks cancellation states", () => {
 });
 
 describe("Fireblocks cancellation verdicts", () => {
-  it("recognizes a cancellation the provider reports", () => {
-    expect(isFireblocksTransactionCancelled("CANCELLED")).toBe(true);
-  });
-
-  it.each(FIREBLOCKS_CANCELLED_TRANSACTION_STATUSES)(
-    "recognizes the provider spelling %s",
+  it.each(["CANCELLED", "CANCELED"])(
+    "recognizes the provider spelling %s as a terminal failed cancellation",
     (status) => {
       expect(isFireblocksTransactionCancelled(status)).toBe(true);
+      expect(isFireblocksTransactionFailed(status)).toBe(true);
     }
   );
 

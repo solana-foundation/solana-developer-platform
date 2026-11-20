@@ -1,8 +1,9 @@
 import { hashString } from "@sdp/payments/hash";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
-import { custodyConfigsResponse, custodyWalletsResponse } from "@/openapi/paths/responses";
+import { custodyWalletsResponse } from "@/openapi/paths/responses";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { insertTestCustodyConfigRow, seedTestCustodyRows } from "@/test/helpers/custody";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
@@ -303,9 +304,10 @@ describe("Custody multi-provider routes", () => {
     );
 
     expect(res.status).toBe(200);
-    const json = await res.json();
-    expect(Object.keys(json.data)).toEqual(["configs"]);
-    const body = custodyConfigsResponse.parse(json);
+    // Every key the route returns stays in the comparison: strict data, loose rows.
+    const body = z
+      .object({ data: z.strictObject({ configs: z.array(z.looseObject({ id: z.string() })) }) })
+      .parse(await res.json());
 
     expect([...body.data.configs].sort((left, right) => left.id.localeCompare(right.id))).toEqual([
       {

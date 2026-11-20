@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { createSigningService } from "@/services/domain/signing.service";
-import { assertManagedCustodyUseAllowed } from "@/services/provider-availability.service";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
@@ -30,9 +29,9 @@ const WALLET_ID = "privy_managed_production_use_sandbox";
 
 const originalPrivy = { appId: env.PRIVY_APP_ID, appSecret: env.PRIVY_APP_SECRET };
 
-// Production is BYOK only (ADR 0006): the schema keeps Managed configs in Sandbox
-// projects, and every Managed use is refused again by the project's environment.
-describe("Managed custody use by project environment", () => {
+// Production is BYOK only (ADR 0006), and the schema keeps Managed configs in
+// Sandbox projects. These cases keep a Sandbox project's Managed wallet usable.
+describe("Managed custody use in a Sandbox project", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     await clearKVStores(env);
@@ -45,18 +44,7 @@ describe("Managed custody use by project environment", () => {
     await clearKVStores(env);
   });
 
-  it("refuses Managed custody use in a Production project and admits a Sandbox project's Managed wallet", async () => {
-    await expect(
-      assertManagedCustodyUseAllowed(getDb(env), {
-        organizationId: ORGANIZATION_ID,
-        projectId: PROJECT_IDS.production,
-        provider: "privy",
-      })
-    ).rejects.toMatchObject({
-      code: "FORBIDDEN",
-      message: "Privy Managed custody is not allowed in a production project.",
-      details: { reason: "custody_mode_not_allowed" },
-    });
+  it("admits a Sandbox project's Managed wallet for runtime execution", async () => {
     await expect(
       createSigningService(env).admitRuntimeExecution(
         ORGANIZATION_ID,

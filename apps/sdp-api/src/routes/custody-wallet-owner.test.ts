@@ -1,6 +1,7 @@
 import { SigningError } from "@sdp/custody/signing";
 import { hashString } from "@sdp/payments/hash";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { custodyWalletResponse } from "@/openapi/paths/responses";
@@ -164,6 +165,11 @@ async function crashBeforeKeyStored(idempotencyKey: string): Promise<number> {
   );
 }
 
+// Loose at every level, so a replay that drops or adds a key fails the comparison.
+const rawWalletBodySchema = z.object({
+  data: z.looseObject({ wallet: z.looseObject({ id: z.string() }) }),
+});
+
 async function readWalletRows() {
   return getDb(env).queryMany<{
     id: string;
@@ -305,7 +311,7 @@ describe("Custody wallet owner contract", () => {
         });
         const first = await createWallet(body, KEY);
         expect(first.status).toBe(201);
-        const created = custodyWalletResponse.parse(await first.json());
+        const created = rawWalletBodySchema.parse(await first.json()).data;
         expect(await crashBeforeKeyStored(KEY)).toBe(1);
         provisionPrivyWalletMock.mockClear();
         const rowsBefore = await readWalletRows();
@@ -316,7 +322,7 @@ describe("Custody wallet owner contract", () => {
         // store route answers 409 IDEMPOTENCY_KEY_OUTCOME_UNKNOWN.
         expect(retry.status).toBe(201);
         expect(retry.headers.get("Idempotent-Replayed")).toBe("true");
-        expect(custodyWalletResponse.parse(await retry.json()).data).toEqual(created.data);
+        expect(rawWalletBodySchema.parse(await retry.json()).data).toEqual(created);
         expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
         expect(await readWalletRows()).toEqual(rowsBefore);
         expect(
