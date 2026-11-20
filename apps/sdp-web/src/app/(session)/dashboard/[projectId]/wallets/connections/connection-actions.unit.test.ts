@@ -1,9 +1,11 @@
+import type { CustodyWalletResponse } from "@sdp/types/custody";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SdpApiResponseError } from "@/lib/sdp-api";
 import { translateServerMessagesToKeys } from "@/test/i18n-server";
 import { revalidatePath } from "@/test/next-cache";
 import { setPageRequest } from "@/test/request-project";
-import { type StubSdpApiClient, stubSdpApiClient } from "@/test/sdp-api-client";
+import { answerSdpApiPaths, type StubSdpApiClient, stubSdpApiClient } from "@/test/sdp-api-client";
+import { syntheticWalletAddress } from "@/test/wallets";
 
 vi.mock("next/cache", () => import("@/test/next-cache"));
 vi.mock("next/headers", () => import("@/test/next-headers"));
@@ -13,15 +15,48 @@ import {
   createConnectionWalletAction,
   deactivateConnectionAction,
 } from "./connection-actions";
+import type { CustodyInstallationConnection } from "./connection-detail.data";
 
 let client: StubSdpApiClient;
+
+/** The connection as the deactivate and cancel routes answer with it. */
+const CONNECTION = {
+  id: "cconn_1",
+  provider: "privy",
+  label: "Treasury app",
+  status: "deactivated",
+  completion: null,
+  canComplete: false,
+  canReplaceCredentials: false,
+  canCancel: false,
+} satisfies CustodyInstallationConnection;
+
+/** `POST /v1/wallets`'s answer for a wallet created in the connection. */
+const CREATED_WALLET = {
+  wallet: {
+    id: "cw_new",
+    custodyConnectionId: "cconn_1",
+    provider: "privy",
+    isRuntimeExecutionAllowed: true,
+    walletId: "privy_wallet_new",
+    publicKey: syntheticWalletAddress(1),
+    label: "Treasury",
+    purpose: null,
+    status: "active",
+    createdAt: "2026-09-01T00:00:00.000Z",
+  },
+} satisfies CustodyWalletResponse;
 
 beforeEach(() => {
   vi.clearAllMocks();
   setPageRequest("/dashboard/prj_test_sandbox/integrations/privy/connections/cconn_1");
   translateServerMessagesToKeys();
   client = stubSdpApiClient();
-  client.fetch.mockResolvedValue({});
+  answerSdpApiPaths(client, {
+    "/internal/dashboard/custody/connections/cconn_1/deactivate": { custodyConnection: CONNECTION },
+    "/internal/dashboard/custody/connections/cconn_1/cancel": { connection: CONNECTION },
+    "/v1/wallets": CREATED_WALLET,
+  });
 });
 
 function apiError(status: number, code: string): SdpApiResponseError {

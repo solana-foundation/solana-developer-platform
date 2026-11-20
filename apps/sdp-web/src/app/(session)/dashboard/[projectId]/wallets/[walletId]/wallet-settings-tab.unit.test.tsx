@@ -4,13 +4,9 @@ import type { SdpReleaseChannel } from "@sdp/types/release-channels";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as custodyActions from "@/app/(session)/dashboard/[projectId]/wallets/actions";
-import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-context";
-import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { stubClerkSession } from "@/test/clerk";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
-import { EnglishI18n } from "@/test/i18n";
-import { dashboardFlagsAt } from "@/test/release-channel-flags";
-import { syntheticWalletAddress } from "@/test/wallets";
+import { syntheticWalletAddress, WalletsTestWorkspace } from "@/test/wallets";
 import type { WalletPageView } from "./wallet-detail.shared";
 import { WalletSettingsTab } from "./wallet-settings-tab";
 
@@ -34,17 +30,12 @@ const WALLET: WalletPageView = {
 
 function renderSettings(wallet: WalletPageView, releaseChannel: SdpReleaseChannel = "stable") {
   render(
-    <EnglishI18n>
-      <DashboardWorkspaceProvider
-        scopeRefreshFallback={null}
-        dashboardAccess={resolveDashboardAccess(wallet.canManageCustody ? "admin" : "member")}
-        flags={dashboardFlagsAt(releaseChannel)}
-        serverDashboardCacheScope={{ orgId: "org_test", userId: "user_test" }}
-        projects={[]}
-      >
-        <WalletSettingsTab wallet={wallet} />
-      </DashboardWorkspaceProvider>
-    </EnglishI18n>
+    <WalletsTestWorkspace
+      organizationRole={wallet.canManageCustody ? "admin" : "member"}
+      releaseChannel={releaseChannel}
+    >
+      <WalletSettingsTab wallet={wallet} />
+    </WalletsTestWorkspace>
   );
 }
 

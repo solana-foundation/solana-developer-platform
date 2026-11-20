@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { toast } from "sonner";
 import useSWR, { type Key } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stubClerkSession } from "@/test/clerk";
@@ -91,10 +92,12 @@ describe("WalletActionsMenu", () => {
   });
 
   it("leaves the cached balances alone when the faucet refuses", async () => {
-    vi.spyOn(custodyActions, "requestDevnetSolanaFaucetAction").mockResolvedValue({
+    const faucet = vi.spyOn(custodyActions, "requestDevnetSolanaFaucetAction").mockResolvedValue({
       status: "error",
       message: "Rate limited",
     });
+    // No Toaster is mounted; the refusal is reported through toast.error.
+    const toastError = vi.spyOn(toast, "error").mockReturnValue("toast");
     const card = vi.fn(async () => ({}));
     const page = vi.fn(async () => ({}));
     const choose = renderMenu({ card, page });
@@ -103,6 +106,13 @@ describe("WalletActionsMenu", () => {
 
     await choose("Request devnet SOL");
 
+    expect(faucet.mock.calls).toEqual([["wallet_1"]]);
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith(
+        "Devnet faucet failed.",
+        expect.objectContaining({ description: "Rate limited" })
+      )
+    );
     expect(card).toHaveBeenCalledTimes(1);
     expect(page).toHaveBeenCalledTimes(1);
   });

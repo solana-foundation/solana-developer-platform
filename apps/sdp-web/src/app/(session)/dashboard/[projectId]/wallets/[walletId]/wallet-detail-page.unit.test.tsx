@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as providerAvailability from "@/lib/provider-availability.server";
 import * as sdpApi from "@/lib/sdp-api";
 import { translateServerMessagesToKeys } from "@/test/i18n-server";
+import { ISSUED_TOKEN, ISSUED_TOKEN_MINT } from "@/test/issued-tokens";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { projectProviderAvailability } from "@/test/provider-availability";
 import { setPageRequest } from "@/test/request-project";
@@ -34,6 +35,7 @@ const solBalance: CustodyWalletTokenBalance = {
 };
 
 const CONNECTION_PATH = "/internal/dashboard/custody/connections/connection_one";
+const ISSUED_TOKENS_PATH = "/v1/issuance/tokens?page=1&pageSize=100";
 
 const request = vi.fn<(path: string) => Promise<Response>>();
 const fetchAvailability = vi.fn<typeof providerAvailability.fetchProjectProviderAvailability>();
@@ -63,7 +65,7 @@ async function defaultApiResponse(path: string): Promise<Response> {
   if (path === "/v1/payments/wallets/wallet%2Fone/balances") {
     return Response.json({ data: { walletBalances: { balances: [solBalance] } } });
   }
-  if (path === "/v1/issuance/tokens?page=1&pageSize=100") {
+  if (path === ISSUED_TOKENS_PATH) {
     return Response.json({ data: [] });
   }
   if (path === CONNECTION_PATH) {
@@ -249,11 +251,18 @@ describe("WalletDetailPage", () => {
     }
   );
 
-  it("hands the balances and issued tokens over as promises", async () => {
+  it("hands the balances and the Project's issued tokens, by mint, over as promises", async () => {
+    answering(ISSUED_TOKENS_PATH, async () =>
+      Response.json({ data: [{ ...ISSUED_TOKEN, name: "Acme Dollar" }] })
+    );
+
     const props = await renderPage();
 
     await expect(props.balancesPromise).resolves.toEqual({ balances: [solBalance], error: null });
-    await expect(props.issuedTokensPromise).resolves.toEqual({});
+    await expect(props.issuedTokensPromise).resolves.toEqual({
+      [ISSUED_TOKEN_MINT]: { id: "tok_issued", name: "Acme Dollar", symbol: "ACME" },
+    });
+    expect(requestedPaths()).toContain(ISSUED_TOKENS_PATH);
   });
 
   it("reports the balances as unavailable when their read fails", async () => {
@@ -275,7 +284,7 @@ describe("WalletDetailPage", () => {
     const props = await renderPage();
 
     await expect(props.issuedTokensPromise).resolves.toEqual({});
-    expect(requestedPaths()).not.toContain("/v1/issuance/tokens?page=1&pageSize=100");
+    expect(requestedPaths()).not.toContain(ISSUED_TOKENS_PATH);
   });
 
   it("renders the page while the balances are still on their way", async () => {

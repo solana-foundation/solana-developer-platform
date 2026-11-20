@@ -439,8 +439,10 @@ describe("ByokCredentialForm", () => {
 
   it("freezes the payload and replays it verbatim when the outcome is unknown", async () => {
     const onLock = vi.fn();
+    const firstSubmit =
+      Promise.withResolvers<Awaited<ReturnType<typeof submitPrivyCredentialAction>>>();
     vi.mocked(submitPrivyCredentialAction)
-      .mockResolvedValueOnce({ status: "error", message: "network dropped" })
+      .mockReturnValueOnce(firstSubmit.promise)
       .mockResolvedValueOnce({ status: "success", connectionId: "cconn_test" });
     const user = userEvent.setup();
     render(
@@ -450,8 +452,12 @@ describe("ByokCredentialForm", () => {
     );
 
     await fillAndSubmit(user);
+    await waitFor(() => expect(submitPrivyCredentialAction).toHaveBeenCalledTimes(1));
     // The lock engages when the POST leaves, before any outcome is known.
-    expect(onLock.mock.calls).toContainEqual([true]);
+    expect(onLock.mock.calls).toEqual([[true]]);
+    await act(async () => {
+      firstSubmit.resolve({ status: "error", message: "network dropped" });
+    });
     // The editable form is gone, and with it any fresh-key resubmit: a committed pending
     // connection would refuse one, so the verbatim replay is the only way on.
     const retry = await screen.findByRole("button", { name: "Retry submission" });

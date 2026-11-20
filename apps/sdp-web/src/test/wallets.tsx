@@ -39,7 +39,7 @@ export function syntheticWalletSignature(index: number): Signature {
  * The dashboard shell's workspace around a wallets surface on `releaseChannel`, for a suite whose
  * copy depends on the modules a channel runs; {@link walletsWorkspace} runs every module.
  */
-export function WalletsWorkspace({
+export function WalletsTestWorkspace({
   organizationRole,
   releaseChannel,
   children,
@@ -65,25 +65,25 @@ export function WalletsWorkspace({
 
 function AdminWalletsWorkspace({ children }: { children: ReactNode }) {
   return (
-    <WalletsWorkspace organizationRole="admin" releaseChannel="experimental">
+    <WalletsTestWorkspace organizationRole="admin" releaseChannel="experimental">
       {children}
-    </WalletsWorkspace>
+    </WalletsTestWorkspace>
   );
 }
 
 function MemberWalletsWorkspace({ children }: { children: ReactNode }) {
   return (
-    <WalletsWorkspace organizationRole="member" releaseChannel="experimental">
+    <WalletsTestWorkspace organizationRole="member" releaseChannel="experimental">
       {children}
-    </WalletsWorkspace>
+    </WalletsTestWorkspace>
   );
 }
 
 function ViewerWalletsWorkspace({ children }: { children: ReactNode }) {
   return (
-    <WalletsWorkspace organizationRole="viewer" releaseChannel="experimental">
+    <WalletsTestWorkspace organizationRole="viewer" releaseChannel="experimental">
       {children}
-    </WalletsWorkspace>
+    </WalletsTestWorkspace>
   );
 }
 

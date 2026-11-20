@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { JsonValue } from "@/lib/idempotency";
 import { translateServerMessagesToKeys } from "@/test/i18n-server";
 import { revalidatePath } from "@/test/next-cache";
 import { PRODUCTION_PROJECT } from "@/test/projects";
@@ -30,11 +31,9 @@ beforeEach(() => {
 
 function completionResult(status: string, code?: string) {
   const attemptedAt = "2026-08-12T00:00:00.000Z";
-  return {
-    providerCredential: credential,
-    connectionId: "conn_test",
-    completion: code === undefined ? { status, attemptedAt } : { status, attemptedAt, code },
-  };
+  const completion: JsonValue =
+    code === undefined ? { status, attemptedAt } : { status, attemptedAt, code };
+  return { providerCredential: credential, connectionId: "conn_test", completion };
 }
 
 function apiError(status: number, message: string): Error {

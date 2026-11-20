@@ -172,11 +172,34 @@ describe("fetchCredentialLifecycle", () => {
     await expect(fetchCredentialLifecycle(answer(500), "conn-1")).resolves.toBeNull();
   });
 
-  it("reads the connection's credential lifecycle", async () => {
-    const lifecycle = makeLifecycle();
-    const request = vi.fn(async (_path: string) => Response.json({ data: lifecycle }));
+  it("reads the connection's credential lifecycle and keeps no secret the answer carried", async () => {
+    const current = makeCredential();
+    const candidate = makeCredential({ id: "pcred_candidate", status: "pending" });
+    const previous = makeCredential({ id: "pcred_previous", status: "retired" });
+    const expiresAt = new Date(NOW + 24 * 60 * 60 * 1000).toISOString();
+    const withSecrets = (credential: LifecycleCredential) => ({
+      ...credential,
+      appSecret: "app-secret-value",
+      encryptedSecret: "encrypted-secret-value",
+    });
+    const request = vi.fn(async (_path: string) =>
+      Response.json({
+        data: {
+          ...makeLifecycle(),
+          providerCredential: withSecrets(current),
+          rotationCandidate: withSecrets(candidate),
+          rollback: { providerCredential: withSecrets(previous), expiresAt },
+        },
+      })
+    );
 
-    await expect(fetchCredentialLifecycle(request, "conn-1")).resolves.toEqual(lifecycle);
+    await expect(fetchCredentialLifecycle(request, "conn-1")).resolves.toStrictEqual(
+      makeLifecycle({
+        providerCredential: current,
+        rotationCandidate: candidate,
+        rollback: { providerCredential: previous, expiresAt },
+      })
+    );
     expect(request.mock.calls).toEqual([
       ["/internal/dashboard/custody/connections/conn-1/provider-credential"],
     ]);

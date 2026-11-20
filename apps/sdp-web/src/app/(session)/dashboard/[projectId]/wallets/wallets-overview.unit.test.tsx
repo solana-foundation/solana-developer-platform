@@ -4,6 +4,7 @@ import type { CustodyWalletOwner, CustodyWalletSummary } from "@sdp/types/custod
 import type { OrganizationRole } from "@sdp/types/roles";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ComponentProps, ReactNode } from "react";
+import { Toaster } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DashboardHeaderTabsTrailingContext } from "@/components/dashboard-header-tabs-trailing-context";
 import { readWalletFavorites, walletFavoritesKey } from "@/lib/wallet-favorites";
@@ -19,17 +20,9 @@ import {
   setDashboardUrl,
 } from "@/test/dashboard-navigation";
 import { SANDBOX_PROJECT } from "@/test/projects";
+import { required } from "@/test/required";
 import { syntheticWalletAddress, walletsWorkspace } from "@/test/wallets";
 
-interface FavoriteToastOptions {
-  description: string;
-  action: { label: string; onClick: () => void };
-}
-
-const toast = vi.hoisted(() => vi.fn<(title: string, options: FavoriteToastOptions) => void>());
-
-// sonner's `toast` is a callable export; the Undo a favorite toast carries is read off its call.
-vi.mock("sonner", () => ({ toast }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 const { WalletsOverview } = await import("./wallets-overview");
@@ -98,16 +91,19 @@ function renderOverview(
           <DashboardHeaderTabsTrailingContext.Provider value={slot}>
             {children}
           </DashboardHeaderTabsTrailingContext.Provider>
+          <Toaster />
         </Workspace>
       ),
     }
   );
 }
 
-function lastFavoriteToast(): FavoriteToastOptions {
-  const call = toast.mock.lastCall;
-  if (call === undefined) throw new Error("No favorites toast was shown");
-  return call[1];
+/** Presses Undo on the toast titled `title`. */
+async function undoFrom(title: string): Promise<void> {
+  const toast = required(
+    (await screen.findByText(title)).closest<HTMLElement>("[data-sonner-toast]")
+  );
+  fireEvent.click(within(toast).getByRole("button", { name: "Undo" }));
 }
 
 function walletLinks(): HTMLElement[] {
@@ -133,7 +129,6 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   slot.remove();
-  toast.mockClear();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   window.history.replaceState(null, "", "/");
@@ -249,10 +244,20 @@ describe("empty and failed lists", () => {
     expect(screen.queryByRole("link", { name: "Create wallet" })).toBeNull();
     expect(walletLinks()).toHaveLength(0);
   });
+
+  // The loading view holds the tab row; a row that came and went would move the page.
+  it.each<[string, Partial<ComponentProps<typeof WalletsOverview>>]>([
+    ["no wallets", { wallets: [] }],
+    ["a failed read", { walletsError: "Upstream timed out" }],
+  ])("keeps the tab row's place with %s, where there is no toolbar", (_state, overrides) => {
+    renderOverview(overrides);
+    expect(slot.childElementCount).toBe(1);
+    expect(within(slot).queryAllByRole("button")).toHaveLength(0);
+  });
 });
 
 describe("favorites", () => {
-  it("pins a wallet to the sidebar and undoes it from the toast", () => {
+  it("pins a wallet to the sidebar and undoes it from the toast", async () => {
     renderOverview();
     fireEvent.click(screen.getByRole("button", { name: "Add Off ramp demo wallet to favorites" }));
 
@@ -265,11 +270,11 @@ describe("favorites", () => {
         .getAttribute("aria-pressed")
     ).toBe("true");
 
-    act(() => lastFavoriteToast().action.onClick());
+    await undoFrom("Added to favorites");
     expect(readWalletFavorites(favoritesKey())).toEqual([]);
   });
 
-  it("unpins a wallet, and Undo puts it back in its place", () => {
+  it("unpins a wallet, and Undo puts it back in its place", async () => {
     renderOverview();
     fireEvent.click(screen.getByRole("button", { name: "Add Settlement Fireblocks to favorites" }));
     fireEvent.click(screen.getByRole("button", { name: "Add Off ramp demo wallet to favorites" }));
@@ -280,7 +285,7 @@ describe("favorites", () => {
     expect(readWalletFavorites(favoritesKey()).map((favorite) => favorite.walletId)).toEqual([
       "wa-offramp",
     ]);
-    act(() => lastFavoriteToast().action.onClick());
+    await undoFrom("Removed from favorites");
     expect(readWalletFavorites(favoritesKey()).map((favorite) => favorite.walletId)).toEqual([
       "fb_wallet",
       "wa-offramp",

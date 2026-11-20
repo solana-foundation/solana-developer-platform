@@ -7,8 +7,8 @@ import { required } from "./required";
 /** The mocks behind the client `createSdpApiClient` answers with. */
 export interface StubSdpApiClient {
   request: Mock<sdpApi.SdpApiClient["request"]>;
-  /** Answers each `fetch`; what it resolves is what the action reads back. */
-  fetch: Mock<(path: string, options?: RequestInit) => Promise<unknown>>;
+  /** Answers each `fetch` with sdp-api's `data` for it, or rejects as the client would. */
+  fetch: Mock<(path: string, options?: RequestInit) => Promise<JsonValue>>;
 }
 
 /** One request a server action sent through `fetch`, with its JSON body parsed. */
@@ -28,16 +28,34 @@ export interface SentSdpApiRequest {
 export function stubSdpApiClient(): StubSdpApiClient {
   const stub: StubSdpApiClient = {
     request: vi.fn<sdpApi.SdpApiClient["request"]>(),
-    fetch: vi.fn<(path: string, options?: RequestInit) => Promise<unknown>>(),
+    fetch: vi.fn<(path: string, options?: RequestInit) => Promise<JsonValue>>(),
   };
   vi.spyOn(sdpApi, "createSdpApiClient").mockResolvedValue({
     request: stub.request,
     fetch: async <T>(path: string, options?: RequestInit): Promise<T> =>
-      // SAFETY: `fetch<T>` trusts the caller's T for sdp-api's answer, as the real client does;
-      // the test answers with the body the action expects.
+      // SAFETY: `fetch<T>` trusts the caller's T for sdp-api's `data`, as the real client does;
+      // the test answers each path with the JSON sdp-api sends for it.
       (await stub.fetch(path, options)) as T,
   });
   return stub;
+}
+
+/**
+ * Answers each `fetch` by its path with sdp-api's `data` for that path; a request to a path with
+ * no answer fails where it is sent.
+ *
+ * @param client - The stub from {@link stubSdpApiClient}.
+ * @param answers - The `data` each path answers with, keyed by the path the action sends.
+ */
+export function answerSdpApiPaths(
+  client: StubSdpApiClient,
+  answers: Readonly<Record<string, JsonValue>>
+): void {
+  client.fetch.mockImplementation(async (path) => {
+    const answer = answers[path];
+    if (answer === undefined) throw new Error(`No sdp-api answer for ${path}`);
+    return answer;
+  });
 }
 
 /**
