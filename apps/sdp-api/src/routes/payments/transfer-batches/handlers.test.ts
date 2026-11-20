@@ -64,7 +64,7 @@ import {
   TEST_SPONSORSHIP_PROVIDER_CONFIG,
   testKoraAdapter,
 } from "@/test/helpers/payments-routes";
-import { seedDefaultProjects } from "@/test/helpers/projects";
+import { seedDefaultProjects, setDisabledMovements } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { sendTransactionPreflightError } from "@/test/helpers/rpc-errors";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
@@ -1008,10 +1008,7 @@ describe("payment transfer batches", () => {
         recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
       }),
     };
-    await getDb(env)
-      .prepare("UPDATE projects SET disabled_movements = ?::text[] WHERE id = ?")
-      .bind(["payments.transfer_batch"], TEST_PROJECT.id)
-      .run();
+    await setDisabledMovements(getDb(env), TEST_PROJECT.id, ["payments.transfer_batch"]);
 
     const stopped = await app.request("/v1/payments/transfer-batches", request, env);
     expect(stopped.status).toBe(403);
@@ -1027,10 +1024,7 @@ describe("payment transfer batches", () => {
         .first<{ count: number }>();
     expect(await count()).toEqual({ count: 0 });
 
-    await getDb(env)
-      .prepare("UPDATE projects SET disabled_movements = ARRAY[]::text[] WHERE id = ?")
-      .bind(TEST_PROJECT.id)
-      .run();
+    await setDisabledMovements(getDb(env), TEST_PROJECT.id, []);
     const retried = await app.request("/v1/payments/transfer-batches", request, env);
     expect(retried.status).toBe(200);
     expect(retried.headers.get("Idempotent-Replayed")).toBeNull();
@@ -1055,10 +1049,7 @@ describe("payment transfer batches", () => {
         return { success: true, logs: [], unitsConsumed: null, error: null };
       });
     const signingOutcomeMock = vi.fn(async () => {
-      await getDb(env)
-        .prepare("UPDATE projects SET disabled_movements = ?::text[] WHERE id = ?")
-        .bind(["payments.transfer_batch"], TEST_PROJECT.id)
-        .run();
+      await setDisabledMovements(getDb(env), TEST_PROJECT.id, ["payments.transfer_batch"]);
       unblockSecondSimulation();
       return FIRST_SIGNATURE;
     });
@@ -3319,12 +3310,7 @@ describe("payment transfer batches", () => {
     it("refuses a stopped project's retry before claiming, then sends under the same key", async () => {
       const { batch, failed } = await seedPartiallyFailedBatch();
       vi.clearAllMocks();
-      const setDisabled = (movements: string[]) =>
-        getDb(env)
-          .prepare("UPDATE projects SET disabled_movements = ?::text[] WHERE id = ?")
-          .bind(movements, TEST_PROJECT.id)
-          .run();
-      await setDisabled(["payments.transfer_batch"]);
+      await setDisabledMovements(getDb(env), TEST_PROJECT.id, ["payments.transfer_batch"]);
 
       const stopped = await retry(batch.id, "stopped-project-retry");
       expect(stopped.status).toBe(403);
@@ -3338,7 +3324,7 @@ describe("payment transfer batches", () => {
         .first<{ status: PaymentTransferBatchRecipientStatus }>();
       expect(unclaimed).toEqual({ status: "failed" });
 
-      await setDisabled([]);
+      await setDisabledMovements(getDb(env), TEST_PROJECT.id, []);
       const resumed = await retry(batch.id, "stopped-project-retry");
       expect(resumed.status).toBe(200);
       expect(sendTransactionMock).toHaveBeenCalledTimes(1);

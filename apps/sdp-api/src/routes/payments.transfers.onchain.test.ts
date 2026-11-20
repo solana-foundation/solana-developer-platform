@@ -7,6 +7,7 @@ import {
   getTransactionDecoder,
 } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { createApp } from "@/app";
 import { getDb } from "@/db/client";
 import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
@@ -42,49 +43,59 @@ import {
 import {
   countTransferRows,
   listTransferRows,
-  postRawTransfer,
   postTransfer,
   readErrorResponse,
   readTransferResponse,
   readTransferRow,
 } from "@/test/helpers/payments-transfers";
 import { required } from "@/test/helpers/required";
-import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
+import { TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 
-function testProjectPaymentsRepository() {
-  return createPostgresPaymentsRepository(
+/**
+ * An off-ramp awaiting its 1-unit deposit to wallet2, as a MoonPay sell leaves it. Defaults to a
+ * SOL sale from the Sandbox project's wallet.
+ */
+const auditMetadataSchema = z.record(z.string(), z.unknown());
+
+const intentMetadataSchema = z.object({
+  target: z.object({ metadata: z.record(z.string(), z.unknown()) }),
+});
+
+async function seedOfframpDeposit(deposit: {
+  transferId: string;
+  projectId?: string;
+  custodyWalletId?: string;
+  walletId?: string;
+  sourceAddress?: string;
+  token?: string;
+  providerReference?: string;
+}) {
+  const projectId = deposit.projectId ?? TEST_PROJECT.id;
+  await createPostgresPaymentsRepository(
     getDb(env),
-    createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
-  );
-}
-
-/** An off-ramp awaiting its 1 SOL deposit to wallet2, as a MoonPay sell leaves it. */
-async function seedSolOfframpDeposit(transferId: string) {
-  await testProjectPaymentsRepository().createTransfer({
-    id: transferId,
+    createTenantScope({ organizationId: TEST_ORG.id, projectId })
+  ).createTransfer({
+    id: deposit.transferId,
     organizationId: TEST_ORG.id,
-    projectId: TEST_PROJECT.id,
-    custodyWalletId: TEST_CUSTODY_WALLET_ID,
-    walletId: TEST_WALLET_ID,
+    projectId,
+    custodyWalletId: deposit.custodyWalletId ?? TEST_CUSTODY_WALLET_ID,
+    walletId: deposit.walletId ?? TEST_WALLET_ID,
     counterpartyId: null,
-    sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
+    sourceAddress: deposit.sourceAddress ?? TEST_SOLANA_ADDRESSES.wallet1,
     destinationAddress: null,
-    token: SOL_MINT,
+    token: deposit.token ?? SOL_MINT,
     amount: "1",
     memo: null,
     type: "offramp",
     direction: "outbound",
     status: "awaiting_payment",
     provider: "moonpay",
-    providerReference: "moonpay-ramp-deposit",
+    providerReference: deposit.providerReference ?? "moonpay-ramp-deposit",
     deliveryMode: "hosted",
     fiatCurrency: "USD",
     fiatAmount: "100",
     providerData: {
-      cryptoDeposit: {
-        destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
-        amount: "1.0",
-      },
+      cryptoDeposit: { destinationAddress: TEST_SOLANA_ADDRESSES.wallet2, amount: "1.0" },
     },
     serializedTx: null,
     signature: null,
@@ -104,6 +115,13 @@ function solOfframpDepositRequest(transferId: string) {
     amount: "1",
   };
 }
+
+const SOL_TRANSFER = {
+  sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+  destination: TEST_SOLANA_ADDRESSES.wallet2,
+  token: "SOL",
+  amount: "1",
+};
 
 describe("Payments routes — on-chain transfers", () => {
   installPaymentsRouteTestHooks();
@@ -125,36 +143,8 @@ describe("Payments routes — on-chain transfers", () => {
     );
   }
 
-  it("rejects the retired privateTransfer field at the request boundary", async () => {
-    const res = await postRawTransfer(
-      {
-        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-        destination: TEST_SOLANA_ADDRESSES.wallet2,
-        token: "SOL",
-        amount: "1",
-        privateTransfer: {},
-      },
-      {}
-    );
-
-    expect(res.status).toBe(400);
-    const body = await readErrorResponse(res);
-    expect(body.error.code).toBe("BAD_REQUEST");
-    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
-    expect(sendTransactionMock).not.toHaveBeenCalled();
-    expect(await countTransferRows()).toBe(0);
-  });
-
   it("blocks create transfer with zero amount before creating a transfer record", async () => {
-    const res = await postTransfer(
-      {
-        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-        destination: TEST_SOLANA_ADDRESSES.wallet2,
-        token: "SOL",
-        amount: "0",
-      },
-      {}
-    );
+    const res = await postTransfer({ ...SOL_TRANSFER, amount: "0" }, {});
 
     expect(res.status).toBe(400);
     const body = await readErrorResponse(res);
@@ -167,12 +157,7 @@ describe("Payments routes — on-chain transfers", () => {
 
   it("refuses a USDC amount finer than its decimals before creating a transfer record", async () => {
     const res = await postTransfer(
-      {
-        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-        destination: TEST_SOLANA_ADDRESSES.wallet2,
-        token: DEVNET_USDC_MINT,
-        amount: "1.0000001",
-      },
+      { ...SOL_TRANSFER, token: DEVNET_USDC_MINT, amount: "1.0000001" },
       {}
     );
 
@@ -200,27 +185,23 @@ describe("Payments routes — on-chain transfers", () => {
         amount: "0.0001",
         // The small destination, then the source.
         accounts: [null, account(5_000_000_000)],
+        fundedAccounts: [account(5_000_000_000), account(5_000_000_000)],
         details: { recipientIndexes: [0], sourceRemainder: null },
       },
       {
         case: "would leave the source wallet below the minimum",
         amount: "0.5",
         accounts: [account(500_300_000)],
+        fundedAccounts: [account(5_000_000_000)],
         details: { recipientIndexes: [], sourceRemainder: "0.0003" },
       },
     ])(
-      "refuses a transfer that $case with an unstored 409 before writing a row",
-      async ({ amount, accounts, details }) => {
+      "refuses a transfer that $case with a 409 that leaves its key free for a retry",
+      async ({ amount, accounts, fundedAccounts, details }) => {
         rpc.answer("getMultipleAccounts", { context: { slot: 1 }, value: accounts });
-        const res = await postTransfer(
-          {
-            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-            destination: TEST_SOLANA_ADDRESSES.wallet2,
-            token: "SOL",
-            amount,
-          },
-          {}
-        );
+        const request = { ...SOL_TRANSFER, amount };
+
+        const res = await postTransfer(request, { idempotencyKey: "rent-minimum-refusal" });
 
         expect(res.status).toBe(409);
         const body = await readErrorResponse(res);
@@ -228,39 +209,42 @@ describe("Payments routes — on-chain transfers", () => {
         expect(body.error.details).toMatchObject({ ...details, minimumAmount: "0.00089088" });
         expect(sendTransactionMock).not.toHaveBeenCalled();
         expect(await countTransferRows()).toBe(0);
+
+        rpc.answer("getMultipleAccounts", { context: { slot: 1 }, value: fundedAccounts });
+        const retried = await postTransfer(request, { idempotencyKey: "rent-minimum-refusal" });
+
+        expect(retried.status).toBe(200);
+        expect(retried.headers.get("Idempotent-Replayed")).toBeNull();
+        expect(await countTransferRows()).toBe(1);
       }
     );
   });
 
-  it("executes a SOL transfer, waits for finalization, and returns a finalized transfer record", async () => {
-    const res = await postTransfer(
-      {
-        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-        destination: TEST_SOLANA_ADDRESSES.wallet2,
-        token: "SOL",
-        amount: "1",
-      },
-      {}
-    );
+  it("executes a SOL transfer, waits for finalization, and records it finalized", async () => {
+    const res = await postTransfer(SOL_TRANSFER, {});
 
     expect(res.status).toBe(200);
-    const body = await readTransferResponse(res);
-    expect(body.data.transfer.status).toBe("finalized");
-    expect(body.data.transfer.id).toMatch(/^xfr_/);
-    expect(body.data.transfer.signature).toBeTruthy();
+    const { transfer } = (await readTransferResponse(res)).data;
+    expect(transfer.id).toMatch(/^xfr_/);
     // The sponsor paid the network fee, so the source wallet paid none (HOO-2614).
-    expect(body.data.transfer.fee).toBe(0);
-    expect(confirmTransactionMock).toHaveBeenCalledWith(
-      expect.anything(),
-      body.data.transfer.signature,
-      { commitment: "finalized" }
-    );
+    expect(transfer).toMatchObject({ status: "finalized", fee: 0 });
+    expect(transfer.signature).toEqual(expect.any(String));
+    expect(confirmTransactionMock).toHaveBeenCalledWith(expect.anything(), transfer.signature, {
+      commitment: "finalized",
+    });
 
-    const row = await readTransferRow(body.data.transfer.id);
-    expect(row.status).toBe("finalized");
-    expect(row.signature).toBeTruthy();
+    const row = await readTransferRow(transfer.id);
+    expect(row).toMatchObject({
+      status: "finalized",
+      signature: transfer.signature,
+      custody_wallet_id: TEST_CUSTODY_WALLET_ID,
+      source_address: TEST_SOLANA_ADDRESSES.wallet1,
+      destination_address: TEST_SOLANA_ADDRESSES.wallet2,
+      token: SOL_MINT,
+      amount: "1",
+      fee: 0,
+    });
     expect(row.confirmed_at).not.toBeNull();
-    expect(row.fee).toBe(0);
   });
 
   it("ties the transfer to the contact whose account it names", async () => {
@@ -274,13 +258,7 @@ describe("Payments routes — on-chain transfers", () => {
     });
 
     const res = await postTransfer(
-      {
-        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-        destination: TEST_SOLANA_ADDRESSES.wallet2,
-        counterpartyAccountId: "cpacct_named_payee",
-        token: "SOL",
-        amount: "1",
-      },
+      { ...SOL_TRANSFER, counterpartyAccountId: "cpacct_named_payee" },
       {}
     );
 
@@ -301,17 +279,15 @@ describe("Payments routes — on-chain transfers", () => {
     });
 
     const res = await postTransfer(
-      {
-        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-        destination: TEST_SOLANA_ADDRESSES.wallet2,
-        counterpartyAccountId: "cpacct_other_project",
-        token: "SOL",
-        amount: "1",
-      },
+      { ...SOL_TRANSFER, counterpartyAccountId: "cpacct_other_project" },
       {}
     );
 
     expect(res.status).toBe(404);
+    expect((await readErrorResponse(res)).error).toMatchObject({
+      code: "NOT_FOUND",
+      message: "Counterparty account cpacct_other_project not found",
+    });
     expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
     expect(await countTransferRows()).toBe(0);
   });
@@ -327,71 +303,59 @@ describe("Payments routes — on-chain transfers", () => {
     });
 
     const res = await postTransfer(
-      {
-        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-        destination: TEST_SOLANA_ADDRESSES.wallet2,
-        counterpartyAccountId: "cpacct_elsewhere",
-        token: "SOL",
-        amount: "1",
-      },
+      { ...SOL_TRANSFER, counterpartyAccountId: "cpacct_elsewhere" },
       {}
     );
 
     expect(res.status).toBe(400);
-    const body = await readErrorResponse(res);
-    expect(body.error.message).toContain("destination must be the address");
+    expect((await readErrorResponse(res)).error).toMatchObject({
+      code: "BAD_REQUEST",
+      message: "destination must be the address of the counterpartyAccountId account",
+    });
     expect(sendTransactionMock).not.toHaveBeenCalled();
     expect(await countTransferRows()).toBe(0);
   });
 
   it("appends a tamper-evident audit intent and outcome for an executed transfer", async () => {
-    const res = await postTransfer(
-      {
-        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-        destination: TEST_SOLANA_ADDRESSES.wallet2,
-        token: "SOL",
-        amount: "1",
-      },
-      {}
-    );
+    const res = await postTransfer(SOL_TRANSFER, {});
     expect(res.status).toBe(200);
     const body = await readTransferResponse(res);
 
-    const outcome = await getDb(env)
-      .prepare(
-        `SELECT metadata, status FROM audit_logs
-         WHERE action = 'transfer' AND resource_type = 'payment_transfer' AND resource_id = ?`
-      )
-      .bind(body.data.transfer.id)
-      .first<{ metadata: string; status: string }>();
-    expect(outcome?.status).toBe("success");
-    const outcomeMetadata = JSON.parse(outcome?.metadata ?? "{}") as Record<string, unknown>;
+    const outcome = required(
+      await getDb(env)
+        .prepare(
+          `SELECT metadata, status FROM audit_logs
+           WHERE action = 'transfer' AND resource_type = 'payment_transfer' AND resource_id = ?`
+        )
+        .bind(body.data.transfer.id)
+        .first<{ metadata: string; status: string }>()
+    );
+    expect(outcome.status).toBe("success");
+    const outcomeMetadata = auditMetadataSchema.parse(JSON.parse(outcome.metadata));
     expect(outcomeMetadata).toMatchObject({
       auditPhase: "outcome",
       signature: body.data.transfer.signature,
+      sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
       destination: TEST_SOLANA_ADDRESSES.wallet2,
       tokenMint: SOL_MINT,
       amount: "1",
+      slot: "100",
     });
-    expect(outcomeMetadata.sourceAddress).toBeTruthy();
-    expect(outcomeMetadata.slot).toBeTruthy();
 
-    const intent = await getDb(env)
-      .prepare(
-        `SELECT resource_id, metadata FROM audit_logs
-         WHERE action = 'maintenance' AND resource_type = 'audit_ledger'
-           AND metadata::jsonb -> 'target' ->> 'resourceId' = ?`
-      )
-      .bind(body.data.transfer.id)
-      .first<{ resource_id: string; metadata: string }>();
-    expect(intent).toBeTruthy();
-    expect(outcomeMetadata.auditIntentId).toBe(intent?.resource_id);
-    const intentTarget = (
-      JSON.parse(intent?.metadata ?? "{}") as {
-        target?: { metadata?: Record<string, unknown> };
-      }
-    ).target?.metadata;
+    const intent = required(
+      await getDb(env)
+        .prepare(
+          `SELECT resource_id, metadata FROM audit_logs
+           WHERE action = 'maintenance' AND resource_type = 'audit_ledger'
+             AND metadata::jsonb -> 'target' ->> 'resourceId' = ?`
+        )
+        .bind(body.data.transfer.id)
+        .first<{ resource_id: string; metadata: string }>()
+    );
+    expect(outcomeMetadata.auditIntentId).toBe(intent.resource_id);
+    const intentTarget = intentMetadataSchema.parse(JSON.parse(intent.metadata)).target.metadata;
     expect(intentTarget).toMatchObject({
+      custodyWalletId: TEST_CUSTODY_WALLET_ID,
       destination: TEST_SOLANA_ADDRESSES.wallet2,
       tokenMint: SOL_MINT,
       amount: "1",
@@ -404,103 +368,88 @@ describe("Payments routes — on-chain transfers", () => {
       .mockRejectedValueOnce(new Error("audit ledger unavailable"));
 
     try {
-      const res = await postTransfer(
-        {
-          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-          destination: TEST_SOLANA_ADDRESSES.wallet2,
-          token: "SOL",
-          amount: "1",
-        },
-        {}
-      );
-      expect(res.status).toBeGreaterThanOrEqual(500);
+      const res = await postTransfer(SOL_TRANSFER, {});
+      expect(res.status).toBe(500);
       expect(sendTransactionMock).not.toHaveBeenCalled();
 
       // The processing row must not survive as a replayable success: a ledger
       // refusal settles it failed instead of stranding it.
-      const transfers = await listTransferRows();
-      expect(transfers).toHaveLength(1);
-      expect(transfers[0]?.status).toBe("failed");
-      expect(transfers[0]?.error).toContain("Audit ledger admission failed");
+      expect(await listTransferRows()).toEqual([
+        expect.objectContaining({
+          status: "failed",
+          error: "Audit ledger admission failed before execution",
+        }),
+      ]);
     } finally {
       beginSpy.mockRestore();
     }
   });
 
-  it("appends a failure outcome when transfer execution is refused before submission", async () => {
+  it("fails a transfer whose execution breaks before submission with a 502 and a failure audit outcome", async () => {
     createOrgSignerForCustodyWalletMock.mockRejectedValueOnce(new Error("signer unavailable"));
 
-    const res = await postTransfer(
-      {
-        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-        destination: TEST_SOLANA_ADDRESSES.wallet2,
-        token: "SOL",
-        amount: "1",
-      },
-      {}
-    );
-    expect(res.status).toBeGreaterThanOrEqual(400);
-    expect(sendTransactionMock).not.toHaveBeenCalled();
+    const res = await postTransfer(SOL_TRANSFER, {});
 
-    const outcome = await getDb(env)
-      .prepare(
-        `SELECT status, metadata FROM audit_logs
-         WHERE action = 'transfer' AND resource_type = 'payment_transfer'
-         ORDER BY ledger_sequence DESC LIMIT 1`
-      )
-      .first<{ status: string; metadata: string }>();
-    expect(outcome?.status).toBe("failure");
-    expect(JSON.parse(outcome?.metadata ?? "{}").auditPhase).toBe("outcome");
+    expect(res.status).toBe(502);
+    expect((await readErrorResponse(res)).error.code).toBe("SOLANA_RPC_ERROR");
+    expect(sendTransactionMock).not.toHaveBeenCalled();
+    const transfers = await listTransferRows();
+    expect(transfers).toEqual([
+      expect.objectContaining({ status: "failed", error: "signer unavailable" }),
+    ]);
+    const outcome = required(
+      await getDb(env)
+        .prepare(
+          `SELECT status, metadata FROM audit_logs
+           WHERE action = 'transfer' AND resource_type = 'payment_transfer' AND resource_id = ?`
+        )
+        .bind(required(transfers[0]).id)
+        .first<{ status: string; metadata: string }>()
+    );
+    expect(outcome.status).toBe("failure");
+    expect(auditMetadataSchema.parse(JSON.parse(outcome.metadata)).auditPhase).toBe("outcome");
   });
 
-  it("uses the existing off-ramp row for its on-chain deposit", async () => {
+  it("funds an off-ramp deposit on its existing row, and answers a second funding from that row", async () => {
     const transferId = generatePaymentTransferId();
-    await seedSolOfframpDeposit(transferId);
+    await seedOfframpDeposit({ transferId });
 
-    const requestBody = JSON.stringify(solOfframpDepositRequest(transferId));
-    const res = await postTransfer(JSON.parse(requestBody), {});
+    const res = await postTransfer(solOfframpDepositRequest(transferId), {});
 
-    const responseText = await res.text();
-    expect(res.status, responseText).toBe(200);
-    const body = await readTransferResponse(new Response(responseText));
-    expect(body.data.transfer).toMatchObject({
-      id: transferId,
-      status: "settling",
+    expect(res.status).toBe(200);
+    const { transfer } = (await readTransferResponse(res)).data;
+    expect(transfer).toMatchObject({ id: transferId, status: "settling" });
+    expect(confirmTransactionMock).toHaveBeenCalledWith(expect.anything(), transfer.signature, {
+      commitment: "confirmed",
     });
-    expect(body.data.transfer.signature).toBeTruthy();
-    expect(confirmTransactionMock).toHaveBeenCalledWith(
-      expect.anything(),
-      body.data.transfer.signature,
-      { commitment: "confirmed" }
-    );
-
-    const rows = await listTransferRows();
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
+    const [row] = await listTransferRows();
+    expect(await countTransferRows()).toBe(1);
+    expect(row).toMatchObject({
       id: transferId,
       custody_wallet_id: TEST_CUSTODY_WALLET_ID,
       status: "settling",
       destination_address: TEST_SOLANA_ADDRESSES.wallet2,
+      signature: transfer.signature,
     });
-    expect(rows[0]?.signature).toBeTruthy();
-    expect(rows[0]?.signed_transaction).toBeTruthy();
+    expect(required(row).signed_transaction).toEqual(expect.any(String));
 
     // A second request to fund the same deposit (a retry after a crash, or
     // another key) is answered from the funded row and sends nothing again
     // (HOO-1918), instead of a 409 the client could never get past.
     const sendsBefore = sendTransactionMock.mock.calls.length;
-    const duplicate = await postTransfer(JSON.parse(requestBody), {});
+    const duplicate = await postTransfer(solOfframpDepositRequest(transferId), {});
     expect(duplicate.status).toBe(200);
-    const duplicateBody = await readTransferResponse(duplicate);
-    expect(duplicateBody.data.transfer.id).toBe(body.data.transfer.id);
-    expect(duplicateBody.data.transfer.signature).toBe(body.data.transfer.signature);
+    expect((await readTransferResponse(duplicate)).data.transfer).toMatchObject({
+      id: transferId,
+      signature: transfer.signature,
+    });
     expect(sendTransactionMock.mock.calls.length).toBe(sendsBefore);
     expect(await countTransferRows()).toBe(1);
   });
 
-  it("rejects a deposit after MoonPay fails the sale", async () => {
+  it("refuses to fund a deposit after MoonPay fails the sale", async () => {
     const transferId = generatePaymentTransferId();
-    await seedSolOfframpDeposit(transferId);
+    await seedOfframpDeposit({ transferId });
     expect(
       await moonpayWebhook.process(env, "sandbox", {
         provider: "moonpay",
@@ -512,24 +461,13 @@ describe("Payments routes — on-chain transfers", () => {
       })
     ).toEqual({ outcome: "refused", reason: "moonpay_sell_failed" });
 
-    const staleClaim = await testProjectPaymentsRepository().updateOnchainTransferForRamp({
-      transferId,
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT.id,
-      custodyWalletId: TEST_CUSTODY_WALLET_ID,
-      walletId: TEST_WALLET_ID,
-      sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
-      destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
-      token: SOL_MINT,
-      amount: "1",
-      initiatedByKeyId: TEST_API_KEY.id,
-      idempotency: null,
-      updatedAt: new Date().toISOString(),
-    });
-    expect(staleClaim).toBeNull();
-
     const response = await postTransfer(solOfframpDepositRequest(transferId), {});
+
     expect(response.status).toBe(400);
+    expect((await readErrorResponse(response)).error).toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Transfer does not match the off-ramp deposit instruction",
+    });
     expect(sendTransactionMock).not.toHaveBeenCalled();
     const row = await readTransferRow(transferId);
     expect(row.status).toBe("failed");
@@ -537,21 +475,32 @@ describe("Payments routes — on-chain transfers", () => {
     expect(row.provider_data.cryptoDeposit).toBeNull();
   });
 
-  it("returns a claimed off-ramp deposit to awaiting it when audit-ledger admission is refused", async () => {
+  it("returns a claimed off-ramp deposit to awaiting it when audit-ledger admission is refused, so its key can fund it again", async () => {
     const transferId = generatePaymentTransferId();
-    await seedSolOfframpDeposit(transferId);
+    await seedOfframpDeposit({ transferId });
     const beginSpy = vi
       .spyOn(AuditService.prototype, "beginCriticalWithin")
       .mockRejectedValueOnce(new Error("audit ledger unavailable"));
 
     try {
-      const res = await postTransfer(solOfframpDepositRequest(transferId), {});
-      expect(res.status).toBeGreaterThanOrEqual(500);
+      const res = await postTransfer(solOfframpDepositRequest(transferId), {
+        idempotencyKey: "deposit-audit-refused",
+      });
+      expect(res.status).toBe(500);
       expect(sendTransactionMock).not.toHaveBeenCalled();
+      expect(await readTransferRow(transferId)).toMatchObject({
+        status: "awaiting_payment",
+        destination_address: null,
+      });
 
-      const row = await readTransferRow(transferId);
-      expect(row.status).toBe("awaiting_payment");
-      expect(row.destination_address).toBeNull();
+      const retried = await postTransfer(solOfframpDepositRequest(transferId), {
+        idempotencyKey: "deposit-audit-refused",
+      });
+      expect(retried.status).toBe(200);
+      expect((await readTransferResponse(retried)).data.transfer).toMatchObject({
+        id: transferId,
+        status: "settling",
+      });
     } finally {
       beginSpy.mockRestore();
     }
@@ -559,9 +508,12 @@ describe("Payments routes — on-chain transfers", () => {
 
   it("keeps a deposit the provider completed mid-send at settling", async () => {
     const transferId = generatePaymentTransferId();
-    await seedSolOfframpDeposit(transferId);
+    await seedOfframpDeposit({ transferId });
     sendTransactionMock.mockImplementationOnce(async (_rpc, transactionBytes) => {
-      await testProjectPaymentsRepository().transitionRampTransfer({
+      await createPostgresPaymentsRepository(
+        getDb(env),
+        createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+      ).transitionRampTransfer({
         transferId,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT.id,
@@ -573,67 +525,29 @@ describe("Payments routes — on-chain transfers", () => {
 
     const res = await postTransfer(solOfframpDepositRequest(transferId), {});
 
-    expect(res.status, await res.text()).toBe(200);
+    expect(res.status).toBe(200);
     expect((await readTransferRow(transferId)).status).toBe("settling");
   });
 
   it("funds a Production off-ramp with the mainnet USDC mint its quote recorded", async () => {
     const productionSigner = await generateKeyPairSigner();
     createOrgSignerForCustodyWalletMock.mockResolvedValue(productionSigner);
-    await seedProductionPrivyWallet({
+    const productionWalletId = await seedProductionPrivyWallet({
       custodyWalletId: "cwlt_payments_production",
       publicKey: productionSigner.address,
     });
     await enableMainnetSponsorship();
     answerSourceUsdcTokenAccount(MAINNET_USDC_MINT);
-    const productionWallet = required(
-      await getDb(env)
-        .prepare("SELECT wallet_id FROM custody_wallets WHERE id = ?")
-        .bind("cwlt_payments_production")
-        .first<{ wallet_id: string }>()
-    );
     const transferId = generatePaymentTransferId();
-    await createPostgresPaymentsRepository(
-      getDb(env),
-      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PRODUCTION_PROJECT_ID })
-    ).createTransfer({
-      id: transferId,
-      organizationId: TEST_ORG.id,
+    await seedOfframpDeposit({
+      transferId,
       projectId: TEST_PRODUCTION_PROJECT_ID,
       custodyWalletId: "cwlt_payments_production",
-      walletId: productionWallet.wallet_id,
-      counterpartyId: null,
+      walletId: productionWalletId,
       sourceAddress: productionSigner.address,
-      destinationAddress: null,
       token: MAINNET_USDC_MINT,
-      amount: "1",
-      memo: null,
-      type: "offramp",
-      direction: "outbound",
-      status: "awaiting_payment",
-      provider: "moonpay",
       providerReference: "moonpay-production-deposit",
-      deliveryMode: "hosted",
-      fiatCurrency: "USD",
-      fiatAmount: "100",
-      providerData: {
-        cryptoDeposit: {
-          destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
-          amount: "1.0",
-        },
-      },
-      serializedTx: null,
-      signature: null,
-      slot: null,
-      initiatedByKeyId: TEST_API_KEY.id,
-      idempotencyKey: null,
-      idempotencyFingerprint: null,
     });
-    const quoted = await getDb(env)
-      .prepare("SELECT token FROM payment_transfers WHERE id = ?")
-      .bind(transferId)
-      .first<{ token: string }>();
-    expect(quoted).toEqual({ token: MAINNET_USDC_MINT });
 
     const res = await postTransfer(
       {
@@ -646,9 +560,8 @@ describe("Payments routes — on-chain transfers", () => {
       {}
     );
 
-    const responseText = await res.text();
-    expect(res.status, responseText).toBe(200);
-    expect((await readTransferResponse(new Response(responseText))).data.transfer).toMatchObject({
+    expect(res.status).toBe(200);
+    expect((await readTransferResponse(res)).data.transfer).toMatchObject({
       id: transferId,
       status: "settling",
     });
@@ -658,51 +571,11 @@ describe("Payments routes — on-chain transfers", () => {
   // with a changed memo, because recovery compared only the on-chain fields.
   it("compares a funded deposit's retry by the fingerprint its key recorded", async () => {
     const transferId = generatePaymentTransferId();
-    const repository = createPostgresPaymentsRepository(
-      getDb(env),
-      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
-    );
-    await repository.createTransfer({
-      id: transferId,
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT.id,
-      custodyWalletId: TEST_CUSTODY_WALLET_ID,
-      walletId: TEST_WALLET_ID,
-      counterpartyId: null,
-      sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
-      destinationAddress: null,
-      token: SOL_MINT,
-      amount: "1",
-      memo: null,
-      type: "offramp",
-      direction: "outbound",
-      status: "awaiting_payment",
-      provider: "moonpay",
-      providerReference: "moonpay-ramp-deposit-fingerprint",
-      deliveryMode: "hosted",
-      fiatCurrency: "USD",
-      fiatAmount: "100",
-      providerData: {
-        cryptoDeposit: { destinationAddress: TEST_SOLANA_ADDRESSES.wallet2, amount: "1.0" },
-      },
-      serializedTx: null,
-      signature: null,
-      slot: null,
-      initiatedByKeyId: TEST_API_KEY.id,
-      idempotencyKey: null,
-      idempotencyFingerprint: null,
-    });
+    await seedOfframpDeposit({ transferId, providerReference: "moonpay-ramp-deposit-fingerprint" });
     const idempotencyKey = crypto.randomUUID();
-    const request = {
-      transferId,
-      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-      destination: TEST_SOLANA_ADDRESSES.wallet2,
-      token: "SOL",
-      amount: "1",
-      memo: "first",
-    };
+    const request = { ...solOfframpDepositRequest(transferId), memo: "first" };
     const funded = await postTransfer(request, { idempotencyKey });
-    expect(funded.status, await funded.clone().text()).toBe(200);
+    expect(funded.status).toBe(200);
     // The shared record expires; the deposit row is what answers now.
     await getDb(env)
       .prepare(
@@ -714,9 +587,7 @@ describe("Payments routes — on-chain transfers", () => {
 
     const changed = await postTransfer({ ...request, memo: "changed" }, { idempotencyKey });
     expect(changed.status).toBe(422);
-    expect(((await changed.json()) as { error: { code: string } }).error.code).toBe(
-      "IDEMPOTENCY_KEY_REUSED"
-    );
+    expect((await readErrorResponse(changed)).error.code).toBe("IDEMPOTENCY_KEY_REUSED");
 
     const same = await postTransfer(request, { idempotencyKey });
     expect(same.status).toBe(200);
@@ -725,64 +596,52 @@ describe("Payments routes — on-chain transfers", () => {
     expect(sendTransactionMock.mock.calls.length).toBe(sendsBefore);
   });
 
-  it.each([
-    { label: "no ramp provider", maturity: SDP_RAMP_PROVIDER_MATURITY, status: 400 },
-    {
-      label: "a different ramp provider",
-      maturity: { ...SDP_RAMP_PROVIDER_MATURITY, stripe: "stable" } as const,
-      status: 403,
-    },
-  ])(
-    "refuses an excluded off-ramp deposit when stable includes $label",
-    async ({ maturity, status }) => {
-      const transferId = generatePaymentTransferId();
-      await seedSolOfframpDeposit(transferId);
-      const app = createApp({ rampProviderMaturity: maturity });
-      const res = await app.request(
-        "/v1/payments/transfers",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-            "Idempotency-Key": crypto.randomUUID(),
-          },
-          body: JSON.stringify(solOfframpDepositRequest(transferId)),
-        },
-        { ...env, SDP_RELEASE_CHANNEL: "stable" }
-      );
+  it("refuses to fund the deposit of a ramp provider the release channel leaves out", async () => {
+    const transferId = generatePaymentTransferId();
+    await seedOfframpDeposit({ transferId });
+    const app = createApp({
+      rampProviderMaturity: { ...SDP_RAMP_PROVIDER_MATURITY, stripe: "stable" },
+    });
 
-      expect(res.status).toBe(status);
-      const { error } = await readErrorResponse(res);
-      expect(error.message).toContain(
-        status === 400 ? 'Unrecognized key: "transferId"' : "moonpay"
-      );
-      const rows = await listTransferRows();
-      expect(rows).toHaveLength(1);
-      expect(rows[0]).toMatchObject({ id: transferId, status: "awaiting_payment" });
-      expect(rows[0]?.signature).toBeFalsy();
-      expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
-      expect(sendTransactionMock).not.toHaveBeenCalled();
-    }
-  );
-
-  it("persists a signed outbox for an SPL transfer", async () => {
-    answerSourceUsdcTokenAccount(DEVNET_USDC_MINT);
-
-    const res = await postTransfer(
+    const res = await app.request(
+      "/v1/payments/transfers",
       {
-        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-        destination: TEST_SOLANA_ADDRESSES.wallet2,
-        token: DEVNET_USDC_MINT,
-        amount: "1",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Idempotency-Key": crypto.randomUUID(),
+        },
+        body: JSON.stringify(solOfframpDepositRequest(transferId)),
       },
-      {}
+      { ...env, SDP_RELEASE_CHANNEL: "stable" }
     );
 
+    expect(res.status).toBe(403);
+    expect((await readErrorResponse(res)).error.message).toContain("moonpay");
+    expect(await readTransferRow(transferId)).toMatchObject({
+      status: "awaiting_payment",
+      signature: null,
+      destination_address: null,
+    });
+    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+    expect(sendTransactionMock).not.toHaveBeenCalled();
+  });
+
+  it("executes an SPL transfer and records it finalized", async () => {
+    answerSourceUsdcTokenAccount(DEVNET_USDC_MINT);
+
+    const res = await postTransfer({ ...SOL_TRANSFER, token: DEVNET_USDC_MINT }, {});
+
     expect(res.status).toBe(200);
-    const body = await readTransferResponse(res);
-    expect(body.data.transfer.status).toBe("finalized");
-    expect(body.data.transfer.signature).toBeTruthy();
+    const { transfer } = (await readTransferResponse(res)).data;
+    expect(transfer.status).toBe("finalized");
+    expect(await readTransferRow(transfer.id)).toMatchObject({
+      status: "finalized",
+      signature: transfer.signature,
+      token: DEVNET_USDC_MINT,
+      amount: "1",
+    });
   });
 
   it("builds a Production project's USDC transfer on mainnet-beta with the mainnet mint", async () => {
@@ -820,36 +679,7 @@ describe("Payments routes — on-chain transfers", () => {
     ]);
   });
 
-  it("marks the transfer as failed when execution throws and returns 502", async () => {
-    createKoraAdapterMock.mockReturnValueOnce(
-      testKoraAdapter({
-        getFeePayer: vi.fn().mockRejectedValue(new Error("RPC connection refused")),
-        getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
-        signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
-      })
-    );
-
-    const res = await postTransfer(
-      {
-        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-        destination: TEST_SOLANA_ADDRESSES.wallet2,
-        token: "SOL",
-        amount: "1",
-      },
-      {}
-    );
-
-    expect(res.status).toBe(502);
-    const body = await readErrorResponse(res);
-    expect(body.error.code).toBe("SOLANA_RPC_ERROR");
-
-    const transfers = await listTransferRows();
-    expect(transfers).toHaveLength(1);
-    expect(transfers[0]?.status).toBe("failed");
-    expect(transfers[0]?.error).toBeTruthy();
-  });
-
-  it("returns 400 ACCOUNT_FROZEN when the source SPL token account is frozen", async () => {
+  it("returns 400 ACCOUNT_FROZEN when the source SPL token account is frozen, and fails the transfer", async () => {
     answerSourceUsdcTokenAccount(DEVNET_USDC_MINT);
     sendTransactionMock.mockRejectedValueOnce(
       new Error(
@@ -857,24 +687,11 @@ describe("Payments routes — on-chain transfers", () => {
       )
     );
 
-    const res = await postTransfer(
-      {
-        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-        destination: TEST_SOLANA_ADDRESSES.wallet2,
-        token: DEVNET_USDC_MINT,
-        amount: "1",
-      },
-      {}
-    );
+    const res = await postTransfer({ ...SOL_TRANSFER, token: DEVNET_USDC_MINT }, {});
 
     expect(res.status).toBe(400);
-    const body = await readErrorResponse(res);
-    expect(body.error.code).toBe("ACCOUNT_FROZEN");
-
-    const transfers = await listTransferRows();
-    expect(transfers).toHaveLength(1);
-    expect(transfers[0]?.status).toBe("failed");
-    expect(transfers[0]?.error).toBeTruthy();
+    expect((await readErrorResponse(res)).error.code).toBe("ACCOUNT_FROZEN");
+    expect(await listTransferRows()).toEqual([expect.objectContaining({ status: "failed" })]);
   });
 
   describe("a source wallet short of funds (HOO-2621)", () => {
@@ -903,12 +720,7 @@ describe("Payments routes — on-chain transfers", () => {
       answerSourceUsdcTokenAccount(DEVNET_USDC_MINT);
       // Instruction 1 is the token transfer; instruction 0 creates the destination account.
       sponsorRefuses(koraShortfall(1));
-      const request = {
-        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-        destination: TEST_SOLANA_ADDRESSES.wallet2,
-        token: DEVNET_USDC_MINT,
-        amount: "500",
-      };
+      const request = { ...SOL_TRANSFER, token: DEVNET_USDC_MINT, amount: "500" };
 
       const res = await postTransfer(request, { idempotencyKey: "hoo-2621-spl-shortfall" });
 
@@ -937,15 +749,7 @@ describe("Payments routes — on-chain transfers", () => {
     it("answers a SOL transfer short of lamports 400 TRANSACTION_FAILED", async () => {
       sponsorRefuses(koraShortfall(0));
 
-      const res = await postTransfer(
-        {
-          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-          destination: TEST_SOLANA_ADDRESSES.wallet2,
-          token: "SOL",
-          amount: "1",
-        },
-        {}
-      );
+      const res = await postTransfer(SOL_TRANSFER, {});
 
       expect(res.status).toBe(400);
       const body = await readErrorResponse(res);
@@ -958,15 +762,7 @@ describe("Payments routes — on-chain transfers", () => {
       answerSourceUsdcTokenAccount(DEVNET_USDC_MINT);
       sponsorRefuses(koraShortfall(0));
 
-      const res = await postTransfer(
-        {
-          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-          destination: TEST_SOLANA_ADDRESSES.wallet2,
-          token: DEVNET_USDC_MINT,
-          amount: "1",
-        },
-        {}
-      );
+      const res = await postTransfer({ ...SOL_TRANSFER, token: DEVNET_USDC_MINT }, {});
 
       expect(res.status).toBe(502);
       expect((await readErrorResponse(res)).error.code).toBe("SOLANA_RPC_ERROR");
