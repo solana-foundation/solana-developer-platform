@@ -97,7 +97,7 @@ export function WalletsOverviewSkeleton() {
     <DashboardWorkspaceOverviewPanel className="space-y-6">
       <WalletsToolbarRowHold loading />
       <LoadingRegion layout="wallets-overview">
-        <div className="grid gap-5 sm:grid-cols-2" data-wallet-grid-skeleton>
+        <div className="grid gap-5 sm:grid-cols-2">
           {FOUR_ITEMS.map((item) => (
             <WalletCardSkeleton key={item} />
           ))}
@@ -207,9 +207,9 @@ function RecordRowsSkeleton() {
   );
 }
 
-function RecordTableSkeleton({ section }: { section: string }) {
+function RecordTableSkeleton() {
   return (
-    <section className="flex flex-col gap-4" data-skeleton-section={section}>
+    <section className="flex flex-col gap-4">
       <Pulse className="h-5 w-32" />
       <div>
         {THREE_ITEMS.map((row) => (
@@ -234,18 +234,18 @@ export function WalletDetailSkeleton() {
   return (
     <DashboardWorkspaceOverviewPanel>
       <LoadingRegion layout="wallet-detail" className="flex flex-col gap-8 md:gap-16">
-        <div data-skeleton-section="wallet-state">
+        <div>
           <Pulse className="h-16 w-full rounded-e-card" />
         </div>
-        <section className="flex flex-col gap-4" data-skeleton-section="wallet-balance">
+        <section className="flex flex-col gap-4">
           <Pulse className="h-4 w-16" />
           <Pulse className="h-11 w-48" />
           <div className="mt-4">
             <RecordRowsSkeleton />
           </div>
         </section>
-        <RecordTableSkeleton section="wallet-tokens" />
-        <RecordTableSkeleton section="wallet-activity" />
+        <RecordTableSkeleton />
+        <RecordTableSkeleton />
       </LoadingRegion>
     </DashboardWorkspaceOverviewPanel>
   );

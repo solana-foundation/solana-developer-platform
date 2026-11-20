@@ -19,6 +19,9 @@ describe("walletFavoritesKey", () => {
     expect(walletFavoritesKey(scope, "project-a")).not.toBe(
       walletFavoritesKey({ ...scope, userId: "other" }, "project-a")
     );
+    expect(walletFavoritesKey(scope, "project-a")).not.toBe(
+      walletFavoritesKey({ ...scope, orgId: "other" }, "project-a")
+    );
     expect(walletFavoritesKey(scope, null)).toBeNull();
   });
 });

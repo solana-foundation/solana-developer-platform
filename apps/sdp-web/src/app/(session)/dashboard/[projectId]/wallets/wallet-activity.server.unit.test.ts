@@ -1,4 +1,6 @@
+import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Translate, WalletActivityPayload } from "./wallet-activity.data";
 
 const flags = vi.hoisted(() => ({ issuance: vi.fn() }));
 
@@ -7,24 +9,29 @@ vi.mock("@/flags", () => ({ issuance: flags.issuance }));
 
 import { loadWalletActivity } from "./wallet-activity.server";
 
+const t: Translate = (key) => key;
+const wallet = { custodyWalletId: "cwlt_1", providerWalletId: "privy_1" };
+
 beforeEach(() => {
   flags.issuance.mockResolvedValue(true);
 });
 
+/** The payload of a load, which always answers `ok`; a missing payload fails here. */
+function payloadOf(result: Awaited<ReturnType<typeof loadWalletActivity>>): WalletActivityPayload {
+  expect(result.ok).toBe(true);
+  if (result.data === undefined) {
+    throw new Error("The wallet activity load answered without a payload");
+  }
+  return result.data;
+}
+
 describe("loadWalletActivity", () => {
   it("uses the exact wallet identity for Payments and Issuance", async () => {
-    const request = vi.fn(async (path: string) => {
-      if (path.startsWith("/v1/payments/transfers?")) {
-        return new Response(JSON.stringify({ data: [] }), { status: 200 });
-      }
-      return new Response(JSON.stringify({ data: [] }), { status: 200 });
-    });
-
-    await loadWalletActivity(
-      request,
-      { custodyWalletId: "cwlt_1", providerWalletId: "privy_1" },
-      ((key: string) => key) as Parameters<typeof loadWalletActivity>[2]
+    const request = vi.fn(
+      async (_path: string) => new Response(JSON.stringify({ data: [] }), { status: 200 })
     );
+
+    await loadWalletActivity(request, wallet, t);
 
     expect(request.mock.calls.map(([path]) => path)).toEqual([
       "/v1/payments/transfers?page=1&pageSize=20&custodyWalletId=cwlt_1&includeObserved=true",
@@ -38,17 +45,17 @@ describe("loadWalletActivity", () => {
       async (_path: string) => new Response(JSON.stringify({ data: [] }), { status: 200 })
     );
 
-    const result = await loadWalletActivity(
-      request,
-      { custodyWalletId: "cwlt_1", providerWalletId: "privy_1" },
-      ((key: string) => key) as Parameters<typeof loadWalletActivity>[2]
-    );
+    const result = await loadWalletActivity(request, wallet, t);
 
     expect(request.mock.calls.map(([path]) => path)).toEqual([
       "/v1/payments/transfers?page=1&pageSize=20&custodyWalletId=cwlt_1&includeObserved=true",
     ]);
-    expect(result.data?.activityNotice).toBeNull();
-    expect(result.data?.activityError).toBeNull();
+    expect(payloadOf(result)).toEqual({
+      activityRows: [],
+      activityError: null,
+      activityNotice: null,
+      hasMore: false,
+    });
   });
 
   // An Issuance read that never ran counted as a loaded source, so a failed payments read
@@ -60,21 +67,18 @@ describe("loadWalletActivity", () => {
         new Response(JSON.stringify({ error: { message: "boom" } }), { status: 500 })
     );
 
-    const result = await loadWalletActivity(
-      request,
-      { custodyWalletId: "cwlt_1", providerWalletId: "privy_1" },
-      ((key: string) => key) as Parameters<typeof loadWalletActivity>[2]
-    );
+    const result = await loadWalletActivity(request, wallet, t);
 
-    expect(result.data?.activityError).toBe("DashboardCustody.walletActivityUnavailable");
-    expect(result.data?.activityNotice).toBeNull();
+    expect(payloadOf(result)).toEqual({
+      activityRows: [],
+      activityError: "DashboardCustody.walletActivityUnavailable",
+      activityNotice: null,
+      hasMore: false,
+    });
   });
 });
 
 describe("loadWalletActivity windows", () => {
-  const t = ((key: string) => key) as Parameters<typeof loadWalletActivity>[2];
-  const wallet = { custodyWalletId: "cwlt_1", providerWalletId: "privy_1" };
-
   function transfer(index: number) {
     return {
       id: `xfr_${index}`,
@@ -101,7 +105,7 @@ describe("loadWalletActivity windows", () => {
         return new Response(JSON.stringify({ data: rows }), { status: 200 });
       }
       const rows = Array.from({ length: Math.min(pageSize, issuanceCount) }, (_, index) => ({
-        token: { symbol: "TKN", name: "Token" },
+        token: { symbol: WELL_KNOWN_TOKENS.USDC.symbol, name: WELL_KNOWN_TOKENS.USDC.name },
         transaction: {
           id: `itx_${index}`,
           type: "mint",
@@ -126,24 +130,24 @@ describe("loadWalletActivity windows", () => {
       "/v1/payments/transfers?page=3&pageSize=100&custodyWalletId=cwlt_1&includeObserved=true",
       "/v1/issuance/transactions?custodyWalletId=cwlt_1&page=1&pageSize=220",
     ]);
-    const rows = result.data?.activityRows ?? [];
-    expect(rows).toHaveLength(220);
-    expect(rows[0]?.id).toBe("payment-xfr_0");
-    expect(rows[219]?.id).toBe("payment-xfr_219");
-    expect(result.data?.hasMore).toBe(true);
+    const { activityRows, hasMore } = payloadOf(result);
+    expect(activityRows.map((row) => row.id)).toEqual(
+      Array.from({ length: 220 }, (_, index) => `payment-xfr_${index}`)
+    );
+    expect(hasMore).toBe(true);
   });
 
   it("reports older rows while a source fills the window or the merge drops rows", async () => {
-    const full = await loadWalletActivity(requestWith(20, 0), wallet, t);
-    expect(full.data?.hasMore).toBe(true);
+    const full = payloadOf(await loadWalletActivity(requestWith(20, 0), wallet, t));
+    expect(full.hasMore).toBe(true);
 
-    const merged = await loadWalletActivity(requestWith(15, 10), wallet, t);
-    expect(merged.data?.activityRows).toHaveLength(20);
-    expect(merged.data?.hasMore).toBe(true);
+    const merged = payloadOf(await loadWalletActivity(requestWith(15, 10), wallet, t));
+    expect(merged.activityRows).toHaveLength(20);
+    expect(merged.hasMore).toBe(true);
 
-    const complete = await loadWalletActivity(requestWith(12, 3), wallet, t);
-    expect(complete.data?.activityRows).toHaveLength(15);
-    expect(complete.data?.hasMore).toBe(false);
+    const complete = payloadOf(await loadWalletActivity(requestWith(12, 3), wallet, t));
+    expect(complete.activityRows).toHaveLength(15);
+    expect(complete.hasMore).toBe(false);
   });
 
   it("fails the transfers source as a whole when any of its pages fails", async () => {
@@ -156,8 +160,11 @@ describe("loadWalletActivity windows", () => {
 
     const result = await loadWalletActivity(request, wallet, t, { pageSize: 150 });
 
-    expect(result.data?.activityRows).toEqual([]);
-    expect(result.data?.activityNotice).toBe("DashboardCustody.paymentsActivityUnavailable");
-    expect(result.data?.hasMore).toBe(false);
+    expect(payloadOf(result)).toEqual({
+      activityRows: [],
+      activityError: null,
+      activityNotice: "DashboardCustody.paymentsActivityUnavailable",
+      hasMore: false,
+    });
   });
 });

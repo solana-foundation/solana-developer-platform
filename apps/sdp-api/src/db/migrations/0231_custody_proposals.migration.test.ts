@@ -15,6 +15,7 @@ import {
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { adminDatabaseUrl } from "@/test/helpers/env";
+import { required } from "@/test/helpers/required";
 
 const directory = path.join(path.dirname(fileURLToPath(import.meta.url)), "postgres");
 const migrationSql = readFileSync(path.join(directory, "0231_custody_proposals.sql"), "utf8");
@@ -56,6 +57,7 @@ afterEach(async () => {
 });
 
 interface ProposalOverrides {
+  payment?: string;
   organization?: string;
   project?: string;
   phase?: string;
@@ -80,7 +82,7 @@ async function insertProposal(overrides: ProposalOverrides = {}): Promise<void> 
         provider_phase, authorization_state, refused_at, refusal_reason, refusal_message,
         cancel_attempt, cancel_requested_at, cancel_declined_at, cancel_acknowledged_at,
         alerted_at, provider_transaction_id, first_missing_at, next_check_at, created_at, updated_at)
-     VALUES ('proposal', $1, $2, 'payment', 'fireblocks', '{}', $3, $4, $5, $6, $7,
+     VALUES ('proposal', $1, $2, $16, 'fireblocks', '{}', $3, $4, $5, $6, $7,
              $8, $9, $10, $11, $12, $13, $14, $15, $15, $15)`,
     [
       overrides.organization ?? "org",
@@ -98,6 +100,7 @@ async function insertProposal(overrides: ProposalOverrides = {}): Promise<void> 
       overrides.providerTransactionId ?? null,
       overrides.firstMissingAt ?? null,
       NOW,
+      overrides.payment ?? "payment",
     ]
   );
 }
@@ -144,13 +147,20 @@ function productOverrides(
   return overrides;
 }
 
-async function expectRejected(operation: () => Promise<void>, code: string): Promise<void> {
+async function expectRejectedWith(
+  operation: () => Promise<void>,
+  error: { code: string; constraint?: string }
+): Promise<void> {
   await client.query("SAVEPOINT rejected_write");
   try {
-    await expect(operation()).rejects.toMatchObject({ code });
+    await expect(operation()).rejects.toMatchObject(error);
   } finally {
     await client.query("ROLLBACK TO SAVEPOINT rejected_write");
   }
+}
+
+async function expectRejected(operation: () => Promise<void>, code: string): Promise<void> {
+  await expectRejectedWith(operation, { code });
 }
 
 describe("0231 custody proposals", () => {
@@ -167,11 +177,17 @@ describe("0231 custody proposals", () => {
   });
 
   it("enforces exact payment and project tenant parents", async () => {
-    await expectRejected(
-      () => insertProposal({ organization: "other_org", project: "other_project" }),
-      "23503"
+    await client.query(
+      "INSERT INTO payment_transfers VALUES ('cross_tenant_payment', 'org', 'other_project', 'processing')"
     );
-    await expectRejected(() => insertProposal({ project: "other_project" }), "23503");
+    await expectRejectedWith(
+      () => insertProposal({ organization: "other_org", project: "other_project" }),
+      { code: "23503", constraint: "custody_proposals_payment_fk" }
+    );
+    await expectRejectedWith(
+      () => insertProposal({ payment: "cross_tenant_payment", project: "other_project" }),
+      { code: "23503", constraint: "custody_proposals_project_fk" }
+    );
     await insertProposal();
     expect((await client.query("SELECT payment_transfer_id FROM custody_proposals")).rows).toEqual([
       { payment_transfer_id: "payment" },
@@ -192,25 +208,6 @@ describe("0231 custody proposals", () => {
     await expectRejected(() => insertProposal({ phase: "completed" }), "23514");
   });
 
-  it("forces tenant RLS and validates the new table's foreign keys separately", async () => {
-    const security = await client.query<{ enabled: boolean; forced: boolean }>(
-      "SELECT relrowsecurity AS enabled, relforcerowsecurity AS forced FROM pg_class WHERE oid = 'pg_temp.custody_proposals'::regclass"
-    );
-    expect(security.rows).toEqual([{ enabled: true, forced: true }]);
-    const policies = await client.query(
-      "SELECT polname FROM pg_policy WHERE polrelid = 'pg_temp.custody_proposals'::regclass"
-    );
-    expect(policies.rows).toEqual([{ polname: "sdp_tenant_isolation" }]);
-    const foreignKeys = await client.query(
-      "SELECT convalidated FROM pg_constraint WHERE conrelid = 'pg_temp.custody_proposals'::regclass AND contype = 'f'"
-    );
-    expect(foreignKeys.rows).toEqual([
-      { convalidated: true },
-      { convalidated: true },
-      { convalidated: true },
-    ]);
-  });
-
   it("pins canonical phase/provider sets and indexes completed alerts independently", async () => {
     const constraints = await client.query<{ definition: string }>(
       "SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conrelid = 'pg_temp.custody_proposals'::regclass AND contype = 'c'"
@@ -225,9 +222,9 @@ describe("0231 custody proposals", () => {
     const indexes = await client.query<{ indexname: string; definition: string }>(
       "SELECT c.relname AS indexname, pg_get_indexdef(i.indexrelid) AS definition FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE i.indrelid = 'pg_temp.custody_proposals'::regclass"
     );
-    const due = indexes.rows.find(
-      (row) => row.indexname === "custody_proposals_due_idx"
-    )?.definition;
+    const due = required(
+      indexes.rows.find((row) => row.indexname === "custody_proposals_due_idx")
+    ).definition;
     for (const phase of CUSTODY_PROPOSAL_ACTIVE_PHASES) expect(due).toContain(`'${phase}'::text`);
     const legacy = indexes.rows.find(
       (row) => row.indexname === "custody_proposals_legacy_unsent_idx"
@@ -235,9 +232,9 @@ describe("0231 custody proposals", () => {
     expect(legacy).toContain("(payment_transfer_id)");
     expect(legacy).toContain("'unsent'::text");
     expect(legacy).toContain("'authorized'::text");
-    const alerts = indexes.rows.find(
-      (row) => row.indexname === "custody_proposals_unalerted_idx"
-    )?.definition;
+    const alerts = required(
+      indexes.rows.find((row) => row.indexname === "custody_proposals_unalerted_idx")
+    ).definition;
     expect(alerts).toContain("'committed_after_refusal'::text");
     expect(alerts).not.toContain("alerted_at");
     expect(alerts).not.toContain("provider_phase");

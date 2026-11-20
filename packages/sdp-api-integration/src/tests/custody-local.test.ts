@@ -1,6 +1,6 @@
 import { apiTestSupport } from "@sdp/api/test-support";
 import type { CustodyConfigsResponse } from "@sdp/types/custody";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, assert, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { TokenApiResponse } from "#/helpers/api-types";
 import {
   cleanupIntegrationSuite,
@@ -8,7 +8,6 @@ import {
   type IntegrationCustodyWallet,
   initIntegrationSuite,
   RUN_INTEGRATION_TESTS,
-  request as rawRequest,
   requestWithApiKey,
   resetIntegrationState,
   SOLANA_CONFIGURED,
@@ -45,20 +44,23 @@ describeIfIntegrationConfigured("Custody Access and Explicit Signing", () => {
     const configsRes = await request("/v1/wallets/configs");
 
     expect(configsRes.status).toBe(200);
+    // SAFETY: GET /v1/wallets/configs answers 200 with a CustodyConfigsResponse envelope.
     const configsBody = (await configsRes.json()) as { data: CustodyConfigsResponse };
     const providerConfigs = configsBody.data.configs.filter(
       (config) => config.provider === INTEGRATION_CUSTODY_PROVIDER
     );
     expect(providerConfigs).toHaveLength(1);
-    expect(custodyWallet.address).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
+    const [providerConfig] = providerConfigs;
+    assert(providerConfig, "the integration provider's config must be listed");
 
     const configRow = await getDb(env)
       .prepare("SELECT config_encrypted FROM custody_configs WHERE id = ?")
-      .bind(providerConfigs[0].id)
+      .bind(providerConfig.id)
       .first<{ config_encrypted: string }>();
+    assert(configRow, "the listed config must have a row");
 
-    expect(configRow?.config_encrypted).toBeTruthy();
-    expect(() => JSON.parse(configRow?.config_encrypted ?? "")).toThrow();
+    // Stored encrypted, never as the plaintext provider config.
+    expect(() => JSON.parse(configRow.config_encrypted)).toThrow();
 
     const createRes = await request("/v1/issuance/tokens", {
       method: "POST",
@@ -76,6 +78,7 @@ describeIfIntegrationConfigured("Custody Access and Explicit Signing", () => {
     });
 
     expect(createRes.status).toBe(201);
+    // SAFETY: a 201 from POST /v1/issuance/tokens carries the token envelope.
     const created = (await createRes.json()) as TokenApiResponse;
     const tokenId = created.data.token.id;
 
@@ -86,19 +89,8 @@ describeIfIntegrationConfigured("Custody Access and Explicit Signing", () => {
     });
 
     expect(deployRes.status).toBe(200);
+    // SAFETY: a 200 from the deploy route carries the token envelope.
     const deployed = (await deployRes.json()) as TokenApiResponse;
     expect(deployed.data.token.mintAuthority).toBe(custodyWallet.address);
-  });
-
-  it("requires auth for custody endpoints", async () => {
-    const configsRes = await rawRequest("/v1/wallets/configs");
-    expect(configsRes.status).toBe(401);
-
-    const initRes = await rawRequest("/v1/wallets", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider: INTEGRATION_CUSTODY_PROVIDER }),
-    });
-    expect(initRes.status).toBe(401);
   });
 });

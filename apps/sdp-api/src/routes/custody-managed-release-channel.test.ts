@@ -2,8 +2,8 @@ import type { CustodyProvider } from "@sdp/types/custody";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
-import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
+import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
@@ -41,9 +41,9 @@ const CACHED_API_KEY: SeededApiKey = {
   expiresAt: null,
 };
 const PUBLIC_KEYS = {
-  privyA: "11111111111111111111111111111111",
-  privyB: "So11111111111111111111111111111111111111112",
-  anchorage: "Vote111111111111111111111111111111111111111",
+  privyA: TEST_SOLANA_ADDRESSES.wallet1,
+  privyB: TEST_SOLANA_ADDRESSES.wallet2,
+  anchorage: TEST_SOLANA_ADDRESSES.wallet3,
 } as const;
 
 describe("Managed custody out of the release channel", () => {
@@ -136,14 +136,6 @@ function isJwksRequest(input: Parameters<typeof fetch>[0]): boolean {
   );
 }
 
-async function _sendAs(
-  headers: Record<string, string>,
-  path: string,
-  body: Record<string, unknown>
-) {
-  return app.request(path, { method: "POST", headers, body: JSON.stringify(body) }, env);
-}
-
 async function get(path: string) {
   return app.request(path, { headers: { Authorization: `Bearer ${API_KEY.raw}` } }, env);
 }
@@ -164,7 +156,7 @@ function channelRefusalBody(provider: CustodyProvider) {
   return {
     error: {
       code: "FORBIDDEN",
-      message: custodyProviderNotInReleaseChannel(provider, "managed").message,
+      message: `The ${provider} custody provider is not available in this release channel for managed custody.`,
       details: { reason: "custody_provider_not_in_release_channel" },
     },
     meta: { requestId: expect.any(String) },

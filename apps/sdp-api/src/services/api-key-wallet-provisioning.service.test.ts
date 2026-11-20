@@ -5,9 +5,9 @@ import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
 import * as custodyProvisioning from "@/services/custody/provisioning";
-import { SigningService } from "@/services/domain/signing.service";
 import { getOrCreateDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
+import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { authenticateTestClerkUser, clerkHeaders } from "@/test/helpers/clerk";
 import { insertTestCustodyConfigRow } from "@/test/helpers/custody";
 import {
@@ -19,6 +19,7 @@ import {
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -35,9 +36,9 @@ const provisionPrivyWalletMock = vi.spyOn(custodyProvisioning, "provisionPrivyWa
 const ORGANIZATION_ID = "org_api_key_provisioning";
 const PROJECT_ID = "prj_api_key_provisioning";
 const CONNECTION_ID = "cconn_api_key_provisioning";
+const MANAGED_CONFIG_ID = "cust_api_key_provisioning_privy";
 const FOREIGN_PROJECT_ID = "prj_api_key_provisioning_foreign";
 const FOREIGN_CONNECTION_ID = "cconn_api_key_provisioning_foreign";
-const CONFIG_ID = "cust_cfg_api_key_provisioning";
 const USER_ID = "usr_api_key_provisioning";
 const CREDENTIAL_ID = "pcred_api_key_provisioning";
 const FOREIGN_CREDENTIAL_ID = "pcred_api_key_provisioning_foreign";
@@ -58,8 +59,11 @@ const auditContext = new Context<{ Bindings: Env }>(new Request("http://localhos
 });
 auditContext.set("apiKey", { ...CACHED_API_KEY, walletAccess: { scope: "all" } });
 
-const createConfigWalletMock = vi.spyOn(SigningService.prototype, "createWallet");
-const originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
+const original = {
+  encryptionKey: env.CUSTODY_ENCRYPTION_KEY,
+  privyAppId: env.PRIVY_APP_ID,
+  privyAppSecret: env.PRIVY_APP_SECRET,
+};
 
 describe("provisionApiKeyWallet", () => {
   beforeEach(async () => {
@@ -71,25 +75,27 @@ describe("provisionApiKeyWallet", () => {
   });
 
   afterEach(async () => {
-    env.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
+    env.CUSTODY_ENCRYPTION_KEY = original.encryptionKey;
+    env.PRIVY_APP_ID = original.privyAppId;
+    env.PRIVY_APP_SECRET = original.privyAppSecret;
     vi.clearAllMocks();
     await clearKVStores(env);
   });
 
-  it("provisions a wallet under the named Connection", async () => {
+  it("provisions a DvP settlement wallet under the named Connection", async () => {
     provisionPrivyWalletMock.mockResolvedValueOnce({
       walletId: "exact_api_key_wallet",
-      address: "Vote111111111111111111111111111111111111111",
+      address: TEST_SOLANA_ADDRESSES.wallet3,
     });
 
     const wallet = await provisionApiKeyWallet(getDb(env), env, {
       auditContext,
-      creationReason: "api_key",
+      creationReason: "dvp_settlement_authority",
       organizationId: ORGANIZATION_ID,
       projectId: PROJECT_ID,
       owner: { connectionId: CONNECTION_ID },
-      label: "API key wallet",
-      purpose: "transfer",
+      label: "Settlement wallet",
+      purpose: "dvp_settlement_authority",
     });
 
     expect(wallet.walletId).toBe("privy_exact_api_key_wallet");
@@ -104,51 +110,61 @@ describe("provisionApiKeyWallet", () => {
     ).toEqual({
       custody_connection_id: CONNECTION_ID,
       custody_config_id: null,
-      label: "API key wallet",
-      purpose: "transfer",
+      label: "Settlement wallet",
+      purpose: "dvp_settlement_authority",
       status: "active",
     });
-    expect(createConfigWalletMock).not.toHaveBeenCalled();
   });
 
-  it("provisions a wallet under the named provider's Managed config", async () => {
-    createConfigWalletMock.mockResolvedValueOnce({
-      id: "cwlt_api_key_managed_provisioned",
-      custodyConfigId: CONFIG_ID,
-      walletId: "para_api_key_managed_provisioned",
-      publicKey: "Vote111111111111111111111111111111111111111",
-      label: "API key wallet",
-      purpose: "transfer",
+  it("provisions a DvP settlement wallet under the named provider's Managed config", async () => {
+    env.PRIVY_APP_ID = "api-key-provisioning-managed-app";
+    env.PRIVY_APP_SECRET = "api-key-provisioning-managed-secret";
+    await insertTestCustodyConfigRow(getDb(env), {
+      id: MANAGED_CONFIG_ID,
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_ID,
+      provider: "privy",
+      configEncrypted: JSON.stringify({ provider: "privy" }),
       status: "active",
-      createdAt: new Date().toISOString(),
+    });
+    provisionPrivyWalletMock.mockResolvedValueOnce({
+      walletId: "managed_settlement_wallet",
+      address: TEST_SOLANA_ADDRESSES.wallet2,
     });
 
     const wallet = await provisionApiKeyWallet(getDb(env), env, {
       auditContext,
-      creationReason: "api_key",
+      creationReason: "dvp_settlement_authority",
       organizationId: ORGANIZATION_ID,
       projectId: PROJECT_ID,
-      owner: { provider: "para" },
-      label: "API key wallet",
-      purpose: "transfer",
+      owner: { provider: "privy" },
+      label: "Settlement wallet",
+      purpose: "dvp_settlement_authority",
     });
 
-    expect(wallet).toMatchObject({
-      id: "cwlt_api_key_managed_provisioned",
-      walletId: "para_api_key_managed_provisioned",
+    // Deployment credentials: no tenant Privy app is passed to the provider call.
+    expect(provisionPrivyWalletMock).toHaveBeenCalledExactlyOnceWith(env, {});
+    expect(wallet.walletId).toBe("privy_managed_settlement_wallet");
+    expect(
+      await getDb(env).queryOne(
+        `SELECT custody_connection_id, custody_config_id, public_key, label, purpose, status
+         FROM custody_wallets WHERE id = ?`,
+        [wallet.id]
+      )
+    ).toEqual({
+      custody_connection_id: null,
+      custody_config_id: MANAGED_CONFIG_ID,
+      public_key: TEST_SOLANA_ADDRESSES.wallet2,
+      label: "Settlement wallet",
+      purpose: "dvp_settlement_authority",
+      status: "active",
     });
-    expect(createConfigWalletMock).toHaveBeenCalledExactlyOnceWith(ORGANIZATION_ID, PROJECT_ID, {
-      provider: "para",
-      label: "API key wallet",
-      purpose: "transfer",
-    });
-    expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
   });
 
   it("audits first-use DVP wallet creation with its initiating actor, and does not create on reuse", async () => {
     provisionPrivyWalletMock.mockResolvedValueOnce({
       walletId: "dvp_settlement",
-      address: "Vote111111111111111111111111111111111111111",
+      address: TEST_SOLANA_ADDRESSES.wallet3,
     });
     const scope = { organizationId: ORGANIZATION_ID, projectId: PROJECT_ID };
     const first = await getOrCreateDvpSettlementWallet(env, auditContext, scope);
@@ -162,7 +178,8 @@ describe("provisionApiKeyWallet", () => {
       "SELECT api_key_id, resource_id, metadata FROM audit_logs WHERE resource_type = 'custody_wallet' AND action = 'create'"
     );
     expect(audits).toHaveLength(1);
-    expect(audits[0]).toMatchObject({ api_key_id: API_KEY.id, resource_id: first.custodyWalletId });
+    const audit = required(audits[0]);
+    expect(audit).toMatchObject({ api_key_id: API_KEY.id, resource_id: first.custodyWalletId });
     const metadata = z
       .object({
         result: z.string(),
@@ -170,7 +187,7 @@ describe("provisionApiKeyWallet", () => {
         connectionId: z.string(),
       })
       .passthrough()
-      .parse(JSON.parse(audits[0].metadata));
+      .parse(JSON.parse(audit.metadata));
     expect(metadata).toMatchObject({
       result: "created",
       creationReason: "dvp_settlement_authority",
@@ -179,50 +196,28 @@ describe("provisionApiKeyWallet", () => {
     expect(metadata).not.toHaveProperty("assignedSettlementAuthority");
   });
 
-  // Creating a key never creates a wallet (HOO-2099): the fields that asked
-  // for one are refused, before any row or Provider call.
   it.each([
-    ["/v1/api-keys", { provisionWallet: { connectionId: CONNECTION_ID } }],
-    [`/v1/projects/${PROJECT_ID}/api-keys`, { provisionWallet: { provider: "privy" } }],
-    ["/v1/api-keys", { walletLabel: "Treasury" }],
-    ["/v1/api-keys", { walletPurpose: "transfer" }],
-  ] as const)("refuses wallet provisioning on key create through %s (%j)", async (path, field) => {
-    const db = getDb(env);
-    const keysBefore = await db.queryOne("SELECT COUNT(*) AS count FROM api_keys");
-    const walletsBefore = await db.queryOne("SELECT COUNT(*) AS count FROM custody_wallets");
-
-    const response = await app.request(
-      path,
-      {
-        method: "POST",
-        headers: adminHeaders(),
-        body: JSON.stringify({
-          name: "Provisioning key",
-          grants: ["transfers.read"],
-          walletScope: "selected",
-          ...field,
-        }),
-      },
-      env
-    );
-
-    expect(response.status).toBe(400);
-    expect(JSON.stringify(await response.json())).toContain("POST /v1/wallets");
-    expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
-    expect(createConfigWalletMock).not.toHaveBeenCalled();
-    expect(await db.queryOne("SELECT COUNT(*) AS count FROM api_keys")).toEqual(keysBefore);
-    expect(await db.queryOne("SELECT COUNT(*) AS count FROM custody_wallets")).toEqual(
-      walletsBefore
-    );
-  });
-
-  it.each([
-    ["missing", "missing_connection", null],
-    ["foreign", FOREIGN_CONNECTION_ID, null],
-    ["out-of-channel", CONNECTION_ID, "byok"],
+    [
+      "missing",
+      "missing_connection",
+      null,
+      { code: "NOT_FOUND", message: "Custody Connection not found" },
+    ],
+    [
+      "another project's",
+      FOREIGN_CONNECTION_ID,
+      null,
+      { code: "NOT_FOUND", message: "Custody Connection not found" },
+    ],
+    [
+      "out-of-channel",
+      CONNECTION_ID,
+      "byok",
+      { code: "FORBIDDEN", details: { reason: "custody_provider_not_in_release_channel" } },
+    ],
   ] as const)(
     "refuses a %s Connection before Provider I/O",
-    async (_, connectionId, outOfChannelMode) => {
+    async (_, connectionId, outOfChannelMode, refusal) => {
       custodyReleaseChannel.outOfChannelMode = outOfChannelMode;
       const walletsBefore = await getDb(env).queryOne(
         "SELECT COUNT(*) AS count FROM custody_wallets"
@@ -231,13 +226,13 @@ describe("provisionApiKeyWallet", () => {
       await expect(
         provisionApiKeyWallet(getDb(env), env, {
           auditContext,
-          creationReason: "api_key",
+          creationReason: "dvp_settlement_authority",
           organizationId: ORGANIZATION_ID,
           projectId: PROJECT_ID,
           owner: { connectionId },
-          purpose: "transfer",
+          purpose: "dvp_settlement_authority",
         })
-      ).rejects.toThrow();
+      ).rejects.toMatchObject(refusal);
 
       expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
       expect(await getDb(env).queryOne("SELECT COUNT(*) AS count FROM custody_wallets")).toEqual(
@@ -255,13 +250,13 @@ describe("provisionApiKeyWallet", () => {
     await expect(
       provisionApiKeyWallet(getDb(env), env, {
         auditContext,
-        creationReason: "api_key",
+        creationReason: "dvp_settlement_authority",
         organizationId: ORGANIZATION_ID,
         projectId: PROJECT_ID,
         owner: { connectionId: CONNECTION_ID },
-        purpose: "transfer",
+        purpose: "dvp_settlement_authority",
       })
-    ).rejects.toThrow();
+    ).rejects.toMatchObject({ code: "CONFLICT", message: "Custody Connection is unavailable" });
     expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
   });
 
@@ -284,7 +279,9 @@ describe("provisionApiKeyWallet", () => {
     );
 
     expect(response.status).toBe(201);
-    const body = (await response.json()) as { data: { apiKey: { id: string } } };
+    const body = z
+      .object({ data: z.object({ apiKey: z.object({ id: z.string() }) }) })
+      .parse(await response.json());
     expect(
       await getDb(env)
         .prepare(
@@ -353,14 +350,6 @@ async function seedFixture(): Promise<void> {
        VALUES (?, ?, ?, ?, 'Admin', 'sk_test_api', ?, ?, 'active')`,
       [API_KEY.id, ORGANIZATION_ID, PROJECT_ID, USER_ID, keyHash, ALL_API_KEY_GRANTS]
     );
-    await insertTestCustodyConfigRow(tx, {
-      id: CONFIG_ID,
-      organizationId: ORGANIZATION_ID,
-      projectId: PROJECT_ID,
-      provider: "para",
-      configEncrypted: "test",
-      status: "active",
-    });
     await seedTestPrivyConnection(tx, {
       organizationId: ORGANIZATION_ID,
       projectId: PROJECT_ID,
@@ -374,7 +363,7 @@ async function seedFixture(): Promise<void> {
         {
           id: "cwlt_api_key_provisioning_default",
           walletId: "privy_api_key_default",
-          publicKey: "11111111111111111111111111111111",
+          publicKey: TEST_SOLANA_ADDRESSES.wallet1,
           label: "Default",
           purpose: null,
           status: "active",

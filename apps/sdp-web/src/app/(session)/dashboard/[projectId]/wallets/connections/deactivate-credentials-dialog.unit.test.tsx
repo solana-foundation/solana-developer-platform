@@ -4,9 +4,9 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
+import { PROJECT_HEADER_NAME } from "@/lib/project-cookie";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { EnglishI18n } from "@/test/i18n";
 import { setPageRequest } from "@/test/request-project";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
@@ -68,17 +68,27 @@ function mockApi(status: number) {
   return api;
 }
 
+/** One request the server action sent to sdp-api, as the API receives it. */
+function sentApiRequest([url, init]: [RequestInfo | URL, RequestInit?]) {
+  if (init === undefined) throw new Error("sdp-api requests always send a RequestInit");
+  return {
+    url: String(url),
+    method: init.method,
+    project: new Headers(init.headers).get(PROJECT_HEADER_NAME),
+    body: init.body,
+  };
+}
+
 async function mount(lifecycle: CustodyCredentialLifecycle, onClose: () => void) {
   render(
-    <I18nProvider locale="en" messages={getMessages("en")}>
-      <DeactivateCredentialsDialog
-        isOpen
-        onClose={onClose}
-        lifecycle={lifecycle}
-        provider="privy"
-        connectionId="cconn_1"
-      />
-    </I18nProvider>
+    <DeactivateCredentialsDialog
+      isOpen
+      onClose={onClose}
+      lifecycle={lifecycle}
+      provider="privy"
+      connectionId="cconn_1"
+    />,
+    { wrapper: EnglishI18n }
   );
   return screen.findByRole("dialog", { name: "Deactivate “Privy production app” credentials?" });
 }
@@ -92,15 +102,19 @@ it("deactivates unused credentials without claiming deletion at the provider", a
   expect(within(dialog).getByText(/does not revoke credentials at the provider/)).toBeTruthy();
   await userEvent.click(within(dialog).getByRole("button", { name: "Deactivate credentials" }));
 
-  await waitFor(() => expect(onClose).toHaveBeenCalled());
-  expect(api).toHaveBeenCalledWith(
-    "https://api.example.test/internal/dashboard/custody/provider-credentials/pcred_current/deactivate",
-    expect.objectContaining({ method: "POST" })
-  );
-  expect(success).toHaveBeenCalledWith("Credentials deactivated", {
+  await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+  expect(api.mock.calls.map(sentApiRequest)).toEqual([
+    {
+      url: "https://api.example.test/internal/dashboard/custody/provider-credentials/pcred_current/deactivate",
+      method: "POST",
+      project: "prj_test_sandbox",
+      body: "{}",
+    },
+  ]);
+  expect(success).toHaveBeenCalledExactlyOnceWith("Credentials deactivated", {
     description: "These credentials can no longer be used for signing through SDP.",
   });
-  expect(dashboardRouter.refresh).toHaveBeenCalled();
+  expect(dashboardRouter.refresh).toHaveBeenCalledOnce();
 });
 
 it("refuses to deactivate credentials another connection still uses", async () => {
@@ -140,10 +154,10 @@ it.each([
 
     await userEvent.click(within(dialog).getByRole("button", { name: "Deactivate credentials" }));
 
-    await waitFor(() => expect(dashboardRouter.refresh).toHaveBeenCalled());
+    await waitFor(() => expect(dashboardRouter.refresh).toHaveBeenCalledOnce());
     expect(onClose).not.toHaveBeenCalled();
     expect(success).not.toHaveBeenCalled();
-    expect(notice).toHaveBeenCalledWith(title, {
+    expect(notice).toHaveBeenCalledExactlyOnceWith(title, {
       description: "Deactivation could not be confirmed.",
     });
   }

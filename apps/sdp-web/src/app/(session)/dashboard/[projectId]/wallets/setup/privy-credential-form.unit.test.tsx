@@ -13,10 +13,9 @@ import {
   submitPrivyCredentialAction,
 } from "@/app/(session)/dashboard/[projectId]/wallets/byok-actions";
 import * as csrActions from "@/app/(session)/dashboard/[projectId]/wallets/setup/fireblocks-csr-actions";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
 import { dashboardDataResponse, stubDashboardFetch } from "@/test/dashboard-fetch";
 import { dashboardRouter, setDashboardUrl } from "@/test/dashboard-navigation";
+import { EnglishI18n } from "@/test/i18n";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { FreshSWRCache } from "@/test/swr";
 import { generateFireblocksCsrAction } from "./fireblocks-csr-actions";
@@ -34,7 +33,7 @@ function renderForm(
   onPendingChange?: (pending: boolean) => void
 ) {
   return render(
-    <I18nProvider locale="en" messages={getMessages("en")}>
+    <EnglishI18n>
       <FreshSWRCache>
         <ByokCredentialForm
           formId="byok-test-form"
@@ -42,7 +41,7 @@ function renderForm(
           onPendingChange={onPendingChange}
         />
       </FreshSWRCache>
-    </I18nProvider>
+    </EnglishI18n>
   );
 }
 
@@ -52,9 +51,29 @@ async function fillAndSubmit(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: "Connect and verify" }));
 }
 
+/** The form the submit action received on its `call`th call, or the test fails. */
+function submission(call: number): FormData {
+  const sent = vi.mocked(submitPrivyCredentialAction).mock.calls[call];
+  if (sent === undefined) throw new Error(`The submit action has no call ${call}`);
+  return sent[0];
+}
+
 function submittedKey(call: number): string {
-  const formData = vi.mocked(submitPrivyCredentialAction).mock.calls[call][0];
-  return String(formData.get("idempotencyKey"));
+  return String(submission(call).get("idempotencyKey"));
+}
+
+/** The text input labelled `label`, or the test fails. */
+function inputLabelled(label: string): HTMLInputElement {
+  const input = screen.getByLabelText(label);
+  if (!(input instanceof HTMLInputElement)) throw new Error(`${label} is not an input`);
+  return input;
+}
+
+/** The Fireblocks registration the form would submit, or the test fails. */
+function signingKeyId(): string {
+  const input = document.querySelector('input[name="signingKeyId"]');
+  if (!(input instanceof HTMLInputElement)) throw new Error("No signing key field");
+  return input.value;
 }
 
 /** Renders the SWR read of `cacheKey` in an `<output>` with test id `name`. */
@@ -184,8 +203,6 @@ describe("ByokCredentialForm", () => {
     // Found by its idle name, so a submit still settling (named "… Loading") is not it.
     const connect = () => screen.getByRole("button", { name: "Connect and verify" });
     const generate = () => screen.getByRole("button", { name: "Generate and download CSR" });
-    const signingKeyId = () =>
-      document.querySelector<HTMLInputElement>('input[name="signingKeyId"]')?.value;
 
     // Each press waits for the state that lets it act: a disabled or busy control drops it.
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -210,10 +227,9 @@ describe("ByokCredentialForm", () => {
       expect(
         screen.getByRole("button", { name: /^Connect and verify/ }).getAttribute("aria-busy")
       ).toBe("true");
-      const payload = vi.mocked(submitPrivyCredentialAction).mock.calls[attempt][0];
-      expect(payload.get("signingKeyId")).toBe(csrs[attempt].id);
+      expect(submission(attempt).get("signingKeyId")).toBe(csrs[attempt].id);
       if (attempt > 0) {
-        expect(payload.get("connectionId")).toBe("cconn_test");
+        expect(submission(attempt).get("connectionId")).toBe("cconn_test");
         expect(submittedKey(attempt)).not.toBe(submittedKey(attempt - 1));
       }
       // Finish the parent transition before interacting with the remounted CSR form.
@@ -257,8 +273,7 @@ describe("ByokCredentialForm", () => {
         })
       );
       await waitFor(() => expect(dashboardRouter.push).toHaveBeenCalledWith(WALLETS_HREF));
-      const calls = vi.mocked(submitPrivyCredentialAction).mock.calls;
-      expect(calls[1][0].get("signingKeyId")).toBe(calls[0][0].get("signingKeyId"));
+      expect(submission(1).get("signingKeyId")).toBe(submission(0).get("signingKeyId"));
       expect(submittedKey(1)).toBe(submittedKey(0));
     }
   );
@@ -279,29 +294,25 @@ describe("ByokCredentialForm", () => {
     await user.click(screen.getByRole("checkbox", { name: /Operations/ }));
     await user.click(screen.getByRole("button", { name: "Connect and verify" }));
     await screen.findByText("Rejected");
-    const submitted = vi.mocked(submitPrivyCredentialAction).mock.calls[0]?.[0];
-    expect(submitted?.get("provider")).toBe("fireblocks");
-    expect(submitted?.get("vaultAccountId")).toBe("0");
-    expect(submitted?.getAll("fireblocksVaultAccountIds")).toEqual(["0", "7"]);
-    expect(submitted?.has("walletLabel")).toBe(false);
-    expect(submitted?.get("signingKeyId")).toBe("fbcsr_11111111-1111-4111-8111-111111111111");
-    expect(submitted?.has("apiSecretPem")).toBe(false);
+    const submitted = submission(0);
+    expect(submitted.get("provider")).toBe("fireblocks");
+    expect(submitted.get("vaultAccountId")).toBe("0");
+    expect(submitted.getAll("fireblocksVaultAccountIds")).toEqual(["0", "7"]);
+    expect(submitted.has("walletLabel")).toBe(false);
+    expect(submitted.get("signingKeyId")).toBe("fbcsr_11111111-1111-4111-8111-111111111111");
+    expect(submitted.has("apiSecretPem")).toBe(false);
     expect(screen.queryByLabelText("RSA private key (PEM)")).toBeNull();
   });
 
-  it("renders the shared field definitions with a write-only secret", () => {
+  it("asks for the secret in a masked field that starts empty", () => {
     renderForm();
 
-    expect(screen.getByLabelText("Connection name")).toHaveProperty(
-      "defaultValue",
-      "Privy credential"
-    );
-    const secret = screen.getByLabelText("App secret") as HTMLInputElement;
+    const secret = inputLabelled("App secret");
     expect(secret.type).toBe("password");
     expect(secret.value).toBe("");
   });
 
-  it("submits with an idempotency key and routes to wallets on success", async () => {
+  it("submits the credentials under an idempotency key and routes to wallets on success", async () => {
     vi.mocked(submitPrivyCredentialAction).mockResolvedValue({
       status: "success",
       connectionId: "cconn_test",
@@ -311,8 +322,17 @@ describe("ByokCredentialForm", () => {
 
     await fillAndSubmit(user);
 
-    await waitFor(() => expect(dashboardRouter.push.mock.calls[0]?.[0]).toBe(WALLETS_HREF));
-    expect(submittedKey(0)).toMatch(/[0-9a-f-]{36}/);
+    await waitFor(() => expect(dashboardRouter.push).toHaveBeenCalledWith(WALLETS_HREF));
+    expect(Object.fromEntries(submission(0))).toEqual({
+      provider: "privy",
+      appId: "app_123",
+      appSecret: "shh-secret",
+      walletLabel: "",
+      credentialLabel: "Privy credential",
+      idempotencyKey: expect.stringMatching(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+      ),
+    });
   });
 
   it("refreshes wallet inventories in the current project after install without replaying commands", async () => {
@@ -325,7 +345,7 @@ describe("ByokCredentialForm", () => {
     const command = vi.fn(async () => "Replayed command");
     const user = userEvent.setup();
     render(
-      <I18nProvider locale="en" messages={getMessages("en")}>
+      <EnglishI18n>
         <SWRConfig value={{ provider: () => new Map() }}>
           <ByokCredentialForm formId="byok-test-form" />
           <Inventory
@@ -352,7 +372,7 @@ describe("ByokCredentialForm", () => {
             fetcher={otherProjectRead}
           />
         </SWRConfig>
-      </I18nProvider>
+      </EnglishI18n>
     );
 
     await fillAndSubmit(user);
@@ -379,14 +399,13 @@ describe("ByokCredentialForm", () => {
     await fillAndSubmit(user);
     await screen.findByRole("alert");
     // The rejected secret must not linger for corrections to be typed onto.
-    const secret = screen.getByLabelText("App secret") as HTMLInputElement;
+    const secret = inputLabelled("App secret");
     expect(secret.value).toBe("");
     await user.type(secret, "corrected-secret");
     await user.click(screen.getByRole("button", { name: "Connect and verify" }));
 
     await waitFor(() => expect(submitPrivyCredentialAction).toHaveBeenCalledTimes(2));
-    const second = vi.mocked(submitPrivyCredentialAction).mock.calls[1]?.[0] as FormData;
-    expect(String(second.get("appSecret"))).toBe("corrected-secret");
+    expect(submission(1).get("appSecret")).toBe("corrected-secret");
     expect(submittedKey(1)).not.toBe(submittedKey(0));
   });
 
@@ -405,8 +424,7 @@ describe("ByokCredentialForm", () => {
     // Nothing was sent, so nothing needs recovering: the form stays editable
     // with the typed secret intact and no frozen replay on offer.
     expect(screen.queryByRole("button", { name: "Retry submission" })).toBeNull();
-    const secret = screen.getByLabelText("App secret") as HTMLInputElement;
-    expect(secret.value).toBe("shh-secret");
+    expect(inputLabelled("App secret").value).toBe("shh-secret");
 
     // Found rather than queried: the alert renders from the state update, but
     // the submit button only returns to this label once the transition behind
@@ -420,61 +438,33 @@ describe("ByokCredentialForm", () => {
   });
 
   it("freezes the payload and replays it verbatim when the outcome is unknown", async () => {
-    vi.mocked(submitPrivyCredentialAction)
-      .mockResolvedValueOnce({ status: "error", message: "network dropped" })
-      .mockResolvedValueOnce({ status: "success", connectionId: "cconn_test" });
-    const user = userEvent.setup();
-    renderForm();
-
-    await fillAndSubmit(user);
-    // The editable form is gone: nothing can drift under the retained key.
-    const retry = await screen.findByRole("button", { name: "Retry submission" });
-    expect(screen.queryByLabelText("App secret")).toBeNull();
-
-    await user.click(retry);
-    await waitFor(() => expect(submitPrivyCredentialAction).toHaveBeenCalledTimes(2));
-    // Identical payload, identical key: a true replay.
-    expect(submittedKey(1)).toBe(submittedKey(0));
-    const second = vi.mocked(submitPrivyCredentialAction).mock.calls[1]?.[0] as FormData;
-    expect(String(second.get("appSecret"))).toBe("shh-secret");
-  });
-
-  it("locks recovery for the parent while an outcome is unknown", async () => {
     const onLock = vi.fn();
     vi.mocked(submitPrivyCredentialAction)
       .mockResolvedValueOnce({ status: "error", message: "network dropped" })
       .mockResolvedValueOnce({ status: "success", connectionId: "cconn_test" });
     const user = userEvent.setup();
     render(
-      <I18nProvider locale="en" messages={getMessages("en")}>
+      <EnglishI18n>
         <ByokCredentialForm formId="byok-lock-test" onRecoveryLockChange={onLock} />
-      </I18nProvider>
+      </EnglishI18n>
     );
 
     await fillAndSubmit(user);
     // The lock engages when the POST leaves, before any outcome is known.
-    expect(onLock.mock.calls[0]?.[0]).toBe(true);
-    await screen.findByRole("button", { name: "Retry submission" });
+    expect(onLock.mock.calls).toContainEqual([true]);
+    // The editable form is gone, and with it any fresh-key resubmit: a committed pending
+    // connection would refuse one, so the verbatim replay is the only way on.
+    const retry = await screen.findByRole("button", { name: "Retry submission" });
+    expect(screen.queryByLabelText("App secret")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Connect and verify" })).toBeNull();
     expect(onLock).toHaveBeenLastCalledWith(true);
 
-    await user.click(screen.getByRole("button", { name: "Retry submission" }));
+    await user.click(retry);
+    await waitFor(() => expect(submitPrivyCredentialAction).toHaveBeenCalledTimes(2));
+    // Identical payload, identical key: a true replay.
+    expect(submittedKey(1)).toBe(submittedKey(0));
+    expect(submission(1).get("appSecret")).toBe("shh-secret");
     await waitFor(() => expect(onLock).toHaveBeenLastCalledWith(false));
-  });
-
-  it("offers no escape from an unknown outcome except the verbatim replay", async () => {
-    vi.mocked(submitPrivyCredentialAction).mockResolvedValueOnce({
-      status: "error",
-      message: "network dropped",
-    });
-    const user = userEvent.setup();
-    renderForm();
-
-    await fillAndSubmit(user);
-    await screen.findByRole("button", { name: "Retry submission" });
-    // A fresh-key submission over a committed pending connection is refused
-    // server-side, so abandoning the frozen key would strand the install.
-    expect(screen.queryByRole("button", { name: "Start over" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Connect and verify" })).toBeNull();
   });
 
   it("keeps a refused completion re-checkable instead of resetting to a doomed resubmit", async () => {
@@ -490,9 +480,9 @@ describe("ByokCredentialForm", () => {
     });
     const user = userEvent.setup();
     render(
-      <I18nProvider locale="en" messages={getMessages("en")}>
+      <EnglishI18n>
         <ByokCredentialForm formId="byok-refused-test" onRecoveryLockChange={onLock} />
-      </I18nProvider>
+      </EnglishI18n>
     );
 
     await fillAndSubmit(user);
@@ -507,7 +497,7 @@ describe("ByokCredentialForm", () => {
 
     await user.click(await screen.findByRole("button", { name: "Check again" }));
     await waitFor(() => expect(recheckPrivyCredentialAction).toHaveBeenCalledWith("conn_1"));
-    await waitFor(() => expect(dashboardRouter.push.mock.calls[0]?.[0]).toBe(WALLETS_HREF));
+    await waitFor(() => expect(dashboardRouter.push).toHaveBeenCalledWith(WALLETS_HREF));
     await waitFor(() => expect(onLock).toHaveBeenLastCalledWith(false));
   });
 
@@ -519,9 +509,9 @@ describe("ByokCredentialForm", () => {
     });
     const user = userEvent.setup();
     render(
-      <I18nProvider locale="en" messages={getMessages("en")}>
+      <EnglishI18n>
         <ByokCredentialForm formId="byok-unrecoverable-test" onRecoveryLockChange={onLock} />
-      </I18nProvider>
+      </EnglishI18n>
     );
 
     await fillAndSubmit(user);
@@ -550,16 +540,14 @@ describe("ByokCredentialForm", () => {
     await screen.findByRole("alert");
     // The failed connection blocks fresh submissions server-side, so the
     // corrected attempt must target it as a replacement under a new key.
-    const secret = screen.getByLabelText("App secret") as HTMLInputElement;
+    const secret = inputLabelled("App secret");
     expect(secret.value).toBe("");
     await user.type(secret, "corrected-secret");
     await user.click(screen.getByRole("button", { name: "Connect and verify" }));
 
     await waitFor(() => expect(submitPrivyCredentialAction).toHaveBeenCalledTimes(2));
-    const first = vi.mocked(submitPrivyCredentialAction).mock.calls[0]?.[0] as FormData;
-    expect(first.get("connectionId")).toBeNull();
-    const second = vi.mocked(submitPrivyCredentialAction).mock.calls[1]?.[0] as FormData;
-    expect(String(second.get("connectionId"))).toBe("conn_1");
+    expect(submission(0).get("connectionId")).toBeNull();
+    expect(submission(1).get("connectionId")).toBe("conn_1");
     expect(submittedKey(1)).not.toBe(submittedKey(0));
   });
 
@@ -570,9 +558,9 @@ describe("ByokCredentialForm", () => {
       .mockResolvedValueOnce({ status: "success", connectionId: "cconn_test" });
     const user = userEvent.setup();
     render(
-      <I18nProvider locale="en" messages={getMessages("en")}>
+      <EnglishI18n>
         <ByokCredentialForm formId="byok-reject-test" onRecoveryLockChange={onLock} />
-      </I18nProvider>
+      </EnglishI18n>
     );
 
     await fillAndSubmit(user);
@@ -604,7 +592,7 @@ describe("ByokCredentialForm", () => {
     // The re-check is idempotent, so a lost response keeps the same screen and
     // the same offer rather than discarding the stored credential's state.
     await user.click(await screen.findByRole("button", { name: "Check again" }));
-    await waitFor(() => expect(dashboardRouter.push.mock.calls[0]?.[0]).toBe(WALLETS_HREF));
+    await waitFor(() => expect(dashboardRouter.push).toHaveBeenCalledWith(WALLETS_HREF));
   });
 
   it("offers a safe re-check instead of resubmitting after an unknown outcome", async () => {
@@ -626,7 +614,7 @@ describe("ByokCredentialForm", () => {
 
     await user.click(checkAgain);
     await waitFor(() => expect(recheckPrivyCredentialAction).toHaveBeenCalledWith("conn_1"));
-    await waitFor(() => expect(dashboardRouter.push.mock.calls[0]?.[0]).toBe(WALLETS_HREF));
+    await waitFor(() => expect(dashboardRouter.push).toHaveBeenCalledWith(WALLETS_HREF));
     expect(submitPrivyCredentialAction).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,48 +1,44 @@
+import { readdirSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
+import type { ComponentType } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import WalletDetailLoading from "./[walletId]/loading";
 import WalletsLoading from "./loading";
 import WalletSetupLoading from "./setup/loading";
-import { WalletDetailSkeleton, WalletsOnboardingSkeleton } from "./wallet-route-skeletons";
 
-const routeLoaders = [
-  ["wallets overview", WalletsLoading, "wallets-overview"],
-  ["wallet setup", WalletSetupLoading, "wallet-setup"],
-  ["wallet detail", WalletDetailLoading, "wallet-detail"],
-] as const;
+const WALLETS_DIR = dirname(fileURLToPath(import.meta.url));
 
-describe("wallet route loading states", () => {
-  it.each(routeLoaders)("maps %s to its final-page geometry", (_name, Loader, layout) => {
-    const html = renderToStaticMarkup(<Loader />);
+/** Each route's loading boundary, by its folder under `wallets/` ("." is the overview). */
+const LOADERS: Record<string, ComponentType> = {
+  ".": WalletsLoading,
+  setup: WalletSetupLoading,
+  "[walletId]": WalletDetailLoading,
+};
 
-    expect(html).toContain(`data-wallet-loading-layout="${layout}"`);
-    expect(html).toContain('aria-busy="true"');
-    expect(html).toContain("motion-reduce:animate-none");
-    expect(html).not.toContain("bg-white");
+/** Every folder under `wallets/` that holds a file named `name`, relative to `wallets/`. */
+function foldersHolding(name: string): string[] {
+  const walk = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      if (entry.isDirectory()) return walk(join(dir, entry.name));
+      if (entry.name !== name) return [];
+      const folder = relative(WALLETS_DIR, dir);
+      return [folder === "" ? "." : folder];
+    });
+  return walk(WALLETS_DIR);
+}
+
+describe("wallets route loading boundaries", () => {
+  // Without one, a navigation to the route holds the previous page with no sign it is loading.
+  it("gives every wallets route a loading boundary", () => {
+    const routes = foldersHolding("page.tsx").sort();
+
+    expect(foldersHolding("loading.tsx").sort()).toEqual(routes);
+    expect(Object.keys(LOADERS).sort()).toEqual(routes);
   });
 
-  it("keeps every wallet-detail section in place while data loads", () => {
-    const html = renderToStaticMarkup(<WalletDetailSkeleton />);
-
-    expect(html).toContain('data-skeleton-section="wallet-state"');
-    expect(html).toContain('data-skeleton-section="wallet-balance"');
-    expect(html).toContain('data-skeleton-section="wallet-tokens"');
-    expect(html).toContain('data-skeleton-section="wallet-activity"');
-  });
-
-  it("reserves the two-column wallet card grid while the overview loads", () => {
-    const html = renderToStaticMarkup(<WalletsLoading />);
-
-    expect(html).toContain('data-wallet-grid-skeleton="true"');
-    expect(html).toContain("sm:grid-cols-2");
-    expect(html).toContain("bg-surface-tile");
-  });
-
-  it("uses the organization-sync card geometry for the onboarding fallback", () => {
-    const html = renderToStaticMarkup(<WalletsOnboardingSkeleton />);
-
-    expect(html).toContain('data-wallet-loading-layout="wallets-onboarding"');
-    expect(html).toContain("rounded-[24px]");
-    expect(html).not.toContain("grid-cols-3");
+  it.each(Object.entries(LOADERS))("marks the %s route busy while it loads", (_route, Loader) => {
+    expect(renderToStaticMarkup(<Loader />)).toContain('aria-busy="true"');
   });
 });

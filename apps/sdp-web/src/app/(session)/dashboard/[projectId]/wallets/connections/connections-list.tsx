@@ -81,9 +81,7 @@ function ConnectionSummary({
           <>
             {" · "}
             <StatusText tone="attention" className="whitespace-nowrap">
-              <span data-signing-state="paused">
-                {t("DashboardCustody.connectionSigningPaused")}
-              </span>
+              {t("DashboardCustody.connectionSigningPaused")}
             </StatusText>
           </>
         )}
@@ -200,7 +198,6 @@ export function ConnectionsList({
                   <Link
                     href={connectionHref(connection.id)}
                     className="truncate text-body font-medium text-primary hover:underline"
-                    data-connection-link
                   >
                     {connection.label}
                   </Link>

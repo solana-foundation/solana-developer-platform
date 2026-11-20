@@ -270,6 +270,19 @@ describe("custody wallets across an organization's projects", () => {
     }
   );
 
+  it("refuses a wallet under another project's Connection without writing anything", async () => {
+    const before = await readCustodyState();
+
+    const response = await requestAsRequester("/v1/wallets", {
+      method: "POST",
+      body: { connectionId: "cconn_cross_project_owner", label: "Cross-project wallet" },
+    });
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual(errorBody("NOT_FOUND", "Custody connection not found"));
+    expect(await readCustodyState()).toEqual(before);
+  });
+
   it.each(OWNER_WALLETS)(
     "refuses to bind a new API key to another project's $owner wallet",
     async ({ custodyWalletId }) => {

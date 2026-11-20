@@ -10,8 +10,10 @@ import * as events from "@/runtime/money-path-events";
 import * as signingProposals from "@/services/custody/fireblocks-proposal-reconciliation";
 import { systemProposalLedger } from "@/services/jobs/proposal-recovery-ledger";
 import * as transfers from "@/services/payments/fireblocks-transfer";
+import { TEST_CUSTODY_PUBLIC_KEY } from "@/test/fixtures/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { reconcileFireblocksProposals } from "./reconcile-fireblocks-proposals";
 
@@ -21,7 +23,7 @@ const projects = {
   production: "prj_fireblocks_queue_production",
 } as const;
 const old = "2026-01-01T00:00:00.000Z";
-const address = "11111111111111111111111111111111";
+const address = TEST_CUSTODY_PUBLIC_KEY;
 const db = () => getDb(env);
 const queue = () => new FireblocksReconciliationRepository(db());
 const run = () =>
@@ -101,7 +103,7 @@ describe("Fireblocks reconciliation queue", () => {
       "sandbox_processing_true_1",
       "sandbox_processing_true_2",
     ]);
-    expect(stats).toMatchObject({ pending: selected.length, transfers: 2, signing: 1 });
+    expect(stats).toMatchObject({ pending: 3, transfers: 2, signing: 1 });
     expect(stats.oldestUnpolledAgeMs).toBeGreaterThan(180_000);
     expect((await queue().stats("production", Date.now())).pending).toBe(3);
     await expect(
@@ -264,7 +266,7 @@ describe("Fireblocks reconciliation queue", () => {
     expect(await db().queryOne("SELECT COUNT(*)::int AS count FROM custody_proposals")).toEqual({
       count: 1,
     });
-    expect((await ledger.repo.getTransferById(identity))?.provider_data).toMatchObject({
+    expect(required(await ledger.repo.getTransferById(identity)).provider_data).toMatchObject({
       fireblocksTransfer: {},
       fireblocksLastPolledAt: expect.any(String),
     });
@@ -272,7 +274,7 @@ describe("Fireblocks reconciliation queue", () => {
       "error",
       expect.objectContaining({ failed: 100, polled: 0, pending: 101 })
     );
-    expect((await queue().list("sandbox", 100))[0]?.id).toBe("fbp_after_malformed");
+    expect(required((await queue().list("sandbox", 100))[0]).id).toBe("fbp_after_malformed");
     await expect(run()).rejects.toThrow("Fireblocks proposal reconciliation failed");
     expect(signingPoll).toHaveBeenCalledOnce();
     expect(provider).not.toHaveBeenCalled();

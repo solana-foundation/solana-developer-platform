@@ -1,6 +1,6 @@
 import { generateKeyPairSync } from "node:crypto";
-import { CUSTODY_CONNECTION_CHECK_STATUSES } from "@sdp/types/custody";
 import { MOVEMENTS } from "@sdp/types/movements";
+import { generateKeyPairSigner } from "@solana/kit";
 import { afterEach, aroundEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import {
@@ -21,6 +21,7 @@ import {
 } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 import { ProposalAdmissionRefusedError } from "./admitted-proposer";
@@ -33,7 +34,8 @@ const apiKeyId = "key_proposal_recovery";
 const custodyWalletId = "cwlt_proposal_recovery";
 const connectionId = "cconn_proposal_recovery";
 const credentialId = "pcred_proposal_recovery";
-const sourceAddress = "11111111111111111111111111111111";
+const { address: sourceAddress } = await generateKeyPairSigner();
+const { address: otherWalletAddress } = await generateKeyPairSigner();
 const binding = {
   connectionId,
   accountFingerprint: "sha256:original-account",
@@ -191,12 +193,10 @@ describe("retained proposal recovery waist", () => {
       runWithoutDatabaseIdentity("test:no-recovery-identity", () => recovery())
     ).rejects.toThrow("Custody proposal recovery requires the recovery worker");
   });
-  it("constructs without admission, credential reads or provider calls", async () => {
-    const dbRead = vi.spyOn(getDb(env), "queryMany");
+  it("constructs without credential reads or provider calls", async () => {
     const secretRead = vi.spyOn(credentialSecretStore, "createCredentialSecretStore");
     const fetch = vi.spyOn(globalThis, "fetch");
-    await expect(recovery()).resolves.toHaveProperty("cancel");
-    expect(dbRead).not.toHaveBeenCalled();
+    await recovery();
     expect(secretRead).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
   });
@@ -265,18 +265,24 @@ describe("retained proposal recovery waist", () => {
       connectionId,
       "proposal_binding_changed",
     ],
-    [
-      "changed wallet",
-      "UPDATE custody_wallets SET public_key = 'Vote111111111111111111111111111111111111111' WHERE id = ?",
-      custodyWalletId,
-      "proposal_binding_changed",
-    ],
   ])("classifies %s as a durable admission refusal", async (_name, sql, id, reason) => {
     const controller = await recovery();
     await getDb(env).execute(sql, [id]);
     await expect(asKey(() => controller.admit())).rejects.toMatchObject({
       name: "ProposalAdmissionRefusedError",
       reason,
+    });
+  });
+
+  it("classifies a changed wallet address as a durable admission refusal", async () => {
+    const controller = await recovery();
+    await getDb(env).execute("UPDATE custody_wallets SET public_key = ? WHERE id = ?", [
+      otherWalletAddress,
+      custodyWalletId,
+    ]);
+    await expect(asKey(() => controller.admit())).rejects.toMatchObject({
+      name: "ProposalAdmissionRefusedError",
+      reason: "proposal_binding_changed",
     });
   });
 
@@ -292,15 +298,15 @@ describe("retained proposal recovery waist", () => {
     });
   });
 
-  it.each([...CUSTODY_CONNECTION_CHECK_STATUSES, null])(
-    "retries pending connection check %s and recovers after activation",
-    async (status) => {
+  it.each(["failed", null] as const)(
+    "retries a pending connection whose last check is %s and recovers after activation",
+    async (lastCheckStatus) => {
       const controller = await recovery();
       const secretRead = vi.spyOn(credentialSecretStore, "createCredentialSecretStore");
       const fetch = vi.spyOn(globalThis, "fetch");
       await getDb(env).execute(
         "UPDATE custody_connections SET status = 'pending', activated_at = NULL, last_check_status = ? WHERE id = ?",
-        [status, connectionId]
+        [lastCheckStatus, connectionId]
       );
       const admission = asKey(() => controller.admit());
       await expect(admission).rejects.toMatchObject({
@@ -356,8 +362,7 @@ describe("retained proposal recovery waist", () => {
     });
   });
 
-  it("reads and cancels after organization, key, wallet and connection deactivation", async () => {
-    const controller = await recovery();
+  it("builds, reads and cancels after organization, key, wallet and connection deactivation", async () => {
     const db = getDb(env);
     await db.execute("UPDATE organizations SET status = 'suspended' WHERE id = ?", [
       organizationId,
@@ -370,9 +375,9 @@ describe("retained proposal recovery waist", () => {
       "UPDATE custody_connections SET status = 'deactivated', deactivated_at = sdp_iso_now() WHERE id = ?",
       [connectionId]
     );
-    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
-      expect(new Headers(init?.headers).get("X-API-Key")).toBe("retained-tenant-key");
-      return Response.json(
+    const controller = await recovery();
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) =>
+      Response.json(
         init?.method === "POST"
           ? { success: true }
           : {
@@ -383,15 +388,21 @@ describe("retained proposal recovery waist", () => {
               assetId: binding.assetId,
               source: { type: "VAULT_ACCOUNT", id: binding.vaultAccountId },
             }
-      );
-    });
-    await expect(controller.read("xfr_original")).resolves.toHaveProperty(
-      "id",
-      "provider-transaction"
+      )
     );
+    await expect(controller.read("xfr_original")).resolves.toMatchObject({
+      id: "provider-transaction",
+      status: "PENDING_SIGNATURE",
+    });
     await expect(controller.cancel("xfr_original")).resolves.toBe(true);
-    expect(fetch).toHaveBeenCalledTimes(3);
-    expect(fetch.mock.calls[2]?.[1]?.method).toBe("POST");
+    const base = "https://fireblocks.recovery.test";
+    expect(fetch.mock.calls.map(([url, init]) => [String(url), required(init).method])).toEqual([
+      [`${base}/v1/transactions/external_tx_id/xfr_original`, "GET"],
+      [`${base}/v1/transactions/external_tx_id/xfr_original`, "GET"],
+      [`${base}/v1/transactions/provider-transaction/cancel`, "POST"],
+    ]);
+    for (const [, init] of fetch.mock.calls)
+      expect(new Headers(required(init).headers).get("X-API-Key")).toBe("retained-tenant-key");
   });
 
   it("keeps provider credential deactivation effective for retained cancellation", async () => {

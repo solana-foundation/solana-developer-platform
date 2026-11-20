@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
+import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { authenticateTestClerkUser, clerkHeaders } from "@/test/helpers/clerk";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
@@ -130,7 +131,7 @@ async function seedAuthAndWallets(): Promise<void> {
         id: "cwlt_scope_a",
         owner: { kind: "config", custodyConfigId: TEST_CONFIG_ID },
         walletId: "wal_scope_a",
-        publicKey: "pub_scope_a",
+        publicKey: TEST_SOLANA_ADDRESSES.wallet1,
         label: "Wallet Scope A",
         purpose: "transfer",
         status: "active",
@@ -139,7 +140,7 @@ async function seedAuthAndWallets(): Promise<void> {
         id: "cwlt_scope_b",
         owner: { kind: "config", custodyConfigId: TEST_CONFIG_ID },
         walletId: "wal_scope_b",
-        publicKey: "pub_scope_b",
+        publicKey: TEST_SOLANA_ADDRESSES.wallet2,
         label: "Wallet Scope B",
         purpose: "transfer",
         status: "active",
@@ -235,15 +236,6 @@ describe("API key wallet scope routes", () => {
     expect(body.error.message).toContain("walletScope 'all'");
   });
 
-  it("rejects the retired wallet-binding fields instead of ignoring them", async () => {
-    const response = await postKey({
-      name: "Legacy fields",
-      walletScope: "selected",
-      signingWalletIds: ["wal_scope_a"],
-    });
-    expect(response.status).toBe(400);
-  });
-
   it("creates a selected key listing exact custody wallet ids", async () => {
     const keyId = await createKey({
       walletScope: "selected",
@@ -286,7 +278,7 @@ describe("API key wallet scope routes", () => {
       walletIds: ["cwlt_scope_a", "cwlt_scope_b"],
     });
 
-    expect(response.status).toBeGreaterThanOrEqual(500);
+    expect(response.status).toBe(500);
     expect(
       await getDb(env).queryMany("SELECT id FROM api_keys WHERE name = ?", ["Rollback key"])
     ).toEqual([]);
@@ -353,7 +345,7 @@ describe("API key wallet scope routes", () => {
       walletIds: ["cwlt_scope_b"],
     });
 
-    expect(response.status).toBeGreaterThanOrEqual(500);
+    expect(response.status).toBe(500);
     expect(await readKey(keyId)).toMatchObject({
       name: "Scoped key",
       walletScope: "selected",

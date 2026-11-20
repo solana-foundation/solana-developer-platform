@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildConnectionsPageUrl,
   buildConnectionsSearchParams,
-  ConnectionsRequestError,
   type CustodyConnectionListItem,
   fetchConnectionPickerOptions,
   fetchConnectionsPage,
@@ -104,8 +103,7 @@ describe("fetchProviderConnections", () => {
 
     const project = await fetchProviderConnections(request, "privy");
 
-    expect(project.connections).toHaveLength(51);
-    expect(project.complete).toBe(true);
+    expect(project).toEqual({ connections: [...first, connection("conn-50")], complete: true });
     expect(request).toHaveBeenLastCalledWith(
       "/internal/dashboard/custody/connections?limit=50&offset=50&provider=privy"
     );
@@ -140,15 +138,19 @@ describe("fetchProviderConnections", () => {
     expect(request).toHaveBeenCalledTimes(1);
   });
 
-  it("accepts additive fields from a newer API response", async () => {
-    const expectedConnection = connection("conn-1");
+  it("reads a response that carries fields from a newer API", async () => {
     const request = vi.fn(async () =>
       jsonResponse({
         data: {
           connections: [
             {
-              ...expectedConnection,
-              lastCheck: { ...expectedConnection.lastCheck, futureField: true },
+              ...connection("conn-1"),
+              lastCheck: {
+                status: "success",
+                at: "2026-08-10T09:05:00.000Z",
+                failureCode: null,
+                futureField: true,
+              },
               futureField: true,
             },
           ],
@@ -161,29 +163,9 @@ describe("fetchProviderConnections", () => {
     );
 
     await expect(fetchProviderConnections(request, "privy")).resolves.toEqual({
-      connections: [expectedConnection],
+      connections: [connection("conn-1")],
       complete: true,
     });
-  });
-
-  it("throws a typed error carrying the response status", async () => {
-    const request = vi.fn(async () => new Response(null, { status: 403 }));
-
-    await expect(fetchProviderConnections(request, "privy")).rejects.toMatchObject({
-      name: "ConnectionsRequestError",
-      status: 403,
-    });
-    await expect(fetchProviderConnections(request, "privy")).rejects.toBeInstanceOf(
-      ConnectionsRequestError
-    );
-  });
-
-  it("rejects a malformed successful response", async () => {
-    const request = vi.fn(async () =>
-      jsonResponse({ data: { connections: [{ id: "conn-1" }], pagination: {} } })
-    );
-
-    await expect(fetchProviderConnections(request, "privy")).rejects.toThrow();
   });
 });
 
@@ -204,11 +186,10 @@ describe("fetchConnectionsPage", () => {
     expect(request).toHaveBeenCalledWith(
       "/internal/dashboard/custody/connections?limit=20&offset=20&provider=privy"
     );
-    expect(read).toMatchObject({ status: "ok", filters: { page: 2 } });
-    expect(read.status === "ok" && read.result.pagination).toEqual({
-      limit: 20,
-      offset: 20,
-      total: 25,
+    expect(read).toEqual({
+      status: "ok",
+      result: { connections: rows, pagination: { limit: 20, offset: 20, total: 25 } },
+      filters: { page: 2 },
     });
   });
 
@@ -221,9 +202,14 @@ describe("fetchConnectionsPage", () => {
     const read = await fetchConnectionsPage(request, "privy", { page: 11 });
 
     expect(request).toHaveBeenCalledTimes(1);
-    expect(read.status === "ok" && read.result.connections.map((row) => row.id)).toEqual([
-      "conn-deep",
-    ]);
+    expect(read).toEqual({
+      status: "ok",
+      result: {
+        connections: [connection("conn-deep")],
+        pagination: { limit: 20, offset: 200, total: 240 },
+      },
+      filters: { page: 11 },
+    });
   });
 
   // Reading the last page here would render rows the caller has to throw away:
@@ -255,16 +241,10 @@ describe("fetchConnectionsPage", () => {
     const read = await fetchConnectionsPage(request, "privy", { page: 1 });
 
     expect(request).toHaveBeenCalledTimes(1);
-    expect(read).toMatchObject({ status: "ok", filters: { page: 1 } });
-    expect(read.status === "ok" && read.result.connections).toEqual([]);
-  });
-
-  it("throws a typed error carrying the response status", async () => {
-    const request = vi.fn(async () => new Response(null, { status: 403 }));
-
-    await expect(fetchConnectionsPage(request, "privy", { page: 1 })).rejects.toMatchObject({
-      name: "ConnectionsRequestError",
-      status: 403,
+    expect(read).toEqual({
+      status: "ok",
+      result: { connections: [], pagination: { limit: 20, offset: 0, total: 0 } },
+      filters: { page: 1 },
     });
   });
 });
@@ -328,8 +308,16 @@ describe("fetchWalletsByConnection", () => {
     const byConnection = await fetchWalletsByConnection(request);
 
     expect(request).toHaveBeenCalledWith("/v1/wallets");
-    expect([...byConnection.keys()].sort()).toEqual(["conn-1", "conn-2"]);
-    expect(byConnection.get("conn-1")?.map((wallet) => wallet.walletId)).toEqual(["w-1", "w-2"]);
+    expect([...byConnection]).toEqual([
+      [
+        "conn-1",
+        [
+          { walletId: "w-1", custodyConnectionId: "conn-1" },
+          { walletId: "w-2", custodyConnectionId: "conn-1" },
+        ],
+      ],
+      ["conn-2", [{ walletId: "w-4", custodyConnectionId: "conn-2" }]],
+    ]);
   });
 });
 

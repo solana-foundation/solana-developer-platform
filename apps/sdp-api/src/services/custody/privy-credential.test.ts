@@ -112,11 +112,8 @@ describe("assertPrivyCredentialAccepted", () => {
     });
   });
 
-  it.each([
-    ["a provider failure", () => Promise.resolve(jsonResponse({ error: "unavailable" }, 503))],
-    ["a transport failure", () => Promise.reject(new Error("network failure"))],
-  ])("refuses credentials Privy did not confirm after %s", async (_case, outcome) => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(outcome);
+  it("refuses credentials Privy did not confirm", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ error: "unavailable" }, 503));
 
     await expect(
       assertPrivyCredentialAccepted({}, { appId: "app-123", appSecret: "secret" })

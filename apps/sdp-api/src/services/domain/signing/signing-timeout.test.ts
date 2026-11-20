@@ -1,6 +1,6 @@
 import { SigningError } from "@sdp/custody/signing";
 import {
-  address,
+  generateKeyPairSigner,
   isTransactionModifyingSigner,
   isTransactionPartialSigner,
   isTransactionSendingSigner,
@@ -14,15 +14,15 @@ import { describe, expect, it, vi } from "vitest";
 import * as loggerModule from "@/runtime/logger";
 import { RINGS_UNSIGNED_GRACE_MS } from "@/services/jobs/poll-rings-indexing";
 import { STUCK_PROCESSING_AFTER_MS } from "@/services/jobs/track-pending-transfers";
+import { required } from "@/test/helpers/required";
 import {
   boundSigningTime,
-  CUSTODY_SIGNING_TIMEOUT_MS,
   custodySigningTimeoutMs,
   MAX_CUSTODY_SIGNING_TIMEOUT_MS,
   warnIfCustodySigningBudgetCapped,
 } from "./signing-timeout";
 
-const SIGNER_ADDRESS = address("11111111111111111111111111111111");
+const { address: SIGNER_ADDRESS } = await generateKeyPairSigner();
 
 describe("boundSigningTime", () => {
   it("fails a signing call that outlives the bound, as a retryable network error", async () => {
@@ -64,7 +64,7 @@ describe("boundSigningTime", () => {
       });
       await vi.advanceTimersByTimeAsync(100);
       await rejected;
-      expect(signal?.aborted).toBe(true);
+      expect(required(signal).aborted).toBe(true);
     } finally {
       vi.useRealTimers();
     }
@@ -78,7 +78,7 @@ describe("boundSigningTime", () => {
       modifyAndSignTransactions: vi.fn(async (_transactions, config) => {
         signal = config?.abortSignal;
         controller.abort();
-        signal?.throwIfAborted();
+        required(signal).throwIfAborted();
         return [];
       }),
     };
@@ -86,8 +86,8 @@ describe("boundSigningTime", () => {
     if (!isTransactionModifyingSigner(bounded)) throw new Error("Expected modifying signer");
     await expect(
       bounded.modifyAndSignTransactions([], { abortSignal: controller.signal })
-    ).rejects.toThrow();
-    expect(signal?.aborted).toBe(true);
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(required(signal).aborted).toBe(true);
   });
 
   it("keeps everything it does not bound, including a sending method on the prototype", async () => {
@@ -115,22 +115,17 @@ describe("boundSigningTime", () => {
 });
 
 describe("custodySigningTimeoutMs", () => {
-  it("covers the default poll budget, and a longer configured Utila budget, with a margin", () => {
-    const defaultBound = custodySigningTimeoutMs({});
-    expect(defaultBound).toBeGreaterThan(60 * 1_000);
-    expect(defaultBound).toBeGreaterThanOrEqual(CUSTODY_SIGNING_TIMEOUT_MS);
-
-    const longerBudget = custodySigningTimeoutMs({
-      UTILA_POLL_INTERVAL_MS: "1000",
-      UTILA_MAX_POLL_ATTEMPTS: "70",
-    });
-    expect(longerBudget).toBe(85_000);
-  });
-
-  it("never drops below the base bound for a short budget", () => {
+  it("covers the default poll budget with a margin, and never drops below it for a short budget", () => {
+    expect(custodySigningTimeoutMs({})).toBe(75_000);
     expect(
       custodySigningTimeoutMs({ UTILA_POLL_INTERVAL_MS: "100", UTILA_MAX_POLL_ATTEMPTS: "5" })
-    ).toBeGreaterThanOrEqual(CUSTODY_SIGNING_TIMEOUT_MS);
+    ).toBe(75_000);
+  });
+
+  it("covers a longer configured Utila budget with the same margin", () => {
+    expect(
+      custodySigningTimeoutMs({ UTILA_POLL_INTERVAL_MS: "1000", UTILA_MAX_POLL_ATTEMPTS: "70" })
+    ).toBe(85_000);
   });
 
   // A signer still running past a recovery window is failed under it, and its
@@ -140,7 +135,7 @@ describe("custodySigningTimeoutMs", () => {
       UTILA_POLL_INTERVAL_MS: "6000",
       UTILA_MAX_POLL_ATTEMPTS: "50",
     });
-    expect(capped).toBe(MAX_CUSTODY_SIGNING_TIMEOUT_MS);
+    expect(capped).toBe(90_000);
     expect(MAX_CUSTODY_SIGNING_TIMEOUT_MS).toBeLessThan(RINGS_UNSIGNED_GRACE_MS);
     expect(MAX_CUSTODY_SIGNING_TIMEOUT_MS).toBeLessThan(STUCK_PROCESSING_AFTER_MS);
   });
@@ -164,7 +159,7 @@ describe("warnIfCustodySigningBudgetCapped", () => {
         expect.objectContaining({
           event: "sdp_custody_signing_budget_capped",
           requested_ms: 315_000,
-          cap_ms: MAX_CUSTODY_SIGNING_TIMEOUT_MS,
+          cap_ms: 90_000,
         }),
         expect.any(String)
       );
