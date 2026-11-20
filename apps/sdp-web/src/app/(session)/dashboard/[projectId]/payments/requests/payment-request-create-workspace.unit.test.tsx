@@ -13,9 +13,13 @@ import { I18nProvider } from "@/i18n/provider";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
 import { stubClipboard } from "@/test/clipboard";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { TEST_PAYMENT_REQUEST_RECIPIENT } from "@/test/payment-requests";
+import { requiredWellKnownMint } from "@/test/well-known-mints";
 import { createdRequestLinkCopied, forgetCreatedRequestLink } from "./created-request-link";
 import { PaymentRequestCreateWorkspace } from "./payment-request-create-workspace";
-import { deriveTokenOptions } from "./payment-requests-page.data";
+
+/** An ISO 8601 instant, as a frozen expiry is sent. */
+const ISO_INSTANT = expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
 
 /** The fields these tests read from a sent create body; the rest is kept for equality checks. */
 const sentCreateBodySchema = z.looseObject({
@@ -37,7 +41,7 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
 const wallet: PaymentsDashboardWallet = {
   id: "cwlt_treasury",
   walletId: "wallet_treasury",
-  publicKey: "11111111111111111111111111111111",
+  publicKey: TEST_PAYMENT_REQUEST_RECIPIENT,
   label: "Treasury",
   isRuntimeExecutionAllowed: true,
 };
@@ -50,8 +54,10 @@ function wrapper({ children }: { children: ReactNode }) {
   );
 }
 
-function readsAs(): string {
-  return screen.getByText("Reads as").nextElementSibling?.textContent ?? "";
+function readsAs(): string | null {
+  const sentence = screen.getByText("Reads as").nextElementSibling;
+  if (sentence === null) throw new Error("no sentence follows Reads as");
+  return sentence.textContent;
 }
 
 beforeEach(() => {
@@ -111,17 +117,17 @@ describe("New request page", () => {
     answer(Response.json({ data: { id: "preq_1", publicToken: "tok_1" } }));
 
     await waitFor(() => expect(dashboardRouter.push).toHaveBeenCalledTimes(1));
-    const usdc = deriveTokenOptions("devnet").find((token) => token.symbol === "USDC");
     expect(writes).toEqual([
       {
         walletId: "wallet_treasury",
-        token: usdc?.mintAddress,
+        token: requiredWellKnownMint("USDC", "devnet"),
         amount: "25",
         expiresAt: null,
       },
     ]);
     const [copied] = clipboard.writes;
-    await expect(copied?.then((blob) => blob.text())).resolves.toBe(
+    if (copied === undefined) throw new Error("no clipboard write started");
+    await expect(copied.then((blob) => blob.text())).resolves.toBe(
       `${window.location.origin}/pay/tok_1`
     );
     expect(dashboardRouter.push).toHaveBeenCalledWith(
@@ -164,46 +170,6 @@ describe("New request page", () => {
     expect(dashboardRouter.push).not.toHaveBeenCalled();
   });
 
-  // The expiry comes from the clock. Read again on the retry, it would be a new
-  // body under a new key, and a first attempt that did create could be repeated.
-  it("resends the first attempt's expiry and key when the user retries", async () => {
-    const sends: { body: z.infer<typeof sentCreateBodySchema>; key: string | null }[] = [];
-    vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
-      sends.push({
-        body: sentCreateBodySchema.parse(JSON.parse(String(init?.body))),
-        key: new Headers(init?.headers).get("Idempotency-Key"),
-      });
-      if (sends.length === 1) throw new TypeError("network down");
-      return Response.json({ data: { id: "preq_1", publicToken: "tok_1" } });
-    });
-    render(<PaymentRequestCreateWorkspace wallets={[wallet]} walletsError={null} />, { wrapper });
-    const user = userEvent.setup();
-    const create = () => screen.getByRole("button", { name: "Create and copy link" });
-
-    await user.type(screen.getByRole("textbox", { name: "Amount" }), "25");
-    await user.click(screen.getByRole("button", { name: "Destination wallet" }));
-    await user.click(screen.getByRole("button", { name: /Treasury/ }));
-    await user.click(screen.getByRole("button", { name: "Link expires" }));
-    await user.click(screen.getByRole("button", { name: "1 hour" }));
-    await waitFor(() => expect(create().hasAttribute("disabled")).toBe(false));
-    await user.click(create());
-    await waitFor(() => expect(create().hasAttribute("disabled")).toBe(false));
-
-    const later = Date.now() + 60_000;
-    const clock = vi.spyOn(Date, "now").mockReturnValue(later);
-    try {
-      await user.click(create());
-      await waitFor(() => expect(dashboardRouter.push).toHaveBeenCalledTimes(1));
-    } finally {
-      clock.mockRestore();
-    }
-
-    expect(sends).toHaveLength(2);
-    expect(sends[0]?.body.expiresAt).toMatch(/^\d{4}-/);
-    expect(sends[1]?.body).toEqual(sends[0]?.body);
-    expect(sends[1]?.key).toBe(sends[0]?.key);
-  });
-
   /** One create the page sent: its body and Idempotency-Key. */
   interface RecordedSend {
     body: z.infer<typeof sentCreateBodySchema>;
@@ -218,7 +184,8 @@ describe("New request page", () => {
         body: sentCreateBodySchema.parse(JSON.parse(String(init?.body))),
         key: new Headers(init?.headers).get("Idempotency-Key"),
       });
-      const answer = answers.shift() ?? 201;
+      const answer = answers.shift();
+      if (answer === undefined) throw new Error("the page sent a create the test did not expect");
       if (answer === "lost") throw new TypeError("Failed to fetch");
       if (answer === "outcome_unknown") {
         return Response.json(
@@ -287,9 +254,9 @@ describe("New request page", () => {
     await createLater(user, sends, 2);
 
     expect(sends.map((send) => send.body.amount)).toEqual(["25", "26", "25"]);
-    expect(sends[1]?.key).not.toBe(sends[0]?.key);
-    expect(sends[2]?.body).toEqual(sends[0]?.body);
-    expect(sends[2]?.key).toBe(sends[0]?.key);
+    expect(sends[0]).toMatchObject({ key: expect.any(String), body: { expiresAt: ISO_INSTANT } });
+    expect(sends[2]).toEqual(sends[0]);
+    expect(new Set(sends.map((send) => send.key)).size).toBe(2);
   });
 
   // Browser test (HOO-1918): with an expiry set, a lost answer, a reload and a
@@ -307,8 +274,8 @@ describe("New request page", () => {
     await createLater(user, sends, 5);
 
     expect(sends).toHaveLength(2);
-    expect(sends[1]?.body).toEqual(sends[0]?.body);
-    expect(sends[1]?.key).toBe(sends[0]?.key);
+    expect(sends[0]).toMatchObject({ key: expect.any(String), body: { expiresAt: ISO_INSTANT } });
+    expect(sends[1]).toEqual(sends[0]);
   });
 
   // The earlier request may have created it: the user checks the list, and
@@ -324,7 +291,7 @@ describe("New request page", () => {
       "We couldn’t confirm whether this was created — check the list before trying again."
     );
     expect(dashboardRouter.push).toHaveBeenCalledWith(
-      expect.stringMatching(/\/payments\/requests$/)
+      "/dashboard/prj_test_sandbox/payments/requests"
     );
     expect(sends).toHaveLength(1);
 
@@ -332,25 +299,8 @@ describe("New request page", () => {
     dashboardRouter.push.mockClear();
     await fillRequest(user, "25");
     await createLater(user, sends, 1);
-    expect(sends[1]?.key).not.toBe(sends[0]?.key);
-  });
-
-  it("frees the form when creating the link throws", async () => {
-    vi.stubGlobal("fetch", async () => {
-      throw new Error("offline");
-    });
-    render(<PaymentRequestCreateWorkspace wallets={[wallet]} walletsError={null} />, { wrapper });
-    const user = userEvent.setup();
-    const create = () => screen.getByRole("button", { name: "Create and copy link" });
-
-    await user.type(screen.getByRole("textbox", { name: "Amount" }), "25");
-    await user.click(screen.getByRole("button", { name: "Destination wallet" }));
-    await user.click(screen.getByRole("button", { name: /Treasury/ }));
-    await waitFor(() => expect(create().hasAttribute("disabled")).toBe(false));
-    await user.click(create());
-
-    await waitFor(() => expect(create().hasAttribute("disabled")).toBe(false));
-    expect(dashboardRouter.push).not.toHaveBeenCalled();
+    expect(sends.map((send) => send.key)).toEqual([expect.any(String), expect.any(String)]);
+    expect(new Set(sends.map((send) => send.key)).size).toBe(2);
   });
 
   it("keeps create off for an amount the API would refuse", async () => {

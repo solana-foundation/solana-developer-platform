@@ -1,6 +1,5 @@
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
@@ -42,6 +41,14 @@ async function storedKeyCount(idempotencyKey: string): Promise<number> {
   return row.count;
 }
 
+async function storedRequestCount(projectId: string): Promise<number> {
+  const row = await getDb(env)
+    .prepare("SELECT COUNT(*)::integer AS count FROM payment_requests WHERE project_id = ?")
+    .bind(projectId)
+    .first<{ count: number }>();
+  return required(row).count;
+}
+
 describe("Payments routes — payment request access before the key", () => {
   installPaymentsRouteTestHooks();
 
@@ -52,17 +59,9 @@ describe("Payments routes — payment request access before the key", () => {
     );
 
     expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ error: { code: "NOT_FOUND" } });
     expect(await storedKeyCount("payreq-foreign-wallet")).toBe(0);
-  });
-
-  it("still creates a request for the project's own wallet", async () => {
-    const response = await postPaymentRequest(
-      { walletId: TEST_WALLET_ID, token: DEVNET_USDC_MINT, amount: "1" },
-      "payreq-own-wallet"
-    );
-
-    expect(response.status).toBe(201);
-    expect(await storedKeyCount("payreq-own-wallet")).toBe(1);
+    expect(await storedRequestCount(TEST_PROJECT.id)).toBe(0);
   });
 
   it("replays a retry that only re-spells the amount (APE SOLA9-734)", async () => {
@@ -76,11 +75,27 @@ describe("Payments routes — payment request access before the key", () => {
     );
 
     expect(first.status).toBe(201);
+    expect(first.headers.get("Idempotent-Replayed")).toBeNull();
     expect(retry.status).toBe(201);
-    const createdSchema = z.object({ data: z.object({ id: z.string() }) });
-    const created = createdSchema.parse(await first.json());
-    const replayed = createdSchema.parse(await retry.json());
-    expect(replayed.data.id).toBe(created.data.id);
+    expect(retry.headers.get("Idempotent-Replayed")).toBe("true");
+    expect(await retry.json()).toEqual(await first.json());
+    expect(await storedRequestCount(TEST_PROJECT.id)).toBe(1);
+  });
+
+  it("rejects the same key with a different payload and stores no second request", async () => {
+    const first = await postPaymentRequest(
+      { walletId: TEST_WALLET_ID, token: DEVNET_USDC_MINT, amount: "1" },
+      "payreq-changed-payload"
+    );
+    const changed = await postPaymentRequest(
+      { walletId: TEST_WALLET_ID, token: DEVNET_USDC_MINT, amount: "2" },
+      "payreq-changed-payload"
+    );
+
+    expect(first.status).toBe(201);
+    expect(changed.status).toBe(422);
+    expect(await changed.json()).toMatchObject({ error: { code: "IDEMPOTENCY_KEY_REUSED" } });
+    expect(await storedRequestCount(TEST_PROJECT.id)).toBe(1);
   });
 });
 
@@ -111,11 +126,7 @@ describe("Payments routes — payment request token cluster", () => {
         message: `USDC mint ${DEVNET_USDC_MINT} is not available on mainnet-beta`,
       },
     });
-    const stored = await getDb(env)
-      .prepare("SELECT COUNT(*)::integer AS count FROM payment_requests WHERE project_id = ?")
-      .bind(TEST_PRODUCTION_PROJECT_ID)
-      .first<{ count: number }>();
-    expect(stored).toEqual({ count: 0 });
+    expect(await storedRequestCount(TEST_PRODUCTION_PROJECT_ID)).toBe(0);
   });
 
   it.each(["1.0000001", "18446744073709.551616"])(
@@ -128,11 +139,7 @@ describe("Payments routes — payment request token cluster", () => {
 
       expect(response.status).toBe(400);
       await expect(response.json()).resolves.toMatchObject({ error: { code: "BAD_REQUEST" } });
-      const stored = await getDb(env)
-        .prepare("SELECT COUNT(*)::integer AS count FROM payment_requests WHERE project_id = ?")
-        .bind(TEST_PROJECT.id)
-        .first<{ count: number }>();
-      expect(stored).toEqual({ count: 0 });
+      expect(await storedRequestCount(TEST_PROJECT.id)).toBe(0);
     }
   );
 });
@@ -203,6 +210,7 @@ describe("Payments routes — SOL payment requests below the rent minimum (HOO-2
       error: { code: "AMOUNT_BELOW_RENT_MINIMUM", details: { recipientIndexes: [0] } },
     });
     expect(await storedKeyCount("payreq-sol-below-rent")).toBe(0);
+    expect(await storedRequestCount(TEST_PROJECT.id)).toBe(0);
   });
 
   it("creates a SOL request at or above the minimum without reading the wallet", async () => {
@@ -212,6 +220,7 @@ describe("Payments routes — SOL payment requests below the rent minimum (HOO-2
     );
 
     expect(response.status).toBe(201);
+    expect(await storedRequestCount(TEST_PROJECT.id)).toBe(1);
     expect(rpc.calls.filter((call) => call.method === "getMultipleAccounts")).toHaveLength(0);
   });
 });

@@ -1,32 +1,34 @@
 import type { Action } from "@sdp/types/actions";
-import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
+import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { app } from "@/index";
+import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
-import { seedPaymentRequest } from "@/test/helpers/payment-requests";
-import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
+import {
+  seedPaymentRequest,
+  seedPaymentRequestTransfer,
+  setPaymentRequestColumns,
+} from "@/test/helpers/payment-requests";
+import {
+  DEVNET_USDC_MINT,
+  installPaymentsRouteTestHooks,
+  seedProjectPrivyWallet,
+  TEST_CUSTODY_WALLET_ID,
+  TEST_ORG,
+  TEST_PRODUCTION_PROJECT_ID,
+  TEST_PROJECT,
+  TEST_USER,
+  TEST_WALLET_ID,
+} from "@/test/helpers/payments-routes";
 
 /**
  * APE-849: a payment request's public token is the bearer credential of its
  * `/pay/:token` link. Reads never disclose it; only create and the
  * `payment_requests.manage` link read return it.
  */
-const ORGANIZATION_ID = "org_payment_request_token";
-const PROJECT_ID = "prj_payment_request_token";
-const USER_ID = "usr_payment_request_token";
-const WALLET_ADDRESS = "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ";
-const DEVNET_USDC = devnetUsdc();
-
-function devnetUsdc(): string {
-  const mint = wellKnownMint("USDC", "devnet");
-  if (!mint) throw new Error("USDC has no devnet mint");
-  return mint;
-}
-
 const READ_KEY = { id: "key_request_reader", raw: "sk_test_request_reader", prefix: "sk_test_rqr" };
 const MANAGE_KEY = {
   id: "key_request_manager",
@@ -37,9 +39,9 @@ const MANAGE_KEY = {
 async function seedKey(key: typeof READ_KEY, grants: Action[]): Promise<void> {
   await seedProjectApiKey(getDb(env), env, {
     key,
-    organizationId: ORGANIZATION_ID,
-    projectId: PROJECT_ID,
-    createdBy: USER_ID,
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT.id,
+    createdBy: TEST_USER.id,
     grants,
   });
 }
@@ -48,87 +50,104 @@ async function get(path: string, key: typeof READ_KEY): Promise<Response> {
   return app.request(path, { headers: { Authorization: `Bearer ${key.raw}` } }, env);
 }
 
+const readResponseSchema = z.object({ data: z.record(z.string(), z.unknown()) });
+
 describe("payment request public tokens", () => {
-  let requestId: string;
-  let publicToken: string;
+  let request: PaymentRequestRow;
+  let otherProjectRequest: PaymentRequestRow;
+
+  installPaymentsRouteTestHooks();
 
   beforeEach(async () => {
-    await seedTestDatabase(env);
-    const db = getDb(env);
-    await db
-      .prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'enterprise', 'active')"
-      )
-      .bind(ORGANIZATION_ID, "Payment request token", "payment-request-token")
-      .run();
-    await db
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-      .bind(USER_ID, "payment-request-token@example.com")
-      .run();
-    await seedDefaultProjects(db, {
-      organizationId: ORGANIZATION_ID,
-      createdBy: USER_ID,
-      members: [],
-      ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
-    });
-    await db
-      .prepare(
-        `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted)
-         VALUES ('cfg_request_token', ?, ?, 'local', 'synthetic')`
-      )
-      .bind(ORGANIZATION_ID, PROJECT_ID)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-         VALUES ('cwlt_request_token', 'cfg_request_token', 'wlt_request_token', ?, 'Receiving', 'transfer', 'active')`
-      )
-      .bind(WALLET_ADDRESS)
-      .run();
     await seedKey(READ_KEY, ["payment_requests.read"]);
     await seedKey(MANAGE_KEY, ["payment_requests.manage"]);
 
-    const request = await seedPaymentRequest(env, {
-      organizationId: ORGANIZATION_ID,
-      projectId: PROJECT_ID,
-      custodyWalletId: "cwlt_request_token",
-      walletId: "wlt_request_token",
-      destinationAddress: WALLET_ADDRESS,
-      token: DEVNET_USDC,
+    request = await seedPaymentRequest(env, {
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      custodyWalletId: TEST_CUSTODY_WALLET_ID,
+      walletId: TEST_WALLET_ID,
+      destinationAddress: TEST_SOLANA_ADDRESSES.wallet1,
+      token: DEVNET_USDC_MINT,
       amount: "25.00",
-      expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-      createdBy: USER_ID,
+      expiresAt: null,
+      createdBy: TEST_USER.id,
     });
-    requestId = request.id;
-    publicToken = request.public_token;
+    const productionWalletId = await seedProjectPrivyWallet({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PRODUCTION_PROJECT_ID,
+      createdBy: TEST_USER.id,
+      custodyWalletId: "cwlt_request_token_production",
+      publicKey: TEST_SOLANA_ADDRESSES.wallet3,
+    });
+    otherProjectRequest = await seedPaymentRequest(env, {
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PRODUCTION_PROJECT_ID,
+      custodyWalletId: "cwlt_request_token_production",
+      walletId: productionWalletId,
+      destinationAddress: TEST_SOLANA_ADDRESSES.wallet3,
+      token: DEVNET_USDC_MINT,
+      amount: "25.00",
+      expiresAt: null,
+      createdBy: TEST_USER.id,
+    });
   });
 
   it.each([
     ["payment_requests.read", READ_KEY],
     ["payment_requests.manage", MANAGE_KEY],
-  ] as const)("never lists the token, even to a key holding %s", async (_grant, key) => {
-    const res = await get("/v1/payments/requests?status=awaiting_payment", key);
+  ] as const)(
+    "lists only the project's requests, never with the token, even to a key holding %s",
+    async (_grant, key) => {
+      const res = await get("/v1/payments/requests?status=awaiting_payment", key);
+
+      expect(res.status).toBe(200);
+      const body = z
+        .object({ data: z.object({ paymentRequests: z.array(z.record(z.string(), z.unknown())) }) })
+        .parse(await res.json());
+      expect(body.data.paymentRequests.map((row) => row.id)).toEqual([request.id]);
+      expect(body.data.paymentRequests[0]).not.toHaveProperty("publicToken");
+      expect(JSON.stringify(body)).not.toContain(request.public_token);
+    }
+  );
+
+  it("reads a request in its record shape, without the token", async () => {
+    const res = await get(`/v1/payments/requests/${request.id}`, MANAGE_KEY);
 
     expect(res.status).toBe(200);
-    const body = z
-      .object({ data: z.object({ paymentRequests: z.array(z.record(z.string(), z.unknown())) }) })
-      .parse(await res.json());
-    expect(body.data.paymentRequests).toHaveLength(1);
-    expect(body.data.paymentRequests[0]).not.toHaveProperty("publicToken");
-    expect(JSON.stringify(body)).not.toContain(publicToken);
+    expect(readResponseSchema.parse(await res.json()).data).toEqual({
+      id: request.id,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      walletId: TEST_WALLET_ID,
+      destinationAddress: TEST_SOLANA_ADDRESSES.wallet1,
+      token: DEVNET_USDC_MINT,
+      amount: "25.00",
+      reference: request.reference,
+      status: "awaiting_payment",
+      expiresAt: null,
+      fulfilledByTransferId: null,
+      paidLate: false,
+      lastCheckedAt: null,
+      canceledByApiKeyId: null,
+      canceledByUserId: null,
+      canceledAt: null,
+      lifecycle: request.lifecycle,
+      createdBy: TEST_USER.id,
+      createdAt: request.created_at,
+      updatedAt: request.updated_at,
+    });
   });
 
-  it("never returns the token on a single read", async () => {
-    const res = await get(`/v1/payments/requests/${requestId}`, MANAGE_KEY);
+  it("answers 404 for a request in another project", async () => {
+    const res = await get(`/v1/payments/requests/${otherProjectRequest.id}`, MANAGE_KEY);
 
-    expect(res.status).toBe(200);
-    const body = z.object({ data: z.record(z.string(), z.unknown()) }).parse(await res.json());
-    expect(body.data.id).toBe(requestId);
-    expect(body.data).not.toHaveProperty("publicToken");
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ error: { code: "NOT_FOUND" } });
   });
 
   it("refuses the link to a key without payment_requests.manage, naming the action", async () => {
-    const res = await get(`/v1/payments/requests/${requestId}/link`, READ_KEY);
+    const res = await get(`/v1/payments/requests/${request.id}/link`, READ_KEY);
 
     expect(res.status).toBe(403);
     expect(await res.json()).toMatchObject({
@@ -137,11 +156,11 @@ describe("payment request public tokens", () => {
   });
 
   it("returns the link token with payment_requests.manage", async () => {
-    const res = await get(`/v1/payments/requests/${requestId}/link`, MANAGE_KEY);
+    const res = await get(`/v1/payments/requests/${request.id}/link`, MANAGE_KEY);
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
-      data: { id: requestId, publicToken },
+      data: { id: request.id, publicToken: request.public_token },
       meta: expect.anything(),
     });
   });
@@ -152,73 +171,44 @@ describe("payment request public tokens", () => {
       {
         method: "POST",
         headers: { Authorization: `Bearer ${READ_KEY.raw}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          walletId: "wlt_request_token",
-          token: DEVNET_USDC,
-          amount: "1.00",
-        }),
+        body: JSON.stringify({ walletId: TEST_WALLET_ID, token: DEVNET_USDC_MINT, amount: "1.00" }),
       },
       env
     );
 
     expect(res.status).toBe(403);
     expect(await res.json()).toMatchObject({
-      error: { details: { action: "payment_requests.manage" } },
+      error: { code: "INSUFFICIENT_PERMISSIONS", details: { action: "payment_requests.manage" } },
     });
   });
 
-  it("answers 404 for a request in another project", async () => {
-    const res = await get("/v1/payments/requests/preq_missing", MANAGE_KEY);
-    expect(res.status).toBe(404);
-  });
-
-  it("returns paidLate false and lastCheckedAt null for a fresh request", async () => {
-    const res = await get(`/v1/payments/requests/${requestId}`, MANAGE_KEY);
-
-    expect(res.status).toBe(200);
-    const body = z.object({ data: z.record(z.string(), z.unknown()) }).parse(await res.json());
-    expect(body.data).toMatchObject({ paidLate: false, lastCheckedAt: null });
-  });
-
   it("reports lastCheckedAt from the last verified check, not the last attempt", async () => {
-    const db = getDb(env);
-    await db
-      .prepare("UPDATE payment_requests SET last_checked_at = ?, last_verified_at = ? WHERE id = ?")
-      .bind("2026-10-23T10:05:00.000Z", "2026-10-23T10:00:00.000Z", requestId)
-      .run();
+    await setPaymentRequestColumns(env, request.id, {
+      last_checked_at: "2026-10-23T10:05:00.000Z",
+      last_verified_at: "2026-10-23T10:00:00.000Z",
+    });
 
-    const res = await get(`/v1/payments/requests/${requestId}`, MANAGE_KEY);
+    const res = await get(`/v1/payments/requests/${request.id}`, MANAGE_KEY);
 
     expect(res.status).toBe(200);
-    const body = z.object({ data: z.record(z.string(), z.unknown()) }).parse(await res.json());
-    expect(body.data).toMatchObject({ lastCheckedAt: "2026-10-23T10:00:00.000Z" });
+    expect(readResponseSchema.parse(await res.json()).data).toMatchObject({
+      lastCheckedAt: "2026-10-23T10:00:00.000Z",
+    });
   });
 
   it("returns paidLate true for a request settled late", async () => {
-    const db = getDb(env);
-    const transferId = "xfr_payment_request_token_late";
-    await db
-      .prepare(
-        `INSERT INTO payment_transfers (
-           id, organization_id, project_id, custody_wallet_id, wallet_id, source_address,
-           destination_address, token, amount, type, direction, status, created_at, updated_at
-         ) VALUES (?, ?, ?, 'cwlt_request_token', 'wlt_request_token', 'PayerAddr', ?, ?, '25.00',
-                   'transfer', 'inbound', 'confirmed', '2026-06-23T00:00:00.000Z', '2026-06-23T00:00:00.000Z')`
-      )
-      .bind(transferId, ORGANIZATION_ID, PROJECT_ID, WALLET_ADDRESS, DEVNET_USDC)
-      .run();
-    await db
-      .prepare(
-        `UPDATE payment_requests SET status = 'paid', paid_late = true, fulfilled_by_transfer_id = ?
-         WHERE id = ?`
-      )
-      .bind(transferId, requestId)
-      .run();
+    await setPaymentRequestColumns(env, request.id, {
+      status: "paid",
+      paid_late: "true",
+      fulfilled_by_transfer_id: await seedPaymentRequestTransfer(env, request),
+    });
 
-    const res = await get(`/v1/payments/requests/${requestId}`, MANAGE_KEY);
+    const res = await get(`/v1/payments/requests/${request.id}`, MANAGE_KEY);
 
     expect(res.status).toBe(200);
-    const body = z.object({ data: z.record(z.string(), z.unknown()) }).parse(await res.json());
-    expect(body.data).toMatchObject({ status: "paid", paidLate: true });
+    expect(readResponseSchema.parse(await res.json()).data).toMatchObject({
+      status: "paid",
+      paidLate: true,
+    });
   });
 });
