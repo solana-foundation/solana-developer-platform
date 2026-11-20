@@ -36,6 +36,7 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/private-channels` | Solana Private Channels gateway, auth, and instance clients. | `@sdp/rpc`, `@sdp/types` |
 | `@sdp/redaction` | Central PII and credential denylist plus the scrubbers every log, Sentry, and audit boundary applies. | None |
 | `@sdp/rpc` | Solana RPC clients, errors, and transport helpers. | `@sdp/types` |
+| `@sdp/safe-proxy` | Safe Proxy service: holds provider credentials and makes provider calls for the API. | None |
 | `@sdp/solana` | Solana transaction and token-program services. | `@sdp/rpc`, `@sdp/types` |
 | `@sdp/spc-escrow` | Generated @solana/kit client for the Private Channels escrow program. | None |
 | `@sdp/spc-withdraw` | Generated @solana/kit client for the Private Channels withdraw program. | None |
@@ -71,6 +72,7 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/private-channels` -> `@sdp/rpc`, `@sdp/types`
 - `@sdp/redaction` -> None
 - `@sdp/rpc` -> `@sdp/types`
+- `@sdp/safe-proxy` -> None
 - `@sdp/solana` -> `@sdp/rpc`
 - `@sdp/spc-escrow` -> None
 - `@sdp/spc-withdraw` -> None

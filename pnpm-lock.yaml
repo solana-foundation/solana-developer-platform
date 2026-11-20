@@ -376,6 +376,25 @@ importers:
         specifier: 6.0.3
         version: 6.0.3
 
+  apps/sdp-safe-proxy:
+    dependencies:
+      '@hono/node-server':
+        specifier: 2.1.5
+        version: 2.1.5(hono@4.13.14)
+      hono:
+        specifier: 4.13.14
+        version: 4.13.14
+    devDependencies:
+      '@types/node':
+        specifier: 26.6.5
+        version: 26.6.5
+      tsx:
+        specifier: 4.23.15
+        version: 4.23.15
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+
   apps/sdp-web:
     dependencies:
       '@base-ui/react':
