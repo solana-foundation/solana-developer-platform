@@ -1,14 +1,13 @@
 // @vitest-environment jsdom
-/**
- * What `createTransfer` makes of each answer.
- *
- * A 202 is inside `response.ok` and is NOT a transfer: a wallet policy parked
- * the payment until somebody approves it. Reading it as a transfer is what
- * turned a held payment into "Transfer failed" and invited a second send.
- */
+/** What `createTransfer` sends the transfer endpoint, and what it makes of each answer. */
 
 import { address } from "@solana/kit";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  dashboardDataResponse,
+  sentDashboardRequests,
+  stubDashboardFetch,
+} from "@/test/dashboard-fetch";
 import { createTransfer, TransferRequestError, type Translate } from "./payments-workspace.data";
 
 const t: Translate = (key) => key;
@@ -20,86 +19,96 @@ const SUBMISSION = {
   amount: "250",
 };
 
+const KEY = { value: "key_1", persisted: true };
+
+const recorded = () =>
+  dashboardDataResponse(201, { transfer: { id: "xfr_1", status: "confirmed", signature: null } });
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe("createTransfer", () => {
-  it("sends the idempotency key as a header, never in the body", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      Response.json({ data: { transfer: { id: "xfr_1", status: "confirmed" } } })
-    );
-    vi.stubGlobal("fetch", fetchMock);
+  it("posts the payment with the caller's key as a header, never in the body", async () => {
+    const fetchMock = stubDashboardFetch(recorded);
 
-    const transfer = await createTransfer(SUBMISSION, t, { value: "key_1", persisted: true });
+    const transfer = await createTransfer(SUBMISSION, t, KEY);
 
-    expect(transfer).toEqual({ id: "xfr_1", status: "confirmed" });
-    const init = fetchMock.mock.calls[0][1];
-    expect(init).toBeDefined();
-    expect(new Headers(init?.headers).get("Idempotency-Key")).toBe("key_1");
-    expect(JSON.parse(String(init?.body))).not.toHaveProperty("idempotencyKey");
+    expect(transfer).toEqual({ id: "xfr_1", status: "confirmed", signature: null });
+    expect(sentDashboardRequests(fetchMock)).toEqual([
+      {
+        path: "/api/dashboard/payments/transfers",
+        method: "POST",
+        idempotencyKey: "key_1",
+        body: SUBMISSION,
+      },
+    ]);
   });
 
-  it("gives a caller without its own key a per-action key", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      Response.json({ data: { transfer: { id: "xfr_1", status: "confirmed" } } })
-    );
-    vi.stubGlobal("fetch", fetchMock);
+  it("gives a caller without its own key a key for its action", async () => {
+    const fetchMock = stubDashboardFetch(recorded);
 
     await createTransfer({ ...SUBMISSION, transferId: "xfr_ramp" }, t, null);
 
-    const init = fetchMock.mock.calls[0][1];
-    expect(init).toBeDefined();
-    // Transfers require a key (HOO-1918), so a single-shot caller gets one for
-    // its action from dashboardRequest.
-    expect(new Headers(init?.headers).get("Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/);
-    expect(JSON.parse(String(init?.body)).transferId).toBe("xfr_ramp");
+    const [sent] = sentDashboardRequests(fetchMock);
+    expect(sent?.body).toEqual({ ...SUBMISSION, transferId: "xfr_ramp" });
+    expect(sent?.idempotencyKey).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+    );
   });
 
-  it("names the contact account the destination belongs to, and only when given", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      Response.json({ data: { transfer: { id: "xfr_1", status: "confirmed" } } })
+  it("names the contact account and the memo only when given", async () => {
+    const fetchMock = stubDashboardFetch(recorded);
+
+    await createTransfer(
+      { ...SUBMISSION, counterpartyAccountId: "cpacct_1", memo: "invoice 7" },
+      t,
+      KEY
     );
-    vi.stubGlobal("fetch", fetchMock);
+    await createTransfer({ ...SUBMISSION, memo: "" }, t, { value: "key_2", persisted: true });
 
-    await createTransfer({ ...SUBMISSION, counterpartyAccountId: "cpacct_1" }, t, {
-      value: "key_1",
-      persisted: true,
-    });
-    await createTransfer(SUBMISSION, t, { value: "key_2", persisted: true });
-
-    const bodies = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
-    expect(bodies[0].counterpartyAccountId).toBe("cpacct_1");
-    expect(bodies[1]).not.toHaveProperty("counterpartyAccountId");
+    expect(sentDashboardRequests(fetchMock).map((request) => request.body)).toEqual([
+      { ...SUBMISSION, counterpartyAccountId: "cpacct_1", memo: "invoice 7" },
+      SUBMISSION,
+    ]);
   });
 
   it("refuses a success answer that carries no transfer", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => Response.json({ data: {} }))
-    );
+    stubDashboardFetch(() => dashboardDataResponse(200, {}));
 
-    await expect(
-      createTransfer(SUBMISSION, t, { value: "key_1", persisted: true })
-    ).rejects.toThrow("DashboardPayments.workspace.transferMissing");
+    await expect(createTransfer(SUBMISSION, t, KEY)).rejects.toThrow(
+      "DashboardPayments.workspace.transferMissing"
+    );
   });
 
-  // The status decides the key's fate, so the error has to carry it.
-  it("throws the API's message with its status", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => Response.json({ error: { message: "over the limit" } }, { status: 422 }))
+  // The status, code and replay mark decide the key's fate, so the error carries them.
+  it("throws the API's refusal with its message, status, code and replay mark", async () => {
+    stubDashboardFetch(() =>
+      Response.json(
+        { error: { code: "INSUFFICIENT_BALANCE", message: "Insufficient balance" } },
+        { status: 422, headers: { "Idempotent-Replayed": "true" } }
+      )
     );
 
-    await expect(
-      createTransfer(SUBMISSION, t, { value: "key_1", persisted: true })
-    ).rejects.toMatchObject({
-      name: "TransferRequestError",
-      message: "over the limit",
+    const refusal = await createTransfer(SUBMISSION, t, KEY).catch((error: unknown) => error);
+
+    expect(refusal).toBeInstanceOf(TransferRequestError);
+    expect(refusal).toMatchObject({
+      message: "Insufficient balance",
       status: 422,
+      code: "INSUFFICIENT_BALANCE",
+      replayed: true,
     });
-    await expect(
-      createTransfer(SUBMISSION, t, { value: "key_1", persisted: true })
-    ).rejects.toBeInstanceOf(TransferRequestError);
+  });
+
+  it("names the status when a refusal carries no message", async () => {
+    stubDashboardFetch(() => new Response("<html>502</html>", { status: 502 }));
+
+    await expect(createTransfer(SUBMISSION, t, KEY)).rejects.toMatchObject({
+      message: "DashboardPayments.workspace.transferRequestFailed",
+      status: 502,
+      code: null,
+      replayed: false,
+    });
   });
 });

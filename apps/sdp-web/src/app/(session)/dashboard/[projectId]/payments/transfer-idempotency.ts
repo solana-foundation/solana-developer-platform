@@ -26,7 +26,7 @@ import {
  */
 
 const store = createIdempotencyKeyStore("sdp:payments:transfer:idempotency:v1");
-type TransferSendResult = { transfer: TransferRecord; fingerprint: string };
+type TransferSendResult = { transfer: TransferRecord };
 const pendingSends = new Map<string, Promise<TransferSendResult>>();
 
 /** @internal Test-only: clear the module-scope tiers so specs are order-independent. */
@@ -52,7 +52,7 @@ function canonicalTransferInput(input: CreateTransferInput): CreateTransferInput
  * same address, so a retry that only changes it stays under the same key, where
  * the API refuses the changed body (422) instead of sending the money again.
  */
-export function transferRequestFingerprint(input: CreateTransferInput): string {
+function transferRequestFingerprint(input: CreateTransferInput): string {
   const canonical = canonicalTransferInput(input);
   return JSON.stringify([
     canonical.sourceCustodyWalletId,
@@ -61,11 +61,6 @@ export function transferRequestFingerprint(input: CreateTransferInput): string {
     canonical.amount,
     canonical.memo === undefined ? null : canonical.memo,
   ]);
-}
-
-/** The key for this payment, the same one on every retry until it is released. */
-export function claimTransferIdempotencyKey(fingerprint: string): string {
-  return store.claim(fingerprint).key;
 }
 
 /**
@@ -77,7 +72,7 @@ export function claimTransferIdempotencyKey(fingerprint: string): string {
  *
  * @param submission - The payment.
  * @param t - Translator, for the API's refusal message.
- * @returns What the API answered, and the fingerprint of the payment.
+ * @returns What the API answered.
  */
 async function performTransferUnderKey(
   submission: CreateTransferInput,
@@ -124,7 +119,7 @@ async function performTransferUnderKey(
       );
     }
   }
-  return { transfer, fingerprint };
+  return { transfer };
 }
 
 /** Joins simultaneous submissions before either can release or claim a key. */

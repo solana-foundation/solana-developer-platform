@@ -54,13 +54,20 @@ async function withHookAccount(instruction: Instruction): Promise<Instruction> {
 describe("callerInsufficientFundsError (HOO-2621)", () => {
   it("names the source wallet for 0x1 on a Token-2022 transfer with no hook accounts", async () => {
     const transfer = await token2022Transfer();
-
-    const error = callerInsufficientFundsError(koraShortfall(0), [transfer]);
-
-    expect(error).toMatchObject({
+    const shortfall = {
       code: "TRANSACTION_FAILED",
+      statusCode: 400,
       message: INSUFFICIENT_FUNDS_MESSAGE,
-    });
+    };
+
+    expect(callerInsufficientFundsError(koraShortfall(0), [transfer])).toMatchObject(shortfall);
+    // SDP's own preflight serializes the instruction index and code as decimal strings.
+    expect(
+      simulatedInsufficientFundsError(
+        JSON.stringify({ InstructionError: ["0", { Custom: "1" }] }),
+        [transfer]
+      )
+    ).toMatchObject(shortfall);
   });
 
   it("does not blame the wallet for 0x1 on a transfer that runs a hook", async () => {

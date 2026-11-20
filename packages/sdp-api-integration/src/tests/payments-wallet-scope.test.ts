@@ -53,9 +53,9 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Payments Wallet S
     keyManager = await requestAsOrganizationAdmin();
   });
 
-  // HOO-2099: a selected key signs only with the custody wallets it lists,
-  // decided at the custody signer; its reads cover the whole project.
-  it("signs only with the key's listed wallets, and reads the whole project", {
+  // HOO-2099: a selected key signs only with the custody wallets it lists; its
+  // transfer reads cover the whole project, its wallet list only those wallets.
+  it("signs only with the key's listed wallets, reads every project transfer, and lists only its wallets", {
     timeout: 240000,
   }, async () => {
     const walletA = await createFundedIntegrationWallet({
@@ -123,6 +123,9 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Payments Wallet S
       `/v1/payments/transfers/${transferB.data.transfer.id}`
     );
     expect(transferBGetRes.status).toBe(200);
+    expect(await transferBGetRes.json()).toMatchObject({
+      data: { transfer: { id: transferB.data.transfer.id } },
+    });
 
     const walletsRes = await scopedRequest("/v1/wallets?view=summary");
     expect(walletsRes.status).toBe(200);

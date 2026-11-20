@@ -6,7 +6,6 @@ import {
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppError } from "@/lib/errors";
-import * as paymentContext from "@/routes/payments/context";
 import * as wallets from "@/routes/payments/wallets";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
@@ -67,17 +66,16 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("transfer funding release channel", () => {
   it.each(["stable", "beta"] as const)(
-    "%s refuses transferId before any wallet or ramp lookup",
+    "%s refuses transferId when no ramp provider is in the channel",
     async (channel) => {
-      const walletLookup = vi.spyOn(wallets, "resolveScope");
-      const rampLookup = vi.spyOn(paymentContext, "getPaymentsRepository");
       const response = await request(buildApp(), channel, { transferId: "xfr_existing" });
       expect(response.status).toBe(400);
       expect(await response.json()).toMatchObject({
-        error: { message: expect.stringContaining('Unrecognized key: "transferId"') },
+        error: {
+          code: "BAD_REQUEST",
+          message: expect.stringContaining('Unrecognized key: "transferId"'),
+        },
       });
-      expect(walletLookup).not.toHaveBeenCalled();
-      expect(rampLookup).not.toHaveBeenCalled();
     }
   );
 

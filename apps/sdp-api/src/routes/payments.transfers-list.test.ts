@@ -1,13 +1,10 @@
 import { formatDecimalAmount } from "@sdp/solana/amount";
-import {
-  PAYMENT_TRANSFER_STATUSES,
-  SUCCESSFUL_PAYMENT_TRANSFER_STATUSES,
-} from "@sdp/types/payments";
+import { PAYMENT_TRANSFER_STATUSES } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import { SOL_MINT, type SolanaCluster, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import type { Signature } from "@solana/kit";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
@@ -40,8 +37,8 @@ import {
   seedProductionPrivyWallet,
   TEST_API_KEY,
   TEST_CUSTODY_WALLET_ID,
-  TEST_KORA_FEE_PAYER,
   TEST_ORG,
+  TEST_PRODUCTION_PROJECT_ID,
   TEST_PROJECT,
   TEST_USER,
   TEST_WALLET_ID,
@@ -128,6 +125,34 @@ describe("Payments routes — list transfers", () => {
     return rpc.requests.filter((request) => request.method === "getSignaturesForAddress");
   }
 
+  /** Answers every getTransaction with a 0.002 SOL deposit from wallet2 into `walletAddress`. */
+  function answerSolDepositTransaction(deposit: {
+    signature: Signature;
+    walletAddress: string;
+    slot: number;
+    blockTime: number;
+  }) {
+    rpc.answer(
+      "getTransaction",
+      parsedTransactionResult({
+        signature: deposit.signature,
+        slot: deposit.slot,
+        blockTime: deposit.blockTime,
+        accountKeys: [TEST_SOLANA_ADDRESSES.wallet2, deposit.walletAddress],
+        instructions: [
+          parsedSystemTransfer({
+            source: TEST_SOLANA_ADDRESSES.wallet2,
+            destination: deposit.walletAddress,
+            lamports: 2_000_000,
+          }),
+        ],
+        innerInstructions: [],
+        preTokenBalances: [],
+        postTokenBalances: [],
+      })
+    );
+  }
+
   function answerObservedSolDeposit(
     walletAddress: string,
     ownedTokenAccounts: readonly StubTokenAccount[]
@@ -144,25 +169,12 @@ describe("Payments routes — list transfers", () => {
     }
     respondOwnedTokenAccounts(ownedTokenAccounts);
     respondSignatureHistory(historyByAddress);
-    rpc.answer(
-      "getTransaction",
-      parsedTransactionResult({
-        signature: observedSig,
-        slot: 104,
-        blockTime: 1700000400,
-        accountKeys: [TEST_SOLANA_ADDRESSES.wallet2, walletAddress],
-        instructions: [
-          parsedSystemTransfer({
-            source: TEST_SOLANA_ADDRESSES.wallet2,
-            destination: walletAddress,
-            lamports: 2_000_000,
-          }),
-        ],
-        innerInstructions: [],
-        preTokenBalances: [],
-        postTokenBalances: [],
-      })
-    );
+    answerSolDepositTransaction({
+      signature: observedSig,
+      walletAddress,
+      slot: 104,
+      blockTime: 1700000400,
+    });
     return observedSig;
   }
 
@@ -175,16 +187,6 @@ describe("Payments routes — list transfers", () => {
     expect(res.status).toBe(200);
     return observedTransfersResponseSchema.parse(await res.json());
   }
-
-  beforeEach(async () => {
-    await seedProjectApiKey(getDb(env), env, {
-      key: TEST_PRODUCTION_API_KEY,
-      organizationId: TEST_ORG.id,
-      projectId: `${TEST_PROJECT.id}_production`,
-      createdBy: TEST_USER.id,
-      grants: ["transfers.read"],
-    });
-  });
 
   async function seedTransfer(params: {
     id: string;
@@ -237,7 +239,6 @@ describe("Payments routes — list transfers", () => {
 
   describe("list transfers", () => {
     beforeEach(() => {
-      vi.clearAllMocks();
       getSignaturesForAddressMock.mockReset();
       getSplTokenAccountAddressesMock.mockReset();
       rpc.answer("getSignaturesForAddress", []);
@@ -347,115 +348,57 @@ describe("Payments routes — list transfers", () => {
       });
     });
 
-    it("matches a token filter against every form the ledger stores it in", async () => {
-      const solMint = "So11111111111111111111111111111111111111112";
-      await seedTransfer({ id: "xfr_tok_sym_1", status: "confirmed", token: "SOL" });
-      await seedTransfer({ id: "xfr_tok_sym_2", status: "confirmed", token: "SOL" });
-      await seedTransfer({ id: "xfr_tok_mint_1", status: "confirmed", token: solMint });
+    it("matches a token filter in any spelling against both forms the ledger stores, and no other asset", async () => {
+      await seedTransfer({ id: "xfr_tok_symbol", status: "confirmed", token: "SOL" });
+      await seedTransfer({ id: "xfr_tok_mint", status: "pending", token: SOL_MINT });
+      await seedTransfer({ id: "xfr_tok_usdc", status: "confirmed", token: DEVNET_USDC_MINT });
 
-      for (const spelling of ["SOL", solMint]) {
+      for (const spelling of ["sol", SOL_MINT]) {
         const res = await app.request(
-          `/v1/payments/transfers?token=${encodeURIComponent(spelling)}`,
+          `/v1/payments/transfers?token=${spelling}`,
           { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
           env
         );
 
         expect(res.status).toBe(200);
         const body = (await res.json()) as { data: Array<{ id: string }> };
-        expect(body.data.map((row) => row.id).sort()).toEqual([
-          "xfr_tok_mint_1",
-          "xfr_tok_sym_1",
-          "xfr_tok_sym_2",
-        ]);
+        expect(body.data.map((row) => row.id).sort()).toEqual(["xfr_tok_mint", "xfr_tok_symbol"]);
       }
     });
 
-    it("does not widen a token filter to an unrelated asset", async () => {
-      await seedTransfer({ id: "xfr_tok_sol", status: "confirmed", token: "SOL" });
-      await seedTransfer({ id: "xfr_tok_usdc", status: "confirmed", token: "USDC" });
-
-      const res = await app.request(
-        "/v1/payments/transfers?token=SOL",
-        { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
-        env
-      );
-
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { data: Array<{ id: string }> };
-      expect(body.data.map((row) => row.id)).toEqual(["xfr_tok_sol"]);
-    });
-
-    it("returns confirmed + pending transfers when wallet filter is provided", async () => {
-      const confirmedSig = syntheticSignature(20);
-
-      await seedTransfer({ id: "xfr_confirmed_1", status: "confirmed", signature: confirmedSig });
-      await seedTransfer({ id: "xfr_pending_1", status: "pending" });
-
+    it("merges a wallet's ledger rows with its on-chain history, one row per signature", async () => {
+      const recordedSig = syntheticSignature(20);
+      await seedTransfer({ id: "xfr_ledger_onchain", status: "confirmed", signature: recordedSig });
+      await seedTransfer({
+        id: "xfr_ledger_older",
+        status: "finalized",
+        signature: syntheticSignature(19),
+      });
+      await seedTransfer({ id: "xfr_ledger_pending", status: "pending" });
       respondSignatureHistory(
         new Map([
           [
             TEST_SOLANA_ADDRESSES.wallet1,
-            [confirmedHistoryEntry({ signature: confirmedSig, slot: 100, blockTime: 1700000000 })],
+            [confirmedHistoryEntry({ signature: recordedSig, slot: 100, blockTime: 1700000000 })],
           ],
         ])
       );
+      // The chain would describe the recorded signature too; the ledger row answers for it.
+      answerSolDepositTransaction({
+        signature: recordedSig,
+        walletAddress: TEST_SOLANA_ADDRESSES.wallet1,
+        slot: 100,
+        blockTime: 1700000000,
+      });
 
       const body = await listObservedTransfers(TEST_CUSTODY_WALLET_ID);
 
-      expect(body.meta.total).toBe(2);
-      expect(body.data).toHaveLength(2);
-      const statuses = body.data.map((t) => t.status).sort();
-      expect(statuses).toEqual(["confirmed", "pending"]);
-    });
-
-    it("keeps older exact ledger rows when observed history has no matching signature", async () => {
-      await seedTransfer({
-        id: "xfr_exact_older_than_observed_window",
-        status: "finalized",
-        signature: syntheticSignature(19),
-      });
-
-      const res = await app.request(
-        `/v1/payments/transfers?custodyWalletId=${TEST_CUSTODY_WALLET_ID}&includeObserved=true`,
-        { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
-        env
-      );
-
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        data: Array<{ id: string }>;
-        meta: { total: number };
-      };
-      expect(body.data.map((transfer) => transfer.id)).toEqual([
-        "xfr_exact_older_than_observed_window",
+      expect(body.data.map((transfer) => transfer.id).sort()).toEqual([
+        "xfr_ledger_older",
+        "xfr_ledger_onchain",
+        "xfr_ledger_pending",
       ]);
-      expect(body.meta.total).toBe(1);
-    });
-
-    it("rejects the removed walletAddress selector without pulling on-chain history", async () => {
-      await seedTransfer({ id: "xfr_db_only_1", status: "pending" });
-
-      const res = await app.request(
-        `/v1/payments/transfers?walletAddress=${TEST_SOLANA_ADDRESSES.wallet3}`,
-        { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
-        env
-      );
-
-      expect(res.status).toBe(400);
-      expect(rpc.calls).toEqual([]);
-    });
-
-    it("pulls on-chain history only for an exact wallet with explicit opt-in", async () => {
-      const res = await app.request(
-        `/v1/payments/transfers?custodyWalletId=${TEST_CUSTODY_WALLET_ID}&includeObserved=true`,
-        { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
-        env
-      );
-
-      expect(res.status).toBe(200);
-      expect(signatureHistoryReads()).toEqual([
-        historyRead("devnet", TEST_SOLANA_ADDRESSES.wallet1),
-      ]);
+      expect(body.meta.total).toBe(3);
     });
 
     it("429s the observed-transfer path before any RPC call once the metered quota is exhausted", async () => {
@@ -473,72 +416,6 @@ describe("Payments routes — list transfers", () => {
 
       expect(res.status).toBe(429);
       expect(rpc.calls).toEqual([]);
-    });
-
-    it("surfaces observed inbound transfers for wallet history even without a DB record", async () => {
-      const observedSig = syntheticSignature(21);
-      const sourceTokenAccount = syntheticAddress(21);
-      const destinationTokenAccount = syntheticAddress(22);
-      const usdcBalance = (accountIndex: number, owner: string, amount: string) =>
-        parsedTokenBalance({
-          accountIndex,
-          mint: DEVNET_USDC_MINT,
-          owner,
-          tokenAmount: {
-            amount,
-            decimals: 6,
-            uiAmountString: formatDecimalAmount(BigInt(amount), 6),
-          },
-        });
-      rpc.answer(
-        "getTransaction",
-        parsedTransactionResult({
-          signature: observedSig,
-          slot: 101,
-          blockTime: 1700000100,
-          accountKeys: [TEST_SOLANA_ADDRESSES.wallet2, sourceTokenAccount, destinationTokenAccount],
-          instructions: [
-            parsedTransferChecked({
-              source: sourceTokenAccount,
-              destination: destinationTokenAccount,
-              mint: DEVNET_USDC_MINT,
-              authority: TEST_SOLANA_ADDRESSES.wallet2,
-              tokenAmount: { amount: "10000000", decimals: 6, uiAmountString: "10" },
-            }),
-          ],
-          innerInstructions: [],
-          preTokenBalances: [
-            usdcBalance(1, TEST_SOLANA_ADDRESSES.wallet2, "10000000"),
-            usdcBalance(2, TEST_SOLANA_ADDRESSES.wallet1, "0"),
-          ],
-          postTokenBalances: [
-            usdcBalance(1, TEST_SOLANA_ADDRESSES.wallet2, "0"),
-            usdcBalance(2, TEST_SOLANA_ADDRESSES.wallet1, "10000000"),
-          ],
-        })
-      );
-      respondSignatureHistory(
-        new Map([
-          [
-            TEST_SOLANA_ADDRESSES.wallet1,
-            [confirmedHistoryEntry({ signature: observedSig, slot: 101, blockTime: 1700000100 })],
-          ],
-        ])
-      );
-
-      const body = await listObservedTransfers(TEST_CUSTODY_WALLET_ID);
-
-      expect(body.meta.total).toBe(1);
-      expect(body.data).toEqual([
-        expect.objectContaining({
-          id: expect.stringMatching(/^xfr_observed_/),
-          amount: "10",
-          direction: "inbound",
-          signature: observedSig,
-          status: "confirmed",
-          token: DEVNET_USDC_MINT,
-        }),
-      ]);
     });
 
     it("discovers observed custom token deposits from owned token account history", async () => {
@@ -697,7 +574,7 @@ describe("Payments routes — list transfers", () => {
       const body = await listObservedTransfers(TEST_CUSTODY_WALLET_ID);
 
       expect(body.data.map((row) => ({ signature: row.signature, amount: row.amount }))).toEqual([
-        { signature: observedSig, amount: formatDecimalAmount(2_000_000n, 9) },
+        { signature: observedSig, amount: "0.002" },
       ]);
       expect(rpc.calls).toContainEqual({ cluster: "devnet", method: "getSignaturesForAddress" });
       expect(rpc.calls).toContainEqual({ cluster: "devnet", method: "getTransaction" });
@@ -724,7 +601,7 @@ describe("Payments routes — list transfers", () => {
       const body = await listObservedTransfers("cwlt_observed_production");
 
       expect(body.data.map((row) => ({ signature: row.signature, amount: row.amount }))).toEqual([
-        { signature: observedSig, amount: formatDecimalAmount(2_000_000n, 9) },
+        { signature: observedSig, amount: "0.002" },
       ]);
       expect(rpc.calls).toContainEqual({
         cluster: "mainnet-beta",
@@ -736,30 +613,6 @@ describe("Payments routes — list transfers", () => {
       ]);
       expect(rpc.calls).toContainEqual({ cluster: "mainnet-beta", method: "getTransaction" });
       expect(rpc.calls.filter((call) => call.cluster === "devnet")).toEqual([]);
-    });
-
-    it("returns all transfers via DB-only path when no wallet filter is provided", async () => {
-      await seedTransfer({ id: "xfr_db_1", status: "confirmed" });
-      await seedTransfer({ id: "xfr_db_2", status: "pending" });
-      await seedTransfer({ id: "xfr_db_3", status: "failed" });
-
-      const res = await app.request(
-        "/v1/payments/transfers",
-        {
-          method: "GET",
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-        },
-        env
-      );
-
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        data: Array<{ id: string }>;
-        meta: { total: number };
-      };
-      expect(body.data).toHaveLength(3);
-      expect(body.meta.total).toBe(3);
-      expect(rpc.calls).toEqual([]);
     });
 
     it("withholds a batch chunk's signed transaction bytes, keeping its signature", async () => {
@@ -801,26 +654,27 @@ describe("Payments routes — list transfers", () => {
       expect(byId.get("xfr_bytes_plain")).toMatchObject({ serializedTx: "AQID" });
     });
 
-    it("scopes database-backed history to the exact wallet row", async () => {
+    it("scopes a wallet's ledger history to rows of that wallet, not of its address, without reading the chain", async () => {
       await seedTransfer({
-        id: "xfr_address_resolved_outbound",
+        id: "xfr_wallet_outbound",
         status: "confirmed",
         source: TEST_SOLANA_ADDRESSES.wallet1,
         destination: TEST_SOLANA_ADDRESSES.wallet2,
       });
       await seedTransfer({
-        id: "xfr_address_resolved_inbound",
+        id: "xfr_wallet_inbound",
         status: "confirmed",
         source: TEST_SOLANA_ADDRESSES.wallet2,
         destination: TEST_SOLANA_ADDRESSES.wallet1,
         direction: "inbound",
       });
+      // Same address as the wallet, recorded against no SDP wallet.
       await seedTransfer({
-        id: "xfr_address_other_wallet",
+        id: "xfr_same_address_other_wallet",
         status: "confirmed",
         custodyWalletId: null,
         walletId: "wal_payments_other",
-        source: TEST_SOLANA_ADDRESSES.wallet2,
+        source: TEST_SOLANA_ADDRESSES.wallet1,
         destination: TEST_SOLANA_ADDRESSES.wallet3,
       });
 
@@ -839,220 +693,64 @@ describe("Payments routes — list transfers", () => {
         meta: { total: number };
       };
       expect(body.data.map((transfer) => transfer.id).sort()).toEqual([
-        "xfr_address_resolved_inbound",
-        "xfr_address_resolved_outbound",
+        "xfr_wallet_inbound",
+        "xfr_wallet_outbound",
       ]);
       expect(body.meta.total).toBe(2);
       expect(rpc.calls).toEqual([]);
     });
 
-    it("does not infer exact ownership from matching ledger addresses", async () => {
+    it("finds a ramp transfer by its provider reference from the ledger alone, still honoring the other filters", async () => {
       await seedTransfer({
-        id: "xfr_address_external_outbound",
-        status: "confirmed",
-        custodyWalletId: null,
-        walletId: "wal_external_outbound",
-        source: TEST_SOLANA_ADDRESSES.wallet2,
-        destination: TEST_SOLANA_ADDRESSES.wallet3,
-      });
-      await seedTransfer({
-        id: "xfr_address_external_inbound",
-        status: "confirmed",
-        custodyWalletId: null,
-        walletId: "wal_external_inbound",
-        source: TEST_SOLANA_ADDRESSES.wallet3,
-        destination: TEST_SOLANA_ADDRESSES.wallet2,
-        direction: "inbound",
-      });
-      await seedTransfer({
-        id: "xfr_address_external_unrelated",
-        status: "confirmed",
-        custodyWalletId: null,
-        walletId: "wal_external_unrelated",
-        source: TEST_SOLANA_ADDRESSES.wallet3,
-        destination: TEST_KORA_FEE_PAYER,
-      });
-
-      const res = await app.request(
-        `/v1/payments/transfers?custodyWalletId=${TEST_CUSTODY_WALLET_ID}&includeObserved=false`,
-        {
-          method: "GET",
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-        },
-        env
-      );
-
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        data: Array<{ id: string }>;
-        meta: { total: number };
-      };
-      expect(body.data).toEqual([]);
-      expect(body.meta.total).toBe(0);
-    });
-
-    it("composes exact provider-reference lookups with every ledger filter and pagination", async () => {
-      const counterpartyId = await seedCounterparty({ id: "cpty_exact_reference" });
-      await seedTransfer({
-        id: "xfr_exact_reference_match",
+        id: "xfr_reference_match",
         status: "completed",
-        counterpartyId,
-        source: TEST_SOLANA_ADDRESSES.wallet1,
-        destination: TEST_SOLANA_ADDRESSES.wallet2,
-        token: DEVNET_USDC_MINT,
-        memo: "Quarterly invoice",
         type: "offramp",
-        direction: "outbound",
         provider: "moonpay",
         providerReference: "exact-reference-42",
-        createdAt: "2026-01-02T12:00:00.000Z",
       });
-
-      const matchingQuery = new URLSearchParams({
+      await seedTransfer({
+        id: "xfr_reference_other",
+        status: "completed",
+        type: "offramp",
+        provider: "moonpay",
+        providerReference: "exact-reference-43",
+      });
+      const listIds = async (query: Record<string, string>) => {
+        const res = await app.request(
+          `/v1/payments/transfers?${new URLSearchParams(query)}`,
+          { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+          env
+        );
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { data: Array<{ id: string }> };
+        return body.data.map((transfer) => transfer.id);
+      };
+      const lookup = {
         provider: "moonpay",
         providerReference: "exact-reference-42",
         custodyWalletId: TEST_CUSTODY_WALLET_ID,
-        search: "quarterly",
-        status: "completed",
-        category: "ramp",
-        type: "offramp",
-        counterpartyId,
-        token: "USDC",
-        direction: "outbound",
-        from: "2026-01-02T16:00:00+05:00",
-        to: "2026-01-02T08:00:00-05:00",
-        sortBy: "amount",
-        sortDirection: "asc",
-        pageSize: "1",
-      });
-
-      const firstPageRes = await app.request(
-        `/v1/payments/transfers?${matchingQuery}`,
-        {
-          method: "GET",
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-        },
-        env
-      );
-      expect(firstPageRes.status).toBe(200);
-      const firstPage = (await firstPageRes.json()) as {
-        data: Array<{ id: string }>;
-        meta: { page: number; pageSize: number; total: number };
+        includeObserved: "true",
       };
-      expect(firstPage.data.map((transfer) => transfer.id)).toEqual(["xfr_exact_reference_match"]);
-      expect(firstPage.meta).toMatchObject({ page: 1, pageSize: 1, total: 1 });
 
-      matchingQuery.set("page", "2");
-      const secondPageRes = await app.request(
-        `/v1/payments/transfers?${matchingQuery}`,
-        {
-          method: "GET",
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-        },
-        env
-      );
-      expect(secondPageRes.status).toBe(200);
-      const secondPage = (await secondPageRes.json()) as {
-        data: unknown[];
-        meta: { hasMore: boolean; page: number; total: number };
-      };
-      expect(secondPage.data).toEqual([]);
-      expect(secondPage.meta).toMatchObject({ hasMore: false, page: 2, total: 1 });
-
-      matchingQuery.set("page", "1");
-      matchingQuery.set("status", "failed");
-      const mismatchedFilterRes = await app.request(
-        `/v1/payments/transfers?${matchingQuery}`,
-        {
-          method: "GET",
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-        },
-        env
-      );
-      expect(mismatchedFilterRes.status).toBe(200);
-      const mismatchedFilter = (await mismatchedFilterRes.json()) as {
-        data: unknown[];
-        meta: { total: number };
-      };
-      expect(mismatchedFilter.data).toEqual([]);
-      expect(mismatchedFilter.meta.total).toBe(0);
+      expect(await listIds(lookup)).toEqual(["xfr_reference_match"]);
+      expect(await listIds({ ...lookup, status: "failed" })).toEqual([]);
       expect(rpc.calls).toEqual([]);
     });
 
-    it("matches native SOL rows whether the token filter is SOL, sol, or the mint", async () => {
-      await seedTransfer({ id: "xfr_native_sol", status: "confirmed", token: SOL_MINT });
-      await seedTransfer({ id: "xfr_usdc", status: "confirmed", token: DEVNET_USDC_MINT });
-      await seedTransfer({ id: "xfr_native_sol_pending", status: "pending", token: SOL_MINT });
-
-      for (const filter of ["SOL", "sol", SOL_MINT]) {
-        const res = await app.request(
-          `/v1/payments/transfers?token=${filter}`,
-          {
-            method: "GET",
-            headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-          },
-          env
-        );
-
-        expect(res.status).toBe(200);
-        const body = (await res.json()) as { data: Array<{ id: string }> };
-        expect(body.data.map((transfer) => transfer.id).sort()).toEqual([
-          "xfr_native_sol",
-          "xfr_native_sol_pending",
-        ]);
-        const walletRes = await app.request(
-          `/v1/payments/transfers?custodyWalletId=${TEST_CUSTODY_WALLET_ID}&token=${filter}&includeObserved=true`,
-          {
-            method: "GET",
-            headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-          },
-          env
-        );
-
-        expect(walletRes.status).toBe(200);
-        const walletBody = (await walletRes.json()) as { data: Array<{ id: string }> };
-        expect(walletBody.data.map((transfer) => transfer.id).sort()).toEqual([
-          "xfr_native_sol",
-          "xfr_native_sol_pending",
-        ]);
-      }
-
-      for (const filter of ["USDC", "usdc", DEVNET_USDC_MINT]) {
-        const res = await app.request(
-          `/v1/payments/transfers?token=${filter}`,
-          {
-            method: "GET",
-            headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-          },
-          env
-        );
-
-        expect(res.status).toBe(200);
-        const body = (await res.json()) as { data: Array<{ id: string }> };
-        expect(body.data.map((transfer) => transfer.id)).toEqual(["xfr_usdc"]);
-      }
-    });
-
-    it("filters by status when status query param is provided", async () => {
-      await seedTransfer({ id: "xfr_status_confirmed", status: "confirmed" });
-      await seedTransfer({ id: "xfr_status_pending", status: "pending" });
-
+    it("refuses a provider reference without its provider", async () => {
       const res = await app.request(
-        "/v1/payments/transfers?status=confirmed",
-        {
-          method: "GET",
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-        },
+        "/v1/payments/transfers?providerReference=exact-reference-42",
+        { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
         env
       );
 
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        data: Array<{ id: string; status: string }>;
-        meta: { total: number };
-      };
-      expect(body.data).toHaveLength(1);
-      expect(body.data[0]?.status).toBe("confirmed");
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({
+        error: {
+          code: "BAD_REQUEST",
+          message: "provider is required for provider reference lookup",
+        },
+      });
     });
 
     it("filters by multiple statuses when status query param is comma-separated", async () => {
@@ -1081,10 +779,11 @@ describe("Payments routes — list transfers", () => {
         data: Array<{ id: string; status: string }>;
         meta: { total: number };
       };
-      expect(body.data).toHaveLength(2);
-      expect(body.data.map((transfer) => transfer.status).sort()).toEqual(
-        SUCCESSFUL_PAYMENT_TRANSFER_STATUSES.filter((status) => status !== "finalized").sort()
-      );
+      expect(body.data.map((transfer) => transfer.id).sort()).toEqual([
+        "xfr_multi_completed",
+        "xfr_multi_confirmed",
+      ]);
+      expect(body.meta.total).toBe(2);
     });
 
     it("composes search, type, provider, and stable database pagination", async () => {
@@ -1150,7 +849,7 @@ describe("Payments routes — list transfers", () => {
       expect(body.meta).toMatchObject({ total: 2, page: 2, pageSize: 1, hasMore: false });
     });
 
-    it("applies search, date filters, and amount sorting to observed wallet history", async () => {
+    it("applies search, date filters, and amount sorting to ledger and on-chain rows alike", async () => {
       const counterpartyId = await seedCounterparty({ id: "cpty_observed_search" });
       const matchingLowSignature = syntheticSignature(40);
       const matchingHighSignature = syntheticSignature(41);
@@ -1188,22 +887,38 @@ describe("Payments routes — list transfers", () => {
         amount: "0.5",
         createdAt: "2026-01-02T00:00:00.000Z",
       });
+      // An on-chain deposit with no ledger row, inside the date window but not the search.
+      const unrecordedDepositSignature = syntheticSignature(44);
+      answerSolDepositTransaction({
+        signature: unrecordedDepositSignature,
+        walletAddress: TEST_SOLANA_ADDRESSES.wallet1,
+        slot: 210,
+        // 2026-01-03T00:00:00Z
+        blockTime: 1_767_398_400,
+      });
       respondSignatureHistory(
         new Map([
           [
             TEST_SOLANA_ADDRESSES.wallet1,
             [
-              matchingLowSignature,
-              matchingHighSignature,
-              outsideDateSignature,
-              otherCounterpartySignature,
-            ].map((signature, index) =>
+              ...[
+                matchingLowSignature,
+                matchingHighSignature,
+                outsideDateSignature,
+                otherCounterpartySignature,
+              ].map((signature, index) =>
+                confirmedHistoryEntry({
+                  signature,
+                  slot: 200 + index,
+                  blockTime: 1_767_225_600 + index,
+                })
+              ),
               confirmedHistoryEntry({
-                signature,
-                slot: 200 + index,
-                blockTime: 1_767_225_600 + index,
-              })
-            ),
+                signature: unrecordedDepositSignature,
+                slot: 210,
+                blockTime: 1_767_398_400,
+              }),
+            ],
           ],
         ])
       );
@@ -1244,25 +959,6 @@ describe("Payments routes — list transfers", () => {
         }),
       ]);
       expect(body.meta.total).toBe(2);
-    });
-
-    it("uses database-backed pagination for wallet filters when observed history is disabled", async () => {
-      await seedTransfer({ id: "xfr_wallet_recorded", status: "confirmed" });
-
-      const res = await app.request(
-        `/v1/payments/transfers?custodyWalletId=${TEST_CUSTODY_WALLET_ID}&includeObserved=false`,
-        {
-          method: "GET",
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-        },
-        env
-      );
-
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { data: Array<{ id: string }>; meta: { total: number } };
-      expect(body.data.map((transfer) => transfer.id)).toEqual(["xfr_wallet_recorded"]);
-      expect(body.meta.total).toBe(1);
-      expect(rpc.calls).toEqual([]);
     });
 
     it("keeps exact persisted history readable after the wallet becomes inactive", async () => {
@@ -1378,16 +1074,26 @@ describe("Payments routes — list transfers", () => {
       });
     });
 
-    it("returns 404 for another project's transfer", async () => {
+    it("does not disclose another project's transfer by id", async () => {
+      await seedProjectApiKey(getDb(env), env, {
+        key: TEST_PRODUCTION_API_KEY,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PRODUCTION_PROJECT_ID,
+        createdBy: TEST_USER.id,
+        grants: ["transfers.read"],
+      });
       await seedTransfer({ id: "xfr_sandbox_owned", status: "confirmed" });
+
       const res = await app.request(
         "/v1/payments/transfers/xfr_sandbox_owned",
-        {
-          headers: { Authorization: `Bearer ${TEST_PRODUCTION_API_KEY.raw}` },
-        },
+        { headers: { Authorization: `Bearer ${TEST_PRODUCTION_API_KEY.raw}` } },
         env
       );
+
       expect(res.status).toBe(404);
+      expect(await res.json()).toMatchObject({
+        error: { code: "NOT_FOUND", message: "Transfer not found" },
+      });
     });
   });
 });

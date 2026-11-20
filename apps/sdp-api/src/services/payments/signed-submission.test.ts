@@ -1,43 +1,62 @@
 import { RpcTimeoutError } from "@sdp/rpc/errors";
-import { createClusterRpc } from "@sdp/rpc/factory";
-import { runInClusterScope } from "@sdp/rpc/scope";
 import * as solanaRpc from "@sdp/rpc/solana";
-import {
-  type Signature,
-  SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM,
-  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
-  SolanaError,
-} from "@solana/kit";
+import type { Signature } from "@solana/kit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
-import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
+import type {
+  OwnedSubmissionLifecycle,
+  SponsorshipFeePayment,
+} from "@/services/sponsorship.service";
 import {
   SubmissionNotStartedError,
   submitSponsoredTransaction,
 } from "@/services/sponsorship-submission";
-import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
-import { fetchFailedError } from "@/test/helpers/rpc-errors";
+import { fetchFailedError, sendTransactionPreflightError } from "@/test/helpers/rpc-errors";
 import { createTransferSignedSubmissionStore } from "./signed-submission";
 
 const SIGNATURE =
   "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature;
+const SIGNED_TRANSACTION = new Uint8Array([1, 2, 3]);
 
-function preflightError(cause?: unknown, logs?: string[]) {
-  return new SolanaError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE, {
-    accounts: null,
-    fee: null,
-    loadedAccountsDataSize: null,
-    loadedAddresses: null,
-    logs: null,
-    postBalances: null,
-    postTokenBalances: null,
-    preBalances: null,
-    preTokenBalances: null,
-    replacementBlockhash: null,
-    returnData: null,
-    unitsConsumed: null,
-    ...(cause === undefined ? {} : { cause }),
-    ...(logs === undefined ? {} : { logs }),
+function fakeStore() {
+  return {
+    persistSigned: vi.fn().mockResolvedValue(undefined),
+    markStarted: vi.fn().mockResolvedValue(undefined),
+    hasStarted: vi.fn().mockResolvedValue(true),
+    clearSigned: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
+/** A sponsor that runs the durable lifecycle before handing back the signed bytes. */
+function fakeSponsor(release = vi.fn().mockResolvedValue(undefined)) {
+  const prepareOwnedSubmission = vi.fn(
+    async (_transaction: Uint8Array, lifecycle: OwnedSubmissionLifecycle) => {
+      await lifecycle.persistSigned({
+        signedTransaction: SIGNED_TRANSACTION,
+        signature: SIGNATURE,
+      });
+      await lifecycle.markStarted();
+      return {
+        signedTransaction: SIGNED_TRANSACTION,
+        signature: SIGNATURE,
+        releaseDefinitelyUnbroadcast: release,
+      };
+    }
+  );
+  return {
+    feePayment: { prepareOwnedSubmission } as unknown as SponsorshipFeePayment,
+    prepareOwnedSubmission,
+    release,
+  };
+}
+
+function submit(feePayment: SponsorshipFeePayment, store: ReturnType<typeof fakeStore>) {
+  return submitSponsoredTransaction({
+    feePayment,
+    rpc: {} as solanaRpc.SolanaRpc,
+    transaction: new Uint8Array([9]),
+    lastValidBlockHeight: 123n,
+    store,
   });
 }
 
@@ -47,283 +66,141 @@ describe("submitSponsoredTransaction", () => {
     vi.restoreAllMocks();
   });
 
-  it("broadcasts the exact bytes only after the durable lifecycle completes", async () => {
+  it("broadcasts the exact signed bytes only after they are persisted and marked started", async () => {
     const order: string[] = [];
-    const signedTransaction = new Uint8Array([1, 2, 3]);
-    const feePayment = {
-      prepareOwnedSubmission: vi.fn(async (_transaction, lifecycle) => {
-        await lifecycle.persistSigned({ signedTransaction, signature: SIGNATURE });
-        await lifecycle.markStarted();
-        order.push("prepared");
-        return { signedTransaction, signature: SIGNATURE };
-      }),
-    } as unknown as SponsorshipFeePayment;
-    const store = {
-      persistSigned: vi.fn(async () => {
-        order.push("persisted");
-      }),
-      markStarted: vi.fn(async () => {
-        order.push("started");
-      }),
-      hasStarted: vi.fn().mockResolvedValue(true),
-      clearSigned: vi.fn(),
-    };
-    const send = vi.spyOn(solanaRpc, "sendTransaction").mockImplementation(async (_rpc, bytes) => {
+    const store = fakeStore();
+    store.persistSigned.mockImplementation(async () => {
+      order.push("persisted");
+    });
+    store.markStarted.mockImplementation(async () => {
+      order.push("started");
+    });
+    const send = vi.spyOn(solanaRpc, "sendTransaction").mockImplementation(async () => {
       order.push("sent");
-      expect(bytes).toEqual(signedTransaction);
       return SIGNATURE;
     });
 
-    await expect(
-      submitSponsoredTransaction({
-        feePayment,
-        rpc: {} as solanaRpc.SolanaRpc,
-        transaction: new Uint8Array([9]),
-        lastValidBlockHeight: 123n,
-        store,
-      })
-    ).resolves.toBe(SIGNATURE);
+    await expect(submit(fakeSponsor().feePayment, store)).resolves.toBe(SIGNATURE);
 
-    expect(order).toEqual(["persisted", "started", "prepared", "sent"]);
-    expect(store.persistSigned).toHaveBeenCalledWith({
+    expect(order).toEqual(["persisted", "started", "sent"]);
+    expect(store.persistSigned).toHaveBeenCalledExactlyOnceWith({
       signature: SIGNATURE,
       signedTransaction: "AQID",
       lastValidBlockHeight: "123",
     });
-    expect(send).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledExactlyOnceWith({}, SIGNED_TRANSACTION);
   });
 
-  it("retries transient broadcasts with the exact same signed bytes", async () => {
+  it("retries a transient broadcast with the same signed bytes, never re-signing", async () => {
     vi.useFakeTimers();
-    const signedTransaction = new Uint8Array([1, 2, 3]);
-    const feePayment = {
-      prepareOwnedSubmission: vi.fn(async (_transaction, lifecycle) => {
-        await lifecycle.persistSigned({ signedTransaction, signature: SIGNATURE });
-        await lifecycle.markStarted();
-        return { signedTransaction, signature: SIGNATURE };
-      }),
-    } as unknown as SponsorshipFeePayment;
-    const store = {
-      persistSigned: vi.fn().mockResolvedValue(undefined),
-      markStarted: vi.fn().mockResolvedValue(undefined),
-      hasStarted: vi.fn().mockResolvedValue(true),
-      clearSigned: vi.fn(),
-    };
+    const store = fakeStore();
+    const sponsor = fakeSponsor();
     const send = vi
       .spyOn(solanaRpc, "sendTransaction")
       .mockRejectedValueOnce(fetchFailedError())
       .mockResolvedValueOnce(SIGNATURE);
 
-    const result = submitSponsoredTransaction({
-      feePayment,
-      rpc: {} as solanaRpc.SolanaRpc,
-      transaction: new Uint8Array([9]),
-      lastValidBlockHeight: 123n,
-      store,
-    });
+    const result = submit(sponsor.feePayment, store);
     await vi.runAllTimersAsync();
 
     await expect(result).resolves.toBe(SIGNATURE);
-    expect(send).toHaveBeenCalledTimes(2);
-    expect(send.mock.calls[0]?.[1]).toBe(signedTransaction);
-    expect(send.mock.calls[1]?.[1]).toBe(signedTransaction);
-    expect(feePayment.prepareOwnedSubmission).toHaveBeenCalledOnce();
+    expect(send.mock.calls.map(([, bytes]) => bytes)).toEqual([
+      SIGNED_TRANSACTION,
+      SIGNED_TRANSACTION,
+    ]);
+    expect(sponsor.prepareOwnedSubmission).toHaveBeenCalledOnce();
     expect(store.persistSigned).toHaveBeenCalledOnce();
     expect(store.markStarted).toHaveBeenCalledOnce();
   });
 
-  it("fails and releases a first-attempt preflight rejection", async () => {
-    const signedTransaction = new Uint8Array([1, 2, 3]);
-    const releaseDefinitelyUnbroadcast = vi.fn().mockResolvedValue(undefined);
-    const feePayment = {
-      prepareOwnedSubmission: vi.fn(async () => ({
-        signedTransaction,
-        signature: SIGNATURE,
-        releaseDefinitelyUnbroadcast,
-      })),
-    } as unknown as SponsorshipFeePayment;
-    const store = {
-      persistSigned: vi.fn(),
-      markStarted: vi.fn(),
-      hasStarted: vi.fn(),
-      clearSigned: vi.fn(),
-    };
-    const cause = new SolanaError(SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM, {
-      code: 42,
-      index: 0,
+  it("fails a first-attempt preflight rejection, releasing the sponsor and forgetting the signature", async () => {
+    const store = fakeStore();
+    const sponsor = fakeSponsor();
+    const refusal = sendTransactionPreflightError(42);
+    vi.spyOn(solanaRpc, "sendTransaction").mockRejectedValueOnce(refusal);
+
+    await expect(submit(sponsor.feePayment, store)).rejects.toMatchObject({
+      code: "TRANSACTION_FAILED",
+      message: (refusal.cause as Error).message,
+      cause: refusal,
     });
-    const error = preflightError(cause);
-    vi.spyOn(solanaRpc, "sendTransaction").mockRejectedValueOnce(error);
 
-    await expect(
-      submitSponsoredTransaction({
-        feePayment,
-        rpc: {} as solanaRpc.SolanaRpc,
-        transaction: new Uint8Array([9]),
-        lastValidBlockHeight: 123n,
-        store,
-      })
-    ).rejects.toMatchObject({ code: "TRANSACTION_FAILED", message: cause.message });
-
-    expect(releaseDefinitelyUnbroadcast).toHaveBeenCalledWith(error);
+    expect(sponsor.release).toHaveBeenCalledExactlyOnceWith(refusal);
     expect(store.clearSigned).toHaveBeenCalledExactlyOnceWith(SIGNATURE);
   });
 
-  it("forgets the signed transaction when releasing a preflight rejection fails", async () => {
-    const feePayment = {
-      prepareOwnedSubmission: vi.fn(async () => ({
-        signedTransaction: new Uint8Array([1, 2, 3]),
-        signature: SIGNATURE,
-        releaseDefinitelyUnbroadcast: vi.fn().mockRejectedValue(new Error("release failed")),
-      })),
-    } as unknown as SponsorshipFeePayment;
-    const store = {
-      persistSigned: vi.fn(),
-      markStarted: vi.fn(),
-      hasStarted: vi.fn(),
-      clearSigned: vi.fn(),
-    };
-    vi.spyOn(solanaRpc, "sendTransaction").mockRejectedValueOnce(preflightError());
+  it("still fails and forgets the signature when releasing the sponsor fails", async () => {
+    const store = fakeStore();
+    const sponsor = fakeSponsor(vi.fn().mockRejectedValue(new Error("release failed")));
+    vi.spyOn(solanaRpc, "sendTransaction").mockRejectedValueOnce(sendTransactionPreflightError());
 
-    await expect(
-      submitSponsoredTransaction({
-        feePayment,
-        rpc: {} as solanaRpc.SolanaRpc,
-        transaction: new Uint8Array([9]),
-        lastValidBlockHeight: 123n,
-        store,
-      })
-    ).rejects.toMatchObject({ code: "TRANSACTION_FAILED" });
+    await expect(submit(sponsor.feePayment, store)).rejects.toMatchObject({
+      code: "TRANSACTION_FAILED",
+    });
 
     expect(store.clearSigned).toHaveBeenCalledExactlyOnceWith(SIGNATURE);
   });
 
   it("does not retry a preflight rejection whose program log reads as transient", async () => {
     vi.useFakeTimers();
-    const releaseDefinitelyUnbroadcast = vi.fn().mockResolvedValue(undefined);
-    const feePayment = {
-      prepareOwnedSubmission: vi.fn(async () => ({
-        signedTransaction: new Uint8Array([1, 2, 3]),
-        signature: SIGNATURE,
-        releaseDefinitelyUnbroadcast,
-      })),
-    } as unknown as SponsorshipFeePayment;
-    const store = {
-      persistSigned: vi.fn(),
-      markStarted: vi.fn(),
-      hasStarted: vi.fn(),
-      clearSigned: vi.fn(),
-    };
-    const error = preflightError(undefined, ["Program log: Error: oracle price timed out"]);
-    const send = vi.spyOn(solanaRpc, "sendTransaction").mockRejectedValue(error);
+    const store = fakeStore();
+    const sponsor = fakeSponsor();
+    const refusal = sendTransactionPreflightError(undefined, [
+      "Program log: Error: oracle price timed out",
+    ]);
+    const send = vi.spyOn(solanaRpc, "sendTransaction").mockRejectedValue(refusal);
 
-    const result = expect(
-      submitSponsoredTransaction({
-        feePayment,
-        rpc: {} as solanaRpc.SolanaRpc,
-        transaction: new Uint8Array([9]),
-        lastValidBlockHeight: 123n,
-        store,
-      })
-    ).rejects.toMatchObject({ code: "TRANSACTION_FAILED" });
-    await vi.runAllTimersAsync();
-
-    await result;
-    expect(send).toHaveBeenCalledOnce();
-    expect(releaseDefinitelyUnbroadcast).toHaveBeenCalledExactlyOnceWith(error);
-    expect(store.clearSigned).toHaveBeenCalledExactlyOnceWith(SIGNATURE);
-  });
-
-  it("maps an account-frozen preflight rejection without losing definiteness", async () => {
-    const signedTransaction = new Uint8Array([1, 2, 3]);
-    const releaseDefinitelyUnbroadcast = vi.fn().mockResolvedValue(undefined);
-    const feePayment = {
-      prepareOwnedSubmission: vi.fn(async () => ({
-        signedTransaction,
-        signature: SIGNATURE,
-        releaseDefinitelyUnbroadcast,
-      })),
-    } as unknown as SponsorshipFeePayment;
-    const store = {
-      persistSigned: vi.fn(),
-      markStarted: vi.fn(),
-      hasStarted: vi.fn(),
-      clearSigned: vi.fn(),
-    };
-    vi.spyOn(solanaRpc, "sendTransaction").mockRejectedValueOnce(
-      preflightError(
-        new SolanaError(SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM, { code: 17, index: 0 })
-      )
-    );
-
-    await expect(
-      submitSponsoredTransaction({
-        feePayment,
-        rpc: {} as solanaRpc.SolanaRpc,
-        transaction: new Uint8Array([9]),
-        lastValidBlockHeight: 123n,
-        store,
-      })
-    ).rejects.toMatchObject({ code: "ACCOUNT_FROZEN" });
-  });
-
-  it("keeps the result ambiguous when a later retry looks deterministic", async () => {
-    vi.useFakeTimers();
-    const signedTransaction = new Uint8Array([1, 2, 3]);
-    const deterministicError = preflightError();
-    const releaseDefinitelyUnbroadcast = vi.fn().mockResolvedValue(undefined);
-    const feePayment = {
-      prepareOwnedSubmission: vi.fn(async (_transaction, lifecycle) => {
-        await lifecycle.persistSigned({ signedTransaction, signature: SIGNATURE });
-        await lifecycle.markStarted();
-        return { signedTransaction, signature: SIGNATURE, releaseDefinitelyUnbroadcast };
-      }),
-    } as unknown as SponsorshipFeePayment;
-    const store = {
-      persistSigned: vi.fn().mockResolvedValue(undefined),
-      markStarted: vi.fn().mockResolvedValue(undefined),
-      hasStarted: vi.fn().mockResolvedValue(true),
-      clearSigned: vi.fn(),
-    };
-    vi.spyOn(solanaRpc, "sendTransaction")
-      .mockRejectedValueOnce(new RpcTimeoutError(25))
-      .mockRejectedValueOnce(deterministicError);
-
-    const result = expect(
-      submitSponsoredTransaction({
-        feePayment,
-        rpc: {} as solanaRpc.SolanaRpc,
-        transaction: new Uint8Array([9]),
-        lastValidBlockHeight: 123n,
-        store,
-      })
-    ).rejects.toMatchObject({
-      message: "Solana RPC submission outcome is ambiguous after a transient failure",
-      cause: deterministicError,
+    const result = expect(submit(sponsor.feePayment, store)).rejects.toMatchObject({
+      code: "TRANSACTION_FAILED",
+      message: "Program log: Error: oracle price timed out",
     });
     await vi.runAllTimersAsync();
 
     await result;
-    expect(releaseDefinitelyUnbroadcast).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledOnce();
+    expect(sponsor.release).toHaveBeenCalledExactlyOnceWith(refusal);
+    expect(store.clearSigned).toHaveBeenCalledExactlyOnceWith(SIGNATURE);
+  });
+
+  it("answers ACCOUNT_FROZEN for a frozen-account preflight rejection, as definitely unbroadcast", async () => {
+    const store = fakeStore();
+    const sponsor = fakeSponsor();
+    const refusal = sendTransactionPreflightError(17);
+    vi.spyOn(solanaRpc, "sendTransaction").mockRejectedValueOnce(refusal);
+
+    await expect(submit(sponsor.feePayment, store)).rejects.toMatchObject({
+      code: "ACCOUNT_FROZEN",
+      cause: refusal,
+    });
+
+    expect(sponsor.release).toHaveBeenCalledExactlyOnceWith(refusal);
+    expect(store.clearSigned).toHaveBeenCalledExactlyOnceWith(SIGNATURE);
+  });
+
+  it("keeps the outcome ambiguous when a retry after a transient failure looks deterministic", async () => {
+    vi.useFakeTimers();
+    const store = fakeStore();
+    const sponsor = fakeSponsor();
+    const refusal = sendTransactionPreflightError();
+    vi.spyOn(solanaRpc, "sendTransaction")
+      .mockRejectedValueOnce(new RpcTimeoutError(25))
+      .mockRejectedValueOnce(refusal);
+
+    const result = expect(submit(sponsor.feePayment, store)).rejects.toMatchObject({
+      message: "Solana RPC submission outcome is ambiguous after a transient failure",
+      cause: refusal,
+    });
+    await vi.runAllTimersAsync();
+
+    await result;
+    expect(sponsor.release).not.toHaveBeenCalled();
     expect(store.clearSigned).not.toHaveBeenCalled();
   });
 
-  it("returns the final transient error after retry exhaustion", async () => {
+  it("returns the final transient error after retry exhaustion, keeping the signature", async () => {
     vi.useFakeTimers();
-    const signedTransaction = new Uint8Array([1, 2, 3]);
+    const store = fakeStore();
     const finalError = new RpcTimeoutError(25);
-    const feePayment = {
-      prepareOwnedSubmission: vi.fn(async () => ({
-        signedTransaction,
-        signature: SIGNATURE,
-      })),
-    } as unknown as SponsorshipFeePayment;
-    const store = {
-      persistSigned: vi.fn(),
-      markStarted: vi.fn(),
-      hasStarted: vi.fn(),
-      clearSigned: vi.fn(),
-    };
     const send = vi
       .spyOn(solanaRpc, "sendTransaction")
       .mockRejectedValueOnce(new RpcTimeoutError(25))
@@ -331,66 +208,28 @@ describe("submitSponsoredTransaction", () => {
       .mockRejectedValueOnce(new RpcTimeoutError(25))
       .mockRejectedValueOnce(finalError);
 
-    const result = expect(
-      submitSponsoredTransaction({
-        feePayment,
-        rpc: {} as solanaRpc.SolanaRpc,
-        transaction: new Uint8Array([9]),
-        lastValidBlockHeight: 123n,
-        store,
-      })
-    ).rejects.toBe(finalError);
+    const result = expect(submit(fakeSponsor().feePayment, store)).rejects.toBe(finalError);
     await vi.runAllTimersAsync();
 
     await result;
-    expect(send).toHaveBeenCalledTimes(4);
-    expect(send.mock.calls.every(([, bytes]) => bytes === signedTransaction)).toBe(true);
+    expect(send.mock.calls.every(([, bytes]) => bytes === SIGNED_TRANSACTION)).toBe(true);
     expect(store.clearSigned).not.toHaveBeenCalled();
   });
 
-  describe("when the start marker write fails", () => {
-    const rpcStub = installClusterRpcStub();
+  it("reports a definite never-started submission without sending when the start marker write fails", async () => {
+    const markerError = new Error("marker response lost");
+    const store = fakeStore();
+    store.markStarted.mockRejectedValue(markerError);
+    const send = vi.spyOn(solanaRpc, "sendTransaction").mockResolvedValue(SIGNATURE);
 
-    it("reports a definite never-started submission without sending", async () => {
-      const markerError = new Error("marker response lost");
-      const feePayment: SponsorshipFeePayment = {
-        providerId: "kora",
-        getFeePayer: vi.fn(),
-        signAsFeePayer: vi.fn(),
-        getSponsorshipConfiguration: vi.fn(),
-        prepareOwnedSubmission: async (_transaction, lifecycle) => {
-          await lifecycle.markStarted();
-          return {
-            signedTransaction: new Uint8Array([1, 2, 3]),
-            signature: SIGNATURE,
-            releaseDefinitelyUnbroadcast: vi.fn(),
-          };
-        },
-      };
-      const store = {
-        persistSigned: vi.fn(),
-        markStarted: vi.fn().mockRejectedValue(markerError),
-        hasStarted: vi.fn(),
-        clearSigned: vi.fn(),
-      };
+    const outcome = submit(fakeSponsor().feePayment, store);
 
-      const outcome = submitSponsoredTransaction({
-        feePayment,
-        rpc: runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
-          createClusterRpc()
-        ),
-        transaction: new Uint8Array([9]),
-        lastValidBlockHeight: 123n,
-        store,
-      });
-
-      await expect(outcome).rejects.toBeInstanceOf(SubmissionNotStartedError);
-      await expect(outcome).rejects.toMatchObject({
-        code: "SERVICE_UNAVAILABLE",
-        cause: markerError,
-      });
-      expect(rpcStub.calls).toEqual([]);
+    await expect(outcome).rejects.toBeInstanceOf(SubmissionNotStartedError);
+    await expect(outcome).rejects.toMatchObject({
+      code: "SERVICE_UNAVAILABLE",
+      cause: markerError,
     });
+    expect(send).not.toHaveBeenCalled();
   });
 });
 
@@ -400,12 +239,21 @@ describe("createTransferSignedSubmissionStore", () => {
     organization_id: "org_signed_submission_test",
     project_id: "prj_signed_submission_test",
   } as PaymentTransferRow;
+  const transferKey = {
+    transferId: transfer.id,
+    organizationId: transfer.organization_id,
+    projectId: transfer.project_id,
+  };
   const signedRow = {
     ...transfer,
     signature: SIGNATURE,
     signed_transaction: "AQID",
     last_valid_block_height: "123",
     submission_started_at: null,
+  } as PaymentTransferRow;
+  const startedRow = {
+    ...signedRow,
+    submission_started_at: "2026-11-20T00:00:00.000Z",
   } as PaymentTransferRow;
 
   function createRepository() {
@@ -416,35 +264,47 @@ describe("createTransferSignedSubmissionStore", () => {
     };
   }
 
-  function createStore(repository = createRepository()) {
-    return createTransferSignedSubmissionStore(
+  async function persistedStore(repository: ReturnType<typeof createRepository>) {
+    const store = createTransferSignedSubmissionStore(
       repository as unknown as PaymentsRepository,
       transfer
     );
-  }
-
-  it("does not expose signed bytes before submission starts", async () => {
-    const store = createStore();
-
     await store.persistSigned({
       signature: SIGNATURE,
       signedTransaction: "AQID",
       lastValidBlockHeight: "123",
     });
+    return store;
+  }
 
+  it("persists the signed transfer and exposes it only once submission has started", async () => {
+    const repository = createRepository();
+    repository.markTransferSubmissionStarted.mockResolvedValue(startedRow);
+    const store = await persistedStore(repository);
+
+    expect(repository.persistSignedTransfer).toHaveBeenCalledExactlyOnceWith({
+      ...transferKey,
+      signature: SIGNATURE,
+      signedTransaction: "AQID",
+      lastValidBlockHeight: "123",
+      updatedAt: expect.any(String),
+    });
     await expect(store.submittedRow()).resolves.toBeNull();
+
+    await store.markStarted();
+
+    expect(repository.markTransferSubmissionStarted).toHaveBeenCalledExactlyOnceWith({
+      ...transferKey,
+      startedAt: expect.any(String),
+    });
+    await expect(store.submittedRow()).resolves.toBe(startedRow);
   });
 
   it("retains the signed row when the start-marker result is unknown", async () => {
     const repository = createRepository();
     repository.markTransferSubmissionStarted.mockResolvedValue(null);
     repository.getTransferById.mockResolvedValue(signedRow);
-    const store = createStore(repository);
-    await store.persistSigned({
-      signature: SIGNATURE,
-      signedTransaction: "AQID",
-      lastValidBlockHeight: "123",
-    });
+    const store = await persistedStore(repository);
 
     await expect(store.markStarted()).rejects.toThrow("submission was not started");
     await expect(store.submittedRow()).resolves.toBe(signedRow);
@@ -457,12 +317,7 @@ describe("createTransferSignedSubmissionStore", () => {
     const repository = createRepository();
     repository.markTransferSubmissionStarted.mockRejectedValue(new Error("marker response lost"));
     repository.getTransferById.mockRejectedValue(new Error("read failed"));
-    const store = createStore(repository);
-    await store.persistSigned({
-      signature: SIGNATURE,
-      signedTransaction: "AQID",
-      lastValidBlockHeight: "123",
-    });
+    const store = await persistedStore(repository);
 
     await expect(store.markStarted()).rejects.toThrow("marker response lost");
     await expect(store.hasStarted()).rejects.toThrow("read failed");

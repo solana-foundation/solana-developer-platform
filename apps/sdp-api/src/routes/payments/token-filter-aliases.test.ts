@@ -1,32 +1,33 @@
 import { SOL_MINT, tokenFilterAliases } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
 
+const DEVNET_USDC = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+const MAINNET_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const JITO_MINT = "J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn";
+
+// A token list filter matches every form `payment_transfers.token` may hold for the asset:
+// the input, its catalogue key, its display symbol and each cluster's mint.
 describe("tokenFilterAliases", () => {
-  it("matches the symbol rows when given a mint", () => {
-    // payment_transfers.token stores SOL both as this mint and as "SOL".
-    const aliases = tokenFilterAliases(SOL_MINT);
-    expect(aliases).toContain(SOL_MINT);
-    expect(aliases).toContain("SOL");
+  it("expands a symbol to every cluster's mint", () => {
+    expect(new Set(tokenFilterAliases("USDC"))).toEqual(
+      new Set(["USDC", DEVNET_USDC, MAINNET_USDC])
+    );
   });
 
-  it("matches the mint rows when given a symbol", () => {
-    const aliases = tokenFilterAliases("SOL");
-    expect(aliases).toContain("SOL");
-    expect(aliases).toContain(SOL_MINT);
+  it("expands one cluster's mint to its symbol and the other cluster's mint", () => {
+    expect(new Set(tokenFilterAliases(DEVNET_USDC))).toEqual(
+      new Set(["USDC", DEVNET_USDC, MAINNET_USDC])
+    );
+    expect(new Set(tokenFilterAliases(SOL_MINT))).toEqual(new Set(["SOL", SOL_MINT]));
   });
 
-  it("covers every cluster's mint for a symbol", () => {
-    const aliases = tokenFilterAliases("USDC");
-    expect(aliases).toContain("USDC");
-    expect(aliases.length).toBeGreaterThan(1);
-  });
-
-  it("resolves a devnet mint to its symbol as well", () => {
-    // Devnet USDC. The local ledger holds rows under this mint, so a filter that
-    // only knew the mainnet address would miss them.
-    const devnetUsdc = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
-    expect(tokenFilterAliases(devnetUsdc)).toContain(devnetUsdc);
-    expect(tokenFilterAliases(devnetUsdc)).toContain("USDC");
+  it("expands a mixed-case asset to its catalogue key, display symbol and mint, from any form", () => {
+    const jito = new Set(["JITOSOL", "JitoSOL", JITO_MINT]);
+    for (const form of [JITO_MINT, "JITOSOL", "JitoSOL"]) {
+      expect(new Set(tokenFilterAliases(form))).toEqual(jito);
+    }
+    // Any other spelling also matches itself.
+    expect(new Set(tokenFilterAliases(" jItOsOl "))).toEqual(new Set([...jito, "jItOsOl"]));
   });
 
   it("passes through a mint the catalogue has never heard of", () => {
@@ -36,56 +37,5 @@ describe("tokenFilterAliases", () => {
 
   it("returns nothing for a blank filter", () => {
     expect(tokenFilterAliases("   ")).toEqual([]);
-  });
-
-  it("expands a mixed-case display symbol to its mint", () => {
-    // The catalogue is keyed JITOSOL while the entry's symbol is JitoSOL, and the
-    // ledger stores the display form. Matching the key exactly made this
-    // asymmetric: the mint expanded to JitoSOL, but JitoSOL did not expand back.
-    const jitoMint = "J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn";
-
-    expect(tokenFilterAliases("JitoSOL")).toContain(jitoMint);
-    expect(tokenFilterAliases(jitoMint)).toContain("JitoSOL");
-  });
-
-  it("round-trips every mixed-case catalogue symbol through its mint", () => {
-    for (const symbol of ["JitoSOL", "mSOL", "bSOL", "cbBTC"]) {
-      const aliases = tokenFilterAliases(symbol);
-      const mints = aliases.filter((alias) => alias.length > 30);
-      expect(mints.length).toBeGreaterThan(0);
-
-      // Whichever mint the ledger used, filtering by it has to come back to the
-      // same symbol, or the two directions disagree again.
-      for (const mint of mints) {
-        expect(tokenFilterAliases(mint)).toContain(symbol);
-      }
-    }
-  });
-
-  it("matches the schema-normalised key rows when given a mint", () => {
-    // paymentTokenSchema upper-cases symbols before storage-bound paths, so the
-    // ledger can hold JITOSOL where the display form is JitoSOL. A mint filter
-    // has to reach those rows too.
-    const jitoMint = "J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn";
-    const aliases = tokenFilterAliases(jitoMint);
-    expect(aliases).toContain("JITOSOL");
-    expect(aliases).toContain("JitoSOL");
-  });
-
-  it("expands a mint and its symbol to the same alias set", () => {
-    const jitoMint = "J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn";
-    expect(new Set(tokenFilterAliases(jitoMint))).toEqual(new Set(tokenFilterAliases("JitoSOL")));
-  });
-
-  it("resolves a symbol whatever casing it arrives in", () => {
-    const jitoMint = "J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn";
-    for (const spelling of ["JITOSOL", "jitosol", "JitoSOL", "jItOsOl"]) {
-      expect(tokenFilterAliases(spelling)).toContain(jitoMint);
-    }
-  });
-
-  it("does not duplicate when a token resolves to itself", () => {
-    const aliases = tokenFilterAliases(SOL_MINT);
-    expect(new Set(aliases).size).toBe(aliases.length);
   });
 });

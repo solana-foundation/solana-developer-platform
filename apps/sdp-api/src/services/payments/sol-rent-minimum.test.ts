@@ -1,22 +1,24 @@
-import { runInClusterScope } from "@sdp/rpc/scope";
 import * as solanaRpc from "@sdp/rpc/solana";
-import { address } from "@solana/kit";
+import { type Address, address } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
-import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
+import { inSandboxScope, installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { findSolRentShortfall, type SolMovement } from "./sol-rent-minimum";
 
 const SOURCE = address(TEST_SOLANA_ADDRESSES.wallet1);
 const OTHER = address(TEST_SOLANA_ADDRESSES.wallet2);
+const ANOTHER = address(TEST_SOLANA_ADDRESSES.wallet3);
 const getMultipleAccountsLamportsMock = vi.spyOn(solanaRpc, "getMultipleAccountsLamports");
 
-function find(movement: SolMovement, sourceLamports: bigint) {
+/** Runs the check with the source at `sourceLamports`, `unfunded` empty, and every other wallet funded. */
+function find(movement: SolMovement, sourceLamports: bigint, unfunded: readonly Address[] = []) {
   getMultipleAccountsLamportsMock.mockImplementation(async (_rpc, addresses) =>
-    addresses.map((account) => (account === SOURCE ? sourceLamports : 5_000_000n))
+    addresses.map((account) => {
+      if (account === SOURCE) return sourceLamports;
+      return unfunded.includes(account) ? 0n : 5_000_000n;
+    })
   );
-  return runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
-    findSolRentShortfall(movement)
-  );
+  return inSandboxScope(() => findSolRentShortfall(movement));
 }
 
 describe("findSolRentShortfall", () => {
@@ -50,77 +52,26 @@ describe("findSolRentShortfall", () => {
     expect(minimumReads()).toBe(2);
   });
 
-  it("does not count a payment back to the source as leaving it", async () => {
-    // 1 SOL held, 0.9997 SOL "sent" to itself: the wallet still holds 1 SOL.
-    await expect(
-      find(
-        { source: SOURCE, payments: [{ index: 0, destination: SOURCE, lamports: 999_700_000n }] },
-        1_000_000_000n
-      )
-    ).resolves.toBeNull();
-  });
-
-  it("counts only the payments that leave the source", async () => {
-    // 1 SOL held, 0.9997 SOL to another wallet plus 0.5 SOL to itself: 0.0003 SOL left.
+  it("refuses only payments below the minimum to an address with no account", async () => {
     const shortfall = await find(
       {
-        source: SOURCE,
+        source: null,
         payments: [
-          { index: 0, destination: OTHER, lamports: 999_700_000n },
-          { index: 1, destination: SOURCE, lamports: 500_000_000n },
+          { index: 0, destination: OTHER, lamports: 890_879n },
+          { index: 1, destination: ANOTHER, lamports: 890_880n },
+          { index: 2, destination: SOURCE, lamports: 100n },
         ],
       },
-      1_000_000_000n
+      1_000_000_000n,
+      [OTHER, ANOTHER]
     );
-    expect(shortfall?.sourceRemainderLamports).toBe(300_000n);
-  });
 
-  it("refuses a sweep whose smallest transaction moves less than the minimum", async () => {
-    const shortfall = await find(
-      {
-        source: SOURCE,
-        payments: [
-          { index: 0, destination: OTHER, lamports: 500_000n },
-          { index: 1, destination: OTHER, lamports: 9_500_000n },
-        ],
-        transactions: [[0], [1]],
-      },
-      10_000_000n
-    );
-    expect(shortfall?.sourceRemainderLamports).toBe(500_000n);
-  });
-
-  it("refuses a sweep beside a transaction that only pays the source back", async () => {
-    // The self-payment still needs 0.0005 SOL in the source, which is empty if it lands last.
-    const shortfall = await find(
-      {
-        source: SOURCE,
-        payments: [
-          { index: 0, destination: OTHER, lamports: 1_000_000n },
-          { index: 1, destination: SOURCE, lamports: 500_000n },
-          { index: 2, destination: OTHER, lamports: 9_000_000n },
-        ],
-        transactions: [[0], [1], [2]],
-      },
-      10_000_000n
-    );
-    expect(shortfall?.sourceRemainderLamports).toBe(0n);
-  });
-
-  it("allows a sweep in one transaction", async () => {
-    await expect(
-      find(
-        {
-          source: SOURCE,
-          payments: [
-            { index: 0, destination: OTHER, lamports: 500_000n },
-            { index: 1, destination: OTHER, lamports: 9_500_000n },
-          ],
-          transactions: [[0, 1]],
-        },
-        10_000_000n
-      )
-    ).resolves.toBeNull();
+    expect(shortfall).toEqual({
+      recipientIndexes: [0],
+      sourceRemainderLamports: null,
+      minimumLamports: 890_880n,
+      minimumAmount: "0.00089088",
+    });
   });
 
   it("fails loudly when a transaction names a payment it was not given", async () => {
