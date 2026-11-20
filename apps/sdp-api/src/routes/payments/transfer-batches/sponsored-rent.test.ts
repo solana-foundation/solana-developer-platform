@@ -1,7 +1,6 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import {
   type Address,
-  address,
   blockhash,
   createNoopSigner,
   lamports,
@@ -9,6 +8,7 @@ import {
   none,
   some,
 } from "@solana/kit";
+import { SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import {
   type ExtensionArgs,
@@ -27,7 +27,6 @@ import {
   buildInstructionGroups,
   chunkInstructionGroups,
   type RecipientInstructionGroup,
-  type SponsoredRentLimit,
 } from "./transaction";
 import type { ResolvedRecipient, TokenContext } from "./types";
 
@@ -67,23 +66,6 @@ function recipients(count: number): ResolvedRecipient[] {
 
 function destinationTokenAccounts(groups: RecipientInstructionGroup[]): Set<string> {
   return new Set(groups.flatMap((group) => group.destinationTokenAccount ?? []));
-}
-
-/** The rent of every chunk: each created token account it names, once. */
-function chunkRent(
-  chunk: { recipientIndexes: number[] },
-  groups: RecipientInstructionGroup[],
-  limit: SponsoredRentLimit
-): bigint {
-  const created = new Map<Address, bigint>();
-  for (const index of chunk.recipientIndexes) {
-    const account = groups[index].destinationTokenAccount;
-    const rent = account === undefined ? undefined : limit.rentByTokenAccount.get(account);
-    if (account !== undefined && rent !== undefined) created.set(account, rent);
-  }
-  let total = 0n;
-  for (const rent of created.values()) total += rent;
-  return total;
 }
 
 describe("batch chunks under the sponsor's rent cap (HOO-2024)", () => {
@@ -145,45 +127,32 @@ describe("batch chunks under the sponsor's rent cap (HOO-2024)", () => {
 
   it("puts one new token account in each chunk when two would pass the cap", async () => {
     rpc.answer("getMinimumBalanceForRentExemption", Number(LEGACY_TOKEN_ACCOUNT_RENT));
-    const { groups, sponsoredRent, chunks } = await plan(
+    const { sponsoredRent, chunks } = await plan(
       tokenContext(TOKEN_PROGRAM_ADDRESS, syntheticAddress(10)),
       5,
       (tokenAccounts) =>
         respondTokenAccounts(rpc, { tokenProgram: TOKEN_PROGRAM_ADDRESS, missing: tokenAccounts })
     );
 
+    expect([...sponsoredRent.rentByTokenAccount.values()]).toEqual(
+      Array.from({ length: 5 }, () => LEGACY_TOKEN_ACCOUNT_RENT)
+    );
+    expect(sponsoredRent.capLamports).toBe(KORA_CAP);
     expect(chunks.map((chunk) => chunk.recipientIndexes)).toEqual([[0], [1], [2], [3], [4]]);
-    for (const chunk of chunks) {
-      expect(chunkRent(chunk, groups, sponsoredRent)).toBe(LEGACY_TOKEN_ACCOUNT_RENT);
-      expect(chunkRent(chunk, groups, sponsoredRent)).toBeLessThanOrEqual(KORA_CAP);
-    }
     // RPC: one getMultipleAccounts for the plan, one rent read, one Kora config read.
     expect(accountReads()).toHaveLength(1);
     expect(rentSizes()).toEqual([165]);
     expect(readConfiguration).toHaveBeenCalledTimes(1);
   });
 
-  it("packs recipients whose token accounts exist by count and size alone", async () => {
-    const { groups, chunks } = await plan(
+  it("funds no rent and reads no cap when every recipient's token account exists", async () => {
+    const { sponsoredRent } = await plan(
       tokenContext(TOKEN_PROGRAM_ADDRESS, syntheticAddress(10)),
       20,
       () => respondTokenAccounts(rpc, { tokenProgram: TOKEN_PROGRAM_ADDRESS })
     );
-    const bySizeAlone = chunkInstructionGroups({
-      groups,
-      sourceSigner: SOURCE,
-      feePayer: FEE_PAYER,
-      lifetime: LIFETIME,
-      sponsoredRent: { rentByTokenAccount: new Map(), capLamports: null },
-    });
 
-    // Every group still carries its idempotent create, so 20 recipients pass the 1,232-byte limit
-    // and split by size (HOO-2313 drops the create for an existing account); rent splits nothing.
-    expect(chunks.map((chunk) => chunk.recipientIndexes)).toEqual(
-      bySizeAlone.map((chunk) => chunk.recipientIndexes)
-    );
-    expect(chunks.flatMap((chunk) => chunk.recipientIndexes)).toHaveLength(20);
-    // Nothing is created, so neither rent nor the cap is read.
+    expect(sponsoredRent).toEqual({ rentByTokenAccount: new Map(), capLamports: null });
     expect(accountReads()).toHaveLength(1);
     expect(rentSizes()).toEqual([]);
     expect(readConfiguration).not.toHaveBeenCalled();
@@ -249,7 +218,7 @@ describe("batch chunks under the sponsor's rent cap (HOO-2024)", () => {
     await expect(planned).rejects.toBeInstanceOf(AppError);
     await expect(planned).rejects.toMatchObject({
       code: "SPONSORED_RENT_OVER_CAP",
-      details: { recipientIndex: 0, capLamports: KORA_CAP.toString() },
+      details: { recipientIndex: 0, rentLamports: "2500001", capLamports: "2500000" },
     });
   });
 
@@ -260,10 +229,10 @@ describe("batch chunks under the sponsor's rent cap (HOO-2024)", () => {
       tokenContext(TOKEN_PROGRAM_ADDRESS, syntheticAddress(10)),
       1,
       // A wallet-shaped account: owned by the system program, not the token program.
-      () => respondTokenAccounts(rpc, { tokenProgram: address("11111111111111111111111111111111") })
+      () => respondTokenAccounts(rpc, { tokenProgram: SYSTEM_PROGRAM_ADDRESS })
     );
 
-    expect(sponsoredRent.rentByTokenAccount.size).toBe(1);
+    expect([...sponsoredRent.rentByTokenAccount.values()]).toEqual([LEGACY_TOKEN_ACCOUNT_RENT]);
   });
 });
 
