@@ -44,6 +44,7 @@ import {
   readTransferResponse,
   readTransferRow,
 } from "@/test/helpers/payments-transfers";
+import { setDisabledMovements } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { sendTransactionPreflightError } from "@/test/helpers/rpc-errors";
 
@@ -341,6 +342,30 @@ describe("Payments routes — signed submission", () => {
       warn.mockRestore();
     });
 
+    it("keeps a submitted transfer processing with its signature when confirmation fails", async () => {
+      const { signAsFeePayer } = await mockSignedSubmissionAdapter();
+      confirmTransactionMock.mockRejectedValueOnce(new Error("confirmation timed out"));
+      const idempotencyKey = "submitted-unconfirmed";
+
+      const res = await transferRequest("0.001", idempotencyKey);
+
+      expect(res.status).toBe(200);
+      const json = await readTransferResponse(res);
+      const signature = broadcastSignature();
+      expect(json.data.transfer).toMatchObject({ status: "processing", signature });
+      expect(await readTransferRow(json.data.transfer.id)).toMatchObject({
+        status: "processing",
+        signature,
+      });
+
+      const replay = await transferRequest("0.001", idempotencyKey);
+      expect(replay.status).toBe(200);
+      expect(replay.headers.get("Idempotent-Replayed")).toBe("true");
+      expect((await readTransferResponse(replay)).data).toEqual(json.data);
+      expect(signAsFeePayer).toHaveBeenCalledOnce();
+      expect(sendTransactionMock).toHaveBeenCalledOnce();
+    });
+
     it("closes the open audit intent when the tracker settles an ambiguous broadcast", async () => {
       await mockSignedSubmissionAdapter();
       sendTransactionMock.mockRejectedValueOnce(new Error("RPC response lost"));
@@ -534,6 +559,31 @@ describe("Payments routes — signed submission", () => {
       const row = await latestTransferRow();
       expect(row).toMatchObject({ status: "failed", signature: null });
       expect(sendTransactionMock).not.toHaveBeenCalled();
+    });
+
+    it("refuses a stopped project before its row and lets the same key run after re-enable", async () => {
+      const { signAsFeePayer } = await mockSignedSubmissionAdapter();
+      await setDisabledMovements(getDb(env), TEST_PROJECT.id, ["payments.transfer"]);
+      const idempotencyKey = "stopped-project-transfer";
+
+      const stopped = await transferRequest("0.001", idempotencyKey);
+
+      expect(stopped.status).toBe(403);
+      expect((await readErrorResponse(stopped)).error).toMatchObject({
+        code: "FORBIDDEN",
+        details: { reason: "movement_disabled" },
+      });
+      expect(signAsFeePayer).not.toHaveBeenCalled();
+      expect(sendTransactionMock).not.toHaveBeenCalled();
+      expect(await listTransferRows()).toHaveLength(0);
+
+      await setDisabledMovements(getDb(env), TEST_PROJECT.id, []);
+      const resumed = await transferRequest("0.001", idempotencyKey);
+
+      expect(resumed.status).toBe(200);
+      expect(resumed.headers.get("Idempotent-Replayed")).toBeNull();
+      expect(sendTransactionMock).toHaveBeenCalledOnce();
+      expect(await listTransferRows()).toHaveLength(1);
     });
 
     it("stores a 400 raised after the row, and past 24 hours answers it from the row", async () => {

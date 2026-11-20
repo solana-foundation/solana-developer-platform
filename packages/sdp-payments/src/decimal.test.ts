@@ -22,6 +22,10 @@ describe("compareDecimalAmounts", () => {
 });
 
 describe("sumDecimalAmounts", () => {
+  it("sums an empty list to 0", () => {
+    assert.equal(sumDecimalAmounts([]), "0");
+  });
+
   it("refuses an amount past 128 bits at its scale as a bad request", () => {
     assert.throws(
       () => sumDecimalAmounts(["18446744073709551615", "0.000000000000000000001"]),

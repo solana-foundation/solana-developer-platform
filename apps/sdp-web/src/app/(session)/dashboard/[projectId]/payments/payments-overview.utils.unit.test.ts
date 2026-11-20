@@ -4,6 +4,7 @@ import { PAYMENT_TRANSFER_STATUSES } from "@sdp/types/payments";
 import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import type { BadgeVariant } from "@sdp/ui/badge";
 import { describe, expect, it } from "vitest";
+import type { MessageKey } from "@/i18n/messages";
 import { ISSUED_TOKEN_MINT } from "@/test/issued-tokens";
 import {
   countUnpricedHoldings,
@@ -16,6 +17,7 @@ import {
   resolveTransferTokenLabel,
   resolveUsdBalanceValue,
   resolveUsdUnitPrice,
+  statusMessageKey,
   statusVariant,
 } from "./payments-overview.utils";
 
@@ -134,6 +136,26 @@ describe("isHttpUrl", () => {
     expect(isHttpUrl("not-a-url")).toBe(false);
     expect(isHttpUrl("")).toBe(false);
   });
+});
+
+describe("statusMessageKey", () => {
+  it.each([
+    ["pending", "DashboardPayments.transactions.pending"],
+    ["processing", "DashboardPayments.transactions.processing"],
+    ["confirmed", "DashboardPayments.transactions.confirmed"],
+    ["finalized", "DashboardPayments.transactions.finalized"],
+    ["failed", "DashboardPayments.transactions.failed"],
+    ["awaiting_payment", "DashboardPayments.transactions.awaitingPayment"],
+    ["settling", "DashboardPayments.transactions.settling"],
+    ["completed", "DashboardPayments.transactions.completed"],
+    ["canceled", "DashboardPayments.transactions.canceled"],
+    ["expired", "DashboardPayments.transactions.expired"],
+  ] as const satisfies ReadonlyArray<readonly [PaymentTransferStatus, MessageKey]>)(
+    "labels a %s transfer with %s",
+    (status, label) => {
+      expect(statusMessageKey(status)).toBe(label);
+    }
+  );
 });
 
 describe("statusVariant", () => {

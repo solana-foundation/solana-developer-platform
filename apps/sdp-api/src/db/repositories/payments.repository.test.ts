@@ -173,6 +173,24 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
     expect(replay.status).toBe("confirmed");
   });
 
+  it("leaves unrecorded authority null without inferring from an audit identity", async () => {
+    const input = {
+      ...transferInput({ suffix: "unrecorded_principal" }),
+      initiatedByKeyId: "key_or_user_audit_id",
+    };
+    await repo.createTransfer(input);
+
+    const stored = await repo.findTransferByIdempotency({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      idempotencyKey: input.idempotencyKey,
+    });
+    expect(required(stored)).toMatchObject({
+      initiated_by_principal: null,
+      initiated_by_key_id: "key_or_user_audit_id",
+    });
+  });
+
   it.for([
     { type: "transfer", guard: "unsigned" },
     { type: "transfer_batch", guard: "unsigned" },

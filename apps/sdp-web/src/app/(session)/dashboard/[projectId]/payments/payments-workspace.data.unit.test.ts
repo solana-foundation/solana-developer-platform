@@ -1,10 +1,16 @@
 import type { Counterparty } from "@sdp/types/counterparties";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { sentDashboardRequests, stubDashboardFetch } from "@/test/dashboard-fetch";
+import {
+  dashboardDataResponse,
+  sentDashboardRequests,
+  stubDashboardFetch,
+} from "@/test/dashboard-fetch";
+import { requiredWellKnownMint } from "@/test/well-known-mints";
 import { setWindowPathname } from "@/test/window-location";
 import {
   counterpartyListComplete,
   createTransferBatch,
+  estimateTransferBatch,
   fetchRampEstimates,
   type Translate,
 } from "./payments-workspace.data";
@@ -14,6 +20,27 @@ const t: Translate = (key) => key;
 describe("createTransferBatch", () => {
   beforeEach(() => setWindowPathname("/dashboard/prj_test_sandbox/payments/pay"));
   afterEach(() => vi.unstubAllGlobals());
+
+  it("sends the exact custody wallet id in the batch estimate and create bodies", async () => {
+    const batch = {
+      sourceCustodyWalletId: "cwlt_batch_source",
+      token: requiredWellKnownMint("USDC", "devnet"),
+      recipients: [{ counterpartyId: "cp_1", counterpartyAccountId: "acct_1", amount: "1" }],
+    };
+    const fetchMock = stubDashboardFetch(({ path }) =>
+      path === "/api/dashboard/payments/transfers/batch/estimate"
+        ? dashboardDataResponse(200, { estimate: { transactionCount: 1 } })
+        : dashboardDataResponse(200, { batch: { id: "batch_1" }, recipients: [], transfers: [] })
+    );
+
+    await estimateTransferBatch(batch, t);
+    await createTransferBatch(batch, t, { value: "idem_batch_1", persisted: true });
+
+    expect(sentDashboardRequests(fetchMock).map(({ path, body }) => ({ path, body }))).toEqual([
+      { path: "/api/dashboard/payments/transfers/batch/estimate", body: batch },
+      { path: "/api/dashboard/payments/transfers/batch", body: batch },
+    ]);
+  });
 
   it("surfaces a disabled batch movement with the API's actionable refusal", async () => {
     stubDashboardFetch(() =>

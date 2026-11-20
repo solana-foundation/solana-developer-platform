@@ -1,5 +1,5 @@
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
-import { blockhash } from "@solana/kit";
+import { blockhash, getSignatureFromTransaction, getTransactionDecoder } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
@@ -8,6 +8,7 @@ import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { seedProjectCryptoWalletCounterparty } from "@/test/helpers/counterparties";
+import { deferred } from "@/test/helpers/deferred";
 import { env } from "@/test/helpers/env";
 import { countStoredIdempotencyKeys } from "@/test/helpers/idempotency-records";
 import {
@@ -67,6 +68,43 @@ describe("Payments routes — transfer idempotency", () => {
     expect((await readErrorResponse(conflict)).error.code).toBe("IDEMPOTENCY_KEY_REUSED");
     expect(sendTransactionMock).toHaveBeenCalledOnce();
     expect(await countTransferRows()).toBe(1);
+  });
+
+  it("executes once when two requests race on the same Idempotency-Key", async () => {
+    const firstAtSend = deferred<void>();
+    const releaseFirst = deferred<void>();
+    sendTransactionMock.mockImplementationOnce(async (_rpc, transactionBytes) => {
+      firstAtSend.resolve();
+      await releaseFirst.promise;
+      return getSignatureFromTransaction(getTransactionDecoder().decode(transactionBytes));
+    });
+
+    const first = postTransfer(SOL_TRANSFER, { idempotencyKey: "xfer-race-key" });
+    await firstAtSend.promise;
+    const concurrent = await postTransfer(SOL_TRANSFER, { idempotencyKey: "xfer-race-key" });
+    releaseFirst.resolve();
+    const winner = await first;
+
+    expect(concurrent.status).toBe(409);
+    expect((await readErrorResponse(concurrent)).error.code).toBe("IDEMPOTENCY_KEY_IN_FLIGHT");
+    expect(winner.status).toBe(200);
+    const retry = await postTransfer(SOL_TRANSFER, { idempotencyKey: "xfer-race-key" });
+    expect(retry.status).toBe(200);
+    expect(retry.headers.get("Idempotent-Replayed")).toBe("true");
+    expect((await readTransferResponse(retry)).data).toEqual(
+      (await readTransferResponse(winner)).data
+    );
+    expect(sendTransactionMock).toHaveBeenCalledOnce();
+    expect(await countTransferRows()).toBe(1);
+  });
+
+  it("refuses a transfer without an Idempotency-Key before anything runs", async () => {
+    const response = await postTransfer(SOL_TRANSFER, { idempotencyKey: null });
+
+    expect(response.status).toBe(400);
+    expect((await readErrorResponse(response)).error.code).toBe("IDEMPOTENCY_KEY_REQUIRED");
+    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+    expect(await countTransferRows()).toBe(0);
   });
 
   it("replays a retry that only re-spells the amount or names the token by its mint", async () => {
