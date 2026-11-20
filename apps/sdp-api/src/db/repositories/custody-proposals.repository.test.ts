@@ -205,7 +205,9 @@ describe("CustodyProposalsRepository", () => {
       binding: { connectionId: "cconn_cw_signing", sourceAddress: "Source_signing" },
       state: { providerPhase: "submitting", authorizationState: "authorized" },
     });
-    expect(await getDb(env).queryMany("SELECT id FROM fireblocks_signing_proposals")).toEqual([]);
+    expect(
+      await getDb(env).queryOne("SELECT to_regclass('fireblocks_signing_proposals') AS legacy")
+    ).toEqual({ legacy: null });
     expect(
       await repo.listSigning({
         organizationId: input.organizationId,
