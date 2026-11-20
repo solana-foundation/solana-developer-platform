@@ -280,15 +280,10 @@ function collectSourceFiles(repositoryRoot) {
 
   for (const root of SCAN_ROOTS) {
     const absoluteRoot = path.join(repositoryRoot, root);
-    // Fail closed: a scan root that cannot be read must fail the check rather
-    // than quietly shrink it to nothing — the "passed" below cannot tell a
-    // clean repo from an unscanned one.
-    let entries;
-    try {
-      entries = readdirSync(absoluteRoot, { recursive: true, encoding: "utf8" });
-    } catch (error) {
-      throw new Error(`scan root ${root} cannot be read: ${error.message}`);
-    }
+    // A scan root that cannot be read fails the walk here: `readdirSync`
+    // throws ENOENT naming the missing root, so the check cannot quietly
+    // shrink to nothing and still print "passed" below.
+    const entries = readdirSync(absoluteRoot, { recursive: true, encoding: "utf8" });
 
     for (const entry of entries) {
       if (!/\.(ts|tsx|mts)$/.test(entry)) continue;

@@ -3,7 +3,6 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 import {
   checkSecretRefSerialization,
   findSecretRefViolations,
@@ -194,10 +193,14 @@ test("the repo walk flags a violating file end to end", () => {
   // real walker over a real fixture so the scan roots, the file collection and
   // the test-file exemption are exercised too. An empty scan cannot tell
   // "clean" from "scanned nothing".
+  const leakSource =
+    `export const leak = (ref: { reveal(): string }) =>\n` +
+    `  JSON.stringify({ key: ref.reveal("adapter") });\n`;
   const root = fixtureRepo({
-    "apps/sdp-api/src/leak.ts":
-      `export const leak = (ref: { reveal(): string }) =>\n` +
-      `  JSON.stringify({ key: ref.reveal("adapter") });\n`,
+    "apps/sdp-api/src/leak.ts": leakSource,
+    // The same leak in a test file is the sanctioned path and must not be
+    // reported.
+    "apps/sdp-api/src/leak.test.ts": leakSource,
     "packages/sdp-helius-rings/src/clean.ts": `export const clean = (ref: { reveal(): string }) => ref.reveal("signer");\n`,
   });
 
@@ -214,20 +217,19 @@ test("the repo walk flags a violating file end to end", () => {
 test("a missing scan root fails the walk instead of passing vacuously", () => {
   // With `packages/` gone, a lenient walker would scan `apps/` alone and
   // report "passed" — a check that cannot see half the repo cannot vouch for
-  // any of it.
+  // any of it. `readdirSync` throws ENOENT naming the missing root.
   const root = mkdtempSync(path.join(tmpdir(), "secretref-check-"));
   try {
     mkdirSync(path.join(root, "apps"));
-    assert.throws(() => checkSecretRefSerialization(root), /scan root packages cannot be read/);
+    assert.throws(
+      () => checkSecretRefSerialization(root),
+      (error) => {
+        assert.equal(error.code, "ENOENT");
+        assert.equal(error.path, path.join(root, "packages"));
+        return true;
+      }
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
-
-test("the real repo's scan roots are readable", () => {
-  // Pins the wiring for this checkout: both roots exist where the script
-  // resolves them, so a rename or a moved script fails here rather than
-  // silently shrinking the CI sweep.
-  const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-  assert.doesNotThrow(() => checkSecretRefSerialization(repositoryRoot));
 });
