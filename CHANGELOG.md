@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.91.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.90.0...v0.91.0) (2026-11-20)
+
+### Features
+
+* **api:** reset or correct a mainnet access request from a gated back-office workflow ([#2905](https://github.com/solana-foundation/solana-developer-platform/pull/2905)) ([e71cbe9](https://github.com/solana-foundation/solana-developer-platform/commit/e71cbe90ff63c5f6723f9de1d4d4c5fd7b313f72))
+* **sandbox:** point links at platform-devnet and api-devnet ([#2916](https://github.com/solana-foundation/solana-developer-platform/pull/2916)) ([b1cabc2](https://github.com/solana-foundation/solana-developer-platform/commit/b1cabc2c582ac2ce84702fc06dfa32bf6f712e7c))
+* **earn:** add Veda PRIME mainnet vaults and Surfpool lifecycle tests ([#2914](https://github.com/solana-foundation/solana-developer-platform/pull/2914)) ([098586b](https://github.com/solana-foundation/solana-developer-platform/commit/098586b68821e82431f8c4f07bd4e8ac3c7b796d))
+
+### Bug Fixes
+
+* **earn:** pin withdrawal idempotency to the typed quantity; add the … ([#2909](https://github.com/solana-foundation/solana-developer-platform/pull/2909)) ([78fd615](https://github.com/solana-foundation/solana-developer-platform/commit/78fd6153e19da52f4f706ffd872c30924a3eddcb))
+
+### Documentation
+
+* **earn:** fix stale /v1/earn/programs route in data-flow table ([#2915](https://github.com/solana-foundation/solana-developer-platform/pull/2915)) ([b212e42](https://github.com/solana-foundation/solana-developer-platform/commit/b212e42dd99a636edb8ecedf07dea7c928e1763e))
+
+### Refactors
+
+* **api:** rename Earn routes to explicit flow families ([#2913](https://github.com/solana-foundation/solana-developer-platform/pull/2913)) ([ca6f941](https://github.com/solana-foundation/solana-developer-platform/commit/ca6f9411297c9dd8ab9223befb73f9d59903aa6f))
+
+### Maintenance
+
+* make four green-for-the-wrong-reason tests bite ([#2912](https://github.com/solana-foundation/solana-developer-platform/pull/2912)) ([22411a2](https://github.com/solana-foundation/solana-developer-platform/commit/22411a25ca9e9887f6e04ad0190068585a0b7e4f))
+* **api:** pin the egress readiness map before deriving health cases from it ([#2911](https://github.com/solana-foundation/solana-developer-platform/pull/2911)) ([376c6e0](https://github.com/solana-foundation/solana-developer-platform/commit/376c6e0f90392cb5644d2b84494d07c93bb5bb1a))
+* **api:** exercise gateway-auth against the real PrivateChannelError ([#2910](https://github.com/solana-foundation/solana-developer-platform/pull/2910)) ([7ccbd27](https://github.com/solana-foundation/solana-developer-platform/commit/7ccbd27fe8ad6a336d58f1fd4c40652a514d31c6))
+* **api:** pin the Fireblocks cancellation status sets by literal ([#2908](https://github.com/solana-foundation/solana-developer-platform/pull/2908)) ([bbba4c7](https://github.com/solana-foundation/solana-developer-platform/commit/bbba4c72c05699d78884748e1fb4a9d1f2a30bdf))
+* **deploy:** call the cron Cloud Run service cron, not worker (PRO-2519) ([#2898](https://github.com/solana-foundation/solana-developer-platform/pull/2898)) ([c4c5467](https://github.com/solana-foundation/solana-developer-platform/commit/c4c5467ece29707b8b3fbda1e6570a5dbd254d00))
+
 ## [0.90.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.89.0...v0.90.0) (2026-11-18)
 
 ### ⚠ BREAKING CHANGES
