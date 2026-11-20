@@ -90,14 +90,27 @@ async function errorOf(res: Response) {
   return errorResponseSchema.parse(await res.json()).error;
 }
 
-async function createPlan(): Promise<PaymentSubscriptionPlan> {
+async function createPlan(fields: Record<string, unknown> = {}): Promise<PaymentSubscriptionPlan> {
   const res = await send(
     "POST",
     PLANS,
-    { ownerWalletId: TEST_WALLET_ID, token: DEVNET_USDC_MINT, amount: "25.00", periodHours: 720 },
+    {
+      ownerWalletId: TEST_WALLET_ID,
+      token: DEVNET_USDC_MINT,
+      amount: "25.00",
+      periodHours: 720,
+      ...fields,
+    },
     null
   );
   expect(res.status).toBe(201);
+  return successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(await res.json()).data
+    .subscriptionPlan;
+}
+
+async function getPlan(planId: string): Promise<PaymentSubscriptionPlan> {
+  const res = await get(`${PLANS}/${planId}`);
+  expect(res.status).toBe(200);
   return successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(await res.json()).data
     .subscriptionPlan;
 }
@@ -315,13 +328,11 @@ describe("Payments routes — subscriptions", () => {
     expect(await replay.json()).toEqual(await first.json());
     expect(changed.status).toBe(422);
     expect((await errorOf(changed)).code).toBe("IDEMPOTENCY_KEY_REUSED");
-    expect((await updatePlan(plan.id, { metadataUri: "https://sdp.dev/plan.json" })).status).toBe(
-      "active"
-    );
+    expect((await getPlan(plan.id)).status).toBe("active");
   });
 
-  it("activates a draft plan and prepares its on-chain creation for the owner to sign", async () => {
-    const plan = await createPlan();
+  it("stores a plan's created and updated fields and prepares its on-chain creation for the owner to sign", async () => {
+    const plan = await createPlan({ metadataUri: "https://sdp.dev/plan.json" });
     expect(plan).toMatchObject({
       ownerWalletId: TEST_WALLET_ID,
       ownerAddress: OWNER,
@@ -330,11 +341,21 @@ describe("Payments routes — subscriptions", () => {
       periodHours: 720,
       planPda: null,
       pullerWalletId: null,
+      metadataUri: "https://sdp.dev/plan.json",
       status: "draft",
     });
-    expect(
-      await updatePlan(plan.id, { status: "active", pullerWalletId: TEST_WALLET_ID })
-    ).toMatchObject({ status: "active", pullerWalletId: TEST_WALLET_ID, pullerAddress: OWNER });
+    const activated = await updatePlan(plan.id, {
+      status: "active",
+      pullerWalletId: TEST_WALLET_ID,
+      metadataUri: "https://sdp.dev/plan-active.json",
+    });
+    expect(activated).toMatchObject({
+      status: "active",
+      pullerWalletId: TEST_WALLET_ID,
+      pullerAddress: OWNER,
+      metadataUri: "https://sdp.dev/plan-active.json",
+    });
+    expect(await getPlan(plan.id)).toEqual(activated);
 
     const res = await send(
       "POST",
@@ -367,13 +388,7 @@ describe("Payments routes — subscriptions", () => {
         .parse(await (await get(`${PLANS}?${query}`)).json())
         .data.subscriptionPlans.map(({ id }) => id);
 
-    const res = await get(`${PLANS}/${draft.id}`);
-
-    expect(res.status).toBe(200);
-    expect(
-      successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(await res.json()).data
-        .subscriptionPlan
-    ).toEqual(draft);
+    expect(await getPlan(draft.id)).toEqual(draft);
     expect(await listedIds("status=draft")).toEqual([draft.id]);
     expect(await listedIds("status=active")).toEqual([active.id]);
   });
