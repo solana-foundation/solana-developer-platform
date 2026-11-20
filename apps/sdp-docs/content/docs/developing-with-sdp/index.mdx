@@ -18,10 +18,10 @@ An environment belongs to the **project**, not to individual requests. Every ten
 
 | Environment  | Network      | Dashboard                  | API                           |
 | ------------ | ------------ | -------------------------- | ----------------------------- |
-| `sandbox`    | devnet       | `platform-beta.solana.com` | `https://api-beta.solana.com` |
+| `sandbox`    | devnet       | `platform-devnet.solana.com` | `https://api-devnet.solana.com` |
 | `production` | mainnet      | `platform.solana.com`      | `https://api.solana.com`      |
 
-A key's format doesn't name its environment; the project it belongs to does. Each host keeps its own accounts, organizations, and keys, so a sandbox key works only against `api-beta.solana.com`.
+A key's format doesn't name its environment; the project it belongs to does. Each host keeps its own accounts, organizations, and keys, so a sandbox key works only against `api-devnet.solana.com`.
 
 Both environments expose the same route shapes. Build and test against your sandbox project, then move to production with a production project's API key and the production API URL. [Go to mainnet](/docs/guides/go-to-mainnet) covers requesting access and setting up your production wallets and API key.
 

@@ -1,7 +1,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { decodeBoringVault } from "@sdp/earn/providers/veda/vault-state";
 import { MAX_SUPPORTED_TRANSACTION_VERSION } from "@sdp/rpc/transaction-version";
 import { parseDecimalAmount } from "@sdp/solana/amount";
+import { vedaVaultMetadata } from "@sdp/types/veda-programs";
 import type { Instruction } from "@solana/kit";
 import {
   address,
@@ -36,7 +38,7 @@ import type { VedaInstructionPlan, VedaRuntime } from "./types";
 /**
  * Real-program proof for Veda's delayed withdrawal path.
  *
- * This suite is opt-in because it needs a Surfpool surfnet with a DEVNET remote
+ * This suite is opt-in because it needs a Surfpool surfnet with a devnet or mainnet remote
  * RPC. Surfpool lazily clones Veda's deployed vault, queue and transfer-hook
  * programs; the only cheatcodes used are test-wallet funding and deterministic
  * clock control. The Veda accounts, program bytecode, instructions and refusal
@@ -46,13 +48,27 @@ import type { VedaInstructionPlan, VedaRuntime } from "./types";
  *
  *   VEDA_SURFPOOL_DEVNET_RPC_URL=<devnet RPC> scripts/kora-surfpool/e2e-veda.sh
  *
+ * Mainnet PRIME vaults: add VEDA_SURFPOOL_CLUSTER=mainnet-beta and set
+ * VEDA_SURFPOOL_MAINNET_RPC_URL instead. Every send goes to a local fork.
+ *
  * The queue's solver is deliberately out of scope. Fulfilment requires Veda's
  * private solve-authority signer, which a fork does not and must not impersonate.
  */
 const ENABLED = process.env.VEDA_SURFPOOL_E2E === "true";
 const RPC_URL = process.env.SOLANA_RPC_URL;
+const CLUSTER = process.env.VEDA_SURFPOOL_CLUSTER ?? "devnet";
+if (CLUSTER !== "devnet" && CLUSTER !== "mainnet-beta") {
+  throw new Error("VEDA_SURFPOOL_CLUSTER must be devnet or mainnet-beta");
+}
+if (
+  ENABLED &&
+  (!RPC_URL || !["localhost", "127.0.0.1", "[::1]"].includes(new URL(RPC_URL).hostname))
+) {
+  throw new Error("Veda Surfpool tests require a local SOLANA_RPC_URL");
+}
+const CONFIG = vedaClusterConfig(CLUSTER);
 const DEPOSIT_AMOUNT = "2";
-const FUNDED_USDC_ATOMS = 10_000_000n;
+const FUNDED_ASSET_ATOMS = 10_000_000n;
 const OWNER_LAMPORTS = 10_000_000_000;
 const CLOCK_SYSVAR = "SysvarC1ock11111111111111111111111111111111";
 
@@ -324,11 +340,15 @@ async function accountExists(account: string): Promise<boolean> {
   return info.value !== null;
 }
 
-describe.skipIf(!ENABLED || !RPC_URL)("Veda queued withdrawals on Surfpool", () => {
+describe.skipIf(!ENABLED).each(
+  CONFIG.vaultStateAddresses.map((vault) => ({
+    vault,
+    name: vedaVaultMetadata(CLUSTER, vault)?.name ?? "Devnet Test Vault",
+  }))
+)("Veda $name queued withdrawals on Surfpool", ({ vault }) => {
   let providerRpcUrl = RPC_URL ?? "";
-  const runtime = (): VedaRuntime => ({ cluster: "devnet", rpcUrl: providerRpcUrl });
-  const config = vedaClusterConfig("devnet");
-  const vault = config.vaultStateAddresses[0];
+  const runtime = (): VedaRuntime => ({ cluster: CLUSTER, rpcUrl: providerRpcUrl });
+  const config = CONFIG;
   let owner: Awaited<ReturnType<typeof generateKeyPairSigner>>;
   let contextAlignedRpc: Awaited<ReturnType<typeof startContextAlignedRpc>> | undefined;
   let clockPaused = false;
@@ -340,7 +360,6 @@ describe.skipIf(!ENABLED || !RPC_URL)("Veda queued withdrawals on Surfpool", () 
   }
 
   beforeAll(async () => {
-    if (!vault) throw new Error("The Veda devnet deployment has no configured vault");
     owner = await generateKeyPairSigner();
 
     // A remote Surfnet seeds its clock before lazy account clones. Move the
@@ -350,6 +369,9 @@ describe.skipIf(!ENABLED || !RPC_URL)("Veda queued withdrawals on Surfpool", () 
     await cheat("surfnet_timeTravel", [{ absoluteSlot: slot + 10_000 }]);
     await cheat("surfnet_pauseClock");
     clockPaused = true;
+    // Each vault gets a fresh provider endpoint and the fork's current clock,
+    // including after the preceding vault's deadline warp.
+    await alignProviderRpcContext();
 
     await cheat("surfnet_setAccount", [
       owner.address,
@@ -369,23 +391,45 @@ describe.skipIf(!ENABLED || !RPC_URL)("Veda queued withdrawals on Surfpool", () 
   });
 
   it("lands deposit -> request, refuses early cancel, then expires -> cancels and returns shares", async () => {
-    if (!vault) throw new Error("The Veda devnet deployment has no configured vault");
+    const metadata = vedaVaultMetadata(CLUSTER, vault);
+    const account = await rpcCall<{
+      value: { owner: string; data: [string, "base64"] } | null;
+    }>("getAccountInfo", [vault, { encoding: "base64" }]);
+    if (!account.value) throw new Error(`Missing Veda vault ${vault}`);
+    expect(account.value.owner).toBe(config.vaultProgramAddress);
+    const state = decodeBoringVault(vault, Buffer.from(account.value.data[0], "base64"));
+    expect(state).not.toBeNull();
+    if (metadata) {
+      expect(state).toMatchObject({
+        vaultId: BigInt(metadata.vaultId),
+        baseAsset: metadata.assetMint,
+        shareMint: metadata.shareMint,
+      });
+    }
     const queueProgramAddress = config.queueProgramAddress;
     if (!queueProgramAddress) {
-      throw new Error("The Veda devnet deployment has no configured queue program");
+      throw new Error("The Veda deployment has no configured queue program");
     }
 
     const options = await readVedaWithdrawalOptions(runtime(), config, { vault });
     expect(options.queued).toBe(true);
+    if (metadata) expect(options.instant).toBe(false);
     expect(options.queueState).not.toBeNull();
     const queueAsset = options.queueAsset;
-    if (!queueAsset) throw new Error("The Veda devnet vault has no queued-withdrawal asset");
+    if (!queueAsset) throw new Error("The Veda vault has no queued-withdrawal asset");
     expect(queueAsset.allowWithdrawals).toBe(true);
+    if (metadata) expect(queueAsset.assetMint).toBe(metadata.assetMint);
 
+    const mintAccount = await rpcCall<{ value: { owner: string } | null }>("getAccountInfo", [
+      queueAsset.assetMint,
+      { encoding: "base64" },
+    ]);
+    if (!mintAccount.value) throw new Error("The deposit mint is missing from the fork");
     await cheat("surfnet_setTokenAccount", [
       owner.address,
       queueAsset.assetMint,
-      { amount: Number(FUNDED_USDC_ATOMS) },
+      { amount: Number(FUNDED_ASSET_ATOMS) },
+      mintAccount.value.owner,
     ]);
 
     const depositQuote = await previewVedaDeposit(runtime(), config, {
@@ -406,8 +450,15 @@ describe.skipIf(!ENABLED || !RPC_URL)("Veda queued withdrawals on Surfpool", () 
       owner: owner.address,
     });
     const depositedAtoms = parseDecimalAmount(deposited.shares, queueAsset.shareDecimals);
-    const requestAtoms = parseDecimalAmount(queueAsset.minimumShares, queueAsset.shareDecimals);
-    expect(depositedAtoms).toBeGreaterThanOrEqual(requestAtoms);
+    expect(depositedAtoms).toBeGreaterThan(0n);
+    if (metadata) {
+      expect(deposited.shareMint).toBe(metadata.shareMint);
+      expect(deposited.tokenMint).toBe(metadata.assetMint);
+    }
+    expect(depositedAtoms).toBeGreaterThanOrEqual(
+      parseDecimalAmount(queueAsset.minimumShares, queueAsset.shareDecimals)
+    );
+    const requestAtoms = depositedAtoms;
 
     // A deployment may impose a post-deposit share lock. Advance the real
     // Surfpool clock beyond it before asking the queue program to escrow the
@@ -420,7 +471,7 @@ describe.skipIf(!ENABLED || !RPC_URL)("Veda queued withdrawals on Surfpool", () 
     const requestInput = {
       vault,
       owner: owner.address,
-      shares: queueAsset.minimumShares,
+      shares: deposited.shares,
       discountBps: queueAsset.minimumDiscountBps,
       deadlineSeconds: queueAsset.minimumSecondsToDeadline,
     };

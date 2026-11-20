@@ -49,9 +49,9 @@ test("a production build links to its configured dashboard over sdp-web's produc
   assert.equal(
     resolveDashboardUrl({
       ...production,
-      NEXT_PUBLIC_SDP_WEB_URL: "https://platform-beta.solana.com",
+      NEXT_PUBLIC_SDP_WEB_URL: "https://platform-devnet.solana.com",
     }),
-    "https://platform-beta.solana.com/"
+    "https://platform-devnet.solana.com/"
   );
   assert.equal(resolveDashboardUrl(production), "https://platform.solana.com/");
 });

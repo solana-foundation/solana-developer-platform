@@ -1,5 +1,5 @@
 import type { EarnDepositTokenSymbol } from "./earn";
-import { type SolanaCluster, wellKnownMint } from "./well-known-tokens";
+import { type SolanaCluster, type WellKnownTokenSymbol, wellKnownMint } from "./well-known-tokens";
 
 /**
  * Veda's on-chain deployment, per cluster.
@@ -12,51 +12,10 @@ import { type SolanaCluster, wellKnownMint } from "./well-known-tokens";
  * it never calls — a workspace cycle `scripts/check-module-boundaries.mjs`
  * rejects outright. Same argument as `./kamino-programs`, and the same home.
  *
- * ── What is filled in, and why mainnet is still `null` ──────────────────────
- * DEVNET is confirmed (2026-08-31), from two independent sources that agree:
- *
- * - Veda's integration docs — the deployment-configuration table an
- *   integration passes to `createVedaClient()` — name the three programs, the
- *   Test Vault's vault-state address, and devnet USDC, per cluster.
- * - SDP's own on-chain audit (2026-08-17, veda-svm-sdk-audit harness; reports
- *   committed at `docs/earn/veda-svm-audit/`) measured the same addresses
- *   against genesis-proved endpoints: all three programs exist and are
- *   executable, the vault state is owned by the vault program, its asset
- *   config references THIS cluster's USDC (`4zMMC9srt…`, exactly the
- *   well-known devnet USDC mint) and not mainnet's. The audit also landed a
- *   deposit and queued-withdrawal request on devnet. Its cancellation attempts
- *   were all made before the request deadline and correctly failed, leaving
- *   the shares escrowed; the committed report is not evidence that a cancel
- *   landed. SDP's reproducible Surfpool scenario is the cancellation proof.
- *
- * That answers the three questions this file used to hold open: the program
- * addresses, the vault-state allowlist, and the docs' unusual claim that
- * devnet and mainnet share addresses (they do — measured, not inferred; the
- * genesis proof in `@sdp/earn` is what keeps the shared address from ever
- * being read on the wrong chain).
- *
- * MAINNET stays `null` deliberately, and not for lack of addresses: the same
- * docs table names the same programs and the SAME vault state for mainnet, and
- * the audit found them live there too. But that vault is Veda's shared TEST
- * vault (share supply was ~4 USDC when measured), and a mainnet entry here
- * puts its row on the PRODUCTION catalogue for every customer. Fill mainnet
- * only when Veda names the production vault(s) SDP should actually offer —
- * and note a wrong address is not a loud failure: a program that does not
- * exist reads as an empty shelf, while one that exists but is not Veda's would
- * take a `deposit` instruction and do something else with the money.
- *
- * Historical note, kept because it explains why nothing is inferred from the
- * SDK: the `address` fields baked into `@vedatech/svm-sdk`'s Anchor IDLs
- * (`5J76xGGXn5op…` vault, `Cchro8d7bN5X…` queue, `FSZPGBfPWb6f…` hook) are the
- * source repository's `declare_id!` defaults — measured 2026-08-19, none of
- * the three exists on either cluster. `createVedaClient` takes every address
- * at runtime and "does not include default addresses or infer one program
- * from another"; this table is that configuration.
- *
- * **Filling mainnet in is a pure data change**: replace the `null` with a
- * `VedaDeployment`. Nothing else in the stack needs to move — the catalogue
- * read, the instruction builder, the cluster guard and their tests all already
- * work against a deployment.
+ * Mainnet: Veda supplied the SDP USDC PRIME and OUSD PRIME deployments in
+ * November 2026. Devnet retains the separately deployed Test Vault confirmed
+ * by Veda's integration guide and SDP's on-chain audit. Never infer deployment
+ * addresses from the SDK's IDL defaults or enumerate other integrators' vaults.
  */
 export interface VedaDeployment {
   /**
@@ -97,10 +56,8 @@ export interface VedaDeployment {
  * Deposit assets SDP is willing to front for Veda, as token SYMBOLS.
  *
  * Declared cluster-agnostically and bridged to mints through the well-known
- * token catalogue, matching `EarnDeclaredStrategySupport`. USDC only: it is the
- * asset Veda's integration material describes, and it is the only one of the
- * three Earn deposit symbols that has a devnet mint, so a wider declaration
- * would be a claim SDP could not exercise in sandbox anyway.
+ * token catalogue, matching EarnDeclaredStrategySupport. USDC and OUSD are
+ * the production PRIME assets; only USDC has a confirmed devnet mint.
  *
  * This is a CEILING, not a promise. The live vault decides what it accepts; the
  * catalogue intersects the two, so widening this never admits an asset the
@@ -108,23 +65,88 @@ export interface VedaDeployment {
  */
 export const VEDA_DEPOSIT_TOKEN_SYMBOLS = [
   "USDC",
+  "OUSD",
 ] as const satisfies readonly EarnDepositTokenSymbol[];
+
+/**
+ * Production vault identities supplied by Veda for SDP (November 2026).
+ * Names are provider-supplied; asset selection is pinned per vault so adding
+ * OUSD never makes a multi-asset vault's deposit or position ambiguous.
+ *
+ * The asset is pinned by SYMBOL and resolved through the well-known token
+ * catalogue, per the code standards: a mint address is written exactly once,
+ * in `WELL_KNOWN_TOKENS`, and these pins read it from there.
+ */
+const VEDA_MAINNET_VAULT_IDENTITIES = [
+  {
+    name: "USDC PRIME",
+    assetSymbol: "USDC",
+    // biome-ignore lint/security/noSecrets: public vault state account.
+    vaultStateAddress: "7PjRdSecsdyUaasPqsQSDyBz67FMJPZT82KCkpXCb1sy",
+    vaultId: 4,
+    // biome-ignore lint/security/noSecrets: public vault share mint.
+    shareMint: "78gitz5xcQUuV7CfYDBMSKpYVqazDWyRZ2KhQjqFZMjh",
+  },
+  {
+    name: "OUSD PRIME",
+    assetSymbol: "OUSD",
+    // biome-ignore lint/security/noSecrets: public vault state account.
+    vaultStateAddress: "5qXvYYBRWwW9JYgFAfu3TpWLRaeJ31sEWNWW2cSvU8ZV",
+    vaultId: 5,
+    // biome-ignore lint/security/noSecrets: public vault share mint.
+    shareMint: "DZZa8WVtkDv281vg8nKawhBjpmTxtNkKJdmciw71ZcP9",
+  },
+] as const satisfies readonly {
+  name: string;
+  assetSymbol: WellKnownTokenSymbol;
+  vaultStateAddress: string;
+  vaultId: number;
+  shareMint: string;
+}[];
+
+/**
+ * The mainnet mint the well-known catalogue carries for a pinned vault asset.
+ *
+ * Throws rather than returning `undefined` on purpose: a vault pin naming a
+ * token the registry does not deploy on mainnet is a programmer error that
+ * must fail loudly at module load, not silently widen into "accepts no mints".
+ */
+function mainnetVaultMint(symbol: WellKnownTokenSymbol): string {
+  const mint = wellKnownMint(symbol, "mainnet-beta");
+  if (mint === undefined) {
+    throw new Error(`The well-known token registry carries no mainnet-beta mint for ${symbol}`);
+  }
+  return mint;
+}
+
+export const VEDA_MAINNET_VAULTS = VEDA_MAINNET_VAULT_IDENTITIES.map((vault) => ({
+  ...vault,
+  assetMint: mainnetVaultMint(vault.assetSymbol),
+}));
+
+export function vedaVaultMetadata(cluster: SolanaCluster, vault: string) {
+  return cluster === "mainnet-beta"
+    ? VEDA_MAINNET_VAULTS.find((entry) => entry.vaultStateAddress === vault)
+    : undefined;
+}
 
 /**
  * Per-cluster deployment, or `null` when SDP has no confirmed one.
  *
- * Annotated rather than `as const`: with both entries `null` a literal type
- * would narrow the accessor's return to `null`, and every consumer of a real
- * deployment would typecheck as dead code — including the tests that prove
- * those paths work.
+ * A missing deployment fails closed at the provider boundary.
  */
 export const VEDA_DEPLOYMENTS: Readonly<Record<SolanaCluster, VedaDeployment | null>> = {
-  // The production vault set is an offering decision Veda has not made yet —
-  // the published mainnet addresses point at their shared Test Vault. See the
-  // header before filling this in.
-  "mainnet-beta": null,
+  "mainnet-beta": {
+    // biome-ignore lint/security/noSecrets: public vault program.
+    vaultProgramAddress: "9TWFuaFP1pvx698ANRpiGBHqi6zrTFBQoXwqaAmfd5Jp",
+    // biome-ignore lint/security/noSecrets: public BoringQueue program.
+    queueProgramAddress: "A4g8EPHbe2GgydQcKaEAv6VkB6Tyz6utcADcMtDwnaqy",
+    // biome-ignore lint/security/noSecrets: public transfer-hook program.
+    hookProgramAddress: "4aHAutB42cB5qVuj8BDowezi3EwX6yPasaDmTqMEEtta",
+    vaultStateAddresses: VEDA_MAINNET_VAULTS.map((vault) => vault.vaultStateAddress),
+  },
   // Veda's devnet Test Vault deployment, from their integration docs and
-  // measured on chain (see header). Addresses are identical on mainnet.
+  // measured on chain. Production uses its own programs and vaults.
   devnet: {
     // biome-ignore lint/security/noSecrets: on-chain program address, not a secret.
     vaultProgramAddress: "ASN8Cz36kQSZf2ZrgUbRShaKUpN4CJoTGdv6C5uMsy3J",
@@ -192,6 +214,8 @@ export function vedaDepositMints(cluster: SolanaCluster): readonly string[] {
  * Fails closed on an unknown mint: a mint the well-known catalogue does not
  * carry is not something SDP fronts anywhere.
  */
-export function isVedaDepositMint(mint: string, cluster: SolanaCluster): boolean {
+export function isVedaDepositMint(mint: string, cluster: SolanaCluster, vault: string): boolean {
+  const configured = vedaVaultMetadata(cluster, vault);
+  if (configured) return mint === configured.assetMint;
   return vedaDepositMints(cluster).includes(mint);
 }

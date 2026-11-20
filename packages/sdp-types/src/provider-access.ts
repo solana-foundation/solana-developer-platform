@@ -86,10 +86,9 @@ export const EARN_PROVIDER_SURFACING = {
   // deposits and withdrawals (@sdp/veda).
   //
   // The shelf follows `VEDA_DEPLOYMENTS` (@sdp/types/veda-programs): devnet is
-  // confirmed, so the SANDBOX catalogue carries Veda's devnet Test Vault;
-  // mainnet is deliberately null, so every production pass reports
-  // PROVIDER_NOT_CONFIGURED and the production shelf stays empty until Veda
-  // names a production vault. Surfacing decides whether rows REACH customers,
+  // confirmed, so SANDBOX carries the Test Vault; production carries the
+  // separately deployed USDC PRIME and OUSD PRIME vaults.
+  // Surfacing decides whether rows REACH customers,
   // never whether any exist.
   veda: true,
   // Registered so the sync and the registry-consistency test have an entry, but
@@ -465,7 +464,7 @@ function deployedClusters(
  * Clusters each `vault_direct` provider has a deployment SDP can execute
  * against, DERIVED from the provider's own program or deployment table so this
  * can never disagree with it. Filling `VEDA_DEPLOYMENTS["mainnet-beta"]`
- * (PRO-1777) opens Veda to production here with no second edit; Jupiter Lend
+ * (PRO-1777) opened Veda to production here with no second edit; Jupiter Lend
  * and Ondo stay mainnet-only for as long as their tables say so.
  *
  * Upshift and Perena are registered placeholders with no client and no

@@ -134,6 +134,18 @@ export const WELL_KNOWN_TOKENS = {
       "mainnet-beta": { address: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", decimals: 6 },
     },
   },
+  OUSD: {
+    symbol: "OUSD",
+    name: "OpenUSD",
+    isUsdStable: true,
+    tokenProgram: "token-2022",
+    category: "stablecoin",
+    mints: {
+      // Verified on mainnet: initialized Token-2022 mint, 6 decimals, OpenUSD metadata.
+      // biome-ignore lint/security/noSecrets: Mainnet OUSD mint address, not a secret.
+      "mainnet-beta": { address: "ousd2mJsPEckLHcSCDxyKD7NDGARZcfLbDZkKiatYHB", decimals: 6 },
+    },
+  },
   USDT: {
     symbol: "USDT",
     name: "Tether USD",

@@ -602,13 +602,27 @@ describe("DvpTradeRepository (postgres)", () => {
     const created = await repo.create(tradeInsert());
     await db.prepare("UPDATE dvp_trades SET status = 'funded' WHERE id = ?").bind(created.id).run();
 
-    await repo.recordClose(created.id, "settled", CLOSE_SIGNATURE);
+    const beforeClose = Date.now();
+    const closed = await repo.recordClose(created.id, "settled", CLOSE_SIGNATURE);
     const row = await db
       .prepare("SELECT closed_at FROM dvp_trades WHERE id = ?")
       .bind(created.id)
       .first<{ closed_at: string }>();
 
-    expect(row?.closed_at).toBeTruthy();
+    // The close time is the moment of the close, present on the returned row
+    // and in the database: a valid ISO stamp taken inside this test, so a
+    // garbage or epoch value cannot pass for "set". Five seconds of slack for
+    // a container clock behind the host.
+    for (const [where, stamped] of [
+      ["returned row", closed?.closedAt],
+      ["database row", row?.closed_at],
+    ] as const) {
+      const at = Date.parse(stamped ?? "");
+      expect(stamped, `${where} carries a close time`).toBeDefined();
+      expect(Number.isNaN(at), `${stamped} parses as a timestamp`).toBe(false);
+      expect(at, where).toBeGreaterThanOrEqual(beforeClose - 5_000);
+      expect(at, where).toBeLessThanOrEqual(Date.now() + 5_000);
+    }
   });
 
   it("keeps the first close time when a closed_unknown trade is resolved", async () => {

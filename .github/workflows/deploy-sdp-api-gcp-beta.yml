@@ -1,6 +1,6 @@
 name: Deploy sdp-api to Cloud Run (beta)
 
-# Beta (api-beta.solana.com) is the devnet sandbox. The merge deploy dispatches this as its own run
+# Beta (api-devnet.solana.com) is the devnet sandbox. The merge deploy dispatches this as its own run
 # once the stage deploy and smoke pass, so a slow or stuck beta never holds prod or the next merge's
 # deploy (the merge deploy's concurrency slot) up. It runs in its own GCP project
 # with its own registry, services and database, and deploys the signed merge image the prod deploy
@@ -45,7 +45,7 @@ jobs:
       BETA_SERVICE: sdp-beta-api-public
       BETA_CRON_SERVICE: sdp-beta-cron
       BETA_MIGRATE_JOB: sdp-beta-api-public-migrate
-      BETA_ORIGIN: https://api-beta.solana.com
+      BETA_ORIGIN: https://api-devnet.solana.com
       DEPLOY_IMAGE_SHA: ${{ inputs.image_sha }}
     steps:
       - name: Checkout
@@ -445,7 +445,7 @@ jobs:
     if: needs.deploy.outputs.present == 'true'
     env:
       SMOKE_TARGET: beta
-      BETA_ORIGIN: https://api-beta.solana.com
+      BETA_ORIGIN: https://api-devnet.solana.com
     steps:
       - name: Checkout
         continue-on-error: true
