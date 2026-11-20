@@ -31,8 +31,11 @@ function pendingCsr(expiresInMs: number) {
     expiresAt: new Date(Date.now() + expiresInMs).toISOString(),
   };
 }
-function signingKeyId(container: HTMLElement) {
-  return container.querySelector<HTMLInputElement>('input[name="signingKeyId"]')?.value;
+/** The registration the fields would submit, or the test fails. */
+function signingKeyId(container: HTMLElement): string {
+  const input = container.querySelector('input[name="signingKeyId"]');
+  if (!(input instanceof HTMLInputElement)) throw new Error("No signing key field");
+  return input.value;
 }
 beforeEach(() => {
   ready.mockReset();
@@ -106,8 +109,15 @@ it("marks a registration that expires while the form is open and withdraws it", 
 
 it("offers a new registration, not the cached one, when the read after a remount fails", async () => {
   // jsdom has no object URLs; the generated CSR downloads through one.
-  URL.createObjectURL = vi.fn(() => "blob:csr");
-  URL.revokeObjectURL = vi.fn();
+  vi.stubGlobal(
+    "URL",
+    class extends URL {
+      static createObjectURL() {
+        return "blob:csr";
+      }
+      static revokeObjectURL() {}
+    }
+  );
   vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
   vi.spyOn(csrActions, "generateFireblocksCsrAction").mockResolvedValue({
     status: "success",

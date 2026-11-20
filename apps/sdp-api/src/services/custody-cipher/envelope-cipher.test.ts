@@ -1,44 +1,48 @@
 import { describe, expect, it, vi } from "vitest";
+import { fakeEnvelopeKms } from "@/test/helpers/custody-cipher";
 import { KmsEnvelopeCipher } from "./envelope-cipher";
-
-// Fake KMS: "wrap" = reversible XOR-with-0x5a so the test needs no real KMS.
-function fakeKms() {
-  const mask = (b: Uint8Array) => b.map((x) => x ^ 0x5a);
-  const b64 = (b: Uint8Array) => btoa(String.fromCharCode(...b));
-  const un = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
-  return {
-    encrypt: vi.fn(async (pt: Uint8Array, _aad: string) => b64(mask(pt))),
-    decrypt: vi.fn(async (ct: string, _aad: string) => mask(un(ct))),
-  };
-}
 
 describe("KmsEnvelopeCipher", () => {
   it("round-trips plaintext and emits the v2 prefix", async () => {
-    const kms = fakeKms();
-    const cipher = new KmsEnvelopeCipher({ kms });
+    const cipher = new KmsEnvelopeCipher({ kms: fakeEnvelopeKms() });
 
     const { ciphertext, version } = await cipher.encrypt("org1", "super-secret");
 
     expect(version).toBe("sdp-custody-kms-v2");
     expect(ciphertext.startsWith("v2.")).toBe(true);
+    expect(ciphertext).not.toContain("super-secret");
     expect(await cipher.decrypt("org1", ciphertext)).toBe("super-secret");
   });
 
-  it("binds the DEK to the org via AAD", async () => {
-    const kms = fakeKms();
+  it("binds the data key to the organization with the org:<orgId> additional data", async () => {
+    const kms = fakeEnvelopeKms();
+    const encrypt = vi.spyOn(kms, "encrypt");
+    const decrypt = vi.spyOn(kms, "decrypt");
     const cipher = new KmsEnvelopeCipher({ kms });
-    await cipher.encrypt("org1", "x");
-    expect(kms.encrypt.mock.calls[0][1]).toBe("org:org1");
+
+    const { ciphertext } = await cipher.encrypt("org1", "super-secret");
+    await cipher.decrypt("org1", ciphertext);
+
+    expect(encrypt).toHaveBeenCalledExactlyOnceWith(expect.any(Uint8Array), "org:org1");
+    expect(decrypt).toHaveBeenCalledExactlyOnceWith(expect.any(String), "org:org1");
+  });
+
+  it("refuses to decrypt one organization's ciphertext for another", async () => {
+    const cipher = new KmsEnvelopeCipher({ kms: fakeEnvelopeKms() });
+    const { ciphertext } = await cipher.encrypt("org1", "super-secret");
+
+    await expect(cipher.decrypt("org2", ciphertext)).rejects.toThrow("AAD mismatch");
   });
 
   it("rejects ciphertext without the v2 prefix", async () => {
-    const cipher = new KmsEnvelopeCipher({ kms: fakeKms() });
-    await expect(cipher.decrypt("org1", "not-v2")).rejects.toThrow(/v2/i);
+    const cipher = new KmsEnvelopeCipher({ kms: fakeEnvelopeKms() });
+    await expect(cipher.decrypt("org1", "not-v2")).rejects.toThrow(
+      "ciphertext is not a v2 envelope"
+    );
   });
 
-  it("rejects a v2 envelope with the wrong number of segments", async () => {
-    const cipher = new KmsEnvelopeCipher({ kms: fakeKms() });
-    await expect(cipher.decrypt("org1", "v2.only-two")).rejects.toThrow(/malformed/i);
-    await expect(cipher.decrypt("org1", "v2.a.b.c")).rejects.toThrow(/malformed/i);
+  it.each(["v2.only-two", "v2.a.b.c"])("rejects the malformed envelope %s", async (ciphertext) => {
+    const cipher = new KmsEnvelopeCipher({ kms: fakeEnvelopeKms() });
+    await expect(cipher.decrypt("org1", ciphertext)).rejects.toThrow("malformed v2 envelope");
   });
 });

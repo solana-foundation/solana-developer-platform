@@ -1,5 +1,5 @@
 import { generateKeyPairSync, webcrypto } from "node:crypto";
-import { describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import { cancelFireblocksTransfer } from "./fireblocks-transfers";
 import type { CustodyProvisioningRuntime } from "./runtime";
 
@@ -35,10 +35,11 @@ describe("Fireblocks cancellation adapter", () => {
       `${access.apiBaseUrl}/v1/transactions/another-id/cancel`,
     ]);
     for (const [, init] of fetch.mock.calls) {
-      expect(init?.method).toBe("POST");
-      expect(init?.body).toBeUndefined();
-      expect(new Headers(init?.headers).get("X-API-Key")).toBe(access.apiKey);
-      expect(new Headers(init?.headers).has("Idempotency-Key")).toBe(false);
+      assert.isDefined(init);
+      expect(init.method).toBe("POST");
+      expect(init.body).toBeUndefined();
+      expect(new Headers(init.headers).get("X-API-Key")).toBe(access.apiKey);
+      expect(new Headers(init.headers).has("Idempotency-Key")).toBe(false);
     }
   });
 
@@ -89,7 +90,9 @@ describe("Fireblocks cancellation adapter", () => {
     await expect(cancelFireblocksTransfer(rt, access, "provider-id")).resolves.toBe(false);
     await expect(cancelFireblocksTransfer(rt, access, "provider-id")).resolves.toBe(true);
     expect(fetch).toHaveBeenCalledTimes(2);
-    for (const [, init] of fetch.mock.calls)
-      expect(new Headers(init?.headers).has("Idempotency-Key")).toBe(false);
+    for (const [, init] of fetch.mock.calls) {
+      assert.isDefined(init);
+      expect(new Headers(init.headers).has("Idempotency-Key")).toBe(false);
+    }
   });
 });

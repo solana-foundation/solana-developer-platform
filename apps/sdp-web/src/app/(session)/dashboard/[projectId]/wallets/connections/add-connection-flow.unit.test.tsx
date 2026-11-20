@@ -2,16 +2,15 @@
 
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   DashboardPageTitleContext,
   type DashboardPageTitleOverride,
 } from "@/components/dashboard-page-title-context";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
+import { stubClerkSession } from "@/test/clerk";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { setPageRequest } from "@/test/request-project";
+import { walletsWorkspace } from "@/test/wallets";
 import { AddConnectionFlow } from "./add-connection-flow";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
@@ -19,9 +18,6 @@ vi.mock("next/headers", () => import("@/test/next-headers"));
 vi.mock("next/cache", () => import("@/test/next-cache"));
 vi.mock("@clerk/nextjs/server", () => ({
   auth: async () => ({ orgId: "org_test", getToken: async () => "test-token" }),
-}));
-vi.mock("./use-selected-project-name", () => ({
-  useSelectedProjectName: () => "Acme Payments",
 }));
 
 const PROVIDER_HREF = "/dashboard/prj_test_sandbox/integrations/privy";
@@ -33,6 +29,7 @@ const showTitle = (override: DashboardPageTitleOverride | null) => {
 };
 
 beforeEach(() => {
+  stubClerkSession();
   setPageRequest("/dashboard/prj_test_sandbox/integrations/privy/connections/new");
 });
 
@@ -45,13 +42,12 @@ afterEach(() => {
   shownTitle = null;
 });
 
-function flow(provider: "privy" | "fireblocks") {
-  return (
-    <I18nProvider locale="en" messages={getMessages("en")}>
-      <DashboardPageTitleContext.Provider value={showTitle}>
-        <AddConnectionFlow provider={provider} />
-      </DashboardPageTitleContext.Provider>
-    </I18nProvider>
+function renderFlow() {
+  render(
+    <DashboardPageTitleContext.Provider value={showTitle}>
+      <AddConnectionFlow provider="privy" />
+    </DashboardPageTitleContext.Provider>,
+    { wrapper: walletsWorkspace("admin") }
   );
 }
 
@@ -91,38 +87,26 @@ async function fillAndSubmit(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: "Connect and create wallet" }));
 }
 
-it.each([
-  [
-    "privy",
-    "Connects this Privy app to Acme Payments and creates the first wallet in it.",
-    "Connect and create wallet",
-  ],
-  ["fireblocks", "Connects this Fireblocks account to Acme Payments.", "Connect and verify"],
-] as const)("words the %s footer for what connecting creates", (provider, footer, primary) => {
-  const markup = renderToStaticMarkup(flow(provider));
-
-  expect(markup).toContain(footer);
-  expect(markup).toContain(primary);
-});
-
 it("returns to the provider page on Cancel", async () => {
   const user = userEvent.setup();
-  render(flow("privy"));
+  renderFlow();
 
   await user.click(screen.getByRole("button", { name: "Cancel" }));
 
-  expect(dashboardRouter.push).toHaveBeenCalledWith(PROVIDER_HREF);
+  expect(dashboardRouter.push).toHaveBeenCalledExactlyOnceWith(PROVIDER_HREF);
 });
 
 it("lands on the new connection once it verifies", async () => {
   const { complete } = mockApi();
   complete.mockImplementation(async () => completed());
   const user = userEvent.setup();
-  render(flow("privy"));
+  renderFlow();
 
   await fillAndSubmit(user);
 
-  await waitFor(() => expect(dashboardRouter.push).toHaveBeenCalledWith(CONNECTION_HREF));
+  await waitFor(() =>
+    expect(dashboardRouter.push).toHaveBeenCalledExactlyOnceWith(CONNECTION_HREF)
+  );
 });
 
 it("holds the page on an unknown submission until its replay settles", async () => {
@@ -130,7 +114,7 @@ it("holds the page on an unknown submission until its replay settles", async () 
   submit.mockRejectedValueOnce(new TypeError("fetch failed"));
   complete.mockImplementation(async () => completed());
   const user = userEvent.setup();
-  render(flow("privy"));
+  renderFlow();
 
   await fillAndSubmit(user);
   const retry = await screen.findByRole("button", { name: "Retry submission" });
@@ -141,14 +125,15 @@ it("holds the page on an unknown submission until its replay settles", async () 
   expect(dashboardRouter.push).not.toHaveBeenCalled();
 
   await user.click(retry);
-  await waitFor(() => expect(dashboardRouter.push).toHaveBeenCalledWith(CONNECTION_HREF));
-  expect(dashboardRouter.push).toHaveBeenCalledTimes(1);
+  await waitFor(() =>
+    expect(dashboardRouter.push).toHaveBeenCalledExactlyOnceWith(CONNECTION_HREF)
+  );
 });
 
 it("blocks leaving during a completion retry and releases it after a refusal", async () => {
   const { complete } = mockApi();
   const user = userEvent.setup();
-  render(flow("privy"));
+  renderFlow();
   await fillAndSubmit(user);
   await screen.findByText("Completion is unavailable.");
   const retry = Promise.withResolvers<Response>();
@@ -168,5 +153,5 @@ it("blocks leaving during a completion retry and releases it after a refusal", a
   expect(shownTitle).toHaveProperty("navigationLocked", undefined);
   expect(leavePrevented()).toBe(false);
   await user.click(close);
-  expect(dashboardRouter.push).toHaveBeenCalledWith(PROVIDER_HREF);
+  expect(dashboardRouter.push).toHaveBeenCalledExactlyOnceWith(PROVIDER_HREF);
 });

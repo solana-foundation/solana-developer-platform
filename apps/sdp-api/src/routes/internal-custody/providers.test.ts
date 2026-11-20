@@ -1,484 +1,296 @@
-import { CUSTODY_CONNECTION_LIFECYCLES, type CustodySetupStatusResponse } from "@sdp/types/custody";
+import {
+  CUSTODY_CONNECTION_LIFECYCLES,
+  CUSTODY_PROVIDERS,
+  type CustodyConfigStatus,
+  type CustodyConnectionLifecycle,
+  type CustodyProvider,
+} from "@sdp/types/custody";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db/client";
-import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
-import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
+import { seedCustodyAdmin } from "@/test/helpers/custody-admin";
+import {
+  insertTestCustodyConnection,
+  insertTestStoredProviderCredential,
+  seedUnreadPrivyWallet,
+} from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
+import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 import { internalCustody } from "./index";
 
-const TEST_ORG = {
-  id: "org_custody_setup_status",
-  name: "Custody Setup Status Org",
-  slug: "custody-setup-status-org",
-  clerkId: "clerk_org_custody_setup_status",
-};
-
-const TEST_PROJECT = {
-  id: "prj_custody_setup_status",
-  slug: "custody-setup-status-project",
-};
-
-const TEST_USER = {
-  id: "usr_custody_setup_status",
-  email: "custody-setup-status@example.com",
-  clerkId: "clerk_custody_setup_status",
-};
-
+const ORGANIZATION_ID = "org_custody_setup_status";
+const PROJECT_ID = "prj_custody_setup_status";
+const USER_ID = "usr_custody_setup_status";
 const CREDENTIAL_ID = "pcred_setup_status_privy";
+const OTHER_ORGANIZATION_ID = "org_setup_status_other";
+const OTHER_ORGANIZATION_PROJECT_ID = "prj_setup_status_other_sandbox";
+const OWN_SCOPE = { organizationId: ORGANIZATION_ID, projectId: PROJECT_ID };
 
-function encodeJwtPart(value: Record<string, unknown>): string {
-  return Buffer.from(JSON.stringify(value)).toString("base64url");
-}
+const setupStatusSchema = z.object({
+  data: z.object({
+    providers: z.array(
+      z.object({
+        provider: z.string(),
+        hasLegacyConfig: z.boolean(),
+        effectiveTargetType: z.string(),
+        connectionCounts: z.record(z.string(), z.number()),
+      })
+    ),
+  }),
+});
 
-function createJwt(payload: ClerkJwtPayload): string {
-  return `${encodeJwtPart({ alg: "RS256", typ: "JWT" })}.${encodeJwtPart(payload)}.signature`;
-}
+let token: string;
+const app = new Hono<{ Bindings: Env }>();
+app.use("*", kvStoreMiddleware());
+app.route("/internal/dashboard/custody", internalCustody);
+app.onError((error) => {
+  if (error instanceof AppError)
+    return Response.json(error.toResponse(), { status: error.statusCode });
+  throw error;
+});
 
-function buildApp(options: { injectJwt?: boolean } = {}) {
-  const payload: ClerkJwtPayload = {
-    sub: TEST_USER.clerkId,
-    org_id: TEST_ORG.clerkId,
-    email: TEST_USER.email,
-  };
-  const token = createJwt(payload);
-  const app = new Hono<{ Bindings: Env }>();
-
-  app.use("*", kvStoreMiddleware());
-  app.use("*", async (c, next) => {
-    if (options.injectJwt !== false) {
-      c.set("verifiedClerkJwt", { token, payload });
-    }
-    c.set("requestId", "req_custody_setup_status");
-    await next();
+async function seedConfig(
+  provider: CustodyProvider,
+  status: CustodyConfigStatus,
+  scope: { organizationId: string; projectId: string }
+): Promise<void> {
+  await seedTestCustodyRows(env, {
+    configs: [
+      {
+        id: `cust_cfg_setup_status_${scope.projectId}_${provider}_${status}`,
+        ...scope,
+        provider,
+        configEncrypted: "test-config",
+        status,
+      },
+    ],
+    wallets: [],
   });
-  app.route("/internal/dashboard/custody", internalCustody);
-  app.onError((error, c) => {
-    if (error instanceof AppError) {
-      return c.json(
-        { error: error.toResponse().error, meta: { requestId: c.get("requestId") } },
-        error.statusCode as 400
-      );
-    }
-    throw error;
-  });
-
-  return { app, token };
-}
-
-async function seedBaseline(): Promise<void> {
-  const db = getDb(env);
-  await db.batch([
-    db
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "enterprise", "active"),
-    db
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
-      .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-    db
-      .prepare(
-        `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
-         VALUES (?, 'clerk', ?, ?, ?)`
-      )
-      .bind("aui_custody_setup_status", TEST_USER.clerkId, TEST_USER.id, TEST_USER.email),
-    db
-      .prepare(
-        `INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
-         VALUES (?, 'clerk', ?, ?, ?)`
-      )
-      .bind("aoi_custody_setup_status", TEST_ORG.clerkId, TEST_ORG.id, TEST_ORG.slug),
-    db
-      .prepare(
-        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-         VALUES (?, ?, ?, 'admin', 'active')`
-      )
-      .bind("mem_custody_setup_status", TEST_ORG.id, TEST_USER.id),
-  ]);
-  await seedDefaultProjects(db, {
-    organizationId: TEST_ORG.id,
-    createdBy: TEST_USER.id,
-    members: [TEST_USER.id],
-    ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
-  });
-}
-
-async function seedLegacyConfig(provider: string, configId: string): Promise<void> {
-  await getDb(env)
-    .prepare(
-      `INSERT INTO custody_configs
-         (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    )
-    .bind(
-      configId,
-      TEST_ORG.id,
-      TEST_PROJECT.id,
-      provider,
-      "test-config",
-      "sdp-custody-encryption-v1",
-      "active"
-    )
-    .run();
 }
 
 async function seedCredential(): Promise<void> {
-  await getDb(env)
-    .prepare(
-      `INSERT INTO provider_credentials
-         (id, organization_id, project_id, provider, label, scope, source, storage_backend,
-          encrypted_secret_payload, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    .bind(
-      CREDENTIAL_ID,
-      TEST_ORG.id,
-      TEST_PROJECT.id,
-      "privy",
-      "Privy credential",
-      "project",
-      "stored",
-      "encrypted_db",
-      "encrypted-test-payload",
-      "active"
-    )
-    .run();
+  await insertTestStoredProviderCredential(getDb(env), {
+    id: CREDENTIAL_ID,
+    organizationId: ORGANIZATION_ID,
+    projectId: PROJECT_ID,
+    provider: "privy",
+    label: "Privy credential",
+    stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "encrypted-test-payload" },
+    displayMetadata: {},
+    status: "active",
+    credentialVersion: 1,
+    rotatedFromProviderCredentialId: null,
+    lastValidatedAt: null,
+    deactivatedAt: null,
+    createdBy: USER_ID,
+  });
 }
 
-async function seedConnection(
+async function seedUnfinishedConnection(
   id: string,
-  status: "pending" | "checking" | "active" | "failed" | "deactivated"
+  status: Extract<CustodyConnectionLifecycle, "pending" | "failed">
 ): Promise<void> {
-  const db = getDb(env);
-  const insertedStatus = status === "active" ? "pending" : status;
-  const lastCheckStatus = status === "checking" ? "running" : status === "failed" ? "failed" : null;
-  await db
-    .prepare(
-      `INSERT INTO custody_connections
-         (id, organization_id, project_id, provider, scope, provider_credential_id,
-          provider_credential_scope_key, status, last_check_status, last_check_at,
-          deactivated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    .bind(
-      id,
-      TEST_ORG.id,
-      TEST_PROJECT.id,
-      "privy",
-      "project",
-      CREDENTIAL_ID,
-      TEST_PROJECT.id,
-      insertedStatus,
-      lastCheckStatus,
-      lastCheckStatus ? "2026-08-05T00:00:00.000Z" : null,
-      status === "deactivated" ? "2026-08-05T00:00:00.000Z" : null
-    )
-    .run();
-
-  if (status !== "active") return;
-  const walletId = `cwlt_${id}`;
-  await db.batch([
-    db
-      .prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_connection_id, wallet_id, public_key, status)
-         VALUES (?, ?, ?, ?, 'active')`
-      )
-      .bind(walletId, id, `provider_${id}`, `public_${id}`),
-    db
-      .prepare(
-        `UPDATE custody_connections
-         SET status = 'active', default_custody_wallet_id = ?,
-             last_check_status = 'success', last_check_at = ?, activated_at = ?
-         WHERE id = ?`
-      )
-      .bind(walletId, "2026-08-05T00:00:00.000Z", "2026-08-05T00:00:00.000Z", id),
-  ]);
+  await insertTestCustodyConnection(getDb(env), {
+    id,
+    organizationId: ORGANIZATION_ID,
+    projectId: PROJECT_ID,
+    provider: "privy",
+    credential: { id: CREDENTIAL_ID, projectId: PROJECT_ID },
+    status,
+    setupMetadata: {},
+    providerAccountFingerprint: null,
+    lastCheckStatus: status === "failed" ? "failed" : null,
+    lastCheckAt: status === "failed" ? "2026-08-05T00:00:00.000Z" : null,
+    lastCheckFailureCode: null,
+    activatedAt: null,
+    deactivatedAt: null,
+    createdBy: USER_ID,
+    createdAt: "2026-08-05T00:00:00.000Z",
+  });
 }
 
-async function fetchSetupStatus(): Promise<CustodySetupStatusResponse> {
-  const { app, token } = buildApp();
+async function seedActiveConnection(projectId: string, key: string): Promise<void> {
+  await getDb(env).transaction((tx) =>
+    seedUnreadPrivyWallet(tx, {
+      organizationId: ORGANIZATION_ID,
+      projectId,
+      createdBy: USER_ID,
+      custodyWalletId: `cwlt_setup_status_${key}`,
+      walletId: `privy_setup_status_${key}`,
+      publicKey: syntheticAddress(1),
+    })
+  );
+}
+
+async function seedOtherOrganization(): Promise<void> {
+  await getDb(env)
+    .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+    .bind(OTHER_ORGANIZATION_ID, "Other", "setup-status-other", "enterprise", "active")
+    .run();
+  await seedDefaultProjects(getDb(env), {
+    organizationId: OTHER_ORGANIZATION_ID,
+    createdBy: USER_ID,
+    members: [],
+    ids: {
+      sandbox: OTHER_ORGANIZATION_PROJECT_ID,
+      production: "prj_setup_status_other_production",
+    },
+  });
+}
+
+async function fetchSetupStatus() {
   const response = await app.request(
     "/internal/dashboard/custody/providers",
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "X-Project-ID": TEST_PROJECT.id,
-      },
-    },
+    { headers: { Authorization: `Bearer ${token}`, "X-Project-ID": PROJECT_ID } },
     env
   );
   expect(response.status).toBe(200);
-  const body = (await response.json()) as { data: CustodySetupStatusResponse };
-  return body.data;
+  return setupStatusSchema.parse(await response.json()).data;
 }
 
-function statusFor(response: CustodySetupStatusResponse, provider: string) {
-  return response.providers.find((entry) => entry.provider === provider);
+async function privyStatus() {
+  const status = (await fetchSetupStatus()).providers.find((entry) => entry.provider === "privy");
+  if (!status) throw new Error("Setup status is missing privy");
+  return status;
+}
+
+function connectionCounts(counts: Partial<Record<CustodyConnectionLifecycle, number>>) {
+  return {
+    ...Object.fromEntries(CUSTODY_CONNECTION_LIFECYCLES.map((lifecycle) => [lifecycle, 0])),
+    ...counts,
+  };
 }
 
 describe("internal custody providers", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
-    await seedBaseline();
+    token = await seedCustodyAdmin(env, {
+      organizationId: ORGANIZATION_ID,
+      userId: USER_ID,
+      projectId: PROJECT_ID,
+      tier: "enterprise",
+    });
   });
 
   afterEach(async () => {
     await clearKVStores(env);
   });
 
-  it("refuses a caller with no dashboard session", async () => {
-    const { app } = buildApp({ injectJwt: false });
-    const response = await app.request(
-      "/internal/dashboard/custody/providers",
-      { headers: { "X-Project-ID": TEST_PROJECT.id } },
-      env
+  it("reports every custody provider, uninstalled, when the project has no rows", async () => {
+    const status = await fetchSetupStatus();
+
+    expect(status.providers).toEqual(
+      CUSTODY_PROVIDERS.map((provider) => ({
+        provider,
+        hasLegacyConfig: false,
+        effectiveTargetType: "none",
+        connectionCounts: connectionCounts({}),
+      }))
     );
-    expect(response.status).toBeGreaterThanOrEqual(401);
   });
 
-  it("reports a provider with no rows as installable rather than installed", async () => {
-    const status = await fetchSetupStatus();
-    const privy = statusFor(status, "privy");
+  it("reports each provider with an active config as a config-backed target", async () => {
+    await seedConfig("privy", "active", OWN_SCOPE);
+    await seedConfig("para", "active", OWN_SCOPE);
 
-    expect(privy?.hasLegacyConfig).toBe(false);
-    expect(privy?.effectiveTargetType).toBe("none");
-    expect(privy?.connectionCounts).toEqual({
-      pending: 0,
-      checking: 0,
-      active: 0,
-      failed: 0,
-      deactivated: 0,
+    const status = await fetchSetupStatus();
+    for (const provider of ["privy", "para"]) {
+      expect(status.providers.find((entry) => entry.provider === provider)).toEqual({
+        provider,
+        hasLegacyConfig: true,
+        effectiveTargetType: "config",
+        connectionCounts: connectionCounts({}),
+      });
+    }
+  });
+
+  it("ignores an inactive config", async () => {
+    await seedConfig("privy", "inactive", OWN_SCOPE);
+
+    expect(await privyStatus()).toEqual({
+      provider: "privy",
+      hasLegacyConfig: false,
+      effectiveTargetType: "none",
+      connectionCounts: connectionCounts({}),
     });
-  });
-
-  it("covers every known provider so the caller never has to guess", async () => {
-    const status = await fetchSetupStatus();
-
-    expect(status.providers.map((entry) => entry.provider)).toContain("fireblocks");
-    expect(status.providers.length).toBeGreaterThanOrEqual(10);
-  });
-
-  it("reports every provider with a reachable config", async () => {
-    await seedLegacyConfig("privy", "cust_cfg_setup_status_multi_privy");
-    await seedLegacyConfig("para", "cust_cfg_setup_status_multi_para");
-
-    const status = await fetchSetupStatus();
-    expect(statusFor(status, "privy")?.effectiveTargetType).toBe("config");
-    expect(statusFor(status, "para")?.effectiveTargetType).toBe("config");
-  });
-
-  it("reports an active legacy config as a config-backed target", async () => {
-    await seedLegacyConfig("privy", "cust_cfg_setup_status_privy");
-
-    const privy = statusFor(await fetchSetupStatus(), "privy");
-    expect(privy?.hasLegacyConfig).toBe(true);
-    expect(privy?.effectiveTargetType).toBe("config");
-  });
-
-  it("ignores an inactive legacy config", async () => {
-    await getDb(env)
-      .prepare(
-        `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        "cust_cfg_setup_status_inactive",
-        TEST_ORG.id,
-        TEST_PROJECT.id,
-        "privy",
-        "test-config",
-        "sdp-custody-encryption-v1",
-        "inactive"
-      )
-      .run();
-
-    const privy = statusFor(await fetchSetupStatus(), "privy");
-    expect(privy?.hasLegacyConfig).toBe(false);
-    expect(privy?.effectiveTargetType).toBe("none");
   });
 
   it("counts connections by lifecycle without listing them", async () => {
     await seedCredential();
-    await seedConnection("ccon_setup_status_pending", "pending");
-    await seedConnection("ccon_setup_status_failed", "failed");
+    await seedUnfinishedConnection("ccon_setup_status_pending", "pending");
+    await seedUnfinishedConnection("ccon_setup_status_failed", "failed");
 
-    const privy = statusFor(await fetchSetupStatus(), "privy");
-    expect(privy?.connectionCounts.pending).toBe(1);
-    expect(privy?.connectionCounts.failed).toBe(1);
-    expect(privy?.connectionCounts.active).toBe(0);
     // A pending connection is not yet a signing target.
-    expect(privy?.effectiveTargetType).toBe("none");
-    expect(JSON.stringify(privy)).not.toContain("ccon_setup_status_pending");
-  });
-
-  it("keeps reporting the config while signing still resolves through it", async () => {
-    await seedLegacyConfig("privy", "cust_cfg_setup_status_both");
-    await seedCredential();
-    await seedConnection("ccon_setup_status_active", "active");
-
-    const privy = statusFor(await fetchSetupStatus(), "privy");
-    expect(privy?.hasLegacyConfig).toBe(true);
-    expect(privy?.connectionCounts.active).toBe(1);
-    // Signing never resolves through a connection today, so calling one the
-    // effective target would report a migration that has not happened.
-    expect(privy?.effectiveTargetType).toBe("config");
-  });
-
-  it("does not call a connection the signing target while nothing signs through it", async () => {
-    await seedCredential();
-    await seedConnection("ccon_setup_status_only", "active");
-
-    const privy = statusFor(await fetchSetupStatus(), "privy");
-    expect(privy?.connectionCounts.active).toBe(1);
-    expect(privy?.hasLegacyConfig).toBe(false);
-    expect(privy?.effectiveTargetType).toBe("none");
-  });
-
-  it("reports a project with no configs as uninstalled while other projects have a config and a connection", async () => {
-    const otherProjectId = `${TEST_PROJECT.id}_production`;
-    const otherOrganizationId = "org_setup_status_other";
-    const otherOrganizationSandboxProjectId = "prj_setup_status_other_sandbox";
-    await getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(
-        otherOrganizationId,
-        "Setup Status Other Org",
-        "setup-status-other",
-        "enterprise",
-        "active"
-      )
-      .run();
-    await seedDefaultProjects(getDb(env), {
-      organizationId: otherOrganizationId,
-      createdBy: TEST_USER.id,
-      members: [],
-      ids: {
-        sandbox: otherOrganizationSandboxProjectId,
-        production: "prj_setup_status_other_production",
-      },
-    });
-    await seedTestCustodyRows(env, {
-      configs: [
-        {
-          id: "cust_cfg_setup_status_other_project",
-          organizationId: otherOrganizationId,
-          projectId: otherOrganizationSandboxProjectId,
-          provider: "privy",
-          configEncrypted: "test-config",
-          status: "active",
-        },
-      ],
-      wallets: [],
-    });
-    await getDb(env).transaction((tx) =>
-      seedTestPrivyConnection(tx, {
-        organizationId: TEST_ORG.id,
-        projectId: otherProjectId,
-        connectionId: "ccon_setup_status_other_project",
-        credentialId: "pcred_setup_status_other_project",
-        createdBy: TEST_USER.id,
-        stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "ciphertext" },
-        providerAccountFingerprint: "sha256:setup-status-other-project",
-        lastCheckStatus: "success",
-        wallets: [
-          {
-            id: "cwlt_setup_status_other_project",
-            walletId: "privy_setup_status_other_project",
-            publicKey: "public_setup_status_other_project",
-            label: null,
-            purpose: null,
-            status: "active",
-          },
-        ],
-        defaultCustodyWalletId: "cwlt_setup_status_other_project",
-      })
-    );
-
-    expect(statusFor(await fetchSetupStatus(), "privy")).toEqual({
+    expect(await privyStatus()).toEqual({
       provider: "privy",
       hasLegacyConfig: false,
       effectiveTargetType: "none",
-      connectionCounts: Object.fromEntries(
-        CUSTODY_CONNECTION_LIFECYCLES.map((lifecycle) => [lifecycle, 0])
-      ),
+      connectionCounts: connectionCounts({ pending: 1, failed: 1 }),
+    });
+  });
+
+  it("keeps reporting the config while signing still resolves through it", async () => {
+    await seedConfig("privy", "active", OWN_SCOPE);
+    await seedActiveConnection(PROJECT_ID, "both");
+
+    // Signing never resolves through a connection today, so calling one the
+    // effective target would report a migration that has not happened.
+    expect(await privyStatus()).toEqual({
+      provider: "privy",
+      hasLegacyConfig: true,
+      effectiveTargetType: "config",
+      connectionCounts: connectionCounts({ active: 1 }),
+    });
+  });
+
+  it("does not call a connection the signing target while nothing signs through it", async () => {
+    await seedActiveConnection(PROJECT_ID, "only");
+
+    expect(await privyStatus()).toEqual({
+      provider: "privy",
+      hasLegacyConfig: false,
+      effectiveTargetType: "none",
+      connectionCounts: connectionCounts({ active: 1 }),
+    });
+  });
+
+  it("reports nothing from another project or another organization", async () => {
+    await seedOtherOrganization();
+    await seedConfig("privy", "active", {
+      organizationId: OTHER_ORGANIZATION_ID,
+      projectId: OTHER_ORGANIZATION_PROJECT_ID,
+    });
+    await seedActiveConnection(`${PROJECT_ID}_production`, "other_project");
+
+    expect(await privyStatus()).toEqual({
+      provider: "privy",
+      hasLegacyConfig: false,
+      effectiveTargetType: "none",
+      connectionCounts: connectionCounts({}),
     });
   });
 
   it("creates nothing while reading", async () => {
-    const countRows = async (table: string) => {
-      const row = await getDb(env).queryOne<{ total: number | string }>(
-        `SELECT COUNT(*) AS total FROM ${table} WHERE organization_id = ?`,
-        [TEST_ORG.id]
+    const countRows = async () =>
+      getDb(env).queryOne<{ configs: number; credentials: number; connections: number }>(
+        `SELECT
+           (SELECT COUNT(*)::int FROM custody_configs WHERE organization_id = ?) AS configs,
+           (SELECT COUNT(*)::int FROM provider_credentials WHERE organization_id = ?) AS credentials,
+           (SELECT COUNT(*)::int FROM custody_connections WHERE organization_id = ?) AS connections`,
+        [ORGANIZATION_ID, ORGANIZATION_ID, ORGANIZATION_ID]
       );
-      return Number(row?.total ?? 0);
-    };
-    // custody_wallets carries no organization_id; it is scoped through its config.
-    const countWallets = async () => {
-      const row = await getDb(env).queryOne<{ total: number | string }>(
-        `SELECT COUNT(*) AS total
-           FROM custody_wallets w
-           JOIN custody_configs c ON c.id = w.custody_config_id
-          WHERE c.organization_id = ?`,
-        [TEST_ORG.id]
-      );
-      return Number(row?.total ?? 0);
-    };
-
-    const before = {
-      configs: await countRows("custody_configs"),
-      credentials: await countRows("provider_credentials"),
-      connections: await countRows("custody_connections"),
-      wallets: await countWallets(),
-    };
 
     await fetchSetupStatus();
     await fetchSetupStatus();
 
-    expect({
-      configs: await countRows("custody_configs"),
-      credentials: await countRows("provider_credentials"),
-      connections: await countRows("custody_connections"),
-      wallets: await countWallets(),
-    }).toEqual(before);
-  });
-
-  it("does not leak another organization's setup", async () => {
-    await getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind("org_setup_status_other", "Other", "other-setup-status", "standard", "active")
-      .run();
-    await seedDefaultProjects(getDb(env), {
-      organizationId: "org_setup_status_other",
-      createdBy: TEST_USER.id,
-      members: [],
-      ids: {
-        sandbox: "prj_setup_status_other",
-        production: "prj_setup_status_other_production",
-      },
-    });
-    await seedTestCustodyRows(env, {
-      configs: [
-        {
-          id: "cust_cfg_setup_status_other",
-          organizationId: "org_setup_status_other",
-          projectId: "prj_setup_status_other",
-          provider: "privy",
-          configEncrypted: "test-config",
-          status: "active",
-        },
-      ],
-      wallets: [],
-    });
-
-    const privy = statusFor(await fetchSetupStatus(), "privy");
-    expect(privy?.hasLegacyConfig).toBe(false);
+    expect(await countRows()).toEqual({ configs: 0, credentials: 0, connections: 0 });
   });
 });

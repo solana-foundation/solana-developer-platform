@@ -9,7 +9,9 @@ import { createSigningService } from "@/services/domain/signing.service";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
+import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const ORGANIZATION_ID = "org_custody_config_store";
@@ -19,7 +21,7 @@ const USER_ID = "usr_custody_config_store";
 const CONFIG_ID = "cust_custody_config_store";
 const CUSTODY_WALLET_ID = "cwlt_custody_config_store";
 const PROVIDER_WALLET_ID = "privy_custody_config_store";
-const PUBLIC_KEY = "Vote111111111111111111111111111111111111111";
+const PUBLIC_KEY = syntheticAddress(1);
 
 describe("CustodyConfigStore project scope", () => {
   beforeEach(async () => {
@@ -91,12 +93,12 @@ describe("CustodyConfigStore project scope", () => {
       custodyWalletId: string | null = null,
       ringsWalletId: string | null = null
     ) =>
-      (
+      required(
         await store.findActiveWalletByPublicKey(ORGANIZATION_ID, PROJECT_ID, PUBLIC_KEY, {
           custodyWalletId,
           ringsWalletId,
         })
-      )?.id;
+      ).id;
 
     expect(await picked()).toBe("cwlt_custody_config_store_same_key");
     await getDb(env)

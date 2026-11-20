@@ -4,15 +4,14 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import * as csrActions from "@/app/(session)/dashboard/[projectId]/wallets/setup/fireblocks-csr-actions";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
+import { EnglishI18n } from "@/test/i18n";
 import { loadFireblocksVaultsAction } from "./fireblocks-csr-actions";
 import { FireblocksVaultPicker } from "./fireblocks-vault-picker";
 
 const ready = vi.fn();
 function renderPicker(multiple = true, primaryVaultId?: string) {
   return render(
-    <I18nProvider locale="en" messages={getMessages("en")}>
+    <EnglishI18n>
       <form aria-label="Vault selection">
         <FireblocksVaultPicker
           signingKeyId="fbcsr_test"
@@ -21,7 +20,7 @@ function renderPicker(multiple = true, primaryVaultId?: string) {
           primaryVaultId={primaryVaultId}
         />
       </form>
-    </I18nProvider>
+    </EnglishI18n>
   );
 }
 beforeEach(() => {

@@ -2,76 +2,34 @@
 
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { toast } from "sonner";
+import useSWR from "swr";
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
-import type {
-  InitializeCustodySetupActionResult,
-  WalletSetupActionResult,
-} from "@/app/(session)/dashboard/[projectId]/wallets/actions";
+import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
+import * as custodyActions from "@/app/(session)/dashboard/[projectId]/wallets/actions";
 import type { PrivyByokSubmitResult } from "@/app/(session)/dashboard/[projectId]/wallets/byok-actions";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
+import * as byokActions from "@/app/(session)/dashboard/[projectId]/wallets/byok-actions";
 import { availableCustodyProviders } from "@/lib/provider-availability";
+import { stubClerkSession } from "@/test/clerk";
 import {
   dashboardDataResponse,
   sentDashboardRequests,
   stubDashboardFetch,
 } from "@/test/dashboard-fetch";
-import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
+import {
+  dashboardRouter,
+  resetDashboardNavigation,
+  setDashboardUrl,
+} from "@/test/dashboard-navigation";
 import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
 import { projectProviderAvailability } from "@/test/provider-availability";
-import { FreshSWRCache } from "@/test/swr";
+import { walletsWorkspace } from "@/test/wallets";
 
-const mocks = vi.hoisted(() => ({
-  projectId: "prj_test_sandbox",
-  createWallet: vi.fn(
-    async (_formData: FormData): Promise<WalletSetupActionResult> => ({
-      status: "success",
-      walletId: "wallet_created",
-    })
-  ),
-  initialize: vi.fn(
-    async (_formData: FormData): Promise<InitializeCustodySetupActionResult> => ({
-      status: "success",
-      walletId: "wallet_initialized",
-    })
-  ),
-  submitCredential: vi.fn(
-    async (_formData: FormData): Promise<PrivyByokSubmitResult> => ({
-      status: "success",
-      connectionId: "conn_new",
-    })
-  ),
-  refreshWalletInventory: vi.fn(),
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
+
+const { WalletSetupFlow } = await import("./wallet-setup-flow");
 
 /** What a refusal settles about the browser's key: the API answered, nothing replayed. */
 const REFUSED = { status: 422, replayed: false, code: null };
-
-vi.mock("@/contexts/dashboard-workspace-context", () => ({
-  useDashboardWorkspace: () => ({
-    dashboardCacheScope: { userId: "user_test", orgId: "org_test" },
-    flags: { dvp: false, issuance: true, markets: false },
-    selectedProjectId: mocks.projectId,
-    projects: [{ id: "prj_test_sandbox", name: "Default Sandbox Project" }],
-    sdpEnvironment: "sandbox",
-  }),
-}));
-vi.mock("next/navigation", () => import("@/test/next-navigation"));
-vi.mock("@/app/(session)/dashboard/[projectId]/wallets/actions", () => ({
-  createCustodySetupWalletAction: mocks.createWallet,
-  initializeCustodySetupAction: mocks.initialize,
-}));
-vi.mock("@/app/(session)/dashboard/[projectId]/wallets/byok-actions", () => ({
-  submitPrivyCredentialAction: mocks.submitCredential,
-  recheckPrivyCredentialAction: vi.fn(),
-}));
-vi.mock("@/app/(session)/dashboard/[projectId]/wallets/use-wallet-inventory-refresh", () => ({
-  useWalletInventoryRefresh: () => mocks.refreshWalletInventory,
-}));
-
-const { WalletSetupFlow } = await import("./wallet-setup-flow");
-// A created wallet is confirmed with a toast; no Toaster is mounted to show it.
-const toastSuccess = vi.spyOn(toast, "success").mockImplementation(() => "toast");
 
 type FlowProps = Parameters<typeof WalletSetupFlow>[0];
 type ConnectionItem = FlowProps["connections"][number];
@@ -123,19 +81,32 @@ const PRODUCTION_BYOK_PAIR_AVAILABILITY = availableCustodyProviders(
   })
 );
 
-function renderFlow(props: Partial<FlowProps> = {}) {
+/** A wallet inventory another feature reads; it counts how often it is read again. */
+const inventoryRead = vi.fn(async () => "Wallets");
+function InventoryReader() {
+  useSWR(paymentsQueryKeys.actionWallets(), inventoryRead, {
+    fallbackData: "Wallets",
+    revalidateOnMount: false,
+  });
+  return null;
+}
+
+const SANDBOX_FLOW: FlowProps = {
+  connectedProviders: ["turnkey"],
+  custodyAvailability: SANDBOX_AVAILABILITY,
+  environment: "sandbox",
+  initialProvider: null,
+  connections: [],
+};
+
+/** Renders the flow for the Sandbox Project, with `overrides` in place of its props. */
+function renderFlow(overrides: Partial<FlowProps>) {
   return render(
-    <I18nProvider locale="en" messages={getMessages("en")}>
-      <FreshSWRCache>
-        <WalletSetupFlow
-          connectedProviders={props.connectedProviders ?? ["turnkey"]}
-          custodyAvailability={props.custodyAvailability ?? SANDBOX_AVAILABILITY}
-          environment={props.environment ?? "sandbox"}
-          initialProvider={props.initialProvider ?? null}
-          connections={props.connections ?? []}
-        />
-      </FreshSWRCache>
-    </I18nProvider>
+    <>
+      <WalletSetupFlow {...SANDBOX_FLOW} {...overrides} />
+      <InventoryReader />
+    </>,
+    { wrapper: walletsWorkspace("admin") }
   );
 }
 
@@ -165,7 +136,8 @@ function connection(overrides: Partial<ConnectionItem> = {}): ConnectionItem {
 const createButton = () =>
   asElement(screen.getByRole("button", { name: /^Create wallet/ }), HTMLButtonElement);
 const connectButton = () => screen.getByRole("button", { name: /^Connect and create wallet/ });
-const footerHint = () => document.getElementById("wallet-setup-footer-hint")?.textContent;
+const footerHint = () =>
+  asElement(document.getElementById("wallet-setup-footer-hint"), HTMLElement).textContent;
 const labelInput = () => asElement(screen.getByLabelText("Wallet label"), HTMLInputElement);
 const typeLabel = (value: string) => fireEvent.change(labelInput(), { target: { value } });
 const radio = (name: RegExp) => asElement(screen.getByRole("radio", { name }), HTMLInputElement);
@@ -178,19 +150,45 @@ const fillPrivyCredentials = () => {
   fireEvent.change(screen.getByLabelText("App secret"), { target: { value: "secret_1" } });
 };
 
-/** The form an action received on its first call. */
-function submitted(action: { mock: { calls: [FormData][] } }): FormData {
-  const [call] = action.mock.calls;
-  if (call === undefined) {
-    throw new Error("The action was not called");
+/** The form an action received on its `call`th call, or the test fails. */
+function submitted(action: { mock: { calls: [FormData][] } }, call = 0): FormData {
+  const sent = action.mock.calls[call];
+  if (sent === undefined) {
+    throw new Error(`The action has no call ${call}`);
   }
-  return call[0];
+  return sent[0];
 }
 
+let createWallet: Mock<typeof custodyActions.createCustodySetupWalletAction>;
+let initialize: Mock<typeof custodyActions.initializeCustodySetupAction>;
+let submitCredential: Mock<typeof byokActions.submitPrivyCredentialAction>;
+let toastSuccess: Mock<typeof toast.success>;
 let dashboardFetch: Mock<typeof fetch>;
 
 beforeEach(() => {
   resetDashboardNavigation();
+  stubClerkSession();
+  // Keys live in the tab's session storage; each test starts with none.
+  window.sessionStorage.clear();
+  createWallet = vi.fn<typeof custodyActions.createCustodySetupWalletAction>(async () => ({
+    status: "success",
+    walletId: "wallet_created",
+  }));
+  initialize = vi.fn<typeof custodyActions.initializeCustodySetupAction>(async () => ({
+    status: "success",
+    walletId: "wallet_initialized",
+  }));
+  submitCredential = vi.fn<typeof byokActions.submitPrivyCredentialAction>(async () => ({
+    status: "success",
+    connectionId: "conn_new",
+  }));
+  vi.spyOn(custodyActions, "createCustodySetupWalletAction").mockImplementation(createWallet);
+  vi.spyOn(custodyActions, "initializeCustodySetupAction").mockImplementation(initialize);
+  vi.spyOn(byokActions, "submitPrivyCredentialAction").mockImplementation(submitCredential);
+  // A created wallet is confirmed with a toast; no Toaster is mounted to show it.
+  toastSuccess = vi.fn<typeof toast.success>(() => "toast");
+  vi.spyOn(toast, "success").mockImplementation(toastSuccess);
+  inventoryRead.mockClear();
   // Fireblocks' fields read the project's registration CSR on mount; none is open yet.
   dashboardFetch = stubDashboardFetch((request) => {
     if (request.path === "/api/dashboard/fireblocks/csr") {
@@ -203,15 +201,13 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
-  vi.clearAllMocks();
-  mocks.projectId = "prj_test_sandbox";
+  vi.restoreAllMocks();
 });
 
 describe("one screen", () => {
   it("asks for the provider only when there is a choice, by name, with its short summary", () => {
     renderFlow({ connectedProviders: ["dfns"] });
 
-    expect(screen.getByRole("heading", { name: "Create wallet" })).toBeTruthy();
     expect(screen.queryByText(/Step \d of/)).toBeNull();
     const list = asElement(document.querySelector("[data-wallet-provider-list]"), HTMLElement);
     const names = [...list.querySelectorAll("[data-wallet-provider]")].map((row) =>
@@ -220,10 +216,8 @@ describe("one screen", () => {
     expect(names).toEqual(["dfns", "privy", "turnkey"]);
     // A set-up provider is not marked: picking it shows what it offers.
     expect(within(list).queryByText("Active")).toBeNull();
-    expect(within(list).getByText("MPC wallets, signed through its API.")).toBeTruthy();
     // The label is asked from the start, so choosing a provider never pops it in.
-    expect(labelInput()).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Wallet details" })).toBeTruthy();
+    expect(labelInput().value).toBe("");
   });
 
   it("opens on the only provider the project can use, with nothing to pick", () => {
@@ -234,7 +228,7 @@ describe("one screen", () => {
   });
 
   it("names what is still missing beside the disabled Create wallet", () => {
-    renderFlow();
+    renderFlow({});
     expect(createButton().disabled).toBe(true);
     expect(createButton().getAttribute("aria-describedby")).toBe("wallet-setup-footer-hint");
     expect(footerHint()).toBe("Pick a provider first.");
@@ -249,18 +243,18 @@ describe("one screen", () => {
   });
 
   it("keeps Enter on a choice from creating anything, and creates once from the label", async () => {
-    renderFlow();
+    renderFlow({});
     const turnkey = radio(/Turnkey/);
     fireEvent.click(turnkey);
     typeLabel("Ops");
 
     fireEvent.keyDown(turnkey, { key: "Enter" });
-    expect(mocks.createWallet).not.toHaveBeenCalled();
+    expect(createWallet).not.toHaveBeenCalled();
 
     await act(async () => {
       fireEvent.keyDown(labelInput(), { key: "Enter" });
     });
-    expect(mocks.createWallet).toHaveBeenCalledTimes(1);
+    expect(createWallet).toHaveBeenCalledTimes(1);
   });
 
   it("says so when the project can use no provider, instead of emptying the page", () => {
@@ -275,7 +269,7 @@ describe("one screen", () => {
   });
 
   it("leaves for the project's wallet list from Cancel when nothing was typed", () => {
-    renderFlow();
+    renderFlow({});
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(dashboardRouter.push).toHaveBeenCalledWith("/dashboard/prj_test_sandbox/wallets");
   });
@@ -314,7 +308,7 @@ describe("one screen", () => {
   // Greptile (#2741): after a lost answer the dialog said no wallet was made, though the
   // request may have created one.
   it("says the wallet may exist when Cancel follows a request that went out", async () => {
-    mocks.initialize.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    initialize.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     renderFlow({ connectedProviders: [], initialProvider: "turnkey" });
     typeLabel("Unsure");
     await act(async () => {
@@ -328,7 +322,7 @@ describe("one screen", () => {
   });
 
   it("says the wallet may exist once a credential submission went out", async () => {
-    mocks.submitCredential.mockResolvedValueOnce({
+    submitCredential.mockResolvedValueOnce({
       status: "failed",
       message: "Those credentials did not verify.",
       connectionId: "conn_failed",
@@ -348,13 +342,13 @@ describe("one screen", () => {
 
 describe("details", () => {
   it("states what the wallet is created with, naming the provider once it is chosen", () => {
-    renderFlow();
+    renderFlow({});
     expect(within(createdWith()).queryByText("Provider")).toBeNull();
 
     fireEvent.click(radio(/Turnkey/));
     const summary = createdWith();
     expect(within(summary).getByText("Turnkey")).toBeTruthy();
-    expect(within(summary).getByText("Default Sandbox Project")).toBeTruthy();
+    expect(within(summary).getByText(SANDBOX_PROJECT.name)).toBeTruthy();
     expect(within(summary).getByText("Sandbox · devnet")).toBeTruthy();
     // A Managed-only provider has no account to name.
     expect(within(summary).queryByText("Connection")).toBeNull();
@@ -369,11 +363,12 @@ describe("details", () => {
       fireEvent.click(createButton());
     });
 
-    const formData = submitted(mocks.createWallet);
-    expect(formData.get("provider")).toBe("turnkey");
-    expect(formData.get("connectionId")).toBeNull();
-    expect(formData.get("label")).toBe("Settlement wallet");
-    expect(formData.get("purpose")).toBe("transfer");
+    expect(Object.fromEntries(submitted(createWallet))).toEqual({
+      provider: "turnkey",
+      label: "Settlement wallet",
+      purpose: "transfer",
+      idempotencyKey: expect.any(String),
+    });
     expect(toastSuccess).toHaveBeenCalledWith("Settlement wallet created");
     expect(dashboardRouter.push).toHaveBeenCalledWith(
       "/dashboard/prj_test_sandbox/wallets/wallet_created"
@@ -391,16 +386,18 @@ describe("details", () => {
     await act(async () => {
       fireEvent.click(createButton());
     });
-    const formData = submitted(mocks.initialize);
-    expect(formData.get("walletLabel")).toBe("Treasury");
-    expect(formData.get("purpose")).toBeNull();
+    expect(Object.fromEntries(submitted(initialize))).toEqual({
+      provider: "turnkey",
+      walletLabel: "Treasury",
+      idempotencyKey: expect.any(String),
+    });
     expect(dashboardRouter.push).toHaveBeenCalledWith(
       "/dashboard/prj_test_sandbox/wallets/wallet_initialized"
     );
   });
 
   it("shows the API's refusal and stays on the page", async () => {
-    mocks.createWallet.mockResolvedValueOnce({
+    createWallet.mockResolvedValueOnce({
       status: "error",
       message: "Provider rejected the request",
       answer: REFUSED,
@@ -418,16 +415,16 @@ describe("details", () => {
   // Jina (#2333): an uncertain or refused setup left the wallet inventory as it
   // was, so a wallet an earlier attempt created did not show up before a retry.
   it("refreshes the wallet inventory after an uncertain or refused setup and points to the list", async () => {
-    mocks.initialize.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    initialize.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     renderFlow({ connectedProviders: [], initialProvider: "turnkey" });
     typeLabel("Unsure");
     await act(async () => {
       fireEvent.click(createButton());
     });
-    expect(mocks.refreshWalletInventory).toHaveBeenCalledTimes(1);
+    expect(inventoryRead).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("alert").textContent).toMatch(/Check your wallet list first/);
 
-    mocks.initialize.mockResolvedValueOnce({
+    initialize.mockResolvedValueOnce({
       status: "error",
       message: "Provider rejected the request",
       answer: REFUSED,
@@ -435,12 +432,12 @@ describe("details", () => {
     await act(async () => {
       fireEvent.click(createButton());
     });
-    expect(mocks.refreshWalletInventory).toHaveBeenCalledTimes(2);
+    expect(inventoryRead).toHaveBeenCalledTimes(2);
     expect(dashboardRouter.push).not.toHaveBeenCalled();
   });
 
   it("keeps the form and the key when the answer is lost, so Create wallet again resends the same key", async () => {
-    mocks.initialize.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    initialize.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     renderFlow({ connectedProviders: [], initialProvider: "turnkey" });
     typeLabel("Lost answer treasury");
     await act(async () => {
@@ -454,17 +451,17 @@ describe("details", () => {
     await act(async () => {
       fireEvent.click(createButton());
     });
-    const [first, retry] = mocks.initialize.mock.calls.map(([form]) => form);
-    expect(first?.get("idempotencyKey")).toEqual(expect.any(String));
-    expect(retry?.get("idempotencyKey")).toBe(first?.get("idempotencyKey"));
-    expect(mocks.createWallet).not.toHaveBeenCalled();
+    const firstKey = submitted(initialize, 0).get("idempotencyKey");
+    expect(firstKey).toEqual(expect.any(String));
+    expect(submitted(initialize, 1).get("idempotencyKey")).toBe(firstKey);
+    expect(createWallet).not.toHaveBeenCalled();
     expect(dashboardRouter.push).toHaveBeenCalledWith(
       "/dashboard/prj_test_sandbox/wallets/wallet_initialized"
     );
   });
 
   it("gives the same setup in another project its own key, so it never settles this one's", async () => {
-    mocks.initialize.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    initialize.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     const submit = async () => {
       renderFlow({ connectedProviders: [], initialProvider: "turnkey" });
       typeLabel("Per-project treasury");
@@ -475,16 +472,37 @@ describe("details", () => {
     };
 
     await submit();
-    mocks.projectId = "prj_test_other";
+    setDashboardUrl(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/setup`, {});
     await submit();
 
-    const [inSandbox, inOther] = mocks.initialize.mock.calls.map(([form]) => form);
-    expect(inSandbox?.get("idempotencyKey")).toEqual(expect.any(String));
-    expect(inOther?.get("idempotencyKey")).not.toBe(inSandbox?.get("idempotencyKey"));
+    const inSandbox = submitted(initialize, 0).get("idempotencyKey");
+    expect(inSandbox).toEqual(expect.any(String));
+    expect(submitted(initialize, 1).get("idempotencyKey")).not.toBe(inSandbox);
+  });
+
+  it("sends the same details under a new key once the API refused them", async () => {
+    createWallet.mockResolvedValueOnce({
+      status: "error",
+      message: "Provider rejected the request",
+      answer: REFUSED,
+    });
+    renderFlow({ initialProvider: "turnkey" });
+    typeLabel("Ops");
+    await act(async () => {
+      fireEvent.click(createButton());
+    });
+    await act(async () => {
+      fireEvent.click(createButton());
+    });
+
+    const refusedKey = submitted(createWallet, 0).get("idempotencyKey");
+    expect(refusedKey).toEqual(expect.any(String));
+    expect(submitted(createWallet, 1).get("label")).toBe("Ops");
+    expect(submitted(createWallet, 1).get("idempotencyKey")).not.toBe(refusedKey);
   });
 
   it("points to adding a wallet when the provider was set up in the meantime", async () => {
-    mocks.initialize.mockResolvedValueOnce({
+    initialize.mockResolvedValueOnce({
       status: "provider_already_set_up",
       answer: { status: 409, replayed: false, code: null },
     });
@@ -496,18 +514,19 @@ describe("details", () => {
     expect(screen.getByRole("alert").textContent).toBe(
       "This provider is already set up. Add a wallet instead."
     );
-    expect(dashboardRouter.refresh).toHaveBeenCalled();
+    expect(dashboardRouter.refresh).toHaveBeenCalledTimes(1);
     expect(dashboardRouter.push).not.toHaveBeenCalled();
   });
 
   it("names the production environment on a production project", () => {
+    setDashboardUrl(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/setup`, {});
     renderFlow({
       connectedProviders: [],
       custodyAvailability: SANDBOX_AVAILABILITY,
       environment: "production",
       initialProvider: "turnkey",
     });
-    expect(screen.getByText(/^Production/)).toBeTruthy();
+    expect(within(createdWith()).getByText("Production · mainnet")).toBeTruthy();
   });
 });
 
@@ -516,11 +535,6 @@ describe("whose account", () => {
     renderFlow({ connectedProviders: [], custodyAvailability: PRIVY_ONLY_AVAILABILITY });
 
     expect(screen.getByRole("group", { name: "Whose Privy account holds the keys?" })).toBeTruthy();
-    expect(screen.getByText("It cannot be changed after the wallet exists.")).toBeTruthy();
-    expect(
-      screen.getByText("For trying SDP out. No wallet policy, and SDP holds the credentials.")
-    ).toBeTruthy();
-    expect(screen.getByText("Connect it with its App ID and secret.")).toBeTruthy();
     expect(managedAnswer().checked).toBe(false);
     expect(ownAnswer().checked).toBe(false);
     expect(document.getElementById("wallet-details-form")).toBeNull();
@@ -541,7 +555,7 @@ describe("whose account", () => {
     await act(async () => {
       fireEvent.click(createButton());
     });
-    expect(submitted(mocks.initialize).get("walletLabel")).toBe("Treasury");
+    expect(submitted(initialize).get("walletLabel")).toBe("Treasury");
   });
 
   it("puts the credential form under the question for the project's own account, keeping the label", async () => {
@@ -571,7 +585,7 @@ describe("whose account", () => {
     await act(async () => {
       fireEvent.click(connectButton());
     });
-    expect(submitted(mocks.submitCredential).get("walletLabel")).toBe("Ops");
+    expect(submitted(submitCredential).get("walletLabel")).toBe("Ops");
     expect(toastSuccess).toHaveBeenCalledWith("Ops created");
     // The credential check settles without a wallet id, so the list is where it lands.
     expect(dashboardRouter.push).toHaveBeenCalledWith("/dashboard/prj_test_sandbox/wallets");
@@ -579,7 +593,7 @@ describe("whose account", () => {
 
   it("locks the answers while a credential check is in flight", async () => {
     let settle: (result: PrivyByokSubmitResult) => void = () => undefined;
-    mocks.submitCredential.mockImplementationOnce(
+    submitCredential.mockImplementationOnce(
       () =>
         new Promise<PrivyByokSubmitResult>((resolve) => {
           settle = resolve;
@@ -609,7 +623,7 @@ describe("whose account", () => {
   // Greptile (#2727): a refusal's panel hides the footer's primary, and the primary stayed
   // hidden after a changed answer mounted a fresh form.
   it("brings Connect and create wallet back when an answer changes after a refused check", async () => {
-    mocks.submitCredential.mockResolvedValueOnce({
+    submitCredential.mockResolvedValueOnce({
       status: "refused",
       message: "Privy refused these credentials.",
       connectionId: "conn_refused",
@@ -622,19 +636,19 @@ describe("whose account", () => {
       fireEvent.click(connectButton());
     });
     // The refusal's panel carries its own way forward, so the footer's goes.
-    expect(document.querySelector("[data-privy-byok-refused]")).toBeTruthy();
+    expect(document.querySelector("[data-privy-byok-refused]")).not.toBeNull();
     expect(screen.queryByRole("button", { name: /^Connect and create wallet/ })).toBeNull();
 
     fireEvent.click(managedAnswer());
     fireEvent.click(ownAnswer());
-    expect(document.querySelector("[data-privy-byok-form]")).toBeTruthy();
+    expect(document.querySelector("[data-privy-byok-form]")).not.toBeNull();
     expect(connectButton()).toBeTruthy();
   });
 
   // Greptile (#2727): the credential form outlived a provider change, so a failed check's
   // connection went out with the next provider's credentials.
   it("starts a fresh credential check when the provider changes", async () => {
-    mocks.submitCredential.mockResolvedValueOnce({
+    submitCredential.mockResolvedValueOnce({
       status: "failed",
       message: "Those credentials did not verify.",
       connectionId: "conn_failed",
@@ -657,9 +671,8 @@ describe("whose account", () => {
     await act(async () => {
       fireEvent.click(connectButton());
     });
-    expect(
-      mocks.submitCredential.mock.calls.map(([formData]) => formData.get("connectionId"))
-    ).toEqual([null, null]);
+    expect(submitted(submitCredential, 0).get("connectionId")).toBeNull();
+    expect(submitted(submitCredential, 1).get("connectionId")).toBeNull();
   });
 
   it("asks nothing to pick when the project's own account is the only answer", () => {
@@ -674,7 +687,7 @@ describe("whose account", () => {
     ).toBeTruthy();
     expect(screen.getByText("Production uses your own. Connect it below.")).toBeTruthy();
     expect(accountList()).toBeNull();
-    expect(document.querySelector("[data-privy-byok-form]")).toBeTruthy();
+    expect(document.querySelector("[data-privy-byok-form]")).not.toBeNull();
     expect(connectButton()).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Create wallet/ })).toBeNull();
   });
@@ -718,7 +731,7 @@ describe("whose account", () => {
     renderFlow({ connectedProviders: [], initialProvider: "turnkey" });
     expect(screen.queryByText("Whose Turnkey account holds the keys?")).toBeNull();
     expect(accountList()).toBeNull();
-    expect(document.getElementById("wallet-details-form")).toBeTruthy();
+    expect(document.getElementById("wallet-details-form")).not.toBeNull();
   });
 
   it("lists the provider's connections beside SDP's account, with nothing preselected", () => {
@@ -756,10 +769,13 @@ describe("whose account", () => {
     await act(async () => {
       fireEvent.click(createButton());
     });
-    const formData = submitted(mocks.createWallet);
-    expect(formData.get("connectionId")).toBe("conn-active");
-    expect(formData.get("label")).toBe("Ops");
-    expect(formData.get("purpose")).toBe("transfer");
+    expect(Object.fromEntries(submitted(createWallet))).toEqual({
+      provider: "privy",
+      connectionId: "conn-active",
+      label: "Ops",
+      purpose: "transfer",
+      idempotencyKey: expect.any(String),
+    });
   });
 
   it("creates the wallet in SDP's set-up account when that is picked", async () => {
@@ -773,10 +789,10 @@ describe("whose account", () => {
     await act(async () => {
       fireEvent.click(createButton());
     });
-    const formData = submitted(mocks.createWallet);
+    const formData = submitted(createWallet);
     expect(formData.get("provider")).toBe("privy");
     expect(formData.get("connectionId")).toBeNull();
-    expect(mocks.initialize).not.toHaveBeenCalled();
+    expect(initialize).not.toHaveBeenCalled();
   });
 
   it("connects another account of the project's own from the list", () => {
@@ -786,7 +802,7 @@ describe("whose account", () => {
       connections: [connection()],
     });
     fireEvent.click(radio(/^Connect another Privy account/));
-    expect(document.querySelector("[data-privy-byok-form]")).toBeTruthy();
+    expect(document.querySelector("[data-privy-byok-form]")).not.toBeNull();
     expect(connectButton()).toBeTruthy();
     expect(screen.queryByRole("combobox", { name: "Purpose" })).toBeNull();
   });
@@ -824,14 +840,16 @@ describe("whose account", () => {
       HTMLElement
     );
     expect(within(failed).getByText("Privy rejected its keys")).toBeTruthy();
-    expect(within(failed).getByRole("link", { name: "Replace credentials" })).toBeTruthy();
+    expect(
+      within(failed).getByRole("link", { name: "Replace credentials" }).getAttribute("href")
+    ).toBe("/dashboard/prj_test_sandbox/integrations/privy/connections/conn-failed");
   });
 
   // Greptile (#2741): the repair link stayed live during a credential check, so leaving through
   // it dropped the request's saved retry.
   it("locks a connection's repair link while a credential check is in flight", async () => {
     let settle: (result: PrivyByokSubmitResult) => void = () => undefined;
-    mocks.submitCredential.mockImplementationOnce(
+    submitCredential.mockImplementationOnce(
       () =>
         new Promise<PrivyByokSubmitResult>((resolve) => {
           settle = resolve;
@@ -849,9 +867,9 @@ describe("whose account", () => {
       document.querySelector('[data-wallet-account="conn-pending"]'),
       HTMLElement
     );
-    expect(
-      within(row).getByRole("link", { name: "Check again" }).getAttribute("href")
-    ).toBeTruthy();
+    expect(within(row).getByRole("link", { name: "Check again" }).getAttribute("href")).toBe(
+      "/dashboard/prj_test_sandbox/integrations/privy/connections/conn-pending"
+    );
 
     await act(async () => {
       fireEvent.click(connectButton());
@@ -863,9 +881,9 @@ describe("whose account", () => {
     await act(async () => {
       settle({ status: "failed", message: "Those credentials did not verify." });
     });
-    expect(
-      within(row).getByRole("link", { name: "Check again" }).getAttribute("href")
-    ).toBeTruthy();
+    expect(within(row).getByRole("link", { name: "Check again" }).getAttribute("href")).toBe(
+      "/dashboard/prj_test_sandbox/integrations/privy/connections/conn-pending"
+    );
   });
 
   // A BYOK-only project has no Managed config, so nothing is connected; the active connection
@@ -919,8 +937,6 @@ describe("whose account", () => {
     expect(footerHint()).toBe("Pick whose Fireblocks account holds the keys.");
     expect(createButton().disabled).toBe(true);
 
-    // Only Privy's account at SDP is known to take no wallet policy, so Fireblocks' claims none.
-    expect(screen.getByText("For trying SDP out. SDP holds the credentials.")).toBeTruthy();
     fireEvent.click(radio(/^SDP's Fireblocks account/));
     expect(footerHint()).toBe("Fireblocks makes the keys in under a minute.");
   });

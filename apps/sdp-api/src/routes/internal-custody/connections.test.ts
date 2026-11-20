@@ -1,11 +1,12 @@
 import type { CustodyConnectionLifecycle, CustodyProvider } from "@sdp/types/custody";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db/client";
-import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { insertTestCustodyWalletRow } from "@/test/helpers/custody";
+import { seedCustodyAdmin } from "@/test/helpers/custody-admin";
 import {
   activateTestCustodyConnection,
   insertTestCustodyConnection,
@@ -13,95 +14,33 @@ import {
   type TestStoredProviderCredential,
 } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
-import { seedDefaultProjects } from "@/test/helpers/projects";
+import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 import { internalCustody } from "./index";
 
-const ORG = {
-  id: "org_connections_read",
-  slug: "connections-read",
-  clerkId: "clerk_org_connections_read",
-};
-const PROJECT = { id: "prj_connections_read", slug: "connections-read-project" };
-const USER = {
-  id: "usr_connections_read",
-  email: "connections-read@example.com",
-  clerkId: "clerk_connections_read",
-};
+const ORGANIZATION_ID = "org_connections_read";
+const PROJECT_ID = "prj_connections_read";
+const OTHER_PROJECT_ID = `${PROJECT_ID}_production`;
+const USER_ID = "usr_connections_read";
 const SECRET_PAYLOAD = "encrypted-connections-read-secret";
+const listSchema = z.object({
+  data: z.object({
+    connections: z.array(z.record(z.string(), z.unknown())),
+    pagination: z.object({ limit: z.number(), offset: z.number(), total: z.number() }),
+  }),
+});
 
-function encodeJwtPart(value: Record<string, unknown>): string {
-  return Buffer.from(JSON.stringify(value)).toString("base64url");
-}
-
-function buildApp(options: { injectJwt: boolean }) {
-  const payload: ClerkJwtPayload = {
-    sub: USER.clerkId,
-    org_id: ORG.clerkId,
-    email: USER.email,
-  };
-  const token = `${encodeJwtPart({ alg: "RS256", typ: "JWT" })}.${encodeJwtPart(payload)}.signature`;
-  const app = new Hono<{ Bindings: Env }>();
-
-  app.use("*", kvStoreMiddleware());
-  app.use("*", async (c, next) => {
-    if (options.injectJwt) {
-      c.set("verifiedClerkJwt", { token, payload });
-    }
-    c.set("requestId", "req_connections_read");
-    await next();
-  });
-  app.route("/internal/dashboard/custody", internalCustody);
-  app.onError((error, c) => {
-    if (error instanceof AppError) {
-      return c.json(
-        { error: error.toResponse().error, meta: { requestId: c.get("requestId") } },
-        error.statusCode as 400
-      );
-    }
-    throw error;
-  });
-
-  return { app, token };
-}
-
-async function seedScope(): Promise<void> {
-  const db = getDb(env);
-  await db.batch([
-    db
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(ORG.id, "Connections Read", ORG.slug, "enterprise", "active"),
-    db
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
-      .bind(USER.id, USER.email, 1, "active"),
-    db
-      .prepare(
-        `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
-         VALUES (?, 'clerk', ?, ?, ?)`
-      )
-      .bind("aui_connections_read", USER.clerkId, USER.id, USER.email),
-    db
-      .prepare(
-        `INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
-         VALUES (?, 'clerk', ?, ?, ?)`
-      )
-      .bind("aoi_connections_read", ORG.clerkId, ORG.id, ORG.slug),
-    db
-      .prepare(
-        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-         VALUES (?, ?, ?, 'admin', 'active')`
-      )
-      .bind("mem_connections_read", ORG.id, USER.id),
-  ]);
-  await seedDefaultProjects(db, {
-    organizationId: ORG.id,
-    createdBy: USER.id,
-    members: [USER.id],
-    ids: { sandbox: PROJECT.id, production: `${PROJECT.id}_production` },
-  });
-}
+let token: string;
+const app = new Hono<{ Bindings: Env }>();
+app.use("*", kvStoreMiddleware());
+app.route("/internal/dashboard/custody", internalCustody);
+app.onError((error) => {
+  if (error instanceof AppError)
+    return Response.json(error.toResponse(), { status: error.statusCode });
+  throw error;
+});
 
 async function seedCredentialAndConnection(input: {
   credentialId: string;
@@ -112,12 +51,14 @@ async function seedCredentialAndConnection(input: {
   createdAt: string;
   failureCode: string | null;
   pendingWalletLabel: string | null;
+  projectId: string;
 }): Promise<void> {
+  const { projectId } = input;
   const db = getDb(env);
   const credential: TestStoredProviderCredential = {
     id: input.credentialId,
-    organizationId: ORG.id,
-    projectId: PROJECT.id,
+    organizationId: ORGANIZATION_ID,
+    projectId,
     provider: input.provider,
     label: input.label,
     stored: { storageBackend: "encrypted_db", encryptedSecretPayload: SECRET_PAYLOAD },
@@ -132,8 +73,8 @@ async function seedCredentialAndConnection(input: {
   await insertTestStoredProviderCredential(db, credential);
   await insertTestCustodyConnection(db, {
     id: input.connectionId,
-    organizationId: ORG.id,
-    projectId: PROJECT.id,
+    organizationId: ORGANIZATION_ID,
+    projectId,
     provider: input.provider,
     credential,
     status: input.status,
@@ -152,14 +93,15 @@ async function seedCredentialAndConnection(input: {
 
 async function makeConnectionRuntimeReady(
   connectionId: string,
-  custodyWalletId: string
+  custodyWalletId: string,
+  publicKey: string
 ): Promise<void> {
   const db = getDb(env);
   await insertTestCustodyWalletRow(db, {
     id: custodyWalletId,
     owner: { kind: "connection", custodyConnectionId: connectionId },
     walletId: `provider-${custodyWalletId}`,
-    publicKey: `address-${custodyWalletId}`,
+    publicKey,
     label: null,
     purpose: null,
     status: "active",
@@ -171,7 +113,11 @@ async function makeConnectionRuntimeReady(
   });
 }
 
-async function seedRuntimeReadyConnection(connectionId: string, createdAt: string): Promise<void> {
+async function seedRuntimeReadyConnection(
+  connectionId: string,
+  createdAt: string,
+  publicKey: string
+): Promise<void> {
   await seedCredentialAndConnection({
     credentialId: `pcred_${connectionId}`,
     connectionId,
@@ -181,47 +127,51 @@ async function seedRuntimeReadyConnection(connectionId: string, createdAt: strin
     createdAt,
     failureCode: null,
     pendingWalletLabel: null,
+    projectId: PROJECT_ID,
   });
-  await makeConnectionRuntimeReady(connectionId, `cwlt_${connectionId}`);
+  await makeConnectionRuntimeReady(connectionId, `cwlt_${connectionId}`, publicKey);
 }
 
 async function requestConnections(query: string): Promise<Response> {
-  const { app, token } = buildApp({ injectJwt: true });
   return app.request(
     `/internal/dashboard/custody/connections${query}`,
-    { headers: { Authorization: `Bearer ${token}`, "X-Project-ID": PROJECT.id } },
+    { headers: { Authorization: `Bearer ${token}`, "X-Project-ID": PROJECT_ID } },
     env
   );
 }
 
-async function listConnections(query: string): Promise<{
-  connections: Array<Record<string, unknown>>;
-  pagination: { limit: number; offset: number; total: number };
-}> {
+async function listConnections(query: string) {
   const response = await requestConnections(query);
   expect(response.status).toBe(200);
-  const body = (await response.json()) as { data: never };
-  return body.data;
+  return listSchema.parse(await response.json()).data;
 }
 
 describe("internal custody connections", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
-    await seedScope();
+    token = await seedCustodyAdmin(env, {
+      organizationId: ORGANIZATION_ID,
+      userId: USER_ID,
+      projectId: PROJECT_ID,
+      tier: "enterprise",
+    });
   });
 
   afterEach(async () => {
     await clearKVStores(env);
   });
 
-  it("refuses a caller with no dashboard session", async () => {
-    const { app } = buildApp({ injectJwt: false });
+  it("refuses a caller with no dashboard session with 401", async () => {
     const response = await app.request(
       "/internal/dashboard/custody/connections",
-      { headers: { "X-Project-ID": PROJECT.id } },
+      { headers: { "X-Project-ID": PROJECT_ID } },
       env
     );
-    expect(response.status).toBeGreaterThanOrEqual(401);
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({
+      error: { code: "UNAUTHORIZED", message: "API key required" },
+    });
   });
 
   it("lists the scope's connections newest first through the safe Connection contract", async () => {
@@ -234,6 +184,7 @@ describe("internal custody connections", () => {
       createdAt: "2026-08-01T00:00:00.000Z",
       failureCode: "invalid_credentials",
       pendingWalletLabel: null,
+      projectId: PROJECT_ID,
     });
     await seedCredentialAndConnection({
       credentialId: "pcred_read_b",
@@ -244,6 +195,7 @@ describe("internal custody connections", () => {
       createdAt: "2026-08-02T00:00:00.000Z",
       failureCode: null,
       pendingWalletLabel: "Treasury wallet",
+      projectId: PROJECT_ID,
     });
 
     const data = await listConnections("");
@@ -279,8 +231,36 @@ describe("internal custody connections", () => {
       ],
       pagination: { limit: 20, offset: 0, total: 2 },
     });
-    expect(JSON.stringify(data)).not.toContain("pcred_read_");
-    expect(JSON.stringify(data)).not.toContain("providerCredential");
+  });
+
+  it("lists only the requested project's connections", async () => {
+    await seedCredentialAndConnection({
+      credentialId: "pcred_read_own",
+      connectionId: "ccon_read_own",
+      provider: "privy",
+      label: "Own treasury",
+      status: "pending",
+      createdAt: "2026-08-01T00:00:00.000Z",
+      failureCode: null,
+      pendingWalletLabel: null,
+      projectId: PROJECT_ID,
+    });
+    await seedCredentialAndConnection({
+      credentialId: "pcred_read_other_project",
+      connectionId: "ccon_read_other_project",
+      provider: "privy",
+      label: "Other project treasury",
+      status: "pending",
+      createdAt: "2026-08-02T00:00:00.000Z",
+      failureCode: null,
+      pendingWalletLabel: null,
+      projectId: OTHER_PROJECT_ID,
+    });
+
+    const data = await listConnections("");
+
+    expect(data.connections.map((row) => row.id)).toEqual(["ccon_read_own"]);
+    expect(data.pagination.total).toBe(1);
   });
 
   it("never returns secret material or unknown failure codes", async () => {
@@ -293,18 +273,29 @@ describe("internal custody connections", () => {
       createdAt: "2026-08-01T00:00:00.000Z",
       failureCode: "raw_provider_stack",
       pendingWalletLabel: null,
+      projectId: PROJECT_ID,
     });
 
     const data = await listConnections("");
     expect(JSON.stringify(data)).not.toContain(SECRET_PAYLOAD);
     expect(JSON.stringify(data)).not.toContain("encrypted_secret_payload");
     expect(JSON.stringify(data)).not.toContain("raw_provider_stack");
-    expect(data.connections[0]?.lastCheck).toMatchObject({ failureCode: null });
+    expect(data.connections.map((row) => row.lastCheck)).toEqual([
+      { status: "failed", at: "2026-08-01T00:00:00.000Z", failureCode: null },
+    ]);
   });
 
   it("reports runtime eligibility from each Connection's own lifecycle, not from any of its wallets", async () => {
-    await seedRuntimeReadyConnection("ccon_read_first", "2026-08-01T00:00:00.000Z");
-    await seedRuntimeReadyConnection("ccon_read_second", "2026-08-02T00:00:00.000Z");
+    await seedRuntimeReadyConnection(
+      "ccon_read_first",
+      "2026-08-01T00:00:00.000Z",
+      syntheticAddress(1)
+    );
+    await seedRuntimeReadyConnection(
+      "ccon_read_second",
+      "2026-08-02T00:00:00.000Z",
+      syntheticAddress(2)
+    );
 
     const activeConnection = (id: string, createdAt: string) => ({
       id,
@@ -316,6 +307,7 @@ describe("internal custody connections", () => {
       activatedAt: expect.any(String),
       lastCheck: { status: "success", at: expect.any(String), failureCode: null },
       pendingWalletLabel: null,
+      projectId: PROJECT_ID,
     });
     expect((await listConnections("")).connections).toEqual([
       activeConnection("ccon_read_second", "2026-08-02T00:00:00.000Z"),
@@ -344,6 +336,7 @@ describe("internal custody connections", () => {
       createdAt: "2026-08-01T00:00:00.000Z",
       failureCode: null,
       pendingWalletLabel: null,
+      projectId: PROJECT_ID,
     });
     await seedCredentialAndConnection({
       credentialId: "pcred_filter_other",
@@ -354,6 +347,7 @@ describe("internal custody connections", () => {
       createdAt: "2026-08-05T00:00:00.000Z",
       failureCode: null,
       pendingWalletLabel: null,
+      projectId: PROJECT_ID,
     });
 
     const all = await listConnections("");
@@ -379,6 +373,7 @@ describe("internal custody connections", () => {
         createdAt: `2026-09-0${index + 1}T00:00:00.000Z`,
         failureCode: null,
         pendingWalletLabel: null,
+        projectId: PROJECT_ID,
       });
     }
     await seedCredentialAndConnection({
@@ -390,6 +385,7 @@ describe("internal custody connections", () => {
       createdAt: "2026-08-01T00:00:00.000Z",
       failureCode: null,
       pendingWalletLabel: null,
+      projectId: PROJECT_ID,
     });
 
     const blind = await listConnections("?limit=3");
@@ -410,6 +406,7 @@ describe("internal custody connections", () => {
       createdAt: "2026-08-01T00:00:00.000Z",
       failureCode: null,
       pendingWalletLabel: null,
+      projectId: PROJECT_ID,
     });
 
     const response = await requestConnections("?provider=not_a_provider");
@@ -427,11 +424,12 @@ describe("internal custody connections", () => {
         createdAt: `2026-08-0${index + 1}T00:00:00.000Z`,
         failureCode: "invalid_credentials",
         pendingWalletLabel: null,
+        projectId: PROJECT_ID,
       });
     }
 
     const page = await listConnections("?limit=2&offset=1");
-    expect(page.connections).toHaveLength(2);
+    expect(page.connections.map((row) => row.id)).toEqual(["ccon_read_p1", "ccon_read_p0"]);
     expect(page.pagination).toEqual({ limit: 2, offset: 1, total: 3 });
 
     const clamped = await listConnections("?limit=9999");
@@ -449,6 +447,6 @@ describe("internal custody connections", () => {
       offset: Number.MAX_SAFE_INTEGER,
       total: 3,
     });
-    expect(oversized.connections).toHaveLength(0);
+    expect(oversized.connections).toEqual([]);
   });
 });

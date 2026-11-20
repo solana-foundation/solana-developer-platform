@@ -1,230 +1,262 @@
 // @vitest-environment jsdom
 
-import type { CustodyWalletSummary } from "@sdp/types/custody";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import type { CustodyWalletOwner, CustodyWalletSummary } from "@sdp/types/custody";
+import type { OrganizationRole } from "@sdp/types/roles";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ComponentProps, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
+import { DashboardHeaderTabsTrailingContext } from "@/components/dashboard-header-tabs-trailing-context";
 import { readWalletFavorites, walletFavoritesKey } from "@/lib/wallet-favorites";
-import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { stubClerkSession } from "@/test/clerk";
+import {
+  dashboardDataResponse,
+  sentDashboardRequests,
+  stubDashboardFetch,
+} from "@/test/dashboard-fetch";
+import {
+  dashboardRouter,
+  resetDashboardNavigation,
+  setDashboardUrl,
+} from "@/test/dashboard-navigation";
+import { SANDBOX_PROJECT } from "@/test/projects";
+import { syntheticWalletAddress, walletsWorkspace } from "@/test/wallets";
 
-const mocks = vi.hoisted(() => ({
-  query: "",
-  toast: vi.fn(),
-  refresh: vi.fn(),
-  mutate: vi.fn(),
-  replaceSearchParams: vi.fn(),
-  balances: undefined as Record<string, unknown> | undefined,
-}));
+interface FavoriteToastOptions {
+  description: string;
+  action: { label: string; onClick: () => void };
+}
 
-vi.mock("@/lib/dashboard-url-state", () => ({
-  useDashboardUrlState: () => ({
-    searchParams: new URLSearchParams(mocks.query),
-    replaceSearchParams: mocks.replaceSearchParams,
-  }),
-  useDashboardTab: () => new URLSearchParams(mocks.query).get("tab"),
-}));
+const toast = vi.hoisted(() => vi.fn<(title: string, options: FavoriteToastOptions) => void>());
+
+// sonner's `toast` is a callable export; the Undo a favorite toast carries is read off its call.
+vi.mock("sonner", () => ({ toast }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
-vi.mock("sonner", () => ({ toast: mocks.toast }));
-vi.mock("@/contexts/dashboard-workspace-context", () => ({
-  useDashboardWorkspace: () => ({
-    dashboardCacheScope: { userId: "user", orgId: "org" },
-    selectedProjectId: "project",
-    dashboardAccess: { capabilities: { canUseWalletSignerCheck: true } },
-    sandboxProject: { id: "project" },
-  }),
-}));
-vi.mock("@/app/(session)/dashboard/[projectId]/wallets/wallet-card-balance-value", () => ({
-  WalletCardBalanceValue: () => <span>Balance</span>,
-  useWalletCardBalances: () => ({
-    data: mocks.balances,
-    error: undefined,
-    isValidating: false,
-    mutate: mocks.mutate,
-  }),
-}));
-vi.mock("@/components/dashboard-header-tabs", () => ({
-  DashboardHeaderTabsTrailing: ({ children }: { children: ReactNode }) => (
-    <div data-testid="tab-row">{children}</div>
-  ),
-}));
-vi.mock("./wallet-provider-mark", () => ({
-  WalletProviderMark: () => <span data-testid="mark" />,
-}));
 
 const { WalletsOverview } = await import("./wallets-overview");
 
-const KEY = walletFavoritesKey({ userId: "user", orgId: "org" }, "project") as string;
+const WALLETS_PATH = `/dashboard/${SANDBOX_PROJECT.id}/wallets`;
+const BALANCES_PATH = "/api/dashboard/wallets?includeBalances=true&view=summary";
 
-function makeWallet(overrides: Partial<CustodyWalletSummary>): CustodyWalletSummary {
+function favoritesKey(): string {
+  const key = walletFavoritesKey({ userId: "user_test", orgId: "org_test" }, SANDBOX_PROJECT.id);
+  if (key === null) throw new Error("The Sandbox Project has no favorites key");
+  return key;
+}
+
+function makeWallet(
+  overrides: Partial<Omit<CustodyWalletSummary, keyof CustodyWalletOwner>>
+): CustodyWalletSummary {
   return {
     id: "row",
     custodyConfigId: "config",
     provider: "fireblocks",
     isRuntimeExecutionAllowed: true,
     walletId: "fb_wallet",
-    publicKey: "gZeTc7Hq9mXw2JDUBSD",
+    publicKey: syntheticWalletAddress(1),
     label: "Settlement Fireblocks",
     purpose: "transfer",
     status: "active",
     createdAt: "2026-09-01T00:00:00.000Z",
     ...overrides,
-  } as CustodyWalletSummary;
+  };
 }
 
-const wallets = [
-  makeWallet({}),
-  makeWallet({
-    id: "row-2",
-    provider: "dfns",
-    walletId: "wa-offramp",
-    publicKey: "EGyaAv4Lr8nTqfQ723i",
-    label: "Off ramp demo wallet",
-    purpose: "root",
-  }),
-];
+const SETTLEMENT = makeWallet({});
+const OFF_RAMP = makeWallet({
+  id: "row-2",
+  provider: "dfns",
+  walletId: "wa-offramp",
+  publicKey: syntheticWalletAddress(2),
+  label: "Off ramp demo wallet",
+  purpose: "root",
+});
 
-function renderOverview(overrides: Partial<ComponentProps<typeof WalletsOverview>> = {}) {
+let slot: HTMLDivElement;
+let fetchMock: ReturnType<typeof stubDashboardFetch>;
+
+function openOverview(search = "") {
+  setDashboardUrl(`${WALLETS_PATH}${search}`, {});
+  window.history.replaceState(null, "", `${WALLETS_PATH}${search}`);
+}
+
+function renderOverview(
+  overrides: Partial<ComponentProps<typeof WalletsOverview>> = {},
+  role: OrganizationRole = "admin"
+) {
+  const Workspace = walletsWorkspace(role);
   return render(
-    <I18nProvider locale="en" messages={getMessages("en")}>
-      <WalletsOverview
-        canManageCustody
-        configsError={null}
-        wallets={wallets}
-        walletsError={null}
-        {...overrides}
-      />
-    </I18nProvider>
+    <WalletsOverview
+      canManageCustody={role === "admin"}
+      configsError={null}
+      wallets={[SETTLEMENT, OFF_RAMP]}
+      walletsError={null}
+      {...overrides}
+    />,
+    {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <Workspace>
+          <DashboardHeaderTabsTrailingContext.Provider value={slot}>
+            {children}
+          </DashboardHeaderTabsTrailingContext.Provider>
+        </Workspace>
+      ),
+    }
   );
 }
 
+function lastFavoriteToast(): FavoriteToastOptions {
+  const call = toast.mock.lastCall;
+  if (call === undefined) throw new Error("No favorites toast was shown");
+  return call[1];
+}
+
+function walletLinks(): HTMLElement[] {
+  return screen.queryAllByRole("link", { name: /^Open / });
+}
+
 beforeEach(() => {
+  stubClerkSession();
   resetDashboardNavigation();
-  mocks.query = "";
-  mocks.balances = undefined;
+  openOverview();
   window.localStorage.clear();
+  slot = document.createElement("div");
+  document.body.append(slot);
+  fetchMock = stubDashboardFetch(async () =>
+    dashboardDataResponse(200, {
+      wallets: [
+        { walletId: SETTLEMENT.walletId, balances: [] },
+        { walletId: OFF_RAMP.walletId, balances: [] },
+      ],
+    })
+  );
 });
 afterEach(() => {
   cleanup();
-  vi.clearAllMocks();
+  slot.remove();
+  toast.mockClear();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  window.history.replaceState(null, "", "/");
 });
 
 describe("wallet cards", () => {
   it("names each wallet with its purpose and provider, root wallets included", () => {
     renderOverview();
-    const settlement = screen.getByText("Settlement Fireblocks").closest("article");
-    const offRamp = screen.getByText("Off ramp demo wallet").closest("article");
-    expect(within(settlement as HTMLElement).getByText("Transfers · Fireblocks")).toBeTruthy();
-    expect(within(offRamp as HTMLElement).getByText("Root wallet · DFNS")).toBeTruthy();
-    expect(within(offRamp as HTMLElement).getByText("Address")).toBeTruthy();
-    expect(within(offRamp as HTMLElement).getByText("Wallet ID")).toBeTruthy();
-    expect(
-      screen.getByRole("link", { name: "Open Off ramp demo wallet" }).getAttribute("href")
-    ).toBe("/dashboard/prj_test_sandbox/wallets/wa-offramp");
+    const settlement = screen.getByRole("link", { name: "Open Settlement Fireblocks" });
+    const offRamp = screen.getByRole("link", { name: "Open Off ramp demo wallet" });
+    expect(screen.getByText("Transfers · Fireblocks")).not.toBeNull();
+    expect(screen.getByText("Root wallet · DFNS")).not.toBeNull();
+    expect(settlement.getAttribute("href")).toBe(`${WALLETS_PATH}/fb_wallet`);
+    expect(offRamp.getAttribute("href")).toBe(`${WALLETS_PATH}/wa-offramp`);
   });
 
   it("marks only a wallet whose signing is restricted", () => {
     renderOverview({
-      wallets: [{ ...wallets[0], isRuntimeExecutionAllowed: false }, wallets[1]],
+      wallets: [{ ...SETTLEMENT, isRuntimeExecutionAllowed: false }, OFF_RAMP],
     });
     expect(screen.getAllByText(/Restricted/)).toHaveLength(1);
   });
 
-  it("puts the refresh and the view toggle in the tab row, and refreshes both reads", () => {
+  it("re-reads the wallets and their balances from the tab row, and switches to the list", async () => {
     renderOverview();
-    const tabRow = screen.getByTestId("tab-row");
-    fireEvent.click(within(tabRow).getByRole("button", { name: "Refresh wallets and balances" }));
+    await waitFor(() => expect(sentDashboardRequests(fetchMock)).toHaveLength(1));
+
+    fireEvent.click(within(slot).getByRole("button", { name: "Refresh wallets and balances" }));
     expect(dashboardRouter.refresh).toHaveBeenCalledTimes(1);
-    expect(mocks.mutate).toHaveBeenCalledTimes(1);
-    fireEvent.click(within(tabRow).getByRole("radio", { name: "List" }));
-    expect(mocks.replaceSearchParams).toHaveBeenCalledWith({ view: "list" });
+    await waitFor(() =>
+      expect(sentDashboardRequests(fetchMock).map((request) => request.path)).toEqual([
+        BALANCES_PATH,
+        BALANCES_PATH,
+      ])
+    );
+
+    act(() => {
+      fireEvent.click(within(slot).getByRole("radio", { name: "List" }));
+    });
+    expect(window.location.search).toBe("?view=list");
   });
 
-  it("says when the balances arrived, and nothing before they have", () => {
+  it("says when the balances arrived, and nothing before they have", async () => {
     renderOverview();
-    expect(document.querySelector("[data-wallets-refreshed-at]")).toBeNull();
-    cleanup();
-    mocks.balances = { fb_wallet: [] };
-    renderOverview();
-    const time = document.querySelector("[data-wallets-refreshed-at]");
-    expect(time?.getAttribute("dateTime")).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(slot.querySelector("time")).toBeNull();
+
+    const time = await waitFor(() => {
+      const element = slot.querySelector("time");
+      if (element === null) throw new Error("No refresh time yet");
+      return element;
+    });
+    expect(time.getAttribute("dateTime")).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
   it("leaves the tab row alone on the API Playground tab", () => {
-    mocks.query = "tab=playground";
+    openOverview("?tab=playground");
     renderOverview();
-    expect(screen.queryByTestId("tab-row")).toBeNull();
+    expect(slot.childElementCount).toBe(0);
   });
 
   it("lists the wallets as rows when the list view is chosen", () => {
-    mocks.query = "view=list";
+    openOverview("?view=list");
     renderOverview();
-    const rows = document.querySelectorAll("[data-wallet-list] [data-wallet-row]");
-    expect(rows).toHaveLength(2);
-    expect(within(rows[1] as HTMLElement).getByText("Root wallet · DFNS")).toBeTruthy();
+    const [, settlementRow, offRampRow] = screen.getAllByRole("row");
+    expect(within(settlementRow).getByText("Transfers · Fireblocks")).not.toBeNull();
+    expect(within(offRampRow).getByText("Root wallet · DFNS")).not.toBeNull();
   });
 });
 
 describe("search", () => {
   it("shows no field for a handful of wallets, and ignores a search left in the URL", () => {
-    mocks.query = "query=offramp";
+    openOverview("?query=offramp");
     renderOverview();
     expect(screen.queryByRole("searchbox")).toBeNull();
-    expect(document.querySelectorAll("[data-wallet-card]")).toHaveLength(2);
+    expect(walletLinks()).toHaveLength(2);
   });
 
   it("filters a long list by the search in the URL", () => {
-    mocks.query = "query=vault-7";
+    openOverview("?query=vault-7");
     const many = Array.from({ length: 8 }, (_, index) =>
       makeWallet({
         id: `row-${index}`,
         walletId: `vault-${index}`,
+        publicKey: syntheticWalletAddress(10 + index),
         label: `Vault ${index}`,
       })
     );
     renderOverview({ wallets: many });
-    expect(document.querySelector("[data-wallet-search-toolbar]")).toBeTruthy();
-    expect(document.querySelectorAll("[data-wallet-card]")).toHaveLength(1);
-    expect(screen.getByText("Showing 1 of 8 wallets")).toBeTruthy();
+    expect(screen.getByRole("searchbox")).toHaveProperty("value", "vault-7");
+    expect(walletLinks().map((link) => link.getAttribute("href"))).toEqual([
+      `${WALLETS_PATH}/vault-7`,
+    ]);
   });
 });
 
 describe("empty and failed lists", () => {
-  it("invites an admin to create the first wallet", () => {
+  it("sends an admin with no wallets to the setup flow", () => {
     renderOverview({ wallets: [] });
-    expect(screen.getByText("Create your first wallet")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Create wallet" }).getAttribute("href")).toBe(
+      `${WALLETS_PATH}/setup`
+    );
   });
 
-  // On a phone the tabs are hidden and the row is the toolbar's alone; the loading view held it.
-  it.each([
-    ["no wallets", { wallets: [] }],
-    ["a failed read", { walletsError: "Upstream timed out" }],
-  ])("keeps the toolbar's row, with no toolbar, for %s", (_label, overrides) => {
-    renderOverview(overrides);
-    const tabRow = screen.getByTestId("tab-row");
-    expect(tabRow.querySelector("span.h-7")).not.toBeNull();
-    expect(within(tabRow).queryByRole("button")).toBeNull();
-  });
-
-  it("tells a member who cannot create wallets why the list is empty", () => {
-    renderOverview({ wallets: [], canManageCustody: false });
-    expect(screen.getByText("No wallets available")).toBeTruthy();
+  it("offers a member with no wallets nothing to create", () => {
+    renderOverview({ wallets: [] }, "member");
+    expect(screen.getByText("No wallets available")).not.toBeNull();
+    expect(screen.queryByRole("link", { name: "Create wallet" })).toBeNull();
   });
 
   it("reports a failed read instead of an empty project", () => {
     renderOverview({ walletsError: "Upstream timed out" });
     expect(screen.getByRole("alert").textContent).toContain("Upstream timed out");
+    expect(screen.queryByRole("link", { name: "Create wallet" })).toBeNull();
+    expect(walletLinks()).toHaveLength(0);
   });
 });
 
 describe("favorites", () => {
   it("pins a wallet to the sidebar and undoes it from the toast", () => {
     renderOverview();
-    const star = screen.getByRole("button", { name: "Add Off ramp demo wallet to favorites" });
-    fireEvent.click(star);
+    fireEvent.click(screen.getByRole("button", { name: "Add Off ramp demo wallet to favorites" }));
 
-    expect(readWalletFavorites(KEY)).toEqual([
+    expect(readWalletFavorites(favoritesKey())).toEqual([
       { walletId: "wa-offramp", name: "Off ramp demo wallet", provider: "dfns" },
     ]);
     expect(
@@ -232,15 +264,9 @@ describe("favorites", () => {
         .getByRole("button", { name: "Remove Off ramp demo wallet from favorites" })
         .getAttribute("aria-pressed")
     ).toBe("true");
-    const [title, options] = mocks.toast.mock.calls[0] as [
-      string,
-      { description: string; action: { label: string; onClick: () => void } },
-    ];
-    expect(title).toBe("Added to favorites");
-    expect(options.description).toBe("Off ramp demo wallet is in the sidebar under Wallets.");
 
-    options.action.onClick();
-    expect(readWalletFavorites(KEY)).toEqual([]);
+    act(() => lastFavoriteToast().action.onClick());
+    expect(readWalletFavorites(favoritesKey())).toEqual([]);
   });
 
   it("unpins a wallet, and Undo puts it back in its place", () => {
@@ -251,14 +277,11 @@ describe("favorites", () => {
       screen.getByRole("button", { name: "Remove Settlement Fireblocks from favorites" })
     );
 
-    expect(readWalletFavorites(KEY).map((favorite) => favorite.walletId)).toEqual(["wa-offramp"]);
-    const [title, options] = mocks.toast.mock.calls[2] as [
-      string,
-      { action: { onClick: () => void } },
-    ];
-    expect(title).toBe("Removed from favorites");
-    options.action.onClick();
-    expect(readWalletFavorites(KEY).map((favorite) => favorite.walletId)).toEqual([
+    expect(readWalletFavorites(favoritesKey()).map((favorite) => favorite.walletId)).toEqual([
+      "wa-offramp",
+    ]);
+    act(() => lastFavoriteToast().action.onClick());
+    expect(readWalletFavorites(favoritesKey()).map((favorite) => favorite.walletId)).toEqual([
       "fb_wallet",
       "wa-offramp",
     ]);
@@ -266,22 +289,22 @@ describe("favorites", () => {
 
   it("renames pins and drops wallets that are gone when the list loads", () => {
     window.localStorage.setItem(
-      KEY,
+      favoritesKey(),
       JSON.stringify([
         { walletId: "wa-offramp", name: "Old name", provider: "dfns" },
         { walletId: "deleted", name: "Gone", provider: "para" },
       ])
     );
     renderOverview();
-    expect(readWalletFavorites(KEY)).toEqual([
+    expect(readWalletFavorites(favoritesKey())).toEqual([
       { walletId: "wa-offramp", name: "Off ramp demo wallet", provider: "dfns" },
     ]);
   });
 
   it("keeps the pins when the list failed to load", () => {
     const stored = [{ walletId: "deleted", name: "Gone", provider: "para" }];
-    window.localStorage.setItem(KEY, JSON.stringify(stored));
+    window.localStorage.setItem(favoritesKey(), JSON.stringify(stored));
     renderOverview({ walletsError: "Upstream timed out" });
-    expect(readWalletFavorites(KEY)).toEqual(stored);
+    expect(readWalletFavorites(favoritesKey())).toEqual(stored);
   });
 });

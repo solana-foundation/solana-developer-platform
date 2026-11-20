@@ -13,6 +13,7 @@ import { createTenantScope, TenantScopeViolationError } from "@/lib/tenant-scope
 import { env } from "@/test/helpers/env";
 import { organizationMember, seedOrganizationMembers } from "@/test/helpers/organization-members";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { holdTransaction, untilLockWaiters } from "@/test/helpers/row-locks";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type {
@@ -196,7 +197,7 @@ describe("CustodyProposalsRepository", () => {
         now: NOW,
       })
     ).rejects.toThrow("immutable binding");
-    expect((await repo.getForTransfer(identity("immutable")))?.binding).toEqual(BINDING);
+    expect(required(await repo.getForTransfer(identity("immutable"))).binding).toEqual(BINDING);
     await expect(
       repo.ensureForTransfer({
         transfer: {
@@ -235,7 +236,7 @@ describe("CustodyProposalsRepository", () => {
     await expect(
       scoped.getForTransfer({ ...identity("tenant"), projectId: productionProjectId })
     ).rejects.toBeInstanceOf(TenantScopeViolationError);
-    expect((await repo.getForTransfer(identity("tenant")))?.version).toBe(0);
+    expect(required(await repo.getForTransfer(identity("tenant"))).version).toBe(0);
   });
 
   it("lets only one concurrent CAS emit effects and keeps refusal immutable", async () => {
@@ -251,10 +252,13 @@ describe("CustodyProposalsRepository", () => {
     );
     const winners = results.filter((result) => result !== null);
     expect(winners).toHaveLength(1);
-    expect(winners[0]?.effects).toContainEqual({ type: "audit", event: "proposal_refused" });
-    const after = await repo.getForTransfer(identity("cas"));
-    expect(after?.version).toBe(1);
-    expect(after?.state.refusal?.reason).toBe(winners[0]?.proposal.state.refusal?.reason);
+    const winner = required(winners[0]);
+    expect(winner.effects).toContainEqual({ type: "audit", event: "proposal_refused" });
+    const after = required(await repo.getForTransfer(identity("cas")));
+    expect(after.version).toBe(1);
+    expect(required(after.state.refusal).reason).toBe(
+      required(winner.proposal.state.refusal).reason
+    );
     expect(
       await repo.transition({
         ...identity("cas"),
@@ -381,7 +385,7 @@ describe("CustodyProposalsRepository", () => {
           expectedVersion: refused.proposal.version,
           event: { type: "cancel_requested", at: NOW },
         });
-        expect(requested?.proposal.state.cancelAttempt).toBe(1);
+        expect(required(requested).proposal.state.cancelAttempt).toBe(1);
         throw new Error("audit write failed");
       })
     ).rejects.toThrow("audit write failed");
@@ -398,7 +402,7 @@ describe("CustodyProposalsRepository", () => {
           expectedVersion: proposal.version,
           event: { type: "admission_refused", at: NOW, reason: "revoked", message: "Revoked" },
         });
-        expect(written?.proposal.version).toBe(1);
+        expect(required(written).proposal.version).toBe(1);
         throw new Error("audit write failed");
       })
     ).rejects.toThrow("audit write failed");
@@ -464,7 +468,7 @@ describe("CustodyProposalsRepository", () => {
         expectedVersion: proposal.version,
         event: { type: "submission_claimed", at: NOW },
       });
-      expect(claimed?.proposal.state.providerPhase).toBe("submitting");
+      expect(required(claimed).proposal.state.providerPhase).toBe("submitting");
       // Once the creator claims, both observation paths can recover immediately,
       // including a revocation queued while creation was still in progress.
       expect(
@@ -502,7 +506,7 @@ describe("CustodyProposalsRepository", () => {
     const page = await repo.claimDue({ ...claimInput, limit: 4 });
     expect(page).toHaveLength(4);
     expect(page.filter((row) => row.payment_transfer_id.endsWith("_flag"))).toHaveLength(3);
-    expect(page.at(-1)?.payment_transfer_id).toBe("z_ordinary");
+    expect(required(page.at(-1)).payment_transfer_id).toBe("z_ordinary");
     const remaining = await repo.claimDue(claimInput);
     expect(remaining).toHaveLength(1);
     expect(new Set([...page, ...remaining].map((row) => row.payment_transfer_id)).size).toBe(5);
@@ -519,13 +523,15 @@ describe("CustodyProposalsRepository", () => {
       now: NOW,
     });
     await repo.requestRecheck({ ...identity("retry"), projectId: productionProjectId, now: NOW });
-    expect((await repo.getForTransfer(identity("retry")))?.recheck_requested_at).toBeNull();
+    expect(required(await repo.getForTransfer(identity("retry"))).recheck_requested_at).toBeNull();
     await repo.requestRecheck({ ...identity("retry"), now: BEFORE });
     await repo.requestRecheck({ ...identity("retry"), now: NOW });
-    expect((await repo.getForTransfer(identity("retry")))?.recheck_requested_at).toBe(BEFORE);
+    expect(required(await repo.getForTransfer(identity("retry"))).recheck_requested_at).toBe(
+      BEFORE
+    );
     await repo.requestRecheck({ ...identity("terminal_retry"), now: NOW });
     expect(
-      (await repo.getForTransfer(identity("terminal_retry")))?.recheck_requested_at
+      required(await repo.getForTransfer(identity("terminal_retry"))).recheck_requested_at
     ).toBeNull();
     expect((await repo.claimDue(claimInput)).map((row) => row.payment_transfer_id)).toEqual([
       "retry",
@@ -600,7 +606,7 @@ describe("CustodyProposalsRepository", () => {
       expectedVersion: proposal.version,
       event: { type: "alert_delivered", at: NOW },
     });
-    expect(delivered?.proposal.state).toMatchObject({
+    expect(required(delivered).proposal.state).toMatchObject({
       authorizationState: "refusal_alerted",
       alertedAt: NOW,
     });
