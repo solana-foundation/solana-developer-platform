@@ -11,11 +11,11 @@ import WalletSetupLoading from "./setup/loading";
 const WALLETS_DIR = dirname(fileURLToPath(import.meta.url));
 
 /** Each route's loading boundary, by its folder under `wallets/` ("." is the overview). */
-const LOADERS: Record<string, ComponentType> = {
+const LOADERS = {
   ".": WalletsLoading,
   setup: WalletSetupLoading,
   "[walletId]": WalletDetailLoading,
-};
+} as const satisfies Record<string, ComponentType>;
 
 /** Every folder under `wallets/` that holds a file named `name`, relative to `wallets/`. */
 function foldersHolding(name: string): string[] {

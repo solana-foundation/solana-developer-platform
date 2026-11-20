@@ -1,4 +1,5 @@
 import { apiTestSupport } from "@sdp/api/test-support";
+import { CUSTODY_PROVIDERS } from "@sdp/types/custody";
 import { afterAll, assert, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
@@ -16,7 +17,9 @@ import { env } from "#env-impl";
 const { getDb } = apiTestSupport;
 
 const configsResponseSchema = z.object({
-  data: z.object({ configs: z.array(z.object({ id: z.string(), provider: z.string() })) }),
+  data: z.object({
+    configs: z.array(z.object({ id: z.string(), provider: z.enum(CUSTODY_PROVIDERS) })),
+  }),
 });
 const createdTokenResponseSchema = z.object({
   data: z.object({ token: z.object({ id: z.string() }) }),

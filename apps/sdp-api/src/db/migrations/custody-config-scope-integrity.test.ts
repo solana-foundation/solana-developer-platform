@@ -1,4 +1,5 @@
 import type { CustodyConfigStatus, CustodyProvider } from "@sdp/types/custody";
+import type { ProjectEnvironment } from "@sdp/types/projects";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
@@ -21,7 +22,7 @@ interface StoredConfigRow {
   project_id: string;
   config_encrypted: string;
   status: CustodyConfigStatus;
-  project_environment: string;
+  project_environment: ProjectEnvironment;
   updated_at: string;
 }
 
