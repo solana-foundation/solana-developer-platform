@@ -862,22 +862,31 @@ export function EarnVaultParRedemptionModal({
   const amountValidation = validateVaultWithdrawalAmount(amount);
   const typedAmount =
     amountValidation.kind === "valid" ? amountValidation.canonicalAmount : undefined;
-  const typedFingerprint =
-    typedAmount === undefined
-      ? undefined
-      : source === "intermediate"
-        ? vaultAsyncWithdrawalRequestFingerprint({
-            intermediateAmount: typedAmount,
-            positionId: position.id,
-            projectId,
-            route: { kind: "operator_redemption" },
-          })
-        : vaultAsyncWithdrawalRequestFingerprint({
-            amount: typedAmount,
-            positionId: position.id,
-            projectId,
-            route: { kind: "operator_redemption" },
-          });
+  let typedFingerprint: string | undefined;
+  if (typedAmount !== undefined) {
+    switch (source) {
+      case "shares":
+        typedFingerprint = vaultAsyncWithdrawalRequestFingerprint({
+          amount: typedAmount,
+          positionId: position.id,
+          projectId,
+          route: { kind: "operator_redemption" },
+        });
+        break;
+      case "intermediate":
+        typedFingerprint = vaultAsyncWithdrawalRequestFingerprint({
+          intermediateAmount: typedAmount,
+          positionId: position.id,
+          projectId,
+          route: { kind: "operator_redemption" },
+        });
+        break;
+      default: {
+        const exhaustive: never = source;
+        throw new Error(`Unhandled par-redemption source: ${exhaustive}`);
+      }
+    }
+  }
 
   // The saved request THIS build's kept key would replay, read fresh each
   // render (see `keptAsyncWithdrawalRetry`): the review presents it, and the

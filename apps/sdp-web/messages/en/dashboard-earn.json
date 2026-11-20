@@ -859,6 +859,7 @@
       "keptAttemptRequestLost": "An earlier attempt to withdraw from this position may still be unresolved, but its exact request could not be recovered, so nothing was sent. Check your position, then try again in a moment.",
       "keptAsyncAttemptReviewNote": "An earlier attempt to withdraw {shares} from this position may still be unresolved. Confirming below resubmits that earlier request \u2014 not the amount shown above.",
       "keptAsyncAttemptAnswered": "That earlier attempt was answered in the meantime, so nothing was sent. Check your position, then start a new request if you still need one.",
+      "keptAsyncAttemptRestoredTerms": "The earlier request was made at a {discount}% discount with a deadline of {duration}, and confirming restores those terms \u2014 not the settings shown above.",
       "expectedAmount": "Expected proceeds",
       "minAmount": "Minimum received",
       "quoteLoading": "Fetching the live payout quote\u2026",

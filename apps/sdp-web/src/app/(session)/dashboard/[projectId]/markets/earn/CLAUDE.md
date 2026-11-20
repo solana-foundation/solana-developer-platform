@@ -405,7 +405,10 @@ nothing else; the program create still sends the body `requestId` form.
   share routes on the DERIVED shares, and `recallLegacyAsyncWithdrawalKeptKey`
   is the recovery — a MOUNT-TIME snapshot the modal keeps in state and
   surfaces on the review step through the shared `KeptAsyncAttemptNotice`
-  (`earn-vault-kept-attempt-notice.tsx`, one copy for both async modals), which
+  (`earn-vault-kept-attempt-notice.tsx`, one copy for both async modals; an
+  adopted queue replay also discloses its restored discount and deadline
+  there, because the preview rows above show the form's current terms, not
+  the replay's), which
   the submit's resolver consumes: the adoption replays the legacy attempt
   exactly, under the legacy key with the shares and queue terms parsed out of
   the legacy identity, oldest entry first. The same stops as the instant exit:
