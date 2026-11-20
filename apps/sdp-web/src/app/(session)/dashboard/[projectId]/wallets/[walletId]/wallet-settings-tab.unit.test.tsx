@@ -1,28 +1,22 @@
 // @vitest-environment jsdom
 
+import type { SdpReleaseChannel } from "@sdp/types/release-channels";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as custodyActions from "@/app/(session)/dashboard/[projectId]/wallets/actions";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
+import { stubClerkSession } from "@/test/clerk";
+import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { syntheticWalletAddress, WalletsTestWorkspace } from "@/test/wallets";
 import type { WalletPageView } from "./wallet-detail.shared";
 import { WalletSettingsTab } from "./wallet-settings-tab";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
-vi.mock("@/contexts/dashboard-workspace-context", () => ({
-  useDashboardWorkspace: () => ({
-    dashboardAccess: { capabilities: { canUseWalletSignerCheck: false } },
-    // Stable: no Issuance, no Ramps.
-    flags: { issuance: false, ramps: false },
-    sandboxProject: null,
-  }),
-}));
 
 const WALLET: WalletPageView = {
   walletId: "wal_settings_test",
   custodyWalletId: "cw_settings_test",
   name: "Treasury",
-  publicKey: "11111111111111111111111111111111",
+  publicKey: syntheticWalletAddress(1),
   provider: "turnkey",
   providerName: "Turnkey",
   purposeLabel: null,
@@ -33,6 +27,23 @@ const WALLET: WalletPageView = {
   canManageCustody: true,
   label: "Treasury",
 };
+
+function renderSettings(wallet: WalletPageView, releaseChannel: SdpReleaseChannel = "stable") {
+  render(
+    <WalletsTestWorkspace
+      organizationRole={wallet.canManageCustody ? "admin" : "member"}
+      releaseChannel={releaseChannel}
+    >
+      <WalletSettingsTab wallet={wallet} />
+    </WalletsTestWorkspace>
+  );
+}
+
+beforeEach(() => {
+  stubClerkSession();
+  resetDashboardNavigation();
+  window.sessionStorage.clear();
+});
 
 afterEach(() => {
   cleanup();
@@ -45,36 +56,56 @@ describe("WalletSettingsTab label", () => {
       .spyOn(custodyActions, "updateWalletLabelAction")
       .mockRejectedValueOnce(new TypeError("Failed to fetch"))
       .mockResolvedValueOnce({ status: "success", label: "Settlement" });
-    render(
-      <I18nProvider locale="en" messages={getMessages("en")}>
-        <WalletSettingsTab wallet={WALLET} />
-      </I18nProvider>
-    );
+    renderSettings(WALLET);
     fireEvent.change(screen.getByLabelText("Wallet label"), {
       target: { value: "Settlement" },
     });
-    const save = screen.getByRole("button", { name: "Save changes" });
+    const save = screen.getByRole("button", { name: /^Save changes/ });
     await act(async () => {
       fireEvent.click(save);
     });
+    expect(dashboardRouter.refresh).not.toHaveBeenCalled();
     await act(async () => {
       fireEvent.click(save);
     });
 
-    const [first, retry] = updateLabel.mock.calls;
-    expect(first?.slice(0, 2)).toEqual(["wal_settings_test", "Settlement"]);
-    expect(first?.[2]).toEqual(expect.stringMatching(/^[0-9a-f-]{36}$/));
-    expect(retry?.[2]).toBe(first?.[2]);
+    const uuid = expect.stringMatching(/^[0-9a-f-]{36}$/);
+    expect(updateLabel.mock.calls).toEqual([
+      ["wal_settings_test", "Settlement", uuid],
+      ["wal_settings_test", "Settlement", uuid],
+    ]);
+    expect(new Set(updateLabel.mock.calls.map(([, , key]) => key)).size).toBe(1);
+    expect(dashboardRouter.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses to save a blank label", () => {
+    const updateLabel = vi.spyOn(custodyActions, "updateWalletLabelAction");
+    renderSettings(WALLET);
+    const field = screen.getByLabelText("Wallet label");
+    fireEvent.change(field, { target: { value: "   " } });
+
+    expect(field.getAttribute("aria-invalid")).toBe("true");
+    const save = screen.getByRole("button", { name: /^Save changes/ });
+    expect(save).toHaveProperty("disabled", true);
+    fireEvent.submit(save);
+    expect(updateLabel).not.toHaveBeenCalled();
+  });
+
+  it("shows a member the label without a way to change it", () => {
+    renderSettings({ ...WALLET, canManageCustody: false });
+
+    expect(screen.queryByLabelText("Wallet label")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Save changes/ })).toBeNull();
+    expect(screen.getAllByText("Treasury")).not.toHaveLength(0);
   });
 
   // The hint listed Issuance on stable, where no Issuance page exists to show the label.
-  it("names only the modules that run where the label shows", () => {
-    render(
-      <I18nProvider locale="en" messages={getMessages("en")}>
-        <WalletSettingsTab wallet={WALLET} />
-      </I18nProvider>
-    );
-    expect(screen.getByText(/here, in Payments, and in API responses/)).toBeTruthy();
+  it("names Issuance where the label shows only where Issuance runs", () => {
+    renderSettings(WALLET, "stable");
     expect(screen.queryByText(/Issuance/)).toBeNull();
+    cleanup();
+
+    renderSettings(WALLET, "experimental");
+    expect(screen.getByText(/Issuance/)).not.toBeNull();
   });
 });

@@ -1,4 +1,5 @@
 import { generateKeyPairSync, webcrypto } from "node:crypto";
+import { generateKeyPairSigner } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import { readFireblocksAddressBook } from "./fireblocks-address-book";
 import { readFireblocksTransfer, resolveFireblocksTransferAsset } from "./fireblocks-transfers";
@@ -7,6 +8,7 @@ import { provisionFireblocksVaultAccount } from "./index";
 import type { CustodyProvisioningRuntime } from "./runtime";
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+const { address: VAULT_ADDRESS } = await generateKeyPairSigner();
 function access() {
   return {
     apiKey: crypto.randomUUID(),
@@ -96,7 +98,7 @@ describe("Fireblocks provider boundaries", () => {
         writes.push({ uri, key: new Headers(init.headers).get("Idempotency-Key") });
         return Response.json({ id: "0" });
       }
-      return Response.json({ addresses: [{ address: "11111111111111111111111111111111" }] });
+      return Response.json({ addresses: [{ address: VAULT_ADDRESS }] });
     });
     for (let attempt = 0; attempt < 2; attempt++)
       await provisionFireblocksVaultAccount(

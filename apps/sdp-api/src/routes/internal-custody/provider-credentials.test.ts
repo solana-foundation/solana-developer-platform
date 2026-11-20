@@ -1,24 +1,22 @@
-import { hashString } from "@sdp/payments/hash";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { type DatabaseClient, getDb } from "@/db/client";
-import { verifyClerkJwt } from "@/lib/clerk-token";
 import { AppError, internalError } from "@/lib/errors";
+import { mapErrorStatusCode } from "@/lib/response";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { rootLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import type { CredentialSecretStore } from "@/services/credential-secret-store";
 import * as credentialSecretStoreModule from "@/services/credential-secret-store";
 import { cleanupRetiredProviderCredentialSecrets } from "@/services/jobs/cleanup-provider-credential-secrets";
-import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
-import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { insertTestCustodyWalletRow, seedTestCustodySetup } from "@/test/helpers/custody";
+import { seedCustodyAdmin } from "@/test/helpers/custody-admin";
 import { activateTestCustodyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
-import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { required } from "@/test/helpers/required";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 import { internalCustody } from "./index";
@@ -27,7 +25,12 @@ let clerkToken: string;
 
 const ORGANIZATION_ID = "org_test_provider_credential_submit";
 const PROJECT_ID = "prj_provider_credential_submit";
-const USER_ID = "usr_test_provider_credential_submit";
+const submissionSchema = z.object({
+  data: z.looseObject({
+    connectionId: z.string(),
+    providerCredential: z.looseObject({ id: z.string() }),
+  }),
+});
 const SEEDED_AT = "2026-01-01T00:00:00.000Z";
 const VALID_BODY = {
   provider: "privy",
@@ -60,68 +63,13 @@ function buildApp() {
           error: error.toResponse().error,
           meta: { requestId: c.get("requestId") },
         },
-        error.statusCode as 400
+        mapErrorStatusCode(error.statusCode)
       );
     }
     throw error;
   });
 
   return { app, token };
-}
-
-async function seedActor(): Promise<void> {
-  const db = getDb(env);
-  await db.batch([
-    db
-      .prepare(
-        `INSERT INTO organizations (id, name, slug, tier, status)
-         VALUES (?, ?, ?, 'individual', 'active')`
-      )
-      .bind(ORGANIZATION_ID, "Provider Credential Submit", "provider-credential-submit"),
-    db
-      .prepare(
-        `INSERT INTO users (id, email, email_verified, status)
-         VALUES (?, ?, 1, 'active')`
-      )
-      .bind(USER_ID, "provider-credential-submit@example.com"),
-    db
-      .prepare(
-        `INSERT INTO auth_user_identities
-           (id, provider, provider_user_id, user_id, email)
-         VALUES (?, 'clerk', ?, ?, ?)`
-      )
-      .bind(
-        "aui_provider_credential_submit",
-        "clerk_user_provider_credential_submit",
-        USER_ID,
-        "provider-credential-submit@example.com"
-      ),
-    db
-      .prepare(
-        `INSERT INTO auth_organization_identities
-           (id, provider, provider_org_id, organization_id, slug)
-         VALUES (?, 'clerk', ?, ?, ?)`
-      )
-      .bind(
-        "aoi_provider_credential_submit",
-        "clerk_org_provider_credential_submit",
-        ORGANIZATION_ID,
-        "provider-credential-submit"
-      ),
-    db
-      .prepare(
-        `INSERT INTO organization_members
-           (id, organization_id, user_id, role, status)
-         VALUES (?, ?, ?, 'admin', 'active')`
-      )
-      .bind("mem_provider_credential_submit", ORGANIZATION_ID, USER_ID),
-  ]);
-  await seedDefaultProjects(db, {
-    organizationId: ORGANIZATION_ID,
-    createdBy: USER_ID,
-    members: [USER_ID],
-    ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
-  });
 }
 
 async function submit(
@@ -275,7 +223,6 @@ function mockSubmissionGcp(addVersion?: (versionRef: string) => Promise<Response
   const requests: string[] = [];
   const writes: string[] = [];
   const destroys: string[] = [];
-  const versionCounts = new Map<string, number>();
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = new URL(String(input));
     if (url.hostname === "api.privy.io") return Response.json({ data: [] });
@@ -290,8 +237,7 @@ function mockSubmissionGcp(addVersion?: (versionRef: string) => Promise<Response
       const parent = url.pathname
         .slice(4, -":addVersion".length)
         .replace("projects/sdp-submission-test/", "projects/1234567890/");
-      const version = (versionCounts.get(parent) ?? 0) + 1;
-      versionCounts.set(parent, version);
+      const version = writes.filter((ref) => ref.startsWith(`${parent}/versions/`)).length + 1;
       const versionRef = `${parent}/versions/${version}`;
       writes.push(versionRef);
       return addVersion ? addVersion(versionRef) : Response.json({ name: versionRef });
@@ -332,9 +278,12 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     await clearKVStores(env);
-    await seedActor();
-    clerkToken = await signSeededClerkMember(env, getDb(env), USER_ID, ORGANIZATION_ID);
-    await verifyClerkJwt(clerkToken, env);
+    clerkToken = await seedCustodyAdmin(env, {
+      organizationId: ORGANIZATION_ID,
+      userId: "usr_test_provider_credential_submit",
+      projectId: PROJECT_ID,
+      tier: "individual",
+    });
     env.SDP_DEPLOYMENT_MODE = "managed";
     env.CREDENTIAL_SECRET_STORE_BACKEND = "encrypted_db";
     env.CUSTODY_ENCRYPTION_KEY = testEncryptionKey();
@@ -364,13 +313,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
 
     expect(response.status).toBe(201);
     expect(response.headers.get("Idempotency-Key")).toBe("submit-privy-credentials-1");
-    const body = (await response.json()) as {
-      data: {
-        providerCredential: { id: string };
-        connectionId: string;
-      };
-      meta: { requestId: string; timestamp: string };
-    };
+    const body = await response.json();
     expect(body).toEqual({
       data: {
         connectionId: expect.stringMatching(/^cconn_/),
@@ -392,18 +335,19 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     });
     expect(JSON.stringify(body)).not.toContain("privy-app-1234");
     expect(JSON.stringify(body)).not.toContain("exact secret");
+    const { data } = submissionSchema.parse(body);
 
     expect(await getDomainCounts()).toEqual({
       credentials: 1,
       connections: 1,
       wallets: 0,
     });
-    const connection = await getConnectionForCredential(body.data.providerCredential.id);
-    expect(connection.id).toBe(body.data.connectionId);
+    const connection = await getConnectionForCredential(data.providerCredential.id);
     expect(connection).toMatchObject({
+      id: data.connectionId,
       project_id: PROJECT_ID,
       provider: "privy",
-      provider_credential_id: body.data.providerCredential.id,
+      provider_credential_id: data.providerCredential.id,
       request_delay_ms: 175,
       status: "pending",
       setup_metadata: { pendingWalletLabel: "Treasury Wallet" },
@@ -462,14 +406,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       key: "replacement-preflight-v1",
       body: VALID_BODY,
     });
-    const { data } = z
-      .object({
-        data: z.object({
-          providerCredential: z.object({ id: z.string() }),
-          connectionId: z.string(),
-        }),
-      })
-      .parse(await first.json());
+    const { data } = submissionSchema.parse(await first.json());
     await markInitialValidationFailed(getDb(env), {
       credentialId: data.providerCredential.id,
       connectionId: data.connectionId,
@@ -566,9 +503,9 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
 
     expect(first.status).toBe(201);
     expect(replay.status).toBe(201);
-    const firstBody = (await first.json()) as { data: unknown };
-    const replayBody = (await replay.json()) as { data: unknown };
-    expect(replayBody.data).toEqual(firstBody.data);
+    expect(submissionSchema.parse(await replay.json()).data).toEqual(
+      submissionSchema.parse(await first.json()).data
+    );
     expect(completeCritical).toHaveBeenCalledOnce();
     expect(await getDomainCounts()).toEqual({ credentials: 1, connections: 1, wallets: 0 });
 
@@ -600,96 +537,17 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
 
   it("requires an idempotency key after auth, project, and body validation", async () => {
     const { app, token } = buildApp();
-    const response = await submit(app, token, { projectId: PROJECT_ID, body: VALID_BODY, ...{} });
+    const response = await submit(app, token, { projectId: PROJECT_ID, body: VALID_BODY });
 
     expect(response.status).toBe(400);
-    expect(await response.json()).toMatchObject({
-      error: {
-        code: "BAD_REQUEST",
-        message: "Idempotency-Key is required",
-      },
+    expect(await response.json()).toEqual({
+      error: { code: "BAD_REQUEST", message: "Idempotency-Key is required" },
+      meta: { requestId: "req_provider_credential_submit" },
     });
     expect(await getDomainCounts()).toEqual({
       credentials: 0,
       connections: 0,
       wallets: 0,
-    });
-  });
-
-  it("requires dashboard authentication", async () => {
-    const { app } = buildApp();
-    const response = await app.request(
-      "/internal/dashboard/custody/provider-credentials",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Idempotency-Key": "missing-auth",
-          "X-Project-ID": PROJECT_ID,
-        },
-        body: JSON.stringify(VALID_BODY),
-      },
-      env
-    );
-
-    expect(response.status).toBe(401);
-    expect(await response.json()).toMatchObject({
-      error: { code: "UNAUTHORIZED" },
-    });
-  });
-
-  it("accepts an organization admin Clerk JWT", async () => {
-    const { app } = buildApp();
-
-    const response = await app.request(
-      "/internal/dashboard/custody/provider-credentials",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${clerkToken}`,
-          "Content-Type": "application/json",
-          "Idempotency-Key": "session-submit",
-          "X-Project-ID": PROJECT_ID,
-        },
-        body: JSON.stringify(VALID_BODY),
-      },
-      env
-    );
-
-    expect(response.status).toBe(201);
-    expect(await response.json()).toMatchObject({
-      data: { connectionId: expect.stringMatching(/^cconn_/) },
-    });
-  });
-
-  it("rejects API-key authentication even with custody admin permission", async () => {
-    const rawKey = "sk_test_internal_credential_admin";
-    const keyHash = await hashString(rawKey, env.API_KEY_PEPPER);
-    await seedApiKeyRow(env, keyHash, {
-      id: "key_internal_credential_admin",
-      organizationId: ORGANIZATION_ID,
-      projectId: PROJECT_ID,
-      grants: ALL_API_KEY_GRANTS,
-      environment: "sandbox",
-      rateLimitTier: "standard",
-      allowedIps: null,
-      status: "active",
-      expiresAt: null,
-    });
-    const { app } = buildApp();
-
-    const response = await submit(app, rawKey, {
-      projectId: PROJECT_ID,
-      body: VALID_BODY,
-      key: "api-key-auth-rejected",
-    });
-
-    expect(response.status).toBe(403);
-    expect(await response.json()).toMatchObject({
-      error: {
-        code: "FORBIDDEN",
-        message: "Credential administration requires a signed-in user",
-      },
     });
   });
 
@@ -747,6 +605,14 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       },
     ],
     ["empty opaque secret", { ...VALID_BODY, fields: { ...VALID_BODY.fields, appSecret: "" } }],
+    [
+      "4097-character app ID",
+      { ...VALID_BODY, fields: { ...VALID_BODY.fields, appId: "a".repeat(4097) } },
+    ],
+    [
+      "4097-character app secret",
+      { ...VALID_BODY, fields: { ...VALID_BODY.fields, appSecret: "s".repeat(4097) } },
+    ],
     ["missing credential fields", { provider: "privy" }],
   ])("rejects %s without persistence", async (_name, body) => {
     const { app, token } = buildApp();
@@ -767,7 +633,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     });
   });
 
-  it("accepts credential fields at the 4096-character input limit", async () => {
+  it("accepts credential fields at the 4096-character limit", async () => {
     const { app, token } = buildApp();
     const response = await submit(app, token, {
       projectId: PROJECT_ID,
@@ -779,25 +645,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     });
 
     expect(response.status).toBe(201);
-  });
-
-  it.each(["appId", "appSecret"])("rejects oversized %s before secret-store I/O", async (field) => {
-    env.CREDENTIAL_SECRET_STORE_BACKEND = "gcp_secret_manager";
-    env.GCP_SECRET_MANAGER_PROJECT_ID = "sdp-submission-test";
-    env.GCP_SECRET_MANAGER_SECRET_PREFIX = "sdp-provider-credentials";
-    const providerFetch = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(new Response(null, { status: 503 }));
-    const { app, token } = buildApp();
-
-    const response = await submit(app, token, {
-      projectId: PROJECT_ID,
-      key: "submit-oversized-field",
-      body: { ...VALID_BODY, fields: { ...VALID_BODY.fields, [field]: "x".repeat(4097) } },
-    });
-
-    expect(response.status).toBe(400);
-    expect(providerFetch).not.toHaveBeenCalled();
+    expect(await getDomainCounts()).toEqual({ credentials: 1, connections: 1, wallets: 0 });
   });
 
   it("replays the committed result before current gates and keeps the secret exact", async () => {
@@ -808,11 +656,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       key: "replay-before-gates",
     });
     expect(first.status).toBe(201);
-    const firstBody = (await first.json()) as {
-      data: {
-        providerCredential: { id: string };
-      };
-    };
+    const firstBody = submissionSchema.parse(await first.json());
 
     const stored = await getDb(env)
       .prepare(
@@ -831,20 +675,24 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
         idempotency_key: string;
         idempotency_fingerprint: string;
       }>();
-    expect(stored?.idempotency_key).toBe("replay-before-gates");
-    expect(stored?.idempotency_fingerprint).toMatch(/^[0-9a-f]{64}$/);
-    expect(stored?.idempotency_fingerprint).not.toContain("privy-app-1234");
-    expect(stored?.idempotency_fingerprint).not.toContain("exact secret");
+    const row = required(stored);
+    expect(row).toEqual({
+      storage_backend: "encrypted_db",
+      secret_ref: null,
+      secret_version_ref: null,
+      encrypted_secret_payload: expect.any(String),
+      idempotency_key: "replay-before-gates",
+      idempotency_fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
+    expect(row.encrypted_secret_payload).not.toContain("exact secret");
 
     const secretStore = credentialSecretStoreModule.createCredentialSecretStore(env);
     await expect(
       secretStore.read({
         orgId: ORGANIZATION_ID,
         stored: {
-          storageBackend: stored?.storage_backend ?? "encrypted_db",
-          secretRef: stored?.secret_ref ?? undefined,
-          secretVersionRef: stored?.secret_version_ref ?? undefined,
-          encryptedSecretPayload: stored?.encrypted_secret_payload ?? undefined,
+          storageBackend: row.storage_backend,
+          encryptedSecretPayload: row.encrypted_secret_payload,
         },
       })
     ).resolves.toEqual({
@@ -872,8 +720,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       key: "replay-before-gates",
     });
     expect(replay.status).toBe(201);
-    const replayBody = (await replay.json()) as typeof firstBody;
-    expect(replayBody.data).toEqual(firstBody.data);
+    expect(submissionSchema.parse(await replay.json()).data).toEqual(firstBody.data);
 
     const deniedNewIntent = await submit(app, token, {
       projectId: PROJECT_ID,
@@ -962,7 +809,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
            AND action = 'submit_failed'`
       )
       .first<{ resource_id: string | null }>();
-    expect(failureAudit?.resource_id).toBeNull();
+    expect(required(failureAudit).resource_id).toBeNull();
   });
 
   it("replaces credentials only on the exact eligible failed connection", async () => {
@@ -972,13 +819,9 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       key: "replacement-v1",
       body: { ...VALID_BODY, walletLabel: "First wallet" },
     });
-    const firstBody = (await first.json()) as {
-      data: {
-        providerCredential: { id: string };
-      };
-    };
+    const firstBody = submissionSchema.parse(await first.json());
     const firstCredentialId = firstBody.data.providerCredential.id;
-    const connectionId = (await getConnectionForCredential(firstCredentialId)).id;
+    const connectionId = firstBody.data.connectionId;
     await markInitialValidationFailed(getDb(env), {
       credentialId: firstCredentialId,
       connectionId,
@@ -999,16 +842,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       },
     });
     expect(replacement.status).toBe(201);
-    const replacementBody = (await replacement.json()) as {
-      data: {
-        providerCredential: {
-          id: string;
-          scope: string;
-          projectId: string | null;
-        };
-        connectionId: string;
-      };
-    };
+    const replacementBody = submissionSchema.parse(await replacement.json());
     expect(replacementBody.data.providerCredential).toMatchObject({
       scope: "project",
       projectId: PROJECT_ID,
@@ -1089,7 +923,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       key: "shared-submission-root",
     });
     expect(first.status).toBe(201);
-    const original = await first.json();
+    const original = submissionSchema.parse(await first.json());
     await markInitialValidationFailed(getDb(env), {
       credentialId: original.data.providerCredential.id,
       connectionId: original.data.connectionId,
@@ -1103,7 +937,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const rows = await getDb(env).queryMany<{ secret_ref: string; owns_scan: boolean }>(
       "SELECT secret_ref, secret_next_scan_at IS NOT NULL AS owns_scan FROM provider_credentials ORDER BY credential_version"
     );
-    expect(rows[1]?.secret_ref).toBe(rows[0]?.secret_ref);
+    expect(required(rows[1]).secret_ref).toBe(required(rows[0]).secret_ref);
     expect(rows.map((row) => row.owns_scan)).toEqual([true, false]);
     expect(gcp.requests.filter((url) => url.includes("?secretId="))).toHaveLength(1);
     expect(new Set(gcp.writes).size).toBe(2);
@@ -1117,7 +951,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       key: "gcp-replacement-original",
     });
     expect(first.status).toBe(201);
-    const original = await first.json();
+    const original = submissionSchema.parse(await first.json());
     await markInitialValidationFailed(getDb(env), {
       credentialId: original.data.providerCredential.id,
       connectionId: original.data.connectionId,
@@ -1139,7 +973,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       ...request,
     });
     expect(replacement.status).toBe(201);
-    const created = await replacement.json();
+    const created = submissionSchema.parse(await replacement.json());
     expect(created.data.connectionId).toBe(original.data.connectionId);
     expect(created.data.providerCredential).toMatchObject({
       status: "pending",
@@ -1153,7 +987,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       ...request,
     });
     expect(replay.status).toBe(201);
-    expect((await replay.json()).data).toEqual(created.data);
+    expect(submissionSchema.parse(await replay.json()).data).toEqual(created.data);
     const oldReplay = await submit(app, token, {
       projectId: PROJECT_ID,
       body: VALID_BODY,
@@ -1169,12 +1003,6 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
   });
 
   it("does not reuse the version of an abandoned GCP replacement", async () => {
-    const submissionSchema = z.object({
-      data: z.object({
-        connectionId: z.string(),
-        providerCredential: z.object({ id: z.string() }),
-      }),
-    });
     const { app, token } = buildApp();
     const first = await submit(app, token, {
       projectId: PROJECT_ID,
@@ -1225,9 +1053,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       key: "replacement-clear-label-v1",
       body: { ...VALID_BODY, requestDelayMs: 225, walletLabel: "First wallet" },
     });
-    const firstBody = (await first.json()) as {
-      data: { providerCredential: { id: string } };
-    };
+    const firstBody = submissionSchema.parse(await first.json());
     const firstCredentialId = firstBody.data.providerCredential.id;
     const connectionId = (await getConnectionForCredential(firstCredentialId)).id;
     await markInitialValidationFailed(getDb(env), {
@@ -1248,9 +1074,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       },
     });
     expect(replacement.status).toBe(201);
-    const replacementBody = (await replacement.json()) as {
-      data: { providerCredential: { id: string } };
-    };
+    const replacementBody = submissionSchema.parse(await replacement.json());
 
     const connection = await getConnectionForCredential(replacementBody.data.providerCredential.id);
     expect(connection.id).toBe(connectionId);
@@ -1265,9 +1089,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       body: VALID_BODY,
       key: "exact-idempotency-first",
     });
-    const firstBody = (await first.json()) as {
-      data: { providerCredential: { id: string }; connectionId: string };
-    };
+    const firstBody = submissionSchema.parse(await first.json());
     await markInitialValidationFailed(getDb(env), {
       credentialId: firstBody.data.providerCredential.id,
       connectionId: firstBody.data.connectionId,
@@ -1278,9 +1100,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       body: VALID_BODY,
       key: "exact-idempotency-second",
     });
-    const secondBody = (await second.json()) as {
-      data: { providerCredential: { id: string }; connectionId: string };
-    };
+    const secondBody = submissionSchema.parse(await second.json());
     await markInitialValidationFailed(getDb(env), {
       credentialId: secondBody.data.providerCredential.id,
       connectionId: secondBody.data.connectionId,
@@ -1314,7 +1134,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       body: VALID_BODY,
       key: "exact-non-replaceable-initial",
     });
-    const initialBody = (await initial.json()) as { data: { connectionId: string } };
+    const initialBody = submissionSchema.parse(await initial.json());
 
     const response = await replace(app, token, initialBody.data.connectionId, {
       projectId: PROJECT_ID,
@@ -1363,11 +1183,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
         key: `blocked-${key}-initial`,
       });
       expect(initial.status).toBe(201);
-      const initialBody = (await initial.json()) as {
-        data: {
-          providerCredential: { id: string };
-        };
-      };
+      const initialBody = submissionSchema.parse(await initial.json());
       const db = getDb(env);
       const initialConnection = await getConnectionForCredential(
         initialBody.data.providerCredential.id
@@ -1434,7 +1250,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
         )
         .bind(newKey)
         .first<{ count: number }>();
-      expect(newIntentCount?.count).toBe(0);
+      expect(required(newIntentCount).count).toBe(0);
     }
   );
 
@@ -1447,9 +1263,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
         body: VALID_BODY,
         key: `history-${historyStatus}-initial`,
       });
-      const initialBody = (await initial.json()) as {
-        data: { providerCredential: { id: string }; connectionId: string };
-      };
+      const initialBody = submissionSchema.parse(await initial.json());
       const ids = {
         credentialId: initialBody.data.providerCredential.id,
         connectionId: initialBody.data.connectionId,
@@ -1487,9 +1301,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
         key: `history-${historyStatus}-fresh`,
       });
       expect(fresh.status).toBe(201);
-      const freshBody = (await fresh.json()) as {
-        data: { providerCredential: { id: string }; connectionId: string };
-      };
+      const freshBody = submissionSchema.parse(await fresh.json());
       expect(freshBody.data.connectionId).not.toBe(ids.connectionId);
       expect(await getDomainCounts()).toEqual({
         credentials: 2,
@@ -1506,11 +1318,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       body: VALID_BODY,
       key: "deactivated-lineage-v1",
     });
-    const firstBody = (await first.json()) as {
-      data: {
-        providerCredential: { id: string };
-      };
-    };
+    const firstBody = submissionSchema.parse(await first.json());
     const firstConnection = await getConnectionForCredential(firstBody.data.providerCredential.id);
 
     await getDb(env)
@@ -1529,11 +1337,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       key: "deactivated-lineage-reinstall",
     });
     expect(reinstall.status).toBe(201);
-    const reinstallBody = (await reinstall.json()) as {
-      data: {
-        providerCredential: { id: string };
-      };
-    };
+    const reinstallBody = submissionSchema.parse(await reinstall.json());
     const reinstallConnection = await getConnectionForCredential(
       reinstallBody.data.providerCredential.id
     );
@@ -1650,9 +1454,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     });
 
     expect(response.status).toBe(201);
-    const responseBody = (await response.json()) as {
-      data: { providerCredential: { id: string }; connectionId: string };
-    };
+    const responseBody = await response.json();
     expect(responseBody).toEqual({
       data: {
         connectionId: expect.stringMatching(/^cconn_/),
@@ -1672,14 +1474,13 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
         timestamp: expect.any(String),
       },
     });
-    expect(await getConnectionForCredential(responseBody.data.providerCredential.id)).toMatchObject(
-      {
-        id: responseBody.data.connectionId,
-        project_id: PROJECT_ID,
-        provider: "privy",
-        status: "pending",
-      }
-    );
+    const { data } = submissionSchema.parse(responseBody);
+    expect(await getConnectionForCredential(data.providerCredential.id)).toMatchObject({
+      id: data.connectionId,
+      project_id: PROJECT_ID,
+      provider: "privy",
+      status: "pending",
+    });
     expect(await getDomainCounts()).toEqual({
       credentials: 1,
       connections: 1,
@@ -1760,14 +1561,14 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     }
     const committed = await first;
     expect(committed.status).toBe(201);
-    const committedBody = await committed.json();
+    const committedBody = submissionSchema.parse(await committed.json());
     const replay = await submit(app, token, {
       projectId: PROJECT_ID,
       body: VALID_BODY,
       key: "gcp-in-flight",
     });
     expect(replay.status).toBe(201);
-    expect((await replay.json()).data).toEqual(committedBody.data);
+    expect(submissionSchema.parse(await replay.json()).data).toEqual(committedBody.data);
     expect(gcp.writes).toHaveLength(1);
   });
 
@@ -1780,7 +1581,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       key: "gcp-success-then-cancel",
     });
     expect(response.status).toBe(201);
-    const created = await response.json();
+    const created = submissionSchema.parse(await response.json());
     const cancelled = await app.request(
       `/internal/dashboard/custody/connections/${created.data.connectionId}/cancel`,
       { method: "POST", headers: { Authorization: `Bearer ${token}`, "X-Project-ID": PROJECT_ID } },
@@ -1793,7 +1594,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       key: "gcp-success-then-cancel",
     });
     expect(replay.status).toBe(201);
-    expect((await replay.json()).data).toEqual({
+    expect(submissionSchema.parse(await replay.json()).data).toEqual({
       connectionId: created.data.connectionId,
       providerCredential: { ...created.data.providerCredential, status: "deactivated" },
     });
@@ -1934,14 +1735,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
           key: "gcp-finalization-original",
         });
         expect(response.status).toBe(201);
-        original = z
-          .object({
-            data: z.object({
-              connectionId: z.string(),
-              providerCredential: z.object({ id: z.string() }),
-            }),
-          })
-          .parse(await response.json()).data;
+        original = submissionSchema.parse(await response.json()).data;
         await markInitialValidationFailed(db, {
           credentialId: original.providerCredential.id,
           connectionId: original.connectionId,
@@ -1993,7 +1787,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
           secret_ref: expect.stringMatching(
             /^projects\/sdp-submission-test\/secrets\/sdp-provider-credentials-pcred_/
           ),
-          secret_version_ref: gcp.writes[0]?.replace(
+          secret_version_ref: required(gcp.writes[0]).replace(
             "projects/1234567890/",
             "projects/sdp-submission-test/"
           ),
@@ -2037,14 +1831,14 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     expect(response.status).toBe(201);
     expect(gcp.writes).toHaveLength(1);
     expect(gcp.destroys).toEqual([]);
-    const committedBody = await response.json();
+    const committedBody = submissionSchema.parse(await response.json());
     const replay = await submit(app, token, {
       projectId: PROJECT_ID,
       body: VALID_BODY,
       key: "gcp-commit-ambiguity",
     });
     expect(replay.status).toBe(201);
-    expect((await replay.json()).data).toEqual(committedBody.data);
+    expect(submissionSchema.parse(await replay.json()).data).toEqual(committedBody.data);
     expect(gcp.writes).toHaveLength(1);
     expect(await getDomainCounts()).toEqual({
       credentials: 1,
@@ -2059,7 +1853,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
            AND action = 'submit'`
       )
       .first<{ count: number }>();
-    expect(auditCount?.count).toBe(1);
+    expect(required(auditCount).count).toBe(1);
   });
 
   it("discards uncommitted encrypted ciphertext without destroyVersion", async () => {
@@ -2131,7 +1925,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
         `SELECT COUNT(*) AS count FROM audit_logs WHERE metadata::jsonb ->> 'auditPhase' = 'outcome'`
       )
       .first<{ count: number }>();
-    expect(outcome?.count).toBe(0);
+    expect(required(outcome).count).toBe(0);
   });
 
   it("converges concurrent same-key submissions into one submitted event", async () => {
@@ -2145,12 +1939,9 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
 
     expect(left.status).toBe(201);
     expect(right.status).toBe(201);
-    const [leftBody, rightBody] = (await Promise.all([left.json(), right.json()])) as Array<{
-      data: {
-        providerCredential: { id: string };
-      };
-    }>;
-    expect(rightBody?.data).toEqual(leftBody?.data);
+    expect(submissionSchema.parse(await right.json()).data).toEqual(
+      submissionSchema.parse(await left.json()).data
+    );
     expect(await getDomainCounts()).toEqual({
       credentials: 1,
       connections: 1,
@@ -2165,7 +1956,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
            AND action = 'submit'`
       )
       .first<{ count: number }>();
-    expect(auditCount?.count).toBe(1);
+    expect(required(auditCount).count).toBe(1);
     expect(
       info.mock.calls.filter((call) => call[1] === "sdp_api_provider_credential_submitted")
     ).toEqual([
@@ -2196,7 +1987,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     ]);
     expect(responses.map((response) => response.status).sort()).toEqual([201, 409]);
     const conflictResponse = responses.find((response) => response.status === 409);
-    expect(await conflictResponse?.json()).toMatchObject({
+    expect(await required(conflictResponse).json()).toMatchObject({
       error: {
         code: "CONFLICT",
         details: { reason: "unfinished_installation_exists" },

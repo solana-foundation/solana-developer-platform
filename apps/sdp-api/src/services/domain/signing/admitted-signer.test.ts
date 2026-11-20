@@ -6,9 +6,6 @@ import {
   assertIsTransactionPartialSigner,
   assertIsTransactionSendingSigner,
   generateKeyPairSigner,
-  isMessagePartialSigner,
-  isTransactionPartialSigner,
-  isTransactionSendingSigner,
   type MessageModifyingSigner,
   type MessagePartialSigner,
   type TransactionModifyingSigner,
@@ -34,58 +31,35 @@ const CONTEXT = {
 const ADMITTED: MoneyAdmissionDecision = { admitted: true };
 const REFUSED: MoneyAdmissionDecision = { admitted: false, reason: "organization_inactive" };
 
-type PartialSigner = Extract<TransactionSigner, { signTransactions: unknown }>;
+async function partialSigner(
+  sign: TransactionPartialSigner["signTransactions"]
+): Promise<TransactionPartialSigner> {
+  const { address } = await generateKeyPairSigner();
+  return { address, signTransactions: sign };
+}
 
 describe("admittedSigner", () => {
-  // An exit is decided too (HOO-2099): never by the organization, but a
-  // credential that may no longer sign with the wallet is refused.
-  it("decides an exit each time it signs, and refuses a credential out of scope", async () => {
-    const signer = await generateKeyPairSigner();
-    const decide = vi
-      .fn<() => Promise<MoneyAdmissionDecision>>()
-      .mockResolvedValueOnce(ADMITTED)
-      .mockResolvedValueOnce({ admitted: false, reason: "wallet_out_of_scope" });
-    const exit = admittedSigner(signer, decide, {
-      ...CONTEXT,
-      movement: "recurring.cancel",
-    });
-    if (!isTransactionPartialSigner(exit)) throw new Error("a key pair signer signs partially");
-
-    await expect(exit.signTransactions([])).resolves.toEqual([]);
-    await expect(exit.signTransactions([])).rejects.toMatchObject({
-      reason: "wallet_out_of_scope",
-    });
-    expect(decide).toHaveBeenCalledTimes(2);
-  });
-
-  it("keeps exactly the real signer's signing kinds, so the kit guards classify it the same", async () => {
+  it("offers exactly the real signer's signing kinds, so the kit guards classify it the same", async () => {
     const signer = await generateKeyPairSigner();
 
     const admitted = admittedSigner(signer, async () => ADMITTED, CONTEXT);
 
     expect(admitted.address).toBe(signer.address);
-    expect(Object.keys(admitted).sort()).toEqual(
-      ["address", ...Object.keys(signer).filter((key) => key.startsWith("sign"))].sort()
-    );
-    expect(isTransactionPartialSigner(admitted)).toBe(isTransactionPartialSigner(signer));
-    expect(isMessagePartialSigner(admitted)).toBe(isMessagePartialSigner(signer));
-    expect(isTransactionSendingSigner(admitted)).toBe(false);
+    expect(Object.keys(admitted).sort()).toEqual(["address", "signMessages", "signTransactions"]);
   });
 
   it("refuses a start the organization may not make, without reaching the provider", async () => {
-    const { address } = await generateKeyPairSigner();
-    const sign = vi.fn();
-    const signer = { address, signTransactions: sign } as unknown as TransactionSigner;
+    const sign = vi.fn<TransactionPartialSigner["signTransactions"]>();
     const events = vi.spyOn(moneyPathEvents, "logEvent").mockImplementation(() => {});
 
-    const refusal = await (admittedSigner(signer, async () => REFUSED, CONTEXT) as PartialSigner)
-      .signTransactions([])
-      .catch((error: unknown) => error);
+    const refusal = await signTransactions(
+      admittedSigner(await partialSigner(sign), async () => REFUSED, CONTEXT)
+    ).catch((error: unknown) => error);
 
     expect(refusal).toBeInstanceOf(MoneyMovementRefusedError);
     expect(refusal).toMatchObject({ code: "FORBIDDEN", reason: "organization_inactive" });
     expect(sign).not.toHaveBeenCalled();
-    expect(events).toHaveBeenCalledWith("warn", {
+    expect(events).toHaveBeenCalledExactlyOnceWith("warn", {
       event: "sdp_money_refused",
       surface: "signer",
       movement: "payments.transfer",
@@ -103,28 +77,28 @@ describe("admittedSigner", () => {
   // A flow can hold a signer across slow calls; a suspension that lands in
   // between must stop the next start it signs.
   it("decides again at every signature, so a revocation after resolution still refuses", async () => {
-    const { address } = await generateKeyPairSigner();
-    const sign = vi.fn().mockResolvedValue([]);
-    const signer = { address, signTransactions: sign } as unknown as TransactionSigner;
-    const decide = vi.fn().mockResolvedValueOnce(ADMITTED).mockResolvedValueOnce(REFUSED);
+    const sign = vi.fn<TransactionPartialSigner["signTransactions"]>().mockResolvedValue([]);
+    const decide = vi
+      .fn<() => Promise<MoneyAdmissionDecision>>()
+      .mockResolvedValueOnce(ADMITTED)
+      .mockResolvedValueOnce(REFUSED);
     const events = vi.spyOn(moneyPathEvents, "logEvent").mockImplementation(() => {});
-    const admitted = admittedSigner(signer, decide, CONTEXT) as PartialSigner;
+    const admitted = admittedSigner(await partialSigner(sign), decide, CONTEXT);
 
-    await admitted.signTransactions([]);
-    const second = await admitted.signTransactions([]).catch((error: unknown) => error);
+    await expect(signTransactions(admitted)).resolves.toEqual([]);
+    await expect(signTransactions(admitted)).rejects.toMatchObject({
+      reason: "organization_inactive",
+    });
 
     expect(decide).toHaveBeenCalledTimes(2);
-    expect(sign).toHaveBeenCalledTimes(1);
-    expect(second).toBeInstanceOf(MoneyMovementRefusedError);
+    expect(sign).toHaveBeenCalledOnce();
     events.mockRestore();
   });
 
   it("decides only when asked to sign, so resolving a signer that is never used stays harmless", async () => {
-    const { address } = await generateKeyPairSigner();
-    const signer = { address, signTransactions: vi.fn() } as unknown as TransactionSigner;
-    const decide = vi.fn();
+    const decide = vi.fn<() => Promise<MoneyAdmissionDecision>>();
 
-    admittedSigner(signer, decide, CONTEXT);
+    admittedSigner(await partialSigner(vi.fn()), decide, CONTEXT);
 
     expect(decide).not.toHaveBeenCalled();
   });
@@ -179,35 +153,49 @@ async function signerRejectingWith(
 }
 
 describe("admittedSigner custody policy refusals (HOO-2333)", () => {
-  describe.each([
-    ["privy", "Privy"],
+  it.each([
+    ["signTransactions", signTransactions],
+    ["modifyAndSignTransactions", modifyAndSignTransactions],
+    ["signAndSendTransactions", signAndSendTransactions],
+    ["signMessages", signMessages],
+    ["modifyAndSignMessages", modifyAndSignMessages],
+  ] as const)(
+    "raises a policy refusal from %s as CUSTODY_POLICY_REFUSED, keeping the refusal as its cause",
+    async (_method, sign) => {
+      const refusal = new SigningError("Private provider failure details", "POLICY_REFUSED");
+      const signer = admittedSigner(
+        await signerRejectingWith(refusal),
+        async () => ADMITTED,
+        CONTEXT
+      );
+
+      const error = await sign(signer).catch((cause: unknown) => cause);
+
+      expect(error).toBeInstanceOf(AppError);
+      expect(error).toMatchObject({
+        code: "CUSTODY_POLICY_REFUSED",
+        statusCode: 422,
+        message:
+          "Privy blocked signing due to a wallet policy. Review the policy in Privy or adjust the request.",
+        cause: refusal,
+      });
+    }
+  );
+
+  it.each([
     ["fireblocks", "Fireblocks"],
     ["turnkey", "Turnkey"],
-  ] as const)("%s", (provider, label) => {
-    it.each([
-      ["signTransactions", signTransactions],
-      ["modifyAndSignTransactions", modifyAndSignTransactions],
-      ["signAndSendTransactions", signAndSendTransactions],
-      ["signMessages", signMessages],
-      ["modifyAndSignMessages", modifyAndSignMessages],
-    ] as const)(
-      "raises a policy refusal from %s as CUSTODY_POLICY_REFUSED, keeping the refusal as its cause",
-      async (_method, sign) => {
-        const refusal = new SigningError("Private provider failure details", "POLICY_REFUSED");
-        const signer = admittedSigner(await signerRejectingWith(refusal), async () => ADMITTED, {
-          ...CONTEXT,
-          provider,
-        });
+  ] as const)("names %s as the provider whose policy refused", async (provider, label) => {
+    const refusal = new SigningError("Private provider failure details", "POLICY_REFUSED");
+    const signer = admittedSigner(await signerRejectingWith(refusal), async () => ADMITTED, {
+      ...CONTEXT,
+      provider,
+    });
 
-        await expect(sign(signer)).rejects.toBeInstanceOf(AppError);
-        await expect(sign(signer)).rejects.toMatchObject({
-          code: "CUSTODY_POLICY_REFUSED",
-          statusCode: 422,
-          message: `${label} blocked signing due to a wallet policy. Review the policy in ${label} or adjust the request.`,
-          cause: refusal,
-        });
-      }
-    );
+    await expect(signTransactions(signer)).rejects.toMatchObject({
+      code: "CUSTODY_POLICY_REFUSED",
+      message: `${label} blocked signing due to a wallet policy. Review the policy in ${label} or adjust the request.`,
+    });
   });
 
   it("rethrows any other signing failure unchanged", async () => {

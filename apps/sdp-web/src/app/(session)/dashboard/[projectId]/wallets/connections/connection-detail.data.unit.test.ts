@@ -3,6 +3,7 @@ import {
   type CustodyCredentialLifecycle,
   canRollBack,
   fetchConnectionListItem,
+  fetchCredentialLifecycle,
   isCredentialManagedHere,
   type LifecycleCredential,
   rollbackHoursRemaining,
@@ -122,18 +123,18 @@ describe("fetchConnectionListItem", () => {
   // Four pages spent on other providers is how this walk used to end one row
   // short of the connection it was sent to find.
   it("narrows the walk to the provider the caller knows", async () => {
-    const request = vi.fn(async () => page([listRow("conn-1")], 0, 1));
+    const request = vi.fn(async (_path: string) => page([listRow("conn-1")], 0, 1));
 
-    await expect(fetchConnectionListItem(request, "conn-1", "privy")).resolves.toMatchObject({
-      id: "conn-1",
-    });
-    expect(request).toHaveBeenCalledWith(
-      "/internal/dashboard/custody/connections?limit=50&offset=0&provider=privy"
+    await expect(fetchConnectionListItem(request, "conn-1", "privy")).resolves.toEqual(
+      listRow("conn-1")
     );
+    expect(request.mock.calls).toEqual([
+      ["/internal/dashboard/custody/connections?limit=50&offset=0&provider=privy"],
+    ]);
   });
 
   it("walks the project unnarrowed when the provider is unknown", async () => {
-    const request = vi.fn(async () => page([listRow("conn-1")], 0, 1));
+    const request = vi.fn(async (_path: string) => page([listRow("conn-1")], 0, 1));
 
     await fetchConnectionListItem(request, "conn-1");
 
@@ -152,6 +153,55 @@ describe("fetchConnectionListItem", () => {
     );
 
     await expect(fetchConnectionListItem(request, "conn-missing", "privy")).resolves.toBeNull();
-    expect(request).toHaveBeenCalledTimes(4);
+    expect(request.mock.calls.map(([path]) => path)).toEqual([
+      "/internal/dashboard/custody/connections?limit=50&offset=0&provider=privy",
+      "/internal/dashboard/custody/connections?limit=50&offset=50&provider=privy",
+      "/internal/dashboard/custody/connections?limit=50&offset=100&provider=privy",
+      "/internal/dashboard/custody/connections?limit=50&offset=150&provider=privy",
+    ]);
+  });
+});
+
+describe("fetchCredentialLifecycle", () => {
+  // A caller outside one of the credential's projects is refused by design; any other failed
+  // read leaves the credentials card to say it could not load, without taking the page down.
+  it("tells a refusal apart from a failed read", async () => {
+    const answer = (status: number) => vi.fn(async () => new Response(null, { status }));
+
+    await expect(fetchCredentialLifecycle(answer(403), "conn-1")).resolves.toBe("restricted");
+    await expect(fetchCredentialLifecycle(answer(500), "conn-1")).resolves.toBeNull();
+  });
+
+  it("reads the connection's credential lifecycle and keeps no secret the answer carried", async () => {
+    const current = makeCredential();
+    const candidate = makeCredential({ id: "pcred_candidate", status: "pending" });
+    const previous = makeCredential({ id: "pcred_previous", status: "retired" });
+    const expiresAt = new Date(NOW + 24 * 60 * 60 * 1000).toISOString();
+    const withSecrets = (credential: LifecycleCredential) => ({
+      ...credential,
+      appSecret: "app-secret-value",
+      encryptedSecret: "encrypted-secret-value",
+    });
+    const request = vi.fn(async (_path: string) =>
+      Response.json({
+        data: {
+          ...makeLifecycle(),
+          providerCredential: withSecrets(current),
+          rotationCandidate: withSecrets(candidate),
+          rollback: { providerCredential: withSecrets(previous), expiresAt },
+        },
+      })
+    );
+
+    await expect(fetchCredentialLifecycle(request, "conn-1")).resolves.toStrictEqual(
+      makeLifecycle({
+        providerCredential: current,
+        rotationCandidate: candidate,
+        rollback: { providerCredential: previous, expiresAt },
+      })
+    );
+    expect(request.mock.calls).toEqual([
+      ["/internal/dashboard/custody/connections/conn-1/provider-credential"],
+    ]);
   });
 });

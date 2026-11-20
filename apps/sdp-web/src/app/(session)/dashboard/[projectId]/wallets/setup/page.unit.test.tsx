@@ -1,64 +1,72 @@
-import type { ReactElement } from "react";
+import type { CustodyConfigStatus, CustodyProvider } from "@sdp/types/custody";
+import { isValidElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as providerAvailabilityServer from "@/lib/provider-availability.server";
+import * as sdpApi from "@/lib/sdp-api";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { projectProviderAvailability } from "@/test/provider-availability";
 import { setPageRequest } from "@/test/request-project";
 
-const mocks = vi.hoisted(() => ({
-  auth: vi.fn(),
-  fetchProjectProviderAvailability: vi.fn(),
-  organizationFetch: vi.fn(),
-  projectRequest: vi.fn(),
-  requestMemberRole: vi.fn(),
-}));
-
-vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
+// The signed-in Organization, the one ambient input the page reads from Clerk.
+vi.mock("@clerk/nextjs/server", () => ({ auth: async () => ({ orgId: "org_test" }) }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("next/headers", () => import("@/test/next-headers"));
-vi.mock("@/lib/provider-availability.server", () => ({
-  fetchProjectProviderAvailability: mocks.fetchProjectProviderAvailability,
-}));
-vi.mock("@/lib/sdp-api", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/sdp-api")>()),
-  createRequestScopedSdpApiClients: async () => ({
-    organizationClient: { request: vi.fn(), fetch: mocks.organizationFetch },
-    projectClient: { request: mocks.projectRequest, fetch: vi.fn() },
-  }),
-  requestMemberRole: mocks.requestMemberRole,
-}));
-vi.mock("@/app/(session)/dashboard/[projectId]/wallets/actions", () => ({
-  createCustodySetupWalletAction: vi.fn(),
-  initializeCustodySetupAction: vi.fn(),
-}));
 
 import CustodySetupPage from "./page";
 import { WalletSetupFlow } from "./wallet-setup-flow";
 
-describe("custody setup page", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/setup`);
-    mocks.auth.mockResolvedValue({ orgId: "org_test" });
-    mocks.requestMemberRole.mockResolvedValue("admin");
-    mocks.organizationFetch.mockResolvedValue({
-      linked: true,
-      organization: { id: "org_test" },
-    });
-    mocks.projectRequest.mockImplementation(async (path: string) => {
-      if (path === "/v1/wallets/configs") {
-        return Response.json({ data: { configs: [] } });
-      }
-      if (path.startsWith("/internal/dashboard/custody/connections?")) {
-        return Response.json({
-          data: { connections: [], pagination: { limit: 100, offset: 0, total: 0 } },
-        });
-      }
-      throw new Error(`Unexpected request: ${path}`);
-    });
-  });
+const organizationFetch = vi.fn();
+const projectRequest = vi.fn<sdpApi.SdpApiClient["request"]>();
+const fetchAvailability =
+  vi.fn<typeof providerAvailabilityServer.fetchProjectProviderAvailability>();
+const memberRole = vi.fn<typeof sdpApi.requestMemberRole>();
 
+function config(provider: CustodyProvider, status: CustodyConfigStatus) {
+  return {
+    id: `cfg_${provider}`,
+    organizationId: "org_test",
+    projectId: PRODUCTION_PROJECT.id,
+    provider,
+    status,
+    createdAt: "2026-07-18T00:00:00.000Z",
+  };
+}
+
+beforeEach(() => {
+  vi.restoreAllMocks();
+  organizationFetch.mockReset().mockResolvedValue({
+    linked: true,
+    organization: { id: "org_test" },
+  });
+  projectRequest.mockReset().mockImplementation(async (path: string) => {
+    if (path === "/v1/wallets/configs") {
+      return Response.json({
+        data: { configs: [config("privy", "active"), config("fireblocks", "archived")] },
+      });
+    }
+    if (path.startsWith("/internal/dashboard/custody/connections?")) {
+      return Response.json({
+        data: { connections: [], pagination: { limit: 100, offset: 0, total: 0 } },
+      });
+    }
+    throw new Error(`Unexpected request: ${path}`);
+  });
+  fetchAvailability.mockReset();
+  memberRole.mockReset().mockResolvedValue("admin");
+  vi.spyOn(sdpApi, "createRequestScopedSdpApiClients").mockResolvedValue({
+    organizationClient: { request: vi.fn(), fetch: organizationFetch },
+    projectClient: { request: projectRequest, fetch: vi.fn() },
+  });
+  vi.spyOn(sdpApi, "requestMemberRole").mockImplementation(memberRole);
+  vi.spyOn(providerAvailabilityServer, "fetchProjectProviderAvailability").mockImplementation(
+    fetchAvailability
+  );
+  setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/setup`);
+});
+
+describe("custody setup page", () => {
   it("renders the flow from the project's custody availability and environment", async () => {
-    mocks.fetchProjectProviderAvailability.mockResolvedValue(
+    fetchAvailability.mockResolvedValue(
       projectProviderAvailability({
         project: PRODUCTION_PROJECT,
         custody: [{ provider: "privy", modes: ["byok"] }],
@@ -68,13 +76,13 @@ describe("custody setup page", () => {
       })
     );
 
-    const page = (await CustodySetupPage({
-      searchParams: Promise.resolve({ provider: "privy" }),
-    })) as ReactElement;
+    const page = await CustodySetupPage({ searchParams: Promise.resolve({ provider: "privy" }) });
 
+    if (!isValidElement(page)) throw new Error("The page rendered no element");
     expect(page.type).toBe(WalletSetupFlow);
     expect(page.props).toEqual({
-      connectedProviders: [],
+      // Only an active config counts as a provider the project already uses.
+      connectedProviders: ["privy"],
       custodyAvailability: [
         {
           family: "custody",
@@ -90,27 +98,35 @@ describe("custody setup page", () => {
   });
 
   it("throws when the availability read fails instead of rendering without it", async () => {
-    mocks.fetchProjectProviderAvailability.mockRejectedValue(
-      new Error("SDP API request failed (503): unavailable")
-    );
+    fetchAvailability.mockRejectedValue(new Error("SDP API request failed (503): unavailable"));
 
     await expect(CustodySetupPage({ searchParams: Promise.resolve({}) })).rejects.toThrow(
       "SDP API request failed (503): unavailable"
     );
   });
 
+  it("sends an Organization that is not linked yet to the wallets page", async () => {
+    organizationFetch.mockResolvedValue({ linked: false, organization: null });
+
+    await expect(CustodySetupPage({ searchParams: Promise.resolve({}) })).rejects.toThrow(
+      `NEXT_REDIRECT /dashboard/${PRODUCTION_PROJECT.id}/wallets`
+    );
+    expect(projectRequest).not.toHaveBeenCalled();
+    expect(fetchAvailability).not.toHaveBeenCalled();
+  });
+
   it.each([
     [{ provider: "privy" }, `/dashboard/${PRODUCTION_PROJECT.id}/integrations/privy`],
     [{}, `/dashboard/${PRODUCTION_PROJECT.id}/integrations`],
   ])("redirects a member given %o to %s before any API read", async (searchParams, destination) => {
-    mocks.requestMemberRole.mockResolvedValue("member");
+    memberRole.mockResolvedValue("member");
 
-    await expect(
-      CustodySetupPage({ searchParams: Promise.resolve(searchParams) })
-    ).rejects.toMatchObject({ message: `NEXT_REDIRECT ${destination}` });
+    await expect(CustodySetupPage({ searchParams: Promise.resolve(searchParams) })).rejects.toThrow(
+      `NEXT_REDIRECT ${destination}`
+    );
 
-    expect(mocks.organizationFetch).not.toHaveBeenCalled();
-    expect(mocks.projectRequest).not.toHaveBeenCalled();
-    expect(mocks.fetchProjectProviderAvailability).not.toHaveBeenCalled();
+    expect(organizationFetch).not.toHaveBeenCalled();
+    expect(projectRequest).not.toHaveBeenCalled();
+    expect(fetchAvailability).not.toHaveBeenCalled();
   });
 });

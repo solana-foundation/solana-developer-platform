@@ -1,35 +1,38 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SdpApiResponseError } from "@/lib/sdp-api";
+import { translateServerMessagesToKeys } from "@/test/i18n-server";
+import { revalidatePath } from "@/test/next-cache";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { setPageRequest } from "@/test/request-project";
-
-const mocks = vi.hoisted(() => ({
-  createSdpApiClient: vi.fn(),
-  revalidatePath: vi.fn(),
-}));
+import {
+  type SentSdpApiRequest,
+  type StubSdpApiClient,
+  sentSdpApiRequests,
+  stubSdpApiClient,
+} from "@/test/sdp-api-client";
 
 vi.mock("@clerk/nextjs/server", () => ({
   auth: vi.fn(async () => ({ userId: "user_test", orgId: "org_test" })),
 }));
-vi.mock("next/cache", () => ({
-  revalidatePath: mocks.revalidatePath,
-}));
+vi.mock("next/cache", () => import("@/test/next-cache"));
 vi.mock("next/headers", () => import("@/test/next-headers"));
-vi.mock("@/i18n/server", () => ({
-  getTranslations: vi.fn(async () => (key: string) => key),
-}));
-vi.mock("@/lib/sdp-api", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/sdp-api")>()),
-  createSdpApiClient: mocks.createSdpApiClient,
-}));
 
 import {
+  checkWalletSignerMemoAction,
   createCustodySetupWalletAction,
   initializeCustodySetupAction,
   requestDevnetSolanaFaucetAction,
 } from "./actions";
 
-beforeEach(() => setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/wallet_one`));
+const WALLETS_PATH = `/dashboard/${PRODUCTION_PROJECT.id}/wallets`;
+let client: StubSdpApiClient;
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/wallet_one`);
+  translateServerMessagesToKeys();
+  client = stubSdpApiClient();
+});
 
 function walletForm(fields: Record<string, string>): FormData {
   const formData = new FormData();
@@ -39,31 +42,46 @@ function walletForm(fields: Record<string, string>): FormData {
   return formData;
 }
 
-function requestBody(client: { fetch: ReturnType<typeof vi.fn> }): Record<string, unknown> {
-  return JSON.parse(String(client.fetch.mock.calls[0]?.[1]?.body));
+/** The one request the action sent to sdp-api. */
+function sentRequest(): SentSdpApiRequest {
+  const [request, ...others] = sentSdpApiRequests(client);
+  if (request === undefined || others.length > 0) {
+    throw new Error(`Expected exactly one sdp-api request, got ${client.fetch.mock.calls.length}`);
+  }
+  return request;
 }
 
 describe("initializeCustodySetupAction", () => {
-  const client = { fetch: vi.fn() };
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.createSdpApiClient.mockResolvedValue(client);
-  });
-
-  it("returns the first wallet's ID once the provider is set up", async () => {
-    client.fetch.mockResolvedValue({
-      configId: "cfg_new",
-      publicKey: "11111111111111111111111111111111",
-      walletId: "privy_wallet_first",
-    });
+  it("connects the provider under the browser's key and returns the first wallet's ID", async () => {
+    client.fetch.mockResolvedValue({ configId: "cfg_new", walletId: "privy_wallet_first" });
 
     const result = await initializeCustodySetupAction(
-      walletForm({ provider: "privy", walletLabel: "Treasury" })
+      walletForm({
+        provider: "privy",
+        walletLabel: "Treasury",
+        network: "devnet",
+        idempotencyKey: "browser-key",
+      })
     );
 
     expect(result).toEqual({ status: "success", walletId: "privy_wallet_first" });
-    expect(mocks.revalidatePath).toHaveBeenCalled();
+    expect(sentRequest()).toEqual({
+      path: "/v1/wallets/initialize",
+      method: "POST",
+      headers: { "Idempotency-Key": "browser-key" },
+      body: { provider: "privy", walletLabel: "Treasury", network: "devnet" },
+    });
+    expect(revalidatePath.mock.calls).toEqual([[WALLETS_PATH]]);
+  });
+
+  it("sends Fireblocks setup without a network or account policy", async () => {
+    client.fetch.mockResolvedValue({ configId: "cfg_new", walletId: "fb_wallet_first" });
+
+    await initializeCustodySetupAction(
+      walletForm({ provider: "fireblocks", network: "devnet", accountPolicy: "shared" })
+    );
+
+    expect(sentRequest().body).toEqual({ provider: "fireblocks" });
   });
 
   // The key's original request never recorded its outcome: the wallet may
@@ -101,8 +119,9 @@ describe("initializeCustodySetupAction", () => {
       walletForm({ provider: "privy", walletLabel: "Treasury" })
     );
 
-    expect(result).toMatchObject({
+    expect(result).toEqual({
       status: "error",
+      message: "DashboardCustody.httpRequestFailed",
       answer: { status: 409, replayed: false, code: "IDEMPOTENCY_KEY_IN_FLIGHT" },
     });
   });
@@ -120,43 +139,36 @@ describe("initializeCustodySetupAction", () => {
       status: "provider_already_set_up",
       answer: { status: 409, replayed: false, code: null },
     });
-    expect(client.fetch).toHaveBeenCalledExactlyOnceWith(
-      "/v1/wallets/initialize",
-      expect.anything()
-    );
-    expect(mocks.revalidatePath).not.toHaveBeenCalled();
+    expect(sentRequest().path).toBe("/v1/wallets/initialize");
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 });
 
 describe("createCustodySetupWalletAction", () => {
-  const client = { fetch: vi.fn() };
-
   beforeEach(() => {
-    vi.clearAllMocks();
     client.fetch.mockResolvedValue({ wallet: { id: "cw_new", walletId: "privy_wallet_new" } });
-    mocks.createSdpApiClient.mockResolvedValue(client);
   });
 
-  // The flow opens the new wallet's page, addressed by its provider wallet ID.
-  it("creates the wallet in the chosen connection and returns its ID", async () => {
+  // The flow opens the new wallet's page, addressed by its provider wallet ID. A Connection
+  // names the credential on its own, so the provider is left out.
+  it("creates the wallet in the chosen connection under the browser's key", async () => {
     const result = await createCustodySetupWalletAction(
-      walletForm({ provider: "privy", label: "Treasury", connectionId: "conn_eu" })
+      walletForm({
+        provider: "privy",
+        label: "Treasury",
+        connectionId: "conn_eu",
+        idempotencyKey: "browser-key",
+      })
     );
 
     expect(result).toEqual({ status: "success", walletId: "privy_wallet_new" });
-    expect(client.fetch).toHaveBeenCalledWith("/v1/wallets", expect.anything());
-    expect(requestBody(client)).toEqual({ connectionId: "conn_eu", label: "Treasury" });
-  });
-
-  // HOO-1918: the browser mints the key per user action; the server forwards it
-  // and never mints one, so a retried action is the same request upstream.
-  it("forwards the browser's Idempotency-Key and keeps it out of the body", async () => {
-    await createCustodySetupWalletAction(
-      walletForm({ provider: "privy", label: "Treasury", idempotencyKey: "browser-key" })
-    );
-
-    expect(client.fetch.mock.calls[0]?.[1]?.headers).toEqual({ "Idempotency-Key": "browser-key" });
-    expect(requestBody(client)).not.toHaveProperty("idempotencyKey");
+    expect(sentRequest()).toEqual({
+      path: "/v1/wallets",
+      method: "POST",
+      headers: { "Idempotency-Key": "browser-key" },
+      body: { connectionId: "conn_eu", label: "Treasury" },
+    });
+    expect(revalidatePath.mock.calls).toEqual([[WALLETS_PATH]]);
   });
 
   // The browser cannot see the status or Idempotent-Replayed through a server
@@ -174,23 +186,14 @@ describe("createCustodySetupWalletAction", () => {
       walletForm({ provider: "privy", idempotencyKey: "browser-key" })
     );
 
-    expect(result).toMatchObject({ status: "error", answer: { status, replayed } });
-  });
-
-  // Sending both would leave the API to reconcile a connection against a
-  // provider that may own several of them.
-  it("drops the provider once a connection names the credential", async () => {
-    await createCustodySetupWalletAction(
-      walletForm({ provider: "privy", label: "Treasury", connectionId: "conn_eu" })
-    );
-
-    expect(requestBody(client)).not.toHaveProperty("provider");
+    expect(result).toMatchObject({ status: "error", answer: { status, replayed, code: null } });
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 
   it("names the provider's Managed config when no connection is chosen", async () => {
     await createCustodySetupWalletAction(walletForm({ provider: "privy", label: "Treasury" }));
 
-    expect(requestBody(client)).toEqual({ provider: "privy", label: "Treasury" });
+    expect(sentRequest().body).toEqual({ provider: "privy", label: "Treasury" });
   });
 
   // An empty select submits "", which must not read as a connection.
@@ -199,65 +202,61 @@ describe("createCustodySetupWalletAction", () => {
       walletForm({ provider: "privy", label: "Treasury", connectionId: "  " })
     );
 
-    expect(requestBody(client)).toEqual({ provider: "privy", label: "Treasury" });
+    expect(sentRequest().body).toEqual({ provider: "privy", label: "Treasury" });
   });
 
-  it("sends the purpose the wizard chose, with or without a connection", async () => {
+  it("sends the purpose the wizard chose", async () => {
     await createCustodySetupWalletAction(
       walletForm({ provider: "turnkey", label: "Mint", purpose: "mint_authority" })
     );
-    expect(requestBody(client)).toEqual({
+
+    expect(sentRequest().body).toEqual({
       provider: "turnkey",
       label: "Mint",
       purpose: "mint_authority",
     });
-
-    client.fetch.mockClear();
-    await createCustodySetupWalletAction(
-      walletForm({ provider: "privy", label: "Ops", connectionId: "conn_eu", purpose: "transfer" })
-    );
-    expect(requestBody(client)).toEqual({
-      connectionId: "conn_eu",
-      label: "Ops",
-      purpose: "transfer",
-    });
   });
 
-  // The create endpoint accepts five purposes; anything else is the API's to default, never a
-  // value the dashboard forwards for it to reject.
+  // A purpose the create endpoint does not accept is the API's to default, never a value the
+  // dashboard forwards for it to reject.
   it("leaves out a purpose the create endpoint does not accept", async () => {
     await createCustodySetupWalletAction(
       walletForm({ provider: "turnkey", label: "Settle", purpose: "dvp_settlement_authority" })
     );
-    expect(requestBody(client)).toEqual({ provider: "turnkey", label: "Settle" });
+
+    expect(sentRequest().body).toEqual({ provider: "turnkey", label: "Settle" });
   });
 
   it("refuses a wallet that names neither a provider nor a connection", async () => {
     const result = await createCustodySetupWalletAction(walletForm({ label: "Treasury" }));
 
-    expect(result.status).toBe("error");
+    expect(result).toMatchObject({
+      status: "error",
+      answer: { status: null, replayed: false, code: null },
+    });
     expect(client.fetch).not.toHaveBeenCalled();
   });
+});
 
-  it("reports a failure instead of throwing", async () => {
-    client.fetch.mockRejectedValue(new Error("SDP API request failed (409): {}"));
+describe("checkWalletSignerMemoAction", () => {
+  // The check signs in simulation and broadcasts nothing. Under a kept key a
+  // press after the user fixed the signer would replay the earlier failure.
+  it("probes the signer under no Idempotency-Key", async () => {
+    client.fetch.mockResolvedValue({ walletId: "wallet_one", signature: "sig_check" });
 
-    const result = await createCustodySetupWalletAction(
-      walletForm({ provider: "privy", label: "Treasury", connectionId: "conn_eu" })
-    );
+    const result = await checkWalletSignerMemoAction(" wallet_one ");
 
-    expect(result.status).toBe("error");
+    expect(result).toEqual({ status: "success", walletId: "wallet_one", signature: "sig_check" });
+    expect(sentRequest()).toEqual({
+      path: "/v1/wallets/signer-check",
+      method: "POST",
+      headers: undefined,
+      body: { walletId: "wallet_one" },
+    });
   });
 });
 
 describe("requestDevnetSolanaFaucetAction", () => {
-  const client = { fetch: vi.fn() };
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.createSdpApiClient.mockResolvedValue(client);
-  });
-
   it("revalidates the wallet pages once the API has waited for the airdrop", async () => {
     client.fetch.mockResolvedValue({
       signature: "sig_airdrop",
@@ -276,10 +275,7 @@ describe("requestDevnetSolanaFaucetAction", () => {
     expect(client.fetch).toHaveBeenCalledWith("/internal/dashboard/wallets/wallet_one/faucet", {
       method: "POST",
     });
-    expect(mocks.revalidatePath.mock.calls).toEqual([
-      [`/dashboard/${PRODUCTION_PROJECT.id}/wallets`],
-      [`/dashboard/${PRODUCTION_PROJECT.id}/wallets/wallet_one`],
-    ]);
+    expect(revalidatePath.mock.calls).toEqual([[WALLETS_PATH], [`${WALLETS_PATH}/wallet_one`]]);
   });
 
   it("reports an airdrop that failed on-chain instead of success", async () => {
@@ -295,6 +291,6 @@ describe("requestDevnetSolanaFaucetAction", () => {
       status: "error",
       message: "DashboardCustody.devnetFaucetTransactionFailed",
     });
-    expect(mocks.revalidatePath).not.toHaveBeenCalled();
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 });

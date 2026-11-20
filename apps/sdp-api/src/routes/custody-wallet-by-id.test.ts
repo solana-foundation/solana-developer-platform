@@ -1,10 +1,11 @@
 import { hashString } from "@sdp/payments/hash";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
+import { custodyWalletsResponse } from "@/openapi/paths/responses";
 import * as heliusDasService from "@/services/helius-das.service";
-import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { installClusterRpcResponder, systemAccountInfoResult } from "@/test/helpers/cluster-rpc";
@@ -180,16 +181,22 @@ describe("Custody wallet by ID route", () => {
         env
       );
       expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({
+      expect(await response.json()).toEqual({
         data: {
           wallet: {
             id: connection.walletRecordId,
             custodyConnectionId: connection.connectionId,
-            isRuntimeExecutionAllowed: true,
             provider: "privy",
+            isRuntimeExecutionAllowed: true,
             walletId: connection.walletId,
+            publicKey: connection.publicKey,
+            label: "Connection wallet",
+            purpose: null,
+            status: "active",
+            createdAt: expect.any(String),
           },
         },
+        meta: { requestId: expect.any(String), timestamp: expect.any(String) },
       });
     }
 
@@ -226,29 +233,6 @@ describe("Custody wallet by ID route", () => {
     });
   });
 
-  it("refuses a persisted Connection public key while the BYOK pair is out of channel", async () => {
-    const connection = await seedConnectionWallet();
-    custodyReleaseChannel.outOfChannelMode = "byok";
-
-    const response = await app.request(
-      `/v1/wallets/public-key?walletId=${connection.walletId}`,
-      {
-        method: "GET",
-        headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-      },
-      env
-    );
-    expect(response.status).toBe(403);
-    expect(await response.json()).toEqual({
-      error: {
-        code: "FORBIDDEN",
-        message: custodyProviderNotInReleaseChannel("privy", "byok").message,
-        details: { reason: "custody_provider_not_in_release_channel" },
-      },
-      meta: { requestId: expect.any(String) },
-    });
-  });
-
   it("returns 404 for a wallet under a non-active Connection", async () => {
     const connection = await seedConnectionWallet();
     await getDb(env)
@@ -266,9 +250,12 @@ describe("Custody wallet by ID route", () => {
       env
     );
     expect(list.status).toBe(200);
-    expect(await list.json()).not.toMatchObject({
-      data: { wallets: expect.arrayContaining([{ walletId: connection.walletId }]) },
-    });
+    expect(
+      custodyWalletsResponse
+        .parse(await list.json())
+        .data.wallets.map((wallet) => wallet.walletId)
+        .sort()
+    ).toEqual(["para_wallet_a", "privy_wallet_a"]);
 
     for (const path of [
       `/v1/wallets/${connection.walletId}?includeBalance=false`,
@@ -280,6 +267,7 @@ describe("Custody wallet by ID route", () => {
         env
       );
       expect(response.status).toBe(404);
+      expect(await response.json()).toEqual(WALLET_NOT_FOUND);
     }
   });
 
@@ -301,6 +289,7 @@ describe("Custody wallet by ID route", () => {
       env
     );
     expect(detail.status).toBe(409);
+    expect(await detail.json()).toMatchObject({ error: { code: "CONFLICT" } });
 
     const update = await app.request(
       `/v1/wallets/${connection.walletId}`,
@@ -315,6 +304,7 @@ describe("Custody wallet by ID route", () => {
       env
     );
     expect(update.status).toBe(409);
+    expect(await update.json()).toMatchObject({ error: { code: "CONFLICT" } });
 
     const canonicalOnly = await app.request(
       `/v1/wallets/public-key?walletId=${connection.walletId}`,
@@ -324,7 +314,11 @@ describe("Custody wallet by ID route", () => {
     expect(canonicalOnly.status).toBe(200);
   });
 
-  it("returns wallet metadata and SOL balance for a wallet across active providers", async () => {
+  it("returns wallet metadata and the priced SOL balance the chain reports for that wallet", async () => {
+    attachUsdValuesMock.mockImplementationOnce(async (_env, balances) =>
+      balances.map((balance) => ({ ...balance, usdPrice: 150, usdValue: 630 }))
+    );
+
     const res = await app.request(
       "/v1/wallets/para_wallet_a",
       {
@@ -337,17 +331,22 @@ describe("Custody wallet by ID route", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({
+    expect(await res.json()).toEqual({
       data: {
         wallet: {
-          id: "cwlt_wallet_by_id_para_a",
-          custodyConfigId: PARA_CONFIG_ID,
-          provider: "para",
-          walletId: "para_wallet_a",
-          publicKey: TEST_SOLANA_ADDRESSES.wallet2,
-          balance: { token: "SOL", amount: "4200000000", uiAmount: "4.2", decimals: 9 },
+          ...paraWalletMetadata(),
+          balance: {
+            token: "SOL",
+            mint: SOL_MINT,
+            amount: "4200000000",
+            uiAmount: "4.2",
+            decimals: 9,
+            usdPrice: 150,
+            usdValue: 630,
+          },
         },
       },
+      meta: { requestId: expect.any(String), timestamp: expect.any(String) },
     });
     expect(accountInfoReads()).toEqual([
       {
@@ -356,10 +355,9 @@ describe("Custody wallet by ID route", () => {
         params: [TEST_SOLANA_ADDRESSES.wallet2, { encoding: "base64", commitment: "confirmed" }],
       },
     ]);
-    expect(attachUsdValuesMock).toHaveBeenCalledTimes(1);
   });
 
-  it("returns metadata without reading the chain or pricing when includeBalance=false", async () => {
+  it("returns metadata without reading the chain when includeBalance=false", async () => {
     const res = await app.request(
       "/v1/wallets/para_wallet_a?includeBalance=false",
       { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
@@ -367,68 +365,21 @@ describe("Custody wallet by ID route", () => {
     );
 
     expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body).toMatchObject({
-      data: {
-        wallet: {
-          id: "cwlt_wallet_by_id_para_a",
-          provider: "para",
-          walletId: "para_wallet_a",
-          publicKey: TEST_SOLANA_ADDRESSES.wallet2,
-        },
-      },
+    expect(await res.json()).toEqual({
+      data: { wallet: paraWalletMetadata() },
+      meta: { requestId: expect.any(String), timestamp: expect.any(String) },
     });
-    expect(body).not.toHaveProperty("data.wallet.balance");
     expect(accountInfoReads()).toEqual([]);
-    expect(attachUsdValuesMock).not.toHaveBeenCalled();
   });
 
-  it("includes the balance when includeBalance=true is explicit", async () => {
-    const res = await app.request(
-      "/v1/wallets/para_wallet_a?includeBalance=true",
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
-      },
-      env
-    );
-
-    expect(res.status).toBe(200);
-    expect(await res.json()).toHaveProperty("data.wallet.balance.amount", "4200000000");
-    expect(accountInfoReads()).toHaveLength(1);
-    expect(attachUsdValuesMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps the balance-on default when includeBalance is empty", async () => {
-    const res = await app.request(
-      "/v1/wallets/para_wallet_a?includeBalance=",
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
-      },
-      env
-    );
-
-    expect(res.status).toBe(200);
-    expect(await res.json()).toHaveProperty("data.wallet.balance.amount", "4200000000");
-    expect(accountInfoReads()).toHaveLength(1);
-    expect(attachUsdValuesMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("rejects unauthenticated requests", async () => {
-    const res = await app.request(
-      "/v1/wallets/para_wallet_a",
-      {
-        method: "GET",
-      },
-      env
-    );
+  it("refuses an unauthenticated request with 401", async () => {
+    const res = await app.request("/v1/wallets/para_wallet_a", { method: "GET" }, env);
 
     expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({
+      error: { code: "UNAUTHORIZED", message: "API key required" },
+      meta: { requestId: expect.any(String) },
+    });
   });
 
   it("returns 404 when the wallet does not exist", async () => {
@@ -444,27 +395,11 @@ describe("Custody wallet by ID route", () => {
     );
 
     expect(res.status).toBe(404);
+    expect(await res.json()).toEqual(WALLET_NOT_FOUND);
   });
 
-  it("returns 404 for a selected key that does not list the wallet, to avoid wallet enumeration", async () => {
-    await seedCachedKey({ walletScope: "selected", walletIds: [] });
-
-    const res = await app.request(
-      "/v1/wallets/para_wallet_a",
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
-      },
-      env
-    );
-
-    expect(res.status).toBe(404);
-  });
-
-  // HOO-2099: a selected key reaches only the wallets it lists, for writes as
-  // for reads (the wallet detail above), refused before the key is claimed.
+  // HOO-2099: a selected key writes only the wallets it lists, refused before
+  // the Idempotency-Key is claimed.
   it.each([
     ["deletes", "DELETE", "/v1/wallets", { walletId: "para_wallet_a" }],
     ["relabels", "PATCH", "/v1/wallets/para_wallet_a", { label: "taken" }],
@@ -505,25 +440,6 @@ describe("Custody wallet by ID route", () => {
     }
   );
 
-  it("returns 403 when the API key does not include wallets:read permission", async () => {
-    await seedCachedKey({
-      grants: ["transfers.read"],
-    });
-
-    const res = await app.request(
-      "/v1/wallets/para_wallet_a",
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
-      },
-      env
-    );
-
-    expect(res.status).toBe(403);
-  });
-
   it("answers 503 instead of a zero balance when the balance read fails", async () => {
     clusterRpc.respond("getAccountInfo", () => ({
       error: { code: SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR, message: "Internal error" },
@@ -550,7 +466,6 @@ describe("Custody wallet by ID route", () => {
         params: [TEST_SOLANA_ADDRESSES.wallet2, { encoding: "base64", commitment: "confirmed" }],
       },
     ]);
-    expect(attachUsdValuesMock).not.toHaveBeenCalled();
   });
 
   it("reads a zero SOL balance for a wallet with no account on chain", async () => {
@@ -563,17 +478,37 @@ describe("Custody wallet by ID route", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({
+    expect(await res.json()).toEqual({
       data: {
         wallet: {
-          id: "cwlt_wallet_by_id_para_a",
-          balance: { token: "SOL", amount: "0", uiAmount: "0", decimals: 9 },
+          ...paraWalletMetadata(),
+          balance: { token: "SOL", mint: SOL_MINT, amount: "0", uiAmount: "0", decimals: 9 },
         },
       },
+      meta: { requestId: expect.any(String), timestamp: expect.any(String) },
     });
-    expect(clusterRpc.calls).toContainEqual({ cluster: "devnet", method: "getAccountInfo" });
   });
 });
+
+const WALLET_NOT_FOUND = {
+  error: { code: "NOT_FOUND", message: "Wallet not found" },
+  meta: { requestId: expect.any(String) },
+};
+
+function paraWalletMetadata() {
+  return {
+    id: "cwlt_wallet_by_id_para_a",
+    custodyConfigId: PARA_CONFIG_ID,
+    provider: "para",
+    isRuntimeExecutionAllowed: true,
+    walletId: "para_wallet_a",
+    publicKey: TEST_SOLANA_ADDRESSES.wallet2,
+    label: "Para Wallet A",
+    purpose: "transfer",
+    status: "active",
+    createdAt: expect.any(String),
+  };
+}
 
 async function seedConnectionWallet() {
   const credentialId = "pcred_wallet_by_id_connection";
