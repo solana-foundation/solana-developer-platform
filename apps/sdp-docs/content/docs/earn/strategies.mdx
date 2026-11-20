@@ -4,12 +4,26 @@ title: Strategies
 description: Find a strategy that accepts deposits, then read its rate, slippage default and withdrawal terms.
 ---
 
-`GET /v1/earn/discovery` lists the strategies on your environment's cluster:
+`GET /v1/earn/discovery` lists the strategies on your environment's cluster,
+with `api` and `headers` as in the [quickstart](/docs/earn/quickstart):
 
+<Tabs items={["TypeScript", "curl"]}>
+<Tab value="TypeScript">
+```ts
+const response = await fetch(`${api}/v1/earn/discovery?depositMint=${mint}&pageSize=100`, {
+  headers,
+});
+const { strategies } = (await response.json()).data;
+const open = strategies.filter((strategy) => strategy.capabilities.deposit && strategy.fundable);
+```
+</Tab>
+<Tab value="curl">
 ```bash
-curl -sS "$SDP_API_URL/v1/earn/discovery?depositMint=<token-mint>&pageSize=100" \
+curl -sS "https://api-devnet.solana.com/v1/earn/discovery?depositMint=<token-mint>&pageSize=100" \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
+</Tab>
+</Tabs>
 
 Filter by `id`, `provider`, `depositMint`, `sourceKind`, `apyType`,
 `liquidityTerm`, `cluster`, `minApy` or `maxApy`, and page with `page` and

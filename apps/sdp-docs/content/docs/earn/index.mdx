@@ -5,16 +5,26 @@ description: Offer stablecoin yield in your app, from your customers' own wallet
 ---
 
 Earn puts vault, lending and real-world-asset yield strategies behind one API.
-You prepare a deposit, your customer's wallet signs it, and SDP broadcasts it
+Your customer's wallet signs every deposit and withdrawal, and SDP broadcasts it
 and tracks it to settlement. Funds move between the customer's wallet and the
-provider's program; SDP never holds them ([follow the funds](/docs/earn/concepts#follow-the-funds)).
+provider's program; SDP never holds them
+([follow the funds](/docs/earn/concepts#follow-the-funds)).
 
-```text
-POST /v1/earn/deposit                     → an operation with an unsigned transaction
-     ...your customer's wallet signs it...
-POST /v1/operations/{operationId}/submit  → SDP broadcasts the exact signed bytes
-GET  /v1/operations/{operationId}         → poll until completed
-```
+<EarnFlow>
+
+- **Prepare**
+
+  `POST /v1/earn/deposit` returns an operation with an unsigned transaction.
+
+- **Sign and submit**
+
+  Your customer's wallet signs it, and `/submit` hands SDP the exact bytes.
+
+- **Track**
+
+  Poll `GET /v1/operations/{operationId}` until it completes.
+
+</EarnFlow>
 
 Any Solana wallet can sign, and none needs registering in SDP. Start with the
 [quickstart](/docs/earn/quickstart), or
@@ -36,8 +46,38 @@ locally with no key, wallet or funds.
 
 ## Guides
 
-- [How Earn works](/docs/earn/concepts): strategies, positions, operations and where funds go.
-- [Strategies](/docs/earn/strategies), [deposits](/docs/earn/deposits),
-  [balances](/docs/earn/balances) and [withdrawals](/docs/earn/withdrawals).
-- [Embedded Yield](/docs/guides/embedded-yield): put Earn inside your app.
-- [Integration details](/docs/earn/integration-details): retries, recovery, fees and eligibility.
+<GuideCards>
+
+- [Quickstart](/docs/earn/quickstart)
+
+  Make a first deposit in three calls.
+
+- [How Earn works](/docs/earn/concepts)
+
+  Strategies, positions, operations and where funds go.
+
+- [Strategies](/docs/earn/strategies)
+
+  Find a strategy and read its rate and terms.
+
+- [Deposit funds](/docs/earn/deposits)
+
+  Prepare, review, sign and track a deposit.
+
+- [Balances and earnings](/docs/earn/balances)
+
+  Read holdings, totals and earned yield.
+
+- [Withdraw funds](/docs/earn/withdrawals)
+
+  Choose an exit route and track the payout.
+
+- [Embedded Yield](/docs/guides/embedded-yield)
+
+  Put yield inside your app.
+
+- [Integration details](/docs/earn/integration-details)
+
+  Retries, recovery, fees and eligibility.
+
+</GuideCards>

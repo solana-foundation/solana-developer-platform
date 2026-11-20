@@ -367,7 +367,10 @@ guides own the walkthrough. Do not maintain a second hidden core contract.
 
 Guides walk the `source.ownerAddress` flow only: the owner's wallet signs, and
 SDP never needs it registered. An SDP custody wallet (`source.walletId`) gets
-one note, at the end of the quickstart. `earn-guide-examples.test.ts` parses
+one note, at the end of the quickstart. Guides document the Earn API and how to
+integrate it, nothing more: assume readers know Solana signing and wallets, show
+no signing or environment setup code, and link Solana's docs instead. Code
+examples are TypeScript first, with curl as the second tab. `earn-guide-examples.test.ts` parses
 each titled request block (`deposit.json`, `submission.json`,
 `withdrawal.json`) with the API's own schemas.
 

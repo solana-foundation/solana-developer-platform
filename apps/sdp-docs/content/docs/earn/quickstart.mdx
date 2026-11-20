@@ -1,117 +1,61 @@
 ---
 module: earn
 title: Quickstart
-description: Deposit into a yield strategy with three calls, prepare, submit and poll, and one wallet signature.
+description: Deposit into a yield strategy with three calls, prepare, submit and poll.
 ---
 
-A deposit takes three API calls (prepare, submit, poll) and one wallet
-signature. Each step shows curl and TypeScript: follow either one. To try the
-flow offline first, the
-[example](https://github.com/solana-foundation/solana-developer-platform/tree/main/examples/earn-quickstart)
-runs it against fake responses, with no key, wallet or funds.
+A deposit is three calls: prepare it, submit the signed transaction, then poll
+until it settles. Your app signs with the customer's wallet in between, and SDP
+never holds keys. To see the whole flow offline,
+[run the example](https://github.com/solana-foundation/solana-developer-platform/tree/main/examples/earn-quickstart).
 
-## Before you start
+You need a [devnet API key](https://platform-devnet.solana.com/dashboard?return_to=%2Fdashboard%2Fapi-keys%2Fnew)
+with **Earn Execute**. Every `POST` takes an `Idempotency-Key`: resend the same
+key and body after a lost response, and SDP returns the original response
+instead of a second deposit.
 
-- **An API key.** [Create a devnet key](https://platform-devnet.solana.com/dashboard?return_to=%2Fdashboard%2Fapi-keys%2Fnew)
-  with **Earn Execute**, which includes Read. Keep it on your server.
-- **A devnet keypair** with a little SOL for network fees, such as the
-  `~/.config/solana/id.json` that `solana-keygen new` writes. In your app, any
-  Solana wallet can sign instead, and SDP never needs it registered.
-- **Node.js 24** and `@solana/kit`, to sign. The TypeScript tabs add up to one
-  ES module script, `deposit.mjs`.
+## 1. Prepare
 
-```bash
-export SDP_API_URL=https://api-devnet.solana.com
-export SDP_API_KEY='<your-api-key>'
-export KEYPAIR=~/.config/solana/id.json
-export PREPARE_KEY=$(uuidgen) SUBMIT_KEY=$(uuidgen)
-npm install @solana/kit
-```
-
-Every write requires an `Idempotency-Key`, any unique string. To retry a request
-whose response you lost, send it again with the same key and body: SDP returns
-the original response instead of creating a second deposit. Reusing a key with
-a different body returns `422`, so use a new key when you change the body.
-
-## 1. Pick a strategy
-
-<Tabs items={["curl", "TypeScript"]}>
-<Tab value="curl">
-```bash
-curl -sS "$SDP_API_URL/v1/earn/discovery?pageSize=100" \
-  -H "Authorization: Bearer $SDP_API_KEY" |
-  jq '.data.strategies[] | select(.capabilities.deposit and .fundable) | {id, name, depositMints}'
-```
-</Tab>
-<Tab value="TypeScript">
-```ts
-import { readFile } from "node:fs/promises";
-
-const api = process.env.SDP_API_URL;
-const headers = {
-  Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-  "Content-Type": "application/json",
-};
-const discovery = await fetch(`${api}/v1/earn/discovery?pageSize=100`, { headers });
-const { strategies } = (await discovery.json()).data;
-console.table(
-  strategies
-    .filter((strategy) => strategy.capabilities.deposit && strategy.fundable)
-    .map(({ id, name, depositMints }) => ({ id, name, depositMints }))
-);
-```
-</Tab>
-</Tabs>
-
-Choose one, and fund your keypair on devnet with one of its `depositMints`.
-[Strategies](/docs/earn/strategies) explains rates and the other fields.
-
-## 2. Prepare the deposit
-
-Write `deposit.json` with the strategy's `id`, your keypair's address (from
-`solana address`) and the amount, then send `POST /v1/earn/deposit`:
+Send `POST /v1/earn/deposit` with a strategy from
+[discovery](/docs/earn/strategies), the wallet that signs and owns the position,
+and the amount in token units:
 
 ```json title="deposit.json"
 {
   "strategyId": "<strategy-id>",
-  "source": { "ownerAddress": "<your-wallet-address>" },
+  "source": { "ownerAddress": "<wallet-address>" },
   "amount": { "mint": "<deposit-mint>", "value": "10" },
   "slippageBps": 50
 }
 ```
 
-<Tabs items={["curl", "TypeScript"]}>
+<Tabs items={["TypeScript", "curl"]}>
+<Tab value="TypeScript">
+```ts
+const api = "https://api-devnet.solana.com";
+const headers = { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" };
+
+const prepared = await fetch(`${api}/v1/earn/deposit`, {
+  method: "POST",
+  headers: { ...headers, "Idempotency-Key": prepareKey },
+  body: JSON.stringify(deposit),
+});
+const { operation } = (await prepared.json()).data;
+```
+</Tab>
 <Tab value="curl">
 ```bash
-curl -sS --fail-with-body "$SDP_API_URL/v1/earn/deposit" \
+curl -sS https://api-devnet.solana.com/v1/earn/deposit \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $PREPARE_KEY" \
-  --data-binary @deposit.json -o prepared.json || cat prepared.json
-jq .data.operation prepared.json
-```
-</Tab>
-<Tab value="TypeScript">
-```ts
-const prepared = await fetch(`${api}/v1/earn/deposit`, {
-  method: "POST",
-  headers: { ...headers, "Idempotency-Key": process.env.PREPARE_KEY },
-  body: await readFile("deposit.json", "utf8"),
-});
-if (!prepared.ok) throw new Error(await prepared.text());
-let { operation } = (await prepared.json()).data;
-console.log(operation.terms);
+  --data-binary @deposit.json
 ```
 </Tab>
 </Tabs>
 
-`ownerAddress` is the wallet that signs and owns the position. `amount.value`
-is a decimal string in token units; another mint adds a swap to the same
-transaction. `slippageBps` is optional: `50` is 0.5%, the maximum is `500`, and
-omitting it uses the strategy's default.
-
-SDP returns `202` with an operation. It quotes, builds and simulates the
-transaction, but never signs or sends it:
+SDP returns `202` with an operation. It builds and simulates the transaction,
+but never signs or sends it:
 
 ```json title="202 response (trimmed)"
 {
@@ -137,84 +81,16 @@ transaction, but never signs or sends it:
 }
 ```
 
-Show your customer `terms` before they sign. `estimate` is the quoted share
-amount and `minimum` is the least the transaction accepts. A `null` value is
-unknown, not zero.
+Show your customer `terms`: `estimate` is the quoted share amount, `minimum` is
+the least the transaction accepts, and `null` means unknown, not zero.
 
-## 3. Sign and submit
+## 2. Sign and submit
 
-Sign `nextAction.transaction` with the owner's keypair without changing it, and
-submit it before the network passes `lastValidBlockHeight`, about a minute after
-you prepared. Past that height the transaction can never land: if you didn't
-submit it, prepare a new deposit with new keys.
-
-<Tabs items={["curl", "TypeScript"]}>
-<Tab value="curl">
-```js title="sign.mjs"
-import { readFile, writeFile } from "node:fs/promises";
-import {
-  createKeyPairFromBytes,
-  getBase64EncodedWireTransaction,
-  getBase64Encoder,
-  getTransactionDecoder,
-  signTransaction,
-} from "@solana/kit";
-
-const secretKey = new Uint8Array(JSON.parse(await readFile(process.env.KEYPAIR, "utf8")));
-const keyPair = await createKeyPairFromBytes(secretKey);
-const { operation } = JSON.parse(await readFile("prepared.json", "utf8")).data;
-const bytes = getBase64Encoder().encode(operation.nextAction.transaction);
-const signed = await signTransaction([keyPair], getTransactionDecoder().decode(bytes));
-const submission = {
-  actionId: operation.actionId,
-  version: operation.version,
-  signedTransaction: getBase64EncodedWireTransaction(signed),
-};
-await writeFile("submission.json", JSON.stringify(submission));
-```
-
-```bash
-node sign.mjs
-OPERATION_ID=$(jq -r .data.operation.id prepared.json)
-curl -sS --fail-with-body "$SDP_API_URL/v1/operations/$OPERATION_ID/submit" \
-  -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Content-Type: application/json" \
-  -H "Idempotency-Key: $SUBMIT_KEY" \
-  --data-binary @submission.json
-```
-</Tab>
-<Tab value="TypeScript">
-```ts
-import {
-  createKeyPairFromBytes,
-  getBase64EncodedWireTransaction,
-  getBase64Encoder,
-  getTransactionDecoder,
-  signTransaction,
-} from "@solana/kit";
-
-const secretKey = new Uint8Array(JSON.parse(await readFile(process.env.KEYPAIR, "utf8")));
-const keyPair = await createKeyPairFromBytes(secretKey);
-const bytes = getBase64Encoder().encode(operation.nextAction.transaction);
-const signed = await signTransaction([keyPair], getTransactionDecoder().decode(bytes));
-
-const submitted = await fetch(`${api}/v1/operations/${operation.id}/submit`, {
-  method: "POST",
-  headers: { ...headers, "Idempotency-Key": process.env.SUBMIT_KEY },
-  body: JSON.stringify({
-    actionId: operation.actionId,
-    version: operation.version,
-    signedTransaction: getBase64EncodedWireTransaction(signed),
-  }),
-});
-if (!submitted.ok) throw new Error(await submitted.text());
-({ operation } = (await submitted.json()).data);
-```
-</Tab>
-</Tabs>
-
-Either way, `POST /v1/operations/{operationId}/submit` takes the action you
-reviewed and the signed bytes:
+Have the owner's wallet [sign](https://solana.com/docs/core/transactions)
+`nextAction.transaction` without changing it, before the network passes
+`lastValidBlockHeight` (about a minute). Then send
+`POST /v1/operations/{operationId}/submit` with the reviewed action and the
+signed transaction, base64-encoded:
 
 ```json title="submission.json"
 {
@@ -224,45 +100,59 @@ reviewed and the signed bytes:
 }
 ```
 
-`202` means SDP matched your signed bytes to the transaction it prepared. It
-broadcasts them and tracks the outcome. In a browser app, pass the same
-transaction to your wallet's `signTransaction` (Privy, Wallet Standard or any
-other): your server keeps the key and makes the calls, and only the transaction
-and its signed bytes cross to the browser.
-
-## 4. Poll until it finishes
-
-<Tabs items={["curl", "TypeScript"]}>
-<Tab value="curl">
-```bash
-while :; do
-  STATUS=$(curl -sS "$SDP_API_URL/v1/operations/$OPERATION_ID" \
-    -H "Authorization: Bearer $SDP_API_KEY" | jq -r .data.operation.status)
-  echo "$STATUS"
-  case "$STATUS" in completed | failed | cancelled) break ;; esac
-  sleep 3
-done
-```
-</Tab>
+<Tabs items={["TypeScript", "curl"]}>
 <Tab value="TypeScript">
 ```ts
-while (!["completed", "failed", "cancelled"].includes(operation.status)) {
-  await new Promise((resolve) => setTimeout(resolve, 3000));
-  const current = await fetch(`${api}/v1/operations/${operation.id}`, { headers });
-  operation = (await current.json()).data.operation;
-  console.log(operation.status);
-}
-console.log(operation.result ?? operation.error);
+await fetch(`${api}/v1/operations/${operation.id}/submit`, {
+  method: "POST",
+  headers: { ...headers, "Idempotency-Key": submitKey },
+  body: JSON.stringify({
+    actionId: operation.actionId,
+    version: operation.version,
+    signedTransaction,
+  }),
+});
+```
+</Tab>
+<Tab value="curl">
+```bash
+curl -sS "https://api-devnet.solana.com/v1/operations/$OPERATION_ID/submit" \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: $SUBMIT_KEY" \
+  --data-binary @submission.json
 ```
 </Tab>
 </Tabs>
 
-| `status` | Meaning |
-| --- | --- |
-| `completed` | Delivery verified. `result.positionId` is the new position. |
-| `failed` | It didn't go through; `error` says why. Prepare a new deposit with new keys. |
-| `cancelled` | Stopped before anything was deposited. |
-| Anything else | Still in progress, such as `queued`, `submitted` or `settling`. Keep polling, and don't start another deposit. |
+`202` means SDP matched the signed bytes to the transaction it prepared. It
+broadcasts them and tracks the outcome.
+
+## 3. Poll
+
+<Tabs items={["TypeScript", "curl"]}>
+<Tab value="TypeScript">
+```ts
+let current = operation;
+while (!["completed", "failed", "cancelled"].includes(current.status)) {
+  await new Promise((resolve) => setTimeout(resolve, 3000));
+  const response = await fetch(`${api}/v1/operations/${operation.id}`, { headers });
+  current = (await response.json()).data.operation;
+}
+```
+</Tab>
+<Tab value="curl">
+```bash
+curl -sS "https://api-devnet.solana.com/v1/operations/$OPERATION_ID" \
+  -H "Authorization: Bearer $SDP_API_KEY"
+```
+</Tab>
+</Tabs>
+
+`completed` means SDP verified delivery, and `result.positionId` is the new
+position. `failed` means it didn't go through: read `error`, then prepare a new
+deposit with a new key. Any other status is still in progress, so keep polling
+and don't start another deposit.
 
 ## Next steps
 
@@ -274,7 +164,6 @@ console.log(operation.result ?? operation.error);
 <Callout>
 **Using an [SDP custody wallet](/docs/wallet-operations)?** Send
 `source: { "walletId": "<wallet-id>" }` instead of `ownerAddress`, and submit
-without `signedTransaction`. SDP requests the signature from the wallet's
-custody provider; keep polling, and show any `sign_in_provider` instructions to
-the signer.
+without `signedTransaction`: SDP requests the signature from the wallet's
+custody provider.
 </Callout>

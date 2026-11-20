@@ -4,10 +4,25 @@ title: Balances and earnings
 description: Read a wallet's positions, find holdings opened outside SDP, and total its balances and earnings.
 ---
 
+`GET /v1/earn/positions` reads a wallet's holdings, with `api` and `headers` as
+in the [quickstart](/docs/earn/quickstart):
+
+<Tabs items={["TypeScript", "curl"]}>
+<Tab value="TypeScript">
+```ts
+const response = await fetch(`${api}/v1/earn/positions?ownerAddress=${ownerAddress}`, {
+  headers,
+});
+const { positions } = (await response.json()).data;
+```
+</Tab>
+<Tab value="curl">
 ```bash
-curl -sS "$SDP_API_URL/v1/earn/positions?ownerAddress=<wallet-address>" \
+curl -sS "https://api-devnet.solana.com/v1/earn/positions?ownerAddress=<wallet-address>" \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
+</Tab>
+</Tabs>
 
 Each position's `id` is the `positionId` you [withdraw](/docs/earn/withdrawals)
 with. Without `ownerAddress`, the read covers every position your key can see in
