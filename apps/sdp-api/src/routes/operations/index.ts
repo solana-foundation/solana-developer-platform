@@ -44,6 +44,11 @@ interface AuthorizedOperation {
   preparation: AuthorizedEarnPreparation | null;
 }
 
+/** The custody wallet that signs a stored operation, or null for an owner address. */
+function custodyWalletIdOf(record: OperationRecord): string | null {
+  return "walletId" in record.source ? record.source.walletId : null;
+}
+
 async function loadAuthorizedOperation(
   c: AppContext,
   scope: OperationScope,
@@ -55,7 +60,7 @@ async function loadAuthorizedOperation(
   const record = await createOperationsService(c.env).repository.get(scope, operationId);
   if (record === null) throw notFound("Operation");
   const auth = getAuth(c);
-  const walletId = "walletId" in record.source ? record.source.walletId : null;
+  const walletId = custodyWalletIdOf(record);
   if (walletId !== null) {
     const wallets = await listReadableEarnWallets(c, auth, scope.projectId);
     if (!wallets.some((wallet) => wallet.id === walletId)) throw notFound("Operation");
@@ -94,7 +99,7 @@ async function admitOperationStart(c: AppContext, record: OperationRecord): Prom
     c.env,
     record.scope,
     { surface: "http", movement: record.operation.kind, subjectId: record.operation.id },
-    { custodyWalletId: "walletId" in record.source ? record.source.walletId : null }
+    { custodyWalletId: custodyWalletIdOf(record) }
   );
 }
 
@@ -215,14 +220,12 @@ operations.post(
       });
     }
     const reference = attempt?.resourceRef;
+    const proposalAttempt =
+      reference?.kind === "custody.proposal" || reference?.kind === "custody.proposal_not_sent";
     if (
       attempt !== null &&
       (attempt.signedTransaction !== null || attempt.dispatchStartedAt !== null) &&
-      !(
-        (reference?.kind === "custody.proposal" ||
-          reference?.kind === "custody.proposal_not_sent") &&
-        record.operation.error !== null
-      )
+      !(proposalAttempt && record.operation.error !== null)
     ) {
       throw conflict("The current transaction must be reconciled before refreshing");
     }
@@ -237,10 +240,9 @@ operations.post(
           ? record.operation.terms.options[0]?.id
           : undefined)
     );
-    const evidence =
-      reference?.kind === "custody.proposal" || reference?.kind === "custody.proposal_not_sent"
-        ? { kind: "resolved_attempt" as const, resourceRef: reference }
-        : { kind: "never_dispatched" as const };
+    const evidence = proposalAttempt
+      ? { kind: "resolved_attempt" as const, resourceRef: reference }
+      : { kind: "never_dispatched" as const };
     const operation = await service.repository.replacePreparedAction(
       record.scope,
       record.operation.id,
