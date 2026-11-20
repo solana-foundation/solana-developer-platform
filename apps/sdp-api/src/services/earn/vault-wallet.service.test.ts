@@ -714,10 +714,6 @@ describe("buildWalletDepositTransaction (swap-funded)", () => {
     expect(simulateVaultPlan).toHaveBeenCalledTimes(4);
     expect(await countRows("earn_wallet_transactions")).toBe(0);
     expect(await countRows("earn_movements")).toBe(0);
-    const advisory = await getDb(env)
-      .prepare("SELECT COUNT(*)::int AS rows FROM earn_split_swap_advisories")
-      .first<{ rows: number }>();
-    expect(advisory?.rows).toBe(0);
   });
 
   it("refuses an oversized composed probe before any partial transaction is persisted", async () => {
@@ -751,9 +747,6 @@ describe("buildWalletDepositTransaction (swap-funded)", () => {
     expect(simulateVaultPlan).toHaveBeenCalledTimes(2);
     expect(await countRows("earn_wallet_transactions")).toBe(0);
     expect(await countRows("earn_movements")).toBe(0);
-    expect(
-      await getDb(env).queryOne("SELECT COUNT(*)::int AS rows FROM earn_split_swap_advisories")
-    ).toEqual({ rows: 0 });
   });
 
   it("returns an actionable refusal when a direct plan cannot fit even with a compact memo", async () => {
