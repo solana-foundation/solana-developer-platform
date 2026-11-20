@@ -7,8 +7,8 @@ not product-specific HTTP routes.
 
 See the [core contract](../architecture/earn-core-api-proposal.md) and
 [threat model](../security/earn-core-api-threat-model.md) before changing
-execution or recovery. The replacement remains internal pending security
-sign-off. Registration does not authorize public API publication.
+execution or recovery. Publication follows Earn's existing module tags and
+release-channel rules. Provider registration does not change those rules.
 
 ## Catalogue changes
 
