@@ -1,12 +1,40 @@
 import { expect } from "@playwright/test";
+import { projectHref } from "@/lib/dashboard-project-path";
 import { test } from "@/playwright/support/test";
 import { gotoProjectPage, provisionLinkedOrgProjects } from "../support/local-dashboard-bootstrap";
 
-test.describe("payments transaction ledger", () => {
+test.describe("payments overview and transaction ledger", () => {
   let projectId = "";
 
   test.beforeAll(async ({ browser }) => {
     projectId = (await provisionLinkedOrgProjects(browser)).sandbox;
+  });
+
+  test("renders the overview from the API and links each action to its flow", async ({ page }) => {
+    await gotoProjectPage(page, projectId, "/dashboard/payments");
+
+    // Each region streams in once its reads answer; its heading shows only then.
+    await expect(page.getByRole("heading", { name: "Available balance" })).toBeVisible({
+      timeout: 120_000,
+    });
+    await expect(page.getByRole("heading", { name: "Activity", exact: true })).toBeVisible({
+      timeout: 120_000,
+    });
+    await expect(page.getByText("Balance is temporarily unavailable.")).toHaveCount(0);
+    await expect(page.getByText("Activity is temporarily unavailable.")).toHaveCount(0);
+
+    const moveMoney = page.getByRole("region", { name: "Move money" });
+    for (const [name, path] of [
+      ["Pay", "/dashboard/payments/pay"],
+      ["Deposit", "/dashboard/payments/deposit"],
+      ["Request", "/dashboard/payments/requests"],
+      ["Schedule", "/dashboard/payments/recurring/create"],
+    ] as const) {
+      await expect(moveMoney.getByRole("link", { name: new RegExp(`^${name}`) })).toHaveAttribute(
+        "href",
+        projectHref(projectId, path)
+      );
+    }
   });
 
   test("sends a search to the API, keeps it in a shareable URL, and fits a phone", async ({

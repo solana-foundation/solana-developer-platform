@@ -3,6 +3,7 @@ import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   type Signature,
   SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE,
 } from "@solana/kit";
@@ -485,40 +486,58 @@ describe("trackPendingTransfers", () => {
       ]);
     });
 
-    it("keeps and rotates an expired started submission when history answers from below the floor, logging both slots", async () => {
-      rpc.respond("getSignatureStatuses", (request) =>
-        signatureStatusesRead(request).searchTransactionHistory
-          ? signatureStatusesReplyAt(FLOOR_SLOT - 10, [null])
-          : signatureStatusesReply([null])
-      );
-      const warn = spyOnLog("warn");
-      const staleAt = minutesAgo(10);
+    it.each([
+      {
+        refusal: "an answer from below the floor",
+        historyReply: signatureStatusesReplyAt(FLOOR_SLOT - 10, [null]),
+      },
+      {
+        refusal: "a served minimum-context-slot refusal",
+        historyReply: {
+          error: {
+            code: SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
+            message: "Minimum context slot has not been reached",
+            data: { contextSlot: FLOOR_SLOT - 10 },
+          },
+        },
+      },
+    ] satisfies readonly { refusal: string; historyReply: ClusterRpcReply }[])(
+      "keeps and rotates an expired started submission on $refusal, logging both slots",
+      async ({ historyReply }) => {
+        rpc.respond("getSignatureStatuses", (request) =>
+          signatureStatusesRead(request).searchTransactionHistory
+            ? historyReply
+            : signatureStatusesReply([null])
+        );
+        const warn = spyOnLog("warn");
+        const staleAt = minutesAgo(10);
 
-      await insertTransfer(
-        signedSubmission({
-          id: "xfr_started_outbox_node_behind",
-          signature: TEST_SIG_1,
-          submissionStartedAt: staleAt,
-          updatedAt: staleAt,
-        })
-      );
+        await insertTransfer(
+          signedSubmission({
+            id: "xfr_started_outbox_node_behind",
+            signature: TEST_SIG_1,
+            submissionStartedAt: staleAt,
+            updatedAt: staleAt,
+          })
+        );
 
-      await trackSandboxTransfers();
+        await trackSandboxTransfers();
 
-      const unresolved = await getTransfer("xfr_started_outbox_node_behind");
-      expect(unresolved.status).toBe("processing");
-      expect(unresolved.updated_at).not.toBe(staleAt);
-      expect(warn).toHaveBeenCalledWith(
-        expect.objectContaining({
-          event: "sdp_api_payment_submission_unresolved",
-          reason: "node_behind_floor",
-          transfer_id: "xfr_started_outbox_node_behind",
-          context_slot: String(FLOOR_SLOT - 10),
-          min_context_slot: String(FLOOR_SLOT),
-        }),
-        "sdp_api_payment_submission_unresolved"
-      );
-    });
+        const unresolved = await getTransfer("xfr_started_outbox_node_behind");
+        expect(unresolved.status).toBe("processing");
+        expect(unresolved.updated_at).not.toBe(staleAt);
+        expect(warn).toHaveBeenCalledWith(
+          expect.objectContaining({
+            event: "sdp_api_payment_submission_unresolved",
+            reason: "node_behind_floor",
+            transfer_id: "xfr_started_outbox_node_behind",
+            context_slot: String(FLOOR_SLOT - 10),
+            min_context_slot: String(FLOOR_SLOT),
+          }),
+          "sdp_api_payment_submission_unresolved"
+        );
+      }
+    );
 
     it("fails an expired started submission absent from history at the floor at the horizon's edge", async () => {
       rpc.answer("getEpochInfo", finalizedTipAt(LAST_VALID_BLOCK_HEIGHT + HISTORY_HORIZON_BLOCKS));
