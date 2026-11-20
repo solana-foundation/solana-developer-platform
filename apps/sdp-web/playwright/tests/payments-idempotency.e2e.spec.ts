@@ -15,9 +15,9 @@ import { bootstrapLocalPaymentFixtures } from "../support/local-issuance-bootstr
 
 /**
  * The dashboard's Idempotency-Key contract (HOO-1918), driven through the real UI against the
- * local API: one key per user action, kept across double submits, lost answers, refusals that
- * settle nothing and reloads, and retired by a success, a replay or a 422. Each test
- * checks the keys the browser sent and what the API holds afterwards.
+ * local API: a key kept across a lost answer and a reload, never sent without the browser keeping
+ * it, and retired once the API answers. The key rules themselves are proven in the unit suites;
+ * each test here checks the keys the browser sent and what the API holds afterwards.
  */
 
 const TRANSFERS = "/api/dashboard/payments/transfers";
@@ -196,23 +196,6 @@ test.describe
     const failed = (page: Page) =>
       expect(page.getByText("Transfer failed.").first()).toBeVisible({ timeout: 60_000 });
 
-    test("a rapid triple click sends one key and makes one transfer", async ({ page }) => {
-      const amount = "0.0011";
-      const sent = recordRequests(page);
-      const send = await reviewTransfer(page, amount);
-      await send.evaluate((button: HTMLButtonElement) => {
-        button.click();
-        button.click();
-        button.click();
-      });
-      await sentOrSubmitted(page);
-
-      const keys = keysFor(sent, "POST", TRANSFERS);
-      expect(keys.every(Boolean)).toBe(true);
-      expect(new Set(keys).size).toBe(1);
-      expect(await countTransfers(page, amount)).toBe(1);
-    });
-
     test("a retry after a lost answer resends the key and the API replays", async ({ page }) => {
       const amount = "0.0012";
       const sent = recordRequests(page);
@@ -230,35 +213,9 @@ test.describe
       await sentOrSubmitted(page);
 
       const keys = keysFor(sent, "POST", TRANSFERS);
-      expect(keys).toHaveLength(2);
-      expect(keys[1]).toBe(keys[0]);
+      expect(keys).toEqual([expect.any(String), keys[0]]);
       expect(await countTransfers(page, amount)).toBe(1);
     });
-
-    for (const refusal of [
-      { status: 429, message: "Too many requests" },
-      { status: 401, message: "Session expired" },
-    ]) {
-      test(`a ${refusal.status} after a lost answer keeps the key for the retry`, async ({
-        page,
-      }) => {
-        const amount = refusal.status === 429 ? "0.0016" : "0.0017";
-        const sent = recordRequests(page);
-        await scriptAnswers(page, TRANSFERS, "POST", ["lost", refusal]);
-        const send = await reviewTransfer(page, amount);
-        await send.click();
-        await failed(page);
-        await send.click();
-        await expect(page.getByText(refusal.message).first()).toBeVisible({ timeout: 60_000 });
-        await send.click();
-        await sentOrSubmitted(page);
-
-        const keys = keysFor(sent, "POST", TRANSFERS);
-        expect(keys).toHaveLength(3);
-        expect(new Set(keys).size).toBe(1);
-        expect(await countTransfers(page, amount)).toBe(1);
-      });
-    }
 
     test("the key survives a reload after a lost answer", async ({ page }) => {
       const amount = "0.0022";
@@ -272,8 +229,7 @@ test.describe
       await sentOrSubmitted(page);
 
       const keys = keysFor(sent, "POST", TRANSFERS);
-      expect(keys).toHaveLength(2);
-      expect(keys[1]).toBe(keys[0]);
+      expect(keys).toEqual([expect.any(String), keys[0]]);
       expect(await countTransfers(page, amount)).toBe(1);
     });
 
@@ -364,29 +320,15 @@ test.describe
       await requestCreated(page);
 
       const posts = sent.filter((r) => r.method === "POST" && r.path === REQUESTS);
-      expect(posts).toHaveLength(3);
+      expect(posts.map((post) => post.key)).toEqual([
+        expect.any(String),
+        expect.any(String),
+        posts[0]?.key,
+      ]);
       expect(posts[1]?.key).not.toBe(posts[0]?.key);
-      expect(posts[2]?.key).toBe(posts[0]?.key);
       // The frozen expiry: the retry is byte-for-byte the first attempt's request.
       expect(posts[2]?.body).toBe(posts[0]?.body);
       expect(await countRequests(page, amountA)).toBe(1);
-    });
-
-    test("a payment request's key and frozen expiry survive a reload", async ({ page }) => {
-      const amount = "0.61";
-      const sent = recordRequests(page);
-      await scriptAnswers(page, REQUESTS, "POST", ["lost"]);
-      await (await requestForm(page, amount)).click();
-      await expect(page.locator("[data-sonner-toast]").first()).toBeVisible({ timeout: 60_000 });
-      await page.reload();
-      await (await requestForm(page, amount)).click();
-      await requestCreated(page);
-
-      const posts = sent.filter((r) => r.method === "POST" && r.path === REQUESTS);
-      expect(posts).toHaveLength(2);
-      expect(posts[1]?.key).toBe(posts[0]?.key);
-      expect(posts[1]?.body).toBe(posts[0]?.body);
-      expect(await countRequests(page, amount)).toBe(1);
     });
 
     // ------------------------------------------------------------- recurring edit
@@ -454,9 +396,7 @@ test.describe
       await expect(page.getByText("Schedule updated.").first()).toBeVisible({ timeout: 60_000 });
 
       const keys = keysFor(sent, "PATCH", path);
-      expect(keys).toHaveLength(3);
-      expect(keys.every(Boolean)).toBe(true);
-      expect(keys[1]).toBe(keys[0]);
+      expect(keys).toEqual([expect.any(String), keys[0], expect.any(String)]);
       expect(keys[2]).not.toBe(keys[0]);
       expect(Number((await schedule()).amount)).toBe(2.4);
     });

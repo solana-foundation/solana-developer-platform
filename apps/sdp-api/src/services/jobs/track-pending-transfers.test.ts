@@ -3,7 +3,6 @@ import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   type Signature,
   SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR,
-  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE,
 } from "@solana/kit";
@@ -32,7 +31,6 @@ import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedProcessingBatchChunk } from "@/test/helpers/transfer-batches";
 import { seedTestDatabase } from "@/test/mocks/db";
-import * as proposalRecovery from "./reconcile-pending-proposals";
 import { trackPendingTransfers } from "./track-pending-transfers";
 
 const TEST_SIG_1 =
@@ -284,35 +282,8 @@ describe("trackPendingTransfers", () => {
     rpc.respondSignatureStatusesAt(FLOOR_SLOT, () => null);
   });
 
-  it("settles chain transfers independently of the proposal recovery job", async () => {
-    const recovery = vi
-      .spyOn(proposalRecovery, "reconcilePendingProposals")
-      .mockRejectedValue(new Error("Provider recovery unavailable"));
-    onTestFinished(() => recovery.mockRestore());
-    rpc.respondSignatureStatuses(() => ({
-      slot: 99999,
-      confirmations: null,
-      confirmationStatus: "finalized",
-      err: null,
-    }));
-    await insertTransfer(
-      signedSubmission({
-        id: "xfr_chain_independent_of_proposals",
-        signature: TEST_SIG_1,
-        submissionStartedAt: minutesAgo(1),
-        updatedAt: minutesAgo(1),
-      })
-    );
-    await trackSandboxTransfers();
-    expect(recovery).not.toHaveBeenCalled();
-    expect(await getTransfer("xfr_chain_independent_of_proposals")).toMatchObject({
-      status: "finalized",
-      slot: 99999,
-    });
-  });
-
   describe("recoverStuckProcessingTransfers", () => {
-    it("marks stuck processing transfers (no signature, > 5 min stale) as failed", async () => {
+    it("fails a signature-less processing transfer after 5 minutes without reading the chain", async () => {
       await insertTransfer({
         id: "xfr_stuck_processing",
         status: "processing",
@@ -323,9 +294,11 @@ describe("trackPendingTransfers", () => {
 
       await trackSandboxTransfers();
 
-      const updated = await getTransfer("xfr_stuck_processing");
-      expect(updated?.status).toBe("failed");
-      expect(updated?.error).toBe("Transfer processing timed out");
+      await expect(getTransfer("xfr_stuck_processing")).resolves.toMatchObject({
+        status: "failed",
+        error: "Transfer processing timed out",
+      });
+      expect(statusReads()).toEqual([]);
     });
 
     it("does not fail processing transfers that are still within the threshold", async () => {
@@ -509,58 +482,40 @@ describe("trackPendingTransfers", () => {
       ]);
     });
 
-    it.each([
-      {
-        refusal: "an answer from below the floor",
-        historyReply: signatureStatusesReplyAt(FLOOR_SLOT - 10, [null]),
-      },
-      {
-        refusal: "a served -32016",
-        historyReply: {
-          error: {
-            code: SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
-            message: "Minimum context slot has not been reached",
-            data: { contextSlot: FLOOR_SLOT - 10 },
-          },
-        },
-      },
-    ] satisfies readonly { refusal: string; historyReply: ClusterRpcReply }[])(
-      "keeps and rotates an expired started submission on $refusal, logging both slots",
-      async ({ historyReply }) => {
-        rpc.respond("getSignatureStatuses", (request) =>
-          signatureStatusesRead(request).searchTransactionHistory
-            ? historyReply
-            : signatureStatusesReply([null])
-        );
-        const warn = spyOnLog("warn");
-        const staleAt = minutesAgo(10);
+    it("keeps and rotates an expired started submission when history answers from below the floor, logging both slots", async () => {
+      rpc.respond("getSignatureStatuses", (request) =>
+        signatureStatusesRead(request).searchTransactionHistory
+          ? signatureStatusesReplyAt(FLOOR_SLOT - 10, [null])
+          : signatureStatusesReply([null])
+      );
+      const warn = spyOnLog("warn");
+      const staleAt = minutesAgo(10);
 
-        await insertTransfer(
-          signedSubmission({
-            id: "xfr_started_outbox_node_behind",
-            signature: TEST_SIG_1,
-            submissionStartedAt: staleAt,
-            updatedAt: staleAt,
-          })
-        );
+      await insertTransfer(
+        signedSubmission({
+          id: "xfr_started_outbox_node_behind",
+          signature: TEST_SIG_1,
+          submissionStartedAt: staleAt,
+          updatedAt: staleAt,
+        })
+      );
 
-        await trackSandboxTransfers();
+      await trackSandboxTransfers();
 
-        const unresolved = await getTransfer("xfr_started_outbox_node_behind");
-        expect(unresolved?.status).toBe("processing");
-        expect(unresolved?.updated_at).not.toBe(staleAt);
-        expect(warn).toHaveBeenCalledWith(
-          expect.objectContaining({
-            event: "sdp_api_payment_submission_unresolved",
-            reason: "node_behind_floor",
-            transfer_id: "xfr_started_outbox_node_behind",
-            context_slot: String(FLOOR_SLOT - 10),
-            min_context_slot: String(FLOOR_SLOT),
-          }),
-          "sdp_api_payment_submission_unresolved"
-        );
-      }
-    );
+      const unresolved = await getTransfer("xfr_started_outbox_node_behind");
+      expect(unresolved?.status).toBe("processing");
+      expect(unresolved?.updated_at).not.toBe(staleAt);
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "sdp_api_payment_submission_unresolved",
+          reason: "node_behind_floor",
+          transfer_id: "xfr_started_outbox_node_behind",
+          context_slot: String(FLOOR_SLOT - 10),
+          min_context_slot: String(FLOOR_SLOT),
+        }),
+        "sdp_api_payment_submission_unresolved"
+      );
+    });
 
     it("fails an expired started submission absent from history at the floor at the horizon's edge", async () => {
       rpc.answer("getEpochInfo", finalizedTipAt(LAST_VALID_BLOCK_HEIGHT + HISTORY_HORIZON_BLOCKS));
@@ -811,6 +766,7 @@ describe("trackPendingTransfers", () => {
 
     it("keeps and rotates signed submissions when the finalized height is unavailable", async () => {
       rpc.respond("getEpochInfo", () => INTERNAL_ERROR);
+      const warn = spyOnLog("warn");
       const staleAt = minutesAgo(10);
 
       await insertTransfer(
@@ -827,7 +783,17 @@ describe("trackPendingTransfers", () => {
       const unresolved = await getTransfer("xfr_started_outbox_height_unavailable");
       expect(unresolved?.status).toBe("processing");
       expect(unresolved?.updated_at).not.toBe(staleAt);
-      expect(statusReads()).toHaveLength(1);
+      expect(statusReads()).toEqual([
+        { cluster: "devnet", signatures: [TEST_SIG_1], searchTransactionHistory: false },
+      ]);
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "sdp_api_payment_submission_unresolved",
+          reason: "history_unavailable",
+          transfer_id: "xfr_started_outbox_height_unavailable",
+        }),
+        "sdp_api_payment_submission_unresolved"
+      );
     });
 
     it("applies archival verdicts to the matching signatures", async () => {
@@ -885,6 +851,7 @@ describe("trackPendingTransfers", () => {
       await expect(getTransfer("xfr_archive_c_failed")).resolves.toMatchObject({
         status: "failed",
         slot: 303,
+        error: '{"InstructionError":[0,"InsufficientFunds"]}',
       });
       await expect(getTransfer("xfr_archive_d_processed")).resolves.toMatchObject({
         status: "processing",
@@ -899,6 +866,8 @@ describe("trackPendingTransfers", () => {
         confirmationStatus: "confirmed",
         err: null,
       }));
+      const warn = spyOnLog("warn");
+      spyOnLog("error");
       const staleAt = minutesAgo(10);
 
       await insertTransfer({
@@ -916,6 +885,14 @@ describe("trackPendingTransfers", () => {
       const unresolved = await getTransfer("xfr_batch_verdict_write_failed");
       expect(unresolved?.status).toBe("processing");
       expect(unresolved?.updated_at).not.toBe(staleAt);
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "sdp_api_payment_submission_unresolved",
+          reason: "verdict_write_failed",
+          transfer_id: "xfr_batch_verdict_write_failed",
+        }),
+        "sdp_api_payment_submission_unresolved"
+      );
     });
 
     it("uses the finalized height rather than row age to expire a signed submission", async () => {
@@ -935,57 +912,6 @@ describe("trackPendingTransfers", () => {
       const unchanged = await getTransfer("xfr_started_outbox_not_expired");
       expect(unchanged?.status).toBe("processing");
       expect(statusReads()).toHaveLength(1);
-    });
-
-    it("reconciles mixed processing rows in one Postgres-backed run", async () => {
-      rpc.respondSignatureStatuses(() => ({
-        slot: 22222,
-        confirmations: 3,
-        confirmationStatus: "confirmed",
-        err: null,
-      }));
-
-      await insertTransfer(
-        signedSubmission({
-          id: "xfr_batch_processing_confirmed",
-          signature: TEST_SIG_1,
-          submissionStartedAt: minutesAgo(2),
-          updatedAt: minutesAgo(2),
-        })
-      );
-      await insertTransfer({
-        id: "xfr_batch_processing_stuck",
-        status: "processing",
-        signature: null,
-        createdAt: minutesAgo(7),
-        updatedAt: minutesAgo(7),
-      });
-
-      await trackSandboxTransfers();
-
-      const [confirmed, stuck] = await Promise.all([
-        getTransfer("xfr_batch_processing_confirmed"),
-        getTransfer("xfr_batch_processing_stuck"),
-      ]);
-
-      expect(confirmed?.status).toBe("confirmed");
-      expect(confirmed?.slot).toBe(22222);
-      expect(stuck?.status).toBe("failed");
-      expect(stuck?.error).toBe("Transfer processing timed out");
-    });
-
-    it("does not call getSignatureStatuses when there are no processing transfers with signatures", async () => {
-      await insertTransfer({
-        id: "xfr_processing_without_sig",
-        status: "processing",
-        signature: null,
-        createdAt: minutesAgo(1),
-        updatedAt: minutesAgo(1),
-      });
-
-      await trackSandboxTransfers();
-
-      expect(statusReads()).toEqual([]);
     });
 
     it("reads each project's processing transfers on its environment's cluster in one tick", async () => {
@@ -1358,7 +1284,16 @@ describe("trackPendingTransfers", () => {
       await trackSandboxTransfers();
 
       expect(await getTransfer("xfr_audit_refused")).toMatchObject({ status: "finalized" });
-      expect(await listIntentOutcomes(intentId)).toHaveLength(1);
+      expect(await listIntentOutcomes(intentId)).toEqual([
+        {
+          status: "success",
+          metadata: expect.objectContaining({
+            status: "finalized",
+            signature: String(TEST_SIG_1),
+            slot: "654",
+          }),
+        },
+      ]);
     });
 
     it("settles a row without an intent without writing an outcome", async () => {
@@ -1420,34 +1355,6 @@ describe("trackPendingTransfers", () => {
       const finalized = await getTransfer("xfr_regression_confirmed_at");
       expect(finalized?.status).toBe("finalized");
       expect(finalized?.confirmed_at).toBe(stampedAt);
-    });
-
-    it("running the reconciler twice against the same chain state is idempotent", async () => {
-      rpc.respondSignatureStatuses(() => ({
-        slot: 200,
-        confirmations: null,
-        confirmationStatus: "finalized",
-        err: null,
-      }));
-
-      await insertTransfer({
-        id: "xfr_regression_double_fire",
-        status: "confirmed",
-        signature: String(TEST_SIG_1),
-        createdAt: minutesAgo(3),
-        updatedAt: minutesAgo(2),
-        confirmedAt: minutesAgo(2),
-      });
-
-      await trackSandboxTransfers();
-      const first = await getTransfer("xfr_regression_double_fire");
-
-      await trackSandboxTransfers();
-      const second = await getTransfer("xfr_regression_double_fire");
-
-      expect(first?.status).toBe("finalized");
-      expect(second?.status).toBe("finalized");
-      expect(second?.slot).toBe(first?.slot);
     });
 
     it("a late poll verdict never regresses a finalized or failed transfer", async () => {

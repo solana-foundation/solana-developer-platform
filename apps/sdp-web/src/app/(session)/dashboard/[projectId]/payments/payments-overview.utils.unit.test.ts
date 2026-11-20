@@ -15,7 +15,6 @@ import {
   resolveTransferTokenLabel,
   resolveUsdBalanceValue,
   resolveUsdUnitPrice,
-  statusMessageKey,
   statusVariant,
 } from "./payments-overview.utils";
 
@@ -70,11 +69,12 @@ describe("resolveTransferTokenLabel", () => {
 describe("resolveTokenByMint", () => {
   it("maps the native SOL alias to the SOL mint", () => {
     // Rows written by the native send path record the literal "SOL".
-    expect(resolveTokenByMint("SOL", {})).toMatchObject({
-      mint: SOL_MINT,
-      tokenName: "SOL",
-      isWellKnown: true,
+    expect(resolveTokenByMint("SOL", {})).toEqual({
       tokenId: null,
+      tokenName: "SOL",
+      metadataImageUrl: null,
+      mint: SOL_MINT,
+      isWellKnown: true,
     });
   });
 
@@ -86,10 +86,11 @@ describe("resolveTokenByMint", () => {
       imageUrl: "https://cdn.example/bsgd.png",
     };
 
-    expect(resolveTokenByMint(UNCATALOGUED_MINT, { [UNCATALOGUED_MINT]: issued })).toMatchObject({
+    expect(resolveTokenByMint(UNCATALOGUED_MINT, { [UNCATALOGUED_MINT]: issued })).toEqual({
       tokenId: "tok_1",
       tokenName: "bSGD",
       metadataImageUrl: "https://cdn.example/bsgd.png",
+      mint: UNCATALOGUED_MINT,
       isWellKnown: false,
     });
   });
@@ -133,30 +134,6 @@ describe("isHttpUrl", () => {
   it("rejects unparseable values", () => {
     expect(isHttpUrl("not-a-url")).toBe(false);
     expect(isHttpUrl("")).toBe(false);
-  });
-});
-
-describe("statusMessageKey", () => {
-  const cases = [
-    ["pending", "DashboardPayments.transactions.pending"],
-    ["processing", "DashboardPayments.transactions.processing"],
-    ["confirmed", "DashboardPayments.transactions.confirmed"],
-    ["finalized", "DashboardPayments.transactions.finalized"],
-    ["failed", "DashboardPayments.transactions.failed"],
-    ["awaiting_payment", "DashboardPayments.transactions.awaitingPayment"],
-    ["settling", "DashboardPayments.transactions.settling"],
-    ["completed", "DashboardPayments.transactions.completed"],
-    ["canceled", "DashboardPayments.transactions.canceled"],
-    ["expired", "DashboardPayments.transactions.expired"],
-  ] satisfies ReadonlyArray<
-    readonly [
-      (typeof PAYMENT_TRANSFER_STATUSES)[number],
-      `DashboardPayments.transactions.${string}`,
-    ]
-  >;
-
-  it.each(cases)("maps %s to %s", (status, expected) => {
-    expect(statusMessageKey(status)).toBe(expected);
   });
 });
 
@@ -215,14 +192,14 @@ describe("normalizeAggregateBalances", () => {
 
   it("counts SOL in the total balance", () => {
     const rows = normalizeAggregateBalances([solBalance, usdcBalance, issuedBalance]);
-    expect(resolveTotalBalance(rows)).toBe(375.25 + 100 + 37.5);
+    expect(resolveTotalBalance(rows)).toBe(512.75);
   });
 
   it("keeps a holding with no price feed, which the total leaves out", () => {
     const unpriced: CustodyWalletTokenBalance = { ...issuedBalance, usdValue: undefined };
     const rows = normalizeAggregateBalances([solBalance, usdcBalance, unpriced]);
     expect(rows.map((row) => row.token)).toEqual(["USDC", "bSGD", "SOL"]);
-    expect(resolveTotalBalance(rows)).toBe(375.25 + 100);
+    expect(resolveTotalBalance(rows)).toBe(475.25);
     expect(countUnpricedHoldings(rows)).toBe(1);
   });
 
@@ -250,7 +227,7 @@ describe("resolveTotalBalance", () => {
     decimals: 6,
   };
 
-  it("has no dollar total for 1 SOL beside a spent USDC account, where it read $0.00", () => {
+  it("has no dollar total when the only holding has no price", () => {
     expect(resolveTotalBalance([unpricedSol, spentUsdc])).toBeNull();
     expect(countUnpricedHoldings([unpricedSol, spentUsdc])).toBe(1);
   });

@@ -1,17 +1,18 @@
 // @vitest-environment jsdom
-/** A single transfer's idempotency key: stable across retry, retired once answered. */
+/**
+ * A single transfer's idempotency key: the same key on every retry of one payment until an
+ * answer settles it, and a new key for a different payment.
+ */
 
 import { address } from "@solana/kit";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { z } from "zod";
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { MOVEMENT_POLL_INTERVAL_MS, resetMovementWatchesForTests } from "@/lib/dashboard-fetch";
 import { KEPT_KEY_WINDOW_MS } from "@/lib/idempotency-key-store";
+import { sentDashboardRequests, stubDashboardFetch } from "@/test/dashboard-fetch";
 import type { Translate } from "./payments-workspace.data";
 import {
-  claimTransferIdempotencyKey,
   resetTransferIdempotencyStateForTests,
   sendTransferUnderKey,
-  transferRequestFingerprint,
 } from "./transfer-idempotency";
 
 const SUBMISSION = {
@@ -20,6 +21,17 @@ const SUBMISSION = {
   token: address("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"),
   amount: "250",
 };
+
+const t: Translate = (key) => key;
+
+const confirmed = () => Response.json({ data: { transfer: { id: "xfr_1", status: "confirmed" } } });
+
+/** The Idempotency-Key each transfer send carried, in order. */
+function sentKeys(fetchMock: Mock<typeof fetch>): (string | null)[] {
+  return sentDashboardRequests(fetchMock)
+    .filter((request) => request.method === "POST")
+    .map((request) => request.idempotencyKey);
+}
 
 beforeEach(() => {
   window.sessionStorage.clear();
@@ -32,49 +44,57 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("transferRequestFingerprint", () => {
-  // SOLA9-773: the API fingerprints the canonical amount, so a browser key
-  // over the raw spelling minted a new key for `1` after a lost `1.0`.
-  it("is one payment however the amount is spelled", () => {
-    const fingerprint = (amount: string) => transferRequestFingerprint({ ...SUBMISSION, amount });
-    expect(fingerprint("1.0")).toBe(fingerprint("1"));
-    expect(fingerprint("01.50")).toBe(fingerprint("1.5"));
-    expect(fingerprint("1.01")).not.toBe(fingerprint("1"));
-    expect(fingerprint("10")).not.toBe(fingerprint("1"));
-  });
-
-  // Naming the contact account pays the same address: a retry that only changes
-  // it must reuse the key, so the API refuses it (422) instead of paying twice.
-  it("is one payment whether or not it names the contact account", () => {
-    expect(transferRequestFingerprint({ ...SUBMISSION, counterpartyAccountId: "cpacct_1" })).toBe(
-      transferRequestFingerprint(SUBMISSION)
-    );
-  });
-});
-
 describe("sendTransferUnderKey", () => {
-  const t: Translate = (key) => key;
-
+  // SOLA9-773: the API fingerprints the canonical amount, so a key over the raw
+  // spelling minted a new key for `1` after a lost `1.0`.
   it("resends a lost `1.0` as `1` under the same key, spelled as it is keyed", async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>(async () =>
-        Response.json({ data: { transfer: { id: "xfr_1", status: "confirmed" } } })
-      )
-      .mockRejectedValueOnce(new TypeError("Failed to fetch"));
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = stubDashboardFetch(confirmed).mockRejectedValueOnce(
+      new TypeError("Failed to fetch")
+    );
 
     await expect(sendTransferUnderKey({ ...SUBMISSION, amount: "1.0" }, t)).rejects.toThrow(
       "Failed to fetch"
     );
     await sendTransferUnderKey({ ...SUBMISSION, amount: "1" }, t);
 
-    const calls = fetchMock.mock.calls.map(([, init]) => ({
-      key: new Headers(init?.headers).get("Idempotency-Key"),
-      amount: z.object({ amount: z.string() }).parse(JSON.parse(String(init?.body))).amount,
-    }));
-    expect(calls).toHaveLength(2);
-    expect(calls[1]?.key).toBe(calls[0]?.key);
-    expect(calls.map((call) => call.amount)).toEqual(["1", "1"]);
+    const sent = sentDashboardRequests(fetchMock);
+    expect(sent.map((request) => request.body)).toEqual([
+      { ...SUBMISSION, amount: "1" },
+      { ...SUBMISSION, amount: "1" },
+    ]);
+    expect(sent[1]?.idempotencyKey).toBe(sent[0]?.idempotencyKey);
+  });
+
+  it("sends a different amount, destination or memo under a new key", async () => {
+    const fetchMock = stubDashboardFetch(() =>
+      Response.json({ error: { message: "unavailable" } }, { status: 503 })
+    );
+
+    for (const submission of [
+      SUBMISSION,
+      { ...SUBMISSION, amount: "251" },
+      { ...SUBMISSION, destination: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM" },
+      { ...SUBMISSION, memo: "invoice 7" },
+    ]) {
+      await expect(sendTransferUnderKey(submission, t)).rejects.toThrow("unavailable");
+    }
+
+    expect(new Set(sentKeys(fetchMock)).size).toBe(4);
+  });
+
+  // Naming the contact account pays the same address: a retry that only changes
+  // it must reuse the key, so the API refuses it (422) instead of paying twice.
+  it("resends under the same key when a retry only adds the contact account", async () => {
+    const fetchMock = stubDashboardFetch(confirmed).mockRejectedValueOnce(
+      new TypeError("Failed to fetch")
+    );
+
+    await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toThrow("Failed to fetch");
+    await sendTransferUnderKey({ ...SUBMISSION, counterpartyAccountId: "cpacct_1" }, t);
+
+    const keys = sentKeys(fetchMock);
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).toBe(keys[0]);
   });
 
   // The API answers a transfer's key from the transfer row after its 24-hour
@@ -82,41 +102,29 @@ describe("sendTransferUnderKey", () => {
   // would pay again.
   it("resends a kept key however old it is", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const fetchMock = vi
-      .fn<typeof fetch>(async () =>
-        Response.json({ data: { transfer: { id: "xfr_1", status: "confirmed" } } })
-      )
-      .mockRejectedValueOnce(new TypeError("Failed to fetch"));
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = stubDashboardFetch(confirmed).mockRejectedValueOnce(
+      new TypeError("Failed to fetch")
+    );
 
     await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toThrow("Failed to fetch");
     vi.setSystemTime(Date.now() + KEPT_KEY_WINDOW_MS);
     await sendTransferUnderKey(SUBMISSION, t);
 
-    const keys = fetchMock.mock.calls.map(([, init]) =>
-      new Headers(init?.headers).get("Idempotency-Key")
-    );
+    const keys = sentKeys(fetchMock);
     expect(keys).toHaveLength(2);
     expect(keys[1]).toBe(keys[0]);
   });
 
-  /** The key the request actually carried. */
-  function sentKey(fetchMock: ReturnType<typeof vi.fn<typeof fetch>>): string | null {
-    const init = fetchMock.mock.calls[0]?.[1];
-    return new Headers(init?.headers).get("Idempotency-Key");
-  }
+  it("sends the same payment again under a new key once the API answers it final", async () => {
+    const fetchMock = stubDashboardFetch(confirmed);
 
-  it("retires the key once the API records the transfer", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      Response.json({ data: { transfer: { id: "xfr_1", status: "confirmed" } } })
-    );
-    vi.stubGlobal("fetch", fetchMock);
+    const { transfer } = await sendTransferUnderKey(SUBMISSION, t);
+    await sendTransferUnderKey(SUBMISSION, t);
 
-    const { transfer, fingerprint } = await sendTransferUnderKey(SUBMISSION, t);
-
-    expect(transfer.id).toBe("xfr_1");
-    // Retired: the next send of the same payment is a new payment.
-    expect(claimTransferIdempotencyKey(fingerprint)).not.toBe(sentKey(fetchMock));
+    expect(transfer).toEqual({ id: "xfr_1", status: "confirmed" });
+    const keys = sentKeys(fetchMock);
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).not.toBe(keys[0]);
   });
 
   // APE-461: a 2xx retired the key while the transfer was still processing,
@@ -126,8 +134,8 @@ describe("sendTransferUnderKey", () => {
   it("keeps the key through a stale replay and retires it once a GET shows the transfer final", async () => {
     vi.useFakeTimers();
     let posts = 0;
-    const fetchMock = vi.fn<typeof fetch>(async (_input, init) => {
-      if (init?.method === "GET") {
+    const fetchMock = stubDashboardFetch(({ method }) => {
+      if (method === "GET") {
         return Response.json({ data: { transfer: { id: "xfr_1", status: "finalized" } } });
       }
       posts += 1;
@@ -136,64 +144,82 @@ describe("sendTransferUnderKey", () => {
         posts > 1 ? { headers: { "Idempotent-Replayed": "true" } } : undefined
       );
     });
-    vi.stubGlobal("fetch", fetchMock);
-    const keyOf = (call: number) =>
-      new Headers(fetchMock.mock.calls[call]?.[1]?.headers).get("Idempotency-Key");
 
     await sendTransferUnderKey(SUBMISSION, t);
     await sendTransferUnderKey(SUBMISSION, t);
-    expect(keyOf(1)).toBe(keyOf(0));
+    expect(sentKeys(fetchMock)[1]).toBe(sentKeys(fetchMock)[0]);
 
     await vi.advanceTimersByTimeAsync(MOVEMENT_POLL_INTERVAL_MS);
-    const read = fetchMock.mock.calls.find(([, init]) => init?.method === "GET");
-    expect(read?.[0]).toBe("/api/dashboard/payments/transfers/xfr_1");
+    expect(
+      sentDashboardRequests(fetchMock)
+        .filter((request) => request.method === "GET")
+        .map((request) => request.path)
+    ).toEqual(["/api/dashboard/payments/transfers/xfr_1"]);
 
     await sendTransferUnderKey(SUBMISSION, t);
-    expect(keyOf(fetchMock.mock.calls.length - 1)).not.toBe(keyOf(0));
+    const keys = sentKeys(fetchMock);
+    expect(keys).toHaveLength(3);
+    expect(keys[2]).not.toBe(keys[0]);
   });
 
-  // A refusal moved nothing, so the key is free. A lost answer may have
-  // recorded the payment, so it is not.
+  // A refusal the API recorded moved nothing, so the key is free. Any other
+  // refusal settles nothing about a payment the lost first attempt may have
+  // recorded (HOO-1918), so the next press is answered under the same key.
   it.each([
-    ["a 4xx refusal frees it", 422, false],
-    ["a key conflict keeps it", 409, true],
-    ["a 5xx keeps it", 503, true],
-  ])("%s", async (_label, status, kept) => {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      Response.json({ error: { message: "refused" } }, { status })
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    const fingerprint = transferRequestFingerprint(SUBMISSION);
+    ["a 422 refusal frees it", 422, false, false],
+    ["a replayed refusal frees it", 503, true, false],
+    ["a 409 keeps it", 409, false, true],
+    ["a rate limit keeps it", 429, false, true],
+    ["an expired session keeps it", 401, false, true],
+    ["a 5xx keeps it", 503, false, true],
+  ])("after a lost answer, %s", async (_label, status, replayed, kept) => {
+    const fetchMock = stubDashboardFetch(() =>
+      Response.json(
+        { error: { message: "refused" } },
+        { status, headers: replayed ? { "Idempotent-Replayed": "true" } : undefined }
+      )
+    ).mockRejectedValueOnce(new TypeError("Failed to fetch"));
 
-    await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toThrow();
+    await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toThrow("Failed to fetch");
+    await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toMatchObject({
+      name: "TransferRequestError",
+      message: "refused",
+      status,
+    });
+    await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toThrow("refused");
 
-    expect(claimTransferIdempotencyKey(fingerprint) === sentKey(fetchMock)).toBe(kept);
+    const keys = sentKeys(fetchMock);
+    expect(keys).toHaveLength(3);
+    expect(keys[1]).toBe(keys[0]);
+    expect(keys[2] === keys[0]).toBe(kept);
   });
 
   // Keegan (#2333): a 422 IDEMPOTENCY_KEY_REUSED retired the key, so the next
   // press minted a new one and could pay again while the first may have landed.
   it("keeps the key on IDEMPOTENCY_KEY_REUSED and says to restore the original or check", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
+    const fetchMock = stubDashboardFetch(() =>
       Response.json(
         { error: { code: "IDEMPOTENCY_KEY_REUSED", message: "reused" } },
         { status: 422 }
       )
     );
-    vi.stubGlobal("fetch", fetchMock);
-    const fingerprint = transferRequestFingerprint(SUBMISSION);
 
-    await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toThrow(
-      "Shared.idempotency.keyReusedRestoreOriginal"
-    );
+    for (const _press of [1, 2]) {
+      await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toThrow(
+        "Shared.idempotency.keyReusedRestoreOriginal"
+      );
+    }
 
-    expect(claimTransferIdempotencyKey(fingerprint)).toBe(sentKey(fetchMock));
+    const keys = sentKeys(fetchMock);
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).toBe(keys[0]);
   });
 
   // Greptile (#2333): a refusal whose body failed to download read as an
   // answered 422 with no code, which retired the key the payment ran under.
   it("keeps the key when a refusal's body fails to download", async () => {
-    const fetchMock = vi.fn<typeof fetch>(
-      async () =>
+    const fetchMock = stubDashboardFetch(
+      () =>
         new Response(
           new ReadableStream({
             start(controller) {
@@ -203,73 +229,46 @@ describe("sendTransferUnderKey", () => {
           { status: 422, headers: { "Content-Type": "application/json" } }
         )
     );
-    vi.stubGlobal("fetch", fetchMock);
-    const fingerprint = transferRequestFingerprint(SUBMISSION);
 
-    await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toThrow();
+    await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toThrow(
+      "DashboardPayments.workspace.transferRequestFailed"
+    );
+    await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toThrow(
+      "DashboardPayments.workspace.transferRequestFailed"
+    );
 
-    expect(claimTransferIdempotencyKey(fingerprint)).toBe(sentKey(fetchMock));
+    const keys = sentKeys(fetchMock);
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).toBe(keys[0]);
   });
 
   // A money movement never mints a fresh key while the original may have run:
   // the next press is answered under the same key.
   it("keeps the key on an unknown outcome and resends under it", async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>(async () =>
-        Response.json({ data: { transfer: { id: "xfr_1", status: "confirmed" } } })
+    const fetchMock = stubDashboardFetch(confirmed).mockResolvedValueOnce(
+      Response.json(
+        { error: { code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN", message: "use a new key" } },
+        { status: 409 }
       )
-      .mockResolvedValueOnce(
-        Response.json(
-          { error: { code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN", message: "use a new key" } },
-          { status: 409 }
-        )
-      );
-    vi.stubGlobal("fetch", fetchMock);
+    );
 
     await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toThrow(
       "Shared.idempotency.outcomeUnknownCheckList"
     );
     await sendTransferUnderKey(SUBMISSION, t);
 
-    const keys = fetchMock.mock.calls.map(([, init]) =>
-      new Headers(init?.headers).get("Idempotency-Key")
-    );
+    const keys = sentKeys(fetchMock);
     expect(keys).toHaveLength(2);
     expect(keys[1]).toBe(keys[0]);
-  });
-
-  // Browser test (HOO-1918): the API recorded the transfer but the answer was
-  // lost; a refusal after that settles nothing about the recorded transfer, so
-  // the third press must replay it under the first key, not send a second one.
-  it.each([
-    ["a rate limit", 429],
-    ["an expired session", 401],
-  ])("keeps a lost attempt's key through %s", async (_label, status) => {
-    const fetchMock = vi
-      .fn<typeof fetch>(async () => Response.json({ error: { message: "refused" } }, { status }))
-      .mockRejectedValueOnce(new TypeError("Failed to fetch"));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toThrow("Failed to fetch");
-    await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toMatchObject({ status });
-    await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toThrow();
-
-    const keys = fetchMock.mock.calls.map(([, init]) =>
-      new Headers(init?.headers).get("Idempotency-Key")
-    );
-    expect(keys).toHaveLength(3);
-    expect(new Set(keys).size).toBe(1);
   });
 
   // A key held in memory only is lost on reload, and a retry after the reload
   // would send the payment again under a fresh key.
   it("resends an earlier attempt's stored key even once storage refuses writes", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
+    const fetchMock = stubDashboardFetch(() =>
       Response.json({ error: { message: "unavailable" } }, { status: 503 })
     );
-    vi.stubGlobal("fetch", fetchMock);
-    await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toThrow();
-    const unanswered = sentKey(fetchMock);
+    await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toThrow("unavailable");
 
     const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new DOMException("QuotaExceededError");
@@ -282,76 +281,48 @@ describe("sendTransferUnderKey", () => {
     } finally {
       setItem.mockRestore();
     }
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(new Headers(fetchMock.mock.calls[1]?.[1]?.headers).get("Idempotency-Key")).toBe(
-      unanswered
-    );
-  });
-});
 
-describe("concurrent transfer submissions", () => {
+    const keys = sentKeys(fetchMock);
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).toBe(keys[0]);
+  });
+
   it("joins simultaneous sends of one payment into a single request", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
+    const fetchMock = stubDashboardFetch(() =>
       Response.json({ data: { transfer: { id: "xfr_2", status: "confirmed" } } })
     );
-    vi.stubGlobal("fetch", fetchMock);
-    const t: Translate = (key) => key;
+
     const outcomes = await Promise.all([
       sendTransferUnderKey(SUBMISSION, t),
       sendTransferUnderKey(SUBMISSION, t),
     ]);
-    // Both callers report the ONE payment the key joined them into — each
-    // anchored to the literal, so a divergence between them cannot hide.
-    expect(outcomes[0]?.transfer).toEqual({ id: "xfr_2", status: "confirmed" });
-    expect(outcomes[1]?.transfer).toEqual({ id: "xfr_2", status: "confirmed" });
-    const sends = fetchMock.mock.calls.filter(([input]) =>
-      String(input).includes("payments/transfers")
-    );
-    expect(sends).toHaveLength(1);
-  });
-});
 
-describe("provider session retries", () => {
-  it("retains a successful payment key across an unauthorized callback retry", async () => {
-    let unauthorized = false;
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      unauthorized
-        ? Response.json({ error: { message: "Session expired" } }, { status: 401 })
-        : Response.json({ data: { transfer: { id: "xfr_1", status: "confirmed" } } })
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    const t: Translate = (key) => key;
-    await sendTransferUnderKey(SUBMISSION, t, "session_1");
-    unauthorized = true;
-    await expect(sendTransferUnderKey(SUBMISSION, t, "session_1")).rejects.toThrow(
-      "Session expired"
-    );
-    unauthorized = false;
-    resetTransferIdempotencyStateForTests();
-    await sendTransferUnderKey(SUBMISSION, t, "session_1");
-    const keys = fetchMock.mock.calls.map(([, init]) =>
-      new Headers(init?.headers).get("Idempotency-Key")
-    );
-    expect(keys[0]).toBeTruthy();
-    expect(new Set(keys).size).toBe(1);
+    // Both callers report the one payment the key joined them into.
+    expect(outcomes).toEqual([
+      { transfer: { id: "xfr_2", status: "confirmed" } },
+      { transfer: { id: "xfr_2", status: "confirmed" } },
+    ]);
+    expect(sentKeys(fetchMock)).toHaveLength(1);
   });
 
-  it("keeps one payment key after success and separates later sessions", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
+  // A provider may repeat its signature callback after a lost event response,
+  // and its session always names the same payment.
+  it("keeps a provider session's key after success and across a reload, and gives another session its own", async () => {
+    const fetchMock = stubDashboardFetch(() =>
       Response.json({
         data: { transfer: { id: "xfr_1", status: "confirmed", signature: "sig_1" } },
       })
     );
-    vi.stubGlobal("fetch", fetchMock);
-    const t: Translate = (key) => key;
+
     await sendTransferUnderKey(SUBMISSION, t, "session_1");
+    // A reload: only what session storage kept survives.
     resetTransferIdempotencyStateForTests();
     await sendTransferUnderKey(SUBMISSION, t, "session_1");
     await sendTransferUnderKey(SUBMISSION, t, "session_2");
-    const keys = fetchMock.mock.calls.map(([, init]) =>
-      new Headers(init?.headers).get("Idempotency-Key")
-    );
-    expect(keys[0]).toBe(keys[1]);
+
+    const keys = sentKeys(fetchMock);
+    expect(keys).toHaveLength(3);
+    expect(keys[1]).toBe(keys[0]);
     expect(keys[2]).not.toBe(keys[0]);
   });
 });

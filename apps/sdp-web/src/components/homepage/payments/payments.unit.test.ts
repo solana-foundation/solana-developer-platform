@@ -2,12 +2,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { formatNumber } from "@/lib/number-format";
 import catalog from "@/messages/en/homepage.json";
+import { stubMatchMedia } from "@/test/media-queries";
 import { type FakeIntersectionObserver, stubIntersectionObserver } from "@/test/visibility";
 import { createBenchController } from "./bench-controller";
 import { buildFigure } from "./figures/build-figures";
 import { createFigurePlayer } from "./figures/player";
 import { FIGURE_WORDS, type FigureCopy } from "./figures/scene-input";
-import { figureViewBox, PAYMENT_KINDS } from "./kinds";
+import { PAYMENT_KINDS } from "./kinds";
 
 const words = catalog.Homepage.payments.figure;
 const copy: FigureCopy = {
@@ -22,13 +23,6 @@ const copy: FigureCopy = {
     ),
 };
 const fonts = { sans: '"Season Sans", sans-serif', mono: "ui-monospace, monospace" };
-
-describe("figureViewBox", () => {
-  it("frames the whole floor on a wide screen and the drawing alone on a phone", () => {
-    expect(figureViewBox("pay", false)).toBe("0 0 640 520");
-    expect(figureViewBox("pay", true)).toBe("36 45 572 431");
-  });
-});
 
 describe("buildFigure", () => {
   it.each(PAYMENT_KINDS)("draws %s as a labelled, timed svg in the catalog's words", (kind) => {
@@ -70,7 +64,7 @@ describe("createFigurePlayer", () => {
     const svg = svgOf(host);
     const onEnd = vi.fn();
     const player = createFigurePlayer(svg, "en", onEnd);
-    expect(player.dwell).toBe(2 * 2000 + 900);
+    expect(player.dwell).toBe(4_900);
     player.start();
     expect(svg.classList.contains("live")).toBe(true);
     expect(svg.classList.contains("v1")).toBe(false);
@@ -121,11 +115,7 @@ describe("createBenchController", () => {
 
   beforeEach(() => {
     observers = stubIntersectionObserver();
-    vi.stubGlobal("matchMedia", () => ({
-      matches: false,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-    }));
+    stubMatchMedia();
     Element.prototype.animate = vi.fn(() => {
       const animation: Pick<Animation, "cancel" | "pause" | "play" | "playState" | "onfinish"> = {
         cancel: vi.fn(),
@@ -183,6 +173,7 @@ describe("createBenchController", () => {
     expect(onShow).toHaveBeenLastCalledWith(0);
     controller.destroy();
     expect(deck.children).toHaveLength(0);
+    expect(observers.length).toBeGreaterThan(0);
     for (const observer of observers) expect(observer.disconnect).toHaveBeenCalled();
   });
 

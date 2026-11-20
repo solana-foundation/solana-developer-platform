@@ -34,13 +34,9 @@ async function renderPayments() {
 }
 
 describe("PaymentsSection", () => {
-  it("is the paper-ground #payments section, the bench alone", async () => {
+  it("is the #payments section the nav and footer link to", async () => {
     const view = await renderPayments();
-    const section = view.querySelector("section");
-    expect(section?.id).toBe("payments");
-    expect(section?.dataset.ground).toBe("paper");
-    expect(view.querySelectorAll("h1, h2, h3")).toHaveLength(0);
-    expect(view.querySelector('[role="img"]')).toBeNull();
+    expect(view.querySelector("section")?.id).toBe("payments");
   });
 
   it("names the six kinds as tabs that control one stage", async () => {

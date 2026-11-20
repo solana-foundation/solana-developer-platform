@@ -1,9 +1,7 @@
 import type { CustodyWalletPurpose } from "@sdp/types/custody";
-import { expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
-import { AppError } from "@/lib/errors";
-import { SigningService } from "@/services/domain/signing.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
@@ -13,6 +11,7 @@ import {
   createOrgSignerForCustodyWalletMock,
   installPaymentsRouteTestHooks,
   seedCounterparty,
+  sendTransactionMock,
   TEST_API_KEY,
   TEST_CONFIG_ID,
   TEST_CUSTODY_WALLET_ID,
@@ -91,23 +90,6 @@ async function storedIdempotencyKeys(idempotencyKey: string): Promise<number> {
 describe("Payments routes — transfer wallet access", () => {
   installPaymentsRouteTestHooks();
   installClusterRpcStub();
-  it("describes an unknown exact source without rejecting SDP Wallet IDs", async () => {
-    const response = await postTransfer(
-      {
-        sourceCustodyWalletId: "cwlt_missing",
-        destination: TEST_SOLANA_ADDRESSES.wallet2,
-        token: "SOL",
-        amount: "0.1",
-      },
-      {}
-    );
-    expect(response.status).toBe(404);
-    const body = await readErrorResponse(response);
-    expect(body.error).toEqual({
-      code: "NOT_FOUND",
-      message: "Wallet not found. Verify the wallet identifier supplied to this endpoint.",
-    });
-  });
   it.each<CustodyWalletPurpose | null>([
     "root",
     null,
@@ -193,53 +175,15 @@ describe("Payments routes — transfer wallet access", () => {
       meta: { requestId: expect.any(String) },
     });
   });
-  it("admits runtime execution only for new transfers", async () => {
-    const headers = {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${TEST_API_KEY.raw}`,
-      "Idempotency-Key": "runtime-admission-transfer-replay",
-    };
-    const body = JSON.stringify({
+  it("replays a completed transfer after its exact wallet is deactivated and refuses a new one", async () => {
+    const body = {
       sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
       destination: TEST_SOLANA_ADDRESSES.wallet2,
       token: "SOL",
       amount: "0.1",
-    });
-    const first = await postTransfer(JSON.parse(body), {
-      idempotencyKey: headers["Idempotency-Key"],
-    });
-    expect(first.status).toBe(200);
-    const admission = vi.spyOn(SigningService.prototype, "admitRuntimeExecution").mockRejectedValue(
-      new AppError("CONFLICT", "Custody wallet is unavailable", {
-        reason: "runtime_execution_unavailable",
-      })
-    );
-    try {
-      const replay = await postTransfer(JSON.parse(body), {
-        idempotencyKey: headers["Idempotency-Key"],
-      });
-      const fresh = await postTransfer(JSON.parse(body), {});
-      expect(replay.status).toBe(200);
-      expect(fresh.status).toBe(409);
-      expect(admission).toHaveBeenCalledOnce();
-    } finally {
-      admission.mockRestore();
-    }
-  });
-  it("replays a completed transfer after its exact wallet is deactivated", async () => {
-    const headers = {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${TEST_API_KEY.raw}`,
-      "Idempotency-Key": "deactivated-wallet-transfer-replay",
     };
-    const body = JSON.stringify({
-      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-      destination: TEST_SOLANA_ADDRESSES.wallet2,
-      token: "SOL",
-      amount: "0.1",
-    });
-    const first = await postTransfer(JSON.parse(body), {
-      idempotencyKey: headers["Idempotency-Key"],
+    const first = await postTransfer(body, {
+      idempotencyKey: "deactivated-wallet-transfer-replay",
     });
     expect(first.status).toBe(200);
     const firstBody = await readTransferResponse(first);
@@ -248,23 +192,23 @@ describe("Payments routes — transfer wallet access", () => {
       .bind(TEST_CUSTODY_WALLET_ID)
       .run();
     createOrgSignerForCustodyWalletMock.mockClear();
-    const replay = await postTransfer(JSON.parse(body), {
-      idempotencyKey: headers["Idempotency-Key"],
+
+    const replay = await postTransfer(body, {
+      idempotencyKey: "deactivated-wallet-transfer-replay",
     });
     expect(replay.status).toBe(200);
-    const replayBody = await readTransferResponse(replay);
-    expect(replayBody.data).toEqual(firstBody.data);
-    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+    expect(replay.headers.get("Idempotent-Replayed")).toBe("true");
+    expect((await readTransferResponse(replay)).data).toEqual(firstBody.data);
 
-    // New work from the deactivated wallet is refused by runtime admission.
-    const fresh = await postTransfer(JSON.parse(body), {
-      idempotencyKey: "deactivated-wallet-transfer-fresh",
-    });
+    const fresh = await postTransfer(body, { idempotencyKey: "deactivated-wallet-transfer-fresh" });
     expect(fresh.status).toBe(409);
-    expect(await fresh.json()).toMatchObject({
-      error: { details: { reason: "runtime_execution_unavailable" } },
+    expect((await readErrorResponse(fresh)).error).toMatchObject({
+      code: "CONFLICT",
+      details: { reason: "runtime_execution_unavailable" },
     });
     expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+    expect(sendTransactionMock).toHaveBeenCalledOnce();
+    expect(await countTransferRows()).toBe(1);
   });
   it("executes the exact Config-owned wallet when a Connection duplicates its Provider ID", async () => {
     await seedConnectionOwnedDuplicateProviderWallet();

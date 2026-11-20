@@ -1,16 +1,12 @@
 import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
-import { describe, expect, expectTypeOf, it } from "vitest";
-import type { z } from "zod";
+import { describe, expect, it } from "vitest";
 import {
   createRecurringPaymentSchema,
   updateRecurringPaymentSchema,
 } from "./recurring-payments/schemas";
 import { PAYMENT_TOKEN_VALIDATION_MESSAGE } from "./schemas";
 import { createSubscriptionSchema } from "./subscriptions/schemas";
-import {
-  createTransferBatchSchema,
-  listTransferBatchesQuerySchema,
-} from "./transfer-batches/schemas";
+import { createTransferBatchSchema } from "./transfer-batches/schemas";
 import { createTransferSchema, listTransfersQuerySchema } from "./transfers/schemas";
 
 const USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address;
@@ -18,76 +14,42 @@ const VALID_DESTINATION = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU";
 
 const tokenSchema = createTransferSchema.shape.token;
 const destinationSchema = createTransferSchema.shape.destination;
-const recurringPaymentTokenSchema = createRecurringPaymentSchema.shape.token;
 
-describe("payments exact wallet contract", () => {
-  const transfer = {
-    sourceCustodyWalletId: "cwlt_source",
-    destination: VALID_DESTINATION,
-    token: USDC_MINT,
-    amount: "1",
-  };
-  const batch = {
-    externalId: "payroll-2026-05",
-    sourceCustodyWalletId: "cwlt_source",
-    token: USDC_MINT,
-    recipients: [{ counterpartyAccountId: "cpa_test", amount: "1" }],
-  };
-
-  it("accepts exact SDP Wallet IDs and rejects the removed source selector", () => {
-    expect(createTransferSchema.safeParse(transfer).success).toBe(true);
-    expect(
-      createTransferSchema.safeParse({
-        ...transfer,
-        sourceCustodyWalletId: undefined,
-        source: "provider_wallet_id",
-      }).success
-    ).toBe(false);
-
+describe("transfer and batch request contract", () => {
+  it("requires a batch to name its payout run", () => {
+    const batch = {
+      externalId: "payroll-2026-05",
+      sourceCustodyWalletId: "cwlt_source",
+      token: USDC_MINT,
+      recipients: [{ counterpartyAccountId: "cpa_test", amount: "1" }],
+    };
     expect(createTransferBatchSchema.safeParse(batch).success).toBe(true);
-    // A batch must name its payout run (HOO-2335).
     expect(createTransferBatchSchema.safeParse({ ...batch, externalId: undefined }).success).toBe(
       false
     );
   });
 
-  it("uses exact list filters and keeps observed history opt-in", () => {
-    expect(listTransfersQuerySchema.parse({ custodyWalletId: "cwlt_source" })).toMatchObject({
-      custodyWalletId: "cwlt_source",
-      includeObserved: false,
-    });
-    expect(
-      listTransferBatchesQuerySchema.parse({ sourceCustodyWalletId: "cwlt_source" })
-    ).toMatchObject({ sourceCustodyWalletId: "cwlt_source" });
-    expect(listTransfersQuerySchema.safeParse({ wallet: "provider_wallet_id" }).success).toBe(
-      false
-    );
-    expect(listTransferBatchesQuerySchema.safeParse({ wallet: "provider_wallet_id" }).success).toBe(
-      false
-    );
-  });
-});
-
-describe("payments schema inferred types", () => {
-  it("destination infers as string", () => {
-    type CreateTransfer = z.infer<typeof createTransferSchema>;
-
-    expectTypeOf<CreateTransfer["destination"]>().toEqualTypeOf<string>();
+  it("lists recorded transfers only unless observed history is asked for", () => {
+    expect(listTransfersQuerySchema.parse({}).includeObserved).toBe(false);
+    expect(listTransfersQuerySchema.parse({ includeObserved: "true" }).includeObserved).toBe(true);
   });
 });
 
 describe("subscription create schema", () => {
   it("rejects client-controlled lifecycle fields", () => {
-    const result = createSubscriptionSchema.safeParse({
+    const create = {
       planId: "psp_test",
       counterpartyId: "cp_test",
       subscriberAddress: VALID_DESTINATION,
-      authorizationSignature: "client-controlled-signature",
-      nextCollectionDueAt: new Date().toISOString(),
-      status: "active",
-    });
-
-    expect(result.success).toBe(false);
+    };
+    expect(createSubscriptionSchema.safeParse(create).success).toBe(true);
+    for (const lifecycle of [
+      { authorizationSignature: "client-controlled-signature" },
+      { nextCollectionDueAt: new Date().toISOString() },
+      { status: "active" },
+    ]) {
+      expect(createSubscriptionSchema.safeParse({ ...create, ...lifecycle }).success).toBe(false);
+    }
   });
 });
 
@@ -104,52 +66,14 @@ describe("transfer list timestamp filters", () => {
 });
 
 describe("payments token schema", () => {
-  describe("accepts native SOL keyword", () => {
-    it("'SOL' parses to 'SOL'", () => {
-      expect(tokenSchema.parse("SOL")).toBe("SOL");
-    });
-
-    it("'sol' is case-folded to 'SOL'", () => {
-      expect(tokenSchema.parse("sol")).toBe("SOL");
-    });
-
-    it("' SOL ' is trimmed to 'SOL'", () => {
-      expect(tokenSchema.parse(" SOL ")).toBe("SOL");
-    });
-
-    it("' soL ' combines case + whitespace", () => {
-      expect(tokenSchema.parse(" soL ")).toBe("SOL");
-    });
-  });
-
-  describe("accepts the canonical SOL mint", () => {
-    it("parses the bare mint unchanged", () => {
-      expect(tokenSchema.parse(SOL_MINT)).toBe(SOL_MINT);
-    });
-
-    it("trims whitespace around the mint", () => {
-      expect(tokenSchema.parse(` ${SOL_MINT} `)).toBe(SOL_MINT);
-    });
-  });
-
-  describe("accepts a valid base58 mint", () => {
-    it("parses a real USDC mint unchanged", () => {
-      expect(tokenSchema.parse(USDC_MINT)).toBe(USDC_MINT);
-    });
-
-    it("trims whitespace around a valid mint", () => {
-      expect(tokenSchema.parse(` ${USDC_MINT} `)).toBe(USDC_MINT);
-    });
-  });
-
-  describe("accepts well-known token symbols", () => {
-    it("'USDC' parses to 'USDC'", () => {
-      expect(tokenSchema.parse("USDC")).toBe("USDC");
-    });
-
-    it("' usdc ' is trimmed and case-folded to 'USDC'", () => {
-      expect(tokenSchema.parse(" usdc ")).toBe("USDC");
-    });
+  it.each([
+    ["SOL", "SOL"],
+    [" soL ", "SOL"],
+    [" usdc ", "USDC"],
+    [` ${SOL_MINT} `, SOL_MINT],
+    [` ${USDC_MINT} `, USDC_MINT],
+  ])("normalizes %j to %j", (input, expected) => {
+    expect(tokenSchema.parse(input)).toBe(expected);
   });
 
   describe("rejects string inputs that do not match the contract", () => {
@@ -192,11 +116,7 @@ describe("payments token schema", () => {
 });
 
 describe("payments destination schema", () => {
-  it("accepts a valid base58 address", () => {
-    expect(destinationSchema.parse(VALID_DESTINATION)).toBe(VALID_DESTINATION);
-  });
-
-  it("trims surrounding whitespace", () => {
+  it("accepts a base58 address, trimmed", () => {
     expect(destinationSchema.parse(` ${VALID_DESTINATION} `)).toBe(VALID_DESTINATION);
   });
 
@@ -235,55 +155,31 @@ describe("payments destination schema", () => {
 });
 
 describe("recurring payment schema", () => {
-  it("accepts an exact custody source wallet and rejects the removed Provider selector", () => {
-    const result = createRecurringPaymentSchema.safeParse({
+  it("accepts a first collection in the future and refuses one in the past", () => {
+    const create = {
       sourceCustodyWalletId: "cwlt_source",
       counterpartyId: "cp_test",
       counterpartyAccountId: "cpa_test",
       token: USDC_MINT,
       amount: "25.00",
       periodHours: 24,
-      firstCollectionAt: new Date(Date.now() + 60_000).toISOString(),
-    });
+    };
+    const at = (offsetMs: number) => new Date(Date.now() + offsetMs).toISOString();
 
-    expect(result.success).toBe(true);
     expect(
-      createRecurringPaymentSchema.safeParse({
-        sourceCustodyWalletId: "cwlt_source",
-        sourceWalletId: "provider_source",
-        counterpartyId: "cp_test",
-        counterpartyAccountId: "cpa_test",
-        token: USDC_MINT,
-        amount: "25.00",
-        periodHours: 24,
-      }).success
-    ).toBe(false);
+      createRecurringPaymentSchema.safeParse({ ...create, firstCollectionAt: at(60_000) }).success
+    ).toBe(true);
     expect(
-      updateRecurringPaymentSchema.safeParse({ sourceWalletId: "provider_source" }).success
+      createRecurringPaymentSchema.safeParse({ ...create, firstCollectionAt: at(-60_000) }).success
     ).toBe(false);
   });
 
-  it("rejects a past firstCollectionAt timestamp", () => {
-    const result = createRecurringPaymentSchema.safeParse({
-      sourceCustodyWalletId: "cwlt_source",
-      counterpartyId: "cp_test",
-      counterpartyAccountId: "cpa_test",
-      token: USDC_MINT,
-      amount: "25.00",
-      periodHours: 24,
-      firstCollectionAt: new Date(Date.now() - 60_000).toISOString(),
-    });
-
-    expect(result.success).toBe(false);
-  });
-
-  it("still parses native SOL at the request schema layer for service-level rejection", () => {
-    expect(recurringPaymentTokenSchema.parse("SOL")).toBe("SOL");
-  });
-
-  it("rejects an empty recurring payment update body", () => {
-    const result = updateRecurringPaymentSchema.safeParse({});
-    expect(result.success).toBe(false);
+  it("rejects an update that changes nothing", () => {
+    expect(updateRecurringPaymentSchema.safeParse({}).success).toBe(false);
+    expect(updateRecurringPaymentSchema.safeParse({ expectedUpdatedAt: "v1" }).success).toBe(false);
+    expect(
+      updateRecurringPaymentSchema.safeParse({ expectedUpdatedAt: "v1", amount: "1" }).success
+    ).toBe(true);
   });
 
   it("accepts nullable pending and active timing fields on recurring payment updates", () => {
@@ -296,15 +192,22 @@ describe("recurring payment schema", () => {
   });
 
   it("requires counterpartyAccountId when counterpartyId changes", () => {
-    const result = updateRecurringPaymentSchema.safeParse({
-      counterpartyId: "cp_next",
-    });
-    expect(result.success).toBe(false);
+    expect(updateRecurringPaymentSchema.safeParse({ counterpartyId: "cp_next" }).success).toBe(
+      false
+    );
+    expect(
+      updateRecurringPaymentSchema.safeParse({
+        counterpartyId: "cp_next",
+        counterpartyAccountId: "cpa_next",
+      }).success
+    ).toBe(true);
   });
 
   it("rejects invalid recurring payment update amount, period, and metadata URL", () => {
     expect(updateRecurringPaymentSchema.safeParse({ amount: "0" }).success).toBe(false);
+    expect(updateRecurringPaymentSchema.safeParse({ amount: "1" }).success).toBe(true);
     expect(updateRecurringPaymentSchema.safeParse({ periodHours: 0 }).success).toBe(false);
+    expect(updateRecurringPaymentSchema.safeParse({ periodHours: 1 }).success).toBe(true);
     expect(updateRecurringPaymentSchema.safeParse({ metadataUri: "not-a-url" }).success).toBe(
       false
     );

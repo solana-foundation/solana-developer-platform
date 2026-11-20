@@ -4,44 +4,29 @@ import {
   UNIFIED_TRANSACTION_MODULES,
   type UnifiedTransaction,
 } from "@sdp/types/unified-transactions";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { SWRConfig } from "swr";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PaymentsIssuedTokenSymbol } from "@/app/(session)/dashboard/[projectId]/payments/payments-page.data";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
+import {
+  dashboardDataResponse,
+  sentDashboardRequests,
+  stubDashboardFetch,
+} from "@/test/dashboard-fetch";
+import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { EnglishI18n } from "@/test/i18n";
+import { stubMatchMedia } from "@/test/media-queries";
+import { FreshSWRCache } from "@/test/swr";
+import { restoreWindowLocation, setWindowPathname } from "@/test/window-location";
 import { TransactionDetailWorkspace } from "./transaction-detail-workspace";
 import { enabledPaymentTransactionKinds } from "./transaction-modules";
 import type { TransactionsPageResult } from "./transactions-page.data";
 import type { TransactionFilters } from "./transactions-query";
 import { TransactionsWorkspace } from "./transactions-workspace";
 
-// jsdom implements no matchMedia, while the workspace's motion components read
-// it through useReducedMotion.
-if (!window.matchMedia) {
-  window.matchMedia = ((query: string) => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addEventListener: () => {},
-    removeEventListener: () => {},
-    addListener: () => {},
-    removeListener: () => {},
-    dispatchEvent: () => false,
-  })) as unknown as typeof window.matchMedia;
-}
-
-vi.mock("@/lib/dashboard-url-state", () => ({
-  replaceDashboardSearchParams: vi.fn(),
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/lib/use-solana-cluster", () => ({ useSolanaCluster: () => "devnet" }));
 
-const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
-vi.mock("next/navigation", () => ({
-  useRouter: () => router,
-  useParams: () => ({ projectId: "prj_test_sandbox" }),
-  usePathname: () => "/dashboard/prj_test_sandbox/payments/transactions/xfr_pay",
-}));
+const TRANSACTIONS_PATH = "/dashboard/prj_test_sandbox/payments/transactions";
 
 const ISSUED_TOKENS: Record<string, PaymentsIssuedTokenSymbol> = {
   Mint111: { id: "tok_1", mintAddress: "Mint111", symbol: "ACME", imageUrl: null },
@@ -85,8 +70,8 @@ const DVP_LEG: UnifiedTransaction = {
 
 function renderResults(result: TransactionsPageResult, filters: TransactionFilters) {
   return render(
-    <SWRConfig value={{ provider: () => new Map() }}>
-      <I18nProvider locale="en" messages={getMessages("en")}>
+    <FreshSWRCache>
+      <EnglishI18n>
         <TransactionsWorkspace
           initialFilters={filters}
           initialResult={result}
@@ -96,70 +81,100 @@ function renderResults(result: TransactionsPageResult, filters: TransactionFilte
           modules={UNIFIED_TRANSACTION_MODULES}
           paymentKinds={enabledPaymentTransactionKinds({ ramps: true })}
         />
-      </I18nProvider>
-    </SWRConfig>
+      </EnglishI18n>
+    </FreshSWRCache>
   );
 }
 
-afterEach(() => {
-  cleanup();
-  router.push.mockClear();
-});
-
 function renderDetail(transaction: UnifiedTransaction) {
   return render(
-    <I18nProvider locale="en" messages={getMessages("en")}>
+    <EnglishI18n>
       <TransactionDetailWorkspace
         transaction={transaction}
         transfer={null}
         issuedTokensByMint={ISSUED_TOKENS}
       />
-    </I18nProvider>
+    </EnglishI18n>
   );
 }
 
+/** The status, amount, contact and wallet cells of the row whose type reads `kind`. */
+function rowCells(kind: string) {
+  const row = screen.getByText(kind).closest("tr") as HTMLElement;
+  const [status, , amount, contact, wallet] = within(row)
+    .getAllByRole("cell")
+    .map((cell) => cell.textContent);
+  return { status, amount, contact, wallet };
+}
+
+beforeEach(() => {
+  resetDashboardNavigation();
+  stubMatchMedia();
+  setWindowPathname(TRANSACTIONS_PATH);
+});
+
+afterEach(() => {
+  cleanup();
+  restoreWindowLocation();
+  vi.unstubAllGlobals();
+});
+
 describe("TransactionsResults", () => {
-  it("renders payments states in their own words and other modules by ledger status", () => {
-    renderResults({ transactions: [PAYMENT, DVP_LEG], nextCursor: "cursor_2" }, { cursors: [] });
-
-    for (const header of ["Status", "Type", "Amount", "Contact", "Wallet", "Created"]) {
-      expect(screen.getByRole("columnheader", { name: header })).toBeDefined();
-    }
-    expect(screen.getByText("Pay")).toBeDefined();
-    expect(screen.getByText("Fund leg")).toBeDefined();
-    expect(screen.getByText("Confirmed")).toBeDefined();
-    expect(screen.getByText("Pending")).toBeDefined();
-    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
-  });
-
-  it("resolves the token symbol, the contact name and the wallet label per row", () => {
+  it("shows a payment by its own status, with its token, contact and wallet named", () => {
     renderResults({ transactions: [PAYMENT], nextCursor: null }, { cursors: [] });
 
-    expect(screen.getByText("12.50").parentElement?.textContent).toBe("12.50 ACME");
-    // Once in its column, and once under the type, where a phone shows it.
-    expect(screen.getAllByText("Acme Treasury")).toHaveLength(2);
-    expect(screen.getByText("Treasury")).toBeDefined();
+    expect(rowCells("Pay")).toEqual({
+      status: "Confirmed",
+      amount: "12.50 ACME",
+      contact: "Acme Treasury",
+      wallet: "Treasury",
+    });
+  });
+
+  it("shows another module's row by its ledger status, with dashes for what it lacks", () => {
+    renderResults({ transactions: [DVP_LEG], nextCursor: null }, { cursors: [] });
+
+    expect(rowCells("Fund leg")).toEqual({
+      status: "Pending",
+      amount: "—",
+      contact: "—",
+      wallet: "—",
+    });
   });
 
   it("opens a transaction's page from its row, by click or Enter", () => {
     renderResults({ transactions: [PAYMENT, DVP_LEG], nextCursor: null }, { cursors: [] });
 
     fireEvent.click(screen.getByText("Pay"));
-    expect(router.push).toHaveBeenLastCalledWith(
-      "/dashboard/prj_test_sandbox/payments/transactions/xfr_pay"
-    );
+    expect(dashboardRouter.push).toHaveBeenLastCalledWith(`${TRANSACTIONS_PATH}/xfr_pay`);
 
     const dvpRow = screen.getByText("Fund leg").closest("tr") as HTMLElement;
     fireEvent.keyDown(dvpRow, { key: "Enter" });
-    expect(router.push).toHaveBeenLastCalledWith(
-      "/dashboard/prj_test_sandbox/payments/transactions/dvp_trade%3Afund%3Aa"
+    expect(dashboardRouter.push).toHaveBeenLastCalledWith(
+      `${TRANSACTIONS_PATH}/dvp_trade%3Afund%3Aa`
     );
+  });
+
+  it("reads the next page with the cursor the API returned, and puts it in the URL", async () => {
+    const fetchMock = stubDashboardFetch(() =>
+      dashboardDataResponse(200, { transactions: [], nextCursor: null })
+    );
+    renderResults({ transactions: [PAYMENT], nextCursor: "cursor_2" }, { cursors: [] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+
+    await waitFor(() =>
+      expect(sentDashboardRequests(fetchMock).map((request) => request.path)).toEqual([
+        "/api/dashboard/payments/transactions?limit=25&cursor=cursor_2",
+      ])
+    );
+    expect(window.location.search).toBe("?cursor=cursor_2&cursors=cursor_2");
   });
 
   it("gives a payment's page its explorer link and another module's page the way to it", () => {
     renderDetail(PAYMENT);
-    expect(screen.getByText("View on explorer").closest("a")?.getAttribute("href")).toContain(
-      "/tx/sig_pay"
+    expect(screen.getByText("View on explorer").closest("a")?.getAttribute("href")).toBe(
+      "https://explorer.solana.com/tx/sig_pay?cluster=devnet"
     );
     expect(screen.queryByText("View in Payments")).toBeNull();
     cleanup();

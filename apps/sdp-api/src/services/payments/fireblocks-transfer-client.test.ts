@@ -155,10 +155,12 @@ describe("native Fireblocks HTTP protocol", () => {
       .mockResolvedValueOnce(Response.json({}, { status: 404 }));
     const credentials = access();
     const rt = runtime(fetch);
-    expect(await readFireblocksTransfer(rt, credentials, "xfr_1")).toMatchObject({
+    expect(await readFireblocksTransfer(rt, credentials, "xfr_1")).toEqual({
+      id: "proposal",
       status: "PENDING_SIGNATURE",
     });
     expect(await readFireblocksTransfer(rt, credentials, "xfr_1")).toBeNull();
+    expect(fetch).toHaveBeenCalledTimes(2);
     for (const [url, init] of fetch.mock.calls) {
       expect(url).toBe("https://fireblocks.example.test/v1/transactions/external_tx_id/xfr_1");
       expect(init.method).toBe("GET");
