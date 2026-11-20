@@ -1,5 +1,7 @@
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { required } from "@/test/required";
 import type { FetchResult } from "./payments-page.data";
 import {
   fetchDashboardPaymentTransfers,
@@ -48,7 +50,15 @@ describe("fetchPaymentsWallets", () => {
       provider: "privy",
       custodyConfigId: "config",
       isRuntimeExecutionAllowed: false,
-      balances: [{ token: "USDC", mint: "mint", amount: "1000000", uiAmount: "1", decimals: 6 }],
+      balances: [
+        {
+          token: "USDC",
+          mint: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
+          amount: "1000000",
+          uiAmount: "1",
+          decimals: 6,
+        },
+      ],
     };
     const request = vi.fn().mockResolvedValue(Response.json({ data: { wallets: [wallet] } }));
 
@@ -133,7 +143,7 @@ function transferFor(custodyWalletId: string) {
 /** A request that answers only when aborted, the way a hung wallet read behaves. */
 function hangingUntilAborted(init: RequestInit | undefined): Promise<Response> {
   return new Promise((_, reject) => {
-    init?.signal?.addEventListener("abort", () =>
+    required(init?.signal).addEventListener("abort", () =>
       reject(new DOMException("aborted", "AbortError"))
     );
   });
@@ -172,13 +182,13 @@ afterEach(() => {
 describe("fetchDashboardPaymentTransfersForWallets deadline", () => {
   it("returns what arrived when a wallet misses its deadline, and aborts that read", async () => {
     vi.useFakeTimers();
-    const signals = new Map<string, AbortSignal | undefined>();
+    const signals = new Map<string, AbortSignal>();
     const request = vi.fn(async (path: string, init?: RequestInit) => {
       const custodyWalletId = new URL(`https://example.test${path}`).searchParams.get(
         "custodyWalletId"
       );
       if (custodyWalletId === null) return transfersResponse([]);
-      signals.set(custodyWalletId, init?.signal ?? undefined);
+      signals.set(custodyWalletId, required(init?.signal));
       return custodyWalletId === "wallet-slow"
         ? hangingUntilAborted(init)
         : transfersResponse([transferFor(custodyWalletId)]);
@@ -186,7 +196,7 @@ describe("fetchDashboardPaymentTransfersForWallets deadline", () => {
 
     const pending = fetchDashboardPaymentTransfersForWallets(request, twoWallets, 20, withDeadline);
     await vi.advanceTimersByTimeAsync(WALLET_TRANSFERS_DEADLINE_MS - 1);
-    expect(signals.get("wallet-slow")?.aborted).toBe(false);
+    expect(required(signals.get("wallet-slow")).aborted).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     const result = await pending;
 
@@ -195,8 +205,8 @@ describe("fetchDashboardPaymentTransfersForWallets deadline", () => {
       walletsNotLoaded: 1,
       data: [transferFor("wallet-fast")],
     });
-    expect(signals.get("wallet-slow")?.aborted).toBe(true);
-    expect(signals.get("wallet-fast")?.aborted).toBe(false);
+    expect(required(signals.get("wallet-slow")).aborted).toBe(true);
+    expect(required(signals.get("wallet-fast")).aborted).toBe(false);
   });
 
   it("reports wallets that did not load even when nothing arrived", async () => {
@@ -268,7 +278,7 @@ describe("fetchDashboardPaymentTransfersForWallets deadline", () => {
 
     const pending = fetchDashboardPaymentTransfersForWallets(request, twoWallets, 20);
     await vi.advanceTimersByTimeAsync(WALLET_TRANSFERS_DEADLINE_MS * 4);
-    answerSlowWallet?.();
+    required(answerSlowWallet)();
     const result = await pending;
 
     expect(result.walletsNotLoaded).toBe(0);

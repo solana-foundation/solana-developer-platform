@@ -1,5 +1,5 @@
-import type { getRecentBlockhash } from "@sdp/rpc/solana";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
+import { blockhash } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
@@ -9,6 +9,7 @@ import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { seedProjectCryptoWalletCounterparty } from "@/test/helpers/counterparties";
 import { env } from "@/test/helpers/env";
+import { countStoredIdempotencyKeys } from "@/test/helpers/idempotency-records";
 import {
   createOrgSignerForCustodyWalletMock,
   getRecentBlockhashMock,
@@ -28,7 +29,6 @@ import {
   readTransferResponse,
   readTransferRow,
 } from "@/test/helpers/payments-transfers";
-import { required } from "@/test/helpers/required";
 
 const SOL_TRANSFER = {
   sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
@@ -36,14 +36,6 @@ const SOL_TRANSFER = {
   token: "SOL",
   amount: "1",
 };
-
-async function storedIdempotencyKeys(idempotencyKey: string): Promise<number> {
-  const row = await getDb(env)
-    .prepare("SELECT COUNT(*)::int AS count FROM idempotency_keys WHERE idempotency_key = ?")
-    .bind(idempotencyKey)
-    .first<{ count: number }>();
-  return required(row).count;
-}
 
 describe("Payments routes — transfer idempotency", () => {
   installPaymentsRouteTestHooks();
@@ -131,9 +123,7 @@ describe("Payments routes — transfer idempotency", () => {
 
     // A new transfer signs new bytes: a fresh blockhash keeps its signature distinct.
     getRecentBlockhashMock.mockResolvedValue({
-      blockhash: TEST_SOLANA_ADDRESSES.wallet3 as Awaited<
-        ReturnType<typeof getRecentBlockhash>
-      >["blockhash"],
+      blockhash: blockhash(TEST_SOLANA_ADDRESSES.wallet3),
       lastValidBlockHeight: 1000n,
     });
     const otherCredential = await postTransfer(SOL_TRANSFER, {
@@ -204,7 +194,7 @@ describe("Payments routes — transfer idempotency", () => {
 
     expect(response.status).toBe(404);
     expect((await readErrorResponse(response)).error.code).toBe("NOT_FOUND");
-    expect(await storedIdempotencyKeys("xfer-missing-ramp")).toBe(0);
+    expect(await countStoredIdempotencyKeys("xfer-missing-ramp")).toBe(0);
     expect(await countTransferRows()).toBe(0);
   });
 
@@ -220,7 +210,7 @@ describe("Payments routes — transfer idempotency", () => {
     });
     expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
     expect(await countTransferRows()).toBe(0);
-    expect(await storedIdempotencyKeys("xfer-out-of-scope")).toBe(0);
+    expect(await countStoredIdempotencyKeys("xfer-out-of-scope")).toBe(0);
 
     // Nothing was stored, so the same key runs once the scope allows the wallet.
     await seedCachedKey({ walletIds: [TEST_CUSTODY_WALLET_ID] });

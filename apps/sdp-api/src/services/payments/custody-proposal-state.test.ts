@@ -546,35 +546,10 @@ describe("custody proposal state transitions", () => {
     ).toHaveProperty("rejected");
   });
 
-  it("persists only the legal provider/authorization products", () => {
-    const uncommitted = [
-      "authorized",
-      "refused",
-      "cancel_requested",
-      "cancel_ambiguous",
-      "cancel_declined",
-      "cancel_retry_requested",
-      "cancel_retry_ambiguous",
-      "cancel_acknowledged",
-    ] as const;
-    const unaccepted = ["authorized", "refused"] as const;
-    const legal: Record<
-      CustodyProposalProviderPhase,
-      readonly CustodyProposalAuthorizationState[]
-    > = {
-      unsent: unaccepted,
-      submitting: unaccepted,
-      absent: unaccepted,
-      pending: uncommitted,
-      executing: uncommitted,
-      completed: ["authorized", "committed_after_refusal", "refusal_alerted"],
-      failed: uncommitted,
-      cancelled: uncommitted,
-      not_sent: unaccepted,
-      never_accepted: unaccepted,
-    };
+  it("persists exactly the provider/authorization products the @sdp/types table lists", () => {
     for (const phase of CUSTODY_PROPOSAL_PROVIDER_PHASES) {
-      const allowed = legal[phase];
+      const allowed: readonly CustodyProposalAuthorizationState[] =
+        CUSTODY_PROPOSAL_VALID_AUTHORIZATION_STATES_BY_PHASE[phase];
       for (const authorization of CUSTODY_PROPOSAL_AUTHORIZATION_STATES) {
         expect(
           custodyProposalStateSchema.safeParse(productState(phase, authorization)).success,
@@ -582,6 +557,20 @@ describe("custody proposal state transitions", () => {
         ).toBe(allowed.includes(authorization));
       }
     }
+  });
+
+  it.each([
+    ["unsent", "cancel_requested", false],
+    ["submitting", "cancel_acknowledged", false],
+    ["pending", "cancel_requested", true],
+    ["cancelled", "cancel_acknowledged", true],
+    ["completed", "refused", false],
+    ["completed", "committed_after_refusal", true],
+    ["failed", "committed_after_refusal", false],
+  ] as const)("persists %s/%s: %s", (phase, authorization, persists) => {
+    expect(custodyProposalStateSchema.safeParse(productState(phase, authorization)).success).toBe(
+      persists
+    );
   });
   it("rejects absent progress without the first observation required for its horizon", () => {
     const absent = apply(submitting(), { type: "observed_absent", at: LATER }).next;

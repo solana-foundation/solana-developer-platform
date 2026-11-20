@@ -16,6 +16,7 @@ import {
   INSUFFICIENT_FUNDS_MESSAGE,
   simulatedInsufficientFundsError,
 } from "@/services/fee-payment-errors";
+import { required } from "@/test/helpers/required";
 
 const koraShortfall = (instructionIndex: number) =>
   new FeePaymentError(
@@ -45,7 +46,7 @@ async function withHookAccount(instruction: Instruction): Promise<Instruction> {
   return {
     ...instruction,
     accounts: [
-      ...(instruction.accounts ?? []),
+      ...required(instruction.accounts),
       { address: hookProgram.address, role: AccountRole.READONLY },
     ],
   };

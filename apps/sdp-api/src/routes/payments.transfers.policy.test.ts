@@ -6,6 +6,7 @@ import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
+import { countStoredIdempotencyKeys } from "@/test/helpers/idempotency-records";
 import { stubOfframpQuoteReads } from "@/test/helpers/offramp-quote";
 import {
   createOrgSignerForCustodyWalletMock,
@@ -28,7 +29,6 @@ import {
   seedConnectionOwnedDuplicateProviderWallet,
   seedSelectedApiKeyWallets,
 } from "@/test/helpers/payments-transfers";
-import { required } from "@/test/helpers/required";
 
 const SPECIALIZED_WALLET_ID = "cwlt_policy_specialized";
 
@@ -79,14 +79,6 @@ async function postBatch(path: string, idempotencyKey: string): Promise<Response
   );
 }
 
-async function storedIdempotencyKeys(idempotencyKey: string): Promise<number> {
-  const row = await getDb(env)
-    .prepare("SELECT COUNT(*)::int AS count FROM idempotency_keys WHERE idempotency_key = ?")
-    .bind(idempotencyKey)
-    .first<{ count: number }>();
-  return required(row).count;
-}
-
 describe("Payments routes — transfer wallet access", () => {
   installPaymentsRouteTestHooks();
   installClusterRpcStub();
@@ -115,7 +107,7 @@ describe("Payments routes — transfer wallet access", () => {
     expect(await response.json()).toEqual(WALLET_PURPOSE_REFUSAL);
     expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
     expect(await countTransferRows()).toBe(0);
-    expect(await storedIdempotencyKeys(idempotencyKey)).toBe(0);
+    expect(await countStoredIdempotencyKeys(idempotencyKey)).toBe(0);
   });
   it.each(["/v1/payments/transfer-batches", "/v1/payments/transfer-batches/estimate"])(
     "refuses a non-transfer source wallet on %s before reading its recipients",
@@ -127,7 +119,7 @@ describe("Payments routes — transfer wallet access", () => {
 
       expect(response.status).toBe(403);
       expect(await response.json()).toEqual(WALLET_PURPOSE_REFUSAL);
-      expect(await storedIdempotencyKeys(idempotencyKey)).toBe(0);
+      expect(await countStoredIdempotencyKeys(idempotencyKey)).toBe(0);
     }
   );
   it("refuses a non-transfer source wallet's off-ramp quote before quoting", async () => {

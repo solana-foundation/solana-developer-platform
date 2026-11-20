@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { formatNumber } from "@/lib/number-format";
 import catalog from "@/messages/en/homepage.json";
 import { stubMatchMedia } from "@/test/media-queries";
+import { required } from "@/test/required";
 import { type FakeIntersectionObserver, stubIntersectionObserver } from "@/test/visibility";
 import { createBenchController } from "./bench-controller";
 import { buildFigure } from "./figures/build-figures";
@@ -83,11 +84,11 @@ describe("createFigurePlayer", () => {
     const host = document.createElement("div");
     host.innerHTML = buildFigure("micro", { fonts, label: "Micro", copy });
     const svg = svgOf(host);
-    const balance = svg.querySelector('[data-n="4.2"]');
+    const balance = required(svg.querySelector('[data-n="4.2"]'));
     const player = createFigurePlayer(svg, "en", () => {});
     player.start();
     vi.advanceTimersByTime(700);
-    expect(balance?.textContent).toBe("4.198");
+    expect(balance.textContent).toBe("4.198");
     player.stop();
     expect(svg.classList.contains("live")).toBe(false);
     expect(vi.getTimerCount()).toBe(0);
@@ -97,16 +98,16 @@ describe("createFigurePlayer", () => {
     const host = document.createElement("div");
     host.innerHTML = buildFigure("deposit", { fonts, label: "Deposit", copy });
     const svg = svgOf(host);
-    const balance = svg.querySelector('[data-n="1250"]');
+    const balance = required(svg.querySelector('[data-n="1250"]'));
     const player = createFigurePlayer(svg, "en", () => {});
     player.start();
     vi.advanceTimersByTime(980 + 200); // the balance is rolling from 1,250.00 to 1,750.00
-    const rolling = balance?.textContent;
+    const rolling = balance.textContent;
     expect(rolling).not.toBe("1,250.00");
     expect(rolling).not.toBe("1,750.00");
     player.stop();
     vi.advanceTimersByTime(1000);
-    expect(balance?.textContent).toBe(rolling);
+    expect(balance.textContent).toBe(rolling);
   });
 });
 

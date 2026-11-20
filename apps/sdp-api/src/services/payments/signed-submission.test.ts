@@ -1,6 +1,5 @@
 import { RpcTimeoutError } from "@sdp/rpc/errors";
 import * as solanaRpc from "@sdp/rpc/solana";
-import type { Signature } from "@solana/kit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
 import type {
@@ -11,11 +10,11 @@ import {
   SubmissionNotStartedError,
   submitSponsoredTransaction,
 } from "@/services/sponsorship-submission";
+import { syntheticSignature } from "@/test/helpers/parsed-transactions";
 import { fetchFailedError, sendTransactionPreflightError } from "@/test/helpers/rpc-errors";
 import { createTransferSignedSubmissionStore } from "./signed-submission";
 
-const SIGNATURE =
-  "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature;
+const SIGNATURE = syntheticSignature(1);
 const SIGNED_TRANSACTION = new Uint8Array([1, 2, 3]);
 
 function fakeStore() {
@@ -43,16 +42,21 @@ function fakeSponsor(release = vi.fn().mockResolvedValue(undefined)) {
       };
     }
   );
-  return {
-    feePayment: { prepareOwnedSubmission } as unknown as SponsorshipFeePayment,
+  const unused = () => Promise.reject(new Error("Only the owned submission path is exercised"));
+  const feePayment: SponsorshipFeePayment = {
+    providerId: "test-sponsor",
+    getFeePayer: unused,
+    signAsFeePayer: unused,
+    getSponsorshipConfiguration: unused,
     prepareOwnedSubmission,
-    release,
   };
+  return { feePayment, prepareOwnedSubmission, release };
 }
 
 function submit(feePayment: SponsorshipFeePayment, store: ReturnType<typeof fakeStore>) {
   return submitSponsoredTransaction({
     feePayment,
+    // SAFETY: `sendTransaction` is spied in every test, so the client is never read.
     rpc: {} as solanaRpc.SolanaRpc,
     transaction: new Uint8Array([9]),
     lastValidBlockHeight: 123n,
@@ -117,11 +121,13 @@ describe("submitSponsoredTransaction", () => {
     const store = fakeStore();
     const sponsor = fakeSponsor();
     const refusal = sendTransactionPreflightError(42);
+    const programError = refusal.cause;
+    if (!(programError instanceof Error)) throw new Error("Expected the refusal's program error");
     vi.spyOn(solanaRpc, "sendTransaction").mockRejectedValueOnce(refusal);
 
     await expect(submit(sponsor.feePayment, store)).rejects.toMatchObject({
       code: "TRANSACTION_FAILED",
-      message: (refusal.cause as Error).message,
+      message: programError.message,
       cause: refusal,
     });
 
@@ -234,6 +240,7 @@ describe("submitSponsoredTransaction", () => {
 });
 
 describe("createTransferSignedSubmissionStore", () => {
+  // SAFETY: the store reads only the transfer's id and tenant, and hands rows back unread.
   const transfer = {
     id: "xfr_signed_submission_test",
     organization_id: "org_signed_submission_test",
@@ -244,6 +251,7 @@ describe("createTransferSignedSubmissionStore", () => {
     organizationId: transfer.organization_id,
     projectId: transfer.project_id,
   };
+  // SAFETY: as above, the store returns these rows without reading their other columns.
   const signedRow = {
     ...transfer,
     signature: SIGNATURE,
@@ -258,17 +266,21 @@ describe("createTransferSignedSubmissionStore", () => {
 
   function createRepository() {
     return {
-      persistSignedTransfer: vi.fn().mockResolvedValue(signedRow),
-      markTransferSubmissionStarted: vi.fn(),
-      getTransferById: vi.fn(),
+      persistSignedTransfer: vi
+        .fn<PaymentsRepository["persistSignedTransfer"]>()
+        .mockResolvedValue(signedRow),
+      markTransferSubmissionStarted: vi.fn<PaymentsRepository["markTransferSubmissionStarted"]>(),
+      getTransferById: vi.fn<PaymentsRepository["getTransferById"]>(),
     };
   }
 
   async function persistedStore(repository: ReturnType<typeof createRepository>) {
-    const store = createTransferSignedSubmissionStore(
-      repository as unknown as PaymentsRepository,
-      transfer
-    );
+    const used: Pick<
+      PaymentsRepository,
+      "persistSignedTransfer" | "markTransferSubmissionStarted" | "getTransferById"
+    > = repository;
+    // SAFETY: the store calls only these three repository methods.
+    const store = createTransferSignedSubmissionStore(used as PaymentsRepository, transfer);
     await store.persistSigned({
       signature: SIGNATURE,
       signedTransaction: "AQID",

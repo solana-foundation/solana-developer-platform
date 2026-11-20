@@ -14,7 +14,9 @@ import {
 } from "@/test/dashboard-fetch";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { EnglishI18n } from "@/test/i18n";
+import { ISSUED_TOKEN, ISSUED_TOKEN_MINT } from "@/test/issued-tokens";
 import { stubMatchMedia } from "@/test/media-queries";
+import { required } from "@/test/required";
 import { FreshSWRCache } from "@/test/swr";
 import { restoreWindowLocation, setWindowPathname } from "@/test/window-location";
 import { TransactionDetailWorkspace } from "./transaction-detail-workspace";
@@ -29,7 +31,7 @@ vi.mock("@/lib/use-solana-cluster", () => ({ useSolanaCluster: () => "devnet" })
 const TRANSACTIONS_PATH = "/dashboard/prj_test_sandbox/payments/transactions";
 
 const ISSUED_TOKENS: Record<string, PaymentsIssuedTokenSymbol> = {
-  Mint111: { id: "tok_1", mintAddress: "Mint111", symbol: "ACME", imageUrl: null },
+  [ISSUED_TOKEN_MINT]: ISSUED_TOKEN,
 };
 
 const PAYMENT: UnifiedTransaction = {
@@ -43,7 +45,7 @@ const PAYMENT: UnifiedTransaction = {
   projectId: "prj_test",
   custodyWalletId: "cwlt_test",
   custodyWalletLabel: "Treasury",
-  token: "Mint111",
+  token: ISSUED_TOKEN_MINT,
   amount: "12.5",
   counterpartyId: "cpty_test",
   signature: "sig_pay",
@@ -98,10 +100,14 @@ function renderDetail(transaction: UnifiedTransaction) {
   );
 }
 
+/** The table row whose type cell reads `kind`. */
+function rowOf(kind: string): HTMLTableRowElement {
+  return required(screen.getByText(kind).closest("tr"));
+}
+
 /** The status, amount, contact and wallet cells of the row whose type reads `kind`. */
 function rowCells(kind: string) {
-  const row = screen.getByText(kind).closest("tr") as HTMLElement;
-  const [status, , amount, contact, wallet] = within(row)
+  const [status, , amount, contact, wallet] = within(rowOf(kind))
     .getAllByRole("cell")
     .map((cell) => cell.textContent);
   return { status, amount, contact, wallet };
@@ -148,8 +154,7 @@ describe("TransactionsResults", () => {
     fireEvent.click(screen.getByText("Pay"));
     expect(dashboardRouter.push).toHaveBeenLastCalledWith(`${TRANSACTIONS_PATH}/xfr_pay`);
 
-    const dvpRow = screen.getByText("Fund leg").closest("tr") as HTMLElement;
-    fireEvent.keyDown(dvpRow, { key: "Enter" });
+    fireEvent.keyDown(rowOf("Fund leg"), { key: "Enter" });
     expect(dashboardRouter.push).toHaveBeenLastCalledWith(
       `${TRANSACTIONS_PATH}/dvp_trade%3Afund%3Aa`
     );
@@ -173,7 +178,7 @@ describe("TransactionsResults", () => {
 
   it("gives a payment's page its explorer link and another module's page the way to it", () => {
     renderDetail(PAYMENT);
-    expect(screen.getByText("View on explorer").closest("a")?.getAttribute("href")).toBe(
+    expect(required(screen.getByText("View on explorer").closest("a")).getAttribute("href")).toBe(
       "https://explorer.solana.com/tx/sig_pay?cluster=devnet"
     );
     expect(screen.queryByText("View in Payments")).toBeNull();
@@ -181,7 +186,7 @@ describe("TransactionsResults", () => {
 
     renderDetail(DVP_LEG);
     expect(
-      screen.getByText("View in Delivery vs Payments").closest("a")?.getAttribute("href")
+      required(screen.getByText("View in Delivery vs Payments").closest("a")).getAttribute("href")
     ).toBe("/dashboard/prj_test_sandbox/markets/dvp/dvp_trade");
   });
 

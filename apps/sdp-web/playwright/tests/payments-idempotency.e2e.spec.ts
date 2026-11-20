@@ -196,6 +196,23 @@ test.describe
     const failed = (page: Page) =>
       expect(page.getByText("Transfer failed.").first()).toBeVisible({ timeout: 60_000 });
 
+    test("a rapid triple click sends one key and makes one transfer", async ({ page }) => {
+      const amount = "0.0011";
+      const sent = recordRequests(page);
+      const send = await reviewTransfer(page, amount);
+      await send.evaluate((button: HTMLButtonElement) => {
+        button.click();
+        button.click();
+        button.click();
+      });
+      await sentOrSubmitted(page);
+
+      const keys = keysFor(sent, "POST", TRANSFERS);
+      expect(keys[0]).toEqual(expect.any(String));
+      expect(keys).toEqual(keys.map(() => keys[0]));
+      expect(await countTransfers(page, amount)).toBe(1);
+    });
+
     test("a retry after a lost answer resends the key and the API replays", async ({ page }) => {
       const amount = "0.0012";
       const sent = recordRequests(page);
@@ -327,7 +344,11 @@ test.describe
       ]);
       expect(posts[1]?.key).not.toBe(posts[0]?.key);
       // The frozen expiry: the retry is byte-for-byte the first attempt's request.
-      expect(posts[2]?.body).toBe(posts[0]?.body);
+      expect(posts.map((post) => post.body)).toEqual([
+        expect.any(String),
+        expect.any(String),
+        posts[0]?.body,
+      ]);
       expect(await countRequests(page, amountA)).toBe(1);
     });
 
