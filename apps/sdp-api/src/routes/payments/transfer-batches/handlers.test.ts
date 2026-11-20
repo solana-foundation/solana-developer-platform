@@ -1637,6 +1637,12 @@ describe("payment transfer batches", () => {
         .run();
       vi.clearAllMocks();
 
+      // The chain height can't be read, so the attempt may still land: nothing fails.
+      const unread = await readBatch(await send("batch-external-id-crash-unread", ORIGINAL));
+      expect(unread.batch).toMatchObject({ id: first.batch.id, status: "processing" });
+      expect(unread.recipients.map((r) => r.status)).toEqual(["pending"]);
+      expectNothingSigned();
+
       // The attempt could still land: the resend answers the batch as it stands.
       rpc.answer("getBlockHeight", 100);
       const early = await readBatch(await send("batch-external-id-crash-early", ORIGINAL));
@@ -2318,6 +2324,17 @@ describe("payment transfer batches", () => {
         syntheticAddress(1_000 + index)
       )
     );
+    const transferReads: string[] = [];
+    wrapPaymentsRepository((repository) => ({
+      listTransfersByIds: async (params) => {
+        transferReads.push("listTransfersByIds");
+        return repository.listTransfersByIds(params);
+      },
+      getTransferById: async (params) => {
+        transferReads.push("getTransferById");
+        return repository.getTransferById(params);
+      },
+    }));
 
     const created = await readBatch(
       await sendBatch(accounts.map((account) => ({ ...account, amount: "0.001" })))
@@ -2328,5 +2345,7 @@ describe("payment transfer batches", () => {
     const read = await readBatch(await getBatch(created.batch.id));
     expect(new Set(read.recipients.map((r) => r.destination)).size).toBe(500);
     expect(read.transfers).toHaveLength(created.batch.transactionCount);
+    // Query budget: each answer reads its chunk transfers in one batched lookup.
+    expect(transferReads).toEqual(["listTransfersByIds", "listTransfersByIds"]);
   }, 30_000);
 });
