@@ -1003,12 +1003,6 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
   });
 
   it("does not reuse the version of an abandoned GCP replacement", async () => {
-    const submissionSchema = z.object({
-      data: z.object({
-        connectionId: z.string(),
-        providerCredential: z.object({ id: z.string() }),
-      }),
-    });
     const { app, token } = buildApp();
     const first = await submit(app, token, {
       projectId: PROJECT_ID,
@@ -1460,7 +1454,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     });
 
     expect(response.status).toBe(201);
-    const responseBody = submissionSchema.parse(await response.json());
+    const responseBody = await response.json();
     expect(responseBody).toEqual({
       data: {
         connectionId: expect.stringMatching(/^cconn_/),
@@ -1480,14 +1474,13 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
         timestamp: expect.any(String),
       },
     });
-    expect(await getConnectionForCredential(responseBody.data.providerCredential.id)).toMatchObject(
-      {
-        id: responseBody.data.connectionId,
-        project_id: PROJECT_ID,
-        provider: "privy",
-        status: "pending",
-      }
-    );
+    const { data } = submissionSchema.parse(responseBody);
+    expect(await getConnectionForCredential(data.providerCredential.id)).toMatchObject({
+      id: data.connectionId,
+      project_id: PROJECT_ID,
+      provider: "privy",
+      status: "pending",
+    });
     expect(await getDomainCounts()).toEqual({
       credentials: 1,
       connections: 1,
@@ -1742,14 +1735,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
           key: "gcp-finalization-original",
         });
         expect(response.status).toBe(201);
-        original = z
-          .object({
-            data: z.object({
-              connectionId: z.string(),
-              providerCredential: z.object({ id: z.string() }),
-            }),
-          })
-          .parse(await response.json()).data;
+        original = submissionSchema.parse(await response.json()).data;
         await markInitialValidationFailed(db, {
           credentialId: original.providerCredential.id,
           connectionId: original.connectionId,

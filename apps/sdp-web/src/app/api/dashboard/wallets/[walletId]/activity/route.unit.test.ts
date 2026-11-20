@@ -2,12 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as walletActivityServer from "@/app/(session)/dashboard/[projectId]/wallets/wallet-activity.server";
 import * as sdpApi from "@/lib/sdp-api";
 import { expectDashboardNoStore } from "@/test/dashboard-response";
+import { translateServerMessagesToKeys } from "@/test/i18n-server";
 
 // The deployment's Issuance flag, read by the loader's module; the spy below stands in for the loader.
 vi.mock("@/flags", () => ({ issuance: vi.fn() }));
-vi.mock("@/i18n/server", () => ({
-  getTranslations: vi.fn(async () => (key: string) => key),
-}));
 
 import { GET } from "./route";
 
@@ -36,6 +34,7 @@ function getActivity(walletId: string, search = ""): Promise<Response> {
 }
 
 beforeEach(() => {
+  translateServerMessagesToKeys();
   apiRequest.mockReset();
   createSdpApiClient.mockReset().mockResolvedValue({ request: apiRequest, fetch: vi.fn() });
   loadWalletActivity.mockReset().mockResolvedValue({ ok: true, data: EMPTY_ACTIVITY });

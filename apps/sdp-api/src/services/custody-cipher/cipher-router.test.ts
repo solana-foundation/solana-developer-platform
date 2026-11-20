@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createEncryptionService } from "@/services/encryption.service";
 import { fakeEnvelopeKms, TEST_LEGACY_CUSTODY_KEY } from "@/test/helpers/custody-cipher";
+import { env } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
 import { assertCustodyEncryptionScheme, CustodyCipherRouter } from "./cipher-router";
 import { KmsEnvelopeCipher } from "./envelope-cipher";
@@ -14,8 +15,7 @@ function router(activeScheme: "legacy" | "v2") {
 }
 
 function schemeEnv(fields: Pick<Env, "SDP_DEPLOYMENT_MODE" | "CUSTODY_KMS_KEY_NAME">): Env {
-  // SAFETY: assertCustodyEncryptionScheme reads only the deployment mode and the KMS key name.
-  return fields as Env;
+  return { ...env, ...fields };
 }
 
 describe("CustodyCipherRouter", () => {

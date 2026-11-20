@@ -1,5 +1,6 @@
 import {
   FIREBLOCKS_CANCELLABLE_TRANSACTION_STATUSES,
+  FIREBLOCKS_CANCELLED_TRANSACTION_STATUSES,
   FIREBLOCKS_FAILED_TRANSACTION_STATUSES,
   FIREBLOCKS_SIGNING_PROPOSAL_STATUSES,
   isFireblocksProposalCancellable,
@@ -44,9 +45,16 @@ describe("Fireblocks cancellation states", () => {
 });
 
 describe("Fireblocks cancellation verdicts", () => {
-  it.each(["CANCELLED", "CANCELED"])("recognizes the provider spelling %s", (status) => {
-    expect(isFireblocksTransactionCancelled(status)).toBe(true);
+  it("recognizes a cancellation the provider reports", () => {
+    expect(isFireblocksTransactionCancelled("CANCELLED")).toBe(true);
   });
+
+  it.each(FIREBLOCKS_CANCELLED_TRANSACTION_STATUSES)(
+    "recognizes the provider spelling %s",
+    (status) => {
+      expect(isFireblocksTransactionCancelled(status)).toBe(true);
+    }
+  );
 
   it.each(["CANCELLING", "PENDING_SIGNATURE", "COMPLETED", "UNKNOWN_STATE"])(
     "does not mistake %s for a terminal cancellation",

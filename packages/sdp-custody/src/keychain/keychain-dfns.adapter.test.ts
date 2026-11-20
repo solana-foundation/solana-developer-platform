@@ -1,19 +1,32 @@
 import { generateKeyPairSigner } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
-import type { DfnsApiClient, DfnsWallet } from "#/dfns/client";
+import type { DfnsApiClient } from "#/dfns/client";
 import { KeychainDfnsAdapter } from "./keychain-dfns.adapter";
 
 const { address: WALLET_ADDRESS } = await generateKeyPairSigner();
 
-function clientReading(getWallet: (request: { walletId: string }) => Promise<DfnsWallet>) {
-  // SAFETY: resolving a signer reads only `wallets.getWallet` from the client.
-  return { wallets: { getWallet } } as unknown as DfnsApiClient;
+function notCalledWhenResolving(): Promise<never> {
+  return Promise.reject(new Error("Resolving a signer reads only wallets.getWallet"));
+}
+
+function clientReading(getWallet: DfnsApiClient["wallets"]["getWallet"]): DfnsApiClient {
+  return {
+    wallets: {
+      getWallet,
+      listWallets: notCalledWhenResolving,
+      createWallet: notCalledWhenResolving,
+    },
+    keySignatures: {
+      createSignature: notCalledWhenResolving,
+      getSignature: notCalledWhenResolving,
+    },
+  };
 }
 
 describe("dfns adapter", () => {
   it("evicts failed signer creation so subsequent calls can retry", async () => {
     const getWallet = vi
-      .fn<(request: { walletId: string }) => Promise<DfnsWallet>>()
+      .fn<DfnsApiClient["wallets"]["getWallet"]>()
       .mockRejectedValueOnce(new Error("temporary dfns outage"))
       .mockResolvedValueOnce({
         id: "wa-1",
@@ -30,14 +43,12 @@ describe("dfns adapter", () => {
   });
 
   it("reuses one signer construction across successful calls", async () => {
-    const getWallet = vi
-      .fn<(request: { walletId: string }) => Promise<DfnsWallet>>()
-      .mockResolvedValue({
-        id: "wa-1",
-        network: "SolanaDevnet",
-        address: WALLET_ADDRESS,
-        signingKey: { id: "key-1" },
-      });
+    const getWallet = vi.fn<DfnsApiClient["wallets"]["getWallet"]>().mockResolvedValue({
+      id: "wa-1",
+      network: "SolanaDevnet",
+      address: WALLET_ADDRESS,
+      signingKey: { id: "key-1" },
+    });
     const adapter = new KeychainDfnsAdapter({ client: clientReading(getWallet) });
 
     const first = await adapter.getTransactionSigner("dfns_wa-1");

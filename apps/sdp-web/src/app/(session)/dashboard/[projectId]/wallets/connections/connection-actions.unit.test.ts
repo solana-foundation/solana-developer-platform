@@ -1,13 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import * as sdpApi from "@/lib/sdp-api";
+import { SdpApiResponseError } from "@/lib/sdp-api";
+import { translateServerMessagesToKeys } from "@/test/i18n-server";
 import { revalidatePath } from "@/test/next-cache";
 import { setPageRequest } from "@/test/request-project";
+import { type StubSdpApiClient, stubSdpApiClient } from "@/test/sdp-api-client";
 
 vi.mock("next/cache", () => import("@/test/next-cache"));
 vi.mock("next/headers", () => import("@/test/next-headers"));
-vi.mock("@/i18n/server", () => ({
-  getTranslations: vi.fn(async () => (key: string) => key),
-}));
 
 import {
   cancelSetupAction,
@@ -15,17 +14,18 @@ import {
   deactivateConnectionAction,
 } from "./connection-actions";
 
-const client = { request: vi.fn(), fetch: vi.fn() };
+let client: StubSdpApiClient;
 
 beforeEach(() => {
   vi.clearAllMocks();
   setPageRequest("/dashboard/prj_test_sandbox/integrations/privy/connections/cconn_1");
-  vi.spyOn(sdpApi, "createSdpApiClient").mockResolvedValue(client);
+  translateServerMessagesToKeys();
+  client = stubSdpApiClient();
   client.fetch.mockResolvedValue({});
 });
 
-function apiError(status: number, code: string): sdpApi.SdpApiResponseError {
-  return new sdpApi.SdpApiResponseError(status, JSON.stringify({ error: { code, message: code } }));
+function apiError(status: number, code: string): SdpApiResponseError {
+  return new SdpApiResponseError(status, JSON.stringify({ error: { code, message: code } }));
 }
 
 describe("deactivateConnectionAction", () => {

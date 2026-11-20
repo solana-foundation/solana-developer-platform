@@ -11,15 +11,18 @@ import { required } from "@/test/helpers/required";
 
 const { address: CREATED_WALLET_ADDRESS } = await generateKeyPairSigner();
 
+function notCalledWhenCreating(): Promise<never> {
+  return Promise.reject(new Error("Wallet creation calls only wallets.createWallet"));
+}
+
 function stubWalletClient(create: "createDfnsApiClient" | "createIbmHavenApiClient") {
-  const createWallet = vi.fn().mockResolvedValue({
-    id: "wa-12345-abcde-newdfnswallet",
-    address: CREATED_WALLET_ADDRESS,
+  const createWallet = vi
+    .fn<dfnsClient.DfnsApiClient["wallets"]["createWallet"]>()
+    .mockResolvedValue({ id: "wa-12345-abcde-newdfnswallet", address: CREATED_WALLET_ADDRESS });
+  const createClient = vi.spyOn(dfnsClient, create).mockResolvedValue({
+    wallets: { getWallet: notCalledWhenCreating, listWallets: notCalledWhenCreating, createWallet },
+    keySignatures: { createSignature: notCalledWhenCreating, getSignature: notCalledWhenCreating },
   });
-  const createClient = vi.spyOn(dfnsClient, create).mockResolvedValue(
-    // SAFETY: wallet creation calls only `wallets.createWallet` on the client.
-    { wallets: { createWallet } } as unknown as dfnsClient.DfnsApiClient
-  );
   return { createClient, createWallet };
 }
 

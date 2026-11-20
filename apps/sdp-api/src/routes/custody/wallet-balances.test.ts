@@ -1,7 +1,9 @@
-import type { SolanaRpc } from "@sdp/rpc/solana";
+import { createRpc } from "@sdp/rpc/solana";
 import { SOL_MINT, SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { getAddressDecoder } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
+import { type JsonRpcResult, parseJsonRpcRequest } from "@/test/helpers/cluster-rpc";
 import { required } from "@/test/helpers/required";
 import {
   clearWalletBalanceCache,
@@ -23,32 +25,58 @@ function wallet(index: number): WalletBalanceTarget {
   return { id: `cwlt_${index}`, walletId: `provider_${index}`, publicKey: ownerAddress(index) };
 }
 
-interface Pending<T> {
-  resolve: (value: T) => void;
-  reject: (reason: unknown) => void;
+const RPC_URL = "https://wallet-balances.rpc.test";
+
+/** A read the test answers with `value`, or fails, once it has seen every read start. */
+interface HeldRead {
+  resolve: (answer: { value: readonly JsonRpcResult[] }) => void;
+  reject: (reason: Error) => void;
 }
 
+const multipleAccountsParamsSchema = z.tuple([z.array(z.string())], z.unknown());
+const tokenAccountsByOwnerParamsSchema = z.tuple(
+  [z.string(), z.object({ programId: z.string() })],
+  z.unknown()
+);
+
 /**
- * An RPC whose answers the test releases, so it can see which reads start before
- * any of them finish.
+ * A real RPC client over a stubbed endpoint whose answers the test releases, so it can see
+ * which reads start before any of them finish.
  */
 function heldRpc() {
-  const accountReads: Array<{ addresses: string[] } & Pending<{ value: unknown[] }>> = [];
-  const tokenReads: Array<{ owner: string; programId: string } & Pending<{ value: unknown[] }>> =
-    [];
-  // SAFETY: readWalletBalances calls only these two methods, each as `.send()`;
-  // kit's typed RPC client cannot be built without a transport.
-  const rpc = {
-    getMultipleAccounts: (addresses: string[]) => ({
-      send: () =>
-        new Promise((resolve, reject) => accountReads.push({ addresses, resolve, reject })),
-    }),
-    getTokenAccountsByOwner: (owner: string, { programId }: { programId: string }) => ({
-      send: () =>
-        new Promise((resolve, reject) => tokenReads.push({ owner, programId, resolve, reject })),
-    }),
-  } as unknown as SolanaRpc;
-  return { rpc, accountReads, tokenReads };
+  const accountReads: Array<{ addresses: string[] } & HeldRead> = [];
+  const tokenReads: Array<{ owner: string; programId: string } & HeldRead> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof fetch>(
+      async (_input, init) =>
+        new Promise<Response>((settle, fail) => {
+          const { id, method, params } = parseJsonRpcRequest(init);
+          const held: HeldRead = {
+            resolve: ({ value }) =>
+              settle(
+                Response.json({ jsonrpc: "2.0", id, result: { context: { slot: 1 }, value } })
+              ),
+            reject: fail,
+          };
+          switch (method) {
+            case "getMultipleAccounts": {
+              const [addresses] = multipleAccountsParamsSchema.parse(params);
+              accountReads.push({ addresses, ...held });
+              return;
+            }
+            case "getTokenAccountsByOwner": {
+              const [owner, { programId }] = tokenAccountsByOwnerParamsSchema.parse(params);
+              tokenReads.push({ owner, programId, ...held });
+              return;
+            }
+            default:
+              fail(new Error(`Unexpected RPC method ${method}`));
+          }
+        })
+    )
+  );
+  return { rpc: createRpc(RPC_URL), accountReads, tokenReads };
 }
 
 /** Answers every token-program read with no token accounts. */
@@ -83,6 +111,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe("readWalletBalances", () => {
@@ -106,7 +135,7 @@ describe("readWalletBalances", () => {
     ).toEqual([SPL_TOKEN_PROGRAMS["spl-token"], SPL_TOKEN_PROGRAMS["token-2022"]]);
 
     required(accountReads[0]).resolve({
-      value: [{ lamports: 1_500_000_000n }, null, { lamports: 1n }],
+      value: [{ lamports: 1_500_000_000 }, null, { lamports: 1 }],
     });
     for (const read of tokenReads) {
       const holdsUsdc =
@@ -138,7 +167,7 @@ describe("readWalletBalances", () => {
 
     expect(accountReads.map((read) => read.addresses.length)).toEqual([100, 1]);
     required(accountReads[0]).resolve({
-      value: Array.from({ length: 100 }, () => ({ lamports: 7n })),
+      value: Array.from({ length: 100 }, () => ({ lamports: 7 })),
     });
     required(accountReads[1]).reject(new Error("rpc unavailable"));
     answerTokenReadsEmpty(tokenReads);
@@ -157,7 +186,7 @@ describe("readWalletBalances", () => {
 
     expect(accountReads).toHaveLength(1);
     expect(tokenReads).toHaveLength(2);
-    required(accountReads[0]).resolve({ value: [{ lamports: 5n }] });
+    required(accountReads[0]).resolve({ value: [{ lamports: 5 }] });
     answerTokenReadsEmpty(tokenReads);
 
     const [firstBalances, secondBalances] = await Promise.all([first, second]);
@@ -177,7 +206,7 @@ describe("readWalletBalances", () => {
     await flush();
     // Neither the cache nor the finished read kept the failure.
     expect(accountReads).toHaveLength(2);
-    required(accountReads[1]).resolve({ value: [{ lamports: 9n }] });
+    required(accountReads[1]).resolve({ value: [{ lamports: 9 }] });
     answerTokenReadsEmpty(tokenReads.slice(2));
 
     expect((await retried).get("cwlt_1")).toEqual([
@@ -192,7 +221,7 @@ describe("readWalletBalances", () => {
     const result = readWalletBalances(rpc, SCOPE, [unreadable, wallet(1)], "req_test");
     await flush();
     expect(required(accountReads[0]).addresses).toEqual([ownerAddress(1)]);
-    required(accountReads[0]).resolve({ value: [{ lamports: 2n }] });
+    required(accountReads[0]).resolve({ value: [{ lamports: 2 }] });
     answerTokenReadsEmpty(tokenReads);
 
     const balances = await result;
@@ -207,7 +236,7 @@ describe("readWalletBalances", () => {
 
     const result = readWalletBalances(rpc, SCOPE, [wallet(1)], "req_test");
     await flush();
-    required(accountReads[0]).resolve({ value: [{ lamports: 9n }] });
+    required(accountReads[0]).resolve({ value: [{ lamports: 9 }] });
     required(tokenReads[0]).resolve({ value: [] });
     required(tokenReads[1]).reject(new Error("rpc unavailable"));
 
@@ -220,7 +249,7 @@ describe("readWalletBalances", () => {
 
     const first = readWalletBalances(rpc, SCOPE, [wallet(1)], "req_first");
     await flush();
-    required(accountReads[0]).resolve({ value: [{ lamports: 3n }] });
+    required(accountReads[0]).resolve({ value: [{ lamports: 3 }] });
     answerTokenReadsEmpty(tokenReads);
     await first;
 
@@ -239,7 +268,7 @@ describe("readWalletBalances", () => {
     const stale = readWalletBalances(rpc, SCOPE, [wallet(1)], "req_stale");
     await flush();
     clearWalletBalanceCache();
-    required(accountReads[0]).resolve({ value: [{ lamports: 3n }] });
+    required(accountReads[0]).resolve({ value: [{ lamports: 3 }] });
     answerTokenReadsEmpty(tokenReads);
     await stale;
 

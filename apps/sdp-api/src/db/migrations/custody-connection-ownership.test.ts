@@ -104,36 +104,16 @@ async function insertCredentialWithoutCiphertext(
     .run();
 }
 
-function lastCheckStatusOf(
-  lifecycle: CustodyConnectionLifecycle
-): CustodyConnectionCheckStatus | null {
-  switch (lifecycle) {
-    case "pending":
-    case "deactivated":
-      return null;
-    case "checking":
-      return "running";
-    case "active":
-      return "success";
-    case "failed":
-      return "failed";
-    default: {
-      const exhaustive: never = lifecycle;
-      throw new Error(`Unknown connection lifecycle: ${String(exhaustive)}`);
-    }
-  }
-}
-
 async function insertConnection(
   id: string,
   credential: { id: string; projectId: string },
   options: {
     projectId: string;
     status: CustodyConnectionLifecycle;
+    lastCheckStatus: CustodyConnectionCheckStatus | null;
     providerAccountFingerprint: string | null;
   }
 ): Promise<void> {
-  const lastCheckStatus = lastCheckStatusOf(options.status);
   await insertTestCustodyConnection(getDb(env), {
     id,
     organizationId: ORGANIZATION_ID,
@@ -143,11 +123,11 @@ async function insertConnection(
     status: options.status,
     setupMetadata: {},
     providerAccountFingerprint: options.providerAccountFingerprint,
-    lastCheckStatus,
-    lastCheckAt: lastCheckStatus === null ? null : CHECKED_AT,
+    lastCheckStatus: options.lastCheckStatus,
+    lastCheckAt: options.lastCheckStatus === null ? null : CHECKED_AT,
     lastCheckFailureCode: null,
-    activatedAt: options.status === "active" ? CHECKED_AT : null,
-    deactivatedAt: options.status === "deactivated" ? CHECKED_AT : null,
+    activatedAt: null,
+    deactivatedAt: null,
     createdBy: USER_ID,
     createdAt: CHECKED_AT,
   });
@@ -156,12 +136,15 @@ async function insertConnection(
 async function insertProjectConnection(
   id: string,
   credentialId: string,
-  status: CustodyConnectionLifecycle
+  state: {
+    status: CustodyConnectionLifecycle;
+    lastCheckStatus: CustodyConnectionCheckStatus | null;
+  }
 ): Promise<void> {
   await insertConnection(
     id,
     { id: credentialId, projectId: PROJECT_ID },
-    { projectId: PROJECT_ID, status, providerAccountFingerprint: null }
+    { projectId: PROJECT_ID, ...state, providerAccountFingerprint: null }
   );
 }
 
@@ -208,7 +191,10 @@ describe("custody Connection constraints", () => {
 
   it("requires every wallet to have exactly one Config or Connection owner", async () => {
     await insertCredential("pcred_wallet_owner", "pending", PROJECT_ID);
-    await insertProjectConnection("cconn_wallet_owner", "pcred_wallet_owner", "pending");
+    await insertProjectConnection("cconn_wallet_owner", "pcred_wallet_owner", {
+      status: "pending",
+      lastCheckStatus: null,
+    });
     await insertConnectionWallet("cwlt_connection_owner", "cconn_wallet_owner");
     await insertTestCustodyWalletRow(getDb(env), {
       id: "cwlt_config_owner",
@@ -245,7 +231,10 @@ describe("custody Connection constraints", () => {
 
   it("refuses to delete a Connection that still owns wallets", async () => {
     await insertCredential("pcred_wallet_holder", "active", PROJECT_ID);
-    await insertProjectConnection("cconn_wallet_holder", "pcred_wallet_holder", "failed");
+    await insertProjectConnection("cconn_wallet_holder", "pcred_wallet_holder", {
+      status: "failed",
+      lastCheckStatus: "failed",
+    });
     await activateConnection("cconn_wallet_holder", "cwlt_wallet_holder");
 
     await expect(
@@ -266,7 +255,12 @@ describe("custody Connection constraints", () => {
       insertConnection(
         "cconn_other_project_credential",
         { id: "pcred_other_project", projectId: OTHER_PROJECT_ID },
-        { projectId: PROJECT_ID, status: "pending", providerAccountFingerprint: null }
+        {
+          projectId: PROJECT_ID,
+          status: "pending",
+          lastCheckStatus: null,
+          providerAccountFingerprint: null,
+        }
       )
     ).rejects.toThrow(/custody_connections_credential_scope_check/);
     expect(await connectionStates()).toEqual([]);
@@ -288,10 +282,16 @@ describe("custody Connection constraints", () => {
     await insertCredential("pcred_unfinished_one", "pending", PROJECT_ID);
     await insertCredential("pcred_unfinished_two", "pending", PROJECT_ID);
     await insertCredential("pcred_active_sibling", "active", PROJECT_ID);
-    await insertProjectConnection("cconn_unfinished_one", "pcred_unfinished_one", "pending");
+    await insertProjectConnection("cconn_unfinished_one", "pcred_unfinished_one", {
+      status: "pending",
+      lastCheckStatus: null,
+    });
 
     await expect(
-      insertProjectConnection("cconn_unfinished_two", "pcred_unfinished_two", "checking")
+      insertProjectConnection("cconn_unfinished_two", "pcred_unfinished_two", {
+        status: "checking",
+        lastCheckStatus: "running",
+      })
     ).rejects.toThrow(/idx_custody_connections_privy_unfinished/);
 
     await getDb(env)
@@ -305,8 +305,14 @@ describe("custody Connection constraints", () => {
       .bind(CHECKED_AT)
       .run();
 
-    await insertProjectConnection("cconn_unfinished_two", "pcred_unfinished_two", "checking");
-    await insertProjectConnection("cconn_active_sibling", "pcred_active_sibling", "failed");
+    await insertProjectConnection("cconn_unfinished_two", "pcred_unfinished_two", {
+      status: "checking",
+      lastCheckStatus: "running",
+    });
+    await insertProjectConnection("cconn_active_sibling", "pcred_active_sibling", {
+      status: "failed",
+      lastCheckStatus: "failed",
+    });
     await activateConnection("cconn_active_sibling", "cwlt_active_sibling");
 
     expect(await connectionStates()).toEqual([
@@ -318,7 +324,10 @@ describe("custody Connection constraints", () => {
 
   it("enforces local installation lifecycle combinations", async () => {
     await insertCredential("pcred_lifecycle", "active", PROJECT_ID);
-    await insertProjectConnection("cconn_lifecycle", "pcred_lifecycle", "pending");
+    await insertProjectConnection("cconn_lifecycle", "pcred_lifecycle", {
+      status: "pending",
+      lastCheckStatus: null,
+    });
 
     await expect(
       getDb(env)
@@ -398,18 +407,33 @@ describe("custody Connection constraints", () => {
     await insertConnection(
       "cconn_fingerprint_live",
       { id: "pcred_fingerprint_live", projectId: PROJECT_ID },
-      { projectId: PROJECT_ID, status: "failed", providerAccountFingerprint: fingerprint }
+      {
+        projectId: PROJECT_ID,
+        status: "failed",
+        lastCheckStatus: "failed",
+        providerAccountFingerprint: fingerprint,
+      }
     );
     await activateConnection("cconn_fingerprint_live", "cwlt_fingerprint_live");
     await insertConnection(
       "cconn_fingerprint_terminal",
       { id: "pcred_fingerprint_terminal", projectId: PROJECT_ID },
-      { projectId: PROJECT_ID, status: "failed", providerAccountFingerprint: fingerprint }
+      {
+        projectId: PROJECT_ID,
+        status: "failed",
+        lastCheckStatus: "failed",
+        providerAccountFingerprint: fingerprint,
+      }
     );
     await insertConnection(
       "cconn_fingerprint_other_project",
       { id: "pcred_fingerprint_other_project", projectId: OTHER_PROJECT_ID },
-      { projectId: OTHER_PROJECT_ID, status: "failed", providerAccountFingerprint: fingerprint }
+      {
+        projectId: OTHER_PROJECT_ID,
+        status: "failed",
+        lastCheckStatus: "failed",
+        providerAccountFingerprint: fingerprint,
+      }
     );
     await activateConnection("cconn_fingerprint_other_project", "cwlt_fingerprint_other_project");
 
