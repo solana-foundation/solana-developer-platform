@@ -11,13 +11,15 @@ import type {
   ClaimCustodyProposalsInput,
   CustodyProposalRecoveryScope,
   CustodyProposalRow,
+  ProposedTransactionRow,
 } from "@/db/repositories/custody-proposals.repository";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { internalError } from "@/lib/errors";
 import { runAsRecordedMoneyPrincipal } from "@/lib/money-principal";
 import { getLogger } from "@/runtime/logger";
-import { describeError } from "@/runtime/money-path-events";
+import { describeError, logEvent } from "@/runtime/money-path-events";
+import { recoverSigningProposal } from "@/services/custody/signing-proposal-reconciliation";
 import {
   ProposalAdmissionRefusedError,
   transferProposalIntentSchema,
@@ -35,7 +37,7 @@ import {
 import { createOrgTransferProposalRecovery } from "@/services/solana/signer";
 import type { Env } from "@/types/env";
 
-const RECOVERY_PAGE_SIZE = 50;
+const RECOVERY_PAGE_SIZE = 100;
 const RECOVERY_CONCURRENCY = 5;
 const RECOVERY_PASSES = 2;
 const CANCELLATION_RESULT_WRITE_ATTEMPTS = 5;
@@ -217,21 +219,40 @@ async function recoverClaimedProposals(
   ledger: ProposalLedger,
   input: ClaimCustodyProposalsInput
 ) {
+  const startedAt = Date.now();
   const proposals = await ledger.proposals.claimDue(input);
-  // Row failures use age-based alerts regardless of the rest of the page.
+  // Both kinds reserve work through the same schedule before provider I/O.
   const outcomes = await mapSettledWithConcurrency(
     proposals,
     RECOVERY_CONCURRENCY,
     async (proposal) => {
       try {
+        if (proposal.kind === "signing") {
+          const result = await recoverSigningProposal(env, ledger.proposals, proposal);
+          if (hasUnalertedCustodyProposalRefusal(result.row.state))
+            await emitRefusalAlert(ledger, null, result.row);
+          return {
+            polled: result.polled,
+            terminal: isTerminalCustodyProposalPhase(result.row.state.providerPhase),
+          };
+        }
         await recoverProposal(env, ledger, proposal);
+        const current = await ledger.proposals.getForTransfer(identity(proposal));
+        if (current === null) throw internalError("Custody proposal is missing");
+        return {
+          polled: true,
+          terminal: isTerminalCustodyProposalPhase(current.state.providerPhase),
+        };
       } catch (error) {
         if (error instanceof ProposalRefusalAlertDeliveryError) throw error;
         getLogger().warn(
           {
             event: "proposal_recovery_unavailable",
             environment: input.environment,
-            ...identity(proposal),
+            proposalId: proposal.id,
+            organizationId: proposal.organization_id,
+            projectId: proposal.project_id,
+            transferId: proposal.payment_transfer_id,
             pending_age_seconds: Math.max(
               0,
               Math.floor((Date.now() - Date.parse(proposal.created_at)) / 1000)
@@ -244,20 +265,70 @@ async function recoverClaimedProposals(
       }
     }
   );
-  rethrowFailures(
-    outcomes.filter(
-      (outcome) =>
-        outcome.status === "rejected" && outcome.reason instanceof ProposalRefusalAlertDeliveryError
-    )
-  );
+  const stats = await ledger.proposals.stats({ ...input, now: new Date().toISOString() });
+  const completed = outcomes.filter((outcome) => outcome.status === "fulfilled");
+  const failed = outcomes.length - completed.length;
+  // Keep the existing monitoring event until the dashboard has migrated its metric names.
+  logEvent(failed > 0 ? "error" : "info", {
+    event: "sdp_api_fireblocks_reconciliation_tick",
+    environment: input.environment,
+    pending: stats.pending,
+    pending_transfers: stats.transfers,
+    pending_signing: stats.signing,
+    oldest_unpolled_age_ms: stats.oldestUnpolledAgeMs,
+    duration_ms: Date.now() - startedAt,
+    selected: proposals.length,
+    polled: completed.filter((outcome) => outcome.value.polled).length,
+    skipped: completed.filter((outcome) => !outcome.value.polled).length,
+    settled: completed.filter((outcome) => outcome.value.terminal).length,
+    failed,
+    limit: RECOVERY_PAGE_SIZE,
+    concurrency: RECOVERY_CONCURRENCY,
+    target_ms: 180_000,
+  });
+  rethrowFailures(outcomes);
 }
 
 async function emitRefusalAlert(
   ledger: ProposalLedger,
   transfer: PaymentTransferRow | null,
-  proposal: CustodyProposalRow
+  proposal: ProposedTransactionRow
 ) {
   try {
+    if (proposal.kind === "signing") {
+      const refusal = proposal.state.refusal;
+      if (refusal === null) throw internalError("Custody proposal alert has no recorded refusal");
+      getLogger().fatal(
+        {
+          event: "signing_proposal_completed_after_refusal",
+          proposalId: proposal.id,
+          organizationId: proposal.organization_id,
+          projectId: proposal.project_id,
+          provider: proposal.provider,
+          operation: proposal.operation,
+          refusalReason: refusal.reason,
+          refusedAt: refusal.at,
+        },
+        "signing_proposal_completed_after_refusal"
+      );
+      const acknowledged = await ledger.proposals.transitionSigning({
+        proposalId: proposal.id,
+        organizationId: proposal.organization_id,
+        projectId: proposal.project_id,
+        expectedVersion: proposal.version,
+        event: { type: "alert_delivered", at: new Date().toISOString() },
+      });
+      if (acknowledged === null) {
+        const current = await ledger.proposals.requireSigning({
+          proposalId: proposal.id,
+          organizationId: proposal.organization_id,
+          projectId: proposal.project_id,
+        });
+        if (hasUnalertedCustodyProposalRefusal(current.state))
+          throw internalError("Signing proposal alert acknowledgment changed concurrently");
+      }
+      return;
+    }
     transfer ??= await ledger.repo.getTransferById(identity(proposal));
     if (transfer === null) throw internalError("Custody proposal payment is missing");
     const refusal = proposal.state.refusal;
@@ -281,7 +352,7 @@ async function emitRefusalAlert(
   }
 }
 
-function rethrowFailures(outcomes: readonly PromiseSettledResult<void>[]) {
+function rethrowFailures(outcomes: readonly PromiseSettledResult<unknown>[]) {
   const failures = outcomes
     .filter((outcome): outcome is PromiseRejectedResult => outcome.status === "rejected")
     .map((outcome) => outcome.reason);
@@ -305,7 +376,9 @@ async function drainAlerts(ledger: ProposalLedger, scope: CustodyProposalRecover
         getLogger().warn(
           {
             event: "proposal_refusal_alert_unavailable",
-            ...identity(proposal),
+            proposalId: proposal.id,
+            organizationId: proposal.organization_id,
+            projectId: proposal.project_id,
             ...describeError(error),
           },
           "proposal_refusal_alert_unavailable"

@@ -5,14 +5,22 @@
  * These map to the underlying @solana/keychain-* package configs.
  */
 
+import type { FireblocksSignerConfig } from "@solana/keychain-fireblocks";
 import type { DfnsApiClient } from "#/dfns/client";
-import type { FireblocksProposalTracking } from "#/fireblocks-proposals";
+import type { ProposalTracking } from "#/proposals";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Fireblocks Configuration
 // ═══════════════════════════════════════════════════════════════════════════
 
-export interface KeychainFireblocksConfig extends FireblocksProposalTracking {
+export interface KeychainFireblocksConfig
+  extends Pick<
+    FireblocksSignerConfig,
+    "createExternalTxId" | "onSigningStatus" | "onSigningCleanup" | "onSigningFailure"
+  > {
+  /** Shared durable proposal lifecycle; SDK callbacks remain inside this adapter. */
+  proposalTracking?: ProposalTracking;
+
   /** Fireblocks API key */
   apiKey: string;
 

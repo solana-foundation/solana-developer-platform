@@ -10,6 +10,7 @@ import { getDb } from "@/db/client";
 import { runWithoutDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";
 import type { MoneyPrincipal } from "@/lib/money-principal";
 import { createTenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
+import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { organizationMember, seedOrganizationMembers } from "@/test/helpers/organization-members";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -130,6 +131,42 @@ async function flag(id: string, at = BEFORE): Promise<void> {
 
 const claimInput = { environment: "sandbox", now: NOW, limit: 50 } as const;
 
+async function seedSigning(tag = "signing", ownerProjectId = projectId) {
+  const walletId = `cw_${tag}`;
+  const db = getDb(env);
+  await seedUnreadPrivyWallet(db, {
+    organizationId: ORGANIZATION.id,
+    projectId: ownerProjectId,
+    createdBy: MEMBER.userId,
+    custodyWalletId: walletId,
+    walletId: `provider_${tag}`,
+    publicKey: `Source_${tag}`,
+  });
+  const scope = { organizationId: ORGANIZATION.id, projectId: ownerProjectId };
+  const id = await repo.createSigning({
+    ...scope,
+    provider: "privy",
+    connectionId: `cconn_${walletId}`,
+    walletId: `provider_${tag}`,
+    binding: { connectionId: `cconn_${walletId}`, sourceAddress: `Source_${tag}` },
+    operation: "SIGN_TRANSACTION",
+    requestId: `request_${tag}`,
+  });
+  await db.execute("UPDATE custody_proposals SET next_check_at = ? WHERE id = ?", [BEFORE, id]);
+  return { ...scope, proposalId: id };
+}
+
+function signingObservation(phase: "pending" | "completed" | "cancelled" = "pending") {
+  return {
+    type: "observed" as const,
+    at: NOW,
+    phase,
+    providerTransactionId: "signing_provider_tx",
+    providerStatus: phase === "completed" ? "SIGNED" : "PENDING_AUTHORIZATION",
+    providerSubStatus: null,
+  };
+}
+
 describe("CustodyProposalsRepository", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
@@ -153,6 +190,220 @@ describe("CustodyProposalsRepository", () => {
     });
     foreignProjectId = foreign.sandbox.id;
     repo = createPostgresCustodyProposalsRepository(db);
+  });
+
+  it("stores sign-only requests in the canonical table without a payment or legacy row", async () => {
+    const input = await seedSigning();
+    const row = await repo.requireSigning(input);
+    expect(row).toMatchObject({
+      kind: "signing",
+      payment_transfer_id: null,
+      provider: "privy",
+      operation: "SIGN_TRANSACTION",
+      request_id: "request_signing",
+      finished_at: null,
+      binding: { connectionId: "cconn_cw_signing", sourceAddress: "Source_signing" },
+      state: { providerPhase: "submitting", authorizationState: "authorized" },
+    });
+    expect(await getDb(env).queryMany("SELECT id FROM fireblocks_signing_proposals")).toEqual([]);
+    expect(
+      await repo.listSigning({
+        organizationId: input.organizationId,
+        projectId,
+        walletId: row.custody_wallet_id,
+        offset: 0,
+      })
+    ).toEqual([row]);
+    await expect(
+      repo.createSigning({
+        organizationId: input.organizationId,
+        projectId,
+        provider: "fireblocks",
+        connectionId: "cconn_cw_signing",
+        walletId: "provider_signing",
+        binding: {},
+        operation: "RAW",
+      })
+    ).rejects.toThrow("wallet is unavailable");
+  });
+
+  it("scopes every signing read and mutation to its recorded tenant", async () => {
+    const input = await seedSigning();
+    const wrong = { ...input, projectId: productionProjectId };
+    expect(await repo.getSigning(wrong)).toBeNull();
+    expect(await repo.requestSigningCancellation(wrong)).toBe(false);
+    expect(await repo.claimSigningPoll(wrong)).toBe(false);
+    const scoped = createPostgresCustodyProposalsRepository(getDb(env), createTenantScope(input));
+    await expect(scoped.getSigning(wrong)).rejects.toBeInstanceOf(TenantScopeViolationError);
+    expect((await repo.requireSigning(input)).version).toBe(0);
+  });
+
+  it("keeps a pre-acceptance cancellation sticky when a signature arrives later", async () => {
+    const input = await seedSigning();
+    expect(await repo.requestSigningCancellation(input)).toBe(true);
+    expect(await repo.observeSigning({ ...input, event: signingObservation("completed") })).toBe(
+      false
+    );
+    const row = await repo.requireSigning(input);
+    expect(row.state).toMatchObject({
+      providerPhase: "completed",
+      authorizationState: "committed_after_refusal",
+      refusal: { reason: "cancellation_requested" },
+    });
+    expect(row.finished_at).toBe(NOW);
+    expect(await repo.listUnalerted(claimInput)).toContainEqual(row);
+    expect(
+      await repo.transitionSigning({
+        ...input,
+        expectedVersion: row.version,
+        event: { type: "alert_delivered", at: NOW },
+      })
+    ).toMatchObject({ state: { authorizationState: "refusal_alerted" } });
+    expect(await repo.listUnalerted(claimInput)).toEqual([]);
+  });
+
+  it("lets cancellation or signature delivery win a race without authorizing both", async () => {
+    const input = await seedSigning();
+    const [cancelled, deliverable] = await Promise.all([
+      repo.requestSigningCancellation(input),
+      repo.observeSigning({ ...input, event: signingObservation("completed") }),
+    ]);
+    expect(cancelled && deliverable).toBe(false);
+    expect(cancelled || deliverable).toBe(true);
+    const row = await repo.requireSigning(input);
+    expect(row.state.authorizationState).toBe(cancelled ? "committed_after_refusal" : "authorized");
+  });
+
+  it("retains the first terminal signing fact while accepting an equivalent provider observation", async () => {
+    const input = await seedSigning();
+    expect(await repo.observeSigning({ ...input, event: signingObservation("completed") })).toBe(
+      true
+    );
+    expect(
+      await repo.observeSigning({
+        ...input,
+        event: { ...signingObservation("completed"), providerStatus: "COMPLETED" },
+      })
+    ).toBe(true);
+    expect((await repo.requireSigning(input)).state.providerStatus).toBe("SIGNED");
+    expect(await repo.observeSigning({ ...input, event: signingObservation("cancelled") })).toBe(
+      false
+    );
+    expect(await repo.observeSigning({ ...input, event: signingObservation("pending") })).toBe(
+      false
+    );
+    await expect(
+      repo.observeSigning({
+        ...input,
+        event: { ...signingObservation("completed"), providerTransactionId: "different" },
+      })
+    ).rejects.toThrow("identity or outcome changed");
+  });
+
+  it("rejects stale signing versions and cancellation results for an older attempt", async () => {
+    const input = await seedSigning();
+    await repo.observeSigning({ ...input, event: signingObservation() });
+    const pending = await repo.requireSigning(input);
+    await repo.requestSigningCancellation(input);
+    expect(
+      await repo.transitionSigning({
+        ...input,
+        expectedVersion: pending.version,
+        event: { type: "cancel_requested", at: NOW },
+      })
+    ).toBeNull();
+    const first = await repo.transitionSigning({
+      ...input,
+      event: { type: "cancel_requested", at: NOW },
+    });
+    assert(first);
+    const later = new Date(
+      Date.parse(NOW) + CUSTODY_PROPOSAL_CANCELLATION_RETRY_INTERVAL_MS
+    ).toISOString();
+    await repo.transitionSigning({
+      ...input,
+      expectedCancelAttempt: 1,
+      event: { type: "cancel_ambiguous", at: NOW },
+    });
+    await repo.transitionSigning({ ...input, event: { type: "cancel_requested", at: later } });
+    expect(
+      await repo.transitionSigning({
+        ...input,
+        expectedCancelAttempt: first.state.cancelAttempt,
+        event: { type: "cancel_accepted", at: later },
+      })
+    ).toBeNull();
+    expect((await repo.requireSigning(input)).state.cancelAttempt).toBe(2);
+  });
+
+  it("shares recovery scheduling across proposal kinds while retaining environment and principal scope", async () => {
+    const signing = await seedSigning();
+    await seedSigning("production_signing", productionProjectId);
+    const { proposal } = await seedProposal("shared_transfer");
+    const stats = await repo.stats(claimInput);
+    expect(stats).toMatchObject({ pending: 2, transfers: 1, signing: 1 });
+    expect(
+      (await repo.claimDue({ ...claimInput, principal: PRINCIPAL })).map((row) => row.id)
+    ).toEqual([proposal.id]);
+    const rows = await repo.claimDue(claimInput);
+    expect(rows.map((row) => row.id)).toEqual([signing.proposalId]);
+    expect(await repo.claimDue(claimInput)).toEqual([]);
+  });
+
+  it("keeps signing viewer throttles separate from worker claims", async () => {
+    const input = await seedSigning();
+    expect(await repo.claimSigningPoll(input)).toBe(true);
+    expect(await repo.claimSigningPoll(input)).toBe(false);
+    expect((await repo.claimDue(claimInput)).map((row) => row.id)).toEqual([input.proposalId]);
+    expect((await repo.requireSigning(input)).last_polled_at).not.toBeNull();
+  });
+
+  it("reports the latest worker or viewer poll clock in canonical backlog metrics", async () => {
+    const input = await seedSigning();
+    await getDb(env).execute(
+      "UPDATE custody_proposals SET last_polled_at = ?, last_checked_at = ? WHERE id = ?",
+      [BEFORE, NOW, input.proposalId]
+    );
+    expect((await repo.stats(claimInput)).oldestUnpolledAgeMs).toBe(0);
+    await getDb(env).execute(
+      "UPDATE custody_proposals SET last_polled_at = ?, last_checked_at = ? WHERE id = ?",
+      [NOW, BEFORE, input.proposalId]
+    );
+    expect((await repo.stats(claimInput)).oldestUnpolledAgeMs).toBe(0);
+  });
+
+  it("rotates a 500-proposal mixed backlog within five bounded worker passes", async () => {
+    const signing = await seedSigning("capacity");
+    await seedProposal("capacity_transfer");
+    await getDb(env).execute(
+      `INSERT INTO custody_proposals
+         (id, organization_id, project_id, custody_wallet_id, kind, operation, provider, binding,
+          provider_phase, authorization_state, submission_started_at, next_check_at, created_at, updated_at)
+       SELECT 'capacity_' || series, cp.organization_id, cp.project_id, cp.custody_wallet_id,
+          cp.kind, cp.operation, cp.provider, cp.binding, cp.provider_phase, cp.authorization_state,
+          cp.submission_started_at, cp.next_check_at, cp.created_at, cp.updated_at
+       FROM custody_proposals cp CROSS JOIN generate_series(1, 498) series WHERE cp.id = ?`,
+      [signing.proposalId]
+    );
+    expect(await repo.stats(claimInput)).toMatchObject({
+      pending: 500,
+      transfers: 1,
+      signing: 499,
+    });
+    const seen = new Set<string>();
+    for (let pass = 0; pass < 5; pass += 1) {
+      const page = await repo.claimDue({
+        ...claimInput,
+        limit: 100,
+        now: new Date(Date.parse(NOW) + pass * 30_000).toISOString(),
+      });
+      expect(page).toHaveLength(100);
+      for (const row of page) {
+        expect(seen.has(row.id)).toBe(false);
+        seen.add(row.id);
+      }
+    }
+    expect(seen.size).toBe(500);
   });
 
   it("retains the payment age when adopting an old transfer", async () => {
@@ -501,7 +752,9 @@ describe("CustodyProposalsRepository", () => {
     for (const id of ["a_flag", "b_flag", "c_flag", "d_flag"]) await flag(id);
     const page = await repo.claimDue({ ...claimInput, limit: 4 });
     expect(page).toHaveLength(4);
-    expect(page.filter((row) => row.payment_transfer_id.endsWith("_flag"))).toHaveLength(3);
+    expect(
+      page.filter((row) => row.kind === "transfer" && row.payment_transfer_id.endsWith("_flag"))
+    ).toHaveLength(3);
     expect(page.at(-1)?.payment_transfer_id).toBe("z_ordinary");
     const remaining = await repo.claimDue(claimInput);
     expect(remaining).toHaveLength(1);

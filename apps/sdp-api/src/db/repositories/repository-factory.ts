@@ -338,6 +338,7 @@ const CUSTODY_PROPOSALS_SYSTEM_ONLY_METHODS = [
   "requestRecheck",
   "listUnalerted",
   "adoptLegacyTransfers",
+  "stats",
 ];
 
 /** Tenant proposals bound to the authenticated project. */

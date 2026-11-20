@@ -4,7 +4,7 @@ import { alwaysEnabled, defineCron } from "./define-cron";
 /** Provider proposals reconcile independently of chain transfer settlement. */
 export const custodyProposalsCron = defineCron({
   name: "reconcile-custody-proposals",
-  schedule: "* * * * *",
+  schedule: "*/30 * * * * *",
   scope: "cluster",
   effect: "finishes",
   enabled: alwaysEnabled,

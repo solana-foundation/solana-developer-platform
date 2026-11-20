@@ -170,10 +170,10 @@ callback. The recovery worker restores only the durable initiating principal,
 re-admits through the custody waist and persists a sticky refusal before asking
 the provider to cancel a known pending proposal. Revocation and member removal
 try to enqueue matching principals in a savepoint; a failed wake cannot keep
-the key or membership live. A dedicated every-minute worker drains those flags
-and rechecks known proposals even if legacy adoption fails, without borrowing
-an HTTP viewer's authority. Provider-neutral
-proposal state, payment projection and audit commit through one versioned path. Cancel acknowledgment
+the key or membership live. The shared 30-second proposal worker drains those flags and rechecks known
+proposals even if legacy adoption fails, without borrowing an HTTP viewer's
+authority. Provider-neutral proposal state, payment projection and audit commit
+through one versioned path. Cancel acknowledgment
 never proves non-execution; recovery records verified settlement even when it
 wins the race and emits `fireblocks_transfer_committed_after_refusal` at CRITICAL
 severity. Operational bounds and credential limitations are in
@@ -191,23 +191,26 @@ exception and the `fireblocks-native-transfer` allowlist entry.
 
 ### D5 reconciliation target and current evidence (2026-11-12)
 
-The independent `reconcile-fireblocks-proposals` cron visits both native and
-sign-only proposal queues every 30 seconds per environment, 100 rows per run and
-five concurrent reads. The initial polling-age target is 180 seconds for up to
-500 pending rows under normal provider/database availability. The prior native
-lane visited 50 per minute after Solana settlement (about ten minutes for 500);
-the new lane needs five scheduled visits (about 150 seconds plus the last batch).
-A PostgreSQL-backed regression proves all 500 are visited in five bounded passes.
-This is capacity evidence, not measured live p99 settlement or revocation latency.
+The shared `reconcile-custody-proposals` cron visits transfer and sign-only
+proposals every 30 seconds per environment, 100 rows per run and five concurrent
+recoveries. `custody_proposals` is the sole canonical store used by the
+application; signing requests have no payment parent. Provider adapters expose
+explicit proposal, read and cancellation capabilities and normalize observations
+before the shared lifecycle reducer.
 
-Per-run metrics report pending rows by kind, oldest unpolled age, duration, reads,
-lease skips, closed rows and failures. The companion sdp-infra dashboard and alerts
-cover polling age, row failures and absent ticks separately for stage/prod and
-sandbox/production. Query failures never fabricate an empty queue. See
-[the Fireblocks runbook](../ops/fireblocks-byok.md#scheduled-reconciliation-and-metrics)
-for metric semantics, request counts and deployment order.
+The initial polling-age target remains 180 seconds for up to 500 pending rows
+under normal provider/database availability. This is a capacity target, not
+measured live p99 settlement or revocation latency. Existing monitoring event
+names remain compatible while the queue covers both kinds.
 
-This pass is read-only at Fireblocks: no signing, broadcast, resubmission, new
-approval-age expiry or automatic cancellation. It neither records nor re-admits the initiating money
-principal. PRO-2468/2469/2470 remain deferred; therefore no revocation-to-cancellation
-SLO is claimed, and the security exception above remains proposed.
+A sign-only recovery can observe and retry a recorded cancellation. It cannot
+create a proposal, sign, broadcast or resume a timed-out request. The canonical
+cancellation claim blocks late signature delivery. Native transfer recovery
+retains its recorded-principal admission, atomic payment projection and critical
+alert when execution wins the cancellation race. Provider acknowledgment never
+proves non-execution.
+
+The expansion bridges older writers until all API and worker revisions use the
+shared repository. A separate migration-only contraction then drops the old
+Fireblocks table and bridge. Rollout order and request budgets are in
+[the Fireblocks runbook](../ops/fireblocks-byok.md#canonical-proposal-rollout).

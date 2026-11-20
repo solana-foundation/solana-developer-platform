@@ -24,8 +24,8 @@ import { installLogLineCapture } from "@/test/helpers/log-lines";
 import { required } from "@/test/helpers/required";
 import type { Env } from "@/types/env";
 import { earnCatalogueSyncCron } from "./earn-catalogue-sync";
-import { fireblocksProposalsCron } from "./fireblocks-proposals";
 import { pendingTransfersCron } from "./pending-transfers";
+import { custodyProposalsCron } from "./reconcile-custody-proposals";
 import { CRON_RUN_EVENT, type CronRegistration } from "./run-event";
 import { assertCronConfig, CRON_DEFINITIONS, type CronHandle, startCron } from "./runner";
 
@@ -199,7 +199,7 @@ afterEach(() => {
 });
 
 describe("startCron", () => {
-  it("keeps Fireblocks polling independent of a failing or overlapping Solana settlement slot", async () => {
+  it("keeps proposal recovery independent of a failing or overlapping Solana settlement slot", async () => {
     const worker = await startWorker();
     vi.mocked(pendingTransfersCron.run).mockRejectedValueOnce(
       new Error("Solana batch settlement failed")
@@ -210,16 +210,16 @@ describe("startCron", () => {
     vi.mocked(pendingTransfersCron.run).mockReturnValueOnce(hanging.promise);
     fire(worker, pendingTransfersCron.name, "sandbox");
     fire(worker, pendingTransfersCron.name, "sandbox");
-    vi.mocked(fireblocksProposalsCron.run).mockClear();
-    await Promise.all(fire(worker, fireblocksProposalsCron.name, "sandbox"));
-    expect(fireblocksProposalsCron.run).toHaveBeenCalledTimes(1);
+    vi.mocked(custodyProposalsCron.run).mockClear();
+    await Promise.all(fire(worker, custodyProposalsCron.name, "sandbox"));
+    expect(custodyProposalsCron.run).toHaveBeenCalledTimes(1);
     expect(
       runEvents(pendingTransfersCron.name, "sandbox").some(
         ([, event]) => event.status === "skipped_overlap"
       )
     ).toBe(true);
-    expect(runEvents(fireblocksProposalsCron.name, "sandbox")).toContainEqual(
-      okEvent(fireblocksProposalsCron.name, "sandbox")
+    expect(runEvents(custodyProposalsCron.name, "sandbox")).toContainEqual(
+      okEvent(custodyProposalsCron.name, "sandbox")
     );
     hanging.resolve();
     await worker.bg.awaitAll();

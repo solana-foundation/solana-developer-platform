@@ -11,10 +11,10 @@ import { verifyClerkJwt } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { createCredentialSecretStore } from "@/services/credential-secret-store";
-import { trackFireblocksProposals } from "@/services/custody/fireblocks-proposal-tracking";
 import { eraseExpiredFireblocksCsrs } from "@/services/custody/fireblocks-registration.service";
+import { trackProposals } from "@/services/custody/proposal-tracking";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
-import { reconcileFireblocksProposals } from "@/services/jobs/reconcile-fireblocks-proposals";
+import { reconcilePendingProposals } from "@/services/jobs/reconcile-pending-proposals";
 import { ProviderCredentialSecretCleanupStore } from "@/services/stores/provider-credential-secret-cleanup.store";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { inSandboxScope } from "@/test/helpers/cluster-rpc";
@@ -1041,26 +1041,32 @@ describe("manual Fireblocks signing-proposal cancellation", () => {
       [connection.connectionId]
     );
     if (!binding) throw new Error("Expected Fireblocks wallet");
-    const tracking = trackFireblocksProposals(
+    const tracking = trackProposals(
       getDb(env),
       { organizationId: ORGANIZATION_ID, projectId: PROJECT_ID },
       {
+        provider: "fireblocks",
         connectionId: connection.connectionId,
         walletId: "fb_0",
-        sourceAddress: ADDRESS,
-        accountFingerprint: binding.provider_account_fingerprint,
+        binding: {
+          connectionId: connection.connectionId,
+          sourceAddress: ADDRESS,
+          accountFingerprint: binding.provider_account_fingerprint,
+          vaultAccountId: "0",
+        },
       }
     );
-    if (!tracking.createExternalTxId || !tracking.onSigningStatus)
-      throw new Error("Expected proposal tracking");
-    const id = await tracking.createExternalTxId({
+    const id = await tracking.create({
       operation: "PROGRAM_CALL",
-      assetId: "SOL_TEST",
+      binding: { assetId: "SOL_TEST" },
     });
-    await tracking.onSigningStatus({
-      externalTxId: id,
+    await tracking.observe(id, {
+      type: "observed",
+      at: new Date().toISOString(),
+      phase: "pending",
       providerTransactionId: "proposal-1",
-      status: "PENDING_AUTHORIZATION",
+      providerStatus: "PENDING_AUTHORIZATION",
+      providerSubStatus: null,
     });
     let status = "PENDING_AUTHORIZATION";
     fetch.mockReset().mockImplementation(async (url, init) => {
@@ -1119,16 +1125,21 @@ describe("manual Fireblocks signing-proposal cancellation", () => {
 
   it("preserves an accepted signature when an older poll or cancellation arrives later", async () => {
     const fixture = await tracked();
-    if (!fixture.tracking.onSigningStatus) throw new Error("Expected status tracking");
-    await fixture.tracking.onSigningStatus({
-      externalTxId: fixture.id,
+    await fixture.tracking.observe(fixture.id, {
+      type: "observed",
+      at: new Date().toISOString(),
+      phase: "completed",
       providerTransactionId: "proposal-1",
-      status: "SIGNED",
+      providerStatus: "SIGNED",
+      providerSubStatus: null,
     });
-    await fixture.tracking.onSigningStatus({
-      externalTxId: fixture.id,
+    await fixture.tracking.observe(fixture.id, {
+      type: "observed",
+      at: new Date().toISOString(),
+      phase: "pending",
       providerTransactionId: "proposal-1",
-      status: "PENDING_AUTHORIZATION",
+      providerStatus: "PENDING_AUTHORIZATION",
+      providerSubStatus: null,
     });
     const response = await request(`/fireblocks/proposals/signing/${fixture.id}/cancel`, {});
     expect(response.status, await response.clone().text()).toBe(200);
@@ -1152,7 +1163,7 @@ describe("manual Fireblocks signing-proposal cancellation", () => {
       })
     );
     await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
-      reconcileFireblocksProposals(testEnv)
+      reconcilePendingProposals(testEnv)
     );
     const listed = await request(`/fireblocks/proposals?walletId=${fixture.walletId}&kind=signing`);
     expect((await listed.json()).data.proposals).toMatchObject([
@@ -1206,8 +1217,7 @@ describe("manual Fireblocks signing-proposal cancellation", () => {
   it("discards a late signature when cancellation is requested but not acknowledged", async () => {
     const fixture = await tracked();
     const original = fixture.fetch.getMockImplementation();
-    if (!original || !fixture.tracking.onSigningStatus)
-      throw new Error("Expected proposal tracking transport");
+    if (!original) throw new Error("Expected proposal tracking transport");
     fixture.fetch.mockImplementation(async (url, init) =>
       String(url).endsWith("/cancel") ? Response.json({ success: false }) : original(url, init)
     );
@@ -1218,11 +1228,14 @@ describe("manual Fireblocks signing-proposal cancellation", () => {
       proposal: { status: "PENDING_AUTHORIZATION" },
     });
     await expect(
-      fixture.tracking.onSigningStatus({
-        externalTxId: fixture.id,
+      fixture.tracking.observe(fixture.id, {
+        type: "observed",
+        at: new Date().toISOString(),
+        phase: "completed",
         providerTransactionId: "proposal-1",
-        status: "SIGNED",
+        providerStatus: "SIGNED",
+        providerSubStatus: null,
       })
-    ).rejects.toThrow("Cancellation was requested");
+    ).resolves.toBe(false);
   });
 });

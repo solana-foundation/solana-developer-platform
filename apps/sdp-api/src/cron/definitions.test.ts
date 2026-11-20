@@ -53,7 +53,7 @@ describe("CRON_DEFINITIONS", () => {
     expect(byName.get("expire-payment-requests")?.schedule).toBe("* * * * *");
   });
 
-  it("reconciles custody proposals every minute in an independent environment-scoped registration", () => {
+  it("reconciles every proposal kind through one environment-scoped registration", () => {
     const proposals = CRON_DEFINITIONS.find(
       (definition) => definition.name === "reconcile-custody-proposals"
     );
@@ -61,23 +61,21 @@ describe("CRON_DEFINITIONS", () => {
       (definition) => definition.name === "track-pending-transfers"
     );
     expect(proposals).toMatchObject({
-      schedule: "* * * * *",
+      schedule: "*/30 * * * * *",
       scope: "cluster",
       effect: "finishes",
     });
     expect(proposals?.run).not.toBe(chain?.run);
   });
 
-  it("runs Fireblocks reads independently every 30 seconds in each environment on stable", () => {
-    const cron = CRON_DEFINITIONS.find(
-      (definition) => definition.name === "reconcile-fireblocks-proposals"
+  it("uses the canonical proposal worker on stable without a provider-specific worker", () => {
+    const proposalCrons = CRON_DEFINITIONS.filter((definition) =>
+      definition.name.includes("proposals")
     );
-    expect(cron).toMatchObject({
-      schedule: "*/30 * * * * *",
-      scope: "cluster",
-      effect: "observes",
-    });
-    expect(cron?.enabled({ ...env, SDP_RELEASE_CHANNEL: "stable" })).toBe(true);
+    expect(proposalCrons.map((definition) => definition.name)).toEqual([
+      "reconcile-custody-proposals",
+    ]);
+    expect(proposalCrons[0]?.enabled({ ...env, SDP_RELEASE_CHANNEL: "stable" })).toBe(true);
   });
 
   it("gives every definition a schedule node-cron accepts", () => {

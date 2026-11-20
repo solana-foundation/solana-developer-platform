@@ -20,7 +20,6 @@ import { AuditService } from "@/services/audit.service";
 import * as credentialSecretStore from "@/services/credential-secret-store";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { systemProposalLedger } from "@/services/jobs/proposal-recovery-ledger";
-import { reconcileFireblocksProposals } from "@/services/jobs/reconcile-fireblocks-proposals";
 import { reconcilePendingProposals } from "@/services/jobs/reconcile-pending-proposals";
 import { applyProposalEvent } from "@/services/payments/custody-proposal-ledger";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
@@ -435,9 +434,11 @@ describe("native Fireblocks BYOK payment routes", () => {
     const log = vi.spyOn(moneyPathEvents, "logEvent");
     await expect(
       runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
-        reconcileFireblocksProposals(testEnv)
+        runWithSystemDatabaseIdentity("cron:reconcile-custody-proposals", () =>
+          reconcilePendingProposals(testEnv)
+        )
       )
-    ).rejects.toThrow("Fireblocks proposal reconciliation failed");
+    ).rejects.toThrow("Provider unavailable");
     expect(log).toHaveBeenLastCalledWith(
       "error",
       expect.objectContaining({
@@ -451,7 +452,7 @@ describe("native Fireblocks BYOK payment routes", () => {
     expect(mock.mock.calls[0]?.[1]?.method).toBe("GET");
     expect(
       await getDb(env).queryOne(
-        `SELECT pt.status, cp.last_polled_at AS last_poll
+        `SELECT pt.status, cp.last_checked_at AS last_poll
            FROM payment_transfers pt JOIN custody_proposals cp ON cp.payment_transfer_id = pt.id
           WHERE pt.id = ?`,
         [transfer.id]
@@ -1462,7 +1463,10 @@ describe("native Fireblocks pending proposal recovery (PRO-2435 D4)", () => {
         [check === "running" ? "checking" : "failed", check, ORGANIZATION_ID]
       );
       const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
-      const pending = await recoverPendingProposal(transfer.id);
+      await expect(recoverPendingProposal(transfer.id)).rejects.toThrow(
+        "Custody Connection is unavailable"
+      );
+      const pending = await recordedProposal(transfer.id);
       expect(pending.status).toBe("processing");
       expect(pending.provider_data.proposalRefusal).toBeUndefined();
       expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(0);
@@ -1493,7 +1497,10 @@ describe("native Fireblocks pending proposal recovery (PRO-2435 D4)", () => {
     const transfer = (await response.json()).data.transfer;
     testEnv.SDP_RELEASE_CHANNEL = "stable";
     const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
-    const pending = await recoverPendingProposal(transfer.id);
+    await expect(recoverPendingProposal(transfer.id)).rejects.toThrow(
+      "not available in this release channel"
+    );
+    const pending = await recordedProposal(transfer.id);
     expect(pending.status).toBe("processing");
     expect(pending.provider_data.proposalRefusal).toBeUndefined();
     expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(0);
@@ -1706,7 +1713,7 @@ describe("manual native Fireblocks cancellation", () => {
         if (init?.method === "GET" && String(url).includes("/external_tx_id/")) {
           reads += 1;
           if (reads <= conflicts) {
-            await runWithSystemDatabaseIdentity("cron:reconcile-fireblocks-proposals", async () => {
+            await runWithSystemDatabaseIdentity("cron:reconcile-custody-proposals", async () => {
               const ledger = systemProposalLedger(testEnv);
               const identity = {
                 transferId: transfer.id,

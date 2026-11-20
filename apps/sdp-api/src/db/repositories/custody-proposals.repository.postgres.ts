@@ -5,13 +5,16 @@ import {
   CUSTODY_PROPOSAL_MAX_CANCEL_ATTEMPT,
   CUSTODY_PROPOSAL_PROVIDER_PHASES,
   CUSTODY_PROPOSAL_UNALERTED_AUTHORIZATION_STATES,
+  type CustodyProposalEvent,
   createCustodyProposalState,
   custodyProposalStateSchema,
+  isTerminalCustodyProposalPhase,
   transitionCustodyProposal,
 } from "@sdp/types/custody-proposals";
 import { z } from "zod";
 import type { DatabaseExecutor } from "@/db/client";
 import { currentDatabaseIdentity } from "@/db/identity";
+import { conflict, notFound } from "@/lib/errors";
 import { moneyPrincipalSchema } from "@/lib/money-principal";
 import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import type {
@@ -19,6 +22,9 @@ import type {
   CustodyProposalRecoveryScope,
   CustodyProposalRow,
   CustodyProposalsRepository,
+  ProposedTransactionRow,
+  SigningProposalIdentity,
+  SigningProposalRow,
 } from "./custody-proposals.repository";
 import {
   adoptLegacyCustodyProposals,
@@ -32,7 +38,11 @@ const proposalColumnsSchema = z.object({
   organization_id: z.string().min(1),
   project_id: z.string().min(1),
   custody_wallet_id: z.string().min(1).nullable(),
-  payment_transfer_id: z.string().min(1),
+  kind: z.enum(["transfer", "signing"]),
+  operation: z.string().min(1),
+  request_id: z.string().nullable(),
+  finished_at: nullableTimestampSchema,
+  payment_transfer_id: z.string().min(1).nullable(),
   provider: z.enum(CUSTODY_PROVIDERS),
   binding: z.record(z.string(), z.unknown()),
   provider_phase: z.enum(CUSTODY_PROPOSAL_PROVIDER_PHASES),
@@ -59,7 +69,7 @@ const proposalColumnsSchema = z.object({
   updated_at: timestampSchema,
 });
 
-function mapProposal(value: Record<string, unknown>): CustodyProposalRow {
+function mapAnyProposal(value: Record<string, unknown>): ProposedTransactionRow {
   const row = proposalColumnsSchema.parse(value);
   const state = custodyProposalStateSchema.parse({
     providerPhase: row.provider_phase,
@@ -79,12 +89,11 @@ function mapProposal(value: Record<string, unknown>): CustodyProposalRow {
     cancelAcknowledgedAt: row.cancel_acknowledged_at,
     alertedAt: row.alerted_at,
   });
-  return {
+  const common = {
     id: row.id,
     organization_id: row.organization_id,
     project_id: row.project_id,
     custody_wallet_id: row.custody_wallet_id,
-    payment_transfer_id: row.payment_transfer_id,
     provider: row.provider,
     binding: row.binding,
     state,
@@ -96,6 +105,34 @@ function mapProposal(value: Record<string, unknown>): CustodyProposalRow {
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
+  if (row.kind === "signing") {
+    return {
+      ...common,
+      kind: "signing",
+      custody_wallet_id: z.string().min(1).parse(row.custody_wallet_id),
+      payment_transfer_id: z.null().parse(row.payment_transfer_id),
+      operation: row.operation,
+      request_id: row.request_id,
+      finished_at: row.finished_at,
+    };
+  }
+  return {
+    ...common,
+    kind: "transfer",
+    payment_transfer_id: z.string().min(1).parse(row.payment_transfer_id),
+  };
+}
+
+function mapProposal(value: Record<string, unknown>): CustodyProposalRow {
+  const row = mapAnyProposal(value);
+  if (row.kind !== "transfer") throw new Error("Expected a transfer proposal");
+  return row;
+}
+
+function mapSigningProposal(value: Record<string, unknown>): SigningProposalRow {
+  const row = mapAnyProposal(value);
+  if (row.kind !== "signing") throw new Error("Expected a signing proposal");
+  return row;
 }
 
 function stateValues(state: CustodyProposalRow["state"]): readonly unknown[] {
@@ -140,10 +177,12 @@ const INITIAL_STATE = createCustodyProposalState();
 const UNALERTED_STATES_SQL = CUSTODY_PROPOSAL_UNALERTED_AUTHORIZATION_STATES.map(
   (state) => `'${state}'`
 ).join(", ");
-const WORKER_INTERVAL_MS = 60_000;
+const WORKER_INTERVAL_MS = 30_000;
 // A status read or authority wake may adopt a payment before its creator has
 // claimed submission. Only recovery waits; the create transition stays immediate.
-const SUBMISSION_GRACE_SQL = `(cp.provider_phase <> '${INITIAL_STATE.providerPhase}' OR pt.created_at <= ?)`;
+const SUBMISSION_GRACE_SQL = `(cp.kind = 'signing' OR cp.provider_phase <> '${INITIAL_STATE.providerPhase}' OR pt.created_at <= ?)`;
+const RECOVERABLE_PROPOSALS_SQL = `p.environment = ? AND cp.status = 'active'
+  AND cp.provider_phase IN (${ACTIVE_PHASES_SQL}) AND ${SUBMISSION_GRACE_SQL}`;
 
 function recoveryScopeWhere(input: CustodyProposalRecoveryScope): {
   clauses: string[];
@@ -171,7 +210,7 @@ export function createPostgresCustodyProposalsRepository(
   db: DatabaseExecutor,
   tenantScope?: TenantScope
 ): CustodyProposalsRepository {
-  const assertScope = (identity: CustodyProposalIdentity): void => {
+  const assertScope = (identity: { organizationId: string; projectId: string | null }): void => {
     if (tenantScope) assertTenantClaim(tenantScope, identity, "CustodyProposalsRepository");
   };
   const assertSystem = (operation: string): void => {
@@ -190,8 +229,192 @@ export function createPostgresCustodyProposalsRepository(
     );
     return row ? mapProposal(row) : null;
   };
+  const getSigning = async (input: SigningProposalIdentity): Promise<SigningProposalRow | null> => {
+    assertScope(input);
+    const row = await db.queryOne(
+      `SELECT * FROM custody_proposals WHERE id = ? AND organization_id = ? AND project_id = ?
+         AND kind = 'signing' AND status = 'active'`,
+      [input.proposalId, input.organizationId, input.projectId]
+    );
+    return row ? mapSigningProposal(row) : null;
+  };
+  const transitionSigning = async (
+    input: SigningProposalIdentity & {
+      event: CustodyProposalEvent;
+      expectedVersion?: number;
+      expectedCancelAttempt?: number;
+    }
+  ): Promise<SigningProposalRow | null> => {
+    assertScope(input);
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const current = await getSigning(input);
+      if (
+        current === null ||
+        (input.expectedVersion !== undefined && current.version !== input.expectedVersion) ||
+        (input.expectedCancelAttempt !== undefined &&
+          current.state.cancelAttempt !== input.expectedCancelAttempt)
+      )
+        return null;
+      const result = transitionCustodyProposal(current.state, input.event);
+      if ("rejected" in result) return null;
+      if (result.next === current.state) return current;
+      const row = await db.queryOne(
+        `UPDATE custody_proposals SET ${STATE_COLUMNS.map((column) => `${column} = ?`).join(", ")},
+           finished_at = CASE WHEN ?::boolean THEN COALESCE(finished_at, ?) ELSE finished_at END,
+           version = version + 1, updated_at = ?
+         WHERE id = ? AND organization_id = ? AND project_id = ? AND kind = 'signing'
+           AND status = 'active' AND version = ? RETURNING *`,
+        [
+          ...stateValues(result.next),
+          isTerminalCustodyProposalPhase(result.next.providerPhase),
+          input.event.at,
+          input.event.at,
+          input.proposalId,
+          input.organizationId,
+          input.projectId,
+          current.version,
+        ]
+      );
+      if (row) return mapSigningProposal(row);
+    }
+    throw conflict("The signing proposal changed concurrently");
+  };
   return {
     getForTransfer,
+    getSigning,
+    transitionSigning,
+    async requireSigning(input) {
+      const row = await getSigning(input);
+      if (row === null) throw notFound("Signing proposal");
+      return row;
+    },
+    async createSigning(input) {
+      assertScope(input);
+      const provider = z.enum(CUSTODY_PROVIDERS).parse(input.provider);
+      const binding = z.record(z.string(), z.unknown()).parse(input.binding);
+      const operation = z.string().min(1).parse(input.operation);
+      const now = new Date().toISOString();
+      const state = {
+        ...createCustodyProposalState(),
+        providerPhase: "submitting" as const,
+        submissionStartedAt: now,
+      };
+      const id = `proposal_${crypto.randomUUID()}`;
+      const row = await db.queryOne<{ id: string }>(
+        `INSERT INTO custody_proposals
+           (id, organization_id, project_id, custody_wallet_id, kind, operation, provider, binding,
+            ${STATE_COLUMNS.join(", ")}, request_id, next_check_at, created_at, updated_at)
+         SELECT ?, c.organization_id, c.project_id, w.id, 'signing', ?, ?, ?::jsonb,
+           ${STATE_COLUMNS.map(() => "?").join(", ")}, ?, ?, ?, ?
+         FROM custody_wallets w JOIN custody_connections c ON c.id = w.custody_connection_id
+         WHERE c.id = ? AND c.organization_id = ? AND c.project_id = ? AND w.wallet_id = ? AND c.provider = ?
+         RETURNING id`,
+        [
+          id,
+          operation,
+          provider,
+          JSON.stringify(binding),
+          ...stateValues(state),
+          input.requestId ?? null,
+          now,
+          now,
+          now,
+          input.connectionId,
+          input.organizationId,
+          input.projectId,
+          input.walletId,
+          provider,
+        ]
+      );
+      if (row === null) throw conflict("Signing proposal wallet is unavailable");
+      return row.id;
+    },
+    async listSigning(input) {
+      assertScope(input);
+      const offset = z.number().int().nonnegative().parse(input.offset);
+      const rows = await db.queryMany(
+        `SELECT * FROM custody_proposals WHERE organization_id = ? AND project_id = ?
+           AND custody_wallet_id = ? AND kind = 'signing' AND status = 'active'
+         ORDER BY created_at DESC, id DESC LIMIT 21 OFFSET ?`,
+        [input.organizationId, input.projectId, input.walletId, offset]
+      );
+      return rows.map(mapSigningProposal);
+    },
+    async observeSigning(input) {
+      const row = await transitionSigning(input);
+      if (row === null) {
+        const current = await getSigning(input);
+        if (
+          current !== null &&
+          current.state.providerTransactionId === input.event.providerTransactionId &&
+          isTerminalCustodyProposalPhase(current.state.providerPhase)
+        )
+          return false;
+        throw conflict("Signing proposal identity or outcome changed");
+      }
+      return (
+        row.state.authorizationState === "authorized" &&
+        row.state.providerTransactionId === input.event.providerTransactionId &&
+        row.state.providerPhase === input.event.phase
+      );
+    },
+    async failUnacceptedSigning(input) {
+      const current = await getSigning(input);
+      if (
+        current === null ||
+        current.state.providerTransactionId !== null ||
+        isTerminalCustodyProposalPhase(current.state.providerPhase)
+      )
+        return false;
+      return (
+        (await transitionSigning({
+          ...input,
+          expectedVersion: current.version,
+          event: {
+            type: "submission_refused",
+            at: new Date().toISOString(),
+            error: "Provider refused the signing proposal",
+          },
+        })) !== null
+      );
+    },
+    async requestSigningCancellation(input) {
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const current = await getSigning(input);
+        if (current === null || isTerminalCustodyProposalPhase(current.state.providerPhase))
+          return false;
+        if (current.state.refusal !== null) return true;
+        const refused = await transitionSigning({
+          ...input,
+          expectedVersion: current.version,
+          event: {
+            type: "cancellation_intent_recorded",
+            at: new Date().toISOString(),
+            reason: "cancellation_requested",
+            message: "Signing proposal cancellation requested",
+          },
+        });
+        if (refused !== null) return true;
+      }
+      throw conflict("The signing proposal changed concurrently");
+    },
+    async claimSigningPoll(input) {
+      assertScope(input);
+      return (
+        (await db.queryOne<{ id: string }>(
+          `UPDATE custody_proposals SET last_polled_at = sdp_iso_now()
+         WHERE id = ? AND organization_id = ? AND project_id = ? AND kind = 'signing'
+           AND status = 'active' AND provider_phase IN (${ACTIVE_PHASES_SQL})
+           AND (last_polled_at IS NULL OR last_polled_at < ?) RETURNING id`,
+          [
+            input.proposalId,
+            input.organizationId,
+            input.projectId,
+            new Date(Date.now() - 15_000).toISOString(),
+          ]
+        )) !== null
+      );
+    },
     async ensureForTransfer(input) {
       const identity = {
         transferId: input.transfer.id,
@@ -348,10 +571,7 @@ export function createPostgresCustodyProposalsRepository(
         Date.parse(now) - CUSTODY_PROPOSAL_DISCOVERY_GRACE_MS
       ).toISOString();
       const clauses = [
-        "p.environment = ?",
-        `cp.provider_phase IN (${ACTIVE_PHASES_SQL})`,
-        "cp.status = 'active'",
-        SUBMISSION_GRACE_SQL,
+        RECOVERABLE_PROPOSALS_SQL,
         "(cp.recheck_requested_at IS NOT NULL OR cp.next_check_at <= ?)",
         ...scope.clauses,
       ];
@@ -361,7 +581,7 @@ export function createPostgresCustodyProposalsRepository(
       const nextCheckAt = new Date(Date.parse(now) + WORKER_INTERVAL_MS).toISOString();
       const query = `SELECT cp.id, cp.recheck_requested_at, cp.next_check_at
                        FROM custody_proposals cp
-                       JOIN payment_transfers pt ON pt.id = cp.payment_transfer_id
+                       LEFT JOIN payment_transfers pt ON pt.id = cp.payment_transfer_id
                        JOIN projects p ON p.id = cp.project_id
                       WHERE ${clauses.join(" AND ")}`;
       const rows = await db.queryMany(
@@ -396,7 +616,7 @@ export function createPostgresCustodyProposalsRepository(
           nextCheckAt,
         ]
       );
-      return rows.map(mapProposal);
+      return rows.map(mapAnyProposal);
     },
     async requestRecheck(input) {
       assertSystem("requestRecheck");
@@ -414,7 +634,7 @@ export function createPostgresCustodyProposalsRepository(
       const scope = recoveryScopeWhere(input);
       const rows = await db.queryMany(
         `SELECT cp.* FROM custody_proposals cp
-          JOIN payment_transfers pt ON pt.id = cp.payment_transfer_id
+          LEFT JOIN payment_transfers pt ON pt.id = cp.payment_transfer_id
           JOIN projects p ON p.id = cp.project_id
          WHERE p.environment = ? AND cp.status = 'active' AND cp.authorization_state IN (${UNALERTED_STATES_SQL})
             ${scope.clauses.map((clause) => `AND ${clause}`).join(" ")}
@@ -425,7 +645,41 @@ export function createPostgresCustodyProposalsRepository(
           z.number().int().positive().max(1000).parse(input.limit),
         ]
       );
-      return rows.map(mapProposal);
+      return rows.map(mapAnyProposal);
+    },
+    async stats(input) {
+      assertSystem("stats");
+      const now = timestampSchema.parse(input.now);
+      const scope = recoveryScopeWhere(input);
+      const row = await db.queryOne<{
+        pending: number;
+        transfers: number;
+        signing: number;
+        oldest_poll: string | null;
+      }>(
+        `SELECT COUNT(*)::int AS pending,
+           COUNT(*) FILTER (WHERE cp.kind = 'transfer')::int AS transfers,
+           COUNT(*) FILTER (WHERE cp.kind = 'signing')::int AS signing,
+           MIN(COALESCE(GREATEST(cp.last_polled_at, cp.last_checked_at), cp.created_at)) AS oldest_poll
+         FROM custody_proposals cp
+         LEFT JOIN payment_transfers pt ON pt.id = cp.payment_transfer_id
+         JOIN projects p ON p.id = cp.project_id
+         WHERE ${RECOVERABLE_PROPOSALS_SQL}
+           ${scope.clauses.map((clause) => `AND ${clause}`).join(" ")}`,
+        [
+          input.environment,
+          new Date(Date.parse(now) - CUSTODY_PROPOSAL_DISCOVERY_GRACE_MS).toISOString(),
+          ...scope.values,
+        ]
+      );
+      if (row === null) throw new Error("Missing proposal reconciliation aggregate");
+      return {
+        pending: row.pending,
+        transfers: row.transfers,
+        signing: row.signing,
+        oldestUnpolledAgeMs:
+          row.oldest_poll === null ? 0 : Math.max(0, Date.parse(now) - Date.parse(row.oldest_poll)),
+      };
     },
     async adoptLegacyTransfers(input) {
       assertSystem("adoptLegacyTransfers");

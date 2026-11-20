@@ -44,7 +44,7 @@ import {
   type ByokCredentialAuthentication,
   parseByokCredential,
 } from "@/services/custody/byok-credential";
-import { trackFireblocksProposals } from "@/services/custody/fireblocks-proposal-tracking";
+import { trackProposals } from "@/services/custody/proposal-tracking";
 import {
   provisionFireblocksVaultAccount,
   provisionPrivyWallet,
@@ -1240,11 +1240,15 @@ export class CustodyRuntimeTargets {
             ...secret,
             walletId: wallet.walletId,
             requestDelayMs: row.request_delay_ms ?? undefined,
-            proposalTracking: trackFireblocksProposals(this.db, target, {
+            proposalTracking: trackProposals(this.db, target, {
+              provider: target.provider,
               connectionId: target.connectionId,
               walletId: wallet.walletId,
-              sourceAddress: wallet.publicKey,
-              accountFingerprint: row.provider_account_fingerprint,
+              binding: {
+                connectionId: target.connectionId,
+                sourceAddress: wallet.publicKey,
+                accountFingerprint: row.provider_account_fingerprint,
+              },
             }),
           })
         : createPrivyAdapterFromCredential(this.env, {

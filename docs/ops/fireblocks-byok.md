@@ -231,11 +231,11 @@ This is a **bounded signing operation**, not a durable asynchronous proposal API
 
 A caller deadline that does not forward an abort signal cannot interrupt the SDK early;
 its own polling limit still performs cleanup. The wallet proposal list refreshes pending
-provider status on demand. The `reconcile-fireblocks-proposals` cron (every 30 seconds)
-reconciles status only for these sign-only rows — the same read-and-record path the page
-uses; it never resumes, retries or submits a signing request. Native TRANSFER intents
-retain their existing persisted, asynchronous approval/reconciliation flow. Durable
-generic asynchronous program-call submission is separate work.
+provider status on demand. The shared `reconcile-custody-proposals` cron runs every 30 seconds for transfers
+and sign-only proposals. Both use the same table, lifecycle reducer and recovery
+schedule. Recovery observes provider status and retries durable cancellation
+requests; it never resumes a timed-out signing request or broadcasts a recovered
+signature. Durable program-call continuation remains separate work.
 
 The Signer check uses a sign-only memo program call, verifies and simulates without
 broadcasting. It needs an allowed Program Call policy and a funded SDP fee payer;
@@ -419,8 +419,12 @@ Legacy rows without a principal refuse in every environment, including stage
 and writes from an older API revision during a rolling deploy; the audit actor
 is never a fallback authority.
 
-`custody_proposals` owns provider progress, sticky authorization decisions and
-recovery scheduling. The initiating principal and public status stay on the
+`custody_proposals` is the canonical proposed-transactions table for every
+provider. It owns progress, sticky authorization decisions and recovery
+scheduling for both transfer and signing proposals. `kind` identifies the
+operation owner: only a transfer requires `payment_transfer_id`; a sign-only
+proposal retains its operation and immutable provider binding without creating
+a payment. The initiating principal and public transfer status stay on the
 payment. One shared reducer selects transitions; versioned writes commit the
 proposal, payment projection, audit and pending cancellation or alert together.
 A stale observation loses its version check and cannot overwrite newer state.
@@ -437,7 +441,7 @@ Key revocation and member removal try to enqueue affected proposals in a
 savepoint inside their database transaction. A failed wake rolls back only its
 adoption and flags; authority withdrawal still commits. The error event
 `proposal_recovery_wake_failed` records tenant scope and available SQLSTATE
-without raw provider data. The minute worker continues checking known proposals
+without raw provider data. The shared worker continues checking known proposals
 when legacy adoption fails; that failure still fails the cron. Ordinary recovery
 failures use the per-payment age signal described below. Malformed legacy records
 need repair before adoption.
@@ -515,7 +519,7 @@ for the next tick; a losing observation is never replayed. Provider acknowledgme
 remains `processing`; only a terminal provider outcome closes the payment. The
 first cancellation attempt is immediate; a timeout or rejected cancel keeps the
 durable refusal and retries no sooner than five minutes after the last attempt.
-Observations continue every minute during that cooldown, including
+Observations continue every 30 seconds during that cooldown, including
 completion-after-refusal alerts.
 An acknowledged cancel is polled to outcome. Cancellation stages are explicit:
 `cancel_requested` is in flight, `cancel_ambiguous` records an uncertain result,
@@ -578,12 +582,13 @@ including `PENDING_ENRICHMENT`.
 Each cancellation validates project and wallet access before the shared required
 `Idempotency-Key` step. Audit intent is written before provider cancellation.
 
-Migration `0229_fireblocks_signing_proposals.sql` stores sign-only proposal metadata before
-creation, with tenant RLS and a project/wallet index. It contains no payload bytes, keys or
-signatures. Older sign-only proposals are not backfilled. The SDK's status hook and manual
-cancellation claim serialize in PostgreSQL: if cancellation wins, a later signature cannot
-be returned to an SDP broadcaster. If signature acceptance wins, cancellation cannot undo
-it. Confirmed terminal statuses never regress to an older pending poll response.
+Sign-only proposals persist in `custody_proposals` before the provider POST,
+with tenant RLS and an indexed project/wallet history. They contain no payload
+bytes, keys or signatures. Provider adapters translate statuses into the shared
+lifecycle; SDK callbacks do not define another proposal model. Cancellation and
+signature acceptance serialize through versioned writes: if cancellation wins,
+a late signature cannot reach the broadcaster. Terminal outcomes never regress.
+Historical Fireblocks external IDs remain unchanged during migration.
 
 Both cancellation paths resolve the retained credential and check the stored account,
 connection, wallet, external ID, operation and asset before a cancel POST. Disabling
@@ -611,72 +616,61 @@ rows are paginated; a retention policy remains follow-up work.
 
 ## Scheduled reconciliation and metrics
 
-`reconcile-fireblocks-proposals` is an independent, always-enabled 30-second cron,
-registered separately for sandbox and production. It selects at most 100 pending
-native TRANSFER and sign-only RAW/PROGRAM_CALL rows together, oldest `updated_at`
-first, with five concurrent reads. A failed Solana settlement job cannot skip or
-hold this registration. Dashboard and worker reads share the existing 15-second
-per-row claim. Attempts rotate the queue even when credentials or provider reads
-fail, and a terminal observation cannot regress a terminal row.
+`reconcile-custody-proposals` is the single proposal worker, registered every
+30 seconds per environment. One canonical queue claims at most 100 transfers
+and sign-only transactions, with five concurrent recoveries. Authority-change
+wakes retain priority while ordinary proposals reserve capacity. A failed chain
+settlement job cannot hold this registration. Viewer polling uses a separate
+15-second throttle and cannot clear a worker wake.
 
-This job only reads Fireblocks and persists status. It never signs, broadcasts,
-resubmits, or cancels, and never reconstructs a transaction from a sign-only row.
-An approval after the synchronous request ended does not resume that request.
-There is no maximum pending-approval age or new expiry policy. The existing
-recovery rule for a never-acknowledged native submission proven absent by two
-24-hour-separated authenticated 404s is unchanged.
+Recovery reads existing external IDs. It never creates a replacement proposal,
+signs, broadcasts or resumes a dead request. A recorded cancellation can retry
+through the shared cooldown and attempt counter; provider acknowledgment does
+not prove cancellation. Native transfer recovery still checks the recorded
+principal's live authority. A sign-only request records cleanup as a sticky
+refusal, so later provider approval cannot return its signature to that request.
+Authenticated absence requires repeated observations over the existing 24-hour
+horizon; request age alone does not prove non-execution.
 
-The initial operational target is **no pending row unvisited for more than 180
-seconds**, per environment, under normal provider/database availability and up to
-500 pending rows across both kinds. Previously, 50 native rows per minute meant
-500 rows needed ten scheduled visits (about ten minutes), after the Solana work.
-Now 100 rows per 30-second slot gives five visits (about 150 seconds plus the last
-batch's provider latency). With five concurrent reads averaging at most one
-second including credential/database overhead, a full batch takes about 20
-seconds. Slow reads, overlap or a larger backlog can breach the target and alert;
-this is a starting target, not a measured production SLO or a revocation guarantee.
-The database regression visits 500 distinct old approvals in five passes with no
-expiry and at most five reads in flight. Live p99 settlement latency is not yet
-measured; no provider completion timestamp is inferred from proposal creation.
+The existing monitoring event `sdp_api_fireblocks_reconciliation_tick` remains
+for dashboard compatibility and now describes the shared queue. Its fields are:
 
-Each completed pass emits `sdp_api_fireblocks_reconciliation_tick` with:
+- `pending`, `pending_transfers`, `pending_signing`: active rows in this environment.
+- `oldest_unpolled_age_ms`: oldest recovery or viewer attempt, or creation time.
+- `selected`, `polled`, `skipped`, `settled`, `failed`: outcomes for this batch.
+- `duration_ms`, `limit`, `concurrency`, `target_ms`: duration and operating bounds.
 
-| Field                                                | Meaning                                                                                                                                                                                                             |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `environment`                                        | Sandbox or production project environment.                                                                                                                                                                          |
-| `pending`, `pending_transfers`, `pending_signing`    | Remaining rows, using exactly the candidate predicate. No pending-age cutoff.                                                                                                                                       |
-| `oldest_unpolled_age_ms`                             | Time since the oldest pending row's last poll attempt, or creation when never polled; zero for an empty queue.                                                                                                      |
-| `selected`, `polled`, `skipped`, `settled`, `failed` | Selected rows, completed provider reads, lost-claim/no-longer-pending rows, rows closed by observation (including failures/cancellation), and failed row attempts. Rows beyond the batch limit remain in `pending`. |
-| `duration_ms`, `limit`, `concurrency`, `target_ms`   | Wall time and the operating bounds.                                                                                                                                                                                 |
+Row failures emit `proposal_recovery_unavailable` with safe proposal and tenant
+IDs, error metadata and age. Other rows continue. Row, refusal-alert delivery,
+queue and aggregate-query failures fail the cron; a failed query never invents
+an empty queue. Keep the failed-row alert enabled alongside polling age because
+an attempted read can fail.
 
-A row failure also emits `sdp_api_fireblocks_reconciliation_failed` with a safe
-proposal ID/error name/code. Other rows continue, then the job throws so its
-`sdp_cron_run` is `error`. A candidate or aggregate-query failure emits no invented
-zero backlog; cron errors and tick-absence alerts cover it. Polling age measures
-attempts, so the failure alert must stay enabled alongside the age alert.
+The initial polling-age target remains 180 seconds for up to 500 pending rows
+under normal provider/database availability. It is a capacity target, not
+measured live p99 latency or a guarantee that revocation stops execution. The
+existing [monitoring runbook](https://github.com/solana-foundation/sdp-infra/blob/main/docs/runbooks/fireblocks-reconciliation.md)
+covers polling-age, failed-row and missing-tick alerts.
 
-The companion `sdp-infra` change adds the **SDP Fireblocks reconciliation** Grafana
-dashboard and stage/prod alerts: polling age above 180 seconds for a minute, failed
-rows for a minute, and no tick for three minutes (separate sandbox/production
-absence rules). Empty queues still emit ticks. Deploy the API worker before
-activating these rules. Runbook:
-[Fireblocks reconciliation](https://github.com/solana-foundation/sdp-infra/blob/main/docs/runbooks/fireblocks-reconciliation.md).
+An ordinary observation retains one provider GET and zero Solana RPC calls.
+A cancellation adds at most one POST and a follow-up GET. The shared worker
+replaces the separate Fireblocks queue with one claim and one aggregate query;
+proposal reads and writes remain scoped to the recorded tenant.
 
-Request budget before/after: each visited row retains one wallet/credential
-resolution and one Fireblocks GET; zero Solana RPC and zero provider POSTs. The
-new worker caps the combined batch at 100 GETs, five in flight. It performs one
-candidate query and one post-run aggregate query; per-row lookup, claim and status
-writes are scoped to the recorded organization/project. Native wallet resolution
-currently uses two owner queries plus one credential query; encrypted DB credentials
-need no external fetch, while Secret Manager-backed credentials retain their existing
-secret read. The signing queue has a concurrent partial pending index (0230).
+## Canonical proposal rollout
 
-Native transfers persist their initiating principal. A separate one-minute
-authority-recovery worker rechecks that principal and requests cancellation after
-a refusal, prioritizing recorded key/member access changes. The 30-second status
-job remains read-only; its request budget excludes that separate worker. Neither
-job fabricates a revocation-latency metric or guarantees cancellation before
-execution. Manual cancellation remains available.
+Deploy the expansion and shared implementation before retiring the old table.
+The expansion adds operation metadata to `custody_proposals`, imports historical
+signing rows and bridges writes from an older running image. New code reads and
+writes only the canonical table. The temporary bridge carries canonical
+cancellation back into the old callback's result, preserving signature blocking
+during the overlap.
+
+After every API and worker revision uses the shared repository, deploy the
+migration-only retirement of `fireblocks_signing_proposals` and its bridge. The
+breaking-migration gate pins the currently serving parent revision. Never merge
+retirement with runtime changes or roll back to code that reads the retired
+table. The final schema has one proposal table and no provider-specific store.
 
 ## Sandbox evidence still required
 
@@ -714,9 +708,9 @@ the remaining launch gates require separate approval and operational evidence.
 | [PRO-2466](https://linear.app/solana-fndn/issue/PRO-2466) | Direct-transfer-only API restriction deliberately excluded: it conflicts with this branch's arbitrary stable proposal scope.                                                                                                                                                                  |
 | [PRO-2467](https://linear.app/solana-fndn/issue/PRO-2467) | Direct-transfer-only dashboard filtering excluded for the same reason.                                                                                                                                                                                                                        |
 | [PRO-2468](https://linear.app/solana-fndn/issue/PRO-2468) | Native transfers persist the initiating money principal; recovery restores only that recorded principal.                                                                                                                                                                                      |
-| [PRO-2469](https://linear.app/solana-fndn/issue/PRO-2469) | The one-minute authority worker re-admits pending native transfers and requests cancellation after refusal. Status-only polls never restore execution authority.                                                                                                                              |
+| [PRO-2469](https://linear.app/solana-fndn/issue/PRO-2469) | The shared proposal worker re-admits pending native transfers and requests cancellation after refusal. Status-only polls never restore execution authority.                                                                                                                              |
 | [PRO-2470](https://linear.app/solana-fndn/issue/PRO-2470) | Key/member authority withdrawal durably prioritizes proposal recovery. Queues and provider delays prevent an immediate-cancellation guarantee.                                                                                                                                                |
-| [PRO-2471](https://linear.app/solana-fndn/issue/PRO-2471) | Independent 30-second, per-environment status lane for both proposal kinds, with batch limit 100 and concurrency five. Native authority recovery has its own one-minute registration.                                                                                                         |
+| [PRO-2471](https://linear.app/solana-fndn/issue/PRO-2471) | One 30-second worker per environment for both proposal kinds, with batch limit 100 and concurrency five. Native authority recovery shares this registration.                                                                                                         |
 | [PRO-2472](https://linear.app/solana-fndn/issue/PRO-2472) | 180-second polling-age target, backlog/age/duration/outcome metrics and companion dashboard/alerts included. Live p99 settlement measurements and revocation-to-cancel metrics remain outstanding.                                                                                            |
 | [PRO-2473](https://linear.app/solana-fndn/issue/PRO-2473) | Pending-approval expiry remains deliberately omitted, including the proposed seven-day limit.                                                                                                                                                                                                 |
 | [PRO-2364](https://linear.app/solana-fndn/issue/PRO-2364) | Policy-absence detection, audit and alert remain outstanding. Editor credentials cannot read active policies; a dismissible reminder is not detection.                                                                                                                                        |

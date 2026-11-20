@@ -13,11 +13,12 @@
  * {@link SigningError}; every other failure passes through unchanged.
  */
 
-import { isFireblocksPolicyRefusal } from "@sdp/types/fireblocks";
+import { isFireblocksPolicyRefusal, isFireblocksSignatureAccepted } from "@sdp/types/fireblocks";
 import { SignerErrorCode } from "@solana/keychain-core";
 import { createFireblocksSigner } from "@solana/keychain-fireblocks";
 import type { Address } from "@solana/kit";
 import { z } from "zod";
+import { fireblocksSigningObservation } from "#/fireblocks-proposals";
 import { SigningError } from "#/signing";
 import { BaseKeychainAdapter } from "./base-keychain.adapter";
 import type { KeychainFireblocksConfig } from "./types";
@@ -86,6 +87,7 @@ export class KeychainFireblocksAdapter extends BaseKeychainAdapter {
   }
 
   private async createInitializedSigner(vaultAccountId: string): Promise<FireblocksSigner> {
+    const tracking = this.config.proposalTracking;
     return createFireblocksSigner({
       apiKey: this.config.apiKey,
       privateKeyPem: this.config.apiSecretPem,
@@ -97,10 +99,46 @@ export class KeychainFireblocksAdapter extends BaseKeychainAdapter {
       requestDelayMs: this.config.requestDelayMs,
       // Both modes return a signature; SDP owns sponsorship and broadcast.
       useProgramCall: this.config.useProgramCall,
-      createExternalTxId: this.config.createExternalTxId,
-      onSigningCleanup: this.config.onSigningCleanup,
-      onSigningFailure: this.config.onSigningFailure,
-      onSigningStatus: this.config.onSigningStatus,
+      createExternalTxId: tracking
+        ? (request) =>
+            tracking.create({
+              operation: request.operation,
+              binding: { assetId: request.assetId, vaultAccountId },
+            })
+        : this.config.createExternalTxId,
+      onSigningStatus: async (event) => {
+        const tracking = this.config.proposalTracking;
+        if (tracking) {
+          const accepted = await tracking.observe(
+            event.externalTxId,
+            fireblocksSigningObservation({
+              providerTransactionId: event.providerTransactionId,
+              status: event.status,
+              at: new Date().toISOString(),
+            })
+          );
+          if (!accepted && isFireblocksSignatureAccepted(event.status)) {
+            throw new SigningError(
+              "Cancellation was requested for this proposal",
+              "INVALID_REQUEST"
+            );
+          }
+        }
+        await this.config.onSigningStatus?.(event);
+      },
+      onSigningFailure: async (event) => {
+        await this.config.proposalTracking?.failUnaccepted(event.externalTxId);
+        await this.config.onSigningFailure?.(event);
+      },
+      onSigningCleanup: async (event) => {
+        if (!tracking) return this.config.onSigningCleanup?.(event);
+        try {
+          await tracking.requestCancellation(event.externalTxId);
+          return false;
+        } finally {
+          await this.config.onSigningCleanup?.(event);
+        }
+      },
     });
   }
 }
