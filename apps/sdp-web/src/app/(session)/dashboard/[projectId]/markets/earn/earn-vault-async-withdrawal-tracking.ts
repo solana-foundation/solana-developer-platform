@@ -102,7 +102,7 @@ export function vaultAsyncWithdrawalRequestFingerprint(
       "intermediate",
     ]);
   }
-  const identity: unknown[] = [
+  const identity: (string | number | null)[] = [
     FINGERPRINT_FORMAT,
     input.projectId,
     input.positionId,
@@ -138,24 +138,6 @@ const FINGERPRINT_FORMAT = "async-typed-quantity-1";
  * external input), never by hand; the three tuple shapes that build could
  * write collapse to one record.
  */
-type LegacyAsyncWithdrawalIdentity =
-  | {
-      intermediateAmount?: undefined;
-      projectId: string | null;
-      positionId: string;
-      route:
-        | { kind: "queue"; discountBps: number; deadlineSeconds: number }
-        | { kind: "operator_redemption" };
-      shares: string;
-    }
-  | {
-      intermediateAmount: string;
-      projectId: string | null;
-      positionId: string;
-      route: { kind: "operator_redemption" };
-      shares?: undefined;
-    };
-
 const legacyIdentitySchema = z.union([
   z
     .tuple([
@@ -166,22 +148,13 @@ const legacyIdentitySchema = z.union([
       z.number(),
       z.number(),
     ])
-    .transform(
-      ([
-        projectId,
-        positionId,
-        shares,
-        ,
-        discountBps,
-        deadlineSeconds,
-      ]): LegacyAsyncWithdrawalIdentity => ({
-        intermediateAmount: undefined,
-        projectId,
-        positionId,
-        route: { kind: "queue", discountBps, deadlineSeconds },
-        shares,
-      })
-    ),
+    .transform(([projectId, positionId, shares, , discountBps, deadlineSeconds]) => ({
+      intermediateAmount: undefined,
+      projectId,
+      positionId,
+      route: { kind: "queue" as const, discountBps, deadlineSeconds },
+      shares,
+    })),
   z
     .tuple([
       z.union([z.string(), z.null()]),
@@ -189,15 +162,13 @@ const legacyIdentitySchema = z.union([
       z.string().min(1),
       z.literal("operator_redemption"),
     ])
-    .transform(
-      ([projectId, positionId, shares]): LegacyAsyncWithdrawalIdentity => ({
-        intermediateAmount: undefined,
-        projectId,
-        positionId,
-        route: { kind: "operator_redemption" },
-        shares,
-      })
-    ),
+    .transform(([projectId, positionId, shares]) => ({
+      intermediateAmount: undefined,
+      projectId,
+      positionId,
+      route: { kind: "operator_redemption" as const },
+      shares,
+    })),
   z
     .tuple([
       z.union([z.string(), z.null()]),
@@ -206,16 +177,31 @@ const legacyIdentitySchema = z.union([
       z.literal("operator_redemption"),
       z.literal("intermediate"),
     ])
-    .transform(
-      ([projectId, positionId, intermediateAmount]): LegacyAsyncWithdrawalIdentity => ({
-        intermediateAmount,
-        projectId,
-        positionId,
-        route: { kind: "operator_redemption" },
-        shares: undefined,
-      })
-    ),
+    .transform(([projectId, positionId, intermediateAmount]) => ({
+      intermediateAmount,
+      projectId,
+      positionId,
+      route: { kind: "operator_redemption" as const },
+      shares: undefined,
+    })),
 ]);
+
+/**
+ * One kept entry the PREVIOUS build wrote, parsed back out of its stored
+ * fingerprint. The identity that build serialized was
+ * `[projectId, positionId, shares, "queue", discountBps, deadlineSeconds]`
+ * or `[projectId, positionId, shares, "operator_redemption"]` — the DERIVED
+ * shares where this build keeps the typed dollar amount, no format tag — so
+ * the identity itself carries the shares (and the queue's own terms) the
+ * first attempt went out with, which is what makes an exact replay of that
+ * attempt possible. The held-intermediate shape is parsed only to be SKIPPED:
+ * its keys are still found through `has`, and adopting one from a shares
+ * submission would replay the wrong request. Parsed by schema (saved input is
+ * external input), never by hand; the three tuple shapes that build could
+ * write collapse to one record. Derived from the schema with `z.infer` —
+ * the same fields are never maintained twice.
+ */
+type LegacyAsyncWithdrawalIdentity = z.infer<typeof legacyIdentitySchema>;
 
 function legacyAsyncWithdrawalIdentity(
   fingerprint: string
@@ -325,34 +311,41 @@ export function asyncWithdrawalRecoveryBody(
  * The adoption only stands while the recovered key is STILL kept. When it is
  * gone — its own answer arrived between the mount-time snapshot and this
  * confirm (a replay sent from a previous visit, retired late) — the
- * resolution reports `recoverySpent` and resolves to NOTHING sendable: the
+ * resolution is `spent` and resolves to NOTHING sendable: the
  * confirm was approved as a REPLAY of that attempt, so turning it into a
  * fresh typed submission would be the second escrow the adoption exists to
  * prevent. The caller stops, refreshes its recovery (the re-scan finds
  * nothing kept), and the next confirm — re-reviewed, notice gone — is a
  * normal typed-quantity submission.
  */
+export type AsyncWithdrawalKeptKeyResolution =
+  | { adopted: AsyncWithdrawalRecovery; fingerprint: string; kind: "adopted"; reused: true }
+  /** This build's own typed-quantity fingerprint has a kept key. */
+  | { fingerprint: string; kind: "kept"; reused: true }
+  /** No key is kept; the next claim mints one. */
+  | { fingerprint: string; kind: "fresh"; reused: false }
+  /** The adopted attempt's own answer retired its key between mount and confirm. */
+  | { fingerprint: string; kind: "spent"; recoverySpent: true; reused: true };
+
 export function resolveAsyncWithdrawalKeptKey(input: {
   fingerprint: string;
   recovery?: AsyncWithdrawalRecovery | undefined;
-}): {
-  /** Set when the resolved key was an ADOPTED legacy attempt. */
-  adopted?: AsyncWithdrawalRecovery;
-  fingerprint: string;
-  recoverySpent?: boolean;
-  reused: boolean;
-} {
+}): AsyncWithdrawalKeptKeyResolution {
   const recovery = input.recovery;
   if (recovery) {
     if (!vaultAsyncWithdrawalIdempotencyKeyStore.has(recovery.fingerprint)) {
-      return { fingerprint: recovery.fingerprint, recoverySpent: true, reused: true };
+      return {
+        fingerprint: recovery.fingerprint,
+        kind: "spent",
+        recoverySpent: true,
+        reused: true,
+      };
     }
-    return { adopted: recovery, fingerprint: recovery.fingerprint, reused: true };
+    return { adopted: recovery, fingerprint: recovery.fingerprint, kind: "adopted", reused: true };
   }
-  return {
-    fingerprint: input.fingerprint,
-    reused: vaultAsyncWithdrawalIdempotencyKeyStore.has(input.fingerprint),
-  };
+  return vaultAsyncWithdrawalIdempotencyKeyStore.has(input.fingerprint)
+    ? { fingerprint: input.fingerprint, kind: "kept", reused: true }
+    : { fingerprint: input.fingerprint, kind: "fresh", reused: false };
 }
 
 /**
@@ -463,11 +456,11 @@ export function decideAsyncWithdrawalSubmit(input: {
   fingerprint: string;
   recovery?: AsyncWithdrawalRecovery | undefined;
 }): AsyncWithdrawalSubmitDecision {
-  const { fingerprint, reused, adopted, recoverySpent } = resolveAsyncWithdrawalKeptKey({
+  const resolution = resolveAsyncWithdrawalKeptKey({
     fingerprint: input.fingerprint,
     recovery: input.recovery,
   });
-  if (recoverySpent) return { kind: "stop", reason: "recoverySpent" };
+  if (resolution.kind === "spent") return { kind: "stop", reason: "recoverySpent" };
   // The confirm was approved against the review AS RENDERED: when it showed
   // a saved request (`approvedTerms`), it promised to resubmit THAT attempt —
   // never a fresh escrow over it. A key retired between the review and this
@@ -476,11 +469,17 @@ export function decideAsyncWithdrawalSubmit(input: {
   // second escrow the notice promised not to do. The error re-render reads
   // the memo fresh, so the notice is gone and the next confirm is
   // re-reviewed against current terms.
-  if (input.approvedTerms && !reused) return { kind: "stop", reason: "answered" };
+  if (input.approvedTerms && !resolution.reused) return { kind: "stop", reason: "answered" };
 
   const freshBody = input.freshBody;
   if (freshBody.mechanism === "operatorRedemption" && freshBody.intermediateAmount !== undefined) {
-    return { adopted: false, body: freshBody, fingerprint, intermediate: true, kind: "send" };
+    return {
+      adopted: false,
+      body: freshBody,
+      fingerprint: resolution.fingerprint,
+      intermediate: true,
+      kind: "send",
+    };
   }
   // A KEPT key — one an earlier attempt left unretired (a lost answer, a 5xx,
   // a refusal that settled nothing) — must replay the request it was MINTED
@@ -492,25 +491,64 @@ export function decideAsyncWithdrawalSubmit(input: {
   // derivation has moved). An ADOPTED legacy key's shares and queue terms
   // came out of the legacy fingerprint itself. A fresh key sends the live
   // derivation.
-  const shares = adopted
-    ? adopted.shares
-    : reused
-      ? recallAsyncWithdrawalShares(fingerprint)
-      : freshBody.shares;
+  let shares: string | undefined;
+  switch (resolution.kind) {
+    case "adopted":
+      shares = resolution.adopted.shares;
+      break;
+    case "kept":
+      shares = recallAsyncWithdrawalShares(resolution.fingerprint);
+      break;
+    case "fresh":
+      shares = freshBody.shares;
+      break;
+    default: {
+      const exhaustive: never = resolution;
+      throw new Error(`Unhandled kept-key resolution: ${JSON.stringify(exhaustive)}`);
+    }
+  }
   if (shares === undefined) return { kind: "stop", reason: "sharesLost" };
-  rememberAsyncWithdrawalShares(fingerprint, shares);
+  rememberAsyncWithdrawalShares(resolution.fingerprint, shares);
   // Rebuilt from the DECIDED share intent, never the fresh body whole: on a
   // kept key the fresh derivation has moved and the minted shares are what
   // the API's fingerprint pins.
-  const body: EarnVaultAsyncWithdrawalTermsRequest = adopted
-    ? asyncWithdrawalRecoveryBody(adopted, freshBody.positionId)
-    : freshBody.mechanism === "operatorRedemption"
-      ? { mechanism: "operatorRedemption", positionId: freshBody.positionId, shares }
-      : {
-          deadlineSeconds: freshBody.deadlineSeconds,
-          discountBps: freshBody.discountBps,
-          positionId: freshBody.positionId,
-          shares,
-        };
-  return { adopted: adopted !== undefined, body, fingerprint, intermediate: false, kind: "send" };
+  let body: EarnVaultAsyncWithdrawalTermsRequest;
+  switch (resolution.kind) {
+    case "adopted":
+      body = asyncWithdrawalRecoveryBody(resolution.adopted, freshBody.positionId);
+      break;
+    case "kept":
+    case "fresh":
+      body = typedAsyncWithdrawalBody(freshBody, shares);
+      break;
+    default: {
+      const exhaustive: never = resolution;
+      throw new Error(`Unhandled kept-key resolution: ${JSON.stringify(exhaustive)}`);
+    }
+  }
+  return {
+    adopted: resolution.kind === "adopted",
+    body,
+    fingerprint: resolution.fingerprint,
+    intermediate: false,
+    kind: "send",
+  };
+}
+
+/**
+ * The body a TYPED submission sends (a kept key's replay and a fresh send
+ * alike): the live derivation's own terms around the DECIDED share intent.
+ */
+function typedAsyncWithdrawalBody(
+  freshBody: EarnVaultAsyncWithdrawalTermsRequest,
+  shares: string
+): EarnVaultAsyncWithdrawalTermsRequest {
+  return freshBody.mechanism === "operatorRedemption"
+    ? { mechanism: "operatorRedemption", positionId: freshBody.positionId, shares }
+    : {
+        deadlineSeconds: freshBody.deadlineSeconds,
+        discountBps: freshBody.discountBps,
+        positionId: freshBody.positionId,
+        shares,
+      };
 }

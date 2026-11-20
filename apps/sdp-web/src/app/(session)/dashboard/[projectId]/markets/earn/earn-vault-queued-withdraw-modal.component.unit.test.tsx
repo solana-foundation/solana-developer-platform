@@ -387,10 +387,13 @@ describe("EarnVaultQueuedWithdrawModal", () => {
 
     await openReview();
     // The review discloses the ADOPTED attempt: its own 7 shares, whatever
-    // the form's live derivation shows.
-    expect((await screen.findByText(/An earlier attempt to withdraw/)).textContent).toMatch(
-      /withdraw 7\s/
-    );
+    // the form's live derivation shows — AND its own 0.5% / 10-minute queue
+    // terms, which the confirm restores while the rows above preview the
+    // form's 0.25% / 6-minute settings.
+    const notice = await screen.findByText(/An earlier attempt to withdraw/);
+    expect(notice.textContent).toMatch(/withdraw 7\s/);
+    expect(notice.textContent).toMatch(/0\.5% discount/);
+    expect(notice.textContent).toMatch(/deadline of 10 minutes/);
 
     fireEvent.click(screen.getByRole("button", { name: "Request withdrawal" }));
     await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledTimes(1));

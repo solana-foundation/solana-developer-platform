@@ -30,6 +30,7 @@ import { EarnAmountMaxButton } from "./earn-amount-max-button";
 import { compareUnsignedDecimals, isPositiveDecimal, parseUnsignedDecimal } from "./earn-decimal";
 import { EarnErrorNote } from "./earn-error-note";
 import {
+  formatBpsPercent,
   formatDurationSeconds,
   formatEpochSecondsOr,
   formatTokenValue,
@@ -56,7 +57,7 @@ import {
   vaultAsyncWithdrawalIdempotencyKeyStore,
   vaultAsyncWithdrawalRequestFingerprint,
 } from "./earn-vault-async-withdrawal-tracking";
-import { KeptAsyncAttemptNotice } from "./earn-vault-kept-attempt-notice";
+import { KeptAsyncAttemptNotice, type RestoredQueueTerms } from "./earn-vault-kept-attempt-notice";
 import type { VaultSubmissionObserver } from "./earn-vault-movement";
 import {
   earnVaultQueuedWithdrawalStatusPresentation,
@@ -87,10 +88,6 @@ type FormStep = "details" | "review";
 interface QueueDurationUnit {
   divisor: number;
   labelKey: MessageKey;
-}
-
-function bpsToPercent(bps: number): string {
-  return (bps / 100).toFixed(2).replace(/\.?0+$/, "");
 }
 
 function percentToBps(value: string): number {
@@ -502,6 +499,7 @@ function QueueReview({
   onSubmit,
   position,
   preview,
+  restoredTerms,
   savedTerms,
   submitting,
 }: {
@@ -511,6 +509,8 @@ function QueueReview({
   onSubmit: () => void;
   position: EarnVaultPosition;
   preview: EarnVaultQueuedWithdrawalPreview | null;
+  /** The recovered queue terms an adopted replay restores, if any. */
+  restoredTerms: RestoredQueueTerms | undefined;
   /** The saved request this review promises a confirm will resubmit, if any. */
   savedTerms: KeptAsyncWithdrawalRetry | undefined;
   submitting: boolean;
@@ -535,7 +535,7 @@ function QueueReview({
             </span>
           </DetailRow>
           <DetailRow fit="figure" label={t("DashboardEarn.queuedWithdraw.discount")}>
-            {bpsToPercent(preview.discountBps)}%
+            {formatBpsPercent(preview.discountBps)}%
           </DetailRow>
           <DetailRow fit="wrap" label={t("DashboardEarn.queuedWithdraw.maturity")}>
             {formatEpochSecondsOr(
@@ -568,7 +568,11 @@ function QueueReview({
         </Callout>
       ) : null}
       {savedTerms ? (
-        <KeptAsyncAttemptNotice shareMint={position.shareMint} shares={savedTerms.shares} />
+        <KeptAsyncAttemptNotice
+          restoredTerms={restoredTerms}
+          shareMint={position.shareMint}
+          shares={savedTerms.shares}
+        />
       ) : null}
       <p className="mt-4 text-meta text-tertiary">
         {t("DashboardEarn.queuedWithdraw.solverNotice")}
@@ -698,7 +702,7 @@ function QueueDetails({
               <span className="mt-0.5 block text-meta text-tertiary">
                 {termsValid
                   ? t("DashboardEarn.queuedWithdraw.settingsSummary", {
-                      discount: bpsToPercent(discountBps),
+                      discount: formatBpsPercent(discountBps),
                       // Localized catalogs keep `{duration}` until they re-translate.
                       maturity:
                         formatDurationSeconds(terms.secondsToMaturity, locale) ??
@@ -731,8 +735,8 @@ function QueueDetails({
               />
               <p className="text-meta text-tertiary">
                 {t("DashboardEarn.queuedWithdraw.discountRange", {
-                  minimum: bpsToPercent(terms.minimumDiscountBps),
-                  maximum: bpsToPercent(terms.maximumDiscountBps),
+                  minimum: formatBpsPercent(terms.minimumDiscountBps),
+                  maximum: formatBpsPercent(terms.maximumDiscountBps),
                 })}
               </p>
               <p className="text-meta text-tertiary">
@@ -799,7 +803,7 @@ export function EarnVaultQueuedWithdrawModal({
   const durationUnit = queueDurationUnit(terms.minimumSecondsToDeadline);
   const [step, setStep] = useState<FormStep>("details");
   const [amount, setAmount] = useState("");
-  const [discount, setDiscount] = useState(() => bpsToPercent(terms.minimumDiscountBps));
+  const [discount, setDiscount] = useState(() => formatBpsPercent(terms.minimumDiscountBps));
   const [deadline, setDeadline] = useState(() =>
     durationValue(terms.minimumSecondsToDeadline, durationUnit)
   );
@@ -878,6 +882,15 @@ export function EarnVaultQueuedWithdrawModal({
   // resolver adopts it first), so it is the terms the review shows when both
   // are kept.
   const savedTerms = recovery ?? keptAsyncWithdrawalRetry(typedFingerprint);
+  // An ADOPTED legacy replay restores its OWN queue terms at confirm (its
+  // body is rebuilt from the legacy fingerprint — see
+  // `asyncWithdrawalRecoveryBody`), so the review discloses them beside the
+  // shares: the discount and deadline rows above come from the live
+  // preview, which is not what the replay will carry.
+  const restoredTerms =
+    recovery?.route.kind === "queue"
+      ? { deadlineSeconds: recovery.route.deadlineSeconds, discountBps: recovery.route.discountBps }
+      : undefined;
 
   const positionName = positionDisplayName(position);
   const modalLabel = t("DashboardEarn.queuedWithdraw.title", { position: positionName });
@@ -957,6 +970,7 @@ export function EarnVaultQueuedWithdrawModal({
                   }
                   position={position}
                   preview={preview}
+                  restoredTerms={restoredTerms}
                   savedTerms={savedTerms}
                   submitting={submitting}
                 />

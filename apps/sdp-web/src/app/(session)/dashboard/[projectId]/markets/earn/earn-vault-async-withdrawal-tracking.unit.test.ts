@@ -59,6 +59,9 @@ beforeEach(() => {
   let minted = 0;
   vi.spyOn(globalThis.crypto, "randomUUID").mockImplementation(() => {
     minted += 1;
+    // SAFETY: the stub keeps randomUUID's hyphenated 8-4-4-4-12 shape — a
+    // fixed hex prefix with the counter in the final group — so the literal
+    // satisfies the UUID template type it is asserted to.
     return `00000000-0000-4000-8000-00000000000${minted}` as `${string}-${string}-${string}-${string}-${string}`;
   });
 });
@@ -209,9 +212,17 @@ describe("recallLegacyAsyncWithdrawalKeptKey", () => {
 describe("resolveAsyncWithdrawalKeptKey", () => {
   it("mints fresh for an unknown fingerprint and reports a kept key's reuse", () => {
     const fingerprint = vaultAsyncWithdrawalRequestFingerprint(queueIntent());
-    expect(resolveAsyncWithdrawalKeptKey({ fingerprint })).toEqual({ fingerprint, reused: false });
+    expect(resolveAsyncWithdrawalKeptKey({ fingerprint })).toEqual({
+      fingerprint,
+      kind: "fresh",
+      reused: false,
+    });
     vaultAsyncWithdrawalIdempotencyKeyStore.claim(fingerprint, () => FIRST_KEY);
-    expect(resolveAsyncWithdrawalKeptKey({ fingerprint })).toEqual({ fingerprint, reused: true });
+    expect(resolveAsyncWithdrawalKeptKey({ fingerprint })).toEqual({
+      fingerprint,
+      kind: "kept",
+      reused: true,
+    });
   });
 
   it("adopts a kept legacy recovery under the legacy fingerprint", () => {
@@ -222,7 +233,12 @@ describe("resolveAsyncWithdrawalKeptKey", () => {
         fingerprint: vaultAsyncWithdrawalRequestFingerprint(queueIntent()),
         recovery,
       })
-    ).toEqual({ adopted: recovery, fingerprint: legacyQueueFingerprint, reused: true });
+    ).toEqual({
+      adopted: recovery,
+      fingerprint: legacyQueueFingerprint,
+      kind: "adopted",
+      reused: true,
+    });
   });
 
   it("reports a spent recovery instead of minting over it", () => {
@@ -237,7 +253,12 @@ describe("resolveAsyncWithdrawalKeptKey", () => {
         fingerprint: vaultAsyncWithdrawalRequestFingerprint(queueIntent()),
         recovery,
       })
-    ).toEqual({ fingerprint: legacyQueueFingerprint, recoverySpent: true, reused: true });
+    ).toEqual({
+      fingerprint: legacyQueueFingerprint,
+      kind: "spent",
+      recoverySpent: true,
+      reused: true,
+    });
   });
 });
 
