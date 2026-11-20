@@ -9,6 +9,7 @@ import { I18nProvider } from "@/i18n/provider";
 import { getRequestTimeZone } from "@/i18n/server";
 import { TimeZoneProvider } from "@/i18n/time-zone";
 import { resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { TEST_PAYMENT_REQUEST_RECIPIENT } from "@/test/payment-requests";
 import { resetRequestProject } from "@/test/request-project";
 import PayPage from "./page";
 
@@ -25,7 +26,7 @@ function payLink(): Response {
     JSON.stringify({
       amount: "5",
       tokenSymbol: "USDC",
-      recipient: "11111111111111111111111111111111",
+      recipient: TEST_PAYMENT_REQUEST_RECIPIENT,
       status: "awaiting_payment",
       expiresAt: EXPIRES_AT,
       network: "devnet",
@@ -77,8 +78,9 @@ describe("PayPage on a payer's first visit", () => {
     container.innerHTML = html;
     document.body.append(container);
     const serverExpiry = [...container.querySelectorAll("span")].find((span) =>
-      /10:14\sPM/.test(span.textContent ?? "")
+      /10:14\sPM/.test(String(span.textContent))
     );
+    if (serverExpiry === undefined) throw new Error("the server rendered no expiry");
     const recoverableErrors: unknown[] = [];
     await act(async () => {
       root = hydrateRoot(container, page, {
@@ -90,6 +92,6 @@ describe("PayPage on a payer's first visit", () => {
     expect(container.textContent).toMatch(/Nov 5, 4:14\sPM/);
     expect(container.textContent).not.toMatch(/10:14\sPM/);
     // A replaced element is not a layout shift; the server's text sliding along the row would be.
-    expect(serverExpiry?.isConnected).toBe(false);
+    expect(serverExpiry.isConnected).toBe(false);
   });
 });

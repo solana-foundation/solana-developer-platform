@@ -1,7 +1,7 @@
 import * as solanaRpc from "@sdp/rpc/solana";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { OrganizationStatus } from "@sdp/types/organizations";
-import { SOL_MINT } from "@sdp/types/well-known-tokens";
+import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import {
   address,
   appendTransactionMessageInstruction,
@@ -17,7 +17,7 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
   signature,
 } from "@solana/kit";
-import { getTransferSolInstruction } from "@solana-program/system";
+import { getTransferSolInstruction, SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
 
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
@@ -28,7 +28,6 @@ import { createSystemPaymentRequestsRepository } from "@/db/repositories/reposit
 import { app } from "@/index";
 import { AuditService } from "@/services/audit.service";
 import { PAY_SPONSOR_SIGNATURES_PER_HOUR } from "@/services/payments/payment-request-sponsorship";
-import * as paymentRequests from "@/services/payments/payment-requests";
 import * as sponsorshipService from "@/services/sponsorship.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
@@ -43,9 +42,11 @@ import {
   cancelSeededPaymentRequest,
   seedPaymentRequest,
   seedPaymentRequestTransfer,
+  setPaymentRequestColumns,
 } from "@/test/helpers/payment-requests";
 import {
   createKoraAdapterMock,
+  DEVNET_USDC_MINT,
   getRecentBlockhashMock,
   getSignaturesForAddressMock,
   installPaymentsRouteTestHooks,
@@ -153,7 +154,6 @@ describe("Public payment request routes", () => {
     "returns 400 for a legacy invalid SOL pay-link amount %s",
     async (amount) => {
       const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
-      if (request === null) throw new Error("Expected a payment request fixture");
       await getDb(env)
         .prepare("UPDATE payment_requests SET amount = ? WHERE id = ?")
         .bind(amount, request.id)
@@ -207,6 +207,36 @@ describe("Public payment request routes", () => {
       expect(rpc.calls).toEqual([]);
     }
   );
+
+  it("shows a payer only the payment terms of the request its token names", async () => {
+    const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+    const other = await createAwaitingTokenPaymentRequest(SANDBOX_REQUEST_WALLET, DEVNET_USDC_MINT);
+
+    const response = await app.request(`/pay/${request.public_token}`, {}, env);
+    const otherResponse = await app.request(`/pay/${other.public_token}`, {}, env);
+    const unknown = await app.request("/pay/unknownPayToken0", {}, env);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      amount: "1.5",
+      token: SOL_MINT,
+      tokenSymbol: WELL_KNOWN_TOKENS.SOL.symbol,
+      recipient: TEST_SOLANA_ADDRESSES.wallet1,
+      reference: request.reference,
+      status: "awaiting_payment",
+      expiresAt: null,
+      network: "devnet",
+      solanaPayUrl: `solana:https://localhost/pay/${request.public_token}/tx`,
+    });
+    expect(otherResponse.status).toBe(200);
+    expect(await otherResponse.json()).toMatchObject({
+      token: DEVNET_USDC_MINT,
+      tokenSymbol: WELL_KNOWN_TOKENS.USDC.symbol,
+      reference: other.reference,
+    });
+    expect(unknown.status).toBe(404);
+    expect(await unknown.json()).toMatchObject({ error: { code: "NOT_FOUND" } });
+  });
 
   it("withholds the Solana Pay link while the request's organization is suspended (HOO-2009)", async () => {
     const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
@@ -461,7 +491,7 @@ describe("Public payment request routes", () => {
             data: ["", "base64"],
             executable: false,
             lamports: 1_500_300_000,
-            owner: "11111111111111111111111111111111",
+            owner: SYSTEM_PROGRAM_ADDRESS,
             rentEpoch: 0,
             space: 0,
           },
@@ -482,7 +512,7 @@ describe("Public payment request routes", () => {
             data: ["", "base64"],
             executable: false,
             lamports: 2_000_000_000,
-            owner: "11111111111111111111111111111111",
+            owner: SYSTEM_PROGRAM_ADDRESS,
             rentEpoch: 0,
             space: 0,
           },
@@ -603,12 +633,13 @@ describe("Public payment request routes", () => {
       const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
       expect((await postTransaction(request.public_token)).status).toBe(200);
 
-      const expiry = vi.spyOn(paymentRequests, "isPaymentRequestExpired").mockReturnValue(true);
-      onTestFinished(() => expiry.mockRestore());
+      await setPaymentRequestColumns(env, request.id, { expires_at: "2020-01-01T00:00:00.000Z" });
 
       const replay = await postTransaction(request.public_token);
       expect(replay.status).toBe(400);
-      expect(await replay.json()).not.toHaveProperty("transaction");
+      expect(await replay.json()).toMatchObject({
+        error: { code: "BAD_REQUEST", message: "Payment request is no longer payable" },
+      });
     });
 
     it("answers no longer payable when the claim is lost to a cancel", async () => {

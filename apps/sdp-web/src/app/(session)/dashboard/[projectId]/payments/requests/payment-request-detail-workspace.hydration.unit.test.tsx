@@ -1,7 +1,5 @@
 // @vitest-environment jsdom
 
-import type { PaymentRequest } from "@sdp/types/payments";
-import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { act } from "@testing-library/react";
 import { hydrateRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
@@ -13,33 +11,19 @@ import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { testPaymentRequest } from "@/test/payment-requests";
 import { PaymentRequestDetailWorkspace } from "./payment-request-detail-workspace";
 import * as requestsData from "./payment-requests-page.data";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 // 10:14 PM in UTC, the server's zone, and 4:14 PM in Chicago, the viewer's.
-const request: PaymentRequest = {
-  id: "preq_1",
-  organizationId: "org_1",
-  projectId: "prj_1",
-  walletId: "wallet_1",
-  destinationAddress: "11111111111111111111111111111111",
-  token: SOL_MINT,
-  amount: "5",
-  reference: "ref_1",
-  status: "awaiting_payment",
+const request = testPaymentRequest({
   expiresAt: "2026-11-05T22:14:00.000Z",
-  fulfilledByTransferId: null,
-  paidLate: false,
-  canceledByApiKeyId: null,
-  canceledByUserId: null,
-  canceledAt: null,
   lifecycle: [{ status: "awaiting_payment", at: "2026-11-04T22:14:00.000Z" }],
-  createdBy: null,
   createdAt: "2026-11-04T22:14:00.000Z",
   updatedAt: "2026-11-04T22:14:00.000Z",
-};
+});
 
 let root: Root | null = null;
 
