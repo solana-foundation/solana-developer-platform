@@ -528,16 +528,31 @@ describe("payment transfer batches", () => {
     expect(created.recipients.map((r) => r.counterpartyId)).toEqual([counterpartyId]);
   });
 
-  it("refuses an amount finer than the token's decimals with 400, writing nothing", async () => {
-    const recipient = await seedRecipientAccount(WALLET_A);
+  it.each(
+    [
+      { route: "create", path: BATCHES_PATH },
+      { route: "estimate", path: `${BATCHES_PATH}/estimate` },
+    ].flatMap(({ route, path }) => [
+      { route, path, amount: "1.0000000001", message: "Amount has too many decimal places" },
+      { route, path, amount: "18446744073.709551616", message: "Amount is out of range" },
+    ])
+  )(
+    "refuses a $route amount of $amount with 400 '$message', reading and writing nothing",
+    async ({ path, amount, message }) => {
+      const recipient = await seedRecipientAccount(WALLET_A);
 
-    const error = await readError(await sendBatch([{ ...recipient, amount: "1.0000000001" }]), 400);
+      const error = await readError(
+        await postBatchRequest(path, [{ ...recipient, amount }], {}),
+        400
+      );
 
-    expect(error.code).toBe("BAD_REQUEST");
-    expect(error.message).toBe("Amount has too many decimal places");
-    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
-    expect(await countBatches()).toBe(0);
-  });
+      expect(error.code).toBe("BAD_REQUEST");
+      expect(error.message).toBe(message);
+      expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+      expect(rpc.calls).toEqual([]);
+      expect(await countBatches()).toBe(0);
+    }
+  );
 
   it.each([
     ["create", BATCHES_PATH],
