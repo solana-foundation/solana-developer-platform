@@ -1,0 +1,23 @@
+{
+  "name": "@sdp/safe-proxy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "SDP_SAFE_PROXY_PORT=8791 node --import tsx src/server.ts",
+    "start": "node --import tsx src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check src/"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.5",
+    "@solana/kit": "8.6.0",
+    "hono": "4.13.14",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3"
+  }
+}

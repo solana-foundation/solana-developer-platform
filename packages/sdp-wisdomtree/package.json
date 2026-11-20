@@ -20,7 +20,8 @@
     "@sdp/rpc": "workspace:*",
     "@sdp/types": "workspace:*",
     "@solana-program/token-2022": "catalog:",
-    "@solana/kit": "catalog:"
+    "@solana/kit": "catalog:",
+    "@solana/sysvars": "catalog:"
   },
   "devDependencies": {
     "@types/node": "26.6.5",
