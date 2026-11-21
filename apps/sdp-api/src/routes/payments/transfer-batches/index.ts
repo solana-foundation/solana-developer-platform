@@ -20,7 +20,7 @@ import {
   retryTransferBatch,
 } from "@/routes/payments/transfer-batches/retry";
 import type { Env } from "@/types/env";
-import { canonicalizeTransferBatchBody, previousCanonicalTransferBatchBody } from "./idempotency";
+import { canonicalizeTransferBatchBody } from "./idempotency";
 import {
   createTransferBatchSchema,
   estimateTransferBatchSchema,
@@ -52,7 +52,10 @@ transferBatches.post(
     recovery: "record",
     leaseSeconds: 300,
     canonicalize: canonicalizeTransferBatchBody,
-    previousCanonicalize: previousCanonicalTransferBatchBody,
+    // The execute step was split out of POST /v1/payments/transfer-batches; a
+    // key or batch row saved under that operation still answers its retry.
+    // One previous form: this rename supersedes the body's older one.
+    previousOperation: "POST /v1/payments/transfer-batches",
   }),
   replayFromRecord(findTransferBatchRecordReplay),
   // Meters only new sends: a replay, an in-flight poll or a record answer has

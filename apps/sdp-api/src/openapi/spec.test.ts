@@ -759,8 +759,8 @@ describe("OpenAPI spec", () => {
     expect(doc.paths?.["/v1/wallets"]?.post?.responses).toHaveProperty("503");
     expect(doc.paths?.["/v1/wallets"]?.get?.responses).toHaveProperty("400");
     expect(doc.paths?.["/v1/wallets"]?.get?.responses).toHaveProperty("409");
-    expect(doc.paths?.["/v1/wallets/aggregate"]?.get?.responses).toHaveProperty("400");
-    expect(doc.paths?.["/v1/wallets/aggregate"]?.get?.responses).toHaveProperty("409");
+    expect(doc.paths?.["/v1/wallets/balances/aggregate"]?.get?.responses).toHaveProperty("400");
+    expect(doc.paths?.["/v1/wallets/balances/aggregate"]?.get?.responses).toHaveProperty("409");
     expect(doc.paths?.["/v1/wallets/public-key"]?.get?.responses).toHaveProperty("409");
     expect(doc.paths?.["/v1/wallets/{walletId}"]?.get?.responses).toHaveProperty("409");
     expect(doc.paths?.["/v1/wallets/{walletId}"]?.get?.responses).toHaveProperty("503");
@@ -771,7 +771,7 @@ describe("OpenAPI spec", () => {
   });
 
   it("documents unavailable aggregates instead of partial wallet totals", () => {
-    const operation = createOpenApiDocument().paths?.["/v1/wallets/aggregate"]?.get;
+    const operation = createOpenApiDocument().paths?.["/v1/wallets/balances/aggregate"]?.get;
     expect(operation?.responses).toHaveProperty("503");
     expect(operation?.description).toContain("rather than returning an incomplete total");
   });

@@ -2499,7 +2499,7 @@ Source: https://platform.solana.com/docs/reference/api/wallets
 | `DELETE` | `/v1/wallets` | [Delete wallet](/docs/reference/api/wallets/delete-wallet.md) |
 | `GET` | `/v1/wallets` | [List wallets](/docs/reference/api/wallets/list-wallets.md) |
 | `GET` | `/v1/wallets/configs` | [List wallet signing configs](/docs/reference/api/wallets/list-wallet-configs.md) |
-| `GET` | `/v1/wallets/aggregate` | [Aggregate wallet balances](/docs/reference/api/wallets/aggregate-wallet-balances.md) |
+| `GET` | `/v1/wallets/balances/aggregate` | [Aggregate wallet balances](/docs/reference/api/wallets/aggregate-wallet-balances.md) |
 | `GET` | `/v1/wallets/public-key` | [Get wallet public key](/docs/reference/api/wallets/get-wallet-public-key.md) |
 | `POST` | `/v1/wallets/signer-check` | [Check signer via simulated memo transaction](/docs/reference/api/wallets/check-wallet-signer.md) |
 | `GET` | `/v1/wallets/{walletId}` | [Get wallet by ID](/docs/reference/api/wallets/get-wallet-by-id.md) |
@@ -3423,7 +3423,7 @@ Source: https://platform.solana.com/docs/reference/api/wallets/aggregate-wallet-
 
 > Aggregates tracked balances for active wallets under the same owner-aware inclusion rules as the wallet list, without exposing one aggregate-level owner or runtime-admission value.
 
-`GET /v1/wallets/aggregate`
+`GET /v1/wallets/balances/aggregate`
 
 Returns 503 if any included wallet balance cannot be read, rather than returning an incomplete total.
 
@@ -3550,12 +3550,12 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `wallet
 ## Example request
 
 ```bash tab="cURL"
-curl 'https://api.solana.com/v1/wallets/aggregate' \
+curl 'https://api.solana.com/v1/wallets/balances/aggregate' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/wallets/aggregate", {
+const res = await fetch("https://api.solana.com/v1/wallets/balances/aggregate", {
   method: "GET",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`
@@ -3566,7 +3566,7 @@ const res = await fetch("https://api.solana.com/v1/wallets/aggregate", {
 ```python tab="Python"
 import os, requests
 
-r = requests.get("https://api.solana.com/v1/wallets/aggregate",
+r = requests.get("https://api.solana.com/v1/wallets/balances/aggregate",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
@@ -16603,7 +16603,7 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | `POST` | `/v1/payments/requests` | [Create payment request](/docs/reference/api/payments/create-payment-request.md) |
 | `GET` | `/v1/payments/requests` | [List payment requests](/docs/reference/api/payments/list-payment-requests.md) |
 | `GET` | `/v1/payments/requests/{paymentRequestId}` | [Get payment request](/docs/reference/api/payments/get-payment-request.md) |
-| `GET` | `/v1/payments/requests/{paymentRequestId}/link` | [Get payment request link](/docs/reference/api/payments/get-payment-request-link.md) |
+| `GET` | `/v1/payments/requests/{paymentRequestId}/link-token` | [Get payment request link](/docs/reference/api/payments/get-payment-request-link.md) |
 | `POST` | `/v1/payments/requests/{paymentRequestId}/cancel` | [Cancel payment request](/docs/reference/api/payments/cancel-payment-request.md) |
 
 ## Subscription plans
@@ -25025,7 +25025,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/create-payment-r
 
 `POST /v1/payments/requests`
 
-Requires `payment_requests.manage`. `walletId` is the provider wallet ID (`walletId` from `GET /v1/wallets`), not the SDP Wallet ID transfers take; an unknown wallet, or one outside the project, returns 404. `amount` is a decimal string with at most the mint's decimals, so `0.05` and `0.050` are the same request; more decimals return 400. A native SOL request is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM` when the wallet has no account and the amount is below the rent-exempt minimum. The response is the only one besides `GET /v1/payments/requests/{paymentRequestId}/link` that carries `publicToken`. Accepts an Idempotency-Key: a retry with the same key and request returns the original payment request instead of creating a second one.
+Requires `payment_requests.manage`. `walletId` is the provider wallet ID (`walletId` from `GET /v1/wallets`), not the SDP Wallet ID transfers take; an unknown wallet, or one outside the project, returns 404. `amount` is a decimal string with at most the mint's decimals, so `0.05` and `0.050` are the same request; more decimals return 400. A native SOL request is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM` when the wallet has no account and the amount is below the rent-exempt minimum. The response is the only one besides `GET /v1/payments/requests/{paymentRequestId}/link-token` that carries `publicToken`. Accepts an Idempotency-Key: a retry with the same key and request returns the original payment request instead of creating a second one.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `payment_requests.manage` action.
 
@@ -25614,7 +25614,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/get-payment-requ
 
 `GET /v1/payments/requests/{paymentRequestId}`
 
-Requires `payment_requests.read`. An open request past its `expiresAt` reads as `expired`. The record never carries `publicToken`; use `GET /v1/payments/requests/{paymentRequestId}/link`.
+Requires `payment_requests.read`. An open request past its `expiresAt` reads as `expired`. The record never carries `publicToken`; use `GET /v1/payments/requests/{paymentRequestId}/link-token`.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `payment_requests.read` action.
 
@@ -25865,11 +25865,11 @@ Source: https://platform.solana.com/docs/reference/api/payments/get-payment-requ
 
 > Returns the token behind a payment request's hosted payment link, /pay/{publicToken}.
 
-`GET /v1/payments/requests/{paymentRequestId}/link`
+`GET /v1/payments/requests/{paymentRequestId}/link-token`
 
 Anyone holding it can build the request's fee-sponsored payment transaction, so this route requires `payment_requests.manage`, not `payment_requests.read`. Another project's request returns 404. The token is returned whatever the request's status.
 
-Requires an [API key](/docs/developing-with-sdp/authentication).
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `payment_requests.manage` action.
 
 ## Path parameters
 
@@ -25941,7 +25941,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication).
 
   Same fields as `400`.
 
-- **`403`** Forbidden
+- **`403`** Forbidden. Requires the `payment_requests.manage` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
 
   Same fields as `400`.
 
@@ -25956,12 +25956,12 @@ Requires an [API key](/docs/developing-with-sdp/authentication).
 ## Example request
 
 ```bash tab="cURL"
-curl 'https://api.solana.com/v1/payments/requests/preq_example/link' \
+curl 'https://api.solana.com/v1/payments/requests/preq_example/link-token' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/payments/requests/preq_example/link", {
+const res = await fetch("https://api.solana.com/v1/payments/requests/preq_example/link-token", {
   method: "GET",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`
@@ -25972,7 +25972,7 @@ const res = await fetch("https://api.solana.com/v1/payments/requests/preq_exampl
 ```python tab="Python"
 import os, requests
 
-r = requests.get("https://api.solana.com/v1/payments/requests/preq_example/link",
+r = requests.get("https://api.solana.com/v1/payments/requests/preq_example/link-token",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
@@ -25987,6 +25987,21 @@ r = requests.get("https://api.solana.com/v1/payments/requests/preq_example/link"
   "meta": {
     "requestId": "req_example",
     "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: payment_requests.manage",
+    "details": {
+      "action": "payment_requests.manage"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
   }
 }
 ```
@@ -43996,13 +44011,13 @@ Section 5's controls only matter if they enforce. Here you move tokens between t
 
 ### 1. The clean transfer
 
-Transfers use `POST /v1/payments/transfers`, which needs `transfers.execute` (the Developer key has it). Screen the destination first with Section 5's `screenDestination`:
+Transfers use `POST /v1/payments/transfers/execute`, which needs `transfers.execute` (the Developer key has it). Screen the destination first with Section 5's `screenDestination`:
 
 ```javascript title="transfer-tokens.js"
 await screenDestination(destinationAddress);
 
 const transfer = await sdp.post(
-  "/v1/payments/transfers",
+  "/v1/payments/transfers/execute",
   {
     sourceCustodyWalletId: signingCustodyWalletId,
     destination: destinationAddress,
@@ -44071,7 +44086,7 @@ Run the same transfer. This time it fails:
 ```javascript title="transfer-blocked.js"
 try {
   await sdp.post(
-    "/v1/payments/transfers",
+    "/v1/payments/transfers/execute",
     {
       sourceCustodyWalletId: signingCustodyWalletId,
       destination: destinationAddress,
@@ -44203,7 +44218,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers/execute \
 
 **Accepted.** The key is optional, and honored when sent.
 
-- Wallets: `POST /v1/wallets`, `POST /v1/wallets/managed-signing/initialize-with-wallet`, `POST /v1/wallets/signer-check`, `PATCH /v1/wallets/{walletId}`, `DELETE /v1/wallets`
+- Wallets: `POST /v1/wallets`, `POST /v1/wallets/initialize`, `POST /v1/wallets/signer-check`, `PATCH /v1/wallets/{walletId}`, `DELETE /v1/wallets`
 - Counterparties: `POST`, `PATCH` and `DELETE` on `/v1/counterparties` and on counterparty accounts
 - Payment requests: `POST /v1/payments/requests` and `POST /v1/payments/requests/{paymentRequestId}/cancel`
 

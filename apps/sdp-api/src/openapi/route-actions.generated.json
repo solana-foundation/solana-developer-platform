@@ -139,7 +139,7 @@
   "GET /v1/transactions": "transactions.read",
   "GET /v1/wallets": "wallets.read",
   "GET /v1/wallets/:_": "wallets.read",
-  "GET /v1/wallets/aggregate": "wallets.read",
+  "GET /v1/wallets/balances/aggregate": "wallets.read",
   "GET /v1/wallets/configs": "wallets.read",
   "GET /v1/wallets/public-key": "wallets.read",
   "PATCH /v1/api-keys/:_": "api_keys.manage",

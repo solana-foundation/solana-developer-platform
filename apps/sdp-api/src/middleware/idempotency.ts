@@ -85,6 +85,14 @@ export interface IdempotencyOptions {
    * so a retry across the change replays instead of answering 422. Must be pure.
    */
   previousCanonicalize?: (body: JsonValue) => JsonValue;
+  /**
+   * The operation the route fingerprinted with before its path changed (for
+   * example `POST /v1/payments/transfers` before the execute step was split
+   * out). A domain row saved under it still matches, so a retry across the
+   * rename replays from its row instead of answering 422. The full
+   * `METHOD /path` string, exactly as {@link idempotencyOperation} built it.
+   */
+  previousOperation?: string;
 }
 
 const DEFAULT_IDEMPOTENCY_LEASE_SECONDS = 60;
@@ -353,19 +361,23 @@ export async function runIdempotency(
   const maxRenewalSeconds = options.maxLeaseRenewalSeconds ?? MAX_IDEMPOTENCY_LEASE_RENEWAL_SECONDS;
   const validatedParams = validatedInput(c).params;
   const body = await readFingerprintBody(c);
-  const fingerprintOf = (canonicalize: IdempotencyOptions["canonicalize"]) =>
+  const fingerprintOf = (canonicalize: IdempotencyOptions["canonicalize"], scope: string) =>
     requestFingerprint({
-      operation,
+      operation: scope,
       // As the route's param validator left them, like the body.
       params: toJsonValue(validatedParams),
       // Names are ordered by the canonical form; repeated values keep their order.
       query: c.req.queries(),
       body: canonicalize ? canonicalize(body) : body,
     });
-  let fingerprint = fingerprintOf(options.canonicalize);
-  const previousFingerprint = options.previousCanonicalize
-    ? fingerprintOf(options.previousCanonicalize)
-    : fingerprint;
+  let fingerprint = fingerprintOf(options.canonicalize, operation);
+  const previousFingerprint =
+    options.previousCanonicalize || options.previousOperation
+      ? fingerprintOf(
+          options.previousCanonicalize ?? options.canonicalize,
+          options.previousOperation ?? operation
+        )
+      : fingerprint;
   const id = `idk_${crypto.randomUUID()}`;
   const claimToken = crypto.randomUUID();
   const repository = createPostgresIdempotencyKeyRepository(getDb(c.env));
@@ -658,8 +670,9 @@ export function getIdempotencyFingerprint(c: Context<{ Bindings: Env }>): string
 
 /**
  * Whether a fingerprint stored on a domain row is this request's: its current
- * fingerprint, or the one under the route's `previousCanonicalize`, so a row
- * saved before the canonical form changed still answers its retry.
+ * fingerprint, or the one under the route's `previousCanonicalize` or
+ * `previousOperation`, so a row saved before the canonical form or the route
+ * path changed still answers its retry.
  */
 export function idempotencyFingerprintMatches(
   c: Context<{ Bindings: Env }>,

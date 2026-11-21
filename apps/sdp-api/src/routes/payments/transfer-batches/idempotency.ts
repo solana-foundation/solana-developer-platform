@@ -21,14 +21,6 @@ export function canonicalizeTransferBatchBody(body: JsonValue): JsonValue {
     : canonical;
 }
 
-/**
- * {@link canonicalizeTransferBatchBody} with the token as sent, so a key or
- * batch row saved under that form still matches its retry (`previousCanonicalize`).
- */
-export function previousCanonicalTransferBatchBody(body: JsonValue): JsonValue {
-  return canonicalBatchBody(body);
-}
-
 function canonicalBatchBody(body: JsonValue): JsonValue {
   if (body === null || typeof body !== "object" || Array.isArray(body)) {
     return body;

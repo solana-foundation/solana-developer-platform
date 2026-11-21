@@ -58,7 +58,7 @@ exports[`API route ownership > lists every route with its owner 1`] = `
   "custody GET /internal/dashboard/fireblocks/destination",
   "custody GET /v1/wallets",
   "custody GET /v1/wallets/:walletId",
-  "custody GET /v1/wallets/aggregate",
+  "custody GET /v1/wallets/balances/aggregate",
   "custody GET /v1/wallets/configs",
   "custody GET /v1/wallets/public-key",
   "custody PATCH /v1/wallets/:walletId",

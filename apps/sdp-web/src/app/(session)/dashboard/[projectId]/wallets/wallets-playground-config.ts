@@ -174,7 +174,7 @@ export function buildWalletsPlaygroundEndpointConfigs({
       id: "aggregate-balances",
       title: t("DashboardCustody.playgroundAggregateBalances"),
       method: "GET",
-      path: "/v1/wallets/aggregate",
+      path: "/v1/wallets/balances/aggregate",
       pathFields: [],
       bodyFields: [],
       expectedResponse: {

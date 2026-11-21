@@ -241,7 +241,7 @@
         "operationId": "aggregateWalletBalances",
         "title": "Aggregate wallet balances",
         "method": "GET",
-        "path": "/v1/wallets/aggregate?provider={provider}",
+        "path": "/v1/wallets/balances/aggregate?provider={provider}",
         "pathFields": [
           {
             "key": "provider",
@@ -433,7 +433,7 @@
         },
         "takesIdempotencyKey": false,
         "releaseModule": "custody",
-        "shadowedBy": ["/v1/wallets/aggregate", "/v1/wallets/configs", "/v1/wallets/public-key"]
+        "shadowedBy": ["/v1/wallets/configs", "/v1/wallets/public-key"]
       },
       {
         "id": "update-wallet",
@@ -2301,7 +2301,7 @@
         "operationId": "getPaymentRequestLink",
         "title": "Get payment request link",
         "method": "GET",
-        "path": "/v1/payments/requests/{paymentRequestId}/link",
+        "path": "/v1/payments/requests/{paymentRequestId}/link-token",
         "pathFields": [
           {
             "key": "paymentRequestId",
@@ -9906,12 +9906,12 @@
         },
         "takesIdempotencyKey": false
       },
-      "GET /v1/wallets/aggregate": {
+      "GET /v1/wallets/balances/aggregate": {
         "id": "aggregate-wallet-balances",
         "operationId": "aggregateWalletBalances",
         "title": "Aggregate wallet balances",
         "method": "GET",
-        "path": "/v1/wallets/aggregate?provider={provider}",
+        "path": "/v1/wallets/balances/aggregate?provider={provider}",
         "pathFields": [
           {
             "key": "provider",

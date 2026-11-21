@@ -486,7 +486,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Create payment request",
     operationId: "createPaymentRequest",
     description:
-      "Creates a payment request: an amount of one token for a payer to send to a custody wallet in the caller's project, through the request's hosted payment link. Requires `payment_requests.manage`. `walletId` is the provider wallet ID (`walletId` from `GET /v1/wallets`), not the SDP Wallet ID transfers take; an unknown wallet, or one outside the project, returns 404. `amount` is a decimal string with at most the mint's decimals, so `0.05` and `0.050` are the same request; more decimals return 400. A native SOL request is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM` when the wallet has no account and the amount is below the rent-exempt minimum. The response is the only one besides `GET /v1/payments/requests/{paymentRequestId}/link` that carries `publicToken`. Accepts an Idempotency-Key: a retry with the same key and request returns the original payment request instead of creating a second one.",
+      "Creates a payment request: an amount of one token for a payer to send to a custody wallet in the caller's project, through the request's hosted payment link. Requires `payment_requests.manage`. `walletId` is the provider wallet ID (`walletId` from `GET /v1/wallets`), not the SDP Wallet ID transfers take; an unknown wallet, or one outside the project, returns 404. `amount` is a decimal string with at most the mint's decimals, so `0.05` and `0.050` are the same request; more decimals return 400. A native SOL request is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM` when the wallet has no account and the amount is below the rent-exempt minimum. The response is the only one besides `GET /v1/payments/requests/{paymentRequestId}/link-token` that carries `publicToken`. Accepts an Idempotency-Key: a retry with the same key and request returns the original payment request instead of creating a second one.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: keyAcceptedHeaders,
@@ -535,7 +535,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Get payment request",
     operationId: "getPaymentRequest",
     description:
-      "Retrieves one payment request in the caller's project; another project's request returns 404. Requires `payment_requests.read`. An open request past its `expiresAt` reads as `expired`. The record never carries `publicToken`; use `GET /v1/payments/requests/{paymentRequestId}/link`.",
+      "Retrieves one payment request in the caller's project; another project's request returns 404. Requires `payment_requests.read`. An open request past its `expiresAt` reads as `expired`. The record never carries `publicToken`; use `GET /v1/payments/requests/{paymentRequestId}/link-token`.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -552,7 +552,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
-    path: "/v1/payments/requests/{paymentRequestId}/link",
+    path: "/v1/payments/requests/{paymentRequestId}/link-token",
     tags: ["Payments"],
     [DOCS_GROUP]: PAYMENT_GROUPS.paymentRequests,
     summary: "Get payment request link",

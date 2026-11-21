@@ -424,13 +424,13 @@ Section 5's controls only matter if they enforce. Here you move tokens between t
 
 ### 1. The clean transfer
 
-Transfers use `POST /v1/payments/transfers`, which needs `transfers.execute` (the Developer key has it). Screen the destination first with Section 5's `screenDestination`:
+Transfers use `POST /v1/payments/transfers/execute`, which needs `transfers.execute` (the Developer key has it). Screen the destination first with Section 5's `screenDestination`:
 
 ```javascript title="transfer-tokens.js"
 await screenDestination(destinationAddress);
 
 const transfer = await sdp.post(
-  "/v1/payments/transfers",
+  "/v1/payments/transfers/execute",
   {
     sourceCustodyWalletId: signingCustodyWalletId,
     destination: destinationAddress,
@@ -499,7 +499,7 @@ Run the same transfer. This time it fails:
 ```javascript title="transfer-blocked.js"
 try {
   await sdp.post(
-    "/v1/payments/transfers",
+    "/v1/payments/transfers/execute",
     {
       sourceCustodyWalletId: signingCustodyWalletId,
       destination: destinationAddress,
