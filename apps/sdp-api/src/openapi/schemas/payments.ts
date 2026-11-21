@@ -829,7 +829,7 @@ export const paymentListRequestsQuerySchema = listPaymentRequestsQuerySchemaBase
 
 const paymentRequestPublicTokenSchema = z.string().openapi({
   description:
-    "Token behind the request's hosted payment link, `/pay/{publicToken}`. Anyone holding it can build the request's fee-sponsored payment transaction, so share it only with the payer. Reads never return it; get it again with `GET /v1/payments/requests/{paymentRequestId}/link`.",
+    "Token behind the request's hosted payment link, `/pay/{publicToken}`. Anyone holding it can build the request's fee-sponsored payment transaction, so share it only with the payer. Reads never return it; get it again with `GET /v1/payments/requests/{paymentRequestId}/link-token`.",
   example: "example-public-token",
 });
 
