@@ -43725,7 +43725,7 @@ A regulated stablecoin has four onchain authorities. At deploy, SDP gives all fo
 - **`permanentDelegate`**: moves or burns any holder's tokens without their signature, the capability the GENIUS Act requires for lawful orders.
 - **`metadata`**: updates onchain metadata.
 
-The **pause authority** belongs to the `pausable` extension and defaults to the mint authority. Move or revoke any authority later with `POST /v1/issuance/tokens/{tokenId}/authority`.
+The **pause authority** belongs to the `pausable` extension and defaults to the mint authority. Move or revoke any authority later with `POST /v1/issuance/tokens/{tokenId}/authority/update/execute`.
 
 ### 4. Capture the design as a config
 
