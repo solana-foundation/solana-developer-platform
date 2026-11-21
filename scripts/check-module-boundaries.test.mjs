@@ -1,8 +1,19 @@
 import assert from "node:assert/strict";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  checkModuleBoundaries,
   findWorkspaceDependencyCycles,
   forbiddenPackageSourceImport,
   listFiles,
@@ -241,4 +252,46 @@ test("fails closed when a module's source directory is missing", () => {
     () => listFiles(path.join(repositoryRoot, "packages/sdp-types/renamed-away")),
     /ENOENT/
   );
+});
+
+test("drives the real walk end to end over a repo-shaped fixture", () => {
+  // The tests above hand validateModuleBoundaries pre-extracted imports; this
+  // drives checkModuleBoundaries over a repo-shaped fixture so the walk, the
+  // import extraction and the violation reporting run for real. An extractor
+  // that returned nothing would otherwise pass every test and the CI check
+  // without ever checking a source import.
+  const root = mkdtempSync(path.join(tmpdir(), "module-boundaries-check-"));
+  try {
+    // Every workspace module needs its manifest; an empty `src/index.mjs`
+    // keeps each walked module non-empty without contributing imports.
+    for (const parent of ["apps", "packages"]) {
+      for (const entry of readdirSync(path.join(repositoryRoot, parent), { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const manifestPath = path.join(repositoryRoot, parent, entry.name, "package.json");
+        if (!existsSync(manifestPath)) continue;
+        const { name } = JSON.parse(readFileSync(manifestPath, "utf8"));
+        const fixtureDirectory = path.join(root, parent, entry.name);
+        mkdirSync(path.join(fixtureDirectory, "src"), { recursive: true });
+        writeFileSync(path.join(fixtureDirectory, "package.json"), JSON.stringify({ name }));
+        writeFileSync(path.join(fixtureDirectory, "src", "index.mjs"), "");
+      }
+    }
+
+    // One undeclared relative import from @sdp/types into @sdp/rpc: only a
+    // walk that really finds it makes the check report it.
+    writeFileSync(
+      path.join(root, "packages/sdp-types/src/index.mjs"),
+      `import "../../sdp-rpc/src/index.mjs";\n`
+    );
+
+    const errors = checkModuleBoundaries(root, { write: true });
+
+    assert.equal(errors.length, 1);
+    assert.match(
+      errors[0],
+      /packages\/sdp-types\/src\/index\.mjs imports \.\.\/\.\.\/sdp-rpc\/src\/index\.mjs without declaring @sdp\/rpc\./
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
