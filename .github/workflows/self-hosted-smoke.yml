@@ -233,12 +233,14 @@ jobs:
         run: |
           set -euo pipefail
           # The smoke tests the latest published release, whose API surface can
-          # lag this workflow. Ask the release's own OpenAPI document which
-          # wallet-initialize path it serves, so a release that predates the
-          # managed-signing rename is still exercisable.
+          # lag this workflow. The wallet-initialize path is session-only, so
+          # the release's public OpenAPI document never names it. Detect the
+          # rename by probing the published managed-signing/configurations
+          # route, which only a release carrying the rename serves, so a
+          # release that predates the rename is still exercisable.
           initialize_path="$(curl -fsS http://localhost:8787/openapi.json | jq -r '
             .paths |
-            if has("/v1/wallets/managed-signing/initialize-with-wallet")
+            if has("/v1/wallets/managed-signing/configurations")
             then "/v1/wallets/managed-signing/initialize-with-wallet"
             else "/v1/wallets/initialize"
             end')"
