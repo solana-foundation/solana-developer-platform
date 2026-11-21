@@ -49,6 +49,19 @@ webhooks.post(
   publicRoute("signed webhook: Clerk's signature authenticates it"),
   handleClerkWebhook
 );
+// Endpoints registered before the rename still deliver to /link-orgs; the same
+// signature check authenticates them, so this alias serves the identical
+// handler until those endpoints move. It also keeps those deliveries under the
+// `/webhooks/clerk/` prefix of the platform load balancer's WAF exemption
+// (sdp-infra sdp-api-public-lb), which the canonical `/clerk` route above only
+// matches once that rule is widened — update the exemption alongside removing
+// this alias, or Clerk events whose bodies trip the OWASP rules are 403'd
+// before verification.
+webhooks.post(
+  "/clerk/link-orgs",
+  publicRoute("signed webhook: Clerk's signature authenticates it"),
+  handleClerkWebhook
+);
 webhooks.use("/payments/ramps/*", requireModule("ramps"));
 webhooks.use("/payments/ramps/:environment/:provider", requireRampProviderParam("provider"));
 webhooks.post(

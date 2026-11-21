@@ -47307,7 +47307,7 @@ In your Clerk development application, follow the [Clerk setup guide](https://gi
 - Customize the session token (**Sessions** → **Customize session token**) with the guide's claims. Without `org_id`, the API refuses every dashboard request.
 - Copy the publishable key, secret key, and issuer for the configurator.
 - Give the API a public HTTPS URL, because Clerk can't reach `localhost`. To test locally, reserve a free static domain at [dashboard.ngrok.com/domains](https://dashboard.ngrok.com/domains) and run `ngrok http --url=<your-domain> 8787`.
-- Add a webhook endpoint at `https://<your-domain>/webhooks/clerk/link-orgs`, subscribed to the events the guide lists. Copy its signing secret for `CLERK_WEBHOOK_SECRET`.
+- Add a webhook endpoint at `https://<your-domain>/webhooks/clerk`, subscribed to the events the guide lists. Copy its signing secret for `CLERK_WEBHOOK_SECRET`.
 
 The API starts without `CLERK_WEBHOOK_SECRET`, but set it now. The webhook is how SDP learns the settings you add to the organization in Clerk, such as a provider you turn on or off for it.
 

@@ -221,7 +221,7 @@ outbox first so the same bytes can be resubmitted after a lost RPC response.
   end ("Retry of …", "Retried as …") and stops offering Retry on a failure that
   already has one. The cap counts ancestors, not siblings, so nothing server-side
   refuses a second retry of the same failure.
-- `POST /operations/:id/execute` and `POST /operations/:id/recheck` have no
+- `POST /operations/:id/resume-execution` and `POST /operations/:id/recheck` have no
   trusted body.
 
 ## Settling an operation

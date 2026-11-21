@@ -28,7 +28,8 @@ const WEBHOOK_SECRET = `whsec_${Buffer.from("test_clerk_webhook_secret_123456789
 
 async function simulateClerkWebhook(
   event: { type: string; data: Record<string, unknown> },
-  requestEnv: Env = env
+  requestEnv: Env = env,
+  requestPath = "/webhooks/clerk"
 ) {
   const payload = JSON.stringify(event);
   const timestamp = Math.floor(Date.now() / 1000);
@@ -39,7 +40,7 @@ async function simulateClerkWebhook(
     .digest("base64");
   const signature = `v1,${digest}`;
   return app.request(
-    "/webhooks/clerk",
+    requestPath,
     {
       method: "POST",
       headers: {
@@ -836,6 +837,19 @@ describe("Clerk webhooks", () => {
 
   it("user.deleted naming no user is refused", async () => {
     const response = await simulateClerkWebhook({ type: "user.deleted", data: {} });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: { code: "BAD_REQUEST", message: "user.deleted event names no user" },
+      meta: { requestId: expect.any(String) },
+    });
+  });
+  it("still serves the legacy /webhooks/clerk/link-orgs path endpoints registered before the rename", async () => {
+    const response = await simulateClerkWebhook(
+      { type: "user.deleted", data: {} },
+      env,
+      "/webhooks/clerk/link-orgs"
+    );
 
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({
