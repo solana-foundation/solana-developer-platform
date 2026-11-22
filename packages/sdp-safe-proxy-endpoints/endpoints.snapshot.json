@@ -34,7 +34,7 @@
         "query": "",
         "requestHeaders": "",
         "parameters": {
-          "transaction": "uuid"
+          "transaction": "token ^[A-Za-z0-9_-]{1,255}$"
         }
       },
       "GET /v1/transactions/external_tx_id/{externalTxId}": {
@@ -44,7 +44,7 @@
         "query": "",
         "requestHeaders": "",
         "parameters": {
-          "externalTxId": "token"
+          "externalTxId": "token ^[A-Za-z0-9_-]{1,255}$"
         }
       },
       "GET /v1/vault/accounts_paged": {
@@ -62,7 +62,7 @@
         "query": "",
         "requestHeaders": "",
         "parameters": {
-          "vault": "digits"
+          "vault": "digits ^[0-9]{1,100}$"
         }
       },
       "GET /v1/vault/accounts/{vault}/{asset}/addresses_paginated": {
@@ -72,7 +72,7 @@
         "query": "limit",
         "requestHeaders": "",
         "parameters": {
-          "vault": "digits",
+          "vault": "digits ^[0-9]{1,100}$",
           "asset": "one_of SOL SOL_TEST"
         }
       },
@@ -122,7 +122,7 @@
         "query": "",
         "requestHeaders": "",
         "parameters": {
-          "transaction": "uuid"
+          "transaction": "token ^[A-Za-z0-9_-]{1,255}$"
         },
         "idempotency": {
           "key": "path",
@@ -150,7 +150,7 @@
         "query": "",
         "requestHeaders": "idempotency-key",
         "parameters": {
-          "vault": "digits",
+          "vault": "digits ^[0-9]{1,100}$",
           "asset": "one_of SOL SOL_TEST"
         },
         "idempotency": {
@@ -180,7 +180,7 @@
         "query": "",
         "requestHeaders": "",
         "parameters": {
-          "wallet": "token"
+          "wallet": "token ^[A-Za-z0-9_-]{1,255}$"
         }
       },
       "POST /v1/wallets": {
@@ -199,11 +199,11 @@
       "POST /v1/wallets/{wallet}/rpc method=signMessage": {
         "kind": "sign",
         "status": "active",
-        "callers": "api",
+        "callers": "api cron",
         "query": "",
         "requestHeaders": "",
         "parameters": {
-          "wallet": "token"
+          "wallet": "token ^[A-Za-z0-9_-]{1,255}$"
         }
       },
       "POST /v1/wallets/{wallet}/rpc method=signTransaction": {
@@ -213,7 +213,7 @@
         "query": "",
         "requestHeaders": "",
         "parameters": {
-          "wallet": "token"
+          "wallet": "token ^[A-Za-z0-9_-]{1,255}$"
         }
       }
     }

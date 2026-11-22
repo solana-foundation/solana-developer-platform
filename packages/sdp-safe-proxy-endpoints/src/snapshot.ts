@@ -1,8 +1,11 @@
 import type { AllowedEndpoint, PathParameter } from "./endpoint";
+import { FORMAT_PATTERNS } from "./path-pattern";
 import { SAFE_PROXY_PROVIDERS } from "./providers";
 
 function parameterText(parameter: PathParameter): string {
-  return parameter.format === "one_of" ? `one_of ${parameter.values.join(" ")}` : parameter.format;
+  return parameter.format === "one_of"
+    ? `one_of ${parameter.values.join(" ")}`
+    : `${parameter.format} ${FORMAT_PATTERNS[parameter.format].source}`;
 }
 
 function idempotencyRow(endpoint: AllowedEndpoint) {

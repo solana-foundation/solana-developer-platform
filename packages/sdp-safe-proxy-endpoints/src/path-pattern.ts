@@ -6,9 +6,12 @@ export type PatternSegment =
 
 // Every path segment Safe Proxy forwards is made of these characters only.
 const SEGMENT = /^[A-Za-z0-9_-]+$/;
-const DIGITS = /^[0-9]{1,100}$/;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const TOKEN = /^[A-Za-z0-9_-]{1,255}$/;
+
+export const FORMAT_PATTERNS = {
+  digits: /^[0-9]{1,100}$/,
+  uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+  token: /^[A-Za-z0-9_-]{1,255}$/,
+} as const satisfies Record<Exclude<PathParameter["format"], "one_of">, RegExp>;
 
 export function pathSegments(path: string): string[] | null {
   if (!path.startsWith("/")) return null;
@@ -29,20 +32,9 @@ export function patternSegments(endpoint: AllowedEndpoint): PatternSegment[] {
 }
 
 export function parameterAccepts(parameter: PathParameter, segment: string): boolean {
-  switch (parameter.format) {
-    case "digits":
-      return DIGITS.test(segment);
-    case "uuid":
-      return UUID.test(segment);
-    case "token":
-      return TOKEN.test(segment);
-    case "one_of":
-      return parameter.values.includes(segment);
-    default: {
-      const unhandled: never = parameter;
-      throw new Error(`unhandled path parameter: ${JSON.stringify(unhandled)}`);
-    }
-  }
+  return parameter.format === "one_of"
+    ? parameter.values.includes(segment)
+    : FORMAT_PATTERNS[parameter.format].test(segment);
 }
 
 export function segmentAccepts(pattern: PatternSegment, segment: string): boolean {

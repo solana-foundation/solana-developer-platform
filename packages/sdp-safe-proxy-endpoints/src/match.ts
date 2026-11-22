@@ -49,8 +49,7 @@ function pathMatches(endpoint: AllowedEndpoint, segments: string[], query: strin
   );
 }
 
-// A body is read only in the form JSON.stringify writes, so the field checked
-// here is the only field of that name the provider can see.
+// The body must be the exact string JSON.stringify writes for it.
 function bodyAllowed(rule: BodyRule, body: string): boolean {
   let parsed: unknown;
   try {
@@ -59,7 +58,10 @@ function bodyAllowed(rule: BodyRule, body: string): boolean {
     return false;
   }
   if (JSON.stringify(parsed) !== body) return false;
-  return z.looseObject({ [rule.field]: z.enum(rule.values) }).safeParse(parsed).success;
+  const ruled = z.looseObject({ [rule.field]: z.enum(rule.values) }).safeParse(parsed);
+  if (!ruled.success) return false;
+  const field = rule.field.toLowerCase();
+  return Object.keys(ruled.data).every((key) => key === rule.field || key.toLowerCase() !== field);
 }
 
 export function matchEndpoint(request: ProviderRequest): MatchResult {

@@ -56,7 +56,7 @@ const signMessage = endpoint({
   parameters: { wallet: { format: "token" } },
   query: [],
   kind: "sign",
-  callers: ["api"],
+  callers: ["api", "cron"],
   requestHeaders: [],
   status: "active",
   body: { field: "method", values: ["signMessage"] },

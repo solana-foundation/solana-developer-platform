@@ -7,7 +7,7 @@ import {
 
 const VAULT = { format: "digits" } as const satisfies PathParameter;
 const ASSET = { format: "one_of", values: ["SOL", "SOL_TEST"] } as const satisfies PathParameter;
-const TRANSACTION = { format: "uuid" } as const satisfies PathParameter;
+const TRANSACTION = { format: "token" } as const satisfies PathParameter;
 
 const readVaultAddresses = endpoint({
   method: "GET",
