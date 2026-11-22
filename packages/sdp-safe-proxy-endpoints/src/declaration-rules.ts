@@ -7,7 +7,7 @@ function segmentsOverlap(left: PatternSegment, right: PatternSegment): boolean {
   return true;
 }
 
-function samePaths(left: AllowedEndpoint, right: AllowedEndpoint): boolean {
+function canMatchSameTarget(left: AllowedEndpoint, right: AllowedEndpoint): boolean {
   const leftPattern = patternSegments(left);
   const rightPattern = patternSegments(right);
   return (
@@ -35,7 +35,7 @@ export function declarationProblems(
     for (const [index, endpoint] of provider.endpoints.entries()) {
       const label = `${name} ${endpoint.method} ${endpoint.path}`;
       for (const other of provider.endpoints.slice(index + 1)) {
-        if (samePaths(endpoint, other) && !bodiesDisjoint(endpoint, other)) {
+        if (canMatchSameTarget(endpoint, other) && !bodiesDisjoint(endpoint, other)) {
           problems.push(`${label} and ${other.method} ${other.path} can match the same request`);
         }
       }
