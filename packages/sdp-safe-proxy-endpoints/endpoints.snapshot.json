@@ -1,0 +1,221 @@
+{
+  "fireblocks": {
+    "hosts": "api.fireblocks.io",
+    "authScheme": "fireblocks_jwt",
+    "endpoints": {
+      "GET /v1/external_wallets": {
+        "kind": "read",
+        "status": "active",
+        "callers": "api",
+        "query": "",
+        "requestHeaders": "",
+        "parameters": {}
+      },
+      "GET /v1/internal_wallets": {
+        "kind": "read",
+        "status": "active",
+        "callers": "api",
+        "query": "",
+        "requestHeaders": "",
+        "parameters": {}
+      },
+      "GET /v1/supported_assets": {
+        "kind": "read",
+        "status": "active",
+        "callers": "api",
+        "query": "",
+        "requestHeaders": "",
+        "parameters": {}
+      },
+      "GET /v1/transactions/{transaction}": {
+        "kind": "read",
+        "status": "active",
+        "callers": "api cron",
+        "query": "",
+        "requestHeaders": "",
+        "parameters": {
+          "transaction": "uuid"
+        }
+      },
+      "GET /v1/transactions/external_tx_id/{externalTxId}": {
+        "kind": "read",
+        "status": "active",
+        "callers": "api cron",
+        "query": "",
+        "requestHeaders": "",
+        "parameters": {
+          "externalTxId": "token"
+        }
+      },
+      "GET /v1/vault/accounts_paged": {
+        "kind": "read",
+        "status": "active",
+        "callers": "api",
+        "query": "after assetId limit namePrefix",
+        "requestHeaders": "",
+        "parameters": {}
+      },
+      "GET /v1/vault/accounts/{vault}": {
+        "kind": "read",
+        "status": "active",
+        "callers": "api",
+        "query": "",
+        "requestHeaders": "",
+        "parameters": {
+          "vault": "digits"
+        }
+      },
+      "GET /v1/vault/accounts/{vault}/{asset}/addresses_paginated": {
+        "kind": "read",
+        "status": "active",
+        "callers": "api cron",
+        "query": "limit",
+        "requestHeaders": "",
+        "parameters": {
+          "vault": "digits",
+          "asset": "one_of SOL SOL_TEST"
+        }
+      },
+      "POST /v1/transactions operation=PROGRAM_CALL": {
+        "kind": "sign",
+        "status": "active",
+        "callers": "api cron",
+        "query": "",
+        "requestHeaders": "",
+        "parameters": {},
+        "idempotency": {
+          "key": "body externalTxId",
+          "dedupe": "permanent",
+          "read": "GET /v1/transactions/external_tx_id/{externalTxId}"
+        }
+      },
+      "POST /v1/transactions operation=RAW": {
+        "kind": "sign",
+        "status": "active",
+        "callers": "api cron",
+        "query": "",
+        "requestHeaders": "",
+        "parameters": {},
+        "idempotency": {
+          "key": "body externalTxId",
+          "dedupe": "permanent",
+          "read": "GET /v1/transactions/external_tx_id/{externalTxId}"
+        }
+      },
+      "POST /v1/transactions operation=TRANSFER": {
+        "kind": "change",
+        "status": "active",
+        "callers": "api",
+        "query": "",
+        "requestHeaders": "",
+        "parameters": {},
+        "idempotency": {
+          "key": "body externalTxId",
+          "dedupe": "permanent",
+          "read": "GET /v1/transactions/external_tx_id/{externalTxId}"
+        }
+      },
+      "POST /v1/transactions/{transaction}/cancel": {
+        "kind": "change",
+        "status": "active",
+        "callers": "api cron",
+        "query": "",
+        "requestHeaders": "",
+        "parameters": {
+          "transaction": "uuid"
+        },
+        "idempotency": {
+          "key": "path",
+          "dedupe": "permanent",
+          "read": "GET /v1/transactions/{transaction}"
+        }
+      },
+      "POST /v1/vault/accounts": {
+        "kind": "change",
+        "status": "active",
+        "callers": "api",
+        "query": "",
+        "requestHeaders": "idempotency-key",
+        "parameters": {},
+        "idempotency": {
+          "key": "header idempotency-key",
+          "dedupe": "hours 24",
+          "read": "GET /v1/vault/accounts_paged"
+        }
+      },
+      "POST /v1/vault/accounts/{vault}/{asset}": {
+        "kind": "change",
+        "status": "active",
+        "callers": "api",
+        "query": "",
+        "requestHeaders": "idempotency-key",
+        "parameters": {
+          "vault": "digits",
+          "asset": "one_of SOL SOL_TEST"
+        },
+        "idempotency": {
+          "key": "header idempotency-key",
+          "dedupe": "hours 24",
+          "read": "GET /v1/vault/accounts/{vault}/{asset}/addresses_paginated"
+        }
+      }
+    }
+  },
+  "privy": {
+    "hosts": "api.privy.io",
+    "authScheme": "privy_basic",
+    "endpoints": {
+      "GET /v1/wallets": {
+        "kind": "read",
+        "status": "active",
+        "callers": "api",
+        "query": "",
+        "requestHeaders": "",
+        "parameters": {}
+      },
+      "GET /v1/wallets/{wallet}": {
+        "kind": "read",
+        "status": "active",
+        "callers": "api cron",
+        "query": "",
+        "requestHeaders": "",
+        "parameters": {
+          "wallet": "token"
+        }
+      },
+      "POST /v1/wallets": {
+        "kind": "change",
+        "status": "active",
+        "callers": "api",
+        "query": "",
+        "requestHeaders": "privy-idempotency-key",
+        "parameters": {},
+        "idempotency": {
+          "key": "header privy-idempotency-key",
+          "dedupe": "hours 24",
+          "read": "GET /v1/wallets/{wallet}"
+        }
+      },
+      "POST /v1/wallets/{wallet}/rpc method=signMessage": {
+        "kind": "sign",
+        "status": "active",
+        "callers": "api",
+        "query": "",
+        "requestHeaders": "",
+        "parameters": {
+          "wallet": "token"
+        }
+      },
+      "POST /v1/wallets/{wallet}/rpc method=signTransaction": {
+        "kind": "sign",
+        "status": "active",
+        "callers": "api cron",
+        "query": "",
+        "requestHeaders": "",
+        "parameters": {
+          "wallet": "token"
+        }
+      }
+    }
+  }
+}
