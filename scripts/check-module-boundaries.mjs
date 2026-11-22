@@ -261,7 +261,7 @@ const MODULE_METADATA = [
     directory: "packages/sdp-safe-proxy-endpoints",
     purpose:
       "The provider endpoints Safe Proxy forwards to, the matcher that admits a request, and the forward protocol.",
-    allowedDependencies: [],
+    allowedDependencies: ["@sdp/types"],
   },
   {
     name: "@sdp/rpc",
