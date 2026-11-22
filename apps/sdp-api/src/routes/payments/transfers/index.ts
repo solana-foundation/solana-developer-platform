@@ -35,7 +35,7 @@ transfers.post(
     canonicalize: canonicalizePaymentBody,
     // The execute step was split out of POST /v1/payments/transfers; a key or
     // row saved under that operation still answers its retry.
-    previousOperation: "POST /v1/payments/transfers",
+    previousForms: [{ operation: "POST /v1/payments/transfers" }],
   }),
   replayFromRecord(findTransferRecordReplay),
   admit(admitTransferExecution),

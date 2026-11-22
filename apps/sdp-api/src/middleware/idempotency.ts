@@ -80,19 +80,18 @@ export interface IdempotencyOptions {
    */
   canonicalize?: (body: JsonValue) => JsonValue;
   /**
-   * The canonical form the route fingerprinted with before its current
-   * `canonicalize`. A key record or domain row saved under it still matches,
-   * so a retry across the change replays instead of answering 422. Must be pure.
+   * The forms the route fingerprinted with before its current one, oldest
+   * last: the `canonicalize` it used (defaulting to the current one) and the
+   * `operation` it was mounted at (defaulting to the current path), each as of
+   * that era. A key record or domain row saved under any of them still
+   * matches, so a retry across a rename or a canonical-form change replays
+   * instead of answering 422. Canonicalizers must be pure.
    */
-  previousCanonicalize?: (body: JsonValue) => JsonValue;
-  /**
-   * The operation the route fingerprinted with before its path changed (for
-   * example `POST /v1/payments/transfers` before the execute step was split
-   * out). A domain row saved under it still matches, so a retry across the
-   * rename replays from its row instead of answering 422. The full
-   * `METHOD /path` string, exactly as {@link idempotencyOperation} built it.
-   */
-  previousOperation?: string;
+  previousForms?: {
+    canonicalize?: (body: JsonValue) => JsonValue;
+    /** The full `METHOD /path` string, exactly as {@link idempotencyOperation} built it. */
+    operation?: string;
+  }[];
 }
 
 const DEFAULT_IDEMPOTENCY_LEASE_SECONDS = 60;
@@ -371,13 +370,15 @@ export async function runIdempotency(
       body: canonicalize ? canonicalize(body) : body,
     });
   let fingerprint = fingerprintOf(options.canonicalize, operation);
-  const previousFingerprint =
-    options.previousCanonicalize || options.previousOperation
-      ? fingerprintOf(
-          options.previousCanonicalize ?? options.canonicalize,
-          options.previousOperation ?? operation
-        )
-      : fingerprint;
+  // The forms the route fingerprinted with before this one, deduped: a form
+  // equal to the current one matches without a fallback claim.
+  const previousFingerprints = [
+    ...new Set(
+      (options.previousForms ?? []).map((form) =>
+        fingerprintOf(form.canonicalize ?? options.canonicalize, form.operation ?? operation)
+      )
+    ),
+  ].filter((candidate) => candidate !== fingerprint);
   const id = `idk_${crypto.randomUUID()}`;
   const claimToken = crypto.randomUUID();
   const repository = createPostgresIdempotencyKeyRepository(getDb(c.env));
@@ -398,16 +399,18 @@ export async function runIdempotency(
     retentionSeconds: IDEMPOTENCY_KEY_RETENTION_SECONDS,
   };
   let claim = await repository.claim(claimInput);
-  if (claim.kind === "mismatch" && previousFingerprint !== fingerprint) {
-    // A key saved before the route's canonical form changed (a mismatch
-    // writes nothing, so claiming again under the old form is safe).
-    const previous = await repository.claim({ ...claimInput, fingerprint: previousFingerprint });
-    if (previous.kind !== "mismatch") {
+  if (claim.kind === "mismatch") {
+    // A key saved before the route's fingerprint form changed (a mismatch
+    // writes nothing, so claiming again under an old form is safe).
+    for (const previousFingerprint of previousFingerprints) {
+      const previous = await repository.claim({ ...claimInput, fingerprint: previousFingerprint });
+      if (previous.kind === "mismatch") continue;
       claim = previous;
       fingerprint = previousFingerprint;
+      break;
     }
   }
-  c.set("idempotencyPreviousFingerprint", previousFingerprint);
+  c.set("idempotencyPreviousFingerprints", previousFingerprints);
 
   switch (claim.kind) {
     case "completed":
@@ -670,15 +673,15 @@ export function getIdempotencyFingerprint(c: Context<{ Bindings: Env }>): string
 
 /**
  * Whether a fingerprint stored on a domain row is this request's: its current
- * fingerprint, or the one under the route's `previousCanonicalize` or
- * `previousOperation`, so a row saved before the canonical form or the route
- * path changed still answers its retry.
+ * fingerprint, or one under the route's `previousForms`, so a row saved before
+ * the canonical form or the route path changed still answers its retry.
  */
 export function idempotencyFingerprintMatches(
   c: Context<{ Bindings: Env }>,
   stored: string
 ): boolean {
   return (
-    stored === c.get("idempotencyFingerprint") || stored === c.get("idempotencyPreviousFingerprint")
+    stored === c.get("idempotencyFingerprint") ||
+    (c.get("idempotencyPreviousFingerprints")?.includes(stored) ?? false)
   );
 }

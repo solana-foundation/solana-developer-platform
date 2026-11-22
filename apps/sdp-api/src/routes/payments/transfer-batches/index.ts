@@ -20,7 +20,7 @@ import {
   retryTransferBatch,
 } from "@/routes/payments/transfer-batches/retry";
 import type { Env } from "@/types/env";
-import { canonicalizeTransferBatchBody } from "./idempotency";
+import { canonicalizeTransferBatchBody, previousCanonicalTransferBatchBody } from "./idempotency";
 import {
   createTransferBatchSchema,
   estimateTransferBatchSchema,
@@ -53,9 +53,16 @@ transferBatches.post(
     leaseSeconds: 300,
     canonicalize: canonicalizeTransferBatchBody,
     // The execute step was split out of POST /v1/payments/transfer-batches; a
-    // key or batch row saved under that operation still answers its retry.
-    // One previous form: this rename supersedes the body's older one.
-    previousOperation: "POST /v1/payments/transfer-batches",
+    // key or batch row saved under that operation still answers its retry,
+    // under either body form that operation fingerprinted with: the token as
+    // sent before APE SOLA9-695, as the mint since.
+    previousForms: [
+      { operation: "POST /v1/payments/transfer-batches" },
+      {
+        canonicalize: previousCanonicalTransferBatchBody,
+        operation: "POST /v1/payments/transfer-batches",
+      },
+    ],
   }),
   replayFromRecord(findTransferBatchRecordReplay),
   // Meters only new sends: a replay, an in-flight poll or a record answer has

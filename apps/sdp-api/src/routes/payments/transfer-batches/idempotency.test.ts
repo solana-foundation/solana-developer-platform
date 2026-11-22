@@ -1,7 +1,7 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import { SOL_MINT, wellKnownMint } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
-import { canonicalizeTransferBatchBody } from "./idempotency";
+import { canonicalizeTransferBatchBody, previousCanonicalTransferBatchBody } from "./idempotency";
 
 describe("canonicalizeTransferBatchBody", () => {
   it("makes recipient order irrelevant and keeps everything else as sent", () => {
@@ -44,6 +44,21 @@ describe("canonicalizeTransferBatchBody", () => {
         canonicalizeTransferBatchBody({ ...body, token: SOL_MINT })
       );
     });
+  });
+
+  it("keeps the token as sent in the previous form, for keys saved under it", () => {
+    const body = {
+      sourceCustodyWalletId: "cwlt_1",
+      token: "SOL",
+      recipients: [{ counterpartyAccountId: "cpa_a", amount: "1.0" }],
+    };
+    expect(previousCanonicalTransferBatchBody(body)).toEqual({
+      ...body,
+      recipients: [{ counterpartyAccountId: "cpa_a", amount: "1" }],
+    });
+    expect(previousCanonicalTransferBatchBody(body)).not.toEqual(
+      canonicalizeTransferBatchBody(body)
+    );
   });
 
   it("leaves what is not a recipient untouched for validation to refuse", () => {
