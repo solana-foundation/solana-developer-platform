@@ -14,13 +14,13 @@ import {
   verifyGatewayIdentity,
 } from "@/lib/gateway-identity";
 import { invalidGatewayIdentityLimiter } from "@/middleware/gateway-identity";
-import { RATE_LIMIT_TIERS } from "@/middleware/rate-limit";
+import { ANONYMOUS_MAX_REQUESTS, RATE_LIMIT_TIERS } from "@/middleware/rate-limit";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { TEST_REVOKED_KEY, TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedRateLimit } from "@/test/mocks/kv";
+import { clearKVStores, readRateLimitCount, seedRateLimit } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 
 const errorBodySchema = z.object({
@@ -450,6 +450,93 @@ describe("gateway identity (X-SF-Identity)", () => {
     expect(anonymous.status).toBe(401);
   });
 
+  // A gateway public route (`auth: none`) signs Principal::anonymous(): every
+  // id null, no grants, `anonymous: true` (PRO-2204).
+  describe("anonymous identities from gateway public routes", () => {
+    const anonymousToken = (claims: JWTPayload = {}) =>
+      identityToken({
+        project_id: null,
+        org_id: null,
+        key_id: null,
+        clerk_user_id: null,
+        plan: null,
+        grants: [],
+        anonymous: true,
+        request_id: "req_anonymous",
+        ...claims,
+      });
+
+    it("serves the public paths as the legacy path does", async () => {
+      for (const path of ["/health", "/openapi.json", "/pay/plink_unknown"]) {
+        const direct = await app.request(path, {}, gatewayEnv());
+        const viaGateway = await app.request(
+          path,
+          { headers: { [GATEWAY_IDENTITY_HEADER]: await anonymousToken() } },
+          gatewayEnv()
+        );
+
+        expect(viaGateway.status, path).toBe(direct.status);
+      }
+      expect(
+        (
+          await app.request(
+            "/health",
+            { headers: { [GATEWAY_IDENTITY_HEADER]: await anonymousToken() } },
+            gatewayEnv()
+          )
+        ).status
+      ).toBe(200);
+    });
+
+    it("gets the usual 401 on a path that needs a key or session", async () => {
+      await seedSfKey();
+
+      const res = await request({ [GATEWAY_IDENTITY_HEADER]: await anonymousToken() });
+
+      expect(res.status).toBe(401);
+      expect(errorBodySchema.parse(await res.json()).error.message).toBe("API key required");
+    });
+
+    it("refuses a key sent with it as a mismatch", async () => {
+      await seedSfKey();
+
+      const res = await request({
+        Authorization: `Bearer ${sfKey.key}`,
+        [GATEWAY_IDENTITY_HEADER]: await anonymousToken(),
+      });
+
+      expect(res.status).toBe(401);
+      expect(errorBodySchema.parse(await res.json()).error).toEqual({
+        code: "INVALID_API_KEY",
+        message: "API key does not match the gateway identity",
+      });
+    });
+
+    it("counts SDP's anonymous limit by client_ip, never by forwarding headers", async () => {
+      await request({
+        [GATEWAY_IDENTITY_HEADER]: await anonymousToken(),
+        "X-Forwarded-For": "198.51.100.1, 198.51.100.2",
+        "X-SF-Client-IP": "198.51.100.3",
+      });
+
+      expect(await readRateLimitCount(env, CLIENT_IP)).toBe(1);
+      expect(await readRateLimitCount(env, "198.51.100.1")).toBe(0);
+      expect(await readRateLimitCount(env, "198.51.100.3")).toBe(0);
+    });
+
+    it("keeps SDP's anonymous limit for each client_ip", async () => {
+      await seedRateLimit(env, CLIENT_IP, ANONYMOUS_MAX_REQUESTS);
+
+      const limited = await request({ [GATEWAY_IDENTITY_HEADER]: await anonymousToken() });
+      const otherClient = await request({
+        [GATEWAY_IDENTITY_HEADER]: await anonymousToken({ client_ip: "198.51.100.9" }),
+      });
+
+      expect(limited.status).toBe(429);
+      expect(otherClient.status).toBe(401);
+    });
+  });
+
   describe("refuses an identity that does not verify, never falling back to the key", () => {
     const cases: Array<[string, () => Promise<string>]> = [
       ["for another app", () => identityToken({ key_id: sfKey.keyId }, { audience: "tokens" })],
@@ -503,6 +590,11 @@ describe("gateway identity (X-SF-Identity)", () => {
         "naming both a key and a user",
         () => identityToken({ key_id: sfKey.keyId, clerk_user_id: "user_1" }),
       ],
+      [
+        "anonymous but naming a key",
+        () => identityToken({ key_id: sfKey.keyId, project_id: null, anonymous: true }),
+      ],
+      ["anonymous but naming a project", () => identityToken({ anonymous: true })],
       ["that is not a JWT", async () => "not-a-jwt"],
     ];
 
@@ -543,6 +635,31 @@ describe("verifyGatewayIdentity", () => {
       plan: null,
       clientIp: CLIENT_IP,
       requestId: "req_1",
+      anonymous: false,
+    });
+  });
+
+  it("reads a gateway-shaped anonymous identity", async () => {
+    const token = await identityToken({
+      project_id: null,
+      org_id: null,
+      key_id: null,
+      clerk_user_id: null,
+      plan: null,
+      grants: [],
+      anonymous: true,
+      request_id: "req_2",
+    });
+
+    expect(await verifyGatewayIdentity(token, { issuer, jwksUrl })).toEqual({
+      projectId: null,
+      orgId: null,
+      keyId: null,
+      clerkUserId: null,
+      plan: null,
+      clientIp: CLIENT_IP,
+      requestId: "req_2",
+      anonymous: true,
     });
   });
 

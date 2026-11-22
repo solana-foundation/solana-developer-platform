@@ -24,6 +24,7 @@ function identity(overrides: Partial<GatewayIdentity>): GatewayIdentity {
     plan: null,
     clientIp: "203.0.113.5",
     requestId: null,
+    anonymous: false,
     ...overrides,
   };
 }
@@ -63,5 +64,11 @@ describe("a Clerk session forwarded with a gateway identity (HOO-2256)", () => {
 
   it("refuses a session when the identity names a key", async () => {
     expect(await verifyUnder(identity({ clerkUserId: null, keyId: "0123456789abcdef" }))).toBe(401);
+  });
+
+  it("refuses a session when the identity is anonymous (a public route)", async () => {
+    expect(await verifyUnder(identity({ clerkUserId: null, orgId: null, anonymous: true }))).toBe(
+      401
+    );
   });
 });

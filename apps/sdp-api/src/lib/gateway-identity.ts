@@ -8,9 +8,11 @@ import type { Env } from "@/types/env";
  *
  * The gateway authenticates the caller (an `sf_` key or a Clerk session),
  * then forwards the request with `X-SF-Identity`: an ES256 JWT, valid for 60
- * seconds, signed by the gateway's JWKS. SDP keeps its own authorization
- * (grants, wallet bindings, row-level security); the identity only says who
- * the caller is and where the request came from.
+ * seconds, signed by the gateway's JWKS. On a public route (`auth: none`) the
+ * identity is anonymous: it names no caller and carries only the client IP.
+ * SDP keeps its own authorization (grants, wallet bindings, row-level
+ * security); the identity only says who the caller is and where the request
+ * came from.
  *
  * Until the gateway fronts every request, both paths are accepted: a request
  * with a verified identity, and a request that presents its key directly. The
@@ -43,10 +45,19 @@ const claimsSchema = z
     plan: z.string().min(1).nullish(),
     client_ip: z.string().refine((value) => isIP(value) !== 0, "client_ip must be an IP address"),
     request_id: z.string().min(1).nullish(),
+    // A public route's caller (`auth: none`); the gateway omits it otherwise.
+    anonymous: z.boolean().nullish(),
   })
-  .refine((claims) => (claims.key_id == null) !== (claims.clerk_user_id == null), {
-    message: "exactly one of key_id and clerk_user_id",
-  });
+  .refine(
+    (claims) =>
+      claims.anonymous === true
+        ? claims.key_id == null &&
+          claims.clerk_user_id == null &&
+          claims.project_id == null &&
+          claims.org_id == null
+        : (claims.key_id == null) !== (claims.clerk_user_id == null),
+    { message: "anonymous with no caller, or exactly one of key_id and clerk_user_id" }
+  );
 
 export interface GatewayIdentity {
   /** The gateway project: the customer team, one per SDP organization. */
@@ -65,6 +76,12 @@ export interface GatewayIdentity {
   /** The client address the gateway saw; replaces any forwarding header. */
   clientIp: string;
   requestId: string | null;
+  /**
+   * A caller of a gateway public route: no key, user, project or org. It
+   * authenticates nothing; the request is served as one with no credential,
+   * and SDP's anonymous limit counts it by `clientIp`.
+   */
+  anonymous: boolean;
 }
 
 export interface GatewayIdentityConfig {
@@ -196,5 +213,6 @@ export async function verifyGatewayIdentity(
     plan: claims.plan ?? null,
     clientIp: claims.client_ip,
     requestId: claims.request_id ?? null,
+    anonymous: claims.anonymous === true,
   };
 }
