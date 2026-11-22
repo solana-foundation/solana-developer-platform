@@ -9,6 +9,7 @@ import {
   PROJECT_COOKIE_OPTIONS,
   PROJECT_HEADER_NAME,
 } from "@/lib/project-cookie";
+import { SENTRY_TUNNEL_PATH } from "@/lib/sentry-tunnel";
 import { WORKSPACE_LOADING_PATH } from "@/lib/workspace-loading";
 
 export const isPublicRoute = createRouteMatcher([
@@ -26,6 +27,7 @@ export const isPublicRoute = createRouteMatcher([
   // extensionless metadata routes are not excluded by the proxy matcher.
   "/opengraph-image",
   "/twitter-image",
+  SENTRY_TUNNEL_PATH,
 ]);
 
 const isBrowserWriteGated = createRouteMatcher(["/api/dashboard(.*)", "/api/playground(.*)"]);
