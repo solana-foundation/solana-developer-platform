@@ -37,7 +37,7 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/redaction` | Central PII and credential denylist plus the scrubbers every log, Sentry, and audit boundary applies. | None |
 | `@sdp/rpc` | Solana RPC clients, errors, and transport helpers. | `@sdp/types` |
 | `@sdp/safe-proxy` | Safe Proxy service: holds provider credentials and makes provider calls for the API. | `@sdp/redaction`, `@sdp/safe-proxy-endpoints`, `@sdp/service-call` |
-| `@sdp/safe-proxy-endpoints` | The provider endpoints Safe Proxy forwards to, the matcher that admits a request, and the forward protocol. | None |
+| `@sdp/safe-proxy-endpoints` | The provider endpoints Safe Proxy forwards to, the matcher that admits a request, and the forward protocol. | `@sdp/types` |
 | `@sdp/service-call` | Identity tokens for calls between SDP's private services: fetching one, checking the destination, and verifying a caller's. | None |
 | `@sdp/solana` | Solana transaction and token-program services. | `@sdp/rpc`, `@sdp/types` |
 | `@sdp/spc-escrow` | Generated @solana/kit client for the Private Channels escrow program. | None |
@@ -75,7 +75,7 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/redaction` -> None
 - `@sdp/rpc` -> `@sdp/types`
 - `@sdp/safe-proxy` -> `@sdp/redaction`, `@sdp/safe-proxy-endpoints`, `@sdp/service-call`
-- `@sdp/safe-proxy-endpoints` -> None
+- `@sdp/safe-proxy-endpoints` -> `@sdp/types`
 - `@sdp/service-call` -> None
 - `@sdp/solana` -> `@sdp/rpc`
 - `@sdp/spc-escrow` -> None

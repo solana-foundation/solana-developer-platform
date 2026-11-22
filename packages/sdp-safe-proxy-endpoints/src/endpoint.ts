@@ -1,9 +1,14 @@
+import type { SafeProxyEndpointStatus } from "@sdp/types/safe-proxy";
+import { z } from "zod";
 import type { SafeProxyCaller } from "./callers";
 
-export type PathParameter =
-  | { format: "digits" }
-  | { format: "token" }
-  | { format: "one_of"; values: readonly [string, ...string[]] };
+const pathParameterSchema = z.discriminatedUnion("format", [
+  z.object({ format: z.literal("digits") }),
+  z.object({ format: z.literal("token") }),
+  z.object({ format: z.literal("one_of"), values: z.tuple([z.string()], z.string()).readonly() }),
+]);
+
+export type PathParameter = z.infer<typeof pathParameterSchema>;
 
 type ParameterNames<Path extends string> = Path extends `${string}{${infer Name}}${infer Rest}`
   ? Name | ParameterNames<Rest>
@@ -25,7 +30,12 @@ type IdempotencyKey<Header extends string> =
   // The path names the thing changed, so a repeat asks for the same end state.
   | { in: "path" };
 
-type ProviderDedupe = { lasts: "hours"; hours: number } | { lasts: "permanent" };
+const providerDedupeSchema = z.discriminatedUnion("lasts", [
+  z.object({ lasts: z.literal("hours"), hours: z.number() }),
+  z.object({ lasts: z.literal("permanent") }),
+]);
+
+type ProviderDedupe = z.infer<typeof providerDedupeSchema>;
 
 interface Idempotency<Header extends string> {
   key: IdempotencyKey<NoInfer<Header>>;
@@ -40,8 +50,7 @@ interface EndpointFields<Parameters, Header extends string> {
   query: readonly string[];
   callers: readonly [SafeProxyCaller, ...SafeProxyCaller[]];
   requestHeaders: readonly Header[];
-  // A retired endpoint still matches; only a retired endpoint may be removed.
-  status: "active" | "retired";
+  status: SafeProxyEndpointStatus;
   body?: BodyRule;
 }
 

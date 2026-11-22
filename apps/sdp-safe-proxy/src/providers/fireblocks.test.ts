@@ -15,7 +15,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 async function signedToken(request: InjectionRequest) {
   const headers = await fireblocksAuthHeaders(credential, request);
-  const token = headers.Authorization?.replace(/^Bearer /, "") ?? "";
+  assert.ok(headers.Authorization, "fireblocksAuthHeaders returned no Authorization header");
+  const token = headers.Authorization.replace(/^Bearer /, "");
   assert.deepEqual(headers, { Authorization: `Bearer ${token}`, "X-API-Key": "fb-api-key-1" });
   return jwtVerify(token, await importSPKI(publicKey, "RS256"));
 }

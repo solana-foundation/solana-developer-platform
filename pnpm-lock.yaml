@@ -1149,6 +1149,9 @@ importers:
 
   packages/sdp-safe-proxy-endpoints:
     dependencies:
+      '@sdp/types':
+        specifier: workspace:*
+        version: link:../sdp-types
       zod:
         specifier: 4.6.7
         version: 4.6.7

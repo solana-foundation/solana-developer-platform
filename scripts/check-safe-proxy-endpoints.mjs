@@ -12,17 +12,54 @@ const PACKAGE_PATH = "packages/sdp-safe-proxy-endpoints";
 const SNAPSHOT_PATH = `${PACKAGE_PATH}/endpoints.snapshot.json`;
 const USAGE = "Usage: check-safe-proxy-endpoints.mjs (--base <ref> | --write)";
 
+const ENDPOINT_LISTS = ["callers", "query", "requestHeaders"];
+
+// The members of a space-separated snapshot list that the newer list lacks.
+function dropped(before, after) {
+  const kept = after.split(" ");
+  return before.split(" ").filter((member) => member !== "" && !kept.includes(member));
+}
+
+function narrowings(before, after) {
+  const narrowed = [];
+  for (const list of ENDPOINT_LISTS) {
+    const lost = dropped(before[list], after[list]);
+    if (lost.length > 0) narrowed.push(`no longer allows ${list} ${lost.join(" ")}`);
+  }
+  for (const [name, parameter] of Object.entries(before.parameters)) {
+    const now = after.parameters[name];
+    if (parameter.startsWith("one_of ") && now?.startsWith("one_of ")) {
+      const lost = dropped(parameter, now);
+      if (lost.length > 0) narrowed.push(`no longer allows ${name} ${lost.join(" ")}`);
+    } else if (now !== parameter) {
+      narrowed.push(`changed parameter ${name} from "${parameter}" to "${now}"`);
+    }
+  }
+  return narrowed;
+}
+
 export function nonAdditiveChanges(base, head) {
   const errors = [];
-  for (const [provider, { endpoints }] of Object.entries(base)) {
+  for (const [provider, { hosts, endpoints }] of Object.entries(base)) {
+    const lostHosts = head[provider] === undefined ? [] : dropped(hosts, head[provider].hosts);
+    if (lostHosts.length > 0) {
+      errors.push(`${provider} no longer forwards to host ${lostHosts.join(" ")}.`);
+    }
     for (const [target, before] of Object.entries(endpoints)) {
       const after = head[provider]?.endpoints[target];
       if (after === undefined) {
         if (before.status !== "retired") {
           errors.push(`${provider} ${target} was removed without being retired first.`);
         }
-      } else if (after.kind !== before.kind) {
+        continue;
+      }
+      if (after.kind !== before.kind) {
         errors.push(`${provider} ${target} changed kind from ${before.kind} to ${after.kind}.`);
+      }
+      if (before.status !== "retired") {
+        errors.push(
+          ...narrowings(before, after).map((change) => `${provider} ${target} ${change}.`)
+        );
       }
     }
   }
