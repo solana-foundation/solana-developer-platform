@@ -19,7 +19,12 @@ import type { ApiKeyEnvironment } from "@sdp/types/api-keys";
 import type { Context, Next } from "hono";
 import { getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";
-import { extractApiKey, parsePresentedApiKey, presentsApiKey } from "@/lib/api-key-format";
+import {
+  extractApiKey,
+  gatewayEnforcedApiKey,
+  parsePresentedApiKey,
+  presentsApiKey,
+} from "@/lib/api-key-format";
 import { hashApiKey } from "@/lib/api-key-hash";
 import {
   assertNoCachedTerminalRefusal,
@@ -258,9 +263,9 @@ async function resolveApiKeyLookup(c: Context<{ Bindings: Env }>): Promise<ApiKe
 async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise<ApiKeyContext> {
   const lookup = await resolveApiKeyLookup(c);
   const refusalKey = apiKeyRefusalKey(lookup);
-  // The gateway verified this key and enforced its limits, then stripped it
-  // (gatewayEnforcedApiKey): SDP skips its own key limits and keeps the read.
-  const gatewayEnforced = lookup.kind === "gateway";
+  // The gateway verified this key and enforced its limits, then stripped it:
+  // SDP skips its own key limits and keeps the read.
+  const gatewayEnforced = lookup.kind === "gateway" && gatewayEnforcedApiKey(c);
 
   // A key this instance recently refused for good (unknown, revoked,
   // expired) is refused again from memory, with no Redis call or DB read.

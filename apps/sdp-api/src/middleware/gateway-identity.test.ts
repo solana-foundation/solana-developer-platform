@@ -251,6 +251,19 @@ describe("gateway identity (X-SF-Identity)", () => {
       expect(res.headers.get("X-RateLimit-Limit")).toBe(tierLimit);
     });
 
+    // The gateway also takes a key from x-api-key, which SDP never reads.
+    it("keeps SDP's limits when shadow mode leaves the key in x-api-key", async () => {
+      await seedSfKey();
+      await seedRateLimit(env, TEST_SEEDED_API_KEY.id, 10_000);
+
+      const res = await request({
+        "x-api-key": sfKey.key,
+        [GATEWAY_IDENTITY_HEADER]: await identityToken({ key_id: sfKey.keyId }),
+      });
+
+      expect(res.status).toBe(429);
+    });
+
     it("keeps SDP's limits for a key presented directly", async () => {
       await seedSfKey();
 
