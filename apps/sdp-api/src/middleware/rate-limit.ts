@@ -1,7 +1,7 @@
 import type { RateLimitTier } from "@sdp/types/api-keys";
 import type { Context, Next } from "hono";
 import { routePath } from "hono/route";
-import { presentsApiKey } from "@/lib/api-key-format";
+import { gatewayEnforcedApiKey, presentsApiKey } from "@/lib/api-key-format";
 import { BoundedLruMap } from "@/lib/bounded-lru";
 import { verifyClerkJwtForRequest } from "@/lib/clerk-token";
 import { getClientIp } from "@/lib/client-ip";
@@ -534,9 +534,13 @@ export function skipRateLimitPaths(...paths: string[]) {
 
     const clientIp = getClientIp(c) ?? "unknown";
     if (authenticatedPath && presentsApiKey(c)) {
-      await enforceRateLimit(c, clientIp, KEYED_IP_BACKSTOP_MAX_REQUESTS, {
-        fallback: keyedIpBackstopFallback,
-      });
+      // A key the gateway verified and limited arrives as a signed key ID, not
+      // a key: there is no key spray to bound, and its limits ran there.
+      if (!gatewayEnforcedApiKey(c)) {
+        await enforceRateLimit(c, clientIp, KEYED_IP_BACKSTOP_MAX_REQUESTS, {
+          fallback: keyedIpBackstopFallback,
+        });
+      }
     } else if (c.req.method === "GET" && matchesFreePath(c.req.path, [PAY_LINK_STATUS_PATH])) {
       await enforceRateLimit(c, payLinkStatusIdentifier(clientIp), ANONYMOUS_MAX_REQUESTS, {
         metricTier: "pay_link_status",

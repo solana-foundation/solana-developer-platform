@@ -9,6 +9,9 @@
  * 4. Read and judge the key's live rows in one Postgres statement
  * 5. Enforce the key's own tier per key id
  * 6. Set auth context for downstream handlers
+ *
+ * Steps 3 and 5 are skipped for a key the gateway already limited (it names
+ * the key and strips it); the read in step 4 always runs.
  */
 
 import type { Action } from "@sdp/types/actions";
@@ -255,28 +258,34 @@ async function resolveApiKeyLookup(c: Context<{ Bindings: Env }>): Promise<ApiKe
 async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise<ApiKeyContext> {
   const lookup = await resolveApiKeyLookup(c);
   const refusalKey = apiKeyRefusalKey(lookup);
+  // The gateway verified this key and enforced its limits, then stripped it
+  // (gatewayEnforcedApiKey): SDP skips its own key limits and keeps the read.
+  const gatewayEnforced = lookup.kind === "gateway";
 
   // A key this instance recently refused for good (unknown, revoked,
   // expired) is refused again from memory, with no Redis call or DB read.
   assertNoCachedTerminalRefusal(refusalKey);
-  // A key its own tier refused stays refused from memory until the limiter
-  // would next admit it, with no Redis call or DB read (see the cache).
-  assertNotThrottled(refusalKey, (seconds) => c.header("Retry-After", seconds.toString()));
 
-  // A flood guard per key and client IP before the row is read, at the
-  // highest tier since the key's own is not known yet: a flooding credential,
-  // valid or not, is bounded before it costs a DB read. It is keyed by the
-  // client IP too, so a leaked key used from outside its IP allowlist only
-  // ever exhausts its own bucket, never the owner's. Random-key spray (a
-  // fresh hash each time) is bounded by the per-IP backstop in front of auth.
-  // While Redis is down both count in this instance's memory instead, so the
-  // auth read below never goes unbounded.
-  await enforceRateLimit(
-    c,
-    apiKeyFloodGuardIdentifier(refusalKey, getClientIp(c)),
-    API_KEY_PRE_READ_MAX_REQUESTS,
-    { metricTier: "api_key_flood_guard", fallback: apiKeyFloodGuardFallback }
-  );
+  if (!gatewayEnforced) {
+    // A key its own tier refused stays refused from memory until the limiter
+    // would next admit it, with no Redis call or DB read (see the cache).
+    assertNotThrottled(refusalKey, (seconds) => c.header("Retry-After", seconds.toString()));
+
+    // A flood guard per key and client IP before the row is read, at the
+    // highest tier since the key's own is not known yet: a flooding credential,
+    // valid or not, is bounded before it costs a DB read. It is keyed by the
+    // client IP too, so a leaked key used from outside its IP allowlist only
+    // ever exhausts its own bucket, never the owner's. Random-key spray (a
+    // fresh hash each time) is bounded by the per-IP backstop in front of auth.
+    // While Redis is down both count in this instance's memory instead, so the
+    // auth read below never goes unbounded.
+    await enforceRateLimit(
+      c,
+      apiKeyFloodGuardIdentifier(refusalKey, getClientIp(c)),
+      API_KEY_PRE_READ_MAX_REQUESTS,
+      { metricTier: "api_key_flood_guard", fallback: apiKeyFloodGuardFallback }
+    );
+  }
 
   // The authoritative read: every authorization field from the key's live
   // rows, in one statement, so a change to any of them applies on this
@@ -285,9 +294,11 @@ async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise
 
   // The key's own tier, per key id. Only admitted requests count, so a client
   // above its tier still gets its tier's worth through.
-  await enforceRateLimit(c, key.id, RATE_LIMIT_TIERS[key.rateLimitTier], {
-    onRefused: (admitAtMs) => rememberThrottled(refusalKey, admitAtMs),
-  });
+  if (!gatewayEnforced) {
+    await enforceRateLimit(c, key.id, RATE_LIMIT_TIERS[key.rateLimitTier], {
+      onRefused: (admitAtMs) => rememberThrottled(refusalKey, admitAtMs),
+    });
+  }
 
   recordOrganizationEntitlements(c, key.settings);
 
