@@ -96,7 +96,8 @@ async function identityToken(
 /** An identity with `alg: none` and no signature, otherwise valid. */
 function unsignedIdentityToken(claims: JWTPayload): string {
   const now = Math.floor(Date.now() / 1000);
-  const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  const encode = (value: Record<string, unknown>) =>
+    Buffer.from(JSON.stringify(value)).toString("base64url");
   return `${encode({ alg: "none", kid })}.${encode({
     project_id: "prj_gateway",
     client_ip: CLIENT_IP,
