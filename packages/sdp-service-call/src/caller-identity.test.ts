@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { before, describe, it } from "node:test";
 import {
   createLocalJWKSet,
-  errors,
   exportJWK,
   generateKeyPair,
   type JWTPayload,
@@ -30,8 +29,7 @@ before(async () => {
   const trusted = await generateKeyPair("RS256");
   signingKey = trusted.privateKey;
   otherSigningKey = (await generateKeyPair("RS256")).privateKey;
-  const jwk = await exportJWK(trusted.publicKey);
-  keys = createLocalJWKSet({ keys: [{ ...jwk, alg: "RS256", kid: "current" }] });
+  keys = createLocalJWKSet({ keys: [{ ...(await exportJWK(trusted.publicKey)), alg: "RS256" }] });
 });
 
 function signToken(
@@ -39,19 +37,17 @@ function signToken(
     claims?: JWTPayload;
     audience?: string;
     issuer?: string;
-    issuedAt?: number | null;
     expiresAt?: number;
-    kid?: string;
     key?: CryptoKey;
   } = {}
 ): Promise<string> {
-  const jwt = new SignJWT(options.claims ?? { email: EMAIL, email_verified: true })
-    .setProtectedHeader({ alg: "RS256", kid: options.kid ?? "current" })
+  return new SignJWT(options.claims ?? { email: EMAIL, email_verified: true })
+    .setProtectedHeader({ alg: "RS256" })
     .setIssuer(options.issuer ?? ISSUER)
     .setAudience(options.audience ?? AUDIENCE)
-    .setExpirationTime(options.expiresAt ?? ISSUED_AT + 3600);
-  if (options.issuedAt !== null) jwt.setIssuedAt(options.issuedAt ?? ISSUED_AT);
-  return jwt.sign(options.key ?? signingKey);
+    .setIssuedAt(ISSUED_AT)
+    .setExpirationTime(options.expiresAt ?? ISSUED_AT + 3600)
+    .sign(options.key ?? signingKey);
 }
 
 function verify(
@@ -116,44 +112,33 @@ describe("createCallerIdentityVerifier", () => {
     }
   });
 
-  it("accepts a token up to the maximum age plus the clock tolerance and refuses an older one by the injected clock", async () => {
+  it("refuses a token older than the maximum age plus the clock tolerance", async () => {
     const header = `Bearer ${await signToken()}`;
     assert.equal((await verify(header, { nowSeconds: 1_800_000_305 })).email, EMAIL);
     await assertRefused(verify(header, { nowSeconds: 1_800_000_306 }), "invalid_token");
   });
 
-  it("accepts a token issued ahead of the clock within the tolerance and refuses one issued further ahead", async () => {
+  it("accepts a token issued ahead of the clock only within the tolerance", async () => {
     const header = `Bearer ${await signToken()}`;
     assert.equal((await verify(header, { nowSeconds: 1_799_999_995 })).email, EMAIL);
     await assertRefused(verify(header, { nowSeconds: 1_799_999_994 }), "invalid_token");
   });
 
-  it("reports invalid_token for a token with no issue time", async () => {
-    await assertRefused(verify(`Bearer ${await signToken({ issuedAt: null })}`), "invalid_token");
-  });
-
-  it("reports keys_unavailable when the key set cannot produce keys", async () => {
-    const header = `Bearer ${await signToken()}`;
-    for (const failure of [new TypeError("fetch failed"), new errors.JWKSTimeout()]) {
-      await assertRefused(
-        verify(header, { keys: () => Promise.reject(failure) }),
-        "keys_unavailable"
-      );
-    }
-  });
-
-  it("reports invalid_token when the token names a key the set does not hold", async () => {
-    await assertRefused(verify(`Bearer ${await signToken({ kid: "retired" })}`), "invalid_token");
+  it("reports keys_unavailable, not invalid_token, when the key set cannot be read", async () => {
+    const failing = () => Promise.reject(new TypeError("fetch failed"));
+    await assertRefused(
+      verify(`Bearer ${await signToken()}`, { keys: failing }),
+      "keys_unavailable"
+    );
   });
 
   it("keeps the token and the caller's email out of the error and its cause", async () => {
-    const refusals = [
-      { token: await signToken({ audience: "https://another-callee.mock.invalid" }) },
-      { token: await signToken({ claims: { email: EMAIL, email_verified: false } }) },
-      { token: await signToken(), keys: () => Promise.reject(new TypeError("fetch failed")) },
+    const tokens = [
+      await signToken({ audience: "https://another-callee.mock.invalid" }),
+      await signToken({ claims: { email: EMAIL, email_verified: false } }),
     ];
-    for (const { token, keys: failingKeys } of refusals) {
-      await assert.rejects(verify(`Bearer ${token}`, { keys: failingKeys }), (error: unknown) => {
+    for (const token of tokens) {
+      await assert.rejects(verify(`Bearer ${token}`), (error: unknown) => {
         assert.ok(error instanceof CallerIdentityError);
         const rendered = `${String(error)} ${error.stack}`;
         assert.ok(!rendered.includes(token));

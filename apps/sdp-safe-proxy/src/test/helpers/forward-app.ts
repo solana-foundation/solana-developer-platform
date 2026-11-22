@@ -1,7 +1,6 @@
-import { generateKeyPairSync, type KeyObject } from "node:crypto";
+import { generateKeyPairSync } from "node:crypto";
 import type { SafeProxyCaller } from "@sdp/safe-proxy-endpoints/callers";
 import { createCallerIdentityVerifier } from "@sdp/service-call/caller-identity";
-import type { SafeProxyReadiness } from "@sdp/types/safe-proxy";
 import { createLocalJWKSet, type JWTVerifyGetKey, SignJWT } from "jose";
 import { createApp } from "@/app";
 import { createTokenCallerCheck } from "@/caller";
@@ -10,42 +9,29 @@ import type { ProviderCredentials } from "@/providers/auth-services";
 import { createRequestLog } from "@/request-log";
 
 const AUDIENCE = "https://safe-proxy.mock.invalid";
-const ISSUER = "https://accounts.google.com";
-const START_MS = 1_800_000_000_000;
-
-export const CALLER_EMAILS = {
+const NOW_MS = 1_800_000_000_000;
+const CALLER_EMAILS = {
   api: "api@callers.mock.invalid",
   cron: "cron@callers.mock.invalid",
 } as const satisfies Record<SafeProxyCaller, string>;
-export const MAX_BUDGET_MS = 10_000;
-export const MAX_TOKEN_AGE_S = 300;
-export const REVISION = "sdp-safe-proxy-00042-abc";
 
 const callerKeys = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const untrustedCallerKeys = generateKeyPairSync("rsa", { modulusLength: 2048 });
-const fireblocksKeys = generateKeyPairSync("rsa", {
-  modulusLength: 2048,
-  privateKeyEncoding: { type: "pkcs8", format: "pem" },
-  publicKeyEncoding: { type: "spki", format: "pem" },
+const trustedKeys = createLocalJWKSet({
+  keys: [{ ...callerKeys.publicKey.export({ format: "jwk" }), alg: "RS256" }],
 });
 
-export const FIREBLOCKS_PUBLIC_PEM = fireblocksKeys.publicKey;
 export const PLATFORM_CREDENTIALS = {
   privy: { appId: "privy-app-a31", appSecret: "privy-secret-q8z" },
-  fireblocks: { apiKey: "fireblocks-key-k4w", apiSecretPem: fireblocksKeys.privateKey },
+  fireblocks: {
+    apiKey: "fireblocks-key-k4w",
+    apiSecretPem: generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+      privateKeyEncoding: { type: "pkcs8", format: "pem" },
+      publicKeyEncoding: { type: "spki", format: "pem" },
+    }).privateKey,
+  },
 } as const satisfies ProviderCredentials;
-
-// The request headers a well-formed forward carries; a test overrides one, or drops it with null.
-export const FORWARD_REQUEST_HEADERS = {
-  "sdp-safe-proxy-request-id": "req-7d1",
-  "sdp-safe-proxy-budget-ms": "10000",
-  "sdp-safe-proxy-credential": "platform",
-} as const;
-
-export interface Clock {
-  now: () => number;
-  advance: (ms: number) => void;
-}
 
 export interface ProviderCall {
   url: string;
@@ -56,61 +42,36 @@ export interface ProviderCall {
   signal: AbortSignal | null;
 }
 
-export interface CallerTokenOptions {
-  email?: string;
-  ageSeconds?: number;
-  untrusted?: true;
-}
-
 export interface ForwardRequest {
   method?: string;
   // The caller whose token is sent; null sends no authorization header.
   caller?: SafeProxyCaller | null;
-  token?: CallerTokenOptions;
-  authorization?: string;
-  headers?: Record<string, string | null>;
+  untrustedToken?: true;
+  headers?: Record<string, string>;
   body?: RequestInit["body"];
 }
 
 export interface ForwardAppOptions {
-  answer?: (call: ProviderCall, clock: Clock) => Response | Promise<Response>;
-  keys?: (trusted: JWTVerifyGetKey, clock: Clock) => JWTVerifyGetKey;
+  answer?: (call: ProviderCall) => Response | Promise<Response>;
+  keys?: (trusted: JWTVerifyGetKey) => JWTVerifyGetKey;
   credentials?: ProviderCredentials;
 }
 
 export function createForwardApp(options: ForwardAppOptions = {}) {
-  let nowMs = START_MS;
-  const clock: Clock = {
-    now: () => nowMs,
-    advance: (ms) => {
-      nowMs += ms;
-    },
-  };
-  let readiness: SafeProxyReadiness = "starting";
   const calls: ProviderCall[] = [];
   const logged: string[] = [];
-
-  const trustedKeys = createLocalJWKSet({
-    keys: [{ ...callerKeys.publicKey.export({ format: "jwk" }), alg: "RS256" }],
-  });
-  const answer =
-    options.answer ??
-    (() =>
-      new Response('{"id":"wallet-1"}', {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }));
+  const tokens: string[] = [];
 
   const app = createApp({
     identifyCaller: createTokenCallerCheck({
       verify: createCallerIdentityVerifier({
         audience: AUDIENCE,
-        keys: options.keys?.(trustedKeys, clock) ?? trustedKeys,
-        maxTokenAgeSeconds: MAX_TOKEN_AGE_S,
-        now: clock.now,
+        keys: options.keys?.(trustedKeys) ?? trustedKeys,
+        maxTokenAgeSeconds: 300,
+        now: () => NOW_MS,
       }),
       callerEmails: CALLER_EMAILS,
-      now: clock.now,
+      now: () => NOW_MS,
     }),
     loadCredential: createPlatformCredentialLoader(options.credentials ?? PLATFORM_CREDENTIALS),
     fetch: async (input, init) => {
@@ -123,41 +84,34 @@ export function createForwardApp(options: ForwardAppOptions = {}) {
         signal: init?.signal ?? null,
       };
       calls.push(call);
-      return answer(call, clock);
+      return (options.answer ?? (() => new Response('{"id":"wallet-1"}')))(call);
     },
-    now: clock.now,
-    maxBudgetMs: MAX_BUDGET_MS,
+    now: () => NOW_MS,
+    maxBudgetMs: 10_000,
     writeRequestLog: createRequestLog({ write: (line: string) => logged.push(line) }),
-    readiness: () => readiness,
-    revision: REVISION,
+    readiness: () => "ready",
+    revision: "sdp-safe-proxy-00042-abc",
   });
 
-  function callerToken(token: CallerTokenOptions = {}): Promise<string> {
-    const issuedAt = Math.floor(nowMs / 1000) - (token.ageSeconds ?? 42);
-    const key: KeyObject = token.untrusted ? untrustedCallerKeys.privateKey : callerKeys.privateKey;
-    return new SignJWT({ email: token.email ?? CALLER_EMAILS.api, email_verified: true })
-      .setProtectedHeader({ alg: "RS256" })
-      .setIssuer(ISSUER)
-      .setAudience(AUDIENCE)
-      .setIssuedAt(issuedAt)
-      .setExpirationTime(issuedAt + 3600)
-      .sign(key);
-  }
-
   async function send(path: string, request: ForwardRequest = {}): Promise<Response> {
-    const headers = new Headers();
-    const caller = request.caller === undefined ? "api" : request.caller;
-    if (request.authorization !== undefined) {
-      headers.set("authorization", request.authorization);
-    } else if (caller !== null) {
-      const token = await callerToken({ email: CALLER_EMAILS[caller], ...request.token });
-      headers.set("authorization", `Bearer ${token}`);
-    }
-    for (const [name, value] of Object.entries({
-      ...FORWARD_REQUEST_HEADERS,
+    const headers = new Headers({
+      "sdp-safe-proxy-request-id": "req-7d1",
+      "sdp-safe-proxy-budget-ms": "10000",
+      "sdp-safe-proxy-credential": "platform",
       ...request.headers,
-    })) {
-      if (value !== null) headers.set(name, value);
+    });
+    const caller = request.caller === undefined ? "api" : request.caller;
+    if (caller !== null) {
+      const issuedAt = NOW_MS / 1000 - 42;
+      const token = await new SignJWT({ email: CALLER_EMAILS[caller], email_verified: true })
+        .setProtectedHeader({ alg: "RS256" })
+        .setIssuer("https://accounts.google.com")
+        .setAudience(AUDIENCE)
+        .setIssuedAt(issuedAt)
+        .setExpirationTime(issuedAt + 3600)
+        .sign(request.untrustedToken ? untrustedCallerKeys.privateKey : callerKeys.privateKey);
+      tokens.push(token);
+      headers.set("authorization", `Bearer ${token}`);
     }
     return app.request(path, {
       method: request.method ?? "GET",
@@ -167,23 +121,6 @@ export function createForwardApp(options: ForwardAppOptions = {}) {
     });
   }
 
-  return {
-    app,
-    calls,
-    clock,
-    send,
-    callerToken,
-    setReadiness: (next: SafeProxyReadiness) => {
-      readiness = next;
-    },
-    rawLogLines: (): readonly string[] => logged,
-    // Each line as written, without pino's wall-clock `time`.
-    logLines: (): Record<string, unknown>[] =>
-      logged.map((line) => {
-        const { time: _time, ...fields } = JSON.parse(line);
-        return fields;
-      }),
-  };
+  // `tokens` holds every caller token sent, `logged` every request log line as written.
+  return { calls, send, tokens, logged };
 }
-
-export type ForwardApp = ReturnType<typeof createForwardApp>;
