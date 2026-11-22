@@ -116,10 +116,16 @@ describe("createCallerIdentityVerifier", () => {
     }
   });
 
-  it("accepts a token up to the maximum age and refuses an older one by the injected clock", async () => {
+  it("accepts a token up to the maximum age plus the clock tolerance and refuses an older one by the injected clock", async () => {
     const header = `Bearer ${await signToken()}`;
-    assert.equal((await verify(header, { nowSeconds: 1_800_000_300 })).email, EMAIL);
-    await assertRefused(verify(header, { nowSeconds: 1_800_000_301 }), "invalid_token");
+    assert.equal((await verify(header, { nowSeconds: 1_800_000_305 })).email, EMAIL);
+    await assertRefused(verify(header, { nowSeconds: 1_800_000_306 }), "invalid_token");
+  });
+
+  it("accepts a token issued ahead of the clock within the tolerance and refuses one issued further ahead", async () => {
+    const header = `Bearer ${await signToken()}`;
+    assert.equal((await verify(header, { nowSeconds: 1_799_999_995 })).email, EMAIL);
+    await assertRefused(verify(header, { nowSeconds: 1_799_999_994 }), "invalid_token");
   });
 
   it("reports invalid_token for a token with no issue time", async () => {

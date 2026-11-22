@@ -5,11 +5,12 @@ import { FORWARD_HEADERS } from "@sdp/safe-proxy-endpoints/protocol";
 import { SAFE_PROXY_PROVIDERS, type SafeProxyProvider } from "@sdp/safe-proxy-endpoints/providers";
 import type { Context } from "hono";
 import { z } from "zod";
+import { type DeadlinePassed, deadlinePassed, isDeadlinePassed, readBounded } from "./bounded-read";
 import type { IdentifyCaller } from "./caller";
-import type { CredentialLoader, ProviderCredentials } from "./credentials";
-import type { AuthHeaders, AuthInjection, InjectionRequest } from "./providers/injection";
-import { AUTH_INJECTIONS } from "./providers/registry";
-import { Refusal } from "./refusal";
+import type { CredentialLoader } from "./credentials";
+import type { AuthHeaders, AuthRequest } from "./providers/auth-service";
+import { AUTH_SERVICES } from "./providers/auth-services";
+import { ProviderAnswerTooLarge, Refusal } from "./refusal";
 import type { Progress } from "./request-result";
 
 export type AppEnv = {
@@ -28,6 +29,7 @@ const ROUTE_PREFIX = "/v1/forward/";
 export const FORWARD_ROUTE = `${ROUTE_PREFIX}*`;
 
 const MAX_BODY_BYTES = 1024 * 1024;
+const MAX_ANSWER_BYTES = 8 * 1024 * 1024;
 
 const CARRIES_BODY = { GET: false, POST: true } as const satisfies Record<
   AllowedEndpoint["method"],
@@ -38,13 +40,6 @@ const CARRIES_BODY = { GET: false, POST: true } as const satisfies Record<
 const PROVIDER_HOSTS: Record<SafeProxyProvider, readonly [string]> = {
   fireblocks: SAFE_PROXY_PROVIDERS.fireblocks.hosts,
   privy: SAFE_PROXY_PROVIDERS.privy.hosts,
-};
-
-const AUTH_BY_PROVIDER: {
-  [Provider in SafeProxyProvider]: AuthInjection<ProviderCredentials[Provider]>;
-} = {
-  fireblocks: AUTH_INJECTIONS[SAFE_PROXY_PROVIDERS.fireblocks.authScheme],
-  privy: AUTH_INJECTIONS[SAFE_PROXY_PROVIDERS.privy.authScheme],
 };
 
 const requestIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
@@ -78,27 +73,42 @@ function declaresBody(headers: Headers): boolean {
   return headers.has("transfer-encoding") || (length !== null && length !== "0");
 }
 
-async function readBody(request: Request): Promise<string> {
-  if (request.body === null) return "";
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > MAX_BODY_BYTES) {
-      await reader.cancel();
+async function readBody(request: Request, passed: Promise<DeadlinePassed>): Promise<string> {
+  const body = await readBounded(request.body, MAX_BODY_BYTES, passed);
+  switch (body.read) {
+    case "too_large":
       throw new Refusal("invalid_request");
+    case "deadline_passed":
+      throw new Refusal("deadline_exceeded");
+    case "complete": {
+      // The string is what gets matched, signed and sent, so the bytes must decode without loss.
+      const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+      try {
+        return decoder.decode(body.bytes);
+      } catch {
+        throw new Refusal("invalid_request");
+      }
     }
-    chunks.push(value);
+    default: {
+      const unreachable: never = body;
+      return unreachable;
+    }
   }
-  // The string is what gets matched, signed and sent, so the bytes must decode without loss.
-  const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
-  try {
-    return decoder.decode(Buffer.concat(chunks));
-  } catch {
-    throw new Refusal("invalid_request");
+}
+
+async function readAnswer(answer: Response, passed: Promise<DeadlinePassed>): Promise<Uint8Array> {
+  const body = await readBounded(answer.body, MAX_ANSWER_BYTES, passed);
+  switch (body.read) {
+    case "too_large":
+      throw new ProviderAnswerTooLarge();
+    case "deadline_passed":
+      throw new Error("the deadline passed before the provider's answer ended");
+    case "complete":
+      return body.bytes;
+    default: {
+      const unreachable: never = body;
+      return unreachable;
+    }
   }
 }
 
@@ -106,27 +116,32 @@ async function authHeaders<Provider extends SafeProxyProvider>(
   loadCredential: CredentialLoader,
   provider: Provider,
   credentialHeader: string | undefined,
-  request: InjectionRequest
+  request: AuthRequest
 ): Promise<AuthHeaders> {
   const reference = credentialReferenceSchema.safeParse(credentialHeader);
   if (!reference.success) throw new Refusal("invalid_request");
   const credential = await loadCredential(provider, reference.data);
-  return AUTH_BY_PROVIDER[provider](credential, request);
+  return AUTH_SERVICES[provider].injectCredentials(credential, request);
 }
 
 export function createForwardHandler(
   dependencies: ForwardDependencies
 ): (c: Context<AppEnv>) => Promise<Response> {
-  return async (c) => {
-    const caller = await dependencies.identifyCaller(c.req.raw.headers);
+  async function forward(
+    c: Context<AppEnv>,
+    deadline: number,
+    budget: AbortSignal
+  ): Promise<Response> {
+    const passed = deadlinePassed(budget);
+
+    const caller = await Promise.race([dependencies.identifyCaller(c.req.raw.headers), passed]);
+    if (isDeadlinePassed(caller)) throw new Refusal("deadline_exceeded");
     c.set("progress", { stage: "identified", caller });
 
     if (c.get("requestId") === null) throw new Refusal("invalid_request");
-    const budgetMs = readBudgetMs(c.req.header(FORWARD_HEADERS.budgetMs), dependencies.maxBudgetMs);
-    const deadline = c.get("receivedAt") + budgetMs;
 
     const { provider: requestedProvider, target } = providerRequest(c.req.url);
-    const body = await readBody(c.req.raw);
+    const body = await readBody(c.req.raw, passed);
     const match = matchEndpoint({
       provider: requestedProvider,
       method: c.req.method,
@@ -139,7 +154,7 @@ export function createForwardHandler(
     c.set("progress", { ...matched, providerCall: "not_sent" });
 
     if (!endpoint.callers.includes(caller.caller)) throw new Refusal("caller_not_allowed");
-    // A request object may not expose the body of a GET, so its headers are checked too.
+    // A request for a body-less method carries no body.
     if (!CARRIES_BODY[endpoint.method] && (body !== "" || declaresBody(c.req.raw.headers))) {
       throw new Refusal("body_not_allowed");
     }
@@ -160,27 +175,18 @@ export function createForwardHandler(
     if (body !== "") headers.set("content-type", "application/json");
     for (const [name, value] of Object.entries(auth)) headers.set(name, value);
 
-    const remainingMs = deadline - dependencies.now();
-    if (remainingMs <= 0) throw new Refusal("deadline_exceeded");
-    const budget = new AbortController();
-    const budgetTimer = setTimeout(() => budget.abort(), remainingMs);
+    if (dependencies.now() >= deadline) throw new Refusal("deadline_exceeded");
 
     const [host] = PROVIDER_HOSTS[provider];
     c.set("progress", { ...matched, providerCall: "in_flight" });
-    let answer: Response;
-    let answerBody: ArrayBuffer;
-    try {
-      answer = await dependencies.fetch(`https://${host}${target}`, {
-        method: endpoint.method,
-        headers,
-        body: body === "" ? null : body,
-        redirect: "manual",
-        signal: budget.signal,
-      });
-      answerBody = await answer.arrayBuffer();
-    } finally {
-      clearTimeout(budgetTimer);
-    }
+    const answer = await dependencies.fetch(`https://${host}${target}`, {
+      method: endpoint.method,
+      headers,
+      body: body === "" ? null : body,
+      redirect: "manual",
+      signal: budget,
+    });
+    const answerBody = await readAnswer(answer, passed);
     c.set("progress", { ...matched, providerCall: "answered" });
 
     const answerHeaders = new Headers({ [FORWARD_HEADERS.result]: "forwarded" });
@@ -190,5 +196,19 @@ export function createForwardHandler(
       status: answer.status,
       headers: answerHeaders,
     });
+  }
+
+  // One timer bounds the whole request: the caller check, the body read, the provider call and
+  // the read of its answer.
+  return async (c) => {
+    const budgetMs = readBudgetMs(c.req.header(FORWARD_HEADERS.budgetMs), dependencies.maxBudgetMs);
+    const deadline = c.get("receivedAt") + budgetMs;
+    const budget = new AbortController();
+    const budgetTimer = setTimeout(() => budget.abort(), deadline - dependencies.now());
+    try {
+      return await forward(c, deadline, budget.signal);
+    } finally {
+      clearTimeout(budgetTimer);
+    }
   };
 }

@@ -4,6 +4,7 @@ import { z } from "zod";
 const GOOGLE_ISSUER = "https://accounts.google.com";
 const GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs";
 const BEARER_TOKEN = /^Bearer (\S+)$/i;
+const CLOCK_TOLERANCE_SECONDS = 5;
 
 export const CALLER_IDENTITY_ERROR_CODES = [
   "missing_token",
@@ -76,6 +77,7 @@ export function createCallerIdentityVerifier(options: {
         audience: options.audience,
         algorithms: ["RS256"],
         maxTokenAge: options.maxTokenAgeSeconds,
+        clockTolerance: CLOCK_TOLERANCE_SECONDS,
         currentDate: new Date(options.now()),
       }));
     } catch (error) {

@@ -48,6 +48,7 @@ export function requestLogLine(request: {
     ...progressFields(request.progress),
     result: request.outcome.result,
     code: request.outcome.result === "forwarded" ? null : request.outcome.code,
+    error_name: request.outcome.result === "forwarded" ? null : request.outcome.errorName,
     provider_call: providerCallOf(request.progress),
     duration_ms: request.durationMs,
     revision: request.revision,
@@ -64,7 +65,7 @@ export function createRequestLog(destination: DestinationStream): WriteRequestLo
       base: undefined,
       messageKey: "message",
       formatters: {
-        level: (_label, number) => ({ level: number, severity: "INFO" }),
+        level: (label, number) => ({ level: number, severity: label.toUpperCase() }),
       },
       hooks: {
         logMethod(args, method) {
@@ -75,5 +76,5 @@ export function createRequestLog(destination: DestinationStream): WriteRequestLo
     },
     destination
   );
-  return (line) => logger.info(line);
+  return (line) => (line.code === "internal" ? logger.error(line) : logger.info(line));
 }

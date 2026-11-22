@@ -7,3 +7,11 @@ export class Refusal extends Error {
     this.name = "Refusal";
   }
 }
+
+// Thrown only once the request has been sent to the provider.
+export class ProviderAnswerTooLarge extends Error {
+  constructor() {
+    super("provider_answer_too_large");
+    this.name = "ProviderAnswerTooLarge";
+  }
+}

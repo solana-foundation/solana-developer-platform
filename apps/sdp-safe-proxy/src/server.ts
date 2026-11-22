@@ -4,7 +4,8 @@ import {
   createGoogleIdentityKeys,
 } from "@sdp/service-call/caller-identity";
 
-import { createApp, type Readiness } from "./app";
+import type { SafeProxyReadiness } from "@sdp/types/safe-proxy";
+import { createApp } from "./app";
 import { createTokenCallerCheck } from "./caller";
 import { createPlatformCredentialLoader } from "./credentials";
 import { createRequestLog } from "./request-log";
@@ -13,7 +14,7 @@ import { exitWithMessage, settingsOrExit } from "./start-up";
 
 const settings = settingsOrExit(parseServerSettings);
 const identityKeys = createGoogleIdentityKeys();
-let readiness: Readiness = "starting";
+let readiness: SafeProxyReadiness = "starting";
 
 const app = createApp({
   identifyCaller: createTokenCallerCheck({

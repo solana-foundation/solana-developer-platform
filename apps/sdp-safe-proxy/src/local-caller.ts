@@ -12,8 +12,16 @@ export function assertNotOnCloudRun(env: Record<string, string | undefined>): vo
   }
 }
 
-export const identifyLocalCaller: IdentifyCaller = async (headers) => {
-  const caller = localCaller.safeParse(headers.get(LOCAL_CALLER_HEADER));
-  if (!caller.success) throw new Refusal("unauthenticated");
-  return { caller: caller.data, tokenAgeSeconds: null };
-};
+// A local caller addresses the loopback address and port the entry listens on, and names itself.
+export function createLocalCallerCheck(listensOn: {
+  hostname: string;
+  port: number;
+}): IdentifyCaller {
+  const host = `${listensOn.hostname}:${listensOn.port}`;
+  return async (headers) => {
+    if (headers.get("host") !== host) throw new Refusal("unauthenticated");
+    const caller = localCaller.safeParse(headers.get(LOCAL_CALLER_HEADER));
+    if (!caller.success) throw new Refusal("unauthenticated");
+    return { caller: caller.data, tokenAgeSeconds: null };
+  };
+}

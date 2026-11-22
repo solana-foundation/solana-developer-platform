@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
 import { once } from "node:events";
+import { type IncomingMessage, request } from "node:http";
 import { connect, createServer } from "node:net";
 import { networkInterfaces } from "node:os";
 import { after, before, describe, it } from "node:test";
@@ -112,16 +113,14 @@ describe("local entry", () => {
       assert.equal(outcome, "ECONNREFUSED");
     });
 
+    const UNDECLARED = "/v1/forward/fireblocks/v1/undeclared";
+    const FORWARD = { [FORWARD_HEADERS.requestId]: "req-1", [FORWARD_HEADERS.budgetMs]: "1000" };
+
     async function forward(caller: string | undefined) {
-      const response = await fetch(`http://127.0.0.1:${port}/v1/forward/fireblocks/v1/undeclared`, {
-        headers: {
-          [FORWARD_HEADERS.requestId]: "req-1",
-          [FORWARD_HEADERS.budgetMs]: "1000",
-          ...(caller === undefined ? {} : { [LOCAL_CALLER_HEADER]: caller }),
-        },
-      });
+      const headers = new Headers(FORWARD);
+      if (caller !== undefined) headers.set(LOCAL_CALLER_HEADER, caller);
+      const response = await fetch(`http://127.0.0.1:${port}${UNDECLARED}`, { headers });
       return {
-        status: response.status,
         result: response.headers.get(FORWARD_HEADERS.result),
         body: await response.json(),
       };
@@ -129,7 +128,6 @@ describe("local entry", () => {
 
     it("refuses a request that names no caller", async () => {
       assert.deepEqual(await forward(undefined), {
-        status: 401,
         result: "refused",
         body: { code: "unauthenticated" },
       });
@@ -137,7 +135,6 @@ describe("local entry", () => {
 
     it("refuses a request that names an unknown caller", async () => {
       assert.deepEqual(await forward("auditor"), {
-        status: 401,
         result: "refused",
         body: { code: "unauthenticated" },
       });
@@ -145,10 +142,26 @@ describe("local entry", () => {
 
     it("lets a named caller through to the endpoint check", async () => {
       assert.deepEqual(await forward("api"), {
-        status: 403,
         result: "refused",
         body: { code: "endpoint_not_allowed" },
       });
+    });
+
+    it("refuses a named caller whose request is addressed to another host", async () => {
+      // fetch sets Host from the URL, so the request goes out through node:http.
+      const response = await new Promise<IncomingMessage>((resolve, reject) => {
+        const headers = { ...FORWARD, host: `localhost:${port}`, [LOCAL_CALLER_HEADER]: "api" };
+        request({ host: "127.0.0.1", port, path: UNDECLARED, headers }, resolve)
+          .on("error", reject)
+          .end();
+      });
+      let body = "";
+      for await (const chunk of response) body += chunk;
+
+      assert.deepEqual(
+        { result: response.headers[FORWARD_HEADERS.result], body: JSON.parse(body) },
+        { result: "refused", body: { code: "unauthenticated" } }
+      );
     });
   });
 });

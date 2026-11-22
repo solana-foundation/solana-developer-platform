@@ -51,7 +51,19 @@ describe("parseServerSettings", () => {
     });
   }
 
+  it("reads the largest budget and token age it allows", () => {
+    const settings = parseServerSettings({
+      ...serverEnv,
+      SAFE_PROXY_MAX_BUDGET_MS: "299999",
+      SAFE_PROXY_MAX_TOKEN_AGE_SECONDS: "3600",
+    });
+    assert.equal(settings.SAFE_PROXY_MAX_BUDGET_MS, 299_999);
+    assert.equal(settings.SAFE_PROXY_MAX_TOKEN_AGE_SECONDS, 3600);
+  });
+
   const invalid = [
+    ["a budget not below the platform's request timeout", "SAFE_PROXY_MAX_BUDGET_MS", "300000"],
+    ["a token age past an identity token's lifetime", "SAFE_PROXY_MAX_TOKEN_AGE_SECONDS", "3601"],
     ["an http audience", "SAFE_PROXY_AUDIENCE", "http://safe-proxy-7c1e.example.com"],
     ["a caller that is not an email", "SAFE_PROXY_API_CALLER", "caller-value-4b1d"],
     ["a credential that is not a key", "FIREBLOCKS_API_SECRET", "fireblocks-secret-9e2a"],

@@ -414,6 +414,9 @@ importers:
       '@sdp/service-call':
         specifier: workspace:*
         version: link:../../packages/sdp-service-call
+      '@sdp/types':
+        specifier: workspace:*
+        version: link:../../packages/sdp-types
       hono:
         specifier: 4.13.14
         version: 4.13.14

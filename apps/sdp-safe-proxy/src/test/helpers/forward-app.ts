@@ -1,10 +1,12 @@
 import { generateKeyPairSync, type KeyObject } from "node:crypto";
 import type { SafeProxyCaller } from "@sdp/safe-proxy-endpoints/callers";
 import { createCallerIdentityVerifier } from "@sdp/service-call/caller-identity";
+import type { SafeProxyReadiness } from "@sdp/types/safe-proxy";
 import { createLocalJWKSet, type JWTVerifyGetKey, SignJWT } from "jose";
-import { createApp, type Readiness } from "@/app";
+import { createApp } from "@/app";
 import { createTokenCallerCheck } from "@/caller";
-import { createPlatformCredentialLoader, type ProviderCredentials } from "@/credentials";
+import { createPlatformCredentialLoader } from "@/credentials";
+import type { ProviderCredentials } from "@/providers/auth-services";
 import { createRequestLog } from "@/request-log";
 
 const AUDIENCE = "https://safe-proxy.mock.invalid";
@@ -50,6 +52,7 @@ export interface ProviderCall {
   method: string;
   headers: Record<string, string>;
   body: string | null;
+  redirect: RequestInit["redirect"];
   signal: AbortSignal | null;
 }
 
@@ -66,7 +69,7 @@ export interface ForwardRequest {
   token?: CallerTokenOptions;
   authorization?: string;
   headers?: Record<string, string | null>;
-  body?: string;
+  body?: RequestInit["body"];
 }
 
 export interface ForwardAppOptions {
@@ -83,7 +86,7 @@ export function createForwardApp(options: ForwardAppOptions = {}) {
       nowMs += ms;
     },
   };
-  let readiness: Readiness = "starting";
+  let readiness: SafeProxyReadiness = "starting";
   const calls: ProviderCall[] = [];
   const logged: string[] = [];
 
@@ -116,6 +119,7 @@ export function createForwardApp(options: ForwardAppOptions = {}) {
         method: init?.method ?? "GET",
         headers: Object.fromEntries(new Headers(init?.headers)),
         body: init?.body == null ? null : String(init.body),
+        redirect: init?.redirect,
         signal: init?.signal ?? null,
       };
       calls.push(call);
@@ -155,7 +159,12 @@ export function createForwardApp(options: ForwardAppOptions = {}) {
     })) {
       if (value !== null) headers.set(name, value);
     }
-    return app.request(path, { method: request.method ?? "GET", headers, body: request.body });
+    return app.request(path, {
+      method: request.method ?? "GET",
+      headers,
+      body: request.body,
+      duplex: "half",
+    });
   }
 
   return {
@@ -164,7 +173,7 @@ export function createForwardApp(options: ForwardAppOptions = {}) {
     clock,
     send,
     callerToken,
-    setReadiness: (next: Readiness) => {
+    setReadiness: (next: SafeProxyReadiness) => {
       readiness = next;
     },
     rawLogLines: (): readonly string[] => logged,

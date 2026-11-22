@@ -1,5 +1,6 @@
 import { FORWARD_HEADERS, type SafeProxyCode } from "@sdp/safe-proxy-endpoints/protocol";
-import { Hono } from "hono";
+import type { SafeProxyReadiness } from "@sdp/types/safe-proxy";
+import { type Context, Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import {
   type AppEnv,
@@ -12,12 +13,9 @@ import { Refusal } from "./refusal";
 import { requestLogLine, type WriteRequestLog } from "./request-log";
 import { failureOutcome, type RequestOutcome } from "./request-result";
 
-export const READINESS_STATES = ["starting", "ready"] as const;
-export type Readiness = (typeof READINESS_STATES)[number];
-
 export interface AppDependencies extends ForwardDependencies {
   writeRequestLog: WriteRequestLog;
-  readiness: () => Readiness;
+  readiness: () => SafeProxyReadiness;
   revision: string;
 }
 
@@ -34,6 +32,7 @@ const OWN_ANSWER_STATUS = {
   deadline_exceeded: 504,
   internal: 500,
   provider_no_answer: 502,
+  provider_answer_too_large: 502,
 } as const satisfies Record<SafeProxyCode, ContentfulStatusCode>;
 
 export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
@@ -48,7 +47,7 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
     await next();
   });
 
-  function logRequest(c: Parameters<typeof forward>[0], outcome: RequestOutcome): void {
+  function logRequest(c: Context<AppEnv>, outcome: RequestOutcome): void {
     dependencies.writeRequestLog(
       requestLogLine({
         requestId: c.get("requestId"),

@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 
 import { createApp } from "./app";
 import { createPlatformCredentialLoader } from "./credentials";
-import { assertNotOnCloudRun, identifyLocalCaller } from "./local-caller";
+import { assertNotOnCloudRun, createLocalCallerCheck } from "./local-caller";
 import { createRequestLog } from "./request-log";
 import { parseLocalSettings } from "./settings";
 import { exitWithMessage, settingsOrExit } from "./start-up";
@@ -13,9 +13,10 @@ try {
   exitWithMessage(error instanceof Error ? error.message : "the local entry cannot start");
 }
 const settings = settingsOrExit(parseLocalSettings);
+const listensOn = { hostname: "127.0.0.1", port: settings.SDP_SAFE_PROXY_PORT };
 
 const app = createApp({
-  identifyCaller: identifyLocalCaller,
+  identifyCaller: createLocalCallerCheck(listensOn),
   loadCredential: createPlatformCredentialLoader({
     fireblocks: {
       apiKey: settings.FIREBLOCKS_API_KEY,
@@ -31,9 +32,5 @@ const app = createApp({
   revision: "local",
 });
 
-const server = serve({
-  fetch: app.fetch,
-  port: settings.SDP_SAFE_PROXY_PORT,
-  hostname: "127.0.0.1",
-});
+const server = serve({ fetch: app.fetch, ...listensOn });
 process.on("SIGTERM", () => server.close());

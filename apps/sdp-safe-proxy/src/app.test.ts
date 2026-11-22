@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { SafeProxyCode } from "@sdp/safe-proxy-endpoints/protocol";
+import { LOCAL_CALLER_HEADER, type SafeProxyCode } from "@sdp/safe-proxy-endpoints/protocol";
 import { importSPKI, jwtVerify } from "jose";
 import {
   createForwardApp,
@@ -14,6 +14,33 @@ import {
 
 const LIST_WALLETS = "/v1/forward/privy/v1/wallets";
 const UNKNOWN_PROVIDER = "/v1/forward/nope/v1/wallets";
+
+function waitPoint(): { reached: Promise<void>; reach: () => void } {
+  let reach!: () => void;
+  const reached = new Promise<void>((resolve) => {
+    reach = resolve;
+  });
+  return { reached, reach };
+}
+
+// A body that never ends; `reading` settles once something waits on it.
+function stalledBody() {
+  const { reached: reading, reach } = waitPoint();
+  let cancelled = false;
+  const stream = new ReadableStream<Uint8Array>(
+    {
+      pull: () => {
+        reach();
+        return new Promise<void>(() => {});
+      },
+      cancel: () => {
+        cancelled = true;
+      },
+    },
+    { highWaterMark: 0 }
+  );
+  return { stream, reading, wasCancelled: () => cancelled };
+}
 
 async function assertOwnAnswer(
   forwardApp: ForwardApp,
@@ -38,33 +65,39 @@ describe("forward route: provider answers", () => {
     {
       name: "a JSON 200",
       status: 200,
-      contentType: "application/json; charset=utf-8",
+      headers: { "content-type": "application/json; charset=utf-8" },
       body: '{"id":"w1"}',
     },
     // Same status and body as a Safe Proxy refusal: only the result header tells them apart.
     {
       name: "a 403",
       status: 403,
-      contentType: "application/json",
+      headers: { "content-type": "application/json" },
       body: '{"code":"caller_not_allowed"}',
     },
-    { name: "a 204 with no body", status: 204, contentType: null, body: null },
+    { name: "a 204 with no body", status: 204, headers: {}, body: null },
   ];
   for (const answer of answers) {
-    it(`returns ${answer.name} from the provider unchanged, marked forwarded`, async () => {
+    it(`returns ${answer.name} from the provider with only its content type, marked forwarded`, async () => {
       const forwardApp = createForwardApp({
         answer: () =>
           new Response(answer.body, {
             status: answer.status,
-            headers: answer.contentType === null ? {} : { "content-type": answer.contentType },
+            headers: {
+              "set-cookie": "session=provider-7a2",
+              "sdp-safe-proxy-result": "refused",
+              ...answer.headers,
+            },
           }),
       });
 
       const response = await forwardApp.send(LIST_WALLETS);
 
       assert.equal(response.status, answer.status);
-      assert.equal(response.headers.get("sdp-safe-proxy-result"), "forwarded");
-      assert.equal(response.headers.get("content-type"), answer.contentType);
+      assert.deepEqual(Object.fromEntries(response.headers), {
+        ...answer.headers,
+        "sdp-safe-proxy-result": "forwarded",
+      });
       assert.equal(await response.text(), answer.body ?? "");
       assert.equal(forwardApp.calls.length, 1);
     });
@@ -94,6 +127,7 @@ describe("forward route: provider answers", () => {
           url: "https://api.privy.io/v1/wallets",
           method: "POST",
           body,
+          redirect: "manual",
           headers: {
             authorization: "Basic cHJpdnktYXBwLWEzMTpwcml2eS1zZWNyZXQtcTh6",
             "privy-app-id": "privy-app-a31",
@@ -143,19 +177,20 @@ describe("forward route: refusals, each at the first step the request fails", ()
     keys?: ForwardAppOptions["keys"];
   })[] = [
     {
-      name: "checks the caller before the request's headers",
+      name: "checks the budget before the caller",
       caller: null,
       headers: { "sdp-safe-proxy-budget-ms": "abc" },
+      code: "invalid_request",
+    },
+    {
+      name: "refuses a request with no token even when it names a local caller",
+      caller: null,
+      headers: { [LOCAL_CALLER_HEADER]: "api" },
       code: "unauthenticated",
     },
     {
       name: "refuses a token from another signer",
       token: { untrusted: true },
-      code: "unauthenticated",
-    },
-    {
-      name: "refuses a token past the maximum age",
-      token: { ageSeconds: 301 },
       code: "unauthenticated",
     },
     {
@@ -176,6 +211,18 @@ describe("forward route: refusals, each at the first step the request fails", ()
       path: UNKNOWN_PROVIDER,
       code: "invalid_request" as const,
     })),
+    {
+      name: "refuses a body over the size limit",
+      method: "POST",
+      body: "a".repeat(1024 * 1024 + 1),
+      code: "invalid_request",
+    },
+    {
+      name: "refuses a body that is not valid UTF-8",
+      method: "POST",
+      body: new Uint8Array([0x7b, 0xff, 0x7d]),
+      code: "invalid_request",
+    },
     {
       name: "refuses an unknown provider",
       caller: "cron",
@@ -238,8 +285,10 @@ describe("forward route: refusals, each at the first step the request fails", ()
       await assertRefused(forwardApp, await forwardApp.send(path ?? LIST_WALLETS, request), code);
     });
   }
+});
 
-  it("counts time spent identifying the caller against the budget", async () => {
+describe("forward route: the budget", { timeout: 5_000 }, () => {
+  it("refuses without a provider call when the budget has passed before sending", async () => {
     const forwardApp = createForwardApp({
       keys: (trusted, clock) => (header, token) => {
         clock.advance(10_001);
@@ -250,18 +299,48 @@ describe("forward route: refusals, each at the first step the request fails", ()
     await assertRefused(forwardApp, await forwardApp.send(LIST_WALLETS), "deadline_exceeded");
     assert.equal(forwardApp.logLines()[0]?.duration_ms, 10_001);
   });
-});
 
-describe("forward route: the provider call", () => {
-  it("aborts the provider call when the budget runs out and answers no_answer", async (t) => {
+  it("refuses a caller check still pending when the budget passes", async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
-    let reachedProvider!: () => void;
-    const reached = new Promise<void>((resolve) => {
-      reachedProvider = resolve;
-    });
+    const keys = waitPoint();
     const forwardApp = createForwardApp({
+      keys: () => () => {
+        keys.reach();
+        return new Promise<never>(() => {});
+      },
+    });
+
+    const pending = forwardApp.send(LIST_WALLETS);
+    await keys.reached;
+    t.mock.timers.tick(10_000);
+
+    await assertRefused(forwardApp, await pending, "deadline_exceeded");
+  });
+
+  it("refuses a request body still arriving when the budget passes, and stops reading it", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const body = stalledBody();
+    const forwardApp = createForwardApp();
+
+    const pending = forwardApp.send(LIST_WALLETS, { method: "POST", body: body.stream });
+    await body.reading;
+    t.mock.timers.tick(10_000);
+
+    await assertRefused(forwardApp, await pending, "deadline_exceeded");
+    assert.equal(body.wasCancelled(), true);
+  });
+
+  it("gives the provider call only the budget the caller check left", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const provider = waitPoint();
+    const forwardApp = createForwardApp({
+      keys: (trusted, clock) => (header, token) => {
+        clock.advance(4_000);
+        t.mock.timers.tick(4_000);
+        return trusted(header, token);
+      },
       answer: ({ signal }) => {
-        reachedProvider();
+        provider.reach();
         return new Promise((_resolve, reject) => {
           signal?.addEventListener("abort", () => reject(signal.reason));
         });
@@ -269,16 +348,60 @@ describe("forward route: the provider call", () => {
     });
 
     const pending = forwardApp.send(LIST_WALLETS);
-    await reached;
-    t.mock.timers.tick(9_999);
+    await provider.reached;
+    t.mock.timers.tick(5_999);
     assert.equal(forwardApp.calls[0]?.signal?.aborted, false);
     t.mock.timers.tick(1);
     assert.equal(forwardApp.calls[0]?.signal?.aborted, true);
 
-    const response = await pending;
-    await assertOwnAnswer(forwardApp, response, {
+    await assertOwnAnswer(forwardApp, await pending, {
       result: "no_answer",
       code: "provider_no_answer",
+      providerCalls: 1,
+    });
+  });
+
+  it("answers no_answer when the provider's answer is still arriving as the budget passes", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const answer = stalledBody();
+    const forwardApp = createForwardApp({ answer: () => new Response(answer.stream) });
+
+    const pending = forwardApp.send(LIST_WALLETS);
+    await answer.reading;
+    t.mock.timers.tick(10_000);
+
+    await assertOwnAnswer(forwardApp, await pending, {
+      result: "no_answer",
+      code: "provider_no_answer",
+      providerCalls: 1,
+    });
+  });
+});
+
+describe("forward route: the provider call", () => {
+  it("forwards a request body and a provider answer each at its size limit", async () => {
+    const forwardApp = createForwardApp({
+      answer: () => new Response(new Uint8Array(8 * 1024 * 1024), { status: 200 }),
+    });
+
+    const response = await forwardApp.send(LIST_WALLETS, {
+      method: "POST",
+      body: "a".repeat(1024 * 1024),
+    });
+
+    assert.equal(response.headers.get("sdp-safe-proxy-result"), "forwarded");
+    assert.equal((await response.arrayBuffer()).byteLength, 8 * 1024 * 1024);
+    assert.equal(forwardApp.calls[0]?.body?.length, 1024 * 1024);
+  });
+
+  it("answers no_answer when the provider's answer is over the size limit", async () => {
+    const forwardApp = createForwardApp({
+      answer: () => new Response(new Uint8Array(8 * 1024 * 1024 + 1), { status: 200 }),
+    });
+
+    await assertOwnAnswer(forwardApp, await forwardApp.send(LIST_WALLETS), {
+      result: "no_answer",
+      code: "provider_answer_too_large",
       providerCalls: 1,
     });
   });
@@ -297,17 +420,36 @@ describe("forward route: the provider call", () => {
     });
   });
 
-  it("refuses with internal when the request fails before it is sent", async () => {
+  it("refuses with internal when the request fails before it is sent, logging only the error's class at error severity", async () => {
     const forwardApp = createForwardApp({
       credentials: {
-        ...PLATFORM_CREDENTIALS,
-        fireblocks: { apiKey: "fireblocks-key-k4w", apiSecretPem: "not a key" },
+        fireblocks: PLATFORM_CREDENTIALS.fireblocks,
+        get privy(): never {
+          throw new TypeError("credential read failed k71");
+        },
       },
     });
 
-    const response = await forwardApp.send("/v1/forward/fireblocks/v1/supported_assets");
-
-    await assertRefused(forwardApp, response, "internal");
+    await assertRefused(forwardApp, await forwardApp.send(LIST_WALLETS), "internal");
+    assert.deepEqual(forwardApp.logLines(), [
+      {
+        request_id: "req-7d1",
+        revision: REVISION,
+        level: 50,
+        severity: "ERROR",
+        caller: "api",
+        caller_token_age_s: 42,
+        provider: "privy",
+        endpoint_method: "GET",
+        endpoint_path: "/v1/wallets",
+        result: "refused",
+        code: "internal",
+        error_name: "TypeError",
+        provider_call: "not_sent",
+        duration_ms: 0,
+      },
+    ]);
+    assert.ok(!forwardApp.rawLogLines()[0]?.includes("k71"));
   });
 });
 
@@ -403,10 +545,11 @@ describe("request log", () => {
       },
       {
         path: LIST_WALLETS,
-        request: { caller: "cron", headers: { "sdp-safe-proxy-budget-ms": null } },
+        request: { caller: "cron", headers: { "sdp-safe-proxy-request-id": null } },
         line: {
           ...cron,
           ...unmatched,
+          request_id: null,
           result: "refused",
           code: "invalid_request",
           provider_call: "not_sent",
@@ -431,7 +574,14 @@ describe("request log", () => {
       const forwardApp = createForwardApp({ answer });
       await forwardApp.send(path, request);
       assert.deepEqual(forwardApp.logLines(), [
-        { request_id: "req-7d1", revision: REVISION, level: 30, severity: "INFO", ...line },
+        {
+          request_id: "req-7d1",
+          revision: REVISION,
+          level: 30,
+          severity: "INFO",
+          error_name: null,
+          ...line,
+        },
       ]);
     }
   });

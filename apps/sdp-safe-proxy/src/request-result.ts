@@ -1,16 +1,9 @@
 import type { AllowedEndpoint } from "@sdp/safe-proxy-endpoints/endpoint";
-import {
-  type ForwardResult,
-  SAFE_PROXY_CODES,
-  type SafeProxyCode,
-} from "@sdp/safe-proxy-endpoints/protocol";
+import { SAFE_PROXY_CODES, type SafeProxyCode } from "@sdp/safe-proxy-endpoints/protocol";
 import type { SafeProxyProvider } from "@sdp/safe-proxy-endpoints/providers";
+import type { SafeProxyForwardResult, SafeProxyProviderCallState } from "@sdp/types/safe-proxy";
 import type { IdentifiedCaller } from "./caller";
-import { Refusal } from "./refusal";
-
-// not_sent -> in_flight -> answered. A request makes one provider call and never goes back.
-export const PROVIDER_CALL_STATES = ["not_sent", "in_flight", "answered"] as const;
-export type ProviderCallState = (typeof PROVIDER_CALL_STATES)[number];
+import { ProviderAnswerTooLarge, Refusal } from "./refusal";
 
 // How far a request got: received -> identified -> matched.
 export type Progress =
@@ -21,14 +14,19 @@ export type Progress =
       caller: IdentifiedCaller;
       provider: SafeProxyProvider;
       endpoint: AllowedEndpoint;
-      providerCall: ProviderCallState;
+      providerCall: SafeProxyProviderCallState;
     };
 
 export type RequestOutcome =
   | { result: "forwarded" }
-  | { result: Exclude<ForwardResult, "forwarded">; code: SafeProxyCode };
+  | {
+      result: Exclude<SafeProxyForwardResult, "forwarded">;
+      code: SafeProxyCode;
+      // The class of the thrown error when the code is `internal`, otherwise null.
+      errorName: string | null;
+    };
 
-export function providerCallOf(progress: Progress): ProviderCallState {
+export function providerCallOf(progress: Progress): SafeProxyProviderCallState {
   switch (progress.stage) {
     case "received":
     case "identified":
@@ -51,12 +49,23 @@ export function failureOutcome(
   const providerCall = providerCallOf(progress);
   switch (providerCall) {
     case "not_sent": {
-      const code = error instanceof Refusal ? error.code : "internal";
-      return { result: SAFE_PROXY_CODES[code], code };
+      if (error instanceof Refusal) {
+        return { result: SAFE_PROXY_CODES[error.code], code: error.code, errorName: null };
+      }
+      return {
+        result: SAFE_PROXY_CODES.internal,
+        code: "internal",
+        errorName: error.constructor.name,
+      };
     }
     case "in_flight":
-    case "answered":
-      return { result: SAFE_PROXY_CODES.provider_no_answer, code: "provider_no_answer" };
+    case "answered": {
+      const code =
+        error instanceof ProviderAnswerTooLarge
+          ? "provider_answer_too_large"
+          : "provider_no_answer";
+      return { result: SAFE_PROXY_CODES[code], code, errorName: null };
+    }
     default: {
       const unreachable: never = providerCall;
       return unreachable;

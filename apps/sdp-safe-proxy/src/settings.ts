@@ -12,8 +12,11 @@ const pkcs8PrivateKey = z
   .transform((value) => value.replace(/\\n/g, "\n").trim())
   .pipe(z.string().regex(/^-----BEGIN PRIVATE KEY-----\n[\s\S]+\n-----END PRIVATE KEY-----$/));
 
+const PLATFORM_REQUEST_TIMEOUT_MS = 300_000;
+const IDENTITY_TOKEN_LIFETIME_SECONDS = 3600;
+
 const sharedSettings = {
-  SAFE_PROXY_MAX_BUDGET_MS: positiveInteger,
+  SAFE_PROXY_MAX_BUDGET_MS: positiveInteger.pipe(z.number().lt(PLATFORM_REQUEST_TIMEOUT_MS)),
   PRIVY_APP_ID: z.string().min(1),
   PRIVY_APP_SECRET: z.string().min(1),
   FIREBLOCKS_API_KEY: z.string().min(1),
@@ -28,7 +31,9 @@ const serverSettingsSchema = z
     SAFE_PROXY_AUDIENCE: z.url({ protocol: /^https$/ }),
     SAFE_PROXY_API_CALLER: z.email(),
     SAFE_PROXY_CRON_CALLER: z.email(),
-    SAFE_PROXY_MAX_TOKEN_AGE_SECONDS: positiveInteger,
+    SAFE_PROXY_MAX_TOKEN_AGE_SECONDS: positiveInteger.pipe(
+      z.number().max(IDENTITY_TOKEN_LIFETIME_SECONDS)
+    ),
   })
   .refine((settings) => settings.SAFE_PROXY_API_CALLER !== settings.SAFE_PROXY_CRON_CALLER, {
     path: ["SAFE_PROXY_CRON_CALLER"],
