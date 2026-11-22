@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { before, describe, it } from "node:test";
-import { LOCAL_CALLER_HEADER, type SafeProxyCode } from "@sdp/safe-proxy-endpoints/protocol";
+import {
+  FORWARD_HEADERS,
+  LOCAL_CALLER_HEADER,
+  type SafeProxyCode,
+} from "@sdp/safe-proxy-endpoints/protocol";
+import { decodeJwt } from "jose";
 import {
   createForwardApp,
   type ForwardRequest,
@@ -33,6 +38,29 @@ describe("forward route refusals reach no provider", () => {
       name: "a body that is not valid UTF-8",
       method: "POST",
       body: new Uint8Array([0x7b, 0xff, 0x7d]),
+      code: "invalid_request",
+    },
+    {
+      name: "a GET that declares a body",
+      headers: { "content-length": "2" },
+      code: "body_not_allowed",
+    },
+    {
+      name: "a malformed request id",
+      headers: { [FORWARD_HEADERS.requestId]: "req 7d1" },
+      code: "invalid_request",
+    },
+    {
+      name: "a reference to a customer secret",
+      headers: {
+        [FORWARD_HEADERS.credential]:
+          "secret_manager_version:projects/sdp-test/secrets/privy-g96/versions/3",
+      },
+      code: "credential_store_unavailable",
+    },
+    {
+      name: "a malformed credential reference",
+      headers: { [FORWARD_HEADERS.credential]: "secret_manager_version:privy-g96" },
       code: "invalid_request",
     },
   ];
@@ -119,6 +147,46 @@ describe("the provider answer", () => {
       body: { code: "provider_answer_too_large" },
     });
   });
+
+  it("is no answer when the call fails after the request left", async () => {
+    const forwardApp = createForwardApp({
+      answer: () => Promise.reject(new TypeError("fetch failed")),
+    });
+    const failed = await forwardApp.send(LIST_WALLETS);
+    assert.deepEqual(await ownAnswer(failed), {
+      result: "no_answer",
+      body: { code: "provider_no_answer" },
+    });
+    assert.equal(forwardApp.calls.length, 1);
+  });
+});
+
+it("refuses a request whose deadline passes before it is sent", { timeout: 5_000 }, async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let reading!: () => void;
+  const bodyRead = new Promise<void>((resolve) => {
+    reading = resolve;
+  });
+  const forwardApp = createForwardApp();
+  const stalledBody = new ReadableStream<Uint8Array>(
+    {
+      pull: () => {
+        reading();
+        return new Promise(() => {});
+      },
+    },
+    { highWaterMark: 0 }
+  );
+
+  const pending = forwardApp.send(LIST_WALLETS, { method: "POST", body: stalledBody });
+  await bodyRead;
+  t.mock.timers.tick(10_000);
+
+  assert.deepEqual(await ownAnswer(await pending), {
+    result: "refused",
+    body: { code: "deadline_exceeded" },
+  });
+  assert.equal(forwardApp.calls.length, 0);
 });
 
 it("bounds the provider call by the budget the caller check left", {
@@ -152,6 +220,36 @@ it("bounds the provider call by the budget the caller check left", {
     result: "no_answer",
     body: { code: "provider_no_answer" },
   });
+});
+
+it("signs the Fireblocks target and body exactly as forwarded", async () => {
+  const forwardApp = createForwardApp();
+  await forwardApp.send(
+    "/v1/forward/fireblocks/v1/vault/accounts_paged?namePrefix=vault-e74&limit=5"
+  );
+  await forwardApp.send("/v1/forward/fireblocks/v1/transactions", {
+    method: "POST",
+    body: '{"operation":"TRANSFER"}',
+  });
+
+  const signed = forwardApp.calls.map(({ url, body, headers }) => {
+    const { uri, bodyHash } = decodeJwt(headers.authorization?.replace(/^Bearer /, "") ?? "");
+    return { url, body, uri, bodyHash };
+  });
+  assert.deepEqual(signed, [
+    {
+      url: "https://api.fireblocks.io/v1/vault/accounts_paged?namePrefix=vault-e74&limit=5",
+      body: null,
+      uri: "/v1/vault/accounts_paged?namePrefix=vault-e74&limit=5",
+      bodyHash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    },
+    {
+      url: "https://api.fireblocks.io/v1/transactions",
+      body: '{"operation":"TRANSFER"}',
+      uri: "/v1/transactions",
+      bodyHash: "38ad69eb823eff0c4d8f416ceda77b9a1f5bcf32fce1892d8d6cc2a7386c4706",
+    },
+  ]);
 });
 
 it("logs no body, concrete path, credential, reference or error message", async () => {
