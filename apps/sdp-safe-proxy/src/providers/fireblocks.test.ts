@@ -25,7 +25,6 @@ describe("fireblocksAuthHeaders", () => {
     t.mock.timers.enable({ apis: ["Date"], now: 1_800_000_000_750 });
 
     const { payload, protectedHeader } = await signedToken({
-      method: "POST",
       path: "/v1/transactions?limit=5",
       body: '{"amount":"1.5"}',
     });
@@ -43,7 +42,7 @@ describe("fireblocksAuthHeaders", () => {
   });
 
   it("hashes an empty body as the empty string", async () => {
-    const { payload } = await signedToken({ method: "GET", path: "/v1/vault/accounts", body: "" });
+    const { payload } = await signedToken({ path: "/v1/vault/accounts", body: "" });
 
     assert.equal(
       payload.bodyHash,
@@ -52,7 +51,7 @@ describe("fireblocksAuthHeaders", () => {
   });
 
   it("issues a different nonce on each call", async () => {
-    const request = { method: "GET", path: "/v1/vault/accounts", body: "" };
+    const request = { path: "/v1/vault/accounts", body: "" };
     const first = await signedToken(request);
     const second = await signedToken(request);
 
@@ -60,14 +59,19 @@ describe("fireblocksAuthHeaders", () => {
     assert.notEqual(first.payload.nonce, second.payload.nonce);
   });
 
-  it("rejects a credential whose key is not PKCS#8", async () => {
+  it("rejects a credential whose key is not PKCS#8 without carrying the key text", async () => {
     const pkcs1 = createPrivateKey(privateKey).export({ type: "pkcs1", format: "pem" }).toString();
+    const keyLines = pkcs1.split("\n").filter((line) => line !== "" && !line.startsWith("-----"));
 
     await assert.rejects(
       fireblocksAuthHeaders(
         { ...credential, apiSecretPem: pkcs1 },
-        { method: "GET", path: "/v1/vault/accounts", body: "" }
-      )
+        { path: "/v1/vault/accounts", body: "" }
+      ),
+      (error: Error) => {
+        const carried = [error.message, error.stack, String(error.cause)].join("\n");
+        return keyLines.every((line) => !carried.includes(line));
+      }
     );
   });
 });
