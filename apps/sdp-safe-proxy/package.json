@@ -12,7 +12,6 @@
   "dependencies": {
     "@hono/node-server": "2.1.5",
     "@sdp/safe-proxy-endpoints": "workspace:*",
-    "@solana/kit": "8.6.0",
     "hono": "4.13.14",
     "jose": "6.2.13",
     "zod": "4.6.7"
