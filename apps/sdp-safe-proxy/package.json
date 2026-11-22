@@ -7,6 +7,7 @@
     "dev": "SDP_SAFE_PROXY_PORT=${SDP_SAFE_PROXY_PORT:-8791} node --import tsx src/server.ts",
     "start": "node --import tsx src/server.ts",
     "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "lint": "biome check src/"
   },
   "dependencies": {
