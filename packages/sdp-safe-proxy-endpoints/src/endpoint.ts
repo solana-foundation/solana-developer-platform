@@ -2,7 +2,6 @@ import type { SafeProxyCaller } from "./callers";
 
 export type PathParameter =
   | { format: "digits" }
-  | { format: "uuid" }
   | { format: "token" }
   | { format: "one_of"; values: readonly [string, ...string[]] };
 

@@ -9,7 +9,6 @@ const SEGMENT = /^[A-Za-z0-9_-]+$/;
 
 export const FORMAT_PATTERNS = {
   digits: /^[0-9]{1,100}$/,
-  uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
   token: /^[A-Za-z0-9_-]{1,255}$/,
 } as const satisfies Record<Exclude<PathParameter["format"], "one_of">, RegExp>;
 
