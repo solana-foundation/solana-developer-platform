@@ -316,6 +316,7 @@ exports[`route actions > pins every route without an action, with its reason 1`]
   "POST /admin/onboarding-allowlist: operator: ALLOWLIST_ADMIN_KEY or a platform administrator, not a tenant grant",
   "POST /pay/:token/tx: payment link: the link's public token is the credential",
   "POST /v1/organizations: signed-in people with no organization: creates the caller's own organization, one per person",
+  "POST /webhooks/clerk/link-orgs: signed webhook: Clerk's signature authenticates it",
   "POST /webhooks/clerk: signed webhook: Clerk's signature authenticates it",
   "POST /webhooks/payments/ramps/production/:provider: signed webhook: the ramp provider's signature authenticates it",
   "POST /webhooks/payments/ramps/sandbox/:provider: signed webhook: the ramp provider's signature authenticates it",
