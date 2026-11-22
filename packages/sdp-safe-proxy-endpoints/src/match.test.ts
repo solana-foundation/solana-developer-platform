@@ -28,6 +28,12 @@ const cases = [
     '{"operation":"RAW","Operation":"TRANSFER"}',
     "body_not_allowed",
   ],
+  [
+    "refuses a ruled body not in the exact form JSON.stringify writes",
+    ...TRANSACTIONS,
+    '{"operation":"BURN","operation":"TRANSFER"}',
+    "body_not_allowed",
+  ],
   ["allows a Privy read", "privy", "GET", "/v1/wallets/wal_1", "", "read /v1/wallets/{wallet}"],
   [
     "allows a Fireblocks transfer",

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { nonAdditiveChanges } from "./check-safe-proxy-endpoints.mjs";
+import { endpointCheckErrors, nonAdditiveChanges } from "./check-safe-proxy-endpoints.mjs";
 
 const row = () => ({
   kind: "read",
@@ -43,3 +43,13 @@ for (const [name, edit, errors] of cases) {
     assert.deepEqual(nonAdditiveChanges(base, head), errors);
   });
 }
+
+test("fails when the committed snapshot is out of date with the declarations", () => {
+  const rendered = `${JSON.stringify(base)}\n`;
+  assert.deepEqual(
+    endpointCheckErrors({ problems: [], rendered, committed: "{}\n", base: undefined }),
+    [
+      "packages/sdp-safe-proxy-endpoints/endpoints.snapshot.json is stale. Run pnpm generate:safe-proxy-endpoints.",
+    ]
+  );
+});
