@@ -50,7 +50,6 @@ export function renderEndpointSnapshot(): string {
       name,
       {
         hosts: provider.hosts.join(" "),
-        authScheme: provider.authScheme,
         endpoints: Object.fromEntries(
           provider.endpoints
             .flatMap(endpointRows)

@@ -72,6 +72,5 @@ const endpoints: readonly AllowedEndpoint[] = [
 
 export const PRIVY = {
   hosts: ["api.privy.io"],
-  authScheme: "privy_basic",
   endpoints,
 } as const satisfies ProviderDeclaration;

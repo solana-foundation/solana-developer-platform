@@ -6,7 +6,7 @@ import { type AllowedEndpoint, endpoint } from "./endpoint";
 const fields = { query: [], callers: ["api"], requestHeaders: [], status: "active" } as const;
 
 function problemsOf(...endpoints: AllowedEndpoint[]): string[] {
-  return declarationProblems({ acme: { hosts: ["api.acme.test"], authScheme: "acme", endpoints } });
+  return declarationProblems({ acme: { hosts: ["api.acme.test"], endpoints } });
 }
 
 const listItems = () =>
