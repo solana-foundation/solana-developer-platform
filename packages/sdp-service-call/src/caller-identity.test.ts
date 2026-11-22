@@ -2,15 +2,15 @@ import assert from "node:assert/strict";
 import { before, describe, it } from "node:test";
 import {
   createLocalJWKSet,
+  errors,
   exportJWK,
   generateKeyPair,
-  generateSecret,
   type JWTPayload,
   type JWTVerifyGetKey,
   SignJWT,
-  UnsecuredJWT,
 } from "jose";
 import {
+  type CallerIdentity,
   CallerIdentityError,
   type CallerIdentityErrorCode,
   createCallerIdentityVerifier,
@@ -19,6 +19,8 @@ import {
 const AUDIENCE = "https://callee.mock.invalid";
 const ISSUER = "https://accounts.google.com";
 const EMAIL = "caller@service-account.mock.invalid";
+const ISSUED_AT = 1_800_000_000;
+const MAX_TOKEN_AGE_SECONDS = 300;
 
 let signingKey: CryptoKey;
 let otherSigningKey: CryptoKey;
@@ -26,41 +28,49 @@ let keys: JWTVerifyGetKey;
 
 before(async () => {
   const trusted = await generateKeyPair("RS256");
-  const untrusted = await generateKeyPair("RS256");
   signingKey = trusted.privateKey;
-  otherSigningKey = untrusted.privateKey;
-  keys = createLocalJWKSet({ keys: [{ ...(await exportJWK(trusted.publicKey)), alg: "RS256" }] });
+  otherSigningKey = (await generateKeyPair("RS256")).privateKey;
+  const jwk = await exportJWK(trusted.publicKey);
+  keys = createLocalJWKSet({ keys: [{ ...jwk, alg: "RS256", kid: "current" }] });
 });
-
-const validClaims: JWTPayload = { email: EMAIL, email_verified: true };
 
 function signToken(
   options: {
     claims?: JWTPayload;
     audience?: string;
     issuer?: string;
-    expiresAt?: number | string;
+    issuedAt?: number | null;
+    expiresAt?: number;
+    kid?: string;
     key?: CryptoKey;
   } = {}
 ): Promise<string> {
-  return new SignJWT(options.claims ?? validClaims)
-    .setProtectedHeader({ alg: "RS256" })
+  const jwt = new SignJWT(options.claims ?? { email: EMAIL, email_verified: true })
+    .setProtectedHeader({ alg: "RS256", kid: options.kid ?? "current" })
     .setIssuer(options.issuer ?? ISSUER)
     .setAudience(options.audience ?? AUDIENCE)
-    .setIssuedAt()
-    .setExpirationTime(options.expiresAt ?? "10m")
-    .sign(options.key ?? signingKey);
+    .setExpirationTime(options.expiresAt ?? ISSUED_AT + 3600);
+  if (options.issuedAt !== null) jwt.setIssuedAt(options.issuedAt ?? ISSUED_AT);
+  return jwt.sign(options.key ?? signingKey);
 }
 
-function verify(header: string | undefined): Promise<{ email: string }> {
-  return createCallerIdentityVerifier({ audience: AUDIENCE, keys })(header);
-}
-
-async function assertRejectsWith(
+function verify(
   header: string | undefined,
+  overrides: { keys?: JWTVerifyGetKey; nowSeconds?: number } = {}
+): Promise<CallerIdentity> {
+  return createCallerIdentityVerifier({
+    audience: AUDIENCE,
+    keys: overrides.keys ?? keys,
+    maxTokenAgeSeconds: MAX_TOKEN_AGE_SECONDS,
+    now: () => (overrides.nowSeconds ?? ISSUED_AT + 60) * 1000,
+  })(header);
+}
+
+async function assertRefused(
+  result: Promise<CallerIdentity>,
   code: CallerIdentityErrorCode
 ): Promise<void> {
-  await assert.rejects(verify(header), (error: unknown) => {
+  await assert.rejects(result, (error: unknown) => {
     assert.ok(error instanceof CallerIdentityError);
     assert.equal(error.code, code);
     return true;
@@ -68,26 +78,30 @@ async function assertRejectsWith(
 }
 
 describe("createCallerIdentityVerifier", () => {
-  it("returns exactly the verified email for a valid Google identity token", async () => {
-    assert.deepEqual(await verify(`Bearer ${await signToken()}`), { email: EMAIL });
+  it("returns the verified email and the token's issue time for a valid Google identity token", async () => {
+    assert.deepEqual(await verify(`Bearer ${await signToken()}`), {
+      email: EMAIL,
+      issuedAt: 1_800_000_000,
+    });
   });
 
   it("reports missing_token for an absent, empty or non-Bearer header", async () => {
     const token = await signToken();
     for (const header of [undefined, "", `Basic ${token}`, token]) {
-      await assertRejectsWith(header, "missing_token");
+      await assertRefused(verify(header), "missing_token");
     }
   });
 
-  it("reports invalid_token for a token with the wrong audience, issuer, lifetime or key", async () => {
+  it("reports invalid_token for a malformed token or one with the wrong audience, issuer, expiry or signature", async () => {
     const tokens = [
+      "not-a-jwt",
       await signToken({ audience: "https://another-callee.mock.invalid" }),
       await signToken({ issuer: "https://issuer.mock.invalid" }),
-      await signToken({ expiresAt: Math.floor(Date.now() / 1000) - 60 }),
+      await signToken({ expiresAt: ISSUED_AT + 30 }),
       await signToken({ key: otherSigningKey }),
     ];
     for (const token of tokens) {
-      await assertRejectsWith(`Bearer ${token}`, "invalid_token");
+      await assertRefused(verify(`Bearer ${token}`), "invalid_token");
     }
   });
 
@@ -98,34 +112,42 @@ describe("createCallerIdentityVerifier", () => {
       { email_verified: true },
     ];
     for (const claims of claimSets) {
-      await assertRejectsWith(`Bearer ${await signToken({ claims })}`, "invalid_token");
+      await assertRefused(verify(`Bearer ${await signToken({ claims })}`), "invalid_token");
     }
   });
 
-  it("reports invalid_token for an unsigned token, an HS256 token and a malformed token", async () => {
-    const unsigned = new UnsecuredJWT(validClaims)
-      .setIssuer(ISSUER)
-      .setAudience(AUDIENCE)
-      .setExpirationTime("10m")
-      .encode();
-    const hmac = await new SignJWT(validClaims)
-      .setProtectedHeader({ alg: "HS256" })
-      .setIssuer(ISSUER)
-      .setAudience(AUDIENCE)
-      .setExpirationTime("10m")
-      .sign(await generateSecret("HS256"));
-    for (const token of [unsigned, hmac, "not-a-jwt"]) {
-      await assertRejectsWith(`Bearer ${token}`, "invalid_token");
+  it("accepts a token up to the maximum age and refuses an older one by the injected clock", async () => {
+    const header = `Bearer ${await signToken()}`;
+    assert.equal((await verify(header, { nowSeconds: 1_800_000_300 })).email, EMAIL);
+    await assertRefused(verify(header, { nowSeconds: 1_800_000_301 }), "invalid_token");
+  });
+
+  it("reports invalid_token for a token with no issue time", async () => {
+    await assertRefused(verify(`Bearer ${await signToken({ issuedAt: null })}`), "invalid_token");
+  });
+
+  it("reports keys_unavailable when the key set cannot produce keys", async () => {
+    const header = `Bearer ${await signToken()}`;
+    for (const failure of [new TypeError("fetch failed"), new errors.JWKSTimeout()]) {
+      await assertRefused(
+        verify(header, { keys: () => Promise.reject(failure) }),
+        "keys_unavailable"
+      );
     }
+  });
+
+  it("reports invalid_token when the token names a key the set does not hold", async () => {
+    await assertRefused(verify(`Bearer ${await signToken({ kid: "retired" })}`), "invalid_token");
   });
 
   it("keeps the token and the caller's email out of the error and its cause", async () => {
-    const tokens = [
-      await signToken({ audience: "https://another-callee.mock.invalid" }),
-      await signToken({ claims: { email: EMAIL, email_verified: false } }),
+    const refusals = [
+      { token: await signToken({ audience: "https://another-callee.mock.invalid" }) },
+      { token: await signToken({ claims: { email: EMAIL, email_verified: false } }) },
+      { token: await signToken(), keys: () => Promise.reject(new TypeError("fetch failed")) },
     ];
-    for (const token of tokens) {
-      await assert.rejects(verify(`Bearer ${token}`), (error: unknown) => {
+    for (const { token, keys: failingKeys } of refusals) {
+      await assert.rejects(verify(`Bearer ${token}`, { keys: failingKeys }), (error: unknown) => {
         assert.ok(error instanceof CallerIdentityError);
         const rendered = `${String(error)} ${error.stack}`;
         assert.ok(!rendered.includes(token));
