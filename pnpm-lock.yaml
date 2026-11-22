@@ -405,12 +405,18 @@ importers:
       '@hono/node-server':
         specifier: 2.1.5
         version: 2.1.5(hono@4.13.14)
+      '@sdp/safe-proxy-endpoints':
+        specifier: workspace:*
+        version: link:../../packages/sdp-safe-proxy-endpoints
       '@solana/kit':
         specifier: 8.6.0
         version: 8.6.0(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6)
       hono:
         specifier: 4.13.14
         version: 4.13.14
+      jose:
+        specifier: 6.2.13
+        version: 6.2.13
       zod:
         specifier: 4.6.7
         version: 4.6.7
