@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "SDP_SAFE_PROXY_PORT=${SDP_SAFE_PROXY_PORT:-8791} node --import tsx src/server.ts",
+    "dev": "SDP_SAFE_PROXY_PORT=${SDP_SAFE_PROXY_PORT:-8791} SAFE_PROXY_MAX_BUDGET_MS=60000 node --import tsx src/local.ts",
     "start": "node --import tsx src/server.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
@@ -12,9 +12,12 @@
   },
   "dependencies": {
     "@hono/node-server": "2.1.5",
+    "@sdp/redaction": "workspace:*",
     "@sdp/safe-proxy-endpoints": "workspace:*",
+    "@sdp/service-call": "workspace:*",
     "hono": "4.13.14",
     "jose": "6.2.13",
+    "pino": "10.4.0",
     "zod": "4.6.7"
   },
   "devDependencies": {

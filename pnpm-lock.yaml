@@ -405,15 +405,24 @@ importers:
       '@hono/node-server':
         specifier: 2.1.5
         version: 2.1.5(hono@4.13.14)
+      '@sdp/redaction':
+        specifier: workspace:*
+        version: link:../../packages/sdp-redaction
       '@sdp/safe-proxy-endpoints':
         specifier: workspace:*
         version: link:../../packages/sdp-safe-proxy-endpoints
+      '@sdp/service-call':
+        specifier: workspace:*
+        version: link:../../packages/sdp-service-call
       hono:
         specifier: 4.13.14
         version: 4.13.14
       jose:
         specifier: 6.2.13
         version: 6.2.13
+      pino:
+        specifier: 10.4.0
+        version: 10.4.0
       zod:
         specifier: 4.6.7
         version: 4.6.7
