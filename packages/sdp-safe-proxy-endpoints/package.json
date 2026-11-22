@@ -1,0 +1,45 @@
+{
+  "name": "@sdp/safe-proxy-endpoints",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./callers": {
+      "types": "./src/callers.ts",
+      "import": "./src/callers.ts",
+      "default": "./src/callers.ts"
+    },
+    "./endpoint": {
+      "types": "./src/endpoint.ts",
+      "import": "./src/endpoint.ts",
+      "default": "./src/endpoint.ts"
+    },
+    "./match": {
+      "types": "./src/match.ts",
+      "import": "./src/match.ts",
+      "default": "./src/match.ts"
+    },
+    "./protocol": {
+      "types": "./src/protocol.ts",
+      "import": "./src/protocol.ts",
+      "default": "./src/protocol.ts"
+    },
+    "./providers": {
+      "types": "./src/providers.ts",
+      "import": "./src/providers.ts",
+      "default": "./src/providers.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check src/"
+  },
+  "dependencies": {
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3"
+  }
+}

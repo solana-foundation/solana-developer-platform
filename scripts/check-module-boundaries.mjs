@@ -51,7 +51,7 @@ const MODULE_METADATA = [
     name: "@sdp/safe-proxy",
     directory: "apps/sdp-safe-proxy",
     purpose: "Safe Proxy service: holds provider credentials and makes provider calls for the API.",
-    allowedDependencies: [],
+    allowedDependencies: ["@sdp/safe-proxy-endpoints"],
   },
   {
     name: "sdp-docs",
@@ -254,6 +254,13 @@ const MODULE_METADATA = [
     directory: "packages/sdp-redaction",
     purpose:
       "Central PII and credential denylist plus the scrubbers every log, Sentry, and audit boundary applies.",
+    allowedDependencies: [],
+  },
+  {
+    name: "@sdp/safe-proxy-endpoints",
+    directory: "packages/sdp-safe-proxy-endpoints",
+    purpose:
+      "The provider endpoints Safe Proxy forwards to, the matcher that admits a request, and the forward protocol.",
     allowedDependencies: [],
   },
   {
