@@ -197,6 +197,5 @@ const endpoints: readonly AllowedEndpoint[] = [
 
 export const FIREBLOCKS = {
   hosts: ["api.fireblocks.io"],
-  authScheme: "fireblocks_jwt",
   endpoints,
 } as const satisfies ProviderDeclaration;

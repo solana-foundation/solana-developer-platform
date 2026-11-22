@@ -1,7 +1,6 @@
 {
   "fireblocks": {
     "hosts": "api.fireblocks.io",
-    "authScheme": "fireblocks_jwt",
     "endpoints": {
       "GET /v1/external_wallets": {
         "kind": "read",
@@ -163,7 +162,6 @@
   },
   "privy": {
     "hosts": "api.privy.io",
-    "authScheme": "privy_basic",
     "endpoints": {
       "GET /v1/wallets": {
         "kind": "read",

@@ -14,7 +14,6 @@ const row = (kind, status = "active") => ({
 const base = {
   fireblocks: {
     hosts: "api.fireblocks.io",
-    authScheme: "fireblocks_jwt",
     endpoints: {
       "GET /v1/wallets": row("read"),
       "POST /v1/payments rail=card": row("sign"),
@@ -65,7 +64,6 @@ const allowed = {
   "adds a provider": (head) => {
     head.privy = {
       hosts: "api.privy.io",
-      authScheme: "privy_basic",
       endpoints: { "GET /v1/wallets": row("read") },
     };
   },

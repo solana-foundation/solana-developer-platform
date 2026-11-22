@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { createPrivateKey, generateKeyPairSync } from "node:crypto";
 import { describe, it } from "node:test";
 import { importSPKI, jwtVerify } from "jose";
-import { fireblocksAuthHeaders } from "./fireblocks";
-import type { InjectionRequest } from "./injection";
+import type { AuthRequest } from "./auth-service";
+import { FireblocksAuthService } from "./fireblocks";
 
 const { privateKey, publicKey } = generateKeyPairSync("rsa", {
   modulusLength: 2048,
@@ -11,17 +11,18 @@ const { privateKey, publicKey } = generateKeyPairSync("rsa", {
   publicKeyEncoding: { type: "spki", format: "pem" },
 });
 const credential = { apiKey: "fb-api-key-1", apiSecretPem: privateKey };
+const service = new FireblocksAuthService();
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-async function signedToken(request: InjectionRequest) {
-  const headers = await fireblocksAuthHeaders(credential, request);
-  assert.ok(headers.Authorization, "fireblocksAuthHeaders returned no Authorization header");
+async function signedToken(request: AuthRequest) {
+  const headers = await service.injectCredentials(credential, request);
+  assert.ok(headers.Authorization, "injectCredentials returned no Authorization header");
   const token = headers.Authorization.replace(/^Bearer /, "");
   assert.deepEqual(headers, { Authorization: `Bearer ${token}`, "X-API-Key": "fb-api-key-1" });
   return jwtVerify(token, await importSPKI(publicKey, "RS256"));
 }
 
-describe("fireblocksAuthHeaders", () => {
+describe("FireblocksAuthService", () => {
   it("signs the request target and body hash with a 30-second lifetime", async (t) => {
     t.mock.timers.enable({ apis: ["Date"], now: 1_800_000_000_750 });
 
@@ -65,7 +66,7 @@ describe("fireblocksAuthHeaders", () => {
     const keyLines = pkcs1.split("\n").filter((line) => line !== "" && !line.startsWith("-----"));
 
     await assert.rejects(
-      fireblocksAuthHeaders(
+      service.injectCredentials(
         { ...credential, apiSecretPem: pkcs1 },
         { path: "/v1/vault/accounts", body: "" }
       ),

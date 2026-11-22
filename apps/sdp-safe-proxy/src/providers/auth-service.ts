@@ -1,4 +1,4 @@
-export interface InjectionRequest {
+export interface AuthRequest {
   // The request target as it is sent: path, then an optional query.
   path: string;
   // The body as it is sent; empty when the request has none.
@@ -7,7 +7,9 @@ export interface InjectionRequest {
 
 export type AuthHeaders = Record<string, string>;
 
-export type AuthInjection<Credential> = (
-  credential: Credential,
-  request: InjectionRequest
-) => AuthHeaders | Promise<AuthHeaders>;
+export abstract class AuthService<Credential> {
+  abstract injectCredentials(
+    credential: Credential,
+    request: AuthRequest
+  ): AuthHeaders | Promise<AuthHeaders>;
+}

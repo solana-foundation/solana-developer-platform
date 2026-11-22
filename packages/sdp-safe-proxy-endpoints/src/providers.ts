@@ -8,5 +8,3 @@ export const SAFE_PROXY_PROVIDERS = {
 } as const satisfies Record<string, ProviderDeclaration>;
 
 export type SafeProxyProvider = keyof typeof SAFE_PROXY_PROVIDERS;
-
-export type AuthScheme = (typeof SAFE_PROXY_PROVIDERS)[SafeProxyProvider]["authScheme"];

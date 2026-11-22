@@ -78,6 +78,5 @@ export function endpoint<
 
 export interface ProviderDeclaration {
   hosts: readonly [string, ...string[]];
-  authScheme: string;
   endpoints: readonly AllowedEndpoint[];
 }
