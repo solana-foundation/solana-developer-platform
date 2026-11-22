@@ -417,6 +417,21 @@ describe("gateway identity (X-SF-Identity)", () => {
     expect((await send("203.0.113.5, 35.191.0.1", valid)).status).toBe(200);
   });
 
+  // All gateway traffic arrives from the gateway's few egress IPs.
+  it("never counts an identity the gateway signed but SDP refuses toward that limit", async () => {
+    await seedSfKey();
+    const bindings = { ...gatewayEnv(), TRUST_PROXY_HEADERS: "true" };
+    const legacyKey = await identityToken({ key_id: TEST_SEEDED_API_KEY.id });
+    const from = (token: string) =>
+      request({ [GATEWAY_IDENTITY_HEADER]: token, "X-Forwarded-For": "198.51.100.7" }, bindings);
+
+    for (let i = 0; i < 25; i++) {
+      expect((await from(legacyKey)).status).toBe(401);
+    }
+
+    expect((await from(await identityToken({ key_id: sfKey.keyId }))).status).toBe(200);
+  });
+
   it("answers 503, not 401, when the gateway's signing keys cannot be fetched", async () => {
     await seedSfKey();
 

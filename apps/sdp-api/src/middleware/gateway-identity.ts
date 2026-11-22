@@ -5,6 +5,7 @@ import {
   GATEWAY_IDENTITY_HEADER,
   GatewayKeysUnavailableError,
   resolveGatewayIdentityConfig,
+  UnsupportedGatewayIdentityError,
   verifyGatewayIdentity,
 } from "@/lib/gateway-identity";
 import { getLogger } from "@/runtime/logger";
@@ -68,13 +69,18 @@ export function gatewayIdentityMiddleware() {
         getLogger().error({ error }, "Gateway signing keys are unavailable");
         throw new AppError("SERVICE_UNAVAILABLE", "Gateway identity cannot be verified right now");
       }
-      // Counts the failure; the one that reaches the limit is refused as such.
-      invalidGatewayIdentityLimiter.enforce(
-        c,
-        failureBucket,
-        INVALID_IDENTITY_MAX_FAILURES,
-        INVALID_IDENTITY_WINDOW_MS
-      );
+      // Counts a forgery; the one that reaches the limit is refused as such.
+      // An identity the gateway did sign is never one: counting it would let
+      // one caller (an imported `sk_` key) refuse all gateway traffic from
+      // the gateway's few egress IPs.
+      if (!(error instanceof UnsupportedGatewayIdentityError)) {
+        invalidGatewayIdentityLimiter.enforce(
+          c,
+          failureBucket,
+          INVALID_IDENTITY_MAX_FAILURES,
+          INVALID_IDENTITY_WINDOW_MS
+        );
+      }
       throw new AppError("UNAUTHORIZED", "Invalid gateway identity");
     }
     await next();

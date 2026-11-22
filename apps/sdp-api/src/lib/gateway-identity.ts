@@ -145,6 +145,18 @@ export class GatewayKeysUnavailableError extends Error {
 }
 
 /**
+ * The gateway signed this identity, but SDP does not accept its claims (a
+ * legacy `sk_` key's row id as `key_id`, say). Refused like a forgery, but it
+ * is not one, so it never counts toward the forged-identity limit.
+ */
+export class UnsupportedGatewayIdentityError extends Error {
+  constructor(options: { cause: unknown }) {
+    super("Gateway identity claims are not supported", options);
+    this.name = "UnsupportedGatewayIdentityError";
+  }
+}
+
+/**
  * How long a fetched JWKS is trusted, and the shortest gap between refetches
  * for an unknown key. A key the gateway removes stops verifying within a
  * minute; a new key must be published at least two minutes before the
@@ -171,8 +183,9 @@ function getSigningKeys(jwksUrl: string): ReturnType<typeof createRemoteJWKSet> 
  * Verifies an `X-SF-Identity` token: ES256 only, the configured issuer, the
  * `sdp` audience, and at most 60 seconds old.
  *
- * @throws GatewayKeysUnavailableError when the JWKS cannot be fetched; any
- *   other error means the token is not a valid identity.
+ * @throws GatewayKeysUnavailableError when the JWKS cannot be fetched;
+ *   UnsupportedGatewayIdentityError when the signature verifies but the
+ *   claims do not; any other error means the token is not a valid identity.
  */
 export async function verifyGatewayIdentity(
   token: string,
@@ -204,7 +217,11 @@ export async function verifyGatewayIdentity(
       requiredClaims: ["iat", "exp"],
     }
   );
-  const claims = claimsSchema.parse(payload);
+  const parsed = claimsSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new UnsupportedGatewayIdentityError({ cause: parsed.error });
+  }
+  const claims = parsed.data;
   return {
     projectId: claims.project_id ?? null,
     orgId: claims.org_id ?? null,
