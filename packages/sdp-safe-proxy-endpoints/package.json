@@ -9,6 +9,11 @@
       "import": "./src/callers.ts",
       "default": "./src/callers.ts"
     },
+    "./credential-reference": {
+      "types": "./src/credential-reference.ts",
+      "import": "./src/credential-reference.ts",
+      "default": "./src/credential-reference.ts"
+    },
     "./endpoint": {
       "types": "./src/endpoint.ts",
       "import": "./src/endpoint.ts",
