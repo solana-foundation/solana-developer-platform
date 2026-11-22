@@ -20,13 +20,13 @@ export interface BodyRule {
   values: readonly [string, ...string[]];
 }
 
-export type IdempotencyKey<Header extends string> =
+type IdempotencyKey<Header extends string> =
   | { in: "header"; name: Header }
   | { in: "body"; field: string }
   // The path names the thing changed, so a repeat asks for the same end state.
   | { in: "path" };
 
-export type ProviderDedupe = { lasts: "hours"; hours: number } | { lasts: "permanent" };
+type ProviderDedupe = { lasts: "hours"; hours: number } | { lasts: "permanent" };
 
 interface Idempotency<Header extends string> {
   key: IdempotencyKey<NoInfer<Header>>;
