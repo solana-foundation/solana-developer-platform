@@ -97,6 +97,6 @@ wallets.post(
 // Read configuration and wallets
 wallets.get("/configs", requireAction("wallets.read"), getConfigs);
 wallets.get("/", requireAction("wallets.read"), listWallets);
-wallets.get("/aggregate", requireAction("wallets.read"), getWalletAggregate);
+wallets.get("/balances/aggregate", requireAction("wallets.read"), getWalletAggregate);
 wallets.get("/public-key", requireAction("wallets.read"), getPublicKey);
 wallets.get("/:walletId", requireAction("wallets.read"), getWalletById);

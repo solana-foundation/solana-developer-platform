@@ -21,10 +21,10 @@ const MODULE_PROBES = {
     ["POST", "/v1/payments/subscriptions"],
   ],
   ramps: [
-    ["GET", "/v1/payments/ramps/onramp/currency"],
+    ["GET", "/v1/payments/ramps/onramp/supported-pairs"],
     ["POST", "/webhooks/payments/ramps/sandbox/moonpay"],
-    ["GET", "/v1/counterparties/cp_1/requirements"],
-    ["POST", "/v1/counterparties/cp_1/requirements"],
+    ["GET", "/v1/counterparties/cp_1/ramp-requirements"],
+    ["POST", "/v1/counterparties/cp_1/ramp-requirements/check"],
     ["GET", "/v1/counterparties/cp_1/provider-accounts"],
   ],
   compliance: [["POST", "/v1/compliance/address-screenings"]],

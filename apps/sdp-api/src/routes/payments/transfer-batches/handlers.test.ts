@@ -38,6 +38,7 @@ import { app } from "@/index";
 import { AppError } from "@/lib/errors";
 import { deriveProviderRequestId } from "@/lib/idempotency";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { requestFingerprint } from "@/middleware/idempotency";
 import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { rootLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
@@ -76,6 +77,8 @@ import {
 import { fullChunkOf } from "@/test/helpers/transfer-batches";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
+import { canonicalizeTransferBatchBody, previousCanonicalTransferBatchBody } from "./idempotency";
+import { createTransferBatchSchema } from "./schemas";
 import { MAX_RECIPIENTS_PER_TRANSACTION } from "./transaction";
 
 const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
@@ -550,7 +553,7 @@ describe("payment transfer batches", () => {
     );
     expect(archived.status).toBe(204);
     const response = await app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       {
         method: "POST",
         headers,
@@ -575,7 +578,7 @@ describe("payment transfer batches", () => {
   });
 
   it.each(
-    ["/v1/payments/transfer-batches", "/v1/payments/transfer-batches/estimate"].flatMap(
+    ["/v1/payments/transfer-batches/execute", "/v1/payments/transfer-batches/estimate"].flatMap(
       (endpoint) => [
         { endpoint, amount: "1.0000000001", message: "Amount has too many decimal places" },
         { endpoint, amount: "18446744073.709551616", message: "Amount is out of range" },
@@ -622,7 +625,7 @@ describe("payment transfer batches", () => {
     }
   );
 
-  it.each(["/v1/payments/transfer-batches", "/v1/payments/transfer-batches/estimate"])(
+  it.each(["/v1/payments/transfer-batches/execute", "/v1/payments/transfer-batches/estimate"])(
     "refuses a body that sends options at %s with 400, writing nothing",
     async (endpoint) => {
       const counterpartyId = await seedCounterparty("batch_options_refused");
@@ -849,7 +852,11 @@ describe("payment transfer batches", () => {
       const recipients = await seedRentRecipients();
       const idempotencyKey = crypto.randomUUID();
 
-      const refused = await postBatch("/v1/payments/transfer-batches", recipients, idempotencyKey);
+      const refused = await postBatch(
+        "/v1/payments/transfer-batches/execute",
+        recipients,
+        idempotencyKey
+      );
 
       expect(refused.status).toBe(409);
       expect(await refused.json()).toMatchObject({
@@ -879,7 +886,11 @@ describe("payment transfer batches", () => {
       const sourceSigner = await generateKeyPairSigner();
       await updateSeededWalletPublicKey(sourceSigner.address);
       createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
-      const accepted = await postBatch("/v1/payments/transfer-batches", recipients, idempotencyKey);
+      const accepted = await postBatch(
+        "/v1/payments/transfer-batches/execute",
+        recipients,
+        idempotencyKey
+      );
       expect(accepted.status).toBe(200);
     });
 
@@ -937,7 +948,7 @@ describe("payment transfer batches", () => {
       ]);
 
       const refused = await postBatch(
-        "/v1/payments/transfer-batches",
+        "/v1/payments/transfer-batches/execute",
         recipients,
         crypto.randomUUID()
       );
@@ -961,7 +972,7 @@ describe("payment transfer batches", () => {
         addresses.map((account) => (account === FUNDED ? 5_000_000n : 20_400_000n))
       );
       const res = await app.request(
-        "/v1/payments/transfer-batches",
+        "/v1/payments/transfer-batches/execute",
         {
           method: "POST",
           headers: {
@@ -1013,7 +1024,7 @@ describe("payment transfer batches", () => {
       .bind(["payments.transfer_batch"], TEST_PROJECT.id)
       .run();
 
-    const stopped = await app.request("/v1/payments/transfer-batches", request, env);
+    const stopped = await app.request("/v1/payments/transfer-batches/execute", request, env);
     expect(stopped.status).toBe(403);
     expect(await stopped.json()).toMatchObject({
       error: { code: "FORBIDDEN", details: { reason: "movement_disabled" } },
@@ -1031,7 +1042,7 @@ describe("payment transfer batches", () => {
       .prepare("UPDATE projects SET disabled_movements = ARRAY[]::text[] WHERE id = ?")
       .bind(TEST_PROJECT.id)
       .run();
-    const retried = await app.request("/v1/payments/transfer-batches", request, env);
+    const retried = await app.request("/v1/payments/transfer-batches/execute", request, env);
     expect(retried.status).toBe(200);
     expect(retried.headers.get("Idempotent-Replayed")).toBeNull();
     expect(await count()).toEqual({ count: 1 });
@@ -1075,7 +1086,7 @@ describe("payment transfer batches", () => {
         walletAddress: TEST_SOLANA_ADDRESSES.wallet3,
       });
       const response = await app.request(
-        "/v1/payments/transfer-batches",
+        "/v1/payments/transfer-batches/execute",
         {
           method: "POST",
           headers: {
@@ -1167,7 +1178,7 @@ describe("payment transfer batches", () => {
       const key = crypto.randomUUID();
       const post = () =>
         app.request(
-          "/v1/payments/transfer-batches",
+          "/v1/payments/transfer-batches/execute",
           {
             method: "POST",
             headers: {
@@ -1249,7 +1260,7 @@ describe("payment transfer batches", () => {
     });
 
     const res = await app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       {
         method: "POST",
         headers: {
@@ -1485,7 +1496,7 @@ describe("payment transfer batches", () => {
     const idempotencyKey = crypto.randomUUID();
     const postBatch = () =>
       app.request(
-        "/v1/payments/transfer-batches",
+        "/v1/payments/transfer-batches/execute",
         {
           method: "POST",
           headers: {
@@ -1544,7 +1555,7 @@ describe("payment transfer batches", () => {
     });
 
     const response = await app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       {
         method: "POST",
         headers: {
@@ -1612,7 +1623,7 @@ describe("payment transfer batches", () => {
       walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
     });
     const createRes = await app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       {
         method: "POST",
         headers: {
@@ -1745,7 +1756,7 @@ describe("payment transfer batches", () => {
       walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
     });
     const response = await app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       {
         method: "POST",
         headers: {
@@ -1809,7 +1820,7 @@ describe("payment transfer batches", () => {
         walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
       });
       const response = await app.request(
-        "/v1/payments/transfer-batches",
+        "/v1/payments/transfer-batches/execute",
         {
           method: "POST",
           headers: {
@@ -1872,7 +1883,7 @@ describe("payment transfer batches", () => {
       walletAddress: TEST_SOLANA_ADDRESSES.wallet3,
     });
     const response = await app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       {
         method: "POST",
         headers: {
@@ -2019,7 +2030,7 @@ describe("payment transfer batches", () => {
       walletAddress: TEST_SOLANA_ADDRESSES.wallet3,
     });
     const response = await app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       {
         method: "POST",
         headers: {
@@ -2067,7 +2078,7 @@ describe("payment transfer batches", () => {
         walletAddress: TEST_SOLANA_ADDRESSES.wallet3,
       });
       const response = await app.request(
-        "/v1/payments/transfer-batches",
+        "/v1/payments/transfer-batches/execute",
         {
           method: "POST",
           headers: {
@@ -2164,7 +2175,7 @@ describe("payment transfer batches", () => {
       );
 
       const response = await app.request(
-        "/v1/payments/transfer-batches",
+        "/v1/payments/transfer-batches/execute",
         {
           method: "POST",
           headers: {
@@ -2256,7 +2267,7 @@ describe("payment transfer batches", () => {
       recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
     });
     const first = await app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       { method: "POST", headers, body },
       env
     );
@@ -2269,12 +2280,12 @@ describe("payment transfer batches", () => {
     );
     try {
       const replay = await app.request(
-        "/v1/payments/transfer-batches",
+        "/v1/payments/transfer-batches/execute",
         { method: "POST", headers, body },
         env
       );
       const fresh = await app.request(
-        "/v1/payments/transfer-batches",
+        "/v1/payments/transfer-batches/execute",
         {
           method: "POST",
           headers: {
@@ -2314,7 +2325,7 @@ describe("payment transfer batches", () => {
       recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
     });
     const first = await app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       { method: "POST", headers, body },
       env
     );
@@ -2328,7 +2339,7 @@ describe("payment transfer batches", () => {
     createOrgSignerForCustodyWalletMock.mockClear();
 
     const replay = await app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       { method: "POST", headers, body },
       env
     );
@@ -2341,57 +2352,86 @@ describe("payment transfer batches", () => {
 
   // HOO-1918: once the shared key record is gone (24h, or a 5xx freed it), the
   // batch row is the backstop, and it too ignores recipient order.
-  it("replays a reordered same-key retry from the batch row once the shared record is gone", async () => {
-    const sourceSigner = await generateKeyPairSigner();
-    await updateSeededWalletPublicKey(sourceSigner.address);
-    createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
-    const signingOutcomeMock = vi.fn().mockResolvedValue(FIRST_SIGNATURE);
-    createKoraAdapterMock.mockReturnValue(ownedSubmissionAdapter(signingOutcomeMock));
+  it.each(["current", "previous operation", "previous operation and token form"] as const)(
+    "replays a reordered same-key batch from its row (%s)",
+    async (savedForm) => {
+      const sourceSigner = await generateKeyPairSigner();
+      await updateSeededWalletPublicKey(sourceSigner.address);
+      createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
+      const signingOutcomeMock = vi.fn().mockResolvedValue(FIRST_SIGNATURE);
+      createKoraAdapterMock.mockReturnValue(ownedSubmissionAdapter(signingOutcomeMock));
 
-    const counterpartyId = await seedCounterparty("batch_reordered_backstop_counterparty");
-    const firstAccountId = await seedCryptoWalletCounterpartyAccount({
-      counterpartyId,
-      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
-    });
-    const secondAccountId = await seedCryptoWalletCounterpartyAccount({
-      counterpartyId,
-      walletAddress: TEST_SOLANA_ADDRESSES.wallet3,
-    });
-    const headers = {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${TEST_API_KEY.raw}`,
-      "Idempotency-Key": "batch-reordered-backstop-key",
-    };
-    const first = { counterpartyId, counterpartyAccountId: firstAccountId, amount: "0.1" };
-    const second = { counterpartyId, counterpartyAccountId: secondAccountId, amount: "0.2" };
-    const post = (recipients: (typeof first)[]) =>
-      app.request(
-        "/v1/payments/transfer-batches",
-        {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            externalId: testRunId(),
-            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-            token: "SOL",
-            recipients,
-          }),
-        },
-        env
-      );
+      const counterpartyId = await seedCounterparty("batch_reordered_backstop_counterparty");
+      const firstAccountId = await seedCryptoWalletCounterpartyAccount({
+        counterpartyId,
+        walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      });
+      const secondAccountId = await seedCryptoWalletCounterpartyAccount({
+        counterpartyId,
+        walletAddress: TEST_SOLANA_ADDRESSES.wallet3,
+      });
+      const headers = {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        "Idempotency-Key": "batch-reordered-backstop-key",
+      };
+      const first = { counterpartyId, counterpartyAccountId: firstAccountId, amount: "0.1" };
+      const second = { counterpartyId, counterpartyAccountId: secondAccountId, amount: "0.2" };
+      const batchBody = (recipients: (typeof first)[]) => ({
+        externalId: testRunId(),
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        token: "SOL",
+        recipients,
+      });
+      const post = (recipients: (typeof first)[]) =>
+        app.request(
+          "/v1/payments/transfer-batches/execute",
+          {
+            method: "POST",
+            headers,
+            body: JSON.stringify(batchBody(recipients)),
+          },
+          env
+        );
 
-    const original = await post([first, second]);
-    expect(original.status).toBe(200);
-    const sends = signingOutcomeMock.mock.calls.length;
-    await getDb(env).execute("DELETE FROM idempotency_keys");
-    const reordered = await post([second, first]);
+      const original = await post([first, second]);
+      expect(original.status).toBe(200);
+      const responseSchema = z.object({ data: z.object({ batch: z.object({ id: z.string() }) }) });
+      const originalBatch = responseSchema.parse(await original.json()).data;
+      if (savedForm !== "current") {
+        // Model a durable batch created before /execute existed, under either
+        // token spelling. Exercise the real route's declared previousForms.
+        const canonicalize =
+          savedForm === "previous operation"
+            ? canonicalizeTransferBatchBody
+            : previousCanonicalTransferBatchBody;
+        const fingerprint = requestFingerprint({
+          operation: "POST /v1/payments/transfer-batches",
+          params: {},
+          query: {},
+          body: canonicalize(createTransferBatchSchema.parse(batchBody([first, second]))),
+        });
+        await getDb(env).execute(
+          "UPDATE payment_transfer_batches SET idempotency_fingerprint = ? WHERE id = ?",
+          [fingerprint, originalBatch.batch.id]
+        );
+      }
+      const sends = signingOutcomeMock.mock.calls.length;
+      await getDb(env).execute("DELETE FROM idempotency_keys");
+      const reordered = await post([second, first]);
 
-    expect(reordered.status).toBe(200);
-    const originalBatch = ((await original.json()) as { data: { batch: { id: string } } }).data;
-    const replayedBatch = ((await reordered.json()) as { data: { batch: { id: string } } }).data;
-    expect(replayedBatch.batch.id).toBe(originalBatch.batch.id);
-    expect(signingOutcomeMock).toHaveBeenCalledTimes(sends);
-  });
+      expect(reordered.status).toBe(200);
+      const replayedBatch = responseSchema.parse(await reordered.json()).data;
+      expect(reordered.headers.get("Idempotent-Replayed")).toBe("true");
+      expect(replayedBatch.batch.id).toBe(originalBatch.batch.id);
+      await getDb(env).execute("DELETE FROM idempotency_keys");
+      const changed = await post([{ ...first, amount: "0.3" }, second]);
+      // With the key record expired, the payout run rejects a changed body.
+      expect(changed.status).toBe(409);
+      expect(await changed.json()).toMatchObject({ error: { code: "TRANSFER_BATCH_RUN_EXISTS" } });
+      expect(signingOutcomeMock).toHaveBeenCalledTimes(sends);
+    }
+  );
 
   // Keegan (#2334): a request that died after the batch and its recipients
   // committed, before any chunk transfer row, left the batch processing; its
@@ -2410,7 +2450,7 @@ describe("payment transfer batches", () => {
     });
     const post = () =>
       app.request(
-        "/v1/payments/transfer-batches",
+        "/v1/payments/transfer-batches/execute",
         {
           method: "POST",
           headers: {
@@ -2479,7 +2519,7 @@ describe("payment transfer batches", () => {
       walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
     });
     const original = await app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       {
         method: "POST",
         headers: {
@@ -2537,7 +2577,7 @@ describe("payment transfer batches", () => {
     });
     const request = () =>
       app.request(
-        "/v1/payments/transfer-batches",
+        "/v1/payments/transfer-batches/execute",
         {
           method: "POST",
           headers: {
@@ -2597,7 +2637,7 @@ describe("payment transfer batches", () => {
     });
 
     const first = await app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       { method: "POST", headers, body: requestBody },
       env
     );
@@ -2615,7 +2655,7 @@ describe("payment transfer batches", () => {
     );
     expect(archived.status).toBe(204);
     const second = await app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       { method: "POST", headers, body: requestBody },
       env
     );
@@ -2642,7 +2682,7 @@ describe("payment transfer batches", () => {
     // The row records the key layer's fingerprint, which replayFromRecord compares.
     const keyRecord = await getDb(env)
       .prepare(
-        "SELECT fingerprint FROM idempotency_keys WHERE operation LIKE 'POST %transfer-batches'"
+        "SELECT fingerprint FROM idempotency_keys WHERE operation LIKE 'POST %transfer-batches/execute'"
       )
       .first<{ fingerprint: string }>();
     expect(stored.idempotency_fingerprint).toBe(required(keyRecord).fingerprint);
@@ -2678,7 +2718,7 @@ describe("payment transfer batches", () => {
     };
 
     const first = await app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       {
         method: "POST",
         headers,
@@ -2692,7 +2732,7 @@ describe("payment transfer batches", () => {
       env
     );
     const conflict = await app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       {
         method: "POST",
         headers,
@@ -2754,7 +2794,7 @@ describe("payment transfer batches", () => {
     });
 
     const first = app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       { method: "POST", headers, body: requestBody },
       env
     );
@@ -2762,7 +2802,7 @@ describe("payment transfer batches", () => {
     // The shared Idempotency-Key step (HOO-1918) holds the key for the first
     // request, so the duplicate never reaches the batch row's own race.
     const duplicate = await app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       { method: "POST", headers, body: requestBody },
       env
     );
@@ -2796,7 +2836,7 @@ describe("payment transfer batches", () => {
       walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
     });
     const response = await app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       {
         method: "POST",
         headers: {
@@ -2861,7 +2901,7 @@ describe("payment transfer batches", () => {
       });
 
     const first = await app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       {
         method: "POST",
         headers: { ...headers, "Idempotency-Key": crypto.randomUUID() },
@@ -2870,7 +2910,7 @@ describe("payment transfer batches", () => {
       env
     );
     const second = await app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       {
         method: "POST",
         headers: { ...headers, "Idempotency-Key": crypto.randomUUID() },
@@ -2925,7 +2965,7 @@ describe("payment transfer batches", () => {
         { amount, apiKey }: { amount: string; apiKey: string }
       ) =>
         app.request(
-          "/v1/payments/transfer-batches",
+          "/v1/payments/transfer-batches/execute",
           {
             method: "POST",
             headers: {
@@ -3238,7 +3278,7 @@ describe("payment transfer batches", () => {
         TEST_SOLANA_ADDRESSES.wallet3,
       ]);
       const created = await app.request(
-        "/v1/payments/transfer-batches",
+        "/v1/payments/transfer-batches/execute",
         {
           method: "POST",
           headers: {
@@ -3692,7 +3732,7 @@ describe("payment transfer batches", () => {
       });
 
       const res = await app.request(
-        "/v1/payments/transfer-batches",
+        "/v1/payments/transfer-batches/execute",
         {
           method: "POST",
           headers: {
@@ -3800,7 +3840,7 @@ describe("payment transfer batches", () => {
     });
 
     const res = await app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       {
         method: "POST",
         headers: {
@@ -3876,7 +3916,7 @@ describe("payment transfer batches", () => {
     ]);
 
     const res = await app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       {
         method: "POST",
         headers: {
@@ -3960,7 +4000,7 @@ describe("payment transfer batches", () => {
     );
 
     const res = await app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       {
         method: "POST",
         headers: {
@@ -4022,7 +4062,7 @@ describe("payment transfer batches", () => {
     });
 
     const res = await app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       {
         method: "POST",
         headers: {
@@ -4072,7 +4112,7 @@ describe("payment transfer batches", () => {
     });
 
     const res = await app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       {
         method: "POST",
         headers: {
@@ -4137,7 +4177,7 @@ describe("payment transfer batches", () => {
     });
 
     const res = await app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       {
         method: "POST",
         headers: {
@@ -4196,7 +4236,7 @@ describe("payment transfer batches", () => {
     });
 
     const res = await app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       {
         method: "POST",
         headers: {
@@ -4316,7 +4356,7 @@ describe("payment transfer batches", () => {
       });
 
       const res = await app.request(
-        "/v1/payments/transfer-batches",
+        "/v1/payments/transfer-batches/execute",
         {
           method: "POST",
           headers: {
@@ -4410,7 +4450,7 @@ describe("payment transfer batches", () => {
       });
 
       const res = await app.request(
-        "/v1/payments/transfer-batches",
+        "/v1/payments/transfer-batches/execute",
         {
           method: "POST",
           headers: {
@@ -4512,7 +4552,7 @@ describe("payment transfer batches", () => {
       });
 
       const res = await app.request(
-        "/v1/payments/transfer-batches",
+        "/v1/payments/transfer-batches/execute",
         {
           method: "POST",
           headers: {
@@ -4605,7 +4645,7 @@ describe("payment transfer batches", () => {
       });
 
       const res = await app.request(
-        "/v1/payments/transfer-batches",
+        "/v1/payments/transfer-batches/execute",
         {
           method: "POST",
           headers: {
@@ -4661,7 +4701,7 @@ describe("payment transfer batches", () => {
     });
 
     const res = await app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       {
         method: "POST",
         headers: {
@@ -4740,7 +4780,7 @@ describe("payment transfer batches", () => {
     });
 
     const res = await app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       {
         method: "POST",
         headers: {
@@ -4849,7 +4889,7 @@ describe("payment transfer batches", () => {
 
     const startedAt = performance.now();
     const res = await app.request(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       {
         method: "POST",
         headers: {
@@ -4922,7 +4962,7 @@ describe("payment transfer batches", () => {
     const responses = await Promise.all(
       Array.from({ length: 5 }, () =>
         app.request(
-          "/v1/payments/transfer-batches",
+          "/v1/payments/transfer-batches/execute",
           {
             method: "POST",
             headers: {

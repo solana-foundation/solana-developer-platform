@@ -253,7 +253,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
-    path: "/v1/wallets/aggregate",
+    path: "/v1/wallets/balances/aggregate",
     tags: ["Wallets"],
     summary: "Aggregate wallet balances",
     operationId: "aggregateWalletBalances",

@@ -12,7 +12,7 @@ export type RouteOwner = SdpModule | "core";
 export const ROUTE_OWNERS: readonly (readonly [RegExp, RouteOwner])[] = [
   [/^\/v1\/payments\/ramps(\/|$)/, "ramps"],
   [/^\/webhooks\/payments\/ramps\//, "ramps"],
-  [/^\/v1\/counterparties\/:counterpartyId\/(requirements|provider-accounts)(\/|$)/, "ramps"],
+  [/^\/v1\/counterparties\/:counterpartyId\/(ramp-requirements|provider-accounts)(\/|$)/, "ramps"],
   [/^\/v1\/issuance(\/|$)/, "issuance"],
   [/^\/v1\/earn(\/|$)/, "earn"],
   [/^\/v1\/dvp(\/|$)/, "dvp"],

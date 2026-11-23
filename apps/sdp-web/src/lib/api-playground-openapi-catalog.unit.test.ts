@@ -75,7 +75,7 @@ describe("API playground release channel", () => {
       { transfers: [], wallets: [], rampProviders: [] },
       t
     );
-    expect(paths(payments)).toContain("/v1/payments/ramps/onramp/quote");
+    expect(paths(payments)).toContain("/v1/payments/ramps/onramp/start");
 
     const stable = paths(filterPlaygroundEndpointsToReleaseChannel(payments, "stable"));
     expect(stable.filter((path) => path.startsWith("/v1/payments/ramps"))).toEqual([]);
@@ -113,7 +113,7 @@ describe("API playground release channel", () => {
       getOpenApiPlaygroundEndpoints("payments"),
       "stable"
     );
-    const batches = payments.find((endpoint) => endpoint.id === "create-payment-transfer-batch");
+    const batches = payments.find((endpoint) => endpoint.id === "execute-payment-transfer-batch");
     expect(JSON.stringify(batches?.expectedResponse)).toMatch(/"transfers":\[\{/);
     expect(JSON.stringify(batches?.expectedResponse)).not.toMatch(/moonpay|stripe/);
 
@@ -148,7 +148,7 @@ describe("API playground release channel", () => {
       getOpenApiPlaygroundEndpoints("payments"),
       "stable"
     );
-    const transfer = endpoints.find((endpoint) => endpoint.id === "create-payment-transfer");
+    const transfer = endpoints.find((endpoint) => endpoint.id === "execute-payment-transfer");
     expect(transfer).toBeDefined();
     expect(transfer?.bodyFields.find((field) => field.key === "$body")?.defaultValue).not.toContain(
       "transferId"
@@ -258,10 +258,10 @@ describe("API playground allowlist", () => {
       { transfers: [], wallets: [], rampProviders: [] },
       t
     );
-    expect(paths(payments)).toContain("/v1/payments/ramps/offramp/quote");
+    expect(paths(payments)).toContain("/v1/payments/ramps/offramp/start");
     expect(
       paths(filterPlaygroundEndpointsToReleaseChannel(payments, "experimental"))
-    ).not.toContain("/v1/payments/ramps/offramp/quote");
+    ).not.toContain("/v1/payments/ramps/offramp/start");
   });
 });
 

@@ -689,7 +689,7 @@ describe("OpenAPI spec", () => {
     // them (the customer's wallet or the caller's own fee payer signs), so they
     // cannot answer SIGNING_REJECTED until SDP sponsors them (PRO-1744).
     const sponsored = [
-      ["/v1/payments/transfers", "post"],
+      ["/v1/payments/transfers/execute", "post"],
       ["/v1/issuance/tokens/{tokenId}/mint", "post"],
       ["/v1/dvp/trades/{tradeId}/settle", "post"],
     ] as const;
@@ -759,8 +759,8 @@ describe("OpenAPI spec", () => {
     expect(doc.paths?.["/v1/wallets"]?.post?.responses).toHaveProperty("503");
     expect(doc.paths?.["/v1/wallets"]?.get?.responses).toHaveProperty("400");
     expect(doc.paths?.["/v1/wallets"]?.get?.responses).toHaveProperty("409");
-    expect(doc.paths?.["/v1/wallets/aggregate"]?.get?.responses).toHaveProperty("400");
-    expect(doc.paths?.["/v1/wallets/aggregate"]?.get?.responses).toHaveProperty("409");
+    expect(doc.paths?.["/v1/wallets/balances/aggregate"]?.get?.responses).toHaveProperty("400");
+    expect(doc.paths?.["/v1/wallets/balances/aggregate"]?.get?.responses).toHaveProperty("409");
     expect(doc.paths?.["/v1/wallets/public-key"]?.get?.responses).toHaveProperty("409");
     expect(doc.paths?.["/v1/wallets/{walletId}"]?.get?.responses).toHaveProperty("409");
     expect(doc.paths?.["/v1/wallets/{walletId}"]?.get?.responses).toHaveProperty("503");
@@ -771,7 +771,7 @@ describe("OpenAPI spec", () => {
   });
 
   it("documents unavailable aggregates instead of partial wallet totals", () => {
-    const operation = createOpenApiDocument().paths?.["/v1/wallets/aggregate"]?.get;
+    const operation = createOpenApiDocument().paths?.["/v1/wallets/balances/aggregate"]?.get;
     expect(operation?.responses).toHaveProperty("503");
     expect(operation?.description).toContain("rather than returning an incomplete total");
   });
@@ -783,7 +783,7 @@ describe("OpenAPI spec", () => {
     if (paths === undefined) {
       expect.fail("Expected OpenAPI paths");
     }
-    const requirementsPathItem = paths["/v1/counterparties/{counterpartyId}/requirements"];
+    const requirementsPathItem = paths["/v1/counterparties/{counterpartyId}/ramp-requirements"];
     if (requirementsPathItem === undefined) {
       expect.fail("Expected counterparty requirements path");
     }
@@ -836,7 +836,7 @@ describe("OpenAPI spec", () => {
 
     expect(doc.paths?.["/health"]?.get).toBeDefined();
     expect(doc.paths?.["/v1/wallets"]?.get).toBeDefined();
-    expect(doc.paths?.["/v1/payments/transfers"]?.post).toBeDefined();
+    expect(doc.paths?.["/v1/payments/transfers/execute"]?.post).toBeDefined();
   });
 
   // A deployment refuses every module outside its release channel with 403, so
@@ -912,7 +912,9 @@ describe("OpenAPI spec", () => {
     "%s hides ramp-only transfer fields and prose",
     (releaseChannel) => {
       const doc = createPublicOpenApiDocument({ releaseChannel });
-      const request = getJsonSchema(doc.paths?.["/v1/payments/transfers"]?.post?.requestBody);
+      const request = getJsonSchema(
+        doc.paths?.["/v1/payments/transfers/execute"]?.post?.requestBody
+      );
       expect(request.properties).not.toHaveProperty("transferId");
       expect(request.properties).toHaveProperty("counterpartyAccountId");
       // All shared transfer responses, including batches, retry and recurring collect.
@@ -958,7 +960,7 @@ describe("OpenAPI spec", () => {
   it("keeps the ramp transfer contract in experimental and internal documents", () => {
     for (const doc of [createPublicOpenApiDocument(EXPERIMENTAL), createOpenApiDocument()]) {
       expect(
-        getJsonSchema(doc.paths?.["/v1/payments/transfers"]?.post?.requestBody).properties
+        getJsonSchema(doc.paths?.["/v1/payments/transfers/execute"]?.post?.requestBody).properties
       ).toHaveProperty("transferId");
       expect(JSON.stringify(doc)).toContain('"deliveryMode"');
       expect(JSON.stringify(doc)).toContain('"settling"');
@@ -1136,8 +1138,8 @@ describe("OpenAPI spec", () => {
       "Counterparties",
     ]);
     expect(stable.paths?.["/v1/payments/recurring-payments"]?.post).toBeDefined();
-    expect(stable.paths?.["/v1/payments/ramps/onramp/quote"]).toBeUndefined();
-    expect(stable.paths?.["/v1/counterparties/{counterpartyId}/requirements"]).toBeUndefined();
+    expect(stable.paths?.["/v1/payments/ramps/onramp/start"]).toBeUndefined();
+    expect(stable.paths?.["/v1/counterparties/{counterpartyId}/ramp-requirements"]).toBeUndefined();
     expect(stable.paths?.["/v1/issuance/tokens"]).toBeUndefined();
   });
 

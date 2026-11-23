@@ -75,13 +75,13 @@ const WALLET_SCOPE_ROUTES = {
   },
 
   // Payments
-  "POST /v1/payments/transfers": {
+  "POST /v1/payments/transfers/execute": {
     refusedEarly: {
       file: TRANSFERS,
       test: "refuses a transfer from a wallet outside the key's scope before writing anything",
     },
   },
-  "POST /v1/payments/transfer-batches": {
+  "POST /v1/payments/transfer-batches/execute": {
     refusedEarly: {
       file: "routes/payments/transfer-batches/handlers.test.ts",
       test: "refuses a batch from a wallet outside the key's scope before writing anything",
@@ -107,13 +107,13 @@ const WALLET_SCOPE_ROUTES = {
   },
 
   // Ramps: a quote signs nothing, so its money admission is its only scope check.
-  "POST /v1/payments/ramps/onramp/quote": {
+  "POST /v1/payments/ramps/onramp/start": {
     refusedEarly: {
       file: "routes/payments.ramps-money-admission.test.ts",
       test: "refuses a %s quote on a wallet outside the key's scope with wallet_out_of_scope",
     },
   },
-  "POST /v1/payments/ramps/offramp/quote": {
+  "POST /v1/payments/ramps/offramp/start": {
     refusedEarly: {
       file: "routes/payments.ramps-money-admission.test.ts",
       test: "refuses a %s quote on a wallet outside the key's scope with wallet_out_of_scope",
@@ -121,7 +121,7 @@ const WALLET_SCOPE_ROUTES = {
   },
   "POST /v1/payments/ramps/sandbox/simulate": { exempt: "a provider sandbox event; signs nothing" },
   "POST /v1/payments/ramps/transfers/cancel": { exempt: "a provider-side cancel; signs nothing" },
-  "POST /v1/counterparties/:counterpartyId/requirements": { exempt: SIGNS_NOTHING },
+  "POST /v1/counterparties/:counterpartyId/ramp-requirements/check": { exempt: SIGNS_NOTHING },
 
   // Recurring payments
   "POST /v1/payments/recurring-payments": {

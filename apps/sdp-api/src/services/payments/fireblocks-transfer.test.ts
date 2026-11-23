@@ -261,7 +261,7 @@ async function send(
   projectId = PROJECT_ID
 ) {
   return paymentApp.request(
-    "/v1/payments/transfers",
+    "/v1/payments/transfers/execute",
     {
       method: "POST",
       headers: {
