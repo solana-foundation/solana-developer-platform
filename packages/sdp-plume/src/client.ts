@@ -22,6 +22,7 @@ import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { PLUME_PROGRAMS, PLUME_VAULTS, plumeVault } from "@sdp/types/plume-programs";
+import { EARN_PROVIDER_DESCRIPTORS } from "@sdp/types/provider-access";
 import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
 import {
   type SolanaCluster,
@@ -99,7 +100,7 @@ export class PlumeVaultDirectClient
   getProviderRedemptionModes() {
     return ["standard", "instant"] as const;
   }
-  readonly vaultWithdrawalSettlement = "provider_order" as const;
+  readonly vaultWithdrawalSettlement = EARN_PROVIDER_DESCRIPTORS.plume.withdrawalSettlement;
 
   sponsoredPrograms(cluster: SolanaCluster): readonly string[] {
     if (!PLUME_VAULTS.some((v) => v.cluster === cluster)) return [];

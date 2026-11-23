@@ -165,7 +165,7 @@ or completed an actual transfer-agent order.
 
 ## Not done, deliberately — the go-live checklist
 
-- **Surfacing stays `false`** (`EARN_PROVIDER_SURFACING.wisdomtree`). The
+- **Surfacing stays `false`** (`EARN_PROVIDER_DESCRIPTORS.wisdomtree.surfaced`). The
   playbook's rule is flip LAST, in its own PR, after an end-to-end deposit —
   which needs real Connect credentials AND production vault-direct deposits
   (PRO-1703): WisdomTree is mainnet-only and their sandbox is Ethereum

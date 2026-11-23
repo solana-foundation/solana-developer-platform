@@ -195,10 +195,10 @@ mirror can also show browse-only Jupiter Lend and Ondo rows. Production offers
 Veda's USDC PRIME and OUSD PRIME vaults from `VEDA_DEPLOYMENTS`. The Ground
 integration that previously served the custodial program flow
 was removed, so no registered provider is portfolio-capable today. The unsupported program HTTP surface is removed.
-`EARN_PROVIDER_SURFACING`
-(`packages/sdp-types/src/provider-access.ts`) declares which registered
-providers SDP OFFERS; it is a code constant, so there is no env var or DB row to
-flip. The full rationale, the exit-safety rules it must never break, and the
+Each provider's `surfaced` field in `EARN_PROVIDER_DESCRIPTORS`
+(`packages/sdp-types/src/provider-access.ts`, read as `EARN_PROVIDER_SURFACING`)
+declares which registered providers SDP OFFERS; it is a code constant, so there
+is no env var or DB row to flip. The full rationale, the exit-safety rules it must never break, and the
 test pattern are in `docs/contributing/earn-pluggability-playbook.md` §6 and
 ADR 0002's 2026-08-14 addendum.
 
