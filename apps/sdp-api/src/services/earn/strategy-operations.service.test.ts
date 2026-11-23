@@ -345,6 +345,31 @@ describe("asynchronous operation execution", () => {
     expect(mocks.release).toHaveBeenCalledWith(scope, claim);
   });
 
+  it("reports a custody deposit its strategy stopped admitting as DEPOSIT_REFUSED", async () => {
+    mocks.depositAdmission.mockRejectedValue(
+      forbidden("Vault deposits are paused for this strategy")
+    );
+    expect(await scoped(() => advanceEarnOperation(env, scope, claim))).toMatchObject({
+      status: "failed",
+      nextAction: null,
+      error: { code: "DEPOSIT_REFUSED", message: "Vault deposits are paused for this strategy" },
+    });
+    expect(mocks.restrict).toHaveBeenCalledWith(scope, claim);
+    expect(mocks.proposer).not.toHaveBeenCalled();
+    expect(mocks.sign).not.toHaveBeenCalled();
+  });
+
+  it("keeps a custody deposit's withdrawn permission as SIGNING_REJECTED", async () => {
+    mocks.moneyAdmission.mockRejectedValue(
+      new MoneyMovementRefusedError("action_not_held", "earn.execute")
+    );
+    expect(await scoped(() => advanceEarnOperation(env, scope, claim))).toMatchObject({
+      status: "failed",
+      error: { code: "SIGNING_REJECTED", message: "Permission was withdrawn before signing" },
+    });
+    expect(mocks.depositAdmission).not.toHaveBeenCalled();
+  });
+
   it("verifies and durably records owner-signed bytes before acknowledging queued work", async () => {
     walletBuild();
     expect(

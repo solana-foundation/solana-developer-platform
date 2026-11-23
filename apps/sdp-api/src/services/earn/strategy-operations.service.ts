@@ -235,7 +235,8 @@ async function admitRecordedCustodyBroadcast(
   built: Awaited<ReturnType<typeof resolveEarnOperationBuild>>["target"],
   custodyWalletId: string
 ): Promise<boolean> {
-  if (!(await admitOperationEffect(env, scope, claim, built, custodyWalletId))) return false;
+  if ((await admitOperationEffect(env, scope, claim, built, custodyWalletId)) !== null)
+    return false;
   try {
     if (claim.attempt.signedTransaction !== null && claim.attempt.proposalBinding !== null) {
       const proposer = await createOrgTransactionProposerForCustodyWallet(
@@ -265,14 +266,29 @@ async function admitRecordedCustodyBroadcast(
   }
 }
 
-/** Exits bypass commercial admission, but never the submitted operation's current permission. */
+/** Why a new effect was refused, as the failed operation reports it. */
+interface EffectRefusal {
+  code: "SIGNING_REJECTED" | "DEPOSIT_REFUSED";
+  message: string;
+}
+
+const PERMISSION_WITHDRAWN: EffectRefusal = {
+  code: "SIGNING_REJECTED",
+  message: "Permission was withdrawn before signing",
+};
+
+/**
+ * Exits bypass commercial admission, but never the submitted operation's current permission.
+ * Returns null when admitted, else the refusal, having restricted the attempt to observation.
+ */
 async function admitOperationEffect(
   env: Env,
   scope: OperationScope,
   claim: OperationClaim,
   built: PreparedStrategySigningTarget,
   custodyWalletId: string | null
-): Promise<boolean> {
+): Promise<EffectRefusal | null> {
+  let stage: "permission" | "deposit" = "permission";
   try {
     await assertMoneyStartAdmitted(
       env,
@@ -285,8 +301,9 @@ async function admitOperationEffect(
       },
       { custodyWalletId }
     );
+    stage = "deposit";
     await admitDeposit(env, scope, claim.operation);
-    return true;
+    return null;
   } catch (error) {
     if (
       !(error instanceof MoneyMovementRefusedError) &&
@@ -295,7 +312,13 @@ async function admitOperationEffect(
       throw error;
     }
     await createOperationsService(env).repository.restrictToObservation(scope, claim);
-    return false;
+    // A strategy that stopped admitting the deposit refused it; the caller kept permission.
+    return stage === "deposit"
+      ? {
+          code: "DEPOSIT_REFUSED",
+          message: error.message || "The strategy no longer accepts this deposit",
+        }
+      : PERMISSION_WITHDRAWN;
   }
 }
 
@@ -336,24 +359,25 @@ export async function advanceEarnOperation(
   let signedTransaction = attempt.signedTransaction;
   const stopping = claim.operation.cancelRequestedAt !== null;
   let observeOnly = stopping || attempt.observationOnly;
+  let refusal: EffectRefusal | null = null;
   async function admitNewEffect(): Promise<boolean> {
     if (observeOnly) return false;
-    const admitted = await admitOperationEffect(
+    refusal = await admitOperationEffect(
       env,
       scope,
       claim,
       built,
       transactionScope.custodyWalletId
     );
-    observeOnly = !admitted;
-    return admitted;
+    observeOnly = refusal !== null;
+    return refusal === null;
   }
   const refuseUnsentSignature = () =>
     update({
       status: "failed",
       nextAction: null,
       resourceRef: null,
-      error: { code: "SIGNING_REJECTED", message: "Permission was withdrawn before signing" },
+      error: refusal ?? PERMISSION_WITHDRAWN,
     });
   if (!observeOnly && signedTransaction === null && transactionScope.custodyWalletId !== null)
     await admitNewEffect();
