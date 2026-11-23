@@ -54,7 +54,7 @@ async function recordSpcUnreachable(c: AppContext, error: unknown): Promise<void
   }
 }
 
-/** GET /wallets — list the caller's own verified wallets for this project. */
+/** GET /verified-wallets — list the caller's own verified wallets for this project. */
 export async function listVerifiedWallets(c: AppContext) {
   const rows = await listPrivateChannelWallets(c.env, getAuth(c), requireProjectId(c));
   return success(c, { wallets: rows.map(toVerifiedWalletDto) });
@@ -105,7 +105,7 @@ export async function verifyWallet(c: ValidatedBodyContext<typeof verifyWalletBo
   }
 }
 
-/** DELETE /wallets/:pubkey — revoke a wallet verification with SPC and remove the row. */
+/** DELETE /verified-wallets/:pubkey — revoke a wallet verification with SPC and remove the row. */
 export async function deleteVerifiedWallet(c: AppContext) {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);

@@ -23,7 +23,7 @@ function requestOfframpQuote(fields: {
   fiatCurrency?: "USD";
 }) {
   return app.request(
-    "/v1/payments/ramps/offramp/quote",
+    "/v1/payments/ramps/offramp/start",
     {
       method: "POST",
       headers: {

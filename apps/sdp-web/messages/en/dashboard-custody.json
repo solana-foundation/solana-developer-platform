@@ -327,7 +327,7 @@
     "closeApiKeyCreationModal": "Close API key creation modal",
     "wallets": "Wallets",
     "playgroundListWallets": "List Wallets",
-    "playgroundListWalletConfigs": "List Wallet Configs",
+    "playgroundListWalletConfigs": "List managed signing configurations",
     "playgroundGetWallet": "Get Wallet",
     "playgroundGetWalletPublicKey": "Get Wallet Public Key",
     "playgroundAggregateBalances": "Aggregate Wallet Balances",

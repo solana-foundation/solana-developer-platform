@@ -408,7 +408,7 @@ describe("Issuance Routes", () => {
       const mintToSpy = vi.spyOn(MosaicService.prototype, "mintTo");
 
       const response = await app.request(
-        `/v1/issuance/tokens/${token.id}/mint`,
+        `/v1/issuance/tokens/${token.id}/mint/execute`,
         {
           method: "POST",
           headers: {
@@ -450,7 +450,7 @@ describe("Issuance Routes", () => {
 
       try {
         const executed = await app.request(
-          `/v1/issuance/tokens/${token.id}/mint`,
+          `/v1/issuance/tokens/${token.id}/mint/execute`,
           {
             method: "POST",
             headers: {
@@ -508,7 +508,7 @@ describe("Issuance Routes", () => {
 
       try {
         const first = await app.request(
-          `/v1/issuance/tokens/${token.id}/mint`,
+          `/v1/issuance/tokens/${token.id}/mint/execute`,
           { method: "POST", headers, body },
           env
         );
@@ -518,7 +518,7 @@ describe("Issuance Routes", () => {
           new AppError("CONFLICT", "Wallet runtime became unavailable after settlement")
         );
         const replay = await app.request(
-          `/v1/issuance/tokens/${token.id}/mint`,
+          `/v1/issuance/tokens/${token.id}/mint/execute`,
           { method: "POST", headers, body },
           env
         );
@@ -569,7 +569,7 @@ describe("Issuance Routes", () => {
 
       try {
         const first = await app.request(
-          `/v1/issuance/tokens/${token.id}/authority`,
+          `/v1/issuance/tokens/${token.id}/authority/update/execute`,
           { method: "POST", headers, body },
           env
         );
@@ -580,7 +580,7 @@ describe("Issuance Routes", () => {
           new AppError("CONFLICT", "Wallet runtime became unavailable after settlement")
         );
         const replay = await app.request(
-          `/v1/issuance/tokens/${token.id}/authority`,
+          `/v1/issuance/tokens/${token.id}/authority/update/execute`,
           { method: "POST", headers, body },
           env
         );
@@ -617,7 +617,7 @@ describe("Issuance Routes", () => {
         .mockResolvedValue({ signature: "sig_acl_controller_rotation", slot: 777n });
 
       const response = await app.request(
-        `/v1/issuance/tokens/${token.id}/authority`,
+        `/v1/issuance/tokens/${token.id}/authority/update/execute`,
         {
           method: "POST",
           headers: {
@@ -669,7 +669,7 @@ describe("Issuance Routes", () => {
       signerSpy.mockClear();
 
       const response = await app.request(
-        `/v1/issuance/tokens/${token.id}/mint`,
+        `/v1/issuance/tokens/${token.id}/mint/execute`,
         {
           method: "POST",
           headers: {
@@ -693,7 +693,7 @@ describe("Issuance Routes", () => {
   });
 
   describe("burn selector validation", () => {
-    it.each(["burn", "burn/prepare"])(
+    it.each(["burn/execute", "burn/build-unsigned-transaction"])(
       "rejects %s without a signing wallet before creating a transaction or signing",
       async (operation) => {
         const token = await seedIssuedToken({ id: "tok_burn_without_selector" });
@@ -1032,7 +1032,7 @@ describe("Issuance Routes", () => {
       const idempotencyKey = "burn-out-of-scope";
 
       const res = await app.request(
-        `/v1/issuance/tokens/${token.id}/burn`,
+        `/v1/issuance/tokens/${token.id}/burn/execute`,
         {
           method: "POST",
           headers: headers(idempotencyKey),
@@ -1092,7 +1092,7 @@ describe("Issuance Routes", () => {
 
       try {
         const replay = await app.request(
-          `/v1/issuance/tokens/${token.id}/burn`,
+          `/v1/issuance/tokens/${token.id}/burn/execute`,
           { method: "POST", headers: headers(idempotencyKey), body: JSON.stringify(body) },
           env
         );
@@ -1102,7 +1102,7 @@ describe("Issuance Routes", () => {
         });
 
         const mismatch = await app.request(
-          `/v1/issuance/tokens/${token.id}/burn`,
+          `/v1/issuance/tokens/${token.id}/burn/execute`,
           {
             method: "POST",
             headers: headers(idempotencyKey),
@@ -1162,7 +1162,7 @@ describe("Issuance Routes", () => {
 
       try {
         const replay = await app.request(
-          `/v1/issuance/tokens/${token.id}/seize`,
+          `/v1/issuance/tokens/${token.id}/seize/execute`,
           { method: "POST", headers: headers(idempotencyKey), body: JSON.stringify(body) },
           env
         );
@@ -1217,7 +1217,7 @@ describe("Issuance Routes", () => {
 
       try {
         const replay = await app.request(
-          `/v1/issuance/tokens/${token.id}/force-burn`,
+          `/v1/issuance/tokens/${token.id}/force-burn/execute`,
           { method: "POST", headers: headers(idempotencyKey), body: JSON.stringify(body) },
           env
         );
@@ -1279,7 +1279,7 @@ describe("Issuance Routes", () => {
 
       try {
         const replay = await app.request(
-          `/v1/issuance/tokens/${token.id}/freeze`,
+          `/v1/issuance/tokens/${token.id}/freeze-account`,
           { method: "POST", headers: headers(idempotencyKey), body: JSON.stringify(body) },
           env
         );
@@ -1351,7 +1351,7 @@ describe("Issuance Routes", () => {
 
       try {
         const replay = await app.request(
-          `/v1/issuance/tokens/${token.id}/unfreeze`,
+          `/v1/issuance/tokens/${token.id}/unfreeze-account`,
           { method: "POST", headers: headers(idempotencyKey), body: JSON.stringify(body) },
           env
         );
@@ -1510,7 +1510,7 @@ describe("Issuance Routes", () => {
         method = "PATCH";
         body = { name: "Updated through selected wallet" };
       } else if (operation === "allowlist-add") {
-        path += "/allowlist";
+        path += "/control-list";
         body = { address: TEST_SOLANA_ADDRESSES.wallet1 };
       } else if (operation === "allowlist-remove") {
         const service = new TokenService(getDb(env));
@@ -1520,7 +1520,7 @@ describe("Issuance Routes", () => {
           addedBy: TEST_PROJECT_API_KEY.id,
         });
         method = "DELETE";
-        path += `/allowlist/${entry.id}`;
+        path += `/control-list/${entry.id}`;
       } else {
         path += `/${operation}`;
       }
@@ -4003,7 +4003,7 @@ describe("Issuance Routes", () => {
   // Mint Operation Tests
   // ═══════════════════════════════════════════════════════════════════════════
 
-  describe("POST /v1/issuance/tokens/:tokenId/mint/prepare", () => {
+  describe("POST /v1/issuance/tokens/:tokenId/mint/build-unsigned-transaction", () => {
     let activeTokenId: string;
 
     beforeEach(async () => {
@@ -4043,7 +4043,7 @@ describe("Issuance Routes", () => {
 
       try {
         const res = await app.request(
-          `/v1/issuance/tokens/${activeTokenId}/mint/prepare`,
+          `/v1/issuance/tokens/${activeTokenId}/mint/build-unsigned-transaction`,
           {
             method: "POST",
             headers: {
@@ -4090,7 +4090,7 @@ describe("Issuance Routes", () => {
       const pendingTokenId = created.data.token.id;
 
       const res = await app.request(
-        `/v1/issuance/tokens/${pendingTokenId}/mint/prepare`,
+        `/v1/issuance/tokens/${pendingTokenId}/mint/build-unsigned-transaction`,
         {
           method: "POST",
           headers: {
@@ -4133,7 +4133,7 @@ describe("Issuance Routes", () => {
       const prepareMintToSpy = vi.spyOn(MosaicService.prototype, "prepareMintTo");
 
       const response = await app.request(
-        `/v1/issuance/tokens/${activeTokenId}/mint/prepare`,
+        `/v1/issuance/tokens/${activeTokenId}/mint/build-unsigned-transaction`,
         {
           method: "POST",
           headers: {
@@ -4169,7 +4169,7 @@ describe("Issuance Routes", () => {
         .run();
 
       const res = await app.request(
-        `/v1/issuance/tokens/${activeTokenId}/mint/prepare`,
+        `/v1/issuance/tokens/${activeTokenId}/mint/build-unsigned-transaction`,
         {
           method: "POST",
           headers: {
@@ -4215,7 +4215,7 @@ describe("Issuance Routes", () => {
 
       try {
         const res = await app.request(
-          `/v1/issuance/tokens/${activeTokenId}/mint/prepare`,
+          `/v1/issuance/tokens/${activeTokenId}/mint/build-unsigned-transaction`,
           {
             method: "POST",
             headers: {
@@ -4284,7 +4284,7 @@ describe("Issuance Routes", () => {
 
       try {
         const res = await app.request(
-          `/v1/issuance/tokens/${activeTokenId}/mint/prepare`,
+          `/v1/issuance/tokens/${activeTokenId}/mint/build-unsigned-transaction`,
           {
             method: "POST",
             headers: {
@@ -4333,7 +4333,7 @@ describe("Issuance Routes", () => {
         .run();
 
       const res = await app.request(
-        `/v1/issuance/tokens/${activeTokenId}/mint/prepare`,
+        `/v1/issuance/tokens/${activeTokenId}/mint/build-unsigned-transaction`,
         {
           method: "POST",
           headers: {
@@ -4357,7 +4357,7 @@ describe("Issuance Routes", () => {
 
     it("returns 400 for zero mint amount", async () => {
       const res = await app.request(
-        `/v1/issuance/tokens/${activeTokenId}/mint/prepare`,
+        `/v1/issuance/tokens/${activeTokenId}/mint/build-unsigned-transaction`,
         {
           method: "POST",
           headers: {
@@ -4404,7 +4404,7 @@ describe("Issuance Routes", () => {
 
     it("rejects zero force-burn amount before authority resolution", async () => {
       const res = await app.request(
-        `/v1/issuance/tokens/${policyTokenId}/force-burn/prepare`,
+        `/v1/issuance/tokens/${policyTokenId}/force-burn/build-unsigned-transaction`,
         {
           method: "POST",
           headers: {
@@ -4428,7 +4428,7 @@ describe("Issuance Routes", () => {
 
     it("rejects zero seize amount before authority resolution", async () => {
       const res = await app.request(
-        `/v1/issuance/tokens/${policyTokenId}/seize/prepare`,
+        `/v1/issuance/tokens/${policyTokenId}/seize/build-unsigned-transaction`,
         {
           method: "POST",
           headers: {
@@ -4480,11 +4480,11 @@ describe("Issuance Routes", () => {
       tokenId = created.data.token.id;
     });
 
-    describe("POST /v1/issuance/tokens/:tokenId/allowlist", () => {
+    describe("POST /v1/issuance/tokens/:tokenId/control-list", () => {
       it("adds address to allowlist", async () => {
         const admitSpy = vi.spyOn(SigningService.prototype, "admitRuntimeExecution");
         const res = await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          `/v1/issuance/tokens/${tokenId}/control-list`,
           {
             method: "POST",
             headers: {
@@ -4511,7 +4511,7 @@ describe("Issuance Routes", () => {
 
       it("refuses to re-add an address already on the control list", async () => {
         const first = await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          `/v1/issuance/tokens/${tokenId}/control-list`,
           {
             method: "POST",
             headers: {
@@ -4525,7 +4525,7 @@ describe("Issuance Routes", () => {
         expect(first.status).toBe(201);
 
         const replay = await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          `/v1/issuance/tokens/${tokenId}/control-list`,
           {
             method: "POST",
             headers: {
@@ -4546,7 +4546,7 @@ describe("Issuance Routes", () => {
 
       it("acknowledges removing an already revoked allowlist entry without signing", async () => {
         const createRes = await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          `/v1/issuance/tokens/${tokenId}/control-list`,
           {
             method: "POST",
             headers: {
@@ -4567,7 +4567,7 @@ describe("Issuance Routes", () => {
         signerSpy.mockClear();
 
         const res = await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist/${entryId}`,
+          `/v1/issuance/tokens/${tokenId}/control-list/${entryId}`,
           {
             method: "DELETE",
             headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
@@ -4594,7 +4594,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${tokenId}/allowlist`,
+            `/v1/issuance/tokens/${tokenId}/control-list`,
             {
               method: "POST",
               headers: {
@@ -4646,7 +4646,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${tokenId}/allowlist`,
+            `/v1/issuance/tokens/${tokenId}/control-list`,
             {
               method: "POST",
               headers: {
@@ -4690,7 +4690,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${tokenId}/allowlist`,
+            `/v1/issuance/tokens/${tokenId}/control-list`,
             {
               method: "POST",
               headers: {
@@ -4724,7 +4724,7 @@ describe("Issuance Routes", () => {
           expect(audit).not.toBeNull();
 
           const retry = await app.request(
-            `/v1/issuance/tokens/${tokenId}/allowlist`,
+            `/v1/issuance/tokens/${tokenId}/control-list`,
             {
               method: "POST",
               headers: {
@@ -4768,7 +4768,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${tokenId}/allowlist`,
+            `/v1/issuance/tokens/${tokenId}/control-list`,
             {
               method: "POST",
               headers: {
@@ -4802,7 +4802,7 @@ describe("Issuance Routes", () => {
       it("returns 409 for duplicate address", async () => {
         // Add first entry
         await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          `/v1/issuance/tokens/${tokenId}/control-list`,
           {
             method: "POST",
             headers: {
@@ -4816,7 +4816,7 @@ describe("Issuance Routes", () => {
 
         // Try to add same address again
         const res = await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          `/v1/issuance/tokens/${tokenId}/control-list`,
           {
             method: "POST",
             headers: {
@@ -4857,7 +4857,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${tokenId}/allowlist`,
+            `/v1/issuance/tokens/${tokenId}/control-list`,
             {
               method: "POST",
               headers: {
@@ -4889,11 +4889,11 @@ describe("Issuance Routes", () => {
       });
     });
 
-    describe("GET /v1/issuance/tokens/:tokenId/allowlist", () => {
+    describe("GET /v1/issuance/tokens/:tokenId/control-list", () => {
       it("lists allowlist entries", async () => {
         // Add an entry first
         await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          `/v1/issuance/tokens/${tokenId}/control-list`,
           {
             method: "POST",
             headers: {
@@ -4909,7 +4909,7 @@ describe("Issuance Routes", () => {
         );
 
         const res = await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          `/v1/issuance/tokens/${tokenId}/control-list`,
           {
             headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
           },
@@ -4924,12 +4924,12 @@ describe("Issuance Routes", () => {
       });
     });
 
-    describe("DELETE /v1/issuance/tokens/:tokenId/allowlist/:entryId", () => {
+    describe("DELETE /v1/issuance/tokens/:tokenId/control-list/:entryId", () => {
       it("revokes allowlist entry", async () => {
         const admitSpy = vi.spyOn(SigningService.prototype, "admitRuntimeExecution");
         // Add an entry
         const addRes = await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          `/v1/issuance/tokens/${tokenId}/control-list`,
           {
             method: "POST",
             headers: {
@@ -4945,7 +4945,7 @@ describe("Issuance Routes", () => {
 
         // Delete it
         const res = await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist/${entryId}`,
+          `/v1/issuance/tokens/${tokenId}/control-list/${entryId}`,
           {
             method: "DELETE",
             headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
@@ -4957,7 +4957,7 @@ describe("Issuance Routes", () => {
 
         // Verify it's revoked
         const listRes = await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          `/v1/issuance/tokens/${tokenId}/control-list`,
           {
             headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
           },
@@ -4971,7 +4971,7 @@ describe("Issuance Routes", () => {
 
       it("syncs control-list removals on-chain when an ABL address is configured", async () => {
         await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          `/v1/issuance/tokens/${tokenId}/control-list`,
           {
             method: "POST",
             headers: {
@@ -4990,7 +4990,7 @@ describe("Issuance Routes", () => {
           .run();
 
         const listRes = await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          `/v1/issuance/tokens/${tokenId}/control-list`,
           {
             headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
           },
@@ -5007,7 +5007,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${tokenId}/allowlist/${entryId}`,
+            `/v1/issuance/tokens/${tokenId}/control-list/${entryId}`,
             {
               method: "DELETE",
               headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
@@ -5057,7 +5057,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${tokenId}/allowlist/${entry.id}`,
+            `/v1/issuance/tokens/${tokenId}/control-list/${entry.id}`,
             {
               method: "DELETE",
               headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
@@ -5081,7 +5081,7 @@ describe("Issuance Routes", () => {
 
       it("keeps the database entry active until a retry confirms on-chain removal", async () => {
         await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          `/v1/issuance/tokens/${tokenId}/control-list`,
           {
             method: "POST",
             headers: {
@@ -5100,7 +5100,7 @@ describe("Issuance Routes", () => {
           .run();
 
         const listRes = await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          `/v1/issuance/tokens/${tokenId}/control-list`,
           {
             headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
           },
@@ -5119,7 +5119,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${tokenId}/allowlist/${entryId}`,
+            `/v1/issuance/tokens/${tokenId}/control-list/${entryId}`,
             {
               method: "DELETE",
               headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
@@ -5136,7 +5136,7 @@ describe("Issuance Routes", () => {
           expect(stillActive?.status).toBe("active");
 
           const retry = await app.request(
-            `/v1/issuance/tokens/${tokenId}/allowlist/${entryId}`,
+            `/v1/issuance/tokens/${tokenId}/control-list/${entryId}`,
             {
               method: "DELETE",
               headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
@@ -5180,7 +5180,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${tokenId}/allowlist/${entry.id}`,
+            `/v1/issuance/tokens/${tokenId}/control-list/${entry.id}`,
             {
               method: "DELETE",
               headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
@@ -5257,7 +5257,7 @@ describe("Issuance Routes", () => {
         slot: 100n,
       });
 
-    describe("POST /v1/issuance/tokens/:tokenId/freeze", () => {
+    describe("POST /v1/issuance/tokens/:tokenId/freeze-account", () => {
       it("freezes an account", async () => {
         const activeTokenId = await seedFreezableToken();
         mockResolvedTokenAccount();
@@ -5265,7 +5265,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${activeTokenId}/freeze`,
+            `/v1/issuance/tokens/${activeTokenId}/freeze-account`,
             {
               method: "POST",
               headers: {
@@ -5305,7 +5305,7 @@ describe("Issuance Routes", () => {
         try {
           // Freeze first
           await app.request(
-            `/v1/issuance/tokens/${activeTokenId}/freeze`,
+            `/v1/issuance/tokens/${activeTokenId}/freeze-account`,
             {
               method: "POST",
               headers: {
@@ -5319,7 +5319,7 @@ describe("Issuance Routes", () => {
 
           // Try to freeze again
           const res = await app.request(
-            `/v1/issuance/tokens/${activeTokenId}/freeze`,
+            `/v1/issuance/tokens/${activeTokenId}/freeze-account`,
             {
               method: "POST",
               headers: {
@@ -5351,7 +5351,7 @@ describe("Issuance Routes", () => {
         } as Awaited<ReturnType<typeof MosaicSdk.resolveTokenAccount>>);
 
         const res = await app.request(
-          `/v1/issuance/tokens/${activeTokenId}/freeze`,
+          `/v1/issuance/tokens/${activeTokenId}/freeze-account`,
           {
             method: "POST",
             headers: {
@@ -5387,7 +5387,7 @@ describe("Issuance Routes", () => {
         );
 
         const res = await app.request(
-          `/v1/issuance/tokens/${activeTokenId}/freeze`,
+          `/v1/issuance/tokens/${activeTokenId}/freeze-account`,
           {
             method: "POST",
             headers: {
@@ -5439,7 +5439,7 @@ describe("Issuance Routes", () => {
 
         try {
           const firstFreezeRes = await app.request(
-            `/v1/issuance/tokens/${activeTokenId}/freeze`,
+            `/v1/issuance/tokens/${activeTokenId}/freeze-account`,
             {
               method: "POST",
               headers: {
@@ -5448,7 +5448,7 @@ describe("Issuance Routes", () => {
               },
               body: JSON.stringify({
                 accountAddress: TEST_SOLANA_ADDRESSES.wallet1,
-                reason: "Initial freeze",
+                reason: "Initial freeze-account",
               }),
             },
             env
@@ -5459,7 +5459,7 @@ describe("Issuance Routes", () => {
           const frozenRecordId = firstFreezeBody.data.frozenAccount.id as string;
 
           const unfreezeRes = await app.request(
-            `/v1/issuance/tokens/${activeTokenId}/unfreeze`,
+            `/v1/issuance/tokens/${activeTokenId}/unfreeze-account`,
             {
               method: "POST",
               headers: {
@@ -5474,7 +5474,7 @@ describe("Issuance Routes", () => {
           expect(unfreezeRes.status).toBe(200);
 
           const secondFreezeRes = await app.request(
-            `/v1/issuance/tokens/${activeTokenId}/freeze`,
+            `/v1/issuance/tokens/${activeTokenId}/freeze-account`,
             {
               method: "POST",
               headers: {
@@ -5514,7 +5514,7 @@ describe("Issuance Routes", () => {
       });
     });
 
-    describe("POST /v1/issuance/tokens/:tokenId/unfreeze", () => {
+    describe("POST /v1/issuance/tokens/:tokenId/unfreeze-account", () => {
       it("unfreezes an account", async () => {
         const activeTokenId = await seedFreezableToken();
         mockResolvedTokenAccount();
@@ -5527,7 +5527,7 @@ describe("Issuance Routes", () => {
         try {
           // Freeze first
           await app.request(
-            `/v1/issuance/tokens/${activeTokenId}/freeze`,
+            `/v1/issuance/tokens/${activeTokenId}/freeze-account`,
             {
               method: "POST",
               headers: {
@@ -5541,7 +5541,7 @@ describe("Issuance Routes", () => {
 
           // Unfreeze
           const res = await app.request(
-            `/v1/issuance/tokens/${activeTokenId}/unfreeze`,
+            `/v1/issuance/tokens/${activeTokenId}/unfreeze-account`,
             {
               method: "POST",
               headers: {
@@ -5568,7 +5568,7 @@ describe("Issuance Routes", () => {
         mockResolvedTokenAccount();
 
         const res = await app.request(
-          `/v1/issuance/tokens/${activeTokenId}/unfreeze`,
+          `/v1/issuance/tokens/${activeTokenId}/unfreeze-account`,
           {
             method: "POST",
             headers: {
@@ -5597,7 +5597,7 @@ describe("Issuance Routes", () => {
 
     const addBlocklistEntry = async (address: string) => {
       await app.request(
-        `/v1/issuance/tokens/${blocklistTokenId}/allowlist`,
+        `/v1/issuance/tokens/${blocklistTokenId}/control-list`,
         {
           method: "POST",
           headers: {
@@ -5656,7 +5656,7 @@ describe("Issuance Routes", () => {
     // by the "on-chain allowlist auto-add on mint" describe below.
     it("rejects mint to non-allowlisted address (legacy tokens with no ablListAddress)", async () => {
       const res = await app.request(
-        `/v1/issuance/tokens/${allowlistTokenId}/mint/prepare`,
+        `/v1/issuance/tokens/${allowlistTokenId}/mint/build-unsigned-transaction`,
         {
           method: "POST",
           headers: {
@@ -5680,7 +5680,7 @@ describe("Issuance Routes", () => {
 
     it("rejects execute mint to non-allowlisted address (legacy tokens with no ablListAddress)", async () => {
       const res = await app.request(
-        `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+        `/v1/issuance/tokens/${allowlistTokenId}/mint/execute`,
         {
           method: "POST",
           headers: {
@@ -5716,7 +5716,7 @@ describe("Issuance Routes", () => {
       try {
         // Add to allowlist first
         await app.request(
-          `/v1/issuance/tokens/${allowlistTokenId}/allowlist`,
+          `/v1/issuance/tokens/${allowlistTokenId}/control-list`,
           {
             method: "POST",
             headers: {
@@ -5730,7 +5730,7 @@ describe("Issuance Routes", () => {
 
         // Now mint should work
         const res = await app.request(
-          `/v1/issuance/tokens/${allowlistTokenId}/mint/prepare`,
+          `/v1/issuance/tokens/${allowlistTokenId}/mint/build-unsigned-transaction`,
           {
             method: "POST",
             headers: {
@@ -5797,7 +5797,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint/prepare`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint/build-unsigned-transaction`,
             {
               method: "POST",
               headers: {
@@ -5846,7 +5846,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint/prepare`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint/build-unsigned-transaction`,
             {
               method: "POST",
               headers: {
@@ -5929,7 +5929,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint/execute`,
             {
               method: "POST",
               headers: {
@@ -6008,7 +6008,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint/execute`,
             {
               method: "POST",
               headers: {
@@ -6060,7 +6060,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint/execute`,
             {
               method: "POST",
               headers: {
@@ -6114,7 +6114,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint/execute`,
             {
               method: "POST",
               headers: {
@@ -6168,7 +6168,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint/execute`,
             {
               method: "POST",
               headers: {
@@ -6211,7 +6211,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint/execute`,
             {
               method: "POST",
               headers: {
@@ -6252,7 +6252,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint/execute`,
             {
               method: "POST",
               headers: {
@@ -6325,7 +6325,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint/execute`,
             {
               method: "POST",
               headers: {
@@ -6381,7 +6381,7 @@ describe("Issuance Routes", () => {
           expect(outcome).toMatchObject({ status: "success" });
 
           const replay = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint/execute`,
             {
               method: "POST",
               headers: {
@@ -6448,7 +6448,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint/prepare`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint/build-unsigned-transaction`,
             {
               method: "POST",
               headers: {
@@ -6512,7 +6512,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint/execute`,
             {
               method: "POST",
               headers: {
@@ -6572,7 +6572,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint/prepare`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint/build-unsigned-transaction`,
             {
               method: "POST",
               headers: {
@@ -6625,7 +6625,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint/execute`,
             {
               method: "POST",
               headers: {
@@ -6678,7 +6678,7 @@ describe("Issuance Routes", () => {
 
         try {
           const firstRes = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint/execute`,
             {
               method: "POST",
               headers: {
@@ -6722,7 +6722,7 @@ describe("Issuance Routes", () => {
 
           try {
             const retryRes = await app.request(
-              `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+              `/v1/issuance/tokens/${allowlistTokenId}/mint/execute`,
               {
                 method: "POST",
                 headers: {
@@ -6770,7 +6770,7 @@ describe("Issuance Routes", () => {
 
         try {
           const failedRes = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint/execute`,
             {
               method: "POST",
               headers: {
@@ -6798,7 +6798,7 @@ describe("Issuance Routes", () => {
           // Retry on the same address with the on-chain add succeeding must
           // not be blocked by a stale "revoked" row from the prior rollback.
           const retryRes = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint/execute`,
             {
               method: "POST",
               headers: {
@@ -6856,7 +6856,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            `/v1/issuance/tokens/${allowlistTokenId}/mint/execute`,
             {
               method: "POST",
               headers: {
@@ -6898,7 +6898,7 @@ describe("Issuance Routes", () => {
       await addBlocklistEntry(TEST_SOLANA_ADDRESSES.wallet2);
 
       const res = await app.request(
-        `/v1/issuance/tokens/${blocklistTokenId}/mint/prepare`,
+        `/v1/issuance/tokens/${blocklistTokenId}/mint/build-unsigned-transaction`,
         {
           method: "POST",
           headers: {
@@ -6924,7 +6924,7 @@ describe("Issuance Routes", () => {
       await addBlocklistEntry(TEST_SOLANA_ADDRESSES.wallet2);
 
       const res = await app.request(
-        `/v1/issuance/tokens/${blocklistTokenId}/mint`,
+        `/v1/issuance/tokens/${blocklistTokenId}/mint/execute`,
         {
           method: "POST",
           headers: {
@@ -6950,7 +6950,7 @@ describe("Issuance Routes", () => {
       await addBlocklistEntry(TEST_SOLANA_ADDRESSES.wallet2);
 
       const res = await app.request(
-        `/v1/issuance/tokens/${blocklistTokenId}/seize/prepare`,
+        `/v1/issuance/tokens/${blocklistTokenId}/seize/build-unsigned-transaction`,
         {
           method: "POST",
           headers: {
@@ -6977,7 +6977,7 @@ describe("Issuance Routes", () => {
       await addBlocklistEntry(TEST_SOLANA_ADDRESSES.wallet2);
 
       const res = await app.request(
-        `/v1/issuance/tokens/${blocklistTokenId}/seize`,
+        `/v1/issuance/tokens/${blocklistTokenId}/seize/execute`,
         {
           method: "POST",
           headers: {
@@ -7002,7 +7002,7 @@ describe("Issuance Routes", () => {
 
     it("rejects prepare seize to non-allowlisted destination", async () => {
       const res = await app.request(
-        `/v1/issuance/tokens/${allowlistTokenId}/seize/prepare`,
+        `/v1/issuance/tokens/${allowlistTokenId}/seize/build-unsigned-transaction`,
         {
           method: "POST",
           headers: {
@@ -7027,7 +7027,7 @@ describe("Issuance Routes", () => {
 
     it("rejects execute seize to non-allowlisted destination", async () => {
       const res = await app.request(
-        `/v1/issuance/tokens/${allowlistTokenId}/seize`,
+        `/v1/issuance/tokens/${allowlistTokenId}/seize/execute`,
         {
           method: "POST",
           headers: {
@@ -7513,7 +7513,7 @@ describe("Issuance Routes", () => {
       listAddress: undefined,
     };
 
-    describe("POST /v1/issuance/tokens/:tokenId/deploy", () => {
+    describe("POST /v1/issuance/tokens/:tokenId/deploy/execute", () => {
       it.each([false, true])(
         "persists distinct draft authorities (metadata follow-up fails: %s)",
         async (metadataFails) => {
@@ -7526,7 +7526,7 @@ describe("Issuance Routes", () => {
             TEST_SOLANA_ADDRESSES.wallet2
           );
           const freezeWallet = await seedIssuanceActivityWallet(
-            "wal_draft_freeze",
+            "wal_draft_freeze-account",
             TEST_SOLANA_ADDRESSES.wallet3
           );
           const delegateWallet = await seedIssuanceActivityWallet(
@@ -7564,7 +7564,11 @@ describe("Issuance Routes", () => {
             body: JSON.stringify({ authorityCustodyWalletIds: authorities }),
           };
           try {
-            const first = await app.request(`/v1/issuance/tokens/${token.id}/deploy`, request, env);
+            const first = await app.request(
+              `/v1/issuance/tokens/${token.id}/deploy/execute`,
+              request,
+              env
+            );
             expect(first.status).toBe(metadataFails ? 400 : 200);
             expect(createToken).toHaveBeenCalledWith(
               expect.objectContaining({
@@ -7594,13 +7598,13 @@ describe("Issuance Routes", () => {
               }),
             });
             const replay = await app.request(
-              `/v1/issuance/tokens/${token.id}/deploy`,
+              `/v1/issuance/tokens/${token.id}/deploy/execute`,
               request,
               env
             );
             expect(replay.status).toBe(200);
             const changed = await app.request(
-              `/v1/issuance/tokens/${token.id}/deploy`,
+              `/v1/issuance/tokens/${token.id}/deploy/execute`,
               {
                 ...request,
                 body: JSON.stringify({
@@ -7633,7 +7637,7 @@ describe("Issuance Routes", () => {
           const createToken = vi.spyOn(MosaicService.prototype, "createToken");
           try {
             const response = await app.request(
-              `/v1/issuance/tokens/${token.id}/deploy`,
+              `/v1/issuance/tokens/${token.id}/deploy/execute`,
               {
                 method: "POST",
                 headers: {
@@ -7672,7 +7676,7 @@ describe("Issuance Routes", () => {
             isFreezable: false,
           });
           const response = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy`,
+            `/v1/issuance/tokens/${token.id}/deploy/execute`,
             {
               method: "POST",
               headers: {
@@ -7701,7 +7705,7 @@ describe("Issuance Routes", () => {
         signerSpy.mockClear();
 
         const res = await app.request(
-          `/v1/issuance/tokens/${token.id}/deploy`,
+          `/v1/issuance/tokens/${token.id}/deploy/execute`,
           {
             method: "POST",
             headers: {
@@ -7734,7 +7738,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy`,
+            `/v1/issuance/tokens/${token.id}/deploy/execute`,
             {
               method: "POST",
               headers: {
@@ -7809,7 +7813,7 @@ describe("Issuance Routes", () => {
             });
           try {
             const response = await app.request(
-              `/v1/issuance/tokens/${token.id}/deploy`,
+              `/v1/issuance/tokens/${token.id}/deploy/execute`,
               {
                 method: "POST",
                 headers,
@@ -7860,7 +7864,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy`,
+            `/v1/issuance/tokens/${token.id}/deploy/execute`,
             {
               method: "POST",
               headers: {
@@ -7919,10 +7923,18 @@ describe("Issuance Routes", () => {
         };
 
         try {
-          const first = await app.request(`/v1/issuance/tokens/${token.id}/deploy`, request, env);
-          const replay = await app.request(`/v1/issuance/tokens/${token.id}/deploy`, request, env);
+          const first = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/execute`,
+            request,
+            env
+          );
+          const replay = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/execute`,
+            request,
+            env
+          );
           const mismatch = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy`,
+            `/v1/issuance/tokens/${token.id}/deploy/execute`,
             {
               ...request,
               body: JSON.stringify({
@@ -7963,7 +7975,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy`,
+            `/v1/issuance/tokens/${token.id}/deploy/execute`,
             {
               method: "POST",
               headers: {
@@ -8020,7 +8032,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `https://attacker.example/v1/issuance/tokens/${token.id}/deploy`,
+            `https://attacker.example/v1/issuance/tokens/${token.id}/deploy/execute`,
             {
               method: "POST",
               headers: {
@@ -8061,7 +8073,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy`,
+            `/v1/issuance/tokens/${token.id}/deploy/execute`,
             {
               method: "POST",
               headers: {
@@ -8097,7 +8109,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy`,
+            `/v1/issuance/tokens/${token.id}/deploy/execute`,
             {
               method: "POST",
               headers: {
@@ -8136,7 +8148,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy`,
+            `/v1/issuance/tokens/${token.id}/deploy/execute`,
             {
               method: "POST",
               headers: {
@@ -8177,7 +8189,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy`,
+            `/v1/issuance/tokens/${token.id}/deploy/execute`,
             {
               method: "POST",
               headers: {
@@ -8216,7 +8228,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy`,
+            `/v1/issuance/tokens/${token.id}/deploy/execute`,
             {
               method: "POST",
               headers: {
@@ -8266,7 +8278,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy`,
+            `/v1/issuance/tokens/${token.id}/deploy/execute`,
             {
               method: "POST",
               headers: {
@@ -8331,7 +8343,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy`,
+            `/v1/issuance/tokens/${token.id}/deploy/execute`,
             {
               method: "POST",
               headers: {
@@ -8373,7 +8385,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy`,
+            `/v1/issuance/tokens/${token.id}/deploy/execute`,
             {
               method: "POST",
               headers: {
@@ -8410,7 +8422,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy`,
+            `/v1/issuance/tokens/${token.id}/deploy/execute`,
             {
               method: "POST",
               headers: {
@@ -8432,7 +8444,7 @@ describe("Issuance Routes", () => {
       });
     });
 
-    describe("POST /v1/issuance/tokens/:tokenId/deploy/prepare", () => {
+    describe("POST /v1/issuance/tokens/:tokenId/deploy/build-unsigned-transaction", () => {
       it("rejects a provider override that diverges from an exact pin before writes or secrets", async () => {
         const token = await seedIssuedToken({
           id: "tok_prepare_exact_pin_divergence",
@@ -8447,7 +8459,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy/prepare`,
+            `/v1/issuance/tokens/${token.id}/deploy/build-unsigned-transaction`,
             {
               method: "POST",
               headers: {
@@ -8483,7 +8495,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy/prepare`,
+            `/v1/issuance/tokens/${token.id}/deploy/build-unsigned-transaction`,
             {
               method: "POST",
               headers: {
@@ -8539,7 +8551,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy/prepare`,
+            `/v1/issuance/tokens/${token.id}/deploy/build-unsigned-transaction`,
             {
               method: "POST",
               headers: {
@@ -8599,7 +8611,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy/prepare`,
+            `/v1/issuance/tokens/${token.id}/deploy/build-unsigned-transaction`,
             {
               method: "POST",
               headers: {
@@ -8644,7 +8656,7 @@ describe("Issuance Routes", () => {
       });
     });
 
-    describe("POST /v1/issuance/tokens/:tokenId/deploy/prepare-metadata", () => {
+    describe("POST /v1/issuance/tokens/:tokenId/deploy/metadata/build-unsigned-transaction", () => {
       it("prepares the metadata-uri follow-up tx for a deployed token", async () => {
         const token = await seedIssuedToken({
           id: "tok_prepare_metadata_followup",
@@ -8669,7 +8681,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy/prepare-metadata`,
+            `/v1/issuance/tokens/${token.id}/deploy/metadata/build-unsigned-transaction`,
             {
               method: "POST",
               headers: {
@@ -8727,7 +8739,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy/prepare-metadata`,
+            `/v1/issuance/tokens/${token.id}/deploy/metadata/build-unsigned-transaction`,
             {
               method: "POST",
               headers: {
@@ -8771,7 +8783,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy/prepare-metadata`,
+            `/v1/issuance/tokens/${token.id}/deploy/metadata/build-unsigned-transaction`,
             {
               method: "POST",
               headers: {
@@ -8807,7 +8819,7 @@ describe("Issuance Routes", () => {
         });
 
         const res = await app.request(
-          `/v1/issuance/tokens/${token.id}/deploy/prepare-metadata`,
+          `/v1/issuance/tokens/${token.id}/deploy/metadata/build-unsigned-transaction`,
           {
             method: "POST",
             headers: {
@@ -8823,7 +8835,7 @@ describe("Issuance Routes", () => {
       });
     });
 
-    describe("POST /v1/issuance/tokens/:tokenId/deploy/confirm", () => {
+    describe("POST /v1/issuance/tokens/:tokenId/deploy/confirm-submitted-transaction", () => {
       it("records the mint, marks the token active, and unblocks prepare-metadata", async () => {
         const token = await seedIssuedToken({
           id: "tok_deploy_confirm",
@@ -8864,7 +8876,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            `/v1/issuance/tokens/${token.id}/deploy/confirm-submitted-transaction`,
             {
               method: "POST",
               headers: {
@@ -8902,7 +8914,7 @@ describe("Issuance Routes", () => {
 
           try {
             const followUp = await app.request(
-              `/v1/issuance/tokens/${token.id}/deploy/prepare-metadata`,
+              `/v1/issuance/tokens/${token.id}/deploy/metadata/build-unsigned-transaction`,
               {
                 method: "POST",
                 headers: {
@@ -8976,7 +8988,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            `/v1/issuance/tokens/${token.id}/deploy/confirm-submitted-transaction`,
             {
               method: "POST",
               headers: {
@@ -9044,7 +9056,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            `/v1/issuance/tokens/${token.id}/deploy/confirm-submitted-transaction`,
             {
               method: "POST",
               headers: {
@@ -9122,7 +9134,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            `/v1/issuance/tokens/${token.id}/deploy/confirm-submitted-transaction`,
             {
               method: "POST",
               headers: {
@@ -9176,7 +9188,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            `/v1/issuance/tokens/${token.id}/deploy/confirm-submitted-transaction`,
             {
               method: "POST",
               headers: {
@@ -9265,7 +9277,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            `/v1/issuance/tokens/${token.id}/deploy/confirm-submitted-transaction`,
             {
               method: "POST",
               headers: {
@@ -9360,7 +9372,7 @@ describe("Issuance Routes", () => {
         try {
           // 1. prepareDeploy with a custom signing wallet — it must be persisted.
           const prepareRes = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy/prepare`,
+            `/v1/issuance/tokens/${token.id}/deploy/build-unsigned-transaction`,
             {
               method: "POST",
               headers: {
@@ -9385,7 +9397,7 @@ describe("Issuance Routes", () => {
           // custody address (and recorded authorities) would silently differ.
           exactSignerSpy.mockClear();
           const confirmRes = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            `/v1/issuance/tokens/${token.id}/deploy/confirm-submitted-transaction`,
             {
               method: "POST",
               headers: {
@@ -9433,7 +9445,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            `/v1/issuance/tokens/${token.id}/deploy/confirm-submitted-transaction`,
             {
               method: "POST",
               headers: {
@@ -9464,7 +9476,7 @@ describe("Issuance Routes", () => {
         });
 
         const res = await app.request(
-          `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+          `/v1/issuance/tokens/${token.id}/deploy/confirm-submitted-transaction`,
           {
             method: "POST",
             headers: {
@@ -9502,7 +9514,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            `/v1/issuance/tokens/${token.id}/deploy/confirm-submitted-transaction`,
             {
               method: "POST",
               headers: {
@@ -9538,7 +9550,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            `/v1/issuance/tokens/${token.id}/deploy/confirm-submitted-transaction`,
             {
               method: "POST",
               headers: {
@@ -9629,7 +9641,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            `/v1/issuance/tokens/${token.id}/deploy/confirm-submitted-transaction`,
             {
               method: "POST",
               headers: {

@@ -50,7 +50,7 @@ export async function fetchProviderAvailability(
   organizationId: string
 ): Promise<DashboardProviderAvailability> {
   const response = await request(
-    `/v1/organizations/${encodeURIComponent(organizationId)}/provider-access`
+    `/v1/organizations/${encodeURIComponent(organizationId)}/provider-availability`
   );
   if (!response.ok) {
     const body = await response.text();

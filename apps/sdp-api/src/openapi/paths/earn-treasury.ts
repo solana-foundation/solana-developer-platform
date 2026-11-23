@@ -103,7 +103,15 @@ export function registerEarnTreasuryPaths(
         ? EARN_GROUPS.programs
         : EARN_GROUPS.treasury,
       security,
-      description: options.description + idempotency.description,
+      description:
+        options.description +
+        idempotency.description +
+        (options.signs
+          ? " Fireblocks BYOK wallets use sign-only PROGRAM_CALL proposals on Earn's release channel. " +
+            "The workspace must enable program calls and authorize the vault, programs and destinations. " +
+            "Approval must complete within the synchronous workflow budget; Fireblocks does not broadcast. " +
+            "SDP verifies the signature, preserves the approved message, records the signed intent and submits it."
+          : ""),
       request: {
         headers: idempotency.headers,
         ...(options.params ? { params: options.params } : {}),

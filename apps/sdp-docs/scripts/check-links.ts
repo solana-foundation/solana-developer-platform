@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { expandDocsBlocks } from "@/lib/docs-blocks";
 import { isPageSourcePublished, publicSurface } from "@/lib/release-channel";
 import { docsPageSlugOf, getDocsMarkdownPath, getDocsPagePath } from "@/lib/site";
+import { probeExternalUrl } from "./lib/external-link";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,7 +14,6 @@ const docsContentDir = path.resolve(__dirname, "../content/docs");
 const docsPublicDir = path.resolve(__dirname, "../public");
 const docsMetaPath = path.resolve(docsContentDir, "meta.json");
 const configPath = path.resolve(__dirname, "link-check.config.json");
-const EXTERNAL_URL_TIMEOUT_MS = 10_000;
 
 // Links are checked as the build for src/generated/public-surface.json renders
 // them: pages a `module:` or `rampProvider:` tag leaves out do not exist, and
@@ -197,56 +197,6 @@ function shouldIgnoreExternalUrl(url: URL, config: LinkCheckConfig): boolean {
     config.ignoredExternalUrls.includes(url.toString()) ||
     config.ignoredExternalHosts.includes(url.host)
   );
-}
-
-async function probeExternalUrl(
-  url: string
-): Promise<{ ok: boolean; status?: number; error?: string }> {
-  const attempt = async (method: "HEAD" | "GET") => {
-    const response = await fetch(url, {
-      method,
-      redirect: "follow",
-      signal: AbortSignal.timeout(EXTERNAL_URL_TIMEOUT_MS),
-      headers: {
-        "user-agent": "sdp-docs-link-checker/1.0",
-      },
-    });
-
-    return response.status;
-  };
-
-  try {
-    const headStatus = await attempt("HEAD");
-    if ([401, 403, 429].includes(headStatus) || (headStatus >= 200 && headStatus < 400)) {
-      return { ok: true, status: headStatus };
-    }
-    if (headStatus !== 405) {
-      return { ok: false, status: headStatus };
-    }
-  } catch {
-    try {
-      const getStatus = await attempt("GET");
-      if ([401, 403, 429].includes(getStatus) || (getStatus >= 200 && getStatus < 400)) {
-        return { ok: true, status: getStatus };
-      }
-      return { ok: false, status: getStatus };
-    } catch (nestedError) {
-      return {
-        ok: false,
-        error: nestedError instanceof Error ? nestedError.message : String(nestedError),
-      };
-    }
-  }
-
-  try {
-    const getStatus = await attempt("GET");
-    if ([401, 403, 429].includes(getStatus) || (getStatus >= 200 && getStatus < 400)) {
-      return { ok: true, status: getStatus };
-    }
-    return { ok: false, status: getStatus };
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
-  }
 }
 
 async function collectLinks(pages: Map<string, string>): Promise<LinkReference[]> {

@@ -22,8 +22,8 @@ export function canonicalizeTransferBatchBody(body: JsonValue): JsonValue {
 }
 
 /**
- * {@link canonicalizeTransferBatchBody} with the token as sent, so a key or
- * batch row saved under that form still matches its retry (`previousCanonicalize`).
+ * {@link canonicalizeTransferBatchBody} with the token as sent, so a
+ * batch row saved under that form still matches its retry.
  */
 export function previousCanonicalTransferBatchBody(body: JsonValue): JsonValue {
   return canonicalBatchBody(body);

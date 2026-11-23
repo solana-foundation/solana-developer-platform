@@ -17,7 +17,7 @@ import { Label } from "@sdp/ui/label";
 import { Modal } from "@sdp/ui/modal";
 import { StatusText } from "@sdp/ui/status-text";
 import { ChevronDownIcon, Loader2Icon } from "lucide-react";
-import { type ChangeEvent, type FormEvent, useEffect, useMemo, useState } from "react";
+import { type ChangeEvent, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useSWRConfig } from "swr";
 import { EarnFlowStepper } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-flow-stepper";
 import { EarnFlowTransition } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-flow-transition";
@@ -30,6 +30,7 @@ import { EarnAmountMaxButton } from "./earn-amount-max-button";
 import { compareUnsignedDecimals, isPositiveDecimal, parseUnsignedDecimal } from "./earn-decimal";
 import { EarnErrorNote } from "./earn-error-note";
 import {
+  formatBpsPercent,
   formatDurationSeconds,
   formatEpochSecondsOr,
   formatTokenValue,
@@ -46,9 +47,17 @@ import {
 } from "./earn-program-data";
 import { earnQueryKeys } from "./earn-query-key";
 import {
+  ASYNC_WITHDRAWAL_STOP_COPY,
+  type AsyncWithdrawalRecovery,
+  decideAsyncWithdrawalSubmit,
+  forgetAsyncWithdrawalShares,
+  type KeptAsyncWithdrawalRetry,
+  keptAsyncWithdrawalRetry,
+  recallLegacyAsyncWithdrawalKeptKey,
   vaultAsyncWithdrawalIdempotencyKeyStore,
   vaultAsyncWithdrawalRequestFingerprint,
 } from "./earn-vault-async-withdrawal-tracking";
+import { KeptAsyncAttemptNotice, type RestoredQueueTerms } from "./earn-vault-kept-attempt-notice";
 import type { VaultSubmissionObserver } from "./earn-vault-movement";
 import {
   earnVaultQueuedWithdrawalStatusPresentation,
@@ -79,10 +88,6 @@ type FormStep = "details" | "review";
 interface QueueDurationUnit {
   divisor: number;
   labelKey: MessageKey;
-}
-
-function bpsToPercent(bps: number): string {
-  return (bps / 100).toFixed(2).replace(/\.?0+$/, "");
 }
 
 function percentToBps(value: string): number {
@@ -213,52 +218,94 @@ function useQueuedWithdrawalPreview(
   return { preview, previewLoading, error, setError };
 }
 
+/** What one confirm on the review step sends, decided once at submit. */
+interface QueuedWithdrawalSubmitIntent {
+  /** The review's approved terms — the kept request a confirm promised to resubmit. */
+  approvedTerms: KeptAsyncWithdrawalRetry | undefined;
+  /** The typed-quantity fingerprint; `undefined` only while the form is invalid, which disables the confirm. */
+  fingerprint: string | undefined;
+  /** The body a FRESH key sends: the live share derivation and the current queue terms. */
+  freshBody: EarnVaultQueuedWithdrawalTermsRequest | null;
+  preview: EarnVaultQueuedWithdrawalPreview | null;
+}
+
 /**
  * Owns the value-moving request submission. Bookkeeping happens before
  * component-local state: the modal may have unmounted while the POST was in
  * flight. Ambiguous failures preserve the retry key.
  */
 function useQueuedWithdrawalSubmission(options: {
-  onSubmissionStart?: VaultSubmissionObserver;
   custodyWalletId: string;
+  onRecoveryInvalidated: () => void;
   onRequested?: (request: EarnVaultWithdrawalRequestRecord) => void;
+  onSubmissionStart?: VaultSubmissionObserver;
   projectId: string | null;
+  recovery: AsyncWithdrawalRecovery | undefined;
   setError: (error: string | null) => void;
 }) {
   const t = useTranslations();
   const { mutate } = useSWRConfig();
   const [submitting, setSubmitting] = useState(false);
   const [outcome, setOutcome] = useState<EarnVaultQueuedWithdrawalOutcome | null>(null);
+  // A synchronous double-press guard: `submitting` alone leaves the window
+  // between the click and the re-render open to a second submit.
+  const submittingRef = useRef(false);
 
-  async function submit(
-    previewInput: EarnVaultQueuedWithdrawalTermsRequest | null,
-    preview: EarnVaultQueuedWithdrawalPreview | null
-  ) {
-    if (!previewInput || !preview || preview.blockingIssues.length > 0) return;
+  async function submit(intent: QueuedWithdrawalSubmitIntent) {
+    if (submittingRef.current) return;
+    if (!intent.freshBody || !intent.preview || intent.preview.blockingIssues.length > 0) return;
+    if (intent.fingerprint === undefined) return;
     setSubmitting(true);
+    submittingRef.current = true;
     const finishSubmission = options.onSubmissionStart?.(options.custodyWalletId);
     options.setError(null);
     try {
-      const fingerprint = vaultAsyncWithdrawalRequestFingerprint({
-        projectId: options.projectId,
-        positionId: previewInput.positionId,
-        shares: previewInput.shares,
-        route: {
-          kind: "queue",
-          discountBps: previewInput.discountBps,
-          deadlineSeconds: previewInput.deadlineSeconds,
-        },
+      // Everything between the confirm click and the money-moving POST that
+      // can stop the submission resolves WITHOUT yielding, and the claim
+      // follows in the same synchronous block — THE REPLAY PATH MUST NOT
+      // YIELD (see `resolveSubmitIntent` in the instant exit modal): a kept
+      // key's confirm is a promise to resubmit THAT attempt, and an await in
+      // between is a gap in which the first attempt's late answer can retire
+      // the key — the claim would then mint a second one and the API would
+      // see a second escrow. The kept-key decision is ONE copy for both
+      // asynchronous modals (see `decideAsyncWithdrawalSubmit`).
+      const decision = decideAsyncWithdrawalSubmit({
+        approvedTerms: intent.approvedTerms,
+        fingerprint: intent.fingerprint,
+        freshBody: intent.freshBody,
+        recovery: options.recovery,
       });
-      const { key, persisted } = vaultAsyncWithdrawalIdempotencyKeyStore.claim(fingerprint);
+      if (decision.kind === "stop") {
+        if (decision.reason === "recoverySpent") options.onRecoveryInvalidated();
+        options.setError(t(ASYNC_WITHDRAWAL_STOP_COPY[decision.reason]));
+        return;
+      }
+      const { key, persisted } = vaultAsyncWithdrawalIdempotencyKeyStore.claim(
+        decision.fingerprint
+      );
       if (!persisted) {
         options.setError(t("DashboardEarn.intentStorageUnavailable"));
         return;
       }
-      const result = await createEarnVaultWithdrawalRequest(previewInput, key);
+      const result = await createEarnVaultWithdrawalRequest(decision.body, key);
       // A withdrawal request moves money: an unknown outcome or a reused key
       // keeps the key, so the next press is answered under it.
       const answer = fetchResultAnswer(result);
-      settleMoneyIdempotencyKey(vaultAsyncWithdrawalIdempotencyKeyStore, fingerprint, key, answer);
+      const retired = settleMoneyIdempotencyKey(
+        vaultAsyncWithdrawalIdempotencyKeyStore,
+        decision.fingerprint,
+        key,
+        answer
+      );
+      // A retired key can never be replayed, so its remembered shares are
+      // dead weight the next fresh derivation must not inherit; and an
+      // adopted attempt's own answer spent this recovery — re-scan for the
+      // next-oldest kept attempt, if any. A key kept under an UNKNOWN answer
+      // leaves both alone, so a retry replays the same attempt.
+      if (retired) {
+        if (!decision.intermediate) forgetAsyncWithdrawalShares(decision.fingerprint);
+        if (decision.adopted) options.onRecoveryInvalidated();
+      }
       const uncertain = uncertainMoneyAnswerMessage(answer);
       if (result.ok) {
         setOutcome(result.data);
@@ -271,11 +318,12 @@ function useQueuedWithdrawalSubmission(options: {
       }
     } finally {
       finishSubmission?.();
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }
 
-  return { submitting, outcome, submit };
+  return { outcome, submit, submitting };
 }
 
 /**
@@ -451,6 +499,8 @@ function QueueReview({
   onSubmit,
   position,
   preview,
+  restoredTerms,
+  savedTerms,
   submitting,
 }: {
   error: string | null;
@@ -459,6 +509,10 @@ function QueueReview({
   onSubmit: () => void;
   position: EarnVaultPosition;
   preview: EarnVaultQueuedWithdrawalPreview | null;
+  /** The recovered queue terms an adopted replay restores, if any. */
+  restoredTerms: RestoredQueueTerms | undefined;
+  /** The saved request this review promises a confirm will resubmit, if any. */
+  savedTerms: KeptAsyncWithdrawalRetry | undefined;
   submitting: boolean;
 }) {
   const t = useTranslations();
@@ -481,7 +535,7 @@ function QueueReview({
             </span>
           </DetailRow>
           <DetailRow fit="figure" label={t("DashboardEarn.queuedWithdraw.discount")}>
-            {bpsToPercent(preview.discountBps)}%
+            {formatBpsPercent(preview.discountBps)}%
           </DetailRow>
           <DetailRow fit="wrap" label={t("DashboardEarn.queuedWithdraw.maturity")}>
             {formatEpochSecondsOr(
@@ -512,6 +566,13 @@ function QueueReview({
             ))}
           </ul>
         </Callout>
+      ) : null}
+      {savedTerms ? (
+        <KeptAsyncAttemptNotice
+          restoredTerms={restoredTerms}
+          shareMint={position.shareMint}
+          shares={savedTerms.shares}
+        />
       ) : null}
       <p className="mt-4 text-meta text-tertiary">
         {t("DashboardEarn.queuedWithdraw.solverNotice")}
@@ -641,7 +702,7 @@ function QueueDetails({
               <span className="mt-0.5 block text-meta text-tertiary">
                 {termsValid
                   ? t("DashboardEarn.queuedWithdraw.settingsSummary", {
-                      discount: bpsToPercent(discountBps),
+                      discount: formatBpsPercent(discountBps),
                       // Localized catalogs keep `{duration}` until they re-translate.
                       maturity:
                         formatDurationSeconds(terms.secondsToMaturity, locale) ??
@@ -674,8 +735,8 @@ function QueueDetails({
               />
               <p className="text-meta text-tertiary">
                 {t("DashboardEarn.queuedWithdraw.discountRange", {
-                  minimum: bpsToPercent(terms.minimumDiscountBps),
-                  maximum: bpsToPercent(terms.maximumDiscountBps),
+                  minimum: formatBpsPercent(terms.minimumDiscountBps),
+                  maximum: formatBpsPercent(terms.maximumDiscountBps),
                 })}
               </p>
               <p className="text-meta text-tertiary">
@@ -742,7 +803,7 @@ export function EarnVaultQueuedWithdrawModal({
   const durationUnit = queueDurationUnit(terms.minimumSecondsToDeadline);
   const [step, setStep] = useState<FormStep>("details");
   const [amount, setAmount] = useState("");
-  const [discount, setDiscount] = useState(() => bpsToPercent(terms.minimumDiscountBps));
+  const [discount, setDiscount] = useState(() => formatBpsPercent(terms.minimumDiscountBps));
   const [deadline, setDeadline] = useState(() =>
     durationValue(terms.minimumSecondsToDeadline, durationUnit)
   );
@@ -769,13 +830,67 @@ export function EarnVaultQueuedWithdrawModal({
     previewInput,
     step === "review"
   );
+  // Mount-time SNAPSHOT of the previous build's unresolved attempt on this
+  // exit (see `recallLegacyAsyncWithdrawalKeptKey`): the scan runs once, so
+  // what the review surfaces and what the submit adopts is the same attempt —
+  // never a silent mid-session re-scan that could submit shares the customer
+  // never saw. The review notice presents it; the submit's resolver consumes
+  // it. `undefined` when nothing legacy is kept.
+  const [recovery, setRecovery] = useState(() =>
+    recallLegacyAsyncWithdrawalKeptKey({ positionId: position.id, projectId, routeKind: "queue" })
+  );
+
+  // Re-scan for the next-oldest kept legacy attempt, if any. Only ever runs
+  // after a resolution the customer watched — never silently ahead of an
+  // unreviewed submit (see the mount-time snapshot above).
+  function rescanRecovery(): void {
+    setRecovery(
+      recallLegacyAsyncWithdrawalKeptKey({ positionId: position.id, projectId, routeKind: "queue" })
+    );
+  }
+
   const { submitting, outcome, submit } = useQueuedWithdrawalSubmission({
-    onSubmissionStart,
     custodyWalletId: position.custodyWalletId,
+    onRecoveryInvalidated: rescanRecovery,
     onRequested,
+    onSubmissionStart,
     projectId,
+    recovery,
     setError,
   });
+
+  // The typed-quantity fingerprint, ONE definition for the review's
+  // saved-terms read and the submit's key resolution: whatever the review
+  // resolves from it, the submit resolves the same (the instant exit modal's
+  // mirror). The queue's discount and deadline are user-set terms — part of
+  // the request's identity, stable across the positions polls; the DERIVED
+  // shares are not, which is why they are not in here.
+  const typedFingerprint =
+    amountValidation.kind === "valid" && termsValid
+      ? vaultAsyncWithdrawalRequestFingerprint({
+          amount: amountValidation.canonicalAmount,
+          positionId: position.id,
+          projectId,
+          route: { kind: "queue", discountBps, deadlineSeconds },
+        })
+      : undefined;
+
+  // The saved request THIS build's kept key would replay, read fresh each
+  // render (see `keptAsyncWithdrawalRetry`): the review presents it, and the
+  // confirm hands it back to the submit — the button approves the terms it
+  // displayed. The legacy adoption outranks this build's own kept key (the
+  // resolver adopts it first), so it is the terms the review shows when both
+  // are kept.
+  const savedTerms = recovery ?? keptAsyncWithdrawalRetry(typedFingerprint);
+  // An ADOPTED legacy replay restores its OWN queue terms at confirm (its
+  // body is rebuilt from the legacy fingerprint — see
+  // `asyncWithdrawalRecoveryBody`), so the review discloses them beside the
+  // shares: the discount and deadline rows above come from the live
+  // preview, which is not what the replay will carry.
+  const restoredTerms =
+    recovery?.route.kind === "queue"
+      ? { deadlineSeconds: recovery.route.deadlineSeconds, discountBps: recovery.route.discountBps }
+      : undefined;
 
   const positionName = positionDisplayName(position);
   const modalLabel = t("DashboardEarn.queuedWithdraw.title", { position: positionName });
@@ -845,9 +960,18 @@ export function EarnVaultQueuedWithdrawModal({
                   error={error}
                   loading={previewLoading}
                   onBack={() => setStep("details")}
-                  onSubmit={() => void submit(previewInput, preview)}
+                  onSubmit={() =>
+                    void submit({
+                      approvedTerms: savedTerms,
+                      fingerprint: typedFingerprint,
+                      freshBody: previewInput,
+                      preview,
+                    })
+                  }
                   position={position}
                   preview={preview}
+                  restoredTerms={restoredTerms}
+                  savedTerms={savedTerms}
                   submitting={submitting}
                 />
               )}

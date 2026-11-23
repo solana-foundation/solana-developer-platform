@@ -157,7 +157,7 @@ describe("Payments routes: Fireblocks BYOK sources outside direct payments (PRO-
     const idempotencyKey = crypto.randomUUID();
 
     const response = await postJson(
-      "/v1/payments/transfer-batches",
+      "/v1/payments/transfer-batches/execute",
       {
         externalId: "fireblocks-gate-run",
         sourceCustodyWalletId: FIREBLOCKS_WALLET_ID,
@@ -267,7 +267,7 @@ describe("Payments routes: Fireblocks BYOK sources outside direct payments (PRO-
     const transfersBefore = await countTransferRows();
 
     const response = await app.request(
-      "/v1/payments/ramps/offramp/quote",
+      "/v1/payments/ramps/offramp/start",
       {
         method: "POST",
         headers: {

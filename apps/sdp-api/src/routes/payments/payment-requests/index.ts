@@ -10,7 +10,7 @@ import {
   cancelPaymentRequest,
   createPaymentRequest,
   getPaymentRequest,
-  getPaymentRequestLink,
+  getPaymentRequestLinkToken,
   listPaymentRequests,
 } from "./handlers";
 import { createPaymentRequestSchema, paymentRequestParamsSchema } from "./schemas";
@@ -26,11 +26,11 @@ paymentRequests.get(
   getPaymentRequest
 );
 paymentRequests.get(
-  "/:paymentRequestId/link",
+  "/:paymentRequestId/link-token",
   requireAction("payment_requests.manage"),
   validateParams(paymentRequestParamsSchema),
   authorize(authorizeExistingPaymentRequest),
-  getPaymentRequestLink
+  getPaymentRequestLinkToken
 );
 paymentRequests.post(
   "/",

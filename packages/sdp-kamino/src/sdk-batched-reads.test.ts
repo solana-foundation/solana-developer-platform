@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
+import { assertFireblocksProposal } from "@sdp/custody/testing/fireblocks-proposal";
 import { withMinimumRpcSlot } from "@sdp/rpc/read-context";
 import { address, getAddressEncoder, none } from "@solana/kit";
 import { AccountState, getTokenEncoder, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
@@ -641,6 +642,8 @@ describe("KaminoVaultDirectClient quote and build request counts", () => {
         createsShareAccount: false,
       },
     });
+    if (plan.status !== "fulfilled") throw plan.reason;
+    await assertFireblocksProposal(plan.value, HOLDER_A);
   });
 
   /** Every withdrawal build: the slot, the vault, then the share accounts beside one batch. */
@@ -682,6 +685,10 @@ describe("KaminoVaultDirectClient quote and build request counts", () => {
         accepted: { shares: "0.4" },
         createsShareAccount: false,
       },
+    });
+    if (plan.status !== "fulfilled") throw plan.reason;
+    await assertFireblocksProposal(plan.value, HOLDER_A, {
+      [address(LOOKUP_TABLE)]: LOOKUP_TABLE_PARSED.data.parsed.info.addresses.map(address),
     });
   });
 

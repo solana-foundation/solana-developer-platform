@@ -113,7 +113,7 @@ API user in Fireblocks.
 
 ## Transaction approval
 
-Direct SOL and USDC payments through `POST /v1/payments/transfers` use Fireblocks'
+Direct SOL and USDC payments through `POST /v1/payments/transfers/execute` use Fireblocks'
 [TRANSFER operation](https://developers.fireblocks.com/api-reference/transactions/create-a-new-transaction).
 SDP resolves the exact project wallet and its encrypted BYOK credential. Fireblocks builds the
 transaction, applies the workspace's approvals, signs and broadcasts. The source vault needs
@@ -354,6 +354,17 @@ and GCP cleanup reservations against PostgreSQL. The signing test uses the actua
 implementation with mocked Fireblocks HTTP responses and a locally generated Ed25519 signature.
 Dashboard tests cover submission, rotation, and the existing Privy lifecycle. These tests do not
 replace an approval-policy check against a real Fireblocks workspace.
+
+Provider build suites send deposit and withdrawal plans through the real Fireblocks
+adapter with mocked HTTP: Kamino and Veda use recorded chain data; Jupiter Lend uses
+its real SDK against an in-process chain; WisdomTree uses its real subscription and
+Token-2022 redemption builders; Ondo and Hastra stub their admitted Jupiter swap leg.
+Plume also covers immutable CCTP transactions with existing protocol signatures.
+The shared harness substitutes a local signing key for recorded owners and verifies
+the exact serialized proposal and signature. These are offline compatibility tests,
+not live execution evidence. Hastra, WisdomTree and Plume keep their pre-launch gates;
+Upshift and Perena remain unimplemented stubs. Hastra's absent legacy-ticket sentinel
+is now readonly, so both par and optional DEX redemption transactions can compile.
 
 ## Read-only checks on Pay
 

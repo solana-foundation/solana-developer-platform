@@ -24,6 +24,7 @@ vi.mock("@clerk/nextjs/server", async (importOriginal) => {
   };
 });
 
+import { SENTRY_TUNNEL_PATH } from "@/lib/sentry-tunnel";
 import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
 import { isPublicRoute, proxy, rejectCrossSiteWrite } from "./proxy";
 
@@ -57,21 +58,15 @@ describe("public web routes", () => {
     );
   });
 
-  it("keeps the removed Embedded Yield handoff routes authenticated", () => {
-    // The public engineering-handoff pages left with the UI builder; nothing
-    // under these paths may be reachable without a session again.
+  it("accepts browser error reports on the Sentry tunnel without a session, and nothing beside it", () => {
     expect(
-      isPublicRoute(
-        new NextRequest("https://dashboard.example.com/embedded-yield/integrate/public-token")
-      )
+      isPublicRoute(new NextRequest(`https://dashboard.example.com${SENTRY_TUNNEL_PATH}?o=1&p=2`))
+    ).toBe(true);
+    expect(
+      isPublicRoute(new NextRequest(`https://dashboard.example.com${SENTRY_TUNNEL_PATH}/anything`))
     ).toBe(false);
     expect(
-      isPublicRoute(new NextRequest("https://dashboard.example.com/earn/integrate/public-token"))
-    ).toBe(false);
-    expect(
-      isPublicRoute(
-        new NextRequest("https://dashboard.example.com/dashboard/markets/embedded-yield")
-      )
+      isPublicRoute(new NextRequest(`https://dashboard.example.com${SENTRY_TUNNEL_PATH}x`))
     ).toBe(false);
   });
 });
@@ -140,7 +135,9 @@ describe("rejectCrossSiteWrite", () => {
   it("gates playground writes but not routes outside the BFF", () => {
     expect(
       rejectCrossSiteWrite(
-        write("/api/playground/v1/payments/transfers", { origin: "https://attacker.example" })
+        write("/api/playground/v1/payments/transfers/execute", {
+          origin: "https://attacker.example",
+        })
       )?.status
     ).toBe(403);
     expect(

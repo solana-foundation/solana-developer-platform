@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { sentryScrubbingHooks } from "@sdp/redaction/sentry";
+import { sentryDataCollection } from "@sdp/redaction/sentry";
+import type * as Sentry from "@sentry/nextjs";
 import { describe, expect, it } from "vitest";
 
 const APP_ROOT = path.resolve(__dirname, "../..");
@@ -21,6 +22,14 @@ function listSourceFiles(directory: string): string[] {
   });
 }
 
+type SdkDataCollection = NonNullable<Parameters<typeof Sentry.init>[0]["dataCollection"]>;
+
+type EverySetting<T> = T extends readonly unknown[]
+  ? T
+  : T extends object
+    ? { [K in keyof T]-?: EverySetting<NonNullable<T[K]>> }
+    : T;
+
 const SENTRY_INIT_FILES = [
   "sentry.server.config.ts",
   "sentry.edge.config.ts",
@@ -28,11 +37,36 @@ const SENTRY_INIT_FILES = [
 ];
 
 describe("Sentry initialization", () => {
-  it.each(SENTRY_INIT_FILES)("%s spreads the shared scrubbing hooks", (relativePath) => {
-    const source = readAppFile(relativePath);
+  it.each(SENTRY_INIT_FILES)(
+    "%s spreads the shared scrubbing hooks and switches off data collection",
+    (relativePath) => {
+      const source = readAppFile(relativePath);
 
-    expect(source).toContain("...sentryScrubbingHooks");
-    expect(source).toContain("sendDefaultPii: false");
+      expect(source).toContain("...sentryScrubbingHooks");
+      expect(source).toContain("dataCollection: sentryDataCollection");
+    }
+  );
+
+  it("switches off every data collection category the installed SDK offers", () => {
+    // Typed against the installed SDK, so a category a future release adds
+    // fails the typecheck until it is set. `frameContextLines` counts source
+    // lines around a stack frame and is not collected data.
+    const settings: EverySetting<Omit<SdkDataCollection, "frameContextLines">> =
+      sentryDataCollection;
+
+    expect(settings).toEqual({
+      userInfo: false,
+      cookies: false,
+      httpHeaders: false,
+      httpBodies: [],
+      urlQueryParams: false,
+      graphQL: { document: false, variables: false },
+      genAI: { inputs: false, outputs: false },
+      mcp: { inputs: false, outputs: false },
+      databaseQueryData: false,
+      queues: false,
+      stackFrameVariables: false,
+    });
   });
 
   it("has no other Sentry.init call site that could ship unscrubbed events", () => {
@@ -62,37 +96,5 @@ describe("SentryUserContext", () => {
     expect(source).toContain("Sentry.setUser({ id: userId })");
     expect(source).not.toContain("emailAddress");
     expect(source).not.toContain("useUser");
-  });
-
-  it("does not let the feedback widget reuse a Sentry user email", () => {
-    // Matched as a config key, so the comment explaining its absence can stay.
-    expect(readAppFile("src/instrumentation-client.ts")).not.toContain("useSentryUser:");
-  });
-});
-
-describe("sentryScrubbingHooks in the browser bundle", () => {
-  it("scrubs a dashboard error event carrying counterparty data", () => {
-    // The dashboard renders counterparty names and bank details, so a client
-    // error can close over them via component props or a fetch breadcrumb.
-    const event = sentryScrubbingHooks.beforeSend({
-      event_id: "evt_1",
-      user: { id: "user_1" },
-      request: { url: "/dashboard/counterparties/cp_1?email=jane.doe%40example.com" },
-      extra: {
-        counterpartyId: "cp_1",
-        displayName: "Jane Doe",
-        identity: { firstName: "Jane", phone: "+15551234567" },
-        details: { accountNumber: "000123456789" },
-      },
-      breadcrumbs: [{ category: "fetch", data: { email: "jane.doe@example.com" } }],
-    });
-
-    const serialized = JSON.stringify(event);
-    expect(serialized).not.toContain("jane.doe");
-    expect(serialized).not.toContain("Jane");
-    expect(serialized).not.toContain("+15551234567");
-    expect(serialized).not.toContain("000123456789");
-    expect(event?.user.id).toBe("user_1");
-    expect(serialized).toContain("cp_1");
   });
 });

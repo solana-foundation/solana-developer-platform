@@ -3,7 +3,7 @@
 // Note that this config is unrelated to the Vercel Edge Runtime and is also required when running locally.
 // https://docs.sentry.io/platforms/javascript/guides/nextjs/
 
-import { sentryScrubbingHooks } from "@sdp/redaction/sentry";
+import { sentryDataCollection, sentryScrubbingHooks } from "@sdp/redaction/sentry";
 import * as Sentry from "@sentry/nextjs";
 
 const sentryDsn =
@@ -19,12 +19,8 @@ if (sentryDsn) {
     // Define how likely traces are sampled. Adjust this value in production, or use tracesSampler for greater control.
     tracesSampleRate: process.env.NODE_ENV === "production" ? 0.1 : 1,
 
-    // Enable logs to be sent to Sentry
-    enableLogs: true,
-
-    // Enable sending user PII (Personally Identifiable Information)
-    // https://docs.sentry.io/platforms/javascript/guides/nextjs/configuration/options/#sendDefaultPii
-    sendDefaultPii: false,
+    // What the SDK may collect on its own: nothing.
+    dataCollection: sentryDataCollection,
 
     // The scrubbing boundary — see the note in sentry.server.config.ts.
     ...sentryScrubbingHooks,

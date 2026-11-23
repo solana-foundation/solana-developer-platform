@@ -155,8 +155,8 @@ export function findPublishedPlaygroundOperation(
   pathname: string,
   releaseChannel: SdpReleaseChannel
 ): PlaygroundCatalogOperation | undefined {
-  // A literal segment beats a parameter, as in the API's router: `/v1/wallets/configs`
-  // is the configs read, not a wallet named "configs".
+  // A literal segment beats a parameter, as in the API's router: `/v1/issuance/tokens/facets`
+  // is the facets read, not a token named "facets".
   const operation = CATALOG_OPERATIONS.filter(
     (candidate) => candidate.method === method && matchesTemplate(candidate.segments, pathname)
   ).sort((left, right) => parameterCount(left.segments) - parameterCount(right.segments))[0];

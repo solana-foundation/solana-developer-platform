@@ -94,7 +94,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance CRUD End
     );
 
     const emptyAllowlistRes = await request(
-      `/v1/issuance/tokens/${tokenId}/allowlist?page=1&pageSize=10`
+      `/v1/issuance/tokens/${tokenId}/control-list?page=1&pageSize=10`
     );
     expect(emptyAllowlistRes.status).toBe(200);
     const emptyAllowlistBody = (await emptyAllowlistRes.json()) as {
@@ -103,7 +103,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance CRUD End
     };
     expect(emptyAllowlistBody.meta.total).toBe(0);
 
-    const addAllowlistRes = await request(`/v1/issuance/tokens/${tokenId}/allowlist`, {
+    const addAllowlistRes = await request(`/v1/issuance/tokens/${tokenId}/control-list`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -120,7 +120,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance CRUD End
     expect(addAllowlistBody.data.entry.address).toBe(TEST_WALLETS.wallet1);
 
     const listAllowlistRes = await request(
-      `/v1/issuance/tokens/${tokenId}/allowlist?page=1&pageSize=10`
+      `/v1/issuance/tokens/${tokenId}/control-list?page=1&pageSize=10`
     );
     expect(listAllowlistRes.status).toBe(200);
     const listAllowlistBody = (await listAllowlistRes.json()) as {
@@ -131,7 +131,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance CRUD End
     expect(listAllowlistBody.data[0]?.address).toBe(TEST_WALLETS.wallet1);
 
     const removeAllowlistRes = await request(
-      `/v1/issuance/tokens/${tokenId}/allowlist/${addAllowlistBody.data.entry.id}`,
+      `/v1/issuance/tokens/${tokenId}/control-list/${addAllowlistBody.data.entry.id}`,
       {
         method: "DELETE",
       }
@@ -139,7 +139,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance CRUD End
     expect(removeAllowlistRes.status).toBe(204);
 
     const afterDeleteAllowlistRes = await request(
-      `/v1/issuance/tokens/${tokenId}/allowlist?page=1&pageSize=10`
+      `/v1/issuance/tokens/${tokenId}/control-list?page=1&pageSize=10`
     );
     expect(afterDeleteAllowlistRes.status).toBe(200);
     const afterDeleteAllowlistBody = (await afterDeleteAllowlistRes.json()) as {

@@ -123,6 +123,11 @@
       "types": "./src/fireblocks-proposals.ts",
       "import": "./src/fireblocks-proposals.ts",
       "default": "./src/fireblocks-proposals.ts"
+    },
+    "./testing/fireblocks-proposal": {
+      "types": "./src/test/fireblocks-proposal.ts",
+      "import": "./src/test/fireblocks-proposal.ts",
+      "default": "./src/test/fireblocks-proposal.ts"
     }
   },
   "imports": {

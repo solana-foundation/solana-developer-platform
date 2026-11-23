@@ -74,6 +74,7 @@ import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
 import {
   getIdempotencyFingerprint,
   getIdempotencyRecordKey,
+  idempotencyFingerprintMatches,
   markIdempotencyCommitted,
   markIdempotencyRecordMismatch,
   markIdempotencyReleased,
@@ -252,7 +253,10 @@ async function createTransferRecord(
         idempotencyKey,
       });
       if (existing) {
-        if (existing.idempotency_fingerprint !== input.idempotency?.fingerprint) {
+        if (
+          existing.idempotency_fingerprint === null ||
+          !idempotencyFingerprintMatches(c, existing.idempotency_fingerprint)
+        ) {
           // Another request's row: refused unstored, so that request's own retry
           // is still answered from it.
           markIdempotencyRecordMismatch(c);
