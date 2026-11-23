@@ -29,14 +29,14 @@ const STRATEGY_ID = ${JSON.stringify(strategy.id)};
 async function sdp(path: string, init: RequestInit = {}) {
   const apiKey = process.env.SDP_API_KEY;
   if (!apiKey) throw new Error("SDP_API_KEY is required");
+  const headers: Record<string, string> = {
+    Authorization: \`Bearer \${apiKey}\`,
+    Accept: "application/json",
+  };
+  if (init.body) headers["Content-Type"] = "application/json";
   const response = await fetch(\`\${SDP_API_URL}\${path}\`, {
     ...init,
-    headers: {
-      Authorization: \`Bearer \${apiKey}\`,
-      Accept: "application/json",
-      ...(init.body ? { "Content-Type": "application/json" } : {}),
-      ...init.headers,
-    },
+    headers: { ...headers, ...init.headers },
   });
   const body = await response.json().catch(() => null);
   if (!response.ok) throw new Error(body?.error?.message ?? \`SDP \${response.status}\`);
@@ -75,13 +75,16 @@ export async function prepareEarnDeposit(input: {
   feePayer?: string;
 }) {
   const { ownerAddress, amount, idempotencyKey, slippageBps, feePayer } = input;
-  const { operation } = await post("/v1/earn/deposit", {
-    strategyId: STRATEGY_ID,
-    source: { ownerAddress },
-    amount,
-    ...(slippageBps === undefined ? {} : { slippageBps }),
-    ...(feePayer ? { feePayer } : {}),
-  }, idempotencyKey);
+  const body: {
+    strategyId: string;
+    source: { ownerAddress: string };
+    amount: { mint: string; value: string };
+    slippageBps?: number;
+    feePayer?: string;
+  } = { strategyId: STRATEGY_ID, source: { ownerAddress }, amount };
+  if (slippageBps !== undefined) body.slippageBps = slippageBps;
+  if (feePayer) body.feePayer = feePayer;
+  const { operation } = await post("/v1/earn/deposit", body, idempotencyKey);
   return operation;
 }
 

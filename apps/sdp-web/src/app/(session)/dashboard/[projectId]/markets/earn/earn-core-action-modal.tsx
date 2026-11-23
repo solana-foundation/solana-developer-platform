@@ -16,16 +16,58 @@ import { Select, SelectItem } from "@sdp/ui/select";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { earnCoreClient, isEarnOperationTerminal, useEarnOperation } from "@/lib/earn-core-data";
 import { createIdempotencyKeyStore } from "@/lib/idempotency-key-store";
 import { useModalFocus } from "@/lib/use-modal-focus";
+import { useZodForm } from "@/lib/use-zod-form";
 import { useEarnFundingWallets, walletDisplayName } from "./deposit/earn-funding-wallets";
 import { isPositiveDecimal } from "./earn-decimal";
 import { formatTokenValue, tokenSymbol } from "./earn-format";
 import { EARN_TRANSACTION_MODAL_FRAME } from "./earn-modal";
 
 const operationKeys = createIdempotencyKeyStore("sdp:earn:core-actions:v1");
+
+const WITHDRAWAL_UNITS = ["token", "shares"] as const;
+const withdrawalUnitSchema = z.enum(WITHDRAWAL_UNITS);
+type WithdrawalUnit = z.infer<typeof withdrawalUnitSchema>;
+
+const POSITIVE_AMOUNT = "DashboardEarn.core.positiveAmount" satisfies MessageKey;
+const INVALID_SLIPPAGE = "DashboardEarn.core.invalidSlippage" satisfies MessageKey;
+
+/**
+ * The details step as entered. A custom amount must be a positive decimal (All reads the
+ * position instead), then slippage must be whole basis points within the API's cap, read as
+ * `Number` reads the field. One message at a time, the amount's first.
+ */
+const preparationFormSchema = z
+  .object({
+    /** The deposit's funding wallet; null until chosen, meaning the first eligible one. */
+    walletId: z.string().nullable(),
+    /** The deposit mint; null until chosen, meaning the strategy's first. */
+    mint: z.string().nullable(),
+    amount: z.string(),
+    withdrawAll: z.boolean(),
+    withdrawUnit: withdrawalUnitSchema,
+    slippage: z.string(),
+  })
+  .transform((values, ctx) => {
+    if (!values.withdrawAll && !isPositiveDecimal(values.amount)) {
+      ctx.addIssue({ code: "custom", path: ["amount"], message: POSITIVE_AMOUNT });
+      return z.NEVER;
+    }
+    const slippageBps = Number(values.slippage);
+    if (
+      !Number.isInteger(slippageBps) ||
+      slippageBps < 0 ||
+      slippageBps > EARN_SWAP_MAX_SLIPPAGE_BPS
+    ) {
+      ctx.addIssue({ code: "custom", path: ["slippage"], message: INVALID_SLIPPAGE });
+      return z.NEVER;
+    }
+    return { ...values, slippageBps };
+  });
 
 const preparationClaimSchema = z.strictObject({
   key: z.uuid(),
@@ -67,7 +109,7 @@ function sendOperationAction(
     case "refresh":
       return earnCoreClient.refresh(
         operation.id,
-        { ...reviewed, ...(optionId ? { optionId } : {}) },
+        optionId ? { ...reviewed, optionId } : reviewed,
         key
       );
     default: {
@@ -95,7 +137,7 @@ function withdrawalIntent(
   props: Extract<ActionProps, { kind: "withdraw" }>,
   amount: string,
   withdrawAll: boolean,
-  unit: "token" | "shares",
+  unit: WithdrawalUnit,
   slippageBps: number
 ): OperationIntent {
   const intermediate = props.intermediate ? props.position.parIntermediate : undefined;
@@ -123,7 +165,7 @@ function withdrawalQuantity(
   tokenMint: string,
   amount: string,
   withdrawAll: boolean,
-  unit: "token" | "shares"
+  unit: WithdrawalUnit
 ): Extract<OperationIntent, { kind: "earn.withdraw" }>["amount"] {
   if (withdrawAll) return { kind: "all" };
   switch (unit) {
@@ -148,40 +190,38 @@ function useEarnPreparation(props: ActionProps) {
   const t = useTranslations();
   const workspace = useOptionalDashboardWorkspace();
   const { wallets } = useEarnFundingWallets();
-  const [walletId, setWalletId] = useState<string | null>(null);
-  const [mint, setMint] = useState<string | null>(null);
-  const [amount, setAmount] = useState("");
-  const [withdrawAll, setWithdrawAll] = useState(
-    props.kind === "withdraw" && props.defaultWithdrawAll === true
+  const form = useZodForm(
+    preparationFormSchema,
+    {
+      walletId: null,
+      mint: null,
+      amount: "",
+      withdrawAll: props.kind === "withdraw" && props.defaultWithdrawAll === true,
+      withdrawUnit: "token",
+      slippage: "50",
+    },
+    (message) => {
+      if (message === POSITIVE_AMOUNT) return t(POSITIVE_AMOUNT);
+      if (message === INVALID_SLIPPAGE) return t(INVALID_SLIPPAGE);
+      return message;
+    }
   );
-  const [withdrawUnit, setWithdrawUnit] = useState<"token" | "shares">("token");
-  const [slippage, setSlippage] = useState("50");
   const [prepared, setPrepared] = useState<Operation>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const eligibleWallets = wallets?.filter((wallet) => wallet.isRuntimeExecutionAllowed) ?? [];
-  const selectedWallet = walletId ?? eligibleWallets[0]?.id;
-  const tokenMint = preparationMint(props, mint);
+  const selectedWallet = form.values.walletId ?? eligibleWallets[0]?.id;
+  const tokenMint = preparationMint(props, form.values.mint);
   async function prepare(event: FormEvent) {
     event.preventDefault();
     if (busy || !tokenMint) return;
     setError(undefined);
-    if (!withdrawAll && !isPositiveDecimal(amount)) {
-      setError(t("DashboardEarn.core.positiveAmount"));
-      return;
-    }
-    const slippageBps = Number(slippage);
-    if (
-      !Number.isInteger(slippageBps) ||
-      slippageBps < 0 ||
-      slippageBps > EARN_SWAP_MAX_SLIPPAGE_BPS
-    ) {
-      setError(t("DashboardEarn.core.invalidSlippage"));
-      return;
-    }
+    const parsed = form.validate();
+    if (!parsed.ok) return;
+    const { amount, withdrawAll, withdrawUnit, slippage, slippageBps } = parsed.data;
     let intent: OperationIntent;
     if (props.kind === "deposit") {
-      if (!selectedWallet || !isPositiveDecimal(amount)) return;
+      if (!selectedWallet) return;
       intent = {
         kind: "earn.deposit",
         strategyId: props.strategy.id,
@@ -212,8 +252,8 @@ function useEarnPreparation(props: ActionProps) {
         JSON.stringify({ key: crypto.randomUUID(), intent })
       );
       const retained = restorePreparation(kept);
-      if (props.kind === "deposit" && walletId === null && selectedWallet) {
-        setWalletId(selectedWallet);
+      if (props.kind === "deposit" && form.values.walletId === null && selectedWallet) {
+        form.setField("walletId", selectedWallet);
       }
       let operation: Operation;
       if (retained.intent.kind === "earn.deposit") {
@@ -234,19 +274,10 @@ function useEarnPreparation(props: ActionProps) {
   }
 
   return {
+    form,
     eligibleWallets,
     selectedWallet,
     tokenMint,
-    setWalletId,
-    setMint,
-    amount,
-    setAmount,
-    withdrawAll,
-    setWithdrawAll,
-    withdrawUnit,
-    setWithdrawUnit,
-    slippage,
-    setSlippage,
     prepared,
     setPrepared,
     busy,
@@ -259,19 +290,7 @@ function useEarnPreparation(props: ActionProps) {
 export function EarnCoreActionModal(props: ActionProps) {
   const t = useTranslations();
   const preparation = useEarnPreparation(props);
-  const {
-    selectedWallet,
-    amount,
-    setAmount,
-    withdrawAll,
-    slippage,
-    setSlippage,
-    prepared,
-    setPrepared,
-    busy,
-    error,
-    prepare,
-  } = preparation;
+  const { form, selectedWallet, prepared, setPrepared, busy, error, prepare } = preparation;
   const focusRef = useModalFocus({
     focusKey: prepared?.id ?? "details",
     initialFocusSelector: "[data-modal-focus-target]",
@@ -311,16 +330,23 @@ export function EarnCoreActionModal(props: ActionProps) {
                 preparation={preparation}
               />
             )}
-            {!withdrawAll ? (
+            {!form.values.withdrawAll ? (
               <div className="space-y-2">
                 <Label htmlFor="earn-core-amount">{t("DashboardEarn.core.amount")}</Label>
                 <Input
                   id="earn-core-amount"
                   inputMode="decimal"
-                  value={amount}
-                  onChange={(event) => setAmount(event.target.value)}
+                  value={form.values.amount}
+                  onChange={(event) => form.setField("amount", event.target.value)}
                   autoComplete="off"
+                  aria-invalid={form.errors.amount ? true : undefined}
+                  aria-describedby={form.errors.amount ? "earn-core-amount-error" : undefined}
                 />
+                {form.errors.amount ? (
+                  <p id="earn-core-amount-error" className="text-meta text-error">
+                    {form.errors.amount}
+                  </p>
+                ) : null}
               </div>
             ) : null}
             <div className="space-y-2">
@@ -328,9 +354,16 @@ export function EarnCoreActionModal(props: ActionProps) {
               <Input
                 id="earn-core-slippage"
                 inputMode="numeric"
-                value={slippage}
-                onChange={(event) => setSlippage(event.target.value)}
+                value={form.values.slippage}
+                onChange={(event) => form.setField("slippage", event.target.value)}
+                aria-invalid={form.errors.slippage ? true : undefined}
+                aria-describedby={form.errors.slippage ? "earn-core-slippage-error" : undefined}
               />
+              {form.errors.slippage ? (
+                <p id="earn-core-slippage-error" className="text-meta text-error">
+                  {form.errors.slippage}
+                </p>
+              ) : null}
             </div>
             <p className="text-caption text-secondary">{t("DashboardEarn.core.prepareNote")}</p>
             {error ? <Callout variant="danger">{error}</Callout> : null}
@@ -361,7 +394,8 @@ function EarnWithdrawalQuantityFields({
   preparation: ReturnType<typeof useEarnPreparation>;
 }) {
   const t = useTranslations();
-  const { withdrawUnit, setWithdrawUnit, tokenMint, withdrawAll, setWithdrawAll } = preparation;
+  const { form, tokenMint } = preparation;
+  const { withdrawAll, withdrawUnit } = form.values;
   return (
     <div className="space-y-2">
       {!intermediate ? (
@@ -369,14 +403,20 @@ function EarnWithdrawalQuantityFields({
           value={withdrawUnit}
           ariaLabel={t("DashboardEarn.core.amountUnit")}
           onValueChange={(value) => {
-            if (value === "token" || value === "shares") setWithdrawUnit(value);
+            // Only the listed units can be chosen; anything else leaves the unit as it was.
+            const unit = WITHDRAWAL_UNITS.find((candidate) => candidate === value);
+            if (unit) form.setField("withdrawUnit", unit);
           }}
         >
           <SelectItem value="token">{tokenSymbol(tokenMint ?? "")}</SelectItem>
           <SelectItem value="shares">{t("DashboardEarn.core.shares")}</SelectItem>
         </Select>
       ) : null}
-      <Button type="button" variant="secondary" onClick={() => setWithdrawAll((all) => !all)}>
+      <Button
+        type="button"
+        variant="secondary"
+        onClick={() => form.setField("withdrawAll", !withdrawAll)}
+      >
         {withdrawAll ? t("DashboardEarn.core.customAmount") : t("DashboardEarn.core.withdrawAll")}
       </Button>
     </div>
@@ -592,7 +632,7 @@ function EarnFundingSourceFields({
   preparation: ReturnType<typeof useEarnPreparation>;
 }) {
   const t = useTranslations();
-  const { eligibleWallets, selectedWallet, tokenMint, setWalletId, setMint } = preparation;
+  const { form, eligibleWallets, selectedWallet, tokenMint } = preparation;
   return (
     <>
       <div className="space-y-2">
@@ -600,7 +640,7 @@ function EarnFundingSourceFields({
         <Select
           id="earn-core-wallet"
           value={selectedWallet}
-          onValueChange={setWalletId}
+          onValueChange={(walletId) => form.setField("walletId", walletId)}
           placeholder={t("DashboardEarn.core.chooseWallet")}
         >
           {eligibleWallets.map((wallet) => (
@@ -612,7 +652,11 @@ function EarnFundingSourceFields({
       </div>
       <div className="space-y-2">
         <Label htmlFor="earn-core-token">{t("DashboardEarn.core.asset")}</Label>
-        <Select id="earn-core-token" value={tokenMint} onValueChange={setMint}>
+        <Select
+          id="earn-core-token"
+          value={tokenMint}
+          onValueChange={(mint) => form.setField("mint", mint)}
+        >
           {strategy.depositMints.map((address) => (
             <SelectItem key={address} value={address}>
               {tokenSymbol(address)}

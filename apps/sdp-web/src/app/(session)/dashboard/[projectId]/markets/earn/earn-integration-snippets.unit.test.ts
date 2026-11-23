@@ -16,8 +16,10 @@ interface GeneratedIntegration {
     ownerAddress: string;
     amount: { mint: string; value: string };
     idempotencyKey: string;
+    slippageBps?: number;
     feePayer?: string;
   }): Promise<unknown>;
+  getEarnOperation(operationId: string): Promise<unknown>;
   submitEarnOperation(input: {
     operationId: string;
     actionId: string;
@@ -48,9 +50,16 @@ async function loadGeneratedIntegration(): Promise<GeneratedIntegration> {
 }
 
 afterEach(() => {
-  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   delete process.env.SDP_API_KEY;
 });
+
+/** Route the global fetch through a fake that reads the request URL as a string. */
+function stubFetch(fake: (url: string, init?: RequestInit) => Promise<Response>) {
+  return vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation((input, init) => fake(String(input), init));
+}
 
 describe("Earn integration module", () => {
   it("uses four core Earn routes and one shared operation lifecycle", () => {
@@ -71,7 +80,7 @@ describe("Earn integration module", () => {
     const fetchMock = vi.fn(async (_path: string, _init?: RequestInit) =>
       Response.json({ data: { operation: { id: "operation", status: "prepared" } } })
     );
-    vi.stubGlobal("fetch", fetchMock);
+    stubFetch(fetchMock);
     const integration = await loadGeneratedIntegration();
     await expect(
       integration.prepareEarnDeposit({
@@ -94,12 +103,38 @@ describe("Earn integration module", () => {
     expect(init?.body).not.toContain("server-secret");
   });
 
+  it("sends a zero slippage, omits an absent fee payer and marks only a body as JSON", async () => {
+    process.env.SDP_API_KEY = "key";
+    const fetchMock = vi.fn(async (_path: string, _init?: RequestInit) =>
+      Response.json({ data: { operation: { id: "operation", status: "prepared" } } })
+    );
+    stubFetch(fetchMock);
+    const integration = await loadGeneratedIntegration();
+    await integration.prepareEarnDeposit({
+      ownerAddress: "owner",
+      amount: { mint: "usdc", value: "10" },
+      idempotencyKey: "persisted",
+      slippageBps: 0,
+    });
+    await integration.getEarnOperation("operation");
+    const prepared = fetchMock.mock.calls[0]?.[1];
+    expect(JSON.parse(String(prepared?.body))).toEqual({
+      strategyId: "strategy",
+      source: { ownerAddress: "owner" },
+      amount: { mint: "usdc", value: "10" },
+      slippageBps: 0,
+    });
+    expect(new Headers(prepared?.headers).get("Content-Type")).toBe("application/json");
+    expect(new Headers(prepared?.headers).get("Idempotency-Key")).toBe("persisted");
+    expect(new Headers(fetchMock.mock.calls[1]?.[1]?.headers).has("Content-Type")).toBe(false);
+  });
+
   it("replays exactly the signed action, version and original key", async () => {
     process.env.SDP_API_KEY = "key";
     const fetchMock = vi.fn(async (_path: string, _init?: RequestInit) =>
       Response.json({ data: { operation: { id: "operation", status: "submitted" } } })
     );
-    vi.stubGlobal("fetch", fetchMock);
+    stubFetch(fetchMock);
     const integration = await loadGeneratedIntegration();
     const input = {
       operationId: "operation/one",
@@ -123,8 +158,7 @@ describe("Earn integration module", () => {
 
   it("refuses truncated catalogue pagination", async () => {
     process.env.SDP_API_KEY = "key";
-    vi.stubGlobal(
-      "fetch",
+    stubFetch(
       vi.fn(async () => Response.json({ data: { strategies: [{ id: "one" }], total: 2 } }))
     );
     const integration = await loadGeneratedIntegration();
@@ -133,7 +167,7 @@ describe("Earn integration module", () => {
 
   it("does not send cancellation when SDP forbids it, even for a refreshed preparation", async () => {
     const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
+    stubFetch(fetchMock);
     const integration = await loadGeneratedIntegration();
     await expect(
       integration.cancelEarnOperation({ id: "operation", canCancel: false }, "key")
@@ -146,7 +180,7 @@ describe("Earn integration module", () => {
     const fetchMock = vi.fn(async (_path: string, _init?: RequestInit) =>
       Response.json({ data: { operation: { id: "operation", status: "prepared" } } })
     );
-    vi.stubGlobal("fetch", fetchMock);
+    stubFetch(fetchMock);
     const integration = await loadGeneratedIntegration();
     await integration.refreshEarnOperation({
       operationId: "operation/one",
@@ -171,7 +205,7 @@ describe("Earn integration module", () => {
     const fetchMock = vi.fn(async (_path: string) =>
       Response.json({ data: { operations: [{ id: "one" }], nextCursor: "repeated" } })
     );
-    vi.stubGlobal("fetch", fetchMock);
+    stubFetch(fetchMock);
     const integration = await loadGeneratedIntegration();
     await expect(integration.listEarnActivity("owner/one")).rejects.toThrow(
       "Pagination did not advance"

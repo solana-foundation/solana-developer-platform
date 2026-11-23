@@ -358,6 +358,20 @@ vi.mock("@/app/(session)/dashboard/[projectId]/markets/earn/earn-data", async (i
     };
   },
   useEarnVaultPositions: () => {
+    const exited = {
+      id: "earn_vault_position_exited",
+      provider: "kamino",
+      providerReference: "KvaultExited1111111111111111111111111111111",
+      label: "Exited provider vault",
+      custodyWalletId: "cwlt_live",
+      tokenMint: USDC_MINT,
+      shareMint: "ShareExited11111111111111111111111111111111",
+      createdAt: "2026-08-16T00:00:00.000Z",
+      closedAt: null,
+      feeSponsored: false,
+      shares: "0",
+      tokenValue: "0",
+    };
     const positions = mocks.positionsEmpty
       ? []
       : [
@@ -389,23 +403,9 @@ vi.mock("@/app/(session)/dashboard/[projectId]/markets/earn/earn-data", async (i
             shares: "5",
             tokenValue: "5.25",
           },
-          {
-            id: "earn_vault_position_exited",
-            provider: "kamino",
-            providerReference: "KvaultExited1111111111111111111111111111111",
-            label: "Exited provider vault",
-            custodyWalletId: "cwlt_live",
-            tokenMint: USDC_MINT,
-            shareMint: "ShareExited11111111111111111111111111111111",
-            createdAt: "2026-08-16T00:00:00.000Z",
-            closedAt: null,
-            feeSponsored: false,
-            shares: "0",
-            tokenValue: "0",
-            ...(mocks.exitedPositionParIntermediate
-              ? { parIntermediate: mocks.exitedPositionParIntermediate }
-              : {}),
-          },
+          mocks.exitedPositionParIntermediate
+            ? { ...exited, parIntermediate: mocks.exitedPositionParIntermediate }
+            : exited,
         ];
     return {
       // Real SWR keeps stale data alongside an error; the workspace guard is

@@ -40,27 +40,24 @@ function stubPositionReads() {
         const url = String(input);
         const ids =
           new URL(url, "https://sdp.test").searchParams.get("afterMovementIds")?.split(",") ?? [];
+        const page = {
+          positions: [
+            { ...position, source: { walletId: position.custodyWalletId }, costBasisKnown: true },
+          ],
+          hasMore: false,
+          nextCursor: null,
+        };
+        // A read naming movements answers with the context that proves them.
+        const data =
+          ids.length > 0
+            ? { ...page, balanceReadContext: { afterMovementIds: ids, minimumSlot: 101 } }
+            : page;
         requests.push({
           url,
           answer: (status = 200) =>
             resolve(
               status === 200
-                ? Response.json({
-                    data: {
-                      positions: [
-                        {
-                          ...position,
-                          source: { walletId: position.custodyWalletId },
-                          costBasisKnown: true,
-                        },
-                      ],
-                      hasMore: false,
-                      nextCursor: null,
-                      ...(ids.length > 0
-                        ? { balanceReadContext: { afterMovementIds: ids, minimumSlot: 101 } }
-                        : {}),
-                    },
-                  })
+                ? Response.json({ data })
                 : Response.json({ error: { message: "Provider unavailable" } }, { status })
             ),
         });
