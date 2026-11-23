@@ -78,8 +78,8 @@ import {
 import {
   forgetVaultWithdrawalFloor,
   forgetVaultWithdrawalShares,
-  recallLegacyVaultWithdrawalKeptKey,
   recallVaultWithdrawalFloor,
+  recallVaultWithdrawalKeptAttempt,
   recallVaultWithdrawalShares,
   rememberVaultWithdrawalFloor,
   rememberVaultWithdrawalShares,
@@ -725,8 +725,8 @@ function ReviewAmountRows({
 
 /**
  * The review-step notice for a confirm that RESUBMITS A SAVED REQUEST — an
- * adopted previous-build attempt (see `recallLegacyVaultWithdrawalKeptKey`)
- * or this build's own kept key (see `keptWithdrawalRetry`): the shares and
+ * adopted kept attempt (see `recallVaultWithdrawalKeptAttempt`) or this
+ * build's own kept key (see `keptWithdrawalRetry`): the shares and
  * floor it will send are generally not the amount the form is showing, so
  * the review must say so before the submit, not after. When either saved
  * term was LOST (`undefined`) the attempt cannot be replayed exactly and
@@ -916,15 +916,16 @@ export function EarnVaultWithdrawModal({
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<WithdrawalOutcome | null>(null);
-  // Mount-time SNAPSHOT of the previous build's unresolved attempt on this
-  // exit (see `recallLegacyVaultWithdrawalKeptKey`): the scan runs once, so
-  // what the review surfaces and what the submit adopts is the same attempt —
-  // never a silent mid-session re-scan that could submit shares the customer
-  // never saw. The review notice presents it; the submit's resolver consumes
-  // the snapshot only. `undefined` server-side and when nothing legacy is
+  // Mount-time SNAPSHOT of the oldest kept attempt on this exit (see
+  // `recallVaultWithdrawalKeptAttempt`): a previous build's, or this build's
+  // under typed terms the re-seeded form no longer shows. The scan runs once,
+  // so what the review surfaces and what the submit adopts is the same
+  // attempt — never a silent mid-session re-scan that could submit shares the
+  // customer never saw. The review notice presents it; the submit's resolver
+  // consumes the snapshot only. `undefined` server-side and when nothing is
   // kept.
   const [recovery, setRecovery] = useState(() =>
-    recallLegacyVaultWithdrawalKeptKey({ projectId, positionId: position.id, redemptionMode })
+    recallVaultWithdrawalKeptAttempt({ projectId, positionId: position.id, redemptionMode })
   );
   const submittingRef = useRef(false);
   const requestControllerRef = useRef<AbortController | null>(null);
@@ -1030,8 +1031,8 @@ export function EarnVaultWithdrawModal({
     ),
     settlement,
   });
-  // The legacy adoption outranks this build's own kept key (the resolver adopts
-  // it first), so it is the terms the review shows when both are kept.
+  // The adopted recovery outranks this build's own kept key (the resolver
+  // adopts it first), so it is the terms the review shows when both are kept.
   const savedTerms = recovery ?? keptRetry;
 
   /**
@@ -1069,21 +1070,21 @@ export function EarnVaultWithdrawModal({
     return false;
   }
 
-  // Re-scan for the next-oldest kept legacy attempt, if any. Only ever runs
-  // after a resolution the customer watched — never silently ahead of an
-  // unreviewed submit (see the mount-time snapshot above).
-  function rescanLegacyRecovery(): void {
+  // Re-scan for the next-oldest kept attempt, if any. Only ever runs after a
+  // resolution the customer watched — never silently ahead of an unreviewed
+  // submit (see the mount-time snapshot above).
+  function rescanRecovery(): void {
     setRecovery(
-      recallLegacyVaultWithdrawalKeptKey({ projectId, positionId: position.id, redemptionMode })
+      recallVaultWithdrawalKeptAttempt({ projectId, positionId: position.id, redemptionMode })
     );
   }
 
-  // An adopted legacy attempt's own answer retires ITS key — which spent this
+  // An adopted attempt's own answer retires ITS key — which spent this
   // recovery — so re-scan once that answer resolves. A key kept under an
   // UNKNOWN answer leaves the snapshot alone, so a retry re-adopts the same
   // attempt.
   function rescanAdoptedRecovery(adoptedShares: string | undefined): void {
-    if (adoptedShares !== undefined) rescanLegacyRecovery();
+    if (adoptedShares !== undefined) rescanRecovery();
   }
 
   // A confirm whose recovered key was answered between the mount-time
@@ -1091,12 +1092,12 @@ export function EarnVaultWithdrawModal({
   // retired by its late answer — stops here: that confirm was approved as a
   // REPLAY of the earlier attempt, never a fresh exit over it, and minting
   // under the typed quantity would be exactly the second exit the adoption
-  // exists to prevent. The spent snapshot is re-scanned away (nothing legacy
-  // is kept any more), so the next confirm — re-reviewed, notice gone — is a
+  // exists to prevent. The spent snapshot is re-scanned away (nothing is
+  // kept any more), so the next confirm — re-reviewed, notice gone — is a
   // normal typed-quantity submission.
   function stopOnSpentRecovery(recoverySpent: boolean | undefined): boolean {
     if (!recoverySpent) return false;
-    rescanLegacyRecovery();
+    rescanRecovery();
     setSubmitError(t("DashboardEarn.vaultWithdraw.floorUnavailable"));
     return true;
   }
@@ -1119,13 +1120,13 @@ export function EarnVaultWithdrawModal({
     // kept key, the retry misses it and mints a SECOND key whose submit can
     // exit again while the first attempt may already have executed. The
     // tracking module documents the fingerprint's other terms — including the
-    // UPGRADE RECOVERY: the previous build keyed its kept entries on the
-    // derived shares, so a retry of such an attempt resolves to nothing this
-    // build computed. The adoption surfaced for review (the mount-time
-    // recovery state) decides instead — the submission then runs under the
-    // LEGACY fingerprint and replays THAT attempt exactly, its own key,
-    // shares, and minted floor, so the API answers the first attempt either
-    // way and the answer retires the legacy key.
+    // RECOVERY: a kept entry the re-seeded form cannot reach (a previous
+    // build's, or this build's under different typed terms) resolves to
+    // nothing this build computed. The adoption surfaced for review (the
+    // mount-time recovery state) decides instead — the submission then runs
+    // under the ADOPTED fingerprint and replays THAT attempt exactly, its own
+    // key, shares, and minted floor, so the API answers the first attempt
+    // either way and the answer retires that key.
     const { fingerprint, reused, adoptedShares, recoverySpent } = resolveVaultWithdrawalKeptKey({
       fingerprint: typedQuantityFingerprint(quantity),
       recovery,

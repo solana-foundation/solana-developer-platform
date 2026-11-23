@@ -53,7 +53,7 @@ import {
   forgetAsyncWithdrawalShares,
   type KeptAsyncWithdrawalRetry,
   keptAsyncWithdrawalRetry,
-  recallLegacyAsyncWithdrawalKeptKey,
+  recallAsyncWithdrawalKeptAttempt,
   vaultAsyncWithdrawalIdempotencyKeyStore,
   vaultAsyncWithdrawalRequestFingerprint,
 } from "./earn-vault-async-withdrawal-tracking";
@@ -830,22 +830,25 @@ export function EarnVaultQueuedWithdrawModal({
     previewInput,
     step === "review"
   );
-  // Mount-time SNAPSHOT of the previous build's unresolved attempt on this
-  // exit (see `recallLegacyAsyncWithdrawalKeptKey`): the scan runs once, so
-  // what the review surfaces and what the submit adopts is the same attempt —
-  // never a silent mid-session re-scan that could submit shares the customer
-  // never saw. The review notice presents it; the submit's resolver consumes
-  // it. `undefined` when nothing legacy is kept.
+  // Mount-time SNAPSHOT of the oldest kept attempt on this exit (see
+  // `recallAsyncWithdrawalKeptAttempt`): a previous build's, or this build's
+  // under queue terms the re-seeded form no longer shows — the fields above
+  // start at the provider's minimums, so a kept key minted under customized
+  // terms is reachable through no fingerprint the form can recompute. The
+  // scan runs once, so what the review surfaces and what the submit adopts
+  // is the same attempt — never a silent mid-session re-scan that could
+  // submit shares the customer never saw. The review notice presents it; the
+  // submit's resolver consumes it. `undefined` when nothing is kept.
   const [recovery, setRecovery] = useState(() =>
-    recallLegacyAsyncWithdrawalKeptKey({ positionId: position.id, projectId, routeKind: "queue" })
+    recallAsyncWithdrawalKeptAttempt({ positionId: position.id, projectId, routeKind: "queue" })
   );
 
-  // Re-scan for the next-oldest kept legacy attempt, if any. Only ever runs
-  // after a resolution the customer watched — never silently ahead of an
-  // unreviewed submit (see the mount-time snapshot above).
+  // Re-scan for the next-oldest kept attempt, if any. Only ever runs after a
+  // resolution the customer watched — never silently ahead of an unreviewed
+  // submit (see the mount-time snapshot above).
   function rescanRecovery(): void {
     setRecovery(
-      recallLegacyAsyncWithdrawalKeptKey({ positionId: position.id, projectId, routeKind: "queue" })
+      recallAsyncWithdrawalKeptAttempt({ positionId: position.id, projectId, routeKind: "queue" })
     );
   }
 
@@ -882,8 +885,8 @@ export function EarnVaultQueuedWithdrawModal({
   // resolver adopts it first), so it is the terms the review shows when both
   // are kept.
   const savedTerms = recovery ?? keptAsyncWithdrawalRetry(typedFingerprint);
-  // An ADOPTED legacy replay restores its OWN queue terms at confirm (its
-  // body is rebuilt from the legacy fingerprint — see
+  // An ADOPTED replay restores its OWN queue terms at confirm (its body is
+  // rebuilt from the kept fingerprint's identity — see
   // `asyncWithdrawalRecoveryBody`), so the review discloses them beside the
   // shares: the discount and deadline rows above come from the live
   // preview, which is not what the replay will carry.

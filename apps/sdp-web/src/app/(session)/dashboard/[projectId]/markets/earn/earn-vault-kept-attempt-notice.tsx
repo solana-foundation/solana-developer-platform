@@ -10,7 +10,7 @@ export type RestoredQueueTerms = { deadlineSeconds: number; discountBps: number 
 
 /**
  * The review-step notice for a confirm that RESUBMITS A SAVED REQUEST — an
- * adopted previous-build attempt (see `recallLegacyAsyncWithdrawalKeptKey`)
+ * adopted kept attempt (see `recallAsyncWithdrawalKeptAttempt`)
  * or this build's own kept key (see `keptAsyncWithdrawalRetry`), shared by
  * both asynchronous exit modals because it discloses the same fact: the share
  * intent the confirm will send is generally NOT the derivation the rows above
@@ -19,7 +19,7 @@ export type RestoredQueueTerms = { deadlineSeconds: number; discountBps: number 
  * LOST (`undefined`) the attempt cannot be replayed exactly and nothing will
  * be sent — the notice says that instead of a confirm that could only fail or
  * double-escrow. An ADOPTED queue replay also restores its OWN discount and
- * deadline (the body is rebuilt from the legacy fingerprint — see
+ * deadline (the body is rebuilt from the kept fingerprint's identity — see
  * `asyncWithdrawalRecoveryBody`), so `restoredTerms` carries them and the
  * notice says so: the rows above show the live preview's terms, not the
  * replay's. The held-intermediate route shows no notice at all: its request

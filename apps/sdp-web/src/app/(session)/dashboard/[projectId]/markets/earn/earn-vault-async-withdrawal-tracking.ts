@@ -84,9 +84,19 @@ export function resetAsyncWithdrawalTrackingStateForTests(): void {
  * double escrow above, one upgrade later. The shares identities therefore
  * LEAD with a format tag ({@link FINGERPRINT_FORMAT}), which makes the two
  * builds' entries tellable apart, and
- * {@link recallLegacyAsyncWithdrawalKeptKey} is the compatible recovery path:
+ * {@link recallAsyncWithdrawalKeptAttempt} is the compatible recovery path:
  * the submit adopts the previous build's unresolved attempt and replays it
  * exactly instead of minting over it.
+ *
+ * The tag also marks the entries a reload can strand WITHIN this build: the
+ * queued modal re-seeds its discount and deadline to the provider's MINIMUMS
+ * at mount (and the amount field starts empty), so a kept key minted under
+ * customized queue terms is reachable through no fingerprint the form can
+ * recompute — a retry would mint a second key and escrow again. The
+ * recovery scan therefore matches this build's OWN tagged identities for the
+ * position too, whatever typed amount and queue terms they were minted
+ * under; the identity carries the queue terms themselves, and the shares
+ * memo carries what went out.
  */
 export function vaultAsyncWithdrawalRequestFingerprint(
   input: EarnVaultAsyncWithdrawalIntent
@@ -222,69 +232,157 @@ function legacyAsyncWithdrawalIdentity(
 }
 
 /**
- * What adopting the previous build's unresolved attempt means concretely: the
- * key's legacy fingerprint, and the shares and route terms parsed out of that
- * identity — everything the replayed body needs, which is why a legacy
- * recovery is always exactly replayable and never depends on a memo.
+ * One kept entry THIS build wrote, parsed back out of its stored fingerprint —
+ * the companion to `legacyAsyncWithdrawalIdentity` above. These are the
+ * entries a reload strands WITHIN this build: the queued modal re-seeds its
+ * discount and deadline to the provider's MINIMUMS at mount (and the amount
+ * field starts empty), so a kept key minted under customized queue terms is
+ * reachable through no fingerprint the form can recompute — `has` misses, and
+ * a retry mints a second key over an attempt that may already be escrowed.
+ * The parsed route terms are what the adopted replay sends (`the identity
+ * carries them`, exactly like a legacy adoption); the shares come from the
+ * memo (see `VaultWithdrawalRecovery`'s twin note on `undefined`). The typed
+ * amount is parsed only to validate the tuple — the adoption compares nothing
+ * against the form.
+ */
+const typedQuantityIdentitySchema = z.union([
+  z
+    .tuple([
+      z.literal(FINGERPRINT_FORMAT),
+      z.union([z.string(), z.null()]),
+      z.string().min(1),
+      z.string().min(1),
+      z.literal("queue"),
+      z.number(),
+      z.number(),
+    ])
+    .transform(([, projectId, positionId, , , discountBps, deadlineSeconds]) => ({
+      projectId,
+      positionId,
+      route: { kind: "queue" as const, discountBps, deadlineSeconds },
+    })),
+  z
+    .tuple([
+      z.literal(FINGERPRINT_FORMAT),
+      z.union([z.string(), z.null()]),
+      z.string().min(1),
+      z.string().min(1),
+      z.literal("operator_redemption"),
+    ])
+    .transform(([, projectId, positionId]) => ({
+      projectId,
+      positionId,
+      route: { kind: "operator_redemption" as const },
+    })),
+]);
+
+type TypedQuantityAsyncWithdrawalIdentity = z.infer<typeof typedQuantityIdentitySchema>;
+
+function typedQuantityAsyncWithdrawalIdentity(
+  fingerprint: string
+): TypedQuantityAsyncWithdrawalIdentity | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fingerprint);
+  } catch {
+    return undefined;
+  }
+  const candidate = typedQuantityIdentitySchema.safeParse(parsed);
+  return candidate.success ? candidate.data : undefined;
+}
+
+/**
+ * What adopting an unresolved attempt means concretely: the key's fingerprint,
+ * the route terms parsed out of that identity — everything the replayed body
+ * needs beyond the shares — and the shares themselves. A legacy adoption's
+ * shares come out of the identity; a this-build adoption's come from the
+ * shares memo, and that read can come back `undefined` — the memo (like the
+ * key, per-tab `sessionStorage`) is gone in another tab or a refused store.
+ * The recovery is still surfaced: the review then says nothing sendable
+ * exists, which blocks the mint-over that a skipped entry would invite.
  */
 export type AsyncWithdrawalRecovery = {
   fingerprint: string;
   route:
     | { kind: "queue"; discountBps: number; deadlineSeconds: number }
     | { kind: "operator_redemption" };
-  shares: string;
+  shares: string | undefined;
 };
 
 /**
- * The PREVIOUS build's unresolved attempt on this exit, if one is kept — the
- * upgrade bridge for the fingerprint change above. A kept entry is an attempt
- * that may already be escrowed and was never answered; submitting this exit
- * without adopting it would mint a second key and can escrow AGAIN. The
- * caller replays the adopted attempt's OWN request instead: its key (the
- * store answers `claim` under the legacy fingerprint) and its shares and
- * route terms (`asyncWithdrawalRecoveryBody` rebuilds that body). Whichever
- * way the API answers, it answers the FIRST attempt, and the answer retires
- * the legacy key.
+ * The oldest kept attempt on this exit, if any is unresolved — the recovery
+ * path for every kept entry the form can no longer reach through `has`. A
+ * kept entry is an attempt that may already be escrowed and was never
+ * answered; submitting this exit without adopting it would mint a second key
+ * and can escrow AGAIN. The caller replays the adopted attempt's OWN request
+ * instead: its key (the store answers `claim` under the adopted fingerprint)
+ * and its shares and route terms (`asyncWithdrawalRecoveryBody` rebuilds that
+ * body). Whichever way the API answers, it answers the FIRST attempt, and the
+ * answer retires that key.
+ *
+ * Two shapes are adopted:
+ *
+ * - The PREVIOUS build's entry (the upgrade bridge for the fingerprint
+ *   change above): its identity carries the shares and queue terms
+ *   themselves, so the replay is exact by construction.
+ * - THIS build's entry under DIFFERENT typed terms than the form now shows —
+ *   after a reload the queued form re-seeds its discount and deadline to the
+ *   provider's minimums and the amount field is empty, so a kept key minted
+ *   under customized terms is otherwise unreachable and a retry would mint a
+ *   second key over it. Its shares come from the memo.
  *
  * The adoption is a DECISION the caller surfaces for review before it sends —
  * the recovered shares are generally NOT the derivation the form is showing
  * (see the modals' recovery notice). The OLDEST match comes back first (see
- * `keptEntries`): several legacy attempts can be kept at once — a changed
- * discount or deadline minted a fresh key in the previous build too — and
- * each adopted replay resolves one, oldest first, until none is left and
- * typed-quantity keys flow normally. Only the project, position, and route
- * kind must match: the typed quantity cannot be compared across the two
- * builds (dollars against shares, at a rate neither recorded), and the queue
- * terms cannot either — the replay carries the legacy attempt's own terms,
- * whatever the form shows now. `undefined` when nothing legacy is kept.
+ * `keptEntries`): several attempts can be kept at once — a changed discount
+ * or deadline minted a fresh key in the previous build too — and each adopted
+ * replay resolves one, oldest first, until none is left and typed-quantity
+ * keys flow normally. Only the project, position, and route kind must match:
+ * the typed quantity cannot be compared against a form that no longer holds
+ * it, and the queue terms cannot either — the replay carries the adopted
+ * attempt's own terms, whatever the form shows now. `undefined` when nothing
+ * is kept.
  */
-export function recallLegacyAsyncWithdrawalKeptKey(input: {
+export function recallAsyncWithdrawalKeptAttempt(input: {
   projectId: string | null;
   positionId: string;
   routeKind: "queue" | "operator_redemption";
 }): AsyncWithdrawalRecovery | undefined {
   for (const entry of vaultAsyncWithdrawalIdempotencyKeyStore.keptEntries()) {
+    // The two parses are disjoint: the legacy one refuses this build's tagged
+    // identities, the tagged one requires the tag.
     const legacy = legacyAsyncWithdrawalIdentity(entry.fingerprint);
-    if (!legacy) continue;
     // A held-intermediate entry keeps the previous build's identity and its
     // own replayability — it is never adopted (see the type's comment).
-    if (legacy.intermediateAmount !== undefined) continue;
-    if (legacy.projectId !== input.projectId || legacy.positionId !== input.positionId) continue;
-    if (legacy.route.kind !== input.routeKind) continue;
-    return { fingerprint: entry.fingerprint, route: legacy.route, shares: legacy.shares };
+    if (legacy && legacy.intermediateAmount !== undefined) continue;
+    const typed = legacy ? undefined : typedQuantityAsyncWithdrawalIdentity(entry.fingerprint);
+    const identity = legacy ?? typed;
+    if (!identity) continue;
+    if (identity.projectId !== input.projectId || identity.positionId !== input.positionId) {
+      continue;
+    }
+    if (identity.route.kind !== input.routeKind) continue;
+    return {
+      fingerprint: entry.fingerprint,
+      route: identity.route,
+      shares: legacy ? legacy.shares : recallAsyncWithdrawalShares(entry.fingerprint),
+    };
   }
   return undefined;
 }
 
 /**
- * The wire body an ADOPTED legacy attempt replays: rebuilt field-by-field
- * from the identity the previous build serialized — its shares and its own
- * queue terms, never the live derivation or the form's current settings,
- * because the legacy key's first attempt carried exactly those and the API's
- * fingerprint refuses a changed body under a live key.
+ * The wire body an ADOPTED attempt replays: rebuilt field-by-field from the
+ * identity the kept fingerprint serialized — its shares and its own queue
+ * terms, never the live derivation or the form's current settings, because
+ * the kept key's first attempt carried exactly those and the API's
+ * fingerprint refuses a changed body under a live key. The share intent is
+ * the DECIDED one (narrowed non-undefined by the submit's stop on a lost
+ * memo) — for a legacy adoption it is the identity's own, for a this-build
+ * adoption the memo's.
  */
 export function asyncWithdrawalRecoveryBody(
-  adopted: AsyncWithdrawalRecovery,
+  adopted: AsyncWithdrawalRecovery & { shares: string },
   positionId: string
 ): EarnVaultAsyncWithdrawalTermsRequest {
   return adopted.route.kind === "queue"
@@ -299,10 +397,12 @@ export function asyncWithdrawalRecoveryBody(
 
 /**
  * Which kept key an asynchronous submission runs under, decided ONCE at
- * submit: the recovery the review surfaced (an ADOPTED previous-build attempt
- * — the submit then runs under the legacy fingerprint and replays that
- * attempt exactly, its own key and terms, so the API answers the first
- * attempt either way), or the typed-quantity fingerprint's own kept key.
+ * submit: the recovery the review surfaced (an ADOPTED kept attempt — a
+ * previous build's, or this build's under typed terms the re-seeded form no
+ * longer shows — the submit then runs under the adopted fingerprint and
+ * replays that attempt exactly, its own key and terms, so the API answers
+ * the first attempt either way), or the typed-quantity fingerprint's own
+ * kept key.
  * `adopted` is set for an adoption only — the caller must send the adopted
  * body (`asyncWithdrawalRecoveryBody`) instead of any fresh derivation,
  * because the first attempt's body, verbatim, is the only request the legacy
@@ -515,7 +615,9 @@ export function decideAsyncWithdrawalSubmit(input: {
   let body: EarnVaultAsyncWithdrawalTermsRequest;
   switch (resolution.kind) {
     case "adopted":
-      body = asyncWithdrawalRecoveryBody(resolution.adopted, freshBody.positionId);
+      // The decided `shares` IS the adopted attempt's (the switch above); the
+      // spread only narrows the memo-read `undefined` away for the builder.
+      body = asyncWithdrawalRecoveryBody({ ...resolution.adopted, shares }, freshBody.positionId);
       break;
     case "kept":
     case "fresh":

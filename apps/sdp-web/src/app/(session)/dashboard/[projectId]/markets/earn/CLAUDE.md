@@ -109,12 +109,14 @@ one grows — and the API already answers an unknown value with an empty page, w
 is the honest result.
 
 `proxyToSdpApi` never copies the inbound header bag — auth, project scope and
-tracing stay server-owned — so a client-set `Idempotency-Key` never reaches the
-API on its own. A route forwards one deliberately, per header, through the
-optional `upstreamHeaders` argument, spelling it `IDEMPOTENCY_KEY_HEADER`
-(`src/lib/idempotency.ts`). `vault-deposits/`, `vault-withdrawals/`, and the
-queued request create/cancel routes opt in, forwarding that single header and
-nothing else; the program create still sends the body `requestId` form.
+tracing stay server-owned. The ONE exception is deliberate (HOO-1918): on a
+non-GET/HEAD request the proxy itself forwards the inbound `Idempotency-Key`
+(`withForwardedIdempotencyKey` in `src/lib/sdp-api.ts`), because a retried
+mutation without its key is a new request upstream. `upstreamHeaders` remains
+the opt-in for every OTHER piece of endpoint-specific metadata — the key rides
+along whether or not a route supplies any, and a route can still set its own
+key header explicitly (the proxy does not overwrite one). The program create
+still sends the body `requestId` form beside it.
 
 ## Routes
 
@@ -378,18 +380,22 @@ nothing else; the program create still sends the body `requestId` form.
   fingerprint pins both `shares` and `minAmountOut`) under its own versioned
   `sessionStorage` key. The tag is the upgrade bridge: the previous build
   keyed its entries on the DERIVED shares, so no fingerprint this build
-  computes finds them again, and `recallLegacyVaultWithdrawalKeptKey` is the
+  computes finds them again, and `recallVaultWithdrawalKeptAttempt` is the
   recovery — a MOUNT-TIME snapshot the modal keeps in state and surfaces on
   the review step as a warning notice (the recovered shares and floor are
   generally not the amount the form shows), which the submit's resolver
-  consumes: the adoption replays the legacy attempt exactly, under the legacy
-  key with the shares parsed out of the legacy identity and the memo'd minted
-  floor, oldest entry first — instead of minting a second key over an attempt
-  that may already have executed. A re-scan only runs once an adopted replay
-  has retired its own key; a floor memo the scan finds LOST stops the submit
-  (nothing sendable), a recovered key answered between mount and confirm
-  stops the submit too — that confirm was approved as a replay, never a
-  fresh exit over it, so the review refreshes instead — and a legacy entry
+  consumes: the adoption replays the attempt exactly, under its own key with
+  the shares parsed out of a legacy identity or read from the shares memo,
+  and the memo'd minted floor, oldest entry first — instead of minting a
+  second key over an attempt that may already have executed. The scan adopts
+  THIS build's tagged entries too, because a reload strands them the same
+  way: the form re-seeds (empty amount, the provider's default tolerance), so
+  a kept key minted under customized terms is reachable through no
+  fingerprint the form can recompute. A re-scan only runs once an adopted
+  replay has retired its own key; a floor memo the scan finds LOST stops the
+  submit (nothing sendable), a recovered key answered between mount and
+  confirm stops the submit too — that confirm was approved as a replay, never
+  a fresh exit over it, so the review refreshes instead — and a kept entry
   that appears after mount is never silently adopted.
 - `earn-vault-async-withdrawal-tracking.ts` — the ASYNCHRONOUS exits'
   idempotency-key store (queued withdrawals and par redemptions; fingerprint:
@@ -402,16 +408,22 @@ nothing else; the program create still sends the body `requestId` form.
   its typed input IS the wire quantity, so its identity keeps the previous
   build's shape (no tag, no memo) and its kept keys stay reachable through
   `has`. The format tag is the upgrade bridge: the previous build keyed both
-  share routes on the DERIVED shares, and `recallLegacyAsyncWithdrawalKeptKey`
+  share routes on the DERIVED shares, and `recallAsyncWithdrawalKeptAttempt`
   is the recovery — a MOUNT-TIME snapshot the modal keeps in state and
   surfaces on the review step through the shared `KeptAsyncAttemptNotice`
   (`earn-vault-kept-attempt-notice.tsx`, one copy for both async modals; an
   adopted queue replay also discloses its restored discount and deadline
   there, because the preview rows above show the form's current terms, not
   the replay's), which
-  the submit's resolver consumes: the adoption replays the legacy attempt
-  exactly, under the legacy key with the shares and queue terms parsed out of
-  the legacy identity, oldest entry first. The same stops as the instant exit:
+  the submit's resolver consumes: the adoption replays the attempt
+  exactly, under its own key with the shares and queue terms parsed out of
+  a legacy identity, or the memo'd shares under a this-build one, oldest
+  entry first. The scan adopts THIS build's tagged entries too, because a
+  reload strands them the same way: the queued form re-seeds its discount
+  and deadline to the provider's minimums at mount (and the amount field
+  starts empty), so a kept key minted under customized terms is reachable
+  through no fingerprint the form can recompute. The same stops as the
+  instant exit:
   a lost memo stops the submit (nothing sendable), a recovered key answered
   between mount and confirm stops it too, and a re-scan only runs after a
   resolution the customer watched.

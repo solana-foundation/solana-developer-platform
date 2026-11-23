@@ -101,11 +101,15 @@ function matchesRoute(pattern: string, method: string, path: string): boolean {
  * Dashboard money routes the API replays from its own movement ledger rather
  * than the shared `idempotent()` step, so they are absent from the shared
  * `IdempotencyRequiredRoute` list yet move money all the same (an earn
- * program's custodial payout). The refusal below protects them identically: a
- * reload must never mint a fresh key for a payout that may have landed.
+ * program's custodial payout, and the Earn vault's deposit, exit and queued
+ * escrow executes). The refusal below protects them identically: a reload
+ * must never mint a fresh key for a movement that may have landed.
  */
 const DASHBOARD_MONEY_ROUTES = [
   "POST /api/dashboard/markets/earn/programs/:programId/withdrawals",
+  "POST /api/dashboard/markets/earn/vault-deposits",
+  "POST /api/dashboard/markets/earn/vault-withdrawals",
+  "POST /api/dashboard/markets/earn/vault-withdrawal-requests",
 ] as const;
 
 /** Whether this mutation moves money, so it must never send under a key that cannot be kept. */

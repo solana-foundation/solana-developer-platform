@@ -1361,7 +1361,7 @@ describe("exit slippage floors (quote-derived)", () => {
       expect(mocks.createEarnVaultWithdrawal.mock.calls[0][0]).toMatchObject({ shares: "5" });
     });
 
-    it("never mistakes this build's kept key, tagged or not, for a legacy one", async () => {
+    it("re-adopts this build's kept attempt at mount and replays it instead of minting over it", async () => {
       primeQuote("4.997");
       mocks.createEarnVaultWithdrawal
         .mockResolvedValueOnce({
@@ -1376,10 +1376,12 @@ describe("exit slippage floors (quote-derived)", () => {
           data: { kind: "submitted", withdrawal: withdrawal("submitted") },
         });
 
-      // A THIS-build attempt ($5, its key kept by the 5xx), then the customer
-      // edits the amount and submits $6: a different withdrawal, whose submit
-      // must mint fresh — the kept entry carries the format tag, so the legacy
-      // scan refuses it.
+      // A THIS-build attempt ($5, its key kept by the 5xx), then the modal
+      // reopens — a reload reads the same: the re-seeded form cannot
+      // recompute the kept fingerprint (empty amount, the default tolerance),
+      // so the mount-time recovery adopts the kept attempt and the confirm —
+      // whatever amount the form now holds — replays the $5 attempt under ITS
+      // key instead of minting a second one over it.
       const first = renderModal(vi.fn(), vedaPosition);
       await enterVedaShares("5");
       await vi.waitFor(() => expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(1));
@@ -1387,6 +1389,51 @@ describe("exit slippage floors (quote-derived)", () => {
 
       vi.useFakeTimers();
       renderModal(vi.fn(), vedaPosition);
+      await enterVedaShares("6");
+      await flushSubmission();
+
+      // The second call IS the first attempt: its key, its minted shares, and
+      // its minted floor — the API answers the first attempt either way.
+      expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(2);
+      expect(mocks.createEarnVaultWithdrawal.mock.calls[1][1]).toBe(
+        mocks.createEarnVaultWithdrawal.mock.calls[0][1]
+      );
+      expect(mocks.createEarnVaultWithdrawal.mock.calls[1][0]).toEqual(
+        mocks.createEarnVaultWithdrawal.mock.calls[0][0]
+      );
+    });
+
+    it("mints a fresh key for a different amount while no attempt is kept at mount", async () => {
+      primeQuote("4.997");
+      mocks.createEarnVaultWithdrawal
+        .mockResolvedValueOnce({
+          ok: false,
+          error: "Bad gateway",
+          status: 503,
+          body: null,
+        })
+        .mockResolvedValue({
+          ok: true,
+          status: 200,
+          data: { kind: "submitted", withdrawal: withdrawal("submitted") },
+        });
+
+      // The same $5 attempt kept by a 5xx, but the customer edits the amount
+      // and submits $6 WITHOUT the modal remounting: the recovery snapshot is
+      // the mount-time one (nothing was kept then), the $6 fingerprint misses
+      // the kept key, and the submit mints fresh — a deliberately different
+      // withdrawal, whose first attempt's key stays kept for ITS retry.
+      renderModal(vi.fn(), vedaPosition);
+      await enterVedaShares("5");
+      await vi.waitFor(() => expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(1));
+      // Let the failed submit's state land before pressing Back: the review
+      // step's Back is disabled while the submit still reads as running.
+      await flushSubmission();
+
+      vi.useFakeTimers();
+      // The 503 left the modal on the review step; back to the details step
+      // before entering the different amount.
+      fireEvent.click(screen.getByRole("button", { name: "Back" }));
       await enterVedaShares("6");
       await flushSubmission();
 

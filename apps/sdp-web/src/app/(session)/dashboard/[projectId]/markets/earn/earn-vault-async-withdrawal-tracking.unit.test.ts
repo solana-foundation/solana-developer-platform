@@ -7,8 +7,8 @@ import {
   type EarnVaultAsyncWithdrawalIntent,
   forgetAsyncWithdrawalShares,
   keptAsyncWithdrawalRetry,
+  recallAsyncWithdrawalKeptAttempt,
   recallAsyncWithdrawalShares,
-  recallLegacyAsyncWithdrawalKeptKey,
   rememberAsyncWithdrawalShares,
   resetAsyncWithdrawalTrackingStateForTests,
   resolveAsyncWithdrawalKeptKey,
@@ -150,10 +150,10 @@ describe("vaultAsyncWithdrawalRequestFingerprint", () => {
   });
 });
 
-describe("recallLegacyAsyncWithdrawalKeptKey", () => {
+describe("recallAsyncWithdrawalKeptAttempt", () => {
   it("adopts the previous build's unresolved queue attempt with its own terms", () => {
     vaultAsyncWithdrawalIdempotencyKeyStore.claim(legacyQueueFingerprint, () => LEGACY_KEY);
-    expect(recallLegacyAsyncWithdrawalKeptKey(queueRecoveryScope())).toEqual({
+    expect(recallAsyncWithdrawalKeptAttempt(queueRecoveryScope())).toEqual({
       fingerprint: legacyQueueFingerprint,
       route: { kind: "queue", discountBps: 25, deadlineSeconds: 360 },
       shares: "5",
@@ -163,7 +163,7 @@ describe("recallLegacyAsyncWithdrawalKeptKey", () => {
   it("adopts an operator-redemption attempt for that route only", () => {
     vaultAsyncWithdrawalIdempotencyKeyStore.claim(legacyOperatorFingerprint, () => LEGACY_KEY);
     expect(
-      recallLegacyAsyncWithdrawalKeptKey({
+      recallAsyncWithdrawalKeptAttempt({
         projectId: "project_1",
         positionId: "position_1",
         routeKind: "operator_redemption",
@@ -173,7 +173,7 @@ describe("recallLegacyAsyncWithdrawalKeptKey", () => {
       route: { kind: "operator_redemption" },
       shares: "5",
     });
-    expect(recallLegacyAsyncWithdrawalKeptKey(queueRecoveryScope())).toBeUndefined();
+    expect(recallAsyncWithdrawalKeptAttempt(queueRecoveryScope())).toBeUndefined();
   });
 
   it("never adopts a held-intermediate entry", () => {
@@ -182,7 +182,7 @@ describe("recallLegacyAsyncWithdrawalKeptKey", () => {
     // request.
     vaultAsyncWithdrawalIdempotencyKeyStore.claim(legacyIntermediateFingerprint, () => LEGACY_KEY);
     expect(
-      recallLegacyAsyncWithdrawalKeptKey({
+      recallAsyncWithdrawalKeptAttempt({
         projectId: "project_1",
         positionId: "position_1",
         routeKind: "operator_redemption",
@@ -190,21 +190,83 @@ describe("recallLegacyAsyncWithdrawalKeptKey", () => {
     ).toBeUndefined();
   });
 
-  it("refuses this build's own tagged entries", () => {
-    vaultAsyncWithdrawalIdempotencyKeyStore.claim(
-      vaultAsyncWithdrawalRequestFingerprint(queueIntent()),
-      () => FIRST_KEY
+  it("adopts this build's kept entry minted under customized queue terms", () => {
+    // The reload stranding the recovery exists for: the queued form re-seeds
+    // its discount and deadline to the provider's minimums at mount, so the
+    // kept key under the CUSTOMIZED terms is reachable through no fingerprint
+    // the form can recompute. The scan adopts it; the identity carries the
+    // terms the replay must restore, and the memo carries the shares.
+    const customized = vaultAsyncWithdrawalRequestFingerprint({
+      ...queueIntent(),
+      route: { kind: "queue", discountBps: 120, deadlineSeconds: 3600 },
+    });
+    vaultAsyncWithdrawalIdempotencyKeyStore.claim(customized, () => FIRST_KEY);
+    rememberAsyncWithdrawalShares(customized, "7.5");
+    expect(recallAsyncWithdrawalKeptAttempt(queueRecoveryScope())).toEqual({
+      fingerprint: customized,
+      route: { kind: "queue", discountBps: 120, deadlineSeconds: 3600 },
+      shares: "7.5",
+    });
+  });
+
+  it("adopts this build's kept entry with a LOST shares memo as nothing sendable", () => {
+    // Another tab (or a refused store) holds no shares memo for the kept key:
+    // the adoption must still surface — a skipped entry would invite the
+    // mint-over — and the undefined shares stop the submit instead.
+    const customized = vaultAsyncWithdrawalRequestFingerprint(queueIntent("9"));
+    vaultAsyncWithdrawalIdempotencyKeyStore.claim(customized, () => FIRST_KEY);
+    expect(recallAsyncWithdrawalKeptAttempt(queueRecoveryScope())).toEqual({
+      fingerprint: customized,
+      route: { kind: "queue", discountBps: 25, deadlineSeconds: 360 },
+      shares: undefined,
+    });
+  });
+
+  it("adopts this build's kept operator-redemption entry", () => {
+    const customized = vaultAsyncWithdrawalRequestFingerprint(operatorIntent("4"));
+    vaultAsyncWithdrawalIdempotencyKeyStore.claim(customized, () => FIRST_KEY);
+    rememberAsyncWithdrawalShares(customized, "12");
+    expect(
+      recallAsyncWithdrawalKeptAttempt({
+        projectId: "project_1",
+        positionId: "position_1",
+        routeKind: "operator_redemption",
+      })
+    ).toEqual({
+      fingerprint: customized,
+      route: { kind: "operator_redemption" },
+      shares: "12",
+    });
+  });
+
+  it("adopts the OLDEST kept attempt first across both shapes", () => {
+    // Claim times decide the order, not the shapes: the scan answers the
+    // first attempt first, whichever build wrote it.
+    const clock = vi.spyOn(Date, "now");
+    let nowMs = 1_000_000;
+    clock.mockImplementation(() => (nowMs += 1));
+    const own = vaultAsyncWithdrawalRequestFingerprint(queueIntent());
+    vaultAsyncWithdrawalIdempotencyKeyStore.claim(own, () => FIRST_KEY);
+    nowMs += 10_000;
+    vaultAsyncWithdrawalIdempotencyKeyStore.claim(legacyQueueFingerprint, () => LEGACY_KEY);
+    clock.mockRestore();
+    expect(recallAsyncWithdrawalKeptAttempt(queueRecoveryScope())?.fingerprint).toBe(own);
+    // And once the oldest is answered, the re-scan walks to the next one.
+    vaultAsyncWithdrawalIdempotencyKeyStore.release(own, FIRST_KEY);
+    expect(recallAsyncWithdrawalKeptAttempt(queueRecoveryScope())?.fingerprint).toBe(
+      legacyQueueFingerprint
     );
-    expect(recallLegacyAsyncWithdrawalKeptKey(queueRecoveryScope())).toBeUndefined();
   });
 
   it("matches the project and position, and refuses entries of other scopes", () => {
     vaultAsyncWithdrawalIdempotencyKeyStore.claim(legacyQueueFingerprint, () => LEGACY_KEY);
+    const own = vaultAsyncWithdrawalRequestFingerprint(queueIntent());
+    vaultAsyncWithdrawalIdempotencyKeyStore.claim(own, () => FIRST_KEY);
     expect(
-      recallLegacyAsyncWithdrawalKeptKey({ ...queueRecoveryScope(), projectId: "project_2" })
+      recallAsyncWithdrawalKeptAttempt({ ...queueRecoveryScope(), projectId: "project_2" })
     ).toBeUndefined();
     expect(
-      recallLegacyAsyncWithdrawalKeptKey({ ...queueRecoveryScope(), positionId: "position_2" })
+      recallAsyncWithdrawalKeptAttempt({ ...queueRecoveryScope(), positionId: "position_2" })
     ).toBeUndefined();
   });
 });
@@ -227,7 +289,7 @@ describe("resolveAsyncWithdrawalKeptKey", () => {
 
   it("adopts a kept legacy recovery under the legacy fingerprint", () => {
     vaultAsyncWithdrawalIdempotencyKeyStore.claim(legacyQueueFingerprint, () => LEGACY_KEY);
-    const recovery = recallLegacyAsyncWithdrawalKeptKey(queueRecoveryScope());
+    const recovery = recallAsyncWithdrawalKeptAttempt(queueRecoveryScope());
     expect(
       resolveAsyncWithdrawalKeptKey({
         fingerprint: vaultAsyncWithdrawalRequestFingerprint(queueIntent()),
@@ -246,7 +308,7 @@ describe("resolveAsyncWithdrawalKeptKey", () => {
     // the confirm: the confirm was approved as a REPLAY, never a fresh
     // escrow over it, so the resolution resolves to nothing sendable.
     vaultAsyncWithdrawalIdempotencyKeyStore.claim(legacyQueueFingerprint, () => LEGACY_KEY);
-    const recovery = recallLegacyAsyncWithdrawalKeptKey(queueRecoveryScope());
+    const recovery = recallAsyncWithdrawalKeptAttempt(queueRecoveryScope());
     vaultAsyncWithdrawalIdempotencyKeyStore.release(legacyQueueFingerprint, LEGACY_KEY);
     expect(
       resolveAsyncWithdrawalKeptKey({

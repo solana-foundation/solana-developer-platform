@@ -47,7 +47,7 @@ import {
   forgetAsyncWithdrawalShares,
   type KeptAsyncWithdrawalRetry,
   keptAsyncWithdrawalRetry,
-  recallLegacyAsyncWithdrawalKeptKey,
+  recallAsyncWithdrawalKeptAttempt,
   vaultAsyncWithdrawalIdempotencyKeyStore,
   vaultAsyncWithdrawalRequestFingerprint,
 } from "./earn-vault-async-withdrawal-tracking";
@@ -810,16 +810,16 @@ export function EarnVaultParRedemptionModal({
     [position, belowMinimum, intermediateAmount, overAvailableAmount, shares]
   );
   const { preview, loading, error, setError } = useParRedemptionPreview(input, step === "review");
-  // Mount-time SNAPSHOT of the previous build's unresolved attempt on this
-  // exit (see `recallLegacyAsyncWithdrawalKeptKey`) — SHARES sources only:
+  // Mount-time SNAPSHOT of the oldest kept attempt on this exit (see
+  // `recallAsyncWithdrawalKeptAttempt`) — SHARES sources only:
   // the held-intermediate route's keys keep the previous build's identity,
   // so nothing here needs adopting for them. The scan runs once, so what
   // the review surfaces and what the submit adopts is the same attempt —
   // never a silent mid-session re-scan that could submit shares the
-  // customer never saw. `undefined` when nothing legacy is kept.
+  // customer never saw. `undefined` when nothing is kept.
   const [recovery, setRecovery] = useState(() =>
     source === "shares"
-      ? recallLegacyAsyncWithdrawalKeptKey({
+      ? recallAsyncWithdrawalKeptAttempt({
           positionId: position.id,
           projectId,
           routeKind: "operator_redemption",
@@ -827,13 +827,13 @@ export function EarnVaultParRedemptionModal({
       : undefined
   );
 
-  // Re-scan for the next-oldest kept legacy attempt, if any. Only ever runs
-  // after a resolution the customer watched — never silently ahead of an
-  // unreviewed submit (see the mount-time snapshot above).
+  // Re-scan for the next-oldest kept attempt, if any. Only ever runs after a
+  // resolution the customer watched — never silently ahead of an unreviewed
+  // submit (see the mount-time snapshot above).
   function rescanRecovery(): void {
     setRecovery(
       source === "shares"
-        ? recallLegacyAsyncWithdrawalKeptKey({
+        ? recallAsyncWithdrawalKeptAttempt({
             positionId: position.id,
             projectId,
             routeKind: "operator_redemption",
