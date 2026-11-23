@@ -827,7 +827,7 @@ describe("Issuance Routes", () => {
 
     function mint(tokenId: string, signingCustodyWalletId: string) {
       return app.request(
-        `/v1/issuance/tokens/${tokenId}/mint`,
+        `/v1/issuance/tokens/${tokenId}/mint/execute`,
         {
           method: "POST",
           headers,
@@ -889,7 +889,7 @@ describe("Issuance Routes", () => {
       signer.mockClear();
 
       const response = await app.request(
-        `/v1/issuance/tokens/${token.id}/burn`,
+        `/v1/issuance/tokens/${token.id}/burn/execute`,
         {
           method: "POST",
           headers,
