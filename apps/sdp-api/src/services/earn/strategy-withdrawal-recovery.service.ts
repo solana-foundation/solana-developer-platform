@@ -4,6 +4,7 @@ import type {
 } from "@sdp/earn/types";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
+import { isLiveVaultWithdrawalRequestStatus } from "@sdp/types/earn";
 import { getDb } from "@/db/client";
 import {
   createPostgresEarnVaultWithdrawalRequestsRepository,
@@ -53,9 +54,7 @@ export function assertExpiredStrategyEscrow(
   lookup: EarnVaultQueuedWithdrawalRequestLookup
 ): void {
   if (
-    ["creating", "cancelling", "closed_or_unknown", "fulfilled", "cancelled", "failed"].includes(
-      request.status
-    ) ||
+    !isLiveVaultWithdrawalRequestStatus(request.status) ||
     request.nonce === null ||
     request.creation_timestamp === null ||
     request.deadline_timestamp === null ||

@@ -5,7 +5,10 @@ import type {
   EarnMovementDirection,
   EarnMovementStatus,
 } from "@sdp/types/earn";
-import { EARN_MOVEMENT_TRANSITIONS } from "@sdp/types/earn";
+import {
+  EARN_MOVEMENT_TRANSITIONS,
+  EARN_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES,
+} from "@sdp/types/earn";
 import {
   type EarnProviderSettlement,
   earnProviderSettlementSchema,
@@ -19,6 +22,7 @@ import {
   asTransactionalClient,
   type DatabaseExecutor,
 } from "@/db/client";
+import { sqlLiteralList } from "@/db/postgres-utils";
 import { conflict } from "@/lib/errors";
 
 /**
@@ -1136,10 +1140,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                 AND NOT EXISTS (
                   SELECT 1 FROM earn_vault_withdrawal_requests queued
                    WHERE queued.position_id = earn_positions.id
-                     AND queued.status IN (
-                       'creating', 'pending', 'fulfillable',
-                       'expired_cancelable', 'cancelling', 'closed_or_unknown'
-                     )
+                     AND queued.status IN (${sqlLiteralList(EARN_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES)})
                 )
               RETURNING id`
           )
@@ -1292,10 +1293,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                      CASE WHEN request.status = 'fulfilled' AND request.assets_paid IS NULL
                           THEN 1 ELSE 0 END,
                      0,
-                     CASE WHEN request.status IN (
-                            'creating', 'pending', 'fulfillable',
-                            'expired_cancelable', 'cancelling', 'closed_or_unknown'
-                          ) THEN 1 ELSE 0 END
+                     CASE WHEN request.status IN (${sqlLiteralList(EARN_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES)}) THEN 1 ELSE 0 END
                 FROM earn_vault_withdrawal_requests request
                WHERE request.organization_id = ?
                  AND request.project_id = ?
