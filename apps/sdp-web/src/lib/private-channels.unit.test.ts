@@ -149,7 +149,7 @@ describe("private-channel event API helpers", () => {
   });
 });
 
-describe("renamed Private Channels API paths", () => {
+describe("Private Channels API paths", () => {
   it.each([
     {
       name: "instance",

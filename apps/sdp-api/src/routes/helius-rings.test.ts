@@ -333,7 +333,7 @@ describe("Helius Rings routes", () => {
     expect(body.data.wallets[0]).toMatchObject({ id: ringsWalletId, status: "pending" });
   });
 
-  it("POST /wallets 404s for an unknown custody wallet", async () => {
+  it("POST /wallets/provision-identity 404s for an unknown custody wallet", async () => {
     const res = await post("/v1/helius-rings/wallets/provision-identity", {
       walletId: "wal_missing",
       name: "Ops",
@@ -575,7 +575,7 @@ describe("Helius Rings routes", () => {
       expect(allowedRetry.status).toBe(201);
     });
 
-    it("execute is a no-op on a terminal operation", async () => {
+    it("resume-execution is a no-op on a terminal operation", async () => {
       const failed = (await (
         await post("/v1/helius-rings/operations/execute", {
           walletId: ringsWalletId,
