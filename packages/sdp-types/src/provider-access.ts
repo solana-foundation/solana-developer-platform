@@ -242,26 +242,6 @@ export const EARN_PROVIDER_WITHDRAWAL_SETTLEMENT = {
   plume: "provider_order",
 } as const satisfies Record<EarnProviderId, "atomic" | "provider_order">;
 
-/** Whether the provider has a verified destination-settlement observer in this deployment. */
-export const EARN_PROVIDER_SETTLEMENT_TRACKING = {
-  veda: false,
-  upshift: false,
-  perena: false,
-  kamino: false,
-  jupiter_lend: false,
-  ondo: false,
-  hastra: false,
-  wisdomtree: false,
-  plume: true,
-} as const satisfies Record<EarnProviderId, boolean>;
-export function earnTracksProviderSettlement(provider: string): boolean {
-  // SAFETY: the membership check precedes indexing an open DB provider id.
-  return (
-    Object.hasOwn(EARN_PROVIDER_SETTLEMENT_TRACKING, provider) &&
-    EARN_PROVIDER_SETTLEMENT_TRACKING[provider as EarnProviderId]
-  );
-}
-
 /** Unknown providers fail closed because atomicity is a positive settlement claim. */
 export function earnProviderDepositSettlement(provider: string): "atomic" | "provider_order" {
   return Object.hasOwn(EARN_PROVIDER_DEPOSIT_SETTLEMENT, provider)
