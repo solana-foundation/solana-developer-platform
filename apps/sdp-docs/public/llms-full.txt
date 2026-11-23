@@ -44176,7 +44176,7 @@ Follow one payment through its lifecycle:
 
 1. **Create or pick the source wallet.** Create a custody wallet with [Set Up Wallets](/docs/guides/setup-wallets), or find one with `GET /v1/wallets`. Note its `id` (`cwlt_…`).
 2. **Build the transfer.** Collect the destination address, token and amount, and check them before you send. See [Basic payment](/docs/payments/send-basic-payment).
-3. **Send it.** Call `POST /v1/payments/transfers` with a new `Idempotency-Key`. SDP builds the transaction, has the source wallet's custody provider sign it, and submits it.
+3. **Send it.** Call `POST /v1/payments/transfers/execute` with a new `Idempotency-Key`. SDP builds the transaction, has the source wallet's custody provider sign it, and submits it.
 4. **Keep the identifiers.** Store the transfer `id` (`xfr_…`) and its `signature` with your own record.
 5. **Wait for finality.** A successful request answers `finalized`. If it answers `processing`, read `GET /v1/payments/transfers/{transferId}` until it settles. See [Verifying a payment](/docs/payments/accept-verification).
 6. **Reconcile.** Match the transfer to your ledger and update what your users see. See [Indexing and reconciliation](/docs/payments/accept-indexing).
@@ -44758,7 +44758,7 @@ Source: https://platform.solana.com/docs/payments/send-basic-payment
 
 > Send one token transfer from a custody wallet to a Solana address, from the dashboard or the API.
 
-A basic payment moves tokens from a custody wallet you control to a Solana wallet address. Send it from **Payments** in the dashboard or with `POST /v1/payments/transfers`.
+A basic payment moves tokens from a custody wallet you control to a Solana wallet address. Send it from **Payments** in the dashboard or with `POST /v1/payments/transfers/execute`.
 
 Pass `sourceCustodyWalletId` as the wallet's SDP `id` (`cwlt_…` from `GET /v1/wallets`). Pass `destination` as the recipient's wallet (owner) address, **not** a token account: for an SPL token, SDP derives the recipient's associated token account and creates it if it is missing.
 
@@ -45418,7 +45418,7 @@ A wallet transfer, sent or received, has one of these statuses:
 | `finalized` | The block is finalized. Irreversible. |
 | `failed` | The transfer never reached the network, or the network rejected it. The recipient was not paid; `error` says why. |
 
-`POST /v1/payments/transfers` waits for finality, so a successful request usually answers `finalized`. If the wait runs out, it answers `processing`, and SDP moves the transfer to `confirmed`, `finalized` or `failed` as the chain settles. A `processing` transfer that never got a `signature` fails after 5 minutes, unless it is waiting on a custody approval.
+`POST /v1/payments/transfers/execute` waits for finality, so a successful request usually answers `finalized`. If the wait runs out, it answers `processing`, and SDP moves the transfer to `confirmed`, `finalized` or `failed` as the chain settles. A `processing` transfer that never got a `signature` fails after 5 minutes, unless it is waiting on a custody approval.
 
 Inbound payments differ. A paid payment request is recorded at `finalized`. An observed row (from `includeObserved=true`) shows `confirmed` or `failed` and never `finalized`, because SDP rebuilds it from chain history on each read. Check its finality yourself; see [Independent verification](#independent-verification).
 
@@ -45779,7 +45779,7 @@ Each provider's delivery mode is in the [capability matrix](/docs/payments/ramps
 
 An offramp needs one more call, because you send the crypto. When the provider is ready for it, the transfer moves to `awaiting_payment` and carries `cryptoDeposit`, with the `destinationAddress` and `amount` to send.
 
-Send exactly that with [`POST /v1/payments/transfers`](/docs/reference/api/payments/create-payment-transfer). Set `transferId` to the offramp's transfer, `sourceCustodyWalletId` to the quote's source wallet, `destination` and `amount` from `cryptoDeposit`, and `token` to the quoted asset (its symbol, such as `USDC`, or its mint). The call needs an `Idempotency-Key`, like any transfer, and your API key needs `transfers.execute`.
+Send exactly that with [`POST /v1/payments/transfers/execute`](/docs/reference/api/payments/create-payment-transfer). Set `transferId` to the offramp's transfer, `sourceCustodyWalletId` to the quote's source wallet, `destination` and `amount` from `cryptoDeposit`, and `token` to the quoted asset (its symbol, such as `USDC`, or its mint). The call needs an `Idempotency-Key`, like any transfer, and your API key needs `transfers.execute`.
 
 A deposit that doesn't match the instruction returns `400`, and one for a transfer no longer awaiting payment returns `409`. Sending the same deposit again, under any key, returns the transfer it already funded instead of sending twice.
 

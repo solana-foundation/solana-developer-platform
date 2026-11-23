@@ -7,7 +7,7 @@ steps:
   - Verify the transfer
 ---
 
-A basic payment moves tokens from a custody wallet you control to a Solana wallet address. Send it from **Payments** in the dashboard or with `POST /v1/payments/transfers`.
+A basic payment moves tokens from a custody wallet you control to a Solana wallet address. Send it from **Payments** in the dashboard or with `POST /v1/payments/transfers/execute`.
 
 Pass `sourceCustodyWalletId` as the wallet's SDP `id` (`cwlt_…` from `GET /v1/wallets`). Pass `destination` as the recipient's wallet (owner) address, **not** a token account: for an SPL token, SDP derives the recipient's associated token account and creates it if it is missing.
 
