@@ -46,18 +46,19 @@ const vault = "33333333333333333333333333333333";
 const mint = "44444444444444444444444444444444";
 const share = "55555555555555555555555555555555";
 const databaseName = `earn_cleanup_${randomUUID().replaceAll("-", "")}_test`;
-let admin: Client;
 let client: Client;
 let fixtureDir: string | undefined;
-let databaseCreated = false;
 
 // A second database on the disposable test container holds the complete parent
 // schema. Small temporary table substitutes miss view, trigger and FK edges.
 beforeAll(async () => {
-  admin = new Client({ connectionString: adminDatabaseUrl });
-  await admin.connect();
-  await admin.query(`CREATE DATABASE "${databaseName}"`);
-  databaseCreated = true;
+  const admin = new Client({ connectionString: adminDatabaseUrl });
+  try {
+    await admin.connect();
+    await admin.query(`CREATE DATABASE "${databaseName}"`);
+  } finally {
+    await admin.end();
+  }
   const url = new URL(adminDatabaseUrl);
   url.pathname = `/${databaseName}`;
   fixtureDir = mkdtempSync(path.join(tmpdir(), "earn-cleanup-sql-"));
@@ -79,10 +80,13 @@ beforeAll(async () => {
 }, 60_000);
 
 afterAll(async () => {
-  await client?.end();
-  if (databaseCreated) await admin.query(`DROP DATABASE "${databaseName}"`);
-  await admin?.end();
-  if (fixtureDir) rmSync(fixtureDir, { recursive: true });
+  // The global disposable container owns this database's lifetime. Per-suite
+  // DROP DATABASE can wait on server work while other test files still run.
+  try {
+    await client?.end();
+  } finally {
+    if (fixtureDir) rmSync(fixtureDir, { recursive: true });
+  }
 });
 beforeEach(async () => {
   await client.query("BEGIN");
