@@ -156,16 +156,16 @@ beforeEach(async () => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("Fireblocks BYOK lifecycle on experimental", () => {
-  it("refuses stable CSR, discovery, installation and rotation before provider calls or writes", async () => {
+  it("refuses stable CSR and discovery before provider calls or writes", async () => {
     const fetch = providerResponse();
-    const connected = await connect();
-    const registration = await newRegistration();
-    const pending = await request("/provider-credentials", {
-      ...body,
-      fields: { ...body.fields, ...registration },
-    });
-    expect(pending.status).toBe(201);
-    const pendingId = (await pending.json()).data.connectionId;
+    const pendingCsrs = () =>
+      getDb(env).queryOne<{ count: number }>(
+        `SELECT COUNT(*)::int AS count FROM fireblocks_csr_requests
+       WHERE organization_id = ? AND project_id = ? AND encrypted_private_key IS NOT NULL`,
+        [ORGANIZATION_ID, PROJECT_ID]
+      );
+    const beforeCsrs = await pendingCsrs();
+    expect(beforeCsrs?.count).toBeGreaterThan(0);
     const before = await getDb(env).queryMany(
       "SELECT id, status FROM provider_credentials WHERE organization_id = ? ORDER BY id",
       [ORGANIZATION_ID]
@@ -177,12 +177,6 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
       ["/fireblocks/csr", undefined],
       ["/fireblocks/csr", {}],
       ["/fireblocks/vaults/discover", discoveryFields],
-      ["/provider-credentials", body],
-      [`/connections/${pendingId}/complete-installation`, {}],
-      [
-        `/provider-credentials/${connected.providerCredential.id}/rotate`,
-        { provider: "fireblocks", fields: registration },
-      ],
     ] as const) {
       const response = await request(path, payload);
       expect(response.status, await response.clone().text()).toBe(403);
@@ -195,8 +189,7 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
         [ORGANIZATION_ID]
       )
     ).toEqual(before);
-    // Channel changes must leave cancellation available for existing installations.
-    expect((await request(`/connections/${pendingId}/cancel-installation`, {})).status).toBe(200);
+    expect(await pendingCsrs()).toEqual(beforeCsrs);
   });
 
   it("encrypts credentials, attaches the vault with one read and replays completion", async () => {

@@ -197,7 +197,7 @@ export type InitializeCustodySetupActionResult =
     };
 
 /**
- * Connects a provider from the setup flow. `/initialize` answers 409 only when
+ * Connects a provider from the setup flow. `/managed-signing/initialize-with-wallet` answers 409 only when
  * the project already holds this provider's Managed config; that is reported
  * as its own result so the flow can send the user to add a wallet instead.
  *

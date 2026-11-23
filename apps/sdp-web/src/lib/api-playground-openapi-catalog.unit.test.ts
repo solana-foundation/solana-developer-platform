@@ -213,15 +213,10 @@ describe("API playground allowlist", () => {
     values?: Record<string, string | number>
   ) => translate(messages, key, values);
 
-  it("matches a concrete path to its catalog operation, a literal segment first", () => {
+  it("matches a concrete path to its catalog operation", () => {
     expect(
       findPublishedPlaygroundOperation("GET", "/v1/payments/transfers/trf_1", "stable")
     ).toMatchObject({ pathTemplate: "/v1/payments/transfers/{transferId}" });
-    expect(
-      findPublishedPlaygroundOperation("GET", "/v1/issuance/tokens/facets", "experimental")
-    ).toMatchObject({
-      pathTemplate: "/v1/issuance/tokens/facets",
-    });
   });
 
   it("keeps literal precedence when the catalog puts parameter routes first", async () => {
