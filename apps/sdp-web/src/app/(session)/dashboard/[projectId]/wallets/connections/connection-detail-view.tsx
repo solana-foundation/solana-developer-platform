@@ -512,7 +512,11 @@ export function ConnectionDetailView({
         </div>
 
         {connection.status === "active" ? (
-          <ProviderPolicyCallout check={connection.providerPolicy} provider={provider} />
+          <ProviderPolicyCallout
+            check={connection.providerPolicy}
+            provider={provider}
+            scope="connection"
+          />
         ) : null}
         <ConnectionWalletsCard
           wallets={wallets}

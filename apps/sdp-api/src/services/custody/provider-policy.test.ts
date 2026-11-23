@@ -21,6 +21,55 @@ const run = () =>
     checkDueProviderPolicies(env)
   );
 
+async function seedConnection(
+  organizationId: string,
+  projectId: string,
+  name: string,
+  options: { createdBy: string; extraWallets?: number }
+) {
+  const connectionId = `cconn_${name}`;
+  const credentialId = `pcred_${name}`;
+  const walletId = `cwlt_${name}`;
+  const stored = await writeTestPrivyCredentialSecret(env, {
+    organizationId,
+    credentialId,
+    appId: `app_${name}`,
+    appSecret: "test-secret",
+  });
+  await db().transaction((tx) =>
+    seedTestPrivyConnection(tx, {
+      organizationId,
+      projectId,
+      connectionId,
+      credentialId,
+      createdBy: options.createdBy,
+      stored,
+      providerAccountFingerprint: `sha256:${name}`,
+      lastCheckStatus: "success",
+      defaultCustodyWalletId: walletId,
+      wallets: [
+        {
+          id: walletId,
+          walletId: `privy_${name}`,
+          publicKey: "So11111111111111111111111111111111111111112",
+          label: name,
+          purpose: null,
+          status: "active",
+        },
+        ...Array.from({ length: options.extraWallets ?? 0 }, (_, index) => ({
+          id: `${walletId}_${index + 2}`,
+          walletId: `privy_${name}_${index + 2}`,
+          publicKey: "So11111111111111111111111111111111111111112",
+          label: `${name}_${index + 2}`,
+          purpose: null,
+          status: "active" as const,
+        })),
+      ],
+    })
+  );
+  return { connectionId, credentialId, walletId };
+}
+
 async function seed(
   name: string,
   environment: "sandbox" | "production" = "sandbox",
@@ -29,9 +78,6 @@ async function seed(
   const organizationId = `org_${name}`;
   const projectId = `prj_${name}_${environment}`;
   const userId = `usr_${name}`;
-  const connectionId = `cconn_${name}`;
-  const credentialId = `pcred_${name}`;
-  const walletId = `cwlt_${name}`;
   await db().execute(
     "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'enterprise', 'active')",
     [organizationId, name, name]
@@ -46,44 +92,11 @@ async function seed(
     members: [],
     ids: { sandbox: `prj_${name}_sandbox`, production: `prj_${name}_production` },
   });
-  const stored = await writeTestPrivyCredentialSecret(env, {
-    organizationId,
-    credentialId,
-    appId: `app_${name}`,
-    appSecret: "test-secret",
+  const seeded = await seedConnection(organizationId, projectId, name, {
+    createdBy: userId,
+    extraWallets,
   });
-  await db().transaction((tx) =>
-    seedTestPrivyConnection(tx, {
-      organizationId,
-      projectId,
-      connectionId,
-      credentialId,
-      createdBy: userId,
-      stored,
-      providerAccountFingerprint: `sha256:${name}`,
-      lastCheckStatus: "success",
-      defaultCustodyWalletId: walletId,
-      wallets: [
-        {
-          id: walletId,
-          walletId: `privy_${name}`,
-          publicKey: "So11111111111111111111111111111111111111112",
-          label: name,
-          purpose: null,
-          status: "active",
-        },
-        ...Array.from({ length: extraWallets }, (_, index) => ({
-          id: `${walletId}_${index + 2}`,
-          walletId: `privy_${name}_${index + 2}`,
-          publicKey: "So11111111111111111111111111111111111111112",
-          label: `${name}_${index + 2}`,
-          purpose: null,
-          status: "active" as const,
-        })),
-      ],
-    })
-  );
-  return { organizationId, projectId, connectionId, credentialId, walletId };
+  return { organizationId, projectId, ...seeded };
 }
 
 /** Rewinds the claim and observation timestamp so the next run re-checks the wallet. */
@@ -179,6 +192,14 @@ describe("BYOK provider policy observations", () => {
 
   it("isolates environments and connection reads by tenant and project", async () => {
     const own = await seed("own");
+    // The same organization's other project — its production one — holds its own
+    // connection and wallet.
+    const ownProduction = await seedConnection(
+      own.organizationId,
+      "prj_own_production",
+      "own_production",
+      { createdBy: "usr_own" }
+    );
     const other = await seed("other");
     await seed("prod", "production");
     const fetch = vi
@@ -188,8 +209,26 @@ describe("BYOK provider policy observations", () => {
       );
     await run();
     expect(fetch).toHaveBeenCalledTimes(2);
+    // A sandbox run claims neither another tenant's wallet nor the same
+    // organization's production-project wallet.
+    expect(
+      await store().read(own.organizationId, "prj_own_production", {
+        walletId: ownProduction.walletId,
+      })
+    ).toMatchObject({ status: "unknown", reason: "not_checked" });
     expect(
       await store().read(own.organizationId, other.projectId, { walletId: other.walletId })
+    ).toMatchObject({ status: "unknown", reason: "not_checked" });
+    await runInClusterScope({ projectId: null, environment: "production" }, () =>
+      checkDueProviderPolicies(env)
+    );
+    expect(fetch).toHaveBeenCalledTimes(4);
+    // Each project reads only its own wallet's observation.
+    expect(
+      await store().read(own.organizationId, own.projectId, { walletId: ownProduction.walletId })
+    ).toMatchObject({ status: "unknown", reason: "not_checked" });
+    expect(
+      await store().read(own.organizationId, "prj_own_production", { walletId: own.walletId })
     ).toMatchObject({ status: "unknown", reason: "not_checked" });
     expect(
       await runWithTenantDatabaseIdentity({ organizationId: own.organizationId }, () =>

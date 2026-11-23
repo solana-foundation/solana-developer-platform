@@ -119,6 +119,43 @@ export function fireblocksRuleScope(
   return unknown ? "unknown" : "native";
 }
 
+/** How one readable-rule walk judged a policy: any ungated matching rule, any
+ * gated one, and whether some rule could not be read at all. */
+type TransferWalk = { unknown: boolean; gated: boolean; ungated: boolean };
+
+function walkTransferRules(value: unknown, vaultId: string, assets: string[] | null): TransferWalk {
+  const parsed = policySchema.safeParse(value);
+  if (!parsed.success) return { unknown: true, gated: false, ungated: false };
+  const walk: TransferWalk = { unknown: false, gated: false, ungated: false };
+  for (const rule of parsed.data.policy.rules) {
+    if (rule.type !== "TRANSFER") continue;
+    const transfer = transferRuleSchema.safeParse(rule);
+    if (!transfer.success) {
+      walk.unknown = true;
+      continue;
+    }
+    if (!isTransferOperation(transfer.data)) continue;
+    if (assets !== null && transfer.data.asset !== "*" && !assets.includes(transfer.data.asset))
+      continue;
+    const src = z.object({ ids: z.array(sourceSchema) }).safeParse(transfer.data.src);
+    if (!src.success) {
+      walk.unknown = true;
+      continue;
+    }
+    const source = sourceMatchesVault(src.data.ids, vaultId);
+    if (!source.interpretable) walk.unknown = true;
+    if (!source.matches) continue;
+    const approval = ruleRequiresApproval(transfer.data);
+    if (approval === null) {
+      walk.unknown = true;
+      continue;
+    }
+    if (approval) walk.gated = true;
+    else walk.ungated = true;
+  }
+  return walk;
+}
+
 /**
  * The legacy active-policy API remains supported and returns all Transfer rules in one read.
  * Rules whose `transactionType` names another operation (raw signing, contract calls, …)
@@ -136,44 +173,29 @@ export function inspectFireblocksPolicy(
   vaultId: string,
   assets: string[] | null
 ): PolicyResult {
-  const parsed = policySchema.safeParse(value);
-  if (!parsed.success) return { status: "unknown", reason: "unsupported_response" };
-  let unknown = false;
-  let gated = false;
-  let ungated = false;
-  for (const rule of parsed.data.policy.rules) {
-    if (rule.type !== "TRANSFER") continue;
-    const transfer = transferRuleSchema.safeParse(rule);
-    if (!transfer.success) {
-      unknown = true;
-      continue;
-    }
-    if (!isTransferOperation(transfer.data)) continue;
-    if (assets !== null && transfer.data.asset !== "*" && !assets.includes(transfer.data.asset))
-      continue;
-    const src = z.object({ ids: z.array(sourceSchema) }).safeParse(transfer.data.src);
-    if (!src.success) {
-      unknown = true;
-      continue;
-    }
-    const source = sourceMatchesVault(src.data.ids, vaultId);
-    if (!source.interpretable) unknown = true;
-    if (!source.matches) continue;
-    const approval = ruleRequiresApproval(transfer.data);
-    if (approval === null) {
-      unknown = true;
-      continue;
-    }
-    if (approval) gated = true;
-    else ungated = true;
-  }
+  const walk = walkTransferRules(value, vaultId, assets);
   // An allow rule without approvers wins over any safer matching rule: the credential
   // could move funds alone, so the wallet reports missing coverage.
-  if (ungated) return { status: "missing", reason: "no_policy" };
-  if (gated) return { status: "present", reason: "policy_detected" };
-  return unknown
+  if (walk.ungated) return { status: "missing", reason: "no_policy" };
+  if (walk.gated) return { status: "present", reason: "policy_detected" };
+  return walk.unknown
     ? { status: "unknown", reason: "unsupported_response" }
     : { status: "missing", reason: "no_policy" };
+}
+
+/**
+ * Whether the walk for `assets` judged a rule that lets the credential move funds
+ * alone (an `ALLOW` without approvers on a named asset or a wildcard). That missing
+ * reading is the one the token catalogue cannot revise: every other absence the
+ * native-only judgement reports may still be overturned by a rule only the
+ * catalogue can name.
+ */
+export function fireblocksUngatedRuleJudged(
+  value: unknown,
+  vaultId: string,
+  assets: string[]
+): boolean {
+  return walkTransferRules(value, vaultId, assets).ungated;
 }
 
 /** One read per credential in a check batch, shared across its vaults. Never writes policy. */

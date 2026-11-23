@@ -1,12 +1,14 @@
 # BYOK provider policy observations (PRO-2364 / SDP-015)
 
-SDP checks policy presence after connecting Fireblocks or Privy and after adding
-a connection wallet. The worker's `check-custody-provider-policies` job runs once
-a minute per project environment, claims up to 25 due wallets, and checks each
-wallet hourly. Overlapping workers claim different wallets. An interrupted claim
-becomes eligible again after five minutes; a failed audited write rolls back the
-observation and the worker retries it. A new or rotated credential is checked on
-the next eligible pass. This is advisory: neither setup nor signing is blocked.
+SDP checks policy presence when a Fireblocks or Privy connection is created.
+The worker's `check-custody-provider-policies` job runs once a minute per
+project environment, claims up to 25 due wallets, and checks each wallet
+hourly, so a wallet added to an existing connection is observed by the next
+run. Overlapping workers claim different wallets. An interrupted claim becomes
+eligible again after five minutes; a failed audited write rolls back the
+observation and the worker retries it. A new or rotated credential is checked
+on the next eligible pass. This is advisory: neither setup nor signing is
+blocked.
 
 ## What the result proves
 
@@ -16,10 +18,11 @@ the next eligible pass. This is advisory: neither setup nor signing is blocked.
   or Privy returned at least one `policy_ids` entry on that exact wallet. This
   does not assess rule ordering, initiators, destinations, limits or policy
   strength. Fireblocks RAW signing and program-call policies are outside this check.
-- **missing:** a successful provider read contains no matching policy, or the only
-  matching Fireblocks rule is an `ALLOW` with no approvers — the credential could
-  move funds alone. An empty Privy app or policies attached to other wallets do
-  not prove wallet coverage.
+- **missing:** a successful provider read contains no matching policy, or any
+  matching Fireblocks rule on a supported asset is an `ALLOW` with no approvers
+  — the credential could move funds alone, even when a gated rule on another
+  supported asset also matches. An empty Privy app or policies attached to
+  other wallets do not prove wallet coverage.
 - **unknown:** access was denied, the provider or credential store was unavailable,
   the response could not be interpreted, no check has completed, the credential
   changed, or the observation is at least two hours old.

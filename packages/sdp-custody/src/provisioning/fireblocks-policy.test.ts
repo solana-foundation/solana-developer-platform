@@ -1,22 +1,29 @@
 import { describe, expect, it } from "vitest";
-import { fireblocksRuleScope, inspectFireblocksPolicy } from "./fireblocks-policy";
+import {
+  fireblocksRuleScope,
+  fireblocksUngatedRuleJudged,
+  inspectFireblocksPolicy,
+} from "./fireblocks-policy";
 
 const inspect = (rules: unknown[]) =>
   inspectFireblocksPolicy({ policy: { rules } }, "42", ["SOL", "usdc-asset"]);
+/** A provider-shaped Transfer rule: Fireblocks keeps `type: TRANSFER` fixed and
+ * names the operation in `transactionType`. */
 const rule = (
   ids: string[][],
   asset = "SOL",
   action: Record<string, unknown> = { action: "2-TIER" }
 ) => ({
   type: "TRANSFER",
+  transactionType: "TRANSFER",
   asset,
   src: { ids },
   ...action,
 });
 const approvers = { authorizationGroups: { groups: [{ users: ["usr_1"] }] } };
 /**
- * A rule shaped like the provider's own: Fireblocks keeps `type: TRANSFER` fixed
- * for every transaction rule and names the operation in `transactionType`.
+ * A rule shaped like the provider's own for another operation: the same fixed
+ * `type: TRANSFER`, with `transactionType` naming the operation.
  */
 const operationRule = (
   transactionType: string,
@@ -28,7 +35,6 @@ const operationRule = (
   asset,
   src: { ids: [["*", "VAULT", "*"]] },
   ...action,
-  authorizationGroups: { logic: "OR", groups: [{ th: 1, users: ["usr_1"] }] },
 });
 
 describe("Fireblocks policy presence", () => {
@@ -53,10 +59,15 @@ describe("Fireblocks policy presence", () => {
     // A raw-signing approval rule does not prove native-transfer coverage, and it
     // must not shadow a matching transfer rule either.
     expect(inspect([operationRule("RAW")])).toEqual({ status: "missing", reason: "no_policy" });
-    expect(inspect([operationRule("CONTRACT_CALL"), rule([["42", "VAULT"]])])).toEqual({
-      status: "present",
-      reason: "policy_detected",
+    // Nor does an ungated rule for another operation read as missing coverage,
+    // or shadow a matching gated transfer rule.
+    expect(inspect([operationRule("CONTRACT_CALL", { action: "ALLOW" })])).toEqual({
+      status: "missing",
+      reason: "no_policy",
     });
+    expect(
+      inspect([operationRule("CONTRACT_CALL", { action: "ALLOW" }), rule([["42", "VAULT"]])])
+    ).toEqual({ status: "present", reason: "policy_detected" });
   });
   it("accepts a canonical token rule and an explicit empty policy", () => {
     expect(inspect([rule([["42", "VAULT"]], "usdc-asset")]).status).toBe("present");
@@ -134,6 +145,22 @@ describe("Fireblocks policy presence", () => {
   });
 });
 
+describe("Fireblocks ungated-rule proof", () => {
+  const judged = (rules: unknown[], assets = ["SOL"]) =>
+    fireblocksUngatedRuleJudged({ policy: { rules } }, "42", assets);
+  it("is true only for an allow-without-approvers rule the asset list names", () => {
+    expect(judged([rule([["42", "VAULT"]], "SOL", { action: "ALLOW" })])).toBe(true);
+    expect(judged([rule([["*"]], "SOL", { action: "ALLOW" })])).toBe(true);
+    expect(judged([rule([["42", "VAULT"]], "ETH", { action: "ALLOW" })])).toBe(false);
+  });
+  it("is false for gated rules, unreadable rules and rules for other operations", () => {
+    expect(judged([rule([["42", "VAULT"]])])).toBe(false);
+    expect(judged([rule([["42", "VAULT"]], "SOL", { action: "MAYBE" })])).toBe(false);
+    expect(judged([operationRule("RAW", { action: "ALLOW" })])).toBe(false);
+    expect(judged([{ type: "TRANSFER" }])).toBe(false);
+  });
+});
+
 describe("Fireblocks rule scope", () => {
   const scope = (rules: unknown[]) => fireblocksRuleScope({ policy: { rules } }, "42", ["SOL"]);
   it("keeps native, wildcard and foreign-vault rules catalogue-free", () => {
@@ -158,6 +185,9 @@ describe("Fireblocks rule scope", () => {
       "native"
     );
     expect(scope([operationRule("CONTRACT_CALL", { action: "2-TIER" }, "ETH")])).toBe("native");
+    // An ungated contract-call rule naming a foreign asset is out of scope too:
+    // it must not even ask for the catalogue.
+    expect(scope([operationRule("CONTRACT_CALL", { action: "ALLOW" }, "ETH")])).toBe("native");
     expect(
       scope([operationRule("CONTRACT_CALL", { action: "2-TIER" }, "ETH"), rule([["42", "VAULT"]])])
     ).toBe("native");

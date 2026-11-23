@@ -251,17 +251,20 @@ See the [Wallets API reference](/docs/reference/api/wallets) for request and res
 ## Provider policy checks
 
 For supported BYOK wallets, the connection and wallet detail pages show
-an advisory policy state. SDP checks after connection and wallet creation, then
-hourly. A missing policy warns without blocking signing. A failed or denied read
-shows **Provider policy not verified**. Review the policy in the provider before
-sending funds.
+an advisory policy state. SDP checks when a connection is created, then
+hourly; a wallet added to an existing connection is observed by the next
+periodic run. A missing policy warns without blocking signing. A failed or
+denied read shows **Provider policy not verified**. Review the policy in the
+provider before sending funds.
 
 `GET /v1/wallets/{walletId}` includes `providerPolicy` for these wallets, including
 when `includeBalance=false`. It contains `status` (`present`, `missing`, or
 `unknown`), `reason`, and nullable `checkedAt`. Managed wallets omit this field.
 `present` means the provider reports a policy attached to the wallet or a native
 transfer rule covering its vault and supported assets. It does not
-verify policy strength or permission to sign. Replaced credentials and results
+verify policy strength or permission to sign. `missing` includes a transfer
+rule that allows transactions without approvers, even when a gated rule on
+another supported asset also matches. Replaced credentials and results
 older than two hours are `unknown`.
 
 ---
@@ -4061,7 +4064,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `wallet
 
       - **`providerPolicy`** · `object`
 
-        Advisory policy presence for supported BYOK wallets. present means a provider policy attached to the wallet, or a native Transfer rule covering its vault and supported assets, was observed; it does not verify policy strength, initiators, limits or permission to sign. missing means no matching policy was found in a successful read. unknown covers denied access, provider failures, unsupported responses, unchecked wallets, replaced credentials and observations older than two hours. Checks run on connection and wallet creation, then hourly. This does not block signing. Omitted for managed custody.
+        Advisory policy presence for supported BYOK wallets. present means a provider policy attached to the wallet, or a native Transfer rule covering its vault and supported assets, was observed; it does not verify policy strength, initiators, limits or permission to sign. missing means a successful read found no matching policy, or any matching Transfer rule on a supported asset allows transfers without approvers, even when a gated rule on another supported asset also matches. unknown covers denied access, provider failures, unsupported responses, unchecked wallets, replaced credentials and observations older than two hours. Checks run when a connection is created, then hourly; a new wallet is observed by the next periodic run. This does not block signing. Omitted for managed custody.
 
         - **`status`** · `string` · required · one of `present`, `missing`, `unknown`
 
@@ -48082,13 +48085,14 @@ Publish the rule. SDP uses
 so set **Settings → General → One-time address transactions** to **Allow**.
 Complete the required approvals for both changes.
 
-**Check the policy yourself:** SDP checks policy presence after connection and
-hourly. The connection and wallet detail pages show the result.
+**Check the policy yourself:** SDP checks policy presence when the connection
+is created and hourly. The connection and wallet detail pages show the result.
 
 The Editor user cannot read policies, so this setup shows **Provider policy not
 verified**; ask an authorized operator to review the published policy. A read
 that confirms no matching Transfer rule — or a rule that allows transfers
-without your approver set — shows **No provider policy detected**.
+without your approver set, even beside a gated rule — shows **No provider
+policy detected**.
 
 A workspace that prefers automated verification can register the connection
 with an API user whose role may read the workspace's active policy, accepting

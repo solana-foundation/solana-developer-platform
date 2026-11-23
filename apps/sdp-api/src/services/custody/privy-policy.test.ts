@@ -24,6 +24,22 @@ describe("Privy wallet policy inspection", () => {
       await readPrivyWalletPolicy(env, { appId: "app", appSecret: "secret" }, "privy_wallet-1")
     ).toMatchObject({ status: "unknown" });
   });
+  it("reads Privy's rejected-credential 400 as access denied, as the credential check does", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ code: "missing_or_invalid_privy_app_id" }, { status: 400 })
+    );
+    expect(
+      await readPrivyWalletPolicy(env, { appId: "app", appSecret: "secret" }, "privy_wallet-1")
+    ).toEqual({ status: "unknown", reason: "access_denied" });
+  });
+  it("keeps a 400 body that names no rejected credential unavailable", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ code: "internal_error" }, { status: 400 })
+    );
+    expect(
+      await readPrivyWalletPolicy(env, { appId: "app", appSecret: "secret" }, "privy_wallet-1")
+    ).toEqual({ status: "unknown", reason: "provider_unavailable" });
+  });
   it.each([
     { id: "wallet-1" },
     { id: "another-wallet", policy_ids: [] },

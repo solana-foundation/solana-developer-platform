@@ -36,7 +36,6 @@ import {
   getPrivyProviderAccountFingerprint,
   type PrivyCredentialAuthentication,
 } from "@/services/custody/privy-credential";
-import { checkConnectedProviderPolicies } from "@/services/custody/provider-policy";
 import {
   findPrivyWalletByExternalId,
   getFireblocksVault,
@@ -323,7 +322,6 @@ export async function completeProviderCredentialInstallation(
   const context = createInstallationContext(c);
   const loaded = await loadInstallation(context, connectionId);
   if (loaded.decisions.complete.kind === "replay") {
-    checkConnectedProviderPolicies(c, connectionId);
     return completionResult(loaded);
   }
   if (loaded.decisions.complete.kind === "disabled") {
@@ -425,7 +423,6 @@ export async function completeProviderCredentialInstallation(
         throw conflict("Custody wallet cannot be reconciled");
       }
     }
-    if (outcome.kind === "success") checkConnectedProviderPolicies(c, connectionId);
     return completionResult(completed);
   } catch (error) {
     if (completionPersistencePending) {

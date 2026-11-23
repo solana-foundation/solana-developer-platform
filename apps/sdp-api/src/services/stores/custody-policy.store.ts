@@ -34,10 +34,7 @@ export interface PolicyCheckTarget {
   previous_reason: ProviderPolicyCheck["reason"] | null;
   previous_credential_id: string | null;
 }
-export type PolicyCheckScope = {
-  environment: SdpEnvironment;
-  connection?: { organizationId: string; projectId: string; id: string };
-};
+export type PolicyCheckScope = { environment: SdpEnvironment };
 const notChecked = (): ProviderPolicyCheck => ({
   status: "unknown",
   reason: "not_checked",
@@ -58,7 +55,6 @@ export class CustodyPolicyStore {
         JOIN projects p ON p.id = c.project_id AND p.organization_id = c.organization_id
         WHERE w.status = 'active' AND c.status = 'active' AND pc.status = 'active'
           AND c.provider IN ('fireblocks', 'privy') AND p.status = 'active' AND p.environment = ?
-          ${scope.connection ? "AND c.organization_id = ? AND c.project_id = ? AND c.id = ?" : ""}
           AND (w.policy_check_claimed_at IS NULL OR w.policy_check_claimed_at < NOW() - INTERVAL '5 minutes')
           AND (w.provider_policy IS NULL OR w.provider_policy->>'credentialId' IS DISTINCT FROM c.provider_credential_id
             OR (w.provider_policy->>'checkedAt')::timestamptz < NOW() - INTERVAL '1 hour')
@@ -76,13 +72,7 @@ export class CustodyPolicyStore {
         w.provider_policy->>'credentialId' AS previous_credential_id
       FROM claimed w JOIN custody_connections c ON c.id = w.custody_connection_id
       JOIN provider_credentials pc ON pc.id = c.provider_credential_id`,
-      [
-        scope.environment,
-        ...(scope.connection
-          ? [scope.connection.organizationId, scope.connection.projectId, scope.connection.id]
-          : []),
-        limit,
-      ]
+      [scope.environment, limit]
     );
   }
 

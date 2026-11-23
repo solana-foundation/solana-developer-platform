@@ -290,7 +290,7 @@ export const custodyWalletByIdResponseSchema = z
           .openapi({
             [CUSTODY_MODE_GATE]: "byok",
             description:
-              "Advisory policy presence for supported BYOK wallets. present means a provider policy attached to the wallet, or a native Transfer rule covering its vault and supported assets, was observed; it does not verify policy strength, initiators, limits or permission to sign. missing means no matching policy was found in a successful read. unknown covers denied access, provider failures, unsupported responses, unchecked wallets, replaced credentials and observations older than two hours. Checks run on connection and wallet creation, then hourly. This does not block signing. Omitted for managed custody.",
+              "Advisory policy presence for supported BYOK wallets. present means a provider policy attached to the wallet, or a native Transfer rule covering its vault and supported assets, was observed; it does not verify policy strength, initiators, limits or permission to sign. missing means a successful read found no matching policy, or any matching Transfer rule on a supported asset allows transfers without approvers, even when a gated rule on another supported asset also matches. unknown covers denied access, provider failures, unsupported responses, unchecked wallets, replaced credentials and observations older than two hours. Checks run when a connection is created, then hourly; a new wallet is observed by the next periodic run. This does not block signing. Omitted for managed custody.",
           }),
         provider: orgCustodyProviderSchema.openapi({
           description: "Wallet signing provider.",

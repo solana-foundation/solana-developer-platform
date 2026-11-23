@@ -67,7 +67,11 @@ export function WalletDetailView({
   return (
     <DashboardWorkspaceOverviewPanel data-wallet-detail={tab}>
       <DashboardPageTitle title={wallet.name} mark={mark} actions={actions} />
-      <ProviderPolicyCallout check={wallet.providerPolicy} provider={wallet.provider} />
+      <ProviderPolicyCallout
+        check={wallet.providerPolicy}
+        provider={wallet.provider}
+        scope="wallet"
+      />
       <Suspense fallback={<TabSkeleton />}>
         {tab === "overview" ? (
           <WalletOverviewTab

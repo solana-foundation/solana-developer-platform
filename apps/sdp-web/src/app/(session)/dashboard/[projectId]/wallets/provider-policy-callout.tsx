@@ -2,9 +2,10 @@
 
 import type { CustodyProvider, ProviderPolicyCheck } from "@sdp/types/custody";
 import { Callout } from "@sdp/ui/callout";
-import { useMemo } from "react";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useTimeZone } from "@/i18n/time-zone";
+import { formatDateTime } from "@/lib/date-format";
+import { formatCustodyProviderName } from "./provider-catalog";
 
 type PolicyPresentation = { title: string; body: string };
 
@@ -18,40 +19,35 @@ const POLICY_PRESENTATION = {
 export function ProviderPolicyCallout({
   check,
   provider,
+  scope,
 }: {
   check: ProviderPolicyCheck | undefined;
   provider: CustodyProvider | null;
+  /** The surface showing the advisory: one wallet, or the wallets of a connection. */
+  scope: "connection" | "wallet";
 }) {
   const t = useTranslations();
   const locale = useLocale();
   const timeZone = useTimeZone();
-  const formatCheckedAt = useMemo(
-    () =>
-      new Intl.DateTimeFormat(locale, {
-        dateStyle: "medium",
-        timeStyle: "short",
-        timeZone,
-      }),
-    [locale, timeZone]
-  );
   if (!check || (provider !== "fireblocks" && provider !== "privy")) return null;
-  const name = provider === "fireblocks" ? "Fireblocks" : "Privy";
+  const name = formatCustodyProviderName(provider);
   const presentation = POLICY_PRESENTATION[check.status];
+  const checkedAt = check.checkedAt ? formatDateTime(locale, timeZone, check.checkedAt) : null;
   const body =
     check.status === "unknown" && check.reason === "access_denied"
       ? "providerPolicyDeniedBody"
-      : presentation.body;
+      : check.status === "missing" && scope === "wallet"
+        ? "providerPolicyMissingWalletBody"
+        : presentation.body;
   return (
     <Callout
       variant={check.status === "present" ? "neutral" : "warning"}
       title={t(`DashboardCustody.${presentation.title}`)}
     >
       <p>{t(`DashboardCustody.${body}`, { provider: name })}</p>
-      {check.checkedAt ? (
+      {checkedAt ? (
         <p className="mt-2 text-caption text-secondary">
-          {t("DashboardCustody.providerPolicyCheckedAt", {
-            at: formatCheckedAt.format(new Date(check.checkedAt)),
-          })}
+          {t("DashboardCustody.providerPolicyCheckedAt", { at: checkedAt })}
         </p>
       ) : null}
     </Callout>

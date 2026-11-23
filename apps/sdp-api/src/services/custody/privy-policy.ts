@@ -1,7 +1,11 @@
 import type { ProviderPolicyCheck } from "@sdp/types/custody";
 import { z } from "zod";
 import type { Env } from "@/types/env";
-import type { PrivyCredentialAuthentication } from "./privy-credential";
+import {
+  PRIVY_INVALID_CREDENTIALS_CODE,
+  type PrivyCredentialAuthentication,
+  privyErrorBodySchema,
+} from "./privy-credential";
 
 const walletSchema = z.object({ id: z.string(), policy_ids: z.array(z.string().min(1)) });
 
@@ -23,6 +27,14 @@ export async function readPrivyWalletPolicy(
       signal: AbortSignal.timeout(10_000),
     });
     if ([401, 403].includes(response.status)) return { status: "unknown", reason: "access_denied" };
+    // Privy answers a rejected credential with this 400, never with 401; the
+    // hourly check reads it the same way `checkPrivyCredential` does.
+    if (response.status === 400) {
+      const body = privyErrorBodySchema.safeParse(await response.json().catch(() => null));
+      return body.success && body.data.code === PRIVY_INVALID_CREDENTIALS_CODE
+        ? { status: "unknown", reason: "access_denied" }
+        : { status: "unknown", reason: "provider_unavailable" };
+    }
     if (!response.ok) return { status: "unknown", reason: "provider_unavailable" };
     const parsed = walletSchema.safeParse(await response.json());
     if (!parsed.success || parsed.data.id !== id)

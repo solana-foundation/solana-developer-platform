@@ -7,10 +7,13 @@ import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { ProviderPolicyCallout } from "./provider-policy-callout";
 
-function view(check: ProviderPolicyCheck | undefined) {
+function view(
+  check: ProviderPolicyCheck | undefined,
+  scope: "connection" | "wallet" = "connection"
+) {
   return (
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <ProviderPolicyCallout check={check} provider="fireblocks" />
+      <ProviderPolicyCallout check={check} provider="fireblocks" scope={scope} />
     </I18nProvider>
   );
 }
@@ -19,8 +22,14 @@ describe("provider policy advisory", () => {
   it("shows a missing-policy warning without disabling wallet actions", () => {
     render(view({ status: "missing", reason: "no_policy", checkedAt: null }));
     expect(screen.getByText("No provider policy detected")).toBeTruthy();
+    expect(screen.getByText(/At least one connected wallet/)).toBeTruthy();
     expect(screen.getByText(/SDP still allows signing/)).toBeTruthy();
     expect(screen.queryByRole("button")).toBeNull();
+  });
+  it("scopes the missing-policy copy to the wallet it warns about", () => {
+    render(view({ status: "missing", reason: "no_policy", checkedAt: null }, "wallet"));
+    expect(screen.getByText(/This wallet has no matching provider policy/)).toBeTruthy();
+    expect(screen.queryByText(/At least one connected wallet/)).toBeNull();
   });
   it("distinguishes denied reads from confirmed absence", () => {
     render(view({ status: "unknown", reason: "access_denied", checkedAt: null }));

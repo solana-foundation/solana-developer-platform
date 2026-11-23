@@ -13,6 +13,7 @@ import {
   type CustodyWalletsResponse,
   type CustodyWalletTokenBalance,
   type DeleteWalletResponse,
+  isByokCustodyProvider,
 } from "@sdp/types/custody";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import type { Address } from "@solana/kit";
@@ -47,7 +48,6 @@ import { withIssuedTokenLabels } from "@/routes/payments/token-accounts";
 import { resolveIssuedTokenLabelsByMint } from "@/routes/payments/token-labels";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
-import { checkConnectedProviderPolicies } from "@/services/custody/provider-policy";
 import { assertCustodyProviderCanDeleteWallet } from "@/services/custody-provider-lifecycle.service";
 import {
   CustodyRuntimeTargets,
@@ -315,7 +315,6 @@ export const createWallet = async (c: ValidatedBodyContext<typeof createWalletSc
         idempotency,
       });
       clearWalletCaches();
-      checkConnectedProviderPolicies(c, body.connectionId);
       return created(c, { wallet } satisfies CustodyWalletResponse);
     }
 
@@ -582,10 +581,7 @@ export const getWalletById = async (c: AppContext) => {
   }
 
   const walletMetadata: CustodyWalletMetadataResponse["wallet"] = { ...wallet };
-  if (
-    wallet.custodyConnectionId &&
-    (wallet.provider === "privy" || wallet.provider === "fireblocks")
-  ) {
+  if (wallet.custodyConnectionId && isByokCustodyProvider(wallet.provider)) {
     walletMetadata.providerPolicy = await new CustodyPolicyStore(getDb(c.env)).read(
       getAuth(c).organizationId,
       requireProjectId(c),

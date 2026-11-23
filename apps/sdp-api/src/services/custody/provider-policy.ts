@@ -1,26 +1,21 @@
 import { denormalizeFireblocksWalletId } from "@sdp/custody/provider-wallet-ids";
 import {
   fireblocksRuleScope,
+  fireblocksUngatedRuleJudged,
   inspectFireblocksPolicy,
   type PolicyResult,
   readFireblocksPolicy,
 } from "@sdp/custody/provisioning/fireblocks-policy";
 import { resolveFireblocksTransferAsset } from "@sdp/custody/provisioning/fireblocks-transfers";
-import type { CustodyProvisioningRuntime } from "@sdp/custody/provisioning/runtime";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import type { ProviderPolicyCheck } from "@sdp/types/custody";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
-import { type DatabaseClient, getDb } from "@/db/client";
-import { getAuth, requireProjectId } from "@/lib/auth";
+import { getDb } from "@/db/client";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
-import type { AppContext } from "@/routes/custody/context";
 import { getLogger } from "@/runtime/logger";
-import {
-  type AuditLogEntry,
-  AuditService,
-  createSystemAuditService,
-} from "@/services/audit.service";
+import { createSystemAuditService } from "@/services/audit.service";
 import { createCredentialSecretStore } from "@/services/credential-secret-store";
+import { proposalRuntime } from "@/services/domain/signing/admitted-proposer";
 import {
   CustodyPolicyStore,
   type PolicyCheckScope,
@@ -32,18 +27,6 @@ import { readPrivyWalletPolicy } from "./privy-policy";
 
 /** A batch claims up to 25 wallets; at most this many provider reads run at once. */
 const PROVIDER_READ_CONCURRENCY = 5;
-
-const runtime: CustodyProvisioningRuntime = {
-  fetch: (input, init) => globalThis.fetch(input, init),
-  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-  now: () => Date.now(),
-  randomUUID: () => crypto.randomUUID(),
-  getRandomValues: (data) => crypto.getRandomValues(new Uint8Array(data)),
-  sha256: (data) => crypto.subtle.digest("SHA-256", new Uint8Array(data)),
-};
-type AuditedWrite = (
-  work: (tx: DatabaseClient) => Promise<{ entry: AuditLogEntry | null; result: boolean }>
-) => Promise<boolean>;
 
 /** All policy failures are observations, never permission to sign or reasons to block setup. */
 async function inspectBatch(
@@ -79,7 +62,7 @@ async function inspectBatch(
       }
       let policyRead = policies.get(target.provider_credential_id);
       if (!policyRead) {
-        policyRead = readFireblocksPolicy(runtime, {
+        policyRead = readFireblocksPolicy(proposalRuntime, {
           ...credential,
           apiBaseUrl: env.FIREBLOCKS_API_BASE_URL,
         });
@@ -101,10 +84,16 @@ async function inspectBatch(
         // list keeps every finding the readable rules prove.
         return inspectFireblocksPolicy(policy.value, vaultId, null);
       }
+      // An ungated rule the native list already judged (the native asset or a
+      // wildcard) proves the credential can move funds alone; no token catalogue
+      // can revise that finding, so report it before the optional USDC
+      // resolution can fail. A missing reading with no rule judged — an
+      // unrelated asset's allow rule — waits for the combined check.
+      if (fireblocksUngatedRuleJudged(policy.value, vaultId, [credential.assetId])) return native;
       const mint = wellKnownMint("USDC", currentClusterScope().cluster);
       if (!mint) throw new Error("No canonical USDC mint for this cluster");
       const usdc = await resolveFireblocksTransferAsset(
-        runtime,
+        proposalRuntime,
         { ...credential, apiBaseUrl: env.FIREBLOCKS_API_BASE_URL },
         credential.assetId,
         mint
@@ -113,8 +102,17 @@ async function inspectBatch(
       // approvers on either asset means the credential can move funds alone, and a
       // gated rule on one asset must not hide an ungated rule on the other.
       return inspectFireblocksPolicy(policy.value, vaultId, [credential.assetId, usdc.id]);
-    } catch {
-      // Do not log provider bodies, credentials, secrets, or policy contents.
+    } catch (error) {
+      // The error's class tells a credential-store failure from a provider read
+      // failure; provider bodies, credentials, secrets and policy contents are
+      // never logged.
+      getLogger().warn(
+        {
+          event: "sdp_api_custody_provider_policy_inspect_failed",
+          errorClass: error instanceof Error ? error.name : typeof error,
+        },
+        "Custody provider policy inspection failed"
+      );
       return { status: "unknown", reason: "provider_unavailable" };
     }
   };
@@ -131,41 +129,45 @@ async function inspectBatch(
   }));
 }
 
-async function checkPolicies(env: Env, scope: PolicyCheckScope, audit: AuditedWrite) {
+async function checkPolicies(env: Env, scope: PolicyCheckScope) {
+  const audit = createSystemAuditService(env);
   const targets = await new CustodyPolicyStore(getDb(env)).claim(scope, 25);
   const results = await inspectBatch(env, targets);
   for (const { target, result } of results) {
     const check: ProviderPolicyCheck = { ...result, checkedAt: new Date().toISOString() };
-    // The ledger keeps observations that change the picture; an unchanged hourly
-    // repeat updates the wallet silently while the log line stays hourly.
+    // The ledger keeps observations that change the picture: a changed
+    // observation and its audit entry commit in one audited write, which holds
+    // the ledger's writer lock. An unchanged hourly repeat records outside that
+    // write — it refreshes the wallet silently while the log line stays hourly.
     const changed =
       target.previous_status !== check.status ||
       target.previous_reason !== check.reason ||
       target.previous_credential_id !== target.provider_credential_id;
-    const recorded = await audit(async (tx) => {
-      const saved = await new CustodyPolicyStore(tx).record(target, check);
-      return {
-        result: saved,
-        entry:
-          saved && changed
-            ? {
-                organizationId: target.organization_id,
-                action: "check",
-                resourceType: "custody_connection",
-                resourceId: target.custody_connection_id,
-                metadata: {
-                  event: "custody_provider_policy_checked",
-                  projectId: target.project_id,
-                  walletId: target.id,
-                  provider: target.provider,
-                  environment: scope.environment,
-                  ...check,
-                },
-                status: "success",
-              }
-            : null,
-      };
-    });
+    const recorded = changed
+      ? await audit.logSystemWithin(async (tx) => {
+          const saved = await new CustodyPolicyStore(tx).record(target, check);
+          return {
+            result: saved,
+            entry: saved
+              ? {
+                  organizationId: target.organization_id,
+                  action: "check",
+                  resourceType: "custody_connection",
+                  resourceId: target.custody_connection_id,
+                  metadata: {
+                    event: "custody_provider_policy_checked",
+                    projectId: target.project_id,
+                    walletId: target.id,
+                    provider: target.provider,
+                    environment: scope.environment,
+                    ...check,
+                  },
+                  status: "success",
+                }
+              : null,
+          };
+        })
+      : await new CustodyPolicyStore(getDb(env)).record(target, check);
     if (recorded)
       getLogger().info(
         {
@@ -186,46 +188,5 @@ async function checkPolicies(env: Env, scope: PolicyCheckScope, audit: AuditedWr
 }
 
 export async function checkDueProviderPolicies(env: Env): Promise<void> {
-  const audit = createSystemAuditService(env);
-  await checkPolicies(env, { environment: currentClusterScope().environment }, (work) =>
-    audit.logSystemWithin(work)
-  );
-}
-
-/** Setup has already committed. The periodic queue recovers any interrupted observation. */
-export function checkConnectedProviderPolicies(c: AppContext, connectionId: string): void {
-  // Advisory work must not delay the response it follows, so the observation
-  // continues in the background. Without a request ExecutionContext (a bare
-  // app.request call in tests) nothing keeps the work alive past the response,
-  // so it does not start — the periodic queue claims these targets either way.
-  let waitUntil: (promise: Promise<unknown>) => void;
-  try {
-    const executionCtx = c.executionCtx;
-    waitUntil = (promise) => executionCtx.waitUntil(promise);
-  } catch {
-    return;
-  }
-  waitUntil(observeConnectionPolicies(c, connectionId));
-}
-
-/** Created under the request's database identity, so its audited writes keep it. */
-async function observeConnectionPolicies(c: AppContext, connectionId: string): Promise<void> {
-  const auth = getAuth(c);
-  const projectId = requireProjectId(c);
-  try {
-    const audit = new AuditService(getDb(c.env));
-    await checkPolicies(
-      c.env,
-      {
-        environment: currentClusterScope().environment,
-        connection: { organizationId: auth.organizationId, projectId, id: connectionId },
-      },
-      (work) => audit.logWithin(c, work)
-    );
-  } catch {
-    getLogger().warn(
-      { event: "sdp_api_custody_provider_policy_check_failed", custodyConnectionId: connectionId },
-      "Policy check will be retried by the worker"
-    );
-  }
+  await checkPolicies(env, { environment: currentClusterScope().environment });
 }
