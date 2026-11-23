@@ -19,7 +19,10 @@ import { getLogger } from "@/runtime/logger";
  *   an outage rather than a refusal, answered with a sanitized retryable 503.
  * - `bubbles`: rethrown unchanged for the global error boundary. An unexplained
  *   build failure is SDP's problem to look at, and telling a customer their
- *   request was wrong would be a guess.
+ *   request was wrong would be a guess. `DEPLOYMENT_NOT_CONFIGURED`,
+ *   `CLUSTER_UNSUPPORTED` and `UNSUPPORTED_VAULT` stay here on purpose: they
+ *   fire only when SDP's catalogue and a provider package disagree, some carry
+ *   developer-facing sentences a 400 would echo, and a retry cannot fix them.
  *
  * Matched on the shared `code` shape rather than provider classes, so a new
  * vault-direct provider inherits the mapping by using the same vocabulary.
