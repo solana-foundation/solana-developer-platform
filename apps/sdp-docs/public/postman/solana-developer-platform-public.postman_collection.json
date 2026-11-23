@@ -144,7 +144,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/wallets",
-            "description": "Deletes the wallet from its exact owning custody target when that Provider supports wallet deletion. Provider, when supplied, is a consistency assertion.",
+            "description": "Deletes the wallet from its exact owning provider account when that Provider supports wallet deletion. Provider, when supplied, is a consistency assertion.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"provider\": \"privy\",\n  \"walletId\": \"privy_wallet_123\"\n}",
@@ -157,11 +157,11 @@
           }
         },
         {
-          "name": "List wallet signing configs",
+          "name": "List managed signing configurations",
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/v1/wallets/configs",
+            "url": "{{baseUrl}}/v1/wallets/managed-signing/configurations",
             "description": "Returns the active Config-owned wallet signing configurations for the requested scope, one per provider."
           }
         },

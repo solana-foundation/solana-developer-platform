@@ -121,11 +121,14 @@ async function initializeCustodyWallet(formData: FormData): Promise<string> {
   }
 
   const client = await createSdpApiClient();
-  const { walletId } = await client.fetch<InitializeSigningResponse>("/v1/wallets/initialize", {
-    method: "POST",
-    body: JSON.stringify(payload),
-    headers: actionIdempotencyHeaders(formData.get("idempotencyKey")),
-  });
+  const { walletId } = await client.fetch<InitializeSigningResponse>(
+    "/v1/wallets/managed-signing/initialize-with-wallet",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+      headers: actionIdempotencyHeaders(formData.get("idempotencyKey")),
+    }
+  );
   return walletId;
 }
 
@@ -194,7 +197,7 @@ export type InitializeCustodySetupActionResult =
     };
 
 /**
- * Connects a provider from the setup flow. `/initialize` answers 409 only when
+ * Connects a provider from the setup flow. `/managed-signing/initialize-with-wallet` answers 409 only when
  * the project already holds this provider's Managed config; that is reported
  * as its own result so the flow can send the user to add a wallet instead.
  *

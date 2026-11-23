@@ -104,7 +104,9 @@ describe("/api/playground/v1/[...path]", () => {
   it("rejects an unauthenticated caller before creating an API client", async () => {
     mocks.getSdpAuth.mockResolvedValue({ userId: null, orgId: null });
 
-    const response = await GET(playgroundRequest("GET", "/v1/wallets/configs"));
+    const response = await GET(
+      playgroundRequest("GET", "/v1/wallets/managed-signing/configurations")
+    );
 
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({
@@ -114,7 +116,9 @@ describe("/api/playground/v1/[...path]", () => {
   });
 
   it("requires the calling tab's project, like every other dashboard route", async () => {
-    const response = await GET(new Request(`${ORIGIN}/api/playground/v1/wallets/configs`));
+    const response = await GET(
+      new Request(`${ORIGIN}/api/playground/v1/wallets/managed-signing/configurations`)
+    );
 
     expect(response.status).toBe(400);
     expect(mocks.createSdpApiClient).not.toHaveBeenCalled();
@@ -169,7 +173,11 @@ describe("/api/playground/v1/[...path]", () => {
     ["literal parent segments", "POST", "/v1/payments/transfers/../../../admin/allowlist"],
     ["percent-encoded parent segments", "GET", "/v1/%2e%2e/admin/allowlist"],
     ["backslash parent segments", "GET", "/v1/wallets/..\\..\\admin/allowlist"],
-    ["a parent segment out of the proxy", "GET", "/v1/../v1/wallets/configs/../../../health"],
+    [
+      "a parent segment out of the proxy",
+      "GET",
+      "/v1/../v1/wallets/managed-signing/configurations/../../../../health",
+    ],
   ])("refuses %s that is not in the playground catalog", async (_label, method, path) => {
     const request = upstreamRequest();
     mocks.createSdpApiClient.mockResolvedValue({ request });
@@ -214,12 +222,14 @@ describe("/api/playground/v1/[...path]", () => {
     const request = upstreamRequest().mockResolvedValue(upstreamOk());
     mocks.createSdpApiClient.mockResolvedValue({ request });
 
-    const response = await GET(playgroundRequest("GET", "/v1/wallets/configs"));
+    const response = await GET(
+      playgroundRequest("GET", "/v1/wallets/managed-signing/configurations")
+    );
 
     expect(response.status).toBe(200);
     expect(mocks.logRouteResult).toHaveBeenLastCalledWith(expect.anything(), 200, {
       method: "GET",
-      operation: "/v1/wallets/configs",
+      operation: "/v1/wallets/managed-signing/configurations",
       ok: true,
     });
   });
@@ -288,7 +298,9 @@ describe("/api/playground/v1/[...path]", () => {
       const request = upstreamRequest();
       mocks.createSdpApiClient.mockResolvedValue({ request });
 
-      const response = await GET(playgroundRequest("GET", "/v1/wallets/configs", { headers }));
+      const response = await GET(
+        playgroundRequest("GET", "/v1/wallets/managed-signing/configurations", { headers })
+      );
 
       expect(response.status).toBe(400);
       expect(mocks.createSdpApiClient).not.toHaveBeenCalled();
@@ -330,7 +342,9 @@ describe("/api/playground/v1/[...path]", () => {
     );
     mocks.createSdpApiClient.mockResolvedValue({ request });
 
-    const response = await GET(playgroundRequest("GET", "/v1/wallets/configs"));
+    const response = await GET(
+      playgroundRequest("GET", "/v1/wallets/managed-signing/configurations")
+    );
 
     expect(Object.fromEntries(response.headers)).toEqual({
       "cache-control": "private, no-store",
@@ -346,7 +360,9 @@ describe("/api/playground/v1/[...path]", () => {
     const request = upstreamRequest().mockRejectedValue(new Error("socket hang up"));
     mocks.createSdpApiClient.mockResolvedValue({ request });
 
-    const response = await GET(playgroundRequest("GET", "/v1/wallets/configs"));
+    const response = await GET(
+      playgroundRequest("GET", "/v1/wallets/managed-signing/configurations")
+    );
 
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toEqual({
