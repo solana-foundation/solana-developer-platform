@@ -1,6 +1,5 @@
 import { SdpEarnError } from "@sdp/earn/errors";
 import {
-  plumeCancellationStatusSchema,
   plumeMintStatusSchema,
   plumePriceSchema,
   plumeRedeemStatusSchema,
@@ -21,7 +20,6 @@ import type {
 import { decimalStringFromNumber, multiplyDecimalAmounts } from "@sdp/payments/decimal";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
-import { deriveAssociatedTokenAddress } from "@sdp/solana/address";
 import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { PLUME_PROGRAMS, PLUME_VAULTS, plumeVault } from "@sdp/types/plume-programs";
 import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
@@ -30,16 +28,7 @@ import {
   SPL_TOKEN_PROGRAMS,
   wellKnownMint,
 } from "@sdp/types/well-known-tokens";
-import {
-  address,
-  createNoopSigner,
-  getCompiledTransactionMessageDecoder,
-  getTransactionDecoder,
-  isSome,
-} from "@solana/kit";
-import { getCreateAssociatedTokenIdempotentInstruction } from "@solana-program/token";
 import type { z } from "zod";
-import { oftSendDecoder, redeemCompose } from "./abi";
 import { readPlumeVault } from "./chain";
 import { SdpPlumeError } from "./errors";
 import {
@@ -259,217 +248,6 @@ export class PlumeVaultDirectClient
         };
       })
     );
-  }
-
-  buildVaultPreparation(
-    ctx: EarnRuntimeContext,
-    input: { providerReference: string; owner: string; rentPayer?: string }
-  ) {
-    return this.run("Plume buildVaultPreparation", () =>
-      this.buildVaultPreparationInternal(ctx, input)
-    );
-  }
-
-  private async buildVaultPreparationInternal(
-    ctx: EarnRuntimeContext,
-    input: { providerReference: string; owner: string; rentPayer?: string }
-  ): Promise<EarnVaultTransactionPlan> {
-    const { vault, depositMint } = configuration(ctx, input.providerReference);
-    const state = await readPlumeVault(createClusterRpc(), vault, input.owner, depositMint);
-    if (state.shareAccountExists)
-      return {
-        cluster: vault.cluster,
-        assetIdentity: { depositTokenMint: depositMint, shareMint: vault.shareMint },
-        lookupTables: [],
-        createsShareAccount: false,
-        instructions: [],
-      };
-    const payer = input.rentPayer === undefined ? input.owner : input.rentPayer;
-    const ix = getCreateAssociatedTokenIdempotentInstruction({
-      payer: createNoopSigner(address(payer)),
-      ata: state.shareAta,
-      owner: address(input.owner),
-      mint: address(vault.shareMint),
-    });
-    return {
-      cluster: vault.cluster,
-      assetIdentity: { depositTokenMint: depositMint, shareMint: vault.shareMint },
-      lookupTables: [],
-      createsShareAccount: !state.shareAccountExists,
-      instructions: [
-        {
-          programAddress: ix.programAddress,
-          accounts: ix.accounts.map((a) => ({ address: a.address, role: a.role })),
-          data: Buffer.from(ix.data).toString("base64"),
-        },
-        {
-          programAddress: MEMO_PROGRAM_ADDRESS,
-          accounts: [{ address: input.owner, role: 2 }],
-          data: Buffer.from("sdp:earn:account-preparation").toString("base64"),
-        },
-      ],
-    };
-  }
-
-  private async originalComposer(
-    ctx: EarnRuntimeContext,
-    input: { providerReference: string; owner: string; sourceTransaction: string }
-  ) {
-    const { vault, depositMint } = configuration(ctx, input.providerReference);
-    const original = getTransactionDecoder().decode(Buffer.from(input.sourceTransaction, "base64"));
-    if (original.signatures[address(input.owner)] == null)
-      throw new SdpPlumeError(
-        "WITHDRAW_REFUSED",
-        "The original order is not signed by this wallet"
-      );
-    const message = getCompiledTransactionMessageDecoder().decode(original.messageBytes);
-    if (message.version !== 0)
-      throw new SdpPlumeError("WITHDRAW_REFUSED", "Original order must be a versioned transaction");
-    const sends = message.instructions.filter(
-      (ix) =>
-        ix.data !== undefined &&
-        Buffer.from(ix.data)
-          .subarray(0, 8)
-          .equals(Buffer.from([102, 251, 20, 187, 65, 75, 12, 69]))
-    );
-    if (sends.length !== 1 || sends[0].data === undefined)
-      throw new SdpPlumeError("WITHDRAW_REFUSED", "The original order has no unique OFT request");
-    const send = oftSendDecoder.decode(sends[0].data);
-    const usdcAta = await deriveAssociatedTokenAddress(
-      input.owner,
-      depositMint,
-      SPL_TOKEN_PROGRAMS["spl-token"]
-    );
-    const plumeAtoms =
-      send.amount / 10n ** BigInt(Math.max(0, vault.shareDecimals - vault.plumeShareDecimals));
-    if (
-      !isSome(send.compose) ||
-      !Buffer.from(send.compose.value).equals(
-        Buffer.from(redeemCompose(usdcAta, plumeAtoms, "standard"))
-      )
-    )
-      throw new SdpPlumeError(
-        "WITHDRAW_REFUSED",
-        "Only a standard provider redemption may be cancelled"
-      );
-    return {
-      vault,
-      depositMint,
-      composer: `0x${Buffer.from(send.to).subarray(12).toString("hex")}`,
-    };
-  }
-
-  buildProviderOrderCancellation(
-    ctx: EarnRuntimeContext,
-    input: {
-      providerReference: string;
-      owner: string;
-      sourceTransaction: string;
-      rentPayer?: string;
-    }
-  ) {
-    return this.run("Plume buildProviderOrderCancellation", () =>
-      this.buildProviderOrderCancellationInternal(ctx, input)
-    );
-  }
-
-  private async buildProviderOrderCancellationInternal(
-    ctx: EarnRuntimeContext,
-    input: {
-      providerReference: string;
-      owner: string;
-      sourceTransaction: string;
-      rentPayer?: string;
-    }
-  ): Promise<EarnVaultTransactionPlan> {
-    const { vault, depositMint, composer } = await this.originalComposer(ctx, input);
-    const feePayer = input.rentPayer === undefined ? input.owner : input.rentPayer;
-    const tx = await this.build(
-      "/solana/nest/async-redeem/update/build-tx",
-      {
-        nestVaultSlug: vault.slug,
-        newRawAmountNestToken: "0",
-        composerAddress: composer,
-        owner: input.owner,
-        feePayer,
-      },
-      "withdrawal"
-    );
-    return admitPlumeTransaction(createClusterRpc(), {
-      vault,
-      depositMint,
-      owner: input.owner,
-      feePayer,
-      atoms: 0n,
-      canonicalAmount: "0",
-      mode: "cancel",
-      originalComposer: composer,
-      transactionBase64: tx.txBase64,
-    });
-  }
-
-  readProviderOrderCancellation(
-    ctx: EarnRuntimeContext,
-    input: {
-      providerReference: string;
-      owner: string;
-      sourceSignature: string;
-      sourceTransaction: string;
-    }
-  ) {
-    return this.run("Plume readProviderOrderCancellation", () =>
-      this.readProviderOrderCancellationInternal(ctx, input)
-    );
-  }
-
-  private async readProviderOrderCancellationInternal(
-    ctx: EarnRuntimeContext,
-    input: {
-      providerReference: string;
-      owner: string;
-      sourceSignature: string;
-      sourceTransaction: string;
-    }
-  ) {
-    const { vault, composer } = await this.originalComposer(ctx, input);
-    let status: z.output<typeof plumeCancellationStatusSchema>;
-    try {
-      status = await plumeExecutionRequest(
-        `/solana/update-status/${encodeURIComponent(input.sourceSignature)}`,
-        plumeCancellationStatusSchema
-      );
-    } catch (cause) {
-      if (cause instanceof SdpEarnError && cause.details?.providerStatus === 404)
-        return {
-          sourceSignature: input.sourceSignature,
-          owner: input.owner,
-          destinationSignature: null,
-          tokenMint: vault.shareMint,
-          programAddress: PLUME_PROGRAMS.oft,
-          requiredAccount: vault.oftStore,
-          phase: "processing" as const,
-        };
-      throw cause;
-    }
-    if (
-      status.sourceSignature !== input.sourceSignature ||
-      status.owner !== input.owner ||
-      status.composer.toLowerCase() !== composer.toLowerCase() ||
-      BigInt(status.remainingShares) !== 0n
-    )
-      throw new SdpPlumeError(
-        "VAULT_UNREADABLE",
-        "Plume cancellation status differs from the original order"
-      );
-    return {
-      sourceSignature: input.sourceSignature,
-      owner: input.owner,
-      destinationSignature: status.destinationSignature === "" ? null : status.destinationSignature,
-      tokenMint: vault.shareMint,
-      programAddress: PLUME_PROGRAMS.oft,
-      requiredAccount: vault.oftStore,
-      phase: "processing" as const,
-    };
   }
 
   readProviderSettlement(

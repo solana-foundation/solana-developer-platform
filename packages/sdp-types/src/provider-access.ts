@@ -706,12 +706,3 @@ export function resolveOrganizationProviderEntitlements(
     earn: resolveFamilyEntitlements(EARN_PROVIDERS, defaults.earn, overrides?.earn),
   };
 }
-
-/** Providers whose mint builder requires a pre-existing share account for sponsorship. */
-export function earnRequiresVaultPreparation(provider: string): boolean {
-  return provider === "plume";
-}
-/** Provider orders with a signed cancellation and verified share-return lifecycle. */
-export function earnCanCancelProviderOrder(provider: string): boolean {
-  return provider === "plume";
-}
