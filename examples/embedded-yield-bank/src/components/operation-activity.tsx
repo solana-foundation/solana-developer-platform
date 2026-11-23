@@ -21,6 +21,15 @@ const STATUS: Record<EarnOperation["status"], string> = {
   cancelled: "Cancelled",
 };
 
+const OUTCOME = {
+  delivered: "Delivered",
+  cancelled: "Returned",
+  recovered: "Recovered",
+} as const satisfies Record<
+  NonNullable<NonNullable<EarnOperation["result"]>["settlementOutcome"]>,
+  string
+>;
+
 /** Operations retain pending signatures and settlement without inventing paid amounts. */
 export function OperationActivity({
   operations,
@@ -102,12 +111,8 @@ function OperationRow({
       ) : null}
       {settled ? (
         <p className="text-sm">
-          {operation.result?.settlementOutcome === "recovered"
-            ? "Recovered"
-            : operation.result?.settlementOutcome === "cancelled"
-              ? "Returned"
-              : "Delivered"}
-          : {format(settled)}
+          {OUTCOME[operation.result?.settlementOutcome ?? "delivered"]}:{" "}
+          {format(settled)}
         </p>
       ) : null}
       {canSubmit ? (
@@ -291,6 +296,25 @@ function OperationProgress({
   );
 }
 
+function performOperationAction(
+  operation: EarnOperation,
+  action: "submit" | "cancel" | "refresh",
+  optionId: string | undefined
+): Promise<EarnOperation> {
+  switch (action) {
+    case "submit":
+      return submitPreparedOperation(operation);
+    case "refresh":
+      return refreshPreparedOperation(operation, optionId);
+    case "cancel":
+      return requestOperationCancellation(operation);
+    default: {
+      const unknownAction: never = action;
+      throw new Error(`Unknown operation action: ${unknownAction}`);
+    }
+  }
+}
+
 function useOperationActions(operation: EarnOperation, onUpdated: () => void) {
   const [busy, setBusy] = useState(false);
   async function act(
@@ -300,12 +324,7 @@ function useOperationActions(operation: EarnOperation, onUpdated: () => void) {
     if (busy) return;
     setBusy(true);
     try {
-      const updated =
-        action === "submit"
-          ? await submitPreparedOperation(operation)
-          : action === "refresh"
-            ? await refreshPreparedOperation(operation, optionId)
-            : await requestOperationCancellation(operation);
+      const updated = await performOperationAction(operation, action, optionId);
       if (updated.status === "failed")
         throw new Error(updated.error?.message ?? "Execution failed");
       toast.info(STATUS[updated.status]);
