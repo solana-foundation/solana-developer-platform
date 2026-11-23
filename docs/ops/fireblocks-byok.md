@@ -345,6 +345,17 @@ implementation with mocked Fireblocks HTTP responses and a locally generated Ed2
 Dashboard tests cover submission, rotation, and the existing Privy lifecycle. These tests do not
 replace an approval-policy check against a real Fireblocks workspace.
 
+Provider build suites send deposit and withdrawal plans through the real Fireblocks
+adapter with mocked HTTP: Kamino and Veda use recorded chain data; Jupiter Lend uses
+its real SDK against an in-process chain; WisdomTree uses its real subscription and
+Token-2022 redemption builders; Ondo and Hastra stub their admitted Jupiter swap leg.
+Plume also covers immutable CCTP transactions with existing protocol signatures.
+The shared harness substitutes a local signing key for recorded owners and verifies
+the exact serialized proposal and signature. These are offline compatibility tests,
+not live execution evidence. Hastra, WisdomTree and Plume keep their pre-launch gates;
+Upshift and Perena remain unimplemented stubs. Hastra's absent legacy-ticket sentinel
+is now readonly, so both par and optional DEX redemption transactions can compile.
+
 ## Read-only checks on Pay
 
 The minimal integration retains server-generated RSA-4096 keys, CSR download, API user ID
