@@ -173,7 +173,11 @@ describe("/api/playground/v1/[...path]", () => {
     ["literal parent segments", "POST", "/v1/payments/transfers/../../../admin/allowlist"],
     ["percent-encoded parent segments", "GET", "/v1/%2e%2e/admin/allowlist"],
     ["backslash parent segments", "GET", "/v1/wallets/..\\..\\admin/allowlist"],
-    ["a parent segment out of the proxy", "GET", "/v1/../v1/wallets/configs/../../../health"],
+    [
+      "a parent segment out of the proxy",
+      "GET",
+      "/v1/../v1/wallets/managed-signing/configurations/../../../../health",
+    ],
   ])("refuses %s that is not in the playground catalog", async (_label, method, path) => {
     const request = upstreamRequest();
     mocks.createSdpApiClient.mockResolvedValue({ request });

@@ -1,5 +1,5 @@
 import { ONCHAIN_TRANSFER_STATUSES } from "@sdp/types/payments";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildIssuancePlaygroundEndpointConfigs } from "@/app/(session)/dashboard/[projectId]/issuance/issuance-playground-config";
 import { buildCounterpartyPlaygroundEndpointConfigs } from "@/app/(session)/dashboard/[projectId]/payments/counterparty/counterparty-playground-config";
 import { buildPaymentsPlaygroundEndpointConfigs } from "@/app/(session)/dashboard/[projectId]/payments/payments-playground-config";
@@ -218,14 +218,33 @@ describe("API playground allowlist", () => {
       findPublishedPlaygroundOperation("GET", "/v1/payments/transfers/trf_1", "stable")
     ).toMatchObject({ pathTemplate: "/v1/payments/transfers/{transferId}" });
     expect(
-      findPublishedPlaygroundOperation(
-        "GET",
-        "/v1/wallets/managed-signing/configurations",
-        "stable"
-      )
+      findPublishedPlaygroundOperation("GET", "/v1/issuance/tokens/facets", "experimental")
     ).toMatchObject({
-      pathTemplate: "/v1/wallets/managed-signing/configurations",
+      pathTemplate: "/v1/issuance/tokens/facets",
     });
+  });
+
+  it("keeps literal precedence when the catalog puts parameter routes first", async () => {
+    vi.resetModules();
+    const { default: generatedCatalog } = await import("@sdp/api-catalog/playground-catalog");
+    const operations = generatedCatalog.modules.issuance;
+    const original = [...operations];
+    // Catalog order is not a routing guarantee. Use the real published routes
+    // in the opposite order so this regression exercises the competing match.
+    operations.sort(
+      (left, right) => Number(right.path.includes("{")) - Number(left.path.includes("{"))
+    );
+    try {
+      const { findPublishedPlaygroundOperation: find } = await import(
+        "./api-playground-openapi-catalog"
+      );
+      expect(find("GET", "/v1/issuance/tokens/facets", "experimental")).toMatchObject({
+        pathTemplate: "/v1/issuance/tokens/facets",
+      });
+    } finally {
+      operations.splice(0, operations.length, ...original);
+      vi.resetModules();
+    }
   });
 
   // Greptile (#2433): a concrete path can fit a published template's parameter
