@@ -39,30 +39,33 @@ Three layers hold the line, and none is redundant:
 
 ## The kit-version firewall
 
-klend-sdk is built against `@solana/kit` **^2.3.0**; this repo pins **6.8.0**, and
-both copies live in the tree (pnpm nests the SDK's own). Verified by a live round
-trip: instructions come back as plain objects with a numeric `AccountRole` and
-`Uint8Array` data, so kit 6.8 compiles and signs them unchanged — the boundary is
-real at the TYPE level and inert at RUNTIME.
+klend-sdk is built against `@solana/kit` **^2.3.0**; this repo pins **7.1.1**
+(the catalog), and both copies live in the tree (pnpm nests the SDK's own). A
+live round trip on kit 6.8 showed instructions come back as plain objects with a
+numeric `AccountRole` and `Uint8Array` data, and kit 7.1 keeps that shape (same
+role values, same fields), so the repo's kit compiles and signs them unchanged:
+the boundary is real at the TYPE level and inert at RUNTIME.
 
 `src/sdk.ts` is the only module that may import `@kamino-finance/klend-sdk` (its
 `dist/` subpaths included: the farm reader comes from `dist/classes/farm_utils.js`,
 which the SDK index does not re-export; keep the `.js`, the SDK has no exports
 map and plain Node ESM needs it) or `decimal.js`. Everything crossing this
-package's surface is `@solana/kit` 6.8,
-`@sdp/types`, or a **decimal string**. A `Decimal` escaping would also drag in the
-instance-identity hazard: klend-sdk compares with `instanceof Decimal`, so two
-physical copies degrade to NaN rather than to a type error — which is why the root
-`package.json` pins `decimal.js` via `pnpm.overrides`.
+package's surface is the repo's `@solana/kit`, `@sdp/types`, or a **decimal
+string**. A `Decimal` escaping would also drag in the instance-identity hazard:
+klend-sdk compares with `instanceof Decimal`, so two physical copies degrade to
+NaN rather than to a type error. Nothing overrides `decimal.js`: the tree holds
+one copy only because the Kamino SDKs' `^10` ranges resolve to the 10.6.0 this
+package pins, so a second `decimal.js` in the lockfile is a bug.
 
-klend-sdk's `@kamino-finance/kliquidity-sdk` requires `@solana/web3.js` without
-declaring it, so it resolves only through pnpm's hoisted copy
-(`node_modules/.pnpm/node_modules`). Since `@sdp/hastra` moved to kit, that copy
-comes from `@sdp/jupiter-lend`'s 1.99.0 alone: dropping the last workspace
-web3.js dependency needs a `packageExtensions` entry first. An incremental
-install that prunes a web3.js version can also leave the hoisted link missing
-(every Kamino-loading test fails with `Cannot find module '@solana/web3.js'`);
-a clean `pnpm install` restores it.
+`@kamino-finance/kliquidity-sdk` requires `@solana/web3.js` without declaring
+it, in both copies klend-sdk pulls in (11.0.3 directly, 8.5.10 via farms-sdk).
+The root `package.json` declares it in `pnpm.packageExtensions`, keyed by name
+alone so a klend-sdk bump that moves kliquidity stays covered, and pinned to
+the lockfile's one web3.js version (1.99.0) so the tree keeps a single copy;
+move the pin when that version moves. Without the entry the import resolves
+only through pnpm's hoisted `node_modules/.pnpm/node_modules` link, which an
+incremental install can drop, and every Kamino-loading test then fails with
+`Cannot find module '@solana/web3.js'`.
 
 ## Constants that are MEASUREMENTS, not protocol facts
 
