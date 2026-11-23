@@ -5527,56 +5527,56 @@ Source: https://platform.solana.com/docs/reference/api/issuance
 
 | Method | Endpoint | Summary |
 | --- | --- | --- |
-| `POST` | `/v1/issuance/tokens/{tokenId}/deploy` | [Deploy token](/docs/reference/api/issuance/deploy-token.md) |
-| `POST` | `/v1/issuance/tokens/{tokenId}/deploy/prepare` | [Prepare token deploy transaction](/docs/reference/api/issuance/prepare-deploy-token.md) |
-| `POST` | `/v1/issuance/tokens/{tokenId}/deploy/confirm` | [Confirm non-custodial deploy](/docs/reference/api/issuance/confirm-deploy.md) |
-| `POST` | `/v1/issuance/tokens/{tokenId}/deploy/prepare-metadata` | [Prepare metadata-URI follow-up transaction](/docs/reference/api/issuance/prepare-deploy-metadata.md) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/deploy/execute` | [Deploy token](/docs/reference/api/issuance/deploy-token.md) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/deploy/build-unsigned-transaction` | [Prepare token deploy transaction](/docs/reference/api/issuance/prepare-deploy-token.md) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/deploy/confirm-submitted-transaction` | [Confirm a caller-signed deployment](/docs/reference/api/issuance/confirm-deploy.md) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/deploy/metadata/build-unsigned-transaction` | [Prepare metadata-URI follow-up transaction](/docs/reference/api/issuance/prepare-deploy-metadata.md) |
 
 ## Mint and burn
 
 | Method | Endpoint | Summary |
 | --- | --- | --- |
-| `POST` | `/v1/issuance/tokens/{tokenId}/mint/prepare` | [Prepare mint transaction](/docs/reference/api/issuance/prepare-mint.md) |
-| `POST` | `/v1/issuance/tokens/{tokenId}/mint` | [Execute mint](/docs/reference/api/issuance/execute-mint.md) |
-| `POST` | `/v1/issuance/tokens/{tokenId}/burn/prepare` | [Prepare burn transaction](/docs/reference/api/issuance/prepare-burn.md) |
-| `POST` | `/v1/issuance/tokens/{tokenId}/burn` | [Execute burn](/docs/reference/api/issuance/execute-burn.md) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/mint/build-unsigned-transaction` | [Prepare mint transaction](/docs/reference/api/issuance/prepare-mint.md) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/mint/execute` | [Execute mint](/docs/reference/api/issuance/execute-mint.md) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/burn/build-unsigned-transaction` | [Prepare burn transaction](/docs/reference/api/issuance/prepare-burn.md) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/burn/execute` | [Execute burn](/docs/reference/api/issuance/execute-burn.md) |
 
 ## Enforcement
 
 | Method | Endpoint | Summary |
 | --- | --- | --- |
-| `POST` | `/v1/issuance/tokens/{tokenId}/seize/prepare` | [Prepare seize transaction](/docs/reference/api/issuance/prepare-seize.md) |
-| `POST` | `/v1/issuance/tokens/{tokenId}/seize` | [Execute seize](/docs/reference/api/issuance/execute-seize.md) |
-| `POST` | `/v1/issuance/tokens/{tokenId}/force-burn/prepare` | [Prepare force burn transaction](/docs/reference/api/issuance/prepare-force-burn.md) |
-| `POST` | `/v1/issuance/tokens/{tokenId}/force-burn` | [Execute force burn](/docs/reference/api/issuance/execute-force-burn.md) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/seize/build-unsigned-transaction` | [Prepare seize transaction](/docs/reference/api/issuance/prepare-seize.md) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/seize/execute` | [Execute seize](/docs/reference/api/issuance/execute-seize.md) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/force-burn/build-unsigned-transaction` | [Prepare force burn transaction](/docs/reference/api/issuance/prepare-force-burn.md) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/force-burn/execute` | [Execute force burn](/docs/reference/api/issuance/execute-force-burn.md) |
 | `POST` | `/v1/issuance/tokens/{tokenId}/pause` | [Pause token transfers](/docs/reference/api/issuance/pause-token.md) |
 | `POST` | `/v1/issuance/tokens/{tokenId}/unpause` | [Unpause token transfers](/docs/reference/api/issuance/unpause-token.md) |
-| `POST` | `/v1/issuance/tokens/{tokenId}/freeze` | [Freeze account](/docs/reference/api/issuance/freeze-account.md) |
-| `POST` | `/v1/issuance/tokens/{tokenId}/unfreeze` | [Unfreeze account](/docs/reference/api/issuance/unfreeze-account.md) |
-| `GET` | `/v1/issuance/tokens/{tokenId}/frozen` | [List frozen accounts](/docs/reference/api/issuance/list-frozen-accounts.md) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/freeze-account` | [Freeze account](/docs/reference/api/issuance/freeze-account.md) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/unfreeze-account` | [Unfreeze account](/docs/reference/api/issuance/unfreeze-account.md) |
+| `GET` | `/v1/issuance/tokens/{tokenId}/frozen-accounts` | [List frozen accounts](/docs/reference/api/issuance/list-frozen-accounts.md) |
 
 ## Authority
 
 | Method | Endpoint | Summary |
 | --- | --- | --- |
-| `POST` | `/v1/issuance/tokens/{tokenId}/authority/prepare` | [Prepare authority update](/docs/reference/api/issuance/prepare-update-authority.md) |
-| `POST` | `/v1/issuance/tokens/{tokenId}/authority` | [Execute authority update](/docs/reference/api/issuance/execute-update-authority.md) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/authority/update/build-unsigned-transaction` | [Prepare authority update](/docs/reference/api/issuance/prepare-update-authority.md) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/authority/update/execute` | [Execute authority update](/docs/reference/api/issuance/execute-update-authority.md) |
 
 ## Allowlist
 
 | Method | Endpoint | Summary |
 | --- | --- | --- |
-| `GET` | `/v1/issuance/tokens/{tokenId}/allowlist` | [List token allowlist](/docs/reference/api/issuance/list-token-allowlist.md) |
-| `POST` | `/v1/issuance/tokens/{tokenId}/allowlist` | [Add token allowlist entry](/docs/reference/api/issuance/add-token-allowlist-entry.md) |
-| `GET` | `/v1/issuance/tokens/{tokenId}/allowlist/labels` | [List token allowlist labels](/docs/reference/api/issuance/list-token-allowlist-labels.md) |
-| `DELETE` | `/v1/issuance/tokens/{tokenId}/allowlist/{entryId}` | [Remove token allowlist entry](/docs/reference/api/issuance/remove-token-allowlist-entry.md) |
+| `GET` | `/v1/issuance/tokens/{tokenId}/control-list` | [List token control list](/docs/reference/api/issuance/list-token-allowlist.md) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/control-list` | [Add token control-list entry](/docs/reference/api/issuance/add-token-allowlist-entry.md) |
+| `GET` | `/v1/issuance/tokens/{tokenId}/control-list/labels` | [List token control-list labels](/docs/reference/api/issuance/list-token-allowlist-labels.md) |
+| `DELETE` | `/v1/issuance/tokens/{tokenId}/control-list/{entryId}` | [Remove token control-list entry](/docs/reference/api/issuance/remove-token-allowlist-entry.md) |
 
 ## Holders
 
 | Method | Endpoint | Summary |
 | --- | --- | --- |
-| `GET` | `/v1/issuance/tokens/{tokenId}/holders` | [List verified holders](/docs/reference/api/issuance/list-holders.md) |
-| `POST` | `/v1/issuance/tokens/{tokenId}/holders` | [Enroll a verified holder](/docs/reference/api/issuance/enroll-holder.md) |
+| `GET` | `/v1/issuance/tokens/{tokenId}/holder-enrollments` | [List holder enrollments](/docs/reference/api/issuance/list-holders.md) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/holder-enrollments` | [Enroll a holder](/docs/reference/api/issuance/enroll-holder.md) |
 
 ---
 
@@ -7688,7 +7688,7 @@ Update token request body.
 
 - **`signingCustodyWalletId`** · `string` · min length 1 · example `cwlt_example`
 
-  Optional exact SDP Wallet ID. On an undeployed pending draft, updates the deployment wallet. After deployment, selects the signer only for this on-chain metadata update and does not change deployment attribution. A request containing only this field after deployment returns 400; include the token changes to apply. Database-only edits need no signer. For on-chain metadata updates, the selected wallet must control the current metadata authority; omission requires exactly one matching in-scope custody record, otherwise returns 409.
+  Optional exact SDP Wallet ID. On an undeployed pending draft, updates the deployment wallet. After deployment, selects the signer only for this on-chain metadata update and does not change deployment attribution. A request containing only this field after deployment returns 400; include the token changes to apply. Database-only edits need no signer. For on-chain metadata updates, the selected wallet must control the current metadata authority; omission requires exactly one matching in-scope wallet record, otherwise returns 409.
 
 - **`name`** · `string` · min length 1 · max length 100 · example `Example Token Updated`
 
@@ -9397,9 +9397,9 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Deploy token
 Source: https://platform.solana.com/docs/reference/api/issuance/deploy-token
 
-> Deploys the token to Solana using custody signing.
+> Deploys the token to Solana using the connected provider for signing.
 
-`POST /v1/issuance/tokens/{tokenId}/deploy`
+`POST /v1/issuance/tokens/{tokenId}/deploy/execute`
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuance.execute` action.
 
@@ -9733,7 +9733,7 @@ Direct token deployment request body.
 
 ```bash tab="cURL"
 IDEMPOTENCY_KEY=$(uuidgen)
-curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/deploy' \
+curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/deploy/execute' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
@@ -9751,7 +9751,7 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/deploy' \
 ```ts tab="TypeScript"
 // Reuse this key when you retry this request.
 const idempotencyKey = crypto.randomUUID();
-const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/deploy", {
+const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/deploy/execute", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -9775,7 +9775,7 @@ import os, requests, uuid
 
 # Reuse this key when you retry this request.
 idempotency_key = str(uuid.uuid4())
-r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/deploy",
+r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/deploy/execute",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "signingCustodyWalletId": "cwlt_example",
@@ -9885,9 +9885,9 @@ Source: https://platform.solana.com/docs/reference/api/issuance/prepare-deploy-t
 
 > Builds an unsigned deploy transaction for client-side signing.
 
-`POST /v1/issuance/tokens/{tokenId}/deploy/prepare`
+`POST /v1/issuance/tokens/{tokenId}/deploy/build-unsigned-transaction`
 
-A signing wallet is required: the body's `signingWalletId`, else the token's `signingWalletId`. The request is rejected with 400 when neither is set; an API key is never asked for a default wallet. The resolved wallet is pinned on the token for deploy/confirm and prepare-metadata.
+A signing wallet is required: the body's `signingWalletId`, else the token's `signingWalletId`. The request is rejected with 400 when neither is set; an API key is never asked for a default wallet. The resolved wallet is pinned on the token for deploy/confirm-submitted-transaction and deploy/metadata/build-unsigned-transaction.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuance.execute` action.
 
@@ -9937,7 +9937,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuan
 
     - **`metadataUriFollowUp`** · `object`
 
-      Present when the inline metadata URI overflowed the create transaction's packet limit. The create tx was prepared with an empty URI; after confirming the deploy, the client must call POST /deploy/prepare-metadata and submit the returned follow-up transaction to set this URI on-chain.
+      Present when the inline metadata URI overflowed the create transaction's packet limit. The create tx was prepared with an empty URI; after confirming the deploy, the client must call POST /deploy/metadata/build-unsigned-transaction and submit the returned follow-up transaction to set this URI on-chain.
 
       - **`required`** · `boolean` · required · always `true`
 
@@ -10034,12 +10034,12 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuan
 ## Example request
 
 ```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/deploy/prepare' \
+curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/deploy/build-unsigned-transaction' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/deploy/prepare", {
+const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/deploy/build-unsigned-transaction", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`
@@ -10050,7 +10050,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/d
 ```python tab="Python"
 import os, requests
 
-r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/deploy/prepare",
+r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/deploy/build-unsigned-transaction",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
@@ -10105,12 +10105,12 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
-### Confirm non-custodial deploy
+### Confirm a caller-signed deployment
 Source: https://platform.solana.com/docs/reference/api/issuance/confirm-deploy
 
-> Records the mint after the client signs and submits a prepared (non-custodial) deploy transaction.
+> Records the mint after the client signs and submits a prepared deploy transaction.
 
-`POST /v1/issuance/tokens/{tokenId}/deploy/confirm`
+`POST /v1/issuance/tokens/{tokenId}/deploy/confirm-submitted-transaction`
 
 Verifies the transaction landed on-chain, then marks the token deployed.
 
@@ -10132,7 +10132,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuan
 
 `application/json` · required
 
-Confirm non-custodial deploy request body.
+Confirm a caller-signed deployment request body.
 
 - **`signature`** · `string` · required · example `5x...signature`
 
@@ -10140,7 +10140,7 @@ Confirm non-custodial deploy request body.
 
 - **`mint`** · `string` · required · example `So11111111111111111111111111111111111111112`
 
-  Mint address returned by deploy/prepare and created by the submitted tx.
+  Mint address returned by deploy/build-unsigned-transaction and created by the submitted tx.
 
 - **`listAddress`** · `string` · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
@@ -10148,7 +10148,7 @@ Confirm non-custodial deploy request body.
 
 - **`signingWalletId`** · `string` · min length 1 · example `privy_wallet_123`
 
-  Accepted for backward compatibility but ignored: the server uses the signing wallet pinned during deploy/prepare, so the authority can't be changed at confirm time.
+  Accepted for backward compatibility but ignored: the server uses the signing wallet pinned during deploy/build-unsigned-transaction, so the authority can't be changed at confirm time.
 
 ## Responses
 
@@ -10439,7 +10439,7 @@ Confirm non-custodial deploy request body.
 ## Example request
 
 ```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/deploy/confirm' \
+curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/deploy/confirm-submitted-transaction' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -10451,7 +10451,7 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/deploy/confi
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/deploy/confirm", {
+const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/deploy/confirm-submitted-transaction", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -10469,7 +10469,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/d
 ```python tab="Python"
 import os, requests
 
-r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/deploy/confirm",
+r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/deploy/confirm-submitted-transaction",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "signature": "5x...signature",
@@ -10574,11 +10574,11 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Prepare metadata-URI follow-up transaction
 Source: https://platform.solana.com/docs/reference/api/issuance/prepare-deploy-metadata
 
-> Follow-up step for the non-custodial deploy flow.
+> Follow-up step for the caller-signed deploy flow.
 
-`POST /v1/issuance/tokens/{tokenId}/deploy/prepare-metadata`
+`POST /v1/issuance/tokens/{tokenId}/deploy/metadata/build-unsigned-transaction`
 
-When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm to fetch an unsigned transaction that sets the metadata URI on-chain. Signs with the wallet pinned on the token at deploy/prepare (a body `signingWalletId` is ignored); the request is rejected with 400 when the token has none. Returns a null transaction when the on-chain URI already matches.
+When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm-submitted-transaction to fetch an unsigned transaction that sets the metadata URI on-chain. Signs with the wallet pinned on the token at deploy/build-unsigned-transaction (a body `signingWalletId` is ignored); the request is rejected with 400 when the token has none. Returns a null transaction when the on-chain URI already matches.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuance.execute` action.
 
@@ -10713,12 +10713,12 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuan
 ## Example request
 
 ```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/deploy/prepare-metadata' \
+curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/deploy/metadata/build-unsigned-transaction' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/deploy/prepare-metadata", {
+const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/deploy/metadata/build-unsigned-transaction", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`
@@ -10729,7 +10729,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/d
 ```python tab="Python"
 import os, requests
 
-r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/deploy/prepare-metadata",
+r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/deploy/metadata/build-unsigned-transaction",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
@@ -10786,7 +10786,7 @@ Source: https://platform.solana.com/docs/reference/api/issuance/prepare-mint
 
 > Builds an unsigned mint transaction for client-side signing.
 
-`POST /v1/issuance/tokens/{tokenId}/mint/prepare`
+`POST /v1/issuance/tokens/{tokenId}/mint/build-unsigned-transaction`
 
 The authority wallet is the fee payer: it signs the transaction and pays the network fee and the rent for a new destination token account; SDP does not sponsor prepared transactions.
 
@@ -11033,7 +11033,7 @@ Mint request body.
 ## Example request
 
 ```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/mint/prepare' \
+curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/mint/build-unsigned-transaction' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -11051,7 +11051,7 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/mint/prepare
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/mint/prepare", {
+const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/mint/build-unsigned-transaction", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -11075,7 +11075,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/m
 ```python tab="Python"
 import os, requests
 
-r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/mint/prepare",
+r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/mint/build-unsigned-transaction",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "signingCustodyWalletId": "cwlt_example",
@@ -11159,9 +11159,9 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Execute mint
 Source: https://platform.solana.com/docs/reference/api/issuance/execute-mint
 
-> Mints tokens using custody signing and submission.
+> Mints tokens by requesting a signature from the connected provider, then submitting the transaction.
 
-`POST /v1/issuance/tokens/{tokenId}/mint`
+`POST /v1/issuance/tokens/{tokenId}/mint/execute`
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuance.execute` action.
 
@@ -11373,7 +11373,7 @@ Mint request body.
 
 ```bash tab="cURL"
 IDEMPOTENCY_KEY=$(uuidgen)
-curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/mint' \
+curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/mint/execute' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
@@ -11394,7 +11394,7 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/mint' \
 ```ts tab="TypeScript"
 // Reuse this key when you retry this request.
 const idempotencyKey = crypto.randomUUID();
-const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/mint", {
+const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/mint/execute", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -11421,7 +11421,7 @@ import os, requests, uuid
 
 # Reuse this key when you retry this request.
 idempotency_key = str(uuid.uuid4())
-r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/mint",
+r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/mint/execute",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "signingCustodyWalletId": "cwlt_example",
@@ -11494,7 +11494,7 @@ Source: https://platform.solana.com/docs/reference/api/issuance/prepare-burn
 
 > Builds an unsigned burn transaction for client-side signing.
 
-`POST /v1/issuance/tokens/{tokenId}/burn/prepare`
+`POST /v1/issuance/tokens/{tokenId}/burn/build-unsigned-transaction`
 
 The authority wallet is the fee payer: it signs the transaction and pays the network fee; SDP does not sponsor prepared transactions.
 
@@ -11737,7 +11737,7 @@ Burn request body.
 ## Example request
 
 ```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/burn/prepare' \
+curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/burn/build-unsigned-transaction' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -11755,7 +11755,7 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/burn/prepare
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/burn/prepare", {
+const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/burn/build-unsigned-transaction", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -11779,7 +11779,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/b
 ```python tab="Python"
 import os, requests
 
-r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/burn/prepare",
+r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/burn/build-unsigned-transaction",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "signingCustodyWalletId": "cwlt_example",
@@ -11862,9 +11862,9 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Execute burn
 Source: https://platform.solana.com/docs/reference/api/issuance/execute-burn
 
-> Burns tokens using custody signing and submission.
+> Burns tokens by requesting a signature from the connected provider, then submitting the transaction.
 
-`POST /v1/issuance/tokens/{tokenId}/burn`
+`POST /v1/issuance/tokens/{tokenId}/burn/execute`
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuance.execute` action.
 
@@ -12072,7 +12072,7 @@ Burn request body.
 
 ```bash tab="cURL"
 IDEMPOTENCY_KEY=$(uuidgen)
-curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/burn' \
+curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/burn/execute' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
@@ -12093,7 +12093,7 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/burn' \
 ```ts tab="TypeScript"
 // Reuse this key when you retry this request.
 const idempotencyKey = crypto.randomUUID();
-const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/burn", {
+const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/burn/execute", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -12120,7 +12120,7 @@ import os, requests, uuid
 
 # Reuse this key when you retry this request.
 idempotency_key = str(uuid.uuid4())
-r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/burn",
+r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/burn/execute",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "signingCustodyWalletId": "cwlt_example",
@@ -12194,7 +12194,7 @@ Source: https://platform.solana.com/docs/reference/api/issuance/prepare-seize
 
 > Builds an unsigned force transfer transaction for client-side signing.
 
-`POST /v1/issuance/tokens/{tokenId}/seize/prepare`
+`POST /v1/issuance/tokens/{tokenId}/seize/build-unsigned-transaction`
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuance.enforce` action.
 
@@ -12443,7 +12443,7 @@ Seize (force transfer) request body.
 ## Example request
 
 ```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/seize/prepare' \
+curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/seize/build-unsigned-transaction' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -12463,7 +12463,7 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/seize/prepar
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/seize/prepare", {
+const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/seize/build-unsigned-transaction", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -12489,7 +12489,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/s
 ```python tab="Python"
 import os, requests
 
-r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/seize/prepare",
+r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/seize/build-unsigned-transaction",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "signingCustodyWalletId": "cwlt_example",
@@ -12576,7 +12576,7 @@ Source: https://platform.solana.com/docs/reference/api/issuance/execute-seize
 
 > Forces a transfer using permanent delegate authority.
 
-`POST /v1/issuance/tokens/{tokenId}/seize`
+`POST /v1/issuance/tokens/{tokenId}/seize/execute`
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuance.enforce` action.
 
@@ -12792,7 +12792,7 @@ Seize (force transfer) request body.
 
 ```bash tab="cURL"
 IDEMPOTENCY_KEY=$(uuidgen)
-curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/seize' \
+curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/seize/execute' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
@@ -12815,7 +12815,7 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/seize' \
 ```ts tab="TypeScript"
 // Reuse this key when you retry this request.
 const idempotencyKey = crypto.randomUUID();
-const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/seize", {
+const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/seize/execute", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -12844,7 +12844,7 @@ import os, requests, uuid
 
 # Reuse this key when you retry this request.
 idempotency_key = str(uuid.uuid4())
-r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/seize",
+r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/seize/execute",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "signingCustodyWalletId": "cwlt_example",
@@ -12918,7 +12918,7 @@ Source: https://platform.solana.com/docs/reference/api/issuance/prepare-force-bu
 
 > Builds an unsigned force burn transaction for client-side signing.
 
-`POST /v1/issuance/tokens/{tokenId}/force-burn/prepare`
+`POST /v1/issuance/tokens/{tokenId}/force-burn/build-unsigned-transaction`
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuance.enforce` action.
 
@@ -13163,7 +13163,7 @@ Force burn request body.
 ## Example request
 
 ```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/force-burn/prepare' \
+curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/force-burn/build-unsigned-transaction' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -13182,7 +13182,7 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/force-burn/p
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/force-burn/prepare", {
+const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/force-burn/build-unsigned-transaction", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -13207,7 +13207,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/f
 ```python tab="Python"
 import os, requests
 
-r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/force-burn/prepare",
+r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/force-burn/build-unsigned-transaction",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "signingCustodyWalletId": "cwlt_example",
@@ -13293,7 +13293,7 @@ Source: https://platform.solana.com/docs/reference/api/issuance/execute-force-bu
 
 > Burns tokens using permanent delegate authority.
 
-`POST /v1/issuance/tokens/{tokenId}/force-burn`
+`POST /v1/issuance/tokens/{tokenId}/force-burn/execute`
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuance.enforce` action.
 
@@ -13505,7 +13505,7 @@ Force burn request body.
 
 ```bash tab="cURL"
 IDEMPOTENCY_KEY=$(uuidgen)
-curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/force-burn' \
+curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/force-burn/execute' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
@@ -13527,7 +13527,7 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/force-burn' 
 ```ts tab="TypeScript"
 // Reuse this key when you retry this request.
 const idempotencyKey = crypto.randomUUID();
-const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/force-burn", {
+const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/force-burn/execute", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -13555,7 +13555,7 @@ import os, requests, uuid
 
 # Reuse this key when you retry this request.
 idempotency_key = str(uuid.uuid4())
-r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/force-burn",
+r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/force-burn/execute",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "signingCustodyWalletId": "cwlt_example",
@@ -13656,7 +13656,7 @@ Pause token request body.
 
 - **`signingCustodyWalletId`** · `string` · min length 1 · example `cwlt_example`
 
-  Optional exact SDP Wallet ID controlling the current pause authority. Omission requires exactly one matching in-scope custody record; multiple matches return 409. Replay must retain the original wallet.
+  Optional exact SDP Wallet ID controlling the current pause authority. Omission requires exactly one matching in-scope wallet record; multiple matches return 409. Replay must retain the original wallet.
 
 - **`options`** · `object`
 
@@ -13941,7 +13941,7 @@ Pause token request body.
 
 - **`signingCustodyWalletId`** · `string` · min length 1 · example `cwlt_example`
 
-  Optional exact SDP Wallet ID controlling the current pause authority. Omission requires exactly one matching in-scope custody record; multiple matches return 409. Replay must retain the original wallet.
+  Optional exact SDP Wallet ID controlling the current pause authority. Omission requires exactly one matching in-scope wallet record; multiple matches return 409. Replay must retain the original wallet.
 
 - **`options`** · `object`
 
@@ -14198,7 +14198,7 @@ Source: https://platform.solana.com/docs/reference/api/issuance/freeze-account
 
 > Freezes a token account to prevent transfers.
 
-`POST /v1/issuance/tokens/{tokenId}/freeze`
+`POST /v1/issuance/tokens/{tokenId}/freeze-account`
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuance.enforce` action.
 
@@ -14350,7 +14350,7 @@ Freeze account request body.
 
 ```bash tab="cURL"
 IDEMPOTENCY_KEY=$(uuidgen)
-curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/freeze' \
+curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/freeze-account' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
@@ -14364,7 +14364,7 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/freeze' \
 ```ts tab="TypeScript"
 // Reuse this key when you retry this request.
 const idempotencyKey = crypto.randomUUID();
-const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/freeze", {
+const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/freeze-account", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -14384,7 +14384,7 @@ import os, requests, uuid
 
 # Reuse this key when you retry this request.
 idempotency_key = str(uuid.uuid4())
-r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/freeze",
+r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/freeze-account",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "accountAddress": "So11111111111111111111111111111111111111112",
@@ -14441,7 +14441,7 @@ Source: https://platform.solana.com/docs/reference/api/issuance/unfreeze-account
 
 > Unfreezes a token account so it can be used again.
 
-`POST /v1/issuance/tokens/{tokenId}/unfreeze`
+`POST /v1/issuance/tokens/{tokenId}/unfreeze-account`
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuance.enforce` action.
 
@@ -14589,7 +14589,7 @@ Unfreeze account request body.
 
 ```bash tab="cURL"
 IDEMPOTENCY_KEY=$(uuidgen)
-curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/unfreeze' \
+curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/unfreeze-account' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
@@ -14602,7 +14602,7 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/unfreeze' \
 ```ts tab="TypeScript"
 // Reuse this key when you retry this request.
 const idempotencyKey = crypto.randomUUID();
-const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/unfreeze", {
+const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/unfreeze-account", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -14621,7 +14621,7 @@ import os, requests, uuid
 
 # Reuse this key when you retry this request.
 idempotency_key = str(uuid.uuid4())
-r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/unfreeze",
+r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/unfreeze-account",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "accountAddress": "So11111111111111111111111111111111111111112",
@@ -14677,7 +14677,7 @@ Source: https://platform.solana.com/docs/reference/api/issuance/list-frozen-acco
 
 > Lists frozen accounts for a token.
 
-`GET /v1/issuance/tokens/{tokenId}/frozen`
+`GET /v1/issuance/tokens/{tokenId}/frozen-accounts`
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuance.read` action.
 
@@ -14810,12 +14810,12 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuan
 ## Example request
 
 ```bash tab="cURL"
-curl 'https://api.solana.com/v1/issuance/tokens/tok_example/frozen' \
+curl 'https://api.solana.com/v1/issuance/tokens/tok_example/frozen-accounts' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/frozen", {
+const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/frozen-accounts", {
   method: "GET",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`
@@ -14826,7 +14826,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/f
 ```python tab="Python"
 import os, requests
 
-r = requests.get("https://api.solana.com/v1/issuance/tokens/tok_example/frozen",
+r = requests.get("https://api.solana.com/v1/issuance/tokens/tok_example/frozen-accounts",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
@@ -14883,7 +14883,7 @@ Source: https://platform.solana.com/docs/reference/api/issuance/prepare-update-a
 
 > Builds an unsigned authority update transaction for client-side signing.
 
-`POST /v1/issuance/tokens/{tokenId}/authority/prepare`
+`POST /v1/issuance/tokens/{tokenId}/authority/update/build-unsigned-transaction`
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuance.authority` action.
 
@@ -15118,7 +15118,7 @@ Update authority request body.
 ## Example request
 
 ```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/authority/prepare' \
+curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/authority/update/build-unsigned-transaction' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -15135,7 +15135,7 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/authority/pr
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/authority/prepare", {
+const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/authority/update/build-unsigned-transaction", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -15158,7 +15158,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/a
 ```python tab="Python"
 import os, requests
 
-r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/authority/prepare",
+r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/authority/update/build-unsigned-transaction",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "signingCustodyWalletId": "cwlt_example",
@@ -15240,9 +15240,9 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Execute authority update
 Source: https://platform.solana.com/docs/reference/api/issuance/execute-update-authority
 
-> Updates token authorities using custody signing.
+> Updates token authorities using the connected provider for signing.
 
-`POST /v1/issuance/tokens/{tokenId}/authority`
+`POST /v1/issuance/tokens/{tokenId}/authority/update/execute`
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuance.authority` action.
 
@@ -15444,7 +15444,7 @@ Update authority request body.
 
 ```bash tab="cURL"
 IDEMPOTENCY_KEY=$(uuidgen)
-curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/authority' \
+curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/authority/update/execute' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
@@ -15464,7 +15464,7 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/authority' \
 ```ts tab="TypeScript"
 // Reuse this key when you retry this request.
 const idempotencyKey = crypto.randomUUID();
-const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/authority", {
+const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/authority/update/execute", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -15490,7 +15490,7 @@ import os, requests, uuid
 
 # Reuse this key when you retry this request.
 idempotency_key = str(uuid.uuid4())
-r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/authority",
+r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/authority/update/execute",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": idempotency_key},
   json={
     "signingCustodyWalletId": "cwlt_example",
@@ -15558,12 +15558,12 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ## Issuance: Allowlist
 
-### List token allowlist
+### List token control list
 Source: https://platform.solana.com/docs/reference/api/issuance/list-token-allowlist
 
-> Lists allowlist entries for a token.
+> Lists control-list entries for a token, using its configured allowlist or blocklist mode.
 
-`GET /v1/issuance/tokens/{tokenId}/allowlist`
+`GET /v1/issuance/tokens/{tokenId}/control-list`
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuance.read` action.
 
@@ -15704,12 +15704,12 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuan
 ## Example request
 
 ```bash tab="cURL"
-curl 'https://api.solana.com/v1/issuance/tokens/tok_example/allowlist' \
+curl 'https://api.solana.com/v1/issuance/tokens/tok_example/control-list' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/allowlist", {
+const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/control-list", {
   method: "GET",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`
@@ -15720,7 +15720,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/a
 ```python tab="Python"
 import os, requests
 
-r = requests.get("https://api.solana.com/v1/issuance/tokens/tok_example/allowlist",
+r = requests.get("https://api.solana.com/v1/issuance/tokens/tok_example/control-list",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
@@ -15769,12 +15769,12 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
-### Add token allowlist entry
+### Add token control-list entry
 Source: https://platform.solana.com/docs/reference/api/issuance/add-token-allowlist-entry
 
-> Adds an allowlist entry for a token.
+> Adds a control-list entry for a token, using its configured allowlist or blocklist mode.
 
-`POST /v1/issuance/tokens/{tokenId}/allowlist`
+`POST /v1/issuance/tokens/{tokenId}/control-list`
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuance.enforce` action.
 
@@ -15798,7 +15798,7 @@ Add token allowlist entry request body.
 
 - **`signingCustodyWalletId`** · `string` · min length 1 · example `cwlt_example`
 
-  Optional exact SDP Wallet ID controlling the live list authority. Omission requires exactly one matching in-scope custody record; multiple matches return 409. Database-only lists do not require a signer.
+  Optional exact SDP Wallet ID controlling the live list authority. Omission requires exactly one matching in-scope wallet record; multiple matches return 409. Database-only lists do not require a signer.
 
 - **`address`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
@@ -15917,7 +15917,7 @@ Add token allowlist entry request body.
 ## Example request
 
 ```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/allowlist' \
+curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/control-list' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -15928,7 +15928,7 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/allowlist' \
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/allowlist", {
+const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/control-list", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -15945,7 +15945,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/a
 ```python tab="Python"
 import os, requests
 
-r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/allowlist",
+r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/control-list",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "signingCustodyWalletId": "cwlt_example",
@@ -15996,12 +15996,12 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
-### List token allowlist labels
+### List token control-list labels
 Source: https://platform.solana.com/docs/reference/api/issuance/list-token-allowlist-labels
 
 > Lists the distinct labels used across a token's active control-list entries, for building a label filter.
 
-`GET /v1/issuance/tokens/{tokenId}/allowlist/labels`
+`GET /v1/issuance/tokens/{tokenId}/control-list/labels`
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuance.read` action.
 
@@ -16084,12 +16084,12 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuan
 ## Example request
 
 ```bash tab="cURL"
-curl 'https://api.solana.com/v1/issuance/tokens/tok_example/allowlist/labels' \
+curl 'https://api.solana.com/v1/issuance/tokens/tok_example/control-list/labels' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/allowlist/labels", {
+const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/control-list/labels", {
   method: "GET",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`
@@ -16100,7 +16100,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/a
 ```python tab="Python"
 import os, requests
 
-r = requests.get("https://api.solana.com/v1/issuance/tokens/tok_example/allowlist/labels",
+r = requests.get("https://api.solana.com/v1/issuance/tokens/tok_example/control-list/labels",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
@@ -16141,12 +16141,12 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
-### Remove token allowlist entry
+### Remove token control-list entry
 Source: https://platform.solana.com/docs/reference/api/issuance/remove-token-allowlist-entry
 
-> Removes an allowlist entry from a token.
+> Removes a control-list entry from a token, using its configured allowlist or blocklist mode.
 
-`DELETE /v1/issuance/tokens/{tokenId}/allowlist/{entryId}`
+`DELETE /v1/issuance/tokens/{tokenId}/control-list/{entryId}`
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuance.enforce` action.
 
@@ -16164,7 +16164,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuan
 
 - **`signingCustodyWalletId`** · `string` · min length 1 · example `cwlt_example`
 
-  Optional exact SDP Wallet ID controlling the live list authority. Omission requires exactly one matching in-scope custody record; multiple matches return 409. Database-only lists do not require a signer.
+  Optional exact SDP Wallet ID controlling the live list authority. Omission requires exactly one matching in-scope wallet record; multiple matches return 409. Database-only lists do not require a signer.
 
 ## Headers
 
@@ -16225,12 +16225,12 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuan
 ## Example request
 
 ```bash tab="cURL"
-curl -X DELETE 'https://api.solana.com/v1/issuance/tokens/tok_example/allowlist/al_example' \
+curl -X DELETE 'https://api.solana.com/v1/issuance/tokens/tok_example/control-list/al_example' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/allowlist/al_example", {
+const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/control-list/al_example", {
   method: "DELETE",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`
@@ -16241,7 +16241,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/a
 ```python tab="Python"
 import os, requests
 
-r = requests.delete("https://api.solana.com/v1/issuance/tokens/tok_example/allowlist/al_example",
+r = requests.delete("https://api.solana.com/v1/issuance/tokens/tok_example/control-list/al_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
@@ -16268,12 +16268,12 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ## Issuance: Holders
 
-### List verified holders
+### List holder enrollments
 Source: https://platform.solana.com/docs/reference/api/issuance/list-holders
 
 > Returns the wallets enrolled for this asset (KYC identity + enrollment state).
 
-`GET /v1/issuance/tokens/{tokenId}/holders`
+`GET /v1/issuance/tokens/{tokenId}/holder-enrollments`
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuance.read` action.
 
@@ -16344,12 +16344,12 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuan
 ## Example request
 
 ```bash tab="cURL"
-curl 'https://api.solana.com/v1/issuance/tokens/tok_example/holders' \
+curl 'https://api.solana.com/v1/issuance/tokens/tok_example/holder-enrollments' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/holders", {
+const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/holder-enrollments", {
   method: "GET",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`
@@ -16360,7 +16360,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/h
 ```python tab="Python"
 import os, requests
 
-r = requests.get("https://api.solana.com/v1/issuance/tokens/tok_example/holders",
+r = requests.get("https://api.solana.com/v1/issuance/tokens/tok_example/holder-enrollments",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
@@ -16396,12 +16396,12 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
-### Enroll a verified holder
+### Enroll a holder
 Source: https://platform.solana.com/docs/reference/api/issuance/enroll-holder
 
 > Registers a wallet for this asset (upserts its KYC identity + an active enrollment).
 
-`POST /v1/issuance/tokens/{tokenId}/holders`
+`POST /v1/issuance/tokens/{tokenId}/holder-enrollments`
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuance.manage` action.
 
@@ -16486,7 +16486,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuan
 ## Example request
 
 ```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/holders' \
+curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/holder-enrollments' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -16496,7 +16496,7 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/holders' \
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/holders", {
+const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/holder-enrollments", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -16512,7 +16512,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/h
 ```python tab="Python"
 import os, requests
 
-r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/holders",
+r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/holder-enrollments",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "walletAddress": "11111111111111111111111111111111",
@@ -34286,7 +34286,7 @@ Source: https://platform.solana.com/docs/reference/api/asset-profiles
 | --- | --- | --- |
 | `GET` | `/v1/issuance/asset-profiles/field-options` | [Get asset profile field options](/docs/reference/api/asset-profiles/get-asset-profile-field-options.md) |
 | `GET` | `/v1/issuance/asset-profiles` | [List asset profiles](/docs/reference/api/asset-profiles/list-asset-profiles.md) |
-| `POST` | `/v1/issuance/asset-profiles` | [Create token with asset profile](/docs/reference/api/asset-profiles/create-token-with-asset-profile.md) |
+| `POST` | `/v1/issuance/tokens/create-with-asset-profile` | [Create token with asset profile](/docs/reference/api/asset-profiles/create-token-with-asset-profile.md) |
 | `GET` | `/v1/issuance/asset-profiles/by-token/{tokenId}` | [Get asset profile by token](/docs/reference/api/asset-profiles/get-asset-profile-by-token.md) |
 | `GET` | `/v1/issuance/asset-profiles/{profileId}` | [Get asset profile](/docs/reference/api/asset-profiles/get-asset-profile.md) |
 | `PATCH` | `/v1/issuance/asset-profiles/{profileId}` | [Update asset profile](/docs/reference/api/asset-profiles/update-asset-profile.md) |
@@ -34786,7 +34786,7 @@ Source: https://platform.solana.com/docs/reference/api/asset-profiles/create-tok
 
 > Creates an issued token and its asset profile atomically in a single transaction: if either write fails, both roll back, so a token is never persisted without a profile.
 
-`POST /v1/issuance/asset-profiles`
+`POST /v1/issuance/tokens/create-with-asset-profile`
 
 Requires the Asset Profiles feature to be enabled.
 
@@ -35403,7 +35403,7 @@ Create token + asset profile request body: the token-create fields plus the asse
 ## Example request
 
 ```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/issuance/asset-profiles' \
+curl -X POST 'https://api.solana.com/v1/issuance/tokens/create-with-asset-profile' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -35452,7 +35452,7 @@ curl -X POST 'https://api.solana.com/v1/issuance/asset-profiles' \
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/issuance/asset-profiles", {
+const res = await fetch("https://api.solana.com/v1/issuance/tokens/create-with-asset-profile", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -35507,7 +35507,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/asset-profiles", {
 ```python tab="Python"
 import os, requests
 
-r = requests.post("https://api.solana.com/v1/issuance/asset-profiles",
+r = requests.post("https://api.solana.com/v1/issuance/tokens/create-with-asset-profile",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "name": "Example Token",
@@ -43725,7 +43725,7 @@ A regulated stablecoin has four onchain authorities. At deploy, SDP gives all fo
 - **`permanentDelegate`**: moves or burns any holder's tokens without their signature, the capability the GENIUS Act requires for lawful orders.
 - **`metadata`**: updates onchain metadata.
 
-The **pause authority** belongs to the `pausable` extension and defaults to the mint authority. Move or revoke any authority later with `POST /v1/issuance/tokens/{tokenId}/authority`.
+The **pause authority** belongs to the `pausable` extension and defaults to the mint authority. Move or revoke any authority later with `POST /v1/issuance/tokens/{tokenId}/authority/update/execute`.
 
 ### 4. Capture the design as a config
 
@@ -43767,7 +43767,7 @@ The deploy call creates the Token-2022 mint, signed by your custody wallet, and 
 ```javascript title="deploy-token.js"
 const deployKey = idempotencyKey("deploy");
 const deployed = await sdp.post(
-  `/v1/issuance/tokens/${tokenId}/deploy`,
+  `/v1/issuance/tokens/${tokenId}/deploy/execute`,
   { signingCustodyWalletId },
   { idempotencyKey: deployKey }
 );
@@ -43863,7 +43863,7 @@ Freezing stops one holder's account without touching any other. Token-2022 enfor
 ```javascript title="freeze-account.js"
 const holderFreezeKey = idempotencyKey("freeze");
 await sdpAdmin.post(
-  `/v1/issuance/tokens/${tokenId}/freeze`,
+  `/v1/issuance/tokens/${tokenId}/freeze-account`,
   {
     signingCustodyWalletId,
     accountAddress: holderAddress,
@@ -43882,7 +43882,7 @@ Seize moves tokens out of a holder's account without their signature, through th
 ```javascript title="seize-tokens.js"
 const seizeKey = idempotencyKey("seize");
 await sdpAdmin.post(
-  `/v1/issuance/tokens/${tokenId}/seize`,
+  `/v1/issuance/tokens/${tokenId}/seize/execute`,
   {
     signingCustodyWalletId,
     seize: {
@@ -43905,7 +43905,7 @@ Force burn destroys tokens in a holder's account, with the same authority as sei
 ```javascript title="force-burn.js"
 const forceBurnKey = idempotencyKey("force-burn");
 await sdpAdmin.post(
-  `/v1/issuance/tokens/${tokenId}/force-burn`,
+  `/v1/issuance/tokens/${tokenId}/force-burn/execute`,
   {
     signingCustodyWalletId,
     forceBurn: {
@@ -43933,7 +43933,7 @@ Minting needs `issuance.execute`, which the Developer key holds:
 ```javascript title="mint-tokens.js"
 const mintKey = idempotencyKey("mint");
 const minted = await sdp.post(
-  `/v1/issuance/tokens/${tokenId}/mint`,
+  `/v1/issuance/tokens/${tokenId}/mint/execute`,
   {
     signingCustodyWalletId,
     mint: {
@@ -44065,7 +44065,7 @@ Freeze the destination's TPUSD account with the Admin key; the Developer key lac
 ```javascript title="freeze-destination.js"
 const transferFreezeKey = idempotencyKey("freeze");
 await sdpAdmin.post(
-  `/v1/issuance/tokens/${tokenId}/freeze`,
+  `/v1/issuance/tokens/${tokenId}/freeze-account`,
   {
     signingCustodyWalletId,
     accountAddress: destinationAddress,
@@ -44115,7 +44115,7 @@ In production, unfreeze only after the compliance review resolves. In the sandbo
 
 ```javascript title="unfreeze-account.js"
 await sdpAdmin.post(
-  `/v1/issuance/tokens/${tokenId}/unfreeze`,
+  `/v1/issuance/tokens/${tokenId}/unfreeze-account`,
   {
     signingCustodyWalletId,
     accountAddress: destinationAddress,
@@ -45967,7 +45967,7 @@ Token-2022 extensions make compliance enforceable onchain. Freeze one holder's a
 
 ```javascript title="compliance-action.js" rotate-token-ops
 const response = await fetch(
-  "https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze",
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze-account",
   {
     method: "POST",
     headers: {
@@ -45988,7 +45988,7 @@ import requests
 import uuid
 
 response = requests.post(
-    "https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze",
+    "https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze-account",
     headers={"Authorization": "Bearer sf_...", "Idempotency-Key": str(uuid.uuid4())},
     json=operation_params,
 )
@@ -45998,7 +45998,7 @@ result = response.json()
 **curl**
 
 ```bash title="Terminal" rotate-token-ops
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze-account \
   -H "Authorization: Bearer sf_..." \
   -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
@@ -46042,11 +46042,11 @@ Each step links to its guide, with dashboard and API instructions:
 | --- | --- | --- |
 | `GET` | `/v1/issuance/templates` | List token templates |
 | `POST` | `/v1/issuance/tokens` | Create a token draft |
-| `POST` | `/v1/issuance/tokens/{tokenId}/deploy` | Deploy to Solana |
-| `POST` | `/v1/issuance/tokens/{tokenId}/mint` | Mint new supply |
-| `POST` | `/v1/issuance/tokens/{tokenId}/burn` | Reduce supply |
-| `POST` | `/v1/issuance/tokens/{tokenId}/allowlist` | Add an address to the access list |
-| `POST` | `/v1/issuance/tokens/{tokenId}/freeze` | Freeze an account |
+| `POST` | `/v1/issuance/tokens/{tokenId}/deploy/execute` | Deploy to Solana |
+| `POST` | `/v1/issuance/tokens/{tokenId}/mint/execute` | Mint new supply |
+| `POST` | `/v1/issuance/tokens/{tokenId}/burn/execute` | Reduce supply |
+| `POST` | `/v1/issuance/tokens/{tokenId}/control-list` | Add an address to the access list |
+| `POST` | `/v1/issuance/tokens/{tokenId}/freeze-account` | Freeze an account |
 | `POST` | `/v1/issuance/tokens/{tokenId}/pause` | Pause all transfers |
 | `POST` | `/v1/payments/transfers/execute` | Transfer tokens |
 
@@ -46353,7 +46353,7 @@ SDP signs, sends and confirms the deploy in one request. The token shows **Deplo
 **API**
 
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy \
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: deploy-acme-001" \
@@ -46362,7 +46362,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy \
 
 ```typescript title="deploy-token.ts"
 const res = await fetch(
-  "https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy",
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy/execute",
   {
     method: "POST",
     headers: {
@@ -46467,9 +46467,9 @@ The **Supply** block shows the **Issued supply** with **Mint** and **Burn**, the
 Supply operations share one URL pattern:
 
 ```text title="Endpoints"
-POST /v1/issuance/tokens/{tokenId}/mint
-POST /v1/issuance/tokens/{tokenId}/burn
-POST /v1/issuance/tokens/{tokenId}/force-burn
+POST /v1/issuance/tokens/{tokenId}/mint/execute
+POST /v1/issuance/tokens/{tokenId}/burn/execute
+POST /v1/issuance/tokens/{tokenId}/force-burn/execute
 ```
 
 `amount` is a decimal string in **UI units**: `"1"` is one token and `"1.5"` is one and a half. SDP converts it to base units with the token's `decimals`.
@@ -46507,7 +46507,7 @@ The toast reads "Mint transaction finalized." and **Transactions** lists the min
 **API**
 
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint \
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: mint-001" \
@@ -46523,7 +46523,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint \
 
 ```typescript title="mint-tokens.ts"
 const res = await fetch(
-  "https://api.solana.com/v1/issuance/tokens/tok_abc123/mint",
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/mint/execute",
   {
     method: "POST",
     headers: {
@@ -46580,7 +46580,7 @@ For a force burn, open **Recovery** on **Operations** and click **Force burn**. 
 **Burn from a custody wallet.** The `source` must be the signing wallet or its token account, or the call fails with `400 INVALID_BURN_SOURCE`. A wallet that holds too little gets `400 INSUFFICIENT_TOKEN_BALANCE`.
 
 ```typescript title="burn-tokens.ts"
-await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/burn", {
+await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/burn/execute", {
   method: "POST",
   headers: {
     Authorization: "Bearer sf_...",
@@ -46597,7 +46597,7 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/burn", {
 **Force burn from any holder** (needs `issuance.enforce`):
 
 ```typescript title="force-burn-tokens.ts"
-await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn", {
+await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn/execute", {
   method: "POST",
   headers: {
     Authorization: "Bearer sf_...",
@@ -46724,7 +46724,7 @@ The entry appears under **Approved recipients**, with a trash button that remove
 **API**
 
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist \
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/control-list \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{
@@ -46735,7 +46735,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist \
 
 ```typescript title="add-allowlist-entry.ts"
 const res = await fetch(
-  "https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist",
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/control-list",
   {
     method: "POST",
     headers: {
@@ -46768,7 +46768,7 @@ Check which addresses are approved, before minting to a new destination or durin
 **API**
 
 ```bash title="Terminal"
-curl "https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist?search=So1&label=Treasury" \
+curl "https://api.solana.com/v1/issuance/tokens/tok_abc123/control-list?search=So1&label=Treasury" \
   -H "Authorization: Bearer sf_..."
 ```
 
@@ -46789,7 +46789,7 @@ Search and the label filter run over the whole list, not just the current page.
 To fill a label filter, fetch the labels in use. The response returns `data.labels` and the unfiltered `data.total`:
 
 ```bash
-curl 'https://api.solana.com/v1/issuance/tokens/tok_example/allowlist/labels' \
+curl 'https://api.solana.com/v1/issuance/tokens/tok_example/control-list/labels' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
@@ -46810,7 +46810,7 @@ On **Compliance**, click the trash button beside the address. For an onchain lis
 **API**
 
 ```bash
-curl -X DELETE 'https://api.solana.com/v1/issuance/tokens/tok_example/allowlist/al_example' \
+curl -X DELETE 'https://api.solana.com/v1/issuance/tokens/tok_example/control-list/al_example' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
@@ -46923,7 +46923,7 @@ The toast reads "Unfreeze transaction finalized."
 **Freeze:**
 
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze-account \
   -H "Authorization: Bearer sf_..." \
   -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
@@ -46938,7 +46938,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
 **Unfreeze:**
 
 ```typescript title="unfreeze-account.ts"
-await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/unfreeze", {
+await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/unfreeze-account", {
   method: "POST",
   headers: {
     Authorization: "Bearer sf_...",
@@ -46952,7 +46952,7 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/unfreeze", {
 **List frozen accounts:**
 
 ```bash
-curl 'https://api.solana.com/v1/issuance/tokens/tok_example/frozen' \
+curl 'https://api.solana.com/v1/issuance/tokens/tok_example/frozen-accounts' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
@@ -47033,7 +47033,7 @@ On **Operations**, open **Recovery** and click **Force transfer**. Enter the **S
 **API**
 
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/seize \
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/seize/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: seize-001" \
@@ -47134,7 +47134,7 @@ On **Permissions**, click **Edit** beside the authority. Pick another wallet, or
 SDP signs the rotation:
 
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority \
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority/update/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: rotate-001" \

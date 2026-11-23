@@ -86,7 +86,7 @@ The entry appears under **Approved recipients**, with a trash button that remove
 <Tab value="API">
 
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist \
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/control-list \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{
@@ -97,7 +97,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist \
 
 ```typescript title="add-allowlist-entry.ts"
 const res = await fetch(
-  "https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist",
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/control-list",
   {
     method: "POST",
     headers: {
@@ -133,7 +133,7 @@ Check which addresses are approved, before minting to a new destination or durin
 <Tab value="API">
 
 ```bash title="Terminal"
-curl "https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist?search=So1&label=Treasury" \
+curl "https://api.solana.com/v1/issuance/tokens/tok_abc123/control-list?search=So1&label=Treasury" \
   -H "Authorization: Bearer sf_..."
 ```
 

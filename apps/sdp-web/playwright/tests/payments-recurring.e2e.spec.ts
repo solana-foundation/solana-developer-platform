@@ -43,7 +43,7 @@ test.describe
           fixtures.projectId
         );
 
-        await api.post(`/v1/issuance/tokens/${fixtures.token.id}/mint`, {
+        await api.post(`/v1/issuance/tokens/${fixtures.token.id}/mint/execute`, {
           mint: {
             destination: fixtures.wallets.treasury.publicKey,
             amount: "25",
