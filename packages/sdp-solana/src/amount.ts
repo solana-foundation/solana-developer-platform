@@ -249,13 +249,15 @@ export interface AcceptedTokenAmount {
 /**
  * Zeros after the last non-zero fractional digit, removed with one scan from the end rather than
  * an end-anchored repetition, which could retry from every zero of a long caller-controlled run.
+ * A value with no whole digits and only zero fractional digits (`.0`) is `0`, not empty.
  */
 function trimInsignificantFractionalZeroes(value: string): string {
   const dot = value.indexOf(".");
   if (dot === -1) return value;
   let fractionEnd = value.length;
   while (fractionEnd > dot + 1 && value[fractionEnd - 1] === "0") fractionEnd -= 1;
-  return fractionEnd === dot + 1 ? value.slice(0, dot) : value.slice(0, fractionEnd);
+  if (fractionEnd > dot + 1) return value.slice(0, fractionEnd);
+  return dot === 0 ? "0" : value.slice(0, dot);
 }
 
 /**

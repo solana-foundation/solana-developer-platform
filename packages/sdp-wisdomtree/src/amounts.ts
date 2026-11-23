@@ -43,6 +43,10 @@ function refusal(reason: TokenAmountRefusal, amount: string, decimals: number, w
       return `${what} must be greater than zero.`;
     case "out_of_range":
       return `${what} of ${amount} does not fit an SPL token amount.`;
+    default: {
+      const unhandled: never = reason;
+      throw new Error(`Unhandled token amount refusal: ${String(unhandled)}`);
+    }
   }
 }
 

@@ -211,6 +211,8 @@ describe("acceptTokenAmount", () => {
   });
 
   it("refuses zero only when asked to", () => {
+    assert.deepEqual(acceptTokenAmount(".0", 6), { baseUnits: 0n, canonical: "0" });
+    refusal(".0", 6, "not_positive", true);
     refusal("0.000", 6, "not_positive", true);
     assert.equal(acceptTokenAmount("0.000001", 6, { positive: true }).baseUnits, 1n);
   });
