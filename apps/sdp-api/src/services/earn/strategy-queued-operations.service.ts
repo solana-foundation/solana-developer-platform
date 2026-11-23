@@ -37,7 +37,7 @@ import {
   submitWalletQueuedWithdrawalAction,
   type WalletQueuedWithdrawalBuiltTransaction,
 } from "./vault-queued-withdraw.service";
-import { rethrowVaultProviderFailure } from "./vault-refusals";
+import { isVaultProviderUnavailable, rethrowVaultProviderFailure } from "./vault-refusals";
 import type { VaultFeeMode } from "./vault-sponsorship";
 
 export interface PreparedStrategyWithdrawalChoice {
@@ -80,11 +80,17 @@ async function prepareRecoveryChoices(
   client: Parameters<typeof readExpiredStrategyWithdrawalRecoveries>[2]
 ): Promise<PreparedStrategyWithdrawalChoice[]> {
   if (input.recovery === undefined) return [];
-  const recoveries = await readExpiredStrategyWithdrawalRecoveries(
-    env,
-    { actor: input.recovery.actor, position: input.position },
-    client
-  );
+  let recoveries: Awaited<ReturnType<typeof readExpiredStrategyWithdrawalRecoveries>>;
+  try {
+    recoveries = await readExpiredStrategyWithdrawalRecoveries(
+      env,
+      { actor: input.recovery.actor, position: input.position },
+      client
+    );
+  } catch (error) {
+    // Like a pending release, a recorded escrow SDP can't read fails closed.
+    rethrowVaultProviderFailure(error);
+  }
   return recoveries.map(({ request, proof }) => {
     const id = `recover_expired_escrow:${request.id}`;
     return {
@@ -162,6 +168,15 @@ async function prepareCurrentRedemptionReleaseChoice(
       },
     },
   ];
+}
+
+/** No route survived: an unreadable provider is an outage (503), not a missing route. */
+function refuseWithoutRoute(reads: readonly PromiseSettledResult<unknown>[]): never {
+  const outage = reads
+    .flatMap((read): unknown[] => (read.status === "rejected" ? [read.reason] : []))
+    .find(isVaultProviderUnavailable);
+  if (outage !== undefined) rethrowVaultProviderFailure(outage);
+  throw badRequest("No supported withdrawal route is currently available");
 }
 
 /**
@@ -332,10 +347,9 @@ export async function prepareStrategyWithdrawalChoices(
         })()
       );
   }
-  await Promise.allSettled(quotes);
+  const quoteReads = await Promise.allSettled(quotes);
   choices.sort((left, right) => left.id.localeCompare(right.id));
-  if (choices.length === 0)
-    throw badRequest("No supported withdrawal route is currently available");
+  if (choices.length === 0) refuseWithoutRoute([queueRead, parRead, ...quoteReads]);
   return { choices, options: choices.map((choice) => choice.option) };
 }
 

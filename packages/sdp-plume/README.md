@@ -22,10 +22,12 @@ staging/canary workflow. Do not use a laptop to exercise production APIs.
 
 ## Flows
 
-- A sponsored first mint first finalizes a separate idempotent share ATA setup.
-  An existing live share account returns `not_required` without signing or fees.
-  Treasury does this automatically. Embedded apps use the provider action build,
-  sign, submit and read endpoints before building a deposit.
+- A sponsored first mint needs the owner's share token account to exist: the
+  mint builder refuses one without it (`DEPOSIT_REFUSED`). The package's
+  idempotent share-account setup (`buildVaultPreparation`, which returns
+  `not_required` for a live account) has no API caller since the Earn core
+  rewrite removed the provider action endpoints. Wire it into the core flow,
+  or delete it, before Plume is surfaced.
 - Mint uses the provider's VersionedTransaction unchanged. Its keeper and ephemeral
   CCTP signatures are verified and preserved. Neither its blockhash, payer nor
   instructions can be rewritten; fund USDC separately instead of composing a swap.
@@ -33,10 +35,12 @@ staging/canary workflow. Do not use a laptop to exercise production APIs.
   available instant liquidity path but still crosses chains. Neither is an atomic
   payout and neither requires a later user-signed claim transaction.
 - Standard cancellation sends an update to zero using the original recorded
-  composer. Plume updates the aggregate pending request for that wallet/vault,
-  so cancelling may affect multiple requests. Only an exact full share return can
-  close the selected SDP movement automatically; partial or aggregated returns
-  stay open for recovery. Already-delivered USDC is not recalled.
+  composer. `buildProviderOrderCancellation` builds it, but no API route calls
+  it since the core rewrite. Plume updates the aggregate pending request for
+  that wallet/vault, so cancelling may affect multiple requests. Only an exact
+  full share return can close the selected SDP movement automatically; partial
+  or aggregated returns stay open for recovery. Already-delivered USDC is not
+  recalled.
 - Source finality leaves the economic obligation open. Provider status supplies a
   candidate destination signature; SDP independently reads that finalized Solana
   transaction, verifies the bridge program/accounts and the exact owner/mint token

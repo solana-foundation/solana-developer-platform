@@ -11,7 +11,16 @@ import {
   selectStrategyWithdrawalChoice,
 } from "./strategy-queued-operations.service";
 
-const { resolve, buildQueued } = vi.hoisted(() => ({ resolve: vi.fn(), buildQueued: vi.fn() }));
+const { resolve, buildQueued, readRecoveries } = vi.hoisted(() => ({
+  resolve: vi.fn(),
+  buildQueued: vi.fn(),
+  readRecoveries: vi.fn(),
+}));
+vi.mock("./strategy-withdrawal-recovery.service", async (original) => {
+  const actual = await original<typeof import("./strategy-withdrawal-recovery.service")>();
+  readRecoveries.mockImplementation(actual.readExpiredStrategyWithdrawalRecoveries);
+  return { ...actual, readExpiredStrategyWithdrawalRecoveries: readRecoveries };
+});
 vi.mock("./execution-registry", async (original) => ({
   ...(await original<typeof import("./execution-registry")>()),
   resolveEarnExecutionClient: resolve,
@@ -216,6 +225,36 @@ describe("shared strategy withdrawal options", () => {
     const prepared = await choices({ position, shares: "2" });
     expect(prepared.options.map((option) => option.id)).toEqual(["operator_redemption"]);
     expect(par.quoteParRedemption).toHaveBeenCalledTimes(1);
+    expect(buildQueued).not.toHaveBeenCalled();
+  });
+
+  it("answers a provider outage with 503, not a missing route", async () => {
+    queued.getWithdrawalOptions.mockRejectedValueOnce(
+      Object.assign(new Error("Vault state is unreadable"), { code: "VAULT_UNREADABLE" })
+    );
+    await expect(choices({ position, shares: "2" })).rejects.toMatchObject({
+      code: "PROVIDER_UNAVAILABLE",
+    });
+  });
+
+  it("keeps the no-route 400 when a failed read is not an outage", async () => {
+    queued.getWithdrawalOptions.mockRejectedValueOnce(new Error("Unexpected provider failure"));
+    await expect(choices({ position, shares: "2" })).rejects.toThrow(
+      "No supported withdrawal route"
+    );
+  });
+
+  it("fails closed with 503 when a recorded expired escrow can't be read", async () => {
+    readRecoveries.mockRejectedValueOnce(
+      Object.assign(new Error("Withdrawal request is unreadable"), { code: "REQUEST_UNREADABLE" })
+    );
+    await expect(
+      choices({
+        position,
+        shares: "2",
+        recovery: { actor: { organizationId: "organization", projectId: "project" } },
+      })
+    ).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
     expect(buildQueued).not.toHaveBeenCalled();
   });
 
