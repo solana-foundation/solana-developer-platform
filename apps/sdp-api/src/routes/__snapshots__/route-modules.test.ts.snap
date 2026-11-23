@@ -91,6 +91,7 @@ exports[`API route ownership > lists every route with its owner 1`] = `
   "earn GET /v1/earn/onboarding/wisdomtree/:counterpartyId",
   "earn GET /v1/earn/onboarding/wisdomtree/forms/:entityType",
   "earn GET /v1/earn/positions",
+  "earn GET /v1/earn/positions/:positionId",
   "earn GET /v1/operations",
   "earn GET /v1/operations/:operationId",
   "earn POST /v1/earn/deposit",
