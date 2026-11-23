@@ -103,6 +103,8 @@ describe("gateway identity (X-SF-Identity)", () => {
   }
 
   beforeEach(async () => {
+    // A worker can inherit rate-limit buckets from the preceding test file.
+    await clearKVStores(env);
     invalidGatewayIdentityLimiter.resetForTesting();
     await seedTestDatabase(env);
     await getDb(env)

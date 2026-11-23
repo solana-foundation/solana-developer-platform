@@ -14,6 +14,6 @@ export async function DELETE(request: Request, context: RouteContext) {
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.issuance.token.allowlist.remove",
-    path: `/v1/issuance/tokens/${encodeURIComponent(tokenId)}/allowlist/${encodeURIComponent(entryId)}${suffix}`,
+    path: `/v1/issuance/tokens/${encodeURIComponent(tokenId)}/control-list/${encodeURIComponent(entryId)}${suffix}`,
   });
 }

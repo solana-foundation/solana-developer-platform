@@ -107,7 +107,7 @@ describe("InterfacesSection", () => {
     expect(tabs[0]?.getAttribute("aria-controls")).toBe(panel?.id);
 
     const code = doc.querySelector("pre code")?.textContent ?? "";
-    expect(code).toContain(`curl -X POST ${DEFAULT_SDP_API_URL}/v1/payments/transfers`);
+    expect(code).toContain(`curl -X POST ${DEFAULT_SDP_API_URL}/v1/payments/transfers/execute \\`);
     expect(code).toContain('-H "Authorization: Bearer sf_…"');
 
     const anchors = [...doc.querySelectorAll("a")].map((a) => [

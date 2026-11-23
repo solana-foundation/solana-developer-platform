@@ -75,7 +75,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
     const created = (await createRes.json()) as TokenApiResponse;
     const tokenId = created.data.token.id;
 
-    const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
+    const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy/execute`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),
@@ -101,7 +101,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
    * Helper to mint tokens to a destination address
    */
   async function mintToDestination(tokenId: string, destination: string, amount: string) {
-    const mintRes = await request(`/v1/issuance/tokens/${tokenId}/mint`, {
+    const mintRes = await request(`/v1/issuance/tokens/${tokenId}/mint/execute`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -133,7 +133,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
     console.log(`Minted to token account: ${tokenAccount}`);
 
     // Freeze the account
-    const freezeRes = await request(`/v1/issuance/tokens/${tokenId}/freeze`, {
+    const freezeRes = await request(`/v1/issuance/tokens/${tokenId}/freeze-account`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -166,7 +166,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
     console.log(`Minted to token account: ${tokenAccount}`);
 
     // Freeze the account first
-    const freezeRes = await request(`/v1/issuance/tokens/${tokenId}/freeze`, {
+    const freezeRes = await request(`/v1/issuance/tokens/${tokenId}/freeze-account`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -182,7 +182,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
     console.log("Account frozen, now thawing...");
 
     // Thaw the account
-    const thawRes = await request(`/v1/issuance/tokens/${tokenId}/unfreeze`, {
+    const thawRes = await request(`/v1/issuance/tokens/${tokenId}/unfreeze-account`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -202,7 +202,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
 
     console.log(`Thaw signature: ${thawed.data.frozenAccount.signature}`);
 
-    const repeatThawRes = await request(`/v1/issuance/tokens/${tokenId}/unfreeze`, {
+    const repeatThawRes = await request(`/v1/issuance/tokens/${tokenId}/unfreeze-account`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -233,7 +233,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
     const mint2 = await mintToDestination(tokenId, TEST_WALLETS.wallet2, "1");
 
     // Freeze both accounts
-    await request(`/v1/issuance/tokens/${tokenId}/freeze`, {
+    await request(`/v1/issuance/tokens/${tokenId}/freeze-account`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -245,7 +245,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
       }),
     });
 
-    await request(`/v1/issuance/tokens/${tokenId}/freeze`, {
+    await request(`/v1/issuance/tokens/${tokenId}/freeze-account`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -258,7 +258,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
     });
 
     // List frozen accounts
-    const listRes = await request(`/v1/issuance/tokens/${tokenId}/frozen`);
+    const listRes = await request(`/v1/issuance/tokens/${tokenId}/frozen-accounts`);
 
     expect(listRes.status).toBe(200);
     const list = (await listRes.json()) as {

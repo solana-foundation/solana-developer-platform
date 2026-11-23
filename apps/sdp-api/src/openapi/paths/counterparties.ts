@@ -46,7 +46,7 @@ const keyAcceptedHeaders = projectScopeWithDeclaredIdempotencyHeaders({
 export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
   registry.registerPath({
     method: "get",
-    path: "/v1/counterparties/metadata",
+    path: "/v1/counterparties/field-options",
     tags: ["Counterparties"],
     [DOCS_GROUP]: COUNTERPARTY_GROUPS.profiles,
     summary: "Get counterparty field options",
@@ -169,7 +169,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
-    path: "/v1/counterparties/{counterpartyId}/requirements",
+    path: "/v1/counterparties/{counterpartyId}/ramp-requirements",
     tags: ["Counterparties"],
     [DOCS_GROUP]: COUNTERPARTY_GROUPS.profiles,
     summary: "Get counterparty ramp requirements",
