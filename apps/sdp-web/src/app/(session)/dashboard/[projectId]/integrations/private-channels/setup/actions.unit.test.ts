@@ -48,6 +48,32 @@ describe("connectPrivateChannelAction", () => {
     setPageRequest(`${INTEGRATIONS_PATH}/private-channels/setup`);
   });
 
+  it.each<[string, () => Promise<unknown>, string, string]>([
+    [
+      "connect",
+      () => connectPrivateChannelAction(SANDBOX_DEFAULTS),
+      "/v1/private-channels/instance-connection/connect",
+      "POST",
+    ],
+    [
+      "probe",
+      () => testConnectionAction(SANDBOX_DEFAULTS),
+      "/v1/private-channels/instance-connection/probe",
+      "POST",
+    ],
+    [
+      "disconnect",
+      disconnectPrivateChannelAction,
+      "/v1/private-channels/instance-connection/disconnect",
+      "POST",
+    ],
+    ["delete", deletePrivateChannelAction, "/v1/private-channels/instance-connection", "DELETE"],
+  ])("%s calls its API connection path", async (_name, run, path, method) => {
+    fetchMock.mockResolvedValue({ instance: existingInstance });
+    await run();
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(path, expect.objectContaining({ method }));
+  });
+
   it("returns the reactivation confirmation when the persisted instance has an empty legacy RPC URL", async () => {
     fetchMock.mockRejectedValue(
       new Error(

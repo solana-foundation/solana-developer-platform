@@ -103,7 +103,7 @@ privateChannels.post(
   probePrivateChannelConnection
 );
 
-// --- /instance ------------------------------------------------------------
+// --- /instance-connection ------------------------------------------------------------
 const instance = new Hono<{ Bindings: Env }>();
 instance.get("/", requireAction("private_channels.read"), getPrivateChannelInstance);
 instance.post(
@@ -233,7 +233,7 @@ privateChannels.get(
   getPrivateChannelTransferById
 );
 
-// --- /wallets -------------------------------------------------------------
+// --- /verified-wallets -------------------------------------------------------------
 // Wallet verification: the gate for money-movement. Verifying signs an SPC auth
 // challenge with the custody wallet (any SDP provider) server-side and records
 // it; deleting revokes it with SPC and removes the row.

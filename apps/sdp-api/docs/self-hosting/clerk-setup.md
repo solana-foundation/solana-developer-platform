@@ -124,15 +124,8 @@ In production self-hosted deployments, point Clerk directly at the deployment's 
 `/webhooks/clerk/link-orgs` remains a signed compatibility route. Before changing
 Clerk's registered URL to `/webhooks/clerk`, deploy the API revision serving the
 new route and update any reverse-proxy or WAF rule to admit the exact path.
-A prefix ending in `/webhooks/clerk/` does not match `/webhooks/clerk`.
 Keep the signing secret and subscribed events unchanged, then verify delivery
 at the new URL. Do not create a second active registration for the same events.
-
-For the hosted environments, deploy the companion `sdp-infra` edge change
-first. It also syncs the generated served-path inventory for
-`/admin/onboarding-allowlist` while retaining `/admin/allowlist` during the
-rollout and rollback window. See the infrastructure Terraform runbook's
-endpoint-review rollout instructions.
 
 ## 5. Verify end-to-end
 

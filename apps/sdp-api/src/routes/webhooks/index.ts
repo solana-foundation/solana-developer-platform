@@ -49,9 +49,7 @@ webhooks.post(
   publicRoute("signed webhook: Clerk's signature authenticates it"),
   handleClerkWebhook
 );
-// Existing Clerk registrations keep the same signature verification here.
-// Deploy the sdp-infra WAF exemption for the exact /webhooks/clerk path before
-// migrating registrations; keep this alias until every endpoint has moved.
+// Signed alias for Clerk endpoints registered at the legacy path.
 webhooks.post(
   "/clerk/link-orgs",
   publicRoute("signed webhook: Clerk's signature authenticates it"),

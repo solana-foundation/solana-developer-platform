@@ -170,9 +170,13 @@ describe("/api/playground/v1/[...path]", () => {
     ["a documented path under the wrong method", "DELETE", "/v1/payments/transfers"],
     ["an extra segment", "GET", "/v1/payments/transfers/trf_1/extra"],
     ["an empty path parameter", "GET", "/v1/payments/transfers/"],
-    ["literal parent segments", "POST", "/v1/payments/transfers/../../../admin/allowlist"],
-    ["percent-encoded parent segments", "GET", "/v1/%2e%2e/admin/allowlist"],
-    ["backslash parent segments", "GET", "/v1/wallets/..\\..\\admin/allowlist"],
+    [
+      "literal parent segments",
+      "POST",
+      "/v1/payments/transfers/../../../admin/onboarding-allowlist",
+    ],
+    ["percent-encoded parent segments", "GET", "/v1/%2e%2e/admin/onboarding-allowlist"],
+    ["backslash parent segments", "GET", "/v1/wallets/..\\..\\admin/onboarding-allowlist"],
     [
       "a parent segment out of the proxy",
       "GET",

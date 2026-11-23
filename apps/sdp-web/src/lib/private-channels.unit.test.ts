@@ -9,10 +9,17 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import {
+  addPrincipalChannelMembership,
   createPrivateChannelTransfer,
+  deletePrivateChannelVerifiedWallet,
+  fetchPrivateChannelEventReferences,
   fetchPrivateChannelEvents,
+  fetchPrivateChannelInstance,
   fetchPrivateChannelPrincipals,
+  fetchPrivateChannelTokenEligibility,
   fetchPrivateChannelTransferRecipients,
+  fetchVerifiedWallets,
+  removePrincipalChannelMembership,
 } from "./private-channels";
 
 function createClient(response: unknown): SdpApiClient {
@@ -139,5 +146,69 @@ describe("private-channel event API helpers", () => {
     expect(client.fetch).toHaveBeenCalledWith(
       "/v1/private-channels/events?family=error&type=error.spc_unreachable&status=failed&limit=25&before=cursor%2Fwith+space"
     );
+  });
+});
+
+describe("renamed Private Channels API paths", () => {
+  it.each([
+    {
+      name: "instance",
+      run: fetchPrivateChannelInstance,
+      path: "/v1/private-channels/instance-connection",
+      response: { instance: null },
+      result: { instance: null },
+    },
+    {
+      name: "token eligibility",
+      run: fetchPrivateChannelTokenEligibility,
+      path: "/v1/private-channels/token-eligibility",
+      response: { tokens: [] },
+      result: [],
+    },
+    {
+      name: "reference labels",
+      run: fetchPrivateChannelEventReferences,
+      path: "/v1/private-channels/events/reference-labels",
+      response: { references: { pc_1: "Treasury" } },
+      result: { pc_1: "Treasury" },
+    },
+    {
+      name: "verified wallets",
+      run: fetchVerifiedWallets,
+      path: "/v1/private-channels/verified-wallets",
+      response: { wallets: [] },
+      result: [],
+    },
+  ])("reads $name", async ({ run, path, response, result }) => {
+    const client = createClient(response);
+    await expect(run(client)).resolves.toEqual(result);
+    expect(client.fetch).toHaveBeenCalledExactlyOnceWith(path);
+  });
+
+  it.each<
+    [string, (client: SdpApiClient) => Promise<unknown>, string, { method: string; body?: string }]
+  >([
+    [
+      "add membership",
+      (client) => addPrincipalChannelMembership(client, "channel/1", "principal/1"),
+      "/v1/private-channels/channels/channel%2F1/principal-memberships",
+      { method: "POST", body: JSON.stringify({ principalId: "principal/1" }) },
+    ],
+    [
+      "remove membership",
+      (client) => removePrincipalChannelMembership(client, "channel/1", "principal/1"),
+      "/v1/private-channels/channels/channel%2F1/principal-memberships/principal%2F1",
+      { method: "DELETE" },
+    ],
+    [
+      "remove verified wallet",
+      (client) => deletePrivateChannelVerifiedWallet(client, "wallet/1"),
+      "/v1/private-channels/verified-wallets/wallet%2F1",
+      { method: "DELETE" },
+    ],
+  ])("%s encodes path parameters", async (_name, run, path, options) => {
+    const client = createClient({});
+    await run(client);
+    expect(client.fetch).toHaveBeenCalledExactlyOnceWith(path, options);
   });
 });

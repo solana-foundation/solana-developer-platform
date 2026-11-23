@@ -877,7 +877,7 @@ describe("Helius Rings routes", () => {
 
     it.each([
       {
-        route: "POST /wallets",
+        route: "POST /wallets/provision-identity",
         path: () => "/v1/helius-rings/wallets/provision-identity",
         body: () => ({ walletId: "wal_hr_route", name: "Ops" }),
       },
@@ -887,7 +887,7 @@ describe("Helius Rings routes", () => {
         body: () => ({}),
       },
       {
-        route: "POST /wallets/:walletId/rekey",
+        route: "POST /wallets/:walletId/identity/rekey",
         path: () => `/v1/helius-rings/wallets/${ringsWalletId}/identity/rekey`,
         body: () => ({ confirmation: "Treasury" }),
       },
@@ -897,7 +897,7 @@ describe("Helius Rings routes", () => {
         body: () => ({ name: "Payroll", kind: "treasury" }),
       },
       {
-        route: "POST /operations",
+        route: "POST /operations/execute",
         path: () => "/v1/helius-rings/operations/execute",
         body: () => ({
           walletId: ringsWalletId,
@@ -907,7 +907,7 @@ describe("Helius Rings routes", () => {
         }),
       },
       {
-        route: "POST /operations/:operationId/execute",
+        route: "POST /operations/:operationId/resume-execution",
         path: () => `/v1/helius-rings/operations/${operationId}/resume-execution`,
         body: () => ({}),
       },
