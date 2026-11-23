@@ -38,6 +38,9 @@ const configuredUsdc = wellKnownMint("USDC", "mainnet-beta");
 if (!configuredDeployment || !configuredUsdc) throw new Error("Missing Hastra test deployment");
 const deployment = configuredDeployment;
 const usdc = configuredUsdc;
+// The fixture release is valid through block height 100.
+const liveHeight = async () => 100n;
+const expiredHeight = async () => 101n;
 const key = (value: string) => Buffer.from(getAddressEncoder().encode(address(value)));
 const scope: OperationScope = {
   organizationId: "org",
@@ -320,7 +323,7 @@ describe("current Hastra redemption release", () => {
             signature: scenario === "different signature" ? "different-signature" : base.signature,
           };
     const result = await scoped(() =>
-      advanceCurrentRedemptionRelease(env, scope, claim, async () => transaction)
+      advanceCurrentRedemptionRelease(env, scope, claim, async () => transaction, liveHeight)
     );
     expect(result.status).toBe("settling");
     expect(repository.recordCurrentRedemptionReleaseFinalized).not.toHaveBeenCalled();
@@ -352,6 +355,61 @@ describe("current Hastra redemption release", () => {
       result: { settlementOutcome: null, settledAmount: null },
     });
     expect(repository.recordCurrentRedemptionReleaseFinalized).not.toHaveBeenCalled();
+  });
+
+  it("keeps a missing release settling until its blockhash expires", async () => {
+    const absent = vi.spyOn(repository, "recordCurrentRedemptionReleaseAbsent");
+    const result = await scoped(() =>
+      advanceCurrentRedemptionRelease(env, scope, claim, async () => null, liveHeight)
+    );
+    expect(result.status).toBe("settling");
+    expect(absent).not.toHaveBeenCalled();
+  });
+
+  it("records the first finalized miss after expiry without failing", async () => {
+    const absent = vi
+      .spyOn(repository, "recordCurrentRedemptionReleaseAbsent")
+      .mockImplementation(async () => ({ ...build, release_absence_observed_at: timestamp }));
+    const result = await scoped(() =>
+      advanceCurrentRedemptionRelease(env, scope, claim, async () => null, expiredHeight)
+    );
+    expect(result.status).toBe("settling");
+    expect(absent).toHaveBeenCalledOnce();
+  });
+
+  it("waits when the second miss comes less than 30 seconds after the first", async () => {
+    build.release_absence_observed_at = new Date(Date.now() - 5_000).toISOString();
+    const result = await scoped(() =>
+      advanceCurrentRedemptionRelease(env, scope, claim, async () => null, expiredHeight)
+    );
+    expect(result.status).toBe("settling");
+  });
+
+  it("fails an expired release missing from finalized history twice, 30 seconds apart", async () => {
+    build.release_absence_observed_at = new Date(Date.now() - 31_000).toISOString();
+    const result = await scoped(() =>
+      advanceCurrentRedemptionRelease(env, scope, claim, async () => null, expiredHeight)
+    );
+    expect(result).toMatchObject({
+      status: "failed",
+      error: { code: "TRANSACTION_EXPIRED" },
+      result: { settlementOutcome: null, settledAmount: null },
+    });
+    expect(repository.recordCurrentRedemptionReleaseFinalized).not.toHaveBeenCalled();
+  });
+
+  it("still completes a release found after a recorded miss", async () => {
+    build.release_absence_observed_at = new Date(Date.now() - 31_000).toISOString();
+    const result = await scoped(() =>
+      advanceCurrentRedemptionRelease(
+        env,
+        scope,
+        claim,
+        async () => receiptWithLogs(cancelledLogs(50_000_000n)),
+        expiredHeight
+      )
+    );
+    expect(result.status).toBe("completed");
   });
 
   it("retries a persisted finality receipt without another RPC read", async () => {
@@ -398,13 +456,17 @@ describe("current Hastra redemption release", () => {
   it("consumes exact accepted signed bytes before broadcasting", async () => {
     expect(
       await scoped(() =>
-        submitCurrentRedemptionRelease(env, {
-          scope,
-          buildId: build.id,
-          attemptId: claim.attempt.id,
-          signedTransaction: signed,
-          broadcast: true,
-        })
+        submitCurrentRedemptionRelease(
+          env,
+          {
+            scope,
+            buildId: build.id,
+            attemptId: claim.attempt.id,
+            signedTransaction: signed,
+            broadcast: true,
+          },
+          liveHeight
+        )
       )
     ).toEqual({ kind: "earn.redemption_release", id: build.id });
     expect(repository.consumeCurrentRedemptionRelease).toHaveBeenCalledWith({
@@ -450,19 +512,43 @@ describe("current Hastra redemption release", () => {
     expect(execution.broadcastVaultTransaction).not.toHaveBeenCalled();
   });
 
+  it("hands an expired release to observation without sending it", async () => {
+    expect(
+      await scoped(() =>
+        submitCurrentRedemptionRelease(
+          env,
+          {
+            scope,
+            buildId: build.id,
+            attemptId: claim.attempt.id,
+            signedTransaction: signed,
+            broadcast: true,
+          },
+          expiredHeight
+        )
+      )
+    ).toEqual({ kind: "earn.redemption_release", id: build.id });
+    expect(repository.consumeCurrentRedemptionRelease).toHaveBeenCalledOnce();
+    expect(execution.broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+
   it("leaves a broadcast timeout unresolved with the consumed signed attempt", async () => {
     vi.mocked(execution.broadcastVaultTransaction).mockRejectedValue(
       new Error("Broadcast timed out")
     );
     await expect(
       scoped(() =>
-        submitCurrentRedemptionRelease(env, {
-          scope,
-          buildId: build.id,
-          attemptId: claim.attempt.id,
-          signedTransaction: signed,
-          broadcast: true,
-        })
+        submitCurrentRedemptionRelease(
+          env,
+          {
+            scope,
+            buildId: build.id,
+            attemptId: claim.attempt.id,
+            signedTransaction: signed,
+            broadcast: true,
+          },
+          liveHeight
+        )
       )
     ).rejects.toThrow("Broadcast timed out");
     expect(repository.consumeCurrentRedemptionRelease).toHaveBeenCalledOnce();

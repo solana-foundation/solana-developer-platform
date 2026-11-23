@@ -85,6 +85,7 @@ export async function resolveEarnOperationBuild(
     return {
       target,
       transactionScope,
+      currentRelease,
       submit: async (signedTransaction: string, broadcast: boolean) => {
         if (currentRelease)
           return submitCurrentRedemptionRelease(env, {
@@ -126,6 +127,7 @@ export async function resolveEarnOperationBuild(
   return {
     target,
     transactionScope,
+    currentRelease: false,
     submit: async (signedTransaction: string, broadcast: boolean) => {
       const principal = claim.attempt.principal;
       const submitted = await submitPreparedStrategyTransaction(env, {

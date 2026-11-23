@@ -316,6 +316,7 @@ export async function advanceEarnOperation(
     target: built,
     transactionScope,
     submit,
+    currentRelease,
   } = await resolveEarnOperationBuild(env, scope, claim);
   const update = (change: OperationUpdate) => service.transition(scope, claim, change);
   if (
@@ -605,7 +606,8 @@ export async function advanceEarnOperation(
     await service.repository.restrictToObservation(scope, claim);
     const signed = await verifySignedWalletTransaction(built, signedTransaction);
     workerBudget.assertCanStart();
-    if (!(await observations.hasSignature(scope, signed.signature))) {
+    // A release is adopted for observation either way: it proves absence before failing.
+    if (!currentRelease && !(await observations.hasSignature(scope, signed.signature))) {
       return update({
         status: "awaiting_signature",
         nextAction: {
