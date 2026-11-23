@@ -218,6 +218,7 @@ describe("Custody wallet by ID route", () => {
             label: "Connection wallet",
             purpose: null,
             status: "active",
+            providerPolicy: { checkedAt: null, reason: "not_checked", status: "unknown" },
             createdAt: expect.any(String),
           },
         },
