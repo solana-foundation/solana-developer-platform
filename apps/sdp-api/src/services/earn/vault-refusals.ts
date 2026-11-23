@@ -1,66 +1,81 @@
+import type { VaultProviderErrorCode } from "@sdp/earn/types";
 import { RpcUnavailableError } from "@sdp/rpc/errors";
 import { isRpcUpstreamUnavailable, isTransientRpcError } from "@sdp/rpc/transient";
 import { badRequest, conflict, providerUnavailable } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 
 /**
- * Build failures whose reason belongs in front of the CALLER, not in a 500.
+ * How the API answers each shared vault provider code. Exhaustive, so a code
+ * added to `VaultProviderErrorCode` does not compile until it is classified.
  *
- * Each names something the request or the vault's current state makes
- * impossible, and the provider's own sentence explains it better than any
- * status code:
- *
- * - `INVALID_AMOUNT` — the number is unusable at the mint's scale, or below
- *   what the vault will move an atom for.
- * - `DEPOSIT_REFUSED` / `WITHDRAW_REFUSED` — the vault will not take this
- *   right now: paused, at a cap, the asset disabled, shares still inside the
- *   post-deposit lock, redemption restricted to an authority.
- * - `COMPLIANCE_APPROVAL_REQUIRED` — the vault gates the move on an approval
- *   from the provider's compliance service, which SDP does not implement. A
- *   definite, explainable refusal rather than an internal fault.
- * - `INVALID_QUEUE_PARAMETERS` — caller-selected discount/deadline terms are
- *   invalid for the queue contract.
+ * - `refused`: a caller-fixable 400 carrying the provider's own sentence. Each
+ *   names something the request or the vault's current state makes impossible:
+ *   an amount unusable at the mint's scale, a paused or capped vault, shares
+ *   still inside the post-deposit lock, a compliance approval SDP does not
+ *   implement, or queue terms the contract rejects.
+ * - `stale`: a 409. A queue request PDA present when the caller selected it may
+ *   close before the cancellation build; the caller should refresh history.
+ * - `unavailable`: state SDP could not read, an outage rather than a refusal,
+ *   answered with a sanitized retryable 503.
+ * - `bubbles`: rethrown unchanged for the global error boundary. An unexplained
+ *   build failure is SDP's problem to look at, and telling a customer their
+ *   request was wrong would be a guess.
  *
  * Matched on the shared `code` shape rather than provider classes, so a new
  * vault-direct provider inherits the mapping by using the same vocabulary.
- * Anything else keeps bubbling: an unrecognised build failure is SDP's problem
- * to look at, and telling a customer their request was wrong would be a guess.
- *
  * Shared by the vault BUILDS and the deposit QUOTE on purpose: the quote runs
  * the same provider arithmetic, so the two paths refuse in the same words or
  * they drift.
  */
-const REFUSED_BUILD_CODES: ReadonlySet<string> = new Set([
-  "INVALID_AMOUNT",
-  "DEPOSIT_REFUSED",
-  "WITHDRAW_REFUSED",
-  "REDEMPTION_REFUSED",
-  "COMPLIANCE_APPROVAL_REQUIRED",
-  "INVALID_QUEUE_PARAMETERS",
-]);
+const VAULT_PROVIDER_ERROR_ANSWERS = {
+  INVALID_AMOUNT: "refused",
+  DEPOSIT_REFUSED: "refused",
+  WITHDRAW_REFUSED: "refused",
+  REDEMPTION_REFUSED: "refused",
+  COMPLIANCE_APPROVAL_REQUIRED: "refused",
+  INVALID_QUEUE_PARAMETERS: "refused",
+  WITHDRAWAL_REQUEST_NOT_FOUND: "stale",
+  VAULT_UNREADABLE: "unavailable",
+  REQUEST_UNREADABLE: "unavailable",
+  POSITION_UNREADABLE: "unavailable",
+  SWAP_UNAVAILABLE: "bubbles",
+  DEPLOYMENT_NOT_CONFIGURED: "bubbles",
+  CLUSTER_UNSUPPORTED: "bubbles",
+  UNSUPPORTED_VAULT: "bubbles",
+  INCOMPATIBLE_DEPLOYMENT: "bubbles",
+  PROGRAM_MISMATCH: "bubbles",
+  MINT_MISMATCH: "bubbles",
+} as const satisfies Record<
+  VaultProviderErrorCode,
+  "refused" | "stale" | "unavailable" | "bubbles"
+>;
 
-function providerError(error: unknown): { code: string; message: string } | null {
-  if (!(error instanceof Error) || !("code" in error) || typeof error.code !== "string") {
-    return null;
-  }
-  return { code: error.code, message: error.message };
+function hasStringCode(error: unknown): error is Error & { code: string } {
+  return error instanceof Error && "code" in error && typeof error.code === "string";
 }
 
-/** Provider codes for state SDP could not read: an outage, not a refusal. */
-const UNREADABLE_PROVIDER_CODES: ReadonlySet<string> = new Set([
-  "VAULT_UNREADABLE",
-  "REQUEST_UNREADABLE",
-  "POSITION_UNREADABLE",
-]);
+/** The shared vault provider failure an error carries, or `null` for any other error. */
+function vaultProviderFailure(error: unknown) {
+  if (!hasStringCode(error) || !Object.hasOwn(VAULT_PROVIDER_ERROR_ANSWERS, error.code)) {
+    return null;
+  }
+  // SAFETY: `Object.hasOwn` just proved the code is a key of the exhaustive answer map.
+  const code = error.code as VaultProviderErrorCode;
+  return { code, message: error.message, answer: VAULT_PROVIDER_ERROR_ANSWERS[code] };
+}
+
+/** The shared vault provider code an error carries, or `null` for any other error. */
+export function vaultProviderErrorCode(error: unknown): VaultProviderErrorCode | null {
+  return vaultProviderFailure(error)?.code ?? null;
+}
 
 /**
  * Whether the provider or its RPC could not be read, which
  * `rethrowVaultProviderFailure` answers with a retryable 503.
  */
 export function isVaultProviderUnavailable(error: unknown): boolean {
-  const failure = providerError(error);
   return (
-    (failure !== null && UNREADABLE_PROVIDER_CODES.has(failure.code)) ||
+    vaultProviderFailure(error)?.answer === "unavailable" ||
     error instanceof RpcUnavailableError ||
     isRpcUpstreamUnavailable(error)
   );
@@ -73,11 +88,11 @@ export function isVaultProviderUnavailable(error: unknown): boolean {
  * a retryable 503 with no provider or RPC internals exposed to the caller.
  */
 export function rethrowVaultProviderFailure(error: unknown): never {
-  const failure = providerError(error);
-  if (failure && REFUSED_BUILD_CODES.has(failure.code)) {
+  const failure = vaultProviderFailure(error);
+  if (failure?.answer === "refused") {
     throw badRequest(failure.message);
   }
-  if (failure?.code === "WITHDRAWAL_REQUEST_NOT_FOUND") {
+  if (failure?.answer === "stale") {
     // The PDA was present when the caller selected it but may close before the
     // cancellation build. Treat that race as stale state, not an API outage or
     // an internal failure; the caller should refresh request history.
@@ -97,7 +112,7 @@ export function rethrowVaultProviderFailure(error: unknown): never {
     getLogger().warn(
       {
         event: "earn_provider_state_unavailable",
-        providerCode: failure?.code ?? null,
+        providerCode: hasStringCode(error) ? error.code : null,
         transient,
         causeCode: root && "code" in root && typeof root.code === "number" ? root.code : null,
       },
