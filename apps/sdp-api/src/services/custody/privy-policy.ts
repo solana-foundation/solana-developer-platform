@@ -1,3 +1,4 @@
+import { denormalizePrivyWalletId } from "@sdp/custody/provider-wallet-ids";
 import type { ProviderPolicyCheck } from "@sdp/types/custody";
 import { z } from "zod";
 import type { Env } from "@/types/env";
@@ -15,7 +16,7 @@ export async function readPrivyWalletPolicy(
   credential: PrivyCredentialAuthentication,
   walletId: string
 ): Promise<Pick<ProviderPolicyCheck, "status" | "reason">> {
-  const id = walletId.startsWith("privy_") ? walletId.slice(6) : walletId;
+  const id = denormalizePrivyWalletId(walletId);
   const baseUrl = (env.PRIVY_API_BASE_URL ?? "https://api.privy.io/v1").replace(/\/+$/, "");
   try {
     const response = await fetch(`${baseUrl}/wallets/${encodeURIComponent(id)}`, {
