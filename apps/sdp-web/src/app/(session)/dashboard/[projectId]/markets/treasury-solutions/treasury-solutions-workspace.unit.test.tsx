@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 
+import type { EarnVaultPosition } from "@sdp/types/earn";
 import type { Operation } from "@sdp/types/operations";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useEffect, useEffectEvent } from "react";
 import { SWRConfig, useSWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { EarnWithdrawalRecovery } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-core-operations";
 import { earnQueryKeys } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-query-key";
 import { EnglishTestI18n } from "@/app/(session)/dashboard/[projectId]/markets/test-i18n";
 import {
@@ -52,10 +54,17 @@ const mocks = vi.hoisted(() => ({
     | {
         kind: "deposit" | "withdraw";
         intermediate?: boolean;
+        defaultWithdrawAll?: boolean;
+        onClose: () => void;
         onUpdated?: (operation: Operation) => void;
       }
     | undefined,
-  coreFeed: undefined as { onUpdated: (operation: Operation) => void } | undefined,
+  coreFeed: undefined as
+    | {
+        onUpdated: (operation: Operation) => void;
+        withdrawalRecovery?: EarnWithdrawalRecovery<EarnVaultPosition>;
+      }
+    | undefined,
   walletBalances: undefined as
     | Array<{
         token: string;
@@ -434,8 +443,10 @@ vi.mock("@/app/(session)/dashboard/[projectId]/markets/earn/earn-core-action-mod
   EarnCoreActionModal: (props: {
     kind: "deposit" | "withdraw";
     intermediate?: boolean;
+    defaultWithdrawAll?: boolean;
     strategy?: { name: string };
     position?: { label: string };
+    onClose: () => void;
     onUpdated?: (operation: Operation) => void;
   }) => {
     mocks.coreAction = props;
@@ -449,7 +460,10 @@ vi.mock("@/app/(session)/dashboard/[projectId]/markets/earn/earn-core-action-mod
   },
 }));
 vi.mock("@/app/(session)/dashboard/[projectId]/markets/earn/earn-core-operations", () => ({
-  EarnCoreOperations: (props: { onUpdated: (operation: Operation) => void }) => {
+  EarnCoreOperations: (props: {
+    onUpdated: (operation: Operation) => void;
+    withdrawalRecovery?: EarnWithdrawalRecovery<EarnVaultPosition>;
+  }) => {
     mocks.coreFeed = props;
     return null;
   },
@@ -872,6 +886,7 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(summaryFigure()).toBe("$130.50");
     expect(screen.queryByRole("button", { name: "Deposit" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Withdraw" })).toBeNull();
+    expect(mocks.coreFeed?.withdrawalRecovery).toBeUndefined();
   });
 
   it("keeps a position its par intermediate still funds and offers only its par redemption", async () => {
@@ -896,6 +911,8 @@ describe("TreasurySolutionsWorkspace", () => {
     );
     expect(within(residualRow).queryByRole("button", { name: "Withdraw" })).toBeNull();
     expect(summaryFigure()).toBe("$2,130.50");
+    // The row still offers its own exit, so the activity feed offers no recovery for it.
+    expect(mocks.coreFeed?.withdrawalRecovery?.positions).toEqual([]);
 
     await userEvent
       .setup()
@@ -1509,6 +1526,36 @@ describe("TreasurySolutionsWorkspace", () => {
 
     await user.click(within(vaultPositionRow).getByRole("button", { name: "Withdraw" }));
     expect(screen.getByRole("dialog").textContent).toBe("Withdraw from Steakhouse USDC");
+  });
+
+  it("reopens an escrowed exit from its activity once the holdings table drops the position", async () => {
+    renderWorkspace();
+    // The exited fixture holds no shares, so its row and exit are gone from the table.
+    expect(screen.queryByText("Exited provider vault")).toBeNull();
+    const recovery = mocks.coreFeed?.withdrawalRecovery;
+    const escrowed = recovery?.positions[0];
+    if (!recovery || !escrowed) throw new Error("Expected a recoverable position");
+    expect(recovery.positions.map(({ id }) => id)).toEqual(["earn_vault_position_exited"]);
+
+    await act(async () => recovery.onOpen(escrowed));
+    // The dialog module loads on demand, behind its loading frame.
+    await waitFor(() =>
+      expect(screen.getByRole("dialog").textContent).toBe("Withdraw from Exited provider vault")
+    );
+    expect(mocks.coreAction?.defaultWithdrawAll).toBe(true);
+    expect(mocks.coreAction?.intermediate).toBe(false);
+
+    // Closing the dialog leaves the activity entry in place.
+    act(() => mocks.coreAction?.onClose());
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(mocks.coreFeed?.withdrawalRecovery?.positions).toEqual([escrowed]);
+
+    // A holding row's exit afterwards starts from an amount, not the recovery's All.
+    await userEvent
+      .setup()
+      .click(within(livePositionRow()).getByRole("button", { name: "Withdraw" }));
+    expect(screen.getByRole("dialog").textContent).toBe("Withdraw from Steakhouse USDC");
+    expect(mocks.coreAction?.defaultWithdrawAll).toBe(false);
   });
 
   it("keeps the vault exit verb live in production, where deposits are closed", () => {

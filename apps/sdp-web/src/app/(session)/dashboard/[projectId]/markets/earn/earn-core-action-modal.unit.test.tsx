@@ -113,6 +113,21 @@ function intermediatePosition(withdrawableAmount: string): EarnVaultPosition {
   };
 }
 
+/** A tracked position whose every share sits in a provider withdrawal request's escrow. */
+const escrowedPosition: EarnVaultPosition = {
+  id: "position",
+  provider: "veda",
+  providerReference: "strategy",
+  label: "Treasury holding",
+  custodyWalletId: "wallet",
+  tokenMint: "usdc",
+  shareMint: "shares",
+  feeSponsored: false,
+  createdAt: "2026-11-18T00:00:00Z",
+  closedAt: null,
+  shares: "0",
+};
+
 beforeEach(() => {
   vi.resetAllMocks();
   sessionStorage.clear();
@@ -219,6 +234,84 @@ describe("Earn operation review", () => {
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
     expect(mocks.withdraw.mock.calls[1]?.[0].amount.value).toBe("12");
     expect(mocks.withdraw.mock.calls[1]?.[1]).not.toBe(mocks.withdraw.mock.calls[0]?.[1]);
+  });
+
+  it("opens a recovery exit with All selected and reaches the API's recovery route", async () => {
+    const choice = operation({
+      kind: "earn.withdraw",
+      intent: { kind: "earn.withdraw", positionId: "position", amount: { kind: "all" } },
+      nextAction: { type: "select_option" },
+      terms: {
+        expiresAt: null,
+        estimate: null,
+        minimum: null,
+        fees: null,
+        options: [
+          {
+            id: "recover_expired_escrow:request",
+            label: "Recover expired escrowed shares",
+            settlement: "instant",
+            estimatedSeconds: null,
+            mechanism: "recover_expired_escrow",
+            amount: { mint: "shares", value: "10" },
+            minimum: { mint: "shares", value: "10" },
+          },
+        ],
+      },
+    });
+    mocks.withdraw.mockResolvedValue(choice);
+    mocks.refresh.mockResolvedValue(
+      operation({ ...choice, actionId: "recovery", version: 2, nextAction: { type: "submit" } })
+    );
+    render(
+      <EarnCoreActionModal
+        kind="withdraw"
+        position={escrowedPosition}
+        defaultWithdrawAll
+        onClose={vi.fn()}
+      />
+    );
+    expect(screen.queryByLabelText("amount")).toBeNull();
+    expect(screen.getByRole("button", { name: "customAmount" })).toBeDefined();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
+    expect(mocks.withdraw).toHaveBeenCalledExactlyOnceWith(
+      { positionId: "position", amount: { kind: "all" }, slippageBps: 50 },
+      expect.any(String)
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("combobox", { name: "route" }));
+    await user.click(
+      await screen.findByRole("option", { name: "Recover expired escrowed shares" })
+    );
+    expect(mocks.refresh).toHaveBeenCalledExactlyOnceWith(
+      "operation",
+      { actionId: "action", version: 1, optionId: "recover_expired_escrow:request" },
+      expect.any(String)
+    );
+    expect(await screen.findByRole("button", { name: "submit" })).toBeDefined();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("shows the API's refusal when nothing is recoverable yet, and retries the same request", async () => {
+    mocks.withdraw.mockRejectedValue(
+      new Error("No supported withdrawal route is currently available")
+    );
+    render(
+      <EarnCoreActionModal
+        kind="withdraw"
+        position={escrowedPosition}
+        defaultWithdrawAll
+        onClose={vi.fn()}
+      />
+    );
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
+    expect(screen.getByText("No supported withdrawal route is currently available")).toBeDefined();
+    // The API stores no 400, so the same key prepares afresh once the escrow expires.
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
+    expect(mocks.withdraw).toHaveBeenCalledTimes(2);
+    expect(mocks.withdraw.mock.calls[1]).toEqual(mocks.withdraw.mock.calls[0]);
+    expect(mocks.refresh).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
   });
 
   it("rejects slippage beyond the API limit before preparing a transaction", async () => {

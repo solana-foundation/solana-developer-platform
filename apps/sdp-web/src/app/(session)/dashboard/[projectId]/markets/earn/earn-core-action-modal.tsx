@@ -51,12 +51,44 @@ function durableKey(fingerprint: string, mint?: () => string): string {
   return claim.key;
 }
 
+/** Send one version-bound action under its retained retry key. */
+function sendOperationAction(
+  operation: Operation,
+  action: "submit" | "cancel" | "refresh",
+  optionId: string | undefined,
+  key: string
+): Promise<Operation> {
+  const reviewed = { actionId: operation.actionId, version: operation.version };
+  switch (action) {
+    case "submit":
+      return earnCoreClient.submit(operation.id, reviewed, key);
+    case "cancel":
+      return earnCoreClient.cancel(operation.id, key);
+    case "refresh":
+      return earnCoreClient.refresh(
+        operation.id,
+        { ...reviewed, ...(optionId ? { optionId } : {}) },
+        key
+      );
+    default: {
+      const unknownAction: never = action;
+      throw new Error(`Unknown operation action: ${unknownAction}`);
+    }
+  }
+}
+
 type ActionProps = {
   onClose: () => void;
   onUpdated?: (operation: Operation) => void;
 } & (
   | { kind: "deposit"; strategy: EarnStrategy }
-  | { kind: "withdraw"; position: EarnVaultPosition; intermediate?: boolean }
+  | {
+      kind: "withdraw";
+      position: EarnVaultPosition;
+      intermediate?: boolean;
+      /** Opens with All selected: the API offers recovery routes only to an All withdrawal. */
+      defaultWithdrawAll?: boolean;
+    }
 );
 
 function withdrawalIntent(
@@ -79,12 +111,37 @@ function withdrawalIntent(
       slippageBps,
     };
   }
-  const quantity = withdrawAll
-    ? { kind: "all" as const }
-    : unit === "shares"
-      ? { kind: "shares" as const, value: amount }
-      : { kind: "token" as const, mint: props.position.tokenMint, value: amount };
-  return { kind: "earn.withdraw", positionId: props.position.id, amount: quantity, slippageBps };
+  return {
+    kind: "earn.withdraw",
+    positionId: props.position.id,
+    amount: withdrawalQuantity(props.position.tokenMint, amount, withdrawAll, unit),
+    slippageBps,
+  };
+}
+
+function withdrawalQuantity(
+  tokenMint: string,
+  amount: string,
+  withdrawAll: boolean,
+  unit: "token" | "shares"
+): Extract<OperationIntent, { kind: "earn.withdraw" }>["amount"] {
+  if (withdrawAll) return { kind: "all" };
+  switch (unit) {
+    case "shares":
+      return { kind: "shares", value: amount };
+    case "token":
+      return { kind: "token", mint: tokenMint, value: amount };
+    default: {
+      const unknownUnit: never = unit;
+      throw new Error(`Unknown withdrawal unit: ${unknownUnit}`);
+    }
+  }
+}
+
+/** The mint a preparation spends: the chosen funding mint, or the position's exit mint. */
+function preparationMint(props: ActionProps, chosenMint: string | null): string | undefined {
+  if (props.kind === "deposit") return chosenMint ?? props.strategy.depositMints[0];
+  return props.intermediate ? props.position.parIntermediate?.mint : props.position.tokenMint;
 }
 
 function useEarnPreparation(props: ActionProps) {
@@ -94,7 +151,9 @@ function useEarnPreparation(props: ActionProps) {
   const [walletId, setWalletId] = useState<string | null>(null);
   const [mint, setMint] = useState<string | null>(null);
   const [amount, setAmount] = useState("");
-  const [withdrawAll, setWithdrawAll] = useState(false);
+  const [withdrawAll, setWithdrawAll] = useState(
+    props.kind === "withdraw" && props.defaultWithdrawAll === true
+  );
   const [withdrawUnit, setWithdrawUnit] = useState<"token" | "shares">("token");
   const [slippage, setSlippage] = useState("50");
   const [prepared, setPrepared] = useState<Operation>();
@@ -102,12 +161,7 @@ function useEarnPreparation(props: ActionProps) {
   const [error, setError] = useState<string>();
   const eligibleWallets = wallets?.filter((wallet) => wallet.isRuntimeExecutionAllowed) ?? [];
   const selectedWallet = walletId ?? eligibleWallets[0]?.id;
-  const tokenMint =
-    props.kind === "deposit"
-      ? (mint ?? props.strategy.depositMints[0])
-      : props.intermediate
-        ? props.position.parIntermediate?.mint
-        : props.position.tokenMint;
+  const tokenMint = preparationMint(props, mint);
   async function prepare(event: FormEvent) {
     event.preventDefault();
     if (busy || !tokenMint) return;
@@ -597,27 +651,7 @@ function useEarnOperationActions(
         optionId,
       ]);
       const key = durableKey(fingerprint);
-      const updated =
-        action === "submit"
-          ? await earnCoreClient.submit(
-              operation.id,
-              {
-                actionId: operation.actionId,
-                version: operation.version,
-              },
-              key
-            )
-          : action === "cancel"
-            ? await earnCoreClient.cancel(operation.id, key)
-            : await earnCoreClient.refresh(
-                operation.id,
-                {
-                  actionId: operation.actionId,
-                  version: operation.version,
-                  ...(optionId ? { optionId } : {}),
-                },
-                key
-              );
+      const updated = await sendOperationAction(operation, action, optionId, key);
       if (action === "cancel") operationKeys.release(fingerprint, key);
       if (updated.version < latestOperation.current.version) return;
       onUpdated?.(updated);

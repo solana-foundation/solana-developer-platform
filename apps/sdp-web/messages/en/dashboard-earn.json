@@ -1066,6 +1066,7 @@
       "operations": "Earn activity",
       "operation": "Operation",
       "resume": "Review",
+      "recoveryOptions": "Recovery options",
       "status": {
         "prepared": "Ready for review",
         "queued": "Queued for execution",

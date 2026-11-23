@@ -48,6 +48,12 @@ message is safe to replace. A pending or uncertain provider outcome remains
 review and submission. Definitively failed submissions stay terminal; a new
 intent needs a new deposit or withdrawal request.
 
+A queued exit that escrows every share drops its position from the holdings
+table while the request stays open, expired included, and its operation stays
+`wait`. Treasury passes those positions as `withdrawalRecovery`, so the settling
+row offers Recovery options: the withdraw dialog with All selected, whose
+preparation returns any recovery route or the API's refusal.
+
 Persist retry keys before sending. A lost response retries the same request
 and exact signed bytes. Wire amounts stay fixed across an ambiguous retry,
 including an intermediate-token All amount; live quotes and balances cannot
