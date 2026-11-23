@@ -37,7 +37,11 @@ import {
   submitWalletQueuedWithdrawalAction,
   type WalletQueuedWithdrawalBuiltTransaction,
 } from "./vault-queued-withdraw.service";
-import { isVaultProviderUnavailable, rethrowVaultProviderFailure } from "./vault-refusals";
+import {
+  isVaultProviderUnavailable,
+  rethrowVaultProviderFailure,
+  vaultProviderErrorCode,
+} from "./vault-refusals";
 import type { VaultFeeMode } from "./vault-sponsorship";
 
 export interface PreparedStrategyWithdrawalChoice {
@@ -149,7 +153,7 @@ async function prepareCurrentRedemptionReleaseChoice(
     });
   } catch (error) {
     // A known request may already have closed. Read failures still fail closed.
-    if (error instanceof Error && "code" in error && error.code === "REDEMPTION_REFUSED") return [];
+    if (vaultProviderErrorCode(error) === "REDEMPTION_REFUSED") return [];
     rethrowVaultProviderFailure(error);
   }
   const id = "release_current_redemption";

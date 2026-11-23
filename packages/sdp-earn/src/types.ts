@@ -177,6 +177,57 @@ export interface EarnLiveMetricsProvider extends EarnVaultProvider {
 }
 
 /**
+ * The build-failure vocabulary every vault-direct provider package raises on
+ * its own error class (`SdpVedaError`, `SdpKaminoError` and the rest), so the
+ * API answers a code the same way whichever provider raised it. The API
+ * classifies every member in `vault-refusals.ts`. Separate from
+ * `SdpEarnError`'s catalogue taxonomy on purpose: an instruction-builder
+ * failure must not look like a provider outage to code matching on that class.
+ */
+export type VaultProviderErrorCode =
+  /** A caller amount that is malformed, zero, over-precise, or out of range. */
+  | "INVALID_AMOUNT"
+  /** The vault refuses this deposit right now (paused, capped, asset off). */
+  | "DEPOSIT_REFUSED"
+  /** The vault refuses this exit right now (paused, locked, restricted). */
+  | "WITHDRAW_REFUSED"
+  /** The provider refuses this redemption request or its cancellation. */
+  | "REDEMPTION_REFUSED"
+  /** The vault requires an external compliance approval SDP does not implement. */
+  | "COMPLIANCE_APPROVAL_REQUIRED"
+  /** Queue discount/deadline values are invalid, or cancellation is too early. */
+  | "INVALID_QUEUE_PARAMETERS"
+  /** The named queue request is already closed or does not exist. */
+  | "WITHDRAWAL_REQUEST_NOT_FOUND"
+  /** Vault, asset or position state could not be read on this cluster. */
+  | "VAULT_UNREADABLE"
+  /** A provider redemption request could not be read. */
+  | "REQUEST_UNREADABLE"
+  /** The owner's position could not be read. */
+  | "POSITION_UNREADABLE"
+  /** The swap route a deposit or exit depends on could not be quoted or built. */
+  | "SWAP_UNAVAILABLE"
+  /** SDP has no confirmed deployment for the cluster in play. */
+  | "DEPLOYMENT_NOT_CONFIGURED"
+  /** The instrument does not exist on the requested cluster. */
+  | "CLUSTER_UNSUPPORTED"
+  /** The vault's configuration cannot be expressed by SDP's deposit contract. */
+  | "UNSUPPORTED_VAULT"
+  /** The live deployment does not satisfy what SDP requires of it. */
+  | "INCOMPATIBLE_DEPLOYMENT"
+  /** An instruction or account named a program that is not this cluster's. */
+  | "PROGRAM_MISMATCH"
+  /** The live mint does not match SDP's measured registry. */
+  | "MINT_MISMATCH";
+
+/**
+ * One provider's subset of `VaultProviderErrorCode`. Declaring a provider's
+ * codes through this makes a code outside the shared vocabulary a compile
+ * error instead of a status the API silently answers with a 500.
+ */
+export type VaultProviderErrorCodeOf<Code extends VaultProviderErrorCode> = Code;
+
+/**
  * One account slot in a built instruction.
  *
  * `role` mirrors `@solana/kit`'s `AccountRole` numeric enum (0 readonly,

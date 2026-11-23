@@ -279,6 +279,12 @@ substitute for the provider-built transaction. Kamino additionally implements
 live metrics; Veda does not, because one exchange-rate reading is not a rate of
 return.
 
+Each execution package raises its own error class, but its codes come from one
+vocabulary: `VaultProviderErrorCode` in `@sdp/earn/types`, declared per package
+through `VaultProviderErrorCodeOf<...>`. A code outside it does not compile, and
+the API's exhaustive map in `apps/sdp-api/src/services/earn/vault-refusals.ts`
+decides each code's HTTP answer, so a new code is classified before it ships.
+
 Money OUT is a separate capability, `EarnVaultWithdrawProvider` /
 `supportsVaultWithdraw`. Every surfaced executing provider implements a direct
 exit; WisdomTree's pre-launch client implements its provider-order redemption.
