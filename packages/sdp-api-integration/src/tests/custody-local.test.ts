@@ -42,7 +42,7 @@ describeIfIntegrationConfigured("Custody Access and Explicit Signing", () => {
   });
 
   it("deploys with the named custody wallet", { timeout: 120000 }, async () => {
-    const configsRes = await request("/v1/wallets/configs");
+    const configsRes = await request("/v1/wallets/managed-signing/configurations");
 
     expect(configsRes.status).toBe(200);
     const configsBody = (await configsRes.json()) as { data: CustodyConfigsResponse };
@@ -91,7 +91,7 @@ describeIfIntegrationConfigured("Custody Access and Explicit Signing", () => {
   });
 
   it("requires auth for custody endpoints", async () => {
-    const configsRes = await rawRequest("/v1/wallets/configs");
+    const configsRes = await rawRequest("/v1/wallets/managed-signing/configurations");
     expect(configsRes.status).toBe(401);
 
     const initRes = await rawRequest("/v1/wallets", {
