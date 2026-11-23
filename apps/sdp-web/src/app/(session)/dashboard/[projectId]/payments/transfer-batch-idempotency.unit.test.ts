@@ -1,40 +1,80 @@
 // @vitest-environment jsdom
+/**
+ * A transfer batch's idempotency key and payout run name, as the requests the dashboard sends
+ * carry them: every resend of one batch goes out under the same key and names the same run until
+ * an answer settles it, and a different batch is a different request.
+ */
+
 import type { PaymentTransferBatchStatus } from "@sdp/types/payments";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { z } from "zod";
 import { MOVEMENT_POLL_INTERVAL_MS, resetMovementWatchesForTests } from "@/lib/dashboard-fetch";
 import { KEPT_KEY_WINDOW_MS } from "@/lib/idempotency-key-store";
+import { sentDashboardRequests, stubDashboardFetch } from "@/test/dashboard-fetch";
+import { required } from "@/test/required";
+import { requiredWellKnownMint } from "@/test/well-known-mints";
 import { TransferBatchRequestError, type Translate } from "./payments-workspace.data";
 import {
-  canonicalTransferBatchRequest,
-  claimDefaultTransferBatchReference,
-  claimTransferBatchIdempotencyKey,
   type DashboardTransferBatchRequest,
-  defaultTransferBatchReference,
   isTransferBatchSendOutcomeUnknown,
-  nameTransferBatchRequest,
-  releaseTransferBatchIdempotencyKey,
   resetTransferBatchIdempotencyStateForTests,
   retryTransferBatchUnderKey,
   sendTransferBatchUnderKey,
-  transferBatchRequestFingerprint,
 } from "./transfer-batch-idempotency";
+
+const SEND_PATH = "/api/dashboard/payments/transfers/batch";
+const RETRY_PATH = "/api/dashboard/payments/transfers/batch/batch_1/retry";
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const RECIPIENT_1 = { counterpartyId: "cp_1", counterpartyAccountId: "acct_1", amount: "1.5" };
+const RECIPIENT_2 = { counterpartyId: "cp_2", counterpartyAccountId: "acct_2", amount: "2" };
+const BATCH: DashboardTransferBatchRequest = {
+  projectId: "prj_1",
+  sourceCustodyWalletId: "cwlt_1",
+  token: requiredWellKnownMint("USDC", "devnet"),
+  recipients: [RECIPIENT_1, RECIPIENT_2],
+};
+const runNameSchema = z.object({ externalId: z.string() });
 
 const t: Translate = (key) => key;
 
-function batchRequest(
-  overrides: Partial<DashboardTransferBatchRequest> = {}
-): DashboardTransferBatchRequest {
-  return {
-    projectId: "prj_1",
-    sourceCustodyWalletId: "cwlt_1",
-    token: "USDC",
-    recipients: [
-      { counterpartyId: "cp_1", counterpartyAccountId: "acct_1", amount: "1.5" },
-      { counterpartyId: "cp_2", counterpartyAccountId: "acct_2", amount: "2" },
-    ],
-    ...overrides,
-  };
+const answer = (status: PaymentTransferBatchStatus, init?: ResponseInit) =>
+  Response.json(
+    { data: { batch: { id: "batch_1", status }, recipients: [], transfers: [] } },
+    init
+  );
+const refusal = (status: number, error: { code?: string; message: string }) =>
+  Response.json({ error }, { status });
+
+/** Pins the clock's date only, so the movement watch's timers still run. */
+function today(iso: string): void {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(iso));
+}
+
+function sentSends(fetchMock: Mock<typeof fetch>) {
+  return sentDashboardRequests(fetchMock).filter(
+    (request) => request.method === "POST" && request.path === SEND_PATH
+  );
+}
+
+/** The payout run each batch send named, in order. */
+function sentRunNames(fetchMock: Mock<typeof fetch>): string[] {
+  return sentSends(fetchMock).map((request) => runNameSchema.parse(request.body).externalId);
+}
+
+/**
+ * Asserts the Idempotency-Key the requests on `path` carried, one label per request: the same
+ * label for the same key, a different label for a different one.
+ */
+function expectSentKeys(fetchMock: Mock<typeof fetch>, labels: string[], path = SEND_PATH) {
+  const keys = sentDashboardRequests(fetchMock)
+    .filter((request) => request.method === "POST" && request.path === path)
+    .map((request) => request.idempotencyKey);
+  expect(keys).toHaveLength(labels.length);
+  for (const key of keys) expect(key).toMatch(UUID);
+  expect(keys).toEqual(labels.map((label) => keys[labels.indexOf(label)]));
+  expect(new Set(keys).size).toBe(new Set(labels).size);
 }
 
 beforeEach(() => {
@@ -45,682 +85,382 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
-describe("canonicalTransferBatchRequest", () => {
-  it("sends one intent as one body regardless of selection order", () => {
-    // The API fingerprints recipients IN ORDER. Two clients of the same intent
-    // must therefore agree on the order, or the retry is refused as a key
-    // conflict and the wizard opens a second batch.
-    const forward = batchRequest();
-    const reversed = batchRequest({ recipients: [...forward.recipients].reverse() });
-    expect(canonicalTransferBatchRequest(reversed)).toEqual(canonicalTransferBatchRequest(forward));
-    expect(
-      canonicalTransferBatchRequest(reversed).recipients.map((r) => r.counterpartyAccountId)
-    ).toEqual(["acct_1", "acct_2"]);
-  });
-
-  it("spells every amount canonically, as the API fingerprints it", () => {
-    const canonical = canonicalTransferBatchRequest(
-      batchRequest({
-        recipients: [
-          { counterpartyId: "cp_2", counterpartyAccountId: "acct_2", amount: "2.00" },
-          { counterpartyId: "cp_1", counterpartyAccountId: "acct_1", amount: "01.50" },
-        ],
-      })
-    );
-    expect(canonical.recipients.map((r) => r.amount)).toEqual(["1.5", "2"]);
-  });
-
-  it("leaves everything except recipient order and amount spelling alone", () => {
-    const request = batchRequest({ externalId: "ext_1" });
-    const canonical = canonicalTransferBatchRequest(request);
-    expect(canonical.sourceCustodyWalletId).toBe(request.sourceCustodyWalletId);
-    expect(canonical.token).toBe(request.token);
-    expect(canonical.externalId).toBe("ext_1");
-    expect(canonical.recipients).toHaveLength(request.recipients.length);
-  });
-});
-
-describe("transferBatchRequestFingerprint", () => {
-  it("is stable across recipient selection order", () => {
-    const forward = batchRequest();
-    const reversed = batchRequest({ recipients: [...forward.recipients].reverse() });
-    expect(transferBatchRequestFingerprint(forward)).toBe(
-      transferBatchRequestFingerprint(reversed)
-    );
-  });
-
-  // SOLA9-811: a recipient's `1.0` and `1` are one amount to the API, so they
-  // are one batch to the browser's key too.
-  it("is one batch however an amount is spelled", () => {
-    const withFirstAmount = (amount: string) =>
-      transferBatchRequestFingerprint(
-        batchRequest({
-          recipients: [
-            { counterpartyId: "cp_1", counterpartyAccountId: "acct_1", amount },
-            { counterpartyId: "cp_2", counterpartyAccountId: "acct_2", amount: "2" },
-          ],
-        })
-      );
-    expect(withFirstAmount("1.0")).toBe(withFirstAmount("1"));
-    expect(withFirstAmount("1.50")).toBe(withFirstAmount("1.5"));
-    expect(withFirstAmount("1.01")).not.toBe(withFirstAmount("1"));
-  });
-
-  it("differs when any part of the intent changes", () => {
-    const base = transferBatchRequestFingerprint(batchRequest());
-    expect(transferBatchRequestFingerprint(batchRequest({ projectId: "prj_2" }))).not.toBe(base);
-    expect(
-      transferBatchRequestFingerprint(batchRequest({ sourceCustodyWalletId: "cwlt_2" }))
-    ).not.toBe(base);
-    expect(transferBatchRequestFingerprint(batchRequest({ token: "SOL" }))).not.toBe(base);
-    expect(transferBatchRequestFingerprint(batchRequest({ externalId: "ref-1" }))).not.toBe(base);
-    expect(
-      transferBatchRequestFingerprint(
-        batchRequest({
-          recipients: [{ counterpartyId: "cp_1", counterpartyAccountId: "acct_1", amount: "9" }],
-        })
-      )
-    ).not.toBe(base);
-  });
-
-  it("pins a batch's fingerprint, saved run name and generated run name to exact strings", () => {
-    const unnamed: DashboardTransferBatchRequest = {
-      projectId: "prj_1",
-      sourceCustodyWalletId: "cwlt_1",
-      token: "USDC",
-      recipients: [
-        { counterpartyId: "cp_2", counterpartyAccountId: "acct_2", amount: "2.50" },
-        { counterpartyId: "cp_1", counterpartyAccountId: "acct_1", amount: "1.0" },
-      ],
-    };
-    const savedName = "sdp:payments:transfer-batch:reference:v1:29b38f2627104071";
-    const sentAt = new Date("2026-11-10T12:00:00Z");
-
-    expect(transferBatchRequestFingerprint({ ...unnamed, externalId: "payroll-11" })).toBe(
-      '["prj_1","payroll-11","cwlt_1","USDC",[["cp_1","acct_1","1"],["cp_2","acct_2","2.5"]]]'
-    );
-    expect(defaultTransferBatchReference(unnamed, "2026-11-10")).toBe(
-      "batch-2026-11-10-29b38f2627104071"
-    );
-    expect(claimDefaultTransferBatchReference(unnamed, sentAt)).toBe(
-      "batch-2026-11-10-29b38f2627104071"
-    );
-    expect(Object.keys(window.localStorage)).toEqual([savedName]);
-    window.localStorage.setItem(
-      savedName,
-      JSON.stringify({ reference: "batch-2026-11-09-29b38f2627104071", savedAt: sentAt.getTime() })
-    );
-    expect(claimDefaultTransferBatchReference(unnamed, sentAt)).toBe(
-      "batch-2026-11-09-29b38f2627104071"
-    );
-  });
-});
-
-describe("claim / release", () => {
-  it("returns the same key for the same fingerprint until released", () => {
-    const fingerprint = transferBatchRequestFingerprint(batchRequest());
-    const first = claimTransferBatchIdempotencyKey(fingerprint);
-    expect(claimTransferBatchIdempotencyKey(fingerprint)).toBe(first);
-
-    releaseTransferBatchIdempotencyKey(fingerprint, first);
-    expect(claimTransferBatchIdempotencyKey(fingerprint)).not.toBe(first);
-  });
-
-  it("mints distinct keys for distinct fingerprints", () => {
-    const a = claimTransferBatchIdempotencyKey("fingerprint-a");
-    const b = claimTransferBatchIdempotencyKey("fingerprint-b");
-    expect(a).not.toBe(b);
-  });
-
-  it("survives what a reload leaves behind: the sessionStorage snapshot", () => {
-    const fingerprint = transferBatchRequestFingerprint(batchRequest());
-    const key = claimTransferBatchIdempotencyKey(fingerprint);
-    // A reload loses module state but keeps sessionStorage.
-    resetTransferBatchIdempotencyStateForTests();
-    expect(claimTransferBatchIdempotencyKey(fingerprint)).toBe(key);
-  });
-});
-
 describe("sendTransferBatchUnderKey", () => {
-  const recorded = () =>
-    Response.json({ data: { batch: { id: "batch_1" }, recipients: [], transfers: [] } });
-
-  function sentKeys(fetchMock: ReturnType<typeof vi.fn<typeof fetch>>): (string | null)[] {
-    return fetchMock.mock.calls.map(([, init]) =>
-      new Headers(init?.headers).get("Idempotency-Key")
+  // The API fingerprints recipients in any order and amounts however spelled, so a resend that
+  // reorders or re-spells the batch must reuse the key, or it would pay everyone again.
+  it("resends a lost batch, reordered and re-spelled, as the same body under the same key", async () => {
+    today("2026-11-10T12:00:00Z");
+    const fetchMock = stubDashboardFetch(() => answer("confirmed")).mockRejectedValueOnce(
+      new TypeError("Failed to fetch")
     );
-  }
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
+    await expect(
+      sendTransferBatchUnderKey(
+        { ...BATCH, recipients: [RECIPIENT_2, { ...RECIPIENT_1, amount: "01.50" }] },
+        t
+      )
+    ).rejects.toThrow("Failed to fetch");
+    await sendTransferBatchUnderKey(BATCH, t);
+
+    const sent = { ...BATCH, externalId: expect.stringMatching(/^batch-2026-11-10-[0-9a-f]{16}$/) };
+    expect(sentSends(fetchMock).map((request) => request.body)).toEqual([sent, sent]);
+    expectSentKeys(fetchMock, ["lost", "lost"]);
+    expect(new Set(sentRunNames(fetchMock)).size).toBe(1);
   });
 
-  it("retires the key once the API records the batch", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => recorded());
-    vi.stubGlobal("fetch", fetchMock);
+  it("sends a different batch under a new key, named a different run", async () => {
+    const fetchMock = stubDashboardFetch(() => refusal(503, { message: "unavailable" }));
 
-    await sendTransferBatchUnderKey(batchRequest(), t);
-    await sendTransferBatchUnderKey(batchRequest(), t);
+    for (const batch of [
+      BATCH,
+      { ...BATCH, projectId: "prj_2" },
+      { ...BATCH, sourceCustodyWalletId: "cwlt_2" },
+      { ...BATCH, token: SOL_MINT },
+      { ...BATCH, recipients: [{ ...RECIPIENT_1, amount: "1.6" }, RECIPIENT_2] },
+      { ...BATCH, recipients: [RECIPIENT_1] },
+      { ...BATCH, externalId: "payroll-11" },
+    ]) {
+      await expect(sendTransferBatchUnderKey(batch, t)).rejects.toThrow("unavailable");
+    }
 
-    const [first, second] = sentKeys(fetchMock);
-    expect(first).toMatch(/^[0-9a-f-]{36}$/);
-    expect(second).not.toBe(first);
+    expectSentKeys(fetchMock, ["a", "b", "c", "d", "e", "f", "g"]);
+    expect(new Set(sentRunNames(fetchMock)).size).toBe(7);
   });
 
-  // APE-461: the same rule as a single transfer, on a batch still processing:
-  // the stale replay keeps the key, and a GET showing the batch final retires it.
+  // A lost batch resent by the next release must find the same key and run name, or it is sent
+  // as a new run under a new key and pays every recipient again.
+  it("stores and sends a batch's key and run name under the exact names a later release reads", async () => {
+    today("2026-11-10T12:00:00Z");
+    const fetchMock = stubDashboardFetch(() => {
+      throw new TypeError("Failed to fetch");
+    });
+
+    await expect(sendTransferBatchUnderKey(BATCH, t)).rejects.toThrow("Failed to fetch");
+
+    const runName = "batch-2026-11-10-a8f2988e4b666114";
+    const [sent] = sentSends(fetchMock);
+    expect(required(sent).body).toEqual({ ...BATCH, externalId: runName });
+    expect(Object.keys(window.localStorage)).toEqual([
+      "sdp:payments:transfer-batch:reference:v1:a8f2988e4b666114",
+    ]);
+    expect(
+      JSON.parse(
+        required(window.sessionStorage.getItem("sdp:payments:transfer-batch:idempotency:v1"))
+      )
+    ).toEqual([
+      {
+        id: `["prj_1","${runName}","cwlt_1","${BATCH.token}",[["cp_1","acct_1","1.5"],["cp_2","acct_2","2"]]]`,
+        value: required(sent).idempotencyKey,
+        claimedAt: 1794312000000,
+      },
+    ]);
+  });
+
+  it("resends a lost batch under its key after a reload", async () => {
+    const fetchMock = stubDashboardFetch(() => answer("confirmed")).mockRejectedValueOnce(
+      new TypeError("Failed to fetch")
+    );
+
+    await expect(sendTransferBatchUnderKey(BATCH, t)).rejects.toThrow("Failed to fetch");
+    // A reload keeps session storage and loses module state.
+    resetTransferBatchIdempotencyStateForTests();
+    await sendTransferBatchUnderKey(BATCH, t);
+
+    expectSentKeys(fetchMock, ["lost", "lost"]);
+  });
+
+  // HOO-2335: another tab or operator sending the same batch the same day names the same run,
+  // so the API answers it with the first batch instead of paying everyone again.
+  it("names the same batch the same run from another browser on the same day", async () => {
+    today("2026-11-10T09:00:00Z");
+    const fetchMock = stubDashboardFetch(() => answer("confirmed"));
+
+    await sendTransferBatchUnderKey(BATCH, t);
+    window.sessionStorage.clear();
+    window.localStorage.clear();
+    resetTransferBatchIdempotencyStateForTests();
+    vi.setSystemTime(new Date("2026-11-10T21:00:00Z"));
+    await sendTransferBatchUnderKey({ ...BATCH, recipients: [RECIPIENT_2, RECIPIENT_1] }, t);
+
+    const [first, again] = sentRunNames(fetchMock);
+    expect(first).toMatch(/^batch-2026-11-10-[0-9a-f]{16}$/);
+    expect(again).toBe(first);
+  });
+
+  it("names a send whose answer was lost the same run from a new tab the next day", async () => {
+    today("2026-11-10T12:00:00Z");
+    const fetchMock = stubDashboardFetch(() => {
+      throw new TypeError("Failed to fetch");
+    });
+
+    await expect(sendTransferBatchUnderKey(BATCH, t)).rejects.toThrow("Failed to fetch");
+    // A new tab: the key store is empty, the run's name is not.
+    window.sessionStorage.clear();
+    resetTransferBatchIdempotencyStateForTests();
+    vi.setSystemTime(new Date("2026-11-11T12:00:00Z"));
+    await expect(sendTransferBatchUnderKey(BATCH, t)).rejects.toThrow("Failed to fetch");
+
+    const [first, again] = sentRunNames(fetchMock);
+    expect(first).toMatch(/^batch-2026-11-10-[0-9a-f]{16}$/);
+    expect(again).toBe(first);
+  });
+
+  // The API answers a batch's key from the batch row after its 24-hour key record lapses, so a
+  // resend on a later day replays the same run under the same key.
+  it("resends a kept key and its run name however old they are", async () => {
+    today("2026-11-09T20:00:00Z");
+    const fetchMock = stubDashboardFetch(() => answer("confirmed")).mockRejectedValueOnce(
+      new TypeError("Failed to fetch")
+    );
+
+    await expect(sendTransferBatchUnderKey(BATCH, t)).rejects.toThrow("Failed to fetch");
+    vi.setSystemTime(Date.now() + KEPT_KEY_WINDOW_MS);
+    await sendTransferBatchUnderKey(BATCH, t);
+
+    const [first, resent] = sentRunNames(fetchMock);
+    expect(first).toMatch(/^batch-2026-11-09-/);
+    expect(resent).toBe(first);
+    expectSentKeys(fetchMock, ["lost", "lost"]);
+  });
+
+  it("sends the same batch again under a new key, named for its day, once the API answers it final", async () => {
+    today("2026-11-10T12:00:00Z");
+    const fetchMock = stubDashboardFetch(() => answer("confirmed"));
+
+    await sendTransferBatchUnderKey(BATCH, t);
+    vi.setSystemTime(new Date("2026-11-11T12:00:00Z"));
+    await sendTransferBatchUnderKey(BATCH, t);
+
+    expectSentKeys(fetchMock, ["first", "next"]);
+    expect(sentRunNames(fetchMock)).toEqual([
+      expect.stringMatching(/^batch-2026-11-10-/),
+      expect.stringMatching(/^batch-2026-11-11-/),
+    ]);
+  });
+
+  it("sends the reference the user typed as the run name", async () => {
+    const fetchMock = stubDashboardFetch(() => answer("confirmed"));
+
+    await sendTransferBatchUnderKey({ ...BATCH, externalId: "payroll-2026-05" }, t);
+
+    expect(sentRunNames(fetchMock)).toEqual(["payroll-2026-05"]);
+  });
+
+  // APE-461: the replay repeats the first answer, so only a GET showing the batch final retires it.
   it("keeps the key through a stale replay and retires it once a GET shows the batch final", async () => {
     vi.useFakeTimers();
     let posts = 0;
-    const fetchMock = vi.fn<typeof fetch>(async (_input, init) => {
-      if (init?.method === "GET") {
-        return Response.json({ data: { batch: { id: "batch_1", status: "confirmed" } } });
-      }
+    const fetchMock = stubDashboardFetch(({ method }) => {
+      if (method === "GET") return answer("confirmed");
       posts += 1;
-      return Response.json(
-        {
-          data: {
-            batch: { id: "batch_1", status: "processing" },
-            recipients: [],
-            transfers: [],
-          },
-        },
+      return answer(
+        "processing",
         posts > 1 ? { headers: { "Idempotent-Replayed": "true" } } : undefined
       );
     });
-    vi.stubGlobal("fetch", fetchMock);
 
-    await sendTransferBatchUnderKey(batchRequest(), t);
-    await sendTransferBatchUnderKey(batchRequest(), t);
+    await sendTransferBatchUnderKey(BATCH, t);
+    await sendTransferBatchUnderKey(BATCH, t);
+    await sendTransferBatchUnderKey(BATCH, t);
     await vi.advanceTimersByTimeAsync(MOVEMENT_POLL_INTERVAL_MS);
-    await sendTransferBatchUnderKey(batchRequest(), t);
+    await sendTransferBatchUnderKey(BATCH, t);
 
-    const posted = fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
-    const [first, replay, next] = posted.map(([, init]) =>
-      new Headers(init?.headers).get("Idempotency-Key")
-    );
-    expect(replay).toBe(first);
-    expect(next).not.toBe(first);
-    const read = fetchMock.mock.calls.find(([, init]) => init?.method === "GET");
-    expect(read?.[0]).toBe("/api/dashboard/payments/transfers/batch/batch_1");
+    expectSentKeys(fetchMock, ["first", "first", "first", "next"]);
+    expect(
+      sentDashboardRequests(fetchMock)
+        .filter((request) => request.method === "GET")
+        .map((request) => request.path)
+    ).toEqual(["/api/dashboard/payments/transfers/batch/batch_1"]);
   });
 
   it("retires a fresh key on a first-attempt refusal", async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>(async () => recorded())
-      .mockResolvedValueOnce(Response.json({ error: { message: "bad" } }, { status: 422 }));
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = stubDashboardFetch(() => answer("confirmed")).mockResolvedValueOnce(
+      refusal(422, { message: "bad" })
+    );
 
-    await expect(sendTransferBatchUnderKey(batchRequest(), t)).rejects.toMatchObject({
+    await expect(sendTransferBatchUnderKey(BATCH, t)).rejects.toMatchObject({
+      name: "TransferBatchRequestError",
       status: 422,
     });
-    await sendTransferBatchUnderKey(batchRequest(), t);
+    await sendTransferBatchUnderKey(BATCH, t);
 
-    const [refused, next] = sentKeys(fetchMock);
-    expect(next).not.toBe(refused);
+    expectSentKeys(fetchMock, ["refused", "next"]);
   });
 
-  it("retries a stopped batch under the same key after re-enable", async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>(async () => recorded())
-      .mockResolvedValueOnce(
-        Response.json(
-          {
-            error: {
-              code: "FORBIDDEN",
-              message: "This movement is disabled for the project",
-              details: { reason: "movement_disabled" },
-            },
-          },
-          { status: 403 }
-        )
-      );
-    vi.stubGlobal("fetch", fetchMock);
+  it("resends a batch refused while its movement was stopped under the same key", async () => {
+    const fetchMock = stubDashboardFetch(() => answer("confirmed")).mockResolvedValueOnce(
+      refusal(403, { code: "FORBIDDEN", message: "This movement is disabled for the project" })
+    );
 
-    await expect(sendTransferBatchUnderKey(batchRequest(), t)).rejects.toThrow(
+    await expect(sendTransferBatchUnderKey(BATCH, t)).rejects.toThrow(
       "This movement is disabled for the project"
     );
-    await sendTransferBatchUnderKey(batchRequest(), t);
+    await sendTransferBatchUnderKey(BATCH, t);
 
-    const [refused, retried] = sentKeys(fetchMock);
-    expect(refused).toMatch(/^[0-9a-f-]{36}$/);
-    expect(retried).toBe(refused);
-  });
-
-  // A money movement never mints a fresh key while the original may have run:
-  // the next press is answered under the same key.
-  // The API answers a batch's key from the batch row after its 24-hour key
-  // record lapses, so a resend on a later day replays the same run.
-  it("resends a kept key and its generated reference however old they are", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    vi.setSystemTime(new Date("2026-11-09T20:00:00.000Z"));
-    const fetchMock = vi
-      .fn<typeof fetch>(async () => recorded())
-      .mockRejectedValueOnce(new TypeError("Failed to fetch"));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(sendTransferBatchUnderKey(batchRequest(), t)).rejects.toThrow("Failed to fetch");
-    // A later UTC day, past the API's key record.
-    vi.setSystemTime(Date.now() + KEPT_KEY_WINDOW_MS);
-    await sendTransferBatchUnderKey(batchRequest(), t);
-
-    const runs = fetchMock.mock.calls.map(
-      ([, init]) =>
-        z.object({ externalId: z.string() }).parse(JSON.parse(String(init?.body))).externalId
-    );
-    // The same payout run under the same key, which the API never pays twice.
-    expect(runs).toHaveLength(2);
-    expect(runs[1]).toBe(runs[0]);
-    const [first, resent] = sentKeys(fetchMock);
-    expect(resent).toBe(first);
+    expectSentKeys(fetchMock, ["refused", "refused"]);
   });
 
   it("keeps the key on an unknown outcome and resends under it", async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>(async () => recorded())
-      .mockResolvedValueOnce(
-        Response.json(
-          { error: { code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN", message: "use a new key" } },
-          { status: 409 }
-        )
-      );
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = stubDashboardFetch(() => answer("confirmed")).mockResolvedValueOnce(
+      refusal(409, { code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN", message: "use a new key" })
+    );
 
-    await expect(sendTransferBatchUnderKey(batchRequest(), t)).rejects.toThrow(
+    await expect(sendTransferBatchUnderKey(BATCH, t)).rejects.toThrow(
       "Shared.idempotency.outcomeUnknownCheckList"
     );
-    await sendTransferBatchUnderKey(batchRequest(), t);
+    await sendTransferBatchUnderKey(BATCH, t);
 
-    const [unknown, next] = sentKeys(fetchMock);
-    expect(next).toBe(unknown);
+    expectSentKeys(fetchMock, ["unknown", "unknown"]);
   });
 
-  it("resends a lost batch with a re-spelled amount under the same key, as keyed", async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>(async () => recorded())
-      .mockRejectedValueOnce(new TypeError("Failed to fetch"));
-    vi.stubGlobal("fetch", fetchMock);
-    const withFirstAmount = (amount: string) =>
-      batchRequest({
-        recipients: [
-          { counterpartyId: "cp_1", counterpartyAccountId: "acct_1", amount },
-          { counterpartyId: "cp_2", counterpartyAccountId: "acct_2", amount: "2" },
-        ],
-      });
-
-    await expect(sendTransferBatchUnderKey(withFirstAmount("1.0"), t)).rejects.toThrow(
-      "Failed to fetch"
-    );
-    await sendTransferBatchUnderKey(withFirstAmount("1"), t);
-
-    const [lost, retry] = sentKeys(fetchMock);
-    expect(retry).toBe(lost);
-    const sentAmounts = fetchMock.mock.calls.map(
-      ([, init]) =>
-        z
-          .object({ recipients: z.array(z.object({ amount: z.string() })) })
-          .parse(JSON.parse(String(init?.body))).recipients[0]?.amount
-    );
-    expect(sentAmounts).toEqual(["1", "1"]);
-  });
-
-  // Browser test (HOO-1918): the API recorded the batch but the answer was lost;
-  // a refusal after that settles nothing about the recorded batch, so the third
-  // press must replay it under the first key, not pay every recipient again.
+  // HOO-1918: the API recorded the batch but the answer was lost; a refusal after that settles
+  // nothing about the recorded batch, so the third press replays it under the first key.
   it.each([
     ["a rate limit", 429],
     ["an expired session", 401],
   ])("keeps a lost attempt's key through %s", async (_label, status) => {
-    const fetchMock = vi
-      .fn<typeof fetch>(async () => recorded())
+    const fetchMock = stubDashboardFetch(() => answer("confirmed"))
       .mockRejectedValueOnce(new TypeError("Failed to fetch"))
-      .mockResolvedValueOnce(Response.json({ error: { message: "refused" } }, { status }));
-    vi.stubGlobal("fetch", fetchMock);
+      .mockResolvedValueOnce(refusal(status, { message: "refused" }));
 
-    await expect(sendTransferBatchUnderKey(batchRequest(), t)).rejects.toThrow("Failed to fetch");
-    await expect(sendTransferBatchUnderKey(batchRequest(), t)).rejects.toMatchObject({ status });
-    await sendTransferBatchUnderKey(batchRequest(), t);
+    await expect(sendTransferBatchUnderKey(BATCH, t)).rejects.toThrow("Failed to fetch");
+    await expect(sendTransferBatchUnderKey(BATCH, t)).rejects.toMatchObject({ status });
+    await sendTransferBatchUnderKey(BATCH, t);
 
-    const keys = sentKeys(fetchMock);
-    expect(keys).toHaveLength(3);
-    expect(new Set(keys).size).toBe(1);
+    expectSentKeys(fetchMock, ["lost", "lost", "lost"]);
+  });
+
+  // A key held in memory only could be lost to a reload, and the resend would pay again.
+  it("sends nothing when the browser refuses to store the batch's key", async () => {
+    const fetchMock = stubDashboardFetch(() => answer("confirmed"));
+    // SAFETY: This is the runtime prototype of the Storage instance under test.
+    // Spying on Storage.prototype misses this jsdom implementation's setItem.
+    const sessionStoragePrototype = Object.getPrototypeOf(window.sessionStorage) as Storage;
+    const setItem = vi.spyOn(sessionStoragePrototype, "setItem").mockImplementation(() => {
+      throw new DOMException("QuotaExceededError");
+    });
+    try {
+      await expect(sendTransferBatchUnderKey(BATCH, t)).rejects.toMatchObject({
+        name: "TransferBatchRequestError",
+        status: 428,
+      });
+    } finally {
+      setItem.mockRestore();
+    }
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
-describe("partially failed batches (APE-462)", () => {
-  const answer = (status: PaymentTransferBatchStatus, replayed = false) =>
-    Response.json(
-      { data: { batch: { id: "batch_1", status }, recipients: [], transfers: [] } },
-      replayed ? { headers: { "Idempotent-Replayed": "true" } } : undefined
-    );
-  const postedKeys = (fetchMock: ReturnType<typeof vi.fn<typeof fetch>>) =>
-    fetchMock.mock.calls
-      .filter(([, init]) => init?.method === "POST")
-      .map(([, init]) => new Headers(init?.headers).get("Idempotency-Key"));
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  // Sending the same batch again must replay it, not pay the recipients who were paid.
+describe("a partially failed batch (APE-462)", () => {
+  // Sending it again must replay it, not pay the recipients who were paid.
   it("keeps the key of a batch answered partially failed", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => answer("partially_failed"));
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = stubDashboardFetch(() => answer("partially_failed"));
 
-    await sendTransferBatchUnderKey(batchRequest(), t);
-    await sendTransferBatchUnderKey(batchRequest(), t);
+    await sendTransferBatchUnderKey(BATCH, t);
+    await sendTransferBatchUnderKey(BATCH, t);
 
-    const [first, again] = postedKeys(fetchMock);
-    expect(again).toBe(first);
+    expectSentKeys(fetchMock, ["first", "first"]);
   });
 
   it("keeps the key when a GET shows the processing batch ended partially failed", async () => {
     vi.useFakeTimers();
-    const fetchMock = vi.fn<typeof fetch>(async (_input, init) =>
-      init?.method === "GET" ? answer("partially_failed") : answer("processing")
+    const fetchMock = stubDashboardFetch(({ method }) =>
+      method === "GET" ? answer("partially_failed") : answer("processing")
     );
-    vi.stubGlobal("fetch", fetchMock);
 
-    await sendTransferBatchUnderKey(batchRequest(), t);
+    await sendTransferBatchUnderKey(BATCH, t);
     await vi.advanceTimersByTimeAsync(MOVEMENT_POLL_INTERVAL_MS);
-    await sendTransferBatchUnderKey(batchRequest(), t);
+    await sendTransferBatchUnderKey(BATCH, t);
 
-    const [first, again] = postedKeys(fetchMock);
-    expect(again).toBe(first);
+    expectSentKeys(fetchMock, ["first", "first"]);
+  });
+
+  it("names a resend the same run until a retry finishes the batch", async () => {
+    today("2026-11-10T12:00:00Z");
+    let firstRunName: string | undefined;
+    const fetchMock = stubDashboardFetch(({ path, body }) => {
+      if (path === RETRY_PATH) {
+        return Response.json({
+          data: {
+            batch: { id: "batch_1", status: "confirmed", externalId: firstRunName },
+            recipients: [],
+            transfers: [],
+          },
+        });
+      }
+      firstRunName ??= runNameSchema.parse(body).externalId;
+      return answer("partially_failed");
+    });
+
+    await sendTransferBatchUnderKey(BATCH, t);
+    vi.setSystemTime(new Date("2026-11-11T12:00:00Z"));
+    await sendTransferBatchUnderKey(BATCH, t);
+    await retryTransferBatchUnderKey("batch_1", ["xrec_2"], t);
+    vi.setSystemTime(new Date("2026-11-12T12:00:00Z"));
+    await sendTransferBatchUnderKey(BATCH, t);
+
+    expect(sentRunNames(fetchMock)).toEqual([
+      expect.stringMatching(/^batch-2026-11-10-/),
+      firstRunName,
+      expect.stringMatching(/^batch-2026-11-12-/),
+    ]);
+    expectSentKeys(fetchMock, ["first", "first", "next"]);
   });
 });
 
 describe("retryTransferBatchUnderKey", () => {
-  const retryFailed = () => retryTransferBatchUnderKey("batch_1", ["xrec_2"], t);
-  const retried = () =>
-    Response.json({
-      data: { batch: { id: "batch_1", status: "processing" }, recipients: [], transfers: [] },
-    });
-  const keys = (fetchMock: ReturnType<typeof vi.fn<typeof fetch>>) =>
-    fetchMock.mock.calls.map(([, init]) => new Headers(init?.headers).get("Idempotency-Key"));
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
+  const retried = () => answer("processing");
 
   it("posts the batch's retry, and a recorded answer retires the key at once", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => retried());
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = stubDashboardFetch(retried);
 
-    await retryFailed();
-    await retryFailed();
+    await retryTransferBatchUnderKey("batch_1", ["xrec_2"], t);
+    await retryTransferBatchUnderKey("batch_1", ["xrec_2"], t);
 
-    expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "/api/dashboard/payments/transfers/batch/batch_1/retry"
-    );
-    const [first, next] = keys(fetchMock);
-    expect(first).toMatch(/^[0-9a-f-]{36}$/);
     // Safe: the API only sends recipients still failed when it runs.
-    expect(next).not.toBe(first);
+    expectSentKeys(fetchMock, ["first", "next"], RETRY_PATH);
   });
 
   it("keeps the key on an unknown outcome, so the next press is answered under it", async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>(async () => retried())
-      .mockResolvedValueOnce(
-        Response.json(
-          { error: { code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN", message: "use a new key" } },
-          { status: 409 }
-        )
-      );
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(retryFailed()).rejects.toThrow("Shared.idempotency.outcomeUnknownCheckList");
-    await retryFailed();
-
-    const [unknown, next] = keys(fetchMock);
-    expect(next).toBe(unknown);
-  });
-});
-
-function refuseSessionStorageWrites() {
-  // SAFETY: This is the runtime prototype of the Storage instance under test.
-  // Spying on Storage.prototype misses this jsdom implementation's setItem.
-  return vi
-    .spyOn(Object.getPrototypeOf(window.sessionStorage) as Storage, "setItem")
-    .mockImplementation(() => {
-      throw new DOMException("QuotaExceededError");
-    });
-}
-
-describe("degraded storage", () => {
-  // A batch whose key lives in memory only could be sent twice by a reload and
-  // retry, so it is refused like every other money movement.
-  it("refuses to send a batch whose key storage refused", async () => {
-    const fetchMock = vi.fn<typeof fetch>();
-    vi.stubGlobal("fetch", fetchMock);
-    const setItem = refuseSessionStorageWrites();
-    try {
-      await expect(sendTransferBatchUnderKey(batchRequest(), t)).rejects.toMatchObject({
-        name: "TransferBatchRequestError",
-        status: 428,
-      });
-      expect(fetchMock).not.toHaveBeenCalled();
-    } finally {
-      setItem.mockRestore();
-      vi.unstubAllGlobals();
-    }
-  });
-
-  it("keeps the key stable in memory when sessionStorage refuses writes", () => {
-    const setItem = refuseSessionStorageWrites();
-    try {
-      const fingerprint = "fingerprint-quota";
-      const key = claimTransferBatchIdempotencyKey(fingerprint);
-      expect(claimTransferBatchIdempotencyKey(fingerprint)).toBe(key);
-    } finally {
-      setItem.mockRestore();
-    }
-  });
-
-  it("prefers memory over stale readable storage after a failed write", () => {
-    const fingerprint = "fingerprint-diverged";
-    const stale = claimTransferBatchIdempotencyKey(fingerprint);
-    releaseTransferBatchIdempotencyKey(fingerprint, stale);
-
-    // The release reached storage; now the NEXT claim's write fails, leaving
-    // storage stale while memory holds the fresh key.
-    const setItem = refuseSessionStorageWrites();
-    try {
-      const fresh = claimTransferBatchIdempotencyKey(fingerprint);
-      expect(fresh).not.toBe(stale);
-      expect(claimTransferBatchIdempotencyKey(fingerprint)).toBe(fresh);
-    } finally {
-      setItem.mockRestore();
-    }
-  });
-});
-
-describe("defaultTransferBatchReference", () => {
-  it("names the same batch the same way on a day, whatever its recipient order", () => {
-    const reference = defaultTransferBatchReference(batchRequest(), "2026-10-28");
-    const reordered = batchRequest({ recipients: [...batchRequest().recipients].reverse() });
-
-    expect(reference).toMatch(/^batch-2026-10-28-[0-9a-f]{16}$/);
-    expect(defaultTransferBatchReference(reordered, "2026-10-28")).toBe(reference);
-    // A reference the caller set is not part of the run's default.
-    expect(
-      defaultTransferBatchReference(batchRequest({ externalId: "payroll-05" }), "2026-10-28")
-    ).toBe(reference);
-  });
-
-  it("names a different Project, amount, wallet or day as a different run", () => {
-    const reference = defaultTransferBatchReference(batchRequest(), "2026-10-28");
-    const otherAmount = batchRequest({
-      recipients: [
-        { counterpartyId: "cp_1", counterpartyAccountId: "acct_1", amount: "1.6" },
-        { counterpartyId: "cp_2", counterpartyAccountId: "acct_2", amount: "2" },
-      ],
-    });
-
-    expect(
-      defaultTransferBatchReference(batchRequest({ projectId: "prj_2" }), "2026-10-28")
-    ).not.toBe(reference);
-    expect(defaultTransferBatchReference(otherAmount, "2026-10-28")).not.toBe(reference);
-    expect(
-      defaultTransferBatchReference(batchRequest({ sourceCustodyWalletId: "cwlt_2" }), "2026-10-28")
-    ).not.toBe(reference);
-    expect(defaultTransferBatchReference(batchRequest(), "2026-10-29")).not.toBe(reference);
-  });
-});
-
-describe("claimDefaultTransferBatchReference", () => {
-  const sentReferences = (fetchMock: ReturnType<typeof vi.fn<typeof fetch>>) =>
-    fetchMock.mock.calls
-      .filter(([, init]) => init?.method === "POST")
-      .map(
-        ([, init]) =>
-          z.object({ externalId: z.string() }).parse(JSON.parse(String(init?.body))).externalId
-      );
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it("keeps a batch's generated name across a new UTC day until its send settles", () => {
-    const first = claimDefaultTransferBatchReference(
-      batchRequest(),
-      new Date("2026-10-28T23:59:00Z")
-    );
-    const nextDay = claimDefaultTransferBatchReference(
-      batchRequest(),
-      new Date("2026-10-29T00:01:00Z")
+    const fetchMock = stubDashboardFetch(retried).mockResolvedValueOnce(
+      refusal(409, { code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN", message: "use a new key" })
     );
 
-    expect(first).toMatch(/^batch-2026-10-28-/);
-    expect(nextDay).toBe(first);
-  });
-
-  it("names a send whose answer was lost the same run when it is sent again", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => {
-      throw new TypeError("network");
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(sendTransferBatchUnderKey(batchRequest(), t)).rejects.toThrow();
-    // A new tab: the key store is empty, the run's name is not.
-    window.sessionStorage.clear();
-    resetTransferBatchIdempotencyStateForTests();
-    await expect(sendTransferBatchUnderKey(batchRequest(), t)).rejects.toThrow();
-
-    const [first, again] = sentReferences(fetchMock);
-    expect(first).toMatch(/^batch-\d{4}-\d{2}-\d{2}-[0-9a-f]{16}$/);
-    expect(again).toBe(first);
-  });
-
-  it("forgets the generated name once the batch it named is confirmed", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      Response.json({
-        data: { batch: { id: "batch_1", status: "confirmed" }, recipients: [], transfers: [] },
-      })
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    await sendTransferBatchUnderKey(batchRequest(), t);
-    // Forgotten once the batch it named is confirmed: the next identical batch is a new run.
-    const stored = Object.keys(window.localStorage).filter((name) =>
-      name.startsWith("sdp:payments:transfer-batch:reference:v1:")
-    );
-    expect(sentReferences(fetchMock)).toHaveLength(1);
-    expect(stored).toEqual([]);
-  });
-
-  it("keeps a partially failed batch's name until a retry finishes it", async () => {
-    const storedNames = () =>
-      Object.keys(window.localStorage).filter((name) =>
-        name.startsWith("sdp:payments:transfer-batch:reference:v1:")
-      );
-    const sendFetch = vi.fn<typeof fetch>(async (_input, init) =>
-      Response.json({
-        data: {
-          batch: {
-            id: "batch_1",
-            status: "partially_failed",
-            externalId: z.object({ externalId: z.string() }).parse(JSON.parse(String(init?.body)))
-              .externalId,
-          },
-          recipients: [],
-          transfers: [],
-        },
-      })
-    );
-    vi.stubGlobal("fetch", sendFetch);
-    const sent = await sendTransferBatchUnderKey(batchRequest(), t);
-    // Sending it again must return this batch, so its name is kept.
-    expect(storedNames()).toHaveLength(1);
-
-    vi.stubGlobal(
-      "fetch",
-      vi.fn<typeof fetch>(async () =>
-        Response.json({
-          data: {
-            batch: { id: "batch_1", status: "confirmed", externalId: sent.batch.externalId },
-            recipients: [],
-            transfers: [],
-          },
-        })
-      )
+    await expect(retryTransferBatchUnderKey("batch_1", ["xrec_2"], t)).rejects.toThrow(
+      "Shared.idempotency.outcomeUnknownCheckList"
     );
     await retryTransferBatchUnderKey("batch_1", ["xrec_2"], t);
 
-    // Finished by the retry: a later identical payout is a new run.
-    expect(storedNames()).toEqual([]);
-  });
-
-  it("leaves a reference the user typed alone", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      Response.json({
-        data: { batch: { id: "batch_1", status: "confirmed" }, recipients: [], transfers: [] },
-      })
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    await sendTransferBatchUnderKey(batchRequest({ externalId: "payroll-2026-05" }), t);
-
-    expect(sentReferences(fetchMock)).toEqual(["payroll-2026-05"]);
+    expectSentKeys(fetchMock, ["unknown", "unknown"], RETRY_PATH);
   });
 });
 
 describe("isTransferBatchSendOutcomeUnknown", () => {
-  const refusal = (status: number, code: string | null = null, replayed = false) =>
-    new TransferBatchRequestError("refused", status, replayed, code);
+  const refused = (status: number, code: string | null = null) =>
+    new TransferBatchRequestError("refused", status, false, code);
 
   it("holds a send that may have recorded the batch", () => {
     expect(isTransferBatchSendOutcomeUnknown(new TypeError("Failed to fetch"))).toBe(true);
-    expect(isTransferBatchSendOutcomeUnknown(refusal(502))).toBe(true);
-    expect(isTransferBatchSendOutcomeUnknown(refusal(409, "IDEMPOTENCY_KEY_IN_FLIGHT"))).toBe(true);
-    expect(isTransferBatchSendOutcomeUnknown(refusal(409, "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN"))).toBe(
+    expect(isTransferBatchSendOutcomeUnknown(refused(502))).toBe(true);
+    expect(isTransferBatchSendOutcomeUnknown(refused(409, "IDEMPOTENCY_KEY_IN_FLIGHT"))).toBe(true);
+    expect(isTransferBatchSendOutcomeUnknown(refused(409, "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN"))).toBe(
       true
     );
-    expect(isTransferBatchSendOutcomeUnknown(refusal(422, "IDEMPOTENCY_KEY_REUSED"))).toBe(true);
+    expect(isTransferBatchSendOutcomeUnknown(refused(422, "IDEMPOTENCY_KEY_REUSED"))).toBe(true);
   });
 
   it("frees a send refused before anything was written", () => {
-    expect(isTransferBatchSendOutcomeUnknown(refusal(400, "VALIDATION_ERROR"))).toBe(false);
-    expect(isTransferBatchSendOutcomeUnknown(refusal(403, "FORBIDDEN"))).toBe(false);
-    expect(isTransferBatchSendOutcomeUnknown(refusal(409, "TRANSFER_BATCH_RUN_EXISTS"))).toBe(
+    expect(isTransferBatchSendOutcomeUnknown(refused(400, "VALIDATION_ERROR"))).toBe(false);
+    expect(isTransferBatchSendOutcomeUnknown(refused(403, "FORBIDDEN"))).toBe(false);
+    expect(isTransferBatchSendOutcomeUnknown(refused(409, "TRANSFER_BATCH_RUN_EXISTS"))).toBe(
       false
     );
-    expect(isTransferBatchSendOutcomeUnknown(refusal(428))).toBe(false);
-    expect(isTransferBatchSendOutcomeUnknown(refusal(429))).toBe(false);
-  });
-});
-
-describe("nameTransferBatchRequest", () => {
-  it("names a blank Reference once and leaves a named batch as it is", () => {
-    const named = nameTransferBatchRequest(batchRequest());
-    expect(named.externalId).toMatch(/^batch-/);
-    expect(nameTransferBatchRequest(named)).toEqual(named);
-    expect(nameTransferBatchRequest(batchRequest({ externalId: "run_1" })).externalId).toBe(
-      "run_1"
-    );
+    expect(isTransferBatchSendOutcomeUnknown(refused(428))).toBe(false);
+    expect(isTransferBatchSendOutcomeUnknown(refused(429))).toBe(false);
   });
 });
