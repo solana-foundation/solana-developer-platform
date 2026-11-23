@@ -6,14 +6,14 @@ import { HASTRA_DEPLOYMENTS } from "@sdp/types/hastra-programs";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { PublicKey } from "@solana/web3.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { deriveHastraAddresses } from "./addresses";
+import { HastraVaultDirectClient } from "./client";
 import {
-  deriveHastraAddresses,
   HASTRA_PAR_MINIMUM_ASSETS,
   HASTRA_REQUEST_REUSE_COOLDOWN_BLOCKS,
   HASTRA_SWAP_COMPUTE_UNIT_LIMIT,
-  HastraVaultDirectClient,
-  resetHastraReadCaches,
-} from "./client";
+} from "./constants";
+import { resetHastraReadCaches } from "./rpc";
 import type { HastraSwapLeg, HastraSwapPort } from "./types";
 
 const configuredDeployment = HASTRA_DEPLOYMENTS["mainnet-beta"];

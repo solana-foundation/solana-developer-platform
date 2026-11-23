@@ -6,6 +6,18 @@ instructions, positions, and both exit paths. The API exposes the
 operator-completed par redemption by default; the Jupiter DEX builder remains
 available only when the deployment opts in.
 
+## Layout
+
+`client.ts` holds `HastraVaultDirectClient` alone. The layers under it are
+their own modules: `constants.ts` (program ids and limits), `addresses.ts`
+(cluster config and PDAs), `codec.ts` (Anchor discriminators and little-endian
+reads), `amounts.ts` (token and share arithmetic), `rpc.ts` (the JSON-RPC wire
+and read caches), `state.ts` (account decoders and `readHastraState`),
+`instructions.ts` (raw instruction builders), `issues.ts` (blocking-issue
+checks) and `redemption.ts` (par request admission, request decoding and
+lifecycle events). Import a symbol from the module that defines it: ADR 0010
+bans re-exports, and the package's public surface is its `exports` map.
+
 ## Pinned deployment
 
 Use only `@sdp/types/hastra-programs`. Its program IDs and token mints are tied
