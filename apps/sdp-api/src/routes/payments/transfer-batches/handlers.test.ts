@@ -3,6 +3,7 @@ import { SigningError } from "@sdp/custody/signing";
 import { FeePaymentError } from "@sdp/fee-payment/port";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
+import { ASSET_AUDIT_STATUSES, type AssetAuditStatus } from "@sdp/types/audit";
 import {
   PAYMENT_TRANSFER_BATCH_RECIPIENT_STATUSES,
   PAYMENT_TRANSFER_BATCH_STATUSES,
@@ -403,7 +404,7 @@ function wrapPaymentsRepository(
 
 const auditRowSchema = z.object({
   resource_id: z.string(),
-  status: z.string(),
+  status: z.enum(ASSET_AUDIT_STATUSES),
   metadata: z.string().transform((raw) => z.record(z.string(), z.unknown()).parse(JSON.parse(raw))),
 });
 const auditOutcomeMetadataSchema = z.object({
@@ -438,7 +439,7 @@ async function readChunkAudit(transferId: string) {
 
 async function expectChunkOutcome(
   transfer: { id: string; signature: string | null },
-  verdict: { status: "success" | "failure"; batchTransferStatus: PaymentTransferStatus }
+  verdict: { status: AssetAuditStatus; batchTransferStatus: PaymentTransferStatus }
 ) {
   const { intent, outcome } = await readChunkAudit(transfer.id);
   expect(required(outcome).status).toBe(verdict.status);
@@ -2366,14 +2367,24 @@ describe("payment transfer batches", () => {
         created.batch.id,
       ]);
     });
-    const settled = Promise.all([
+    const settled = Promise.allSettled([
       settle(required(first).id, "confirmed"),
       settle(required(second).id, "failed"),
     ]);
-    await untilLockWaiters(getDb(env), { fragment: "payment_transfer_batches", count: 2 });
-    await holder.commit();
+    try {
+      await untilLockWaiters(getDb(env), { fragment: "payment_transfer_batches", count: 2 });
+    } finally {
+      try {
+        await holder.commit();
+      } finally {
+        await settled;
+      }
+    }
 
-    expect(await settled).toEqual([true, true]);
+    expect(await settled).toEqual([
+      { status: "fulfilled", value: true },
+      { status: "fulfilled", value: true },
+    ]);
     expect(await readBatchStatus(created.batch.id)).toBe("partially_failed");
   });
 
