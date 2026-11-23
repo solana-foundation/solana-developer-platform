@@ -343,19 +343,19 @@ const WALLET_SCOPE_ROUTES = {
   },
   "POST /v1/private-channels/channels": { exempt: SIGNS_NOTHING },
   "DELETE /v1/private-channels/channels/:id": { exempt: SIGNS_NOTHING },
-  "DELETE /v1/private-channels/wallets/:pubkey": { exempt: SIGNS_NOTHING },
+  "DELETE /v1/private-channels/verified-wallets/:pubkey": { exempt: SIGNS_NOTHING },
 
   // Helius Rings
-  "POST /v1/helius-rings/wallets": { refusedEarly: RINGS },
+  "POST /v1/helius-rings/wallets/provision-identity": { refusedEarly: RINGS },
   "POST /v1/helius-rings/wallets/:walletId/sync": { refusedEarly: RINGS },
-  "POST /v1/helius-rings/wallets/:walletId/rekey": { refusedEarly: RINGS },
+  "POST /v1/helius-rings/wallets/:walletId/identity/rekey": { refusedEarly: RINGS },
   "POST /v1/helius-rings/wallets/:walletId/zones": { refusedEarly: RINGS },
-  "POST /v1/helius-rings/operations": { refusedEarly: RINGS },
-  "POST /v1/helius-rings/operations/:operationId/execute": { refusedEarly: RINGS },
+  "POST /v1/helius-rings/operations/execute": { refusedEarly: RINGS },
+  "POST /v1/helius-rings/operations/:operationId/resume-execution": { refusedEarly: RINGS },
   "POST /v1/helius-rings/operations/:operationId/retry": { refusedEarly: RINGS },
   "POST /v1/helius-rings/operations/:operationId/recheck": { refusedEarly: RINGS },
   "POST /v1/helius-rings/operations/:operationId/void": { refusedEarly: RINGS },
-  "POST /v1/helius-rings/rings": {
+  "POST /v1/helius-rings/rings/register-and-initialize": {
     gap: "ring bring-up reserves the ring row, then signs with the custody wallet that owns the ring authority; no early scope check",
   },
 } as const satisfies Record<string, Classification>;
@@ -547,7 +547,7 @@ describe("wallet-scope route inventory", () => {
       "POST /v1/issuance/tokens/:tokenId/deploy/build-unsigned-transaction",
       "POST /v1/issuance/tokens/:tokenId/deploy/metadata/build-unsigned-transaction",
       "POST /v1/issuance/tokens/:tokenId/deploy/confirm-submitted-transaction",
-      "POST /v1/helius-rings/rings",
+      "POST /v1/helius-rings/rings/register-and-initialize",
     ]);
   });
 });
