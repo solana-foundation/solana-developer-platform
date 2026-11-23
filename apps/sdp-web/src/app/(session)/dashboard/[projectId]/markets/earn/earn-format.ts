@@ -141,6 +141,11 @@ export function formatTokenValue(
     : formatTokenQuantity(value, locale, tokenSymbol(tokenMint));
 }
 
+/** Basis points as a bare percent figure, without the % sign: 25 → "0.25". */
+export function formatBpsPercent(bps: number): string {
+  return (bps / 100).toFixed(2).replace(/\.?0+$/, "");
+}
+
 /** Turn a provider duration into one short, human unit for product copy. */
 export function formatDurationSeconds(seconds: number, locale: string): string | undefined {
   if (!Number.isFinite(seconds) || seconds < 0) return undefined;

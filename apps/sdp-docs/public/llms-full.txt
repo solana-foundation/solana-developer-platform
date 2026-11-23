@@ -62,7 +62,7 @@ Source: https://platform.solana.com/docs/guides/go-to-mainnet
 
 > Request mainnet access, connect your own custody account, and go live.
 
-You build in the Devnet sandbox at platform-beta.solana.com. Mainnet runs on
+You build in the Devnet sandbox at platform-devnet.solana.com. Mainnet runs on
 [platform.solana.com](https://platform.solana.com/dashboard), with its own
 accounts, organizations, and API keys. The SDP team must approve your
 organization there before it can use mainnet.
@@ -130,7 +130,7 @@ the summary. Click **Create key**.
 
 Copy the key to your secret manager; it's shown once. Replace your backend's
 sandbox key, and point it at `https://api.solana.com` instead of
-`https://api-beta.solana.com`. See
+`https://api-devnet.solana.com`. See
 [API key grants and wallet access](/docs/developing-with-sdp/manage-api-keys).
 
 ## 5. Fund your wallet with mainnet USDC
@@ -187,10 +187,10 @@ An environment belongs to the **project**, not to individual requests. Every ten
 
 | Environment  | Network      | Dashboard                  | API                           |
 | ------------ | ------------ | -------------------------- | ----------------------------- |
-| `sandbox`    | devnet       | `platform-beta.solana.com` | `https://api-beta.solana.com` |
+| `sandbox`    | devnet       | `platform-devnet.solana.com` | `https://api-devnet.solana.com` |
 | `production` | mainnet      | `platform.solana.com`      | `https://api.solana.com`      |
 
-A key's format doesn't name its environment; the project it belongs to does. Each host keeps its own accounts, organizations, and keys, so a sandbox key works only against `api-beta.solana.com`.
+A key's format doesn't name its environment; the project it belongs to does. Each host keeps its own accounts, organizations, and keys, so a sandbox key works only against `api-devnet.solana.com`.
 
 Both environments expose the same route shapes. Build and test against your sandbox project, then move to production with a production project's API key and the production API URL. [Go to mainnet](/docs/guides/go-to-mainnet) covers requesting access and setting up your production wallets and API key.
 
@@ -2108,6 +2108,23 @@ the fee payer before it signs.
 
 The catalog's `feeSponsored` describes deposits and withdrawals from a Treasury custody
 wallet. It never applies to a customer's wallet.
+
+### Fireblocks Treasury wallets
+
+Fireblocks BYOK custody wallets propose deposits and withdrawals as sign-only
+`PROGRAM_CALL` transactions on experimental deployments. Connect a hot wallet
+and configure its program-call approvals using the
+[Fireblocks setup guide](/docs/wallet-operations/fireblocks). The provider's
+eligibility and availability rules still apply; custody support does not
+enable a provider that is not yet offered.
+
+Approve promptly: Treasury's current workflow has a 20-second budget shared
+by building, simulation and signing. These are synchronous proposals. A late
+approval does not cause Fireblocks to broadcast. If the request times out,
+check its movement before retrying with the same idempotency key and payload.
+SDP preserves the approved message, adds any sponsor signature, records the
+signed transaction and submits it. A provider-order withdrawal still awaits
+the provider's payout after its on-chain request succeeds.
 
 A full withdrawal from a Kamino strategy leaves the empty share account open.
 The customer's wallet can close it to recover the rent; do not promise an
@@ -43357,14 +43374,14 @@ SDP runs in two places, each with its own accounts, organizations, and API keys:
 
 | | Dashboard | API | Network |
 | --- | --- | --- | --- |
-| Devnet sandbox | [platform-beta.solana.com](https://platform-beta.solana.com) | `https://api-beta.solana.com` | devnet, open to everyone |
+| Devnet sandbox | [platform-devnet.solana.com](https://platform-devnet.solana.com) | `https://api-devnet.solana.com` | devnet, open to everyone |
 | Mainnet | [platform.solana.com](https://platform.solana.com/dashboard) | `https://api.solana.com` | mainnet, after SDP approves your organization |
 
 Start in the Devnet sandbox. Nothing there holds real value. Request mainnet when your integration works there; see [Go to mainnet](/docs/guides/go-to-mainnet).
 
 ### 1. Create your account
 
-Go to [platform-beta.solana.com](https://platform-beta.solana.com) and click **Create account**. The sign-in screen has the same button at the top right. On platform.solana.com, **Try the sandbox** leads to the same place.
+Go to [platform-devnet.solana.com](https://platform-devnet.solana.com) and click **Create account**. The sign-in screen has the same button at the top right. On platform.solana.com, **Try the sandbox** leads to the same place.
 
 Enter your email address and a password to create your account.
 

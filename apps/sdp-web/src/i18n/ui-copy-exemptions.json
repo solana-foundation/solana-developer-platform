@@ -176,7 +176,7 @@
     "reason": "Vercel Flags Explorer metadata for operators (flag description and option labels); never rendered in the product UI"
   },
   {
-    "candidate": "src/flags/definitions.ts:111:5:Link to the hosted sandbox (platform-beta) from the homepage, sign-in, the workspace switcher and the mainnet request page. Turn on where the deployment serves mainnet only.",
+    "candidate": "src/flags/definitions.ts:111:5:Link to the hosted sandbox (platform-devnet) from the homepage, sign-in, the workspace switcher and the mainnet request page. Turn on where the deployment serves mainnet only.",
     "reason": "Vercel flag description and option labels, read by operators in the Vercel toolbar, never by dashboard users"
   },
   {
@@ -188,7 +188,7 @@
     "reason": "Vercel flag description and option labels, read by operators in the Vercel toolbar, never by dashboard users"
   },
   {
-    "candidate": "src/flags/definitions.ts:124:5:Show a Devnet badge beside the product name on the homepage and the sign-in, sign-up, terms and mainnet request pages. Turn on for the hosted Devnet sandbox (platform-beta).",
+    "candidate": "src/flags/definitions.ts:124:5:Show a Devnet badge beside the product name on the homepage and the sign-in, sign-up, terms and mainnet request pages. Turn on for the hosted Devnet sandbox (platform-devnet).",
     "reason": "Vercel flag description and option labels, read by operators in the Vercel toolbar, never by dashboard users"
   },
   {

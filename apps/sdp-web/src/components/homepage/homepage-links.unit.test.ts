@@ -76,7 +76,7 @@ describe("externalLinkProps", () => {
     const links = resolveHomepageLinks({ openSignup: true, hostedSandbox: true, ...labels });
     expect(links.signup).toEqual({ href: "/sign-up", label: "Create account", external: false });
     expect(links.sandbox).toEqual({
-      href: "https://platform-beta.solana.com/sign-up",
+      href: "https://platform-devnet.solana.com/sign-up",
       label: "Try the sandbox",
       external: true,
     });
