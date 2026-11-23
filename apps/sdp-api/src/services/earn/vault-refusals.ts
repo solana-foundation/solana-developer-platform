@@ -46,6 +46,26 @@ function providerError(error: unknown): { code: string; message: string } | null
   return { code: error.code, message: error.message };
 }
 
+/** Provider codes for state SDP could not read: an outage, not a refusal. */
+const UNREADABLE_PROVIDER_CODES: ReadonlySet<string> = new Set([
+  "VAULT_UNREADABLE",
+  "REQUEST_UNREADABLE",
+  "POSITION_UNREADABLE",
+]);
+
+/**
+ * Whether the provider or its RPC could not be read, which
+ * `rethrowVaultProviderFailure` answers with a retryable 503.
+ */
+export function isVaultProviderUnavailable(error: unknown): boolean {
+  const failure = providerError(error);
+  return (
+    (failure !== null && UNREADABLE_PROVIDER_CODES.has(failure.code)) ||
+    error instanceof RpcUnavailableError ||
+    isRpcUpstreamUnavailable(error)
+  );
+}
+
 /**
  * Convert the provider-neutral vault error vocabulary into the public API
  * contract. Provider refusals are caller-fixable 400s. An unreadable vault is
@@ -54,7 +74,6 @@ function providerError(error: unknown): { code: string; message: string } | null
  */
 export function rethrowVaultProviderFailure(error: unknown): never {
   const failure = providerError(error);
-  const unreadableRpc = error instanceof RpcUnavailableError || isRpcUpstreamUnavailable(error);
   if (failure && REFUSED_BUILD_CODES.has(failure.code)) {
     throw badRequest(failure.message);
   }
@@ -64,12 +83,7 @@ export function rethrowVaultProviderFailure(error: unknown): never {
     // an internal failure; the caller should refresh request history.
     throw conflict(failure.message);
   }
-  if (
-    failure?.code === "VAULT_UNREADABLE" ||
-    failure?.code === "REQUEST_UNREADABLE" ||
-    failure?.code === "POSITION_UNREADABLE" ||
-    unreadableRpc
-  ) {
+  if (isVaultProviderUnavailable(error)) {
     const causes = new Set<Error>();
     let cause = error;
     let transient = false;
