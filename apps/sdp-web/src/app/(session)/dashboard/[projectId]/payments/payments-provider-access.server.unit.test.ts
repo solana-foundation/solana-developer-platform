@@ -66,7 +66,7 @@ describe("loadOrganizationProviderAccess", () => {
 
     expect(await loadOrganizationProviderAccess()).toBeNull();
     expect(providerAccessUrls()).toEqual([
-      "https://api.sdp.test/v1/organizations/org_sdp/provider-access",
+      "https://api.sdp.test/v1/organizations/org_sdp/provider-availability",
     ]);
   });
 
