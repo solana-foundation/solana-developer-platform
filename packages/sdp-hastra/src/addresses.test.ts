@@ -1,4 +1,5 @@
 import { HASTRA_DEPLOYMENTS } from "@sdp/types/hastra-programs";
+import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { address } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import {
@@ -16,7 +17,9 @@ if (!configuredDeployment) throw new Error("test premise: Hastra mainnet deploym
 const DEPLOYMENT = configuredDeployment;
 const OWNER = address("C4XGF8r1gQP7p2PeKcRAFNwGAU1gCxiinRufqddY1m98");
 const PAYER = address("9jQqxu5N6bV1qkh1Yv5F6zSMDNFCV2eqRV8HqvcHhk9V");
-const USDC = address("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+const configuredUsdc = wellKnownMint("USDC", "mainnet-beta");
+if (!configuredUsdc) throw new Error("test premise: mainnet USDC is configured");
+const USDC = address(configuredUsdc);
 const OWNER_USDC = "8zxEFqNwajQHAJeQoBbQ4z4zUNSt4K5JFX24zXKQJCpK";
 
 describe("Hastra addresses", () => {
