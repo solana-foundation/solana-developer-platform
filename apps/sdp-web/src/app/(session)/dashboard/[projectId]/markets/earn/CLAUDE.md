@@ -40,7 +40,10 @@ review and submission. Definitively failed submissions stay terminal; a new
 intent needs a new deposit or withdrawal request.
 
 Persist retry keys before sending. A lost response retries the same request
-and exact signed bytes. Do not prepare another transaction because an RPC read
+and exact signed bytes. Wire amounts stay fixed across an ambiguous retry,
+including an intermediate-token All amount; live quotes and balances cannot
+change the retained request. Do not prepare another transaction because an
+RPC read
 is missing or a signature expired. Show cancellation only when the API returns
 `canCancel: true`. It discards an unsubmitted preparation. Once `/submit` has
 been accepted, cancellation and refresh stay unavailable. Cancellation never

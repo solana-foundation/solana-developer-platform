@@ -1,3 +1,4 @@
+import { assertFireblocksProposal } from "@sdp/custody/testing/fireblocks-proposal";
 import {
   supportsDepositEligibility,
   supportsVaultDirect,
@@ -143,6 +144,7 @@ describe("buildVaultDeposit", () => {
     expect(plan.cluster).toBe("mainnet-beta");
     expect(plan.assetIdentity).toEqual({ depositTokenMint: USDC, shareMint: WTGXX.mint });
     expect(plan.accepted).toEqual({ amount: "100.25" });
+    await assertFireblocksProposal(plan, OWNER);
     expect(plan.createsShareAccount).toBe(true);
     expect(plan.lookupTables).toEqual([]);
     // Wire shape: plain JSON, base64 data, numeric roles.
@@ -258,6 +260,7 @@ describe("buildVaultWithdrawal", () => {
 
     expect(plan.cluster).toBe("mainnet-beta");
     expect(plan.accepted).toEqual({ shares: "12.5" });
+    await assertFireblocksProposal(plan, OWNER);
     expect(plan.assetIdentity).toEqual({ depositTokenMint: USDC, shareMint: WTGXX.mint });
     expect(plan.createsShareAccount).toBeUndefined();
     // The transfer's destination is the Sale wallet's OWN fund ATA — the

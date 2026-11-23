@@ -67,7 +67,8 @@ PRIME shares.
 Save a fresh `Idempotency-Key` with each request body before you send it. After
 an uncertain response, such as a timeout or a `5xx`, resend the same body with
 the same key, including the same signed bytes, and SDP returns the original
-response. To pick up work you already started, list
+response. Keep the original amount as typed; do not derive a retry body from
+a newer quote or balance. To pick up work you already started, list
 `GET /v1/operations?ownerAddress=...` and continue from its `nextAction`
 instead of preparing another deposit or withdrawal.
 
@@ -75,8 +76,8 @@ Replaying a refresh with its original key returns the original response, even
 after a later submit; it builds nothing new. Read
 `GET /v1/operations/{operationId}` for the current state.
 
-Once you submit, prepare a new operation, with a new key, only after the first
-is `failed`. A timeout, blockhash expiry, an unknown provider response or
+Once you submit, prepare a replacement with a new key only after the original
+is definitively `failed`. A timeout, blockhash expiry, an unknown provider response or
 missing RPC history doesn't prove a submitted transaction never executed: keep
 tracking it until SDP establishes the outcome. A transaction you never submitted
 or sent can no longer land once the network passes its `lastValidBlockHeight`,
@@ -91,7 +92,9 @@ so you can prepare again.
 | SDP pricing | Not part of the Earn response. Confirm SDP pricing separately, and don't read a missing field as zero. |
 
 `terms.fees` lists known fees for the transaction: `null` means unavailable, not
-free, and it is not an invoice for ongoing provider costs. `rate.value` is the
+free, and it is not an invoice for ongoing provider costs. A full Kamino
+withdrawal leaves the empty share account open; do not promise an automatic
+rent refund. `rate.value` is the
 provider-reported APY, not a promise of returns after every cost, and Earn
 doesn't normalize rates across providers into one comparable net yield.
 
