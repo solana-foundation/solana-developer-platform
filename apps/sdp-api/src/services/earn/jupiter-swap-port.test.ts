@@ -1,27 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Env } from "@/types/env";
+import { createJupiterSwapPort, type JupiterSwapService } from "./jupiter-swap-port";
 
-const mocks = vi.hoisted(() => ({
-  build: vi.fn(),
-  quote: vi.fn(),
-}));
+// SAFETY: the port only hands `env` to the injected Jupiter service, which ignores it here.
+const env = {} as Env;
 
-vi.mock("./jupiter-swap.service", () => ({
-  fetchJupiterSwapLeg: mocks.build,
-  fetchJupiterSwapQuote: mocks.quote,
-}));
-
-import { createJupiterSwapPort } from "./jupiter-swap-port";
-
-const env = { JUPITER_SWAP_API_KEY: "jup_test_key" } as Env;
-
-beforeEach(() => {
-  vi.clearAllMocks();
-});
-
-describe("createJupiterSwapPort", () => {
-  it("builds an owner-paid swap with Jupiter's default account ceiling", async () => {
-    mocks.build.mockResolvedValue({
+/** A Jupiter service whose build answers one fixed leg. */
+function jupiterReturning() {
+  return {
+    fetchJupiterSwapLeg: vi.fn<JupiterSwapService["fetchJupiterSwapLeg"]>().mockResolvedValue({
       instructions: [],
       lookupTableAddresses: [],
       sourceAmount: "100",
@@ -30,9 +17,16 @@ describe("createJupiterSwapPort", () => {
       priceImpactPct: "0",
       routeLabels: ["venue"],
       slippageBps: 50,
-    });
+    }),
+    fetchJupiterSwapQuote: vi.fn<JupiterSwapService["fetchJupiterSwapQuote"]>(),
+  };
+}
 
-    const leg = await createJupiterSwapPort(env, "Jupiter swaps").buildSwapLeg({
+describe("createJupiterSwapPort", () => {
+  it("builds an owner-paid swap with Jupiter's default account ceiling", async () => {
+    const jupiter = jupiterReturning();
+
+    const leg = await createJupiterSwapPort(env, "Jupiter swaps", jupiter).buildSwapLeg({
       cluster: "mainnet-beta",
       inputMint: "usdc",
       outputMint: "usdy",
@@ -41,10 +35,15 @@ describe("createJupiterSwapPort", () => {
       slippageBps: 50,
     });
 
-    const [, , request] = mocks.build.mock.calls[0] ?? [];
-    expect(request).toMatchObject({ owner: "owner", sourceAmount: "100", slippageBps: 50 });
-    expect(request?.payer).toBeUndefined();
-    expect(request?.maxAccounts).toBeUndefined();
+    expect(jupiter.fetchJupiterSwapLeg).toHaveBeenCalledWith(env, expect.any(Object), {
+      inputMint: "usdc",
+      outputMint: "usdy",
+      sourceAmount: "100",
+      owner: "owner",
+      payer: undefined,
+      slippageBps: 50,
+      maxAccounts: undefined,
+    });
     expect(leg).toEqual({
       instructions: [],
       lookupTableAddresses: [],
@@ -56,8 +55,10 @@ describe("createJupiterSwapPort", () => {
   });
 
   it("names its caller when it refuses a devnet request, without calling Jupiter", async () => {
+    const jupiter = jupiterReturning();
+
     await expect(
-      createJupiterSwapPort(env, "Jupiter swaps").buildSwapLeg({
+      createJupiterSwapPort(env, "Jupiter swaps", jupiter).buildSwapLeg({
         cluster: "devnet",
         inputMint: "usdc",
         outputMint: "usdy",
@@ -66,6 +67,6 @@ describe("createJupiterSwapPort", () => {
         slippageBps: 50,
       })
     ).rejects.toThrow("Jupiter swaps are mainnet-only; refusing a devnet swap request");
-    expect(mocks.build).not.toHaveBeenCalled();
+    expect(jupiter.fetchJupiterSwapLeg).not.toHaveBeenCalled();
   });
 });

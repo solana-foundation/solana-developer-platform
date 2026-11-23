@@ -3,6 +3,12 @@ import type { Env } from "@/types/env";
 import { fetchJupiterSwapLeg, fetchJupiterSwapQuote } from "./jupiter-swap.service";
 import { createVaultDeadline } from "./vault-deadline";
 
+/** The reviewed Jupiter swap service the port builds through. */
+export interface JupiterSwapService {
+  fetchJupiterSwapLeg: typeof fetchJupiterSwapLeg;
+  fetchJupiterSwapQuote: typeof fetchJupiterSwapQuote;
+}
+
 /**
  * The API's implementation of the execution packages' `EarnSwapPort`.
  *
@@ -20,8 +26,13 @@ import { createVaultDeadline } from "./vault-deadline";
  *
  * @param env - The API environment carrying the Jupiter credential.
  * @param subject - What a refused devnet request names, e.g. "Jupiter swaps".
+ * @param jupiter - The reviewed Jupiter swap service; tests inject their own.
  */
-export function createJupiterSwapPort(env: Env, subject: string): EarnSwapPort {
+export function createJupiterSwapPort(
+  env: Env,
+  subject: string,
+  jupiter: JupiterSwapService = { fetchJupiterSwapLeg, fetchJupiterSwapQuote }
+): EarnSwapPort {
   /** Jupiter routes mainnet only; a devnet request here is a wiring bug. */
   const assertMainnet = (cluster: string) => {
     if (cluster !== "mainnet-beta") {
@@ -31,7 +42,7 @@ export function createJupiterSwapPort(env: Env, subject: string): EarnSwapPort {
   return {
     async buildSwapLeg(request): Promise<EarnSwapLeg> {
       assertMainnet(request.cluster);
-      const leg = await fetchJupiterSwapLeg(env, createVaultDeadline(), {
+      const leg = await jupiter.fetchJupiterSwapLeg(env, createVaultDeadline(), {
         inputMint: request.inputMint,
         outputMint: request.outputMint,
         sourceAmount: request.amount,
@@ -51,7 +62,7 @@ export function createJupiterSwapPort(env: Env, subject: string): EarnSwapPort {
     },
     async quoteSwap(request) {
       assertMainnet(request.cluster);
-      const quote = await fetchJupiterSwapQuote(env, createVaultDeadline(), {
+      const quote = await jupiter.fetchJupiterSwapQuote(env, createVaultDeadline(), {
         inputMint: request.inputMint,
         outputMint: request.outputMint,
         sourceAmount: request.amount,
