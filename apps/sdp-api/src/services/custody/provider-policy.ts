@@ -11,7 +11,7 @@ import { currentClusterScope } from "@sdp/rpc/scope";
 import type { ProviderPolicyCheck } from "@sdp/types/custody";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { getDb } from "@/db/client";
-import { mapSettledWithConcurrency } from "@/lib/concurrency";
+import { mapWithConcurrency } from "@/lib/concurrency";
 import { getLogger } from "@/runtime/logger";
 import { createSystemAuditService } from "@/services/audit.service";
 import { createCredentialSecretStore } from "@/services/credential-secret-store";
@@ -36,8 +36,6 @@ async function inspectBatch(
   const credentials = new Map<string, ReturnType<typeof loadCredential>>();
   const policies = new Map<string, ReturnType<typeof readFireblocksPolicy>>();
   async function loadCredential(target: PolicyCheckTarget) {
-    if (target.source !== "stored")
-      throw new Error("Policy inspection requires stored credentials");
     const payload = await createCredentialSecretStore(env, target.storage_backend).read({
       orgId: target.organization_id,
       stored: {
@@ -69,8 +67,9 @@ async function inspectBatch(
         policies.set(target.provider_credential_id, policyRead);
       }
       const policy = await policyRead;
-      // Presence of a native Transfer rule. RAW signing is not proven by this check.
       if ("error" in policy) return policy.error;
+      // The read returns the parsed policy envelope; every judgement below walks
+      // it without parsing the payload again.
       const vaultId = denormalizeFireblocksWalletId(target.wallet_id);
       // Rules naming the native asset (or any asset) decide the result on their
       // own; the USDC asset id only matters when a rule names some other asset,
@@ -109,6 +108,11 @@ async function inspectBatch(
       getLogger().warn(
         {
           event: "sdp_api_custody_provider_policy_inspect_failed",
+          organizationId: target.organization_id,
+          projectId: target.project_id,
+          custodyConnectionId: target.custody_connection_id,
+          custodyWalletId: target.id,
+          provider: target.provider,
           errorClass: error instanceof Error ? error.name : typeof error,
         },
         "Custody provider policy inspection failed"
@@ -117,15 +121,13 @@ async function inspectBatch(
     }
   };
   // One Privy read per wallet, one Fireblocks policy read per credential. The bound keeps
-  // a slow provider from holding the whole batch open for minutes.
-  const settled = await mapSettledWithConcurrency(targets, PROVIDER_READ_CONCURRENCY, inspect);
-  return settled.map((outcome, index) => ({
-    // SAFETY: mapSettledWithConcurrency returns one settled result per target in input order.
+  // a slow provider from holding the whole batch open for minutes. The inspect closure
+  // observes every failure, so the bounded map cannot reject.
+  const results = await mapWithConcurrency(targets, PROVIDER_READ_CONCURRENCY, inspect);
+  return results.map((result, index) => ({
+    // SAFETY: mapWithConcurrency returns one result per target in input order.
     target: targets[index] as PolicyCheckTarget,
-    result:
-      outcome.status === "fulfilled"
-        ? outcome.value
-        : { status: "unknown", reason: "provider_unavailable" },
+    result,
   }));
 }
 

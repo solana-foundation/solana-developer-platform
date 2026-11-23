@@ -1,5 +1,7 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
+  BYOK_CUSTODY_PROVIDERS,
+  type ByokCustodyProvider,
   PROVIDER_POLICY_REASONS,
   PROVIDER_POLICY_STATUSES,
   type ProviderPolicyCheck,
@@ -21,7 +23,7 @@ export interface PolicyCheckTarget {
   organization_id: string;
   project_id: string;
   custody_connection_id: string;
-  provider: "privy" | "fireblocks";
+  provider: ByokCustodyProvider;
   provider_credential_id: string;
   source: "stored" | "runtime";
   storage_backend: CredentialSecretStorageBackend;
@@ -54,7 +56,8 @@ export class CustodyPolicyStore {
         JOIN provider_credentials pc ON pc.id = c.provider_credential_id
         JOIN projects p ON p.id = c.project_id AND p.organization_id = c.organization_id
         WHERE w.status = 'active' AND c.status = 'active' AND pc.status = 'active'
-          AND c.provider IN ('fireblocks', 'privy') AND p.status = 'active' AND p.environment = ?
+          AND c.provider IN (${BYOK_CUSTODY_PROVIDERS.map((provider) => `'${provider}'`).join(", ")})
+          AND p.status = 'active' AND p.environment = ?
           AND (w.policy_check_claimed_at IS NULL OR w.policy_check_claimed_at < NOW() - INTERVAL '5 minutes')
           AND (w.provider_policy IS NULL OR w.provider_policy->>'credentialId' IS DISTINCT FROM c.provider_credential_id
             OR (w.provider_policy->>'checkedAt')::timestamptz < NOW() - INTERVAL '1 hour')

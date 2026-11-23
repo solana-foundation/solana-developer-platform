@@ -47,3 +47,34 @@ export async function mapSettledWithConcurrency<T, U>(
 
   return results;
 }
+
+/**
+ * The same bound for a mapper that cannot reject: results are values in input
+ * order, and a throw fails the whole map rather than settling per item.
+ *
+ * @param items - Items to map.
+ * @param concurrency - Maximum simultaneously running mappers.
+ * @param mapper - Async transform applied to each item.
+ * @returns Values aligned to `items` by index.
+ */
+export async function mapWithConcurrency<T, U>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T) => Promise<U>
+): Promise<U[]> {
+  const results = new Array<U>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(concurrency, items.length);
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        results[currentIndex] = await mapper(items[currentIndex] as T);
+      }
+    })
+  );
+
+  return results;
+}

@@ -328,6 +328,43 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
     });
   });
 
+  it("reports a proven missing wallet even when the token catalogue read fails", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const path = new URL(String(url)).pathname;
+      if (path === "/v1/tap/active_policy")
+        return Response.json({
+          policy: {
+            rules: [
+              {
+                type: "TRANSFER",
+                asset: "SOL_TEST",
+                src: { ids: [["*", "VAULT", "*"]] },
+                action: "ALLOW",
+              },
+              {
+                type: "TRANSFER",
+                asset: "ETH",
+                src: { ids: [["*", "VAULT", "*"]] },
+                action: "2-TIER",
+              },
+            ],
+          },
+        });
+      if (path === "/v1/supported_assets") return new Response("catalogue down", { status: 500 });
+      return Response.json({ addresses: [{ address: ADDRESS }] });
+    });
+    const connected = await connect();
+    await inSandboxScope(() => checkDueProviderPolicies(testEnv));
+    const detail = await request(`/connections/${connected.connectionId}`);
+    // The native allow rule already proves the credential can move funds alone;
+    // the gated ETH rule only asks for the catalogue, whose failure must not
+    // turn the proven finding into an unknown.
+    expect((await detail.json()).data.connection.providerPolicy).toMatchObject({
+      status: "missing",
+      reason: "no_policy",
+    });
+  });
+
   it("keeps an unreadable USDC rule from reporting missing coverage", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
       const path = new URL(String(url)).pathname;
