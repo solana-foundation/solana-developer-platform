@@ -1,13 +1,5 @@
-import {
-  decimalScale,
-  formatDecimalAmount,
-  isDecimalString,
-  parseDecimalAmount,
-} from "@sdp/solana/amount";
+import { acceptTokenAmount, TokenAmountError } from "@sdp/solana/amount";
 import { amountOutOfRange, amountTooPrecise, invalidAmount } from "./errors";
-
-/** Every amount Kamino serializes into an instruction is an unsigned 64-bit integer. */
-const MAX_U64_BASE_UNITS = (1n << 64n) - 1n;
 
 /**
  * Amount validation at the MINT's precision.
@@ -62,47 +54,14 @@ export function mintDecimals(value: unknown, label: string): number {
  * refusal it can surface, and the number it asked for is the number that moves.
  */
 export function acceptAtMintScale(field: string, value: string, decimals: number): string {
-  const normalized = value.trim();
-  // `isDecimalString` is the syntax gate and also the SIGN gate: it accepts
-  // digits and at most one dot, so "-1", "1e5" and "Infinity" are all rejected
-  // here rather than needing a separate numeric parse.
-  if (!isDecimalString(normalized)) throw invalidAmount(field, value);
-  // Scale is a property of the VALUE, not its spelling. Zeros after the last
-  // non-zero fractional digit do not require mint atoms: `1.5000000` is exactly
-  // representable by a six-decimal mint even though its input text has seven
-  // places. Strip only those insignificant zeros; a non-zero sub-atom remains
-  // and is still rejected below (`1.0000001` stays seven-place precision).
-  const canonicalScaleInput = trimInsignificantFractionalZeroes(normalized);
-  if (decimalScale(canonicalScaleInput) > decimals) {
-    throw amountTooPrecise(field, value, decimals);
+  try {
+    return acceptTokenAmount(value, decimals).canonical;
+  } catch (error) {
+    if (!(error instanceof TokenAmountError)) throw error;
+    if (error.reason === "too_precise") throw amountTooPrecise(field, value, decimals);
+    if (error.reason === "out_of_range") throw amountOutOfRange(field, value);
+    throw invalidAmount(field, value);
   }
-  // Parse once and retain the exact atom count. Scale-valid decimals can still
-  // overflow the u64 encoded by Kamino instructions; letting those through
-  // defers the failure until Borsh emits an opaque byte-length error after RPC
-  // work. This shared gate covers deposit amount, minSharesOut and withdrawal
-  // shares before any of them reaches the SDK.
-  const baseUnits = parseDecimalAmount(canonicalScaleInput, decimals);
-  if (baseUnits > MAX_U64_BASE_UNITS) throw amountOutOfRange(field, value);
-
-  // Re-serialised through the repo's fixed-point helpers so what leaves this
-  // package is scaled exactly like every other amount in SDP ("1.500" -> "1.5").
-  return formatDecimalAmount(baseUnits, decimals);
-}
-
-function trimInsignificantFractionalZeroes(value: string): string {
-  const dot = value.indexOf(".");
-  if (dot === -1) return value;
-
-  const whole = value.slice(0, dot);
-  let fractionEnd = value.length;
-  // Scan once from the end instead of applying an end-anchored repetition to
-  // caller-controlled input. The latter can retry from every zero when a long
-  // run ends in a non-zero digit, turning validation into quadratic work.
-  while (fractionEnd > dot + 1 && value[fractionEnd - 1] === "0") {
-    fractionEnd -= 1;
-  }
-
-  return fractionEnd === dot + 1 ? whole : value.slice(0, fractionEnd);
 }
 
 /**

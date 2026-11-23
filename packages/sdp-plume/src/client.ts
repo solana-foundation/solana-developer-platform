@@ -20,7 +20,13 @@ import type {
 import { decimalStringFromNumber, multiplyDecimalAmounts } from "@sdp/payments/decimal";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
-import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
+import {
+  type AcceptedTokenAmount,
+  AmountError,
+  acceptTokenAmount,
+  formatDecimalAmount,
+  TokenAmountError,
+} from "@sdp/solana/amount";
 import { PLUME_PROGRAMS, PLUME_VAULTS, plumeVault } from "@sdp/types/plume-programs";
 import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
 import {
@@ -39,20 +45,21 @@ import {
 import { admitPlumeTransaction } from "./plan";
 
 function amount(value: string, decimals: number, numeric: boolean) {
-  let atoms: bigint;
+  let accepted: AcceptedTokenAmount;
   try {
-    atoms = parseDecimalAmount(value, decimals);
+    accepted = acceptTokenAmount(value, decimals, { positive: true });
   } catch (cause) {
     if (!(cause instanceof AmountError)) throw cause;
+    if (
+      cause instanceof TokenAmountError &&
+      (cause.reason === "out_of_range" || cause.reason === "not_positive")
+    )
+      throw new SdpPlumeError("INVALID_AMOUNT", "Amount exceeds Plume's exact integer range");
     throw new SdpPlumeError("INVALID_AMOUNT", `Amount must use at most ${decimals} decimals`);
   }
-  if (
-    atoms <= 0n ||
-    atoms > (1n << 64n) - 1n ||
-    (numeric && atoms > BigInt(Number.MAX_SAFE_INTEGER))
-  )
+  if (numeric && accepted.baseUnits > BigInt(Number.MAX_SAFE_INTEGER))
     throw new SdpPlumeError("INVALID_AMOUNT", "Amount exceeds Plume's exact integer range");
-  return { atoms, text: formatDecimalAmount(atoms, decimals) };
+  return { atoms: accepted.baseUnits, text: accepted.canonical };
 }
 
 function configuration(ctx: EarnRuntimeContext, reference: string) {

@@ -91,7 +91,8 @@ equality with the approved request).
 
 `minSharesOut`/`minAmountOut` are refused-if-absent (Veda's rule): a floor
 nobody chose is the appearance of protection. Amounts are refused, never
-rounded, at the pair's 6-decimal scale (`canonicalAmount`).
+rounded, at the pair's 6-decimal scale (`canonicalAmount`, over the shared
+`acceptTokenAmount` grammar).
 
 ## Positions are read in base units, and the valuation may be absent
 

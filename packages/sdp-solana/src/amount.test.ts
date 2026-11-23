@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   AmountError,
+  acceptTokenAmount,
   addDecimalAmounts,
   compareDecimalAmounts,
   formatDecimalAmount,
   parseDecimalAmount,
   parseTokenAmount,
   scaleDecimalAmountByBps,
+  TokenAmountError,
   toMosaicAmount,
   toNumberAmount,
 } from "./amount";
@@ -173,5 +175,50 @@ describe("parseTokenAmount", () => {
   it("rejects excess precision and u64 overflow", () => {
     assert.throws(() => parseTokenAmount("1.0000001", 6), AmountError);
     assert.throws(() => parseTokenAmount("18446744073709.551616", 6), AmountError);
+  });
+});
+
+describe("acceptTokenAmount", () => {
+  const refusal = (value: string, decimals: number, reason: string, positive = false) =>
+    assert.throws(
+      () => acceptTokenAmount(value, decimals, { positive }),
+      (error) => error instanceof TokenAmountError && error.reason === reason
+    );
+
+  it("returns the base units and the canonical form the instruction encodes", () => {
+    assert.deepEqual(acceptTokenAmount(" 1.500 ", 6), { baseUnits: 1_500_000n, canonical: "1.5" });
+    assert.deepEqual(acceptTokenAmount("0", 6), { baseUnits: 0n, canonical: "0" });
+  });
+
+  it("judges scale by value, not spelling", () => {
+    assert.deepEqual(acceptTokenAmount("1.5000000", 6), {
+      baseUnits: 1_500_000n,
+      canonical: "1.5",
+    });
+    refusal("1.0000001", 6, "too_precise");
+  });
+
+  it("refuses anything but digits and one dot", () => {
+    for (const value of ["", " ", ".", "-1", "+1", "1e3", "1,000", "1.2.3", "Infinity", "0x10"]) {
+      refusal(value, 6, "invalid");
+    }
+  });
+
+  it("refuses what a u64 cannot encode, however large", () => {
+    assert.equal(acceptTokenAmount("18446744073709.551615", 6).baseUnits, (1n << 64n) - 1n);
+    refusal("18446744073709.551616", 6, "out_of_range");
+    refusal("9".repeat(80), 6, "out_of_range");
+  });
+
+  it("refuses zero only when asked to", () => {
+    refusal("0.000", 6, "not_positive", true);
+    assert.equal(acceptTokenAmount("0.000001", 6, { positive: true }).baseUnits, 1n);
+  });
+
+  it("treats an unusable decimals count as a configuration error, not a refusal", () => {
+    assert.throws(
+      () => acceptTokenAmount("1", -1),
+      (error) => error instanceof AmountError && !(error instanceof TokenAmountError)
+    );
   });
 });

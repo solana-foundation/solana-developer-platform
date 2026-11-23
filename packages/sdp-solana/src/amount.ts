@@ -220,3 +220,89 @@ export const toMosaicAmount = (value: string, decimals: number): number => {
 
   return toNumberAmount(formatDecimalAmount(baseUnits, decimals));
 };
+
+/** Every token amount a Solana instruction encodes is an unsigned 64-bit integer. */
+export const MAX_TOKEN_BASE_UNITS = (1n << 64n) - 1n;
+
+/** Why `acceptTokenAmount` refused a value. */
+export type TokenAmountRefusal = "invalid" | "too_precise" | "out_of_range" | "not_positive";
+
+/** A caller amount `acceptTokenAmount` refused, with a reason each provider maps to its own error. */
+export class TokenAmountError extends AmountError {
+  constructor(
+    readonly reason: TokenAmountRefusal,
+    message: string
+  ) {
+    super(message);
+    this.name = "TokenAmountError";
+  }
+}
+
+/** An amount `acceptTokenAmount` accepted. */
+export interface AcceptedTokenAmount {
+  /** The exact integer the instruction encodes. */
+  baseUnits: bigint;
+  /** The same value as a decimal string, canonical to the mint's scale ("1.500" is "1.5"). */
+  canonical: string;
+}
+
+/**
+ * Zeros after the last non-zero fractional digit, removed with one scan from the end rather than
+ * an end-anchored repetition, which could retry from every zero of a long caller-controlled run.
+ */
+function trimInsignificantFractionalZeroes(value: string): string {
+  const dot = value.indexOf(".");
+  if (dot === -1) return value;
+  let fractionEnd = value.length;
+  while (fractionEnd > dot + 1 && value[fractionEnd - 1] === "0") fractionEnd -= 1;
+  return fractionEnd === dot + 1 ? value.slice(0, dot) : value.slice(0, fractionEnd);
+}
+
+/**
+ * Accept a caller amount at a mint's scale for an instruction that encodes a u64: the one amount
+ * grammar every Earn provider package uses.
+ *
+ * - Syntax: digits and at most one dot once trimmed (`isDecimalString`), so a sign, an exponent or
+ *   `Infinity` is refused.
+ * - Scale is a property of the VALUE, not its spelling: zeros after the last non-zero fractional
+ *   digit need no mint atoms, so `1.5000000` fits a six-decimal mint while `1.0000001` is refused.
+ *   Never floored or clamped: the number asked for is the number that moves.
+ * - The base units must fit a u64 and, with `positive`, be at least one atom.
+ *
+ * @param value - The caller's decimal amount.
+ * @param decimals - The mint's decimals.
+ * @param options - `positive` refuses zero.
+ * @returns The base units and their canonical decimal string.
+ * @throws {TokenAmountError} With the reason the value was refused.
+ * @throws {AmountError} When `decimals` is not a non-negative integer.
+ */
+export function acceptTokenAmount(
+  value: string,
+  decimals: number,
+  options: { positive?: boolean } = {}
+): AcceptedTokenAmount {
+  if (!Number.isInteger(decimals) || decimals < 0) {
+    throw new AmountError("Invalid decimals configuration");
+  }
+  const normalized = value.trim();
+  if (!isDecimalString(normalized)) throw new TokenAmountError("invalid", "Invalid decimal amount");
+  const significant = trimInsignificantFractionalZeroes(normalized);
+  if (decimalScale(significant) > decimals) {
+    throw new TokenAmountError("too_precise", "Amount has too many decimal places");
+  }
+  let baseUnits: bigint;
+  try {
+    baseUnits = parseDecimalAmount(significant, decimals);
+  } catch (error) {
+    // Syntax, scale and decimals are proven above, so only the 256-bit range remains.
+    if (!(error instanceof AmountError)) throw error;
+    throw new TokenAmountError("out_of_range", "Amount is out of range");
+  }
+  if (baseUnits > MAX_TOKEN_BASE_UNITS) {
+    throw new TokenAmountError("out_of_range", "Amount is out of range");
+  }
+  if (options.positive === true && baseUnits === 0n) {
+    throw new TokenAmountError("not_positive", "Amount must be positive");
+  }
+  return { baseUnits, canonical: formatDecimalAmount(baseUnits, decimals) };
+}

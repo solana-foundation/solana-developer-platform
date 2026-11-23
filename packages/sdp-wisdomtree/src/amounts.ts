@@ -1,3 +1,9 @@
+import {
+  type AcceptedTokenAmount,
+  acceptTokenAmount,
+  TokenAmountError,
+  type TokenAmountRefusal,
+} from "@sdp/solana/amount";
 import { SdpWisdomTreeError } from "./errors";
 
 /**
@@ -7,26 +13,8 @@ import { SdpWisdomTreeError } from "./errors";
  * encode, because a movement row is a claim about what moved on chain.
  */
 
-function isPlainPositiveDecimal(value: string): boolean {
-  if (value.length === 0) return false;
-  let decimalPoint = -1;
-  for (let index = 0; index < value.length; index += 1) {
-    const code = value.charCodeAt(index);
-    if (code >= 48 && code <= 57) continue;
-    if (value[index] !== "." || decimalPoint !== -1 || index === 0 || index === value.length - 1) {
-      return false;
-    }
-    decimalPoint = index;
-  }
-  return true;
-}
-
-export interface AcceptedAmount {
-  /** Canonical decimal string (no trailing fractional zeroes, no leading zeroes). */
-  canonical: string;
-  /** The exact integer the instruction encodes. */
-  baseUnits: bigint;
-}
+/** The canonical decimal string (no trailing fractional or leading zeroes) and its exact base units. */
+export type AcceptedAmount = AcceptedTokenAmount;
 
 /**
  * Parse `amount` against a mint of `decimals`, refusing anything the mint
@@ -34,30 +22,28 @@ export interface AcceptedAmount {
  * never a subscription or redemption, only a caller bug.
  */
 export function acceptAtMintScale(amount: string, decimals: number, what: string): AcceptedAmount {
-  const trimmed = amount.trim();
-  if (!isPlainPositiveDecimal(trimmed)) {
-    throw new SdpWisdomTreeError(
-      "INVALID_AMOUNT",
-      `${what} must be a plain positive decimal string; received "${amount}".`
-    );
+  try {
+    return acceptTokenAmount(amount, decimals, { positive: true });
+  } catch (error) {
+    if (!(error instanceof TokenAmountError)) throw error;
+    throw new SdpWisdomTreeError("INVALID_AMOUNT", refusal(error.reason, amount, decimals, what));
   }
-  const [whole = "0", fraction = ""] = trimmed.split(".");
-  const keptFraction = fraction.slice(0, decimals);
-  const discarded = fraction.slice(decimals);
-  if ([...discarded].some((digit) => digit !== "0")) {
-    throw new SdpWisdomTreeError(
-      "INVALID_AMOUNT",
-      `${what} of ${amount} is finer than the mint's ${decimals} decimals; ` +
-        "refusing rather than silently moving a different amount."
-    );
-  }
+}
 
-  const baseUnits =
-    BigInt(whole) * 10n ** BigInt(decimals) + BigInt(keptFraction.padEnd(decimals, "0") || "0");
-  if (baseUnits === 0n) {
-    throw new SdpWisdomTreeError("INVALID_AMOUNT", `${what} must be greater than zero.`);
+function refusal(reason: TokenAmountRefusal, amount: string, decimals: number, what: string) {
+  switch (reason) {
+    case "invalid":
+      return `${what} must be a plain positive decimal string; received "${amount}".`;
+    case "too_precise":
+      return (
+        `${what} of ${amount} is finer than the mint's ${decimals} decimals; ` +
+        "refusing rather than silently moving a different amount."
+      );
+    case "not_positive":
+      return `${what} must be greater than zero.`;
+    case "out_of_range":
+      return `${what} of ${amount} does not fit an SPL token amount.`;
   }
-  return { canonical: formatBaseUnits(baseUnits, decimals), baseUnits };
 }
 
 /** Exact base-units → canonical decimal string. Serializes zero as "0". */

@@ -19,7 +19,13 @@ import type {
 import { contextAwareRpcFetch } from "@sdp/rpc/read-context";
 import { markRpcAttemptDeadline } from "@sdp/rpc/telemetry";
 import { deriveAssociatedTokenAddress } from "@sdp/solana/address";
-import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
+import {
+  AmountError,
+  acceptTokenAmount,
+  formatDecimalAmount,
+  parseDecimalAmount,
+  TokenAmountError,
+} from "@sdp/solana/amount";
 import { type OndoDeployment, ondoDeployment, ondoDepositMints } from "@sdp/types/ondo-programs";
 import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import { isAddress } from "@solana/kit";
@@ -129,10 +135,16 @@ export function ondoClusterConfig(cluster: SolanaCluster): OndoClusterConfig {
 
 /** Canonical decimal amount at the pair's scale, or a typed refusal. */
 function canonicalAmount(value: string, label: string): { text: string; atoms: bigint } {
-  let atoms: bigint;
   try {
-    atoms = parseDecimalAmount(value, TOKEN_DECIMALS);
+    const { baseUnits, canonical } = acceptTokenAmount(value, TOKEN_DECIMALS, { positive: true });
+    return { text: canonical, atoms: baseUnits };
   } catch (error) {
+    if (
+      error instanceof TokenAmountError &&
+      (error.reason === "out_of_range" || error.reason === "not_positive")
+    ) {
+      throw new SdpOndoError("INVALID_AMOUNT", `${label} must fit a positive SPL token amount`);
+    }
     if (error instanceof AmountError) {
       throw new SdpOndoError(
         "INVALID_AMOUNT",
@@ -141,10 +153,6 @@ function canonicalAmount(value: string, label: string): { text: string; atoms: b
     }
     throw error;
   }
-  if (atoms <= 0n || atoms > MAX_TOKEN_ATOMS) {
-    throw new SdpOndoError("INVALID_AMOUNT", `${label} must fit a positive SPL token amount`);
-  }
-  return { text: formatDecimalAmount(atoms, TOKEN_DECIMALS), atoms };
 }
 
 interface OndoTokenAccount {
