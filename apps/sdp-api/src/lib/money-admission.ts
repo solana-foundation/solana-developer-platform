@@ -370,6 +370,31 @@ function statusAdmits(
   return (table[movement] ?? []).some((allowed) => allowed === status);
 }
 
+/** Whether the principal holds the route permission a durable user operation recorded. */
+function decideRequiredAction(
+  principal: MoneyPrincipalFacts,
+  readAt: number,
+  requiredAction: Action,
+  subject: MoneyAdmissionSubject
+): MoneyAdmissionDecision {
+  const required: readonly [Action] = [requiredAction];
+  switch (principal.kind) {
+    case "api_key":
+      return decideApiKey(principal.key, readAt, required, subject);
+    case "member":
+      return decideMember(principal.member, required);
+    case "none":
+      return refuse("principal_missing");
+    case "mandate":
+    case "payment_request":
+      return refuseActionNotHeld(required);
+    default: {
+      const unknownPrincipal: never = principal;
+      throw new Error(`Unknown money principal: ${JSON.stringify(unknownPrincipal)}`);
+    }
+  }
+}
+
 /**
  * Pure. The principal's half of a decision: is the principal live, may it sign
  * with this wallet, and, for a start, does it hold one of the movement's
@@ -387,15 +412,7 @@ export function decidePrincipal(
   // A durable user operation adds its route permission without replacing the
   // movement's own requirements or its commercial exit classification.
   if (requiredAction !== undefined) {
-    const required: readonly [Action] = [requiredAction];
-    const actionDecision =
-      principal.kind === "api_key"
-        ? decideApiKey(principal.key, facts.readAt, required, subject)
-        : principal.kind === "member"
-          ? decideMember(principal.member, required)
-          : principal.kind === "none"
-            ? refuse("principal_missing")
-            : refuseActionNotHeld(required);
+    const actionDecision = decideRequiredAction(principal, facts.readAt, requiredAction, subject);
     if (!actionDecision.admitted) return actionDecision;
   }
   const actions = movementActions(movement);
@@ -510,11 +527,8 @@ export function decideMovement(
   requiredAction?: Action
 ): MoneyAdmissionDecision {
   if (MOVEMENTS[movement].kind === "exit") {
-    return facts
-      ? decidePrincipal(movement, facts, subject, requiredAction)
-      : requiredAction === undefined
-        ? ADMITTED
-        : refuse("principal_missing");
+    if (facts) return decidePrincipal(movement, facts, subject, requiredAction);
+    return requiredAction === undefined ? ADMITTED : refuse("principal_missing");
   }
   const organization = decideMoneyStart(facts);
   if (!organization.admitted || !facts) {

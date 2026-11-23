@@ -65,6 +65,25 @@ import {
 } from "./position-hydration";
 import { earnDiscoveryQuerySchema, earnPositionsQuerySchema } from "./read-schemas";
 
+/** Why a catalogue row takes no new deposits: retained for discovery, or no adapter can build one. */
+function depositUnavailableReason(
+  row: Parameters<typeof isEarnStrategyInExecutionShelf>[0],
+  capability: Pick<EarnCoreStrategy["capabilities"], "deposit">
+): EarnCoreStrategy["capabilities"]["depositUnavailableReason"] {
+  if (!isEarnStrategyInExecutionShelf(row)) return "catalogue_only";
+  if (!capability.deposit) return "adapter_unavailable";
+  return undefined;
+}
+
+/** The one source a positions read discovers holdings for, when it names one. */
+function discoverySourceOf(
+  query: Pick<z.output<typeof earnPositionsQuerySchema>, "walletId" | "ownerAddress">
+): { walletId: string } | { ownerAddress: string } | null {
+  if (query.walletId) return { walletId: query.walletId };
+  if (query.ownerAddress) return { ownerAddress: query.ownerAddress };
+  return null;
+}
+
 /** The validated ingested strategy catalogue, without provider I/O. */
 export async function readEarnDiscovery(
   c: AppContext,
@@ -105,11 +124,7 @@ export async function readEarnDiscovery(
         capabilities: {
           ...capability,
           deposit: capability.deposit && isEarnStrategyInExecutionShelf(row),
-          depositUnavailableReason: !isEarnStrategyInExecutionShelf(row)
-            ? "catalogue_only"
-            : !capability.deposit
-              ? "adapter_unavailable"
-              : undefined,
+          depositUnavailableReason: depositUnavailableReason(row, capability),
         },
       };
     }),
@@ -310,11 +325,7 @@ async function loadEarnPositions(
     environment,
     hostCluster: cluster,
   });
-  const discoverySource = query.walletId
-    ? { walletId: query.walletId }
-    : query.ownerAddress
-      ? { ownerAddress: query.ownerAddress }
-      : null;
+  const discoverySource = discoverySourceOf(query);
   const discoveredRows =
     query.discover && discoverySource
       ? buildDiscoveredEarnPositionRows(

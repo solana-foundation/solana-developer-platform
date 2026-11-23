@@ -68,6 +68,15 @@ export function registerOperationsPaths(registry: OpenAPIRegistry, publicOnly = 
       ...earnErrorResponses([400, 401, 403, 404, 429, 500, 503]),
     },
   });
+  const bodies = {
+    submit: withOpenApi(submitOperationSchema, {
+      example: { actionId: "opa_example", version: 1, signedTransaction: "AQ==" },
+    }),
+    refresh: withOpenApi(refreshOperationSchema, {
+      example: { actionId: "opa_example", version: 1 },
+    }),
+    cancel: withOpenApi(emptyOperationBodySchema, { example: {} }),
+  };
   for (const action of ["submit", "refresh", "cancel"] as const) {
     const response = operationResponseExample(EARN_OPERATION_EXAMPLES[action]);
     const descriptions = {
@@ -97,27 +106,7 @@ export function registerOperationsPaths(registry: OpenAPIRegistry, publicOnly = 
         params: operationIdParamsSchema,
         body: {
           required: true,
-          content: jsonContent(
-            withOpenApi(
-              action === "submit"
-                ? submitOperationSchema
-                : action === "refresh"
-                  ? refreshOperationSchema
-                  : emptyOperationBodySchema,
-              {
-                example:
-                  action === "submit"
-                    ? {
-                        actionId: "opa_example",
-                        version: 1,
-                        signedTransaction: "AQ==",
-                      }
-                    : action === "refresh"
-                      ? { actionId: "opa_example", version: 1 }
-                      : {},
-              }
-            )
-          ),
+          content: jsonContent(bodies[action]),
         },
       },
       responses: {
