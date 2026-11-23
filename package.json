@@ -64,6 +64,11 @@
           "@solana-program/compute-budget": "^0.8.0",
           "@solana-program/memo": "^0.7.0"
         }
+      },
+      "@kamino-finance/kliquidity-sdk": {
+        "dependencies": {
+          "@solana/web3.js": "1.99.0"
+        }
       }
     }
   },
