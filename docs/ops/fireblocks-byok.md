@@ -478,7 +478,7 @@ do not clear it to unblock adoption. Invalid nonblank timestamps and malformed
 bindings need separate inspection.
 
 The dedicated `reconcile-custody-proposals` cron runs every minute,
-claims at most 50 rows per environment and makes five concurrent provider calls.
+claims at most 50 rows per environment and processes five rows concurrently.
 Flagged revocations take priority with capacity reserved for ordinary progress.
 Dashboard refresh has a separate 15-second throttle and cannot postpone worker
 admission. Backlog, upstream timeouts and credential availability extend recovery
@@ -578,6 +578,94 @@ Cancellation races signing and broadcasting and cannot guarantee containment. Se
 Live-test receipts bind the payment to the SDP API key via a slow one-way fingerprint. Keep the
 same key and receipt when retrying; a changed key or legacy unbound receipt is refused. The
 result receipt stores only a validated SDP transfer ID, never a provider response or secret.
+
+## Custody recovery capacity and request budget
+
+PRO-2471 proposes **180 seconds from a committed revocation wake to the first
+cancel POST**, per environment. This is a conditional engineering target for the
+native-transfer custody worker, separate from the status-polling target below.
+It measures a request to cancel, not cancellation acknowledgement or containment.
+The proposal stays subject to review; production acceptance belongs to
+[PRO-2472](https://linear.app/solana-fndn/issue/PRO-2472).
+
+The capacity envelope is:
+
+- At most 500 already-recorded pending native transfers per environment, with
+  one burst of at most 50 revocations and no further arrivals or authority wakes
+  during the measured sweep. Remaining transfers retain live authority.
+- A committed wake reaches the registered worker on its next one-minute slot.
+  The worker claims 50 rows, reserving up to 38 for priority wakes and at least
+  12 for ordinary progress when both queues are full.
+- Each Fireblocks HTTP request completes within one second. Local database,
+  credential, admission and audit work totals at most one second per row,
+  including at most one conflicting observation. Batch overhead is at most
+  five seconds. Credentials remain available and provider details remain bound
+  to the stored intent in a cancellable phase.
+- One active registration per environment. During a two-instance rollout,
+  disjoint claims allow five concurrent recoveries per instance, ten combined.
+  Five is not a deployment-wide provider request limit.
+
+A cancellation with one conflicting observation performs three detail GETs and
+one cancel POST. Including local work, ten groups of five rows take at most
+50 seconds, plus five seconds of batch overhead. A full page stays inside its
+one-minute slot. The 50-row revocation burst fits in two scheduled pages, within
+180 seconds even when the wake commits just after a slot starts. A complete
+500-row custody sweep has a proposed 12-minute bound under the same finite
+workload. Sustained revocations, outages or slower reads can exceed these bounds;
+queue rotation alone does not establish elapsed latency.
+
+`reconcile-pending-proposals.capacity.test.ts` exercises the real PostgreSQL
+queue, worker and proposal ledger with controlled I/O delays, conflicting
+observations and overlapping workers. The runner regression separately checks
+that failed or hanging Solana settlement cannot block custody recovery. These
+are conditional capacity checks, not measured production p99 latency.
+Run them with the local disposable PostgreSQL/Redis test containers:
+
+```sh
+pnpm --filter @sdp/api exec vitest run \
+  src/services/jobs/reconcile-pending-proposals.capacity.test.ts \
+  src/services/domain/signing/custody-runtime-proposal-recovery.test.ts \
+  src/cron/runner.node.test.ts
+```
+
+The target excludes unavailable or revoked provider credentials, provider
+outages, completed or noncancellable transactions, repeated contention and
+cancellation retries already in cooldown. Ambiguous or declined cancellations
+retain their five-minute retry cooldown; observations continue meanwhile.
+Cancellation can still race provider execution.
+
+The full-worker request-budget regression uses a real database and encrypted
+credentials. Counts below are per proposal visit; wallet ownership takes two
+queries, one for each supported owner kind. Credential rows are re-read for
+admission without decrypting the secret. Cancellation decrypts fresh retained
+access and re-reads provider detail immediately before its POST.
+
+| Custody path                                            | Wallet owner queries | Credential queries | Secret-store reads | Fireblocks GETs | Cancel POSTs |
+| ------------------------------------------------------- | -------------------- | ------------------ | ------------------ | --------------- | ------------ |
+| Pending observation plus live admission                 | 4                    | 2                  | 1                  | 1               | 0            |
+| Noncancellable observation                              | 2                    | 1                  | 1                  | 1               | 0            |
+| First admission refusal and cancellation                | 6                    | 3                  | 2                  | 2               | 1            |
+| Refused proposal during retry cooldown                  | 2                    | 1                  | 1                  | 1               | 0            |
+| Declined or ambiguous cancel retried after five minutes | 4                    | 2                  | 2                  | 2               | 1            |
+| Failed provider observation                             | 2                    | 1                  | 1                  | 1               | 0            |
+| One observation conflict, then live admission           | 6                    | 3                  | 2                  | 2               | 0            |
+| One observation conflict, then refusal and cancellation | 8                    | 4                  | 3                  | 3               | 1            |
+
+These counts exclude payment/proposal, entitlement, money-admission and audit SQL;
+that local work still belongs inside the capacity envelope. Encrypted DB secret
+reads decrypt locally and make no external secret request. Secret Manager-backed
+credentials additionally require secret-version access and any authentication
+refresh. Every row above makes **zero custody-adapter Solana RPC calls**. The
+worker does not make a post-cancel follow-up GET in the same pass; its next visit
+observes the result. Manual cancellation has its own budget below. Losing result
+writes retry persistence without repeating a cancel POST.
+
+[PRO-2472](https://linear.app/solana-fndn/issue/PRO-2472) owns acceptance of the
+proposed envelope, live revocation-to-first-cancel and provider-completion-to-row
+p99 measurements, custody backlog/oldest-unchecked-age/run-duration/failure
+metrics, deployed alerts and missing-tick coverage. The status lane's polling-age
+metric does not prove this custody target. Record the accepted target and live
+evidence in ADR 0007 D5 before treating polling as a revocation control.
 
 ## Manual cancellation in SDP
 
@@ -727,8 +815,8 @@ the remaining launch gates require separate approval and operational evidence.
 | [PRO-2468](https://linear.app/solana-fndn/issue/PRO-2468) | Native transfers persist the initiating money principal; recovery restores only that recorded principal.                                                                                                                                                                                      |
 | [PRO-2469](https://linear.app/solana-fndn/issue/PRO-2469) | The one-minute authority worker re-admits pending native transfers and requests cancellation after refusal. Status-only polls never restore execution authority.                                                                                                                              |
 | [PRO-2470](https://linear.app/solana-fndn/issue/PRO-2470) | Key/member authority withdrawal durably prioritizes proposal recovery. Queues and provider delays prevent an immediate-cancellation guarantee.                                                                                                                                                |
-| [PRO-2471](https://linear.app/solana-fndn/issue/PRO-2471) | Independent 30-second, per-environment status lane for both proposal kinds, with batch limit 100 and concurrency five. Native authority recovery has its own one-minute registration.                                                                                                         |
-| [PRO-2472](https://linear.app/solana-fndn/issue/PRO-2472) | 180-second polling-age target, backlog/age/duration/outcome metrics and companion dashboard/alerts included. Live p99 settlement measurements and revocation-to-cancel metrics remain outstanding.                                                                                            |
+| [PRO-2471](https://linear.app/solana-fndn/issue/PRO-2471) | Custody-specific isolation, elapsed capacity and request-budget regressions; proposed 180-second revocation-wake-to-cancel target under the bounded workload above. Native authority recovery retains its one-minute, 50-row, five-concurrent registration.                                   |
+| [PRO-2472](https://linear.app/solana-fndn/issue/PRO-2472) | Owns target acceptance, custody monitoring and deployed-alert evidence, plus live p99 revocation-to-first-cancel and provider-completion-to-row measurements. The status lane's 180-second polling-age target is separate.                                                                    |
 | [PRO-2473](https://linear.app/solana-fndn/issue/PRO-2473) | Pending-approval expiry remains deliberately omitted, including the proposed seven-day limit.                                                                                                                                                                                                 |
 | [PRO-2364](https://linear.app/solana-fndn/issue/PRO-2364) | Policy-absence detection, audit and alert remain outstanding. Editor credentials cannot read active policies; a dismissible reminder is not detection.                                                                                                                                        |
 | [PRO-2365](https://linear.app/solana-fndn/issue/PRO-2365) | Dependency-register verification, sandbox/production workspace setup and contacts require operational follow-through.                                                                                                                                                                         |
