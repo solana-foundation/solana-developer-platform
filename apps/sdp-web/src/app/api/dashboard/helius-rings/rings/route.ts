@@ -12,6 +12,6 @@ export async function POST(request: Request) {
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.helius-rings.rings",
-    path: "/v1/helius-rings/rings",
+    path: "/v1/helius-rings/rings/register-and-initialize",
   });
 }

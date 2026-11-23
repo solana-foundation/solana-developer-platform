@@ -49,7 +49,7 @@ wallets.use("*", projectContextMiddleware());
 
 // Initialize signing (requires admin)
 wallets.post(
-  "/initialize",
+  "/managed-signing/initialize-with-wallet",
   requireAction("wallets.configure"),
   validateBody(initializeSigningSchema),
   authorizeNone("connects a provider in the caller's own project"),
@@ -95,7 +95,7 @@ wallets.post(
 );
 
 // Read configuration and wallets
-wallets.get("/configs", requireAction("wallets.read"), getConfigs);
+wallets.get("/managed-signing/configurations", requireAction("wallets.read"), getConfigs);
 wallets.get("/", requireAction("wallets.read"), listWallets);
 wallets.get("/balances/aggregate", requireAction("wallets.read"), getWalletAggregate);
 wallets.get("/public-key", requireAction("wallets.read"), getPublicKey);

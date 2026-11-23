@@ -30,7 +30,7 @@ internalFireblocks.use("*", async (c, next) => {
   c.header("Cache-Control", "no-store");
   await next();
 });
-internalFireblocks.get("/destination", requireAction("wallets.read"), async (c) => {
+internalFireblocks.get("/destination-eligibility", requireAction("wallets.read"), async (c) => {
   assertCallerMayPerform(c, "counterparties.read");
   const parsed = input.safeParse(c.req.query());
   if (!parsed.success) throw badRequest("Invalid Fireblocks destination");

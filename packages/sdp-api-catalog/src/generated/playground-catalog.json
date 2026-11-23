@@ -209,9 +209,9 @@
       {
         "id": "list-wallet-configs",
         "operationId": "listWalletConfigs",
-        "title": "List wallet signing configs",
+        "title": "List managed signing configurations",
         "method": "GET",
-        "path": "/v1/wallets/configs",
+        "path": "/v1/wallets/managed-signing/configurations",
         "pathFields": [],
         "bodyFields": [],
         "expectedResponse": {
@@ -433,7 +433,7 @@
         },
         "takesIdempotencyKey": false,
         "releaseModule": "custody",
-        "shadowedBy": ["/v1/wallets/configs", "/v1/wallets/public-key"]
+        "shadowedBy": ["/v1/wallets/public-key"]
       },
       {
         "id": "update-wallet",
