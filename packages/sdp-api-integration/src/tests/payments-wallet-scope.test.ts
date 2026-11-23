@@ -1,4 +1,5 @@
 import { API_KEY_GRANTABLE_ACTIONS } from "@sdp/types/actions";
+import { PAYMENT_TRANSFER_STATUSES } from "@sdp/types/payments";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
@@ -18,7 +19,11 @@ const createApiKeyResponseSchema = z.object({
 
 const transferResponseSchema = z.object({
   data: z.object({
-    transfer: z.object({ id: z.string(), status: z.string(), signature: z.string().nullable() }),
+    transfer: z.object({
+      id: z.string(),
+      status: z.enum(PAYMENT_TRANSFER_STATUSES),
+      signature: z.string().nullable(),
+    }),
   }),
 });
 

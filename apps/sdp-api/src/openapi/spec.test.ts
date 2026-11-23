@@ -178,9 +178,9 @@ describe("OpenAPI spec", () => {
     const doc = createOpenApiDocument();
     for (const [path, method] of [
       ["/v1/private-channels/balance", "get"],
-      ["/v1/private-channels/wallets", "get"],
+      ["/v1/private-channels/verified-wallets", "get"],
       ["/v1/private-channels/wallets/{walletId}/verify", "post"],
-      ["/v1/private-channels/wallets/{pubkey}", "delete"],
+      ["/v1/private-channels/verified-wallets/{pubkey}", "delete"],
     ] as const) {
       expect(doc.paths?.[path]?.[method]?.security).toEqual([
         { apiKeyAuth: [] },
@@ -191,7 +191,8 @@ describe("OpenAPI spec", () => {
 
   it("keeps a route's own 403 reasons after its action requirement", () => {
     const forbidden = forbiddenResponseSchema.parse(
-      createOpenApiDocument().paths?.["/v1/wallets/initialize"]?.post?.responses?.["403"]
+      createOpenApiDocument().paths?.["/v1/wallets/managed-signing/initialize-with-wallet"]?.post
+        ?.responses?.["403"]
     );
     expect(forbidden.description).toContain("Requires the `wallets.configure` action");
     expect(forbidden.description).toContain("custody_mode_not_allowed");
@@ -223,7 +224,7 @@ describe("OpenAPI spec", () => {
       ["/v1/members", "get"],
       ["/v1/members/me", "get"],
       ["/v1/members/me", "delete"],
-      ["/v1/members/invite", "post"],
+      ["/v1/members/invitations", "post"],
       ["/v1/members/invitations/{invitationId}", "delete"],
       ["/v1/members/{memberId}", "patch"],
       ["/v1/members/{memberId}", "delete"],
@@ -268,7 +269,9 @@ describe("OpenAPI spec", () => {
 
   it("documents private-channel probe deployment addresses as a pair", () => {
     const doc = createOpenApiDocument();
-    const probeSchema = getJsonSchema(doc.paths?.["/v1/private-channels/probe"]?.post?.requestBody);
+    const probeSchema = getJsonSchema(
+      doc.paths?.["/v1/private-channels/instance-connection/probe"]?.post?.requestBody
+    );
 
     expect(probeSchema.oneOf).toEqual([
       { required: ["escrowProgramId", "escrowInstanceAddr"] },
@@ -979,9 +982,9 @@ describe("OpenAPI spec", () => {
       "privy",
     ]);
     // Prose too: no description names a provider stable does not offer.
-    const unpublishedLabels = CUSTODY_PROVIDERS.filter(
-      (provider) => provider !== "privy" && provider !== "fireblocks"
-    ).map((provider) => CUSTODY_PROVIDER_CATALOG_BY_ID[provider].label);
+    const unpublishedLabels = CUSTODY_PROVIDERS.filter((provider) => provider !== "privy").map(
+      (provider) => CUSTODY_PROVIDER_CATALOG_BY_ID[provider].label
+    );
     expect(unpublishedLabels.filter((label) => serialized.includes(label))).toEqual([]);
     expect(serialized).not.toMatch(/fireblocks|coinbase/i);
     expect(createPublicSurfaceManifest("stable").custodyProviders).toEqual(["privy"]);
@@ -995,7 +998,7 @@ describe("OpenAPI spec", () => {
     expect(managedOwner.properties.provider.enum).toEqual(["privy"]);
     expect(serialized).not.toContain("x-sdp-custody-mode");
     // Session-only (wallets.configure), so no channel publishes it.
-    expect(paths?.["/v1/wallets/initialize"]).toBeUndefined();
+    expect(paths?.["/v1/wallets/managed-signing/initialize-with-wallet"]).toBeUndefined();
     for (const path of [
       "/internal/dashboard/custody/fireblocks/proposals",
       "/internal/dashboard/custody/fireblocks/proposals/{kind}/{proposalId}/cancel",
@@ -1003,9 +1006,10 @@ describe("OpenAPI spec", () => {
       expect(paths?.[path]).toBeUndefined();
       expect(createOpenApiDocument().paths?.[path]).toBeDefined();
     }
-    expect(createOpenApiDocument().paths?.["/v1/wallets/initialize"]?.post?.security).toEqual([
-      { clerkBearerAuth: [] },
-    ]);
+    expect(
+      createOpenApiDocument().paths?.["/v1/wallets/managed-signing/initialize-with-wallet"]?.post
+        ?.security
+    ).toEqual([{ clerkBearerAuth: [] }]);
 
     for (const releaseChannel of SDP_RELEASE_CHANNEL_NAMES) {
       expect(JSON.stringify(createPublicOpenApiDocument({ releaseChannel }))).not.toContain(

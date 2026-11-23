@@ -8,6 +8,6 @@ export async function POST(
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.helius-rings.rekey",
-    path: `/v1/helius-rings/wallets/${encodeURIComponent(walletId)}/rekey`,
+    path: `/v1/helius-rings/wallets/${encodeURIComponent(walletId)}/identity/rekey`,
   });
 }
