@@ -237,6 +237,18 @@ describe("shared strategy withdrawal options", () => {
     });
   });
 
+  it("answers an unusable swap quote with 503 when no other route survives", async () => {
+    resolve.mockReturnValue(direct);
+    direct.quoteVaultWithdrawal.mockRejectedValueOnce(
+      Object.assign(new Error("Jupiter returned an invalid wYLDS quote."), {
+        code: "SWAP_UNAVAILABLE",
+      })
+    );
+    await expect(choices({ position, shares: "2" })).rejects.toMatchObject({
+      code: "PROVIDER_UNAVAILABLE",
+    });
+  });
+
   it("keeps the no-route 400 when a failed read is not an outage", async () => {
     queued.getWithdrawalOptions.mockRejectedValueOnce(new Error("Unexpected provider failure"));
     await expect(choices({ position, shares: "2" })).rejects.toThrow(

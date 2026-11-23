@@ -89,6 +89,9 @@ transaction fee; the separate 50 bps DEX tolerance is only a slippage bound.
   here. This package deliberately retains the builder regardless of rollout
   state; the API owns the default-off capability gate so deposits, position
   reads, and par-redemption operations remain available without a Jupiter key.
+  The port's own failures (no route, outage) pass through unchanged, so the API
+  answers them as its swap boundary does. `SWAP_UNAVAILABLE` names only a
+  Jupiter answer this package cannot use, and the API answers it with a 503.
 - Disabling the optional DEX lane stops new quotes and builds. It must not stop
   submission or reconciliation of an already admitted transaction: those
   durable movements remain atomic, and recovery must continue from their
