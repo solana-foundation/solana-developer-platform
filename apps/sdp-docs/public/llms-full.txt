@@ -251,9 +251,8 @@ See the [Wallets API reference](/docs/reference/api/wallets) for request and res
 ## Provider policy checks
 
 For supported BYOK wallets, the connection and wallet detail pages show
-an advisory policy state. SDP checks when a connection is created, then
-hourly; a wallet added to an existing connection is observed by the next
-periodic run. A missing policy warns without blocking signing. A failed or
+an advisory policy state. SDP checks within about a minute, then hourly.
+A missing policy warns without blocking signing. A failed or
 denied read shows **Provider policy not verified**. Review the policy in the
 provider before sending funds.
 
@@ -264,8 +263,8 @@ when `includeBalance=false`. It contains `status` (`present`, `missing`, or
 `present` means the provider reports a policy attached to the wallet or a native
 transfer rule covering its vault and supported assets. It does not
 verify policy strength or permission to sign. `missing` includes a transfer
-rule that allows transactions without approvers, even when a gated rule on
-another supported asset also matches. Replaced credentials and results
+rule that allows transactions without approvers, whether alone or beside a
+gated rule. Replaced credentials and results
 older than two hours are `unknown`.
 
 ---
@@ -4065,7 +4064,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `wallet
 
       - **`providerPolicy`** · `object`
 
-        Advisory policy presence for supported BYOK wallets. present means a provider policy attached to the wallet, or a native Transfer rule covering its vault and supported assets, was observed; it does not verify policy strength, initiators, limits or permission to sign. missing means a successful read found no matching policy, or any matching Transfer rule on a supported asset allows transfers without approvers, even when a gated rule on another supported asset also matches. unknown covers denied access, provider failures, unsupported responses, unchecked wallets, replaced credentials and observations older than two hours. Checks run when a connection is created, then hourly; a new wallet is observed by the next periodic run. This does not block signing. Omitted for managed custody.
+        Advisory policy presence for supported BYOK wallets. present means a provider policy attached to the wallet, or a native Transfer rule covering its vault and supported assets, was observed; it does not verify policy strength, initiators, limits or permission to sign. missing means a successful read found no matching policy, or a matching Transfer rule that allows transfers without approvers, whether alone or beside a gated rule. unknown covers denied access, provider failures, unsupported responses, unchecked wallets, replaced credentials and observations older than two hours. Checks run within about a minute, then hourly. This does not block signing. Omitted for managed custody.
 
         - **`status`** · `string` · required · one of `present`, `missing`, `unknown`
 
@@ -48086,14 +48085,14 @@ Publish the rule. SDP uses
 so set **Settings → General → One-time address transactions** to **Allow**.
 Complete the required approvals for both changes.
 
-**Check the policy yourself:** SDP checks policy presence when the connection
-is created and hourly. The connection and wallet detail pages show the result.
+**Check the policy yourself:** SDP checks policy presence within about a
+minute, then hourly. The connection and wallet detail pages show the result.
 
 The Editor user cannot read policies, so this setup shows **Provider policy not
 verified**; ask an authorized operator to review the published policy. A read
-that confirms no matching Transfer rule — or a rule that allows transfers
-without your approver set, even beside a gated rule — shows **No provider
-policy detected**.
+that confirms no matching Transfer rule — or an `ALLOW` rule, which lets
+transfers proceed however its approver fields are filled, even beside a gated
+rule — shows **No provider policy detected**.
 
 A workspace that prefers automated verification can register the connection
 with an API user whose role may read the workspace's active policy, accepting
@@ -48101,7 +48100,7 @@ that wider permission on the credential SDP stores; the check only reads
 policies, never edits or publishes them.
 
 Neither warning blocks signing. A detected rule does not prove its approvals or limits are
-appropriate, and this check does not verify RAW signing policies.
+appropriate, and this check does not verify RAW signing or program-call signing policies.
 
 ### Fund and test
 

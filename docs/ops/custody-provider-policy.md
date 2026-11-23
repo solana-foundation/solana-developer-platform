@@ -1,10 +1,9 @@
 # BYOK provider policy observations (PRO-2364 / SDP-015)
 
-SDP checks policy presence when a Fireblocks or Privy connection is created.
-The worker's `check-custody-provider-policies` job runs once a minute per
+SDP checks policy presence with the worker's
+`check-custody-provider-policies` job, which runs once a minute per
 project environment, claims up to 25 due wallets, and checks each wallet
-hourly, so a wallet added to an existing connection is observed by the next
-run. Overlapping workers claim different wallets. An interrupted claim becomes
+hourly. Overlapping workers claim different wallets. An interrupted claim becomes
 eligible again after five minutes; a failed audited write rolls back the
 observation and the worker retries it. A new or rotated credential is checked
 on the next eligible pass. This is advisory: neither setup nor signing is
@@ -14,15 +13,15 @@ blocked.
 
 - **present:** Fireblocks returned a native Solana or canonical USDC `TRANSFER`
   rule whose source includes the connected vault and whose action requires
-  approval (a `2-TIER` action or configured approvers) or blocks the transfer,
-  or Privy returned at least one `policy_ids` entry on that exact wallet. This
+  approval (a `2-TIER` action) or blocks the transfer — an `ALLOW` rule is
+  ungated whatever approver fields it carries — or Privy returned at least one
+  `policy_ids` entry on that exact wallet. This
   does not assess rule ordering, initiators, destinations, limits or policy
   strength. Fireblocks RAW signing and program-call policies are outside this check.
-- **missing:** a successful provider read contains no matching policy, or any
-  matching Fireblocks rule on a supported asset is an `ALLOW` with no approvers
-  — the credential could move funds alone, even when a gated rule on another
-  supported asset also matches. An empty Privy app or policies attached to
-  other wallets do not prove wallet coverage.
+- **missing:** a successful provider read contains no matching policy, or a
+  matching Fireblocks rule is an `ALLOW` — the credential could move funds
+  alone, whether the rule stands alone or beside a gated rule. An empty Privy
+  app or policies attached to other wallets do not prove wallet coverage.
 - **unknown:** access was denied, the provider or credential store was unavailable,
   the response could not be interpreted, no check has completed, the credential
   changed, or the observation is at least two hours old.
@@ -72,8 +71,7 @@ investigate an absent checker. Merge the application change before the infra rul
    policies attached to the specific wallet, including any signer overrides.
 3. Configure the intended restrictions in the provider. SDP does not edit them.
    The next hourly observation should report present. Confirm the actual rules
-   separately; a rule that allows transfers without approvers is reported as
-   missing.
+   separately; an `ALLOW` rule is reported as missing.
 4. For unknown, check API permissions and provider availability. A 403, timeout,
    rate limit or malformed response must never be treated as proof of absence.
 5. Confirm the new ledger observation and Grafana state. If checks stop, inspect
