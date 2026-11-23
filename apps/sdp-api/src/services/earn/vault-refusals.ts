@@ -15,11 +15,14 @@ import { getLogger } from "@/runtime/logger";
  *   implement, or queue terms the contract rejects.
  * - `stale`: a 409. A queue request PDA present when the caller selected it may
  *   close before the cancellation build; the caller should refresh history.
- * - `unavailable`: state SDP could not read, an outage rather than a refusal,
- *   answered with a sanitized retryable 503.
+ * - `unavailable`: state SDP could not read, or a swap answer it could not use:
+ *   an outage rather than a refusal, answered with a sanitized retryable 503.
  * - `bubbles`: rethrown unchanged for the global error boundary. An unexplained
  *   build failure is SDP's problem to look at, and telling a customer their
- *   request was wrong would be a guess.
+ *   request was wrong would be a guess. `DEPLOYMENT_NOT_CONFIGURED`,
+ *   `CLUSTER_UNSUPPORTED` and `UNSUPPORTED_VAULT` stay here on purpose: they
+ *   fire only when SDP's catalogue and a provider package disagree, some carry
+ *   developer-facing sentences a 400 would echo, and a retry cannot fix them.
  *
  * Matched on the shared `code` shape rather than provider classes, so a new
  * vault-direct provider inherits the mapping by using the same vocabulary.
@@ -38,7 +41,7 @@ const VAULT_PROVIDER_ERROR_ANSWERS = {
   VAULT_UNREADABLE: "unavailable",
   REQUEST_UNREADABLE: "unavailable",
   POSITION_UNREADABLE: "unavailable",
-  SWAP_UNAVAILABLE: "bubbles",
+  SWAP_UNAVAILABLE: "unavailable",
   DEPLOYMENT_NOT_CONFIGURED: "bubbles",
   CLUSTER_UNSUPPORTED: "bubbles",
   UNSUPPORTED_VAULT: "bubbles",
@@ -70,8 +73,8 @@ export function vaultProviderErrorCode(error: unknown): VaultProviderErrorCode |
 }
 
 /**
- * Whether the provider or its RPC could not be read, which
- * `rethrowVaultProviderFailure` answers with a retryable 503.
+ * Whether the provider or its RPC could not be read, or its swap answer could
+ * not be used, which `rethrowVaultProviderFailure` answers with a retryable 503.
  */
 export function isVaultProviderUnavailable(error: unknown): boolean {
   return (
@@ -83,9 +86,10 @@ export function isVaultProviderUnavailable(error: unknown): boolean {
 
 /**
  * Convert the provider-neutral vault error vocabulary into the public API
- * contract. Provider refusals are caller-fixable 400s. An unreadable vault is
- * an infrastructure failure, including RPC outages and rate limits, so it is
- * a retryable 503 with no provider or RPC internals exposed to the caller.
+ * contract. Provider refusals are caller-fixable 400s. An unreadable vault
+ * (RPC outages and rate limits included) or an unusable swap answer is an
+ * infrastructure failure, so it is a retryable 503 with no provider, RPC or
+ * swap internals exposed to the caller.
  */
 export function rethrowVaultProviderFailure(error: unknown): never {
   const failure = vaultProviderFailure(error);
@@ -116,7 +120,7 @@ export function rethrowVaultProviderFailure(error: unknown): never {
         transient,
         causeCode: root && "code" in root && typeof root.code === "number" ? root.code : null,
       },
-      "Earn provider state could not be read"
+      "Earn provider state or swap was unavailable"
     );
     throw providerUnavailable("Earn provider is temporarily unavailable. Try again.");
   }

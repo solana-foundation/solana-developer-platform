@@ -205,7 +205,7 @@ export type VaultProviderErrorCode =
   | "REQUEST_UNREADABLE"
   /** The owner's position could not be read. */
   | "POSITION_UNREADABLE"
-  /** The swap route a deposit or exit depends on could not be quoted or built. */
+  /** The swap a deposit or exit depends on came back unusable. */
   | "SWAP_UNAVAILABLE"
   /** SDP has no confirmed deployment for the cluster in play. */
   | "DEPLOYMENT_NOT_CONFIGURED"

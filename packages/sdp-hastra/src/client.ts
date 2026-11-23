@@ -302,18 +302,19 @@ export class HastraVaultDirectClient
       if (wylds === 0n) {
         return { assetsOut: "0", assetDecimals: TOKEN_DECIMALS, blockingIssues: issues };
       }
-      let quote: { outAmount: string };
+      // The port's own failures (no route, outage) are the API's answer and pass
+      // through unchanged, as in the build; only an unusable quote is ours to name.
+      const quote = await swapPort.quoteSwap({
+        cluster: runtime.cluster,
+        inputMint: config.deployment.wYldsMint,
+        outputMint: config.depositMint,
+        amount: formatAtoms(wylds),
+      });
       let assetsOut: string;
       try {
-        quote = await swapPort.quoteSwap({
-          cluster: runtime.cluster,
-          inputMint: config.deployment.wYldsMint,
-          outputMint: config.depositMint,
-          amount: formatAtoms(wylds),
-        });
         assetsOut = canonicalAmount(quote.outAmount, "Jupiter quoted output").text;
       } catch (cause) {
-        throw new SdpHastraError("SWAP_UNAVAILABLE", "Jupiter could not quote wYLDS to USDC.", {
+        throw new SdpHastraError("SWAP_UNAVAILABLE", "Jupiter returned an invalid wYLDS quote.", {
           cause,
         });
       }

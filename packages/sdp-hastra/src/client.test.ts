@@ -632,6 +632,24 @@ describe("Hastra DEX withdrawal", () => {
     ).rejects.toMatchObject({ code: "WITHDRAW_REFUSED" });
   });
 
+  it("passes the swap port's own quote failure through and names only an unusable quote", async () => {
+    stubRpc(fixtureState().accounts);
+    const reference = { providerReference: DEPLOYMENT.primeMint, shares: "100" };
+    const noRoute = new Error("Jupiter could not route this swap");
+    await expect(
+      makeClient({
+        quoteSwap: async () => {
+          throw noRoute;
+        },
+      }).quoteVaultWithdrawal(CTX, reference)
+    ).rejects.toBe(noRoute);
+    await expect(
+      makeClient({
+        quoteSwap: async () => ({ outAmount: "not-an-amount", priceImpactPct: "0" }),
+      }).quoteVaultWithdrawal(CTX, reference)
+    ).rejects.toMatchObject({ code: "SWAP_UNAVAILABLE" });
+  });
+
   it("isolates the live redeem output without consuming a pre-existing wYLDS balance", async () => {
     const fixture = fixtureState();
     fixture.accounts.set(ata(OWNER, DEPLOYMENT.primeMint), {
