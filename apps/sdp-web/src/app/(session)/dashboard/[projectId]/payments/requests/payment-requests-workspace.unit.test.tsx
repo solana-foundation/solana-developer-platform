@@ -1,31 +1,17 @@
 // @vitest-environment jsdom
 
-import type { PaymentRequest } from "@sdp/types/payments";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps, ReactNode } from "react";
 import { toast } from "sonner";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { stubClipboard } from "@/test/clipboard";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { stubMatchMedia } from "@/test/media-queries";
+import { testPaymentRequest } from "@/test/payment-requests";
 import { PaymentRequestsWorkspace } from "./payment-requests-workspace";
-
-// jsdom implements no matchMedia, while the workspace's motion components read
-// it through useReducedMotion.
-if (!window.matchMedia) {
-  window.matchMedia = ((query: string) => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addEventListener: () => {},
-    removeEventListener: () => {},
-    addListener: () => {},
-    removeListener: () => {},
-    dispatchEvent: () => false,
-  })) as unknown as typeof window.matchMedia;
-}
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
@@ -39,15 +25,7 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useOptionalDashboardWorkspace: () => null,
 }));
 
-const paymentRequest = {
-  id: "preq_1",
-  destinationAddress: "11111111111111111111111111111111",
-  token: "So11111111111111111111111111111111111111112",
-  amount: "5",
-  reference: "ref_1",
-  status: "awaiting_payment",
-  createdAt: "2026-09-14T00:00:00.000Z",
-} as PaymentRequest;
+const paymentRequest = testPaymentRequest({});
 
 function wrapper({ children }: { children: ReactNode }) {
   return (
@@ -71,18 +49,19 @@ function renderWorkspace(props: Partial<ComponentProps<typeof PaymentRequestsWor
   );
 }
 
+beforeEach(() => {
+  // The workspace's motion components read the reduced-motion query, which jsdom lacks.
+  stubMatchMedia();
+});
+
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   resetDashboardNavigation();
   window.history.replaceState(null, "", "/");
 });
 
-const otherRequest = {
-  ...paymentRequest,
-  id: "preq_2",
-  amount: "80",
-  reference: "ref_2",
-} as PaymentRequest;
+const otherRequest = testPaymentRequest({ id: "preq_2", amount: "80", reference: "ref_2" });
 
 describe("PaymentRequestsWorkspace search", () => {
   it("puts a search in the URL on Enter, from the first page", async () => {
@@ -169,7 +148,6 @@ describe("PaymentRequestsWorkspace pager", () => {
 // clipboard write start inside the click, so the write must not wait for it.
 describe("PaymentRequestsWorkspace copy link", () => {
   afterEach(() => {
-    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
