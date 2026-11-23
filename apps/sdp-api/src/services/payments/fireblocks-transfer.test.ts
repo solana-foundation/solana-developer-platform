@@ -10,23 +10,26 @@ import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createApp } from "@/app";
-import { getDb } from "@/db/client";
+import { type DatabaseExecutor, getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import { requestPendingProposalRecovery } from "@/db/repositories/proposal-recovery.repository";
 import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";
 import { verifyClerkJwt } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import type { MoneyPrincipal } from "@/lib/money-principal";
+import { createTenantScope } from "@/lib/tenant-scope";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { internalCustody } from "@/routes/internal-custody";
 import { rootLogger } from "@/runtime/logger";
 import * as moneyPathEvents from "@/runtime/money-path-events";
+import { ApiKeyService } from "@/services/api-key.service";
 import { AuditService } from "@/services/audit.service";
 import * as credentialSecretStore from "@/services/credential-secret-store";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { systemProposalLedger } from "@/services/jobs/proposal-recovery-ledger";
 import { reconcileFireblocksProposals } from "@/services/jobs/reconcile-fireblocks-proposals";
 import { reconcilePendingProposals } from "@/services/jobs/reconcile-pending-proposals";
+import { applyMembershipChange } from "@/services/organization-membership.service";
 import { applyProposalEvent } from "@/services/payments/custody-proposal-ledger";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
@@ -167,7 +170,10 @@ beforeEach(async () => {
   fields.signingKeyId = (await newRegistration()).signingKeyId;
   body.fields.signingKeyId = fields.signingKeyId;
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 const SIG =
   "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
@@ -1429,12 +1435,16 @@ async function recoverPendingProposal(id: string) {
     "UPDATE custody_proposals SET next_check_at = '2000-01-01T00:00:00.000Z' WHERE payment_transfer_id = ?",
     [id]
   );
+  await runPendingProposalWorker();
+  return recordedProposal(id);
+}
+
+async function runPendingProposalWorker() {
   await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
     runWithSystemDatabaseIdentity("cron:reconcile-custody-proposals", () =>
       reconcilePendingProposals(testEnv, { organizationId: ORGANIZATION_ID, projectId: PROJECT_ID })
     )
   );
-  return recordedProposal(id);
 }
 
 async function recordedProposal(id: string) {
@@ -1684,6 +1694,152 @@ describe("native Fireblocks pending proposal recovery (PRO-2435 D4)", () => {
       expect(
         refused.mock.calls.filter(([, event]) => event.event === "sdp_money_refused")
       ).toHaveLength(1);
+    }
+  );
+
+  it.each(["key revocation", "member removal"] as const)(
+    "atomically wakes cancellation before the ordinary check after %s (PRO-2470)",
+    async (action) => {
+      const mock = await ready();
+      const db = getDb(env);
+      const apiKeyId = "key_fireblocks_revoked_pending";
+      if (action === "key revocation") {
+        await useTransferApiKey(apiKeyId, ["transfers.execute"]);
+      } else {
+        await db.execute(
+          "INSERT INTO users (id, email, status) VALUES ('usr_removing_admin', 'removing-admin@example.com', 'active')"
+        );
+        await db.execute(
+          "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES ('mem_removing_admin', ?, 'usr_removing_admin', 'admin', 'active')",
+          [ORGANIZATION_ID]
+        );
+      }
+      const response = await send(`fireblocks-recovery-${action}`);
+      expect(response.status, await response.clone().text()).toBe(200);
+      const transfer = (await response.json()).data.transfer;
+      expect(await recordedProposal(transfer.id)).toMatchObject({
+        status: "processing",
+        provider_reference: "fb-proposal",
+        initiated_by_principal:
+          action === "key revocation"
+            ? { kind: "api_key", apiKeyId }
+            : { kind: "member", userId: USER_ID },
+      });
+      vi.useFakeTimers({ toFake: ["Date"] });
+      const ordinaryCheckAt = new Date(Date.now() + 3_600_000).toISOString();
+      await db.execute(
+        "UPDATE custody_proposals SET next_check_at = ? WHERE payment_transfer_id = ?",
+        [ordinaryCheckAt, transfer.id]
+      );
+      const schedule = (executor: DatabaseExecutor = db) =>
+        executor.queryOne<{ next_check_at: string; recheck_requested_at: string | null }>(
+          "SELECT next_check_at, recheck_requested_at FROM custody_proposals WHERE payment_transfer_id = ?",
+          [transfer.id]
+        );
+      const authority = (executor: DatabaseExecutor = db) =>
+        action === "key revocation"
+          ? executor.queryOne("SELECT status FROM api_keys WHERE id = ?", [apiKeyId])
+          : executor.queryOne("SELECT status FROM organization_members WHERE id = ?", [
+              "mem_fireblocks_byok",
+            ]);
+      const withdrawAuthority = async (tx: DatabaseExecutor) => {
+        if (action === "key revocation") {
+          const service = new ApiKeyService(
+            tx,
+            createTenantScope({ organizationId: ORGANIZATION_ID, projectId: PROJECT_ID })
+          );
+          expect(await service.revokeApiKey(apiKeyId, ORGANIZATION_ID, PROJECT_ID)).toMatchObject({
+            alreadyRevoked: false,
+          });
+        } else {
+          expect(
+            await applyMembershipChange(tx, {
+              organizationId: ORGANIZATION_ID,
+              actorUserId: "usr_removing_admin",
+              change: { kind: "remove", memberId: "mem_fireblocks_byok" },
+            })
+          ).toMatchObject({ changed: true });
+        }
+        expect(await authority(tx)).toEqual({
+          status: action === "key revocation" ? "deactivated" : "removed",
+        });
+        expect(await schedule(tx)).toEqual({
+          next_check_at: ordinaryCheckAt,
+          recheck_requested_at: new Date().toISOString(),
+        });
+        // A separate connection sees neither write before the lifecycle transaction commits.
+        expect(await authority()).toEqual({ status: "active" });
+        expect(await schedule()).toEqual({
+          next_check_at: ordinaryCheckAt,
+          recheck_requested_at: null,
+        });
+      };
+      const rollback = new Error("Roll back authority and wake");
+      await expect(
+        db.transaction(async (tx) => {
+          await withdrawAuthority(tx);
+          throw rollback;
+        })
+      ).rejects.toBe(rollback);
+      expect(await authority()).toEqual({ status: "active" });
+      expect(await schedule()).toEqual({
+        next_check_at: ordinaryCheckAt,
+        recheck_requested_at: null,
+      });
+      await runPendingProposalWorker();
+      expect(mock.mock.calls.filter(([, init]) => init?.method === "GET")).toHaveLength(0);
+
+      await db.transaction(withdrawAuthority);
+      expect(await authority()).toEqual({
+        status: action === "key revocation" ? "deactivated" : "removed",
+      });
+      expect(await schedule()).toEqual({
+        next_check_at: ordinaryCheckAt,
+        recheck_requested_at: new Date().toISOString(),
+      });
+      beforeCancellation = async () => {
+        expect(await recordedProposal(transfer.id)).toMatchObject({ status: "processing" });
+        expect(await proposalState(transfer.id)).toMatchObject({
+          provider_phase: "pending",
+          authorization_state: "cancel_requested",
+          refusal_reason: "principal_not_live",
+          cancel_attempt: 1,
+          cancel_acknowledged_at: null,
+        });
+      };
+      await runPendingProposalWorker();
+      expect(await recordedProposal(transfer.id)).toMatchObject({
+        status: "processing",
+        signature: null,
+      });
+      expect(await proposalState(transfer.id)).toMatchObject({
+        provider_phase: "pending",
+        authorization_state: "cancel_acknowledged",
+        refusal_reason: "principal_not_live",
+        cancel_attempt: 1,
+        cancel_acknowledged_at: expect.any(String),
+      });
+      expect(required(await schedule()).recheck_requested_at).toBeNull();
+      expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(1);
+      providerStatus = "CANCELLED";
+      vi.setSystemTime(required(await schedule()).next_check_at);
+      await runPendingProposalWorker();
+      expect(await recordedProposal(transfer.id)).toMatchObject({
+        status: "failed",
+        signature: null,
+        error: "The credential moving money is no longer active",
+      });
+      expect(await proposalState(transfer.id)).toMatchObject({
+        provider_phase: "cancelled",
+        authorization_state: "cancel_acknowledged",
+        refusal_reason: "principal_not_live",
+      });
+      expect(
+        mock.mock.calls.filter(
+          ([url, init]) => String(url).endsWith("/v1/transactions") && init?.method === "POST"
+        )
+      ).toHaveLength(1);
+      expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(1);
     }
   );
 
