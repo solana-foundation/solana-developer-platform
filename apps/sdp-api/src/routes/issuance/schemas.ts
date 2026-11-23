@@ -289,11 +289,11 @@ export const legacyDeployTokenSchema = z.object({
 });
 
 // Records a confirmed non-custodial deploy: the client sends the `mint` it
-// received from `deploy/prepare` plus the signature of the create tx it
+// received from `deploy/build-unsigned-transaction` plus the signature of the create tx it
 // submitted, so the server can verify the tx landed and persist the mint.
 // `listAddress` and `signingWalletId` are accepted for backward compatibility
 // but ignored — the server re-derives the ABL list PDA from the mint authority
-// and uses the signing wallet pinned at deploy/prepare, so neither can be
+// and uses the signing wallet pinned at deploy/build-unsigned-transaction, so neither can be
 // changed at confirm time.
 export const confirmDeploySchema = z.object({
   // Parsed here rather than asserted at the call site: these are the client's

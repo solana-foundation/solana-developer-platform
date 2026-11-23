@@ -67,7 +67,7 @@ describe("save issuance draft", () => {
     });
     expect(mocks.request).toHaveBeenCalledTimes(1);
     expect(mocks.request).toHaveBeenCalledWith(
-      "/v1/issuance/asset-profiles",
+      "/v1/issuance/tokens/create-with-asset-profile",
       expect.objectContaining({ method: "POST" })
     );
     expect(mocks.revalidate).toHaveBeenCalledWith("/dashboard/prj_test_sandbox/issuance");

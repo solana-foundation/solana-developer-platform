@@ -82,7 +82,7 @@ pattern, and an archived profile can coexist with a new active one.
 ### 6. A profile is created together with its token, in one transaction
 
 There is no "create profile for an existing token" endpoint. A token and its
-profile are created by a single request, `POST /v1/issuance/asset-profiles`,
+profile are created by a single request, `POST /v1/issuance/tokens/create-with-asset-profile`,
 which writes the `issued_tokens` row and the `asset_profiles` row inside one DB
 transaction: if either write fails, both roll back. This makes "every issued
 token has a profile" an invariant established at creation rather than a
