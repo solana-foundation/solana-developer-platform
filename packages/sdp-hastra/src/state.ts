@@ -1,6 +1,6 @@
-import { PublicKey } from "@solana/web3.js";
+import { address } from "@solana/kit";
 import type { HastraAddresses, HastraClusterConfig } from "./addresses";
-import { deriveHastraAddresses, pda } from "./addresses";
+import { addressBytes, deriveHastraAddresses, pda } from "./addresses";
 import {
   assertDiscriminator,
   pubkeyAt,
@@ -283,9 +283,10 @@ function assertEqual(actual: unknown, expected: unknown, label: string): void {
 
 export async function loadHastraState(
   runtime: HastraRuntime,
-  config: HastraClusterConfig
+  config: HastraClusterConfig,
+  addresses?: HastraAddresses
 ): Promise<HastraState> {
-  return (await readHastraState(runtime, config)).state;
+  return (await readHastraState(runtime, config, [], addresses)).state;
 }
 
 /**
@@ -297,10 +298,12 @@ export async function loadHastraState(
 export async function readHastraState(
   runtime: HastraRuntime,
   config: HastraClusterConfig,
-  extra: readonly string[] = []
+  extra: readonly string[] = [],
+  /** Already-derived addresses; with them the identity read is sent before this yields. */
+  derived?: HastraAddresses
 ): Promise<{ state: HastraState; extra: (RpcAccountWire | null)[] }> {
   const { deployment } = config;
-  const addresses = deriveHastraAddresses(deployment);
+  const addresses = derived ?? (await deriveHastraAddresses(deployment));
   const firstAddresses = [
     deployment.vaultMintProgramAddress,
     deployment.vaultStakeProgramAddress,
@@ -383,35 +386,45 @@ export async function readHastraState(
     "Hastra stake vault authority"
   );
 
-  const mintProgramKey = new PublicKey(deployment.vaultMintProgramAddress);
-  const stakeProgramKey = new PublicKey(deployment.vaultStakeProgramAddress);
-  assertEqual(mintConfig.bump, pda(mintProgramKey, "config")[1], "Hastra vault-mint config bump");
+  const mintProgramKey = address(deployment.vaultMintProgramAddress);
+  const stakeProgramKey = address(deployment.vaultStakeProgramAddress);
+  assertEqual(
+    mintConfig.bump,
+    (await pda(mintProgramKey, "config"))[1],
+    "Hastra vault-mint config bump"
+  );
   assertEqual(
     mintVaultConfig.bump,
-    pda(
-      mintProgramKey,
-      "vault_token_account_config",
-      new PublicKey(addresses.mintConfig).toBytes()
+    (
+      await pda(
+        mintProgramKey,
+        "vault_token_account_config",
+        addressBytes(address(addresses.mintConfig))
+      )
     )[1],
     "Hastra vault-token config bump"
   );
   assertEqual(
     stakeConfig.bump,
-    pda(stakeProgramKey, "stake_config")[1],
+    (await pda(stakeProgramKey, "stake_config"))[1],
     "Hastra stake config bump"
   );
   assertEqual(
     stakeVaultConfig.bump,
-    pda(
-      stakeProgramKey,
-      "stake_vault_token_account_config",
-      new PublicKey(addresses.stakeConfig).toBytes()
+    (
+      await pda(
+        stakeProgramKey,
+        "stake_vault_token_account_config",
+        addressBytes(address(addresses.stakeConfig))
+      )
     )[1],
     "Hastra stake-vault config bump"
   );
   assertEqual(
     stakePrice.bump,
-    pda(stakeProgramKey, "stake_price_config", new PublicKey(addresses.stakeConfig).toBytes())[1],
+    (
+      await pda(stakeProgramKey, "stake_price_config", addressBytes(address(addresses.stakeConfig)))
+    )[1],
     "Hastra stake-price config bump"
   );
 

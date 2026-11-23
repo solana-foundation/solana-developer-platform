@@ -18,6 +18,13 @@ checks) and `redemption.ts` (par request admission, request decoding and
 lifecycle events). Import a symbol from the module that defines it: ADR 0010
 bans re-exports, and the package's public surface is its `exports` map.
 
+Addresses and instructions are `@solana/kit`; the package has no
+`@solana/web3.js`. Kit derives PDAs asynchronously, so a derivation inside a
+read yields before that read is sent. Where send order matters, derive first:
+the par cancel passes `deriveHastraAddresses` output to `loadHastraState` so the
+identity read still leaves before the request read (`addresses.test.ts` pins
+the derived values to the web3.js-era ones).
+
 ## Pinned deployment
 
 Use only `@sdp/types/hastra-programs`. Its program IDs and token mints are tied

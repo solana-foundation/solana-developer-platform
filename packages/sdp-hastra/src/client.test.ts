@@ -4,7 +4,7 @@ import type { EarnRuntimeContext, EarnVaultInstruction } from "@sdp/earn/types";
 import { withMinimumRpcSlot } from "@sdp/rpc/read-context";
 import { HASTRA_DEPLOYMENTS } from "@sdp/types/hastra-programs";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
-import { PublicKey } from "@solana/web3.js";
+import { type Address, address, getAddressEncoder, getProgramDerivedAddress } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { deriveHastraAddresses } from "./addresses";
 import { HastraVaultDirectClient } from "./client";
@@ -38,7 +38,7 @@ function disc(namespace: "account" | "event" | "global", name: string): Buffer {
 }
 
 function key(value: string): Buffer {
-  return new PublicKey(value).toBuffer();
+  return Buffer.from(getAddressEncoder().encode(address(value)));
 }
 
 function u32(value: number): Buffer {
@@ -66,19 +66,58 @@ function i128(value: bigint): Buffer {
   return data;
 }
 
-function pda(program: string, ...seeds: (string | Uint8Array)[]): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync(
-    seeds.map((seed) => (typeof seed === "string" ? Buffer.from(seed) : Buffer.from(seed))),
-    new PublicKey(program)
+/** Kit derives PDAs asynchronously, so every address the fixtures use is derived up front. */
+const derived = new Map<string, readonly [Address, number]>();
+
+function seedKey(program: string, seeds: readonly (string | Uint8Array)[]): string {
+  return [
+    program,
+    ...seeds.map((seed) => (typeof seed === "string" ? seed : Buffer.from(seed).toString("hex"))),
+  ].join("|");
+}
+
+async function derive(program: string, ...seeds: (string | Uint8Array)[]): Promise<void> {
+  derived.set(
+    seedKey(program, seeds),
+    await getProgramDerivedAddress({ programAddress: address(program), seeds })
   );
 }
 
-function ata(owner: string, mint: string): string {
-  return PublicKey.findProgramAddressSync(
-    [key(owner), key(TOKEN_PROGRAM), key(mint)],
-    new PublicKey(ATA_PROGRAM)
-  )[0].toBase58();
+function pda(program: string, ...seeds: (string | Uint8Array)[]): readonly [Address, number] {
+  const found = derived.get(seedKey(program, seeds));
+  if (!found) throw new Error(`test premise: derive ${seedKey(program, seeds)} up front`);
+  return found;
 }
+
+function ata(owner: string, mint: string): Address {
+  return pda(ATA_PROGRAM, key(owner), key(TOKEN_PROGRAM), key(mint))[0];
+}
+
+const MINT_PROGRAM = DEPLOYMENT.vaultMintProgramAddress;
+const STAKE_PROGRAM = DEPLOYMENT.vaultStakeProgramAddress;
+await Promise.all([
+  derive(MINT_PROGRAM, "fixture_deposit_vault"),
+  derive(MINT_PROGRAM, "fixture_redeem_vault"),
+  derive(MINT_PROGRAM, "fixture_moved_redeem_vault"),
+  derive(STAKE_PROGRAM, "fixture_stake_vault"),
+  derive(MINT_PROGRAM, "config"),
+  derive(STAKE_PROGRAM, "stake_config"),
+  derive(MINT_PROGRAM, "redemption_request", key(OWNER)),
+  derive(STAKE_PROGRAM, "ticket", key(OWNER)),
+  ...[USDC, DEPLOYMENT.primeMint, DEPLOYMENT.wYldsMint].map((mint) =>
+    derive(ATA_PROGRAM, key(OWNER), key(TOKEN_PROGRAM), key(mint))
+  ),
+]);
+await Promise.all([
+  derive(MINT_PROGRAM, "vault_token_account_config", key(pda(MINT_PROGRAM, "config")[0])),
+  derive(
+    STAKE_PROGRAM,
+    "stake_vault_token_account_config",
+    key(pda(STAKE_PROGRAM, "stake_config")[0])
+  ),
+  derive(STAKE_PROGRAM, "stake_price_config", key(pda(STAKE_PROGRAM, "stake_config")[0])),
+]);
+const HASTRA_ADDRESSES = await deriveHastraAddresses(DEPLOYMENT);
 
 interface FixtureAccount {
   data: Buffer;
@@ -129,26 +168,22 @@ function tokenAccountData(
 }
 
 function fixtureState(options?: { mintPaused?: boolean; stakePaused?: boolean; stale?: boolean }) {
-  const addresses = deriveHastraAddresses(DEPLOYMENT);
+  const addresses = HASTRA_ADDRESSES;
   const mintProgram = DEPLOYMENT.vaultMintProgramAddress;
   const stakeProgram = DEPLOYMENT.vaultStakeProgramAddress;
-  const depositVault = pda(mintProgram, "fixture_deposit_vault")[0].toBase58();
-  const redeemVault = pda(mintProgram, "fixture_redeem_vault")[0].toBase58();
-  const stakeVault = pda(stakeProgram, "fixture_stake_vault")[0].toBase58();
+  const depositVault = pda(mintProgram, "fixture_deposit_vault")[0];
+  const redeemVault = pda(mintProgram, "fixture_redeem_vault")[0];
+  const stakeVault = pda(stakeProgram, "fixture_stake_vault")[0];
   const depositVaultAuthority = PAYER;
   const [mintConfig, mintConfigBump] = pda(mintProgram, "config");
-  const [, mintVaultConfigBump] = pda(
-    mintProgram,
-    "vault_token_account_config",
-    mintConfig.toBytes()
-  );
+  const [, mintVaultConfigBump] = pda(mintProgram, "vault_token_account_config", key(mintConfig));
   const [stakeConfig, stakeConfigBump] = pda(stakeProgram, "stake_config");
   const [, stakeVaultConfigBump] = pda(
     stakeProgram,
     "stake_vault_token_account_config",
-    stakeConfig.toBytes()
+    key(stakeConfig)
   );
-  const [, priceBump] = pda(stakeProgram, "stake_price_config", stakeConfig.toBytes());
+  const [, priceBump] = pda(stakeProgram, "stake_price_config", key(stakeConfig));
 
   const mintConfigData = Buffer.concat([
     disc("account", "Config"),
@@ -678,7 +713,7 @@ describe("Hastra par redemption", () => {
       shares: "1600",
     });
     const request = pda(DEPLOYMENT.vaultMintProgramAddress, "redemption_request", key(OWNER))[0];
-    expect(plan.requestAddress).toBe(request.toBase58());
+    expect(plan.requestAddress).toBe(request);
     expect(plan.expectedRequest).toEqual({
       shares: "1600",
       intermediateMint: DEPLOYMENT.wYldsMint,
@@ -906,7 +941,7 @@ describe("Hastra par redemption", () => {
       stubRpc(heldWylds(2_500_000_000n).accounts);
       const plan = await makeClient().buildParRedemptionRequest(CTX, input);
       const request = pda(DEPLOYMENT.vaultMintProgramAddress, "redemption_request", key(OWNER))[0];
-      expect(plan.requestAddress).toBe(request.toBase58());
+      expect(plan.requestAddress).toBe(request);
       expect(plan.expectedRequest).toEqual({
         shares: "0",
         intermediateMint: DEPLOYMENT.wYldsMint,
@@ -950,7 +985,7 @@ describe("Hastra par redemption", () => {
         "redemption_request",
         key(OWNER)
       );
-      open.accounts.set(request.toBase58(), {
+      open.accounts.set(request, {
         owner: DEPLOYMENT.vaultMintProgramAddress,
         data: Buffer.concat([
           disc("account", "RedemptionRequest"),
@@ -1024,7 +1059,7 @@ describe("Hastra par redemption", () => {
       "redemption_request",
       key(OWNER)
     );
-    fixture.accounts.set(request.toBase58(), {
+    fixture.accounts.set(request, {
       owner: DEPLOYMENT.vaultMintProgramAddress,
       data: Buffer.concat([
         disc("account", "RedemptionRequest"),
@@ -1039,7 +1074,7 @@ describe("Hastra par redemption", () => {
     await expect(
       client.readParRedemptionRequest(CTX, {
         providerReference: DEPLOYMENT.primeMint,
-        requestAddress: request.toBase58(),
+        requestAddress: request,
       })
     ).resolves.toMatchObject({
       status: "pending",
@@ -1048,7 +1083,7 @@ describe("Hastra par redemption", () => {
     const cancel = await client.buildParRedemptionCancel(CTX, {
       providerReference: DEPLOYMENT.primeMint,
       owner: OWNER,
-      requestAddress: request.toBase58(),
+      requestAddress: request,
     });
     expect(cancel.instructions.map((ix) => ix.programAddress)).toEqual([
       ATA_PROGRAM,
@@ -1060,11 +1095,7 @@ describe("Hastra par redemption", () => {
   });
 
   it("accepts only lifecycle events emitted in the pinned vault-mint invocation", async () => {
-    const request = pda(
-      DEPLOYMENT.vaultMintProgramAddress,
-      "redemption_request",
-      key(OWNER)
-    )[0].toBase58();
+    const request = pda(DEPLOYMENT.vaultMintProgramAddress, "redemption_request", key(OWNER))[0];
     const requested = event("RedemptionRequested", [
       key(OWNER),
       u64(2_000_000_000n),
@@ -1121,11 +1152,7 @@ describe("Hastra par redemption", () => {
   });
 
   it("decodes cancellation and refuses to invent a timestamp for a real event", async () => {
-    const request = pda(
-      DEPLOYMENT.vaultMintProgramAddress,
-      "redemption_request",
-      key(OWNER)
-    )[0].toBase58();
+    const request = pda(DEPLOYMENT.vaultMintProgramAddress, "redemption_request", key(OWNER))[0];
     const cancelled = event("RedemptionCancelled", [
       key(OWNER),
       u64(50_000_000n),
@@ -1320,8 +1347,8 @@ describe("Hastra positions and deployment guardrails", () => {
 
 describe("Hastra RPC budget", () => {
   const REQUEST = pda(DEPLOYMENT.vaultMintProgramAddress, "redemption_request", key(OWNER))[0];
-  const REQUEST_PDA = REQUEST.toBase58();
-  const TICKET = pda(DEPLOYMENT.vaultStakeProgramAddress, "ticket", key(OWNER))[0].toBase58();
+  const REQUEST_PDA = REQUEST;
+  const TICKET = pda(DEPLOYMENT.vaultStakeProgramAddress, "ticket", key(OWNER))[0];
   const REUSE_PROOF = [
     `getAccountInfo ${REQUEST_PDA}`,
     `getAccountInfo ${REQUEST_PDA} finalized`,
@@ -1464,20 +1491,20 @@ describe("Hastra RPC budget", () => {
     const redeemVault = fixture.accounts.get(fixture.redeemVault);
     const mintConfig = fixture.accounts.get(fixture.addresses.mintConfig);
     if (!redeemVault || !mintConfig) throw new Error("fixture premise");
-    fixture.accounts.set(moved.toBase58(), redeemVault);
+    fixture.accounts.set(moved, redeemVault);
     fixture.accounts.delete(fixture.redeemVault);
     // Config.redeem_vault follows the discriminator, two mints, two empty
     // administrator vectors and the vault authority.
-    key(moved.toBase58()).copy(mintConfig.data, 112);
+    key(moved).copy(mintConfig.data, 112);
 
     stubRpc(fixture.accounts);
     await expect(options()).resolves.toEqual(before);
-    expect(requests()).toEqual([[...identity(fixture), ...vaults(fixture)], [moved.toBase58()]]);
+    expect(requests()).toEqual([[...identity(fixture), ...vaults(fixture)], [moved]]);
 
     stubRpc(fixture.accounts);
     await options();
     expect(requests()).toEqual([
-      [...identity(fixture), fixture.depositVault, moved.toBase58(), fixture.stakeVault],
+      [...identity(fixture), fixture.depositVault, moved, fixture.stakeVault],
     ]);
   });
 
