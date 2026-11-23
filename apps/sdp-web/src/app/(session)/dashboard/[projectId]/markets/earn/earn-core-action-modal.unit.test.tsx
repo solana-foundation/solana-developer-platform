@@ -375,6 +375,38 @@ describe("Earn operation review", () => {
     );
   });
 
+  it("locks the deposit's choices while its preparation is in flight", async () => {
+    let finish: ((value: Operation) => void) | undefined;
+    mocks.deposit.mockReturnValue(
+      new Promise<Operation>((resolve) => {
+        finish = resolve;
+      })
+    );
+    render(<EarnCoreActionModal kind="deposit" strategy={strategy} onClose={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("amount"), { target: { value: "10" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
+    for (const label of ["wallet", "asset", "amount", "slippage"]) {
+      expect(screen.getByLabelText(label).hasAttribute("disabled")).toBe(true);
+    }
+    await act(async () => finish?.(operation()));
+  });
+
+  it("locks the withdrawal's unit and All choice while its preparation is in flight", async () => {
+    let finish: ((value: Operation) => void) | undefined;
+    mocks.withdraw.mockReturnValue(
+      new Promise<Operation>((resolve) => {
+        finish = resolve;
+      })
+    );
+    render(<EarnCoreActionModal kind="withdraw" position={escrowedPosition} onClose={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("amount"), { target: { value: "2" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
+    const unit = screen.getByRole("combobox", { name: "amountUnit" });
+    expect(unit.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "withdrawAll" }).hasAttribute("disabled")).toBe(true);
+    await act(async () => finish?.(operation()));
+  });
+
   it("lets the same withdrawal choice retry a failed preparation with the same key", async () => {
     mocks.refresh.mockRejectedValueOnce(new Error("Preparation unavailable"));
     mocks.refresh.mockResolvedValueOnce(operation({ actionId: "selected", version: 2 }));

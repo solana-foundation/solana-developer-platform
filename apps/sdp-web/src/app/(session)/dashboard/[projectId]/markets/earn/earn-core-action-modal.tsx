@@ -356,6 +356,7 @@ function EarnPreparationForm({
           autoComplete="off"
           value={form.values.amount}
           error={form.errors.amount}
+          disabled={busy}
           onChange={(value) => form.setField("amount", value)}
         />
       ) : null}
@@ -365,6 +366,7 @@ function EarnPreparationForm({
         inputMode="numeric"
         value={form.values.slippage}
         error={form.errors.slippage}
+        disabled={busy}
         onChange={(value) => form.setField("slippage", value)}
       />
       <p className="text-caption text-secondary">{t("DashboardEarn.core.prepareNote")}</p>
@@ -393,6 +395,7 @@ function EarnTextField({
   autoComplete,
   value,
   error,
+  disabled,
   onChange,
 }: {
   id: string;
@@ -401,6 +404,7 @@ function EarnTextField({
   autoComplete?: string;
   value: string;
   error: string | undefined;
+  disabled: boolean;
   onChange: (value: string) => void;
 }) {
   const errorId = `${id}-error`;
@@ -411,6 +415,7 @@ function EarnTextField({
         id={id}
         inputMode={inputMode}
         value={value}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
         autoComplete={autoComplete}
         aria-invalid={error ? true : undefined}
@@ -433,7 +438,7 @@ function EarnWithdrawalQuantityFields({
   preparation: ReturnType<typeof useEarnPreparation>;
 }) {
   const t = useTranslations();
-  const { form, tokenMint } = preparation;
+  const { form, tokenMint, busy } = preparation;
   const { withdrawAll, withdrawUnit } = form.values;
   return (
     <div className="space-y-2">
@@ -441,6 +446,7 @@ function EarnWithdrawalQuantityFields({
         <Select
           value={withdrawUnit}
           ariaLabel={t("DashboardEarn.core.amountUnit")}
+          disabled={busy}
           onValueChange={(value) => {
             // Only the listed units can be chosen; anything else leaves the unit as it was.
             const unit = WITHDRAWAL_UNITS.find((candidate) => candidate === value);
@@ -454,6 +460,7 @@ function EarnWithdrawalQuantityFields({
       <Button
         type="button"
         variant="secondary"
+        disabled={busy}
         onClick={() => form.setField("withdrawAll", !withdrawAll)}
       >
         {withdrawAll ? t("DashboardEarn.core.customAmount") : t("DashboardEarn.core.withdrawAll")}
@@ -671,7 +678,7 @@ function EarnFundingSourceFields({
   preparation: ReturnType<typeof useEarnPreparation>;
 }) {
   const t = useTranslations();
-  const { form, eligibleWallets, selectedWallet, tokenMint } = preparation;
+  const { form, eligibleWallets, selectedWallet, tokenMint, busy } = preparation;
   return (
     <>
       <div className="space-y-2">
@@ -679,6 +686,7 @@ function EarnFundingSourceFields({
         <Select
           id="earn-core-wallet"
           value={selectedWallet}
+          disabled={busy}
           onValueChange={(walletId) => form.setField("walletId", walletId)}
           placeholder={t("DashboardEarn.core.chooseWallet")}
         >
@@ -694,6 +702,7 @@ function EarnFundingSourceFields({
         <Select
           id="earn-core-token"
           value={tokenMint}
+          disabled={busy}
           onValueChange={(mint) => form.setField("mint", mint)}
         >
           {strategy.depositMints.map((address) => (
