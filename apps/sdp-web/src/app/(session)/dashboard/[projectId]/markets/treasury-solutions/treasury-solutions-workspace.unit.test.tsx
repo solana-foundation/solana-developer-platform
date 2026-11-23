@@ -3,6 +3,7 @@
 import type { Operation } from "@sdp/types/operations";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useEffect, useEffectEvent } from "react";
 import { SWRConfig, useSWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { earnQueryKeys } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-query-key";
@@ -514,7 +515,10 @@ function LiveOperationsFeed({
 }) {
   const { operations } = useEarnOperations();
   const { mutate } = useSWRConfig();
-  onPollReady(() => mutate(earnQueryKeys.operations()));
+  const reportPollReady = useEffectEvent(onPollReady);
+  useEffect(() => {
+    reportPollReady(() => mutate(earnQueryKeys.operations()));
+  }, [mutate]);
   const operation = operations?.find(({ id }) => id === operationId);
   return (
     <>

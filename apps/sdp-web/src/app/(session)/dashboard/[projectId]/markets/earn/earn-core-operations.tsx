@@ -24,6 +24,7 @@ export function EarnCoreOperations({
   const { operations, activeIds, error, hasMore, isLoadingMore, isRefreshing, loadMore, refresh } =
     useEarnOperations();
   if (!operations?.length && !error) return null;
+  const activeOperationIds = new Set(activeIds);
   return (
     <section className="mt-6 space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -54,7 +55,7 @@ export function EarnCoreOperations({
             key={operation.id}
             operation={operation}
             strategyName={strategyName}
-            observeInitialTerminal={activeIds?.includes(operation.id) === true}
+            observeInitialTerminal={activeOperationIds.has(operation.id)}
             onUpdated={onUpdated}
           />
         );

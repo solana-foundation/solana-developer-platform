@@ -1,7 +1,7 @@
 "use client";
 
 import { type Operation, TERMINAL_OPERATION_STATUSES } from "@sdp/types/operations";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { earnQueryKeys } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-query-key";
 import { dashboardRequest } from "./dashboard-fetch";
@@ -197,6 +197,7 @@ export function useEarnOperation(
     }
   );
   const operation = currentObservation(operationId, initial, data);
+  const notifyUpdated = useEffectEvent((observed: Operation) => onUpdated?.(observed));
   useEffect(() => {
     if (reported.current.id !== operationId) {
       reported.current = { id: operationId, observation: initial ? JSON.stringify(initial) : null };
@@ -207,8 +208,8 @@ export function useEarnOperation(
     reported.current.observation = observation;
     if (operation === initial) return;
     // Shared fetches still reach the activity row after their initiating dialog closes.
-    onUpdated?.(operation);
-  }, [initial, onUpdated, operation, operationId]);
+    notifyUpdated(operation);
+  }, [initial, operation, operationId]);
   return {
     operation,
     error,
