@@ -191,7 +191,8 @@ persist that evidence or accept it from a caller; every later preparation or
 refresh must read fresh provider state.
 Offer one recovery choice, not an owner-wide scan or one read per old request.
 Route reads degrade independently, but when no route survives, an unreadable
-provider answers `503`, never the no-route `400`. Reads of a recorded
+provider or an unusable swap quote (`SWAP_UNAVAILABLE`) answers `503`, never
+the no-route `400`. Reads of a recorded
 obligation (expired escrow, pending release) fail closed through
 `rethrowVaultProviderFailure`.
 Returning shares is `settlementOutcome: recovered`, not delivered asset payout.
