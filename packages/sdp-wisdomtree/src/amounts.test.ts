@@ -34,9 +34,15 @@ describe("acceptAtMintScale", () => {
   });
 
   it("handles quantities beyond 2^53 exactly", () => {
-    const { baseUnits, canonical } = acceptAtMintScale("92233720368.547758079", 9, "Shares");
-    expect(baseUnits).toBe(92_233_720_368_547_758_079n);
-    expect(canonical).toBe("92233720368.547758079");
+    const { baseUnits, canonical } = acceptAtMintScale("9223372036.854775807", 9, "Shares");
+    expect(baseUnits).toBe(9_223_372_036_854_775_807n);
+    expect(canonical).toBe("9223372036.854775807");
+  });
+
+  it("refuses a quantity no SPL token transfer can encode", () => {
+    expect(() => acceptAtMintScale("18446744073.709551616", 9, "Shares")).toThrowError(
+      SdpWisdomTreeError
+    );
   });
 });
 

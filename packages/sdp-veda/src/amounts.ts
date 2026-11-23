@@ -1,13 +1,5 @@
-import {
-  decimalScale,
-  formatDecimalAmount,
-  isDecimalString,
-  parseDecimalAmount,
-} from "@sdp/solana/amount";
+import { type AcceptedTokenAmount, acceptTokenAmount, TokenAmountError } from "@sdp/solana/amount";
 import { amountOutOfRange, amountTooPrecise, invalidAmount } from "./errors";
-
-/** Every amount Veda serializes into an instruction is an unsigned 64-bit integer. */
-const MAX_U64_BASE_UNITS = (1n << 64n) - 1n;
 
 /**
  * Amount conversion at the MINT's precision.
@@ -19,12 +11,8 @@ const MAX_U64_BASE_UNITS = (1n << 64n) - 1n;
  * `bigint` base units throughout, never a float.
  */
 
-export interface AcceptedAmount {
-  /** What the instruction will encode. */
-  baseUnits: bigint;
-  /** The same value as a decimal string, canonical to the mint's scale. */
-  canonical: string;
-}
+/** What the instruction will encode, and its canonical decimal string at the mint's scale. */
+export type AcceptedAmount = AcceptedTokenAmount;
 
 /**
  * Convert a decimal string to mint atoms, refusing anything that would not
@@ -47,30 +35,7 @@ export interface AcceptedAmount {
  * is the same class of bug wearing a friendlier costume.
  */
 export function acceptAtMintScale(field: string, value: string, decimals: number): AcceptedAmount {
-  const normalized = value.trim();
-  // `isDecimalString` is the syntax gate and also the SIGN gate: it accepts
-  // digits and at most one dot, so "-1", "1e5" and "Infinity" are all rejected
-  // here rather than needing a separate numeric parse.
-  if (!isDecimalString(normalized)) throw invalidAmount(field, value);
-
-  // Scale is a property of the VALUE, not its spelling. Zeros after the last
-  // non-zero fractional digit need no mint atoms: `1.5000000` is exactly
-  // representable by a six-decimal mint even though its text has seven places.
-  // Strip only those; a non-zero sub-atom remains and is still refused.
-  const canonicalScaleInput = trimInsignificantFractionalZeroes(normalized);
-  if (decimalScale(canonicalScaleInput) > decimals) {
-    throw amountTooPrecise(field, value, decimals);
-  }
-
-  const baseUnits = parseDecimalAmount(canonicalScaleInput, decimals);
-  // Scale-valid decimals can still overflow the u64 Veda encodes. Letting those
-  // through defers the failure into the SDK's own `assertU64` after several RPC
-  // round trips, far from the caller that can fix it.
-  if (baseUnits > MAX_U64_BASE_UNITS) throw amountOutOfRange(field, value);
-
-  // Re-serialised through the repo's fixed-point helpers so what leaves this
-  // package is scaled exactly like every other amount in SDP ("1.500" -> "1.5").
-  return { baseUnits, canonical: formatDecimalAmount(baseUnits, decimals) };
+  return acceptVedaAmount(field, value, decimals, false);
 }
 
 /**
@@ -86,9 +51,23 @@ export function acceptPositiveAtMintScale(
   value: string,
   decimals: number
 ): AcceptedAmount {
-  const accepted = acceptAtMintScale(field, value, decimals);
-  if (accepted.baseUnits === 0n) throw invalidAmount(field, value);
-  return accepted;
+  return acceptVedaAmount(field, value, decimals, true);
+}
+
+function acceptVedaAmount(
+  field: string,
+  value: string,
+  decimals: number,
+  positive: boolean
+): AcceptedAmount {
+  try {
+    return acceptTokenAmount(value, decimals, { positive });
+  } catch (error) {
+    if (!(error instanceof TokenAmountError)) throw error;
+    if (error.reason === "too_precise") throw amountTooPrecise(field, value, decimals);
+    if (error.reason === "out_of_range") throw amountOutOfRange(field, value);
+    throw invalidAmount(field, value);
+  }
 }
 
 /**
@@ -108,20 +87,4 @@ export function mintDecimals(value: unknown, label: string): number {
     throw new Error(`Veda ${label} was not a usable mint decimal count (${String(value)})`);
   }
   return parsed;
-}
-
-function trimInsignificantFractionalZeroes(value: string): string {
-  const dot = value.indexOf(".");
-  if (dot === -1) return value;
-
-  const whole = value.slice(0, dot);
-  let fractionEnd = value.length;
-  // Scan once from the end instead of applying an end-anchored repetition to
-  // caller-controlled input. The latter can retry from every zero when a long
-  // run ends in a non-zero digit, turning validation into quadratic work.
-  while (fractionEnd > dot + 1 && value[fractionEnd - 1] === "0") {
-    fractionEnd -= 1;
-  }
-
-  return fractionEnd === dot + 1 ? whole : value.slice(0, fractionEnd);
 }

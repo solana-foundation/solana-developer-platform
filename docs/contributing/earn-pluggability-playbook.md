@@ -63,7 +63,10 @@ surfacing the provider:
 
 Unknown IDs fail closed. Provider HTTP uses `providerFetch` or
 `providerFetchJson`, with sanitized errors. Keep chain SDKs in execution
-packages, so catalogue cron processes do not load them.
+packages, so catalogue cron processes do not load them. Parse every caller
+amount with `acceptTokenAmount` (`@sdp/solana/amount`), the one grammar every
+execution package shares, and map its refusal reasons to the package's own
+`INVALID_AMOUNT` errors.
 
 ## Execution capabilities
 

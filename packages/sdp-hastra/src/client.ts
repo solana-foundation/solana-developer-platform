@@ -32,7 +32,12 @@ import type {
 import { contextAwareRpcFetch } from "@sdp/rpc/read-context";
 import { markRpcAttemptDeadline } from "@sdp/rpc/telemetry";
 import { MAX_SUPPORTED_TRANSACTION_VERSION } from "@sdp/rpc/transaction-version";
-import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
+import {
+  AmountError,
+  acceptTokenAmount,
+  formatDecimalAmount,
+  TokenAmountError,
+} from "@sdp/solana/amount";
 import {
   type HastraDeployment,
   hastraDeployment,
@@ -232,10 +237,16 @@ function assertDiscriminator(data: Buffer, namespace: "account" | "event", name:
 }
 
 function canonicalAmount(value: string, label: string): { text: string; atoms: bigint } {
-  let atoms: bigint;
   try {
-    atoms = parseDecimalAmount(value, TOKEN_DECIMALS);
+    const { baseUnits, canonical } = acceptTokenAmount(value, TOKEN_DECIMALS, { positive: true });
+    return { text: canonical, atoms: baseUnits };
   } catch (cause) {
+    if (
+      cause instanceof TokenAmountError &&
+      (cause.reason === "out_of_range" || cause.reason === "not_positive")
+    ) {
+      throw new SdpHastraError("INVALID_AMOUNT", `${label} must be between one atom and u64::MAX.`);
+    }
     if (cause instanceof AmountError) {
       throw new SdpHastraError(
         "INVALID_AMOUNT",
@@ -244,10 +255,6 @@ function canonicalAmount(value: string, label: string): { text: string; atoms: b
     }
     throw cause;
   }
-  if (atoms <= 0n || atoms > U64_MAX) {
-    throw new SdpHastraError("INVALID_AMOUNT", `${label} must be between one atom and u64::MAX.`);
-  }
-  return { text: formatDecimalAmount(atoms, TOKEN_DECIMALS), atoms };
 }
 
 function formatAtoms(atoms: bigint): string {

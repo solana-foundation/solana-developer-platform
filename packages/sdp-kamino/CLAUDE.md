@@ -217,6 +217,8 @@ and returns the canonical form the instruction actually encodes — surfaced as
 `KaminoInstructionPlan.accepted`, which is what the ledger should persist.
 Trailing fractional zeroes do not add precision (`1.5000000` is representable by
 a six-decimal mint); a non-zero sub-atom still fails rather than being floored.
+The grammar is `acceptTokenAmount` in `@sdp/solana/amount`, shared by every
+Earn execution package; `amounts.ts` maps its refusals to `SdpKaminoError`.
 
 This exists because klend-sdk converts every `Decimal` to mint atoms and
 **floors, silently**. Two different bugs hide under that floor: `1.0000009` on a
