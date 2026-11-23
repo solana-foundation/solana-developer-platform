@@ -11,6 +11,25 @@ describe("nextState", () => {
     expect(nextState("draft", undefined)).toBe("preparing");
   });
 
+  // Pins the guarded-transition inventory independently of the table the
+  // loop below derives its cases from: a gutted or renamed TRANSITIONS entry
+  // would otherwise register zero loop cases and stay green (mirrors
+  // health.test.ts's "serves traffic in exactly the reviewed egress states").
+  it("defines exactly the reviewed guarded transitions", () => {
+    const guarded = TRANSITIONS.filter((t) => t.guard).map(({ from, guard, to }) => [
+      from,
+      guard,
+      to,
+    ]);
+    expect(guarded).toEqual([
+      ["preparing", "prepared", "proving"],
+      ["proving", "proof_received", "ready_to_sign"],
+      ["ready_to_sign", "signed", "submitted"],
+      ["submitted", "submitted", "indexing"],
+      ["indexing", "indexed", "completed"],
+    ]);
+  });
+
   it("advances every guarded transition when the guard matches", () => {
     const guarded = TRANSITIONS.filter((t) => t.guard);
     for (const transition of guarded) {
