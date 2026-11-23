@@ -321,6 +321,41 @@ describe("current redemption release storage", () => {
     ).toEqual({ status: "pending", cancel_signature: null });
   });
 
+  it("keeps one immutable absence marker, and an expiry failure frees the address for a new release", async () => {
+    await pendingRequest();
+    const p = await prepare("release_1");
+    await operations().requestExecution(scope, p.claim, p.signed);
+    const first = await queues().recordCurrentRedemptionReleaseAbsent(p.input);
+    expect(first.release_absence_observed_at).toEqual(expect.any(String));
+    const again = await queues().recordCurrentRedemptionReleaseAbsent(p.input);
+    expect(again.release_absence_observed_at).toBe(first.release_absence_observed_at);
+    await expect(
+      getDb(env).execute(
+        "UPDATE earn_wallet_withdrawal_request_transactions SET release_absence_observed_at = '2000-01-01T00:00:00.000Z' WHERE id = 'release_1'"
+      )
+    ).rejects.toThrow("absence observation is immutable");
+    await operations().transition(scope, p.claim, {
+      status: "failed",
+      nextAction: null,
+      resourceRef: null,
+      error: {
+        code: "TRANSACTION_EXPIRED",
+        message: "The current redemption release expired before it landed",
+      },
+    });
+    expect(
+      await queues().isRequestFencedByCurrentRedemptionRelease({
+        organizationId: scope.organizationId,
+        environment: scope.environment,
+        withdrawalRequestId: "historical_A",
+      })
+    ).toBe(false);
+    expect(await lease()).toMatchObject({ lease_token: "historical_A", occupied: true });
+    const next = await prepare("release_2");
+    await operations().requestExecution(scope, next.claim, next.signed);
+    expect(await lease()).toMatchObject({ lease_token: "release_2", occupied: true });
+  });
+
   it("rejects cross-scope consumption and restores occupancy after a pre-sign refusal", async () => {
     await pendingRequest();
     const p = await prepare("release_1");
