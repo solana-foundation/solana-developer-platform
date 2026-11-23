@@ -191,13 +191,16 @@ export async function getRecentBlockhash(
  * @param commitment - The commitment whose bank answers.
  * @returns The bank's block height and absolute slot.
  */
-export async function getChainHeight(
-  rpc: SolanaRpc,
-  commitment: Commitment
-): Promise<{ blockHeight: bigint; absoluteSlot: Slot }> {
+export async function getChainHeight(rpc: SolanaRpc, commitment: Commitment): Promise<ChainHeight> {
   const epochInfo = await rpc.getEpochInfo({ commitment }).send();
 
   return { blockHeight: epochInfo.blockHeight, absoluteSlot: epochInfo.absoluteSlot };
+}
+
+/** A bank's block height and the absolute slot it was read at (`getChainHeight`). */
+export interface ChainHeight {
+  blockHeight: bigint;
+  absoluteSlot: Slot;
 }
 
 /**
@@ -701,6 +704,52 @@ export async function reReadExpiredStatuses(
     reRead[index] = current[position];
   }
   return reRead;
+}
+
+/** A batch row still waiting on the chain: its signature and its blockhash's last valid height. */
+export interface AwaitingSignature {
+  signature: Signature;
+  lastValidBlockHeight: bigint;
+}
+
+/**
+ * Prove every awaiting row whose blockhash `height` shows expired absent, by re-reading its status
+ * at the height's slot (`reReadExpiredStatuses`). When no node at that slot answers, the batch
+ * statuses come back unchanged and every expired row is `unproven`: the caller leaves those rows
+ * unjudged this tick, so it neither rebroadcasts nor expires them.
+ *
+ * @param rpc - The cluster's pool client.
+ * @param rows - The batch rows.
+ * @param statuses - The batch statuses, by row index.
+ * @param height - The finalized height read and the slot it was read at.
+ * @param awaiting - The row's signature and last valid block height while it still awaits the
+ * chain, or `null` to leave it out.
+ * @param onUnreadable - Called with the re-read failure and how many expired rows it left unproven.
+ * @returns The statuses with every expired row's re-read applied, and the unproven row indexes.
+ */
+export async function proveExpiredAbsence<Row>(
+  rpc: SolanaRpc,
+  rows: readonly Row[],
+  statuses: ReadonlyArray<SignatureStatusInfo | null>,
+  height: ChainHeight,
+  awaiting: (row: Row, index: number) => AwaitingSignature | null,
+  onUnreadable: (error: unknown, expired: number) => void
+): Promise<{ statuses: Array<SignatureStatusInfo | null>; unproven: Set<number> }> {
+  const expired = rows.flatMap((row, index) => {
+    const pending = awaiting(row, index);
+    return pending !== null && height.blockHeight > pending.lastValidBlockHeight
+      ? [{ index, signature: pending.signature }]
+      : [];
+  });
+  try {
+    return {
+      statuses: await reReadExpiredStatuses(rpc, statuses, expired, height.absoluteSlot),
+      unproven: new Set(),
+    };
+  } catch (error) {
+    onUnreadable(error, expired.length);
+    return { statuses: [...statuses], unproven: new Set(expired.map(({ index }) => index)) };
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

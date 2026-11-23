@@ -4,10 +4,11 @@ import { createClusterRpc } from "@sdp/rpc/factory";
 import { readStamp, withReadFloor } from "@sdp/rpc/read-context";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import {
+  type ChainHeight,
   getChainHeight,
   getSignatureStatuses,
   getTransaction,
-  reReadExpiredStatuses,
+  proveExpiredAbsence,
   type SignatureStatusInfo,
   type SolanaRpc,
   tokenBalanceDelta,
@@ -19,7 +20,7 @@ import {
   EARN_PROVIDER_DEPOSIT_SETTLEMENT,
   earnProviderDepositSettlement,
 } from "@sdp/types/provider-access";
-import type { Signature, Slot } from "@solana/kit";
+import type { Signature } from "@solana/kit";
 import { getDb } from "@/db/client";
 import {
   createPostgresEarnMovementsRepository,
@@ -258,7 +259,7 @@ export async function reconcileEarnVaultMovementBatch(
   const needsBlockHeight = rows.some(
     (row, index) => (statuses[index] ?? null) === null && row.status !== "confirmed"
   );
-  let finalized: FinalizedHeight | null = null;
+  let finalized: ChainHeight | null = null;
   if (needsBlockHeight) {
     try {
       finalized = await getChainHeight(rpc, "finalized");
@@ -278,7 +279,7 @@ export async function reconcileEarnVaultMovementBatch(
   const expiry =
     finalized === null
       ? { statuses, unproven: new Set<number>() }
-      : await proveExpiredAbsence(rpc, environment, rows, signatures, statuses, finalized);
+      : await proveExpiredMovements(rpc, environment, rows, signatures, statuses, finalized);
   if (expiry.unproven.size > 0) stats.statusReadFailures = 1;
   const currentBlockHeight = finalized?.blockHeight ?? null;
 
@@ -316,15 +317,9 @@ export async function reconcileEarnVaultMovementBatch(
   return stats;
 }
 
-interface FinalizedHeight {
-  blockHeight: bigint;
-  absoluteSlot: Slot;
-}
-
 /**
- * Prove the absence of every row whose blockhash the finalized height shows expired while its
- * batch status was null, by re-reading those statuses at the height's slot
- * (`reReadExpiredStatuses`).
+ * Prove the absence of every expired row whose batch status was null (`proveExpiredAbsence`). A
+ * row still awaits the chain while its batch status is null and it is not yet confirmed.
  *
  * @param rpc - The cluster's pool client.
  * @param environment - The environment the rows belong to, for the failure event.
@@ -335,41 +330,40 @@ interface FinalizedHeight {
  * @returns The statuses with every expired row's re-read applied, and the indexes of expired rows
  * whose re-read failed, which stay unjudged this tick.
  */
-async function proveExpiredAbsence(
+function proveExpiredMovements(
   rpc: SolanaRpc,
   environment: SdpEnvironment,
   rows: readonly EarnMovementRow[],
   signatures: readonly Signature[],
   statuses: ReadonlyArray<SignatureStatusInfo | null>,
-  finalized: FinalizedHeight
+  finalized: ChainHeight
 ): Promise<{ statuses: Array<SignatureStatusInfo | null>; unproven: Set<number> }> {
-  const expired = rows.flatMap((row, index) => {
-    const signature = signatures[index];
-    const lastValidBlockHeight = row.last_valid_block_height;
-    return signature !== undefined &&
-      (statuses[index] ?? null) === null &&
-      row.status !== "confirmed" &&
-      lastValidBlockHeight !== null &&
-      finalized.blockHeight > BigInt(lastValidBlockHeight)
-      ? [{ index, signature }]
-      : [];
-  });
-  try {
-    return {
-      statuses: await reReadExpiredStatuses(rpc, statuses, expired, finalized.absoluteSlot),
-      unproven: new Set(),
-    };
-  } catch (error) {
-    logEvent("error", {
-      event: "sdp_api_earn_vault_reconciliation_status_read_failed",
-      environment,
-      rows: expired.length,
-      min_context_slot: finalized.absoluteSlot.toString(),
-      ...describeError(error),
-      error_message: errorMessage(error),
-    });
-    return { statuses: [...statuses], unproven: new Set(expired.map(({ index }) => index)) };
-  }
+  return proveExpiredAbsence(
+    rpc,
+    rows,
+    statuses,
+    finalized,
+    (row, index) => {
+      const signature = signatures[index];
+      const lastValidBlockHeight = row.last_valid_block_height;
+      return signature !== undefined &&
+        (statuses[index] ?? null) === null &&
+        row.status !== "confirmed" &&
+        lastValidBlockHeight !== null
+        ? { signature, lastValidBlockHeight: BigInt(lastValidBlockHeight) }
+        : null;
+    },
+    (error, expired) => {
+      logEvent("error", {
+        event: "sdp_api_earn_vault_reconciliation_status_read_failed",
+        environment,
+        rows: expired,
+        min_context_slot: finalized.absoluteSlot.toString(),
+        ...describeError(error),
+        error_message: errorMessage(error),
+      });
+    }
+  );
 }
 
 interface ChainObservation {
