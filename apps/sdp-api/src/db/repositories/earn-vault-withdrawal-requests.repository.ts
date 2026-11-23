@@ -164,7 +164,6 @@ export interface EarnWalletWithdrawalRequestTransactionRow {
 
 const EARN_VAULT_WITHDRAWAL_REQUEST_ID_PREFIX = "earn_vault_withdrawal_request_";
 const EARN_VAULT_WITHDRAWAL_ACTION_ID_PREFIX = "earn_vault_withdrawal_action_";
-const EARN_VAULT_WITHDRAWAL_RESERVATION_ID_PREFIX = "earn_vault_withdrawal_reservation_";
 const EARN_WALLET_WITHDRAWAL_REQUEST_TRANSACTION_ID_PREFIX =
   "earn_wallet_withdrawal_request_transaction_";
 
@@ -174,10 +173,6 @@ export function generateEarnVaultWithdrawalRequestId(): string {
 
 export function generateEarnVaultWithdrawalRequestActionId(): string {
   return `${EARN_VAULT_WITHDRAWAL_ACTION_ID_PREFIX}${crypto.randomUUID()}`;
-}
-
-export function generateEarnVaultWithdrawalRequestReservationId(): string {
-  return `${EARN_VAULT_WITHDRAWAL_RESERVATION_ID_PREFIX}${crypto.randomUUID()}`;
 }
 
 export function generateEarnWalletWithdrawalRequestTransactionId(): string {
@@ -317,10 +312,6 @@ export interface EarnVaultWithdrawalRequestsRepository extends CurrentRedemption
     mechanism?: EarnVaultWithdrawalMechanism;
   }): Promise<void>;
   releaseRequestReservation(params: { id: string; organizationId: string }): Promise<void>;
-  findByClientRequestId(params: {
-    organizationId: string;
-    clientRequestId: string;
-  }): Promise<EarnVaultWithdrawalRequestRow | null>;
   getById(params: {
     organizationId: string;
     environment: SdpEnvironment;
@@ -365,10 +356,6 @@ export interface EarnVaultWithdrawalRequestsRepository extends CurrentRedemption
   getActionByClientRequestId(params: {
     organizationId: string;
     clientRequestId: string;
-  }): Promise<EarnVaultWithdrawalRequestActionRow | null>;
-  getLatestAction(params: {
-    withdrawalRequestId: string;
-    action: EarnVaultWithdrawalRequestActionKind;
   }): Promise<EarnVaultWithdrawalRequestActionRow | null>;
   advanceAction(input: {
     actionId: string;
@@ -1076,10 +1063,6 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
       });
     },
 
-    async findByClientRequestId(params) {
-      return findRequestByClientRequestId(db, params.organizationId, params.clientRequestId);
-    },
-
     async getById(params) {
       const row = await db
         .prepare(
@@ -1505,18 +1488,6 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
 
     async getActionByClientRequestId(params) {
       return getActionByClientRequestId(db, params.organizationId, params.clientRequestId);
-    },
-
-    async getLatestAction(params) {
-      const row = await db
-        .prepare(
-          `SELECT * FROM earn_vault_withdrawal_request_actions
-            WHERE withdrawal_request_id = ? AND action = ?
-            ORDER BY created_at DESC, id DESC LIMIT 1`
-        )
-        .bind(params.withdrawalRequestId, params.action)
-        .first<Record<string, unknown>>();
-      return row ? mapAction(row) : null;
     },
 
     async advanceAction(input) {
