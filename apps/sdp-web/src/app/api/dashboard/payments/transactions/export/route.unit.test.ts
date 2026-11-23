@@ -1,25 +1,13 @@
 import type { UnifiedTransaction } from "@sdp/types/unified-transactions";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-const mocks = vi.hoisted(() => ({ request: vi.fn() }));
-
-vi.mock("@/lib/sdp-api", () => ({
-  createSdpApiClient: async () => ({ request: mocks.request }),
-}));
-// The modules a stable deployment shows today: Payments only.
-vi.mock("@/flags/dashboard", () => ({
-  getDashboardFlags: async () => ({
-    payments: true,
-    markets: false,
-    earn: false,
-    dvp: false,
-    privateChannels: false,
-    issuance: false,
-    heliusRings: false,
-  }),
-}));
-
+import * as dashboardFlags from "@/flags/dashboard";
+import * as sdpApi from "@/lib/sdp-api";
+import { expectDashboardNoStore } from "@/test/dashboard-response";
+import { dashboardFlagsAt } from "@/test/release-channel-flags";
+import { required } from "@/test/required";
 import { GET } from "./route";
+
+const request = vi.fn<(path: string) => Promise<Response>>();
 
 function transaction(id: string): UnifiedTransaction {
   return {
@@ -52,10 +40,20 @@ function rateLimited(retryAfter: string | null): Response {
   );
 }
 
-function exportRequest(): Request {
-  return new Request(
-    "http://localhost/api/dashboard/payments/transactions/export?status=succeeded"
-  );
+function exportRequest(query = "?status=succeeded"): Request {
+  return new Request(`http://localhost/api/dashboard/payments/transactions/export${query}`);
+}
+
+function requestedPaths(): string[] {
+  return request.mock.calls.map(([path]) => path);
+}
+
+/** The id column of each CSV line, header first; a line without one fails the test. */
+function exportedIds(csv: string): string[] {
+  return csv
+    .trimEnd()
+    .split("\r\n")
+    .map((line) => required(line.split(",")[1]));
 }
 
 /** Lets the route reach its next wait, then moves the clock past it. */
@@ -66,41 +64,86 @@ async function advance(ms: number): Promise<void> {
 describe("GET /api/dashboard/payments/transactions/export", () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    mocks.request.mockReset();
+    vi.setSystemTime(new Date("2026-10-02T12:00:00.000Z"));
+    request.mockReset();
+    vi.spyOn(sdpApi, "createSdpApiClient").mockResolvedValue({
+      request,
+      fetch: async () => {
+        throw new Error("The export reads through request()");
+      },
+    });
+    vi.spyOn(dashboardFlags, "getDashboardFlags").mockResolvedValue(dashboardFlagsAt("stable"));
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("exports every page with the list's filters, from the first page, as a CSV file", async () => {
+    request
+      .mockResolvedValueOnce(page(["txn_1"], "cursor_2"))
+      .mockResolvedValueOnce(page(["txn_2"], null));
+
+    const response = await GET(
+      exportRequest("?status=succeeded&counterpartyId=cpty_1&cursor=c9&cursors=c8&pageSize=50")
+    );
+
+    expect(requestedPaths()).toEqual([
+      "/v1/transactions?limit=100&status=succeeded&counterpartyId=cpty_1",
+      "/v1/transactions?limit=100&status=succeeded&counterpartyId=cpty_1&cursor=cursor_2",
+    ]);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("text/csv; charset=utf-8");
+    expect(response.headers.get("Content-Disposition")).toBe(
+      'attachment; filename="sdp-transactions-2026-10-02.csv"'
+    );
+    expectDashboardNoStore(response);
+    expect(await response.text()).toBe(
+      [
+        "createdAt,id,module,moduleId,kind,status,moduleStatus,amount,token,counterpartyId,custodyWalletId,custodyWalletLabel,signature",
+        "2026-10-01T00:00:00.000Z,txn_1,payments,txn_1,pay,succeeded,completed,1,,,,,",
+        "2026-10-01T00:00:00.000Z,txn_2,payments,txn_2,pay,succeeded,completed,1,,,,,",
+        "",
+      ].join("\r\n")
+    );
+  });
+
+  it("stops at 5,000 rows however many pages remain", async () => {
+    const hundred = Array.from({ length: 100 }, (_, index) => `txn_${index}`);
+    request.mockImplementation(async () => page(hundred, "more"));
+
+    const response = await GET(exportRequest());
+
+    expect(request).toHaveBeenCalledTimes(50);
+    const ids = exportedIds(await response.text());
+    expect(ids).toHaveLength(5_001);
+    expect(ids.slice(0, 2)).toEqual(["id", "txn_0"]);
   });
 
   it("waits out a 429's Retry-After and reads the same page again", async () => {
-    mocks.request
+    request
       .mockResolvedValueOnce(page(["txn_1"], "cursor_2"))
       .mockResolvedValueOnce(rateLimited("20"))
       .mockResolvedValueOnce(page(["txn_2"], null));
 
     const pending = GET(exportRequest());
     await advance(19_999);
-    // Still waiting: the refused page is not read again before Retry-After.
-    expect(mocks.request).toHaveBeenCalledTimes(2);
+    expect(request).toHaveBeenCalledTimes(2);
     await advance(1);
     const response = await pending;
 
     expect(response.status).toBe(200);
-    expect(mocks.request).toHaveBeenCalledTimes(3);
-    // The retry asks for the page the quota refused, not the first one.
-    expect(mocks.request.mock.calls[1]?.[0]).toBe(mocks.request.mock.calls[2]?.[0]);
-    expect(mocks.request.mock.calls[2]?.[0]).toContain("cursor=cursor_2");
-    const csv = await response.text();
-    expect(csv).toContain("txn_1");
-    expect(csv).toContain("txn_2");
+    expect(requestedPaths()).toEqual([
+      "/v1/transactions?limit=100&status=succeeded",
+      "/v1/transactions?limit=100&status=succeeded&cursor=cursor_2",
+      "/v1/transactions?limit=100&status=succeeded&cursor=cursor_2",
+    ]);
+    expect(exportedIds(await response.text())).toEqual(["id", "txn_1", "txn_2"]);
   });
 
   it("answers 429 once the waiting budget is spent, without a partial CSV", async () => {
-    // Each refusal asks for a full minute; the budget covers one wait and a few seconds more.
-    mocks.request
-      .mockResolvedValueOnce(page(["txn_1"], "cursor_2"))
-      .mockResolvedValue(rateLimited("60"));
+    request.mockResolvedValueOnce(page(["txn_1"], "cursor_2")).mockResolvedValue(rateLimited("60"));
 
     const pending = GET(exportRequest());
     await advance(60_000);
@@ -108,29 +151,29 @@ describe("GET /api/dashboard/payments/transactions/export", () => {
     const response = await pending;
 
     expect(response.status).toBe(429);
-    expect(response.headers.get("Content-Type")).toContain("application/json");
-    await expect(response.json()).resolves.toMatchObject({
-      error: { code: "RATE_LIMITED", message: expect.stringContaining("Wait a minute") },
+    expect(response.headers.get("Retry-After")).toBe("60");
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "RATE_LIMITED",
+        message: "Too many transaction reads to finish the export. Wait a minute and try again.",
+      },
     });
-    // The first page, then the refused page three times: after 60s, after the last 5s, and the
-    // read that found the budget gone.
-    expect(mocks.request).toHaveBeenCalledTimes(4);
   });
 
   it("waits a few seconds when a 429 names no Retry-After", async () => {
-    mocks.request.mockResolvedValueOnce(rateLimited(null)).mockResolvedValueOnce(page([], null));
+    request.mockResolvedValueOnce(rateLimited(null)).mockResolvedValueOnce(page([], null));
 
     const pending = GET(exportRequest());
     await advance(4_999);
-    expect(mocks.request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledTimes(1);
     await advance(1);
 
     expect((await pending).status).toBe(200);
-    expect(mocks.request).toHaveBeenCalledTimes(2);
+    expect(request).toHaveBeenCalledTimes(2);
   });
 
-  it("still passes any other failure straight through", async () => {
-    mocks.request.mockResolvedValueOnce(
+  it("passes any other failure straight through", async () => {
+    request.mockResolvedValueOnce(
       Response.json({ error: { message: "Insufficient permissions" } }, { status: 403 })
     );
 
@@ -140,22 +183,15 @@ describe("GET /api/dashboard/payments/transactions/export", () => {
     await expect(response.json()).resolves.toEqual({
       error: { message: "Insufficient permissions" },
     });
-    expect(mocks.request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledTimes(1);
   });
 
   it("drops a module the channel leaves out, and its kind, from the API query", async () => {
-    mocks.request.mockResolvedValueOnce(page(["xfr_1"], null));
+    request.mockResolvedValueOnce(page(["xfr_1"], null));
 
-    const response = await GET(
-      new Request(
-        "http://localhost/api/dashboard/payments/transactions/export?module=issuance&kind=mint&status=succeeded"
-      )
-    );
+    const response = await GET(exportRequest("?module=issuance&kind=mint&status=succeeded"));
 
     expect(response.status).toBe(200);
-    const query = new URL(String(mocks.request.mock.calls[0]?.[0]), "http://api").searchParams;
-    expect(query.get("module")).toBeNull();
-    expect(query.get("kind")).toBeNull();
-    expect(query.get("status")).toBe("succeeded");
+    expect(requestedPaths()).toEqual(["/v1/transactions?limit=100&status=succeeded"]);
   });
 });

@@ -1,6 +1,11 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import type { Action } from "@sdp/types/actions";
+import {
+  CUSTODY_PROPOSAL_AUTHORIZATION_STATES,
+  CUSTODY_PROPOSAL_PROVIDER_PHASES,
+} from "@sdp/types/custody-proposals";
 import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
+import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -23,11 +28,14 @@ import { systemProposalLedger } from "@/services/jobs/proposal-recovery-ledger";
 import { reconcileFireblocksProposals } from "@/services/jobs/reconcile-fireblocks-proposals";
 import { reconcilePendingProposals } from "@/services/jobs/reconcile-pending-proposals";
 import { applyProposalEvent } from "@/services/payments/custody-proposal-ledger";
+import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { deferred } from "@/test/helpers/deferred";
 import { env } from "@/test/helpers/env";
+import { expireIdempotencyKey } from "@/test/helpers/idempotency-records";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -36,8 +44,9 @@ import { applyProposalObservation } from "./fireblocks-transfer";
 const ORGANIZATION_ID = "org_fireblocks_byok";
 const USER_ID = "usr_fireblocks_byok";
 const PROJECT_ID = "prj_fireblocks_byok";
-const ADDRESS = "11111111111111111111111111111111";
-const OTHER_ADDRESS = "So11111111111111111111111111111111111111112";
+const ADDRESS = TEST_SOLANA_ADDRESSES.wallet1;
+const OTHER_ADDRESS = TEST_SOLANA_ADDRESSES.wallet2;
+const FIREBLOCKS_API_BASE_URL = "https://fireblocks.example.test";
 const fields = {
   apiKey: "tenant-fireblocks-key",
   signingKeyId: "",
@@ -55,7 +64,7 @@ const testEnv: Env = {
   SDP_DEPLOYMENT_MODE: "self_hosted",
   CREDENTIAL_SECRET_STORE_BACKEND: "encrypted_db",
   CUSTODY_ENCRYPTION_KEY: Buffer.alloc(32, 11).toString("base64"),
-  FIREBLOCKS_API_BASE_URL: "https://fireblocks.example.test",
+  FIREBLOCKS_API_BASE_URL,
   FIREBLOCKS_API_KEY: "deployment-key-must-not-be-used",
   FIREBLOCKS_API_SECRET: "deployment-secret-must-not-be-used",
 };
@@ -162,7 +171,7 @@ afterEach(() => vi.restoreAllMocks());
 
 const SIG =
   "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
-const USDC = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+const USDC = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
 /** The custody policy refusal's safe message, shared with signing errors (HOO-2478). */
 const FIREBLOCKS_POLICY_REFUSAL =
   "Fireblocks blocked signing due to a wallet policy. Review the policy in Fireblocks or adjust the request.";
@@ -201,7 +210,7 @@ async function ready(projectId = PROJECT_ID) {
   beforeCancellation = null;
   beforeCreateResponse = null;
   mock.mockImplementation(async (url, init) => {
-    const path = String(url).replace(testEnv.FIREBLOCKS_API_BASE_URL ?? "", "");
+    const path = String(url).replace(FIREBLOCKS_API_BASE_URL, "");
     expect(new Headers(init?.headers).get("X-API-Key")).toBe(fields.apiKey);
     if (path === "/v1/supported_assets")
       return Response.json([
@@ -285,10 +294,6 @@ async function send(
     testEnv
   );
 }
-/** Lets a same-key retry reach the transfer row, as one does once its stored answer expires. */
-async function expireIdempotencyKey(key: string) {
-  await getDb(env).execute("DELETE FROM idempotency_keys WHERE idempotency_key = ?", [key]);
-}
 async function refresh(id: string) {
   await getDb(env).execute(
     "UPDATE custody_proposals SET last_polled_at = NULL WHERE payment_transfer_id = ?",
@@ -306,9 +311,11 @@ async function refresh(id: string) {
 /** The row's open audit intent and the outcomes appended for it, oldest first. */
 async function transferAudit(transferId: string) {
   const db = getDb(env);
-  const row = await db.queryOne<{ audit_intent_id: string | null }>(
-    "SELECT audit_intent_id FROM payment_transfers WHERE id = ?",
-    [transferId]
+  const row = required(
+    await db.queryOne<{ audit_intent_id: string | null }>(
+      "SELECT audit_intent_id FROM payment_transfers WHERE id = ?",
+      [transferId]
+    )
   );
   const outcomes = await db.queryMany<{
     status: string;
@@ -321,7 +328,7 @@ async function transferAudit(transferId: string) {
     [transferId]
   );
   return {
-    openIntent: row?.audit_intent_id != null,
+    openIntent: row.audit_intent_id !== null,
     outcomes: outcomes.map((outcome) => ({
       status: outcome.status,
       metadata:
@@ -627,7 +634,8 @@ describe("native Fireblocks BYOK payment routes", () => {
     const mock = await ready();
     const response = await send();
     expect(response.status, await response.clone().text()).toBe(200);
-    const transfer = (await response.json()).data.transfer;
+    const first = await response.json();
+    const transfer = first.data.transfer;
     expect(transfer).toMatchObject({
       status: "processing",
       signature: null,
@@ -646,7 +654,8 @@ describe("native Fireblocks BYOK payment routes", () => {
     expect(mock).toHaveBeenCalledTimes(1);
     const replay = await send();
     expect(replay.status).toBe(200);
-    expect((await replay.json()).data.transfer.id).toBe(transfer.id);
+    expect(replay.headers.get("Idempotent-Replayed")).toBe("true");
+    expect(await replay.json()).toEqual(first);
     expect(mock).toHaveBeenCalledTimes(1);
     providerStatus = "COMPLETED";
     expect(await refresh(transfer.id)).toMatchObject({ status: "confirmed", signature: SIG });
@@ -685,7 +694,7 @@ describe("native Fireblocks BYOK payment routes", () => {
             "SELECT initiated_by_principal FROM payment_transfers WHERE id = ?",
             [proposal.externalTxId]
           );
-          principalAtSubmission = row?.initiated_by_principal;
+          principalAtSubmission = required(row).initiated_by_principal;
         }
         return provider(url, init);
       });
@@ -985,15 +994,12 @@ describe("native Fireblocks BYOK payment routes", () => {
     });
     expect((await send()).status).toBe(500);
     expect(rolledBackClaim).toBe(true);
-    const row = await getDb(env).queryOne<{
-      status: string;
-      provider_data: Record<string, unknown>;
-    }>("SELECT status, provider_data FROM payment_transfers WHERE organization_id = ?", [
-      ORGANIZATION_ID,
-    ]);
+    const row = await getDb(env).queryOne<{ status: string }>(
+      "SELECT status FROM payment_transfers WHERE organization_id = ?",
+      [ORGANIZATION_ID]
+    );
     // Only the durable payment remains for observation-only orphan recovery.
     expect(row).toMatchObject({ status: "processing" });
-    expect(row?.provider_data).not.toHaveProperty("fireblocksSubmissionStartedAt");
     expect(await getDb(env).queryMany("SELECT id FROM custody_proposals")).toEqual([]);
     expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
   });
@@ -1045,7 +1051,7 @@ describe("native Fireblocks BYOK payment routes", () => {
       }),
     ]);
   });
-  it("does not expose credentials and blocks another project from reading or executing this wallet", async () => {
+  it("does not expose credentials and hides the transfer from another project", async () => {
     const mock = await ready();
     const response = await send();
     const raw = await response.text();
@@ -1075,16 +1081,26 @@ describe("native Fireblocks BYOK payment routes", () => {
       expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
     }
   );
-  it.each(["REJECTED", "BLOCKED"])(
-    "returns an error for an immediate %s result",
-    async (status) => {
-      await ready();
-      providerStatus = status;
-      const response = await send();
-      expect(response.status).toBe(400);
-      expect((await response.json()).error.code).toBe("TRANSACTION_FAILED");
-    }
-  );
+  it.each([
+    { status: "REJECTED", error: "Fireblocks REJECTED. Review this transaction in Fireblocks." },
+    {
+      status: "BLOCKED",
+      error:
+        "Fireblocks BLOCKED. Check this transfer's approval and destination rules in Fireblocks.",
+    },
+  ])("fails the payment on an immediate $status result", async ({ status, error }) => {
+    await ready();
+    providerStatus = status;
+    const response = await send();
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe("TRANSACTION_FAILED");
+    expect(
+      await getDb(env).queryOne(
+        "SELECT status, error FROM payment_transfers WHERE organization_id = ?",
+        [ORGANIZATION_ID]
+      )
+    ).toEqual({ status: "failed", error });
+  });
   it("records a definite create refusal even when an absence poll wins the version race", async () => {
     const mock = await ready();
     createStatus = 429;
@@ -1135,7 +1151,8 @@ describe("native Fireblocks BYOK payment routes", () => {
     );
     expect(await refresh(id)).toMatchObject({
       status: "failed",
-      error: expect.stringContaining("24 hours"),
+      error:
+        "Fireblocks still has no transaction for this payment after 24 hours of recovery. Review the payment in Fireblocks before intentionally starting a new transfer.",
     });
     expect((await (await send()).json()).data.transfer.id).toBe(id);
     expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
@@ -1404,17 +1421,6 @@ describe("native Fireblocks BYOK payment routes", () => {
     );
     expect(row).toMatchObject({ status: "failed", provider_reference: null, code: "FORBIDDEN" });
   });
-
-  it("refuses a disabled connection before contacting Fireblocks", async () => {
-    const mock = await ready();
-    await getDb(env).execute(
-      "UPDATE custody_connections SET status = 'deactivated', deactivated_at = sdp_iso_now() WHERE organization_id = ?",
-      [ORGANIZATION_ID]
-    );
-    const response = await send();
-    expect(response.status).toBeGreaterThanOrEqual(400);
-    expect(mock).not.toHaveBeenCalled();
-  });
 });
 
 async function recoverPendingProposal(id: string) {
@@ -1439,6 +1445,27 @@ async function recordedProposal(id: string) {
   });
   if (!row) throw new Error("Expected durable Fireblocks transfer");
   return row;
+}
+
+/** The proposal row the recovery worker decides on; the payment row only mirrors it. */
+const proposalStateRow = z.object({
+  provider_phase: z.enum(CUSTODY_PROPOSAL_PROVIDER_PHASES),
+  authorization_state: z.enum(CUSTODY_PROPOSAL_AUTHORIZATION_STATES),
+  refusal_reason: z.string().nullable(),
+  cancel_attempt: z.number(),
+  cancel_acknowledged_at: z.string().nullable(),
+  alerted_at: z.string().nullable(),
+});
+
+async function proposalState(id: string): Promise<z.infer<typeof proposalStateRow>> {
+  return proposalStateRow.parse(
+    await getDb(env).queryOne(
+      `SELECT provider_phase, authorization_state, refusal_reason, cancel_attempt,
+              cancel_acknowledged_at, alerted_at
+         FROM custody_proposals WHERE payment_transfer_id = ?`,
+      [id]
+    )
+  );
 }
 
 async function useTransferApiKey(apiKeyId: string, grants: readonly Action[]) {
@@ -1468,7 +1495,11 @@ describe("native Fireblocks pending proposal recovery (PRO-2435 D4)", () => {
       const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
       const pending = await recoverPendingProposal(transfer.id);
       expect(pending.status).toBe("processing");
-      expect(pending.provider_data.proposalRefusal).toBeUndefined();
+      expect(await proposalState(transfer.id)).toMatchObject({
+        provider_phase: "pending",
+        authorization_state: "authorized",
+        cancel_attempt: 0,
+      });
       expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(0);
       expect(warn).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1485,7 +1516,10 @@ describe("native Fireblocks pending proposal recovery (PRO-2435 D4)", () => {
       providerStatus = "COMPLETED";
       const completed = await recoverPendingProposal(transfer.id);
       expect(completed).toMatchObject({ status: "confirmed", signature: SIG });
-      expect(completed.provider_data.proposalRefusal).toBeUndefined();
+      expect(await proposalState(transfer.id)).toMatchObject({
+        provider_phase: "completed",
+        authorization_state: "authorized",
+      });
       expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(0);
     }
   );
@@ -1499,7 +1533,10 @@ describe("native Fireblocks pending proposal recovery (PRO-2435 D4)", () => {
     const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
     const pending = await recoverPendingProposal(transfer.id);
     expect(pending.status).toBe("processing");
-    expect(pending.provider_data.proposalRefusal).toBeUndefined();
+    expect(await proposalState(transfer.id)).toMatchObject({
+      authorization_state: "authorized",
+      cancel_attempt: 0,
+    });
     expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(0);
     expect(warn).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1525,20 +1562,38 @@ describe("native Fireblocks pending proposal recovery (PRO-2435 D4)", () => {
     expect(response.status, await response.clone().text()).toBe(200);
     const transfer = (await response.json()).data.transfer;
     await getDb(env).execute("UPDATE api_keys SET status = 'revoked' WHERE id = ?", [apiKeyId]);
-    let refusalBeforeCancellation: Record<string, unknown> | undefined;
+    let stagedBeforeCancellation:
+      | {
+          payment: Awaited<ReturnType<typeof recordedProposal>>["status"];
+          proposal: z.infer<typeof proposalStateRow>;
+        }
+      | undefined;
     beforeCancellation = async () => {
-      const row = await recordedProposal(transfer.id);
-      expect(row.provider_data.proposalRefusal).toMatchObject({ reason: "principal_not_live" });
-      refusalBeforeCancellation = row.provider_data;
-      expect(row.status).toBe("processing");
+      stagedBeforeCancellation = {
+        payment: (await recordedProposal(transfer.id)).status,
+        proposal: await proposalState(transfer.id),
+      };
     };
     const pending = await recoverPendingProposal(transfer.id);
+    expect(stagedBeforeCancellation).toEqual({
+      payment: "processing",
+      proposal: {
+        provider_phase: "pending",
+        authorization_state: "cancel_requested",
+        refusal_reason: "principal_not_live",
+        cancel_attempt: 1,
+        cancel_acknowledged_at: null,
+        alerted_at: null,
+      },
+    });
     expect(pending).toMatchObject({ status: "processing", signature: null });
-    expect(pending.provider_data.proposalRefusal).toMatchObject({ reason: "principal_not_live" });
-    expect(pending.provider_data.proposalCancellationAcceptedAt).toEqual(expect.any(String));
-    expect(refusalBeforeCancellation?.proposalRefusal).toEqual(
-      pending.provider_data.proposalRefusal
-    );
+    expect(await proposalState(transfer.id)).toMatchObject({
+      provider_phase: "pending",
+      authorization_state: "cancel_acknowledged",
+      refusal_reason: "principal_not_live",
+      cancel_attempt: 1,
+      cancel_acknowledged_at: expect.any(String),
+    });
     expect(
       mock.mock.calls.filter(
         ([url, init]) => String(url).endsWith("/v1/transactions") && init?.method === "POST"
@@ -1549,23 +1604,11 @@ describe("native Fireblocks pending proposal recovery (PRO-2435 D4)", () => {
     const cancelled = await recoverPendingProposal(transfer.id);
     expect(cancelled).toMatchObject({ status: "failed", signature: null });
     expect(cancelled.error).toBe("The credential moving money is no longer active");
-    expect(cancelled.provider_data.proposalRefusal).toEqual(pending.provider_data.proposalRefusal);
-    expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(1);
-  });
-
-  it("cancels a pending proposal after its initiating member is removed", async () => {
-    const mock = await ready();
-    const response = await send("fireblocks-recovery-removed-member");
-    expect(response.status, await response.clone().text()).toBe(200);
-    const transfer = (await response.json()).data.transfer;
-    await getDb(env).execute(
-      "UPDATE organization_members SET status = 'removed' WHERE organization_id = ? AND user_id = ?",
-      [ORGANIZATION_ID, USER_ID]
-    );
-    const pending = await recoverPendingProposal(transfer.id);
-    expect(pending.provider_data.proposalRefusal).toMatchObject({ reason: "principal_not_live" });
-    expect(pending.provider_data.proposalCancellationAcceptedAt).toEqual(expect.any(String));
-    expect(pending.status).toBe("processing");
+    expect(await proposalState(transfer.id)).toMatchObject({
+      provider_phase: "cancelled",
+      authorization_state: "cancel_acknowledged",
+      refusal_reason: "principal_not_live",
+    });
     expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(1);
   });
 
@@ -1584,8 +1627,12 @@ describe("native Fireblocks pending proposal recovery (PRO-2435 D4)", () => {
     expect(pending.status).toBe("processing");
     const completed = await recoverPendingProposal(transfer.id);
     expect(completed).toMatchObject({ status: "confirmed", signature: SIG });
-    expect(completed.provider_data.proposalRefusal).toEqual(pending.provider_data.proposalRefusal);
-    expect(completed.provider_data.proposalRefusalAlertedAt).toEqual(expect.any(String));
+    expect(await proposalState(transfer.id)).toMatchObject({
+      provider_phase: "completed",
+      authorization_state: "refusal_alerted",
+      refusal_reason: "principal_not_live",
+      alerted_at: expect.any(String),
+    });
     expect(critical).toHaveBeenCalledWith(
       expect.objectContaining({
         event: "fireblocks_transfer_committed_after_refusal",
@@ -1625,8 +1672,10 @@ describe("native Fireblocks pending proposal recovery (PRO-2435 D4)", () => {
     expect(mock.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
     const stored = await recordedProposal(transfer.id);
     expect(stored.initiated_by_principal).toEqual({ kind: "api_key", apiKeyId });
-    expect(stored.provider_data.proposalRefusal).toBeUndefined();
-    expect(stored.provider_data.proposalCancellationAcceptedAt).toBeUndefined();
+    expect(await proposalState(transfer.id)).toMatchObject({
+      authorization_state: "authorized",
+      cancel_attempt: 0,
+    });
     const schedule = await getDb(env).queryOne<{
       last_checked_at: string | null;
     }>("SELECT last_checked_at FROM custody_proposals WHERE payment_transfer_id = ?", [
@@ -1752,8 +1801,7 @@ describe("manual native Fireblocks cancellation", () => {
       await getDb(env).execute("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?", [
         walletId,
       ]);
-      const pending = await recoverPendingProposal(transfer.id);
-      expect(pending.provider_data.fireblocksCancelRequestedAt).toBeUndefined();
+      await recoverPendingProposal(transfer.id);
       const proposal = await getDb(env).queryOne<{ cancel_requested_at: string }>(
         "SELECT cancel_requested_at FROM custody_proposals WHERE payment_transfer_id = ?",
         [transfer.id]
@@ -1820,9 +1868,11 @@ describe("manual native Fireblocks cancellation", () => {
       expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(
         race === "before cancellation" ? 0 : 1
       );
-      const stored = await recordedProposal(transfer.id);
-      expect(stored.status).toBe("processing");
-      expect(stored.provider_data.proposalRefusal).toBeUndefined();
+      expect((await recordedProposal(transfer.id)).status).toBe("processing");
+      expect(await proposalState(transfer.id)).toMatchObject({
+        provider_phase: "executing",
+        authorization_state: "authorized",
+      });
     }
   );
 

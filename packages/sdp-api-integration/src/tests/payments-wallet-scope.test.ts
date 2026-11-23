@@ -1,5 +1,7 @@
 import { API_KEY_GRANTABLE_ACTIONS } from "@sdp/types/actions";
+import { PAYMENT_TRANSFER_STATUSES } from "@sdp/types/payments";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import {
   cleanupIntegrationSuite,
   createFundedIntegrationWallet,
@@ -11,24 +13,19 @@ import {
   SOLANA_CONFIGURED,
 } from "#/helpers/integration";
 
-type CreateApiKeyResponse = {
-  data: {
-    apiKey: {
-      id: string;
-      key: string;
-    };
-  };
-};
+const createApiKeyResponseSchema = z.object({
+  data: z.object({ apiKey: z.object({ id: z.string(), key: z.string() }) }),
+});
 
-type TransferApiResponse = {
-  data: {
-    transfer: {
-      id: string;
-      status: string;
-      signature: string | null;
-    };
-  };
-};
+const transferResponseSchema = z.object({
+  data: z.object({
+    transfer: z.object({
+      id: z.string(),
+      status: z.enum(PAYMENT_TRANSFER_STATUSES),
+      signature: z.string().nullable(),
+    }),
+  }),
+});
 
 const DESTINATION_A = "6A8j8oy5x8VYKJ9x1L88M3BM3uY7v8nqM6jLi4Y8qfvt";
 const DESTINATION_B = "7pL4J6N9d77qiy5iqfJ5z4T1mSx1FSa7o2r1K5vY7P4m";
@@ -53,9 +50,9 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Payments Wallet S
     keyManager = await requestAsOrganizationAdmin();
   });
 
-  // HOO-2099: a selected key signs only with the custody wallets it lists,
-  // decided at the custody signer; its reads cover the whole project.
-  it("signs only with the key's listed wallets, and reads the whole project", {
+  // HOO-2099: a selected key signs only with the custody wallets it lists; its
+  // transfer reads cover the whole project, its wallet list only those wallets.
+  it("signs only with the key's listed wallets, reads every project transfer, and lists only its wallets", {
     timeout: 240000,
   }, async () => {
     const walletA = await createFundedIntegrationWallet({
@@ -81,7 +78,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Payments Wallet S
     });
 
     expect(createKeyRes.status).toBe(201);
-    const createdKey = (await createKeyRes.json()) as CreateApiKeyResponse;
+    const createdKey = createApiKeyResponseSchema.parse(await createKeyRes.json());
     const scopedRequest = requestWithApiKey(createdKey.data.apiKey.key);
     const transferFrom = (request: typeof scopedRequest, sourceCustodyWalletId: string) =>
       request("/v1/payments/transfers/execute", {
@@ -97,7 +94,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Payments Wallet S
 
     const transferARes = await transferFrom(scopedRequest, walletA.id);
     expect(transferARes.status).toBe(200);
-    const transferA = (await transferARes.json()) as TransferApiResponse;
+    const transferA = transferResponseSchema.parse(await transferARes.json());
     expect(transferA.data.transfer.signature).not.toBeNull();
 
     const refusedRes = await transferFrom(scopedRequest, walletB.id);
@@ -108,7 +105,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Payments Wallet S
 
     const transferBRes = await transferFrom(adminRequest, walletB.id);
     expect(transferBRes.status).toBe(200);
-    const transferB = (await transferBRes.json()) as TransferApiResponse;
+    const transferB = transferResponseSchema.parse(await transferBRes.json());
 
     const listRes = await scopedRequest("/v1/payments/transfers?page=1&pageSize=20");
     expect(listRes.status).toBe(200);
@@ -123,6 +120,9 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Payments Wallet S
       `/v1/payments/transfers/${transferB.data.transfer.id}`
     );
     expect(transferBGetRes.status).toBe(200);
+    expect(await transferBGetRes.json()).toMatchObject({
+      data: { transfer: { id: transferB.data.transfer.id } },
+    });
 
     const walletsRes = await scopedRequest("/v1/wallets?view=summary");
     expect(walletsRes.status).toBe(200);

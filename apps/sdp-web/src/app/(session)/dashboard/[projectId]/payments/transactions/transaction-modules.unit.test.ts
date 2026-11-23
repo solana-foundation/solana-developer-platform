@@ -1,4 +1,3 @@
-import { UNIFIED_TRANSACTION_MODULES } from "@sdp/types/unified-transactions";
 import { describe, expect, it } from "vitest";
 import {
   enabledPaymentTransactionKinds,
@@ -18,10 +17,17 @@ const ALL_ON: TransactionModuleFlags = {
 
 describe("enabledTransactionModules", () => {
   it("lists every module when every area is on", () => {
-    expect(enabledTransactionModules(ALL_ON)).toEqual([...UNIFIED_TRANSACTION_MODULES]);
+    expect(enabledTransactionModules(ALL_ON)).toEqual([
+      "payments",
+      "earn",
+      "dvp",
+      "private_channels",
+      "issuance",
+      "rings",
+    ]);
   });
 
-  it("lists only Payments when the release channel caps the rest off (stable today)", () => {
+  it("lists only Payments when every other area is off", () => {
     expect(
       enabledTransactionModules({
         ...ALL_ON,
@@ -46,7 +52,6 @@ describe("enabledTransactionModules", () => {
 });
 
 describe("enabledPaymentTransactionKinds", () => {
-  // Stable's Type filter offered Onramp, Offramp and Confidential pay, none of which it records.
   it("offers ramps only where the channel runs Ramps, and confidential pay nowhere", () => {
     expect(enabledPaymentTransactionKinds({ ramps: false })).toEqual([
       "pay",

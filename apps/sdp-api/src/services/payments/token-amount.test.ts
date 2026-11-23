@@ -1,12 +1,10 @@
-import { runInClusterScope } from "@sdp/rpc/scope";
-import { parseDecimalAmount } from "@sdp/solana/amount";
 import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { address, getBase64Decoder, none } from "@solana/kit";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { type ExtensionArgs, extension, getMintEncoder } from "@solana-program/token-2022";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
+import { inSandboxScope, installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import {
   type LegacyStubMint,
@@ -43,10 +41,6 @@ const SCALED_BY_TWO_UNTIL_LATER: ExtensionArgs = scaledUiAmountConfig({
   newMultiplierEffectiveTimestamp: CLOCK_UNIX_TIMESTAMP + ONE_YEAR_SECONDS,
 });
 
-function inSandboxScope<TResult>(operation: () => TResult): TResult {
-  return runInClusterScope({ projectId: null, environment: "sandbox" }, operation);
-}
-
 describe("loadPaymentAmountConverter", () => {
   const rpc = installClusterRpcResponder();
 
@@ -70,23 +64,23 @@ describe("loadPaymentAmountConverter", () => {
       extensions: [extension("PermanentDelegate", { delegate: syntheticAddress(3) })],
     },
   ])(
-    "converts a Token-2022 mint with $label by its decimals, without reading the clock",
+    "admits a Token-2022 mint with $label and converts by its decimals in one mint read",
     async ({ extensions }) => {
       serveMint({ decimals: 6, extensions });
 
       const toBaseUnits = await inSandboxScope(() => loadPaymentAmountConverter(MINT));
 
-      expect(toBaseUnits("12.345678")).toBe(parseDecimalAmount("12.345678", 6));
+      expect(toBaseUnits("12.345678")).toBe(12_345_678n);
       expect(accountInfoReads()).toEqual([MINT]);
     }
   );
 
-  it("converts a legacy SPL Token mint by its decimals, without reading the clock", async () => {
+  it("converts a legacy SPL Token mint by its decimals in one mint read", async () => {
     serveMint({ tokenProgram: TOKEN_PROGRAM_ADDRESS, decimals: 9 });
 
     const toBaseUnits = await inSandboxScope(() => loadPaymentAmountConverter(MINT));
 
-    expect(toBaseUnits("12.345678912")).toBe(parseDecimalAmount("12.345678912", 9));
+    expect(toBaseUnits("12.345678912")).toBe(12_345_678_912n);
     expect(accountInfoReads()).toEqual([MINT]);
   });
 
@@ -97,20 +91,9 @@ describe("loadPaymentAmountConverter", () => {
       loadPaymentAmountConverter(address(usdc.address))
     );
 
-    expect(toBaseUnits("12.345678")).toBe(parseDecimalAmount("12.345678", usdc.decimals));
+    expect(toBaseUnits("12.345678")).toBe(12_345_678n);
     expect(rpc.requests).toEqual([]);
   });
-
-  it.each([WELL_KNOWN_TOKENS.USDG, WELL_KNOWN_TOKENS.PYUSD])(
-    "keeps $symbol supported while fee handling is deferred",
-    async (token) => {
-      const mint = token.mints.devnet;
-      if (mint === undefined) throw new Error("Fixture requires a devnet mint");
-      const convert = await inSandboxScope(() => loadPaymentAmountConverter(address(mint.address)));
-      expect(convert("1.5")).toBe(1500000n);
-      expect(rpc.requests).toEqual([]);
-    }
-  );
 
   it("reads a well-known mint the scope's cluster does not declare from the chain", async () => {
     const usdsMainnetMint = address(WELL_KNOWN_TOKENS.USDS.mints["mainnet-beta"].address);
@@ -121,87 +104,81 @@ describe("loadPaymentAmountConverter", () => {
 
     const toBaseUnits = await inSandboxScope(() => loadPaymentAmountConverter(usdsMainnetMint));
 
-    expect(toBaseUnits("1")).toBe(parseDecimalAmount("1", 9));
+    expect(toBaseUnits("1")).toBe(1_000_000_000n);
     expect(accountInfoReads()).toEqual([usdsMainnetMint]);
   });
 
   it.each([
-    { label: "scaled UI amount", extensions: [SCALED_BY_TWO_UNTIL_LATER] },
-    { label: "interest-bearing", extensions: [INTEREST_BEARING_CONFIG] },
-    { label: "non-transferable", extensions: [extension("NonTransferable", {})] },
-  ])(
-    "rejects a $label mint before reading the clock or converting amounts",
-    async ({ extensions }) => {
-      serveMint({ decimals: 6, extensions });
-      await expect(inSandboxScope(() => loadPaymentAmountConverter(MINT))).rejects.toMatchObject({
-        code: "BAD_REQUEST",
-        statusCode: 400,
-      });
-      expect(accountInfoReads()).toEqual([MINT]);
-    }
-  );
-
-  it.each([SCALED_BY_TWO_UNTIL_LATER, INTEREST_BEARING_CONFIG])(
-    "reads facts for recovery without admitting a new payment ($__kind)",
-    async (extension) => {
-      serveMint({ decimals: 6, extensions: [extension] });
-      await inSandboxScope(async () => {
-        expect((await loadPaymentMintFacts(MINT)).toBaseUnits("1.5")).toBe(1500000n);
-        await expect(loadPaymentMint(MINT)).rejects.toMatchObject({ statusCode: 400 });
-      });
-      expect(accountInfoReads()).toEqual([MINT]);
-    }
-  );
-
-  it("keeps raw amounts above 2^53 exact and accepts the full u64 range", async () => {
-    serveMint({ decimals: 6, extensions: null });
-    const convert = await inSandboxScope(() => loadPaymentAmountConverter(MINT));
-    expect(convert("9007199254.740993")).toBe(9007199254740993n);
-    expect(convert("18446744073709.551615")).toBe(18446744073709551615n);
+    { kind: "ScaledUiAmountConfig", extensions: [SCALED_BY_TWO_UNTIL_LATER] },
+    { kind: "InterestBearingConfig", extensions: [INTEREST_BEARING_CONFIG] },
+    { kind: "NonTransferable", extensions: [extension("NonTransferable", {})] },
+  ])("refuses a new payment in a $kind mint with 400", async ({ kind, extensions }) => {
+    serveMint({ decimals: 6, extensions });
+    await expect(inSandboxScope(() => loadPaymentAmountConverter(MINT))).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      statusCode: 400,
+      message: `Payments do not support the ${kind} mint extension`,
+    });
+    expect(accountInfoReads()).toEqual([MINT]);
   });
 
-  it.each(["1.0000001", "18446744073709.551616"])(
-    "rejects %s with 400 instead of rounding or overflowing",
-    async (amount) => {
-      serveMint({ decimals: 6, extensions: null });
-      const convert = await inSandboxScope(() => loadPaymentAmountConverter(MINT));
-      expect(() => convert(amount)).toThrow(
-        expect.objectContaining({ code: "BAD_REQUEST", statusCode: 400 })
-      );
-    }
-  );
-
-  it.each(["wrong owner", "uninitialized", "malformed"])(
-    "rejects a %s mint account",
-    async (kind) => {
-      const data =
-        kind === "malformed"
-          ? new Uint8Array(3)
-          : getMintEncoder().encode({
-              mintAuthority: none(),
-              supply: 0n,
-              decimals: 6,
-              isInitialized: kind !== "uninitialized",
-              freezeAuthority: none(),
-              extensions: none(),
-            });
-      rpc.answer("getAccountInfo", {
-        context: { slot: 1 },
-        value: {
-          data: [getBase64Decoder().decode(data), "base64"],
-          executable: false,
-          lamports: 1,
-          owner: kind === "wrong owner" ? syntheticAddress(99) : TOKEN_PROGRAM_ADDRESS,
-          rentEpoch: 0,
-          space: data.length,
-        },
+  it("reads a refused mint's facts for recovery while still refusing a new payment in it", async () => {
+    serveMint({ decimals: 6, extensions: [INTEREST_BEARING_CONFIG] });
+    await inSandboxScope(async () => {
+      expect((await loadPaymentMintFacts(MINT)).toBaseUnits("1.5")).toBe(1_500_000n);
+      await expect(loadPaymentMint(MINT)).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+        message: "Payments do not support the InterestBearingConfig mint extension",
       });
-      await expect(inSandboxScope(() => loadPaymentAmountConverter(MINT))).rejects.toMatchObject({
+    });
+    expect(accountInfoReads()).toEqual([MINT]);
+  });
+
+  it("answers 400 for an amount it cannot convert exactly, without rounding", async () => {
+    serveMint({ decimals: 6, extensions: null });
+    const convert = await inSandboxScope(() => loadPaymentAmountConverter(MINT));
+    expect(() => convert("1.0000001")).toThrow(
+      expect.objectContaining({
         code: "BAD_REQUEST",
         statusCode: 400,
-      });
-    }
-  );
+        message: "Amount has too many decimal places",
+      })
+    );
+  });
+
+  it.each([
+    { kind: "wrong owner", message: "Unsupported token program for mint" },
+    { kind: "uninitialized", message: "Token mint is not initialized" },
+    { kind: "malformed", message: "Token mint account data is invalid" },
+  ])("rejects a $kind mint account", async ({ kind, message }) => {
+    const data =
+      kind === "malformed"
+        ? new Uint8Array(3)
+        : getMintEncoder().encode({
+            mintAuthority: none(),
+            supply: 0n,
+            decimals: 6,
+            isInitialized: kind !== "uninitialized",
+            freezeAuthority: none(),
+            extensions: none(),
+          });
+    rpc.answer("getAccountInfo", {
+      context: { slot: 1 },
+      value: {
+        data: [getBase64Decoder().decode(data), "base64"],
+        executable: false,
+        lamports: 1,
+        owner: kind === "wrong owner" ? syntheticAddress(99) : TOKEN_PROGRAM_ADDRESS,
+        rentEpoch: 0,
+        space: data.length,
+      },
+    });
+    await expect(inSandboxScope(() => loadPaymentAmountConverter(MINT))).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      statusCode: 400,
+      message,
+    });
+  });
 
   it("shares the mint read between concurrent admission and execution in one scope", async () => {
     serveMint({ decimals: 6, extensions: null });

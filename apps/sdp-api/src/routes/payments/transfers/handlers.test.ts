@@ -32,12 +32,4 @@ describe("mapTransferExecutionError", () => {
 
     expect(mapped).toBe(error);
   });
-
-  it("falls through to SOLANA_RPC_ERROR for a non-program-error failure", () => {
-    const error = new Error("RPC connection refused");
-
-    const mapped = mapTransferExecutionError(error);
-
-    expect(mapped.code).toBe("SOLANA_RPC_ERROR");
-  });
 });

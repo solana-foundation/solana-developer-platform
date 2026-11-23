@@ -4,6 +4,8 @@ import { PAYMENT_TRANSFER_STATUSES } from "@sdp/types/payments";
 import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import type { BadgeVariant } from "@sdp/ui/badge";
 import { describe, expect, it } from "vitest";
+import type { MessageKey } from "@/i18n/messages";
+import { ISSUED_TOKEN_MINT } from "@/test/issued-tokens";
 import {
   countUnpricedHoldings,
   formatTokenAmount,
@@ -19,8 +21,6 @@ import {
   statusVariant,
 } from "./payments-overview.utils";
 
-const UNCATALOGUED_MINT = "BmA22WnK8p5Ai5mkzJhk64DCxMiUiii69tgSmUGMWPSh";
-
 // Intl groups with a no-break space in French; match both forms it may emit.
 const normalizeSpaces = (value: string) => value.replace(/[\xa0\u202f]/g, " ");
 
@@ -33,11 +33,11 @@ describe("resolveTransferTokenLabel", () => {
   });
 
   it("shortens a mint it cannot name", () => {
-    expect(resolveTransferTokenLabel(UNCATALOGUED_MINT)).toBe("BmA22W…WPSh");
+    expect(resolveTransferTokenLabel(ISSUED_TOKEN_MINT)).toBe("BmA22W…WPSh");
   });
 
   it("prefers a caller-supplied symbol over shortening", () => {
-    expect(resolveTransferTokenLabel(UNCATALOGUED_MINT, { [UNCATALOGUED_MINT]: "ATD" })).toBe(
+    expect(resolveTransferTokenLabel(ISSUED_TOKEN_MINT, { [ISSUED_TOKEN_MINT]: "ATD" })).toBe(
       "ATD"
     );
   });
@@ -46,7 +46,7 @@ describe("resolveTransferTokenLabel", () => {
     // The balances payload echoes the mint when it has no symbol for a token;
     // treating that as a name would defeat the shortened-address fallback.
     expect(
-      resolveTransferTokenLabel(UNCATALOGUED_MINT, { [UNCATALOGUED_MINT]: UNCATALOGUED_MINT })
+      resolveTransferTokenLabel(ISSUED_TOKEN_MINT, { [ISSUED_TOKEN_MINT]: ISSUED_TOKEN_MINT })
     ).toBe("BmA22W…WPSh");
   });
 
@@ -70,26 +70,28 @@ describe("resolveTransferTokenLabel", () => {
 describe("resolveTokenByMint", () => {
   it("maps the native SOL alias to the SOL mint", () => {
     // Rows written by the native send path record the literal "SOL".
-    expect(resolveTokenByMint("SOL", {})).toMatchObject({
-      mint: SOL_MINT,
-      tokenName: "SOL",
-      isWellKnown: true,
+    expect(resolveTokenByMint("SOL", {})).toEqual({
       tokenId: null,
+      tokenName: "SOL",
+      metadataImageUrl: null,
+      mint: SOL_MINT,
+      isWellKnown: true,
     });
   });
 
   it("resolves an issued mint to its id, symbol, and metadata image", () => {
     const issued = {
       id: "tok_1",
-      mintAddress: UNCATALOGUED_MINT,
+      mintAddress: ISSUED_TOKEN_MINT,
       symbol: "bSGD",
       imageUrl: "https://cdn.example/bsgd.png",
     };
 
-    expect(resolveTokenByMint(UNCATALOGUED_MINT, { [UNCATALOGUED_MINT]: issued })).toMatchObject({
+    expect(resolveTokenByMint(ISSUED_TOKEN_MINT, { [ISSUED_TOKEN_MINT]: issued })).toEqual({
       tokenId: "tok_1",
       tokenName: "bSGD",
       metadataImageUrl: "https://cdn.example/bsgd.png",
+      mint: ISSUED_TOKEN_MINT,
       isWellKnown: false,
     });
   });
@@ -137,7 +139,7 @@ describe("isHttpUrl", () => {
 });
 
 describe("statusMessageKey", () => {
-  const cases = [
+  it.each([
     ["pending", "DashboardPayments.transactions.pending"],
     ["processing", "DashboardPayments.transactions.processing"],
     ["confirmed", "DashboardPayments.transactions.confirmed"],
@@ -148,16 +150,12 @@ describe("statusMessageKey", () => {
     ["completed", "DashboardPayments.transactions.completed"],
     ["canceled", "DashboardPayments.transactions.canceled"],
     ["expired", "DashboardPayments.transactions.expired"],
-  ] satisfies ReadonlyArray<
-    readonly [
-      (typeof PAYMENT_TRANSFER_STATUSES)[number],
-      `DashboardPayments.transactions.${string}`,
-    ]
-  >;
-
-  it.each(cases)("maps %s to %s", (status, expected) => {
-    expect(statusMessageKey(status)).toBe(expected);
-  });
+  ] as const satisfies ReadonlyArray<readonly [PaymentTransferStatus, MessageKey]>)(
+    "labels a %s transfer with %s",
+    (status, label) => {
+      expect(statusMessageKey(status)).toBe(label);
+    }
+  );
 });
 
 describe("statusVariant", () => {
@@ -201,7 +199,7 @@ describe("normalizeAggregateBalances", () => {
   };
   const issuedBalance: CustodyWalletTokenBalance = {
     token: "bSGD",
-    mint: UNCATALOGUED_MINT,
+    mint: ISSUED_TOKEN_MINT,
     amount: "50000000",
     uiAmount: "50",
     decimals: 6,
@@ -215,14 +213,14 @@ describe("normalizeAggregateBalances", () => {
 
   it("counts SOL in the total balance", () => {
     const rows = normalizeAggregateBalances([solBalance, usdcBalance, issuedBalance]);
-    expect(resolveTotalBalance(rows)).toBe(375.25 + 100 + 37.5);
+    expect(resolveTotalBalance(rows)).toBe(512.75);
   });
 
   it("keeps a holding with no price feed, which the total leaves out", () => {
     const unpriced: CustodyWalletTokenBalance = { ...issuedBalance, usdValue: undefined };
     const rows = normalizeAggregateBalances([solBalance, usdcBalance, unpriced]);
     expect(rows.map((row) => row.token)).toEqual(["USDC", "bSGD", "SOL"]);
-    expect(resolveTotalBalance(rows)).toBe(375.25 + 100);
+    expect(resolveTotalBalance(rows)).toBe(475.25);
     expect(countUnpricedHoldings(rows)).toBe(1);
   });
 
@@ -250,7 +248,7 @@ describe("resolveTotalBalance", () => {
     decimals: 6,
   };
 
-  it("has no dollar total for 1 SOL beside a spent USDC account, where it read $0.00", () => {
+  it("has no dollar total when the only holding has no price", () => {
     expect(resolveTotalBalance([unpricedSol, spentUsdc])).toBeNull();
     expect(countUnpricedHoldings([unpricedSol, spentUsdc])).toBe(1);
   });
@@ -273,7 +271,7 @@ describe("resolveTotalBalance", () => {
   it("never prices a token by its symbol", () => {
     const spoofed: CustodyWalletTokenBalance = {
       token: "USDC",
-      mint: UNCATALOGUED_MINT,
+      mint: ISSUED_TOKEN_MINT,
       amount: "1000000000000",
       uiAmount: "1000000",
       decimals: 6,
@@ -302,7 +300,7 @@ describe("resolveUsdUnitPrice", () => {
 
   it("has no price for a mint without one", () => {
     expect(resolveUsdUnitPrice(SOL_MINT, [sol])).toBeNull();
-    expect(resolveUsdUnitPrice(UNCATALOGUED_MINT, [])).toBeNull();
+    expect(resolveUsdUnitPrice(ISSUED_TOKEN_MINT, [])).toBeNull();
   });
 });
 

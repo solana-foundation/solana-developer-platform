@@ -64,9 +64,7 @@ export async function GET(request: Request) {
     return nextResponse;
   } catch (error) {
     const response = dashboardJson(
-      {
-        error: error instanceof Error ? error.message : "Transfer list request failed",
-      },
+      { error: { message: "Transfer list request failed" } },
       {
         status: 500,
         trace,
