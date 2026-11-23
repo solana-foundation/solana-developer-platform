@@ -2498,7 +2498,7 @@ Source: https://platform.solana.com/docs/reference/api/wallets
 | `POST` | `/v1/wallets` | [Create wallet](/docs/reference/api/wallets/create-wallet.md) |
 | `DELETE` | `/v1/wallets` | [Delete wallet](/docs/reference/api/wallets/delete-wallet.md) |
 | `GET` | `/v1/wallets` | [List wallets](/docs/reference/api/wallets/list-wallets.md) |
-| `GET` | `/v1/wallets/configs` | [List wallet signing configs](/docs/reference/api/wallets/list-wallet-configs.md) |
+| `GET` | `/v1/wallets/managed-signing/configurations` | [List managed signing configurations](/docs/reference/api/wallets/list-wallet-configs.md) |
 | `GET` | `/v1/wallets/balances/aggregate` | [Aggregate wallet balances](/docs/reference/api/wallets/aggregate-wallet-balances.md) |
 | `GET` | `/v1/wallets/public-key` | [Get wallet public key](/docs/reference/api/wallets/get-wallet-public-key.md) |
 | `POST` | `/v1/wallets/signer-check` | [Check signer via simulated memo transaction](/docs/reference/api/wallets/check-wallet-signer.md) |
@@ -2824,7 +2824,7 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Delete wallet
 Source: https://platform.solana.com/docs/reference/api/wallets/delete-wallet
 
-> Deletes the wallet from its exact owning custody target when that Provider supports wallet deletion.
+> Deletes the wallet from its exact owning provider account when that Provider supports wallet deletion.
 
 `DELETE /v1/wallets`
 
@@ -3256,12 +3256,12 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
-### List wallet signing configs
+### List managed signing configurations
 Source: https://platform.solana.com/docs/reference/api/wallets/list-wallet-configs
 
 > Returns the active Config-owned wallet signing configurations for the requested scope, one per provider.
 
-`GET /v1/wallets/configs`
+`GET /v1/wallets/managed-signing/configurations`
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `wallets.read` action.
 
@@ -3356,12 +3356,12 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `wallet
 ## Example request
 
 ```bash tab="cURL"
-curl 'https://api.solana.com/v1/wallets/configs' \
+curl 'https://api.solana.com/v1/wallets/managed-signing/configurations' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/wallets/configs", {
+const res = await fetch("https://api.solana.com/v1/wallets/managed-signing/configurations", {
   method: "GET",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`
@@ -3372,7 +3372,7 @@ const res = await fetch("https://api.solana.com/v1/wallets/configs", {
 ```python tab="Python"
 import os, requests
 
-r = requests.get("https://api.solana.com/v1/wallets/configs",
+r = requests.get("https://api.solana.com/v1/wallets/managed-signing/configurations",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
@@ -4013,7 +4013,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `wallet
 
       - **`provider`** · `string` · required · example `privy`
 
-        Wallet custody provider.
+        Wallet signing provider.
 
       - **`isRuntimeExecutionAllowed`** · `boolean` · required · example `true`
 
@@ -43468,9 +43468,9 @@ A connection signs only with its current credentials. If you rotate or remove th
 
 #### 1. Set up the provider in the dashboard
 
-Setting up a custody provider takes `wallets.configure`, and no API key can hold a `configure` action. An organization admin sets it up once per project, signed in to the dashboard (see the **Dashboard** tab), which calls `POST /v1/wallets/initialize` with that session. The same call with an API key returns `403 INSUFFICIENT_PERMISSIONS` with `details.action` set to `wallets.configure`.
+Setting up a custody provider takes `wallets.configure`, and no API key can hold a `configure` action. An organization admin sets it up once per project, signed in to the dashboard (see the **Dashboard** tab), which calls `POST /v1/wallets/managed-signing/initialize-with-wallet` with that session. The same call with an API key returns `403 INSUFFICIENT_PERMISSIONS` with `details.action` set to `wallets.configure`.
 
-Production projects take only your own provider account. `POST /v1/wallets/initialize` sets up SDP's account of the provider (Managed custody), so in a Production project it returns `403` with `details.reason` set to `custody_mode_not_allowed`. Connect your own account to the project in the dashboard instead. Then create wallets in that connection with `connectionId`, using an API key that holds `wallets.manage`:
+Production projects take only your own provider account. `POST /v1/wallets/managed-signing/initialize-with-wallet` sets up SDP's account of the provider (Managed custody), so in a Production project it returns `403` with `details.reason` set to `custody_mode_not_allowed`. Connect your own account to the project in the dashboard instead. Then create wallets in that connection with `connectionId`, using an API key that holds `wallets.manage`:
 
 ```bash title="Terminal"
 export IDEMPOTENCY_KEY=$(uuidgen)
@@ -44218,7 +44218,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers/execute \
 
 **Accepted.** The key is optional, and honored when sent.
 
-- Wallets: `POST /v1/wallets`, `POST /v1/wallets/initialize`, `POST /v1/wallets/signer-check`, `PATCH /v1/wallets/{walletId}`, `DELETE /v1/wallets`
+- Wallets: `POST /v1/wallets`, `POST /v1/wallets/managed-signing/initialize-with-wallet`, `POST /v1/wallets/signer-check`, `PATCH /v1/wallets/{walletId}`, `DELETE /v1/wallets`
 - Counterparties: `POST`, `PATCH` and `DELETE` on `/v1/counterparties` and on counterparty accounts
 - Payment requests: `POST /v1/payments/requests` and `POST /v1/payments/requests/{paymentRequestId}/cancel`
 
@@ -47307,7 +47307,7 @@ In your Clerk development application, follow the [Clerk setup guide](https://gi
 - Customize the session token (**Sessions** → **Customize session token**) with the guide's claims. Without `org_id`, the API refuses every dashboard request.
 - Copy the publishable key, secret key, and issuer for the configurator.
 - Give the API a public HTTPS URL, because Clerk can't reach `localhost`. To test locally, reserve a free static domain at [dashboard.ngrok.com/domains](https://dashboard.ngrok.com/domains) and run `ngrok http --url=<your-domain> 8787`.
-- Add a webhook endpoint at `https://<your-domain>/webhooks/clerk/link-orgs`, subscribed to the events the guide lists. Copy its signing secret for `CLERK_WEBHOOK_SECRET`.
+- Add a webhook endpoint at `https://<your-domain>/webhooks/clerk`, subscribed to the events the guide lists. Copy its signing secret for `CLERK_WEBHOOK_SECRET`.
 
 The API starts without `CLERK_WEBHOOK_SECRET`, but set it now. The webhook is how SDP learns the settings you add to the organization in Clerk, such as a provider you turn on or off for it.
 

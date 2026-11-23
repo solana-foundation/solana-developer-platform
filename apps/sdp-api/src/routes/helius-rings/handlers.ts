@@ -77,7 +77,7 @@ export async function listRingsProjectRings(c: AppContext) {
 }
 
 /**
- * POST /rings — record a named custom ring's program id and complete bring-up
+ * POST /rings/register-and-initialize — record a named custom ring's program id and complete bring-up
  * through the gateway. Re-submitting the same name and id resumes a failed
  * bring-up. Once the ring is active, operations can target it (`ring:
  * "<name>"`); default-ring operations and sync are never blocked by it.
@@ -94,7 +94,7 @@ export async function createRingsProjectRing(c: AppContext) {
 
 // --- wallets ----------------------------------------------------------------
 
-/** POST /wallets — bind a Rings wallet to an SDP custody wallet and provision its identity. */
+/** POST /wallets/provision-identity — bind a Rings wallet to an SDP custody wallet and provision its identity. */
 export async function createRingsWallet(c: AppContext) {
   const parsed = createRingsWalletSchema.safeParse(await c.req.json());
   if (!parsed.success) throw badRequest(parsed.error.issues[0]?.message ?? "invalid body");
@@ -158,7 +158,7 @@ export async function syncRingsWallet(c: AppContext) {
 }
 
 /**
- * POST /wallets/:walletId/rekey — rotate a wallet whose owner publishes an
+ * POST /wallets/:walletId/identity/rekey — rotate a wallet whose owner publishes an
  * identity this deployment cannot derive, abandoning whatever those keys hold.
  *
  * The body carries the wallet's name as a typed confirmation. The service is
@@ -340,7 +340,7 @@ export async function createRingsZone(c: AppContext) {
 
 // --- operations ---------------------------------------------------------------
 
-/** POST /operations — reserve the intent and run it. */
+/** POST /operations/execute — reserve the intent and run it. */
 export async function prepareRingsOperation(c: AppContext) {
   const parsed = prepareRingsOperationSchema.safeParse(await c.req.json());
   if (!parsed.success) throw badRequest(parsed.error.issues[0]?.message ?? "invalid body");
@@ -379,7 +379,7 @@ export async function getRingsOperation(c: AppContext) {
 }
 
 /**
- * POST /operations/:operationId/execute — advance an operation a crash left
+ * POST /operations/:operationId/resume-execution — advance an operation a crash left
  * mid-pipeline. The request carries no body worth trusting.
  */
 export async function executeRingsOperation(c: AppContext) {

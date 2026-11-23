@@ -32,7 +32,7 @@ function answer(onboarding: OnboardingStatusAnswer) {
 function providerAccessUrls(): string[] {
   return fetchMock.mock.calls
     .map(([input]) => (input instanceof Request ? input.url : String(input)))
-    .filter((url) => url.endsWith("/provider-access"));
+    .filter((url) => url.endsWith("/provider-availability"));
 }
 
 beforeEach(() => {
@@ -52,7 +52,7 @@ describe("loadOrganizationProviderAccess", () => {
       rampProviderAccess: RAMP_ACCESS,
     });
     expect(providerAccessUrls()).toEqual([
-      "https://api.sdp.test/v1/organizations/org_sdp/provider-access",
+      "https://api.sdp.test/v1/organizations/org_sdp/provider-availability",
     ]);
   });
 
@@ -66,7 +66,7 @@ describe("loadOrganizationProviderAccess", () => {
 
     expect(await loadOrganizationProviderAccess()).toBeNull();
     expect(providerAccessUrls()).toEqual([
-      "https://api.sdp.test/v1/organizations/org_sdp/provider-access",
+      "https://api.sdp.test/v1/organizations/org_sdp/provider-availability",
     ]);
   });
 

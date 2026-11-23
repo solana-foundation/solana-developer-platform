@@ -277,7 +277,7 @@ export const custodyWalletByIdResponseSchema = z
     wallet: custodyWalletBaseSchema
       .extend({
         provider: orgCustodyProviderSchema.openapi({
-          description: "Wallet custody provider.",
+          description: "Wallet signing provider.",
           example: "privy",
         }),
         balance: z
