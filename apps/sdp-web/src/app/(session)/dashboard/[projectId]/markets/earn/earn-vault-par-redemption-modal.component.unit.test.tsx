@@ -10,7 +10,11 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
+
+import {
+  resetAsyncWithdrawalTrackingStateForTests,
+  vaultAsyncWithdrawalIdempotencyKeyStore,
+} from "./earn-vault-async-withdrawal-tracking";
 
 const mocks = vi.hoisted(() => ({
   cancelRequest: vi.fn(),
@@ -131,19 +135,17 @@ function renderModal(
     terms,
     ...overrides,
   };
-  return {
-    ...render(
-      <I18nProvider locale="en" messages={getMessages("en")}>
-        <EarnVaultParRedemptionModal {...props} />
-      </I18nProvider>
-    ),
-    props,
-  };
+  const renderUi = () => (
+    <I18nProvider locale="en" messages={getMessages("en")}>
+      <EarnVaultParRedemptionModal {...props} />
+    </I18nProvider>
+  );
+  return { ...render(renderUi()), props, renderUi };
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  resetIdempotencyKeyStoresForTests();
+  resetAsyncWithdrawalTrackingStateForTests();
   sessionStorage.clear();
   vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(IDEMPOTENCY_KEY);
   mocks.fetchPreview.mockResolvedValue({ kind: "ready", value: preview });
@@ -206,6 +208,80 @@ describe("EarnVaultParRedemptionModal", () => {
     );
     expect(onRequested).toHaveBeenCalledWith(request());
     expect(await screen.findByText("Awaiting operator")).toBeTruthy();
+  });
+
+  it("replays a kept key's minted shares when the live position value drifts", async () => {
+    mocks.createRequest.mockResolvedValue({
+      ok: false,
+      status: 503,
+      error: "Operator redemption temporarily unavailable",
+      body: null,
+    });
+    const view = renderModal();
+
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "2500" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Request par redemption" }));
+    await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledTimes(1));
+    expect(mocks.createRequest).toHaveBeenLastCalledWith(
+      expect.objectContaining({ shares: "2500" }),
+      IDEMPOTENCY_KEY
+    );
+
+    // The polled position revalues while the key stays kept: the same typed
+    // $2,500 now derives 3,125 shares from the live value.
+    view.props.position = { ...position, tokenValue: "4000" };
+    view.rerender(view.renderUi());
+    const confirm = (await screen.findByRole("button", {
+      name: "Request par redemption",
+    })) as HTMLButtonElement;
+    await waitFor(() => expect(confirm.disabled).toBe(false));
+    fireEvent.click(confirm);
+    await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledTimes(2));
+    // The FIRST attempt's share intent, verbatim, under the SAME key: the
+    // drifted derivation would be a changed body the API's fingerprint
+    // refuses with a 422 — which retires the key and lets the next submit
+    // escrow a second request beside the first.
+    expect(mocks.createRequest.mock.calls[1]).toEqual([
+      { positionId: position.id, shares: "2500", mechanism: "operatorRedemption" },
+      IDEMPOTENCY_KEY,
+    ]);
+  });
+
+  it("adopts the previous build's unresolved attempt and replays it exactly", async () => {
+    // The previous build keyed this exit on the DERIVED shares; its kept
+    // entry is unreachable through this build's fingerprint and must be
+    // adopted, never minted over.
+    const LEGACY_FINGERPRINT = JSON.stringify([
+      "project_1",
+      "position_1",
+      "1800",
+      "operator_redemption",
+    ]);
+    const LEGACY_KEY = "99999999-9999-4999-8999-999999999999";
+    vaultAsyncWithdrawalIdempotencyKeyStore.claim(LEGACY_FINGERPRINT, () => LEGACY_KEY);
+    mocks.createRequest.mockResolvedValue({
+      ok: true,
+      status: 201,
+      data: { kind: "submitted", withdrawalRequest: request() },
+    });
+    renderModal();
+
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "2500" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    // The review discloses the ADOPTED attempt: its own 1,800 shares, whatever
+    // the form's live derivation shows.
+    expect((await screen.findByText(/An earlier attempt to withdraw/)).textContent).toMatch(
+      /withdraw 1,800\s/
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Request par redemption" }));
+    await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledTimes(1));
+    // The legacy attempt's OWN body and key — not the form's 2,500.
+    expect(mocks.createRequest.mock.calls[0]).toEqual([
+      { positionId: position.id, shares: "1800", mechanism: "operatorRedemption" },
+      LEGACY_KEY,
+    ]);
   });
 
   it("redeems a position's held wYLDS without asking for shares", async () => {
