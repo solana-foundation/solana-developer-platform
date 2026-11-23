@@ -1554,63 +1554,138 @@ describe("native Fireblocks pending proposal recovery (PRO-2435 D4)", () => {
     });
   });
 
-  it("records key revocation before cancellation, keeps acknowledgment pending, and closes only on CANCELLED", async () => {
-    const mock = await ready();
-    const apiKeyId = "key_fireblocks_revoked_pending";
-    await useTransferApiKey(apiKeyId, ["transfers.execute"]);
-    const response = await send("fireblocks-recovery-revoked-key");
-    expect(response.status, await response.clone().text()).toBe(200);
-    const transfer = (await response.json()).data.transfer;
-    await getDb(env).execute("UPDATE api_keys SET status = 'revoked' WHERE id = ?", [apiKeyId]);
-    let stagedBeforeCancellation:
-      | {
-          payment: Awaited<ReturnType<typeof recordedProposal>>["status"];
-          proposal: z.infer<typeof proposalStateRow>;
-        }
-      | undefined;
-    beforeCancellation = async () => {
-      stagedBeforeCancellation = {
-        payment: (await recordedProposal(transfer.id)).status,
-        proposal: await proposalState(transfer.id),
-      };
-    };
-    const pending = await recoverPendingProposal(transfer.id);
-    expect(stagedBeforeCancellation).toEqual({
-      payment: "processing",
-      proposal: {
+  it.each([
+    {
+      change: "key revocation",
+      principal: { kind: "api_key", apiKeyId: "key_fireblocks_revoked_pending" },
+      invalidate: () =>
+        getDb(env).execute("UPDATE api_keys SET status = 'revoked' WHERE id = ?", [
+          "key_fireblocks_revoked_pending",
+        ]),
+      reason: "principal_not_live",
+      message: "The credential moving money is no longer active",
+    },
+    {
+      change: "movement disabled",
+      principal: { kind: "member", userId: USER_ID },
+      invalidate: () =>
+        getDb(env).execute(
+          "UPDATE projects SET disabled_movements = ARRAY['payments.transfer']::text[] WHERE id = ?",
+          [PROJECT_ID]
+        ),
+      reason: "movement_disabled",
+      message: "This movement is disabled for the project",
+    },
+    {
+      change: "initiating member downgraded to viewer",
+      principal: { kind: "member", userId: USER_ID },
+      invalidate: () =>
+        getDb(env).execute(
+          "UPDATE organization_members SET role = 'viewer' WHERE organization_id = ? AND user_id = ?",
+          [ORGANIZATION_ID, USER_ID]
+        ),
+      reason: "action_not_held",
+      message: "Missing action: transfers.execute",
+    },
+  ] as const)(
+    "records $change after provider acceptance before cancellation, keeps acknowledgment pending, and closes only on CANCELLED",
+    async ({ principal, invalidate, reason, message }) => {
+      const mock = await ready();
+      if (principal.kind === "api_key")
+        await useTransferApiKey(principal.apiKeyId, ["transfers.execute"]);
+      const response = await send("fireblocks-recovery-authority-change");
+      expect(response.status, await response.clone().text()).toBe(200);
+      const transfer = (await response.json()).data.transfer;
+      expect(transfer).toMatchObject({ status: "processing", signature: null });
+      expect((await recordedProposal(transfer.id)).initiated_by_principal).toEqual(principal);
+      expect(await proposalState(transfer.id)).toMatchObject({
         provider_phase: "pending",
-        authorization_state: "cancel_requested",
-        refusal_reason: "principal_not_live",
+        authorization_state: "authorized",
+        refusal_reason: null,
+        cancel_attempt: 0,
+      });
+      expect(
+        mock.mock.calls.filter(
+          ([url, init]) => String(url).endsWith("/v1/transactions") && init?.method === "POST"
+        )
+      ).toHaveLength(1);
+      const refused = vi.spyOn(moneyPathEvents, "logEvent");
+      await invalidate();
+      let stagedBeforeCancellation:
+        | {
+            payment: Awaited<ReturnType<typeof recordedProposal>>["status"];
+            proposal: z.infer<typeof proposalStateRow>;
+            refusals: typeof refused.mock.calls;
+          }
+        | undefined;
+      beforeCancellation = async () => {
+        stagedBeforeCancellation = {
+          payment: (await recordedProposal(transfer.id)).status,
+          proposal: await proposalState(transfer.id),
+          refusals: refused.mock.calls.filter(([, event]) => event.event === "sdp_money_refused"),
+        };
+      };
+      const pending = await recoverPendingProposal(transfer.id);
+      expect(stagedBeforeCancellation).toEqual({
+        payment: "processing",
+        proposal: {
+          provider_phase: "pending",
+          authorization_state: "cancel_requested",
+          refusal_reason: reason,
+          cancel_attempt: 1,
+          cancel_acknowledged_at: null,
+          alerted_at: null,
+        },
+        refusals: [
+          [
+            "warn",
+            {
+              event: "sdp_money_refused",
+              surface: "signer",
+              movement: "payments.transfer",
+              module: "payments",
+              subject_id: walletId,
+              organization_id: ORGANIZATION_ID,
+              project_id: PROJECT_ID,
+              principal_kind: principal.kind,
+              principal:
+                principal.kind === "api_key"
+                  ? `api_key:${principal.apiKeyId}`
+                  : `member:${principal.userId}`,
+              reason,
+            },
+          ],
+        ],
+      });
+      expect(pending).toMatchObject({ status: "processing", signature: null });
+      expect(await proposalState(transfer.id)).toMatchObject({
+        provider_phase: "pending",
+        authorization_state: "cancel_acknowledged",
+        refusal_reason: reason,
         cancel_attempt: 1,
-        cancel_acknowledged_at: null,
-        alerted_at: null,
-      },
-    });
-    expect(pending).toMatchObject({ status: "processing", signature: null });
-    expect(await proposalState(transfer.id)).toMatchObject({
-      provider_phase: "pending",
-      authorization_state: "cancel_acknowledged",
-      refusal_reason: "principal_not_live",
-      cancel_attempt: 1,
-      cancel_acknowledged_at: expect.any(String),
-    });
-    expect(
-      mock.mock.calls.filter(
-        ([url, init]) => String(url).endsWith("/v1/transactions") && init?.method === "POST"
-      )
-    ).toHaveLength(1);
-    expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(1);
-    providerStatus = "CANCELLED";
-    const cancelled = await recoverPendingProposal(transfer.id);
-    expect(cancelled).toMatchObject({ status: "failed", signature: null });
-    expect(cancelled.error).toBe("The credential moving money is no longer active");
-    expect(await proposalState(transfer.id)).toMatchObject({
-      provider_phase: "cancelled",
-      authorization_state: "cancel_acknowledged",
-      refusal_reason: "principal_not_live",
-    });
-    expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(1);
-  });
+        cancel_acknowledged_at: expect.any(String),
+      });
+      expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(1);
+      providerStatus = "CANCELLED";
+      const cancelled = await recoverPendingProposal(transfer.id);
+      expect(cancelled).toMatchObject({ status: "failed", signature: null, error: message });
+      expect(await proposalState(transfer.id)).toMatchObject({
+        provider_phase: "cancelled",
+        authorization_state: "cancel_acknowledged",
+        refusal_reason: reason,
+        cancel_attempt: 1,
+      });
+      expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/cancel"))).toHaveLength(1);
+      expect(
+        mock.mock.calls.filter(
+          ([url, init]) => String(url).endsWith("/v1/transactions") && init?.method === "POST"
+        )
+      ).toHaveLength(1);
+      expect(
+        refused.mock.calls.filter(([, event]) => event.event === "sdp_money_refused")
+      ).toHaveLength(1);
+    }
+  );
 
   it("records exact settlement and a critical event when completion wins the cancellation race", async () => {
     const mock = await ready();
