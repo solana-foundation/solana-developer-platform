@@ -165,6 +165,10 @@ Summary totals cover the whole selected scope, not just a position page.
 Unavailable values remain absent; a partial total cannot appear complete.
 Customer drill-down requires explicit owner/position flags. Discovered holdings
 have unknown acquisition time and cost basis. A live balance is not earned yield.
+A withdrawal through a selector that names a tracked holding resolves to it,
+as position detail does, and keeps its cost basis. An imported holding stays
+visible and active without a successful movement, so a failed first exit never
+hides it.
 
 Apply `packages/sdp-earn/CLAUDE.md`'s RPC budget: batch independent inputs, share
 identical concurrent work only within exact authorized scope, cache static facts

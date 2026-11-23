@@ -944,7 +944,11 @@ async function getFulfilledQueueMovement(
   return row ? mapFulfilledQueueMovement(row) : null;
 }
 
-/** Holding visibility is shared by list, detail and reconciliation reads. */
+/**
+ * Holding visibility is shared by list, detail and reconciliation reads. An
+ * imported holding (unknown cost basis, claimed from a verified live balance)
+ * needs no movement: its balance, not SDP history, made it a holding.
+ */
 const VISIBLE_VAULT_POSITION_SQL = `kind = 'vault_direct'
                AND activated_at IS NOT NULL
                AND (
@@ -956,7 +960,7 @@ const VISIBLE_VAULT_POSITION_SQL = `kind = 'vault_direct'
                      AND reentry.status IN ('requested', 'submitted')
                  )
                )
-               AND (EXISTS (
+               AND (NOT earn_positions.cost_basis_known OR EXISTS (
                  SELECT 1 FROM earn_movements movement
                  WHERE movement.position_id = earn_positions.id
                    AND movement.status IN ('requested', 'submitted', 'confirmed', 'finalized')
@@ -1856,13 +1860,16 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
 
         if (input.toStatus === "failed") {
           // De-activate only when nothing live remains: a failed attempt beside a
-          // good one must not close a holding the organization still has.
+          // good one must not close a holding the organization still has. An
+          // imported holding never depended on a movement, so a failed exit
+          // leaves its funds visible.
           await transaction
             .prepare(
               `UPDATE earn_positions position
                   SET activated_at = NULL, updated_at = sdp_iso_now()
                 WHERE position.id = ?
                   AND position.activated_at IS NOT NULL
+                  AND position.cost_basis_known
                   AND NOT EXISTS (
                     SELECT 1 FROM earn_movements movement
                      WHERE movement.position_id = position.id
@@ -2289,6 +2296,8 @@ export interface ClaimDiscoveredStrategyPositionInput {
  * Claim a live holding only after verifying its signed withdrawal. The caller
  * must use the transaction that persists that withdrawal's signed movement.
  * This writes no deposit, amount, cost basis, or synthetic movement history.
+ * A selector can name a holding SDP already tracks: that claim resolves as
+ * position detail does, keeping its known cost basis and acquisition history.
  */
 export async function claimDiscoveredStrategyPosition(
   input: ClaimDiscoveredStrategyPositionInput,
@@ -2296,17 +2305,32 @@ export async function claimDiscoveredStrategyPosition(
 ): Promise<EarnPositionRow> {
   const db = asTransactionalClient(executor);
   const metadata = { ...input, vaultAddress: input.strategyReference };
+  const tracked = await createPostgresEarnMovementsRepository(db).getReadablePositionByInstrument({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    environment: input.environment,
+    provider: input.provider,
+    providerReference: input.strategyReference,
+    tokenMint: input.tokenMint,
+    shareMint: input.shareMint,
+    source: input.source,
+  });
   const position =
-    "walletId" in input.source
+    tracked ??
+    ("walletId" in input.source
       ? await claimVaultPosition(db, { ...metadata, custodyWalletId: input.source.walletId })
       : await claimWalletVaultPosition(db, {
           ...metadata,
           ownerAddress: input.source.ownerAddress,
-        });
+        }));
+  // Only a holding SDP did not already track starts with an unknown cost basis.
+  const imported = tracked === null;
   const row = await db
     .prepare(`UPDATE earn_positions
-    SET strategy_id = ?, cost_basis_known = FALSE,
-        closed_at = NULL, updated_at = sdp_iso_now()
+    SET strategy_id = ?,
+        cost_basis_known = cost_basis_known AND NOT ?::boolean,
+        closed_at = CASE WHEN ?::boolean THEN NULL ELSE closed_at END,
+        updated_at = sdp_iso_now()
     WHERE id = ? AND (strategy_id IS NULL OR strategy_id = ?)
       AND EXISTS (
         SELECT 1 FROM earn_strategies strategy
@@ -2317,7 +2341,7 @@ export async function claimDiscoveredStrategyPosition(
           AND strategy.deposit_mints @> jsonb_build_array(earn_positions.token_mint)
       )
     RETURNING *`)
-    .bind(input.strategyId, position.id, input.strategyId, input.strategyId)
+    .bind(input.strategyId, imported, imported, position.id, input.strategyId, input.strategyId)
     .first<EarnPositionRow>();
   if (!row) throw conflict("Position strategy identity does not match the signed withdrawal");
   return row;

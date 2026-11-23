@@ -52,7 +52,10 @@ New shared references use `strategy_id` and `strategy_reference`.
 Migration 0236 synchronizes `strategy_reference` with `vault_address` on
 positions, movements and direct builds while previous revisions serve traffic;
 keep the alias until deployment drain. A discovered holding receives unknown
-cost basis (0236), never a synthetic deposit or earnings. Current operations
+cost basis (0236), never a synthetic deposit or earnings; a selector that names
+a holding SDP already tracks keeps that holding's cost basis. `cost_basis_known
+= false` marks an imported holding: visibility needs no movement for it, and a
+failed movement never deactivates it. Current operations
 use the same movement ledger and provider obligations; do not create a second
 financial ledger or adopt old prelaunch actions. The schema-only companion
 removes unused legacy storage after the rewrite is serving.

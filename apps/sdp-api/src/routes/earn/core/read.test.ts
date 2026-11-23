@@ -549,6 +549,92 @@ describe("Earn core read contracts", () => {
     });
   });
 
+  it("resolves a selector that names a tracked holding without forgetting its cost basis", async () => {
+    const strategy = await seedStrategy("tracked-reference");
+    const holding = await seedPosition({ reference: "tracked-reference" });
+    const row = await getDb(env).transaction((tx) =>
+      claimDiscoveredStrategyPosition(
+        {
+          organizationId: tenant.org.id,
+          projectId: tenant.project.id,
+          environment: "sandbox",
+          provider: "veda",
+          strategyId: strategy.id,
+          strategyReference: strategy.provider_reference,
+          tokenMint: TOKEN,
+          shareMint: SHARE,
+          label: strategy.name,
+          source: { ownerAddress: OWNER },
+        },
+        tx
+      )
+    );
+    expect(row).toMatchObject({ id: holding.id, strategy_id: strategy.id, cost_basis_known: true });
+  });
+
+  it("keeps an imported holding listed and active after its first withdrawal fails", async () => {
+    const strategy = await seedStrategy("imported-reference");
+    const walletId = await seedWallet();
+    const ledger = createPostgresEarnMovementsRepository(getDb(env));
+    const position = await getDb(env).transaction((tx) =>
+      claimDiscoveredStrategyPosition(
+        {
+          organizationId: tenant.org.id,
+          projectId: tenant.project.id,
+          environment: "sandbox",
+          provider: "veda",
+          strategyId: strategy.id,
+          strategyReference: strategy.provider_reference,
+          tokenMint: TOKEN,
+          shareMint: SHARE,
+          label: strategy.name,
+          source: { walletId },
+        },
+        tx
+      )
+    );
+    const { movement } = await ledger.createSignedVaultWithdrawalIntent({
+      organizationId: tenant.org.id,
+      projectId: tenant.project.id,
+      environment: "sandbox",
+      provider: "veda",
+      positionId: position.id,
+      vaultAddress: strategy.provider_reference,
+      custodyWalletId: walletId,
+      shareMint: SHARE,
+      requestedShares: "1",
+      walletAddress: OWNER,
+      signature: "imported_failed_exit",
+      signedTransaction: "AQ==",
+      lastValidBlockHeight: "12345",
+      requestId: "imported-failed-exit",
+      idempotencyFingerprint: "imported-failed-exit-fingerprint",
+    });
+    await ledger.advanceVaultMovement({
+      movementId: movement.id,
+      organizationId: tenant.org.id,
+      toStatus: "failed",
+      failureReason: "Transaction expired",
+    });
+    const tracked = await ledger.getReadablePositionByInstrument({
+      organizationId: tenant.org.id,
+      projectId: tenant.project.id,
+      environment: "sandbox",
+      provider: "veda",
+      providerReference: strategy.provider_reference,
+      tokenMint: TOKEN,
+      shareMint: SHARE,
+      source: { walletId },
+    });
+    expect(tracked).toMatchObject({ id: position.id, cost_basis_known: false });
+    expect(tracked?.activated_at).not.toBeNull();
+    const response = (await (await get(`positions?walletId=${walletId}`)).json()) as {
+      data: EarnPositionsResponse;
+    };
+    expect(response.data.positions.map((listed) => listed.id)).toEqual([position.id]);
+    expect(response.data.positions[0]).toMatchObject({ costBasisKnown: false });
+  });
+
   it("rejects a signed claim whose strategy metadata disagrees and rolls it back", async () => {
     const strategy = await seedStrategy("correct-reference");
     await expect(
