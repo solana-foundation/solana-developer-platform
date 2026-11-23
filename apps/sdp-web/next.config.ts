@@ -1,6 +1,7 @@
 import path from "node:path";
-import { withSentryConfig } from "@sentry/nextjs";
+import { withSentryConfig } from "@sentry/nextjs/config";
 import type { NextConfig } from "next";
+import { SENTRY_TUNNEL_PATH } from "./src/lib/sentry-tunnel";
 
 const docsProxyOrigin = (
   process.env.SDP_DOCS_PROXY_ORIGIN?.trim() ||
@@ -119,13 +120,11 @@ export default withSentryConfig(nextConfig, {
   ...(sentryDisabled
     ? {}
     : {
-        // Route browser requests to Sentry through a Next.js rewrite to circumvent ad-blockers.
+        // Route browser requests to Sentry through the app's own origin to circumvent ad-blockers.
         // This can increase your server load as well as your hosting bill.
-        // Note: Check that the configured route will not match with your Next.js middleware, otherwise reporting of client-
-        // side errors will fail.
-        tunnelRoute: "/monitoring",
+        tunnelRoute: SENTRY_TUNNEL_PATH,
       }),
 
   // Automatically tree-shake Sentry logger statements to reduce bundle size.
-  disableLogger: true,
+  bundleSizeOptimizations: { excludeDebugStatements: true },
 });

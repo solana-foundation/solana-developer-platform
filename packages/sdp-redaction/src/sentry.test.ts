@@ -55,9 +55,13 @@ describe("sentryScrubbingHooks", () => {
       contexts: { trace: { trace_id: "trace_1", data: attributes } },
     });
     const span = sentryScrubbingHooks.beforeSendSpan({
+      trace_id: "trace_1",
       span_id: "span_1",
-      description: "quote for jane.doe@example.com",
-      data: attributes,
+      name: "quote for jane.doe@example.com",
+      start_timestamp: 1,
+      status: "ok",
+      is_segment: false,
+      attributes,
     });
     const log = sentryScrubbingHooks.beforeSendLog({
       level: "info",
@@ -81,9 +85,10 @@ describe("sentryScrubbingHooks", () => {
 
     // Operational identity is untouched: the span still says what it was.
     assert.equal(span.span_id, "span_1");
+    assert.equal(span.name, "quote for [REDACTED_EMAIL]");
     assert.equal(transaction?.transaction, "POST /v1/counterparties");
     assert.equal(transaction?.contexts.trace.trace_id, "trace_1");
-    assert.equal(span.data["wallet.address"], SOLANA_ADDRESS);
+    assert.equal(span.attributes["wallet.address"], SOLANA_ADDRESS);
     assert.equal(metric?.value, 1);
   });
 
@@ -131,10 +136,18 @@ describe("sentryScrubbingHooks", () => {
 
   it("reduces a span to its skeleton when scrubbing throws, since a span must be returned", () => {
     const hostile = {
-      span_id: "span_1",
       trace_id: "trace_1",
-      op: "http.client",
-      get data(): unknown {
+      span_id: "span_1",
+      parent_span_id: "span_0",
+      name: "quote for jane.doe@example.com",
+      start_timestamp: 1,
+      end_timestamp: 2,
+      status: "ok",
+      is_segment: false,
+      links: [
+        { trace_id: "trace_2", span_id: "span_2", attributes: { email: "jane.doe@example.com" } },
+      ],
+      get attributes(): Record<string, string> {
         throw new TypeError("no");
       },
     };
@@ -142,10 +155,15 @@ describe("sentryScrubbingHooks", () => {
     const span = sentryScrubbingHooks.beforeSendSpan(hostile);
 
     assert.deepEqual(span, {
-      description: "[REDACTED]",
-      span_id: "span_1",
+      name: "[REDACTED]",
+      attributes: {},
       trace_id: "trace_1",
-      op: "http.client",
+      span_id: "span_1",
+      parent_span_id: "span_0",
+      start_timestamp: 1,
+      end_timestamp: 2,
+      status: "ok",
+      is_segment: false,
     });
   });
 });
