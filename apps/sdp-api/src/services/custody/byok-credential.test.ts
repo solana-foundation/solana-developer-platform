@@ -1,6 +1,7 @@
 import { generateKeyPairSync } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { env as testEnv } from "@/test/helpers/env";
+import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import {
   byokCredentialCheckSchema,
   checkByokCredential,
@@ -15,7 +16,7 @@ const fields = {
   vaultAccountId: "0",
 };
 const env = { ...testEnv, FIREBLOCKS_API_BASE_URL: "https://fireblocks.example.test" };
-const address = "11111111111111111111111111111111";
+const address = syntheticAddress(1);
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -85,7 +86,11 @@ describe("Fireblocks BYOK credentials", () => {
       credentialPayload("fireblocks", fields, "sandbox")
     );
     const result = await checkByokCredential(env, credential);
-    expect(result).toMatchObject({ status: "success", wallet: { walletId: "fb_0", address } });
+    expect(result).toEqual({
+      status: "success",
+      fingerprint: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+      wallet: { walletId: "fb_0", address },
+    });
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenCalledWith(
       `${env.FIREBLOCKS_API_BASE_URL}/v1/vault/accounts/0/SOL_TEST/addresses_paginated`,
@@ -114,14 +119,20 @@ describe("Fireblocks BYOK credentials", () => {
     expect(await checkByokCredential(env, auth({ vaultAccountId: "1" }))).not.toEqual(first);
     expect(await checkByokCredential(env, auth({ assetId: "SOL" }))).not.toEqual(first);
     vi.mocked(globalThis.fetch).mockResolvedValue(
-      Response.json({ addresses: [{ address: "So11111111111111111111111111111111111111112" }] })
+      Response.json({ addresses: [{ address: syntheticAddress(2) }] })
     );
     expect(await checkByokCredential(env, auth())).not.toEqual(first);
   });
 
-  it.each([401, 403, 404, 429, 500])(
-    "classifies HTTP %s without exposing provider response bodies",
-    async (status) => {
+  it.each([
+    [401, "failed"],
+    [403, "failed"],
+    [404, "failed"],
+    [429, "retry_unknown"],
+    [500, "retry_unknown"],
+  ] as const)(
+    "classifies HTTP %s as %s without exposing provider response bodies",
+    async (status, expected) => {
       vi.spyOn(globalThis, "fetch").mockResolvedValue(
         new Response("sensitive upstream body", { status })
       );
@@ -129,9 +140,7 @@ describe("Fireblocks BYOK credentials", () => {
         env,
         parseByokCredential("fireblocks", credentialPayload("fireblocks", fields, "sandbox"))
       );
-      expect(result).toEqual({
-        status: [401, 403, 404].includes(status) ? "failed" : "retry_unknown",
-      });
+      expect(result).toEqual({ status: expected });
     }
   );
 

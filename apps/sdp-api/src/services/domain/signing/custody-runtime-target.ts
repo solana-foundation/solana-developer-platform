@@ -569,7 +569,7 @@ export class CustodyRuntimeTargets {
 
   async createConnectionWallet(params: {
     auditContext: Context<{ Bindings: Env }>;
-    creationReason: "wallet_api" | "api_key" | "dvp_settlement_authority";
+    creationReason: "wallet_api" | "dvp_settlement_authority";
     organizationId: string;
     projectId: string;
     connectionId: string;

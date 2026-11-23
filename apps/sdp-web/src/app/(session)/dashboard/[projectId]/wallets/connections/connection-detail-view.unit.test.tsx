@@ -1,32 +1,20 @@
 // @vitest-environment jsdom
 
 import type { CustodyWalletSummary } from "@sdp/types/custody";
-import { cleanup, render as renderDOM, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { type ReactNode, useState } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as byokActions from "@/app/(session)/dashboard/[projectId]/wallets/byok-actions";
 import {
   DashboardPageTitleContext,
   type DashboardPageTitleOverride,
 } from "@/components/dashboard-page-title-context";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
+import { stubClerkSession } from "@/test/clerk";
+import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { syntheticWalletAddress, walletsWorkspace } from "@/test/wallets";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
-vi.mock("next/headers", () => import("@/test/next-headers"));
-vi.mock("next/cache", () => import("@/test/next-cache"));
-vi.mock("@clerk/nextjs/server", () => ({
-  auth: async () => ({ orgId: "org_test", getToken: async () => "test-token" }),
-}));
-
-vi.mock("@/app/(session)/dashboard/[projectId]/wallets/wallet-provider-mark", () => ({
-  WalletProviderMark: () => <span>Provider mark</span>,
-}));
-
-vi.mock("./use-selected-project-name", () => ({
-  useSelectedProjectName: () => "Acme Payments",
-}));
 
 import type {
   CustodyCredentialLifecycle,
@@ -34,8 +22,14 @@ import type {
 } from "./connection-detail.data";
 import { ConnectionDetailView } from "./connection-detail-view";
 
+beforeEach(() => {
+  stubClerkSession();
+});
+
 afterEach(() => {
   cleanup();
+  resetDashboardNavigation();
+  vi.restoreAllMocks();
 });
 
 function makeConnection(
@@ -55,6 +49,7 @@ function makeConnection(
 }
 
 const ACTIVE = makeConnection({ status: "active", canComplete: false, canCancel: false });
+const DEACTIVATED = makeConnection({ status: "deactivated", canComplete: false, canCancel: false });
 
 function makeWallet(
   walletId: string,
@@ -66,7 +61,7 @@ function makeWallet(
     custodyConnectionId: "cconn_1",
     isRuntimeExecutionAllowed: true,
     walletId,
-    publicKey: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+    publicKey: syntheticWalletAddress(1),
     label: `Wallet ${walletId}`,
     purpose,
     status,
@@ -98,34 +93,7 @@ function makeLifecycle(
 const IN_USE = makeLifecycle([{ id: "cconn_1", projectId: "prj_1", status: "active" }]);
 const UNUSED = makeLifecycle([]);
 
-function view({
-  connection,
-  wallets,
-  lifecycle,
-  canManageCustody,
-}: {
-  connection: CustodyInstallationConnection;
-  wallets: CustodyWalletSummary[];
-  lifecycle: CustodyCredentialLifecycle | "restricted";
-  canManageCustody: boolean;
-}) {
-  return (
-    <I18nProvider locale="en" messages={getMessages("en")}>
-      <HeaderHost>
-        <ConnectionDetailView
-          connection={connection}
-          listItem={null}
-          lifecycle={lifecycle}
-          wallets={wallets}
-          walletsUnavailable={false}
-          provider="privy"
-          canManageCustody={canManageCustody}
-        />
-      </HeaderHost>
-    </I18nProvider>
-  );
-}
-
+/** Stands in for the shell's header, which shows what the page hands it. */
 function HeaderHost({ children }: { children: ReactNode }) {
   const [header, setHeader] = useState<DashboardPageTitleOverride | null>(null);
   return (
@@ -142,29 +110,37 @@ function HeaderHost({ children }: { children: ReactNode }) {
   );
 }
 
-const renderBanner = (connection: CustodyInstallationConnection, canManageCustody: boolean) =>
-  renderToStaticMarkup(
-    view({ connection, wallets: [], lifecycle: "restricted", canManageCustody })
+function renderView({
+  connection,
+  wallets = [],
+  lifecycle = "restricted",
+  canManageCustody = true,
+}: {
+  connection: CustodyInstallationConnection;
+  wallets?: CustodyWalletSummary[];
+  lifecycle?: CustodyCredentialLifecycle | "restricted";
+  canManageCustody?: boolean;
+}) {
+  render(
+    <HeaderHost>
+      <ConnectionDetailView
+        connection={connection}
+        listItem={null}
+        lifecycle={lifecycle}
+        wallets={wallets}
+        walletsUnavailable={false}
+        provider="privy"
+        canManageCustody={canManageCustody}
+      />
+    </HeaderHost>,
+    { wrapper: walletsWorkspace(canManageCustody ? "admin" : "member") }
   );
-
-const UNFINISHED_TITLE = "Setup is not finished";
-const UNKNOWN_TITLE = "We could not confirm whether verification finished";
-
-/**
- * Whether the page rendered that control as a button.
- *
- * Matched on the button's own label markup rather than the bare words: the
- * deactivate card's blocking reason says "use Cancel setup above", and a plain
- * substring check counts that sentence as an offered action.
- */
-function hasButton(html: string, label: string): boolean {
-  return html.includes(`<span>${label}</span>`);
 }
 
-/** How many of the two setup banners the page rendered. */
-function bannerCount(html: string): number {
-  return [UNFINISHED_TITLE, UNKNOWN_TITLE].filter((title) => html.includes(title)).length;
-}
+const UNFINISHED_TITLE = /Setup is not finished/;
+const UNKNOWN_TITLE = /We could not confirm whether verification finished/;
+
+const button = (name: string) => screen.queryByRole("button", { name });
 
 describe("connection detail banners", () => {
   const unknownCompletion = {
@@ -172,58 +148,64 @@ describe("connection detail banners", () => {
     attemptedAt: "2026-09-17T13:20:00.000Z",
   };
 
-  // The two used to stack: "Setup is not finished" over "We could not confirm
-  // whether verification finished", each with its own re-check button.
-  it("states an unconfirmed outcome once, not beside a second banner", () => {
-    const html = renderBanner(makeConnection({ completion: unknownCompletion }), true);
+  // The two used to stack, each with its own re-check button.
+  it("states an unconfirmed outcome once, with both ways out of the setup", () => {
+    renderView({ connection: makeConnection({ completion: unknownCompletion }) });
 
-    expect(html).toContain(UNKNOWN_TITLE);
-    expect(bannerCount(html)).toBe(1);
+    expect(screen.getByText(UNKNOWN_TITLE)).toBeTruthy();
+    expect(screen.queryByText(UNFINISHED_TITLE)).toBeNull();
+    expect(button("Check current state")).not.toBeNull();
+    expect(button("Cancel setup")).not.toBeNull();
   });
 
-  it("carries both ways out of the setup on the one banner it keeps", () => {
-    const html = renderBanner(makeConnection({ completion: unknownCompletion }), true);
+  it("re-runs the same connection's completion from the banner, then re-reads the page", async () => {
+    const recheck = vi
+      .spyOn(byokActions, "recheckPrivyCredentialAction")
+      .mockResolvedValue({ status: "retry_unknown", connectionId: "cconn_1" });
+    renderView({ connection: makeConnection({ completion: unknownCompletion }) });
 
-    expect(hasButton(html, "Check current state")).toBe(true);
-    expect(hasButton(html, "Cancel setup")).toBe(true);
+    await userEvent.click(screen.getByRole("button", { name: "Check current state" }));
+
+    await waitFor(() => expect(dashboardRouter.refresh).toHaveBeenCalledOnce());
+    expect(recheck.mock.calls).toEqual([["cconn_1"]]);
   });
 
   it("offers no action a viewer without the role could take", () => {
-    const html = renderBanner(makeConnection({ completion: unknownCompletion }), false);
+    renderView({
+      connection: makeConnection({ completion: unknownCompletion }),
+      canManageCustody: false,
+    });
 
-    expect(html).toContain(UNKNOWN_TITLE);
-    expect(hasButton(html, "Check current state")).toBe(false);
-    expect(hasButton(html, "Cancel setup")).toBe(false);
+    expect(screen.getByText(UNKNOWN_TITLE)).toBeTruthy();
+    expect(button("Check current state")).toBeNull();
+    expect(button("Cancel setup")).toBeNull();
   });
 
-  // Nothing has been attempted yet, so there is no outcome to report — only the
-  // state the connection is in.
+  // Nothing has been attempted yet, so there is no outcome to report, only the state.
   it("falls back to the generic banner when no attempt was recorded", () => {
-    const html = renderBanner(makeConnection({ completion: null }), true);
+    renderView({ connection: makeConnection({ completion: null }) });
 
-    expect(html).toContain(UNFINISHED_TITLE);
-    expect(bannerCount(html)).toBe(1);
+    expect(screen.getByText(UNFINISHED_TITLE)).toBeTruthy();
+    expect(screen.queryByText(UNKNOWN_TITLE)).toBeNull();
   });
 
   it("leaves a settled connection with no banner at all", () => {
-    const html = renderBanner(
-      makeConnection({
-        status: "active",
-        canComplete: false,
-        canCancel: false,
+    renderView({
+      connection: {
+        ...ACTIVE,
         completion: { status: "success", attemptedAt: "2026-09-17T13:20:00.000Z" },
-      }),
-      true
-    );
+      },
+    });
 
-    expect(bannerCount(html)).toBe(0);
+    expect(screen.queryByText(UNFINISHED_TITLE)).toBeNull();
+    expect(screen.queryByText(UNKNOWN_TITLE)).toBeNull();
   });
 
-  // Re-checking cannot reconcile a wallet conflict, so the retry is withheld
-  // even though the viewer may act and the API would accept the call.
+  // Re-checking cannot reconcile a wallet conflict, so the retry is withheld even though the
+  // viewer may act and the API would accept the call.
   it("withholds the retry on an outcome that cannot converge", () => {
-    const html = renderBanner(
-      makeConnection({
+    renderView({
+      connection: makeConnection({
         status: "failed",
         completion: {
           status: "failed",
@@ -231,17 +213,16 @@ describe("connection detail banners", () => {
           code: "wallet_conflict",
         },
       }),
-      true
-    );
+    });
 
-    expect(hasButton(html, "Check again")).toBe(false);
-    expect(hasButton(html, "Cancel setup")).toBe(true);
+    expect(button("Check again")).toBeNull();
+    expect(button("Cancel setup")).not.toBeNull();
   });
 });
 
 describe("connection header", () => {
   it("names the connection with its status and starts a rotation from Rotate secret", async () => {
-    renderDOM(view({ connection: ACTIVE, wallets: [], lifecycle: IN_USE, canManageCustody: true }));
+    renderView({ connection: ACTIVE, lifecycle: IN_USE });
     const header = screen.getByRole("banner");
 
     expect(within(header).getByRole("heading", { name: "Production signing" })).toBeTruthy();
@@ -253,74 +234,70 @@ describe("connection header", () => {
 
 describe("connection wallets", () => {
   it("lists each wallet under its provider, state and purpose with a short address", () => {
-    const html = renderToStaticMarkup(
-      view({
-        connection: ACTIVE,
-        wallets: [
-          makeWallet("wal_ops", "active", "Treasury"),
-          makeWallet("wal_old", "inactive", null),
-          makeWallet("wal_fees", "active", "fee_payer"),
-        ],
-        lifecycle: "restricted",
-        canManageCustody: true,
-      })
-    );
+    renderView({
+      connection: ACTIVE,
+      wallets: [
+        makeWallet("wal_ops", "active", "Treasury"),
+        makeWallet("wal_old", "inactive", null),
+        makeWallet("wal_fees", "active", "fee_payer"),
+      ],
+    });
 
-    expect(html).toContain('href="/dashboard/prj_test_sandbox/wallets/wal_ops"');
-    expect(html).toContain("Privy · Treasury");
-    expect(html).toContain("Privy · inactive");
-    expect(html).toContain("Privy · Fee payer");
-    expect(html).toContain("7xKX...gAsU");
-    expect(hasButton(html, "Add wallet")).toBe(true);
+    expect(screen.getByRole("link", { name: "Wallet wal_ops" }).getAttribute("href")).toBe(
+      "/dashboard/prj_test_sandbox/wallets/wal_ops"
+    );
+    expect(screen.getByText("Privy · Treasury")).toBeTruthy();
+    expect(screen.getByText("Privy · inactive")).toBeTruthy();
+    expect(screen.getByText("Privy · Fee payer")).toBeTruthy();
+    expect(screen.getAllByText("1113...gSA2")).toHaveLength(3);
+    expect(button("Add wallet")).not.toBeNull();
   });
 
   it("marks wallets read-only and offers no new one once the connection is deactivated", () => {
-    const html = renderToStaticMarkup(
-      view({
-        connection: makeConnection({ status: "deactivated", canComplete: false, canCancel: false }),
-        wallets: [makeWallet("wal_ops", "active", "Treasury")],
-        lifecycle: "restricted",
-        canManageCustody: true,
-      })
-    );
+    renderView({ connection: DEACTIVATED, wallets: [makeWallet("wal_ops", "active", "Treasury")] });
 
-    expect(html).toContain("Privy · Read-only · Treasury");
-    expect(hasButton(html, "Add wallet")).toBe(false);
+    expect(screen.getByText("Privy · Read-only · Treasury")).toBeTruthy();
+    expect(button("Add wallet")).toBeNull();
   });
 });
 
 describe("danger zone", () => {
   it.each([
-    ["an unfinished setup", makeConnection({}), [], true, false, false],
-    ["an active wallet", ACTIVE, [makeWallet("wal_ops", "active", null)], true, true, false],
-    ["only inactive wallets", ACTIVE, [makeWallet("wal_old", "inactive", null)], true, false, true],
-    ["a viewer who cannot manage custody", ACTIVE, [], false, false, false],
+    ["an unfinished setup", makeConnection({}), [], true, null, false],
+    [
+      "an active wallet",
+      ACTIVE,
+      [makeWallet("wal_ops", "active", null)],
+      true,
+      "1 wallet still active",
+      false,
+    ],
+    ["only inactive wallets", ACTIVE, [makeWallet("wal_old", "inactive", null)], true, null, true],
+    ["a viewer who cannot manage custody", ACTIVE, [], false, null, false],
   ] as const)(
     "decides the deactivate-connection control for %s",
-    (_case, connection, wallets, canManageCustody, disclosure, button) => {
-      const html = renderToStaticMarkup(
-        view({ connection, wallets: [...wallets], lifecycle: "restricted", canManageCustody })
-      );
+    (_case, connection, wallets, canManageCustody, disclosure, offered) => {
+      renderView({ connection, wallets: [...wallets], canManageCustody });
 
-      expect(html).toContain("Danger zone");
-      expect(html.includes("1 wallet still active")).toBe(disclosure);
-      expect(hasButton(html, "Deactivate connection")).toBe(button);
+      expect(screen.getByText("Danger zone")).toBeTruthy();
+      if (disclosure === null) {
+        expect(screen.queryByText(/still active/)).toBeNull();
+      } else {
+        expect(button(disclosure)).not.toBeNull();
+      }
+      expect(button("Deactivate connection") !== null).toBe(offered);
     }
   );
 
   it("lists the active wallets that block deactivation as links", async () => {
-    renderDOM(
-      view({
-        connection: ACTIVE,
-        wallets: [
-          makeWallet("wal_ops", "active", null),
-          makeWallet("wal_pay", "active", null),
-          makeWallet("wal_old", "inactive", null),
-        ],
-        lifecycle: "restricted",
-        canManageCustody: true,
-      })
-    );
+    renderView({
+      connection: ACTIVE,
+      wallets: [
+        makeWallet("wal_ops", "active", null),
+        makeWallet("wal_pay", "active", null),
+        makeWallet("wal_old", "inactive", null),
+      ],
+    });
     const disclosure = screen.getByRole("button", { name: "2 wallets still active" });
 
     await userEvent.click(disclosure);
@@ -328,6 +305,7 @@ describe("danger zone", () => {
     expect(disclosure.getAttribute("aria-expanded")).toBe("true");
     const linksTo = (name: string) =>
       screen.getAllByRole("link", { name }).map((link) => link.getAttribute("href"));
+    // Each wallet's own row, plus the blocking list for the active ones.
     expect(linksTo("Wallet wal_ops")).toEqual([
       "/dashboard/prj_test_sandbox/wallets/wal_ops",
       "/dashboard/prj_test_sandbox/wallets/wal_ops",
@@ -342,34 +320,16 @@ describe("danger zone", () => {
   ] as const)(
     "shows a deactivated connection's danger zone only for deactivatable credentials (%s)",
     (_case, lifecycle, shown) => {
-      const html = renderToStaticMarkup(
-        view({
-          connection: makeConnection({
-            status: "deactivated",
-            canComplete: false,
-            canCancel: false,
-          }),
-          wallets: [],
-          lifecycle,
-          canManageCustody: true,
-        })
-      );
+      renderView({ connection: DEACTIVATED, lifecycle });
 
-      expect(html.includes("Danger zone")).toBe(shown);
-      expect(hasButton(html, "Deactivate credentials")).toBe(shown);
-      expect(html).not.toContain(">Deactivate connection<");
+      expect(screen.queryByText("Danger zone") !== null).toBe(shown);
+      expect(button("Deactivate credentials") !== null).toBe(shown);
+      expect(button("Deactivate connection")).toBeNull();
     }
   );
 
   it("opens the credential deactivation from its row", async () => {
-    renderDOM(
-      view({
-        connection: makeConnection({ status: "deactivated", canComplete: false, canCancel: false }),
-        wallets: [],
-        lifecycle: UNUSED,
-        canManageCustody: true,
-      })
-    );
+    renderView({ connection: DEACTIVATED, lifecycle: UNUSED });
 
     await userEvent.click(screen.getByRole("button", { name: "Deactivate credentials" }));
 

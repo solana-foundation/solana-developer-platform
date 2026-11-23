@@ -56,7 +56,7 @@ function createEnv(): Env {
     ENVIRONMENT: "development",
     API_VERSION: "v1",
     SDP_RELEASE_CHANNEL: "beta",
-  } as Env;
+  };
 }
 
 function createRejectingDecrypt() {
@@ -215,7 +215,7 @@ describe("custody adapter factories and the release channel", () => {
     ],
   ])("logs a %s Privy adapter's calls with its custody mode and cluster", async (mode, build) => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      Response.json({ address: "11111111111111111111111111111111", chain_type: "solana" })
+      Response.json({ address: TEST_MOCK_FEE_PAYER, chain_type: "solana" })
     );
     const logEvent = vi.spyOn(events, "logEvent");
 

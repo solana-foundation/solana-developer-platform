@@ -18,7 +18,7 @@ const RAMP_ACCESS = { moonpay: { entitled: true, configured: true, enabled: true
 
 const fetchMock = vi.spyOn(globalThis, "fetch");
 
-/** Answers the onboarding read and the provider-access read through the real client. */
+/** Answers the onboarding read and the provider-availability read through the real client. */
 function answer(onboarding: OnboardingStatusAnswer) {
   fetchMock.mockImplementation(async (input) => {
     const url = input instanceof Request ? input.url : String(input);

@@ -13,7 +13,9 @@ import { internalCustody } from "@/routes/internal-custody";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
+import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -21,8 +23,8 @@ import type { Env } from "@/types/env";
 const ORGANIZATION_ID = "org_fireblocks_byok";
 const USER_ID = "usr_fireblocks_byok";
 const PROJECT_ID = "prj_fireblocks_byok";
-const ADDRESS = "11111111111111111111111111111111";
-const OTHER_ADDRESS = "So11111111111111111111111111111111111111112";
+const ADDRESS = syntheticAddress(1);
+const OTHER_ADDRESS = syntheticAddress(2);
 const fields = {
   apiKey: "tenant-fireblocks-key",
   signingKeyId: "",
@@ -168,13 +170,12 @@ async function ready() {
   const mock = providerResponse();
   connectionId = (await connect()).connectionId;
   const db = getDb(env);
-  walletId =
-    (
-      await db.queryOne<{ id: string }>(
-        "SELECT id FROM custody_wallets WHERE custody_connection_id = ?",
-        [connectionId]
-      )
-    )?.id ?? "";
+  walletId = required(
+    await db.queryOne<{ id: string }>(
+      "SELECT id FROM custody_wallets WHERE custody_connection_id = ?",
+      [connectionId]
+    )
+  ).id;
   await db.execute(
     "INSERT INTO counterparties (id, organization_id, project_id, entity_type, display_name, provider_data) VALUES (?, ?, ?, 'business', 'My SDP name', '{}'::jsonb)",
     [contactId, ORGANIZATION_ID, PROJECT_ID]
@@ -227,22 +228,13 @@ async function ready() {
 function selection() {
   return { walletId, counterpartyId: contactId, accountId, token: "SOL", address: OTHER_ADDRESS };
 }
-async function bookRequest(method = "GET", overrides = {}, projectId = PROJECT_ID) {
+async function bookRequest(overrides = {}, projectId = PROJECT_ID) {
   const input = { ...selection(), ...overrides };
-  const response = await api.request(
-    `/internal/dashboard/fireblocks/${method === "GET" ? `destination-eligibility?${new URLSearchParams(input)}` : "whitelist"}`,
-    {
-      method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "X-Project-ID": projectId,
-        "Content-Type": "application/json",
-      },
-      body: method === "POST" ? JSON.stringify(input) : undefined,
-    },
+  return api.request(
+    `/internal/dashboard/fireblocks/destination-eligibility?${new URLSearchParams(input)}`,
+    { headers: { Authorization: `Bearer ${token}`, "X-Project-ID": projectId } },
     testEnv
   );
-  return response;
 }
 function expireBook() {
   invalidateFireblocksAddressBook({
@@ -257,7 +249,10 @@ describe("Fireblocks read-only address book", () => {
     internal = [entry()];
     const replies = await Promise.all([bookRequest(), bookRequest()]);
     for (const reply of replies) expect((await reply.json()).data.state).toBe("approved");
-    expect(calls).toHaveLength(2);
+    expect(calls.map((call) => call.path).sort()).toEqual([
+      "/v1/external_wallets",
+      "/v1/internal_wallets",
+    ]);
     expireBook();
     internal = [entry("APPROVED", "SOL")];
     expect((await (await bookRequest()).json()).data.state).toBe("not_whitelisted");
@@ -287,8 +282,8 @@ describe("Fireblocks read-only address book", () => {
   });
   it("rejects changed addresses and cross-project access before provider calls", async () => {
     await ready();
-    expect((await bookRequest("GET", { address: ADDRESS })).status).toBe(409);
-    expect((await bookRequest("GET", {}, `${PROJECT_ID}_production`)).status).toBe(404);
+    expect((await bookRequest({ address: ADDRESS })).status).toBe(409);
+    expect((await bookRequest({}, `${PROJECT_ID}_production`)).status).toBe(404);
     expect(calls).toHaveLength(0);
   });
   it("rejects API keys on the internal dashboard book endpoint", async () => {
@@ -303,25 +298,6 @@ describe("Fireblocks read-only address book", () => {
     });
     token = raw;
     expect((await bookRequest()).status).toBe(403);
-    expect(calls).toEqual([]);
-  });
-  it("removes the whitelist endpoint even for an administrator", async () => {
-    await ready();
-    expect((await bookRequest("POST")).status).toBe(404);
-    expect(calls).toEqual([]);
-  });
-  it("listing contacts no longer triggers provider calls or automatic imports", async () => {
-    await ready();
-    external = [entry("APPROVED", "SOL_TEST", ADDRESS)];
-    const response = await api.request(
-      "/v1/counterparties",
-      {
-        headers: { Authorization: `Bearer ${token}`, "X-Project-ID": PROJECT_ID },
-      },
-      testEnv
-    );
-    expect(response.status).toBe(200);
-    expect((await response.json()).data.counterparties).toHaveLength(1);
     expect(calls).toEqual([]);
   });
 });

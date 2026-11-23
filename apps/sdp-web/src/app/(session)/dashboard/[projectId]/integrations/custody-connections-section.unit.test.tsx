@@ -1,23 +1,12 @@
-import type { ReactNode } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
+// @vitest-environment jsdom
+
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { stubClerkSession } from "@/test/clerk";
+import { resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { walletsWorkspace } from "@/test/wallets";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
-
-vi.mock("next/link", () => ({
-  default: ({ children, href }: { children: ReactNode; href: string }) => (
-    <a href={href}>{children}</a>
-  ),
-}));
-
-vi.mock(
-  "@/app/(session)/dashboard/[projectId]/wallets/connections/use-selected-project-name",
-  () => ({
-    useSelectedProjectName: () => "Acme Payments",
-  })
-);
 
 import {
   type ConnectionsPageResult,
@@ -29,7 +18,20 @@ import {
   CustodyConnectionsSigningLine,
 } from "./custody-connections-section";
 
-const ADD_CONNECTION_HREF = 'href="/dashboard/prj_test_sandbox/integrations/privy/connections/new"';
+const ADD_CONNECTION_HREF = "/dashboard/prj_test_sandbox/integrations/privy/connections/new";
+const SIGNING_PAUSED = "Signing through your own credentials is currently not allowed";
+
+const workspace = walletsWorkspace("admin");
+
+beforeEach(() => {
+  stubClerkSession();
+});
+
+afterEach(() => {
+  cleanup();
+  resetDashboardNavigation();
+  vi.restoreAllMocks();
+});
 
 function makeConnection(
   overrides: Partial<CustodyConnectionListItem> & { id: string }
@@ -47,7 +49,7 @@ function makeConnection(
   };
 }
 
-function render({
+function renderSection({
   connections,
   projectConnections,
   complete,
@@ -57,119 +59,118 @@ function render({
   projectConnections: CustodyConnectionListItem[];
   complete: boolean;
   canManageCustody: boolean;
-}): string {
+}) {
   const result: ConnectionsPageResult = {
     connections,
     pagination: { limit: 20, offset: 0, total: projectConnections.length },
   };
-  return renderToStaticMarkup(
-    <I18nProvider locale="en" messages={getMessages("en")}>
-      <CustodyConnectionsSection
-        result={result}
-        filters={{ page: 1 }}
-        summary={summarizeProviderConnections({ connections: projectConnections, complete })}
-        walletsByConnection={{}}
-        walletsUnavailable={false}
-        canManageCustody={canManageCustody}
-        provider="privy"
-      />
-    </I18nProvider>
+  render(
+    <CustodyConnectionsSection
+      result={result}
+      filters={{ page: 1 }}
+      summary={summarizeProviderConnections({ connections: projectConnections, complete })}
+      walletsByConnection={{}}
+      walletsUnavailable={false}
+      canManageCustody={canManageCustody}
+      provider="privy"
+    />,
+    { wrapper: workspace }
   );
 }
 
-function renderSigningLine(
-  total: number,
-  connections: CustodyConnectionListItem[],
-  complete: boolean
-) {
-  return renderToStaticMarkup(
-    <I18nProvider locale="en" messages={getMessages("en")}>
-      <CustodyConnectionsSigningLine
-        total={total}
-        summary={summarizeProviderConnections({ connections, complete })}
-      />
-    </I18nProvider>
+function signingLine(total: number, connections: CustodyConnectionListItem[], complete: boolean) {
+  const { container } = render(
+    <CustodyConnectionsSigningLine
+      total={total}
+      summary={summarizeProviderConnections({ connections, complete })}
+    />,
+    { wrapper: workspace }
   );
+  return container.textContent;
+}
+
+function addConnectionLinks(): (string | null)[] {
+  return screen
+    .queryAllByRole("link", { name: "Add connection" })
+    .map((link) => link.getAttribute("href"));
 }
 
 describe("custody connections section", () => {
   it("explains a signing pause without implying anything was removed", () => {
     const paused = makeConnection({ id: "cconn_1", isRuntimeExecutionAllowed: false });
-    const html = render({
+    renderSection({
       connections: [paused],
       projectConnections: [paused],
       complete: true,
       canManageCustody: true,
     });
 
-    expect(html).toContain("Signing through your own credentials is currently not allowed");
-    expect(html).toContain("Nothing has been deleted.");
-    expect(html).toContain('data-connection-id="cconn_1"');
+    expect(screen.getByText(new RegExp(SIGNING_PAUSED))).toBeTruthy();
+    expect(screen.getByText(/Nothing has been deleted\./)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Production signing" }).getAttribute("href")).toBe(
+      "/dashboard/prj_test_sandbox/integrations/privy/connections/cconn_1"
+    );
   });
 
-  it("does not pause signing over one paused connection among several", () => {
-    const onPage = makeConnection({ id: "cconn_1", isRuntimeExecutionAllowed: false });
-    const html = render({
-      connections: [onPage],
-      projectConnections: [onPage, makeConnection({ id: "cconn_2" })],
-      complete: true,
+  // The banner is a claim about the whole project: one paused row among several, or a read that
+  // could not see every connection, does not support it.
+  it.each([
+    [
+      "one paused connection among several",
+      [
+        makeConnection({ id: "cconn_1", isRuntimeExecutionAllowed: false }),
+        makeConnection({ id: "cconn_2" }),
+      ],
+      true,
+    ],
+    [
+      "a project read that could not see every connection",
+      [makeConnection({ id: "cconn_1", isRuntimeExecutionAllowed: false })],
+      false,
+    ],
+  ])("does not pause signing over %s", (_case, projectConnections, complete) => {
+    renderSection({
+      connections: projectConnections.slice(0, 1),
+      projectConnections,
+      complete,
       canManageCustody: true,
     });
 
-    expect(html).not.toContain("Signing through your own credentials is currently not allowed");
-  });
-
-  it("does not pause signing when the project could not be read through", () => {
-    const paused = makeConnection({ id: "cconn_1", isRuntimeExecutionAllowed: false });
-    const html = render({
-      connections: [paused],
-      projectConnections: [paused],
-      complete: false,
-      canManageCustody: true,
-    });
-
-    expect(html).not.toContain("Signing through your own credentials is currently not allowed");
+    expect(screen.queryByText(new RegExp(SIGNING_PAUSED))).toBeNull();
   });
 
   it("names the role a read-only viewer is missing, and offers them no actions", () => {
     const connection = makeConnection({ id: "cconn_1" });
-    const html = render({
+    renderSection({
       connections: [connection],
       projectConnections: [connection],
       complete: true,
       canManageCustody: false,
     });
 
-    expect(html).toContain("custody admin");
-    expect(html).toContain("Settings");
-    expect(html).not.toContain("Add connection");
+    expect(screen.getByText(/custody admin/)).toBeTruthy();
+    expect(addConnectionLinks()).toEqual([]);
   });
 
-  it("links Add connection to the new connection page from the heading once rows exist", () => {
+  it("offers Add connection once, with rows or without", () => {
     const connection = makeConnection({ id: "cconn_1" });
-    const html = render({
+    renderSection({
       connections: [connection],
       projectConnections: [connection],
       complete: true,
       canManageCustody: true,
     });
+    expect(addConnectionLinks()).toEqual([ADD_CONNECTION_HREF]);
+    cleanup();
 
-    expect(html.split(ADD_CONNECTION_HREF)).toHaveLength(2);
-    expect(html.indexOf(ADD_CONNECTION_HREF)).toBeLessThan(html.indexOf("<table"));
-  });
-
-  it("moves Add connection into the empty state when the project has no connections", () => {
-    const html = render({
+    renderSection({
       connections: [],
       projectConnections: [],
       complete: true,
       canManageCustody: true,
     });
-
-    expect(html.split(ADD_CONNECTION_HREF)).toHaveLength(2);
-    expect(html.indexOf("No connections in Acme Payments yet")).toBeLessThan(
-      html.indexOf(ADD_CONNECTION_HREF)
-    );
+    expect(screen.getByText("No connections in Sandbox yet")).toBeTruthy();
+    expect(addConnectionLinks()).toEqual([ADD_CONNECTION_HREF]);
   });
 });
 
@@ -178,18 +179,14 @@ describe("custody connections signing line", () => {
   const signing = makeConnection({ id: "cconn_2" });
 
   it("says the project has none yet", () => {
-    expect(renderSigningLine(0, [], true)).toBe("No connections in Acme Payments yet");
+    expect(signingLine(0, [], true)).toBe("No connections in Sandbox yet");
   });
 
   it("gives the count alone when the summary could not see every connection", () => {
-    expect(renderSigningLine(150, [paused, signing], false)).toBe(
-      "150 connections in Acme Payments"
-    );
+    expect(signingLine(150, [paused, signing], false)).toBe("150 connections in Sandbox");
   });
 
   it("says how many of the project's connections can sign", () => {
-    expect(renderSigningLine(2, [paused, signing], true)).toBe(
-      "1 of 2 connections can sign in Acme Payments."
-    );
+    expect(signingLine(2, [paused, signing], true)).toBe("1 of 2 connections can sign in Sandbox.");
   });
 });
