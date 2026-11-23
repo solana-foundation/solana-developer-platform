@@ -4,6 +4,7 @@ import type { KeyPairSigner } from "@solana/kit";
 import { isPositiveDecimal } from "../src/lib/decimal";
 import type {
   DashboardData,
+  SlippagePolicy,
   WithdrawalIntent,
   YieldStrategy,
 } from "../src/types";
@@ -129,6 +130,22 @@ async function retryUncertainSubmit<T>(submit: () => Promise<T>): Promise<T> {
   throw lastError;
 }
 
+/** What a preparation may add to its request; an absent term is omitted, never sent empty. */
+interface PreparationTerms {
+  slippageBps?: number;
+  feePayer?: string;
+}
+
+function preparationTerms(
+  slippage: SlippagePolicy | null,
+  feePayer: KeyPairSigner | undefined
+): PreparationTerms {
+  const terms: PreparationTerms = {};
+  if (slippage) terms.slippageBps = slippage.defaultToleranceBps;
+  if (feePayer) terms.feePayer = feePayer.address;
+  return terms;
+}
+
 function assertAmount(amount: string): void {
   if (!isPositiveDecimal(amount))
     throw new Error("Enter a positive decimal amount");
@@ -162,10 +179,7 @@ export async function prepareCoreDeposit(
       strategyId: strategy.id,
       source: { ownerAddress: owner.address },
       amount: { mint: requireDepositMint(strategy), value: amount },
-      ...(strategy.depositSlippage
-        ? { slippageBps: strategy.depositSlippage.defaultToleranceBps }
-        : {}),
-      ...(feePayer ? { feePayer: feePayer.address } : {}),
+      ...preparationTerms(strategy.depositSlippage, feePayer),
     },
     idempotencyKey
   );
@@ -193,10 +207,7 @@ export async function prepareCoreWithdrawal(
     {
       positionId: position.id,
       amount: { kind: "token", mint: position.tokenMint, value: input.amount },
-      ...(strategy.withdrawalSlippage
-        ? { slippageBps: strategy.withdrawalSlippage.defaultToleranceBps }
-        : {}),
-      ...(feePayer ? { feePayer: feePayer.address } : {}),
+      ...preparationTerms(strategy.withdrawalSlippage, feePayer),
     },
     idempotencyKey
   );
@@ -225,24 +236,19 @@ export async function submitCoreOperation(
   if (nextAction?.type !== "sign_transaction" && nextAction?.type !== "submit")
     return operation;
   await assertRpcCluster(config.SOLANA_RPC_URL, config.SOLANA_CLUSTER);
-  const signedTransaction =
-    nextAction.type === "sign_transaction"
-      ? await signTransaction(
-          nextAction.transaction,
-          all,
-          feePayer?.address ?? owner.address
-        )
-      : undefined;
+  const submission: {
+    actionId: string;
+    version: number;
+    signedTransaction?: string;
+  } = { actionId: action.actionId, version: action.version };
+  if (nextAction.type === "sign_transaction")
+    submission.signedTransaction = await signTransaction(
+      nextAction.transaction,
+      all,
+      feePayer?.address ?? owner.address
+    );
   return retryUncertainSubmit(() =>
-    client.submitOperation(
-      id,
-      {
-        actionId: action.actionId,
-        version: action.version,
-        ...(signedTransaction ? { signedTransaction } : {}),
-      },
-      action.idempotencyKey
-    )
+    client.submitOperation(id, submission, action.idempotencyKey)
   );
 }
 

@@ -24,10 +24,18 @@ import { POST as prepare } from "../src/app/api/deposits/route";
 import { POST as submit } from "../src/app/api/operations/[operationId]/submit/route";
 
 afterEach(() => {
-  vi.unstubAllGlobals();
   vi.restoreAllMocks();
   sign.mockClear();
 });
+
+/** Route the global fetch through a fake that reads the request URL as a string. */
+function stubFetch(
+  fake: (url: string, init?: RequestInit) => Promise<Response>
+) {
+  return vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation((input, init) => fake(String(input), init));
+}
 
 it("prepares without signing and recovers a lost submit response through the same operation", async () => {
   let submits = 0;
@@ -68,8 +76,7 @@ it("prepares without signing and recovers a lost submit response through the sam
     updatedAt: "2026-11-18T12:00:00.000Z",
   };
   vi.spyOn(console, "error").mockImplementation(() => {});
-  vi.stubGlobal(
-    "fetch",
+  stubFetch(
     vi.fn(async (url: string, init?: RequestInit) => {
       const path = new URL(url).pathname;
       if (path.endsWith("/discovery"))
@@ -113,16 +120,18 @@ it("prepares without signing and recovers a lost submit response through the sam
       throw new Error(`Unexpected request: ${path}`);
     })
   );
-  const request = (path: string, body: unknown, key?: string) =>
-    new Request(`https://bank.example${path}`, {
+  const request = (path: string, body: unknown, key?: string) => {
+    const headers = new Headers({
+      "Content-Type": "application/json",
+      Origin: "https://bank.example",
+    });
+    if (key) headers.set("Idempotency-Key", key);
+    return new Request(`https://bank.example${path}`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Origin: "https://bank.example",
-        ...(key ? { "Idempotency-Key": key } : {}),
-      },
+      headers,
       body: JSON.stringify(body),
     });
+  };
   expect(
     (await prepare(request("/api/deposits", { amount: "10" }, "prepare-key")))
       .status
@@ -189,7 +198,7 @@ it("refuses to sign an operation belonging to a different owner", async () => {
       },
     })
   );
-  vi.stubGlobal("fetch", fetchMock);
+  stubFetch(fetchMock);
   const response = await submit(
     new Request("https://bank.example/api/operations/foreign/submit", {
       method: "POST",

@@ -28,12 +28,11 @@ async function request(
   body: unknown,
   key?: string
 ): Promise<EarnOperation> {
+  const headers = new Headers({ "Content-Type": "application/json" });
+  if (key) headers.set("Idempotency-Key", key);
   const response = await fetch(new URL(path, window.location.origin), {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(key ? { "Idempotency-Key": key } : {}),
-    },
+    headers,
     body: JSON.stringify(body),
   });
   if (!response.ok) {
@@ -174,12 +173,10 @@ export async function refreshPreparedOperation(
       operation.nextAction?.type !== "select_option")
   )
     throw new Error("This operation cannot be refreshed");
-  return updatePreparedOperation(operation.id, {
-    action: "refresh",
-    input: {
-      actionId: operation.actionId,
-      version: operation.version,
-      ...(optionId ? { optionId } : {}),
-    },
-  });
+  const input: { actionId: string; version: number; optionId?: string } = {
+    actionId: operation.actionId,
+    version: operation.version,
+  };
+  if (optionId) input.optionId = optionId;
+  return updatePreparedOperation(operation.id, { action: "refresh", input });
 }
