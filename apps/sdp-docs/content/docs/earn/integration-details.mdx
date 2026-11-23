@@ -16,11 +16,14 @@ Every operation says what to do next in `nextAction`:
 | `null` | Nothing left to do: the operation is final. |
 
 These calls live under `/v1/operations/{operationId}`. Only `/submit` lets SDP
-send anything; there is no separate approval step.
+send anything; there is no separate approval step. `actionId` and `version`
+name the exact transaction you were shown: each refresh issues a new pair, and
+submitting an old pair returns `409`.
 
 ## Refresh and cancel
 
-Both work only before you submit:
+Both work only while an operation waits for a route choice (`select_option`),
+before SDP hands you a transaction to sign:
 
 - **Refresh** picks a withdrawal route and prepares its transaction. It never
   signs, sends or cancels anything, and the chosen route stays fixed.
@@ -40,8 +43,8 @@ signature or pull a broadcast transaction from Solana.
 
 ## Recover expired withdrawal escrow
 
-A solver withdrawal that misses its deadline can leave its shares in the
-provider's escrow. To get them back, prepare `POST /v1/earn/withdraw` for the
+A queued withdrawal that isn't filled before its deadline can leave its shares
+in the provider's escrow. To get them back, prepare `POST /v1/earn/withdraw` for the
 same tracked `positionId` with `amount: { "kind": "all" }`. When the provider
 proves the recorded request still holds those expired shares, `terms.options`
 offers **Recover expired escrowed shares** through `select_option`.
@@ -56,47 +59,41 @@ for the next. The original operation is not reopened, and its `/cancel` stays
 unavailable. Expiry alone, or a missing provider request, does not authorize
 recovery.
 
-Hastra operator redemptions can't be recovered this way. They reuse one owner
-request address with delegated wYLDS, and their cancellation instruction can't
-bind a reviewed amount or request cycle, so recovery needs a separate design.
-Don't treat their pending intermediate tokens as delivered USDC or recovered
-PRIME shares.
+Hastra operator redemptions can't be recovered this way: their cancellation
+instruction can't be tied to one reviewed amount or request cycle. Don't treat
+their pending intermediate tokens as delivered USDC or recovered PRIME shares.
 
 ## Retries and idempotency
 
 Save a fresh `Idempotency-Key` with each request body before you send it. After
-an uncertain response, such as a timeout or a `5xx`, resend the same body with
-the same key, including the same signed bytes, and SDP returns the original
-response.
+an uncertain response, such as a timeout or a `5xx`, resend the exact same body,
+signed bytes included, with the same key: SDP returns the original response.
+Don't rebuild a retry from a newer quote or balance.
 
-Keep the original amount as typed; do not derive a retry body from a newer
-quote or balance. To pick up work you already started, list
-`GET /v1/operations?ownerAddress=...` and continue from its `nextAction`
-instead of preparing another deposit or withdrawal.
+To pick up work you already started, list `GET /v1/operations?ownerAddress=...`
+and continue from its `nextAction` instead of preparing another deposit or
+withdrawal.
 
 Replaying a refresh with its original key returns the original response, even
 after a later submit; it builds nothing new. Read
 `GET /v1/operations/{operationId}` for the current state.
 
-Once you submit, prepare a replacement with a new key only after the original
-is definitively `failed`. A timeout, blockhash expiry, an unknown provider response or
-missing RPC history doesn't prove a submitted transaction never executed: keep
-tracking it until SDP establishes the outcome. A transaction you never submitted
-or sent can no longer land once the network passes its `lastValidBlockHeight`,
-so you can prepare again.
+Once you submit, start over with a new key only after the operation is
+`failed`. A timeout, an expired blockhash, an unknown provider response or
+missing RPC history doesn't prove a submitted transaction never ran: keep
+tracking until SDP knows. A transaction you never submitted or sent can't land
+once the network passes its `lastValidBlockHeight`, so you can prepare again.
 
 ## Fees and rates
 
 | Cost | What you can know |
 | --- | --- |
-| Network fees and rent | The owner pays them, unless you set a separate `feePayer`, which must also sign. |
+| Network fees and rent | The owner pays them, unless you set a separate `feePayer`, which must also sign. A full Kamino withdrawal leaves the empty share account open, so don't promise its rent back. |
 | Provider costs | Management, performance, swap and redemption charges depend on the strategy and route. Show the provider's metadata and the reviewed estimate; a queue discount also lowers proceeds. |
 | SDP pricing | Not part of the Earn response. Confirm SDP pricing separately, and don't read a missing field as zero. |
 
 `terms.fees` lists known fees for the transaction: `null` means unavailable, not
-free, and it is not an invoice for ongoing provider costs. A full Kamino
-withdrawal leaves the empty share account open; do not promise an automatic
-rent refund. `rate.value` is the
+free, and it is not an invoice for ongoing provider costs. `rate.value` is the
 provider-reported APY, not a promise of returns after every cost, and Earn
 doesn't normalize rates across providers into one comparable net yield.
 

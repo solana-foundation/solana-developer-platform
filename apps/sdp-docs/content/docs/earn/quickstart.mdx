@@ -10,15 +10,17 @@ never holds keys. To see the whole flow offline,
 [run the example](https://github.com/solana-foundation/solana-developer-platform/tree/main/examples/earn-quickstart).
 
 You need a [devnet API key](https://platform-devnet.solana.com/dashboard?return_to=%2Fdashboard%2Fapi-keys%2Fnew)
-with **Earn Execute**. Every `POST` takes an `Idempotency-Key`: resend the same
-key and body after a lost response, and SDP returns the original response
-instead of a second deposit.
+with the Earn **Execute** permission (`earn.execute`), which includes Read.
+Every `POST` needs an `Idempotency-Key`. If a response
+gets lost, send the same request again with the same key: SDP returns the first
+response instead of making a second deposit.
 
 ## 1. Prepare
 
 Send `POST /v1/earn/deposit` with a strategy from
 [discovery](/docs/earn/strategies), the wallet that signs and owns the position,
-and the amount in token units:
+and the amount. `value` is in whole tokens, so `"10"` is 10 USDC, not base
+units:
 
 ```json title="deposit.json"
 {
@@ -87,10 +89,11 @@ the least the transaction accepts, and `null` means unknown, not zero.
 ## 2. Sign and submit
 
 Have the owner's wallet [sign](https://solana.com/docs/core/transactions)
-`nextAction.transaction` without changing it, before the network passes
-`lastValidBlockHeight` (about a minute). Then send
-`POST /v1/operations/{operationId}/submit` with the reviewed action and the
-signed transaction, base64-encoded:
+`nextAction.transaction`, a v0 transaction, without changing it, before the
+network passes `lastValidBlockHeight` (about a minute). Sign only: SDP
+broadcasts what you submit. Then send `POST /v1/operations/{operationId}/submit`
+with the signed transaction, base64-encoded, and the operation's `actionId` and
+`version`, which name the exact transaction you were shown:
 
 ```json title="submission.json"
 {
@@ -151,8 +154,8 @@ curl -sS "https://api-devnet.solana.com/v1/operations/$OPERATION_ID" \
 
 `completed` means SDP verified delivery, and `result.positionId` is the new
 position. `failed` means it didn't go through: read `error`, then prepare a new
-deposit with a new key. Any other status is still in progress, so keep polling
-and don't start another deposit.
+deposit with a new key. `cancelled` means nothing was deposited. Any other
+status is still in progress, so keep polling and don't start another deposit.
 
 ## Next steps
 

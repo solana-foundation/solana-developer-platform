@@ -318,7 +318,7 @@ Source: https://platform.solana.com/docs/earn
 Earn puts vault, lending and real-world-asset yield strategies behind one API.
 Your customer's wallet signs every deposit and withdrawal, and SDP broadcasts it
 and tracks it to settlement. Funds move between the customer's wallet and the
-provider's program; SDP never holds them
+provider; SDP never holds them
 ([follow the funds](/docs/earn/concepts#follow-the-funds)).
 
 - **Prepare**
@@ -333,7 +333,10 @@ provider's program; SDP never holds them
 
   Poll `GET /v1/operations/{operationId}` until it completes.
 
-Any Solana wallet can sign, and none needs registering in SDP. Start with the
+Any Solana wallet can sign, and you don't register it with SDP; a few
+real-world-asset funds accept only
+[issuer-approved wallets](/docs/earn/integration-details#provider-eligibility).
+Start with the
 [quickstart](/docs/earn/quickstart), or
 [run the example](https://github.com/solana-foundation/solana-developer-platform/tree/main/examples/earn-quickstart)
 locally with no key, wallet or funds.
@@ -351,7 +354,7 @@ locally with no key, wallet or funds.
 | [`GET /v1/operations/{operationId}`](/docs/reference/api/earn/get-operation) | Reads one operation's status and next action. |
 | [`POST /v1/operations/{operationId}/submit`](/docs/reference/api/earn/submit-operation) | Sends the signed transaction. |
 | [`POST /v1/operations/{operationId}/refresh`](/docs/reference/api/earn/refresh-operation) | Chooses a withdrawal route before you sign. |
-| [`POST /v1/operations/{operationId}/cancel`](/docs/reference/api/earn/cancel-operation) | Abandons an operation before you sign. |
+| [`POST /v1/operations/{operationId}/cancel`](/docs/reference/api/earn/cancel-operation) | Abandons a withdrawal before you choose its route. |
 
 ## Guides
 
@@ -402,15 +405,17 @@ never holds keys. To see the whole flow offline,
 [run the example](https://github.com/solana-foundation/solana-developer-platform/tree/main/examples/earn-quickstart).
 
 You need a [devnet API key](https://platform-devnet.solana.com/dashboard?return_to=%2Fdashboard%2Fapi-keys%2Fnew)
-with **Earn Execute**. Every `POST` takes an `Idempotency-Key`: resend the same
-key and body after a lost response, and SDP returns the original response
-instead of a second deposit.
+with the Earn **Execute** permission (`earn.execute`), which includes Read.
+Every `POST` needs an `Idempotency-Key`. If a response
+gets lost, send the same request again with the same key: SDP returns the first
+response instead of making a second deposit.
 
 ## 1. Prepare
 
 Send `POST /v1/earn/deposit` with a strategy from
 [discovery](/docs/earn/strategies), the wallet that signs and owns the position,
-and the amount in token units:
+and the amount. `value` is in whole tokens, so `"10"` is 10 USDC, not base
+units:
 
 ```json title="deposit.json"
 {
@@ -478,10 +483,11 @@ the least the transaction accepts, and `null` means unknown, not zero.
 ## 2. Sign and submit
 
 Have the owner's wallet [sign](https://solana.com/docs/core/transactions)
-`nextAction.transaction` without changing it, before the network passes
-`lastValidBlockHeight` (about a minute). Then send
-`POST /v1/operations/{operationId}/submit` with the reviewed action and the
-signed transaction, base64-encoded:
+`nextAction.transaction`, a v0 transaction, without changing it, before the
+network passes `lastValidBlockHeight` (about a minute). Sign only: SDP
+broadcasts what you submit. Then send `POST /v1/operations/{operationId}/submit`
+with the signed transaction, base64-encoded, and the operation's `actionId` and
+`version`, which name the exact transaction you were shown:
 
 ```json title="submission.json"
 {
@@ -540,8 +546,8 @@ curl -sS "https://api-devnet.solana.com/v1/operations/$OPERATION_ID" \
 
 `completed` means SDP verified delivery, and `result.positionId` is the new
 position. `failed` means it didn't go through: read `error`, then prepare a new
-deposit with a new key. Any other status is still in progress, so keep polling
-and don't start another deposit.
+deposit with a new key. `cancelled` means nothing was deposited. Any other
+status is still in progress, so keep polling and don't start another deposit.
 
 ## Next steps
 
@@ -584,9 +590,9 @@ signs it: SDP never holds its keys. The wallet signs the exact bytes SDP
 prepared, and SDP rejects any change to them. Preparing grants no permission to
 send: only your `/submit` call does, and only for the transaction you reviewed.
 
-A signature, a confirmed request or escrowed shares are not a payout.
-`completed` means SDP verified delivery. When an outcome is unknown, the
-operation keeps its signed bytes and stays pending until evidence settles it.
+Only `completed` means the funds arrived: a signature, a confirmed request or
+shares held in escrow are not a payout. If SDP can't tell yet whether something
+ran, the operation stays pending until it can.
 
 ## Follow the funds
 
@@ -615,15 +621,15 @@ For example, Kamino's K-Vault program is
 `KvauGMspG5k6rtzrqqn7WNn3oZdyKqLKwK2XWQ8FLjd` on mainnet and
 `devkRngFnfp4gBc5a3LsadgbQKdPo8MSZ4prFiNSVmY` on devnet. The strategy's
 `providerReference` is the vault account and its `shareMint` is the receipt
-token. A deposit invokes that program to mint shares to the owner; redemption
-burns them as assets leave the vault for the owner.
+token. A deposit calls that program to mint shares to the owner; a withdrawal
+burns them and pays the owner from the vault.
 
-Before signing, compare those identities with the transaction's program and
-token accounts. The
-[cluster-specific program registry](https://github.com/solana-foundation/solana-developer-platform/blob/main/packages/sdp-types/src/kamino-programs.ts)
-and the confirmed transaction let you trace the program, the deposit
-destination and the shares received. SDP checks the same asset identities
-against the strategy or position when it plans each transaction.
+Before signing, you can check that the transaction calls that program and pays
+into that vault; the
+[program registry](https://github.com/solana-foundation/solana-developer-platform/blob/main/packages/sdp-types/src/kamino-programs.ts)
+lists each cluster's program. After it confirms, the transaction shows the
+shares the owner received. SDP runs the same checks against the strategy or
+position whenever it builds a transaction.
 
 Provider orders work differently from a vault. A WisdomTree subscription sends
 USDC to an issuer-operated wallet, and its transfer agent delivers fund tokens
@@ -688,11 +694,16 @@ lists every allowed value.
 ## Pick one that accepts deposits
 
 Choose a strategy whose `capabilities.deposit` and `fundable` are both `true`,
-and pass its `id` as `strategyId` when you [prepare a deposit](/docs/earn/deposits).
-When `capabilities.deposit` is `false`, `depositUnavailableReason` says why:
-`catalogue_only` or `adapter_unavailable`. Preparation still checks admission
-live, so provider limits, issuer requirements and liquidity can refuse a listed
-strategy.
+and pass its `id` as `strategyId` when you [prepare a deposit](/docs/earn/deposits):
+
+- `fundable` is `false` when the strategy's instrument doesn't exist on your
+  environment's cluster, such as a mainnet vault listed for browsing on devnet.
+- When `capabilities.deposit` is `false`, `depositUnavailableReason` says why:
+  `catalogue_only` (listed for browsing, not open to deposits) or
+  `adapter_unavailable` (Earn can't build deposits for this provider).
+
+A listed strategy can still refuse a deposit when you prepare it: provider
+limits, issuer rules and liquidity are checked live.
 
 ## Read the terms
 
@@ -729,7 +740,7 @@ See [all deposit parameters](/docs/reference/api/earn/prepare-earn-deposit).
 | --- | --- |
 | `strategyId` | From [discovery](/docs/earn/strategies). |
 | `source.ownerAddress` | The wallet that signs and owns the position. It needs no registration in SDP. |
-| `amount` | The `mint` you fund with and a decimal-string `value` in that token's units. |
+| `amount` | The `mint` you fund with, and `value` as a decimal string in whole tokens: `"10"` is 10 USDC, not base units. |
 | `slippageBps` | Optional, at the top level. `50` is 0.5%, at most `500`. Defaults to the strategy's `depositSlippage.defaultToleranceBps`, else 50. |
 | `feePayer` | Optional address that pays network fees instead of the owner. It must also sign. |
 
@@ -749,20 +760,24 @@ the transaction, but signs and sends nothing. Show your customer:
 
 ## Sign and submit
 
-The owner, and the `feePayer` if you set one, sign `nextAction.transaction`
-without changing it. Send the signed transaction, base64-encoded, with the
-operation's current `actionId` and `version` to
-`POST /v1/operations/{operationId}/submit`. SDP checks the bytes match what it
-prepared, then broadcasts them. If the customer declines to sign, nothing
-executes and no SDP call is needed.
+The owner, and the `feePayer` if you set one, sign `nextAction.transaction`, a
+v0 transaction, without changing it. Sign only, don't send it: SDP broadcasts
+what you submit. Send the signed transaction, base64-encoded, with the
+operation's `actionId` and `version` to `POST /v1/operations/{operationId}/submit`.
+SDP checks the bytes match what it prepared, then broadcasts them.
+
+If the customer declines to sign, nothing executes and no SDP call is needed.
+The operation stays `prepared`, and `status=active` keeps listing it. Once the
+network passes its `lastValidBlockHeight`, its transaction can't land, so you
+can prepare a new deposit.
 
 ## Track
 
 Poll `GET /v1/operations/{operationId}` until `status` is `completed`, `failed`
 or `cancelled`; anything else is still in progress. A submitted deposit can't
-be refreshed or cancelled, so keep tracking it. Only a `failed` deposit lets you
-prepare a new one, with a new `Idempotency-Key`. A timeout or an unknown outcome
-does not:
+be refreshed or cancelled, so keep tracking it. After you submit, only a
+`failed` deposit lets you prepare a new one, with a new `Idempotency-Key`. A
+timeout or an unknown outcome does not:
 [retry the same request](/docs/earn/integration-details#retries-and-idempotency)
 instead.
 
@@ -775,7 +790,7 @@ Source: https://platform.solana.com/docs/earn/balances
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
-`GET /v1/earn/positions` reads a wallet's holdings, with `api` and `headers` as
+`GET /v1/earn/positions` lists a wallet's holdings, with `api` and `headers` as
 in the [quickstart](/docs/earn/quickstart):
 
 **TypeScript**
@@ -795,13 +810,13 @@ curl -sS "https://api-devnet.solana.com/v1/earn/positions?ownerAddress=<wallet-a
 ```
 
 Each position's `id` is the `positionId` you [withdraw](/docs/earn/withdrawals)
-with. Without `ownerAddress`, the read covers every position your key can see in
-the project. See [position filters](/docs/reference/api/earn/list-earn-core-positions).
+with. Without `ownerAddress`, the list covers every position your key can see
+in the project. See [position filters](/docs/reference/api/earn/list-earn-core-positions).
 
 ## Read one position
 
-Use a position's `id` to read its latest balance and withdrawal state without
-fetching the whole list:
+`GET /v1/earn/positions/{positionId}` returns one position, with the same fields
+as the list:
 
 **TypeScript**
 
@@ -819,43 +834,53 @@ curl -sS "https://api-devnet.solana.com/v1/earn/positions/<position-id>" \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
-The ID selects its owner and strategy; no wallet filter is needed. The read
-uses the same access rules and position fields as the list, including IDs
-returned by `discover=true`. Reading a discovered holding does not import it. If it is already tracked,
-the response returns its canonical position ID. Missing positions and positions outside your project return `404`.
+- Any `id` from the list works, including holdings found with `discover=true`.
+  The ID already names the owner and strategy, so no wallet filter is needed.
+- Reading a discovered holding doesn't start tracking it. If SDP already tracks
+  it, the response carries the tracked `id`.
+- An unknown position, or one outside your project, returns `404`. A
+  discovered holding SDP can't verify right now returns `503`.
+- A balance read right after a transaction can lag. When the operation is
+  `completed` and its `resourceRef.kind` is `earn.movement`, pass its
+  `resourceRef.id` as `afterMovementIds` to read a balance that includes it.
+  Another position's movement returns `404`.
 
-Pass `afterMovementIds` after a transaction to require a balance observation
-that includes those movements. See [position parameters](/docs/reference/api/earn/get-earn-position).
-Unknown live values stay unavailable; do not show them as zero.
+A value SDP couldn't read live is left out, never shown as zero. See
+[position parameters](/docs/reference/api/earn/get-earn-position).
 
 ## Holdings opened outside SDP
 
-Add `discover=true` to an `ownerAddress` read to include the wallet's holdings
+Add `discover=true` to an `ownerAddress` list to include the wallet's holdings
 in integrated strategies that SDP didn't open. You can withdraw from them the
 same way. `discovery.unavailableStrategyCount` counts strategies SDP couldn't
-read: their balances are unknown, not zero. Discovered holdings have no
-acquisition history, so their `costBasisKnown` is `false`.
+read: their balances are unknown, not zero. Holdings found this way have no
+purchase history, so their `costBasisKnown` is `false`.
 
 ## Totals and earnings
 
-`includeSummary=true` totals the whole selected scope, not only the current
-page. Add `includeOwnerAddresses=true` for totals per owner, and
-`includePositions=true`, which needs it, for each position.
+`includeSummary=true` totals everything the filter selects, not only the
+current page. Add `includeOwnerAddresses=true` for totals per owner; with that
+set, `includePositions=true` adds each position.
 
-Show earned yield only where `costBasisKnown` is `true`; `summary.costBasisCoverage`
-is `complete` when that holds for every position. Keep pending queue shares and
-intermediate tokens visible until they settle.
+Show earned yield only where `costBasisKnown` is `true`;
+`summary.costBasisCoverage` is `complete` when that holds for every position.
+Keep pending queue shares and intermediate tokens visible until they settle.
 
 ## Activity
 
 `GET /v1/operations?ownerAddress=<wallet-address>` lists the wallet's deposits
 and withdrawals, newest first, each with its current `nextAction`. Always pass
-the owner: without a filter, the list leaves out owner-address operations.
+`ownerAddress` here: unlike the positions list, an unfiltered operations list
+leaves out every `ownerAddress` operation. Narrow it with:
 
-Add `status=active` for outstanding actions, including unsigned preparations.
-Paginate history separately with `limit` and `cursor`; every filter applies
-before pagination. Keep tracking an older pending action even when newer
-operations fill the first history page. See [activity filters](/docs/reference/api/earn/list-operations).
+- `status=active` for everything not yet final, including preparations still
+  waiting for a signature or a route choice.
+- `kind=earn.deposit` or `kind=earn.withdraw` for one type.
+- `limit` and `cursor` to page through history.
+
+Full history can push an older pending operation past the first page.
+`status=active` applies before paging, so it returns every unfinished operation
+up front. See [activity filters](/docs/reference/api/earn/list-operations).
 
 ---
 
@@ -877,7 +902,7 @@ Send `POST /v1/earn/withdraw` with a position from
 ```
 
 The position fixes the strategy and the owner, and the payout goes back to that
-owner. To review its latest balance first, [read the position](/docs/earn/balances#read-one-position).
+owner. To check its balance first, [read the position](/docs/earn/balances#read-one-position).
 `slippageBps` is optional and sits at the top level. See
 [all withdrawal parameters](/docs/reference/api/earn/prepare-earn-withdrawal).
 
@@ -886,35 +911,42 @@ owner. To review its latest balance first, [read the position](/docs/earn/balanc
 | `all` | The whole position. |
 | `shares` | `value` shares. |
 | `token` | Shares worth `value` of the strategy's deposit token `mint`. |
-| `intermediate` | `value` of a held intermediate token `mint`, for strategies that redeem through one. |
+| `intermediate` | `value` of a held intermediate token `mint`. Some strategies redeem in two steps, through a token you hold in between. |
 
 ## Choose an exit route
 
-Some strategies offer more than one exit, such as an instant swap and a delayed
-redemption. Then `nextAction.type` is `select_option`, and `terms.options` lists
-each route with its `settlement`, `estimatedSeconds` and `amount`. Call
+An instant exit burns the shares and pays out in one transaction. A queued
+exit files a withdrawal request instead: the shares move into the provider's
+escrow until the provider pays out, which can take days.
+
+When a strategy offers both, `nextAction.type` is `select_option`, and
+`terms.options` lists each route with its `settlement`, `estimatedSeconds` and
+`amount`. Call
 `POST /v1/operations/{operationId}/refresh` with the chosen `optionId` and the
 current `actionId` and `version`. SDP prepares that route's transaction for you
 to review, and the route stays fixed on later refreshes.
 
 While the withdrawal waits for your choice, `canCancel` is `true` and
-`POST /v1/operations/{operationId}/cancel` abandons it. Cancel needs the
-`earn.manage` grant.
+`POST /v1/operations/{operationId}/cancel` abandons it. Cancel needs the Earn
+**Manage** permission (`earn.manage`).
 
 ## Sign, submit and track
 
 Sign and submit as for a [deposit](/docs/earn/deposits#sign-and-submit), then
-poll the operation. For a queued withdrawal, `submitted` waits for the request
-transaction to confirm; `settling` waits for the provider to pay out. A delayed
-redemption stays in progress until that payout: a request ID or escrowed shares are not a payout, and there is no
-separate claim step. `completed` means SDP verified the payout; a `null`
-`result.settledAmount` is unknown, not zero.
+poll the operation:
+
+- A queued withdrawal shows `submitted` until its request confirms, then
+  `settling` until the provider pays out. Poll it every few minutes, not
+  seconds: `redemptionDelayDays` on the strategy estimates the wait.
+- A request ID or escrowed shares aren't a payout, and there is no separate
+  claim step.
+- `completed` means SDP verified the payout. A `null` `result.settledAmount` is
+  unknown, not zero.
 
 Once submitted, a withdrawal can't be refreshed or cancelled, even while
-queued. After a definitive failure, prepare its replacement with a new
-`Idempotency-Key`. An uncertain outcome never authorizes a replacement. If
-shares end up stuck in an expired queue request,
-[recover them](/docs/earn/integration-details#recover-expired-withdrawal-escrow).
+queued. If it ends `failed`, prepare a new one with a new `Idempotency-Key`; an
+unknown outcome is not a failure. If shares get stuck in an expired queue
+request, [recover them](/docs/earn/integration-details#recover-expired-withdrawal-escrow).
 
 ---
 
@@ -950,7 +982,8 @@ to see the flow, then follow the [quickstart](/docs/earn/quickstart).
 4. Poll the operation until it is `completed`, then show the customer's
    `GET /v1/earn/positions?ownerAddress=...`.
 
-Withdrawals follow the same steps with a `positionId`. Before you handle
+Withdrawals follow the same steps with a `positionId`, plus a route choice when
+a strategy offers more than one exit. Before you handle
 retries, refresh or cancellation, read [integration details](/docs/earn/integration-details);
 to scope reads per customer, see
 [one integration, many customers](/docs/earn/concepts#one-integration-many-customers).
@@ -976,11 +1009,14 @@ Every operation says what to do next in `nextAction`:
 | `null` | Nothing left to do: the operation is final. |
 
 These calls live under `/v1/operations/{operationId}`. Only `/submit` lets SDP
-send anything; there is no separate approval step.
+send anything; there is no separate approval step. `actionId` and `version`
+name the exact transaction you were shown: each refresh issues a new pair, and
+submitting an old pair returns `409`.
 
 ## Refresh and cancel
 
-Both work only before you submit:
+Both work only while an operation waits for a route choice (`select_option`),
+before SDP hands you a transaction to sign:
 
 - **Refresh** picks a withdrawal route and prepares its transaction. It never
   signs, sends or cancels anything, and the chosen route stays fixed.
@@ -1000,8 +1036,8 @@ signature or pull a broadcast transaction from Solana.
 
 ## Recover expired withdrawal escrow
 
-A solver withdrawal that misses its deadline can leave its shares in the
-provider's escrow. To get them back, prepare `POST /v1/earn/withdraw` for the
+A queued withdrawal that isn't filled before its deadline can leave its shares
+in the provider's escrow. To get them back, prepare `POST /v1/earn/withdraw` for the
 same tracked `positionId` with `amount: { "kind": "all" }`. When the provider
 proves the recorded request still holds those expired shares, `terms.options`
 offers **Recover expired escrowed shares** through `select_option`.
@@ -1016,47 +1052,41 @@ for the next. The original operation is not reopened, and its `/cancel` stays
 unavailable. Expiry alone, or a missing provider request, does not authorize
 recovery.
 
-Hastra operator redemptions can't be recovered this way. They reuse one owner
-request address with delegated wYLDS, and their cancellation instruction can't
-bind a reviewed amount or request cycle, so recovery needs a separate design.
-Don't treat their pending intermediate tokens as delivered USDC or recovered
-PRIME shares.
+Hastra operator redemptions can't be recovered this way: their cancellation
+instruction can't be tied to one reviewed amount or request cycle. Don't treat
+their pending intermediate tokens as delivered USDC or recovered PRIME shares.
 
 ## Retries and idempotency
 
 Save a fresh `Idempotency-Key` with each request body before you send it. After
-an uncertain response, such as a timeout or a `5xx`, resend the same body with
-the same key, including the same signed bytes, and SDP returns the original
-response.
+an uncertain response, such as a timeout or a `5xx`, resend the exact same body,
+signed bytes included, with the same key: SDP returns the original response.
+Don't rebuild a retry from a newer quote or balance.
 
-Keep the original amount as typed; do not derive a retry body from a newer
-quote or balance. To pick up work you already started, list
-`GET /v1/operations?ownerAddress=...` and continue from its `nextAction`
-instead of preparing another deposit or withdrawal.
+To pick up work you already started, list `GET /v1/operations?ownerAddress=...`
+and continue from its `nextAction` instead of preparing another deposit or
+withdrawal.
 
 Replaying a refresh with its original key returns the original response, even
 after a later submit; it builds nothing new. Read
 `GET /v1/operations/{operationId}` for the current state.
 
-Once you submit, prepare a replacement with a new key only after the original
-is definitively `failed`. A timeout, blockhash expiry, an unknown provider response or
-missing RPC history doesn't prove a submitted transaction never executed: keep
-tracking it until SDP establishes the outcome. A transaction you never submitted
-or sent can no longer land once the network passes its `lastValidBlockHeight`,
-so you can prepare again.
+Once you submit, start over with a new key only after the operation is
+`failed`. A timeout, an expired blockhash, an unknown provider response or
+missing RPC history doesn't prove a submitted transaction never ran: keep
+tracking until SDP knows. A transaction you never submitted or sent can't land
+once the network passes its `lastValidBlockHeight`, so you can prepare again.
 
 ## Fees and rates
 
 | Cost | What you can know |
 | --- | --- |
-| Network fees and rent | The owner pays them, unless you set a separate `feePayer`, which must also sign. |
+| Network fees and rent | The owner pays them, unless you set a separate `feePayer`, which must also sign. A full Kamino withdrawal leaves the empty share account open, so don't promise its rent back. |
 | Provider costs | Management, performance, swap and redemption charges depend on the strategy and route. Show the provider's metadata and the reviewed estimate; a queue discount also lowers proceeds. |
 | SDP pricing | Not part of the Earn response. Confirm SDP pricing separately, and don't read a missing field as zero. |
 
 `terms.fees` lists known fees for the transaction: `null` means unavailable, not
-free, and it is not an invoice for ongoing provider costs. A full Kamino
-withdrawal leaves the empty share account open; do not promise an automatic
-rent refund. `rate.value` is the
+free, and it is not an invoice for ongoing provider costs. `rate.value` is the
 provider-reported APY, not a promise of returns after every cost, and Earn
 doesn't normalize rates across providers into one comparable net yield.
 
@@ -36664,13 +36694,13 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Get a position
 Source: https://platform.solana.com/docs/reference/api/earn/get-earn-position
 
-> Returns one position using the same identity, units and live valuation as the positions list.
+> Returns one position, with the same fields and live values as the positions list.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
 `GET /v1/earn/positions/{positionId}`
 
-Use any position ID returned by that list, including an untracked discovered holding; no extra wallet filter or SDP wallet registration is needed. The authenticated project and environment still control visibility. A discovered selector is verified live without importing a position or inventing acquisition history. If SDP has since tracked that holding, the selector resolves to its canonical tracked position ID, including pending queued withdrawals. Missing or inaccessible positions return 404. Unavailable live values remain absent for tracked positions; an unverified discovered holding returns 503 rather than a fabricated zero or 404. afterMovementIds enforces the same confirmation floor as the list and must name movements for this source and instrument. Reading never prepares, signs or submits a transaction.
+Pass any position ID the list returns, including a holding found with discover=true; no wallet filter or SDP wallet registration is needed, and the authenticated project and environment still control visibility. A discovered holding is verified live without importing it or inventing acquisition history; if SDP already tracks it, the response carries the tracked position ID, pending queued withdrawals included. An unknown or inaccessible position returns 404. Values SDP can't read live are left out of a tracked position, never shown as zero; a discovered holding SDP can't verify returns 503. afterMovementIds reads the balance from a point that includes those movements, which must belong to this position (another position's movement returns 404). Reading never prepares, signs or submits a transaction.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
 
@@ -38311,7 +38341,7 @@ Source: https://platform.solana.com/docs/reference/api/earn/list-operations
 
 `GET /v1/operations`
 
-Pass ownerAddress to list a wallet's operations; the wallet needs no registration in SDP. Without a filter, the list holds only SDP custody wallet operations, and walletId narrows it to one. Use status=active to list all nonterminal actions, including preparations, without scanning completed history. Use an exact status for that state only, or omit status for full history. Every filter applies before cursor pagination. Settlement projection may already show a newer terminal result than the stored status selected by a filter. Requires earn.read. Reading never starts execution.
+Pass ownerAddress to list a wallet's operations; the wallet needs no registration in SDP. Without a filter, the list holds only SDP custody wallet operations, and walletId narrows it to one. status=active returns every operation not yet final, preparations included; an exact status returns only that state, and no status returns full history. kind=earn.deposit or kind=earn.withdraw returns one type. Every filter applies before cursor pagination. A returned operation can already show a newer final result than the status the filter matched. Requires earn.read. Reading never starts execution.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
 
@@ -38325,7 +38355,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
 - **`status`** · `string` · one of `prepared`, `queued`, `awaiting_signature`, `submitted`, `settling`, `completed`, `failed`, `cancelled`, `active`
 
-  One exact status, or active for all nonterminal operations, including prepared actions.
+  One exact status, or active for every operation not yet final, preparations included.
 
 - **`ownerAddress`** · `string` · min length 32 · max length 44
 
@@ -38818,7 +38848,7 @@ Source: https://platform.solana.com/docs/reference/api/earn/get-operation
 
 `GET /v1/operations/{operationId}`
 
-Poll it after submitting. Each nextAction type says what to do next: sign_transaction asks the owner to sign, select_option asks you to choose a route with refresh, and wait means keep polling the same attempt. queued, awaiting_signature, submitted and settling are in progress. For a queued withdrawal, submitted tracks request confirmation; settling tracks the provider payout after the request is observed. completed means verified delivery; for a selected recovery, result.settlementOutcome recovered means returned strategy shares, never withdrawal proceeds. cancelled means a verified cancellation. canCancel says whether the preparation can still be cancelled, which also needs earn.manage; cancelRequestedAt alone is pending intent. result fields stay null until their source is known. Requires earn.read and source visibility.
+Poll it after submitting. Each nextAction type says what to do next: sign_transaction asks the owner to sign, select_option asks you to choose a route with refresh, and wait means keep polling the same attempt. queued, awaiting_signature, submitted and settling are in progress. For a queued withdrawal, submitted means its request is still confirming, and settling means the provider has yet to pay out. completed means verified delivery; for a selected recovery, result.settlementOutcome recovered means returned strategy shares, never withdrawal proceeds. cancelled means a verified cancellation. canCancel says whether the preparation can still be cancelled, which also needs earn.manage; cancelRequestedAt alone is pending intent. result fields stay null until their source is known. Requires earn.read and source visibility.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
 

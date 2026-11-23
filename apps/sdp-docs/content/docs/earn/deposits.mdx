@@ -16,7 +16,7 @@ See [all deposit parameters](/docs/reference/api/earn/prepare-earn-deposit).
 | --- | --- |
 | `strategyId` | From [discovery](/docs/earn/strategies). |
 | `source.ownerAddress` | The wallet that signs and owns the position. It needs no registration in SDP. |
-| `amount` | The `mint` you fund with and a decimal-string `value` in that token's units. |
+| `amount` | The `mint` you fund with, and `value` as a decimal string in whole tokens: `"10"` is 10 USDC, not base units. |
 | `slippageBps` | Optional, at the top level. `50` is 0.5%, at most `500`. Defaults to the strategy's `depositSlippage.defaultToleranceBps`, else 50. |
 | `feePayer` | Optional address that pays network fees instead of the owner. It must also sign. |
 
@@ -36,19 +36,23 @@ the transaction, but signs and sends nothing. Show your customer:
 
 ## Sign and submit
 
-The owner, and the `feePayer` if you set one, sign `nextAction.transaction`
-without changing it. Send the signed transaction, base64-encoded, with the
-operation's current `actionId` and `version` to
-`POST /v1/operations/{operationId}/submit`. SDP checks the bytes match what it
-prepared, then broadcasts them. If the customer declines to sign, nothing
-executes and no SDP call is needed.
+The owner, and the `feePayer` if you set one, sign `nextAction.transaction`, a
+v0 transaction, without changing it. Sign only, don't send it: SDP broadcasts
+what you submit. Send the signed transaction, base64-encoded, with the
+operation's `actionId` and `version` to `POST /v1/operations/{operationId}/submit`.
+SDP checks the bytes match what it prepared, then broadcasts them.
+
+If the customer declines to sign, nothing executes and no SDP call is needed.
+The operation stays `prepared`, and `status=active` keeps listing it. Once the
+network passes its `lastValidBlockHeight`, its transaction can't land, so you
+can prepare a new deposit.
 
 ## Track
 
 Poll `GET /v1/operations/{operationId}` until `status` is `completed`, `failed`
 or `cancelled`; anything else is still in progress. A submitted deposit can't
-be refreshed or cancelled, so keep tracking it. Only a `failed` deposit lets you
-prepare a new one, with a new `Idempotency-Key`. A timeout or an unknown outcome
-does not:
+be refreshed or cancelled, so keep tracking it. After you submit, only a
+`failed` deposit lets you prepare a new one, with a new `Idempotency-Key`. A
+timeout or an unknown outcome does not:
 [retry the same request](/docs/earn/integration-details#retries-and-idempotency)
 instead.

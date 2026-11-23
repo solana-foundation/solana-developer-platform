@@ -23,15 +23,16 @@ Companion docs:
 
 ## Strategy actions and wallet signing
 
-Treasury and Embedded Yield use the same four core routes. A strategy may be a
+Treasury and Embedded Yield use the same five core routes. A strategy may be a
 vault, lending market or RWA product; its provider owns the implementation.
 
-| Endpoint                 | Purpose                                               |
-| ------------------------ | ----------------------------------------------------- |
-| `GET /v1/earn/discovery` | List validated strategies and execution capabilities. |
-| `GET /v1/earn/positions` | Read holdings and optional complete-scope totals.     |
-| `POST /v1/earn/deposit`  | Prepare a strategy deposit from a wallet.             |
-| `POST /v1/earn/withdraw` | Prepare an exit from an existing position.            |
+| Endpoint                              | Purpose                                               |
+| ------------------------------------- | ----------------------------------------------------- |
+| `GET /v1/earn/discovery`              | List validated strategies and execution capabilities. |
+| `GET /v1/earn/positions`              | Read holdings and optional complete-scope totals.     |
+| `GET /v1/earn/positions/{positionId}` | Read one position's live balance and exit state.      |
+| `POST /v1/earn/deposit`               | Prepare a strategy deposit from a wallet.             |
+| `POST /v1/earn/withdraw`              | Prepare an exit from an existing position.            |
 
 Preparation stores a durable operation with reviewable terms and unsigned
 transaction bytes or a next action. It never starts wallet signing or broadcasts.

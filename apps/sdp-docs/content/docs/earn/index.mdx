@@ -7,7 +7,7 @@ description: Offer stablecoin yield in your app, from your customers' own wallet
 Earn puts vault, lending and real-world-asset yield strategies behind one API.
 Your customer's wallet signs every deposit and withdrawal, and SDP broadcasts it
 and tracks it to settlement. Funds move between the customer's wallet and the
-provider's program; SDP never holds them
+provider; SDP never holds them
 ([follow the funds](/docs/earn/concepts#follow-the-funds)).
 
 <EarnFlow>
@@ -26,7 +26,10 @@ provider's program; SDP never holds them
 
 </EarnFlow>
 
-Any Solana wallet can sign, and none needs registering in SDP. Start with the
+Any Solana wallet can sign, and you don't register it with SDP; a few
+real-world-asset funds accept only
+[issuer-approved wallets](/docs/earn/integration-details#provider-eligibility).
+Start with the
 [quickstart](/docs/earn/quickstart), or
 [run the example](https://github.com/solana-foundation/solana-developer-platform/tree/main/examples/earn-quickstart)
 locally with no key, wallet or funds.
@@ -44,7 +47,7 @@ locally with no key, wallet or funds.
 | [`GET /v1/operations/{operationId}`](/docs/reference/api/earn/get-operation) | Reads one operation's status and next action. |
 | [`POST /v1/operations/{operationId}/submit`](/docs/reference/api/earn/submit-operation) | Sends the signed transaction. |
 | [`POST /v1/operations/{operationId}/refresh`](/docs/reference/api/earn/refresh-operation) | Chooses a withdrawal route before you sign. |
-| [`POST /v1/operations/{operationId}/cancel`](/docs/reference/api/earn/cancel-operation) | Abandons an operation before you sign. |
+| [`POST /v1/operations/{operationId}/cancel`](/docs/reference/api/earn/cancel-operation) | Abandons a withdrawal before you choose its route. |
 
 ## Guides
 

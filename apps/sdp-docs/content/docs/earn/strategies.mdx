@@ -33,11 +33,16 @@ lists every allowed value.
 ## Pick one that accepts deposits
 
 Choose a strategy whose `capabilities.deposit` and `fundable` are both `true`,
-and pass its `id` as `strategyId` when you [prepare a deposit](/docs/earn/deposits).
-When `capabilities.deposit` is `false`, `depositUnavailableReason` says why:
-`catalogue_only` or `adapter_unavailable`. Preparation still checks admission
-live, so provider limits, issuer requirements and liquidity can refuse a listed
-strategy.
+and pass its `id` as `strategyId` when you [prepare a deposit](/docs/earn/deposits):
+
+- `fundable` is `false` when the strategy's instrument doesn't exist on your
+  environment's cluster, such as a mainnet vault listed for browsing on devnet.
+- When `capabilities.deposit` is `false`, `depositUnavailableReason` says why:
+  `catalogue_only` (listed for browsing, not open to deposits) or
+  `adapter_unavailable` (Earn can't build deposits for this provider).
+
+A listed strategy can still refuse a deposit when you prepare it: provider
+limits, issuer rules and liquidity are checked live.
 
 ## Read the terms
 

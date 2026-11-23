@@ -15,7 +15,7 @@ Send `POST /v1/earn/withdraw` with a position from
 ```
 
 The position fixes the strategy and the owner, and the payout goes back to that
-owner. To review its latest balance first, [read the position](/docs/earn/balances#read-one-position).
+owner. To check its balance first, [read the position](/docs/earn/balances#read-one-position).
 `slippageBps` is optional and sits at the top level. See
 [all withdrawal parameters](/docs/reference/api/earn/prepare-earn-withdrawal).
 
@@ -24,32 +24,39 @@ owner. To review its latest balance first, [read the position](/docs/earn/balanc
 | `all` | The whole position. |
 | `shares` | `value` shares. |
 | `token` | Shares worth `value` of the strategy's deposit token `mint`. |
-| `intermediate` | `value` of a held intermediate token `mint`, for strategies that redeem through one. |
+| `intermediate` | `value` of a held intermediate token `mint`. Some strategies redeem in two steps, through a token you hold in between. |
 
 ## Choose an exit route
 
-Some strategies offer more than one exit, such as an instant swap and a delayed
-redemption. Then `nextAction.type` is `select_option`, and `terms.options` lists
-each route with its `settlement`, `estimatedSeconds` and `amount`. Call
+An instant exit burns the shares and pays out in one transaction. A queued
+exit files a withdrawal request instead: the shares move into the provider's
+escrow until the provider pays out, which can take days.
+
+When a strategy offers both, `nextAction.type` is `select_option`, and
+`terms.options` lists each route with its `settlement`, `estimatedSeconds` and
+`amount`. Call
 `POST /v1/operations/{operationId}/refresh` with the chosen `optionId` and the
 current `actionId` and `version`. SDP prepares that route's transaction for you
 to review, and the route stays fixed on later refreshes.
 
 While the withdrawal waits for your choice, `canCancel` is `true` and
-`POST /v1/operations/{operationId}/cancel` abandons it. Cancel needs the
-`earn.manage` grant.
+`POST /v1/operations/{operationId}/cancel` abandons it. Cancel needs the Earn
+**Manage** permission (`earn.manage`).
 
 ## Sign, submit and track
 
 Sign and submit as for a [deposit](/docs/earn/deposits#sign-and-submit), then
-poll the operation. For a queued withdrawal, `submitted` waits for the request
-transaction to confirm; `settling` waits for the provider to pay out. A delayed
-redemption stays in progress until that payout: a request ID or escrowed shares are not a payout, and there is no
-separate claim step. `completed` means SDP verified the payout; a `null`
-`result.settledAmount` is unknown, not zero.
+poll the operation:
+
+- A queued withdrawal shows `submitted` until its request confirms, then
+  `settling` until the provider pays out. Poll it every few minutes, not
+  seconds: `redemptionDelayDays` on the strategy estimates the wait.
+- A request ID or escrowed shares aren't a payout, and there is no separate
+  claim step.
+- `completed` means SDP verified the payout. A `null` `result.settledAmount` is
+  unknown, not zero.
 
 Once submitted, a withdrawal can't be refreshed or cancelled, even while
-queued. After a definitive failure, prepare its replacement with a new
-`Idempotency-Key`. An uncertain outcome never authorizes a replacement. If
-shares end up stuck in an expired queue request,
-[recover them](/docs/earn/integration-details#recover-expired-withdrawal-escrow).
+queued. If it ends `failed`, prepare a new one with a new `Idempotency-Key`; an
+unknown outcome is not a failure. If shares get stuck in an expired queue
+request, [recover them](/docs/earn/integration-details#recover-expired-withdrawal-escrow).

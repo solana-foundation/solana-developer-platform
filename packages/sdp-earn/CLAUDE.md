@@ -125,9 +125,10 @@ clear — SQL in `docs/contributing/earn-pluggability-playbook.md` § 3.
 
 ### 4b. Prepare a strategy action
 
-Treasury and Embedded Yield use the same four core routes:
-`GET /v1/earn/discovery`, `GET /v1/earn/positions`, `POST /v1/earn/deposit`
-and `POST /v1/earn/withdraw`. Catalogue items are **strategies**, identified by
+Treasury and Embedded Yield use the same five core routes:
+`GET /v1/earn/discovery`, `GET /v1/earn/positions`,
+`GET /v1/earn/positions/{positionId}`, `POST /v1/earn/deposit` and
+`POST /v1/earn/withdraw`. Catalogue items are **strategies**, identified by
 `strategyId`; a strategy may represent a vault, a token or an RWA product.
 Provider interfaces keep protocol-specific names such as `EarnVaultProvider`.
 
