@@ -260,6 +260,7 @@ provider before sending funds.
 `GET /v1/wallets/{walletId}` includes `providerPolicy` for these wallets, including
 when `includeBalance=false`. It contains `status` (`present`, `missing`, or
 `unknown`), `reason`, and nullable `checkedAt`. Managed wallets omit this field.
+
 `present` means the provider reports a policy attached to the wallet or a native
 transfer rule covering its vault and supported assets. It does not
 verify policy strength or permission to sign. `missing` includes a transfer
