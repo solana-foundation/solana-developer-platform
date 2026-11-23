@@ -201,7 +201,7 @@ describe("fetchCredentialLifecycle", () => {
       })
     );
     expect(request.mock.calls).toEqual([
-      ["/internal/dashboard/custody/connections/conn-1/provider-credential"],
+      ["/internal/dashboard/custody/connections/conn-1/provider-credential/lifecycle"],
     ]);
   });
 });

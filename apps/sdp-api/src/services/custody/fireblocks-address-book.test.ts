@@ -81,7 +81,11 @@ async function connect(projectId = PROJECT_ID) {
   const submitted = await request("/provider-credentials", body, projectId);
   expect(submitted.status, await submitted.clone().text()).toBe(201);
   const { data } = await submitted.json();
-  const completed = await request(`/connections/${data.connectionId}/complete`, {}, projectId);
+  const completed = await request(
+    `/connections/${data.connectionId}/complete-installation`,
+    {},
+    projectId
+  );
   expect(completed.status).toBe(200);
   expect((await completed.json()).data.completion.status).toBe("success");
   return z
@@ -227,7 +231,7 @@ function selection() {
 async function bookRequest(overrides = {}, projectId = PROJECT_ID) {
   const input = { ...selection(), ...overrides };
   return api.request(
-    `/internal/dashboard/fireblocks/destination?${new URLSearchParams(input)}`,
+    `/internal/dashboard/fireblocks/destination-eligibility?${new URLSearchParams(input)}`,
     { headers: { Authorization: `Bearer ${token}`, "X-Project-ID": projectId } },
     testEnv
   );

@@ -9,7 +9,7 @@ import {
 } from "@/routes/private-channels/context";
 import { readPrivateChannelTokenEligibility } from "@/services/private-channels/mint";
 
-/** GET /tokens — SDP registry tokens combined with the instance's on-chain allowlist. */
+/** GET /token-eligibility — SDP registry tokens combined with the instance's on-chain allowlist. */
 export async function listPrivateChannelTokenEligibility(c: AppContext) {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);

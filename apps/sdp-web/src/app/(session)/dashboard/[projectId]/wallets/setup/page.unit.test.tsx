@@ -39,7 +39,7 @@ beforeEach(() => {
     organization: { id: "org_test" },
   });
   projectRequest.mockReset().mockImplementation(async (path: string) => {
-    if (path === "/v1/wallets/configs") {
+    if (path === "/v1/wallets/managed-signing/configurations") {
       return Response.json({
         data: { configs: [config("privy", "active"), config("fireblocks", "archived")] },
       });

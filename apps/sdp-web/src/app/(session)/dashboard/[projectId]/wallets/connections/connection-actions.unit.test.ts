@@ -54,7 +54,7 @@ beforeEach(() => {
   client = stubSdpApiClient();
   answerSdpApiPaths(client, {
     "/internal/dashboard/custody/connections/cconn_1/deactivate": { custodyConnection: CONNECTION },
-    "/internal/dashboard/custody/connections/cconn_1/cancel": { connection: CONNECTION },
+    "/internal/dashboard/custody/connections/cconn_1/cancel-installation": { connection: CONNECTION },
     "/v1/wallets": CREATED_WALLET,
   });
 });
@@ -113,7 +113,7 @@ describe("cancelSetupAction", () => {
     await expect(cancelSetupAction("cconn_1", "privy")).resolves.toEqual({ status: "success" });
 
     expect(client.fetch.mock.calls).toEqual([
-      ["/internal/dashboard/custody/connections/cconn_1/cancel", { method: "POST", body: "{}" }],
+      ["/internal/dashboard/custody/connections/cconn_1/cancel-installation", { method: "POST", body: "{}" }],
     ]);
     expect(revalidatePath.mock.calls).toEqual([
       ["/dashboard/prj_test_sandbox/integrations/privy"],

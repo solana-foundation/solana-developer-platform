@@ -324,7 +324,7 @@ describe("BYOK Privy outside the release channel", () => {
     const before = await connectionState();
 
     const response = await dashboardRequest(
-      `/internal/dashboard/custody/connections/${CONNECTION_ID}/complete`,
+      `/internal/dashboard/custody/connections/${CONNECTION_ID}/complete-installation`,
       { method: "POST", idempotencyKey: null, body: null }
     );
 
@@ -349,7 +349,7 @@ describe("BYOK Privy outside the release channel", () => {
     );
 
     const response = await dashboardRequest(
-      `/internal/dashboard/custody/connections/${CONNECTION_ID}/complete`,
+      `/internal/dashboard/custody/connections/${CONNECTION_ID}/complete-installation`,
       { method: "POST", idempotencyKey: null, body: null }
     );
 
@@ -382,7 +382,7 @@ describe("BYOK Privy outside the release channel", () => {
       operation: "rollback",
       state: "a retired Credential",
       seed: () => seedSuccessor({ status: "retired", deactivatedAt: null }),
-      path: `/internal/dashboard/custody/provider-credentials/${SUCCESSOR_CREDENTIAL_ID}/rollback`,
+      path: `/internal/dashboard/custody/provider-credentials/${SUCCESSOR_CREDENTIAL_ID}/rollback-rotation`,
       idempotencyKey: null,
       body: null,
     },

@@ -257,7 +257,7 @@ async function installationRequest(
   options: { connectionId: string; projectId: string }
 ): Promise<Response> {
   return app.request(
-    `/internal/dashboard/custody/connections/${options.connectionId}/${action}`,
+    `/internal/dashboard/custody/connections/${options.connectionId}/${action}-installation`,
     {
       method: "POST",
       headers: {

@@ -111,7 +111,7 @@ export function buildWalletsPlaygroundEndpointConfigs({
       id: "list-wallet-configs",
       title: t("DashboardCustody.playgroundListWalletConfigs"),
       method: "GET",
-      path: "/v1/wallets/configs",
+      path: "/v1/wallets/managed-signing/configurations",
       pathFields: [],
       bodyFields: [],
       expectedResponse: {

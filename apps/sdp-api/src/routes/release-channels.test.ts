@@ -40,7 +40,7 @@ const MODULE_PROBES = {
   ],
   earn: [["GET", "/v1/earn/treasury/movements"]],
   dvp: [["GET", "/v1/dvp/trades"]],
-  private_channels: [["GET", "/v1/private-channels/health"]],
+  private_channels: [["GET", "/v1/private-channels/instance-connection/check-gateway-health"]],
   helius_rings: [
     ["GET", "/v1/helius-rings/health"],
     ["GET", "/internal/dashboard/helius-rings/connections"],

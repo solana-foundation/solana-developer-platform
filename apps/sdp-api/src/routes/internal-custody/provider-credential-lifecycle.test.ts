@@ -158,7 +158,7 @@ async function lifecycleRequest(
 
 async function readConnectionCredential(): Promise<Response> {
   return buildApp().request(
-    `/internal/dashboard/custody/connections/${CONNECTION_A_ID}/provider-credential`,
+    `/internal/dashboard/custody/connections/${CONNECTION_A_ID}/provider-credential/lifecycle`,
     { headers: { Authorization: `Bearer ${clerkToken}`, "X-Project-ID": PROJECT_A_ID } },
     env
   );
@@ -430,9 +430,12 @@ describe("provider credential lifecycle", () => {
       expect(rotated.status).toBe(200);
       const current = credentialResponseSchema.parse(await rotated.json()).data.providerCredential
         .id;
-      const rollback = await lifecycleRequest(`/provider-credentials/${current}/rollback`, {
-        method: "POST",
-      });
+      const rollback = await lifecycleRequest(
+        `/provider-credentials/${current}/rollback-rotation`,
+        {
+          method: "POST",
+        }
+      );
       expect(rollback.status).toBe(200);
       expect(await activeConnectionCredentialIds()).toEqual([
         { provider_credential_id: CREDENTIAL_ID },
@@ -1207,7 +1210,7 @@ describe("provider credential lifecycle", () => {
       providerFetch.mockClear();
 
       const response = await lifecycleRequest(
-        `/provider-credentials/${data.providerCredential.id}/${action}`,
+        `/provider-credentials/${data.providerCredential.id}/${action === "rollback" ? "rollback-rotation" : action}`,
         { method: "POST" }
       );
 
@@ -2275,7 +2278,7 @@ describe("provider credential lifecycle", () => {
     },
     {
       operation: "rollback",
-      command: "rollback",
+      command: "rollback-rotation",
       event: "provider_credential_rolled_back",
       action: "rollback",
     },
@@ -2440,9 +2443,12 @@ describe("provider credential lifecycle", () => {
         CHECK (action <> 'maintenance') NOT VALID`);
       try {
         await expect(
-          lifecycleRequest(`/provider-credentials/${candidateId}/${operation}`, {
-            method: "POST",
-          })
+          lifecycleRequest(
+            `/provider-credentials/${candidateId}/${operation === "rollback" ? "rollback-rotation" : operation}`,
+            {
+              method: "POST",
+            }
+          )
         ).rejects.toThrow("Required audit record could not be persisted");
         expect(secretLookup).not.toHaveBeenCalled();
         expect(providerFetch).toHaveBeenCalledTimes(2);
@@ -2483,7 +2489,7 @@ describe("provider credential lifecycle", () => {
         CHECK (action <> '${action}') NOT VALID`);
       try {
         const response = await lifecycleRequest(
-          `/provider-credentials/${currentId}/${action === "rollback" ? "rollback" : "rotate"}`,
+          `/provider-credentials/${currentId}/${action === "rollback" ? "rollback-rotation" : "rotate"}`,
           action === "rollback" ? { method: "POST" } : request
         );
         expect(response.status).toBe(200);
@@ -2810,7 +2816,7 @@ describe("provider credential lifecycle", () => {
     await seedRateLimit(env, `metered:credential-rotation:org:${ORGANIZATION_ID}`, 20);
 
     const rollback = await lifecycleRequest(
-      `/provider-credentials/${rotatedBody.data.providerCredential.id}/rollback`,
+      `/provider-credentials/${rotatedBody.data.providerCredential.id}/rollback-rotation`,
       { method: "POST" }
     );
 
@@ -2890,7 +2896,9 @@ describe("provider credential lifecycle", () => {
     const third = credentialResponseSchema.parse(await thirdResponse.json()).data
       .providerCredential;
     expect(
-      await lifecycleRequest(`/provider-credentials/${third.id}/rollback`, { method: "POST" })
+      await lifecycleRequest(`/provider-credentials/${third.id}/rollback-rotation`, {
+        method: "POST",
+      })
     ).toMatchObject({ status: 200 });
     expect(
       await lifecycleRequest(`/provider-credentials/${second.id}/rotate`, {
@@ -2945,7 +2953,7 @@ describe("provider credential lifecycle", () => {
     });
 
     const rollback = lifecycleRequest(
-      `/provider-credentials/${rotatedBody.data.providerCredential.id}/rollback`,
+      `/provider-credentials/${rotatedBody.data.providerCredential.id}/rollback-rotation`,
       { method: "POST" }
     );
     await secretLookupStarted;
@@ -3284,9 +3292,12 @@ describe("provider credential lifecycle", () => {
     });
     const candidateId = pendingBody.data.providerCredential.id;
 
-    const response = await lifecycleRequest(`/provider-credentials/${currentId}/rollback`, {
-      method: "POST",
-    });
+    const response = await lifecycleRequest(
+      `/provider-credentials/${currentId}/rollback-rotation`,
+      {
+        method: "POST",
+      }
+    );
 
     expect(response.status).toBe(409);
     expect(providerFetch).toHaveBeenCalledTimes(4);
@@ -3368,9 +3379,12 @@ describe("provider credential lifecycle", () => {
       }
       const before = await db.queryMany("SELECT * FROM provider_credentials ORDER BY id");
 
-      const response = await lifecycleRequest(`/provider-credentials/${currentId}/rollback`, {
-        method: "POST",
-      });
+      const response = await lifecycleRequest(
+        `/provider-credentials/${currentId}/rollback-rotation`,
+        {
+          method: "POST",
+        }
+      );
 
       expect(response.status).toBe(httpStatus);
       expect(await lifecycleAuditAttempts("rollback")).toEqual([

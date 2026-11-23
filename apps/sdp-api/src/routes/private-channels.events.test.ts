@@ -121,7 +121,7 @@ function authHeaders() {
 async function connectInstance(): Promise<void> {
   probeConnectionMock.mockResolvedValueOnce(successProbe());
   const res = await app.request(
-    "/v1/private-channels/instance",
+    "/v1/private-channels/instance-connection/connect",
     {
       method: "POST",
       headers: adminHeaders,
@@ -457,7 +457,7 @@ describe("Private Channels — event routes", () => {
     let res: Response;
     try {
       res = await app.request(
-        `/v1/private-channels/wallets/${pubkey}`,
+        `/v1/private-channels/verified-wallets/${pubkey}`,
         { method: "DELETE", headers: authHeaders() },
         env
       );
@@ -493,7 +493,7 @@ describe("Private Channels — event routes", () => {
     let res: Response;
     try {
       res = await app.request(
-        `/v1/private-channels/wallets/${pubkey}`,
+        `/v1/private-channels/verified-wallets/${pubkey}`,
         { method: "DELETE", headers: authHeaders() },
         env
       );
@@ -530,7 +530,7 @@ describe("Private Channels — event routes", () => {
   it("project feed survives instance deletion (durable history)", async () => {
     await connectInstance();
     const del = await app.request(
-      "/v1/private-channels/instance",
+      "/v1/private-channels/instance-connection",
       { method: "DELETE", headers: adminHeaders },
       env
     );

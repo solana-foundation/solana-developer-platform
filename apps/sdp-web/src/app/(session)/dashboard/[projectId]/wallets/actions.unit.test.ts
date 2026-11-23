@@ -66,7 +66,7 @@ describe("initializeCustodySetupAction", () => {
 
     expect(result).toEqual({ status: "success", walletId: "privy_wallet_first" });
     expect(sentRequest()).toEqual({
-      path: "/v1/wallets/initialize",
+      path: "/v1/wallets/managed-signing/initialize-with-wallet",
       method: "POST",
       headers: { "Idempotency-Key": "browser-key" },
       body: { provider: "privy", walletLabel: "Treasury", network: "devnet" },
@@ -139,7 +139,7 @@ describe("initializeCustodySetupAction", () => {
       status: "provider_already_set_up",
       answer: { status: 409, replayed: false, code: null },
     });
-    expect(sentRequest().path).toBe("/v1/wallets/initialize");
+    expect(sentRequest().path).toBe("/v1/wallets/managed-signing/initialize-with-wallet");
     expect(revalidatePath).not.toHaveBeenCalled();
   });
 });

@@ -59,7 +59,7 @@ describe("recheckPrivyCredentialAction", () => {
     });
     expect(sentSdpApiRequests(client)).toEqual([
       {
-        path: "/internal/dashboard/custody/connections/conn_test/complete",
+        path: "/internal/dashboard/custody/connections/conn_test/complete-installation",
         method: "POST",
         headers: undefined,
         body: {},
@@ -253,7 +253,7 @@ describe("submitPrivyCredentialAction outcome classification", () => {
         },
       },
       {
-        path: "/internal/dashboard/custody/connections/conn_test/complete",
+        path: "/internal/dashboard/custody/connections/conn_test/complete-installation",
         method: "POST",
         headers: undefined,
         body: {},
@@ -274,7 +274,7 @@ describe("submitPrivyCredentialAction outcome classification", () => {
     });
     expect(sentSdpApiRequests(client).map((request) => request.path)).toEqual([
       "/internal/dashboard/custody/connections/conn_test/provider-credentials",
-      "/internal/dashboard/custody/connections/conn_test/complete",
+      "/internal/dashboard/custody/connections/conn_test/complete-installation",
     ]);
   });
 
