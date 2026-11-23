@@ -1,4 +1,9 @@
-import type { Operation, OperationSource } from "@sdp/types/operations";
+import {
+  isTerminalOperationStatus,
+  type Operation,
+  type OperationSource,
+  projectedOperationStatus,
+} from "@sdp/types/operations";
 import { getDb } from "@/db/client";
 import type {
   EarnVaultWithdrawalRequestActionRow,
@@ -77,7 +82,13 @@ export async function projectWithdrawalRecovery(
     (row.request_status === "cancelled" &&
       row.closing_signature !== null &&
       row.closing_signature !== row.signature);
-  const status = recovered ? "completed" : failed ? "failed" : "settling";
+  // A terminal operation keeps its status and error: later evidence cannot reopen or flip it.
+  const terminal = isTerminalOperationStatus(operation.status);
+  const status = projectedOperationStatus(
+    operation.status,
+    recovered ? "completed" : failed ? "failed" : "settling"
+  );
+  const returned = recovered && status === "completed";
   return {
     ...operation,
     status,
@@ -85,19 +96,21 @@ export async function projectWithdrawalRecovery(
       status === "settling"
         ? { type: "wait", reason: "Waiting for verified return of escrowed shares" }
         : null,
-    error: failed
-      ? {
-          code: "TRANSACTION_FAILED",
-          message: row.failure_reason ?? "This recovery did not return the escrowed shares",
-        }
-      : null,
+    error: terminal
+      ? operation.error
+      : failed
+        ? {
+            code: "TRANSACTION_FAILED",
+            message: row.failure_reason ?? "This recovery did not return the escrowed shares",
+          }
+        : null,
     result: {
       positionId: row.position_id,
       ...(row.strategy_id === null ? {} : { strategyId: row.strategy_id }),
       source: row.source,
       signature: row.signature,
-      settledAmount: recovered ? { mint: row.share_mint, value: row.shares } : null,
-      settlementOutcome: recovered ? "recovered" : null,
+      settledAmount: returned ? { mint: row.share_mint, value: row.shares } : null,
+      settlementOutcome: returned ? "recovered" : null,
     },
   };
 }

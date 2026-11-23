@@ -103,6 +103,29 @@ describe("exact withdrawal recovery projection", () => {
     });
   });
 
+  it("keeps a failed recovery failed when its exact cancellation later finalizes", async () => {
+    const error = { code: "TRANSACTION_FAILED", message: "Recovery expired" };
+    const failed: Operation = { ...operation, status: "failed", nextAction: null, error };
+
+    expect(await projectWithdrawalRecovery(env, scope, failed, "exact-action")).toMatchObject({
+      status: "failed",
+      nextAction: null,
+      error,
+      result: { settledAmount: null, settlementOutcome: null },
+    });
+  });
+
+  it("keeps a completed recovery completed while the action still reads confirmed", async () => {
+    mocks.read.mockResolvedValue(row({ action_status: "confirmed" }));
+    const completed: Operation = { ...operation, status: "completed", nextAction: null };
+
+    expect(await projectWithdrawalRecovery(env, scope, completed, "exact-action")).toMatchObject({
+      status: "completed",
+      nextAction: null,
+      error: null,
+    });
+  });
+
   it("rejects a row whose signing source does not match the operation", async () => {
     mocks.read.mockResolvedValue(row({ source: { ownerAddress: "another-owner" } }));
     await expect(projectWithdrawalRecovery(env, scope, operation, "exact-action")).rejects.toThrow(

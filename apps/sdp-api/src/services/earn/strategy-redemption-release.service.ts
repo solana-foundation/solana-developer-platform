@@ -3,7 +3,7 @@ import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { MAX_SUPPORTED_TRANSACTION_VERSION } from "@sdp/rpc/transaction-version";
 import type { Operation, OperationReference, OperationSource } from "@sdp/types/operations";
-import { TERMINAL_OPERATION_STATUSES } from "@sdp/types/operations";
+import { isTerminalOperationStatus, projectedOperationStatus } from "@sdp/types/operations";
 import { signature } from "@solana/kit";
 import { getDb } from "@/db/client";
 import { isCurrentRedemptionReleaseBuild } from "@/db/repositories/earn-redemption-release.repository";
@@ -198,8 +198,7 @@ export async function projectCurrentRedemptionRelease(
   )
     throw notFound("Operation current redemption release");
   const recovered = row.release_finalized_at !== null;
-  const terminal = TERMINAL_OPERATION_STATUSES.some((status) => status === operation.status);
-  const status = terminal ? operation.status : recovered ? "completed" : "settling";
+  const status = projectedOperationStatus(operation.status, recovered ? "completed" : "settling");
   return {
     ...operation,
     status,
@@ -244,7 +243,7 @@ export async function advanceCurrentRedemptionRelease(
     claim.attempt.signedTransaction === null
   )
     throw conflict("Current redemption release has no recorded signed attempt");
-  if (TERMINAL_OPERATION_STATUSES.some((status) => status === claim.operation.status))
+  if (isTerminalOperationStatus(claim.operation.status))
     return projectCurrentRedemptionRelease(env, scope, claim.operation, buildId);
   const repository = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
   const input = { ...scope, transactionId: buildId, attemptId: claim.attempt.id };

@@ -18,6 +18,24 @@ export const OPERATION_STATUSES = [
 /** Terminal observations never regress to an executable state. */
 export const TERMINAL_OPERATION_STATUSES = ["completed", "failed", "cancelled"] as const;
 
+const TERMINAL_OPERATION_STATUS_SET = new Set<string>(TERMINAL_OPERATION_STATUSES);
+
+/** Whether an operation status is terminal. */
+export function isTerminalOperationStatus(status: OperationStatus): boolean {
+  return TERMINAL_OPERATION_STATUS_SET.has(status);
+}
+
+/**
+ * The status an operation projection reports: live evidence may advance an
+ * operation, but never moves one that is already terminal.
+ */
+export function projectedOperationStatus(
+  current: OperationStatus,
+  observed: OperationStatus
+): OperationStatus {
+  return isTerminalOperationStatus(current) ? current : observed;
+}
+
 /** Listing can select one exact state or every nonterminal action. */
 export const operationStatusFilterSchema = z.enum([...OPERATION_STATUSES, "active"]);
 
