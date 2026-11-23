@@ -208,6 +208,18 @@ sandbox/production. Query failures never fabricate an empty queue. See
 for metric semantics, request counts and deployment order.
 
 This pass is read-only at Fireblocks: no signing, broadcast, resubmission, new
-approval-age expiry or automatic cancellation. It neither records nor re-admits the initiating money
-principal. PRO-2468/2469/2470 remain deferred; therefore no revocation-to-cancellation
-SLO is claimed, and the security exception above remains proposed.
+approval-age expiry or automatic cancellation. The separate one-minute custody
+worker restores the recorded initiating principal, re-admits pending native
+transfers and requests cancellation after refusal. PRO-2471 proposes 180 seconds
+from a committed revocation wake to the first cancel POST for at most 500 pending
+transfers and one burst of at most 50 revocations, with one-second provider
+requests and bounded local work. The full workload, elapsed-capacity proof and
+request counts live in the
+[custody recovery contract](../ops/fireblocks-byok.md#custody-recovery-capacity-and-request-budget).
+
+This is a conditional engineering proposal, not an accepted production SLO.
+[PRO-2472](https://linear.app/solana-fndn/issue/PRO-2472) retains target acceptance,
+live p99 revocation-to-first-cancel and provider-completion-to-row measurements,
+custody metrics and deployed-alert readiness. Record those results here before
+polling is relied on as a revocation control. Cancellation can race execution;
+the security exception above remains proposed pending its named approval.

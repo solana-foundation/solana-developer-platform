@@ -1,5 +1,7 @@
 import { generateKeyPairSync } from "node:crypto";
+import { createCustodyProposalState } from "@sdp/types/custody-proposals";
 import { MOVEMENTS } from "@sdp/types/movements";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { generateKeyPairSigner } from "@solana/kit";
 import { afterEach, aroundEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
@@ -8,8 +10,12 @@ import {
   runWithSystemDatabaseIdentity,
   runWithTenantDatabaseIdentity,
 } from "@/db/identity";
+import { createPostgresCustodyProposalsRepository } from "@/db/repositories/custody-proposals.repository.postgres";
+import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { runAsMoneyPrincipal } from "@/lib/money-principal";
+import { rootLogger } from "@/runtime/logger";
 import * as credentialSecretStore from "@/services/credential-secret-store";
+import { reconcilePendingProposals } from "@/services/jobs/reconcile-pending-proposals";
 import { createOrgTransferProposalRecovery } from "@/services/solana/signer";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { inSandboxScope } from "@/test/helpers/cluster-rpc";
@@ -24,7 +30,7 @@ import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
-import { ProposalAdmissionRefusedError } from "./admitted-proposer";
+import { ProposalAdmissionRefusedError, transferProposalIntentSchema } from "./admitted-proposer";
 import { CustodyRuntimeTargets } from "./custody-runtime-target";
 
 const organizationId = "org_proposal_recovery";
@@ -56,7 +62,10 @@ const testEnv: Env = {
 aroundEach((runTest) =>
   runWithSystemDatabaseIdentity("cron:reconcile-custody-proposals", () => inSandboxScope(runTest))
 );
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 beforeEach(async () => {
   testEnv.SDP_RELEASE_CHANNEL = "experimental";
@@ -446,5 +455,241 @@ describe("retained proposal recovery waist", () => {
     const admission = asKey(() => controller.admit());
     await expect(admission).rejects.toBe(unavailable);
     await expect(admission).rejects.not.toBeInstanceOf(ProposalAdmissionRefusedError);
+  });
+});
+
+const budgetTransferId = "xfr_recovery_budget";
+const budgetNow = "2026-11-23T12:00:00.000Z";
+const budgetBefore = "2026-11-23T11:00:00.000Z";
+const budgetIdentity = { transferId: budgetTransferId, organizationId, projectId };
+
+async function seedBudgetProposal() {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(budgetNow);
+  const db = getDb(testEnv);
+  const intent = transferProposalIntentSchema.parse(binding);
+  await db.execute(
+    `INSERT INTO payment_transfers
+       (id, organization_id, project_id, custody_wallet_id, wallet_id,
+        source_address, destination_address, token, amount, type, direction,
+        status, created_at, updated_at, provider_data, initiated_by_principal,
+        provider_reference)
+     VALUES (?, ?, ?, ?, 'fb_42', ?, ?, ?, '1', 'transfer', 'outbound',
+             'processing', ?, ?, ?::jsonb, ?::jsonb, 'provider-transaction')`,
+    [
+      budgetTransferId,
+      organizationId,
+      projectId,
+      custodyWalletId,
+      sourceAddress,
+      otherWalletAddress,
+      SOL_MINT,
+      budgetBefore,
+      budgetBefore,
+      JSON.stringify({ fireblocksTransfer: intent, fireblocksStatus: "PENDING_SIGNATURE" }),
+      JSON.stringify({ kind: "api_key", apiKeyId }),
+    ]
+  );
+  const transfer = required(
+    await createPostgresPaymentsRepository(db).getTransferById(budgetIdentity)
+  );
+  const proposals = createPostgresCustodyProposalsRepository(db);
+  await proposals.ensureForTransfer({
+    transfer,
+    provider: "fireblocks",
+    binding: { version: 1, provider: "fireblocks", ...intent },
+    state: {
+      ...createCustodyProposalState(),
+      providerPhase: "pending",
+      providerTransactionId: "provider-transaction",
+      providerStatus: "PENDING_SIGNATURE",
+      submissionStartedAt: budgetBefore,
+    },
+    now: budgetBefore,
+  });
+  return proposals;
+}
+
+function recoveryBudget(options: {
+  status?: "PENDING_SIGNATURE" | "BROADCASTING";
+  beforeRead?: () => Promise<void>;
+  cancelOutcome?: "declined" | "ambiguous";
+  readFailure?: Error;
+}) {
+  const db = getDb(testEnv);
+  const warn = vi.spyOn(rootLogger, "warn");
+  const ownerReads = vi.spyOn(db, "queryMany");
+  const credentialReads = vi.spyOn(db, "queryOne");
+  const secretReads = vi.spyOn(
+    credentialSecretStore.EncryptedDbCredentialSecretStore.prototype,
+    "read"
+  );
+  const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const url = String(input);
+    if (init?.method === "POST") {
+      expect(url).toBe(
+        `${testEnv.FIREBLOCKS_API_BASE_URL}/v1/transactions/provider-transaction/cancel`
+      );
+      if (options.cancelOutcome === "ambiguous") throw new Error("Provider cancellation timed out");
+      return Response.json({ success: false });
+    }
+    expect(url).toBe(
+      `${testEnv.FIREBLOCKS_API_BASE_URL}/v1/transactions/external_tx_id/${budgetTransferId}`
+    );
+    await options.beforeRead?.();
+    if (options.readFailure) throw options.readFailure;
+    return Response.json({
+      id: "provider-transaction",
+      externalTxId: budgetTransferId,
+      status: options.status ?? "PENDING_SIGNATURE",
+      operation: "TRANSFER",
+      assetId: binding.assetId,
+      source: { type: "VAULT_ACCOUNT", id: binding.vaultAccountId },
+    });
+  });
+  return {
+    assert(expected: {
+      owner: number;
+      credential: number;
+      secret: number;
+      methods: string[];
+      failures: number;
+    }) {
+      expect(
+        warn.mock.calls.filter(([, message]) => message === "proposal_recovery_unavailable")
+      ).toHaveLength(expected.failures);
+      expect(
+        ownerReads.mock.calls.filter(
+          ([sql]) => sql.includes("w.wallet_id") && sql.includes("AND w.id = ?")
+        )
+      ).toHaveLength(expected.owner);
+      expect(
+        credentialReads.mock.calls.filter(([sql]) => sql.includes("pc.encrypted_secret_payload"))
+      ).toHaveLength(expected.credential);
+      expect(secretReads).toHaveBeenCalledTimes(expected.secret);
+      // Every fetch is checked against the exact provider endpoint above. An RPC
+      // or other external request would fail this assertion instead of escaping.
+      expect(fetch.mock.calls.map(([, init]) => required(init).method)).toEqual(expected.methods);
+    },
+    clear() {
+      warn.mockClear();
+      ownerReads.mockClear();
+      credentialReads.mockClear();
+      secretReads.mockClear();
+      fetch.mockClear();
+    },
+  };
+}
+
+describe("custody worker request budget", () => {
+  it.each([
+    { status: "PENDING_SIGNATURE", owner: 4, credential: 2 },
+    { status: "BROADCASTING", owner: 2, credential: 1 },
+  ] as const)("counts observation and admission separately for $status", async (testCase) => {
+    await seedBudgetProposal();
+    const budget = recoveryBudget({ status: testCase.status });
+    await reconcilePendingProposals(testEnv);
+    budget.assert({
+      owner: testCase.owner,
+      credential: testCase.credential,
+      secret: 1,
+      methods: ["GET"],
+      failures: 0,
+    });
+  });
+
+  it.each(["declined", "ambiguous"] as const)(
+    "counts fresh cancellation access, cooldown observation and a retry after %s cancellation",
+    async (outcome) => {
+      const proposals = await seedBudgetProposal();
+      await getDb(testEnv).execute("UPDATE api_keys SET status = 'revoked' WHERE id = ?", [
+        apiKeyId,
+      ]);
+      const budget = recoveryBudget({ cancelOutcome: outcome });
+      const failures = outcome === "ambiguous" ? 1 : 0;
+      await reconcilePendingProposals(testEnv);
+      budget.assert({
+        owner: 6,
+        credential: 3,
+        secret: 2,
+        methods: ["GET", "GET", "POST"],
+        failures,
+      });
+      expect(
+        required(await proposals.getForTransfer(budgetIdentity)).state.authorizationState
+      ).toBe(outcome === "ambiguous" ? "cancel_ambiguous" : "cancel_declined");
+
+      budget.clear();
+      vi.setSystemTime(Date.parse(budgetNow) + 61_000);
+      await reconcilePendingProposals(testEnv);
+      budget.assert({ owner: 2, credential: 1, secret: 1, methods: ["GET"], failures: 0 });
+
+      budget.clear();
+      vi.setSystemTime(Date.parse(budgetNow) + 300_000);
+      await reconcilePendingProposals(testEnv);
+      budget.assert({
+        owner: 4,
+        credential: 2,
+        secret: 2,
+        methods: ["GET", "GET", "POST"],
+        failures,
+      });
+      expect(required(await proposals.getForTransfer(budgetIdentity)).state.cancelAttempt).toBe(2);
+    }
+  );
+
+  it.each([
+    { revoke: false, owner: 6, credential: 3, secret: 2, methods: ["GET", "GET"], failures: 0 },
+    {
+      revoke: true,
+      owner: 8,
+      credential: 4,
+      secret: 3,
+      methods: ["GET", "GET", "GET", "POST"],
+      failures: 0,
+    },
+  ])(
+    "counts a fresh observation after contention before cancellation=$revoke",
+    async (testCase) => {
+      const proposals = await seedBudgetProposal();
+      if (testCase.revoke)
+        await getDb(testEnv).execute("UPDATE api_keys SET status = 'revoked' WHERE id = ?", [
+          apiKeyId,
+        ]);
+      let conflicted = false;
+      const budget = recoveryBudget({
+        beforeRead: async () => {
+          if (conflicted) return;
+          conflicted = true;
+          const proposal = required(await proposals.getForTransfer(budgetIdentity));
+          expect(
+            await proposals.transition({
+              ...budgetIdentity,
+              expectedVersion: proposal.version,
+              event: {
+                type: "observed",
+                at: budgetNow,
+                phase: "pending",
+                providerTransactionId: "provider-transaction",
+                providerStatus: "PENDING_SIGNATURE",
+                providerSubStatus: null,
+              },
+            })
+          ).not.toBeNull();
+        },
+      });
+      await reconcilePendingProposals(testEnv);
+      expect(conflicted).toBe(true);
+      budget.assert(testCase);
+    }
+  );
+  it("bounds an unavailable provider read without re-admission or cancellation", async () => {
+    const proposals = await seedBudgetProposal();
+    const budget = recoveryBudget({ readFailure: new Error("Provider read timed out") });
+    await reconcilePendingProposals(testEnv);
+    budget.assert({ owner: 2, credential: 1, secret: 1, methods: ["GET"], failures: 1 });
+    expect(required(await proposals.getForTransfer(budgetIdentity)).state.authorizationState).toBe(
+      "authorized"
+    );
   });
 });

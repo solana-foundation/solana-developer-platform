@@ -26,6 +26,7 @@ import type { Env } from "@/types/env";
 import { earnCatalogueSyncCron } from "./earn-catalogue-sync";
 import { fireblocksProposalsCron } from "./fireblocks-proposals";
 import { pendingTransfersCron } from "./pending-transfers";
+import { custodyProposalsCron } from "./reconcile-custody-proposals";
 import { CRON_RUN_EVENT, type CronRegistration } from "./run-event";
 import { assertCronConfig, CRON_DEFINITIONS, type CronHandle, startCron } from "./runner";
 
@@ -225,6 +226,41 @@ describe("startCron", () => {
     await worker.bg.awaitAll();
     await worker.handle.stop();
   });
+
+  it.each(["sandbox", "production"] as const)(
+    "keeps custody recovery independent of failed and overlapping Solana settlement in %s",
+    async (environment) => {
+      const worker = await startWorker();
+      const hanging = deferred<void>();
+      vi.mocked(custodyProposalsCron.run).mockClear();
+      try {
+        const failure = new Error("Solana batch settlement failed");
+        vi.mocked(pendingTransfersCron.run).mockRejectedValueOnce(failure);
+        const [failed] = fire(worker, pendingTransfersCron.name, environment);
+        await expect(failed).rejects.toBe(failure);
+        await Promise.all(fire(worker, custodyProposalsCron.name, environment));
+
+        vi.mocked(pendingTransfersCron.run).mockReturnValueOnce(hanging.promise);
+        fire(worker, pendingTransfersCron.name, environment);
+        expect(fire(worker, pendingTransfersCron.name, environment)).toEqual([]);
+        await Promise.all(fire(worker, custodyProposalsCron.name, environment));
+
+        expect(custodyProposalsCron.run).toHaveBeenCalledTimes(2);
+        expect(runEvents(custodyProposalsCron.name, environment)).toEqual([
+          okEvent(custodyProposalsCron.name, environment),
+          okEvent(custodyProposalsCron.name, environment),
+        ]);
+        expect(runEvents(pendingTransfersCron.name, environment)).toContainEqual([
+          "warn",
+          slotEvent(pendingTransfersCron.name, environment, "skipped_overlap"),
+        ]);
+      } finally {
+        hanging.resolve();
+        await worker.bg.awaitAll();
+        await worker.handle.stop();
+      }
+    }
+  );
 
   it("registers a cluster definition once per environment inside its scope and a global one once outside any scope", async () => {
     const worker = await startWorker();
