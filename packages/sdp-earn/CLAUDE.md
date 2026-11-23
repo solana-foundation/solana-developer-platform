@@ -191,9 +191,9 @@ that is correct, not a bug. Grant the override in the **local** DB to proceed.
 **Kamino, Veda, Jupiter Lend, and Ondo are offered. WisdomTree is registered
 pre-launch; Upshift and Perena remain stubs.** The sandbox catalogue's own lane
 shows Kamino's devnet shelf plus Veda's devnet Test Vault. Its explicit mainnet
-mirror can also show browse-only Jupiter Lend and Ondo rows. Production has no
-Veda row because `VEDA_DEPLOYMENTS` is devnet-only until Veda names a production
-vault. The Ground integration that previously served the custodial program flow
+mirror can also show browse-only Jupiter Lend and Ondo rows. Production offers
+Veda's USDC PRIME and OUSD PRIME vaults from `VEDA_DEPLOYMENTS`. The Ground
+integration that previously served the custodial program flow
 was removed, so no registered provider is portfolio-capable today. The unsupported program HTTP surface is removed.
 `EARN_PROVIDER_SURFACING`
 (`packages/sdp-types/src/provider-access.ts`) declares which registered
@@ -218,12 +218,12 @@ ADR 0002's 2026-08-14 addendum.
 | Web typecheck fails in `.next/dev/types`                                                                        | stale generated cache: `rm -rf apps/sdp-web/.next/dev/types`                                                                                                                                                                                                                                                                                                                                                                                                          |
 | Discovery returns `strategies: []` unexpectedly                                                                 | Check the credential's project environment and the requested `cluster`; local calls must use a sandbox project.                                                                                                                                                                                                                                                                                                                                                       |
 | Catalogue empty right after boot                                                                                | the sync runs on cron service start and then once per hourly slot; verify the release channel, provider credentials, and scheduler registration, then wait for a live pass                                                                                                                                                                                                                                                                                            |
-| A discovered strategy cannot accept a deposit                                                                   | Check `capabilities.deposit` and its unavailable reason. Preparation also checks cluster, provider availability, active status and entitlement; Veda production remains unavailable until PRO-1777.                                                                                                                                                                                                                                                                   |
+| A discovered strategy cannot accept a deposit                                                                   | Check `capabilities.deposit` and its unavailable reason. Preparation also checks cluster, provider availability, active status and entitlement.                                                                                                                                                                                                                                                                                                                       |
 | Kamino APY is blank in sandbox                                                                                  | correct: the metrics endpoint is mainnet's and 404s for devnet pubkeys, so `listStrategyMetrics` returns `[]` outside production and the row renders "—" rather than a fabricated rate                                                                                                                                                                                                                                                                                |
 | Kamino APY looks stale in production                                                                            | the 5-minute metrics refresh is a separate cron — check it registered (`isEarnEnabled`), not the hourly sync                                                                                                                                                                                                                                                                                                                                                          |
 | Local API boots on 8787 despite `PORT=…`                                                                        | the dev wrapper reads **`SDP_API_PORT`**, not `PORT` (apps/sdp-api/scripts/lib/dev-env.mjs)                                                                                                                                                                                                                                                                                                                                                                           |
 | Need devnet USDC to fund a program                                                                              | Circle's faucet: <https://faucet.circle.com/> — USDC + Solana Devnet (§4b)                                                                                                                                                                                                                                                                                                                                                                                            |
-| No Veda rows in the PRODUCTION catalogue                                                                        | correct — `VEDA_DEPLOYMENTS` (`@sdp/types/veda-programs`) is devnet-only: the published mainnet vault state is Veda's shared Test Vault, so production `listStrategies` throws `PROVIDER_NOT_CONFIGURED` and the sync skips that lane without touching other providers' rows. Sandbox carries the devnet Test Vault row                                                                                                                                               |
+| No Veda rows in the PRODUCTION catalogue                                                                        | the production sync needs a mainnet RPC: with no `SOLANA_RPC_<PROVIDER>_MAINNET_API_KEY_URL`, production `listStrategies` throws `PROVIDER_NOT_CONFIGURED` and the sync skips that lane without touching other providers' rows. With one, the catalogue carries the two PRIME vault rows from `VEDA_DEPLOYMENTS` (`@sdp/types/veda-programs`). Sandbox carries the devnet Test Vault row                                                                              |
 | A Veda deposit answers 403 "is not currently offered"                                                           | stale build — `EARN_PROVIDER_SURFACING.veda` flipped `true` on 2026-08-31 (Kamino, Veda, Jupiter Lend and Ondo are offered). The gate still exists and still answers this for upshift/perena, and no org override lifts it (§5b)                                                                                                                                                                                                                                      |
 | No Ondo rows in the sandbox catalogue's own lane; USDY only appears under the mainnet-mirror toggle             | correct — Ondo has no devnet deployment anywhere (even its staging runs on mainnet), so sandbox carries USDY only as the PRO-1742 browse-only mirror row. See the Ondo section below                                                                                                                                                                                                                                                                                  |
 | The Ondo pass fails with `Ondo assets API listed no usdy entry` or `Ondo USDY apy is not a non-negative number` | `ondo.finance/api/v1/assets` changed shape (the `usdy` entry or its numeric `apy` percent). Check the live body; the row keeps its last figures until fixed                                                                                                                                                                                                                                                                                                           |
@@ -373,7 +373,7 @@ page it links is fetchable as raw markdown):
   authority/address data or an audited vault-address allowlist — free-text
   vault names must never feed a curator or source-kind classification.
 
-## Veda: an allowlisted devnet shelf
+## Veda: an allowlisted shelf
 
 Veda's catalogue read is the mirror image of Kamino's. Kamino's registry is
 permissionless, so its problem is filtering a census down; Veda deploys a vault
@@ -384,11 +384,11 @@ is also what makes Veda's `sourceKind` defensible: every row traces to an
 address Veda named rather than to anything a stranger could create.
 
 `VEDA_DEPLOYMENTS.devnet` pins Veda's confirmed Test Vault programs and vault
-state, measured on chain. `VEDA_DEPLOYMENTS["mainnet-beta"]` remains `null`:
-the published mainnet addresses point at Veda's shared Test Vault, not a
-production offering SDP may expose. Sandbox therefore carries one fundable
-Veda row; production contributes none until Veda names an approved vault. See
-`packages/sdp-veda/CLAUDE.md` for the measured addresses and execution notes.
+state, measured on chain. `VEDA_DEPLOYMENTS["mainnet-beta"]` pins the USDC
+PRIME (id 4) and OUSD PRIME (id 5) vaults Veda supplied for SDP (PRO-1777), each
+pinned to one asset in `VEDA_MAINNET_VAULTS`. Sandbox therefore carries one
+fundable Veda row and production two. See `packages/sdp-veda/CLAUDE.md` for the
+measured addresses and execution notes.
 
 Four things about the read itself:
 

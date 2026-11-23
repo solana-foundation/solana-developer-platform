@@ -1,8 +1,9 @@
 # 0003. Veda vault withdrawals — the exit path for `vault_direct`
 
 Date: 2026-08-19
-Status: Implemented for the configured devnet deployment (2026-09-18) and
-published for wallet Embedded Yield integrations (2026-09-22).
+Status: Implemented for the configured devnet deployment (2026-09-18),
+published for wallet Embedded Yield integrations (2026-09-22), and configured
+for the mainnet PRIME vaults (2026-11-19).
 
 The context below is retained as the decision record. The implementation now
 includes the separate queued-withdraw capability, live options and previews,
@@ -32,8 +33,10 @@ The EARN-027 publication gate completed in
 `cutbow7` approved exact head `b2d313803` before merge. Wallet route
 discovery, queued previews, request/cancellation builds, submits, and history
 all require an API key. Custody queue routes remain internal.
-Production remains fail-closed until Veda names approved mainnet vaults for SDP
-rather than the shared Test Vault.
+Production opened in
+[PR #2914](https://github.com/solana-foundation/solana-developer-platform/pull/2914)
+(PRO-1777), which pinned the USDC PRIME and OUSD PRIME vaults Veda supplied for
+SDP.
 
 ## 2026-09-29 withdrawal audit
 
