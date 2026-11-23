@@ -14,6 +14,22 @@ const rule = (
   ...action,
 });
 const approvers = { authorizationGroups: { groups: [{ users: ["usr_1"] }] } };
+/**
+ * A rule shaped like the provider's own: Fireblocks keeps `type: TRANSFER` fixed
+ * for every transaction rule and names the operation in `transactionType`.
+ */
+const operationRule = (
+  transactionType: string,
+  action: Record<string, unknown> = { action: "2-TIER" },
+  asset = "*"
+) => ({
+  type: "TRANSFER",
+  transactionType,
+  asset,
+  src: { ids: [["*", "VAULT", "*"]] },
+  ...action,
+  authorizationGroups: { logic: "OR", groups: [{ th: 1, users: ["usr_1"] }] },
+});
 
 describe("Fireblocks policy presence", () => {
   it.each([[["*"]], [["*", "VAULT", "*"]], [["42", "VAULT"]], [["42", "*"]]])(
@@ -29,8 +45,18 @@ describe("Fireblocks policy presence", () => {
         rule([["42", "EXCHANGE"]]),
         rule([["42", "VAULT"]], "ETH"),
         { type: "RAW" },
+        operationRule("RAW"),
       ])
     ).toEqual({ status: "missing", reason: "no_policy" });
+  });
+  it("ignores provider-shaped rules for other operations when judging transfer coverage", () => {
+    // A raw-signing approval rule does not prove native-transfer coverage, and it
+    // must not shadow a matching transfer rule either.
+    expect(inspect([operationRule("RAW")])).toEqual({ status: "missing", reason: "no_policy" });
+    expect(inspect([operationRule("CONTRACT_CALL"), rule([["42", "VAULT"]])])).toEqual({
+      status: "present",
+      reason: "policy_detected",
+    });
   });
   it("accepts a canonical token rule and an explicit empty policy", () => {
     expect(inspect([rule([["42", "VAULT"]], "usdc-asset")]).status).toBe("present");
@@ -124,5 +150,16 @@ describe("Fireblocks rule scope", () => {
     expect(scope([rule([["42", "VAULT"]], "ETH", { action: "MAYBE" })])).toBe("unknown");
     expect(scope([{ type: "TRANSFER" }])).toBe("unknown");
     expect(scope([rule([["42", "VAULT", "FUTURE"]], "ETH")])).toBe("unknown");
+  });
+  it("treats provider-shaped rules for other operations as out of scope", () => {
+    // A raw-signing rule naming a foreign asset needs no catalogue read: it is
+    // not a transfer rule, so the native judgement alone decides the wallet.
+    expect(scope([operationRule("RAW", { action: "ALLOW", authorizers: ["usr_1"] }, "ETH")])).toBe(
+      "native"
+    );
+    expect(scope([operationRule("CONTRACT_CALL", { action: "2-TIER" }, "ETH")])).toBe("native");
+    expect(
+      scope([operationRule("CONTRACT_CALL", { action: "2-TIER" }, "ETH"), rule([["42", "VAULT"]])])
+    ).toBe("native");
   });
 });

@@ -22,10 +22,22 @@ const transferRuleSchema = z.object({
   asset: z.string(),
   src: z.unknown().optional(),
   action: z.string(),
+  // Fireblocks keeps `type: TRANSFER` fixed and names the operation here instead;
+  // absent is the legacy default (transfers between accounts).
+  transactionType: z.string().optional(),
   authorizers: z.array(z.string()).optional(),
   authorizersCount: z.number().optional(),
   authorizationGroups: z.object({ groups: z.array(z.unknown()).optional() }).optional(),
 });
+
+/**
+ * Whether a parsed rule governs account transfers, the only operation this check
+ * speaks about. A `transactionType` naming anything else (raw signing, contract
+ * calls, staking, …) puts the rule out of scope rather than in the verdict.
+ */
+function isTransferOperation(rule: z.infer<typeof transferRuleSchema>): boolean {
+  return rule.transactionType === undefined || rule.transactionType === "TRANSFER";
+}
 
 /**
  * Whether a matching rule stops SDP's credential from moving funds alone.
@@ -63,7 +75,9 @@ function sourceMatchesVault(
 }
 
 /**
- * What a wallet's Transfer rules depend on, judged without the token catalogue:
+ * What a wallet's Transfer rules depend on, judged without the token catalogue.
+ * Rules whose `transactionType` names another operation (raw signing, contract
+ * calls, …) govern transfers' neighbors, not transfers, and are ignored.
  * - `native`: every rule names `assets` (or `*`), another vault, or is plainly
  *   absent, so inspecting the native asset alone already decides the wallet.
  * - `outside`: a matching rule with a recognised action names an asset outside
@@ -89,6 +103,7 @@ export function fireblocksRuleScope(
       unknown = true;
       continue;
     }
+    if (!isTransferOperation(transfer.data)) continue;
     if (transfer.data.asset === "*" || assets.includes(transfer.data.asset)) continue;
     const src = z.object({ ids: z.array(sourceSchema) }).safeParse(transfer.data.src);
     if (!src.success) {
@@ -106,6 +121,8 @@ export function fireblocksRuleScope(
 
 /**
  * The legacy active-policy API remains supported and returns all Transfer rules in one read.
+ * Rules whose `transactionType` names another operation (raw signing, contract calls, …)
+ * are out of scope and ignored: this check speaks for transfer coverage only.
  * Source tuples are [id, type, subtype], not [type, id]. Unrecognised selectors stay unknown.
  * A matching rule proves coverage only when it stops SDP's credential from moving funds
  * alone: it must require approval (a `2-TIER` action or configured approvers) or block the
@@ -131,6 +148,7 @@ export function inspectFireblocksPolicy(
       unknown = true;
       continue;
     }
+    if (!isTransferOperation(transfer.data)) continue;
     if (assets !== null && transfer.data.asset !== "*" && !assets.includes(transfer.data.asset))
       continue;
     const src = z.object({ ids: z.array(sourceSchema) }).safeParse(transfer.data.src);
