@@ -1,11 +1,14 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import {
-  operationResponseSchema,
   operationsPageSchema,
   refreshOperationSchema,
   submitOperationSchema,
 } from "@sdp/types/operations";
 import { successResponseSchema, withOpenApi } from "@/openapi/schemas/base";
+import {
+  EARN_OPERATION_EXAMPLES,
+  operationResponseExample,
+} from "@/openapi/schemas/earn-operation-examples";
 import {
   emptyOperationBodySchema,
   operationIdParamsSchema,
@@ -27,7 +30,6 @@ export function registerOperationsPaths(registry: OpenAPIRegistry, publicOnly = 
     : [{ apiKeyAuth: [] }, { clerkBearerAuth: [] }];
   // Operations track Earn's actions, so the reference nests them under Earn as their own group.
   const common = { tags: ["Earn"], [DOCS_GROUP]: EARN_GROUPS.operations, security };
-  const response = successResponseSchema(operationResponseSchema);
   registry.registerPath({
     ...common,
     method: "get",
@@ -40,7 +42,11 @@ export function registerOperationsPaths(registry: OpenAPIRegistry, publicOnly = 
     responses: {
       200: {
         description: "One operation page",
-        content: jsonContent(successResponseSchema(operationsPageSchema)),
+        content: jsonContent(
+          successResponseSchema(
+            withOpenApi(operationsPageSchema, { example: EARN_OPERATION_EXAMPLES.list })
+          )
+        ),
       },
       ...earnErrorResponses([400, 401, 403, 404, 429, 500, 503]),
     },
@@ -55,11 +61,15 @@ export function registerOperationsPaths(registry: OpenAPIRegistry, publicOnly = 
       "Returns an operation's status, terms, current actionId and version, nextAction and settlement result. Poll it after submitting. Each nextAction type says what to do next: sign_transaction asks the owner to sign, select_option asks you to choose a route with refresh, and wait means keep polling the same attempt. queued, awaiting_signature, submitted and settling are in progress. For a queued withdrawal, submitted means its request is still confirming, and settling means the provider has yet to pay out. completed means verified delivery; for a selected recovery, result.settlementOutcome recovered means returned strategy shares, never withdrawal proceeds. cancelled means a verified cancellation. canCancel says whether the preparation can still be cancelled, which also needs earn.manage; cancelRequestedAt alone is pending intent. result fields stay null until their source is known. Requires earn.read and source visibility.",
     request: { headers: projectScopeHeaders, params: operationIdParamsSchema },
     responses: {
-      200: { description: "Current operation", content: jsonContent(response) },
+      200: {
+        description: "Current operation",
+        content: jsonContent(operationResponseExample(EARN_OPERATION_EXAMPLES.get)),
+      },
       ...earnErrorResponses([400, 401, 403, 404, 429, 500, 503]),
     },
   });
   for (const action of ["submit", "refresh", "cancel"] as const) {
+    const response = operationResponseExample(EARN_OPERATION_EXAMPLES[action]);
     const descriptions = {
       submit:
         "Submits the reviewed transaction for asynchronous broadcast and returns 202. Pass the current actionId and version and, for an ownerAddress source, signedTransaction: the prepared transaction signed in the owner's wallet, base64-encoded. SDP verifies the exact stored message and required signatures and records the authorization; a worker then broadcasts and tracks the transaction, so poll GET /v1/operations/{operationId}. Stale actions return 409. Requires earn.execute and the current action principal. Before each new signing or broadcast effect, the worker rechecks the credential, execute permission, project membership and wallet binding; losing authority stops new effects but never proves a transaction did not execute. For an SDP custody wallet, omit signedTransaction: the worker requests the custody provider's signature, which can return sign_in_provider instructions but never needs a second submit.",

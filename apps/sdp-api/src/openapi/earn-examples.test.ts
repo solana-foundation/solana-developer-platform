@@ -1,4 +1,9 @@
-import { refreshOperationSchema, submitOperationSchema } from "@sdp/types/operations";
+import {
+  operationResponseSchema,
+  operationsPageSchema,
+  refreshOperationSchema,
+  submitOperationSchema,
+} from "@sdp/types/operations";
 import { describe, expect, it } from "vitest";
 import { prepareEarnDepositSchema, prepareEarnWithdrawalSchema } from "@/routes/earn/core/schemas";
 import { emptyOperationBodySchema } from "@/routes/operations/schemas";
@@ -105,4 +110,37 @@ describe("Earn core contract examples", () => {
       }).success
     ).toBe(false);
   });
+
+  it.each([
+    ["post", "/v1/earn/deposit", "202", operationResponseSchema, "sign_transaction"],
+    ["post", "/v1/earn/withdraw", "202", operationResponseSchema, "select_option"],
+    ["post", "/v1/operations/{operationId}/submit", "202", operationResponseSchema, "wait"],
+    [
+      "post",
+      "/v1/operations/{operationId}/refresh",
+      "202",
+      operationResponseSchema,
+      "sign_transaction",
+    ],
+    ["post", "/v1/operations/{operationId}/cancel", "200", operationResponseSchema, null],
+    ["get", "/v1/operations/{operationId}", "200", operationResponseSchema, null],
+    ["get", "/v1/operations", "200", operationsPageSchema, undefined],
+  ] as const)(
+    "publishes a valid response example for %s %s",
+    (method, path, status, schema, nextAction) => {
+      const response = document.paths[path]?.[method]?.responses?.[status];
+      if (response === undefined || "$ref" in response)
+        throw new Error(`Missing ${status} for ${path}`);
+      const envelope = response.content?.["application/json"]?.schema;
+      if (envelope === undefined || "$ref" in envelope)
+        throw new Error(`Missing schema for ${path}`);
+      const data = envelope.properties?.data;
+      if (data === undefined || "$ref" in data || data.example === undefined)
+        throw new Error(`Missing response example for ${path}`);
+      const parsed = schema.parse(data.example);
+      if (nextAction !== undefined && "operation" in parsed) {
+        expect(parsed.operation.nextAction?.type ?? null).toBe(nextAction);
+      }
+    }
+  );
 });

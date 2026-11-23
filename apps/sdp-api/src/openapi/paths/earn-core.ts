@@ -1,5 +1,4 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
-import { operationResponseSchema } from "@sdp/types/operations";
 import { successResponseSchema, withOpenApi } from "@/openapi/schemas/base";
 import {
   earnCorePositionSchema,
@@ -7,6 +6,10 @@ import {
   earnPositionsResponseSchema,
 } from "@/openapi/schemas/earn-core";
 import { EARN_EXAMPLE_IDS, EARN_OWNER_ADDRESS_EXAMPLE } from "@/openapi/schemas/earn-examples";
+import {
+  EARN_OPERATION_EXAMPLES,
+  operationResponseExample,
+} from "@/openapi/schemas/earn-operation-examples";
 import {
   earnDiscoveryQuerySchema,
   earnPositionParamsSchema,
@@ -85,8 +88,8 @@ export function registerEarnCorePaths(registry: OpenAPIRegistry, publicOnly = fa
       ...earnErrorResponses([400, 401, 403, 404, 429, 500, 503]),
     },
   });
-  const response = successResponseSchema(operationResponseSchema);
   for (const direction of ["deposit", "withdraw"] as const) {
+    const response = operationResponseExample(EARN_OPERATION_EXAMPLES[direction]);
     registry.registerPath({
       ...common,
       method: "post",

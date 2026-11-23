@@ -25,6 +25,11 @@ const examples = [
     responses: ["202 response (trimmed)"],
   },
   {
+    page: "api-overview",
+    requests: [],
+    responses: ["Strategy (trimmed)", "Position (trimmed)", "Operation (trimmed)"],
+  },
+  {
     page: "withdrawals",
     requests: [
       {

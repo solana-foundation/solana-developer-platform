@@ -343,6 +343,8 @@ locally with no key, wallet or funds.
 
 ## Endpoints
 
+What each endpoint takes and returns is in the [API overview](/docs/earn/api-overview).
+
 | Endpoint | What it does |
 | --- | --- |
 | [`GET /v1/earn/discovery`](/docs/reference/api/earn/discover-earn-strategies) | Lists strategies, their rates and what each supports. |
@@ -361,6 +363,10 @@ locally with no key, wallet or funds.
 - [Quickstart](/docs/earn/quickstart)
 
   Make a first deposit in three calls.
+
+- [API overview](/docs/earn/api-overview)
+
+  Every endpoint, what it takes and what it returns.
 
 - [How Earn works](/docs/earn/concepts)
 
@@ -659,6 +665,170 @@ does not prove the caller controls the address.
 
 ---
 
+### API overview
+Source: https://platform.solana.com/docs/earn/api-overview
+
+> Every Earn endpoint, what to send it, what it returns, and the strategy, position and operation objects.
+
+> **Earn is under active development.** Features, API endpoints, and docs may change.
+
+Earn has ten endpoints. Three read strategies and positions, two prepare a
+deposit or withdrawal, and five submit and track the operation that comes
+back. Every call takes your API key as `Authorization: Bearer <key>`, and every
+`POST` an `Idempotency-Key`. Each endpoint links to its full reference, with
+every parameter, field and error.
+
+## Endpoints
+
+| Endpoint | Send | Returns |
+| --- | --- | --- |
+| [`GET /v1/earn/discovery`](/docs/reference/api/earn/discover-earn-strategies) | Optional filters, such as `depositMint` | A page of [strategies](#strategy) |
+| [`GET /v1/earn/positions`](/docs/reference/api/earn/list-earn-core-positions) | `ownerAddress`; optional `discover`, `includeSummary` | A page of [positions](#position) |
+| [`GET /v1/earn/positions/{positionId}`](/docs/reference/api/earn/get-earn-position) | A position `id` | One [position](#position) |
+| [`POST /v1/earn/deposit`](/docs/reference/api/earn/prepare-earn-deposit) | `strategyId`, `source.ownerAddress`, `amount` | An [operation](#operation) to sign |
+| [`POST /v1/earn/withdraw`](/docs/reference/api/earn/prepare-earn-withdrawal) | `positionId`, `amount` | An [operation](#operation) to sign, or a route to choose |
+| [`GET /v1/operations`](/docs/reference/api/earn/list-operations) | `ownerAddress`; optional `status`, `kind` | A page of [operations](#operation) |
+| [`GET /v1/operations/{operationId}`](/docs/reference/api/earn/get-operation) | Nothing | One [operation](#operation) |
+| [`POST /v1/operations/{operationId}/submit`](/docs/reference/api/earn/submit-operation) | `actionId`, `version`, `signedTransaction` | The [operation](#operation), now `queued` |
+| [`POST /v1/operations/{operationId}/refresh`](/docs/reference/api/earn/refresh-operation) | `actionId`, `version`, `optionId` | The [operation](#operation), with the chosen route to sign |
+| [`POST /v1/operations/{operationId}/cancel`](/docs/reference/api/earn/cancel-operation) | An empty body, `{}` | The [operation](#operation), now `cancelled` |
+
+Every response wraps its payload in `data`, beside a `meta` object with the
+`requestId`. Errors return `{ "error": { "code", "message", "details" } }` with
+a matching HTTP status; the Earn-specific `409` reasons are in
+[integration details](/docs/earn/integration-details#refresh-and-cancel).
+
+## How the calls fit together
+
+1. Find a strategy with `GET /v1/earn/discovery`.
+2. Prepare with `POST /v1/earn/deposit` or `POST /v1/earn/withdraw`. You get an
+   operation back.
+3. If its `nextAction.type` is `select_option`, choose a route with
+   `/refresh`.
+4. Sign `nextAction.transaction` with the owner's wallet, then `/submit` it.
+5. Poll the operation until it is final, then read the position for the new
+   balance.
+
+The [quickstart](/docs/earn/quickstart) runs steps 2, 4 and 5 for a deposit.
+
+## Strategy
+
+One yield product that you can deposit into. Discovery returns a page of these:
+
+```json title="Strategy (trimmed)"
+{
+  "id": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
+  "provider": "kamino",
+  "name": "Allez USDC",
+  "depositMints": ["4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"],
+  "shareMint": "hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2",
+  "liquidityTerm": "instant",
+  "fundable": true,
+  "rate": { "value": "0.062", "observedAt": "2026-11-20T14:00:00.000Z" },
+  "capabilities": { "deposit": true, "withdraw": true }
+}
+```
+
+| Field | What it tells you |
+| --- | --- |
+| `id` | Pass it as `strategyId` when you deposit. |
+| `depositMints` | The tokens it takes directly. Another token adds a swap. |
+| `shareMint` | The receipt token a deposit gives you. |
+| `rate.value` | The provider-reported APY as a decimal fraction: `"0.062"` is 6.2%. `null` is unknown. |
+| `liquidityTerm` | `instant`, or `delayed` when withdrawals queue. |
+| `capabilities.deposit`, `fundable` | When both are `true`, it takes deposits. |
+
+More on choosing one in [Strategies](/docs/earn/strategies).
+
+## Position
+
+One wallet's holding in one strategy. The positions endpoints return these:
+
+```json title="Position (trimmed)"
+{
+  "id": "earn_position_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
+  "strategyId": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
+  "source": { "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM" },
+  "label": "Allez USDC",
+  "tokenMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+  "shareMint": "hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2",
+  "shares": "25.42",
+  "withdrawableShares": "25.42",
+  "tokenValue": "25.81",
+  "costBasisKnown": true
+}
+```
+
+| Field | What it tells you |
+| --- | --- |
+| `id` | Pass it as `positionId` when you withdraw. |
+| `shares` | Strategy shares held. `withdrawableShares` is what you can withdraw now. |
+| `tokenValue` | The live value in the deposit token, `tokenMint`. |
+| `costBasisKnown` | `false` when SDP doesn't know what was paid, so earnings are unknown. |
+
+A live value SDP couldn't read is left out, never shown as zero. More in
+[Balances and earnings](/docs/earn/balances).
+
+## Operation
+
+One deposit or withdrawal, from preparation to payout. Preparing returns one,
+and every call after that returns its new state:
+
+```json title="Operation (trimmed)"
+{
+  "id": "op_5f2a9c1e-8d4b-4f6a-9b3e-2c7d1a0e6f84",
+  "kind": "earn.deposit",
+  "status": "prepared",
+  "actionId": "opa_0c8e1f4a-6b2d-4e9a-8f3c-5d7b9a1e2c40",
+  "version": 1,
+  "nextAction": {
+    "type": "sign_transaction",
+    "transaction": "<base64-unsigned-transaction>",
+    "lastValidBlockHeight": "312345678",
+    "expiresAt": null
+  },
+  "terms": {
+    "inputAmount": { "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU", "value": "100" },
+    "estimate": { "mint": "hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2", "value": "98.41" },
+    "minimum": { "mint": "hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2", "value": "97.92" },
+    "fees": null,
+    "options": []
+  },
+  "canCancel": false,
+  "resourceRef": null,
+  "result": null,
+  "error": null
+}
+```
+
+| Field | What it tells you |
+| --- | --- |
+| `id` | Every `/v1/operations/{operationId}` call takes it. |
+| `status` | Where it is, in the table below. |
+| `nextAction` | What to do next: sign, choose a route, or wait. See [next actions](/docs/earn/integration-details#next-actions). |
+| `actionId`, `version` | The exact transaction you were shown. Send both back with `/submit` or `/refresh`. |
+| `terms` | What the customer agrees to: `inputAmount`, the quoted `estimate`, the enforced `minimum`, known `fees`, and route `options` for a withdrawal. |
+| `canCancel` | Whether `/cancel` works right now. |
+| `resourceRef` | After submit, the record SDP tracks. An `earn.movement` `id` works as `afterMovementIds` on position reads. |
+| `result` | Once final: `positionId`, `signature`, `settledAmount` and `settlementOutcome`. |
+| `error` | When it failed: a `code` and a `message`. |
+
+| `status` | Meaning |
+| --- | --- |
+| `prepared` | Built and waiting for a signature or a route choice. |
+| `queued` | Submitted; SDP is about to broadcast it. |
+| `awaiting_signature` | Waiting on a signature step. Keep polling. |
+| `submitted` | Broadcast and waiting to confirm; for a queued withdrawal, its request. |
+| `settling` | Confirmed and waiting for the provider to pay out. |
+| `completed` | Done, and SDP verified delivery. |
+| `failed` | It didn't go through; `error` says why. |
+| `cancelled` | Stopped before anything moved. |
+
+Every field is in the reference, for example
+[Get an operation](/docs/reference/api/earn/get-operation).
+
+---
+
 ### Strategies
 Source: https://platform.solana.com/docs/earn/strategies
 
@@ -715,7 +885,8 @@ limits, issuer rules and liquidity are checked live.
 - `liquidityTerm` is `instant` or `delayed`. A delayed strategy's
   `redemptionDelayDays` estimates how long a withdrawal takes to settle.
 
-A rate is not a promise of returns after costs; see
+The [strategy object](/docs/earn/api-overview#strategy) shows a full example. A
+rate is not a promise of returns after costs; see
 [fees and rates](/docs/earn/integration-details#fees-and-rates). Discovery
 covers the providers Earn integrates, not every strategy on Solana.
 
@@ -751,8 +922,9 @@ fund the deposit token directly and try again.
 
 ## Review
 
-Preparation returns `202` with an operation. SDP quotes, plans and simulates
-the transaction, but signs and sends nothing. Show your customer:
+Preparation returns `202` with an [operation](/docs/earn/api-overview#operation).
+SDP quotes, plans and simulates the transaction, but signs and sends nothing.
+Show your customer:
 
 - `terms.estimate`: the quoted shares.
 - `terms.minimum`: the least the transaction accepts.
@@ -810,7 +982,7 @@ curl -sS "https://api-devnet.solana.com/v1/earn/positions?ownerAddress=<wallet-a
 ```
 
 Each position's `id` is the `positionId` you [withdraw](/docs/earn/withdrawals)
-with. Without `ownerAddress`, the list covers every position your key can see
+with; the [position object](/docs/earn/api-overview#position) lists its fields. Without `ownerAddress`, the list covers every position your key can see
 in the project. See [position filters](/docs/reference/api/earn/list-earn-core-positions).
 
 ## Read one position
@@ -933,7 +1105,7 @@ While the withdrawal waits for your choice, `canCancel` is `true` and
 ## Sign, submit and track
 
 Sign and submit as for a [deposit](/docs/earn/deposits#sign-and-submit), then
-poll the operation:
+poll the [operation](/docs/earn/api-overview#operation):
 
 - A queued withdrawal shows `submitted` until its request confirms, then
   `settling` until the provider pays out. Poll it every few minutes, not
@@ -37421,94 +37593,59 @@ r = requests.post("https://api.solana.com/v1/earn/deposit",
 {
   "data": {
     "operation": {
-      "id": "_example",
+      "id": "op_5f2a9c1e-8d4b-4f6a-9b3e-2c7d1a0e6f84",
       "kind": "earn.deposit",
       "status": "prepared",
       "environment": "sandbox",
       "intent": {
         "kind": "earn.deposit",
-        "strategyId": "strategy_example",
+        "strategyId": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
         "source": {
-          "ownerAddress": "11111111111111111111111111111111"
+          "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
         },
         "amount": {
-          "mint": "example",
-          "value": "example"
-        }
+          "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+          "value": "100"
+        },
+        "slippageBps": 50
       },
-      "actionId": "action_example",
+      "actionId": "opa_0c8e1f4a-6b2d-4e9a-8f3c-5d7b9a1e2c40",
       "version": 1,
       "nextAction": {
         "type": "sign_transaction",
-        "transaction": "example",
-        "lastValidBlockHeight": "example",
-        "expiresAt": "2026-01-01T00:00:00.000Z"
+        "transaction": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAQACBX6MCIdgv94d3c8ywX8gm4JC7lKq8TH6zYjQ6ixtCwbyAcUXmthoicMvwQoemkkh8VYuH2cWunAQDIuT/GkDUJ0KYgMMHq4BIvb2PBZ0fI2yv1bG0iLGqFi+JMFe0tIQCTtELLORIVfxOpM9ATQoLQMrX/7NAaLb8bd5BgjfAC6nCWPLASE2WfQBsHH1iKEwbap6S3HQJ5LgWwCcHCsv79/MSQ6SjNLjhzuzQ/yV2jMXnKYPTb9GwsNukSmdVdTmuQEEBAABAgMQ8iPGiVLh8rYA4fUFAAAAAAA=",
+        "lastValidBlockHeight": "312345678",
+        "expiresAt": null
       },
       "terms": {
         "inputAmount": {
-          "mint": "example",
-          "value": "example"
+          "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+          "value": "100"
         },
-        "expiresAt": "2026-01-01T00:00:00.000Z",
+        "description": "Deposit into the strategy",
+        "expiresAt": null,
         "estimate": {
-          "mint": "example",
-          "value": "example"
+          "mint": "hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2",
+          "value": "98.41"
         },
         "minimum": {
-          "mint": "example",
-          "value": "example"
+          "mint": "hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2",
+          "value": "97.92"
         },
-        "fees": [
-          {
-            "mint": "example",
-            "value": "example"
-          }
-        ],
-        "options": [
-          {
-            "id": "_example",
-            "label": "example",
-            "settlement": "instant",
-            "estimatedSeconds": 1,
-            "amount": {
-              "mint": "example",
-              "value": "example"
-            },
-            "minimum": {
-              "mint": "example",
-              "value": "example"
-            }
-          }
-        ]
+        "fees": null,
+        "options": []
       },
       "buildRef": {
-        "kind": "example",
-        "id": "_example"
+        "kind": "earn.strategy_transaction",
+        "id": "earn_wallet_transaction_7d3e9b2a-1c5f-4a8e-b6d0-3f9a2e7c1b58"
       },
-      "resourceRef": {
-        "kind": "example",
-        "id": "_example"
-      },
+      "resourceRef": null,
       "canCancel": false,
-      "cancelRequestedAt": "2026-01-01T00:00:00.000Z",
-      "error": {
-        "code": "example",
-        "message": "example"
-      },
-      "result": {
-        "positionId": "position_example",
-        "signature": "example",
-        "source": {
-          "ownerAddress": "11111111111111111111111111111111"
-        },
-        "settledAmount": {
-          "mint": "example",
-          "value": "example"
-        },
-        "settlementOutcome": "delivered"
-      },
-      "createdAt": "2026-01-01T00:00:00.000Z",
-      "updatedAt": "2026-01-01T00:00:00.000Z"
+      "cancelRequestedAt": null,
+      "error": null,
+      "result": null,
+      "createdAt": "2026-11-20T15:00:00.000Z",
+      "updatedAt": "2026-11-20T15:00:00.000Z"
     }
   },
   "meta": {
@@ -37522,94 +37659,59 @@ r = requests.post("https://api.solana.com/v1/earn/deposit",
 {
   "data": {
     "operation": {
-      "id": "_example",
+      "id": "op_5f2a9c1e-8d4b-4f6a-9b3e-2c7d1a0e6f84",
       "kind": "earn.deposit",
       "status": "prepared",
       "environment": "sandbox",
       "intent": {
         "kind": "earn.deposit",
-        "strategyId": "strategy_example",
+        "strategyId": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
         "source": {
-          "ownerAddress": "11111111111111111111111111111111"
+          "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
         },
         "amount": {
-          "mint": "example",
-          "value": "example"
-        }
+          "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+          "value": "100"
+        },
+        "slippageBps": 50
       },
-      "actionId": "action_example",
+      "actionId": "opa_0c8e1f4a-6b2d-4e9a-8f3c-5d7b9a1e2c40",
       "version": 1,
       "nextAction": {
         "type": "sign_transaction",
-        "transaction": "example",
-        "lastValidBlockHeight": "example",
-        "expiresAt": "2026-01-01T00:00:00.000Z"
+        "transaction": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAQACBX6MCIdgv94d3c8ywX8gm4JC7lKq8TH6zYjQ6ixtCwbyAcUXmthoicMvwQoemkkh8VYuH2cWunAQDIuT/GkDUJ0KYgMMHq4BIvb2PBZ0fI2yv1bG0iLGqFi+JMFe0tIQCTtELLORIVfxOpM9ATQoLQMrX/7NAaLb8bd5BgjfAC6nCWPLASE2WfQBsHH1iKEwbap6S3HQJ5LgWwCcHCsv79/MSQ6SjNLjhzuzQ/yV2jMXnKYPTb9GwsNukSmdVdTmuQEEBAABAgMQ8iPGiVLh8rYA4fUFAAAAAAA=",
+        "lastValidBlockHeight": "312345678",
+        "expiresAt": null
       },
       "terms": {
         "inputAmount": {
-          "mint": "example",
-          "value": "example"
+          "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+          "value": "100"
         },
-        "expiresAt": "2026-01-01T00:00:00.000Z",
+        "description": "Deposit into the strategy",
+        "expiresAt": null,
         "estimate": {
-          "mint": "example",
-          "value": "example"
+          "mint": "hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2",
+          "value": "98.41"
         },
         "minimum": {
-          "mint": "example",
-          "value": "example"
+          "mint": "hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2",
+          "value": "97.92"
         },
-        "fees": [
-          {
-            "mint": "example",
-            "value": "example"
-          }
-        ],
-        "options": [
-          {
-            "id": "_example",
-            "label": "example",
-            "settlement": "instant",
-            "estimatedSeconds": 1,
-            "amount": {
-              "mint": "example",
-              "value": "example"
-            },
-            "minimum": {
-              "mint": "example",
-              "value": "example"
-            }
-          }
-        ]
+        "fees": null,
+        "options": []
       },
       "buildRef": {
-        "kind": "example",
-        "id": "_example"
+        "kind": "earn.strategy_transaction",
+        "id": "earn_wallet_transaction_7d3e9b2a-1c5f-4a8e-b6d0-3f9a2e7c1b58"
       },
-      "resourceRef": {
-        "kind": "example",
-        "id": "_example"
-      },
+      "resourceRef": null,
       "canCancel": false,
-      "cancelRequestedAt": "2026-01-01T00:00:00.000Z",
-      "error": {
-        "code": "example",
-        "message": "example"
-      },
-      "result": {
-        "positionId": "position_example",
-        "signature": "example",
-        "source": {
-          "ownerAddress": "11111111111111111111111111111111"
-        },
-        "settledAmount": {
-          "mint": "example",
-          "value": "example"
-        },
-        "settlementOutcome": "delivered"
-      },
-      "createdAt": "2026-01-01T00:00:00.000Z",
-      "updatedAt": "2026-01-01T00:00:00.000Z"
+      "cancelRequestedAt": null,
+      "error": null,
+      "result": null,
+      "createdAt": "2026-11-20T15:00:00.000Z",
+      "updatedAt": "2026-11-20T15:00:00.000Z"
     }
   },
   "meta": {
@@ -38113,94 +38215,73 @@ r = requests.post("https://api.solana.com/v1/earn/withdraw",
 {
   "data": {
     "operation": {
-      "id": "_example",
-      "kind": "earn.deposit",
+      "id": "op_b7e2d4a1-3c9f-4e6b-8a2d-6f1e3c5a7b90",
+      "kind": "earn.withdraw",
       "status": "prepared",
       "environment": "sandbox",
       "intent": {
-        "kind": "earn.deposit",
-        "strategyId": "strategy_example",
-        "source": {
-          "ownerAddress": "11111111111111111111111111111111"
-        },
+        "kind": "earn.withdraw",
+        "positionId": "earn_position_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
         "amount": {
-          "mint": "example",
-          "value": "example"
+          "kind": "all"
         }
       },
-      "actionId": "action_example",
+      "actionId": "opa_4e6a8c2b-9d1f-4a3e-b5c7-0e2a4c6e8a13",
       "version": 1,
       "nextAction": {
-        "type": "sign_transaction",
-        "transaction": "example",
-        "lastValidBlockHeight": "example",
-        "expiresAt": "2026-01-01T00:00:00.000Z"
+        "type": "select_option"
       },
       "terms": {
         "inputAmount": {
-          "mint": "example",
-          "value": "example"
+          "mint": "hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2",
+          "value": "25.42"
         },
-        "expiresAt": "2026-01-01T00:00:00.000Z",
-        "estimate": {
-          "mint": "example",
-          "value": "example"
-        },
-        "minimum": {
-          "mint": "example",
-          "value": "example"
-        },
-        "fees": [
-          {
-            "mint": "example",
-            "value": "example"
-          }
-        ],
+        "description": "Choose a withdrawal route before reviewing its transaction",
+        "expiresAt": null,
+        "estimate": null,
+        "minimum": null,
+        "fees": null,
         "options": [
           {
-            "id": "_example",
-            "label": "example",
+            "id": "direct",
+            "label": "Direct withdrawal",
             "settlement": "instant",
-            "estimatedSeconds": 1,
+            "estimatedSeconds": null,
+            "mechanism": "direct",
             "amount": {
-              "mint": "example",
-              "value": "example"
+              "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+              "value": "25.81"
             },
             "minimum": {
-              "mint": "example",
-              "value": "example"
+              "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+              "value": "25.68"
             }
+          },
+          {
+            "id": "solver_queue:5:259200",
+            "label": "Solver queue (5 bps discount, 259200s window)",
+            "settlement": "delayed",
+            "estimatedSeconds": null,
+            "mechanism": "solver_queue",
+            "amount": {
+              "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+              "value": "25.80"
+            },
+            "minimum": null
           }
         ]
       },
       "buildRef": {
-        "kind": "example",
-        "id": "_example"
+        "kind": "earn.withdrawal_options",
+        "id": "choices_2b4d6f8a-1c3e-4a5b-9d7f-8e0a2c4e6a35"
       },
-      "resourceRef": {
-        "kind": "example",
-        "id": "_example"
-      },
-      "canCancel": false,
-      "cancelRequestedAt": "2026-01-01T00:00:00.000Z",
-      "error": {
-        "code": "example",
-        "message": "example"
-      },
-      "result": {
-        "positionId": "position_example",
-        "signature": "example",
-        "source": {
-          "ownerAddress": "11111111111111111111111111111111"
-        },
-        "settledAmount": {
-          "mint": "example",
-          "value": "example"
-        },
-        "settlementOutcome": "delivered"
-      },
-      "createdAt": "2026-01-01T00:00:00.000Z",
-      "updatedAt": "2026-01-01T00:00:00.000Z"
+      "resourceRef": null,
+      "canCancel": true,
+      "cancelRequestedAt": null,
+      "error": null,
+      "result": null,
+      "createdAt": "2026-11-21T09:30:00.000Z",
+      "updatedAt": "2026-11-21T09:30:00.000Z"
     }
   },
   "meta": {
@@ -38214,94 +38295,73 @@ r = requests.post("https://api.solana.com/v1/earn/withdraw",
 {
   "data": {
     "operation": {
-      "id": "_example",
-      "kind": "earn.deposit",
+      "id": "op_b7e2d4a1-3c9f-4e6b-8a2d-6f1e3c5a7b90",
+      "kind": "earn.withdraw",
       "status": "prepared",
       "environment": "sandbox",
       "intent": {
-        "kind": "earn.deposit",
-        "strategyId": "strategy_example",
-        "source": {
-          "ownerAddress": "11111111111111111111111111111111"
-        },
+        "kind": "earn.withdraw",
+        "positionId": "earn_position_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
         "amount": {
-          "mint": "example",
-          "value": "example"
+          "kind": "all"
         }
       },
-      "actionId": "action_example",
+      "actionId": "opa_4e6a8c2b-9d1f-4a3e-b5c7-0e2a4c6e8a13",
       "version": 1,
       "nextAction": {
-        "type": "sign_transaction",
-        "transaction": "example",
-        "lastValidBlockHeight": "example",
-        "expiresAt": "2026-01-01T00:00:00.000Z"
+        "type": "select_option"
       },
       "terms": {
         "inputAmount": {
-          "mint": "example",
-          "value": "example"
+          "mint": "hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2",
+          "value": "25.42"
         },
-        "expiresAt": "2026-01-01T00:00:00.000Z",
-        "estimate": {
-          "mint": "example",
-          "value": "example"
-        },
-        "minimum": {
-          "mint": "example",
-          "value": "example"
-        },
-        "fees": [
-          {
-            "mint": "example",
-            "value": "example"
-          }
-        ],
+        "description": "Choose a withdrawal route before reviewing its transaction",
+        "expiresAt": null,
+        "estimate": null,
+        "minimum": null,
+        "fees": null,
         "options": [
           {
-            "id": "_example",
-            "label": "example",
+            "id": "direct",
+            "label": "Direct withdrawal",
             "settlement": "instant",
-            "estimatedSeconds": 1,
+            "estimatedSeconds": null,
+            "mechanism": "direct",
             "amount": {
-              "mint": "example",
-              "value": "example"
+              "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+              "value": "25.81"
             },
             "minimum": {
-              "mint": "example",
-              "value": "example"
+              "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+              "value": "25.68"
             }
+          },
+          {
+            "id": "solver_queue:5:259200",
+            "label": "Solver queue (5 bps discount, 259200s window)",
+            "settlement": "delayed",
+            "estimatedSeconds": null,
+            "mechanism": "solver_queue",
+            "amount": {
+              "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+              "value": "25.80"
+            },
+            "minimum": null
           }
         ]
       },
       "buildRef": {
-        "kind": "example",
-        "id": "_example"
+        "kind": "earn.withdrawal_options",
+        "id": "choices_2b4d6f8a-1c3e-4a5b-9d7f-8e0a2c4e6a35"
       },
-      "resourceRef": {
-        "kind": "example",
-        "id": "_example"
-      },
-      "canCancel": false,
-      "cancelRequestedAt": "2026-01-01T00:00:00.000Z",
-      "error": {
-        "code": "example",
-        "message": "example"
-      },
-      "result": {
-        "positionId": "position_example",
-        "signature": "example",
-        "source": {
-          "ownerAddress": "11111111111111111111111111111111"
-        },
-        "settledAmount": {
-          "mint": "example",
-          "value": "example"
-        },
-        "settlementOutcome": "delivered"
-      },
-      "createdAt": "2026-01-01T00:00:00.000Z",
-      "updatedAt": "2026-01-01T00:00:00.000Z"
+      "resourceRef": null,
+      "canCancel": true,
+      "cancelRequestedAt": null,
+      "error": null,
+      "result": null,
+      "createdAt": "2026-11-21T09:30:00.000Z",
+      "updatedAt": "2026-11-21T09:30:00.000Z"
     }
   },
   "meta": {
@@ -38721,97 +38781,141 @@ r = requests.get("https://api.solana.com/v1/operations",
   "data": {
     "operations": [
       {
-        "id": "_example",
-        "kind": "earn.deposit",
+        "id": "op_b7e2d4a1-3c9f-4e6b-8a2d-6f1e3c5a7b90",
+        "kind": "earn.withdraw",
         "status": "prepared",
         "environment": "sandbox",
         "intent": {
-          "kind": "earn.deposit",
-          "strategyId": "strategy_example",
-          "source": {
-            "ownerAddress": "11111111111111111111111111111111"
-          },
+          "kind": "earn.withdraw",
+          "positionId": "earn_position_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
           "amount": {
-            "mint": "example",
-            "value": "example"
+            "kind": "all"
           }
         },
-        "actionId": "action_example",
+        "actionId": "opa_4e6a8c2b-9d1f-4a3e-b5c7-0e2a4c6e8a13",
         "version": 1,
         "nextAction": {
-          "type": "sign_transaction",
-          "transaction": "example",
-          "lastValidBlockHeight": "example",
-          "expiresAt": "2026-01-01T00:00:00.000Z"
+          "type": "select_option"
         },
         "terms": {
           "inputAmount": {
-            "mint": "example",
-            "value": "example"
+            "mint": "hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2",
+            "value": "25.42"
           },
-          "expiresAt": "2026-01-01T00:00:00.000Z",
-          "estimate": {
-            "mint": "example",
-            "value": "example"
-          },
-          "minimum": {
-            "mint": "example",
-            "value": "example"
-          },
-          "fees": [
-            {
-              "mint": "example",
-              "value": "example"
-            }
-          ],
+          "description": "Choose a withdrawal route before reviewing its transaction",
+          "expiresAt": null,
+          "estimate": null,
+          "minimum": null,
+          "fees": null,
           "options": [
             {
-              "id": "_example",
-              "label": "example",
+              "id": "direct",
+              "label": "Direct withdrawal",
               "settlement": "instant",
-              "estimatedSeconds": 1,
+              "estimatedSeconds": null,
+              "mechanism": "direct",
               "amount": {
-                "mint": "example",
-                "value": "example"
+                "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+                "value": "25.81"
               },
               "minimum": {
-                "mint": "example",
-                "value": "example"
+                "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+                "value": "25.68"
               }
+            },
+            {
+              "id": "solver_queue:5:259200",
+              "label": "Solver queue (5 bps discount, 259200s window)",
+              "settlement": "delayed",
+              "estimatedSeconds": null,
+              "mechanism": "solver_queue",
+              "amount": {
+                "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+                "value": "25.80"
+              },
+              "minimum": null
             }
           ]
         },
         "buildRef": {
-          "kind": "example",
-          "id": "_example"
+          "kind": "earn.withdrawal_options",
+          "id": "choices_2b4d6f8a-1c3e-4a5b-9d7f-8e0a2c4e6a35"
+        },
+        "resourceRef": null,
+        "canCancel": true,
+        "cancelRequestedAt": null,
+        "error": null,
+        "result": null,
+        "createdAt": "2026-11-21T09:30:00.000Z",
+        "updatedAt": "2026-11-21T09:30:00.000Z"
+      },
+      {
+        "id": "op_5f2a9c1e-8d4b-4f6a-9b3e-2c7d1a0e6f84",
+        "kind": "earn.deposit",
+        "status": "completed",
+        "environment": "sandbox",
+        "intent": {
+          "kind": "earn.deposit",
+          "strategyId": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
+          "source": {
+            "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
+          },
+          "amount": {
+            "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+            "value": "100"
+          },
+          "slippageBps": 50
+        },
+        "actionId": "opa_0c8e1f4a-6b2d-4e9a-8f3c-5d7b9a1e2c40",
+        "version": 1,
+        "nextAction": null,
+        "terms": {
+          "inputAmount": {
+            "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+            "value": "100"
+          },
+          "description": "Deposit into the strategy",
+          "expiresAt": null,
+          "estimate": {
+            "mint": "hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2",
+            "value": "98.41"
+          },
+          "minimum": {
+            "mint": "hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2",
+            "value": "97.92"
+          },
+          "fees": null,
+          "options": []
+        },
+        "buildRef": {
+          "kind": "earn.strategy_transaction",
+          "id": "earn_wallet_transaction_7d3e9b2a-1c5f-4a8e-b6d0-3f9a2e7c1b58"
         },
         "resourceRef": {
-          "kind": "example",
-          "id": "_example"
+          "kind": "earn.movement",
+          "id": "earn_movement_9a1c3e5b-7d2f-4b8a-a6e0-1c3d5f7b9e21"
         },
         "canCancel": false,
-        "cancelRequestedAt": "2026-01-01T00:00:00.000Z",
-        "error": {
-          "code": "example",
-          "message": "example"
-        },
+        "cancelRequestedAt": null,
+        "error": null,
         "result": {
-          "positionId": "position_example",
-          "signature": "example",
+          "positionId": "earn_position_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
+          "strategyId": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
+          "signature": "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW",
           "source": {
-            "ownerAddress": "11111111111111111111111111111111"
+            "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
           },
           "settledAmount": {
-            "mint": "example",
-            "value": "example"
+            "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+            "value": "100"
           },
           "settlementOutcome": "delivered"
         },
-        "createdAt": "2026-01-01T00:00:00.000Z",
-        "updatedAt": "2026-01-01T00:00:00.000Z"
+        "createdAt": "2026-11-20T15:00:00.000Z",
+        "updatedAt": "2026-11-20T15:00:41.000Z"
       }
     ],
-    "nextCursor": "example"
+    "nextCursor": null
   },
   "meta": {
     "requestId": "req_example",
@@ -39211,94 +39315,69 @@ r = requests.get("https://api.solana.com/v1/operations/operation_example",
 {
   "data": {
     "operation": {
-      "id": "_example",
+      "id": "op_5f2a9c1e-8d4b-4f6a-9b3e-2c7d1a0e6f84",
       "kind": "earn.deposit",
-      "status": "prepared",
+      "status": "completed",
       "environment": "sandbox",
       "intent": {
         "kind": "earn.deposit",
-        "strategyId": "strategy_example",
+        "strategyId": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
         "source": {
-          "ownerAddress": "11111111111111111111111111111111"
+          "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
         },
         "amount": {
-          "mint": "example",
-          "value": "example"
-        }
+          "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+          "value": "100"
+        },
+        "slippageBps": 50
       },
-      "actionId": "action_example",
+      "actionId": "opa_0c8e1f4a-6b2d-4e9a-8f3c-5d7b9a1e2c40",
       "version": 1,
-      "nextAction": {
-        "type": "sign_transaction",
-        "transaction": "example",
-        "lastValidBlockHeight": "example",
-        "expiresAt": "2026-01-01T00:00:00.000Z"
-      },
+      "nextAction": null,
       "terms": {
         "inputAmount": {
-          "mint": "example",
-          "value": "example"
+          "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+          "value": "100"
         },
-        "expiresAt": "2026-01-01T00:00:00.000Z",
+        "description": "Deposit into the strategy",
+        "expiresAt": null,
         "estimate": {
-          "mint": "example",
-          "value": "example"
+          "mint": "hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2",
+          "value": "98.41"
         },
         "minimum": {
-          "mint": "example",
-          "value": "example"
+          "mint": "hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2",
+          "value": "97.92"
         },
-        "fees": [
-          {
-            "mint": "example",
-            "value": "example"
-          }
-        ],
-        "options": [
-          {
-            "id": "_example",
-            "label": "example",
-            "settlement": "instant",
-            "estimatedSeconds": 1,
-            "amount": {
-              "mint": "example",
-              "value": "example"
-            },
-            "minimum": {
-              "mint": "example",
-              "value": "example"
-            }
-          }
-        ]
+        "fees": null,
+        "options": []
       },
       "buildRef": {
-        "kind": "example",
-        "id": "_example"
+        "kind": "earn.strategy_transaction",
+        "id": "earn_wallet_transaction_7d3e9b2a-1c5f-4a8e-b6d0-3f9a2e7c1b58"
       },
       "resourceRef": {
-        "kind": "example",
-        "id": "_example"
+        "kind": "earn.movement",
+        "id": "earn_movement_9a1c3e5b-7d2f-4b8a-a6e0-1c3d5f7b9e21"
       },
       "canCancel": false,
-      "cancelRequestedAt": "2026-01-01T00:00:00.000Z",
-      "error": {
-        "code": "example",
-        "message": "example"
-      },
+      "cancelRequestedAt": null,
+      "error": null,
       "result": {
-        "positionId": "position_example",
-        "signature": "example",
+        "positionId": "earn_position_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
+        "strategyId": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
+        "signature": "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW",
         "source": {
-          "ownerAddress": "11111111111111111111111111111111"
+          "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
         },
         "settledAmount": {
-          "mint": "example",
-          "value": "example"
+          "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+          "value": "100"
         },
         "settlementOutcome": "delivered"
       },
-      "createdAt": "2026-01-01T00:00:00.000Z",
-      "updatedAt": "2026-01-01T00:00:00.000Z"
+      "createdAt": "2026-11-20T15:00:00.000Z",
+      "updatedAt": "2026-11-20T15:00:41.000Z"
     }
   },
   "meta": {
@@ -39771,94 +39850,57 @@ r = requests.post("https://api.solana.com/v1/operations/operation_example/submit
 {
   "data": {
     "operation": {
-      "id": "_example",
+      "id": "op_5f2a9c1e-8d4b-4f6a-9b3e-2c7d1a0e6f84",
       "kind": "earn.deposit",
-      "status": "prepared",
+      "status": "queued",
       "environment": "sandbox",
       "intent": {
         "kind": "earn.deposit",
-        "strategyId": "strategy_example",
+        "strategyId": "earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
         "source": {
-          "ownerAddress": "11111111111111111111111111111111"
+          "ownerAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
         },
         "amount": {
-          "mint": "example",
-          "value": "example"
-        }
+          "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+          "value": "100"
+        },
+        "slippageBps": 50
       },
-      "actionId": "action_example",
+      "actionId": "opa_0c8e1f4a-6b2d-4e9a-8f3c-5d7b9a1e2c40",
       "version": 1,
       "nextAction": {
-        "type": "sign_transaction",
-        "transaction": "example",
-        "lastValidBlockHeight": "example",
-        "expiresAt": "2026-01-01T00:00:00.000Z"
+        "type": "wait",
+        "reason": "Execution queued"
       },
       "terms": {
         "inputAmount": {
-          "mint": "example",
-          "value": "example"
+          "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+          "value": "100"
         },
-        "expiresAt": "2026-01-01T00:00:00.000Z",
+        "description": "Deposit into the strategy",
+        "expiresAt": null,
         "estimate": {
-          "mint": "example",
-          "value": "example"
+          "mint": "hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2",
+          "value": "98.41"
         },
         "minimum": {
-          "mint": "example",
-          "value": "example"
+          "mint": "hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2",
+          "value": "97.92"
         },
-        "fees": [
-          {
-            "mint": "example",
-            "value": "example"
-          }
-        ],
-        "options": [
-          {
-            "id": "_example",
-            "label": "example",
-            "settlement": "instant",
-            "estimatedSeconds": 1,
-            "amount": {
-              "mint": "example",
-              "value": "example"
-            },
-            "minimum": {
-              "mint": "example",
-              "value": "example"
-            }
-          }
-        ]
+        "fees": null,
+        "options": []
       },
       "buildRef": {
-        "kind": "example",
-        "id": "_example"
+        "kind": "earn.strategy_transaction",
+        "id": "earn_wallet_transaction_7d3e9b2a-1c5f-4a8e-b6d0-3f9a2e7c1b58"
       },
-      "resourceRef": {
-        "kind": "example",
-        "id": "_example"
-      },
+      "resourceRef": null,
       "canCancel": false,
-      "cancelRequestedAt": "2026-01-01T00:00:00.000Z",
-      "error": {
-        "code": "example",
-        "message": "example"
-      },
-      "result": {
-        "positionId": "position_example",
-        "signature": "example",
-        "source": {
-          "ownerAddress": "11111111111111111111111111111111"
-        },
-        "settledAmount": {
-          "mint": "example",
-          "value": "example"
-        },
-        "settlementOutcome": "delivered"
-      },
-      "createdAt": "2026-01-01T00:00:00.000Z",
-      "updatedAt": "2026-01-01T00:00:00.000Z"
+      "cancelRequestedAt": null,
+      "error": null,
+      "result": null,
+      "createdAt": "2026-11-20T15:00:00.000Z",
+      "updatedAt": "2026-11-20T15:00:20.000Z"
     }
   },
   "meta": {
@@ -40326,94 +40368,70 @@ r = requests.post("https://api.solana.com/v1/operations/operation_example/refres
 {
   "data": {
     "operation": {
-      "id": "_example",
-      "kind": "earn.deposit",
+      "id": "op_b7e2d4a1-3c9f-4e6b-8a2d-6f1e3c5a7b90",
+      "kind": "earn.withdraw",
       "status": "prepared",
       "environment": "sandbox",
       "intent": {
-        "kind": "earn.deposit",
-        "strategyId": "strategy_example",
-        "source": {
-          "ownerAddress": "11111111111111111111111111111111"
-        },
+        "kind": "earn.withdraw",
+        "positionId": "earn_position_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
         "amount": {
-          "mint": "example",
-          "value": "example"
+          "kind": "all"
         }
       },
-      "actionId": "action_example",
-      "version": 1,
+      "actionId": "opa_8a0c2e4b-6d8f-4b1a-a3c5-7e9b1d3f5a77",
+      "version": 2,
       "nextAction": {
         "type": "sign_transaction",
-        "transaction": "example",
-        "lastValidBlockHeight": "example",
-        "expiresAt": "2026-01-01T00:00:00.000Z"
+        "transaction": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAQACBX6MCIdgv94d3c8ywX8gm4JC7lKq8TH6zYjQ6ixtCwbyAcUXmthoicMvwQoemkkh8VYuH2cWunAQDIuT/GkDUJ0KYgMMHq4BIvb2PBZ0fI2yv1bG0iLGqFi+JMFe0tIQCTtELLORIVfxOpM9ATQoLQMrX/7NAaLb8bd5BgjfAC6nCWPLASE2WfQBsHH1iKEwbap6S3HQJ5LgWwCcHCsv79/MSQ6SjNLjhzuzQ/yV2jMXnKYPTb9GwsNukSmdVdTmuQEEBAABAgMQ8iPGiVLh8rYA4fUFAAAAAAA=",
+        "lastValidBlockHeight": "312401250",
+        "expiresAt": null
       },
       "terms": {
         "inputAmount": {
-          "mint": "example",
-          "value": "example"
+          "mint": "hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2",
+          "value": "25.42"
         },
-        "expiresAt": "2026-01-01T00:00:00.000Z",
+        "description": "Direct withdrawal",
+        "expiresAt": null,
         "estimate": {
-          "mint": "example",
-          "value": "example"
+          "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+          "value": "25.81"
         },
         "minimum": {
-          "mint": "example",
-          "value": "example"
+          "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+          "value": "25.68"
         },
-        "fees": [
-          {
-            "mint": "example",
-            "value": "example"
-          }
-        ],
+        "fees": null,
         "options": [
           {
-            "id": "_example",
-            "label": "example",
+            "id": "direct",
+            "label": "Direct withdrawal",
             "settlement": "instant",
-            "estimatedSeconds": 1,
+            "estimatedSeconds": null,
+            "mechanism": "direct",
             "amount": {
-              "mint": "example",
-              "value": "example"
+              "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+              "value": "25.81"
             },
             "minimum": {
-              "mint": "example",
-              "value": "example"
+              "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+              "value": "25.68"
             }
           }
         ]
       },
       "buildRef": {
-        "kind": "example",
-        "id": "_example"
+        "kind": "earn.strategy_transaction",
+        "id": "earn_wallet_transaction_3c5e7a9b-2d4f-4c6a-8e0b-5a7c9e1b3d62"
       },
-      "resourceRef": {
-        "kind": "example",
-        "id": "_example"
-      },
+      "resourceRef": null,
       "canCancel": false,
-      "cancelRequestedAt": "2026-01-01T00:00:00.000Z",
-      "error": {
-        "code": "example",
-        "message": "example"
-      },
-      "result": {
-        "positionId": "position_example",
-        "signature": "example",
-        "source": {
-          "ownerAddress": "11111111111111111111111111111111"
-        },
-        "settledAmount": {
-          "mint": "example",
-          "value": "example"
-        },
-        "settlementOutcome": "delivered"
-      },
-      "createdAt": "2026-01-01T00:00:00.000Z",
-      "updatedAt": "2026-01-01T00:00:00.000Z"
+      "cancelRequestedAt": null,
+      "error": null,
+      "result": null,
+      "createdAt": "2026-11-21T09:30:00.000Z",
+      "updatedAt": "2026-11-21T09:30:12.000Z"
     }
   },
   "meta": {
@@ -40866,94 +40884,71 @@ r = requests.post("https://api.solana.com/v1/operations/operation_example/cancel
 {
   "data": {
     "operation": {
-      "id": "_example",
-      "kind": "earn.deposit",
-      "status": "prepared",
+      "id": "op_b7e2d4a1-3c9f-4e6b-8a2d-6f1e3c5a7b90",
+      "kind": "earn.withdraw",
+      "status": "cancelled",
       "environment": "sandbox",
       "intent": {
-        "kind": "earn.deposit",
-        "strategyId": "strategy_example",
-        "source": {
-          "ownerAddress": "11111111111111111111111111111111"
-        },
+        "kind": "earn.withdraw",
+        "positionId": "earn_position_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
         "amount": {
-          "mint": "example",
-          "value": "example"
+          "kind": "all"
         }
       },
-      "actionId": "action_example",
+      "actionId": "opa_4e6a8c2b-9d1f-4a3e-b5c7-0e2a4c6e8a13",
       "version": 1,
-      "nextAction": {
-        "type": "sign_transaction",
-        "transaction": "example",
-        "lastValidBlockHeight": "example",
-        "expiresAt": "2026-01-01T00:00:00.000Z"
-      },
+      "nextAction": null,
       "terms": {
         "inputAmount": {
-          "mint": "example",
-          "value": "example"
+          "mint": "hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2",
+          "value": "25.42"
         },
-        "expiresAt": "2026-01-01T00:00:00.000Z",
-        "estimate": {
-          "mint": "example",
-          "value": "example"
-        },
-        "minimum": {
-          "mint": "example",
-          "value": "example"
-        },
-        "fees": [
-          {
-            "mint": "example",
-            "value": "example"
-          }
-        ],
+        "description": "Choose a withdrawal route before reviewing its transaction",
+        "expiresAt": null,
+        "estimate": null,
+        "minimum": null,
+        "fees": null,
         "options": [
           {
-            "id": "_example",
-            "label": "example",
+            "id": "direct",
+            "label": "Direct withdrawal",
             "settlement": "instant",
-            "estimatedSeconds": 1,
+            "estimatedSeconds": null,
+            "mechanism": "direct",
             "amount": {
-              "mint": "example",
-              "value": "example"
+              "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+              "value": "25.81"
             },
             "minimum": {
-              "mint": "example",
-              "value": "example"
+              "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+              "value": "25.68"
             }
+          },
+          {
+            "id": "solver_queue:5:259200",
+            "label": "Solver queue (5 bps discount, 259200s window)",
+            "settlement": "delayed",
+            "estimatedSeconds": null,
+            "mechanism": "solver_queue",
+            "amount": {
+              "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+              "value": "25.80"
+            },
+            "minimum": null
           }
         ]
       },
       "buildRef": {
-        "kind": "example",
-        "id": "_example"
+        "kind": "earn.withdrawal_options",
+        "id": "choices_2b4d6f8a-1c3e-4a5b-9d7f-8e0a2c4e6a35"
       },
-      "resourceRef": {
-        "kind": "example",
-        "id": "_example"
-      },
+      "resourceRef": null,
       "canCancel": false,
-      "cancelRequestedAt": "2026-01-01T00:00:00.000Z",
-      "error": {
-        "code": "example",
-        "message": "example"
-      },
-      "result": {
-        "positionId": "position_example",
-        "signature": "example",
-        "source": {
-          "ownerAddress": "11111111111111111111111111111111"
-        },
-        "settledAmount": {
-          "mint": "example",
-          "value": "example"
-        },
-        "settlementOutcome": "delivered"
-      },
-      "createdAt": "2026-01-01T00:00:00.000Z",
-      "updatedAt": "2026-01-01T00:00:00.000Z"
+      "cancelRequestedAt": "2026-11-21T09:31:05.000Z",
+      "error": null,
+      "result": null,
+      "createdAt": "2026-11-21T09:30:00.000Z",
+      "updatedAt": "2026-11-21T09:31:05.000Z"
     }
   },
   "meta": {
