@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { assertFireblocksProposal } from "@sdp/custody/testing/fireblocks-proposal";
 import type { EarnRuntimeContext, EarnVaultInstruction } from "@sdp/earn/types";
 import { withMinimumRpcSlot } from "@sdp/rpc/read-context";
 import { HASTRA_DEPLOYMENTS } from "@sdp/types/hastra-programs";
@@ -420,6 +421,7 @@ describe("Hastra deposit", () => {
     expect(plan.cluster).toBe("mainnet-beta");
     expect(plan.assetIdentity).toEqual({ depositTokenMint: USDC, shareMint: DEPLOYMENT.primeMint });
     expect(plan.accepted).toEqual({ amount: "100" });
+    await assertFireblocksProposal(plan, OWNER);
     expect(plan.createsShareAccount).toBe(true);
     expect(plan.instructions.map((ix) => ix.programAddress)).toEqual([
       "ComputeBudget111111111111111111111111111111",
@@ -512,6 +514,7 @@ describe("Hastra DEX withdrawal", () => {
       HASTRA_SWAP_COMPUTE_UNIT_LIMIT
     );
     expect(instructionAmount(plan.instructions[5] as EarnVaultInstruction)).toBe(100_000_000n);
+    await assertFireblocksProposal(plan, OWNER);
     const transient = plan.instructions[5]?.accounts[6]?.address;
     expect(transient).toBeTruthy();
     expect(transient).not.toBe(ata(OWNER, DEPLOYMENT.wYldsMint));
@@ -696,6 +699,7 @@ describe("Hastra par redemption", () => {
     ]);
     expect(instructionAmount(plan.instructions[5] as EarnVaultInstruction)).toBe(1_600_000_000n);
     expect(instructionAmount(plan.instructions[8] as EarnVaultInstruction)).toBe(2_000_000_000n);
+    await assertFireblocksProposal(plan, OWNER);
     expect(plan.instructions[5]?.accounts[6]?.address).not.toBe(ata(OWNER, DEPLOYMENT.wYldsMint));
     expect(plan.instructions[6]?.accounts[1]?.address).toBe(ata(OWNER, DEPLOYMENT.wYldsMint));
   });

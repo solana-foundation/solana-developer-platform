@@ -154,6 +154,7 @@ const MODULE_METADATA = [
   },
   {
     name: "@sdp/hastra",
+    allowedTestDependencies: ["@sdp/custody"],
     directory: "packages/sdp-hastra",
     purpose:
       "Hastra PRIME mint/stake, Jupiter DEX exit, par-redemption lifecycle, and position plans.",
@@ -176,6 +177,7 @@ const MODULE_METADATA = [
   },
   {
     name: "@sdp/kamino",
+    allowedTestDependencies: ["@sdp/custody"],
     directory: "packages/sdp-kamino",
     purpose: "Kit-native Kamino K-Vault deposit/withdraw instruction plans over klend-sdk.",
     // The arrow points INWARD and only inward: this package depends on
@@ -188,18 +190,21 @@ const MODULE_METADATA = [
   },
   {
     name: "@sdp/jupiter-lend",
+    allowedTestDependencies: ["@sdp/custody"],
     directory: "packages/sdp-jupiter-lend",
     purpose: "Jupiter Lend Earn USDT deposit/withdraw plans over the official SDK.",
     allowedDependencies: ["@sdp/earn", "@sdp/rpc", "@sdp/types"],
   },
   {
     name: "@sdp/plume",
+    allowedTestDependencies: ["@sdp/custody"],
     directory: "packages/sdp-plume",
     purpose: "Plume RWA transaction admission, cross-chain settlement, and live positions.",
     allowedDependencies: ["@sdp/earn", "@sdp/payments", "@sdp/rpc", "@sdp/solana", "@sdp/types"],
   },
   {
     name: "@sdp/ondo",
+    allowedTestDependencies: ["@sdp/custody"],
     directory: "packages/sdp-ondo",
     purpose:
       "Ondo USDY secondary-market swap plans and position reads over an injected Jupiter port.",
@@ -213,6 +218,7 @@ const MODULE_METADATA = [
   },
   {
     name: "@sdp/veda",
+    allowedTestDependencies: ["@sdp/custody"],
     directory: "packages/sdp-veda",
     purpose:
       "Kit-native Veda SVM vault deposit, instant and queued withdrawal plans, plus position and lifecycle reads over @vedatech/svm-sdk.",
@@ -282,6 +288,7 @@ const MODULE_METADATA = [
   },
   {
     name: "@sdp/wisdomtree",
+    allowedTestDependencies: ["@sdp/custody"],
     directory: "packages/sdp-wisdomtree",
     purpose:
       "Kit-native WisdomTree Connect transfer plans (on-receipt subscription/redemption legs) and Token-2022 fund position reads.",
@@ -385,6 +392,7 @@ function readModules(repositoryRoot) {
       manifestPath,
       sourceDirectory: path.join(repositoryRoot, metadata.directory, "src"),
       declaredDependencies: getDeclaredDependencies(manifest),
+      runtimeDependencies: getDeclaredDependencies({ ...manifest, devDependencies: {} }),
     };
   });
 }
@@ -507,7 +515,13 @@ export function validateModuleBoundaries({ modules, sourceImports, appSourceRoot
       if (!moduleNames.has(dependencyName)) {
         continue;
       }
-      if (!module.allowedDependencies.includes(dependencyName)) {
+      if (
+        !module.allowedDependencies.includes(dependencyName) &&
+        !(
+          module.allowedTestDependencies?.includes(dependencyName) &&
+          !module.runtimeDependencies?.includes(dependencyName)
+        )
+      ) {
         errors.push(`${module.name} declares disallowed workspace dependency ${dependencyName}.`);
       }
     }
@@ -526,6 +540,17 @@ export function validateModuleBoundaries({ modules, sourceImports, appSourceRoot
     ) {
       errors.push(
         `${toPosixPath(sourceImport.filePath)} imports ${sourceImport.specifier} without declaring ${importedWorkspace}.`
+      );
+    }
+
+    if (
+      importedWorkspace &&
+      sourceImport.module.allowedTestDependencies?.includes(importedWorkspace) &&
+      !sourceImport.module.allowedDependencies.includes(importedWorkspace) &&
+      !/\.test\.[cm]?[jt]sx?$/.test(sourceImport.filePath)
+    ) {
+      errors.push(
+        `${toPosixPath(sourceImport.filePath)} imports test-only dependency ${importedWorkspace} outside a test.`
       );
     }
 
@@ -552,20 +577,26 @@ export function renderModuleMap(modules) {
     "## Dependency Direction",
     "",
     "- Shared packages point only toward lower-level shared packages.",
+    "- Test-only edges must be devDependencies and may be imported only from test files.",
     "- Applications compose shared packages and do not provide implementation imports to packages.",
-    "- `@sdp/api-integration` is the one test-only exception: it may use the explicit `@sdp/api/test-support` facade, never private API paths.",
+    "- `@sdp/api-integration` is the one application-import exception: it may use the explicit `@sdp/api/test-support` facade, never private API paths.",
     "",
     "## Modules",
     "",
-    "| Module | Purpose | Allowed workspace dependencies |",
-    "| --- | --- | --- |",
+    "| Module | Purpose | Allowed workspace dependencies | Test-only workspace dependencies |",
+    "| --- | --- | --- | --- |",
   ];
 
   for (const module of [...modules].sort((left, right) => left.name.localeCompare(right.name))) {
     const dependencies = module.allowedDependencies.length
       ? module.allowedDependencies.map((dependency) => `\`${dependency}\``).join(", ")
       : "None";
-    lines.push(`| \`${module.name}\` | ${module.purpose} | ${dependencies} |`);
+    const testDependencies = module.allowedTestDependencies?.length
+      ? module.allowedTestDependencies.map((dependency) => `\`${dependency}\``).join(", ")
+      : "None";
+    lines.push(
+      `| \`${module.name}\` | ${module.purpose} | ${dependencies} | ${testDependencies} |`
+    );
   }
 
   lines.push("", "## Declared Workspace Graph", "");

@@ -1,3 +1,4 @@
+import { assertFireblocksProposal } from "@sdp/custody/testing/fireblocks-proposal";
 import type { EarnRuntimeContext } from "@sdp/earn/types";
 import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
@@ -171,6 +172,7 @@ describe("buildVaultDeposit", () => {
     expect(plan.assetIdentity).toEqual({ depositTokenMint: USDC, shareMint: USDY });
     // Canonicalized to what the swap encodes: trailing zeroes dropped.
     expect(plan.accepted).toEqual({ amount: "100.5", minSharesOut: "87" });
+    await assertFireblocksProposal(plan, OWNER);
     expect(plan.createsShareAccount).toBe(true);
   });
 
@@ -260,6 +262,7 @@ describe("buildVaultWithdrawal", () => {
 
     expect(plan.assetIdentity).toEqual({ depositTokenMint: USDC, shareMint: USDY });
     expect(plan.accepted).toEqual({ shares: "50", minAmountOut: "57" });
+    await assertFireblocksProposal(plan, OWNER);
     expect(plan.createsShareAccount).toBeUndefined();
   });
 });

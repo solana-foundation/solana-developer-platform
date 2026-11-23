@@ -17,7 +17,7 @@ import { Label } from "@sdp/ui/label";
 import { Modal } from "@sdp/ui/modal";
 import { StatusText } from "@sdp/ui/status-text";
 import { Loader2Icon } from "lucide-react";
-import { type ChangeEvent, type FormEvent, useEffect, useMemo, useState } from "react";
+import { type ChangeEvent, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useSWRConfig } from "swr";
 import { EarnFlowStepper } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-flow-stepper";
 import { EarnFlowTransition } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-flow-transition";
@@ -41,9 +41,17 @@ import {
 } from "./earn-program-data";
 import { earnQueryKeys } from "./earn-query-key";
 import {
+  ASYNC_WITHDRAWAL_STOP_COPY,
+  type AsyncWithdrawalRecovery,
+  decideAsyncWithdrawalSubmit,
+  forgetAsyncWithdrawalShares,
+  type KeptAsyncWithdrawalRetry,
+  keptAsyncWithdrawalRetry,
+  recallLegacyAsyncWithdrawalKeptKey,
   vaultAsyncWithdrawalIdempotencyKeyStore,
   vaultAsyncWithdrawalRequestFingerprint,
 } from "./earn-vault-async-withdrawal-tracking";
+import { KeptAsyncAttemptNotice } from "./earn-vault-kept-attempt-notice";
 import type { VaultSubmissionObserver } from "./earn-vault-movement";
 import {
   earnVaultParRedemptionStatusPresentation,
@@ -249,45 +257,91 @@ function useParRedemptionPreview(
   return { preview, loading, error, setError };
 }
 
+/** What one confirm on the review step sends, decided once at submit. */
+interface ParRedemptionSubmitIntent {
+  /** The review's approved terms — the kept request a confirm promised to resubmit. */
+  approvedTerms: KeptAsyncWithdrawalRetry | undefined;
+  /** The typed-quantity fingerprint; `undefined` only while the form is invalid, which disables the confirm. */
+  fingerprint: string | undefined;
+  /** The body a FRESH key sends: the live share derivation, or the typed held-intermediate amount. */
+  freshBody: EarnVaultParRedemptionTermsRequest | null;
+  preview: EarnVaultParRedemptionPreview | null;
+}
+
 function useParRedemptionSubmission(options: {
-  onSubmissionStart?: VaultSubmissionObserver;
   custodyWalletId: string;
+  onRecoveryInvalidated: () => void;
   onRequested?: (request: EarnVaultWithdrawalRequestRecord) => void;
+  onSubmissionStart?: VaultSubmissionObserver;
   projectId: string | null;
+  recovery: AsyncWithdrawalRecovery | undefined;
   setError: (error: string | null) => void;
 }) {
   const t = useTranslations();
   const { mutate } = useSWRConfig();
   const [submitting, setSubmitting] = useState(false);
   const [outcome, setOutcome] = useState<EarnVaultQueuedWithdrawalOutcome | null>(null);
+  // A synchronous double-press guard: `submitting` alone leaves the window
+  // between the click and the re-render open to a second submit.
+  const submittingRef = useRef(false);
 
-  async function submit(
-    input: EarnVaultParRedemptionTermsRequest | null,
-    preview: EarnVaultParRedemptionPreview | null
-  ) {
-    if (!input || !preview || preview.blockingIssues.length > 0) return;
+  async function submit(intent: ParRedemptionSubmitIntent) {
+    if (submittingRef.current) return;
+    if (!intent.freshBody || !intent.preview || intent.preview.blockingIssues.length > 0) return;
+    if (intent.fingerprint === undefined) return;
     setSubmitting(true);
+    submittingRef.current = true;
     const finishSubmission = options.onSubmissionStart?.(options.custodyWalletId);
     options.setError(null);
     try {
-      const fingerprint = vaultAsyncWithdrawalRequestFingerprint({
-        projectId: options.projectId,
-        positionId: input.positionId,
-        ...(input.intermediateAmount === undefined
-          ? { shares: input.shares }
-          : { intermediateAmount: input.intermediateAmount }),
-        route: { kind: "operator_redemption" },
+      // Everything between the confirm click and the money-moving POST that
+      // can stop the submission resolves WITHOUT yielding, and the claim
+      // follows in the same synchronous block — THE REPLAY PATH MUST NOT
+      // YIELD (see `resolveSubmitIntent` in the instant exit modal): a kept
+      // key's confirm is a promise to resubmit THAT attempt, and an await in
+      // between is a gap in which the first attempt's late answer can retire
+      // the key — the claim would then mint a second one and the API would
+      // see a second escrow. The kept-key decision is ONE copy for both
+      // asynchronous modals (see `decideAsyncWithdrawalSubmit`); the
+      // held-intermediate route needs none of it (its body IS its typed
+      // input), and the helper sends it verbatim.
+      const decision = decideAsyncWithdrawalSubmit({
+        approvedTerms: intent.approvedTerms,
+        fingerprint: intent.fingerprint,
+        freshBody: intent.freshBody,
+        recovery: options.recovery,
       });
-      const { key, persisted } = vaultAsyncWithdrawalIdempotencyKeyStore.claim(fingerprint);
+      if (decision.kind === "stop") {
+        if (decision.reason === "recoverySpent") options.onRecoveryInvalidated();
+        options.setError(t(ASYNC_WITHDRAWAL_STOP_COPY[decision.reason]));
+        return;
+      }
+      const { key, persisted } = vaultAsyncWithdrawalIdempotencyKeyStore.claim(
+        decision.fingerprint
+      );
       if (!persisted) {
         options.setError(t("DashboardEarn.intentStorageUnavailable"));
         return;
       }
-      const result = await createEarnVaultWithdrawalRequest(input, key);
+      const result = await createEarnVaultWithdrawalRequest(decision.body, key);
       // A withdrawal request moves money: an unknown outcome or a reused key
       // keeps the key, so the next press is answered under it.
       const answer = fetchResultAnswer(result);
-      settleMoneyIdempotencyKey(vaultAsyncWithdrawalIdempotencyKeyStore, fingerprint, key, answer);
+      const retired = settleMoneyIdempotencyKey(
+        vaultAsyncWithdrawalIdempotencyKeyStore,
+        decision.fingerprint,
+        key,
+        answer
+      );
+      // A retired key can never be replayed, so its remembered shares are
+      // dead weight the next fresh derivation must not inherit; and an
+      // adopted attempt's own answer spent this recovery — re-scan for the
+      // next-oldest kept attempt, if any. A key kept under an UNKNOWN answer
+      // leaves both alone, so a retry replays the same attempt.
+      if (retired) {
+        if (!decision.intermediate) forgetAsyncWithdrawalShares(decision.fingerprint);
+        if (decision.adopted) options.onRecoveryInvalidated();
+      }
       const uncertain = uncertainMoneyAnswerMessage(answer);
       if (result.ok) {
         setOutcome(result.data);
@@ -300,11 +354,12 @@ function useParRedemptionSubmission(options: {
       }
     } finally {
       finishSubmission?.();
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }
 
-  return { submitting, outcome, submit };
+  return { outcome, submit, submitting };
 }
 
 /**
@@ -560,6 +615,8 @@ function ParRedemptionReview({
   onBack,
   onSubmit,
   preview,
+  savedTerms,
+  shareMint,
   source,
   submitting,
 }: {
@@ -568,6 +625,9 @@ function ParRedemptionReview({
   onBack: () => void;
   onSubmit: () => void;
   preview: EarnVaultParRedemptionPreview | null;
+  /** The saved request this review promises a confirm will resubmit, if any. */
+  savedTerms: KeptAsyncWithdrawalRetry | undefined;
+  shareMint: string;
   source: EarnVaultParRedemptionSource;
   submitting: boolean;
 }) {
@@ -617,6 +677,9 @@ function ParRedemptionReview({
           {t("DashboardEarn.parRedemption.belowBatchMinimum")}
         </Callout>
       ) : null}
+      {savedTerms ? (
+        <KeptAsyncAttemptNotice shareMint={shareMint} shares={savedTerms.shares} />
+      ) : null}
       <p className="mt-4 text-meta text-tertiary">{t(PAR_SOURCE_COPY[source].reviewNotice)}</p>
       {error ? <EarnErrorNote message={error} /> : null}
       <div className="mt-6 flex gap-2">
@@ -652,6 +715,8 @@ function ParRedemptionForm({
   onSubmit,
   overAvailableAmount,
   preview,
+  savedTerms,
+  shareMint,
   source,
   step,
   submitting,
@@ -673,6 +738,8 @@ function ParRedemptionForm({
   onSubmit: () => void;
   overAvailableAmount: boolean;
   preview: EarnVaultParRedemptionPreview | null;
+  savedTerms: KeptAsyncWithdrawalRetry | undefined;
+  shareMint: string;
   source: EarnVaultParRedemptionSource;
   step: FormStep;
   submitting: boolean;
@@ -710,6 +777,8 @@ function ParRedemptionForm({
           onBack={onBack}
           onSubmit={onSubmit}
           preview={preview}
+          savedTerms={savedTerms}
+          shareMint={shareMint}
           source={source}
           submitting={submitting}
         />
@@ -741,13 +810,93 @@ export function EarnVaultParRedemptionModal({
     [position, belowMinimum, intermediateAmount, overAvailableAmount, shares]
   );
   const { preview, loading, error, setError } = useParRedemptionPreview(input, step === "review");
+  // Mount-time SNAPSHOT of the previous build's unresolved attempt on this
+  // exit (see `recallLegacyAsyncWithdrawalKeptKey`) — SHARES sources only:
+  // the held-intermediate route's keys keep the previous build's identity,
+  // so nothing here needs adopting for them. The scan runs once, so what
+  // the review surfaces and what the submit adopts is the same attempt —
+  // never a silent mid-session re-scan that could submit shares the
+  // customer never saw. `undefined` when nothing legacy is kept.
+  const [recovery, setRecovery] = useState(() =>
+    source === "shares"
+      ? recallLegacyAsyncWithdrawalKeptKey({
+          positionId: position.id,
+          projectId,
+          routeKind: "operator_redemption",
+        })
+      : undefined
+  );
+
+  // Re-scan for the next-oldest kept legacy attempt, if any. Only ever runs
+  // after a resolution the customer watched — never silently ahead of an
+  // unreviewed submit (see the mount-time snapshot above).
+  function rescanRecovery(): void {
+    setRecovery(
+      source === "shares"
+        ? recallLegacyAsyncWithdrawalKeptKey({
+            positionId: position.id,
+            projectId,
+            routeKind: "operator_redemption",
+          })
+        : undefined
+    );
+  }
+
   const { submitting, outcome, submit } = useParRedemptionSubmission({
-    onSubmissionStart,
     custodyWalletId: position.custodyWalletId,
+    onRecoveryInvalidated: rescanRecovery,
     onRequested,
+    onSubmissionStart,
     projectId,
+    recovery,
     setError,
   });
+
+  // The typed-quantity fingerprint, ONE definition for the review's
+  // saved-terms read and the submit's key resolution: whatever the review
+  // resolves from it, the submit resolves the same (the instant exit modal's
+  // mirror). A shares redemption types dollars and derives the share intent
+  // from the live position value — the typed amount is what stays in the
+  // fingerprint. The held-intermediate route types the wire quantity itself;
+  // its identity keeps the previous build's shape (see the fingerprint).
+  const amountValidation = validateVaultWithdrawalAmount(amount);
+  const typedAmount =
+    amountValidation.kind === "valid" ? amountValidation.canonicalAmount : undefined;
+  let typedFingerprint: string | undefined;
+  if (typedAmount !== undefined) {
+    switch (source) {
+      case "shares":
+        typedFingerprint = vaultAsyncWithdrawalRequestFingerprint({
+          amount: typedAmount,
+          positionId: position.id,
+          projectId,
+          route: { kind: "operator_redemption" },
+        });
+        break;
+      case "intermediate":
+        typedFingerprint = vaultAsyncWithdrawalRequestFingerprint({
+          intermediateAmount: typedAmount,
+          positionId: position.id,
+          projectId,
+          route: { kind: "operator_redemption" },
+        });
+        break;
+      default: {
+        const exhaustive: never = source;
+        throw new Error(`Unhandled par-redemption source: ${exhaustive}`);
+      }
+    }
+  }
+
+  // The saved request THIS build's kept key would replay, read fresh each
+  // render (see `keptAsyncWithdrawalRetry`): the review presents it, and the
+  // confirm hands it back to the submit — the button approves the terms it
+  // displayed. The legacy adoption outranks this build's own kept key (the
+  // resolver adopts it first), so it is the terms the review shows when both
+  // are kept. The held-intermediate route has no saved-terms read at all:
+  // its request IS the typed input the rows already show.
+  const savedTerms =
+    source === "shares" ? (recovery ?? keptAsyncWithdrawalRetry(typedFingerprint)) : undefined;
   const positionName = position.label || shortenMarketAddress(position.providerReference);
   const modalLabel = t(PAR_SOURCE_COPY[source].title, { position: positionName });
 
@@ -790,9 +939,18 @@ export function EarnVaultParRedemptionModal({
               onMax={() => {
                 if (availableAmount) setAmount(availableAmount);
               }}
-              onSubmit={() => void submit(input, preview)}
+              onSubmit={() =>
+                void submit({
+                  approvedTerms: savedTerms,
+                  fingerprint: typedFingerprint,
+                  freshBody: input,
+                  preview,
+                })
+              }
               overAvailableAmount={amountState.overAvailableAmount}
               preview={preview}
+              savedTerms={savedTerms}
+              shareMint={position.shareMint}
               source={source}
               step={step}
               submitting={submitting}
