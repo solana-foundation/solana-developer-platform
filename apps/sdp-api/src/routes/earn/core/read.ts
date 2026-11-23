@@ -34,10 +34,7 @@ import {
   type VaultPositionCursor,
 } from "@/routes/earn/handlers/vault-position-cursor";
 import {
-  closeEmptyHydratedPositions,
   type HydratedVaultPositionValue,
-  hydrateVaultPositions,
-  markVaultPositionRowsRead,
   vaultPositionDiscoveryScope,
 } from "@/routes/earn/handlers/vault-position-hydration";
 import {
@@ -61,6 +58,11 @@ import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import type { Env } from "@/types/env";
 import { parseDiscoveredEarnPositionLocator } from "./discovered-position";
 import { buildDiscoveredEarnPositionRows } from "./position-discovery";
+import {
+  earnStrategyIdsByInstrument,
+  hydrateEarnPositionRows,
+  projectEarnCorePosition,
+} from "./position-hydration";
 import { earnDiscoveryQuerySchema, earnPositionsQuerySchema } from "./read-schemas";
 
 /** The validated ingested strategy catalogue, without provider I/O. */
@@ -328,81 +330,19 @@ async function loadEarnPositions(
       : [];
   const discoveredIds = new Set(discoveredRows.map((row) => row.id));
   const candidateRows = [...page.rows, ...discoveredRows].sort(newestFirst);
-  const rowsReadAt = markVaultPositionRowsRead();
   const addresses = new Map(wallets.map((wallet) => [wallet.id, wallet.publicKey]));
-  const holdings: EarnPositionHolding[] = candidateRows.map((row) => {
-    const ownerAddress = row.custody_wallet_id
-      ? addresses.get(row.custody_wallet_id)
-      : row.owner_address;
-    if (!ownerAddress || !row.vault_address || !row.token_mint || !row.share_mint)
-      throw internalError("Earn position is missing its instrument identity");
-    return {
-      id: row.id,
-      provider: row.provider,
-      providerReference: row.vault_address,
-      label: row.label,
-      ownerAddress,
-      tokenMint: row.token_mint,
-      shareMint: row.share_mint,
-      shareAtaRentFunder: row.share_ata_rent_funder,
-      costBasisKnown: row.cost_basis_known !== false,
-      createdAt: row.created_at,
-      closedAt: row.closed_at,
-      updatedAt: row.updated_at,
-    };
-  });
-  // Both owner shapes share provider batching and identity validation. The kind
-  // affects telemetry only; no provider admission gate belongs on this read.
   const discoveryObservations = {
     completedScopes: new Set<string>(),
     rejectedPositionIds: new Set<string>(),
   };
-  const live = await hydrateVaultPositions(
-    c,
-    holdings.map((holding) => ({
-      id: holding.id,
-      provider: holding.provider,
-      providerReference: holding.providerReference,
-      ownerAddress: holding.ownerAddress,
-      tokenMint: holding.tokenMint,
-      shareMint: holding.shareMint,
-    })),
-    {
-      sourceType: includeAddress ? "address" : "wallet",
-      rowsReadAt,
-      minimumSlotByPositionId: balanceContext?.minimumSlotByPositionId,
-      discoverAll: query.discover,
-      discoveryObservations: query.discover ? discoveryObservations : undefined,
-    }
-  );
-  await closeEmptyHydratedPositions(
-    (positionId, observedUpdatedAt) =>
-      repo.closeVaultPositionIfEmpty({
-        positionId,
-        organizationId: auth.organizationId,
-        observedUpdatedAt,
-      }),
-    holdings.filter((holding) => !discoveredIds.has(holding.id)),
-    live
-  );
-  // One DB lookup for stable strategy IDs, including delisted metadata. Missing
-  // catalogue entries never hide a position or prevent an exit.
-  const strategyIds = new Map(
-    strategies.flatMap((strategy) =>
-      strategy.deposit_mints.map(
-        (mint) =>
-          [
-            JSON.stringify([
-              strategy.provider,
-              strategy.provider_reference,
-              strategy.share_mint,
-              mint,
-            ]),
-            strategy.id,
-          ] as const
-      )
-    )
-  );
+  const { holdings, live } = await hydrateEarnPositionRows(c, candidateRows, addresses, {
+    sourceType: includeAddress ? "address" : "wallet",
+    minimumSlotByPositionId: balanceContext?.minimumSlotByPositionId,
+    discoveredIds,
+    discoverAll: query.discover,
+    discoveryObservations: query.discover ? discoveryObservations : undefined,
+  });
+  const strategyIds = earnStrategyIdsByInstrument(strategies);
   const holdingsById = new Map(holdings.map((holding) => [holding.id, holding]));
   const observedRows = candidateRows.filter((row) => {
     if (!discoveredIds.has(row.id)) return true;
@@ -425,38 +365,11 @@ async function loadEarnPositions(
   const positions: EarnCorePosition[] = visible.map((row) => {
     const holding = holdingsById.get(row.id);
     if (!holding) throw internalError("Earn position is missing its instrument identity");
-    const hydrated = live.get(row.id);
-    return {
-      id: row.id,
-      source: row.custody_wallet_id
-        ? { walletId: row.custody_wallet_id }
-        : { ownerAddress: holding.ownerAddress },
-      strategyId:
-        row.strategy_id ??
-        strategyIds.get(
-          JSON.stringify([
-            row.provider,
-            holding.providerReference,
-            holding.shareMint,
-            holding.tokenMint,
-          ])
-        ),
-      provider: row.provider,
-      providerReference: holding.providerReference,
-      label: row.label,
-      tokenMint: holding.tokenMint,
-      shareMint: holding.shareMint,
-      createdAt: discoveredIds.has(row.id) ? null : row.created_at,
-      discovered: discoveredIds.has(row.id) || undefined,
-      costBasisKnown: row.cost_basis_known !== false,
-      closedAt: row.closed_at,
-      feeSponsored: row.custody_wallet_id !== null && feeSponsored,
-      shares: hydrated?.shares,
-      withdrawableShares: hydrated?.withdrawableShares,
-      unlockTimestamp: hydrated?.unlockTimestamp,
-      tokenValue: hydrated?.tokenValue,
-      parIntermediate: hydrated?.parIntermediate,
-    };
+    return projectEarnCorePosition(row, holding, live.get(row.id), {
+      discovered: discoveredIds.has(row.id),
+      feeSponsored,
+      strategyIds,
+    });
   });
   const last = visible.at(-1);
   return {

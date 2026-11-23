@@ -4,8 +4,8 @@ Status: implementation under review, 18 November 2026. **Critical**: this
 changes fund movement, signing authorization and recovery. The contract follows
 the existing module tags and release-channel rules.
 
-Earn aggregates provider strategies behind four core actions. Treasury and
-Embedded Yield use the same contract. Providers supply the underlying products;
+Earn aggregates provider strategies through discovery, positions, deposits and
+withdrawals. Treasury and Embedded Yield use the same contract. Providers supply the underlying products;
 SDP supplies discovery, wallet integration, execution tracking and recovery.
 
 ## Contract
@@ -14,6 +14,7 @@ SDP supplies discovery, wallet integration, execution tracking and recovery.
 | ------------------------------------------- | ------------------------------------------------------------------- |
 | `GET /v1/earn/discovery`                    | Filter the strategy catalogue and its rates/capabilities.           |
 | `GET /v1/earn/positions`                    | Read tracked or explicitly discovered holdings and optional totals. |
+| `GET /v1/earn/positions/{positionId}`       | Read one visible position with the same live valuation rules.       |
 | `POST /v1/earn/deposit`                     | Prepare a deposit using a strategy, source and token amount.        |
 | `POST /v1/earn/withdraw`                    | Prepare an exit using a position and explicit quantity.             |
 | `GET /v1/operations`                        | List scoped activity and outstanding actions.                       |
@@ -25,7 +26,7 @@ SDP supplies discovery, wallet integration, execution tracking and recovery.
 Six independent WisdomTree onboarding operations remain for customer
 verification, documents, corrections and wallet registration. They are
 eligibility requirements, not another deposit or withdrawal API. The resulting
-surface has **15 method/path pairs: ten under Earn and five shared operations**.
+surface has **16 method/path pairs: eleven under Earn and five shared operations**.
 No obsolete Earn URLs, redirects or retirement stubs remain.
 
 ## Vocabulary
@@ -40,7 +41,7 @@ API clients normally supply an SDP API key and `source: { ownerAddress }`, using
 any compatible Solana wallet. Preparation returns an unsigned transaction; the
 caller signs its unchanged message with the prepared owner and submits base64
 `signedTransaction`. No SDP wallet record or provider connection is required.
-An existing connected wallet's `source: { walletId }` is optional and uses its
+An SDP custody wallet's `source: { walletId }` is optional and uses its
 configured signing policy. Neither source creates another API family or
 synchronous execution path. Provider adapters can retain exact protocol terms
 such as vault, reserve and redemption order.
@@ -70,8 +71,8 @@ middleware, automatic OPTIONS, dashboard proxies and cron routes.
 | **Total**                                           |            **59** | **Remove 53 old routes; retain six eligibility routes.** |
 
 The baseline published 21 partner operations on beta/experimental. Stable
-published none. The replacement uses the same publication rules for its four
-core actions and five shared operation routes. Public OpenAPI, reference,
+published none. The replacement uses the same publication rules for its five
+core endpoints and five shared operation routes. Public OpenAPI, reference,
 playground, Postman and AI resources follow the existing module tags and release
 channel; there is no rewrite-specific visibility override.
 
@@ -103,11 +104,12 @@ the dashboard and demo to the core contract.
 3. Review the estimate, enforceable minimum and known fees. The caller signs the
    exact returned transaction with the prepared owner and submits its signed
    bytes. Submit returns `202` after durable acceptance and never prepares
-   another action. An optional connected wallet instead authorizes the worker
+   another action. An optional SDP custody wallet instead authorizes the worker
    to request signing through its configured provider.
 4. The worker broadcasts and tracks the same transaction. Poll the operation
-   through submission and settlement. Delayed settlement needs no separate claim
-   endpoint. Once submit is accepted, refresh and cancellation are unavailable.
+   through submission and settlement. A queued exit stays `submitted` until its
+   request is verified, then becomes `settling` while payout is pending. Delayed
+   settlement needs no separate claim endpoint. Once submit is accepted, refresh and cancellation are unavailable.
 
 Configured-wallet signing uses `awaiting_signature`. When a person must act in
 the wallet provider, `nextAction: sign_in_provider` supplies instructions such
@@ -234,6 +236,24 @@ on the provider SDK and holdings. Tracked positions retain batched reads and
 minimum-slot/finality checks. Identical summary requests can share in-flight
 reads only after fresh access checks and within the exact tenant/source scope;
 movement-triggered fresh reads cannot join stale work.
+
+A position detail resolves one visible stored ID or discovered selector, then
+uses the list's hydration and projection. It never scans the full catalogue or
+imports a holding. Stored IDs use the same activated-position and signed-ledger
+visibility as the list. Discovered selectors verify their source before one
+targeted provider read. Unknown live values remain unavailable; only a proven
+empty discovered holding is `404`. A provider read failure is `503` for a
+selector whose holding cannot yet be verified.
+
+By default the activity feed polls active work and the newest 50 history
+entries. Older pages load only on request. Expanded history keeps its snapshot
+and cursor while active work stays live; Refresh returns to the newest page. A pending row that leaves the active query stays
+mounted until its existing detail poll observes completion, including when it
+is older than the current history page. With 1,000 terminal movement-backed
+operations and no active work, steady-state polling drops from ten HTTP calls
+and about 2,000 projection DB reads to two HTTP calls and about 100 projection
+DB reads. These counts exclude unchanged authorization and list queries and
+add no Solana RPC calls. The active filter uses a partial project-scoped index.
 
 Withdrawal planning quotes each route once and reuses its protection floor.
 Token-sized exits add one cold share-mint precision read, zero warm reads;

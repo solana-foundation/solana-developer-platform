@@ -12,7 +12,9 @@ import {
   operationsListQuerySchema,
 } from "@/routes/operations/schemas";
 import { earnErrorResponses } from "./earn-errors";
+import { EARN_GROUPS } from "./earn-groups";
 import {
+  DOCS_GROUP,
   jsonContent,
   projectScopeHeaders,
   projectScopeWithDeclaredIdempotencyHeaders,
@@ -23,7 +25,8 @@ export function registerOperationsPaths(registry: OpenAPIRegistry, publicOnly = 
   const security: Array<Record<string, string[]>> = publicOnly
     ? [{ apiKeyAuth: [] }]
     : [{ apiKeyAuth: [] }, { clerkBearerAuth: [] }];
-  const common = { tags: ["Operations"], security };
+  // Operations track Earn's actions, so the reference nests them under Earn as their own group.
+  const common = { tags: ["Earn"], [DOCS_GROUP]: EARN_GROUPS.operations, security };
   const response = successResponseSchema(operationResponseSchema);
   registry.registerPath({
     ...common,
@@ -32,7 +35,7 @@ export function registerOperationsPaths(registry: OpenAPIRegistry, publicOnly = 
     operationId: "listOperations",
     summary: "List operations",
     description:
-      "Lists operation history in the exact authenticated project and environment. Pass ownerAddress to list your wallet's operations; no SDP wallet registration is required. Use walletId instead for an existing connected wallet. With neither filter, the feed contains visible connected-wallet operations. Filters apply before cursor pagination. Requires earn.read for the initially supported Earn operation kinds. Reading never starts execution.",
+      "Lists deposits and withdrawals in the authenticated project and environment, newest first. Pass ownerAddress to list a wallet's operations; the wallet needs no registration in SDP. Without a filter, the list holds only SDP custody wallet operations, and walletId narrows it to one. Use status=active to list all nonterminal actions, including preparations, without scanning completed history. Use an exact status for that state only, or omit status for full history. Every filter applies before cursor pagination. Settlement projection may already show a newer terminal result than the stored status selected by a filter. Requires earn.read. Reading never starts execution.",
     request: { headers: projectScopeHeaders, query: operationsListQuerySchema },
     responses: {
       200: {
@@ -49,7 +52,7 @@ export function registerOperationsPaths(registry: OpenAPIRegistry, publicOnly = 
     operationId: "getOperation",
     summary: "Get an operation",
     description:
-      "Returns current terms, the exact actionId/version, nextAction and authoritative settlement projection. Poll this route after submission or reload. nextAction sign_transaction asks your wallet to sign the supplied transaction before calling submit. sign_in_provider only applies when an explicitly selected connected wallet requires signing in its provider; follow its instructions and keep polling without submitting again. nextAction refresh rebuilds an unsigned preparation only before submission is accepted; wait retains the same unresolved attempt. queued, awaiting_signature, submitted and settling are nonterminal. completed means verified delivery or an explicitly selected recovery; result.settlementOutcome recovered identifies returned strategy shares, never withdrawal proceeds; cancelled means a verified cancellation outcome. canCancel states whether this preparation can still be cancelled; earn.manage is also required. cancelRequestedAt alone is pending intent. result fields stay null until their authoritative source is known. Requires earn.read and source visibility.",
+      "Returns an operation's status, terms, current actionId and version, nextAction and settlement result. Poll it after submitting. Each nextAction type says what to do next: sign_transaction asks the owner to sign, select_option asks you to choose a route with refresh, and wait means keep polling the same attempt. queued, awaiting_signature, submitted and settling are in progress. For a queued withdrawal, submitted tracks request confirmation; settling tracks the provider payout after the request is observed. completed means verified delivery; for a selected recovery, result.settlementOutcome recovered means returned strategy shares, never withdrawal proceeds. cancelled means a verified cancellation. canCancel says whether the preparation can still be cancelled, which also needs earn.manage; cancelRequestedAt alone is pending intent. result fields stay null until their source is known. Requires earn.read and source visibility.",
     request: { headers: projectScopeHeaders, params: operationIdParamsSchema },
     responses: {
       200: { description: "Current operation", content: jsonContent(response) },
@@ -59,11 +62,11 @@ export function registerOperationsPaths(registry: OpenAPIRegistry, publicOnly = 
   for (const action of ["submit", "refresh", "cancel"] as const) {
     const descriptions = {
       submit:
-        "Submits the exact reviewed transaction for asynchronous processing. Pass actionId and version. Route selection and transaction preparation never happen here. For source.ownerAddress, supply signedTransaction as base64 after signing the prepared transaction in your own wallet; no SDP wallet or provider connection is needed. SDP verifies the exact stored message and required signatures. For source.walletId, omit signedTransaction; the worker requests signing through that connected wallet's configured provider. The request durably records authorization and returns 202. A worker broadcasts and tracks the transaction asynchronously. Provider signing may return sign_in_provider instructions; it never requires a second submit. Stale actions return 409. Requires earn.execute and the current action principal. Before a new signing or broadcast effect, the worker rechecks the active credential, current execute permission, project membership and wallet binding. Losing authority stops new effects while observation of existing attempts continues; it never proves a transaction did not execute.",
+        "Submits the reviewed transaction for asynchronous broadcast and returns 202. Pass the current actionId and version and, for an ownerAddress source, signedTransaction: the prepared transaction signed in the owner's wallet, base64-encoded. SDP verifies the exact stored message and required signatures and records the authorization; a worker then broadcasts and tracks the transaction, so poll GET /v1/operations/{operationId}. Stale actions return 409. Requires earn.execute and the current action principal. Before each new signing or broadcast effect, the worker rechecks the credential, execute permission, project membership and wallet binding; losing authority stops new effects but never proves a transaction did not execute. For an SDP custody wallet, omit signedTransaction: the worker requests the custody provider's signature, which can return sign_in_provider instructions but never needs a second submit.",
       refresh:
-        "Rebuilds an unsigned transaction and its terms before submission is accepted. It never signs, broadcasts or cancels a transaction. Pass the current actionId and version. For nextAction select_option, also pass an optionId advertised in terms.options; the selected route remains fixed on later refreshes. Review the new action/version and sign it before submit. After any POST /v1/operations/{operationId}/submit acceptance, new refresh requests return 409 CONFLICT with details.reason operation_already_submitted, including definitive failure; track that operation to its outcome, and start a new deposit or withdrawal only after a known failure. An exposed owner transaction without a known outcome returns 409 with details.reason wallet_transaction_outcome_unknown because SDP cannot invalidate bytes held by the caller. Timeout, blockhash expiry and missing RPC history alone never authorize replacement. An exact Idempotency-Key replay returns its original response without rebuilding; GET returns the current operation state. Requires earn.execute and fresh source admission.",
+        "Prepares a new unsigned transaction and terms before submission; it never signs, broadcasts or cancels. Pass the current actionId and version, plus an optionId from terms.options when nextAction is select_option; the chosen route stays fixed on later refreshes. Review the returned action and sign it before submitting. After any accepted submit, refresh returns 409 CONFLICT with details.reason operation_already_submitted, even after a definitive failure: track that operation, and start a new deposit or withdrawal only after a known failure. Once an owner transaction is exposed for signing, refresh returns 409 with details.reason wallet_transaction_outcome_unknown, because SDP cannot invalidate bytes the owner holds. Timeout, blockhash expiry and missing RPC history never authorize a replacement. Replaying the original Idempotency-Key returns the original response without rebuilding; GET returns the current state. Requires earn.execute and fresh source admission.",
       cancel:
-        "Cancels a preparation only before any submission has been accepted. After POST /v1/operations/{operationId}/submit is accepted, new cancellation requests return 409 CONFLICT with details.reason operation_already_submitted, including while queued or waiting for a provider signature. It never cancels an onchain transaction, revokes a signature or cancels a previously submitted queued withdrawal. An owner-address transaction already exposed for signing returns 409 with details.reason wallet_transaction_outcome_unknown because SDP cannot invalidate bytes held by the caller. Closing your own wallet signing prompt needs no API cancellation. A successful cancellation marks only an undispatched preparation cancelled. Requires earn.manage and current source authority.",
+        "Cancels a preparation while canCancel is true, before any submission has been accepted. Otherwise it returns 409 CONFLICT: details.reason operation_already_submitted after an accepted submit, including while queued or waiting for a signature; wallet_transaction_outcome_unknown once an owner transaction is exposed for signing, because SDP cannot invalidate bytes the owner holds; operation_not_cancellable for any other state. It never cancels an onchain transaction, revokes a signature or cancels a submitted queued withdrawal, and closing your own wallet's signing prompt needs no API call. Success marks only an undispatched preparation cancelled. Requires earn.manage and current source authority.",
     };
     registry.registerPath({
       ...common,
@@ -95,12 +98,12 @@ export function registerOperationsPaths(registry: OpenAPIRegistry, publicOnly = 
                 example:
                   action === "submit"
                     ? {
-                        actionId: "opact_example",
+                        actionId: "opa_example",
                         version: 1,
                         signedTransaction: "AQ==",
                       }
                     : action === "refresh"
-                      ? { actionId: "opact_example", version: 1 }
+                      ? { actionId: "opa_example", version: 1 }
                       : {},
               }
             )

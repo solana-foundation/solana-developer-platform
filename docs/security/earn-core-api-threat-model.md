@@ -98,6 +98,12 @@ deposit eligibility nor authority over a wallet.
 - Deposit acceptance requires its critical audit intent. Exit auditing retains
   the existing best-effort posture so an audit outage cannot trap funds.
 
+Single-position reads use the same project, environment and read visibility as
+position lists. A selected-wallet spending restriction cannot hide a position
+from an authorized reader or grant new spending authority. Discovered IDs are
+source selectors, never authorization; they are checked before provider reads
+and do not import holdings.
+
 ## Residual risks and release gates
 
 Custody signing policy, provider liquidity, issuer redemption, RPC history,
@@ -125,7 +131,7 @@ cannot prevent that address changing before execution. Earn does not advertise
 that recovery path. A separate current-delegation release design remains in
 PRO-2530 and PRO-2528; pending wYLDS is not recovered PRIME or delivered USDC.
 
-The four core Earn routes and five operation routes follow Earn's existing
+The five core Earn routes and five operation routes follow Earn's existing
 release-channel publication rules. The old 53 non-onboarding routes are removed
 rather than mounted as compatibility URLs. The PR keeps public route inventory
 explicit for security review. No production migration, provider sandbox flow or

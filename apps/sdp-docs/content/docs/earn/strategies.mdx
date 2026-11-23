@@ -1,32 +1,54 @@
 ---
 module: earn
 title: Strategies
-description: Find a strategy your project can deposit into, then check its slippage policy, rate, eligibility, and withdrawal terms.
+description: Find a strategy that accepts deposits, then read its rate, slippage default and withdrawal terms.
 ---
 
-Use `GET /v1/earn/discovery` to browse the validated strategy catalogue. Filter
-by ID, provider, deposit mint, source kind, APY type, cluster or APY bounds, with
-`page` and `pageSize` for pagination.
+`GET /v1/earn/discovery` lists the strategies on your environment's cluster,
+with `api` and `headers` as in the [quickstart](/docs/earn/quickstart):
 
-Discovery is optional when you already know the strategy ID and supported mint.
-See [discovery filters](/docs/reference/api/earn/discover-earn-strategies) for
-parameter types, allowed values and pagination.
-
+<Tabs items={["TypeScript", "curl"]}>
+<Tab value="TypeScript">
+```ts
+const response = await fetch(`${api}/v1/earn/discovery?depositMint=${mint}&pageSize=100`, {
+  headers,
+});
+const { strategies } = (await response.json()).data;
+const open = strategies.filter((strategy) => strategy.capabilities.deposit && strategy.fundable);
+```
+</Tab>
+<Tab value="curl">
 ```bash
-curl --fail-with-body -sS "$SDP_API_URL/v1/earn/discovery?pageSize=100" \
+curl -sS "https://api-devnet.solana.com/v1/earn/discovery?depositMint=<token-mint>&pageSize=100" \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
+</Tab>
+</Tabs>
 
-## Read rates and capabilities
+Filter by `id`, `provider`, `depositMint`, `sourceKind`, `apyType`,
+`liquidityTerm`, `cluster`, `minApy` or `maxApy`, and page with `page` and
+`pageSize` (at most 100). [Discovery filters](/docs/reference/api/earn/discover-earn-strategies)
+lists every allowed value.
 
-`rate.value` is an APY decimal fraction: `"0.062"` means 6.2%.
-`rate.observedAt` is null when the observation time is unknown. Missing rates
-are unknown, not zero.
+## Pick one that accepts deposits
 
-Check `capabilities.deposit` and its unavailable reason. Discovery coverage can
-exceed execution coverage; preparation and execution still check the wallet's
-current admission. Provider liquidity, issuer requirements and signing policy
-apply independently of the catalogue listing.
+Choose a strategy whose `capabilities.deposit` and `fundable` are both `true`,
+and pass its `id` as `strategyId` when you [prepare a deposit](/docs/earn/deposits).
+When `capabilities.deposit` is `false`, `depositUnavailableReason` says why:
+`catalogue_only` or `adapter_unavailable`. Preparation still checks admission
+live, so provider limits, issuer requirements and liquidity can refuse a listed
+strategy.
 
-Pass the returned `id` as `strategyId` when preparing a deposit. Discovery
-covers integrated provider sources; it does not claim every ecosystem strategy.
+## Read the terms
+
+- `rate.value` is the provider-reported APY as a decimal fraction: `"0.062"` is
+  6.2%. `null` means unknown, not zero. `rate.observedAt` is when the provider
+  observed it, or `null` if that time is unknown.
+- `depositSlippage.defaultToleranceBps` is the slippage a deposit uses when you
+  omit `slippageBps`; when it is `null`, the default is 50 (0.5%).
+- `liquidityTerm` is `instant` or `delayed`. A delayed strategy's
+  `redemptionDelayDays` estimates how long a withdrawal takes to settle.
+
+A rate is not a promise of returns after costs; see
+[fees and rates](/docs/earn/integration-details#fees-and-rates). Discovery
+covers the providers Earn integrates, not every strategy on Solana.

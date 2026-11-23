@@ -1,4 +1,5 @@
 import type {
+  EarnCorePosition,
   EarnCorePositionSummary,
   EarnDiscoveryResponse,
   EarnPositionsResponse,
@@ -61,21 +62,22 @@ export const earnCoreSummarySchema: z.ZodType<EarnCorePositionSummary> = z.objec
   totalsByToken: z.array(tokenTotal),
 });
 
+/** Detail and list reads validate the same position without fabricating unknown values. */
+export const earnCorePositionSchema: z.ZodType<EarnCorePosition> = z.looseObject({
+  ...positionFields,
+  source: z.union([
+    z.strictObject({ walletId: z.string() }),
+    z.strictObject({ ownerAddress: z.string() }),
+  ]),
+  strategyId: z.string().optional(),
+  discovered: z.boolean().optional(),
+  costBasisKnown: z.boolean(),
+  feeSponsored: z.boolean(),
+});
+
 /** Runtime validation keeps an invalid or older response from hiding holdings. */
 export const earnPositionsResponseSchema: z.ZodType<EarnPositionsResponse> = z.object({
-  positions: z.array(
-    z.looseObject({
-      ...positionFields,
-      source: z.union([
-        z.strictObject({ walletId: z.string() }),
-        z.strictObject({ ownerAddress: z.string() }),
-      ]),
-      strategyId: z.string().optional(),
-      discovered: z.boolean().optional(),
-      costBasisKnown: z.boolean(),
-      feeSponsored: z.boolean(),
-    })
-  ),
+  positions: z.array(earnCorePositionSchema),
   hasMore: z.boolean(),
   nextCursor: z.string().nullable(),
   balanceReadContext: earnBalanceReadContextSchema.optional(),

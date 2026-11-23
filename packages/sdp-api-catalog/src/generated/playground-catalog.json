@@ -11,8 +11,7 @@
       "Compliance": 1,
       "Counterparties": 13,
       "Asset Profiles": 7,
-      "Earn": 4,
-      "Operations": 5
+      "Earn": 10
     },
     "modules": {
       "wallets": 9,

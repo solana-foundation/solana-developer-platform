@@ -1,51 +1,54 @@
 ---
 module: earn
 title: Deposit funds
-description: Prepare and review strategy deposits, then follow signing and settlement.
+description: Prepare a deposit, review its terms, sign it in your customer's wallet and track it to settlement.
 ---
 
-Send `POST /v1/earn/deposit` with `strategyId`, a source and token amount.
-With your SDP API key, use `source: { "ownerAddress": "<owner-public-key>" }` for
-any compatible Solana wallet. No SDP wallet registration or provider connection
-is required. Amounts use a mint and decimal-string `value` in that token's units.
+The [quickstart](/docs/earn/quickstart) walks through one deposit end to end.
+This page covers the details.
 
+## Prepare
+
+`POST /v1/earn/deposit` takes the strategy, the owner's wallet and the amount.
 See [all deposit parameters](/docs/reference/api/earn/prepare-earn-deposit).
-`ownerAddress` belongs inside `source`; optional `slippageBps` belongs at the
-request top level. `50` means 0.5%, up to a maximum of 500 basis points.
 
-## Review before submission
+| Field | Notes |
+| --- | --- |
+| `strategyId` | From [discovery](/docs/earn/strategies). |
+| `source.ownerAddress` | The wallet that signs and owns the position. It needs no registration in SDP. |
+| `amount` | The `mint` you fund with and a decimal-string `value` in that token's units. |
+| `slippageBps` | Optional, at the top level. `50` is 0.5%, at most `500`. Defaults to the strategy's `depositSlippage.defaultToleranceBps`, else 50. |
+| `feePayer` | Optional address that pays network fees instead of the owner. It must also sign. |
 
-Preparation returns `202` with a durable operation, economic terms and its next
-action. It quotes, plans and simulates without starting wallet signing or
-broadcasting. Show the estimate, enforceable minimum and fees.
-Unknown fees are not zero fees.
+Funding with a token other than the strategy's deposit token puts the swap and
+the deposit in one transaction, so a deposit never half-executes. If the two
+don't fit in one transaction, preparation fails before anything is signed:
+fund the deposit token directly and try again.
 
-For `sign_transaction`, use your wallet integration to sign the exact advertised
-transaction. Its owner must match the prepared `ownerAddress`; any required fee
-payer must co-sign. Keep the message unchanged and encode the signed transaction
-as base64.
-Call `POST /v1/operations/{operationId}/submit` with the current action ID and
-version and `signedTransaction`. Submission authorizes and queues
-that exact transaction; it does not prepare another action.
+## Review
 
-If you already have a wallet connected in SDP, `source: { "walletId": "..." }`
-is an optional alternative. For its `submit` action, send the action ID/version
-without signed bytes. The worker requests signing through the configured wallet
-provider; there is no separate API flow.
+Preparation returns `202` with an operation. SDP quotes, plans and simulates
+the transaction, but signs and sends nothing. Show your customer:
 
-Funding with another supported token combines the swap and deposit into one
-transaction. If they cannot fit together after a compact-route retry, preparation
-refuses before signing. Fund the strategy's deposit token and retry; SDP never
-returns a standalone funding swap.
+- `terms.estimate`: the quoted shares.
+- `terms.minimum`: the least the transaction accepts.
+- `terms.fees`: the known fees. `null` means unknown, not free.
 
-The worker coordinates signing and broadcast. Poll
-`GET /v1/operations/{operationId}` and display its next action. For
-`sign_in_provider`, show the signing instructions and handoff URL when present.
-A queued or submitted operation has not yet established delivery.
+## Sign and submit
 
-After submit acceptance, refresh and cancellation are unavailable. Track the
-operation until its outcome is known. A definitive failure requires a new
-deposit request and idempotency key; an uncertain outcome does not permit one.
+The owner, and the `feePayer` if you set one, sign `nextAction.transaction`
+without changing it. Send the signed transaction, base64-encoded, with the
+operation's current `actionId` and `version` to
+`POST /v1/operations/{operationId}/submit`. SDP checks the bytes match what it
+prepared, then broadcasts them. If the customer declines to sign, nothing
+executes and no SDP call is needed.
 
-Persist an `Idempotency-Key` before each mutation. Recover uncertain responses
-by reading the operation and retrying the same body with its original key.
+## Track
+
+Poll `GET /v1/operations/{operationId}` until `status` is `completed`, `failed`
+or `cancelled`; anything else is still in progress. A submitted deposit can't
+be refreshed or cancelled, so keep tracking it. Only a `failed` deposit lets you
+prepare a new one, with a new `Idempotency-Key`. A timeout or an unknown outcome
+does not:
+[retry the same request](/docs/earn/integration-details#retries-and-idempotency)
+instead.

@@ -1511,6 +1511,11 @@ describe("Earn core operation HTTP flow", () => {
     expect(await unfiltered.json()).toMatchObject({ data: { operations: [] } });
     const scoped = await request(`operations?ownerAddress=${owner}`);
     expect(await scoped.json()).toMatchObject({ data: { operations: [{ id: operation.id }] } });
+    const active = await request(`operations?ownerAddress=${owner}&status=active&limit=1`);
+    expect(active.status).toBe(200);
+    expect(await active.json()).toMatchObject({
+      data: { operations: [{ id: operation.id, status: "prepared" }], nextCursor: null },
+    });
     const other = await seedEarnAuthzTenant(env, "core_operation_other", {
       environment: "sandbox",
     });

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { EarnStrategy } from "@sdp/types/earn";
+import type { EarnStrategy, EarnVaultPosition } from "@sdp/types/earn";
 import type { Operation } from "@sdp/types/operations";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -9,6 +9,7 @@ import { EarnCoreActionModal, EarnOperationReview } from "./earn-core-action-mod
 
 const mocks = vi.hoisted(() => ({
   deposit: vi.fn(),
+  withdraw: vi.fn(),
   submit: vi.fn(),
   cancel: vi.fn(),
   refresh: vi.fn(),
@@ -90,6 +91,28 @@ const strategy: EarnStrategy = {
   updatedAt: "2026-11-18T12:00:00Z",
 };
 
+function intermediatePosition(withdrawableAmount: string): EarnVaultPosition {
+  return {
+    id: "position",
+    provider: "hastra",
+    providerReference: "strategy",
+    label: "Treasury holding",
+    custodyWalletId: "wallet",
+    tokenMint: "usdc",
+    shareMint: "shares",
+    feeSponsored: false,
+    createdAt: "2026-11-18T00:00:00Z",
+    closedAt: null,
+    shares: "0",
+    parIntermediate: {
+      mint: "intermediate",
+      amount: withdrawableAmount,
+      withdrawableAmount,
+      tokenValue: withdrawableAmount,
+    },
+  };
+}
+
 beforeEach(() => {
   vi.resetAllMocks();
   sessionStorage.clear();
@@ -101,6 +124,103 @@ afterEach(() => {
 });
 
 describe("Earn operation review", () => {
+  it("keeps an intermediate-All body and key through live balance changes and remounts", async () => {
+    mocks.withdraw.mockRejectedValue(new Error("Response outcome unknown"));
+    const view = render(
+      <EarnCoreActionModal
+        kind="withdraw"
+        intermediate
+        position={intermediatePosition("10")}
+        onClose={vi.fn()}
+      />
+    );
+    fireEvent.change(screen.getByLabelText("amount"), { target: { value: "3" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "withdrawAll" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
+    expect(mocks.withdraw.mock.calls[0]?.[0].amount).toEqual({
+      kind: "intermediate",
+      mint: "intermediate",
+      value: "10",
+    });
+    view.rerender(
+      <EarnCoreActionModal
+        kind="withdraw"
+        intermediate
+        position={intermediatePosition("12")}
+        onClose={vi.fn()}
+      />
+    );
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
+    expect(mocks.withdraw.mock.calls[1]).toEqual(mocks.withdraw.mock.calls[0]);
+    view.unmount();
+    resetIdempotencyKeyStoresForTests();
+    render(
+      <EarnCoreActionModal
+        kind="withdraw"
+        intermediate
+        position={intermediatePosition("14")}
+        onClose={vi.fn()}
+      />
+    );
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "withdrawAll" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
+    expect(mocks.withdraw.mock.calls[2]).toEqual(mocks.withdraw.mock.calls[0]);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "customAmount" })));
+    fireEvent.change(screen.getByLabelText("amount"), { target: { value: "5" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
+    expect(mocks.withdraw.mock.calls[3]?.[0].amount.value).toBe("5");
+    expect(mocks.withdraw.mock.calls[3]?.[1]).not.toBe(mocks.withdraw.mock.calls[0]?.[1]);
+  });
+
+  it("does not rebuild a corrupted retained preparation", async () => {
+    mocks.withdraw.mockRejectedValue(new Error("Response outcome unknown"));
+    render(
+      <EarnCoreActionModal
+        kind="withdraw"
+        intermediate
+        position={intermediatePosition("10")}
+        onClose={vi.fn()}
+      />
+    );
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "withdrawAll" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
+    const stored = sessionStorage.getItem("sdp:earn:core-actions:v1");
+    expect(stored).not.toBeNull();
+    const entries = JSON.parse(stored ?? "[]") as Array<{ id: string; value: string }>;
+    for (const entry of entries) entry.value = "corrupted";
+    sessionStorage.setItem("sdp:earn:core-actions:v1", JSON.stringify(entries));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
+    expect(mocks.withdraw).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/saved preparation is unavailable/)).toBeDefined();
+  });
+
+  it("retires the saved preparation body only after a successful response", async () => {
+    mocks.withdraw.mockResolvedValue(operation());
+    const view = render(
+      <EarnCoreActionModal
+        kind="withdraw"
+        intermediate
+        position={intermediatePosition("10")}
+        onClose={vi.fn()}
+      />
+    );
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "withdrawAll" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
+    view.unmount();
+    render(
+      <EarnCoreActionModal
+        kind="withdraw"
+        intermediate
+        position={intermediatePosition("12")}
+        onClose={vi.fn()}
+      />
+    );
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "withdrawAll" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
+    expect(mocks.withdraw.mock.calls[1]?.[0].amount.value).toBe("12");
+    expect(mocks.withdraw.mock.calls[1]?.[1]).not.toBe(mocks.withdraw.mock.calls[0]?.[1]);
+  });
+
   it("rejects slippage beyond the API limit before preparing a transaction", async () => {
     render(<EarnCoreActionModal kind="deposit" strategy={strategy} onClose={vi.fn()} />);
     fireEvent.change(screen.getByLabelText("amount"), { target: { value: "10" } });

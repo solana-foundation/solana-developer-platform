@@ -62,7 +62,7 @@ import {
 import routeActionsJson from "./route-actions.generated.json";
 
 const EARN_TAG_DESCRIPTION =
-  "Strategy reads, previews, withdrawal-route discovery, unsigned builds, submission, queued actions, and tenant tracking. Availability follows the deployment's release channel.";
+  "Discover strategies, read positions, and prepare deposits and withdrawals, then submit and track each one as an operation. Availability follows the deployment's release channel.";
 
 const OPENAPI_TAG = {
   HEALTH: { name: "Health", description: "Service health and readiness endpoints." },
@@ -114,10 +114,6 @@ const OPENAPI_TAG = {
   EARN: {
     name: "Earn",
     description: EARN_TAG_DESCRIPTION,
-  },
-  OPERATIONS: {
-    name: "Operations",
-    description: "Durable asynchronous execution and recovery for prepared intents.",
   },
   ADMIN: { name: "Admin", description: "Administrative allowlist management." },
   ONBOARDING: { name: "Onboarding", description: "Clerk organization sync status." },
@@ -175,7 +171,6 @@ const PUBLIC_OPENAPI_TAGS = [
   OPENAPI_TAG.COUNTERPARTIES,
   OPENAPI_TAG.ASSET_PROFILES,
   OPENAPI_TAG.PUBLIC_EARN,
-  OPENAPI_TAG.OPERATIONS,
 ];
 
 const OPENAPI_TAGS = [
@@ -192,7 +187,6 @@ const OPENAPI_TAGS = [
   OPENAPI_TAG.COUNTERPARTIES,
   OPENAPI_TAG.ASSET_PROFILES,
   OPENAPI_TAG.EARN,
-  OPENAPI_TAG.OPERATIONS,
   OPENAPI_TAG.DVP,
   OPENAPI_TAG.ADMIN,
   OPENAPI_TAG.ONBOARDING,

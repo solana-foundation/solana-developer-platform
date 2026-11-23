@@ -17,11 +17,13 @@ import { useSWRConfig } from "swr";
 import { EarnCoreOperations } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-core-operations";
 import { useEarnStrategies } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-data";
 import { EARN_TRANSACTION_MODAL_FRAME } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-modal";
+import { earnQueryKeys } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-query-key";
 import type { EarnProviderAccess } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-surfacing";
 import type { EarnVaultParRedemptionSource } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-vault-holding";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
+import { type EarnOperationsFeed, isEarnOperationTerminal } from "@/lib/earn-core-data";
 import { filterSandboxDevnetStrategies } from "./devnet-mainnet-intersection";
 import { kaminoAllocationsVaults, useKaminoVaultAllocations } from "./kamino-allocations";
 import {
@@ -299,33 +301,40 @@ export function TreasurySolutionsWorkspace({
   } = useTreasuryBalances(EMPTY_TREASURY_ACTIVITIES);
 
   const { mutate: mutateCore } = useSWRConfig();
-  const observedCoreResults = useRef(new Set<string>());
+  const observedCoreResults = useRef(new Map<string, { observation: string; balance: string }>());
   const onCoreUpdated = useCallback(
     (operation: Operation) => {
-      const observation = JSON.stringify([
-        operation.id,
-        operation.status,
-        operation.version,
-        operation.result,
-        operation.updatedAt,
-      ]);
-      if (observedCoreResults.current.has(observation)) return;
-      observedCoreResults.current.add(observation);
-      void mutateCore<Operation[]>(
-        "dashboard-earn-core-operations",
-        (current) => {
-          const found = current?.some((candidate) => candidate.id === operation.id);
-          return found
-            ? current?.map((candidate) => (candidate.id === operation.id ? operation : candidate))
-            : [operation, ...(current ?? [])];
-        },
+      const observation = JSON.stringify(operation);
+      const balance = JSON.stringify([operation.status, operation.resourceRef, operation.result]);
+      const previous = observedCoreResults.current.get(operation.id);
+      if (previous?.observation === observation) return;
+      observedCoreResults.current.set(operation.id, { observation, balance });
+      void mutateCore<EarnOperationsFeed>(
+        earnQueryKeys.operations(),
+        (current) => ({
+          activeIds: current?.activeIds ?? [],
+          nextCursor: current?.nextCursor ?? null,
+          expanded: current?.expanded ?? false,
+          operations: current?.operations.some((candidate) => candidate.id === operation.id)
+            ? current.operations.map((candidate) =>
+                candidate.id === operation.id ? operation : candidate
+              )
+            : [operation, ...(current?.operations ?? [])],
+        }),
         { revalidate: false }
       );
+      // Provider heartbeats can change updatedAt without changing any holdings.
+      if (previous?.balance === balance) return;
       const result = operation.result;
       if (!result || !("walletId" in result.source)) return;
       if (operation.status === "completed" && operation.resourceRef?.kind === "earn.movement") {
         void refreshOperation(operation.resourceRef.id, result.positionId, result.source.walletId);
-      } else if (operation.resourceRef?.kind === "earn.withdrawal_request") {
+      } else if (
+        (operation.resourceRef?.kind === "earn.withdrawal_request" &&
+          (operation.status === "settling" || isEarnOperationTerminal(operation))) ||
+        (operation.resourceRef?.kind === "earn.withdrawal_recovery" &&
+          operation.status === "completed")
+      ) {
         void refreshTreasuryBalances();
       }
     },

@@ -44,6 +44,11 @@ CREATE TABLE operations (
 CREATE INDEX operations_project_history ON operations
     (organization_id, project_id, environment, created_at DESC, id DESC);
 
+-- Active action reads never scan completed history to find older pending work.
+CREATE INDEX operations_project_active_history ON operations
+    (organization_id, project_id, environment, created_at DESC, id DESC)
+    WHERE status NOT IN ('completed', 'failed', 'cancelled');
+
 -- Due work stays bounded even while completed operation history grows.
 CREATE INDEX operations_recovery_due ON operations
     (environment, next_check_at, id)

@@ -1,7 +1,7 @@
 /**
  * Sentry scrubbing hooks, shared by every `Sentry.init` in the repo.
  *
- * `sendDefaultPii: false` only stops the SDK from *collecting* PII on its own;
+ * `sentryDataCollection` only stops the SDK from *collecting* PII on its own;
  * everything the application attaches — exception messages, breadcrumb data,
  * span attributes, structured logs, scope context — ships untouched. These
  * hooks are the enforcement point, so a sink cannot be added without one.
@@ -23,13 +23,10 @@ const SPAN_SKELETON_KEYS = [
   "span_id",
   "parent_span_id",
   "trace_id",
-  "segment_id",
-  "op",
   "status",
-  "origin",
   "is_segment",
   "start_timestamp",
-  "timestamp",
+  "end_timestamp",
 ];
 
 /**
@@ -70,7 +67,7 @@ function scrubSpanOrStrip<T>(span: T): T {
       return span;
     }
     const source = span as Record<string, unknown>;
-    const skeleton: Record<string, unknown> = { description: REDACTED };
+    const skeleton: Record<string, unknown> = { name: REDACTED, attributes: {} };
     for (const key of SPAN_SKELETON_KEYS) {
       if (key in source) {
         skeleton[key] = source[key];
@@ -90,8 +87,29 @@ export interface SentryScrubbingHooks {
 }
 
 /**
+ * Passed as `dataCollection` to every `Sentry.init`. The SDK collects every
+ * category unless it is switched off here, so a category it adds later arrives
+ * switched on: re-read the option's type on each SDK upgrade.
+ */
+export const sentryDataCollection = {
+  userInfo: false,
+  cookies: false,
+  httpHeaders: false,
+  httpBodies: [],
+  urlQueryParams: false,
+  graphQL: { document: false, variables: false },
+  genAI: { inputs: false, outputs: false },
+  mcp: { inputs: false, outputs: false },
+  databaseQueryData: false,
+  queues: false,
+  stackFrameVariables: false,
+};
+
+/**
  * Spread into `Sentry.init` to cover every payload type the SDK sends: errors,
- * transactions, spans, structured logs, metrics, and breadcrumbs.
+ * spans, structured logs, metrics, and breadcrumbs. Spans arrive in the SDK's
+ * streamed shape; `beforeSendTransaction` only runs under the static trace
+ * lifecycle and stays so that switching to it cannot ship unscrubbed transactions.
  */
 export const sentryScrubbingHooks: SentryScrubbingHooks = {
   beforeSend: (event) => scrubOrDrop("event", event),

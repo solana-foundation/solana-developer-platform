@@ -56,6 +56,8 @@ export async function resolveVaultBalanceReadContext(
     /** The core positions read may also constrain exact-project owner-signed rows. */
     includeAddress?: boolean;
     ownerAddress?: string;
+    /** Detail reads bind their floor to this exact instrument and public ID. */
+    position?: { id: string; provider: string; providerReference: string };
   }
 ): Promise<
   | {
@@ -81,6 +83,9 @@ export async function resolveVaultBalanceReadContext(
       movement?.execution_model !== "vault_direct" ||
       movement.environment !== environment ||
       movement.project_id !== input.projectId ||
+      (input.position !== undefined &&
+        (movement.provider !== input.position.provider ||
+          movement.vault_address !== input.position.providerReference)) ||
       !(movement.custody_wallet_id
         ? input.custodyWalletIds.includes(movement.custody_wallet_id)
         : input.includeAddress &&
@@ -130,7 +135,7 @@ export async function resolveVaultBalanceReadContext(
       rememberFinalizedStatus(keys[index], status);
     }
     minimumSlot = Math.max(minimumSlot, slot);
-    const positionId = movements[index]?.position_id;
+    const positionId = input.position?.id ?? movements[index]?.position_id;
     if (positionId) {
       minimumSlotByPositionId.set(
         positionId,

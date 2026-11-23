@@ -18,6 +18,9 @@ export const OPERATION_STATUSES = [
 /** Terminal observations never regress to an executable state. */
 export const TERMINAL_OPERATION_STATUSES = ["completed", "failed", "cancelled"] as const;
 
+/** Listing can select one exact state or every nonterminal action. */
+export const operationStatusFilterSchema = z.enum([...OPERATION_STATUSES, "active"]);
+
 /** The shared legal transition matrix; terminal states cannot reopen. */
 export const OPERATION_TRANSITIONS = {
   prepared: ["queued", "awaiting_signature", "submitted", "failed", "cancelled"],
@@ -44,15 +47,17 @@ const positiveDecimal = decimal.refine((value) => /[1-9]/.test(value), "Amount m
 /** Explicit token units; valuation in USD is a separate observation. */
 export const operationAmountSchema = z.strictObject({ mint: identifier, value: decimal });
 
-/** Use an owner address directly, or optionally select a connected wallet. */
+/** The owner's wallet signs; an SDP custody wallet is the optional alternative. */
 export const operationSourceSchema = z.union([
   z.strictObject({
     ownerAddress: identifier.describe(
-      "Your wallet address. Sign the returned transaction yourself; no SDP wallet registration or signing-provider configuration is required."
+      "The wallet that signs and owns the position. It needs no registration in SDP."
     ),
   }),
   z.strictObject({
-    walletId: identifier.describe("Optional alternative: an SDP wallet with configured signing."),
+    walletId: identifier.describe(
+      "Alternative to ownerAddress: an SDP custody wallet, signed through its custody provider."
+    ),
   }),
 ]);
 
@@ -134,22 +139,22 @@ export const operationNextActionSchema = z.discriminatedUnion("type", [
       expiresAt: z.string().datetime().nullable(),
     })
     .describe(
-      "Sign this exact transaction, then call /submit with signedTransaction and the current actionId/version. No SDP wallet setup is required."
+      "Sign this exact transaction in the owner's wallet, then call /submit with signedTransaction and the current actionId and version."
     ),
   z
     .strictObject({ type: z.literal("submit") })
     .describe(
-      "Connected walletId only. Call /submit with actionId/version and no signedTransaction to request configured signing."
+      "SDP custody wallets only: call /submit with actionId and version, without signedTransaction, to request the custody provider's signature."
     ),
   z
     .strictObject({ type: z.literal("select_option") })
     .describe(
-      "Choose an advertised terms.options ID, then call /refresh with optionId and the current actionId/version. Review the returned transaction before submitting."
+      "Choose an id from terms.options and call /refresh with it as optionId and the current actionId and version. Review the returned transaction before submitting."
     ),
   z
     .strictObject({ type: z.literal("refresh") })
     .describe(
-      "SDP has established safe replacement. Call /refresh with the current actionId/version, then review again. Never use refresh to bypass an unresolved timeout."
+      "SDP can safely replace the unsigned transaction: call /refresh with the current actionId and version, then review again. Never use refresh to bypass an unresolved timeout."
     ),
   z
     .strictObject({
@@ -160,7 +165,7 @@ export const operationNextActionSchema = z.discriminatedUnion("type", [
       handoffUrl: z.url().nullable(),
     })
     .describe(
-      "Connected walletId only. Follow the wallet provider's signing instructions, then poll this operation. Do not call /submit again."
+      "SDP custody wallets only: follow the custody provider's signing instructions, then poll this operation. Do not call /submit again."
     ),
   z
     .strictObject({ type: z.literal("wait"), reason: z.string().min(1).max(512) })
@@ -217,7 +222,7 @@ export const submitOperationSchema = z.strictObject({
     .regex(/^[A-Za-z0-9+/]+={0,2}$/)
     .optional()
     .describe(
-      "Required for an ownerAddress source: the exact prepared transaction, base64 encoded and signed by its required signers. Omit for a connected walletId source, whose configured signer signs asynchronously."
+      "Required for an ownerAddress source: the prepared transaction, unchanged, signed by its required signers and base64-encoded. Omit it for an SDP custody wallet, whose custody provider signs."
     ),
 });
 
@@ -238,6 +243,8 @@ export const operationsPageSchema = z.strictObject({
 export type Operation = z.infer<typeof operationSchema>;
 export type OperationKind = Operation["kind"];
 export type OperationStatus = Operation["status"];
+/** Query-only active grouping never becomes an operation lifecycle state. */
+export type OperationStatusFilter = z.infer<typeof operationStatusFilterSchema>;
 export type OperationIntent = z.infer<typeof operationIntentSchema>;
 export type OperationSource = z.infer<typeof operationSourceSchema>;
 export type OperationTerms = z.infer<typeof operationTermsSchema>;

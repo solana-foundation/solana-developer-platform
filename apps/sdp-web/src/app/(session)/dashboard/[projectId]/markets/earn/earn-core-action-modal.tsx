@@ -5,7 +5,7 @@ import {
   type EarnStrategy,
   type EarnVaultPosition,
 } from "@sdp/types/earn";
-import type { Operation, OperationIntent } from "@sdp/types/operations";
+import { type Operation, type OperationIntent, operationIntentSchema } from "@sdp/types/operations";
 import { Button } from "@sdp/ui/button";
 import { Callout } from "@sdp/ui/callout";
 import { DetailList, DetailRow } from "@sdp/ui/detail-list";
@@ -14,6 +14,7 @@ import { Label } from "@sdp/ui/label";
 import { Modal } from "@sdp/ui/modal";
 import { Select, SelectItem } from "@sdp/ui/select";
 import { type FormEvent, useEffect, useRef, useState } from "react";
+import { z } from "zod";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { earnCoreClient, isEarnOperationTerminal, useEarnOperation } from "@/lib/earn-core-data";
@@ -26,8 +27,23 @@ import { EARN_TRANSACTION_MODAL_FRAME } from "./earn-modal";
 
 const operationKeys = createIdempotencyKeyStore("sdp:earn:core-actions:v1");
 
-function durableKey(fingerprint: string): string {
-  const claim = operationKeys.claim(fingerprint);
+const preparationClaimSchema = z.strictObject({
+  key: z.uuid(),
+  intent: operationIntentSchema,
+});
+
+function restorePreparation(kept: string) {
+  try {
+    return preparationClaimSchema.parse(JSON.parse(kept));
+  } catch {
+    throw new Error(
+      "The saved preparation is unavailable. Check activity before starting another request."
+    );
+  }
+}
+
+function durableKey(fingerprint: string, mint?: () => string): string {
+  const claim = operationKeys.claim(fingerprint, mint);
   if (!claim.persisted)
     throw new Error(
       "Save access is required to safely retry this action. Enable browser storage and try again."
@@ -122,19 +138,38 @@ function useEarnPreparation(props: ActionProps) {
     } else {
       intent = withdrawalIntent(props, amount, withdrawAll, withdrawUnit, slippageBps);
     }
-    const fingerprint = JSON.stringify([workspace?.selectedProjectId, "prepare", intent]);
+    const fingerprint = JSON.stringify([
+      workspace?.selectedProjectId,
+      "prepare",
+      props.kind,
+      props.kind === "deposit" ? props.strategy.id : props.position.id,
+      props.kind === "deposit" ? selectedWallet : props.position.custodyWalletId,
+      tokenMint,
+      props.kind === "withdraw" && props.intermediate === true,
+      withdrawAll ? null : amount,
+      withdrawAll,
+      withdrawUnit,
+      slippage,
+    ]);
     setBusy(true);
     try {
-      const key = durableKey(fingerprint);
-      let operation: Operation;
-      if (intent.kind === "earn.deposit") {
-        const { kind: _, ...body } = intent;
-        operation = await earnCoreClient.deposit(body, key);
-      } else {
-        const { kind: _, ...body } = intent;
-        operation = await earnCoreClient.withdraw(body, key);
+      // Store the exact request with its key: All can depend on a live balance.
+      const kept = durableKey(fingerprint, () =>
+        JSON.stringify({ key: crypto.randomUUID(), intent })
+      );
+      const retained = restorePreparation(kept);
+      if (props.kind === "deposit" && walletId === null && selectedWallet) {
+        setWalletId(selectedWallet);
       }
-      operationKeys.release(fingerprint, key);
+      let operation: Operation;
+      if (retained.intent.kind === "earn.deposit") {
+        const { kind: _, ...body } = retained.intent;
+        operation = await earnCoreClient.deposit(body, retained.key);
+      } else {
+        const { kind: _, ...body } = retained.intent;
+        operation = await earnCoreClient.withdraw(body, retained.key);
+      }
+      operationKeys.release(fingerprint, kept);
       setPrepared(operation);
       props.onUpdated?.(operation);
     } catch (caught) {

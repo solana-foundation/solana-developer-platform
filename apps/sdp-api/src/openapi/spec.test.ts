@@ -298,6 +298,7 @@ describe("OpenAPI spec", () => {
           ? [
               "GET /v1/earn/discovery",
               "GET /v1/earn/positions",
+              "GET /v1/earn/positions/{positionId}",
               "POST /v1/earn/deposit",
               "POST /v1/earn/withdraw",
               "GET /v1/operations",
@@ -319,7 +320,7 @@ describe("OpenAPI spec", () => {
     }
   );
 
-  it("documents only four core Earn actions, eligibility and five shared lifecycle operations", () => {
+  it("documents core Earn actions, position detail, eligibility and the shared lifecycle", () => {
     const internal = createOpenApiDocument();
     const operations = Object.entries(internal.paths)
       .filter(([path]) => path.startsWith("/v1/earn") || path.startsWith("/v1/operations"))
@@ -333,6 +334,7 @@ describe("OpenAPI spec", () => {
       [
         "GET /v1/earn/discovery",
         "GET /v1/earn/positions",
+        "GET /v1/earn/positions/{positionId}",
         "POST /v1/earn/deposit",
         "POST /v1/earn/withdraw",
         "GET /v1/earn/onboarding/wisdomtree/forms/{entityType}",
@@ -640,7 +642,6 @@ describe("OpenAPI spec", () => {
       "Counterparties",
       "Asset Profiles",
       "Earn",
-      "Operations",
     ]);
 
     expect(doc.paths?.["/v1/organizations/{orgId}"]).toBeUndefined();

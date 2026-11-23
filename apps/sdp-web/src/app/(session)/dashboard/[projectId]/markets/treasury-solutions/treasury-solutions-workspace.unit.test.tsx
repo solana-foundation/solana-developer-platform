@@ -1,10 +1,18 @@
 // @vitest-environment jsdom
 
 import type { Operation } from "@sdp/types/operations";
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { SWRConfig, useSWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { earnQueryKeys } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-query-key";
 import { EnglishTestI18n } from "@/app/(session)/dashboard/[projectId]/markets/test-i18n";
+import {
+  earnCoreClient,
+  isEarnOperationTerminal,
+  useEarnOperation,
+  useEarnOperations,
+} from "@/lib/earn-core-data";
 import * as kaminoAllocations from "./kamino-allocations";
 import type { KaminoVaultAllocations } from "./kamino-allocations-schema";
 import { TREASURY_WALLETS_BODY } from "./treasury-layout";
@@ -492,6 +500,32 @@ const workspaceElement = () => (
   </EnglishTestI18n>
 );
 
+function LiveOperationDetail({ operation }: { operation: Operation }) {
+  useEarnOperation(operation.id, operation, (updated) => mocks.coreFeed?.onUpdated(updated));
+  return null;
+}
+
+function LiveOperationsFeed({
+  operationId,
+  onPollReady,
+}: {
+  operationId: string;
+  onPollReady: (poll: () => Promise<unknown>) => void;
+}) {
+  const { operations } = useEarnOperations();
+  const { mutate } = useSWRConfig();
+  onPollReady(() => mutate(earnQueryKeys.operations()));
+  const operation = operations?.find(({ id }) => id === operationId);
+  return (
+    <>
+      <p data-testid="observed-exit">{operation?.status ?? "absent"}</p>
+      {operation && !isEarnOperationTerminal(operation) ? (
+        <LiveOperationDetail operation={operation} />
+      ) : null}
+    </>
+  );
+}
+
 function renderWorkspace() {
   return render(workspaceElement());
 }
@@ -612,6 +646,120 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(mocks.refreshPositions).toHaveBeenCalledTimes(1);
     expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(1);
     expect(mocks.refreshStrategies).not.toHaveBeenCalled();
+  });
+
+  it("refreshes queue balances at escrow confirmation, not submission or heartbeat", async () => {
+    renderWorkspace();
+    const submitted = coreOperation("submitted");
+    submitted.resourceRef = { kind: "earn.withdrawal_request", id: "queued-request" };
+    await act(async () => mocks.coreFeed?.onUpdated(submitted));
+    await act(async () =>
+      mocks.coreFeed?.onUpdated({ ...submitted, updatedAt: "2026-11-18T00:00:15Z" })
+    );
+    expect(mocks.refreshPositions).not.toHaveBeenCalled();
+    expect(mocks.refreshWalletBalances).not.toHaveBeenCalled();
+    const settling = {
+      ...submitted,
+      status: "settling" as const,
+      updatedAt: "2026-11-18T00:00:30Z",
+    };
+    await act(async () => mocks.coreFeed?.onUpdated(settling));
+    await act(async () =>
+      mocks.coreFeed?.onUpdated({ ...settling, updatedAt: "2026-11-18T00:00:45Z" })
+    );
+    expect(mocks.refreshPositions).toHaveBeenCalledTimes(1);
+    expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes returned escrow shares without treating recovery as withdrawal proceeds", async () => {
+    renderWorkspace();
+    const operation = coreOperation("completed");
+    operation.kind = "earn.withdraw";
+    operation.intent = {
+      kind: "earn.withdraw",
+      positionId: "earn_vault_position_live",
+      amount: { kind: "all" },
+    };
+    operation.resourceRef = { kind: "earn.withdrawal_recovery", id: "recovery" };
+    if (operation.result) {
+      operation.result.settlementOutcome = "recovered";
+      operation.result.settledAmount = { mint: SHARE_MINT, value: "10" };
+    }
+    await act(async () => mocks.coreFeed?.onUpdated(operation));
+    expect(mocks.refreshPositions).toHaveBeenCalledTimes(1);
+    expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("$10.00")).toBeNull();
+  });
+
+  it("does not reread holdings or cash for a provider heartbeat", async () => {
+    renderWorkspace();
+    const operation = coreOperation("settling");
+    operation.resourceRef = { kind: "earn.withdrawal_request", id: "queued-request" };
+    await act(async () => mocks.coreFeed?.onUpdated(operation));
+    await act(async () =>
+      mocks.coreFeed?.onUpdated({ ...operation, updatedAt: "2026-11-18T00:00:15Z" })
+    );
+    expect(mocks.refreshPositions).toHaveBeenCalledTimes(1);
+    expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(1);
+    await act(async () =>
+      mocks.coreFeed?.onUpdated({
+        ...operation,
+        status: "completed",
+        updatedAt: "2026-11-18T00:00:30Z",
+      })
+    );
+    expect(mocks.refreshPositions).toHaveBeenCalledTimes(2);
+    expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(2);
+  });
+
+  it("publishes an old exit's detail completion into the real feed and refreshes its exact wallet", async () => {
+    const pending = { ...coreOperation("settling"), createdAt: "2026-11-17T00:00:00Z" };
+    const recent = Array.from({ length: 50 }, (_, index) => ({
+      ...coreOperation("completed"),
+      id: `recent-${index}`,
+    }));
+    let activeReads = 0;
+    const list = vi.spyOn(earnCoreClient, "operations").mockImplementation(async (query) => ({
+      operations: query?.status === "active" ? (++activeReads === 1 ? [pending] : []) : recent,
+      nextCursor: null,
+    }));
+    let finish: ((value: Operation) => void) | undefined;
+    const response = new Promise<Operation>((resolve) => {
+      finish = resolve;
+    });
+    const detail = vi.spyOn(earnCoreClient, "operation").mockReturnValue(response);
+    let poll: () => Promise<unknown> = async () => undefined;
+    const cache = new Map();
+    try {
+      render(
+        <SWRConfig value={{ provider: () => cache, dedupingInterval: 0 }}>
+          {workspaceElement()}
+          <LiveOperationsFeed
+            operationId={pending.id}
+            onPollReady={(read) => {
+              poll = read;
+            }}
+          />
+        </SWRConfig>
+      );
+      await waitFor(() => expect(detail).toHaveBeenCalledTimes(1));
+      await act(() => poll());
+      expect(screen.getByTestId("observed-exit").textContent).toBe("settling");
+      await act(async () => {
+        finish?.(coreOperation("completed"));
+        await response;
+      });
+      await waitFor(() =>
+        expect(screen.getByTestId("observed-exit").textContent).toBe("completed")
+      );
+      expect(mocks.refreshPositions).toHaveBeenCalledExactlyOnceWith(["core-movement"]);
+      expect(mocks.refreshWalletBalances).toHaveBeenCalledExactlyOnceWith(101, ["cwlt_live"]);
+      await act(() => poll());
+      expect(screen.getByTestId("observed-exit").textContent).toBe("absent");
+    } finally {
+      list.mockRestore();
+      detail.mockRestore();
+    }
   });
 
   it("shows immediate feedback while a deferred transaction modal loads", () => {

@@ -37,7 +37,8 @@ export const earnDiscoveryResponseSchema = successResponseSchema(
   })
 );
 
-const corePositionSchema = earnWalletPositionSchema.omit({ ownerAddress: true }).extend({
+/** Canonical position resource shared by collection and detail reads. */
+export const earnCorePositionSchema = earnWalletPositionSchema.omit({ ownerAddress: true }).extend({
   feeSponsored: z.boolean(),
   source: operationSourceSchema,
   strategyId: z.string().optional(),
@@ -67,7 +68,7 @@ const coreSummarySchema = summarySchema.extend({
 /** Scope totals include the complete selected scope, not just the current position page. */
 export const earnPositionsResponseSchema = successResponseSchema(
   z.object({
-    positions: z.array(corePositionSchema),
+    positions: z.array(earnCorePositionSchema),
     hasMore: z.boolean(),
     nextCursor: z.string().nullable(),
     balanceReadContext: earnBalanceReadContextSchema.optional(),

@@ -58,7 +58,8 @@ describe("Earn API contract coverage", () => {
     let operationCount = 0;
     const internal = createOpenApiDocument();
     for (const [path, item] of Object.entries(internal.paths)) {
-      if (!path.startsWith("/v1/earn/")) continue;
+      // Operations track Earn's actions and sit in Earn's reference as their own group.
+      if (!path.startsWith("/v1/earn/") && !path.startsWith("/v1/operations")) continue;
       for (const method of ["get", "post", "put"] as const) {
         const operation = item[method];
         if (!operation) continue;
@@ -69,7 +70,7 @@ describe("Earn API contract coverage", () => {
       }
     }
     expect([...groups].sort()).toEqual(Object.values(EARN_GROUPS).sort());
-    expect(operationCount).toBe(10);
+    expect(operationCount).toBe(16);
 
     const corePaths = Object.entries(internal.paths)
       .filter(
@@ -79,7 +80,7 @@ describe("Earn API contract coverage", () => {
       )
       .map(([path]) => path)
       .sort();
-    expect(corePaths).toHaveLength(4);
+    expect(corePaths).toHaveLength(5);
     for (const releaseChannel of ["stable", "beta", "experimental"] as const) {
       const published = createPublicOpenApiDocument({ releaseChannel });
       expect(
@@ -117,6 +118,7 @@ describe("Earn API contract coverage", () => {
       for (const path of [
         "/v1/earn/discovery",
         "/v1/earn/positions",
+        "/v1/earn/positions/{positionId}",
         "/v1/earn/deposit",
         "/v1/earn/withdraw",
         ...Object.keys(internal.paths).filter((path) => path.startsWith("/v1/operations")),

@@ -1,4 +1,5 @@
 import type { EarnVaultPositionSnapshot } from "@sdp/earn/types";
+import { currentMinimumRpcSlot, observeRpcRead } from "@sdp/rpc/read-context";
 import type { EarnPositionsResponse } from "@sdp/types/earn-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
@@ -11,6 +12,8 @@ import {
   generateEarnPositionId,
 } from "@/db/repositories/earn-movements.repository";
 import { app } from "@/index";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
+import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import {
   type EarnAuthzTenant,
   type EarnTestApiKey,
@@ -31,6 +34,8 @@ vi.mock("@/services/earn/execution-registry", async (original) => ({
   ...(await original<typeof import("@/services/earn/execution-registry")>()),
   resolveVaultDirectClient: () => ({ readVaultPositions }),
 }));
+
+const rpc = installClusterRpcStub();
 
 const OWNER = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 const TOKEN = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -83,24 +88,29 @@ async function get(path: string) {
 
 async function seedPosition(input: {
   reference: string;
+  organizationId?: string;
   walletId?: string;
   projectId?: string;
   ownerAddress?: string;
   createdAt?: string;
+  environment?: "sandbox" | "production";
 }) {
   const id = generateEarnPositionId();
   const movementId = generateEarnMovementId();
   const projectId = input.projectId ?? tenant.project.id;
+  const organizationId = input.organizationId ?? tenant.org.id;
   const ownerAddress = input.ownerAddress ?? OWNER;
+  const environment = input.environment ?? "sandbox";
   const db = getDb(env);
   await db
     .prepare(
-      `INSERT INTO earn_positions (id, organization_id, project_id, environment, provider, kind, custody_wallet_id, owner_address, vault_address, share_mint, token_mint, label, activated_at, created_at) VALUES (?, ?, ?, 'sandbox', 'veda', 'vault_direct', ?, ?, ?, ?, ?, 'Strategy holding', sdp_iso_now(), ?)`
+      `INSERT INTO earn_positions (id, organization_id, project_id, environment, provider, kind, custody_wallet_id, owner_address, vault_address, share_mint, token_mint, label, activated_at, created_at) VALUES (?, ?, ?, ?, 'veda', 'vault_direct', ?, ?, ?, ?, ?, 'Strategy holding', sdp_iso_now(), ?)`
     )
     .bind(
       id,
-      tenant.org.id,
+      organizationId,
       projectId,
+      environment,
       input.walletId ?? null,
       input.walletId ? null : ownerAddress,
       input.reference,
@@ -111,12 +121,13 @@ async function seedPosition(input: {
     .run();
   await db
     .prepare(
-      `INSERT INTO earn_movements (id, organization_id, project_id, environment, provider, execution_model, direction, position_id, status, denomination, amount_requested, custody_wallet_id, owner_address, vault_address, source_address, destination_address, signature, signed_transaction, last_valid_block_height, request_id, idempotency_fingerprint) VALUES (?, ?, ?, 'sandbox', 'veda', 'vault_direct', 'deposit', ?, 'requested', ?, '1', ?, ?, ?, ?, ?, ?, 'AQ==', '12345', ?, ?)`
+      `INSERT INTO earn_movements (id, organization_id, project_id, environment, provider, execution_model, direction, position_id, status, denomination, amount_requested, custody_wallet_id, owner_address, vault_address, source_address, destination_address, signature, signed_transaction, last_valid_block_height, request_id, idempotency_fingerprint) VALUES (?, ?, ?, ?, 'veda', 'vault_direct', 'deposit', ?, 'requested', ?, '1', ?, ?, ?, ?, ?, ?, 'AQ==', '12345', ?, ?)`
     )
     .bind(
       movementId,
-      tenant.org.id,
+      organizationId,
       projectId,
+      environment,
       id,
       TOKEN,
       input.walletId ?? null,
@@ -132,13 +143,13 @@ async function seedPosition(input: {
   return { id, movementId };
 }
 
-async function seedWallet() {
+async function seedWallet(scope = { organizationId: tenant.org.id, projectId: tenant.project.id }) {
   const db = getDb(env);
   await db
     .prepare(
       "INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, status) VALUES ('cfg_core_read', ?, ?, 'privy', 'encrypted', 'active')"
     )
-    .bind(tenant.org.id, tenant.project.id)
+    .bind(scope.organizationId, scope.projectId)
     .run();
   await db
     .prepare(
@@ -611,5 +622,328 @@ describe("Earn core read contracts", () => {
         .bind(holding.id)
         .first()
     ).toEqual({ strategy_reference: "legacy-reference", vault_address: "legacy-reference" });
+  });
+});
+
+describe("Earn position detail", () => {
+  it("returns the list's canonical position with one targeted provider read", async () => {
+    const position = await seedPosition({ reference: "target" });
+    await seedPosition({ reference: "unrelated" });
+    await seedStrategy("target");
+    const page = (await (await get(`positions?ownerAddress=${OWNER}`)).json()) as {
+      data: EarnPositionsResponse;
+    };
+    const listed = page.data.positions.find((candidate) => candidate.id === position.id);
+    readVaultPositions.mockClear();
+    const response = await get(`positions/${position.id}`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ data: listed });
+    expect(readVaultPositions).toHaveBeenCalledTimes(1);
+    expect(readVaultPositions.mock.calls[0]?.[1]).toEqual({
+      owner: OWNER,
+      providerReferences: ["target"],
+    });
+  });
+
+  it("keeps missing, foreign-project and foreign-environment IDs private before RPC", async () => {
+    const sibling = await seedPosition({
+      reference: "sibling-detail",
+      projectId: "prj_core_reads_production",
+    });
+    const production = await seedPosition({
+      reference: "production-detail",
+      projectId: "prj_core_reads_production",
+      environment: "production",
+    });
+    for (const id of ["absent", sibling.id, production.id]) {
+      const response = await get(`positions/${id}`);
+      expect(response.status).toBe(404);
+    }
+    expect(readVaultPositions).not.toHaveBeenCalled();
+  });
+
+  it("requires earn.read before a detail can reach provider I/O", async () => {
+    const position = await seedPosition({ reference: "read-grant" });
+    key = await seedEarnApiKey(env, tenant, {
+      id: "detail_without_read",
+      grants: [],
+      environment: "sandbox",
+    });
+    expect((await get(`positions/${position.id}`)).status).toBe(403);
+    expect(readVaultPositions).not.toHaveBeenCalled();
+  });
+
+  it("does not expose an unsigned preparation as a holding", async () => {
+    const position = await seedPosition({ reference: "not-activated" });
+    await getDb(env).execute("UPDATE earn_positions SET activated_at = NULL WHERE id = ?", [
+      position.id,
+    ]);
+    expect((await get(`positions/${position.id}`)).status).toBe(404);
+    expect(readVaultPositions).not.toHaveBeenCalled();
+  });
+
+  it("uses project wallet read visibility even when the key has no signing wallets", async () => {
+    const walletId = await seedWallet();
+    const position = await seedPosition({ reference: "wallet-read", walletId });
+    await getDb(env).execute("UPDATE api_keys SET wallet_scope = 'selected' WHERE id = ?", [
+      key.id,
+    ]);
+    const response = await get(`positions/${position.id}`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ data: { source: { walletId } } });
+  });
+
+  it("refuses a custody holding owned by another organization before provider I/O", async () => {
+    const foreign = await seedEarnAuthzTenant(env, "foreign_detail", { environment: "sandbox" });
+    const walletId = await seedWallet({
+      organizationId: foreign.org.id,
+      projectId: foreign.project.id,
+    });
+    const position = await seedPosition({
+      reference: "foreign-wallet",
+      walletId,
+      organizationId: foreign.org.id,
+      projectId: foreign.project.id,
+    });
+    expect((await get(`positions/${position.id}`)).status).toBe(404);
+    expect(readVaultPositions).not.toHaveBeenCalled();
+  });
+
+  it("refuses a sibling-project wallet despite legacy position attribution", async () => {
+    const walletId = "cwlt_sibling_detail";
+    await seedUnreadPrivyWallet(getDb(env), {
+      organizationId: tenant.org.id,
+      projectId: "prj_core_reads_production",
+      createdBy: tenant.user.id,
+      custodyWalletId: walletId,
+      walletId: "privy_sibling_detail",
+      publicKey: OWNER,
+    });
+    const position = await seedPosition({
+      reference: "sibling-wallet",
+      walletId,
+      projectId: tenant.project.id,
+    });
+    expect((await get(`positions/${position.id}`)).status).toBe(404);
+    expect(readVaultPositions).not.toHaveBeenCalled();
+  });
+
+  it("retains custody visibility when its historical position project stamp is null", async () => {
+    const walletId = await seedWallet();
+    const position = await seedPosition({ reference: "retained-wallet", walletId });
+    await getDb(env).execute("UPDATE earn_positions SET project_id = NULL WHERE id = ?", [
+      position.id,
+    ]);
+    const listed = await get(`positions?walletId=${walletId}`);
+    expect(listed.status).toBe(200);
+    expect(await listed.json()).toMatchObject({
+      data: { positions: [expect.objectContaining({ id: position.id })] },
+    });
+    const response = await get(`positions/${position.id}`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { id: position.id, source: { walletId } },
+    });
+  });
+
+  it("keeps tracked values unavailable after a failed live read", async () => {
+    const position = await seedPosition({ reference: "unavailable-detail" });
+    readVaultPositions.mockRejectedValue(new Error("Provider unavailable"));
+    const response = await get(`positions/${position.id}`);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { data: Record<string, unknown> };
+    expect(body.data.id).toBe(position.id);
+    expect(body.data.shares).toBeUndefined();
+    expect(body.data.tokenValue).toBeUndefined();
+    expect(
+      await getDb(env).queryOne("SELECT closed_at FROM earn_positions WHERE id = ?", [position.id])
+    ).toEqual({ closed_at: null });
+  });
+
+  it("reads a discovered holding without importing it or fabricating acquisition history", async () => {
+    const strategy = await seedStrategy("discovered-detail", { status: "deprecated" });
+    const id = encodeDiscoveredEarnPositionLocator({
+      strategyId: strategy.id,
+      source: { ownerAddress: OWNER },
+    });
+    const response = await get(`positions/${id}`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: {
+        id,
+        strategyId: strategy.id,
+        discovered: true,
+        createdAt: null,
+        costBasisKnown: false,
+        tokenValue: "10",
+      },
+    });
+    expect(await getDb(env).queryOne("SELECT COUNT(*)::int AS count FROM earn_positions")).toEqual({
+      count: 0,
+    });
+    expect(readVaultPositions).toHaveBeenCalledTimes(1);
+    expect(readVaultPositions.mock.calls[0]?.[1].providerReferences).toEqual(["discovered-detail"]);
+  });
+
+  it("rejects malformed or unreadable discovered selectors before provider I/O", async () => {
+    const strategy = await seedStrategy("discovered-authority");
+    const foreignWallet = encodeDiscoveredEarnPositionLocator({
+      strategyId: strategy.id,
+      source: { walletId: "cwlt_foreign" },
+    });
+    for (const id of ["earn_discovered_invalid", foreignWallet]) {
+      expect((await get(`positions/${id}`)).status).toBe(404);
+    }
+    expect(readVaultPositions).not.toHaveBeenCalled();
+  });
+
+  it("distinguishes an unverified discovered holding from a proven empty one", async () => {
+    const strategy = await seedStrategy("discovered-unknown");
+    const id = encodeDiscoveredEarnPositionLocator({
+      strategyId: strategy.id,
+      source: { ownerAddress: OWNER },
+    });
+    readVaultPositions.mockRejectedValueOnce(new Error("Provider unavailable"));
+    expect((await get(`positions/${id}`)).status).toBe(503);
+    readVaultPositions.mockResolvedValueOnce([
+      {
+        owner: OWNER,
+        providerReference: "discovered-unknown",
+        cluster: "devnet",
+        tokenMint: TOKEN,
+        shareMint: SHARE,
+        shares: "0",
+        withdrawableShares: "0",
+        tokenValue: "0",
+      },
+    ]);
+    expect((await get(`positions/${id}`)).status).toBe(404);
+    expect(await getDb(env).queryOne("SELECT COUNT(*)::int AS count FROM earn_positions")).toEqual({
+      count: 0,
+    });
+  });
+
+  it("retains a discovered intermediate holding when wallet shares are zero", async () => {
+    const strategy = await seedStrategy("intermediate-detail");
+    const id = encodeDiscoveredEarnPositionLocator({
+      strategyId: strategy.id,
+      source: { ownerAddress: OWNER },
+    });
+    readVaultPositions.mockResolvedValueOnce([
+      {
+        owner: OWNER,
+        providerReference: "intermediate-detail",
+        cluster: "devnet",
+        tokenMint: TOKEN,
+        shareMint: SHARE,
+        shares: "0",
+        withdrawableShares: "0",
+        tokenValue: "0",
+        parIntermediate: { mint: TOKEN, amount: "5", withdrawableAmount: "5", tokenValue: "5" },
+      },
+    ]);
+    const response = await get(`positions/${id}`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { shares: "0", parIntermediate: { amount: "5" } },
+    });
+  });
+
+  it("resolves a discovered selector to its tracked queue holding even at zero wallet shares", async () => {
+    const strategy = await seedStrategy("queued-detail");
+    const position = await seedPosition({ reference: "queued-detail" });
+    await getDb(env).execute(
+      "UPDATE earn_movements SET status = 'finalized', confirmed_at = sdp_iso_now(), settled_at = sdp_iso_now() WHERE id = ?",
+      [position.movementId]
+    );
+    await getDb(env).execute(
+      `INSERT INTO earn_vault_withdrawal_requests (
+        id, organization_id, project_id, environment, provider, position_id,
+        owner_address, vault_address, token_mint, share_mint, request_address,
+        status, shares, quoted_assets, share_decimals, asset_decimals, discount_bps,
+        maturity_timestamp, deadline_timestamp, client_request_id, idempotency_fingerprint,
+        creation_signature)
+       VALUES ('queued-detail-request', ?, ?, 'sandbox', 'veda', ?, ?, 'queued-detail', ?, ?,
+         'queued-detail-address', 'pending', '2', '10', 6, 6, 0, 10, 20,
+         'queued-detail-client', 'queued-detail-fingerprint', 'queued-detail-signature')`,
+      [tenant.org.id, tenant.project.id, position.id, OWNER, TOKEN, SHARE]
+    );
+    readVaultPositions.mockResolvedValueOnce([
+      {
+        owner: OWNER,
+        providerReference: "queued-detail",
+        cluster: "devnet",
+        tokenMint: TOKEN,
+        shareMint: SHARE,
+        shares: "0",
+        withdrawableShares: "0",
+        tokenValue: "0",
+      },
+    ]);
+    const id = encodeDiscoveredEarnPositionLocator({
+      strategyId: strategy.id,
+      source: { ownerAddress: OWNER },
+    });
+    const response = await get(`positions/${id}`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { id: position.id, shares: "0", closedAt: null },
+    });
+    expect(
+      await getDb(env).queryOne("SELECT closed_at FROM earn_positions WHERE id = ?", [position.id])
+    ).toEqual({ closed_at: null });
+    expect(readVaultPositions).toHaveBeenCalledTimes(1);
+  });
+
+  it("applies a ledger confirmation floor to the same discovered instrument ID", async () => {
+    const strategy = await seedStrategy("confirmed-detail");
+    const position = await seedPosition({ reference: "confirmed-detail" });
+    await getDb(env).execute("UPDATE earn_movements SET signature = ? WHERE id = ?", [
+      "3".repeat(88),
+      position.movementId,
+    ]);
+    await getDb(env).execute("UPDATE earn_positions SET activated_at = NULL WHERE id = ?", [
+      position.id,
+    ]);
+    rpc.answer("getSignatureStatuses", {
+      value: [{ slot: 103, confirmations: 0, confirmationStatus: "confirmed", err: null }],
+    });
+    const id = encodeDiscoveredEarnPositionLocator({
+      strategyId: strategy.id,
+      source: { ownerAddress: OWNER },
+    });
+    readVaultPositions.mockImplementationOnce(async () => {
+      expect(currentMinimumRpcSlot()).toBe(103);
+      observeRpcRead(
+        { method: "getAccountInfo" },
+        { result: { context: { slot: 103 }, value: null } }
+      );
+      return [
+        {
+          owner: OWNER,
+          providerReference: "confirmed-detail",
+          cluster: "devnet",
+          tokenMint: TOKEN,
+          shareMint: SHARE,
+          shares: "2",
+          withdrawableShares: "2",
+          tokenValue: "10",
+        },
+      ];
+    });
+    const response = await get(`positions/${id}?afterMovementIds=${position.movementId}`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ data: { id, tokenValue: "10" } });
+    expect(readVaultPositions).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses another instrument's movement floor before any chain reads", async () => {
+    const position = await seedPosition({ reference: "detail-floor" });
+    const other = await seedPosition({ reference: "other-floor" });
+    expect(
+      (await get(`positions/${position.id}?afterMovementIds=${other.movementId}`)).status
+    ).toBe(404);
+    expect(readVaultPositions).not.toHaveBeenCalled();
+    expect(rpc.calls.filter((call) => call.method === "getSignatureStatuses")).toEqual([]);
   });
 });

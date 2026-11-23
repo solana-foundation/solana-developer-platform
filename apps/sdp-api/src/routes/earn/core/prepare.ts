@@ -2,6 +2,7 @@ import { supportsVaultDirect } from "@sdp/earn/capabilities";
 import { notImplemented } from "@sdp/earn/errors";
 import { compareDecimalAmounts } from "@sdp/payments/decimal";
 import { currentClusterScope } from "@sdp/rpc/scope";
+import type { MovementOf } from "@sdp/types/movements";
 import type { OperationIntent, OperationNextAction, OperationTerms } from "@sdp/types/operations";
 import { earnDepositSlippagePolicy } from "@sdp/types/provider-access";
 import { isAddress } from "@solana/kit";
@@ -42,7 +43,7 @@ import {
 } from "@/services/earn/strategy-queued-operations.service";
 import { strategySharesForTokenAmount } from "@/services/earn/strategy-terms";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
-import { resolveVaultSponsorship } from "@/services/earn/vault-sponsorship";
+import { resolveVaultSponsorship, type VaultFeeMode } from "@/services/earn/vault-sponsorship";
 import {
   buildWalletDepositTransaction,
   buildWalletWithdrawalTransaction,
@@ -102,6 +103,13 @@ export async function resolveStrategySource(
   return { source, ownerAddress: wallet.publicKey, wallet };
 }
 
+/** A named fee payer co-signs an owner's transaction; a custody wallet keeps its configured one. */
+function assertFeePayer(feePayer: string | undefined, source: EarnStrategySource): void {
+  if (feePayer === undefined) return;
+  if (!isAddress(feePayer)) throw badRequest("feePayer must be a Solana address");
+  if (source.wallet !== null) throw badRequest("A custody wallet uses its configured fee payer");
+}
+
 /** Resolve only ownership here; mutable strategy admission runs after idempotency. */
 export async function authorizeEarnDeposit(
   c: AppContext,
@@ -112,10 +120,7 @@ export async function authorizeEarnDeposit(
   const { strategy } = await requireEarnStrategyForCaller(c, body.strategyId);
   const source = await resolveStrategySource(c, actor, body.source);
   if (!isAddress(body.amount.mint)) throw badRequest("amount.mint must be a Solana mint address");
-  if (body.feePayer !== undefined && !isAddress(body.feePayer))
-    throw badRequest("feePayer must be a Solana address");
-  if (source.wallet !== null && body.feePayer !== undefined)
-    throw badRequest("A custody wallet uses its configured fee payer");
+  assertFeePayer(body.feePayer, source);
   return { actor, intent: { kind: "earn.deposit", ...body }, source, strategy, position: null };
 }
 
@@ -160,10 +165,7 @@ export async function authorizeEarnWithdrawal(
     }
   }
   if (position === null) throw notFound("Earn position");
-  if (body.feePayer !== undefined && !isAddress(body.feePayer))
-    throw badRequest("feePayer must be a Solana address");
-  if (source.wallet !== null && body.feePayer !== undefined)
-    throw badRequest("A custody wallet uses its configured fee payer");
+  assertFeePayer(body.feePayer, source);
   return { actor, intent: { kind: "earn.withdraw", ...body }, source, strategy, position };
 }
 
@@ -188,6 +190,31 @@ function preparationContext(actor: EarnOperationActor) {
     userId: actor.auth.userId,
     apiKeyId: actor.auth.apiKeyId,
   };
+}
+
+/** Applied when neither the caller nor the provider's policy names a deposit tolerance. */
+const DEFAULT_DEPOSIT_SLIPPAGE_BPS = 50;
+
+/**
+ * A custody wallet signs through its provider, and SDP sponsors its fees where
+ * policy allows. An owner address signs and pays for itself, so it adds nothing.
+ */
+async function custodySigning(
+  c: AppContext,
+  { actor, source }: AuthorizedEarnPreparation,
+  movement: MovementOf<"earn">,
+  sponsored = true
+): Promise<{ custodyWalletId?: string; fee?: VaultFeeMode }> {
+  if (source.wallet === null) return {};
+  const custodyWalletId = source.wallet.id;
+  if (!sponsored) return { custodyWalletId };
+  const fee = await resolveVaultSponsorship(c.env, {
+    movement,
+    ...preparationContext(actor),
+    walletId: custodyWalletId,
+    deadline: createVaultDeadline(),
+  });
+  return { custodyWalletId, fee };
 }
 
 async function prepareDepositAction(
@@ -217,21 +244,6 @@ async function prepareDepositAction(
     tokenMint
   );
   const policy = earnDepositSlippagePolicy(provider, actor.environment, strategy.host_cluster);
-  const slippageBps =
-    intent.slippageBps === undefined
-      ? policy === null
-        ? 50
-        : policy.defaultToleranceBps
-      : intent.slippageBps;
-  const fee =
-    source.wallet === null || swap !== null
-      ? undefined
-      : await resolveVaultSponsorship(c.env, {
-          movement: "earn.deposit",
-          ...context,
-          walletId: source.wallet.id,
-          deadline: createVaultDeadline(),
-        });
   const result = await buildWalletDepositTransaction(c.env, {
     ...context,
     provider,
@@ -242,10 +254,10 @@ async function prepareDepositAction(
     shareMint: strategy.share_mint,
     label: strategy.name,
     amount: intent.amount.value,
-    slippageBps,
+    slippageBps: intent.slippageBps ?? policy?.defaultToleranceBps ?? DEFAULT_DEPOSIT_SLIPPAGE_BPS,
     feePayer: intent.feePayer,
-    ...(source.wallet === null ? {} : { custodyWalletId: source.wallet.id }),
-    ...(fee === undefined ? {} : { fee }),
+    // A swap-funded deposit always pays its own fees.
+    ...(await custodySigning(c, resolved, "earn.deposit", swap === null)),
     ...(swap === null ? {} : { swap }),
   });
   const terms = emptyTerms();
@@ -290,6 +302,13 @@ function requireWithdrawalPosition(position: EarnPositionRow | null): Withdrawal
   };
 }
 
+/** What a withdrawal redeems: shares, or a held intermediate token. */
+interface WithdrawalAmounts {
+  shares?: string;
+  intermediate?: { mint: string; value: string };
+  discovered: boolean;
+}
+
 async function readWithdrawalHolding(
   c: AppContext,
   source: EarnStrategySource,
@@ -321,8 +340,10 @@ async function readWithdrawalHolding(
   return holding;
 }
 
+type WithdrawalHolding = NonNullable<Awaited<ReturnType<typeof readWithdrawalHolding>>>;
+
 function requireHeldIntermediate(
-  holding: NonNullable<Awaited<ReturnType<typeof readWithdrawalHolding>>>,
+  holding: WithdrawalHolding,
   amount: { mint: string; value: string }
 ) {
   if (
@@ -335,7 +356,7 @@ function requireHeldIntermediate(
 }
 
 async function sharesForTokenWithdrawal(
-  holding: NonNullable<Awaited<ReturnType<typeof readWithdrawalHolding>>>,
+  holding: WithdrawalHolding,
   position: WithdrawalPosition,
   amount: { mint: string; value: string }
 ): Promise<string> {
@@ -355,48 +376,39 @@ async function withdrawalAmounts(
   c: AppContext,
   resolved: AuthorizedEarnPreparation,
   position: WithdrawalPosition
-) {
+): Promise<WithdrawalAmounts> {
   const { intent, source } = resolved;
   if (intent.kind !== "earn.withdraw") throw internalError("Expected a withdrawal intent");
-  let shares: string | undefined;
-  let intermediateAmount: string | undefined;
-  let intermediateMint: string | undefined;
+  const { amount } = intent;
   const discovered = parseDiscoveredEarnPositionLocator(position.id) !== null;
-  if (intent.amount.kind === "shares" && !discovered) {
-    shares = intent.amount.value;
+  const amounts: WithdrawalAmounts = { discovered };
+  if (amount.kind === "shares" && !discovered) {
+    amounts.shares = amount.value;
   } else {
-    const holding = await readWithdrawalHolding(
-      c,
-      source,
-      position,
-      intent.amount.kind === "all" && !discovered
-    );
-    if (holding === null) {
-      // A tracked position may hold only escrow. Its recorded request and
-      // live provider state, rather than a wallet balance, must prove recovery.
-      return { shares, intermediateAmount, intermediateMint, discovered };
-    }
-    if (intent.amount.kind === "intermediate") {
-      requireHeldIntermediate(holding, intent.amount);
-      intermediateAmount = intent.amount.value;
-      intermediateMint = intent.amount.mint;
-    } else if (intent.amount.kind === "shares") shares = intent.amount.value;
-    else if (intent.amount.kind === "all") {
-      if (compareDecimalAmounts(holding.shares, "0") > 0) shares = holding.shares;
-      else if (holding.parIntermediate !== undefined) {
-        intermediateAmount = holding.parIntermediate.withdrawableAmount;
-        intermediateMint = holding.parIntermediate.mint;
-      }
-    } else {
-      shares = await sharesForTokenWithdrawal(holding, position, intent.amount);
+    const allowMissing = amount.kind === "all" && !discovered;
+    const holding = await readWithdrawalHolding(c, source, position, allowMissing);
+    // A tracked position may hold only escrow. Its recorded request and
+    // live provider state, rather than a wallet balance, must prove recovery.
+    if (holding === null) return amounts;
+    if (amount.kind === "intermediate") {
+      requireHeldIntermediate(holding, amount);
+      amounts.intermediate = { mint: amount.mint, value: amount.value };
+    } else if (amount.kind === "shares") {
+      amounts.shares = amount.value;
+    } else if (amount.kind === "token") {
+      amounts.shares = await sharesForTokenWithdrawal(holding, position, amount);
+    } else if (compareDecimalAmounts(holding.shares, "0") > 0) {
+      amounts.shares = holding.shares;
+    } else if (holding.parIntermediate !== undefined) {
+      const { mint, withdrawableAmount } = holding.parIntermediate;
+      amounts.intermediate = { mint, value: withdrawableAmount };
     }
   }
-  if (intent.amount.kind === "all")
-    return { shares, intermediateAmount, intermediateMint, discovered };
-  const redeemable = shares ?? intermediateAmount;
+  if (amount.kind === "all") return amounts;
+  const redeemable = amounts.shares ?? amounts.intermediate?.value;
   if (redeemable === undefined || compareDecimalAmounts(redeemable, "0") <= 0)
     throw badRequest("No redeemable strategy balance was found");
-  return { shares, intermediateAmount, intermediateMint, discovered };
+  return amounts;
 }
 
 function withdrawalAdapterPosition(position: WithdrawalPosition, source: EarnStrategySource) {
@@ -420,12 +432,11 @@ async function prepareWithdrawalAction(
   if (intent.kind !== "earn.withdraw") throw internalError("Expected a withdrawal intent");
   const position = requireWithdrawalPosition(resolved.position);
   const amounts = await withdrawalAmounts(c, resolved, position);
-  const { shares, intermediateAmount, intermediateMint } = amounts;
-  const queuedPosition = withdrawalAdapterPosition(position, source);
+  const { shares, intermediate } = amounts;
   const choices = await prepareStrategyWithdrawalChoices(c.env, {
-    position: queuedPosition,
+    position: withdrawalAdapterPosition(position, source),
     shares,
-    intermediateAmount,
+    intermediateAmount: intermediate?.value,
     slippageBps: intent.slippageBps,
     ...(intent.amount.kind === "all" && !amounts.discovered
       ? { recovery: { actor: preparationContext(resolved.actor) } }
@@ -433,13 +444,7 @@ async function prepareWithdrawalAction(
   });
   const terms = emptyTerms();
   terms.inputAmount =
-    intermediateAmount === undefined
-      ? shares === undefined
-        ? null
-        : { mint: position.share_mint, value: shares }
-      : intermediateMint === undefined
-        ? null
-        : { mint: intermediateMint, value: intermediateAmount };
+    intermediate ?? (shares === undefined ? null : { mint: position.share_mint, value: shares });
   terms.options = choices.options;
   if (
     selectedOptionId === undefined &&
@@ -477,24 +482,13 @@ async function buildRecoveryAction(
     parseDiscoveredEarnPositionLocator(position.id) !== null
   )
     throw internalError("Expired escrow recovery has no authorized tracked request");
-  const context = preparationContext(actor);
-  const fee =
-    source.wallet === null
-      ? undefined
-      : await resolveVaultSponsorship(c.env, {
-          movement: "earn.queued_withdraw_cancel",
-          ...context,
-          walletId: source.wallet.id,
-          deadline: createVaultDeadline(),
-        });
   const built = await prepareQueuedStrategyRecovery(c.env, {
-    actor: context,
+    actor: preparationContext(actor),
     position: withdrawalAdapterPosition(position, source),
     request: selected.recovery,
     proof: selected.recoveryProof,
     feePayer: intent.feePayer,
-    ...(source.wallet === null ? {} : { custodyWalletId: source.wallet.id }),
-    ...(fee === undefined ? {} : { fee }),
+    ...(await custodySigning(c, resolved, "earn.queued_withdraw_cancel")),
   });
   terms.inputAmount = { mint: selected.recovery.share_mint, value: selected.recovery.shares };
   return {
@@ -508,36 +502,25 @@ async function buildSelectedWithdrawalAction(
   c: AppContext,
   resolved: AuthorizedEarnPreparation,
   position: WithdrawalPosition,
-  amounts: Awaited<ReturnType<typeof withdrawalAmounts>>,
+  amounts: WithdrawalAmounts,
   selected: PreparedStrategyWithdrawalChoice,
   terms: OperationTerms
 ): Promise<PreparedOperationAction> {
   const { intent, source, actor } = resolved;
   if (intent.kind !== "earn.withdraw") throw internalError("Expected a withdrawal intent");
   const context = preparationContext(actor);
-  const deadline = createVaultDeadline();
   const queuedPosition = withdrawalAdapterPosition(position, source);
   const { discovered, shares } = amounts;
   if (selected.kind === "recovery")
     return buildRecoveryAction(c, resolved, position, selected, terms);
   if (selected.kind === "queued") {
     if (selected.terms === undefined) throw internalError("Queued withdrawal terms are missing");
-    const fee =
-      source.wallet === null
-        ? undefined
-        : await resolveVaultSponsorship(c.env, {
-            movement: "earn.queued_withdraw_request",
-            ...context,
-            walletId: source.wallet.id,
-            deadline,
-          });
     const built = await prepareQueuedStrategyWithdrawal(c.env, {
       actor: context,
       position: queuedPosition,
       terms: selected.terms,
       feePayer: intent.feePayer,
-      ...(source.wallet === null ? {} : { custodyWalletId: source.wallet.id }),
-      ...(fee === undefined ? {} : { fee }),
+      ...(await custodySigning(c, resolved, "earn.queued_withdraw_request")),
       ...(discovered && position.strategy_id != null
         ? { discoveredStrategyId: position.strategy_id }
         : {}),
@@ -554,16 +537,6 @@ async function buildSelectedWithdrawalAction(
     };
   }
   if (shares === undefined) throw internalError("Direct withdrawal has no share amount");
-  const minAmountOut = terms.minimum?.value;
-  const fee =
-    source.wallet === null
-      ? undefined
-      : await resolveVaultSponsorship(c.env, {
-          movement: "earn.withdraw",
-          ...context,
-          walletId: source.wallet.id,
-          deadline,
-        });
   const built = await buildWalletWithdrawalTransaction(c.env, {
     ...context,
     provider: position.provider,
@@ -576,10 +549,9 @@ async function buildSelectedWithdrawalAction(
     label: position.label,
     shareAtaRentFunder: position.share_ata_rent_funder,
     shares,
-    minAmountOut,
+    minAmountOut: terms.minimum?.value,
     feePayer: intent.feePayer,
-    ...(source.wallet === null ? {} : { custodyWalletId: source.wallet.id }),
-    ...(fee === undefined ? {} : { fee }),
+    ...(await custodySigning(c, resolved, "earn.withdraw")),
   });
   return {
     nextAction: actionFor(source, built.unsigned_transaction, built.last_valid_block_height),

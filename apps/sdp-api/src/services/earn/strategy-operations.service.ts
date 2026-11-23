@@ -67,6 +67,8 @@ async function projectQueuedOperation(
     positionId: request.position_id,
   });
   const strategyId = position?.strategy_id;
+  // A creation signature is stored before broadcast. Keep creating requests
+  // submitted, without regressing an operation already stored as settling.
   const status =
     request.status === "fulfilled"
       ? "completed"
@@ -74,12 +76,27 @@ async function projectQueuedOperation(
         ? "cancelled"
         : request.status === "failed"
           ? "failed"
-          : "settling";
+          : request.status === "creating" && operation.status !== "settling"
+            ? "submitted"
+            : "settling";
   return {
     ...operation,
+    // Request evidence can advance before the operation worker records progress.
+    updatedAt:
+      Date.parse(request.updated_at) > Date.parse(operation.updatedAt)
+        ? request.updated_at
+        : operation.updatedAt,
     status: isTerminalOperation(operation) ? operation.status : status,
     nextAction:
-      status === "settling" ? { type: "wait", reason: "Waiting for provider settlement" } : null,
+      status === "submitted" || status === "settling"
+        ? {
+            type: "wait",
+            reason:
+              status === "submitted"
+                ? "Waiting for transaction confirmation"
+                : "Waiting for provider settlement",
+          }
+        : null,
     error:
       status === "failed"
         ? {

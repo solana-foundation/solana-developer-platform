@@ -1,3 +1,4 @@
+import type { EarnCorePosition } from "@sdp/types/earn-core";
 import type { Operation } from "@sdp/types/operations";
 import { describe, expect, it, vi } from "vitest";
 import { createEarnClient, type EarnApiError } from "./earn-client";
@@ -30,6 +31,42 @@ function operation(): Operation {
 }
 
 describe("Earn core client", () => {
+  it("reads a single position with the same source and unknown-value contract as the list", async () => {
+    const position: EarnCorePosition = {
+      id: "discovered/owner position",
+      provider: "kamino",
+      providerReference: "strategy",
+      label: "Existing holding",
+      tokenMint: "usdc",
+      shareMint: "shares",
+      source: { ownerAddress: "owner" },
+      createdAt: null,
+      closedAt: null,
+      costBasisKnown: false,
+      feeSponsored: false,
+    };
+    const transport = vi.fn(async (_path: string, _init?: RequestInit) =>
+      Response.json({ data: position })
+    );
+    const controller = new AbortController();
+    const result = await createEarnClient(transport).position(
+      position.id,
+      { afterMovementIds: "movement-a,movement-b" },
+      controller.signal
+    );
+    expect(result).toEqual(position);
+    expect(result.tokenValue).toBeUndefined();
+    expect(transport).toHaveBeenCalledExactlyOnceWith(
+      "/v1/earn/positions/discovered%2Fowner%20position?afterMovementIds=movement-a%2Cmovement-b",
+      { signal: controller.signal }
+    );
+  });
+
+  it("rejects malformed position detail instead of exposing a zero balance", async () => {
+    const client = createEarnClient(async () => Response.json({ data: { id: "position" } }));
+    await expect(client.position("position")).rejects.toThrow();
+  });
+
   it("prepares an owner-signed deposit without submitting or adding credentials", async () => {
     const transport = vi
       .fn()

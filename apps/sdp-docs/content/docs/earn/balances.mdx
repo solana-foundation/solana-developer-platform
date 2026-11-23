@@ -1,37 +1,89 @@
 ---
 module: earn
 title: Balances and earnings
-description: Read holdings and complete-scope totals while preserving unavailable values.
+description: Read a wallet's positions, find holdings opened outside SDP, and total its balances and earnings.
 ---
 
-Use `GET /v1/earn/positions?ownerAddress=<owner-public-key>` for your wallet's
-holdings. No SDP wallet registration is required. An optional `walletId` filter
-selects an existing connected wallet instead; `sourceType` distinguishes
-`address` and `wallet` sources. Position IDs are the references for withdrawals.
+`GET /v1/earn/positions` reads a wallet's holdings, with `api` and `headers` as
+in the [quickstart](/docs/earn/quickstart):
 
-The `ownerAddress` and `walletId` filters are optional; use one, not both.
-Without one, the read covers the caller's visible tracked scope.
-See [position filters](/docs/reference/api/earn/list-earn-core-positions).
+<Tabs items={["TypeScript", "curl"]}>
+<Tab value="TypeScript">
+```ts
+const response = await fetch(`${api}/v1/earn/positions?ownerAddress=${ownerAddress}`, {
+  headers,
+});
+const { positions } = (await response.json()).data;
+```
+</Tab>
+<Tab value="curl">
+```bash
+curl -sS "https://api-devnet.solana.com/v1/earn/positions?ownerAddress=<wallet-address>" \
+  -H "Authorization: Bearer $SDP_API_KEY"
+```
+</Tab>
+</Tabs>
 
-## Discover existing holdings
+Each position's `id` is the `positionId` you [withdraw](/docs/earn/withdrawals)
+with. Without `ownerAddress`, the read covers every position your key can see in
+the project. See [position filters](/docs/reference/api/earn/list-earn-core-positions).
 
-With one explicit source, `discover=true` reads integrated strategies for
-holdings opened outside SDP. The response states coverage and unavailable
-strategy counts. Missing provider observations remain unavailable, not zero.
-Reads do not import ownership or invent acquisition history.
+## Read one position
 
-## Summaries and earnings
+Use a position's `id` to read its latest balance and withdrawal state without
+fetching the whole list:
 
-`includeSummary=true` aggregates the full selected scope. Owner-address details
-require `includeOwnerAddresses=true`; individual positions additionally require
-`includePositions=true`.
+<Tabs items={["TypeScript", "curl"]}>
+<Tab value="TypeScript">
+```ts
+const response = await fetch(`${api}/v1/earn/positions/${encodeURIComponent(positionId)}`, {
+  headers,
+});
+const position = (await response.json()).data;
+```
+</Tab>
+<Tab value="curl">
+```bash
+curl -sS "https://api-devnet.solana.com/v1/earn/positions/<position-id>" \
+  -H "Authorization: Bearer $SDP_API_KEY"
+```
+</Tab>
+</Tabs>
 
-Respect `costBasisKnown` and `costBasisCoverage`. Display earned yield only when
-history and current observations establish it. Keep pending queue shares and
-held intermediate tokens visible while settlement is unresolved.
+The ID selects its owner and strategy; no wallet filter is needed. The read
+uses the same access rules and position fields as the list, including IDs
+returned by `discover=true`. Reading a discovered holding does not import it. If it is already tracked,
+the response returns its canonical position ID. Missing positions and positions outside your project return `404`.
+
+Pass `afterMovementIds` after a transaction to require a balance observation
+that includes those movements. See [position parameters](/docs/reference/api/earn/get-earn-position).
+Unknown live values stay unavailable; do not show them as zero.
+
+## Holdings opened outside SDP
+
+Add `discover=true` to an `ownerAddress` read to include the wallet's holdings
+in integrated strategies that SDP didn't open. You can withdraw from them the
+same way. `discovery.unavailableStrategyCount` counts strategies SDP couldn't
+read: their balances are unknown, not zero. Discovered holdings have no
+acquisition history, so their `costBasisKnown` is `false`.
+
+## Totals and earnings
+
+`includeSummary=true` totals the whole selected scope, not only the current
+page. Add `includeOwnerAddresses=true` for totals per owner, and
+`includePositions=true`, which needs it, for each position.
+
+Show earned yield only where `costBasisKnown` is `true`; `summary.costBasisCoverage`
+is `complete` when that holds for every position. Keep pending queue shares and
+intermediate tokens visible until they settle.
 
 ## Activity
 
-Read `GET /v1/operations` with the source filter to recover activity and pending
-actions created through the core API. Read an individual operation for its
-current next action and result.
+`GET /v1/operations?ownerAddress=<wallet-address>` lists the wallet's deposits
+and withdrawals, newest first, each with its current `nextAction`. Always pass
+the owner: without a filter, the list leaves out owner-address operations.
+
+Add `status=active` for outstanding actions, including unsigned preparations.
+Paginate history separately with `limit` and `cursor`; every filter applies
+before pagination. Keep tracking an older pending action even when newer
+operations fill the first history page. See [activity filters](/docs/reference/api/earn/list-operations).

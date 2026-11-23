@@ -51,6 +51,7 @@ exports[`route actions > pins each route's action 1`] = `
   "earn.read GET /v1/earn/onboarding/wisdomtree/:counterpartyId",
   "earn.read GET /v1/earn/onboarding/wisdomtree/forms/:entityType",
   "earn.read GET /v1/earn/positions",
+  "earn.read GET /v1/earn/positions/:positionId",
   "earn.read GET /v1/operations",
   "earn.read GET /v1/operations/:operationId",
   "feedback.execute POST /v1/organizations/:orgId/feedback",

@@ -1,53 +1,55 @@
 ---
 module: earn
 title: Withdraw funds
-description: Prepare position exits and track verified delivery.
+description: Prepare a withdrawal from a position, choose its exit route when offered, and track the payout.
 ---
 
-Prepare an exit with `POST /v1/earn/withdraw` using a position ID:
+Send `POST /v1/earn/withdraw` with a position from
+[`GET /v1/earn/positions`](/docs/earn/balances):
 
-```json
+```json title="withdrawal.json"
 {
-  "positionId": "earn_position_example",
+  "positionId": "<position-id>",
   "amount": { "kind": "all" }
 }
 ```
 
-The position determines its strategy and owner. For a wallet you sign through
-your own integration, obtain its position ID with
-`GET /v1/earn/positions?ownerAddress=<owner-public-key>`. No SDP wallet record is
-required. Other quantity kinds are
-`shares`, `token` and held `intermediate`; each quantity carries its own units.
-Payout returns to that owner.
+The position fixes the strategy and the owner, and the payout goes back to that
+owner. To review its latest balance first, [read the position](/docs/earn/balances#read-one-position).
+`slippageBps` is optional and sits at the top level. See
+[all withdrawal parameters](/docs/reference/api/earn/prepare-earn-withdrawal).
 
-See [all withdrawal parameters](/docs/reference/api/earn/prepare-earn-withdrawal).
-The position supplies the owner; `slippageBps`, when provided, stays at the
-request top level.
+| `amount.kind` | Withdraws |
+| --- | --- |
+| `all` | The whole position. |
+| `shares` | `value` shares. |
+| `token` | Shares worth `value` of the strategy's deposit token `mint`. |
+| `intermediate` | `value` of a held intermediate token `mint`, for strategies that redeem through one. |
 
-## Choose and review an exit
+## Choose an exit route
 
-For `nextAction.type="select_option"`, choose an advertised exit from
-`terms.options`. Call `POST /v1/operations/{operationId}/refresh` with its
-`optionId`, the current `actionId` and `version`, then review the newly prepared
-transaction. Selection does not authorize execution. Later refreshes retain the
-selected route instead of switching between instant and delayed exits. Refresh
-is available only before submit acceptance.
+Some strategies offer more than one exit, such as an instant swap and a delayed
+redemption. Then `nextAction.type` is `select_option`, and `terms.options` lists
+each route with its `settlement`, `estimatedSeconds` and `amount`. Call
+`POST /v1/operations/{operationId}/refresh` with the chosen `optionId` and the
+current `actionId` and `version`. SDP prepares that route's transaction for you
+to review, and the route stays fixed on later refreshes.
 
-Sign the returned transaction with the position's owner and any required fee
-payer through your wallet integration. Call
-`POST /v1/operations/{operationId}/submit` with the new action ID/version and
-base64 `signedTransaction`. An existing connected-wallet position may instead
-request provider signing. The same worker tracks broadcast and settlement.
+While the withdrawal waits for your choice, `canCancel` is `true` and
+`POST /v1/operations/{operationId}/cancel` abandons it. Cancel needs the
+`earn.manage` grant.
 
-## Track delivery
+## Sign, submit and track
 
-Poll the same operation through request and settlement. A provider request ID
-or escrowed shares is not payout evidence. There is no separate claim endpoint.
+Sign and submit as for a [deposit](/docs/earn/deposits#sign-and-submit), then
+poll the operation. For a queued withdrawal, `submitted` waits for the request
+transaction to confirm; `settling` waits for the provider to pay out. A delayed
+redemption stays in progress until that payout: a request ID or escrowed shares are not a payout, and there is no
+separate claim step. `completed` means SDP verified the payout; a `null`
+`result.settledAmount` is unknown, not zero.
 
-Only when `operation.canCancel` is true can
-`POST /v1/operations/{operationId}/cancel` with `earn.manage` abandon preparation.
-After any submit acceptance, cancellation is unavailable, including for queued
-withdrawals and pending provider signing. Refresh is also unavailable. Keep
-tracking the operation. A definitive failure is terminal; only then may you
-prepare another withdrawal with a new idempotency key. Null settled amounts
-remain unknown.
+Once submitted, a withdrawal can't be refreshed or cancelled, even while
+queued. After a definitive failure, prepare its replacement with a new
+`Idempotency-Key`. An uncertain outcome never authorizes a replacement. If
+shares end up stuck in an expired queue request,
+[recover them](/docs/earn/integration-details#recover-expired-withdrawal-escrow).

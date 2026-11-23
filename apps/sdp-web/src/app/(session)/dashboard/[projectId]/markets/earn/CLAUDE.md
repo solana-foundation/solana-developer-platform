@@ -14,8 +14,8 @@ program creation and allocation configuration.
   then requires explicit submission. A funding swap and deposit are atomic.
 - `earn-core-operations.tsx` shows requested and verified settled amounts
   separately. Queue acceptance or Solana submission never means payout.
-- BFF routes under `src/app/api/dashboard/markets/earn` forward the four core
-  routes. Shared operation proxies live under `api/dashboard/operations`.
+- BFF routes under `src/app/api/dashboard/markets/earn` forward the five core
+  endpoints, including single-position reads. Shared operation proxies live under `api/dashboard/operations`.
   Preserve project, environment, auth and idempotency headers through the seam.
 - `earn-data.ts` supplies shared discovery and position reads. Activity and
   outstanding exits use current operations.
@@ -30,6 +30,14 @@ acceptance; workers request signatures, broadcast and track settlement. Keep
 polling queued and active operations, including custody providers that require
 a signature in another application. Read requests never trigger submission.
 
+The default activity view polls active work and the newest 50 history entries.
+Older pages load on demand and keep their snapshot while expanded; Refresh
+returns to the newest page. Retain a pending row until its existing detail poll
+observes a terminal outcome, even if it leaves the active feed. Completion from
+either feed or detail must refresh holdings. Recovered shares refresh holdings
+and cash observations without becoming withdrawal proceeds. Timestamp-only
+updates must not trigger another balance read.
+
 Render `nextAction` explicitly: `submit`, `sign_transaction`, `select_option`,
 `sign_in_provider`, `wait` or `refresh`. Selecting a withdrawal option
 prepares its terms through version-bound refresh, followed by separate review
@@ -40,7 +48,9 @@ review and submission. Definitively failed submissions stay terminal; a new
 intent needs a new deposit or withdrawal request.
 
 Persist retry keys before sending. A lost response retries the same request
-and exact signed bytes. Do not prepare another transaction because an RPC read
+and exact signed bytes. Wire amounts stay fixed across an ambiguous retry,
+including an intermediate-token All amount; live quotes and balances cannot
+change the retained request. Do not prepare another transaction because an RPC read
 is missing or a signature expired. Show cancellation only when the API returns
 `canCancel: true`. It discards an unsubmitted preparation. Once `/submit` has
 been accepted, cancellation and refresh stay unavailable. Cancellation never
