@@ -509,23 +509,6 @@ export async function checkWisdomTreeDepositEligibility(
 }
 
 /**
- * Raw orders feed — tooling surface (underscore convention, like Ground's
- * `_iterateYieldSources`): consumed by inventory/settlement tooling and the
- * future order-settlement reconciler, not part of the provider contract.
- * Accepts both the bare-array and wrapped shapes because the spec never prints
- * this route's envelope. UNVERIFIED.
- */
-export async function _listWisdomTreeOrders(ctx: EarnRuntimeContext): Promise<unknown[]> {
-  const response = await connectGetJson<unknown>(ctx, "/api/orders/all");
-  if (Array.isArray(response)) return response;
-  if (response && typeof response === "object") {
-    const wrapped = (response as { orders?: unknown }).orders;
-    if (Array.isArray(wrapped)) return wrapped;
-  }
-  throw providerUnavailable("WisdomTree returned an orders response in an unrecognized shape");
-}
-
-/**
  * Sensitive onboarding exchange using the existing environment-pinned OAuth
  * identity. Reads may refresh a revoked token once; writes are NEVER replayed,
  * including on 401, timeout, malformed replies or a partially saved 4xx.
