@@ -39,12 +39,13 @@ separate policies.
 
 ## Register a provider
 
-Start `EARN_PROVIDER_SURFACING` at `false`. Complete these registrations before
+Start the provider's `surfaced` at `false`. Complete these registrations before
 surfacing the provider:
 
-1. Add the ID to `EARN_PROVIDERS` in
-   `packages/sdp-types/src/provider-access.ts`. Fill every exhaustive policy map,
-   including surfacing, deposit style and deposit/withdrawal slippage floors.
+1. Add the ID to `EARN_PROVIDERS` and its entry to `EARN_PROVIDER_DESCRIPTORS`
+   in `packages/sdp-types/src/provider-access.ts`. The descriptor states every
+   policy: surfacing, deposit style, settlement, slippage floors and deployed
+   clusters. The per-policy tables are derived from it.
    Earn entitlement is override-only; registration grants no organization access.
 2. Add an SDK-free catalogue client under
    `packages/sdp-earn/src/providers/<id>/client.ts`, its entry in

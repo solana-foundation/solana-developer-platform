@@ -11,6 +11,7 @@ import type {
   EarnVaultTransactionPlan,
   EarnVaultWithdrawInput,
 } from "@sdp/earn/types";
+import { EARN_PROVIDER_DESCRIPTORS } from "@sdp/types/provider-access";
 import {
   CLUSTER_BY_SDP_ENVIRONMENT,
   type SolanaCluster,
@@ -78,7 +79,7 @@ export class WisdomTreeVaultDirectClient
   implements EarnVaultProviderOrderWithdrawProvider
 {
   /** The redemption transaction transfers shares; WisdomTree pays USDC later. */
-  readonly vaultWithdrawalSettlement = "provider_order" as const;
+  readonly vaultWithdrawalSettlement = EARN_PROVIDER_DESCRIPTORS.wisdomtree.withdrawalSettlement;
 
   constructor(
     private readonly resolveProvenRpcUrl: (
