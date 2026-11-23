@@ -33,6 +33,8 @@ export async function mapSettledWithConcurrency<T, U>(
         try {
           results[currentIndex] = {
             status: "fulfilled",
+            // SAFETY: each of the at-most-`items.length` workers claims one index
+            // under `nextIndex`, so the read is always in bounds.
             value: await mapper(items[currentIndex] as T),
           };
         } catch (reason) {
@@ -71,6 +73,8 @@ export async function mapWithConcurrency<T, U>(
       while (nextIndex < items.length) {
         const currentIndex = nextIndex;
         nextIndex += 1;
+        // SAFETY: each of the at-most-`items.length` workers claims one index
+        // under `nextIndex`, so the read is always in bounds.
         results[currentIndex] = await mapper(items[currentIndex] as T);
       }
     })

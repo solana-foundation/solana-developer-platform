@@ -176,8 +176,8 @@ describe("Fireblocks policy presence", () => {
     const parsed = parseFireblocksPolicy({
       policy: { rules: [{ type: "TRANSFER", asset: "SOL", srcId: "42" }] },
     });
-    expect(parsed).not.toBeNull();
-    expect(inspectFireblocksPolicy(parsed as NonNullable<typeof parsed>, "42", ["SOL"])).toEqual({
+    if (!parsed) throw new Error("An envelope with unreadable rules must still parse");
+    expect(inspectFireblocksPolicy(parsed, "42", ["SOL"])).toEqual({
       status: "unknown",
       reason: "unsupported_response",
     });
