@@ -18,7 +18,7 @@ export const OPERATION_STATUSES = [
 /** Terminal observations never regress to an executable state. */
 export const TERMINAL_OPERATION_STATUSES = ["completed", "failed", "cancelled"] as const;
 
-const TERMINAL_OPERATION_STATUS_SET = new Set<string>(TERMINAL_OPERATION_STATUSES);
+const TERMINAL_OPERATION_STATUS_SET = new Set<OperationStatus>(TERMINAL_OPERATION_STATUSES);
 
 /** Whether an operation status is terminal. */
 export function isTerminalOperationStatus(status: OperationStatus): boolean {
