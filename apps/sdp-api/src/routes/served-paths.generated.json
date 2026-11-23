@@ -1,6 +1,6 @@
 {
   "/": "exact",
-  "/admin/allowlist": "prefix",
+  "/admin/onboarding-allowlist": "prefix",
   "/docs": "prefix",
   "/health": "prefix",
   "/internal/dashboard/custody/connections": "prefix",

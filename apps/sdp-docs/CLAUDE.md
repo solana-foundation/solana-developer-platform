@@ -360,20 +360,22 @@ the same filtered page map.
 Earn uses the same `module: earn` frontmatter and release-channel rules as
 every other module, with no separate publication flag or preview override. Its
 guides live in `content/docs/earn`, with Embedded Yield in
-`content/docs/guides/embedded-yield.mdx`. The public contract has four core
-actions and five shared operation routes; the API reference nests the operation
+`content/docs/guides/embedded-yield.mdx`. The public contract has five core
+routes and five shared operation routes; the API reference nests the operation
 routes under Earn as their own Operations group (`EARN_GROUPS.operations`), and
-the six WisdomTree onboarding operations stay internal. OpenAPI owns request and response contracts, and the
-guides own the walkthrough. Do not maintain a second hidden core contract.
+the six WisdomTree onboarding operations stay internal. OpenAPI owns request
+and response contracts, and the guides own the walkthrough. Do not maintain a
+second hidden core contract.
 
 Guides walk the `source.ownerAddress` flow only: the owner's wallet signs, and
 SDP never needs it registered. An SDP custody wallet (`source.walletId`) gets
 one note, at the end of the quickstart. Guides document the Earn API and how to
 integrate it, nothing more: assume readers know Solana signing and wallets, show
 no signing or environment setup code, and link Solana's docs instead. Code
-examples are TypeScript first, with curl as the second tab. `earn-guide-examples.test.ts` parses
-each titled request block (`deposit.json`, `submission.json`,
-`withdrawal.json`) with the API's own schemas.
+examples are TypeScript first, with curl as the second tab.
+`earn-guide-examples.test.ts` parses each titled request block
+(`deposit.json`, `submission.json`, `withdrawal.json`) with the API's own
+schemas.
 
 ## Do's and Don'ts
 

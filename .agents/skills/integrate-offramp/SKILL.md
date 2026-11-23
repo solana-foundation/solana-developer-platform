@@ -28,7 +28,7 @@ Output `PaymentRampQuote` is closed by `provider` and `deliveryMode`; add the pr
 
 Add a branch to `apps/sdp-api/src/routes/payments/ramps/offramp/handlers.ts`. The handler resolves counterparty + source wallet + payout destination, calls the HTTP-only package method, and persists the transfer. A `reservedTransferId` is minted before the provider call so it can travel upstream as the reference (pass it in a description/reference field where the upstream accepts one); persistence then takes one of two paths: default `persistRampQuoteTransfer` after the quote (off-ramp writes `sourceAddress` + `cryptoAmount`, `direction: "outbound"`, plus any provider-specific `providerData`), or a pending transfer created **before** the provider call and completed/failed after it (a `createPending*` → `completePending*` helper pair) when the provider call must be attributable to a row even on failure.
 
-Dashboard runtime route: `POST /v1/payments/ramps/offramp/quote`, gated by provider availability, metered quota, and the `offramp.execute` action. It is not currently in public OpenAPI; do not advertise it as public unless the OpenAPI policy changes.
+Dashboard runtime route: `POST /v1/payments/ramps/offramp/start`, gated by provider availability, metered quota, and the `offramp.execute` action. It is not currently in public OpenAPI; do not advertise it as public unless the OpenAPI policy changes.
 
 ## Variety
 

@@ -113,7 +113,7 @@ API user in Fireblocks.
 
 ## Transaction approval
 
-Direct SOL and USDC payments through `POST /v1/payments/transfers` use Fireblocks'
+Direct SOL and USDC payments through `POST /v1/payments/transfers/execute` use Fireblocks'
 [TRANSFER operation](https://developers.fireblocks.com/api-reference/transactions/create-a-new-transaction).
 SDP resolves the exact project wallet and its encrypted BYOK credential. Fireblocks builds the
 transaction, applies the workspace's approvals, signs and broadcasts. The source vault needs

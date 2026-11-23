@@ -5,7 +5,7 @@ import { healthQuerySchema } from "@/routes/private-channels/schemas";
 import { probeInstanceHealth } from "@/services/private-channels/service";
 
 /**
- * GET /health — probe a candidate gateway's `/health` + `/ready` (a pre-connect
+ * GET /instance-connection/check-gateway-health — probe a candidate gateway's `/health` + `/ready` (a pre-connect
  * test of a user-supplied candidate gateway URL). Always responds 200 with the
  * `PrivateChannelHealth` DTO for every probe outcome (ready/degraded/unreachable);
  * only a missing `gatewayUrl` is a 400. The DTO omits upstream response bodies by

@@ -22,9 +22,9 @@ signs it: SDP never holds its keys. The wallet signs the exact bytes SDP
 prepared, and SDP rejects any change to them. Preparing grants no permission to
 send: only your `/submit` call does, and only for the transaction you reviewed.
 
-A signature, a confirmed request or escrowed shares are not a payout.
-`completed` means SDP verified delivery. When an outcome is unknown, the
-operation keeps its signed bytes and stays pending until evidence settles it.
+Only `completed` means the funds arrived: a signature, a confirmed request or
+shares held in escrow are not a payout. If SDP can't tell yet whether something
+ran, the operation stays pending until it can.
 
 ## Follow the funds
 
@@ -57,15 +57,15 @@ For example, Kamino's K-Vault program is
 `KvauGMspG5k6rtzrqqn7WNn3oZdyKqLKwK2XWQ8FLjd` on mainnet and
 `devkRngFnfp4gBc5a3LsadgbQKdPo8MSZ4prFiNSVmY` on devnet. The strategy's
 `providerReference` is the vault account and its `shareMint` is the receipt
-token. A deposit invokes that program to mint shares to the owner; redemption
-burns them as assets leave the vault for the owner.
+token. A deposit calls that program to mint shares to the owner; a withdrawal
+burns them and pays the owner from the vault.
 
-Before signing, compare those identities with the transaction's program and
-token accounts. The
-[cluster-specific program registry](https://github.com/solana-foundation/solana-developer-platform/blob/main/packages/sdp-types/src/kamino-programs.ts)
-and the confirmed transaction let you trace the program, the deposit
-destination and the shares received. SDP checks the same asset identities
-against the strategy or position when it plans each transaction.
+Before signing, you can check that the transaction calls that program and pays
+into that vault; the
+[program registry](https://github.com/solana-foundation/solana-developer-platform/blob/main/packages/sdp-types/src/kamino-programs.ts)
+lists each cluster's program. After it confirms, the transaction shows the
+shares the owner received. SDP runs the same checks against the strategy or
+position whenever it builds a transaction.
 
 Provider orders work differently from a vault. A WisdomTree subscription sends
 USDC to an issuer-operated wallet, and its transfer agent delivers fund tokens

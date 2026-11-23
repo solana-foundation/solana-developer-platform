@@ -34,25 +34,25 @@ subscriptions.post(
 );
 subscriptions.get("/", requireAction("recurring.read"), listSubscriptions);
 subscriptions.post(
-  "/:subscriptionId/prepare-authorization",
+  "/:subscriptionId/authorize/build-unsigned-transaction",
   requireAction("recurring.execute"),
   validateBody(prepareSubscriptionAuthorizationSchema),
   prepareSubscriptionAuthorization
 );
 subscriptions.post(
-  "/:subscriptionId/prepare-cancel",
+  "/:subscriptionId/cancel/build-unsigned-transaction",
   requireAction("recurring.manage"),
   validateBody(prepareSubscriptionLifecycleSchema),
   prepareCancelSubscription
 );
 subscriptions.post(
-  "/:subscriptionId/prepare-resume",
+  "/:subscriptionId/resume/build-unsigned-transaction",
   requireAction("recurring.execute"),
   validateBody(prepareSubscriptionLifecycleSchema),
   prepareResumeSubscription
 );
 subscriptions.post(
-  "/:subscriptionId/prepare-collection",
+  "/:subscriptionId/collect/build-unsigned-transaction",
   requireAction("recurring.execute"),
   validateBody(prepareSubscriptionCollectionSchema),
   prepareSubscriptionCollection

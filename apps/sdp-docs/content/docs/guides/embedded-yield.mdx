@@ -28,7 +28,8 @@ to see the flow, then follow the [quickstart](/docs/earn/quickstart).
 4. Poll the operation until it is `completed`, then show the customer's
    `GET /v1/earn/positions?ownerAddress=...`.
 
-Withdrawals follow the same steps with a `positionId`. Before you handle
+Withdrawals follow the same steps with a `positionId`, plus a route choice when
+a strategy offers more than one exit. Before you handle
 retries, refresh or cancellation, read [integration details](/docs/earn/integration-details);
 to scope reads per customer, see
 [one integration, many customers](/docs/earn/concepts#one-integration-many-customers).

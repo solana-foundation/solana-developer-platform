@@ -221,7 +221,7 @@ outbox first so the same bytes can be resubmitted after a lost RPC response.
   end ("Retry of …", "Retried as …") and stops offering Retry on a failure that
   already has one. The cap counts ancestors, not siblings, so nothing server-side
   refuses a second retry of the same failure.
-- `POST /operations/:id/execute` and `POST /operations/:id/recheck` have no
+- `POST /operations/:id/resume-execution` and `POST /operations/:id/recheck` have no
   trusted body.
 
 ## Settling an operation
@@ -338,7 +338,7 @@ does.
    the wallet with devnet SOL first — it fee-pays every bring-up transaction
    and rents the config, ring-auth, reader-record, and lookup-table accounts.
 3. Hand the program id to the project admin. They enter it with a name in the
-   dashboard's _Custom rings_ card (or `POST /v1/helius-rings/rings`).
+   dashboard's _Custom rings_ card (or `POST /v1/helius-rings/rings/register-and-initialize`).
 
 SDP then completes bring-up through the SDK: an auditor key from the Ring RPC
 saved in project setup, the ring's create-config instruction, its

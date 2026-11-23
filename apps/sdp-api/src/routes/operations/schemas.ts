@@ -17,7 +17,7 @@ export const operationsListQuerySchema = z
     kind: z.enum(OPERATION_KINDS).optional(),
     status: operationStatusFilterSchema
       .describe(
-        "One exact status, or active for all nonterminal operations, including prepared actions."
+        "One exact status, or active for every operation not yet final, preparations included."
       )
       .optional(),
     ownerAddress: z.string().min(32).max(44).optional(),

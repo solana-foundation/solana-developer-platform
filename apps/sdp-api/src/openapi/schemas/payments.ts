@@ -158,7 +158,7 @@ const walletBalancesSchema = z
   })
   .openapi({
     description:
-      "Balance payload for a custody-managed wallet. Use /v1/wallets for wallet provisioning and listing.",
+      "Balance payload for a custody wallet. Use /v1/wallets for wallet provisioning and listing.",
   });
 
 export const createTransferRequestSchema = createTransferSchemaBase
@@ -200,7 +200,7 @@ export const createTransferRequestSchema = createTransferSchemaBase
   })
   .openapi({
     description:
-      "Create transfer request payload for a custody-managed source wallet. This endpoint does not provision wallets.",
+      "Create transfer request payload for a source custody wallet. This endpoint does not provision wallets.",
     example: {
       projectId: "prj_example",
       sourceCustodyWalletId: "cwlt_example",
@@ -523,7 +523,7 @@ export const createTransferBatchRequestSchema = createTransferBatchSchemaBase
     }),
   })
   .openapi({
-    description: "Create a custody-executed outbound transfer batch.",
+    description: "Create an outbound transfer batch.",
   });
 
 export const estimateTransferBatchRequestSchema = estimateTransferBatchSchemaBase
@@ -829,7 +829,7 @@ export const paymentListRequestsQuerySchema = listPaymentRequestsQuerySchemaBase
 
 const paymentRequestPublicTokenSchema = z.string().openapi({
   description:
-    "Token behind the request's hosted payment link, `/pay/{publicToken}`. Anyone holding it can build the request's fee-sponsored payment transaction, so share it only with the payer. Reads never return it; get it again with `GET /v1/payments/requests/{paymentRequestId}/link`.",
+    "Token behind the request's hosted payment link, `/pay/{publicToken}`. Anyone holding it can build the request's fee-sponsored payment transaction, so share it only with the payer. Reads never return it; get it again with `GET /v1/payments/requests/{paymentRequestId}/link-token`.",
   example: "example-public-token",
 });
 
@@ -916,7 +916,7 @@ export const createRecurringPaymentRequestSchema = createRecurringPaymentSchemaB
   })
   .openapi({
     description:
-      "Creates an SDP-custody outbound recurring payment intent. Activation and collection are added by follow-up endpoints.",
+      "Creates an outbound recurring payment intent. Activation and collection are added by follow-up endpoints.",
   });
 
 const expectedUpdatedAtField = withOpenApi(expectedUpdatedAtSchema.optional(), {
@@ -1067,7 +1067,7 @@ const paymentRecurringPaymentSchema = z
     createdAt: isoDateTimeSchema,
     updatedAt: isoDateTimeSchema,
   })
-  .openapi({ description: "SDP-custody outbound recurring payment record." });
+  .openapi({ description: "Outbound recurring payment record." });
 
 const paymentRecurringPaymentTokenApprovalSchema = z
   .object({
@@ -1159,7 +1159,7 @@ export const createSubscriptionPlanRequestSchema = createSubscriptionPlanSchemaB
       example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
     }),
     pullerWalletId: withOpenApi(createSubscriptionPlanSchemaBase.shape.pullerWalletId, {
-      description: "Optional SDP custody wallet allowed to pull subscription payments.",
+      description: "Optional custody wallet allowed to pull subscription payments.",
       example: "wal_collector",
     }),
     metadataUri: withOpenApi(createSubscriptionPlanSchemaBase.shape.metadataUri, {

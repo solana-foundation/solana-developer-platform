@@ -1,5 +1,4 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
-import { operationResponseSchema } from "@sdp/types/operations";
 import { successResponseSchema, withOpenApi } from "@/openapi/schemas/base";
 import {
   earnCorePositionSchema,
@@ -7,6 +6,10 @@ import {
   earnPositionsResponseSchema,
 } from "@/openapi/schemas/earn-core";
 import { EARN_EXAMPLE_IDS, EARN_OWNER_ADDRESS_EXAMPLE } from "@/openapi/schemas/earn-examples";
+import {
+  EARN_OPERATION_EXAMPLES,
+  operationResponseExample,
+} from "@/openapi/schemas/earn-operation-examples";
 import {
   earnDiscoveryQuerySchema,
   earnPositionParamsSchema,
@@ -71,7 +74,7 @@ export function registerEarnCorePaths(registry: OpenAPIRegistry, publicOnly = fa
     operationId: "getEarnPosition",
     summary: "Get a position",
     description:
-      "Returns one position using the same identity, units and live valuation as the positions list. Use any position ID returned by that list, including an untracked discovered holding; no extra wallet filter or SDP wallet registration is needed. The authenticated project and environment still control visibility. A discovered selector is verified live without importing a position or inventing acquisition history. If SDP has since tracked that holding, the selector resolves to its canonical tracked position ID, including pending queued withdrawals. Missing or inaccessible positions return 404. Unavailable live values remain absent for tracked positions; an unverified discovered holding returns 503 rather than a fabricated zero or 404. afterMovementIds enforces the same confirmation floor as the list and must name movements for this source and instrument. Reading never prepares, signs or submits a transaction.",
+      "Returns one position, with the same fields and live values as the positions list. Pass any position ID the list returns, including a holding found with discover=true; no wallet filter or SDP wallet registration is needed, and the authenticated project and environment still control visibility. A discovered holding is verified live without importing it or inventing acquisition history; if SDP already tracks it, the response carries the tracked position ID, pending queued withdrawals included. An unknown or inaccessible position returns 404. Values SDP can't read live are left out of a tracked position, never shown as zero; a discovered holding SDP can't verify returns 503. afterMovementIds reads the balance from a point that includes those movements, which must belong to this position (another position's movement returns 404). Reading never prepares, signs or submits a transaction.",
     request: {
       headers: projectScopeHeaders,
       params: earnPositionParamsSchema,
@@ -85,8 +88,8 @@ export function registerEarnCorePaths(registry: OpenAPIRegistry, publicOnly = fa
       ...earnErrorResponses([400, 401, 403, 404, 429, 500, 503]),
     },
   });
-  const response = successResponseSchema(operationResponseSchema);
   for (const direction of ["deposit", "withdraw"] as const) {
+    const response = operationResponseExample(EARN_OPERATION_EXAMPLES[direction]);
     registry.registerPath({
       ...common,
       method: "post",
