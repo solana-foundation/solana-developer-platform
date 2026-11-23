@@ -80,12 +80,11 @@ export interface IdempotencyOptions {
    */
   canonicalize?: (body: JsonValue) => JsonValue;
   /**
-   * The forms the route fingerprinted with before its current one, oldest
-   * last: the `canonicalize` it used (defaulting to the current one) and the
-   * `operation` it was mounted at (defaulting to the current path), each as of
-   * that era. A key record or domain row saved under any of them still
-   * matches, so a retry across a rename or a canonical-form change replays
-   * instead of answering 422. Canonicalizers must be pure.
+   * Earlier forms of a domain row's fingerprint: the `canonicalize` used
+   * (defaulting to the current one) and the `operation` it was mounted at
+   * (defaulting to the current path), each as of that era. A domain row saved
+   * under any of them can answer a retry across a rename or canonical-form
+   * change instead of returning 422. Canonicalizers must be pure.
    */
   previousForms?: {
     canonicalize?: (body: JsonValue) => JsonValue;
@@ -369,24 +368,14 @@ export async function runIdempotency(
       query: c.req.queries(),
       body: canonicalize ? canonicalize(body) : body,
     });
-  let fingerprint = fingerprintOf(options.canonicalize, operation);
-  // The forms the route fingerprinted with before this one, deduped: a form
-  // equal to the current one matches without a fallback claim.
-  const previousForms = (options.previousForms ?? []).map((form) => ({
-    operation: form.operation ?? operation,
-    fingerprint: fingerprintOf(
-      form.canonicalize ?? options.canonicalize,
-      form.operation ?? operation
-    ),
-  }));
-  const previousFingerprints = [...new Set(previousForms.map((form) => form.fingerprint))].filter(
-    (candidate) => candidate !== fingerprint
-  );
-  // Key records are operation-scoped. Older operations can only be recovered
-  // through the domain row; retry claims only for forms in the current scope.
-  const previousClaimFingerprints = [
+  const fingerprint = fingerprintOf(options.canonicalize, operation);
+  // The domain row can have been written under any earlier operation or body
+  // form. Key records stay scoped to the current operation and fingerprint.
+  const previousFingerprints = [
     ...new Set(
-      previousForms.filter((form) => form.operation === operation).map((form) => form.fingerprint)
+      (options.previousForms ?? []).map((form) =>
+        fingerprintOf(form.canonicalize ?? options.canonicalize, form.operation ?? operation)
+      )
     ),
   ].filter((candidate) => candidate !== fingerprint);
   const id = `idk_${crypto.randomUUID()}`;
@@ -408,18 +397,7 @@ export async function runIdempotency(
     leaseSeconds,
     retentionSeconds: IDEMPOTENCY_KEY_RETENTION_SECONDS,
   };
-  let claim = await repository.claim(claimInput);
-  if (claim.kind === "mismatch") {
-    // A key saved before the route's fingerprint form changed (a mismatch
-    // writes nothing, so claiming again under an old form is safe).
-    for (const previousFingerprint of previousClaimFingerprints) {
-      const previous = await repository.claim({ ...claimInput, fingerprint: previousFingerprint });
-      if (previous.kind === "mismatch") continue;
-      claim = previous;
-      fingerprint = previousFingerprint;
-      break;
-    }
-  }
+  const claim = await repository.claim(claimInput);
   c.set("idempotencyPreviousFingerprints", previousFingerprints);
 
   switch (claim.kind) {

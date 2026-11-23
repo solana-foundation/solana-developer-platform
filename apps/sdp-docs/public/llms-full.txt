@@ -17258,7 +17258,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
 `application/json` · required
 
-Create transfer request payload for a provider-connected source wallet. This endpoint does not provision wallets.
+Create transfer request payload for a source custody wallet. This endpoint does not provision wallets.
 
 - **`projectId`** · `string` · min length 1 · example `prj_example`
 
@@ -18842,7 +18842,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/estimate-payment
 
 `POST /v1/payments/transfer-batches/estimate`
 
-`warnings` lists what would make the batch fail: a native SOL amount below the rent-exempt minimum sent to an address with no account, or a source wallet left below the minimum; create refuses those with 409 `AMOUNT_BELOW_RENT_MINIMUM`. Returns 503 `ESTIMATE_NOT_AVAILABLE` when Solana RPC cannot price a chunk's fee; the estimate stores nothing, so retry it.
+`warnings` lists what would make the batch fail: a native SOL amount below the rent-exempt minimum sent to an address with no account, or a source wallet left below the minimum; execute refuses those with 409 `AMOUNT_BELOW_RENT_MINIMUM`. Returns 503 `ESTIMATE_NOT_AVAILABLE` when Solana RPC cannot price a chunk's fee; the estimate stores nothing, so retry it.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `transfer_batches.read` action.
 

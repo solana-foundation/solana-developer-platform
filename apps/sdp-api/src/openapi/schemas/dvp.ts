@@ -58,7 +58,7 @@ export const listDvpTradesQuerySchema = listDvpTradesQuerySchemaBase
 
 export const fundDvpTradeRequestSchema = withOpenApi(fundDvpTradeSchemaBase, {
   description:
-    "Names the leg to fund and, optionally, which of the caller's connected wallets pays from. The right to fund a side is holding an active connected wallet whose public key is that side's party address — derived at act time, never stored on the trade. An explicit walletId only narrows: it must hold the named side's address.",
+    "Names the leg to fund and, optionally, which of the caller's custody wallets pays from. The right to fund a side is holding an active custody wallet whose public key is that side's party address — derived at act time, never stored on the trade. An explicit walletId only narrows: it must hold the named side's address.",
 });
 
 const dvpTradeStatusSchema = z.enum(DVP_TRADE_STATUSES).openapi({
@@ -81,14 +81,14 @@ const dvpLegOutcomeSchema = z.enum(DVP_LEG_OUTCOMES).openapi({
 const dvpCallerWalletSchema = z
   .object({
     id: z.string().openapi({
-      description: "The connected wallet record id holding this address.",
+      description: "The custody wallet record id holding this address.",
     }),
     name: z.string().nullable().openapi({
       description: "The wallet's display name, or null when none was set.",
     }),
   })
   .nullable()
-  .openapi({ description: "The connected wallet, or null." });
+  .openapi({ description: "The custody wallet, or null." });
 
 const dvpTradePartySchema = z
   .object({
@@ -112,7 +112,7 @@ const dvpTradePartySchema = z
       }),
     wallet: dvpCallerWalletSchema.openapi({
       description:
-        "A wallet in the caller's project that holds this address, or null when none exists. This is attribution, not permission to act: execution also requires the dvp.execute grant and an eligible actionWallet. Derived per request; never stored.",
+        "A wallet in the caller's project that holds this address, or null when none exists. This is attribution, not permission to act: funding also requires the dvp.execute grant and an active custody wallet permitted by the credential’s wallet bindings. Derived per request; never stored.",
     }),
   })
   .openapi({ description: "One party of the trade, as the caller may see it." });
@@ -219,7 +219,7 @@ const dvpTradeSchema = z
     legs: z.object({ a: dvpTradeLegSchema, b: dvpTradeLegSchema }),
     kind: z.enum(["agent", "principal", "bilateral"]).openapi({
       description:
-        "The project's standing on this trade, derived per request and never stored. Display copy only: how many sides have an active wallet in the caller's project — 0 is an agent trade (the terms were set for two other parties), 1 is a principal trade, 2 is bilateral. This does not describe the credential's wallet bindings or permission to execute; use actionWallet for an eligible execution wallet.",
+        "The project's standing on this trade, derived per request and never stored. Display copy only: how many sides have an active wallet in the caller's project — 0 is an agent trade (the terms were set for two other parties), 1 is a principal trade, 2 is bilateral. This does not describe the credential's wallet bindings or permission to execute.",
     }),
     nonce: z.string().openapi({
       description:

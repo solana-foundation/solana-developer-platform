@@ -200,7 +200,7 @@ export const createTransferRequestSchema = createTransferSchemaBase
   })
   .openapi({
     description:
-      "Create transfer request payload for a provider-connected source wallet. This endpoint does not provision wallets.",
+      "Create transfer request payload for a source custody wallet. This endpoint does not provision wallets.",
     example: {
       projectId: "prj_example",
       sourceCustodyWalletId: "cwlt_example",

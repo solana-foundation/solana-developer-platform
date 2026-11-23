@@ -229,7 +229,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Estimate transfer batch",
     operationId: "estimatePaymentTransferBatch",
     description:
-      "Validates an exact-wallet transfer batch request and estimates transaction chunking and fees. `warnings` lists what would make the batch fail: a native SOL amount below the rent-exempt minimum sent to an address with no account, or a source wallet left below the minimum; create refuses those with 409 `AMOUNT_BELOW_RENT_MINIMUM`. Returns 503 `ESTIMATE_NOT_AVAILABLE` when Solana RPC cannot price a chunk's fee; the estimate stores nothing, so retry it.",
+      "Validates an exact-wallet transfer batch request and estimates transaction chunking and fees. `warnings` lists what would make the batch fail: a native SOL amount below the rent-exempt minimum sent to an address with no account, or a source wallet left below the minimum; execute refuses those with 409 `AMOUNT_BELOW_RENT_MINIMUM`. Returns 503 `ESTIMATE_NOT_AVAILABLE` when Solana RPC cannot price a chunk's fee; the estimate stores nothing, so retry it.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

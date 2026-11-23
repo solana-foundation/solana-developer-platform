@@ -88,7 +88,7 @@ describe("ApiPlaygroundShell", () => {
       referenceEndpointId: "execute-payment-transfer",
       title: "Execute transfer",
       method: "POST",
-      path: "/v1/payments/transfers",
+      path: "/v1/payments/transfers/execute",
     };
     render(
       <I18nProvider locale="en" messages={getMessages("en")}>
