@@ -7,15 +7,17 @@ import { idempotent } from "@/middleware/idempotency";
 import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { requireAction } from "@/middleware/require-action";
-import { validateBody } from "@/middleware/validate";
+import { validateBody, validateParams } from "@/middleware/validate";
 import { createEarnOnboardingRoutes } from "@/routes/earn-onboarding";
 import type { Env } from "@/types/env";
+import { getEarnPosition } from "./core/position-detail";
 import {
   authorizeEarnDeposit,
   authorizeEarnWithdrawal,
   prepareEarnOperation,
 } from "./core/prepare";
 import { listEarnDiscovery, listEarnPositions } from "./core/read";
+import { earnPositionParamsSchema } from "./core/read-schemas";
 import { prepareEarnDepositSchema, prepareEarnWithdrawalSchema } from "./core/schemas";
 import { isEarnExitOrRead } from "./exits";
 
@@ -47,6 +49,13 @@ earn.get(
   requireAction("earn.read"),
   meteredQuota({ name: "earn-chain-read", actorMax: 30, orgMax: 120 }),
   listEarnPositions
+);
+earn.get(
+  "/positions/:positionId",
+  requireAction("earn.read"),
+  validateParams(earnPositionParamsSchema),
+  meteredQuota({ name: "earn-chain-read", actorMax: 30, orgMax: 120 }),
+  getEarnPosition
 );
 earn.post(
   "/deposit",

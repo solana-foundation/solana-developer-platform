@@ -28,7 +28,7 @@
 - Compliance: https://api.solana.com/v1/compliance
 - Counterparties: https://api.solana.com/v1/counterparties
 - Asset Profiles: https://api.solana.com/v1/issuance
-- Earn: https://api.solana.com/v1/operations
+- Earn: https://api.solana.com/v1/earn
 
 ## Start here
 - [What is SDP?](https://platform.solana.com/docs/introduction): One API for building on Solana with your chosen providers, from devnet to mainnet.

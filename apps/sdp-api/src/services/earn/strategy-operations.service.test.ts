@@ -835,8 +835,67 @@ describe("operation settlement projection", () => {
       closing_signature: null,
       assets_paid: null,
       failure_reason: null,
+      updated_at: claim.operation.updatedAt,
     });
   }
+
+  it.each(["solver_queue", "operator_redemption"])(
+    "keeps an unobserved %s creation submitted even when its signature is recorded",
+    async (mechanism) => {
+      queue("creating", mechanism);
+      claim.operation.status = "submitted";
+      expect(await scoped(() => projectEarnOperation(env, scope, claim.operation))).toMatchObject({
+        status: "submitted",
+        nextAction: { type: "wait", reason: "Waiting for transaction confirmation" },
+        result: { signature: "escrow-signature", settledAmount: null, settlementOutcome: null },
+      });
+      expect(mocks.sign).not.toHaveBeenCalled();
+      expect(mocks.submit).not.toHaveBeenCalled();
+    }
+  );
+
+  it("projects provider-observed queue entry as semantic progress without changing its signature", async () => {
+    queue("creating");
+    claim.operation.status = "submitted";
+    const creating = await scoped(() => projectEarnOperation(env, scope, claim.operation));
+    const request = await mocks.withdrawal();
+    const observedAt = "2026-11-18T00:00:10.000Z";
+    mocks.withdrawal.mockResolvedValue({ ...request, status: "pending", updated_at: observedAt });
+    const pending = await scoped(() => projectEarnOperation(env, scope, creating));
+    expect(creating.status).toBe("submitted");
+    expect(creating.updatedAt).toBe(claim.operation.updatedAt);
+    expect(pending.status).toBe("settling");
+    expect(pending.updatedAt).toBe(observedAt);
+    expect(pending.result).toEqual(creating.result);
+    expect(pending.nextAction).toEqual({ type: "wait", reason: "Waiting for provider settlement" });
+    expect(mocks.sign).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("retains later operation metadata when request evidence has an older timestamp", async () => {
+    queue("pending");
+    const request = await mocks.withdrawal();
+    mocks.withdrawal.mockResolvedValue({ ...request, updated_at: "2026-11-18T00:00:10.000Z" });
+    claim.operation.updatedAt = "2026-11-18T00:00:20.000Z";
+    const projected = await scoped(() => projectEarnOperation(env, scope, claim.operation));
+    expect(projected.updatedAt).toBe(claim.operation.updatedAt);
+    expect(projected.status).toBe("settling");
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("does not regress an older stored settling operation while creation remains unobserved", async () => {
+    queue("creating");
+    expect(await scoped(() => advanceEarnOperation(env, scope, claim))).toMatchObject({
+      status: "settling",
+      nextAction: { type: "wait", reason: "Waiting for provider settlement" },
+    });
+    expect(mocks.transition).toHaveBeenCalledWith(
+      scope,
+      claim,
+      expect.objectContaining({ status: "settling" })
+    );
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
 
   it("keeps a confirmed escrow request settling without claiming an underlying payout", async () => {
     queue("pending");

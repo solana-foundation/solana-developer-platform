@@ -344,6 +344,7 @@ locally with no key, wallet or funds.
 | --- | --- |
 | [`GET /v1/earn/discovery`](/docs/reference/api/earn/discover-earn-strategies) | Lists strategies, their rates and what each supports. |
 | [`GET /v1/earn/positions`](/docs/reference/api/earn/list-earn-core-positions) | Reads a wallet's holdings and totals. |
+| [`GET /v1/earn/positions/{positionId}`](/docs/reference/api/earn/get-earn-position) | Reads one position's latest balance and withdrawal state. |
 | [`POST /v1/earn/deposit`](/docs/reference/api/earn/prepare-earn-deposit) | Prepares a deposit into a strategy. |
 | [`POST /v1/earn/withdraw`](/docs/reference/api/earn/prepare-earn-withdrawal) | Prepares a withdrawal from a position. |
 | [`GET /v1/operations`](/docs/reference/api/earn/list-operations) | Lists a wallet's deposits and withdrawals. |
@@ -797,6 +798,36 @@ Each position's `id` is the `positionId` you [withdraw](/docs/earn/withdrawals)
 with. Without `ownerAddress`, the read covers every position your key can see in
 the project. See [position filters](/docs/reference/api/earn/list-earn-core-positions).
 
+## Read one position
+
+Use a position's `id` to read its latest balance and withdrawal state without
+fetching the whole list:
+
+**TypeScript**
+
+```ts
+const response = await fetch(`${api}/v1/earn/positions/${encodeURIComponent(positionId)}`, {
+  headers,
+});
+const position = (await response.json()).data;
+```
+
+**curl**
+
+```bash
+curl -sS "https://api-devnet.solana.com/v1/earn/positions/<position-id>" \
+  -H "Authorization: Bearer $SDP_API_KEY"
+```
+
+The ID selects its owner and strategy; no wallet filter is needed. The read
+uses the same access rules and position fields as the list, including IDs
+returned by `discover=true`. Reading a discovered holding does not import it. If it is already tracked,
+the response returns its canonical position ID. Missing positions and positions outside your project return `404`.
+
+Pass `afterMovementIds` after a transaction to require a balance observation
+that includes those movements. See [position parameters](/docs/reference/api/earn/get-earn-position).
+Unknown live values stay unavailable; do not show them as zero.
+
 ## Holdings opened outside SDP
 
 Add `discover=true` to an `ownerAddress` read to include the wallet's holdings
@@ -821,6 +852,11 @@ intermediate tokens visible until they settle.
 and withdrawals, newest first, each with its current `nextAction`. Always pass
 the owner: without a filter, the list leaves out owner-address operations.
 
+Add `status=active` for outstanding actions, including unsigned preparations.
+Paginate history separately with `limit` and `cursor`; every filter applies
+before pagination. Keep tracking an older pending action even when newer
+operations fill the first history page. See [activity filters](/docs/reference/api/earn/list-operations).
+
 ---
 
 ### Withdraw funds
@@ -841,7 +877,8 @@ Send `POST /v1/earn/withdraw` with a position from
 ```
 
 The position fixes the strategy and the owner, and the payout goes back to that
-owner. `slippageBps` is optional and sits at the top level. See
+owner. To review its latest balance first, [read the position](/docs/earn/balances#read-one-position).
+`slippageBps` is optional and sits at the top level. See
 [all withdrawal parameters](/docs/reference/api/earn/prepare-earn-withdrawal).
 
 | `amount.kind` | Withdraws |
@@ -867,14 +904,16 @@ While the withdrawal waits for your choice, `canCancel` is `true` and
 ## Sign, submit and track
 
 Sign and submit as for a [deposit](/docs/earn/deposits#sign-and-submit), then
-poll the operation. A delayed redemption stays in progress until the provider
-pays out: a request ID or escrowed shares are not a payout, and there is no
+poll the operation. For a queued withdrawal, `submitted` waits for the request
+transaction to confirm; `settling` waits for the provider to pay out. A delayed
+redemption stays in progress until that payout: a request ID or escrowed shares are not a payout, and there is no
 separate claim step. `completed` means SDP verified the payout; a `null`
 `result.settledAmount` is unknown, not zero.
 
 Once submitted, a withdrawal can't be refreshed or cancelled, even while
-queued. Only a `failed` withdrawal lets you prepare a new one, with a new
-`Idempotency-Key`. If shares end up stuck in an expired queue request,
+queued. After a definitive failure, prepare its replacement with a new
+`Idempotency-Key`. An uncertain outcome never authorizes a replacement. If
+shares end up stuck in an expired queue request,
 [recover them](/docs/earn/integration-details#recover-expired-withdrawal-escrow).
 
 ---
@@ -988,7 +1027,10 @@ PRIME shares.
 Save a fresh `Idempotency-Key` with each request body before you send it. After
 an uncertain response, such as a timeout or a `5xx`, resend the same body with
 the same key, including the same signed bytes, and SDP returns the original
-response. To pick up work you already started, list
+response.
+
+Keep the original amount as typed; do not derive a retry body from a newer
+quote or balance. To pick up work you already started, list
 `GET /v1/operations?ownerAddress=...` and continue from its `nextAction`
 instead of preparing another deposit or withdrawal.
 
@@ -996,8 +1038,8 @@ Replaying a refresh with its original key returns the original response, even
 after a later submit; it builds nothing new. Read
 `GET /v1/operations/{operationId}` for the current state.
 
-Once you submit, prepare a new operation, with a new key, only after the first
-is `failed`. A timeout, blockhash expiry, an unknown provider response or
+Once you submit, prepare a replacement with a new key only after the original
+is definitively `failed`. A timeout, blockhash expiry, an unknown provider response or
 missing RPC history doesn't prove a submitted transaction never executed: keep
 tracking it until SDP establishes the outcome. A transaction you never submitted
 or sent can no longer land once the network passes its `lastValidBlockHeight`,
@@ -1012,7 +1054,9 @@ so you can prepare again.
 | SDP pricing | Not part of the Earn response. Confirm SDP pricing separately, and don't read a missing field as zero. |
 
 `terms.fees` lists known fees for the transaction: `null` means unavailable, not
-free, and it is not an invoice for ongoing provider costs. `rate.value` is the
+free, and it is not an invoice for ongoing provider costs. A full Kamino
+withdrawal leaves the empty share account open; do not promise an automatic
+rent refund. `rate.value` is the
 provider-reported APY, not a promise of returns after every cost, and Earn
 doesn't normalize rates across providers into one comparable net yield.
 
@@ -35788,6 +35832,7 @@ Source: https://platform.solana.com/docs/reference/api/earn
 | --- | --- | --- |
 | `GET` | `/v1/earn/discovery` | [Discover strategies](/docs/reference/api/earn/discover-earn-strategies.md) |
 | `GET` | `/v1/earn/positions` | [List positions](/docs/reference/api/earn/list-earn-core-positions.md) |
+| `GET` | `/v1/earn/positions/{positionId}` | [Get a position](/docs/reference/api/earn/get-earn-position.md) |
 | `POST` | `/v1/earn/deposit` | [Prepare a deposit](/docs/reference/api/earn/prepare-earn-deposit.md) |
 | `POST` | `/v1/earn/withdraw` | [Prepare a withdrawal](/docs/reference/api/earn/prepare-earn-withdrawal.md) |
 
@@ -36589,6 +36634,257 @@ r = requests.get("https://api.solana.com/v1/earn/positions",
       "strategyCount": 1,
       "unavailableStrategyCount": 1
     }
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: earn.read",
+    "details": {
+      "action": "earn.read"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+Error responses use the [standard error shape](/docs/reference/conventions/errors).
+
+---
+
+### Get a position
+Source: https://platform.solana.com/docs/reference/api/earn/get-earn-position
+
+> Returns one position using the same identity, units and live valuation as the positions list.
+
+> **Earn is under active development.** Features, API endpoints, and docs may change.
+
+`GET /v1/earn/positions/{positionId}`
+
+Use any position ID returned by that list, including an untracked discovered holding; no extra wallet filter or SDP wallet registration is needed. The authenticated project and environment still control visibility. A discovered selector is verified live without importing a position or inventing acquisition history. If SDP has since tracked that holding, the selector resolves to its canonical tracked position ID, including pending queued withdrawals. Missing or inaccessible positions return 404. Unavailable live values remain absent for tracked positions; an unverified discovered holding returns 503 rather than a fabricated zero or 404. afterMovementIds enforces the same confirmation floor as the list and must name movements for this source and instrument. Reading never prepares, signs or submits a transaction.
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
+
+## Path parameters
+
+- **`positionId`** · `string` · required · min length 1 · max length 1024
+
+## Query parameters
+
+- **`afterMovementIds`** · `string` · max length 12899 · pattern `^[A-Za-z0-9_-]{1,128}(,[A-Za-z0-9_-]{1,128}){0,99}$`
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Required for dashboard sessions. API keys use their assigned project.
+
+## Responses
+
+- **`200`** One visible position with available live values
+
+  - **`data`** · `object` · required
+
+    - **`id`** · `string` · required · example `earn_position_3b6a81ce-00b0-4c5a-9761-cb359932e97e`
+
+    - **`provider`** · `string` · required · example `kamino`
+
+    - **`providerReference`** · `string` · required · example `7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx`
+
+      The strategy's onchain address.
+
+    - **`label`** · `string` · required · example `Allez USDC`
+
+    - **`tokenMint`** · `string` · required · example `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`
+
+    - **`shareMint`** · `string` · required · example `hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2`
+
+    - **`createdAt`** · `string | null` · required · format `date-time`
+
+    - **`closedAt`** · `string | null` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+    - **`shares`** · `string` · max length 128 · pattern `^\d+(\.\d+)?$` · example `25.42`
+
+      Live share balance. Absent when the live read is unavailable; never zero-filled.
+
+    - **`withdrawableShares`** · `string` · max length 128 · pattern `^\d+(\.\d+)?$` · example `25.42`
+
+      Shares you can withdraw right now. Absent when the live read is unavailable.
+
+    - **`unlockTimestamp`** · `string | null` · pattern `^\d+$` · example `1789722000`
+
+      Unix time, in seconds, when locked shares become withdrawable. Null or absent when no lock applies. To tell an unavailable read apart, check `shares`.
+
+    - **`tokenValue`** · `string` · max length 128 · pattern `^\d+(\.\d+)?$` · example `25.42`
+
+      Live value of the position in the deposit token (`tokenMint`), as the provider reports it: shares times the rate for rate-based strategies, or a withdrawal quote for the whole position for quote-based providers such as Veda and Ondo. A quote already includes spread and price impact, so it does not scale to other share amounts. It is a deposit-token amount, not a share count or a USD conversion; no USD conversion is implied. Absent when the live read is unavailable.
+
+    - **`parIntermediate`** · `object`
+
+      The operator redemption's intermediate token the wallet holds outside any open request, such as Hastra wYLDS after a canceled operator redemption. It belongs to this position and is not included in `tokenValue`. Present only while non-zero.
+
+      - **`mint`** · `string` · required · example `8fr7WGTVFszfyNWRMXj6fRjZZAnDwmXwEpCrtzmUkdih`
+
+      - **`amount`** · `string` · required · max length 128 · pattern `^\d+(\.\d+)?$` · example `25.42`
+
+        Live decimal value returned by the vault provider; never a float.
+
+      - **`withdrawableAmount`** · `string` · required · max length 128 · pattern `^\d+(\.\d+)?$` · example `25.42`
+
+        Zero while the provider has frozen the token account.
+
+      - **`tokenValue`** · `string` · required · max length 128 · pattern `^\d+(\.\d+)?$` · example `25.42`
+
+        Value in the position's deposit token (`tokenMint`).
+
+    - **`feeSponsored`** · `boolean` · required
+
+    - **`source`** · `object` · required
+
+      Any of:
+
+      - **object**
+
+        - **`ownerAddress`** · `string` · required · min length 1 · max length 256
+
+          The wallet that signs and owns the position. It needs no registration in SDP.
+
+      - **object**
+
+        - **`walletId`** · `string` · required · min length 1 · max length 256
+
+          Alternative to ownerAddress: an SDP custody wallet, signed through its custody provider.
+
+    - **`strategyId`** · `string`
+
+    - **`discovered`** · `boolean`
+
+    - **`costBasisKnown`** · `boolean` · required
+
+  - **`meta`** · `object` · required
+
+    Response metadata.
+
+    - **`requestId`** · `string` · required · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+- **`400`** Bad Request
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+      Machine-readable error code.
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`401`** Unauthorized
+
+  Same fields as `400`.
+
+- **`403`** Forbidden. Requires the `earn.read` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+
+  Same fields as `400`.
+
+- **`404`** Not Found
+
+  Same fields as `400`.
+
+- **`429`** Too Many Requests
+
+  Same fields as `400`.
+
+- **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+- **`503`** Service Unavailable
+
+  Same fields as `400`.
+
+## Example request
+
+```bash tab="cURL"
+curl 'https://api.solana.com/v1/earn/positions/position_example' \
+  -H "Authorization: Bearer $SDP_API_KEY"
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/earn/positions/position_example", {
+  method: "GET",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`
+  }
+});
+```
+
+```python tab="Python"
+import os, requests
+
+r = requests.get("https://api.solana.com/v1/earn/positions/position_example",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": {
+    "id": "earn_position_3b6a81ce-00b0-4c5a-9761-cb359932e97e",
+    "provider": "kamino",
+    "providerReference": "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
+    "label": "Allez USDC",
+    "tokenMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+    "shareMint": "hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2",
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "closedAt": "2025-01-01T00:00:00.000Z",
+    "shares": "25.42",
+    "withdrawableShares": "25.42",
+    "unlockTimestamp": "1789722000",
+    "tokenValue": "25.42",
+    "parIntermediate": {
+      "mint": "8fr7WGTVFszfyNWRMXj6fRjZZAnDwmXwEpCrtzmUkdih",
+      "amount": "25.42",
+      "withdrawableAmount": "25.42",
+      "tokenValue": "25.42"
+    },
+    "feeSponsored": false,
+    "source": {
+      "ownerAddress": "11111111111111111111111111111111"
+    },
+    "costBasisKnown": false
   },
   "meta": {
     "requestId": "req_example",
@@ -38015,7 +38311,7 @@ Source: https://platform.solana.com/docs/reference/api/earn/list-operations
 
 `GET /v1/operations`
 
-Pass ownerAddress to list a wallet's operations; the wallet needs no registration in SDP. Without a filter, the list holds only SDP custody wallet operations, and walletId narrows it to one. Filters apply before cursor pagination. Requires earn.read. Reading never starts execution.
+Pass ownerAddress to list a wallet's operations; the wallet needs no registration in SDP. Without a filter, the list holds only SDP custody wallet operations, and walletId narrows it to one. Use status=active to list all nonterminal actions, including preparations, without scanning completed history. Use an exact status for that state only, or omit status for full history. Every filter applies before cursor pagination. Settlement projection may already show a newer terminal result than the stored status selected by a filter. Requires earn.read. Reading never starts execution.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
 
@@ -38027,7 +38323,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
 - **`kind`** · `string` · one of `earn.deposit`, `earn.withdraw`
 
-- **`status`** · `string` · one of `prepared`, `queued`, `awaiting_signature`, `submitted`, `settling`, `completed`, `failed`, `cancelled`
+- **`status`** · `string` · one of `prepared`, `queued`, `awaiting_signature`, `submitted`, `settling`, `completed`, `failed`, `cancelled`, `active`
+
+  One exact status, or active for all nonterminal operations, including prepared actions.
 
 - **`ownerAddress`** · `string` · min length 32 · max length 44
 
@@ -38520,7 +38818,7 @@ Source: https://platform.solana.com/docs/reference/api/earn/get-operation
 
 `GET /v1/operations/{operationId}`
 
-Poll it after submitting. Each nextAction type says what to do next: sign_transaction asks the owner to sign, select_option asks you to choose a route with refresh, and wait means keep polling the same attempt. queued, awaiting_signature, submitted and settling are in progress. completed means verified delivery; for a selected recovery, result.settlementOutcome recovered means returned strategy shares, never withdrawal proceeds. cancelled means a verified cancellation. canCancel says whether the preparation can still be cancelled, which also needs earn.manage; cancelRequestedAt alone is pending intent. result fields stay null until their source is known. Requires earn.read and source visibility.
+Poll it after submitting. Each nextAction type says what to do next: sign_transaction asks the owner to sign, select_option asks you to choose a route with refresh, and wait means keep polling the same attempt. queued, awaiting_signature, submitted and settling are in progress. For a queued withdrawal, submitted tracks request confirmation; settling tracks the provider payout after the request is observed. completed means verified delivery; for a selected recovery, result.settlementOutcome recovered means returned strategy shares, never withdrawal proceeds. cancelled means a verified cancellation. canCancel says whether the preparation can still be cancelled, which also needs earn.manage; cancelRequestedAt alone is pending intent. result fields stay null until their source is known. Requires earn.read and source visibility.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
 

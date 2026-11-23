@@ -1,14 +1,23 @@
-import type { EarnDiscoveryResponse, EarnPositionsResponse } from "@sdp/types/earn-core";
+import type {
+  EarnCorePosition,
+  EarnDiscoveryResponse,
+  EarnPositionsResponse,
+} from "@sdp/types/earn-core";
 import {
   type Operation,
   type OperationIntent,
+  type OperationStatusFilter,
   operationResponseSchema,
   operationsPageSchema,
   type RefreshOperation,
   type SubmitOperation,
 } from "@sdp/types/operations";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
-import { earnDiscoveryResponseSchema, earnPositionsResponseSchema } from "./earn-response-schemas";
+import {
+  earnCorePositionSchema,
+  earnDiscoveryResponseSchema,
+  earnPositionsResponseSchema,
+} from "./earn-response-schemas";
 
 /** Transport owns authentication and project scope; the client never sees credentials. */
 export type EarnTransport = (path: string, init?: RequestInit) => Promise<Response>;
@@ -42,10 +51,13 @@ export interface EarnPositionsQuery {
   includePositions?: boolean;
 }
 
+/** A single holding uses the same movement-verification floor as the list. */
+export type EarnPositionQuery = Pick<EarnPositionsQuery, "afterMovementIds">;
+
 /** Recovery filters are independent of the initiating dashboard surface. */
 export interface EarnOperationsQuery {
   kind?: Operation["kind"];
-  status?: Operation["status"];
+  status?: OperationStatusFilter;
   ownerAddress?: string;
   walletId?: string;
   positionId?: string;
@@ -143,6 +155,15 @@ export function createEarnClient(transport: EarnTransport) {
     ): Promise<EarnPositionsResponse> {
       return earnPositionsResponseSchema.parse(
         await read(queryPath("/v1/earn/positions", query), { signal })
+      );
+    },
+    async position(
+      id: string,
+      query: EarnPositionQuery = {},
+      signal?: AbortSignal
+    ): Promise<EarnCorePosition> {
+      return earnCorePositionSchema.parse(
+        await read(queryPath(`/v1/earn/positions/${encodeURIComponent(id)}`, query), { signal })
       );
     },
     deposit(

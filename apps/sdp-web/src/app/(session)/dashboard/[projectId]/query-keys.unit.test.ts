@@ -14,6 +14,7 @@ const plainKeys = [
   issuanceQueryKeys.createTokenSignerWallets(),
   earnQueryKeys.vaultPositions(),
   earnQueryKeys.fundingWallets(),
+  earnQueryKeys.operations(),
 ];
 
 const parameterizedKeys: [key: readonly unknown[], params: unknown[]][] = [
@@ -44,6 +45,7 @@ const parameterizedKeys: [key: readonly unknown[], params: unknown[]][] = [
   [issuanceQueryKeys.tokens({ query: DEFAULT_ISSUANCE_LIST_QUERY }), [DEFAULT_ISSUANCE_LIST_QUERY]],
   [issuanceQueryKeys.authorityWallets({ tokenId: "token_1" }), ["token_1"]],
   [earnQueryKeys.strategies({ cluster: "devnet" }), ["devnet"]],
+  [earnQueryKeys.operation("operation"), ["operation"]],
 ];
 
 describe("dashboard query-key factories", () => {

@@ -35,7 +35,7 @@ export function registerOperationsPaths(registry: OpenAPIRegistry, publicOnly = 
     operationId: "listOperations",
     summary: "List operations",
     description:
-      "Lists deposits and withdrawals in the authenticated project and environment, newest first. Pass ownerAddress to list a wallet's operations; the wallet needs no registration in SDP. Without a filter, the list holds only SDP custody wallet operations, and walletId narrows it to one. Filters apply before cursor pagination. Requires earn.read. Reading never starts execution.",
+      "Lists deposits and withdrawals in the authenticated project and environment, newest first. Pass ownerAddress to list a wallet's operations; the wallet needs no registration in SDP. Without a filter, the list holds only SDP custody wallet operations, and walletId narrows it to one. Use status=active to list all nonterminal actions, including preparations, without scanning completed history. Use an exact status for that state only, or omit status for full history. Every filter applies before cursor pagination. Settlement projection may already show a newer terminal result than the stored status selected by a filter. Requires earn.read. Reading never starts execution.",
     request: { headers: projectScopeHeaders, query: operationsListQuerySchema },
     responses: {
       200: {
@@ -52,7 +52,7 @@ export function registerOperationsPaths(registry: OpenAPIRegistry, publicOnly = 
     operationId: "getOperation",
     summary: "Get an operation",
     description:
-      "Returns an operation's status, terms, current actionId and version, nextAction and settlement result. Poll it after submitting. Each nextAction type says what to do next: sign_transaction asks the owner to sign, select_option asks you to choose a route with refresh, and wait means keep polling the same attempt. queued, awaiting_signature, submitted and settling are in progress. completed means verified delivery; for a selected recovery, result.settlementOutcome recovered means returned strategy shares, never withdrawal proceeds. cancelled means a verified cancellation. canCancel says whether the preparation can still be cancelled, which also needs earn.manage; cancelRequestedAt alone is pending intent. result fields stay null until their source is known. Requires earn.read and source visibility.",
+      "Returns an operation's status, terms, current actionId and version, nextAction and settlement result. Poll it after submitting. Each nextAction type says what to do next: sign_transaction asks the owner to sign, select_option asks you to choose a route with refresh, and wait means keep polling the same attempt. queued, awaiting_signature, submitted and settling are in progress. For a queued withdrawal, submitted tracks request confirmation; settling tracks the provider payout after the request is observed. completed means verified delivery; for a selected recovery, result.settlementOutcome recovered means returned strategy shares, never withdrawal proceeds. cancelled means a verified cancellation. canCancel says whether the preparation can still be cancelled, which also needs earn.manage; cancelRequestedAt alone is pending intent. result fields stay null until their source is known. Requires earn.read and source visibility.",
     request: { headers: projectScopeHeaders, params: operationIdParamsSchema },
     responses: {
       200: { description: "Current operation", content: jsonContent(response) },

@@ -1,3 +1,4 @@
+import type { OperationStatus } from "@sdp/types/operations";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";
@@ -806,6 +807,76 @@ describe("durable operations repository", () => {
     expect(
       (await repository().get(scope, claim.operation.id))?.operation.cancelRequestedAt
     ).toBeNull();
+  });
+
+  it("paginates old active actions independently of newer terminal and foreign history", async () => {
+    async function seed(
+      requestKey: string,
+      status: OperationStatus,
+      day: number,
+      overrides: Partial<CreateOperationInput> = {}
+    ) {
+      const { record } = await repository().createOrReplay(input({ requestKey, ...overrides }));
+      await getDb(env).execute(
+        "UPDATE operations SET status = ?, next_action = NULL, created_at = ? WHERE id = ?",
+        [status, `2026-11-${String(day).padStart(2, "0")}T12:00:00.000Z`, record.operation.id]
+      );
+      return record.operation.id;
+    }
+    const older = await seed("older-active", "awaiting_signature", 1);
+    const newer = await seed("newer-active", "prepared", 2);
+    const completed = await seed("completed-history", "completed", 3);
+    await getDb(env).execute(
+      `INSERT INTO operations
+         (id, organization_id, project_id, environment, kind, status, intent, source,
+          principal, action_principal, request_key, fingerprint, action_id, terms,
+          created_at, updated_at)
+       SELECT operation.id || '_history_' || history.number,
+              organization_id, project_id, environment, kind, status, intent, source,
+              principal, action_principal, request_key || '_history_' || history.number,
+              fingerprint, action_id || '_history_' || history.number, terms,
+              '2026-11-20T12:00:00.000Z', updated_at
+         FROM operations operation CROSS JOIN generate_series(1, 1000) history(number)
+        WHERE operation.id = ?`,
+      [completed]
+    );
+    await seed("failed-history", "failed", 4);
+    await seed("cancelled-history", "cancelled", 5);
+    await seed("other-owner", "settling", 6, {
+      source: { ownerAddress: "other-owner" },
+      intent: {
+        kind: "earn.deposit",
+        strategyId: "strategy_1",
+        source: { ownerAddress: "other-owner" },
+        amount: { mint: "mint", value: "1" },
+      },
+    });
+    await seed("other-project", "queued", 7, { projectId: "sibling-project" });
+    const service = new OperationsService(repository());
+    const first = await service.list(scope, { ownerAddress: "owner", status: "active", limit: 1 });
+    expect(first.operations.map((operation) => operation.id)).toEqual([newer]);
+    expect(first.nextCursor).not.toBeNull();
+    const second = await service.list(scope, {
+      ownerAddress: "owner",
+      status: "active",
+      limit: 1,
+      cursor: first.nextCursor ?? undefined,
+    });
+    expect(second.operations.map((operation) => operation.id)).toEqual([older]);
+    expect(second.nextCursor).toBeNull();
+
+    await getDb(env).execute("UPDATE operations SET status = 'completed' WHERE id = ?", [newer]);
+    expect(
+      (await service.list(scope, { ownerAddress: "owner", status: "active" })).operations.map(
+        (operation) => operation.id
+      )
+    ).toEqual([older]);
+    expect(
+      (await service.list(scope, { ownerAddress: "owner", status: "failed" })).operations
+    ).toHaveLength(1);
+    const history = await service.list(scope, { ownerAddress: "owner" });
+    expect(history.operations).toHaveLength(50);
+    expect(history.nextCursor).not.toBeNull();
   });
 
   it("history filters wallets before pagination and requires an explicit owner address", async () => {

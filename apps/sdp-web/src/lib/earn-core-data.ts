@@ -1,10 +1,12 @@
 "use client";
 
-import type { Operation } from "@sdp/types/operations";
-import { useRef } from "react";
-import useSWR from "swr";
+import { type Operation, TERMINAL_OPERATION_STATUSES } from "@sdp/types/operations";
+import { useEffect, useRef, useState } from "react";
+import useSWR, { useSWRConfig } from "swr";
+import { earnQueryKeys } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-query-key";
 import { dashboardRequest } from "./dashboard-fetch";
-import { createEarnClient, type EarnOperationsQuery } from "./earn-client";
+import { createEarnClient } from "./earn-client";
+import { useCadencedSWR } from "./use-cadenced-swr";
 
 /** Both Earn products use the same project-scoped transport and typed contract. */
 export const earnCoreClient = createEarnClient((path, init) => {
@@ -25,37 +27,152 @@ export const earnCoreClient = createEarnClient((path, init) => {
 
 /** Settlement, rejection and confirmed cancellation stop active operation polling. */
 export function isEarnOperationTerminal(operation: Operation): boolean {
-  return (
-    operation.status === "completed" ||
-    operation.status === "failed" ||
-    operation.status === "cancelled"
+  return TERMINAL_OPERATION_STATUSES.some((status) => status === operation.status);
+}
+
+const OPERATIONS_HISTORY_PAGE_SIZE = 50;
+
+/** One cache owns live work and the history snapshot the user is reading. */
+export interface EarnOperationsFeed {
+  operations: Operation[];
+  activeIds: string[];
+  nextCursor: string | null;
+  expanded: boolean;
+}
+
+/** Keep the strongest server observation when list and detail reads overlap. */
+function preferredObservation(previous: Operation | undefined, incoming: Operation): Operation {
+  if (!previous || previous.id !== incoming.id) return incoming;
+  if (previous.version !== incoming.version)
+    return previous.version > incoming.version ? previous : incoming;
+  const previousTerminal = isEarnOperationTerminal(previous);
+  const incomingTerminal = isEarnOperationTerminal(incoming);
+  if (previousTerminal !== incomingTerminal) return previousTerminal ? previous : incoming;
+  return Date.parse(previous.updatedAt) > Date.parse(incoming.updatedAt) ? previous : incoming;
+}
+
+function currentObservation(
+  id: string | undefined,
+  initial: Operation | undefined,
+  observed: Operation | undefined
+): Operation | undefined {
+  const fallback = initial?.id === id ? initial : undefined;
+  return observed && observed.id === id ? preferredObservation(fallback, observed) : fallback;
+}
+
+function mergeOperations(...groups: readonly (readonly Operation[])[]): Operation[] {
+  const byId = new Map<string, Operation>();
+  for (const group of groups) {
+    for (const operation of group)
+      byId.set(operation.id, preferredObservation(byId.get(operation.id), operation));
+  }
+  return [...byId.values()].sort(
+    (left, right) =>
+      Date.parse(right.createdAt) - Date.parse(left.createdAt) || right.id.localeCompare(left.id)
   );
 }
 
-/** A bounded recovery feed must fail on cursor cycles instead of silently hiding operations. */
-export async function fetchEarnOperations(query: EarnOperationsQuery = {}): Promise<Operation[]> {
+/** Walk only active work; terminal history is one explicit page at a time. */
+async function fetchActiveOperations(): Promise<Operation[]> {
   const operations: Operation[] = [];
   const seen = new Set<string>();
-  let before: string | undefined;
+  let cursor: string | undefined;
   for (let page = 0; page < 100; page += 1) {
-    const result = await earnCoreClient.operations({ ...query, limit: 100, cursor: before });
+    const result = await earnCoreClient.operations({ status: "active", limit: 100, cursor });
     operations.push(...result.operations);
     if (result.nextCursor === null) return operations;
     if (seen.has(result.nextCursor)) throw new Error("Earn operation pagination did not advance");
     seen.add(result.nextCursor);
-    before = result.nextCursor;
+    cursor = result.nextCursor;
   }
   throw new Error("Earn operation pagination exceeded its safety limit");
 }
 
-/** Recover durable work on reload, including provider signing and settlement waits. */
+/** Recover every active operation while keeping automatic history reads bounded. */
 export function useEarnOperations() {
-  const { data, error, isLoading, mutate } = useSWR(
-    "dashboard-earn-core-operations",
-    () => fetchEarnOperations(),
-    { refreshInterval: 15_000, revalidateOnFocus: true }
-  );
-  return { operations: data, error, isLoading, refresh: () => void mutate() };
+  const { cache } = useSWRConfig();
+  const key = earnQueryKeys.operations();
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<Error>();
+  // This private key is written only with the typed feed below or the action callback.
+  const currentFeed = () => cache.get(key)?.data as EarnOperationsFeed | undefined;
+  async function readFeed(): Promise<EarnOperationsFeed> {
+    const expanded = currentFeed()?.expanded === true;
+    const [active, recent] = await Promise.all([
+      fetchActiveOperations(),
+      expanded ? undefined : earnCoreClient.operations({ limit: OPERATIONS_HISTORY_PAGE_SIZE }),
+    ]);
+    const previous = currentFeed();
+    return {
+      operations: mergeOperations(
+        // Keep a disappearing row mounted until its existing detail poll reports the outcome.
+        expanded
+          ? (previous?.operations ?? [])
+          : (previous?.operations.filter((operation) => !isEarnOperationTerminal(operation)) ?? []),
+        recent?.operations ?? [],
+        active
+      ),
+      activeIds: active.map(({ id }) => id),
+      nextCursor: expanded ? (previous?.nextCursor ?? null) : (recent?.nextCursor ?? null),
+      expanded,
+    };
+  }
+  const { data, error, isLoading, isValidating, mutate } = useSWR(key, () => readFeed(), {
+    refreshInterval: 15_000,
+    revalidateOnFocus: true,
+  });
+  async function loadMore(): Promise<void> {
+    const cursor = currentFeed()?.nextCursor;
+    if (cursor === null || cursor === undefined || isLoadingMore) return;
+    setIsLoadingMore(true);
+    setLoadMoreError(undefined);
+    try {
+      // Freeze the cursor before the request; an older poll must not replace this snapshot.
+      await mutate((current) => (current ? { ...current, expanded: true } : current), {
+        revalidate: false,
+      });
+      const page = await earnCoreClient.operations({
+        cursor,
+        limit: OPERATIONS_HISTORY_PAGE_SIZE,
+      });
+      if (page.nextCursor === cursor) throw new Error("Earn operation pagination did not advance");
+      await mutate(
+        (current) =>
+          current
+            ? {
+                ...current,
+                operations: mergeOperations(current.operations, page.operations),
+                nextCursor: page.nextCursor,
+                expanded: true,
+              }
+            : current,
+        { revalidate: false }
+      );
+    } catch (caught) {
+      setLoadMoreError(
+        caught instanceof Error ? caught : new Error("Operation history unavailable")
+      );
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }
+  return {
+    operations: data?.operations,
+    activeIds: data?.activeIds,
+    error: error ?? loadMoreError,
+    isLoading,
+    isRefreshing: isValidating,
+    hasMore: data?.nextCursor !== null && data?.nextCursor !== undefined,
+    isLoadingMore,
+    loadMore,
+    refresh: async () => {
+      setLoadMoreError(undefined);
+      await mutate((current) => (current ? { ...current, expanded: false } : current), {
+        revalidate: false,
+      });
+      return mutate();
+    },
+  };
 }
 
 /** Fast detail polling is scoped to the operation; closing a modal never owns progress. */
@@ -64,31 +181,36 @@ export function useEarnOperation(
   initial?: Operation,
   onUpdated?: (operation: Operation) => void
 ) {
-  const reported = useRef<string | null>(null);
-  const { data, error, mutate } = useSWR(
-    operationId ? ["dashboard-earn-operation", operationId] : null,
+  const reported = useRef({
+    id: operationId,
+    observation: initial ? JSON.stringify(initial) : null,
+  });
+  const { data, error, mutate } = useCadencedSWR(
+    operationId ? earnQueryKeys.operation(operationId) : null,
     () => earnCoreClient.operation(operationId ?? ""),
+    (latest) => {
+      const operation = currentObservation(operationId, initial, latest);
+      return operation && isEarnOperationTerminal(operation) ? 0 : 2_000;
+    },
     {
       fallbackData: initial,
-      refreshInterval: (latest) => {
-        const operation = latest ?? initial;
-        return operation && isEarnOperationTerminal(operation) ? 0 : 2_000;
-      },
-      onSuccess(operation) {
-        const observation = JSON.stringify([
-          operation.id,
-          operation.status,
-          operation.version,
-          operation.updatedAt,
-        ]);
-        if (reported.current === observation) return;
-        reported.current = observation;
-        onUpdated?.(operation);
-      },
     }
   );
+  const operation = currentObservation(operationId, initial, data);
+  useEffect(() => {
+    if (reported.current.id !== operationId) {
+      reported.current = { id: operationId, observation: initial ? JSON.stringify(initial) : null };
+    }
+    if (!operation) return;
+    const observation = JSON.stringify(operation);
+    if (reported.current.observation === observation) return;
+    reported.current.observation = observation;
+    if (operation === initial) return;
+    // Shared fetches still reach the activity row after their initiating dialog closes.
+    onUpdated?.(operation);
+  }, [initial, onUpdated, operation, operationId]);
   return {
-    operation: data,
+    operation,
     error,
     refresh: () => mutate(),
     update: (operation: Operation) => mutate(operation, { revalidate: false }),

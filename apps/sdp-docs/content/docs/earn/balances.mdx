@@ -28,6 +28,37 @@ Each position's `id` is the `positionId` you [withdraw](/docs/earn/withdrawals)
 with. Without `ownerAddress`, the read covers every position your key can see in
 the project. See [position filters](/docs/reference/api/earn/list-earn-core-positions).
 
+## Read one position
+
+Use a position's `id` to read its latest balance and withdrawal state without
+fetching the whole list:
+
+<Tabs items={["TypeScript", "curl"]}>
+<Tab value="TypeScript">
+```ts
+const response = await fetch(`${api}/v1/earn/positions/${encodeURIComponent(positionId)}`, {
+  headers,
+});
+const position = (await response.json()).data;
+```
+</Tab>
+<Tab value="curl">
+```bash
+curl -sS "https://api-devnet.solana.com/v1/earn/positions/<position-id>" \
+  -H "Authorization: Bearer $SDP_API_KEY"
+```
+</Tab>
+</Tabs>
+
+The ID selects its owner and strategy; no wallet filter is needed. The read
+uses the same access rules and position fields as the list, including IDs
+returned by `discover=true`. Reading a discovered holding does not import it. If it is already tracked,
+the response returns its canonical position ID. Missing positions and positions outside your project return `404`.
+
+Pass `afterMovementIds` after a transaction to require a balance observation
+that includes those movements. See [position parameters](/docs/reference/api/earn/get-earn-position).
+Unknown live values stay unavailable; do not show them as zero.
+
 ## Holdings opened outside SDP
 
 Add `discover=true` to an `ownerAddress` read to include the wallet's holdings
@@ -51,3 +82,8 @@ intermediate tokens visible until they settle.
 `GET /v1/operations?ownerAddress=<wallet-address>` lists the wallet's deposits
 and withdrawals, newest first, each with its current `nextAction`. Always pass
 the owner: without a filter, the list leaves out owner-address operations.
+
+Add `status=active` for outstanding actions, including unsigned preparations.
+Paginate history separately with `limit` and `cursor`; every filter applies
+before pagination. Keep tracking an older pending action even when newer
+operations fill the first history page. See [activity filters](/docs/reference/api/earn/list-operations).

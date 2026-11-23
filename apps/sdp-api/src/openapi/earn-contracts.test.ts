@@ -70,7 +70,7 @@ describe("Earn API contract coverage", () => {
       }
     }
     expect([...groups].sort()).toEqual(Object.values(EARN_GROUPS).sort());
-    expect(operationCount).toBe(15);
+    expect(operationCount).toBe(16);
 
     const corePaths = Object.entries(internal.paths)
       .filter(
@@ -80,7 +80,7 @@ describe("Earn API contract coverage", () => {
       )
       .map(([path]) => path)
       .sort();
-    expect(corePaths).toHaveLength(4);
+    expect(corePaths).toHaveLength(5);
     for (const releaseChannel of ["stable", "beta", "experimental"] as const) {
       const published = createPublicOpenApiDocument({ releaseChannel });
       expect(
@@ -118,6 +118,7 @@ describe("Earn API contract coverage", () => {
       for (const path of [
         "/v1/earn/discovery",
         "/v1/earn/positions",
+        "/v1/earn/positions/{positionId}",
         "/v1/earn/deposit",
         "/v1/earn/withdraw",
         ...Object.keys(internal.paths).filter((path) => path.startsWith("/v1/operations")),

@@ -90,3 +90,13 @@ export const earnPositionsQuerySchema = z
       });
     }
   });
+
+/** A detail read accepts every durable or discovered position ID returned by the list. */
+export const earnPositionParamsSchema = z.object({
+  positionId: z.string().min(1).max(1024),
+});
+
+/** A position detail can request the same confirmation floor as the list. */
+export const earnPositionQuerySchema = z
+  .object({ afterMovementIds: earnVaultPositionsQuerySchema.shape.afterMovementIds })
+  .strict();

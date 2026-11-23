@@ -18,6 +18,9 @@ export const OPERATION_STATUSES = [
 /** Terminal observations never regress to an executable state. */
 export const TERMINAL_OPERATION_STATUSES = ["completed", "failed", "cancelled"] as const;
 
+/** Listing can select one exact state or every nonterminal action. */
+export const operationStatusFilterSchema = z.enum([...OPERATION_STATUSES, "active"]);
+
 /** The shared legal transition matrix; terminal states cannot reopen. */
 export const OPERATION_TRANSITIONS = {
   prepared: ["queued", "awaiting_signature", "submitted", "failed", "cancelled"],
@@ -240,6 +243,8 @@ export const operationsPageSchema = z.strictObject({
 export type Operation = z.infer<typeof operationSchema>;
 export type OperationKind = Operation["kind"];
 export type OperationStatus = Operation["status"];
+/** Query-only active grouping never becomes an operation lifecycle state. */
+export type OperationStatusFilter = z.infer<typeof operationStatusFilterSchema>;
 export type OperationIntent = z.infer<typeof operationIntentSchema>;
 export type OperationSource = z.infer<typeof operationSourceSchema>;
 export type OperationTerms = z.infer<typeof operationTermsSchema>;

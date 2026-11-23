@@ -15,7 +15,8 @@ Send `POST /v1/earn/withdraw` with a position from
 ```
 
 The position fixes the strategy and the owner, and the payout goes back to that
-owner. `slippageBps` is optional and sits at the top level. See
+owner. To review its latest balance first, [read the position](/docs/earn/balances#read-one-position).
+`slippageBps` is optional and sits at the top level. See
 [all withdrawal parameters](/docs/reference/api/earn/prepare-earn-withdrawal).
 
 | `amount.kind` | Withdraws |
@@ -41,12 +42,14 @@ While the withdrawal waits for your choice, `canCancel` is `true` and
 ## Sign, submit and track
 
 Sign and submit as for a [deposit](/docs/earn/deposits#sign-and-submit), then
-poll the operation. A delayed redemption stays in progress until the provider
-pays out: a request ID or escrowed shares are not a payout, and there is no
+poll the operation. For a queued withdrawal, `submitted` waits for the request
+transaction to confirm; `settling` waits for the provider to pay out. A delayed
+redemption stays in progress until that payout: a request ID or escrowed shares are not a payout, and there is no
 separate claim step. `completed` means SDP verified the payout; a `null`
 `result.settledAmount` is unknown, not zero.
 
 Once submitted, a withdrawal can't be refreshed or cancelled, even while
-queued. Only a `failed` withdrawal lets you prepare a new one, with a new
-`Idempotency-Key`. If shares end up stuck in an expired queue request,
+queued. After a definitive failure, prepare its replacement with a new
+`Idempotency-Key`. An uncertain outcome never authorizes a replacement. If
+shares end up stuck in an expired queue request,
 [recover them](/docs/earn/integration-details#recover-expired-withdrawal-escrow).

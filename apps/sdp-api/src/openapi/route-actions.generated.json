@@ -38,6 +38,7 @@
   "GET /v1/earn/onboarding/wisdomtree/:_": "earn.read",
   "GET /v1/earn/onboarding/wisdomtree/forms/:_": "earn.read",
   "GET /v1/earn/positions": "earn.read",
+  "GET /v1/earn/positions/:_": "earn.read",
   "GET /v1/helius-rings/health": "helius_rings.read",
   "GET /v1/helius-rings/operations": "helius_rings.read",
   "GET /v1/helius-rings/operations/:_": "helius_rings.read",

@@ -10,6 +10,7 @@ import {
   type OperationReference,
   type OperationSource,
   type OperationStatus,
+  type OperationStatusFilter,
   type OperationTerms,
   operationIntentSchema,
   operationNextActionSchema,
@@ -36,7 +37,7 @@ export interface OperationScope {
 /** Address-filtered history names one owner; wallet history names known project wallets. */
 export interface OperationListFilters {
   kind?: Operation["kind"];
-  status?: OperationStatus;
+  status?: OperationStatusFilter;
   ownerAddress?: string;
   walletId?: string;
   positionId?: string;
@@ -463,7 +464,11 @@ export function createOperationsRepository(db: DatabaseClient) {
         filters.push("kind = ?");
         values.push(input.kind);
       }
-      if (input.status !== undefined) {
+      if (input.status === "active") {
+        filters.push(
+          `status NOT IN (${TERMINAL_OPERATION_STATUSES.map((status) => `'${status}'`).join(", ")})`
+        );
+      } else if (input.status !== undefined) {
         filters.push("status = ?");
         values.push(input.status);
       }

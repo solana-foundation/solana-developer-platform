@@ -1,4 +1,4 @@
-import { OPERATION_KINDS, OPERATION_STATUSES } from "@sdp/types/operations";
+import { OPERATION_KINDS, operationStatusFilterSchema } from "@sdp/types/operations";
 import { z } from "zod";
 
 /** Every lifecycle mutation names an exact prepared operation. */
@@ -15,7 +15,11 @@ export const operationsListQuerySchema = z
     cursor: z.string().max(2048).optional(),
     limit: z.coerce.number().int().min(1).max(100).optional(),
     kind: z.enum(OPERATION_KINDS).optional(),
-    status: z.enum(OPERATION_STATUSES).optional(),
+    status: operationStatusFilterSchema
+      .describe(
+        "One exact status, or active for all nonterminal operations, including prepared actions."
+      )
+      .optional(),
     ownerAddress: z.string().min(32).max(44).optional(),
     walletId: z.string().min(1).max(256).optional(),
     positionId: z.string().min(1).max(1024).optional(),

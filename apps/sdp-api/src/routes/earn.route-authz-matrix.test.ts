@@ -13,6 +13,7 @@ import { clearKVStores } from "@/test/mocks/kv";
 const EARN_ROUTE_ACTIONS = {
   "GET /discovery": "earn.read",
   "GET /positions": "earn.read",
+  "GET /positions/:positionId": "earn.read",
   "POST /deposit": "earn.execute",
   "POST /withdraw": "earn.execute",
   "GET /onboarding/wisdomtree/forms/:entityType": "earn.read",

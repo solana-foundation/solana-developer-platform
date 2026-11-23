@@ -2,12 +2,15 @@ import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { operationResponseSchema } from "@sdp/types/operations";
 import { successResponseSchema, withOpenApi } from "@/openapi/schemas/base";
 import {
+  earnCorePositionSchema,
   earnDiscoveryResponseSchema,
   earnPositionsResponseSchema,
 } from "@/openapi/schemas/earn-core";
 import { EARN_EXAMPLE_IDS, EARN_OWNER_ADDRESS_EXAMPLE } from "@/openapi/schemas/earn-examples";
 import {
   earnDiscoveryQuerySchema,
+  earnPositionParamsSchema,
+  earnPositionQuerySchema,
   earnPositionsQuerySchema,
 } from "@/routes/earn/core/read-schemas";
 import { prepareEarnDepositSchema, prepareEarnWithdrawalSchema } from "@/routes/earn/core/schemas";
@@ -59,6 +62,27 @@ export function registerEarnCorePaths(registry: OpenAPIRegistry, publicOnly = fa
         content: jsonContent(earnPositionsResponseSchema),
       },
       ...earnErrorResponses([400, 401, 403, 429, 500, 503]),
+    },
+  });
+  registry.registerPath({
+    ...common,
+    method: "get",
+    path: "/v1/earn/positions/{positionId}",
+    operationId: "getEarnPosition",
+    summary: "Get a position",
+    description:
+      "Returns one position using the same identity, units and live valuation as the positions list. Use any position ID returned by that list, including an untracked discovered holding; no extra wallet filter or SDP wallet registration is needed. The authenticated project and environment still control visibility. A discovered selector is verified live without importing a position or inventing acquisition history. If SDP has since tracked that holding, the selector resolves to its canonical tracked position ID, including pending queued withdrawals. Missing or inaccessible positions return 404. Unavailable live values remain absent for tracked positions; an unverified discovered holding returns 503 rather than a fabricated zero or 404. afterMovementIds enforces the same confirmation floor as the list and must name movements for this source and instrument. Reading never prepares, signs or submits a transaction.",
+    request: {
+      headers: projectScopeHeaders,
+      params: earnPositionParamsSchema,
+      query: earnPositionQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "One visible position with available live values",
+        content: jsonContent(successResponseSchema(earnCorePositionSchema)),
+      },
+      ...earnErrorResponses([400, 401, 403, 404, 429, 500, 503]),
     },
   });
   const response = successResponseSchema(operationResponseSchema);

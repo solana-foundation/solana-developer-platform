@@ -67,8 +67,10 @@ PRIME shares.
 Save a fresh `Idempotency-Key` with each request body before you send it. After
 an uncertain response, such as a timeout or a `5xx`, resend the same body with
 the same key, including the same signed bytes, and SDP returns the original
-response. Keep the original amount as typed; do not derive a retry body from
-a newer quote or balance. To pick up work you already started, list
+response.
+
+Keep the original amount as typed; do not derive a retry body from a newer
+quote or balance. To pick up work you already started, list
 `GET /v1/operations?ownerAddress=...` and continue from its `nextAction`
 instead of preparing another deposit or withdrawal.
 

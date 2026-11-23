@@ -234,6 +234,25 @@ export interface EarnMovementsRepository {
     environment: SdpEnvironment;
     positionId: string;
   }): Promise<EarnPositionRow | null>;
+  /** One visible holding, under the same source boundaries as the positions list. */
+  getReadablePositionById(params: {
+    organizationId: string;
+    projectId: string;
+    environment: SdpEnvironment;
+    positionId: string;
+    custodyWalletIds: readonly string[];
+  }): Promise<EarnPositionRow | null>;
+  /** A discovered selector can resolve to a visible holding already tracked in this scope. */
+  getReadablePositionByInstrument(params: {
+    organizationId: string;
+    projectId: string;
+    environment: SdpEnvironment;
+    provider: string;
+    providerReference: string;
+    tokenMint: string;
+    shareMint: string;
+    source: { walletId: string } | { ownerAddress: string };
+  }): Promise<EarnPositionRow | null>;
   /** Vault holdings with live movement evidence, newest first, as a keyset page. */
   listVaultPositions(params: {
     organizationId: string;
@@ -1034,36 +1053,20 @@ async function getFulfilledQueueMovement(
   return row ? mapFulfilledQueueMovement(row) : null;
 }
 
-/**
- * What makes a custody vault claim VISIBLE to the org: the exact predicate
- * behind `GET /vault-positions` (activated, open or re-entered, signed ledger
- * evidence, wallet-scoped). Queued discoveries have signed request evidence
- * without a fabricated deposit. `listVaultClaimsForReconciliation` shares it by
- * construction, because the reconciliation report's meaning is "relative to
- * what the positions read serves": a claim matched by a broader predicate
- * would mark a holding recorded while `/vault-positions` still hides it, and
- * the Treasury would understate with reconciliation reporting all clear.
- *
- * Binds, in order: organization_id, environment, custody wallet id array.
- */
-const CUSTODY_VAULT_CLAIM_VISIBILITY_SQL = `organization_id = ?
-               AND environment = ?
-               AND kind = 'vault_direct'
+/** Holding visibility is shared by list, detail and reconciliation reads. */
+const VISIBLE_VAULT_POSITION_SQL = `kind = 'vault_direct'
                AND activated_at IS NOT NULL
                AND (
                  closed_at IS NULL
                  OR EXISTS (
-                   SELECT 1
-                   FROM earn_movements reentry
+                   SELECT 1 FROM earn_movements reentry
                    WHERE reentry.position_id = earn_positions.id
                      AND reentry.direction = 'deposit'
                      AND reentry.status IN ('requested', 'submitted')
                  )
                )
-               AND custody_wallet_id = ANY (?::text[])
                AND (EXISTS (
-                 SELECT 1
-                 FROM earn_movements movement
+                 SELECT 1 FROM earn_movements movement
                  WHERE movement.position_id = earn_positions.id
                    AND movement.status IN ('requested', 'submitted', 'confirmed', 'finalized')
                ) OR EXISTS (
@@ -1071,6 +1074,12 @@ const CUSTODY_VAULT_CLAIM_VISIBILITY_SQL = `organization_id = ?
                  WHERE request.position_id = earn_positions.id
                    AND request.creation_signature IS NOT NULL
                ))`;
+
+/** Binds organization, environment and the project's readable custody wallet IDs. */
+const CUSTODY_VAULT_CLAIM_VISIBILITY_SQL = `organization_id = ?
+               AND environment = ?
+               AND custody_wallet_id = ANY (?::text[])
+               AND ${VISIBLE_VAULT_POSITION_SQL}`;
 
 export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsRepository {
   return {
@@ -1103,6 +1112,57 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
              WHERE id = ? AND organization_id = ? AND environment = ?`
         )
         .bind(params.positionId, params.organizationId, params.environment)
+        .first<EarnPositionRow>();
+    },
+
+    async getReadablePositionById(params) {
+      return db
+        .prepare(
+          `SELECT *, COALESCE(strategy_reference, vault_address) AS strategy_reference
+             FROM earn_positions
+            WHERE id = ? AND organization_id = ? AND environment = ?
+              AND (custody_wallet_id = ANY (?::text[])
+                OR (owner_address IS NOT NULL AND project_id = ?))
+              AND ${VISIBLE_VAULT_POSITION_SQL}`
+        )
+        .bind(
+          params.positionId,
+          params.organizationId,
+          params.environment,
+          params.custodyWalletIds,
+          params.projectId
+        )
+        .first<EarnPositionRow>();
+    },
+
+    async getReadablePositionByInstrument(params) {
+      // Custody sources are resolved from the project's readable wallet IDs;
+      // address claims additionally name their exact project in the query.
+      const sourceClause =
+        "walletId" in params.source
+          ? "custody_wallet_id = ?"
+          : "owner_address = ? AND project_id = ?";
+      const sourceValues =
+        "walletId" in params.source
+          ? [params.source.walletId]
+          : [params.source.ownerAddress, params.projectId];
+      return db
+        .prepare(
+          `SELECT *, COALESCE(strategy_reference, vault_address) AS strategy_reference
+           FROM earn_positions
+          WHERE organization_id = ? AND environment = ?
+            AND provider = ? AND vault_address = ? AND token_mint = ? AND share_mint = ?
+            AND ${sourceClause} AND ${VISIBLE_VAULT_POSITION_SQL}`
+        )
+        .bind(
+          params.organizationId,
+          params.environment,
+          params.provider,
+          params.providerReference,
+          params.tokenMint,
+          params.shareMint,
+          ...sourceValues
+        )
         .first<EarnPositionRow>();
     },
 
@@ -1299,29 +1359,8 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
              WHERE organization_id = ?
                AND project_id = ?
                AND environment = ?
-               AND kind = 'vault_direct'
                AND owner_address IS NOT NULL
-               AND activated_at IS NOT NULL
-               AND (
-                 closed_at IS NULL
-                 OR EXISTS (
-                   SELECT 1
-                   FROM earn_movements reentry
-                   WHERE reentry.position_id = earn_positions.id
-                     AND reentry.direction = 'deposit'
-                     AND reentry.status IN ('requested', 'submitted')
-                 )
-               )
-               AND (EXISTS (
-                 SELECT 1
-                 FROM earn_movements movement
-                 WHERE movement.position_id = earn_positions.id
-                   AND movement.status IN ('requested', 'submitted', 'confirmed', 'finalized')
-               ) OR EXISTS (
-                 SELECT 1 FROM earn_vault_withdrawal_requests request
-                 WHERE request.position_id = earn_positions.id
-                   AND request.creation_signature IS NOT NULL
-               ))
+               AND ${VISIBLE_VAULT_POSITION_SQL}
                ${ownerClause}
                ${beforeClause}
              ORDER BY created_at DESC, id DESC

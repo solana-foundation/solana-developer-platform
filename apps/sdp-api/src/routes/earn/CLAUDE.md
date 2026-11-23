@@ -7,7 +7,7 @@ program creation, allocation configuration or automation.
 
 ## Route contract
 
-`index.ts` mounts four core operations and six WisdomTree eligibility operations:
+`index.ts` mounts five core endpoints and six WisdomTree eligibility operations:
 
 - `GET /discovery`: a filtered catalogue, rates and execution capabilities.
 - `GET /positions`: selected holdings, discovery and optional complete-scope totals.
@@ -27,7 +27,7 @@ use `earn.execute`; safe preparation cancellation uses `earn.manage`.
 ### Public OpenAPI promotion
 
 Earn and shared operations follow the same module release channel as the
-runtime. The public contract contains four core actions and five operation
+runtime. The public contract contains five core endpoints and five operation
 routes; provider eligibility stays internal. Keep the explicit public inventory
 in `openapi/spec.test.ts` aligned with the router and normal publication rules.
 Do not add rewrite-specific flags or preview visibility exceptions.
