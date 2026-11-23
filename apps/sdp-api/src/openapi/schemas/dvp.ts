@@ -112,7 +112,7 @@ const dvpTradePartySchema = z
       }),
     wallet: dvpCallerWalletSchema.openapi({
       description:
-        "The caller's connected wallet for this address, or null when none is accessible. A non-null value means the caller can act for this party. Derived per caller from the same wallet map used for discovery and funding authorization; never stored.",
+        "A wallet in the caller's project that holds this address, or null when none exists. This is attribution, not permission to act: execution also requires the dvp.execute grant and an eligible actionWallet. Derived per request; never stored.",
     }),
   })
   .openapi({ description: "One party of the trade, as the caller may see it." });
@@ -219,7 +219,7 @@ const dvpTradeSchema = z
     legs: z.object({ a: dvpTradeLegSchema, b: dvpTradeLegSchema }),
     kind: z.enum(["agent", "principal", "bilateral"]).openapi({
       description:
-        "The caller's standing on this trade, derived per caller and never stored. Display copy only: how many sides the caller holds an active connected wallet for — 0 is an agent trade (the terms were set for two other parties), 1 is a principal trade, 2 is bilateral. Follows the same wallet map discovery and funding authorize against, so a wallet-scoped key's kind reflects its own bindings.",
+        "The project's standing on this trade, derived per request and never stored. Display copy only: how many sides have an active wallet in the caller's project — 0 is an agent trade (the terms were set for two other parties), 1 is a principal trade, 2 is bilateral. This does not describe the credential's wallet bindings or permission to execute; use actionWallet for an eligible execution wallet.",
     }),
     nonce: z.string().openapi({
       description:

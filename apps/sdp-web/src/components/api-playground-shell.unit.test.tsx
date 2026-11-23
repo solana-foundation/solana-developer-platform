@@ -80,12 +80,12 @@ describe("ApiPlaygroundShell", () => {
 
   it("selects a curated form from its generated reference deep link", async () => {
     mocks.searchParamGet.mockImplementation((key) =>
-      key === "endpoint" ? "create-payment-transfer" : null
+      key === "endpoint" ? "execute-payment-transfer" : null
     );
     const curated: ApiPlaygroundEndpointConfig = {
       ...endpoint,
       id: "execute-transfer",
-      referenceEndpointId: "create-payment-transfer",
+      referenceEndpointId: "execute-payment-transfer",
       title: "Execute transfer",
       method: "POST",
       path: "/v1/payments/transfers",

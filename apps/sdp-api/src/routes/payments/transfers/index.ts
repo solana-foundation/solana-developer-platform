@@ -33,7 +33,7 @@ transfers.post(
     serverErrors: "rerun",
     recovery: "record",
     canonicalize: canonicalizePaymentBody,
-    // The execute step was split out of POST /v1/payments/transfers; a key or
+    // The execute step was split out of POST /v1/payments/transfers; a
     // row saved under that operation still answers its retry.
     previousForms: [{ operation: "POST /v1/payments/transfers" }],
   }),

@@ -16568,7 +16568,7 @@ Source: https://platform.solana.com/docs/reference/api/payments
 
 | Method | Endpoint | Summary |
 | --- | --- | --- |
-| `POST` | `/v1/payments/transfers/execute` | [Execute a provider-signed transfer](/docs/reference/api/payments/create-payment-transfer.md) |
+| `POST` | `/v1/payments/transfers/execute` | [Execute a provider-signed transfer](/docs/reference/api/payments/execute-payment-transfer.md) |
 | `GET` | `/v1/payments/transfers` | [List transfers](/docs/reference/api/payments/list-payment-transfers.md) |
 | `GET` | `/v1/payments/transfers/{transferId}` | [Get transfer](/docs/reference/api/payments/get-payment-transfer.md) |
 
@@ -16577,7 +16577,7 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | Method | Endpoint | Summary |
 | --- | --- | --- |
 | `POST` | `/v1/payments/transfer-batches/estimate` | [Estimate transfer batch](/docs/reference/api/payments/estimate-payment-transfer-batch.md) |
-| `POST` | `/v1/payments/transfer-batches/execute` | [Create transfer batch](/docs/reference/api/payments/create-payment-transfer-batch.md) |
+| `POST` | `/v1/payments/transfer-batches/execute` | [Execute a provider-signed transfer batch](/docs/reference/api/payments/execute-payment-transfer-batch.md) |
 | `POST` | `/v1/payments/transfer-batches/{batchId}/retry` | [Retry a transfer batch's failed recipients](/docs/reference/api/payments/retry-payment-transfer-batch.md) |
 | `GET` | `/v1/payments/transfer-batches` | [List transfer batches](/docs/reference/api/payments/list-payment-transfer-batches.md) |
 | `GET` | `/v1/payments/transfer-batches/{batchId}` | [Get transfer batch](/docs/reference/api/payments/get-payment-transfer-batch.md) |
@@ -16603,7 +16603,7 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | `POST` | `/v1/payments/requests` | [Create payment request](/docs/reference/api/payments/create-payment-request.md) |
 | `GET` | `/v1/payments/requests` | [List payment requests](/docs/reference/api/payments/list-payment-requests.md) |
 | `GET` | `/v1/payments/requests/{paymentRequestId}` | [Get payment request](/docs/reference/api/payments/get-payment-request.md) |
-| `GET` | `/v1/payments/requests/{paymentRequestId}/link-token` | [Get payment request link](/docs/reference/api/payments/get-payment-request-link.md) |
+| `GET` | `/v1/payments/requests/{paymentRequestId}/link-token` | [Get payment request link token](/docs/reference/api/payments/get-payment-request-link-token.md) |
 | `POST` | `/v1/payments/requests/{paymentRequestId}/cancel` | [Cancel payment request](/docs/reference/api/payments/cancel-payment-request.md) |
 
 ## Subscription plans
@@ -16612,7 +16612,7 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | --- | --- | --- |
 | `POST` | `/v1/payments/subscription-plans` | [Create subscription plan](/docs/reference/api/payments/create-payment-subscription-plan.md) |
 | `GET` | `/v1/payments/subscription-plans` | [List subscription plans](/docs/reference/api/payments/list-payment-subscription-plans.md) |
-| `POST` | `/v1/payments/subscription-plans/{planId}/create/build-unsigned-transaction` | [Prepare subscription plan creation](/docs/reference/api/payments/prepare-payment-subscription-plan-create.md) |
+| `POST` | `/v1/payments/subscription-plans/{planId}/create/build-unsigned-transaction` | [Build unsigned subscription plan creation transaction](/docs/reference/api/payments/build-payment-subscription-plan-create-unsigned-transaction.md) |
 | `GET` | `/v1/payments/subscription-plans/{planId}` | [Get subscription plan](/docs/reference/api/payments/get-payment-subscription-plan.md) |
 | `PATCH` | `/v1/payments/subscription-plans/{planId}` | [Update subscription plan](/docs/reference/api/payments/update-payment-subscription-plan.md) |
 
@@ -16622,10 +16622,10 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | --- | --- | --- |
 | `POST` | `/v1/payments/subscriptions` | [Create subscription](/docs/reference/api/payments/create-payment-subscription.md) |
 | `GET` | `/v1/payments/subscriptions` | [List subscriptions](/docs/reference/api/payments/list-payment-subscriptions.md) |
-| `POST` | `/v1/payments/subscriptions/{subscriptionId}/authorize/build-unsigned-transaction` | [Prepare subscription authorization](/docs/reference/api/payments/prepare-payment-subscription-authorization.md) |
-| `POST` | `/v1/payments/subscriptions/{subscriptionId}/cancel/build-unsigned-transaction` | [Prepare subscription cancellation](/docs/reference/api/payments/prepare-payment-subscription-cancel.md) |
-| `POST` | `/v1/payments/subscriptions/{subscriptionId}/resume/build-unsigned-transaction` | [Prepare subscription resume](/docs/reference/api/payments/prepare-payment-subscription-resume.md) |
-| `POST` | `/v1/payments/subscriptions/{subscriptionId}/collect/build-unsigned-transaction` | [Prepare subscription collection](/docs/reference/api/payments/prepare-payment-subscription-collection.md) |
+| `POST` | `/v1/payments/subscriptions/{subscriptionId}/authorize/build-unsigned-transaction` | [Build unsigned subscription authorization transaction](/docs/reference/api/payments/build-payment-subscription-authorization-unsigned-transaction.md) |
+| `POST` | `/v1/payments/subscriptions/{subscriptionId}/cancel/build-unsigned-transaction` | [Build unsigned subscription cancellation transaction](/docs/reference/api/payments/build-payment-subscription-cancel-unsigned-transaction.md) |
+| `POST` | `/v1/payments/subscriptions/{subscriptionId}/resume/build-unsigned-transaction` | [Build unsigned subscription resume transaction](/docs/reference/api/payments/build-payment-subscription-resume-unsigned-transaction.md) |
+| `POST` | `/v1/payments/subscriptions/{subscriptionId}/collect/build-unsigned-transaction` | [Build unsigned subscription collection transaction](/docs/reference/api/payments/build-payment-subscription-collection-unsigned-transaction.md) |
 | `GET` | `/v1/payments/subscriptions/{subscriptionId}` | [Get subscription](/docs/reference/api/payments/get-payment-subscription.md) |
 | `GET` | `/v1/payments/subscriptions/{subscriptionId}/collection-attempts` | [List subscription collection attempts](/docs/reference/api/payments/list-payment-subscription-collection-attempts.md) |
 
@@ -16633,9 +16633,9 @@ Source: https://platform.solana.com/docs/reference/api/payments
 
 | Method | Endpoint | Summary |
 | --- | --- | --- |
-| `GET` | `/v1/payments/ramps/onramp/supported-pairs` | [List on-ramp currency support](/docs/reference/api/payments/list-payment-onramp-currencies.md) |
-| `GET` | `/v1/payments/ramps/offramp/supported-pairs` | [List off-ramp currency support](/docs/reference/api/payments/list-payment-offramp-currencies.md) |
-| `POST` | `/v1/payments/ramps/onramp/start` | [Start on-ramp](/docs/reference/api/payments/create-payment-onramp-quote.md) |
+| `GET` | `/v1/payments/ramps/onramp/supported-pairs` | [List supported on-ramp pairs](/docs/reference/api/payments/list-payment-onramp-supported-pairs.md) |
+| `GET` | `/v1/payments/ramps/offramp/supported-pairs` | [List supported off-ramp pairs](/docs/reference/api/payments/list-payment-offramp-supported-pairs.md) |
+| `POST` | `/v1/payments/ramps/onramp/start` | [Start on-ramp](/docs/reference/api/payments/start-payment-onramp.md) |
 | `POST` | `/v1/payments/ramps/sandbox/simulate` | [Simulate sandbox transfer](/docs/reference/api/payments/simulate-sandbox-transfer.md) |
 
 ---
@@ -16645,7 +16645,7 @@ Source: https://platform.solana.com/docs/reference/api/payments
 ### Get wallet balances
 Source: https://platform.solana.com/docs/reference/api/payments/get-payment-wallet-balances
 
-> Retrieves balances for a connected wallet.
+> Retrieves balances for a custody wallet.
 
 `GET /v1/payments/wallets/{walletId}/balances`
 
@@ -17234,7 +17234,7 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ## Payments: Transfers
 
 ### Execute a provider-signed transfer
-Source: https://platform.solana.com/docs/reference/api/payments/create-payment-transfer
+Source: https://platform.solana.com/docs/reference/api/payments/execute-payment-transfer
 
 > Executes an on-chain transfer using the exact SDP Wallet ID (id from /v1/wallets) and server-side signing through the connected provider.
 
@@ -19143,8 +19143,8 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
-### Create transfer batch
-Source: https://platform.solana.com/docs/reference/api/payments/create-payment-transfer-batch
+### Execute a provider-signed transfer batch
+Source: https://platform.solana.com/docs/reference/api/payments/execute-payment-transfer-batch
 
 > Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records.
 
@@ -19236,7 +19236,7 @@ Create an outbound transfer batch.
 
       - **`sourceAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
-        Source connected wallet address.
+        Source custody wallet address.
 
       - **`token`** · `string` · required · example `SOL`
 
@@ -19940,7 +19940,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
       - **`sourceAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
-        Source connected wallet address.
+        Source custody wallet address.
 
       - **`token`** · `string` · required · example `SOL`
 
@@ -20602,7 +20602,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
     - **`sourceAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
-      Source connected wallet address.
+      Source custody wallet address.
 
     - **`token`** · `string` · required · example `SOL`
 
@@ -20835,7 +20835,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
       - **`sourceAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
-        Source connected wallet address.
+        Source custody wallet address.
 
       - **`token`** · `string` · required · example `SOL`
 
@@ -21402,7 +21402,7 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Create recurring payment
 Source: https://platform.solana.com/docs/reference/api/payments/create-payment-recurring-payment
 
-> Creates an outbound recurring payment intent from a connected wallet to a counterparty crypto-wallet account.
+> Creates an outbound recurring payment intent from a custody wallet to a counterparty crypto-wallet account.
 
 `POST /v1/payments/recurring-payments`
 
@@ -25860,8 +25860,8 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
-### Get payment request link
-Source: https://platform.solana.com/docs/reference/api/payments/get-payment-request-link
+### Get payment request link token
+Source: https://platform.solana.com/docs/reference/api/payments/get-payment-request-link-token
 
 > Returns the token behind a payment request's hosted payment link, /pay/{publicToken}.
 
@@ -26321,7 +26321,7 @@ Creates an SDP subscription plan record. Prepare the on-chain Solana subscriptio
 
 - **`ownerWalletId`** · `string` · required · min length 1 · example `wal_merchant`
 
-  Connected wallet that owns the Solana subscription plan.
+  Custody wallet that owns the Solana subscription plan.
 
 - **`token`** · `string` · required · example `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`
 
@@ -26349,7 +26349,7 @@ Creates an SDP subscription plan record. Prepare the on-chain Solana subscriptio
 
 - **`pullerWalletId`** · `string` · min length 1 · example `wal_collector`
 
-  Optional connected wallet allowed to pull subscription payments.
+  Optional custody wallet allowed to pull subscription payments.
 
 - **`metadataUri`** · `string` · format `uri` · max length 128 · example `https://example.com/subscriptions/monthly-usdc.json`
 
@@ -26868,8 +26868,8 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
-### Prepare subscription plan creation
-Source: https://platform.solana.com/docs/reference/api/payments/prepare-payment-subscription-plan-create
+### Build unsigned subscription plan creation transaction
+Source: https://platform.solana.com/docs/reference/api/payments/build-payment-subscription-plan-create-unsigned-transaction
 
 > Prepares an unsigned Solana subscriptions program create-plan transaction from an SDP subscription plan.
 
@@ -28246,8 +28246,8 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
-### Prepare subscription authorization
-Source: https://platform.solana.com/docs/reference/api/payments/prepare-payment-subscription-authorization
+### Build unsigned subscription authorization transaction
+Source: https://platform.solana.com/docs/reference/api/payments/build-payment-subscription-authorization-unsigned-transaction
 
 > Prepares the subscriber-signed Solana transaction that initializes the subscription authority and subscribes to the plan.
 
@@ -28561,8 +28561,8 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
-### Prepare subscription cancellation
-Source: https://platform.solana.com/docs/reference/api/payments/prepare-payment-subscription-cancel
+### Build unsigned subscription cancellation transaction
+Source: https://platform.solana.com/docs/reference/api/payments/build-payment-subscription-cancel-unsigned-transaction
 
 > Prepares the subscriber-signed Solana transaction that cancels a subscription.
 
@@ -28838,8 +28838,8 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
-### Prepare subscription resume
-Source: https://platform.solana.com/docs/reference/api/payments/prepare-payment-subscription-resume
+### Build unsigned subscription resume transaction
+Source: https://platform.solana.com/docs/reference/api/payments/build-payment-subscription-resume-unsigned-transaction
 
 > Prepares the subscriber-signed Solana transaction that resumes a canceled subscription before revocation.
 
@@ -29119,8 +29119,8 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
-### Prepare subscription collection
-Source: https://platform.solana.com/docs/reference/api/payments/prepare-payment-subscription-collection
+### Build unsigned subscription collection transaction
+Source: https://platform.solana.com/docs/reference/api/payments/build-payment-subscription-collection-unsigned-transaction
 
 > Prepares the collector-signed Solana subscriptions transfer transaction for an active subscription.
 
@@ -30059,8 +30059,8 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ## Payments: Ramps
 
-### List on-ramp currency support
-Source: https://platform.solana.com/docs/reference/api/payments/list-payment-onramp-currencies
+### List supported on-ramp pairs
+Source: https://platform.solana.com/docs/reference/api/payments/list-payment-onramp-supported-pairs
 
 > Lists generated fiat-to-crypto on-ramp pairs and the providers that support each pair.
 
@@ -30338,8 +30338,8 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
-### List off-ramp currency support
-Source: https://platform.solana.com/docs/reference/api/payments/list-payment-offramp-currencies
+### List supported off-ramp pairs
+Source: https://platform.solana.com/docs/reference/api/payments/list-payment-offramp-supported-pairs
 
 > Lists generated crypto-to-fiat off-ramp pairs and the providers that support each pair.
 
@@ -30617,7 +30617,7 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ---
 
 ### Start on-ramp
-Source: https://platform.solana.com/docs/reference/api/payments/create-payment-onramp-quote
+Source: https://platform.solana.com/docs/reference/api/payments/start-payment-onramp
 
 > Creates an on-ramp quote with the provider you name, and the transfer that follows it.
 
@@ -30643,7 +30643,7 @@ Create an on-ramp quote. The response's `quote.deliveryMode` says whether to ope
 
 - **`destinationCustodyWalletId`** · `string` · required · min length 1 · example `cwlt_example`
 
-  Connected wallet ID (the `id` returned by the wallets API) for purchased crypto.
+  Custody wallet ID (the `id` returned by the wallets API) for purchased crypto.
 
 - **`assetRail`** · `string` · required · one of `sol.solana`, `usdc.solana`, `usdt.solana`, `usdg.solana`, `pyusd.solana` · example `usdc.solana`
 
@@ -32518,7 +32518,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 
 - **`destinationCustodyWalletId`** · `string` · min length 1 · example `cwlt_example`
 
-  Connected wallet ID (the `id` returned by the wallets API). Required when direction is onramp.
+  Custody wallet ID (the `id` returned by the wallets API). Required when direction is onramp.
 
 ## Headers
 
@@ -45779,7 +45779,7 @@ Each provider's delivery mode is in the [capability matrix](/docs/payments/ramps
 
 An offramp needs one more call, because you send the crypto. When the provider is ready for it, the transfer moves to `awaiting_payment` and carries `cryptoDeposit`, with the `destinationAddress` and `amount` to send.
 
-Send exactly that with [`POST /v1/payments/transfers/execute`](/docs/reference/api/payments/create-payment-transfer). Set `transferId` to the offramp's transfer, `sourceCustodyWalletId` to the quote's source wallet, `destination` and `amount` from `cryptoDeposit`, and `token` to the quoted asset (its symbol, such as `USDC`, or its mint). The call needs an `Idempotency-Key`, like any transfer, and your API key needs `transfers.execute`.
+Send exactly that with [`POST /v1/payments/transfers/execute`](/docs/reference/api/payments/execute-payment-transfer). Set `transferId` to the offramp's transfer, `sourceCustodyWalletId` to the quote's source wallet, `destination` and `amount` from `cryptoDeposit`, and `token` to the quoted asset (its symbol, such as `USDC`, or its mint). The call needs an `Idempotency-Key`, like any transfer, and your API key needs `transfers.execute`.
 
 A deposit that doesn't match the instruction returns `400`, and one for a transfer no longer awaiting payment returns `409`. Sending the same deposit again, under any key, returns the transfer it already funded instead of sending twice.
 
@@ -46048,7 +46048,7 @@ Each step links to its guide, with dashboard and API instructions:
 | `POST` | `/v1/issuance/tokens/{tokenId}/allowlist` | Add an address to the access list |
 | `POST` | `/v1/issuance/tokens/{tokenId}/freeze` | Freeze an account |
 | `POST` | `/v1/issuance/tokens/{tokenId}/pause` | Pause all transfers |
-| `POST` | `/v1/payments/transfers` | Transfer tokens |
+| `POST` | `/v1/payments/transfers/execute` | Transfer tokens |
 
 See the full schemas in the [Issuance API reference](/docs/reference/api/issuance) and the [Payments API reference](/docs/reference/api/payments).
 

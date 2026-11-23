@@ -53,7 +53,7 @@ transferBatches.post(
     leaseSeconds: 300,
     canonicalize: canonicalizeTransferBatchBody,
     // The execute step was split out of POST /v1/payments/transfer-batches; a
-    // key or batch row saved under that operation still answers its retry,
+    // batch row saved under that operation still answers its retry,
     // under either body form that operation fingerprinted with: the token as
     // sent before APE SOLA9-695, as the mint since.
     previousForms: [

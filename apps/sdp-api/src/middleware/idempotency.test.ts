@@ -890,6 +890,41 @@ describe("idempotent()", () => {
     expect(after.create).not.toHaveBeenCalled();
   });
 
+  it("does not retry an operation-scoped key claim with another operation's fingerprint", async () => {
+    const before = buildApp({ key: "required" }, created);
+    await post(before.app, "/v1/other", { a: 1 }, KEY);
+    const actual = idempotencyKeysRepository.createPostgresIdempotencyKeyRepository;
+    const claims: string[] = [];
+    const factory = vi
+      .spyOn(idempotencyKeysRepository, "createPostgresIdempotencyKeyRepository")
+      .mockImplementation((db) => {
+        const repository = actual(db);
+        return {
+          ...repository,
+          claim: (input) => {
+            claims.push(input.fingerprint);
+            return repository.claim(input);
+          },
+        };
+      });
+    try {
+      const after = buildApp(
+        {
+          key: "required",
+          previousForms: [{ operation: "POST /v1/old" }, { operation: "POST /v1/older" }],
+        },
+        created
+      );
+      const refused = await post(after.app, "/v1/other", { a: 2 }, KEY);
+      expect(refused.status).toBe(422);
+      expect(await errorCode(refused)).toBe("IDEMPOTENCY_KEY_REUSED");
+      expect(claims).toHaveLength(1);
+      expect(after.create).not.toHaveBeenCalled();
+    } finally {
+      factory.mockRestore();
+    }
+  });
+
   it("replays a domain row saved under the route's previous operation", async () => {
     // The rename also moves the key record's scope (it includes the matched
     // route), so the key layer cannot match across it: the row is what

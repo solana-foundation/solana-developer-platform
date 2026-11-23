@@ -3,7 +3,11 @@ import type { getRecentBlockhash } from "@sdp/rpc/solana";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
+import * as paymentsRepository from "@/db/repositories/payments.repository.postgres";
 import { app } from "@/index";
+import { requestFingerprint } from "@/middleware/idempotency";
+import { canonicalizePaymentBody } from "@/routes/payments/fingerprint";
+import { walletTransferSchema } from "@/routes/payments/transfers/schemas";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
@@ -232,6 +236,66 @@ describe("Payments routes — transfer idempotency", () => {
     expect(signAsFeePayerMock).toHaveBeenCalledOnce();
     expect(sendTransactionMock).not.toHaveBeenCalled();
   });
+
+  it.each(["1", "2"])(
+    "checks the previous fingerprint after losing an insert, retry amount %s",
+    async (amount) => {
+      const body = {
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "SOL",
+        amount: "1",
+      };
+      const key = "pre-rename-insert-race";
+      const first = await postTransfer(body, { idempotencyKey: key });
+      expect(first.status).toBe(200);
+      const original = await readTransferResponse(first);
+      const fingerprint = requestFingerprint({
+        operation: "POST /v1/payments/transfers",
+        params: {},
+        query: {},
+        body: canonicalizePaymentBody(walletTransferSchema.parse(body)),
+      });
+      await getDb(env).execute(
+        "UPDATE payment_transfers SET idempotency_fingerprint = ? WHERE id = ?",
+        [fingerprint, original.data.transfer.id]
+      );
+      await getDb(env).execute("DELETE FROM idempotency_keys WHERE idempotency_key = ?", [key]);
+      // The first lookup misses the winner, which becomes visible at the unique
+      // insert conflict. Both insertion and conflict recovery use the real DB.
+      const actual = paymentsRepository.createPostgresPaymentsRepository;
+      let lookups = 0;
+      const factory = vi
+        .spyOn(paymentsRepository, "createPostgresPaymentsRepository")
+        .mockImplementation((...args) => {
+          const repository = actual(...args);
+          return {
+            ...repository,
+            findTransferByIdempotency: async (input) => {
+              lookups += 1;
+              return lookups === 1 ? null : repository.findTransferByIdempotency(input);
+            },
+          };
+        });
+      try {
+        const retry = await postTransfer({ ...body, amount }, { idempotencyKey: key });
+        if (amount === "1") {
+          expect(retry.status).toBe(200);
+          expect((await readTransferResponse(retry)).data.transfer.id).toBe(
+            original.data.transfer.id
+          );
+        } else {
+          expect(retry.status).toBe(422);
+          expect(await retry.json()).toMatchObject({ error: { code: "IDEMPOTENCY_KEY_REUSED" } });
+        }
+        expect(lookups).toBe(2);
+        expect(await countTransferRows()).toBe(1);
+        expect(sendTransactionMock).toHaveBeenCalledOnce();
+      } finally {
+        factory.mockRestore();
+      }
+    }
+  );
 
   it("executes once when two requests race on the same Idempotency-Key", async () => {
     const body = {

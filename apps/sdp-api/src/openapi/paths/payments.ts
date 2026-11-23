@@ -120,7 +120,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Get wallet balances",
     operationId: "getPaymentWalletBalances",
     description:
-      "Retrieves balances for a connected wallet. If any SOL or SPL balance read fails, returns 503 instead of partial or zero balances. Optional minimumSlot requires confirmed account state at or after that Solana slot; the response acknowledges the bound in data.balanceReadContext.minimumSlot. Wallet lifecycle and provisioning are managed through /v1/wallets.",
+      "Retrieves balances for a custody wallet. If any SOL or SPL balance read fails, returns 503 instead of partial or zero balances. Optional minimumSlot requires confirmed account state at or after that Solana slot; the response acknowledges the bound in data.balanceReadContext.minimumSlot. Wallet lifecycle and provisioning are managed through /v1/wallets.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -156,7 +156,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     [DOCS_GROUP]: PAYMENT_GROUPS.transfers,
     summary: "Execute a provider-signed transfer",
-    operationId: "createPaymentTransfer",
+    operationId: "executePaymentTransfer",
     description:
       "Executes an on-chain transfer using the exact SDP Wallet ID (`id` from `/v1/wallets`) and server-side signing through the connected provider. Requires an Idempotency-Key: a retry with the same key and request returns the original transfer instead of sending a second one. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment. A native SOL transfer is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when it pays less than the rent-exempt minimum to an address with no account or would leave the source wallet holding more than nothing but less than the minimum. When the source wallet's policy at its custody provider refuses to sign, the transfer fails with 422 `CUSTODY_POLICY_REFUSED` and nothing is signed or sent; the message names the provider whose policy to review. When the source wallet holds less SOL, or less of the token in its token account, than the amount, the transfer fails with 400 `TRANSACTION_FAILED` and is recorded `failed` with that reason in `error`; a retry with the same Idempotency-Key returns the same error, so fund the wallet and send again with a new key. A source wallet with no token account for the token is refused earlier with 400 `BAD_REQUEST`.",
     security: [{ apiKeyAuth: [] }],
@@ -252,8 +252,8 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     path: "/v1/payments/transfer-batches/execute",
     tags: ["Payments"],
     [DOCS_GROUP]: PAYMENT_GROUPS.transferBatches,
-    summary: "Create transfer batch",
-    operationId: "createPaymentTransferBatch",
+    summary: "Execute a provider-signed transfer batch",
+    operationId: "executePaymentTransferBatch",
     description:
       "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request. A native SOL batch is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when a recipient whose address has no account gets less than the rent-exempt minimum (`details.recipientIndexes`) or the source wallet would be left holding more than nothing but less than the minimum (`details.sourceRemainder`). A token batch is refused with 409 `SPONSORED_RENT_OVER_CAP` when one recipient's new token account costs more rent than the sponsor funds in a transaction (`details.recipientIndex`). A recipient's counterparty account archived while the batch is being prepared returns 404, and one whose address changed returns 409 `TRANSFER_BATCH_DESTINATION_CHANGED` (`details.counterpartyAccountIds`); either way nothing is written or sent, so the same request can be sent again. " +
       "A chunk the source wallet cannot fund fails its recipients and transfer with the reason in `error` (the wallet does not have enough funds); the batch still returns 200. " +
@@ -354,7 +354,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Create recurring payment",
     operationId: "createPaymentRecurringPayment",
     description:
-      "Creates an outbound recurring payment intent from a connected wallet to a counterparty crypto-wallet account. This stores backend state only; activation and collection are added by follow-up endpoints.",
+      "Creates an outbound recurring payment intent from a custody wallet to a counterparty crypto-wallet account. This stores backend state only; activation and collection are added by follow-up endpoints.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: keyRequiredRerunHeaders,
@@ -555,8 +555,8 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     path: "/v1/payments/requests/{paymentRequestId}/link-token",
     tags: ["Payments"],
     [DOCS_GROUP]: PAYMENT_GROUPS.paymentRequests,
-    summary: "Get payment request link",
-    operationId: "getPaymentRequestLink",
+    summary: "Get payment request link token",
+    operationId: "getPaymentRequestLinkToken",
     description:
       "Returns the token behind a payment request's hosted payment link, `/pay/{publicToken}`. Anyone holding it can build the request's fee-sponsored payment transaction, so this route requires `payment_requests.manage`, not `payment_requests.read`. Another project's request returns 404. The token is returned whatever the request's status.",
     security: [{ apiKeyAuth: [] }],
@@ -743,8 +743,8 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     path: "/v1/payments/subscription-plans/{planId}/create/build-unsigned-transaction",
     tags: ["Payments"],
     [DOCS_GROUP]: PAYMENT_GROUPS.subscriptionPlans,
-    summary: "Prepare subscription plan creation",
-    operationId: "preparePaymentSubscriptionPlanCreate",
+    summary: "Build unsigned subscription plan creation transaction",
+    operationId: "buildPaymentSubscriptionPlanCreateUnsignedTransaction",
     description:
       "Prepares an unsigned Solana subscriptions program create-plan transaction from an SDP subscription plan. This derives and stores the plan PDA but does not submit the transaction.",
     security: [{ apiKeyAuth: [] }],
@@ -866,8 +866,8 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     path: "/v1/payments/subscriptions/{subscriptionId}/authorize/build-unsigned-transaction",
     tags: ["Payments"],
     [DOCS_GROUP]: PAYMENT_GROUPS.subscriptions,
-    summary: "Prepare subscription authorization",
-    operationId: "preparePaymentSubscriptionAuthorization",
+    summary: "Build unsigned subscription authorization transaction",
+    operationId: "buildPaymentSubscriptionAuthorizationUnsignedTransaction",
     description:
       "Prepares the subscriber-signed Solana transaction that initializes the subscription authority and subscribes to the plan. The transaction must still be signed and submitted by the client. A subscriber that is one of the organization's SDP wallets answers 409: pay from an SDP wallet through a recurring payment.",
     security: [{ apiKeyAuth: [] }],
@@ -893,8 +893,8 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     path: "/v1/payments/subscriptions/{subscriptionId}/cancel/build-unsigned-transaction",
     tags: ["Payments"],
     [DOCS_GROUP]: PAYMENT_GROUPS.subscriptions,
-    summary: "Prepare subscription cancellation",
-    operationId: "preparePaymentSubscriptionCancel",
+    summary: "Build unsigned subscription cancellation transaction",
+    operationId: "buildPaymentSubscriptionCancelUnsignedTransaction",
     description:
       "Prepares the subscriber-signed Solana transaction that cancels a subscription. The transaction must still be signed and submitted by the client.",
     security: [{ apiKeyAuth: [] }],
@@ -920,8 +920,8 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     path: "/v1/payments/subscriptions/{subscriptionId}/resume/build-unsigned-transaction",
     tags: ["Payments"],
     [DOCS_GROUP]: PAYMENT_GROUPS.subscriptions,
-    summary: "Prepare subscription resume",
-    operationId: "preparePaymentSubscriptionResume",
+    summary: "Build unsigned subscription resume transaction",
+    operationId: "buildPaymentSubscriptionResumeUnsignedTransaction",
     description:
       "Prepares the subscriber-signed Solana transaction that resumes a canceled subscription before revocation. The transaction must still be signed and submitted by the client. A subscription that belongs to a recurring payment answers 409: a recurring payment's cancel is final.",
     security: [{ apiKeyAuth: [] }],
@@ -947,8 +947,8 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     path: "/v1/payments/subscriptions/{subscriptionId}/collect/build-unsigned-transaction",
     tags: ["Payments"],
     [DOCS_GROUP]: PAYMENT_GROUPS.subscriptions,
-    summary: "Prepare subscription collection",
-    operationId: "preparePaymentSubscriptionCollection",
+    summary: "Build unsigned subscription collection transaction",
+    operationId: "buildPaymentSubscriptionCollectionUnsignedTransaction",
     description:
       "Prepares the collector-signed Solana subscriptions transfer transaction for an active subscription. The transaction must still be signed and submitted by the collector/fee-payer flow. A subscription that belongs to a recurring payment, or whose subscriber is one of the organization's SDP wallets, answers 409: SDP collects from an SDP wallet only through a recurring payment.",
     security: [{ apiKeyAuth: [] }],
@@ -1019,8 +1019,8 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     path: "/v1/payments/ramps/onramp/supported-pairs",
     tags: ["Payments"],
     [DOCS_GROUP]: PAYMENT_GROUPS.ramps,
-    summary: "List on-ramp currency support",
-    operationId: "listPaymentOnrampCurrencies",
+    summary: "List supported on-ramp pairs",
+    operationId: "listPaymentOnrampSupportedPairs",
     description:
       "Lists generated fiat-to-crypto on-ramp pairs and the providers that support each pair. Supports optional source, destination rail, and provider filters.",
     security: [{ apiKeyAuth: [] }],
@@ -1042,8 +1042,8 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     path: "/v1/payments/ramps/offramp/supported-pairs",
     tags: ["Payments"],
     [DOCS_GROUP]: PAYMENT_GROUPS.ramps,
-    summary: "List off-ramp currency support",
-    operationId: "listPaymentOfframpCurrencies",
+    summary: "List supported off-ramp pairs",
+    operationId: "listPaymentOfframpSupportedPairs",
     description:
       "Lists generated crypto-to-fiat off-ramp pairs and the providers that support each pair. Supports optional source rail, destination fiat, and provider filters.",
     security: [{ apiKeyAuth: [] }],
@@ -1066,7 +1066,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     [DOCS_GROUP]: PAYMENT_GROUPS.ramps,
     summary: "Start on-ramp",
-    operationId: "createPaymentOnrampQuote",
+    operationId: "startPaymentOnramp",
     description:
       "Creates an on-ramp quote with the provider you name, and the transfer that follows it. `quote.deliveryMode` says how to hand the customer to the provider: `hosted` returns a provider-hosted URL, and `session_widget` a provider session to mount.",
     security: [{ apiKeyAuth: [] }],

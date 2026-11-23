@@ -169,9 +169,9 @@ describe("/api/playground/v1/[...path]", () => {
     [
       "literal parent segments",
       "POST",
-      "/v1/payments/transfers/../../../admin/onboarding-allowlist",
+      "/v1/payments/transfers/../../../admin/allowlist",
     ],
-    ["percent-encoded parent segments", "GET", "/v1/%2e%2e/admin/onboarding-allowlist"],
+    ["percent-encoded parent segments", "GET", "/v1/%2e%2e/admin/allowlist"],
     ["backslash parent segments", "GET", "/v1/wallets/..\\..\\admin/allowlist"],
     ["a parent segment out of the proxy", "GET", "/v1/../v1/wallets/configs/../../../health"],
   ])("refuses %s that is not in the playground catalog", async (_label, method, path) => {

@@ -74,7 +74,7 @@ export const counterpartyRequirementsQuerySchema = z
       onrampRequirementsQuerySchema.shape.destinationCustodyWalletId.optional(),
       {
         description:
-          "Connected wallet ID (the `id` returned by the wallets API). Required when direction is onramp.",
+          "Custody wallet ID (the `id` returned by the wallets API). Required when direction is onramp.",
         example: "cwlt_example",
       }
     ),

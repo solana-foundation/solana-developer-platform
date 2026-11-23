@@ -540,8 +540,8 @@
         "shadowedBy": []
       },
       {
-        "id": "create-payment-transfer",
-        "operationId": "createPaymentTransfer",
+        "id": "execute-payment-transfer",
+        "operationId": "executePaymentTransfer",
         "title": "Execute a provider-signed transfer",
         "method": "POST",
         "path": "/v1/payments/transfers/execute",
@@ -1084,9 +1084,9 @@
         "shadowedBy": []
       },
       {
-        "id": "create-payment-transfer-batch",
-        "operationId": "createPaymentTransferBatch",
-        "title": "Create transfer batch",
+        "id": "execute-payment-transfer-batch",
+        "operationId": "executePaymentTransferBatch",
+        "title": "Execute a provider-signed transfer batch",
         "method": "POST",
         "path": "/v1/payments/transfer-batches/execute",
         "pathFields": [],
@@ -2297,9 +2297,9 @@
         "shadowedBy": []
       },
       {
-        "id": "get-payment-request-link",
-        "operationId": "getPaymentRequestLink",
-        "title": "Get payment request link",
+        "id": "get-payment-request-link-token",
+        "operationId": "getPaymentRequestLinkToken",
+        "title": "Get payment request link token",
         "method": "GET",
         "path": "/v1/payments/requests/{paymentRequestId}/link-token",
         "pathFields": [
@@ -2832,9 +2832,9 @@
         "shadowedBy": []
       },
       {
-        "id": "prepare-payment-subscription-plan-create",
-        "operationId": "preparePaymentSubscriptionPlanCreate",
-        "title": "Prepare subscription plan creation",
+        "id": "build-payment-subscription-plan-create-unsigned-transaction",
+        "operationId": "buildPaymentSubscriptionPlanCreateUnsignedTransaction",
+        "title": "Build unsigned subscription plan creation transaction",
         "method": "POST",
         "path": "/v1/payments/subscription-plans/{planId}/create/build-unsigned-transaction",
         "pathFields": [
@@ -3162,9 +3162,9 @@
         "shadowedBy": []
       },
       {
-        "id": "prepare-payment-subscription-authorization",
-        "operationId": "preparePaymentSubscriptionAuthorization",
-        "title": "Prepare subscription authorization",
+        "id": "build-payment-subscription-authorization-unsigned-transaction",
+        "operationId": "buildPaymentSubscriptionAuthorizationUnsignedTransaction",
+        "title": "Build unsigned subscription authorization transaction",
         "method": "POST",
         "path": "/v1/payments/subscriptions/{subscriptionId}/authorize/build-unsigned-transaction",
         "pathFields": [
@@ -3228,9 +3228,9 @@
         "shadowedBy": []
       },
       {
-        "id": "prepare-payment-subscription-cancel",
-        "operationId": "preparePaymentSubscriptionCancel",
-        "title": "Prepare subscription cancellation",
+        "id": "build-payment-subscription-cancel-unsigned-transaction",
+        "operationId": "buildPaymentSubscriptionCancelUnsignedTransaction",
+        "title": "Build unsigned subscription cancellation transaction",
         "method": "POST",
         "path": "/v1/payments/subscriptions/{subscriptionId}/cancel/build-unsigned-transaction",
         "pathFields": [
@@ -3292,9 +3292,9 @@
         "shadowedBy": []
       },
       {
-        "id": "prepare-payment-subscription-resume",
-        "operationId": "preparePaymentSubscriptionResume",
-        "title": "Prepare subscription resume",
+        "id": "build-payment-subscription-resume-unsigned-transaction",
+        "operationId": "buildPaymentSubscriptionResumeUnsignedTransaction",
+        "title": "Build unsigned subscription resume transaction",
         "method": "POST",
         "path": "/v1/payments/subscriptions/{subscriptionId}/resume/build-unsigned-transaction",
         "pathFields": [
@@ -3356,9 +3356,9 @@
         "shadowedBy": []
       },
       {
-        "id": "prepare-payment-subscription-collection",
-        "operationId": "preparePaymentSubscriptionCollection",
-        "title": "Prepare subscription collection",
+        "id": "build-payment-subscription-collection-unsigned-transaction",
+        "operationId": "buildPaymentSubscriptionCollectionUnsignedTransaction",
+        "title": "Build unsigned subscription collection transaction",
         "method": "POST",
         "path": "/v1/payments/subscriptions/{subscriptionId}/collect/build-unsigned-transaction",
         "pathFields": [
@@ -3587,9 +3587,9 @@
         "shadowedBy": []
       },
       {
-        "id": "list-payment-onramp-currencies",
-        "operationId": "listPaymentOnrampCurrencies",
-        "title": "List on-ramp currency support",
+        "id": "list-payment-onramp-supported-pairs",
+        "operationId": "listPaymentOnrampSupportedPairs",
+        "title": "List supported on-ramp pairs",
         "method": "GET",
         "path": "/v1/payments/ramps/onramp/supported-pairs?source={source}&dest={dest}&provider={provider}",
         "pathFields": [
@@ -3825,9 +3825,9 @@
         "shadowedBy": []
       },
       {
-        "id": "list-payment-offramp-currencies",
-        "operationId": "listPaymentOfframpCurrencies",
-        "title": "List off-ramp currency support",
+        "id": "list-payment-offramp-supported-pairs",
+        "operationId": "listPaymentOfframpSupportedPairs",
+        "title": "List supported off-ramp pairs",
         "method": "GET",
         "path": "/v1/payments/ramps/offramp/supported-pairs?source={source}&dest={dest}&provider={provider}",
         "pathFields": [
@@ -4063,8 +4063,8 @@
         "shadowedBy": []
       },
       {
-        "id": "create-payment-onramp-quote",
-        "operationId": "createPaymentOnrampQuote",
+        "id": "start-payment-onramp",
+        "operationId": "startPaymentOnramp",
         "title": "Start on-ramp",
         "method": "POST",
         "path": "/v1/payments/ramps/onramp/start",
@@ -4734,7 +4734,7 @@
           {
             "key": "destinationCustodyWalletId",
             "label": "destinationCustodyWalletId",
-            "description": "Connected wallet ID (the `id` returned by the wallets API). Required when direction is onramp.",
+            "description": "Custody wallet ID (the `id` returned by the wallets API). Required when direction is onramp.",
             "defaultValue": "cwlt_example",
             "required": false
           }
@@ -8932,8 +8932,8 @@
     "experimental": {},
     "beta": {
       "POST /v1/payments/transfers/execute": {
-        "id": "create-payment-transfer",
-        "operationId": "createPaymentTransfer",
+        "id": "execute-payment-transfer",
+        "operationId": "executePaymentTransfer",
         "title": "Execute a provider-signed transfer",
         "method": "POST",
         "path": "/v1/payments/transfers/execute",
@@ -9290,9 +9290,9 @@
         "takesIdempotencyKey": false
       },
       "POST /v1/payments/transfer-batches/execute": {
-        "id": "create-payment-transfer-batch",
-        "operationId": "createPaymentTransferBatch",
-        "title": "Create transfer batch",
+        "id": "execute-payment-transfer-batch",
+        "operationId": "executePaymentTransferBatch",
+        "title": "Execute a provider-signed transfer batch",
         "method": "POST",
         "path": "/v1/payments/transfer-batches/execute",
         "pathFields": [],
@@ -9954,8 +9954,8 @@
         "takesIdempotencyKey": false
       },
       "POST /v1/payments/transfers/execute": {
-        "id": "create-payment-transfer",
-        "operationId": "createPaymentTransfer",
+        "id": "execute-payment-transfer",
+        "operationId": "executePaymentTransfer",
         "title": "Execute a provider-signed transfer",
         "method": "POST",
         "path": "/v1/payments/transfers/execute",
@@ -10297,9 +10297,9 @@
         "takesIdempotencyKey": false
       },
       "POST /v1/payments/transfer-batches/execute": {
-        "id": "create-payment-transfer-batch",
-        "operationId": "createPaymentTransferBatch",
-        "title": "Create transfer batch",
+        "id": "execute-payment-transfer-batch",
+        "operationId": "executePaymentTransferBatch",
+        "title": "Execute a provider-signed transfer batch",
         "method": "POST",
         "path": "/v1/payments/transfer-batches/execute",
         "pathFields": [],

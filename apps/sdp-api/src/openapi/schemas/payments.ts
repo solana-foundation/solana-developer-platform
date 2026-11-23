@@ -158,7 +158,7 @@ const walletBalancesSchema = z
   })
   .openapi({
     description:
-      "Balance payload for a provider-connected wallet. Use /v1/wallets for wallet provisioning and listing.",
+      "Balance payload for a custody wallet. Use /v1/wallets for wallet provisioning and listing.",
   });
 
 export const createTransferRequestSchema = createTransferSchemaBase
@@ -624,7 +624,7 @@ export const transferBatchSchema = z
       description: "Source Provider wallet ID retained as evidence.",
     }),
     sourceAddress: solanaAddressSchema.openapi({
-      description: "Source connected wallet address.",
+      description: "Source custody wallet address.",
     }),
     token: z.string().openapi({ description: "Token symbol or mint address.", example: "SOL" }),
     status: paymentTransferBatchStatusSchema,
@@ -1129,7 +1129,7 @@ export const paymentRecurringPaymentListResponseSchema = z
 export const createSubscriptionPlanRequestSchema = createSubscriptionPlanSchemaBase
   .extend({
     ownerWalletId: withOpenApi(createSubscriptionPlanSchemaBase.shape.ownerWalletId, {
-      description: "Connected wallet that owns the Solana subscription plan.",
+      description: "Custody wallet that owns the Solana subscription plan.",
       example: "wal_merchant",
     }),
     token: withOpenApi(createSubscriptionPlanSchemaBase.shape.token, {
@@ -1159,7 +1159,7 @@ export const createSubscriptionPlanRequestSchema = createSubscriptionPlanSchemaB
       example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
     }),
     pullerWalletId: withOpenApi(createSubscriptionPlanSchemaBase.shape.pullerWalletId, {
-      description: "Optional connected wallet allowed to pull subscription payments.",
+      description: "Optional custody wallet allowed to pull subscription payments.",
       example: "wal_collector",
     }),
     metadataUri: withOpenApi(createSubscriptionPlanSchemaBase.shape.metadataUri, {
@@ -1507,7 +1507,7 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
       createOnrampQuoteSchemaBase.shape.destinationCustodyWalletId,
       {
         description:
-          "Connected wallet ID (the `id` returned by the wallets API) for purchased crypto.",
+          "Custody wallet ID (the `id` returned by the wallets API) for purchased crypto.",
         example: "cwlt_example",
       }
     ),

@@ -171,7 +171,7 @@ Each provider's delivery mode is in the [capability matrix](/docs/payments/ramps
 
 An offramp needs one more call, because you send the crypto. When the provider is ready for it, the transfer moves to `awaiting_payment` and carries `cryptoDeposit`, with the `destinationAddress` and `amount` to send.
 
-Send exactly that with [`POST /v1/payments/transfers/execute`](/docs/reference/api/payments/create-payment-transfer). Set `transferId` to the offramp's transfer, `sourceCustodyWalletId` to the quote's source wallet, `destination` and `amount` from `cryptoDeposit`, and `token` to the quoted asset (its symbol, such as `USDC`, or its mint). The call needs an `Idempotency-Key`, like any transfer, and your API key needs `transfers.execute`.
+Send exactly that with [`POST /v1/payments/transfers/execute`](/docs/reference/api/payments/execute-payment-transfer). Set `transferId` to the offramp's transfer, `sourceCustodyWalletId` to the quote's source wallet, `destination` and `amount` from `cryptoDeposit`, and `token` to the quoted asset (its symbol, such as `USDC`, or its mint). The call needs an `Idempotency-Key`, like any transfer, and your API key needs `transfers.execute`.
 
 A deposit that doesn't match the instruction returns `400`, and one for a transfer no longer awaiting payment returns `409`. Sending the same deposit again, under any key, returns the transfer it already funded instead of sending twice.
 

@@ -372,11 +372,21 @@ export async function runIdempotency(
   let fingerprint = fingerprintOf(options.canonicalize, operation);
   // The forms the route fingerprinted with before this one, deduped: a form
   // equal to the current one matches without a fallback claim.
-  const previousFingerprints = [
+  const previousForms = (options.previousForms ?? []).map((form) => ({
+    operation: form.operation ?? operation,
+    fingerprint: fingerprintOf(
+      form.canonicalize ?? options.canonicalize,
+      form.operation ?? operation
+    ),
+  }));
+  const previousFingerprints = [...new Set(previousForms.map((form) => form.fingerprint))].filter(
+    (candidate) => candidate !== fingerprint
+  );
+  // Key records are operation-scoped. Older operations can only be recovered
+  // through the domain row; retry claims only for forms in the current scope.
+  const previousClaimFingerprints = [
     ...new Set(
-      (options.previousForms ?? []).map((form) =>
-        fingerprintOf(form.canonicalize ?? options.canonicalize, form.operation ?? operation)
-      )
+      previousForms.filter((form) => form.operation === operation).map((form) => form.fingerprint)
     ),
   ].filter((candidate) => candidate !== fingerprint);
   const id = `idk_${crypto.randomUUID()}`;
@@ -402,7 +412,7 @@ export async function runIdempotency(
   if (claim.kind === "mismatch") {
     // A key saved before the route's fingerprint form changed (a mismatch
     // writes nothing, so claiming again under an old form is safe).
-    for (const previousFingerprint of previousFingerprints) {
+    for (const previousFingerprint of previousClaimFingerprints) {
       const previous = await repository.claim({ ...claimInput, fingerprint: previousFingerprint });
       if (previous.kind === "mismatch") continue;
       claim = previous;
