@@ -189,8 +189,9 @@ reconciliation while the outcome is uncertain. Finalized release retains that
 freeze permanently, so a replacement with the same amount cannot become a
 fictional payout for an earlier request. A definitive no-effect failure lifts
 the freeze. A release that never lands is one: once its blockhash expires at
-finalized commitment, SDP never resends it, and two finalized-history misses at
-least 30 seconds apart fail it `TRANSACTION_EXPIRED`. The original recorded
+finalized commitment, SDP never resends it. A second finalized-history miss at
+least 30 seconds after the first fails it `TRANSACTION_EXPIRED` only when every
+RPC endpoint, read at a finalized slot past the expiry, also misses it. The original recorded
 outcome stays unchanged and can remain unresolved; only the new release
 operation completes.
 

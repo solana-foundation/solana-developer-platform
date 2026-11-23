@@ -63,7 +63,9 @@ deposit eligibility nor authority over a wallet.
   refresh cannot reset it. An exposed owner message with an unknown outcome
   cannot be cancelled. Route authorization remains independently required.
   Internal cleanup for permission loss or expiry is private worker safety, not
-  caller cancellation. Observation-only restriction remains irreversible.
+  caller cancellation. Observation-only restriction remains irreversible: its
+  unsent signed bytes end only on proven nonexecution (finalized expiry, then
+  every RPC endpoint's history floored at that slot), never on a pooled miss.
 - Refresh and cancel reject after any submit acceptance, including after a
   custody signing refusal. Definitive rejection or proven nonexecution makes
   the operation terminal `failed`; only then can a new request/key create a
@@ -109,9 +111,10 @@ deposit eligibility nor authority over a wallet.
   The result says `recovered` with no settled amount, not recovered PRIME or USDC.
   Missing evidence, timeouts and ambiguous broadcasts retain the reservation
   until the release's blockhash expires at finalized commitment. After that,
-  SDP never resends it, and two finalized-history misses at least 30 seconds
-  apart are definitive no-effect failure (`TRANSACTION_EXPIRED`), which lifts
-  the reservation and the freeze. A finalized success whose evidence stays
+  SDP never resends it. A second finalized-history miss at least 30 seconds
+  after the first is definitive no-effect failure (`TRANSACTION_EXPIRED`) only
+  when every RPC endpoint, read at a finalized slot past the expiry, also misses
+  it; that lifts the reservation and the freeze. A finalized success whose evidence stays
   incomplete still keeps them.
 - Indexed due-time scans feed at most four workers, which lease only work ready
   to start. Backoff changes observation timing, never spend authority. Shared

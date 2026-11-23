@@ -1,9 +1,19 @@
 import { currentClusterScope } from "@sdp/rpc/scope";
-import type { Operation, OperationProposalBinding, SubmitOperation } from "@sdp/types/operations";
+import type { EarnMovementStatus, EarnVaultWithdrawalRequestStatus } from "@sdp/types/earn";
+import type {
+  Operation,
+  OperationProposalBinding,
+  OperationSource,
+  OperationStatus,
+  SubmitOperation,
+} from "@sdp/types/operations";
 import { isTerminalOperationStatus, projectedOperationStatus } from "@sdp/types/operations";
 import { getDb } from "@/db/client";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
-import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
+import {
+  createPostgresEarnMovementsRepository,
+  type EarnPositionRow,
+} from "@/db/repositories/earn-movements.repository";
 import { createPostgresEarnVaultWithdrawalRequestsRepository } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import type {
   OperationAttempt,
@@ -33,8 +43,9 @@ import type { Env } from "@/types/env";
 import {
   createOperationObservationRpc,
   type OperationObservationRpc,
+  type UnsentTransactionVerdict,
 } from "./operation-observation-rpc";
-import { createOperationWorkerBudget } from "./operation-worker-budget";
+import { createOperationWorkerBudget, type OperationWorkerBudget } from "./operation-worker-budget";
 import { resolveEarnOperationBuild } from "./strategy-operation-build.service";
 import {
   advanceCurrentRedemptionRelease,
@@ -42,6 +53,7 @@ import {
 } from "./strategy-redemption-release.service";
 import {
   type PreparedStrategySigningTarget,
+  type StrategyTransactionScope,
   signPreparedStrategyTransaction,
   sponsorPreparedStrategyTransaction,
 } from "./strategy-transactions.service";
@@ -50,6 +62,93 @@ import { verifySignedWalletTransaction } from "./vault-wallet.service";
 
 export function isTerminalOperation(operation: Operation): boolean {
   return isTerminalOperationStatus(operation.status);
+}
+
+const CONFIRMATION = "Waiting for transaction confirmation";
+const SETTLEMENT = "Waiting for provider settlement";
+
+/** What submitted work's evidence reports, and what a caller waits for until it is final. */
+interface ObservedProgress {
+  status: OperationStatus;
+  waitingFor: typeof CONFIRMATION | typeof SETTLEMENT | null;
+}
+
+/** What a provider withdrawal request's lifecycle says about its operation. */
+function queuedRequestProgress(
+  request: EarnVaultWithdrawalRequestStatus,
+  current: OperationStatus
+): ObservedProgress & { outcome: NonNullable<Operation["result"]>["settlementOutcome"] } {
+  switch (request) {
+    case "fulfilled":
+      return { status: "completed", waitingFor: null, outcome: "delivered" };
+    case "cancelled":
+      return { status: "cancelled", waitingFor: null, outcome: "cancelled" };
+    case "failed":
+      return { status: "failed", waitingFor: null, outcome: null };
+    // A creation signature is stored before broadcast. Keep creating requests
+    // submitted, without regressing an operation already stored as settling.
+    case "creating":
+      return current === "settling"
+        ? { status: "settling", waitingFor: SETTLEMENT, outcome: null }
+        : { status: "submitted", waitingFor: CONFIRMATION, outcome: null };
+    case "pending":
+    case "fulfillable":
+    case "expired_cancelable":
+    case "cancelling":
+    case "closed_or_unknown":
+      return { status: "settling", waitingFor: SETTLEMENT, outcome: null };
+    default: {
+      const unknownStatus: never = request;
+      throw internalError(`Unknown withdrawal request status: ${unknownStatus}`);
+    }
+  }
+}
+
+/** What an operation's vault movement says about it; operations never record custodial ones. */
+function movementProgress(movement: EarnMovementStatus, chainFinalized: boolean): ObservedProgress {
+  switch (movement) {
+    case "failed":
+      return { status: "failed", waitingFor: null };
+    case "finalized":
+      return { status: "completed", waitingFor: null };
+    case "requested":
+    case "submitted":
+    case "confirmed":
+      return chainFinalized
+        ? { status: "settling", waitingFor: SETTLEMENT }
+        : { status: "submitted", waitingFor: CONFIRMATION };
+    case "processing":
+    case "pending_approval":
+    case "completed":
+    case "partially_completed":
+    case "cancelled":
+      throw internalError("Operation movement is not a vault transaction");
+    default: {
+      const unknownStatus: never = movement;
+      throw internalError(`Unknown movement status: ${unknownStatus}`);
+    }
+  }
+}
+
+function waitFor(progress: ObservedProgress): Operation["nextAction"] {
+  return progress.waitingFor === null ? null : { type: "wait", reason: progress.waitingFor };
+}
+
+function positionSource(position: EarnPositionRow): OperationSource {
+  if (position.custody_wallet_id !== null) return { walletId: position.custody_wallet_id };
+  if (position.owner_address !== null) return { ownerAddress: position.owner_address };
+  throw internalError("Operation position has no source");
+}
+
+/**
+ * The error a projection reports. Evidence replaces a recovery error left by an earlier worker
+ * pass: only a failure carries one, and a terminal operation keeps its own.
+ */
+function projectedError(
+  operation: Operation,
+  failure: NonNullable<Operation["error"]> | null
+): Operation["error"] {
+  return isTerminalOperation(operation) ? operation.error : failure;
 }
 
 async function projectQueuedOperation(
@@ -71,18 +170,8 @@ async function projectQueuedOperation(
     positionId: request.position_id,
   });
   const strategyId = position?.strategy_id;
-  // A creation signature is stored before broadcast. Keep creating requests
-  // submitted, without regressing an operation already stored as settling.
-  const status =
-    request.status === "fulfilled"
-      ? "completed"
-      : request.status === "cancelled"
-        ? "cancelled"
-        : request.status === "failed"
-          ? "failed"
-          : request.status === "creating" && operation.status !== "settling"
-            ? "submitted"
-            : "settling";
+  const progress = queuedRequestProgress(request.status, operation.status);
+  const { status } = progress;
   return {
     ...operation,
     // Request evidence can advance before the operation worker records progress.
@@ -91,23 +180,16 @@ async function projectQueuedOperation(
         ? request.updated_at
         : operation.updatedAt,
     status: projectedOperationStatus(operation.status, status),
-    nextAction:
-      status === "submitted" || status === "settling"
-        ? {
-            type: "wait",
-            reason:
-              status === "submitted"
-                ? "Waiting for transaction confirmation"
-                : "Waiting for provider settlement",
-          }
-        : null,
-    error:
+    nextAction: waitFor(progress),
+    error: projectedError(
+      operation,
       status === "failed"
         ? {
             code: "TRANSACTION_FAILED",
             message: request.failure_reason ?? "Withdrawal request failed",
           }
-        : operation.error,
+        : null
+    ),
     result: {
       positionId: request.position_id,
       ...(strategyId ? { strategyId } : {}),
@@ -121,8 +203,7 @@ async function projectQueuedOperation(
         request.assets_paid === null
           ? null
           : { mint: request.token_mint, value: request.assets_paid },
-      settlementOutcome:
-        status === "completed" ? "delivered" : status === "cancelled" ? "cancelled" : null,
+      settlementOutcome: progress.outcome,
     },
   };
 }
@@ -166,45 +247,25 @@ export async function projectEarnOperation(
   const strategyId =
     position.strategy_id ??
     (operation.intent.kind === "earn.deposit" ? operation.intent.strategyId : undefined);
-  const status: Operation["status"] =
-    movement.status === "failed"
-      ? "failed"
-      : movement.status === "finalized" || movement.status === "completed"
-        ? "completed"
-        : movement.chain_finalized_at !== null
-          ? "settling"
-          : "submitted";
-  const source =
-    position.custody_wallet_id !== null
-      ? { walletId: position.custody_wallet_id }
-      : position.owner_address !== null
-        ? { ownerAddress: position.owner_address }
-        : null;
-  if (source === null) throw internalError("Operation position has no source");
+  const progress = movementProgress(movement.status, movement.chain_finalized_at !== null);
+  const { status } = progress;
   return {
     ...operation,
     status: projectedOperationStatus(operation.status, status),
-    nextAction:
-      status === "completed" || status === "failed"
-        ? null
-        : {
-            type: "wait",
-            reason:
-              status === "settling"
-                ? "Waiting for provider settlement"
-                : "Waiting for transaction confirmation",
-          },
-    error:
-      movement.status === "failed"
+    nextAction: waitFor(progress),
+    error: projectedError(
+      operation,
+      status === "failed"
         ? {
             code: "TRANSACTION_FAILED",
             message: movement.failure_reason ?? "Strategy transaction failed",
           }
-        : operation.error,
+        : null
+    ),
     result: {
       positionId: position.id,
       ...(strategyId ? { strategyId } : {}),
-      source,
+      source: positionSource(position),
       signature: movement.signature,
       settledAmount:
         movement.token_amount_settled !== null && position.token_mint !== null
@@ -322,6 +383,93 @@ async function admitOperationEffect(
   }
 }
 
+/**
+ * What signed bytes SDP will not send become once retained history has a verdict: still
+ * reconciling, ended, or undefined once they landed, so they are observed like any sent
+ * transaction. They end failed even after a cancellation request: a terminal cancellation needs
+ * an authoritative resource reference, and bytes SDP never sent have none.
+ */
+function unsentSignatureUpdate(verdict: UnsentTransactionVerdict): OperationUpdate | undefined {
+  switch (verdict) {
+    case "landed":
+      return undefined;
+    case "pending":
+      return {
+        status: "awaiting_signature",
+        nextAction: {
+          type: "wait",
+          reason: "Reconciling the signed transaction without sending it",
+        },
+        resourceRef: null,
+        error: null,
+      };
+    case "expired":
+      return {
+        status: "failed",
+        nextAction: null,
+        resourceRef: null,
+        error: {
+          code: "TRANSACTION_EXPIRED",
+          message: "The signed transaction expired before it was sent",
+        },
+      };
+    default: {
+      const unknownVerdict: never = verdict;
+      throw internalError(`Unknown unsent transaction verdict: ${unknownVerdict}`);
+    }
+  }
+}
+
+/**
+ * Observe signed bytes SDP will not send. A release is adopted for observation either way: it
+ * proves its own absence before failing. Other unsent bytes end only once retained history
+ * proves they can never land. Undefined once the bytes are seen, so they are adopted like any
+ * sent transaction.
+ */
+async function observeUnsentSignature(input: {
+  scope: OperationScope;
+  built: PreparedStrategySigningTarget;
+  signedTransaction: string;
+  currentRelease: boolean;
+  observations: OperationObservationRpc;
+  workerBudget: OperationWorkerBudget;
+}): Promise<OperationUpdate | undefined> {
+  const signed = await verifySignedWalletTransaction(input.built, input.signedTransaction);
+  input.workerBudget.assertCanStart();
+  if (input.currentRelease) return undefined;
+  if (await input.observations.hasSignature(input.scope, signed.signature)) return undefined;
+  const verdict = await input.observations.unsentVerdict(
+    input.scope,
+    signed.signature,
+    BigInt(input.built.last_valid_block_height)
+  );
+  return unsentSignatureUpdate(verdict);
+}
+
+/**
+ * The synchronous custody signer's signed bytes. A provider wallet policy that refused before
+ * signing anything ends the operation, as a rejected proposal does: asking again cannot change
+ * its answer. Any other failure propagates to recovery.
+ */
+async function signWithCustodySigner(
+  env: Env,
+  transactionScope: StrategyTransactionScope,
+  built: PreparedStrategySigningTarget,
+  workerBudget: OperationWorkerBudget
+): Promise<string | OperationUpdate> {
+  try {
+    return await signPreparedStrategyTransaction(env, transactionScope, built, workerBudget);
+  } catch (error) {
+    if (!(error instanceof AppError) || error.code !== "CUSTODY_POLICY_REFUSED") throw error;
+    return {
+      status: "failed",
+      nextAction: null,
+      resourceRef: null,
+      error: { code: error.code, message: error.message },
+    };
+  }
+}
+
 export async function advanceEarnOperation(
   env: Env,
   scope: OperationScope,
@@ -333,7 +481,7 @@ export async function advanceEarnOperation(
   const workerBudget = createOperationWorkerBudget();
   if (isTerminalOperation(claim.operation)) return claim.operation;
   if (claim.operation.resourceRef?.kind === "earn.redemption_release")
-    return advanceCurrentRedemptionRelease(env, scope, claim);
+    return advanceCurrentRedemptionRelease(env, scope, claim, observations);
   const service = createOperationsService(env);
   const {
     target: built,
@@ -590,12 +738,9 @@ export async function advanceEarnOperation(
         });
       }
       if (!(await admitNewEffect())) return refuseUnsentSignature();
-      signedTransaction = await signPreparedStrategyTransaction(
-        env,
-        transactionScope,
-        built,
-        workerBudget
-      );
+      const signing = await signWithCustodySigner(env, transactionScope, built, workerBudget);
+      if (typeof signing !== "string") return update(signing);
+      signedTransaction = signing;
     } else {
       const outcome = await prepareCustodyProposal(proposer);
       if (outcome !== undefined) return outcome;
@@ -628,20 +773,15 @@ export async function advanceEarnOperation(
   const broadcast = !observeOnly;
   if (!broadcast) {
     await service.repository.restrictToObservation(scope, claim);
-    const signed = await verifySignedWalletTransaction(built, signedTransaction);
-    workerBudget.assertCanStart();
-    // A release is adopted for observation either way: it proves absence before failing.
-    if (!currentRelease && !(await observations.hasSignature(scope, signed.signature))) {
-      return update({
-        status: "awaiting_signature",
-        nextAction: {
-          type: "wait",
-          reason: "Reconciling the signed transaction without sending it",
-        },
-        resourceRef: null,
-        error: null,
-      });
-    }
+    const unsent = await observeUnsentSignature({
+      scope,
+      built,
+      signedTransaction,
+      currentRelease,
+      observations,
+      workerBudget,
+    });
+    if (unsent !== undefined) return update(unsent);
   }
   workerBudget.assertCanStart();
   if (broadcast) await service.markDispatchStarted(scope, claim);

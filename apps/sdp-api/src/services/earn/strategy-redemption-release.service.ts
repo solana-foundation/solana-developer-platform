@@ -16,6 +16,10 @@ import { conflict, internalError, notFound } from "@/lib/errors";
 import { createOperationsService } from "@/services/operations.service";
 import type { Env } from "@/types/env";
 import { resolveVaultParRedemptionClient } from "./execution-registry";
+import type {
+  OperationObservationRpc,
+  UnsentTransactionVerdict,
+} from "./operation-observation-rpc";
 import { earnRuntime } from "./runtime";
 import { createVaultDeadline } from "./vault-deadline";
 import { broadcastVaultTransaction } from "./vault-execution.service";
@@ -128,8 +132,10 @@ export async function submitCurrentRedemptionRelease(
 
 /**
  * A missing receipt proves nothing until the release's blockhash has expired at finalized
- * commitment. After that, two finalized misses RELEASE_ABSENCE_RECHECK_MS apart prove the
- * release never ran.
+ * commitment. After that, a second finalized miss RELEASE_ABSENCE_RECHECK_MS after the first
+ * hands the release to the shared absence proof: a lagging or pruned history backend can miss
+ * a finalized transaction twice, so only every endpoint's retained history, read at a
+ * finalized slot past the expiry, proves the release never ran.
  */
 async function releaseAbsenceVerdict(input: {
   build: Pick<
@@ -138,17 +144,19 @@ async function releaseAbsenceVerdict(input: {
   >;
   readFinalizedHeight: FinalizedHeightReader;
   recordAbsence: () => Promise<unknown>;
+  proveAbsence: () => Promise<UnsentTransactionVerdict>;
 }): Promise<"pending" | "expired"> {
-  if ((await input.readFinalizedHeight()) <= BigInt(input.build.last_valid_block_height))
-    return "pending";
   const observedAt = input.build.release_absence_observed_at;
   if (observedAt == null) {
-    await input.recordAbsence();
+    if ((await input.readFinalizedHeight()) > BigInt(input.build.last_valid_block_height))
+      await input.recordAbsence();
     return "pending";
   }
   const firstMiss = Date.parse(observedAt);
   if (!Number.isFinite(firstMiss)) throw internalError("Release absence observation is unreadable");
-  return Date.now() - firstMiss < RELEASE_ABSENCE_RECHECK_MS ? "pending" : "expired";
+  if (Date.now() - firstMiss < RELEASE_ABSENCE_RECHECK_MS) return "pending";
+  // The marker already records expiry; the proof reads its own finalized height.
+  return (await input.proveAbsence()) === "expired" ? "expired" : "pending";
 }
 
 interface ReleaseProjection {
@@ -211,7 +219,8 @@ export async function projectCurrentRedemptionRelease(
       status === "settling"
         ? { type: "wait", reason: "Waiting for the current redemption release to finalize" }
         : null,
-    error: status === "completed" ? null : operation.error,
+    // Release evidence replaces an earlier pass's recovery error; a terminal operation keeps its own.
+    error: isTerminalOperationStatus(operation.status) ? operation.error : null,
     result: {
       positionId: row.position_id,
       ...(row.strategy_id === null ? {} : { strategyId: row.strategy_id }),
@@ -230,6 +239,7 @@ export async function advanceCurrentRedemptionRelease(
   env: Env,
   scope: OperationScope,
   claim: OperationClaim,
+  observations: Pick<OperationObservationRpc, "unsentVerdict">,
   readTransaction?: FinalizedTransactionReader,
   readFinalizedHeight?: FinalizedHeightReader
 ): Promise<Operation> {
@@ -272,10 +282,13 @@ export async function advanceCurrentRedemptionRelease(
   const chain = releaseChainReads();
   const transaction = await (readTransaction ?? chain.readTransaction)(claim.attempt.signature);
   if (transaction === null) {
+    const released = claim.attempt.signature;
     const verdict = await releaseAbsenceVerdict({
       build,
       readFinalizedHeight: readFinalizedHeight ?? chain.readFinalizedHeight,
       recordAbsence: () => repository.recordCurrentRedemptionReleaseAbsent(input),
+      proveAbsence: () =>
+        observations.unsentVerdict(scope, released, BigInt(build.last_valid_block_height)),
     });
     // An expired release with no effect is a definitive failure, which lifts the PDA fence.
     return verdict === "expired" ? update("failed", RELEASE_EXPIRED) : update("settling");

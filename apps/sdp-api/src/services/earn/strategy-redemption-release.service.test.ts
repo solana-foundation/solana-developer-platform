@@ -19,13 +19,14 @@ import {
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import type { EarnWalletWithdrawalRequestTransactionRow } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import * as queueRepositories from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import type { OperationClaim, OperationScope } from "@/db/repositories/operations.repository";
 import { conflict } from "@/lib/errors";
 import * as operationServices from "@/services/operations.service";
 import { env } from "@/test/helpers/env";
+import type { OperationObservationRpc } from "./operation-observation-rpc";
 import {
   advanceCurrentRedemptionRelease,
   projectCurrentRedemptionRelease,
@@ -55,6 +56,8 @@ const operations = operationServices.createOperationsService(env);
 let build: EarnWalletWithdrawalRequestTransactionRow;
 let claim: OperationClaim;
 let signed: string;
+/** The shared floored-history absence proof, decided per test. */
+let absence: { unsentVerdict: Mock<OperationObservationRpc["unsentVerdict"]> };
 
 function projection() {
   return {
@@ -82,7 +85,7 @@ function cancelledLogs(amount: bigint, program = deployment.vaultMintProgramAddr
 }
 
 type Receipt = NonNullable<
-  Awaited<ReturnType<NonNullable<Parameters<typeof advanceCurrentRedemptionRelease>[3]>>>
+  Awaited<ReturnType<NonNullable<Parameters<typeof advanceCurrentRedemptionRelease>[4]>>>
 >;
 function receiptWithLogs(logs = cancelledLogs(50_000_000n)): Receipt {
   return {
@@ -95,6 +98,9 @@ function receiptWithLogs(logs = cancelledLogs(50_000_000n)): Receipt {
 }
 
 beforeEach(async () => {
+  absence = {
+    unsentVerdict: vi.fn<OperationObservationRpc["unsentVerdict"]>().mockResolvedValue("expired"),
+  };
   vi.spyOn(
     queueRepositories,
     "createPostgresEarnVaultWithdrawalRequestsRepository"
@@ -235,7 +241,9 @@ describe("current Hastra redemption release", () => {
       // Neither the build nor finality path binds historical A or its amount.
       // The provider cancellation affects whichever owner request exists now.
       const read = vi.fn(async () => receiptWithLogs(cancelledLogs(amount)));
-      const result = await scoped(() => advanceCurrentRedemptionRelease(env, scope, claim, read));
+      const result = await scoped(() =>
+        advanceCurrentRedemptionRelease(env, scope, claim, absence, read)
+      );
       expect(result).toMatchObject({
         status: "completed",
         result: {
@@ -256,7 +264,7 @@ describe("current Hastra redemption release", () => {
 
   it("never treats a cancellation event amount as a payout", async () => {
     const result = await scoped(() =>
-      advanceCurrentRedemptionRelease(env, scope, claim, async () =>
+      advanceCurrentRedemptionRelease(env, scope, claim, absence, async () =>
         receiptWithLogs(cancelledLogs(9_000_000_000n))
       )
     );
@@ -278,7 +286,9 @@ describe("current Hastra redemption release", () => {
       if (scenario === "duplicate event")
         logs = [...logs.slice(0, 2), logs[1] ?? "", ...logs.slice(2)];
       const result = await scoped(() =>
-        advanceCurrentRedemptionRelease(env, scope, claim, async () => receiptWithLogs(logs))
+        advanceCurrentRedemptionRelease(env, scope, claim, absence, async () =>
+          receiptWithLogs(logs)
+        )
       );
       expect(result).toMatchObject({
         status: "settling",
@@ -297,7 +307,9 @@ describe("current Hastra redemption release", () => {
     });
     await expect(
       scoped(() =>
-        advanceCurrentRedemptionRelease(env, scope, claim, async () => receiptWithLogs(logs))
+        advanceCurrentRedemptionRelease(env, scope, claim, absence, async () =>
+          receiptWithLogs(logs)
+        )
       )
     ).rejects.toMatchObject({ code: "REQUEST_UNREADABLE" });
     expect(operations.transition).not.toHaveBeenCalled();
@@ -323,7 +335,14 @@ describe("current Hastra redemption release", () => {
             signature: scenario === "different signature" ? "different-signature" : base.signature,
           };
     const result = await scoped(() =>
-      advanceCurrentRedemptionRelease(env, scope, claim, async () => transaction, liveHeight)
+      advanceCurrentRedemptionRelease(
+        env,
+        scope,
+        claim,
+        absence,
+        async () => transaction,
+        liveHeight
+      )
     );
     expect(result.status).toBe("settling");
     expect(repository.recordCurrentRedemptionReleaseFinalized).not.toHaveBeenCalled();
@@ -332,7 +351,7 @@ describe("current Hastra redemption release", () => {
   it("keeps an RPC error unresolved", async () => {
     await expect(
       scoped(() =>
-        advanceCurrentRedemptionRelease(env, scope, claim, async () => {
+        advanceCurrentRedemptionRelease(env, scope, claim, absence, async () => {
           throw new Error("RPC unavailable");
         })
       )
@@ -344,7 +363,7 @@ describe("current Hastra redemption release", () => {
   it("fails only the exact finalized signature with a known chain error", async () => {
     const transaction = receiptWithLogs();
     const result = await scoped(() =>
-      advanceCurrentRedemptionRelease(env, scope, claim, async () => ({
+      advanceCurrentRedemptionRelease(env, scope, claim, absence, async () => ({
         ...transaction,
         error: { InstructionError: [0, { Custom: 1 }] },
       }))
@@ -360,7 +379,7 @@ describe("current Hastra redemption release", () => {
   it("keeps a missing release settling until its blockhash expires", async () => {
     const absent = vi.spyOn(repository, "recordCurrentRedemptionReleaseAbsent");
     const result = await scoped(() =>
-      advanceCurrentRedemptionRelease(env, scope, claim, async () => null, liveHeight)
+      advanceCurrentRedemptionRelease(env, scope, claim, absence, async () => null, liveHeight)
     );
     expect(result.status).toBe("settling");
     expect(absent).not.toHaveBeenCalled();
@@ -371,7 +390,7 @@ describe("current Hastra redemption release", () => {
       .spyOn(repository, "recordCurrentRedemptionReleaseAbsent")
       .mockImplementation(async () => ({ ...build, release_absence_observed_at: timestamp }));
     const result = await scoped(() =>
-      advanceCurrentRedemptionRelease(env, scope, claim, async () => null, expiredHeight)
+      advanceCurrentRedemptionRelease(env, scope, claim, absence, async () => null, expiredHeight)
     );
     expect(result.status).toBe("settling");
     expect(absent).toHaveBeenCalledOnce();
@@ -380,23 +399,46 @@ describe("current Hastra redemption release", () => {
   it("waits when the second miss comes less than 30 seconds after the first", async () => {
     build.release_absence_observed_at = new Date(Date.now() - 5_000).toISOString();
     const result = await scoped(() =>
-      advanceCurrentRedemptionRelease(env, scope, claim, async () => null, expiredHeight)
+      advanceCurrentRedemptionRelease(env, scope, claim, absence, async () => null, expiredHeight)
     );
     expect(result.status).toBe("settling");
+    expect(absence.unsentVerdict).not.toHaveBeenCalled();
   });
 
-  it("fails an expired release missing from finalized history twice, 30 seconds apart", async () => {
+  it("fails a release missing twice only once every endpoint's floored history proves it absent", async () => {
     build.release_absence_observed_at = new Date(Date.now() - 31_000).toISOString();
     const result = await scoped(() =>
-      advanceCurrentRedemptionRelease(env, scope, claim, async () => null, expiredHeight)
+      advanceCurrentRedemptionRelease(env, scope, claim, absence, async () => null, expiredHeight)
     );
     expect(result).toMatchObject({
       status: "failed",
       error: { code: "TRANSACTION_EXPIRED" },
       result: { settlementOutcome: null, settledAmount: null },
     });
+    expect(absence.unsentVerdict).toHaveBeenCalledExactlyOnceWith(
+      scope,
+      claim.attempt.signature,
+      100n
+    );
     expect(repository.recordCurrentRedemptionReleaseFinalized).not.toHaveBeenCalled();
   });
+
+  it.each(["pending", "landed"] as const)(
+    "keeps a twice-missed release settling when floored history answers %s",
+    async (verdict) => {
+      build.release_absence_observed_at = new Date(Date.now() - 31_000).toISOString();
+      absence.unsentVerdict.mockResolvedValue(verdict);
+      const result = await scoped(() =>
+        advanceCurrentRedemptionRelease(env, scope, claim, absence, async () => null, expiredHeight)
+      );
+      expect(result).toMatchObject({ status: "settling", error: null });
+      expect(operations.transition).not.toHaveBeenCalledWith(
+        scope,
+        claim,
+        expect.objectContaining({ status: "failed" })
+      );
+    }
+  );
 
   it("still completes a release found after a recorded miss", async () => {
     build.release_absence_observed_at = new Date(Date.now() - 31_000).toISOString();
@@ -405,6 +447,7 @@ describe("current Hastra redemption release", () => {
         env,
         scope,
         claim,
+        absence,
         async () => receiptWithLogs(cancelledLogs(50_000_000n)),
         expiredHeight
       )
@@ -416,7 +459,9 @@ describe("current Hastra redemption release", () => {
     build.release_finalized_at = timestamp;
     vi.mocked(env.db.queryOne).mockResolvedValue(projection());
     const read = vi.fn(async () => null);
-    const result = await scoped(() => advanceCurrentRedemptionRelease(env, scope, claim, read));
+    const result = await scoped(() =>
+      advanceCurrentRedemptionRelease(env, scope, claim, absence, read)
+    );
     expect(result.status).toBe("completed");
     expect(read).not.toHaveBeenCalled();
     expect(repository.recordCurrentRedemptionReleaseFinalized).not.toHaveBeenCalled();
@@ -428,7 +473,7 @@ describe("current Hastra redemption release", () => {
     vi.mocked(env.db.queryOne).mockResolvedValue(projection());
     const read = vi.fn(async () => null);
     expect(
-      (await scoped(() => advanceCurrentRedemptionRelease(env, scope, claim, read))).status
+      (await scoped(() => advanceCurrentRedemptionRelease(env, scope, claim, absence, read))).status
     ).toBe("completed");
     expect(repository.consumeCurrentRedemptionRelease).not.toHaveBeenCalled();
     expect(read).not.toHaveBeenCalled();

@@ -91,9 +91,10 @@ post-submit rules still apply. An uncertain broadcast is not permission to
 build another release.
 
 A release that never lands ends `failed` with `TRANSACTION_EXPIRED`. SDP
-decides that only after the transaction's blockhash has expired and two checks
-of finalized history, at least 30 seconds apart, find no trace of it. That frees
-the redemption address, so you can prepare a new release.
+decides that only after the transaction's blockhash has expired and finalized
+history misses it twice, at least 30 seconds apart, the second time on every
+RPC endpoint SDP uses. That frees the redemption address, so you can prepare a
+new release.
 
 ## Retries and idempotency
 
@@ -115,6 +116,11 @@ Once you submit, start over with a new key only after the operation is
 missing RPC history doesn't prove a submitted transaction never ran: keep
 tracking until SDP knows. A transaction you never submitted or sent can't land
 once the network passes its `lastValidBlockHeight`, so you can prepare again.
+
+When SDP stops before sending signed bytes, for example because the key lost
+`earn.execute`, it keeps watching for them. Once their blockhash has expired
+and no RPC endpoint's finalized history holds the signature, the operation ends
+`failed` with `TRANSACTION_EXPIRED`.
 
 ## Fees and rates
 

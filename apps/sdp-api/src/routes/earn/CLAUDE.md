@@ -136,9 +136,20 @@ and retain it across action versions. Pending provider signing and queued
 withdrawals have no public refresh or cancellation path after submit.
 
 Permission/expiry cleanup remains an internal worker safety mechanism.
-Observation-only attempts never regain broadcast authority. Only verified
-chain/provider observations establish payout; never copy expected amounts into
-settled fields.
+Observation-only attempts never regain broadcast authority. Signed bytes such
+an attempt never sent end only on proven nonexecution (`unsentVerdict` in
+`operation-observation-rpc.ts`): the finalized height is past their last valid
+block height and every pool endpoint, floored at that finalized slot, misses
+them inside `VERDICT_HISTORY_HORIZON_BLOCKS`. Then the operation is `failed`
+`TRANSACTION_EXPIRED`, even after a cancellation request: a terminal `cancelled`
+needs an authoritative resource reference, which unsent bytes never have. An
+endpoint that cannot answer, or an expiry past the horizon, keeps waiting and
+logs. A
+synchronous signer's `CUSTODY_POLICY_REFUSED` is a definitive refusal: the
+operation ends `failed` with that code, as a rejected proposal does. Only
+verified chain/provider observations establish payout; never copy expected
+amounts into settled fields. A projection of movement or request evidence
+replaces an earlier pass's recovery error; a terminal operation keeps its own.
 
 ## Replacement boundary
 
@@ -186,6 +197,9 @@ exact organization, project, environment and recorded principal. Four concurrent
 same-authority status requests become one batch; two custody-proposal height
 reads become one. Batch at most 256 signatures, evict finished status batches
 and failed heights, and never treat absence or a cached failure as nonexecution.
+An unsent-bytes proof adds one finalized height read per run and scope, and only
+past expiry one floored status read per pool endpoint, once; before this the
+operation polled forever.
 
 Expired solver recovery adds zero provider reads without an eligible recorded
 request and one live proof read for the position's oldest candidate. Reusing
@@ -215,9 +229,11 @@ proof, not a missing account or an unrelated closure. Acceptance freezes
 financial reconciliation of earlier matching Hastra requests until definitive
 no-effect failure; finalized release keeps that freeze permanently. A release
 that never lands is such a failure: once finalized height passes its last valid
-block height SDP never resends it, and two finalized-history misses at least 30
-seconds apart fail it `TRANSACTION_EXPIRED`. An observation-only release is
-adopted for the same proof. Match the organization, project, environment,
+block height SDP never resends it. A second finalized miss at least 30
+seconds after the first hands it to the shared `unsentVerdict` proof, and only
+every endpoint's floored history missing it fails it `TRANSACTION_EXPIRED`: two
+pooled misses can come from a lagging or pruned backend. An observation-only
+release is adopted for the same proof. Match the organization, project, environment,
 position, owner, custody source, provider, PDA and mints. Causal row ordering is local bookkeeping, never onchain cycle
 proof. Leave the historical request's recorded outcome unchanged; it can remain
 unresolved while only the new release completes. Close the current request and

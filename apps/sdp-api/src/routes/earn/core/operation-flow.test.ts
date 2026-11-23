@@ -1,3 +1,4 @@
+import { SigningError } from "@sdp/custody/signing";
 import { currentClusterScope, runInClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { MovementId } from "@sdp/types/movements";
@@ -40,6 +41,7 @@ import { decideMovement, readMoneyAdmissionFacts } from "@/lib/money-admission";
 import * as meteredQuota from "@/middleware/metered-quota";
 import { AuditService } from "@/services/audit.service";
 import { admittedSigner } from "@/services/domain/signing/admitted-signer";
+import * as observationRpc from "@/services/earn/operation-observation-rpc";
 import type {
   prepareCurrentRedemptionRelease,
   prepareQueuedStrategyRecovery,
@@ -211,13 +213,6 @@ vi.mock("@/services/earn/vault-intent-execution.service", async (original) => ({
   ...(await original<typeof import("@/services/earn/vault-intent-execution.service")>()),
   readConfirmedBlockHeight: async () => 50n,
 }));
-vi.mock("@/services/earn/operation-observation-rpc", () => ({
-  createOperationObservationRpc: () => ({
-    confirmedHeight: async () => 50n,
-    hasSignature: async () => false,
-  }),
-}));
-
 const TOKEN = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SHARE = "So11111111111111111111111111111111111111112";
 const VAULT = "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx";
@@ -292,6 +287,12 @@ beforeEach(async () => {
   await seedTestDatabase(env);
   await clearKVStores(env);
   vi.resetAllMocks();
+  // Chain observations are this suite's boundary: nothing is seen landing or expiring.
+  vi.spyOn(observationRpc, "createOperationObservationRpc").mockReturnValue({
+    confirmedHeight: async () => 50n,
+    hasSignature: async () => false,
+    unsentVerdict: async () => "pending",
+  });
   mocks.withdrawalEnabled = false;
   mocks.withdrawalChoices = false;
   mocks.directWithdrawalAvailable = true;
@@ -1535,6 +1536,149 @@ describe("Earn core operation HTTP flow", () => {
     expect(mocks.broadcast).toHaveBeenCalledTimes(1);
     expect(mocks.sign).not.toHaveBeenCalled();
     expect(mocks.proposer).not.toHaveBeenCalled();
+  });
+
+  describe("unsent and refused submissions in the real operation store", () => {
+    const reconcile = () =>
+      runWithSystemDatabaseIdentity("cron:reconcile-operations", () =>
+        runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+          reconcileOperations(env)
+        )
+      );
+    const stored = (id: string) =>
+      getDb(env).queryOne<{ status: string; fence: number }>(
+        "SELECT status, fence FROM operations WHERE id = ?",
+        [id]
+      );
+    function proveUnsent(verdict: "expired" | "pending") {
+      const unsentVerdict = vi
+        .fn<observationRpc.OperationObservationRpc["unsentVerdict"]>()
+        .mockResolvedValue(verdict);
+      vi.spyOn(observationRpc, "createOperationObservationRpc").mockReturnValue({
+        confirmedHeight: async () => 50n,
+        hasSignature: async () => false,
+        unsentVerdict,
+      });
+      return unsentVerdict;
+    }
+    async function acceptOwnerDeposit(key: string) {
+      const operation = await prepare();
+      const accepted = await request(
+        `operations/${operation.id}/submit`,
+        "POST",
+        action(operation),
+        key
+      );
+      expect(accepted.status, await accepted.clone().text()).toBe(202);
+      return operation;
+    }
+
+    it("fails revoked owner bytes once history proves they expired unsent, and keeps them failed", async () => {
+      const operation = await acceptOwnerDeposit("execute-then-revoke");
+      await getDb(env).execute("UPDATE api_keys SET grants = '{earn.read}' WHERE id = ?", [
+        apiKey.id,
+      ]);
+      const unsentVerdict = proveUnsent("expired");
+      await reconcile();
+      expect(await readOperation(await request(`operations/${operation.id}`))).toMatchObject({
+        status: "failed",
+        nextAction: null,
+        resourceRef: null,
+        error: { code: "TRANSACTION_EXPIRED" },
+      });
+      const ended = await stored(operation.id);
+      await reconcile();
+      expect(await stored(operation.id)).toEqual(ended);
+      expect(unsentVerdict).toHaveBeenCalledTimes(1);
+      expect(mocks.broadcast).not.toHaveBeenCalled();
+      expect(await unfinishedCounts()).toEqual({ movements: 0, positions: 0 });
+    });
+
+    it("keeps revoked owner bytes waiting while they can still land", async () => {
+      const operation = await acceptOwnerDeposit("execute-then-revoke-pending");
+      await getDb(env).execute("UPDATE api_keys SET grants = '{earn.read}' WHERE id = ?", [
+        apiKey.id,
+      ]);
+      proveUnsent("pending");
+      await reconcile();
+      expect(await readOperation(await request(`operations/${operation.id}`))).toMatchObject({
+        status: "awaiting_signature",
+        nextAction: { type: "wait" },
+        error: null,
+      });
+      expect(mocks.broadcast).not.toHaveBeenCalled();
+    });
+
+    it("fails bytes whose cancellation was recorded beside an accepted submit once they provably never landed", async () => {
+      const operation = await acceptOwnerDeposit("execute-then-cancel");
+      await getDb(env).execute(
+        "UPDATE operations SET cancel_requested_at = sdp_iso_now() WHERE id = ?",
+        [operation.id]
+      );
+      proveUnsent("expired");
+      await reconcile();
+      expect(await readOperation(await request(`operations/${operation.id}`))).toMatchObject({
+        status: "failed",
+        nextAction: null,
+        error: { code: "TRANSACTION_EXPIRED" },
+      });
+      expect(mocks.broadcast).not.toHaveBeenCalled();
+    });
+
+    it("ends a custody deposit its wallet policy refused without asking the provider again", async () => {
+      const walletId = await seedOperationCustodyWallet("policy_refused");
+      mocks.proposer.mockResolvedValue(null);
+      const rawSigner = await createSignerFromKeyPair(keyPair);
+      const providerSign = vi.fn<typeof rawSigner.signTransactions>(async () => {
+        throw new SigningError("Blocked by wallet policy", "POLICY_REFUSED");
+      });
+      mocks.sign.mockImplementation(
+        async (
+          binding: Env,
+          organizationId: string,
+          projectId: string,
+          custodyWalletId: string,
+          movement: MovementId
+        ) => {
+          const scope = { organizationId, projectId };
+          const subject = { custodyWalletId };
+          return admittedSigner(
+            { address: rawSigner.address, signTransactions: providerSign },
+            async () =>
+              decideMovement(
+                movement,
+                await readMoneyAdmissionFacts(binding, scope, movement, subject),
+                subject
+              ),
+            { ...scope, ...subject, movement, provider: "privy", credential: null }
+          );
+        }
+      );
+      const prepared = await request(
+        "earn/deposit",
+        "POST",
+        { strategyId, source: { walletId }, amount: { mint: TOKEN, value: "10" } },
+        "prepare-policy-refused"
+      );
+      expect(prepared.status, await prepared.clone().text()).toBe(202);
+      const deposit = await readOperation(prepared);
+      const accepted = await request(
+        `operations/${deposit.id}/submit`,
+        "POST",
+        { actionId: deposit.actionId, version: deposit.version },
+        "submit-policy-refused"
+      );
+      expect(accepted.status, await accepted.clone().text()).toBe(202);
+      await reconcile();
+      expect(await readOperation(await request(`operations/${deposit.id}`))).toMatchObject({
+        status: "failed",
+        nextAction: null,
+        error: { code: "CUSTODY_POLICY_REFUSED" },
+      });
+      await reconcile();
+      expect(providerSign).toHaveBeenCalledTimes(1);
+      expect(mocks.broadcast).not.toHaveBeenCalled();
+    });
   });
 
   it("fails closed when deposit audit admission cannot persist", async () => {

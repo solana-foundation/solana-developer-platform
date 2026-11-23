@@ -1031,6 +1031,10 @@ same way. `discovery.unavailableStrategyCount` counts strategies SDP couldn't
 read: their balances are unknown, not zero. Holdings found this way have no
 purchase history, so their `costBasisKnown` is `false`.
 
+A withdrawal starts tracking a discovered holding, and it stays listed while it
+holds a balance, even if that withdrawal fails. Withdrawing through a discovered
+ID of a holding SDP already tracks uses that holding and keeps its cost basis.
+
 ## Totals and earnings
 
 `includeSummary=true` totals everything the filter selects, not only the
@@ -1266,9 +1270,10 @@ post-submit rules still apply. An uncertain broadcast is not permission to
 build another release.
 
 A release that never lands ends `failed` with `TRANSACTION_EXPIRED`. SDP
-decides that only after the transaction's blockhash has expired and two checks
-of finalized history, at least 30 seconds apart, find no trace of it. That frees
-the redemption address, so you can prepare a new release.
+decides that only after the transaction's blockhash has expired and finalized
+history misses it twice, at least 30 seconds apart, the second time on every
+RPC endpoint SDP uses. That frees the redemption address, so you can prepare a
+new release.
 
 ## Retries and idempotency
 
@@ -1290,6 +1295,11 @@ Once you submit, start over with a new key only after the operation is
 missing RPC history doesn't prove a submitted transaction never ran: keep
 tracking until SDP knows. A transaction you never submitted or sent can't land
 once the network passes its `lastValidBlockHeight`, so you can prepare again.
+
+When SDP stops before sending signed bytes, for example because the key lost
+`earn.execute`, it keeps watching for them. Once their blockhash has expired
+and no RPC endpoint's finalized history holds the signature, the operation ends
+`failed` with `TRANSACTION_EXPIRED`.
 
 ## Fees and rates
 
@@ -39457,7 +39467,7 @@ Source: https://platform.solana.com/docs/reference/api/earn/submit-operation
 
 `POST /v1/operations/{operationId}/submit`
 
-Pass the current actionId and version and, for an ownerAddress source, signedTransaction: the prepared transaction signed in the owner's wallet, base64-encoded. SDP verifies the exact stored message and required signatures and records the authorization; a worker then broadcasts and tracks the transaction, so poll GET /v1/operations/\{operationId\}. Stale actions return 409. Requires earn.execute and the current action principal. Before each new signing or broadcast effect, the worker rechecks the credential, execute permission, project membership and wallet binding; losing authority stops new effects but never proves a transaction did not execute. For an SDP custody wallet, omit signedTransaction: the worker requests the custody provider's signature, which can return sign_in_provider instructions but never needs a second submit.
+Pass the current actionId and version and, for an ownerAddress source, signedTransaction: the prepared transaction signed in the owner's wallet, base64-encoded. SDP verifies the exact stored message and required signatures and records the authorization; a worker then broadcasts and tracks the transaction, so poll GET /v1/operations/\{operationId\}. Stale actions return 409. Requires earn.execute and the current action principal. Before each new signing or broadcast effect, the worker rechecks the credential, execute permission, project membership and wallet binding; losing authority stops new effects but never proves a transaction did not execute. Signed bytes the worker then never sends end failed with TRANSACTION_EXPIRED only once their blockhash has expired and no RPC endpoint's finalized history holds them. For an SDP custody wallet, omit signedTransaction: the worker requests the custody provider's signature, which can return sign_in_provider instructions but never needs a second submit. A wallet policy at the provider that refuses to sign ends the operation failed with CUSTODY_POLICY_REFUSED.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.execute` action.
 
