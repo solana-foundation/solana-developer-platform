@@ -32,7 +32,7 @@ An instant exit burns the shares and pays out in one transaction. A queued
 exit files a withdrawal request instead: the shares move into the provider's
 escrow until the provider pays out, which can take days.
 
-When a strategy offers both, `nextAction.type` is `select_option`, and
+When a strategy offers several routes, `nextAction.type` is `select_option`, and
 `terms.options` lists each route with its `settlement`, `estimatedSeconds` and
 `amount`. Call
 `POST /v1/operations/{operationId}/refresh` with the chosen `optionId` and the
@@ -53,10 +53,17 @@ poll the [operation](/docs/earn/api-overview#operation):
   seconds: `redemptionDelayDays` on the strategy estimates the wait.
 - A request ID or escrowed shares aren't a payout, and there is no separate
   claim step.
-- `completed` means SDP verified the payout. A `null` `result.settledAmount` is
-  unknown, not zero.
+- `completed` means SDP verified the outcome. Normal withdrawals deliver the
+  payout; recovery returns shares or releases held tokens. A `null`
+  `result.settledAmount` gives no verified amount, not zero.
 
 Once submitted, a withdrawal can't be refreshed or cancelled, even while
 queued. If it ends `failed`, prepare a new one with a new `Idempotency-Key`; an
 unknown outcome is not a failure. If shares get stuck in an expired queue
 request, [recover them](/docs/earn/integration-details#recover-expired-withdrawal-escrow).
+
+A pending Hastra redemption can instead offer
+[Release current pending redemption](/docs/earn/integration-details#release-a-pending-hastra-redemption).
+Recovery always requires an explicit route choice, even when it is the only
+option. Hastra release applies to the request current at execution and reports
+no settled amount; it does not pay USDC or return PRIME.

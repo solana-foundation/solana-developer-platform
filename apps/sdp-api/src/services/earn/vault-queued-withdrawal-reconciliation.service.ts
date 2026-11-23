@@ -419,6 +419,16 @@ export async function reconcileAction(
   status: SignatureStatusInfo | null,
   chain: { rpc: RawHistoryRpc; currentHeight: bigint | null }
 ): Promise<"advanced" | "failed" | "rebroadcast" | "unchanged"> {
+  // A current release may affect a replacement at the same owner PDA. Keep
+  // older financial history isolated while that accepted action can execute.
+  if (
+    await ledger.isRequestFencedByCurrentRedemptionRelease({
+      organizationId: actionRow.organization_id,
+      environment: actionRow.environment,
+      withdrawalRequestId: actionRow.withdrawal_request_id,
+    })
+  )
+    return "unchanged";
   if (status?.err) {
     // A rejection on an unrooted fork cannot release the durable PDA claim.
     if (status.confirmationStatus !== "finalized") return "unchanged";
@@ -1172,6 +1182,14 @@ export async function reconcileParRequest(
   ledger: QueueLedger,
   request: EarnVaultWithdrawalRequestRow
 ): Promise<"advanced" | "closedUnknown" | "unchanged"> {
+  if (
+    await ledger.isRequestFencedByCurrentRedemptionRelease({
+      organizationId: request.organization_id,
+      environment: request.environment,
+      withdrawalRequestId: request.id,
+    })
+  )
+    return "unchanged";
   const client = resolveVaultParRedemptionClient(env, request.provider, createVaultDeadline());
   if (!client) throw new Error(`Par-redemption provider ${request.provider} is unavailable`);
   const lookup = await client.readParRedemptionRequest(

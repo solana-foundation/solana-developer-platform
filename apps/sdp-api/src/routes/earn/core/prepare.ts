@@ -36,6 +36,7 @@ import { earnRuntime } from "@/services/earn/runtime";
 import { strategyShareDecimals } from "@/services/earn/strategy-mint";
 import {
   type PreparedStrategyWithdrawalChoice,
+  prepareCurrentRedemptionRelease,
   prepareQueuedStrategyRecovery,
   prepareQueuedStrategyWithdrawal,
   prepareStrategyWithdrawalChoices,
@@ -399,7 +400,10 @@ async function withdrawalAmounts(
       amounts.shares = await sharesForTokenWithdrawal(holding, position, amount);
     } else if (compareDecimalAmounts(holding.shares, "0") > 0) {
       amounts.shares = holding.shares;
-    } else if (holding.parIntermediate !== undefined) {
+    } else if (
+      holding.parIntermediate !== undefined &&
+      compareDecimalAmounts(holding.parIntermediate.withdrawableAmount, "0") > 0
+    ) {
       const { mint, withdrawableAmount } = holding.parIntermediate;
       amounts.intermediate = { mint, value: withdrawableAmount };
     }
@@ -476,12 +480,32 @@ async function buildRecoveryAction(
 ): Promise<PreparedOperationAction> {
   const { intent, source, actor } = resolved;
   if (
-    selected.recovery === undefined ||
+    (selected.recovery === undefined && selected.currentRedemptionRelease === undefined) ||
     intent.kind !== "earn.withdraw" ||
     intent.amount.kind !== "all" ||
     parseDiscoveredEarnPositionLocator(position.id) !== null
   )
-    throw internalError("Expired escrow recovery has no authorized tracked request");
+    throw internalError("Recovery has no authorized tracked withdrawal position");
+  if (selected.currentRedemptionRelease !== undefined) {
+    const built = await prepareCurrentRedemptionRelease(c.env, {
+      actor: preparationContext(actor),
+      position: withdrawalAdapterPosition(position, source),
+      ...selected.currentRedemptionRelease,
+      feePayer: intent.feePayer,
+      ...(await custodySigning(c, resolved, "earn.queued_withdraw_cancel")),
+    });
+    terms.inputAmount = null;
+    terms.estimate = null;
+    terms.minimum = null;
+    terms.description =
+      "Release the wallet's current pending redemption at execution, including any replacement request. Available wYLDS stays in the wallet; this does not return PRIME or pay USDC.";
+    return {
+      nextAction: actionFor(source, built.unsignedTransaction, built.lastValidBlockHeight),
+      terms,
+      buildRef: { kind: "earn.queued_transaction", id: built.id },
+    };
+  }
+  if (selected.recovery === undefined) throw internalError("Escrow recovery request is missing");
   const built = await prepareQueuedStrategyRecovery(c.env, {
     actor: preparationContext(actor),
     position: withdrawalAdapterPosition(position, source),

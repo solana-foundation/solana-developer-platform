@@ -37,6 +37,10 @@ import {
 import { createOperationWorkerBudget } from "./operation-worker-budget";
 import { resolveEarnOperationBuild } from "./strategy-operation-build.service";
 import {
+  advanceCurrentRedemptionRelease,
+  projectCurrentRedemptionRelease,
+} from "./strategy-redemption-release.service";
+import {
   type PreparedStrategySigningTarget,
   signPreparedStrategyTransaction,
   sponsorPreparedStrategyTransaction,
@@ -129,13 +133,18 @@ export async function projectEarnOperation(
   scope: OperationScope,
   operation: Operation
 ): Promise<Operation> {
-  if (operation.resourceRef?.kind === "earn.withdrawal_recovery") {
-    return projectWithdrawalRecovery(env, scope, operation, operation.resourceRef.id);
+  switch (operation.resourceRef?.kind) {
+    case "earn.redemption_release":
+      return projectCurrentRedemptionRelease(env, scope, operation, operation.resourceRef.id);
+    case "earn.withdrawal_recovery":
+      return projectWithdrawalRecovery(env, scope, operation, operation.resourceRef.id);
+    case "earn.withdrawal_request":
+      return projectQueuedOperation(env, scope, operation, operation.resourceRef.id);
+    case "earn.movement":
+      break;
+    default:
+      return operation;
   }
-  if (operation.resourceRef?.kind === "earn.withdrawal_request") {
-    return projectQueuedOperation(env, scope, operation, operation.resourceRef.id);
-  }
-  if (operation.resourceRef?.kind !== "earn.movement") return operation;
   const ledger = createPostgresEarnMovementsRepository(getDb(env));
   const movement = await ledger.getMovementById({
     organizationId: scope.organizationId,
@@ -300,6 +309,8 @@ export async function advanceEarnOperation(
     throw internalError("Operation cluster scope changed");
   const workerBudget = createOperationWorkerBudget();
   if (isTerminalOperation(claim.operation)) return claim.operation;
+  if (claim.operation.resourceRef?.kind === "earn.redemption_release")
+    return advanceCurrentRedemptionRelease(env, scope, claim);
   const service = createOperationsService(env);
   const {
     target: built,

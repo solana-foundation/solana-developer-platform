@@ -204,7 +204,9 @@ export const operationSchema = z.strictObject({
       settlementOutcome: z
         .enum(["delivered", "cancelled", "recovered"])
         .nullable()
-        .describe("Recovered means strategy shares returned, not withdrawal proceeds."),
+        .describe(
+          "Recovered means held assets were released; it does not mean withdrawal proceeds were paid. settledAmount is null when no returned amount is proven."
+        ),
     })
     .nullable(),
   createdAt: z.string().datetime(),

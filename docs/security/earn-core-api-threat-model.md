@@ -75,16 +75,39 @@ deposit eligibility nor authority over a wallet.
   and a fresh review bind the returned shares to the same owner and strategy.
   Live provider state must match the recorded request address, nonce, creation
   time, deadline, mints and shares, and prove the deadline passed.
-- Recovery completion requires the exact finalized cancellation action from
+- Solver recovery completion requires the exact finalized cancellation action from
   this operation's attempt and consumed canonical build. Its signature must
   match both the request's cancellation and authenticated closing signatures.
   Provider lifecycle evidence must prove the returned share quantity. The
   result says `recovered` in the share mint, never copies expected asset payout.
   A different verified closure fails the recovery; unknown outcomes still wait.
-- An independently broadcast recovery can consume its exact operation-only
+- An independently broadcast solver recovery can consume its exact operation-only
   build only after those signed bytes match the authenticated terminal closing
   transaction. Action persistence and build consumption are atomic; the
   cancelled request stays terminal. This cannot adopt historical builds.
+- Hastra release is a separate reviewed withdrawal option for a tracked
+  position with a known pending operator redemption in the same project. The
+  owner consents to release the redemption current at execution, including a
+  replacement. The instruction has no amount/cycle guard; history is not used
+  to claim one. The option requires explicit selection even when it stands alone.
+- Its canonical operator-cancellation build has no historical request ID. Build
+  consumption binds one operation attempt, and a PDA-scoped reservation fences
+  competing SDP redemptions/releases through unresolved signing and broadcast.
+  Completion requires its own finalized cancellation signature and provider
+  evidence. Another transaction closing the request is not release evidence.
+- Acceptance freezes earlier matching Hastra financial reconciliation while
+  release is unresolved. Finalized release keeps that freeze permanently;
+  definitive no-effect failure lifts it. Equal-amount replacement events must
+  never create a fictional earlier payout. Match organization, project,
+  environment, position, owner, custody source, provider, PDA and mints. Causal
+  row ordering is local bookkeeping, never proof of an onchain request cycle.
+- Release never changes the original request's recorded outcome or creates a
+  payout movement. The original can remain unresolved; only the new release
+  operation completes. It closes the current request and revokes Hastra's
+  burn delegation if present, preserving unrelated delegates. It guarantees no
+  unlocked amount.
+  The result says `recovered` with no settled amount, not recovered PRIME or USDC.
+  Missing evidence, timeouts and ambiguous broadcasts retain the reservation.
 - Indexed due-time scans feed at most four workers, which lease only work ready
   to start. Backoff changes observation timing, never spend authority. Shared
   RPC observations stay within one run and the exact organization, project,
@@ -124,12 +147,13 @@ Catalogue coverage and execution coverage are distinct. A discovery-only
 strategy cannot enter the deposit path. Expanding assets beyond current stable
 token exposure accounting requires appropriate valuation and safety controls.
 
-Recovery is not complete for every provider mechanism. Hastra's operator
-redemption reuses an owner request address, and its cancellation instruction
-binds neither an amount nor a request cycle. Rechecking history before signing
-cannot prevent that address changing before execution. Earn does not advertise
-that recovery path. A separate current-delegation release design remains in
-PRO-2530 and PRO-2528; pending wYLDS is not recovered PRIME or delivered USDC.
+Hastra's reusable owner request address can change between preparation and
+execution. Its release option therefore authorizes the current redemption,
+including a replacement, rather than promising a cycle-specific cancellation.
+This scope needs security review. SDP's reservation covers its own attempts;
+it cannot prevent direct wallet or provider actions. Only tracked positions
+with a known pending request are covered. Release does not ensure wYLDS remains
+transferable: issuer freezes and program restrictions still apply.
 
 The five core Earn routes and five operation routes follow Earn's existing
 release-channel publication rules. The old 53 non-onboarding routes are removed
@@ -147,3 +171,9 @@ Old prelaunch provider positions and movements are deliberately discarded; live
 wallet positions, movements and recovery records remain. The breaking migration
 uses the serving-parent deployment gate and permits only forward recovery. No
 historical action adoption or compatibility execution path is supported.
+
+Hastra address reuse requires parent-first cleanup. Parent `0238` retains the
+existing address index; schema-only child `0239` removes it only after the
+guarded parent serves. The global PDA lock and durable lease continue to
+serialize requests. Removing the index neither resolves historical requests nor
+permits assigning them a replacement redemption's financial outcome.

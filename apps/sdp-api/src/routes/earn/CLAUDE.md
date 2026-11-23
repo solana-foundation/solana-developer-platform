@@ -192,9 +192,28 @@ refresh must read fresh provider state.
 Offer one recovery choice, not an owner-wide scan or one read per old request.
 Returning shares is `settlementOutcome: recovered`, not delivered asset payout.
 The new reviewed withdrawal retains source grants and leaves the original
-operation's post-submit cancellation barrier intact. Do not restore Hastra par
-cancellation as recovery: its reusable request has no amount/cycle binding.
-PRO-2530 and PRO-2528 track that separate authority-release design.
+operation's post-submit cancellation barrier intact.
+
+Hastra release uses `release_current_redemption`, with explicit selection even
+when it is the only route. A bounded project/position lookup must find a known
+pending operator redemption before one live provider request read. This is
+consent to release the request current at execution, including a replacement;
+never describe it as cancelling a historical amount or cycle. Its canonical
+operation-only operator-cancel build has no historical request ID, and its
+consumed attempt and PDA reservation fence competing SDP actions while pending.
+Complete only from its own finalized cancellation signature and provider
+proof, not a missing account or an unrelated closure. Acceptance freezes
+financial reconciliation of earlier matching Hastra requests until definitive
+no-effect failure; finalized release keeps that freeze permanently. Match the
+organization, project, environment, position, owner, custody source, provider,
+PDA and mints. Causal row ordering is local bookkeeping, never onchain cycle
+proof. Leave the historical request's recorded outcome unchanged; it can remain
+unresolved while only the new release completes. Close the current request and
+revoke only Hastra's burn delegation if still present; preserve unrelated
+delegates. Guarantee no unlocked
+amount. Completion is `settlementOutcome: recovered` with `settledAmount: null`,
+with no PRIME return, USDC payout or payout movement.
+Keep the existing exact-byte signing and post-submit cancel/refresh barriers.
 
 Atomic swap-funded builds retain one compute probe and one final simulation per
 attempt. An oversized request no longer reads a split baseline balance or runs

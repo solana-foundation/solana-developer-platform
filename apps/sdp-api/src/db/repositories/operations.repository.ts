@@ -23,6 +23,10 @@ import {
 } from "@sdp/types/operations";
 import { z } from "zod";
 import type { DatabaseClient, DatabaseExecutor } from "@/db/client";
+import {
+  acceptCurrentRedemptionReleaseWithin,
+  releaseCurrentRedemptionReleaseWithin,
+} from "@/db/repositories/earn-redemption-release.repository";
 import { conflict, internalError, notFound } from "@/lib/errors";
 import { type MoneyPrincipal, moneyPrincipalSchema } from "@/lib/money-principal";
 import { OPERATION_WORKER_LEASE_MS } from "@/services/earn/operation-worker-budget";
@@ -775,6 +779,7 @@ export function createOperationsRepository(db: DatabaseClient) {
          WHERE id = ? AND ${scopeSql}`,
         [auditIntentId, attempt.id, ...scopeValues(scope)]
       );
+      await acceptCurrentRedemptionReleaseWithin(tx, scope, attempt);
       await wakeRecovery(tx, scope, claim.operation.id);
       return true;
     },
@@ -801,6 +806,7 @@ export function createOperationsRepository(db: DatabaseClient) {
            WHERE id = ? AND ${scopeSql} RETURNING *`,
           [attempt.id, ...scopeValues(scope)]
         );
+        await acceptCurrentRedemptionReleaseWithin(tx, scope, attempt);
         await wakeRecovery(tx, scope, claim.operation.id);
         return parseAttempt(updated);
       });
@@ -891,6 +897,8 @@ export function createOperationsRepository(db: DatabaseClient) {
             `UPDATE operation_attempts SET resource_ref = ?::jsonb WHERE id = ? AND ${scopeSql}`,
             [JSON.stringify(resourceRef), claim.attempt.id, ...scopeValues(scope)]
           );
+        if (isTerminal(update.status))
+          await releaseCurrentRedemptionReleaseWithin(tx, scope, claim.attempt);
         return parseRecord(changed).operation;
       });
     },

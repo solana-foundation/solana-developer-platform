@@ -40,7 +40,10 @@ import { decideMovement, readMoneyAdmissionFacts } from "@/lib/money-admission";
 import * as meteredQuota from "@/middleware/metered-quota";
 import { AuditService } from "@/services/audit.service";
 import { admittedSigner } from "@/services/domain/signing/admitted-signer";
-import type { prepareQueuedStrategyRecovery } from "@/services/earn/strategy-queued-operations.service";
+import type {
+  prepareCurrentRedemptionRelease,
+  prepareQueuedStrategyRecovery,
+} from "@/services/earn/strategy-queued-operations.service";
 import type {
   WalletDepositBuildInput,
   WalletWithdrawalBuildInput,
@@ -66,6 +69,7 @@ const mocks = vi.hoisted(() => ({
   readPositions: vi.fn(),
   choiceReads: vi.fn(),
   recoveryBuild: vi.fn(),
+  releaseBuild: vi.fn(),
   recoveryRequest: null as EarnVaultWithdrawalRequestRow | null,
   withdrawalEnabled: false,
   withdrawalChoices: false,
@@ -106,12 +110,41 @@ vi.mock("@/services/earn/strategy-queued-operations.service", async (original) =
   return {
     ...actual,
     prepareQueuedStrategyRecovery: mocks.recoveryBuild,
+    prepareCurrentRedemptionRelease: mocks.releaseBuild,
     prepareStrategyWithdrawalChoices: (
       ...args: Parameters<typeof actual.prepareStrategyWithdrawalChoices>
     ) => {
       mocks.choiceReads(...args);
       if (mocks.recoveryRequest !== null) {
         const request = mocks.recoveryRequest;
+        if (request.mechanism === "operator_redemption") {
+          const id = "release_current_redemption";
+          const choice = {
+            id,
+            kind: "recovery" as const,
+            currentRedemptionRelease: {
+              request,
+              plan: {
+                cluster: "devnet" as const,
+                instructions: [],
+                lookupTables: [],
+                assetIdentity: {
+                  depositTokenMint: request.token_mint,
+                  shareMint: request.share_mint,
+                },
+              },
+            },
+            option: {
+              id,
+              label: "Release current pending redemption",
+              settlement: "instant" as const,
+              estimatedSeconds: null,
+              mechanism: id,
+              minimum: null,
+            },
+          };
+          return Promise.resolve({ choices: [choice], options: [choice.option] });
+        }
         const id = `recover_expired_escrow:${request.id}`;
         const choice = {
           id,
@@ -816,6 +849,255 @@ describe("Earn core operation HTTP flow", () => {
           withdrawalRequestId: requestId,
         })
       ).toEqual(originalRequest);
+    }
+  );
+
+  it.each(["owner", "custody"] as const)(
+    "explicitly reviews a current Hastra release with all wYLDS delegated through %s signing",
+    async (source) => {
+      const primeMint = "3b8X44fLF9ooXaUm3hhSgjpmVs6rZZ3pPoGnGahc3Uu7";
+      const wYldsMint = "8fr7WGTVFszfyNWRMXj6fRjZZAnDwmXwEpCrtzmUkdih";
+      const walletId =
+        source === "custody" ? await seedOperationCustodyWallet("current_release") : null;
+      const positionId = generateEarnPositionId();
+      await getDb(env).execute(
+        `INSERT INTO earn_positions (id, organization_id, project_id, environment, provider,
+         kind, custody_wallet_id, owner_address, vault_address, share_mint, token_mint,
+         label, activated_at)
+         VALUES (?, ?, ?, 'sandbox', 'hastra', 'vault_direct', ?, ?, ?, ?, ?,
+                 'Hastra holding', sdp_iso_now())`,
+        [
+          positionId,
+          tenant.org.id,
+          tenant.project.id,
+          walletId,
+          walletId ? null : owner,
+          primeMint,
+          primeMint,
+          TOKEN,
+        ]
+      );
+      const repository = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
+      const seedRequest = async (id: string) => {
+        await getDb(env).execute(
+          `INSERT INTO earn_vault_withdrawal_requests (
+           id, organization_id, project_id, environment, provider, position_id,
+           custody_wallet_id, owner_address, vault_address, token_mint, share_mint,
+           request_address, status, mechanism, shares, quoted_assets, share_decimals,
+           asset_decimals, intermediate_mint, intermediate_amount, provider_state_observed,
+           client_request_id, idempotency_fingerprint, creation_signature)
+           VALUES (?, ?, ?, 'sandbox', 'hastra', ?, ?, ?, ?, ?, ?, ?, 'pending',
+                   'operator_redemption', '0', '2000', 6, 6, ?, '2000', TRUE, ?, ?, ?)`,
+          [
+            id,
+            tenant.org.id,
+            tenant.project.id,
+            positionId,
+            walletId,
+            owner,
+            primeMint,
+            TOKEN,
+            primeMint,
+            VAULT,
+            wYldsMint,
+            id,
+            `${id}_fingerprint`,
+            `${id}_signature`,
+          ]
+        );
+        const row = await repository.getById({
+          organizationId: tenant.org.id,
+          environment: "sandbox",
+          withdrawalRequestId: id,
+        });
+        if (row === null) throw new Error("Missing pending redemption fixture");
+        return row;
+      };
+      const requestA = await seedRequest("redemption_a");
+      mocks.recoveryRequest = requestA;
+      mocks.withdrawalEnabled = true;
+      mocks.readPositions.mockResolvedValue([
+        {
+          providerReference: primeMint,
+          owner,
+          tokenMint: TOKEN,
+          shareMint: primeMint,
+          cluster: "devnet",
+          shares: "0",
+          parIntermediate: {
+            mint: wYldsMint,
+            amount: "2000",
+            withdrawableAmount: "0",
+            tokenValue: "2000",
+          },
+        },
+      ]);
+      mocks.releaseBuild.mockImplementation(
+        async (binding: Env, input: Parameters<typeof prepareCurrentRedemptionRelease>[1]) => {
+          const build = await createPostgresEarnVaultWithdrawalRequestsRepository(
+            getDb(binding)
+          ).createWalletTransaction({
+            id: `release_build_${source}`,
+            organizationId: input.actor.organizationId,
+            projectId: input.actor.projectId,
+            environment: "sandbox",
+            provider: input.position.provider,
+            positionId: input.position.id,
+            custodyWalletId: input.custodyWalletId,
+            action: "cancel",
+            mechanism: "operator_redemption",
+            shareDecimals: input.request.share_decimals,
+            assetDecimals: input.request.asset_decimals,
+            intermediateMint: wYldsMint,
+            ownerAddress: input.position.ownerAddress,
+            vaultAddress: input.position.vaultAddress,
+            tokenMint: input.position.tokenMint,
+            shareMint: input.position.shareMint,
+            requestAddress: input.request.request_address,
+            unsignedTransaction: unsigned,
+            lastValidBlockHeight: "100",
+            operationOnly: true,
+          });
+          return {
+            id: build.id,
+            unsignedTransaction: unsigned,
+            lastValidBlockHeight: "100",
+            ownerAddress: build.owner_address,
+            custodyWalletId: build.custody_wallet_id ?? null,
+            feeMode: build.fee_mode ?? "wallet",
+            feePayer: build.fee_payer,
+            action: build.action,
+            build,
+          } satisfies Awaited<ReturnType<typeof prepareCurrentRedemptionRelease>>;
+        }
+      );
+
+      const override = await request(
+        "earn/withdraw",
+        "POST",
+        { positionId, amount: { kind: "all" }, source: { ownerAddress: VAULT } },
+        "release-source-override"
+      );
+      expect(override.status).toBe(400);
+      const response = await request(
+        "earn/withdraw",
+        "POST",
+        { positionId, amount: { kind: "all" } },
+        "prepare-release"
+      );
+      expect(response.status, await response.clone().text()).toBe(202);
+      const operation = await readOperation(response);
+      expect(operation.nextAction).toEqual({ type: "select_option" });
+      expect(operation.terms.options).toEqual([
+        expect.objectContaining({
+          id: "release_current_redemption",
+          mechanism: "release_current_redemption",
+          minimum: null,
+        }),
+      ]);
+      expect(operation.terms.options[0]).not.toHaveProperty("amount");
+      expect(mocks.releaseBuild).not.toHaveBeenCalled();
+      const premature = await request(
+        `operations/${operation.id}/submit`,
+        "POST",
+        { actionId: operation.actionId, version: operation.version },
+        "release-before-review"
+      );
+      expect(premature.status).toBe(409);
+
+      // Hastra reuses this address. The reviewed option follows current state,
+      // while each historical request retains its own settlement outcome.
+      await getDb(env).execute(
+        "UPDATE earn_vault_withdrawal_requests SET status = 'fulfilled', fulfilled_at = sdp_iso_now(), closing_signature = 'fulfilled_a' WHERE id = ?",
+        [requestA.id]
+      );
+      const requestB = await seedRequest("redemption_b");
+      mocks.recoveryRequest = requestB;
+      const requestSnapshots = await getDb(env).queryMany(
+        "SELECT * FROM earn_vault_withdrawal_requests ORDER BY id"
+      );
+      const selected = await request(
+        `operations/${operation.id}/refresh`,
+        "POST",
+        {
+          actionId: operation.actionId,
+          version: operation.version,
+          optionId: "release_current_redemption",
+        },
+        "select-release"
+      );
+      expect(selected.status, await selected.clone().text()).toBe(202);
+      const reviewed = await readOperation(selected);
+      expect(reviewed.terms).toMatchObject({ inputAmount: null, estimate: null, minimum: null });
+      expect(reviewed.nextAction).toMatchObject({
+        type: source === "custody" ? "submit" : "sign_transaction",
+      });
+      expect(mocks.releaseBuild.mock.calls[0]?.[1]).toMatchObject({
+        actor: { organizationId: tenant.org.id, projectId: tenant.project.id },
+        position: { id: positionId, ownerAddress: owner },
+        request: { id: requestB.id },
+      });
+      const otherKey = await seedEarnApiKey(env, tenant, {
+        id: "another-release-principal",
+        grants: ["earn.read", "earn.execute"],
+        environment: "sandbox",
+      });
+      const submitBody =
+        source === "custody"
+          ? { actionId: reviewed.actionId, version: reviewed.version }
+          : action(reviewed);
+      const wrongPrincipal = await request(
+        `operations/${operation.id}/submit`,
+        "POST",
+        submitBody,
+        "release-other-principal",
+        otherKey
+      );
+      expect(wrongPrincipal.status, await wrongPrincipal.clone().text()).toBe(409);
+      const submitted = await request(
+        `operations/${operation.id}/submit`,
+        "POST",
+        submitBody,
+        "submit-release"
+      );
+      expect(submitted.status, await submitted.clone().text()).toBe(202);
+      expect(await readOperation(submitted)).toMatchObject({
+        status: "queued",
+        result: null,
+        canCancel: false,
+      });
+      for (const mutation of ["refresh", "cancel"]) {
+        const rejected = await request(
+          `operations/${operation.id}/${mutation}`,
+          "POST",
+          mutation === "cancel"
+            ? {}
+            : {
+                actionId: reviewed.actionId,
+                version: reviewed.version,
+                optionId: "release_current_redemption",
+              },
+          `release-reject-${mutation}`
+        );
+        expect(rejected.status, await rejected.clone().text()).toBe(409);
+        expect(await rejected.json()).toMatchObject({
+          error: { details: { reason: "operation_already_submitted" } },
+        });
+      }
+      expect(
+        await getDb(env).queryMany("SELECT * FROM earn_vault_withdrawal_requests ORDER BY id")
+      ).toEqual(requestSnapshots);
+      expect(
+        await getDb(env).queryOne(
+          "SELECT count(*) AS count FROM earn_vault_withdrawal_request_actions"
+        )
+      ).toEqual({ count: 0 });
+      expect(await getDb(env).queryOne("SELECT count(*) AS count FROM earn_movements")).toEqual({
+        count: 0,
+      });
+      expect(mocks.sign).not.toHaveBeenCalled();
+      expect(mocks.proposer).not.toHaveBeenCalled();
+      expect(mocks.broadcast).not.toHaveBeenCalled();
     }
   );
 

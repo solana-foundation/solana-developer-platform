@@ -170,11 +170,46 @@ original requested asset payout. Exact already-broadcast canonical bytes can be
 recorded atomically without reopening the terminal request. Unknown outcomes
 remain unresolved.
 
-Hastra's operator redemption has different semantics: its owner request address
-is reusable and the cancellation instruction has no amount or cycle argument.
-Preparation-time history cannot bind which cycle executes later. That recovery
-path remains unadvertised pending a separate delegation-release design in
-PRO-2530 and PRO-2528. The solver recovery does not cover it.
+### Release the current Hastra redemption
+
+A tracked Hastra position with a known pending operator redemption can offer
+`release_current_redemption` through the same withdrawal flow. It requires an
+explicit choice even when it is the only option. The caller reviews consent to
+release whichever owner redemption is current when the transaction executes,
+including a replacement created after preparation. The instruction has no
+amount or cycle argument, so a preparation-time check cannot narrow that scope.
+
+The bounded lookup stays within the position's project and uses its latest
+recorded pending request to locate the provider account. The new canonical
+cancellation build has `mechanism="operator_redemption"`,
+`withdrawal_request_id=NULL` and `operation_only=true`. It belongs to the new
+operation attempt, not the historical request. No financial request/action row
+is created. Acceptance freezes earlier matching Hastra requests' financial
+reconciliation while the outcome is uncertain. Finalized release retains that
+freeze permanently, so a replacement with the same amount cannot become a
+fictional payout for an earlier request. A definitive no-effect failure lifts
+the freeze. The original recorded outcome stays unchanged and can remain
+unresolved; only the new release operation completes.
+
+The guard matches organization, project, environment, position, owner, custody
+source, provider, PDA and mints. Local causal row ordering identifies earlier
+records for this bookkeeping boundary; it does not prove an onchain request
+cycle or a cancelled amount.
+
+The release closes the current request and revokes Hastra's burn delegation
+if still present, preserving unrelated delegates. It moves no tokens, mints no
+PRIME and pays no USDC. Completion requires the release attempt's
+own finalized cancellation transaction and authenticated provider evidence.
+Its result is `settlementOutcome="recovered"` with `settledAmount=null`, with
+no payout movement. A PDA-scoped reservation excludes other SDP release or
+redemption attempts while execution is unresolved. It does not stop the owner
+or provider from replacing the onchain request, which the reviewed scope
+explicitly permits. Issuer freezes can still prevent release.
+
+Source authorization, exact-byte signing, idempotency, retries and post-submit
+cancel/refresh barriers stay unchanged. A different signature, a missing
+provider account or a completed historical cycle cannot complete this release.
+Unknown outcomes keep the reservation and remain unresolved.
 
 ## Replacement boundary
 
@@ -267,6 +302,9 @@ become one, before the provider builder's existing validation and simulation.
 That proof is never persisted or accepted from a caller; later preparation or
 refresh calls read provider state again. Each review offers at most one recovery
 option; it never scans all owner requests or fans out provider reads across them.
+Hastra release also adds no request read without a known pending candidate and
+one live request read when present. It targets the current owner request, not a
+historical cycle. No provider account is fetched twice in one choice read.
 
 Operation recovery uses the partial index on environment, `next_check_at` and
 ID to read at most 100 due candidates. Four workers claim only work ready to
@@ -302,6 +340,12 @@ the cleanup parent, or a descendant, to be serving before applying the breaking
 migration. Recovery after removal is a forward fix. No production database is
 changed by preparing these PRs. Do not restore HTTP aliases or historical
 execution paths.
+
+Parent migration `0238` retains the existing Hastra address index while the
+previous revision can serve. Schema-only `0239` removes it only after this
+guarded parent is serving; reusing a released Hastra address requires that
+cleanup. The global PDA lock and durable lease remain the concurrency authority.
+Index retirement assigns no financial outcome to historical requests.
 
 See the [threat model](../security/earn-core-api-threat-model.md) and
 [integration guide](../../apps/sdp-docs/content/docs/earn/integration-details.mdx).
