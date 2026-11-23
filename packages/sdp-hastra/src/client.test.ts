@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 import { assertFireblocksProposal } from "@sdp/custody/testing/fireblocks-proposal";
-import type { EarnRuntimeContext, EarnVaultInstruction } from "@sdp/earn/types";
+import type {
+  EarnRuntimeContext,
+  EarnSwapLeg,
+  EarnSwapPort,
+  EarnVaultInstruction,
+} from "@sdp/earn/types";
 import { withMinimumRpcSlot } from "@sdp/rpc/read-context";
 import { HASTRA_DEPLOYMENTS } from "@sdp/types/hastra-programs";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
@@ -14,7 +19,6 @@ import {
   HastraVaultDirectClient,
   resetHastraReadCaches,
 } from "./client";
-import type { HastraSwapLeg, HastraSwapPort } from "./types";
 
 const configuredDeployment = HASTRA_DEPLOYMENTS["mainnet-beta"];
 if (!configuredDeployment) throw new Error("test premise: Hastra mainnet deployment is configured");
@@ -358,7 +362,7 @@ function rpcCalls(): { method: string; params: unknown[] }[] {
     );
 }
 
-function swapLeg(minOutAmount: string, quotedAmount = minOutAmount): HastraSwapLeg {
+function swapLeg(minOutAmount: string, quotedAmount = minOutAmount): EarnSwapLeg {
   return {
     instructions: [
       {
@@ -375,8 +379,8 @@ function swapLeg(minOutAmount: string, quotedAmount = minOutAmount): HastraSwapL
   };
 }
 
-function makeClient(port: Partial<HastraSwapPort> = {}, rpcUrl = "https://rpc.test") {
-  const swapPort: HastraSwapPort = {
+function makeClient(port: Partial<EarnSwapPort> = {}, rpcUrl = "https://rpc.test") {
+  const swapPort: EarnSwapPort = {
     quoteSwap: port.quoteSwap ?? (async () => ({ outAmount: "125", priceImpactPct: "0" })),
     buildSwapLeg: port.buildSwapLeg ?? (async () => swapLeg("120", "125")),
   };

@@ -62,8 +62,8 @@ rate.
 ## No chain SDK, no Jupiter client — the swap seam is INJECTED
 
 This package's dependencies are `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` and
-nothing else. Executable instructions come through `OndoSwapPort`
-(`src/types.ts`), implemented by the API over its reviewed Jupiter trust
+nothing else. Executable instructions come through `EarnSwapPort`
+(`@sdp/earn/types`), implemented by the API over its reviewed Jupiter trust
 boundary (`apps/sdp-api/src/services/earn/jupiter-swap.service.ts`: pinned
 aggregator/ATA programs, no signer but the owner, encoded amounts matching the
 request). **Never re-implement instruction admission here** — a second owner of

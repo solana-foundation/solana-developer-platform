@@ -1,6 +1,8 @@
 import { OndoEarnClient } from "@sdp/earn/providers/ondo/client";
 import type {
   EarnRuntimeContext,
+  EarnSwapLeg,
+  EarnSwapPort,
   EarnVaultDepositInput,
   EarnVaultDepositQuote,
   EarnVaultDepositQuoteInput,
@@ -30,7 +32,7 @@ import { type OndoDeployment, ondoDeployment, ondoDepositMints } from "@sdp/type
 import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import { isAddress } from "@solana/kit";
 import { SdpOndoError } from "./errors";
-import type { OndoRuntime, OndoSwapLeg, OndoSwapPort, OndoVaultOperationRunner } from "./types";
+import type { OndoRuntime, OndoVaultOperationRunner } from "./types";
 
 /**
  * Ondo as an EXECUTING provider: the catalogue client plus the vault-direct,
@@ -46,7 +48,7 @@ import type { OndoRuntime, OndoSwapLeg, OndoSwapPort, OndoVaultOperationRunner }
  * not protection (Veda's rule, inherited).
  *
  * ── Where the trust boundary lives ──────────────────────────────────────────
- * Everything on-chain-executable comes through the injected `OndoSwapPort`;
+ * Everything on-chain-executable comes through the injected `EarnSwapPort`;
  * the API's implementation admits Jupiter's instructions against the reviewed
  * contract in `services/earn/jupiter-swap.service.ts` (pinned programs, no
  * foreign signer, encoded amounts matching the request). This class treats a
@@ -179,7 +181,7 @@ export class OndoVaultDirectClient
    * Injected seams, same construction shape as the Kamino/Veda clients: the
    * API resolves and genesis-proves the per-request RPC endpoint, bounds every
    * operation with its vault deadline, and supplies the admitted swap builder
-   * (see `OndoSwapPort`). Nothing here reads `ctx.env` directly.
+   * (see `EarnSwapPort`). Nothing here reads `ctx.env` directly.
    */
   constructor(
     private readonly resolveProvenRpcUrl: (
@@ -192,7 +194,7 @@ export class OndoVaultDirectClient
      * reads platform credentials (the Jupiter swap key) from the request's
      * environment, which this package never sees directly.
      */
-    private readonly resolveSwapPort: (ctx: EarnRuntimeContext) => OndoSwapPort
+    private readonly resolveSwapPort: (ctx: EarnRuntimeContext) => EarnSwapPort
   ) {
     super();
   }
@@ -467,7 +469,7 @@ export class OndoVaultDirectClient
    * floor must refuse rather than build a transaction that will fail on chain.
    */
   private async buildLegWithFloor(args: {
-    swapPort: OndoSwapPort;
+    swapPort: EarnSwapPort;
     runtime: OndoRuntime;
     inputMint: string;
     outputMint: string;
@@ -476,7 +478,7 @@ export class OndoVaultDirectClient
     owner: string;
     direction: "deposit" | "withdrawal";
     assertActive: () => void;
-  }): Promise<OndoSwapLeg> {
+  }): Promise<EarnSwapLeg> {
     const refusalCode = args.direction === "deposit" ? "DEPOSIT_REFUSED" : "WITHDRAW_REFUSED";
     const quote = await args.swapPort.quoteSwap({
       cluster: args.runtime.cluster,

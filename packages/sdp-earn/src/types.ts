@@ -228,6 +228,69 @@ export type VaultProviderErrorCode =
 export type VaultProviderErrorCodeOf<Code extends VaultProviderErrorCode> = Code;
 
 /**
+ * The swap seam an execution package builds through, injected by the API:
+ * Ondo's USDC to USDY swap and Hastra's wYLDS to USDC exit leg.
+ *
+ * The API already owns a reviewed trust boundary for admitting Jupiter's
+ * response-controlled instructions into a transaction a wallet authorizes
+ * wholesale (`apps/sdp-api/src/services/earn/jupiter-swap.service.ts`).
+ * Injecting it as a port keeps that boundary single-owner, so no package
+ * re-implements instruction admission, and keeps execution packages free of
+ * Jupiter credentials. Unit tests stub the port; smoke tests provide a live one.
+ */
+export interface EarnSwapPort {
+  /**
+   * Build an ExactIn swap as admitted, plan-vocabulary instructions.
+   *
+   * The implementation must guarantee what the API's swap service guarantees:
+   * instructions only from the pinned aggregator/ATA programs, no signer other
+   * than `owner` and an explicitly requested `payer`, the encoded amounts
+   * matching `amount`/`slippageBps`, and a `minOutAmount` equal to the route's
+   * guaranteed threshold.
+   */
+  buildSwapLeg(request: EarnSwapBuildRequest): Promise<EarnSwapLeg>;
+  /** Price an ExactIn swap without building instructions (no owner needed). */
+  quoteSwap(request: EarnSwapQuoteRequest): Promise<EarnSwapQuote>;
+}
+
+export interface EarnSwapQuoteRequest {
+  cluster: SolanaCluster;
+  inputMint: string;
+  outputMint: string;
+  /** ExactIn amount in the INPUT token's units, decimal string. */
+  amount: string;
+}
+
+export interface EarnSwapBuildRequest extends EarnSwapQuoteRequest {
+  /** The wallet that signs and receives; it also pays unless `payer` is set. */
+  owner: string;
+  /** Optional distinct payer for the setup accounts the route creates. */
+  payer?: string;
+  /** Tolerance the route encodes; the threshold it yields is the real floor. */
+  slippageBps: number;
+  /** Bound route account fan-out so a composed transaction still fits. */
+  maxAccounts?: number;
+}
+
+export interface EarnSwapLeg {
+  /** Setup + swap in execution order, already in the plan's own vocabulary. */
+  instructions: EarnVaultInstruction[];
+  lookupTableAddresses: string[];
+  /** Quoted output at the live rate, OUTPUT token units, decimal string. */
+  quotedAmount: string;
+  /** The guaranteed output floor the instructions encode, OUTPUT token units. */
+  minOutAmount: string;
+  priceImpactPct: string;
+  routeLabels: string[];
+}
+
+export interface EarnSwapQuote {
+  /** Output at the live rate, OUTPUT token units, decimal string. */
+  outAmount: string;
+  priceImpactPct: string;
+}
+
+/**
  * One account slot in a built instruction.
  *
  * `role` mirrors `@solana/kit`'s `AccountRole` numeric enum (0 readonly,
