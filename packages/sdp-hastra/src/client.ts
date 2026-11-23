@@ -2,6 +2,8 @@ import { createHash, randomBytes } from "node:crypto";
 import { HastraEarnClient } from "@sdp/earn/providers/hastra/client";
 import type {
   EarnRuntimeContext,
+  EarnSwapLeg,
+  EarnSwapPort,
   EarnVaultDepositInput,
   EarnVaultDepositQuote,
   EarnVaultDepositQuoteInput,
@@ -41,12 +43,7 @@ import {
 import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { SdpHastraError, type SdpHastraErrorCode } from "./errors";
-import type {
-  HastraRuntime,
-  HastraSwapLeg,
-  HastraSwapPort,
-  HastraVaultOperationRunner,
-} from "./types";
+import type { HastraRuntime, HastraVaultOperationRunner } from "./types";
 
 // Public Solana program addresses, never credentials.
 const SYSTEM_PROGRAM_ID = "11111111111111111111111111111111";
@@ -1808,7 +1805,7 @@ export class HastraVaultDirectClient
       cluster: SolanaCluster
     ) => Promise<string>,
     private readonly runOperation: HastraVaultOperationRunner,
-    private readonly resolveSwapPort: (ctx: EarnRuntimeContext) => HastraSwapPort
+    private readonly resolveSwapPort: (ctx: EarnRuntimeContext) => EarnSwapPort
   ) {
     super();
   }
@@ -2156,7 +2153,7 @@ export class HastraVaultDirectClient
   }
 
   private async buildLegWithFloor(args: {
-    swapPort: HastraSwapPort;
+    swapPort: EarnSwapPort;
     runtime: HastraRuntime;
     config: HastraClusterConfig;
     amount: { text: string; atoms: bigint };
@@ -2164,7 +2161,7 @@ export class HastraVaultDirectClient
     owner: string;
     payer: string;
     assertActive: () => void;
-  }): Promise<HastraSwapLeg> {
+  }): Promise<EarnSwapLeg> {
     const quote = await args.swapPort.quoteSwap({
       cluster: args.runtime.cluster,
       inputMint: args.config.deployment.wYldsMint,

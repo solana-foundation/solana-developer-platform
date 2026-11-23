@@ -65,7 +65,7 @@ transaction fee; the separate 50 bps DEX tolerance is only a slippage bound.
 
 ## Important constraints
 
-- Jupiter instructions enter only through `HastraSwapPort`, implemented by the
+- Jupiter instructions enter only through `EarnSwapPort`, implemented by the
   API's reviewed Jupiter admission boundary. Never add a Jupiter HTTP client
   here. This package deliberately retains the builder regardless of rollout
   state; the API owns the default-off capability gate so deposits, position

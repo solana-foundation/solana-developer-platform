@@ -23,7 +23,7 @@ import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 import { assertClusterEndpoint } from "./cluster-rpc";
 import { createHastraSwapPort } from "./hastra-swap-port";
-import { createOndoSwapPort } from "./ondo-swap-port";
+import { createJupiterSwapPort } from "./jupiter-swap-port";
 import type { VaultDeadline } from "./vault-deadline";
 import { createVaultRpcFailover } from "./vault-rpc-failover";
 
@@ -78,7 +78,7 @@ export function resolveEarnExecutionClient(
   }
   if (provider === "ondo") {
     const client = new OndoVaultDirectClient(provenRpcUrl, runOperation, () =>
-      createOndoSwapPort(env)
+      createJupiterSwapPort(env, "Jupiter swaps")
     );
     return instrumentVendorPort("ondo", client);
   }
