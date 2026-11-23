@@ -119,6 +119,10 @@ export interface CurrentRedemptionReleaseRepository {
   recordCurrentRedemptionReleaseFinalized(
     input: CurrentRedemptionReleaseInput
   ): Promise<EarnWalletWithdrawalRequestTransactionRow>;
+  /** First finalized miss after expiry; only a later miss can prove the release never ran. */
+  recordCurrentRedemptionReleaseAbsent(
+    input: CurrentRedemptionReleaseInput
+  ): Promise<EarnWalletWithdrawalRequestTransactionRow>;
 }
 
 type Scope = Pick<CurrentRedemptionReleaseInput, "organizationId" | "projectId" | "environment">;
@@ -328,6 +332,29 @@ export function createCurrentRedemptionReleaseRepository(
           [input.transactionId, ...values(input)]
         );
         if (updated === null) throw notFound("Current redemption release");
+        return { ...updated, last_valid_block_height: String(updated.last_valid_block_height) };
+      });
+    },
+    async recordCurrentRedemptionReleaseAbsent(input) {
+      return db.transaction(async (tx) => {
+        const build = await requireAttempt(tx, input);
+        if (
+          build.consumed_attempt_id !== input.attemptId ||
+          build.execution_requested_at === null ||
+          build.signed_transaction === null ||
+          build.signature === null
+        )
+          throw conflict("Redemption release has no accepted signed attempt");
+        // Keep the first miss: only a later miss may complete the absence proof.
+        const updated = await tx.queryOne<EarnWalletWithdrawalRequestTransactionRow>(
+          `UPDATE earn_wallet_withdrawal_request_transactions
+           SET release_absence_observed_at = COALESCE(release_absence_observed_at, sdp_iso_now()),
+             updated_at = sdp_iso_now()
+           WHERE id = ? AND organization_id = ? AND project_id = ? AND environment = ?
+             AND release_finalized_at IS NULL RETURNING *`,
+          [input.transactionId, ...values(input)]
+        );
+        if (updated === null) throw conflict("Redemption release already finalized");
         return { ...updated, last_valid_block_height: String(updated.last_valid_block_height) };
       });
     },

@@ -208,9 +208,12 @@ consumed attempt and PDA reservation fence competing SDP actions while pending.
 Complete only from its own finalized cancellation signature and provider
 proof, not a missing account or an unrelated closure. Acceptance freezes
 financial reconciliation of earlier matching Hastra requests until definitive
-no-effect failure; finalized release keeps that freeze permanently. Match the
-organization, project, environment, position, owner, custody source, provider,
-PDA and mints. Causal row ordering is local bookkeeping, never onchain cycle
+no-effect failure; finalized release keeps that freeze permanently. A release
+that never lands is such a failure: once finalized height passes its last valid
+block height SDP never resends it, and two finalized-history misses at least 30
+seconds apart fail it `TRANSACTION_EXPIRED`. An observation-only release is
+adopted for the same proof. Match the organization, project, environment,
+position, owner, custody source, provider, PDA and mints. Causal row ordering is local bookkeeping, never onchain cycle
 proof. Leave the historical request's recorded outcome unchanged; it can remain
 unresolved while only the new release completes. Close the current request and
 revoke only Hastra's burn delegation if still present; preserve unrelated

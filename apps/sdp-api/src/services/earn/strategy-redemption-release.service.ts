@@ -7,7 +7,10 @@ import { TERMINAL_OPERATION_STATUSES } from "@sdp/types/operations";
 import { signature } from "@solana/kit";
 import { getDb } from "@/db/client";
 import { isCurrentRedemptionReleaseBuild } from "@/db/repositories/earn-redemption-release.repository";
-import { createPostgresEarnVaultWithdrawalRequestsRepository } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
+import {
+  createPostgresEarnVaultWithdrawalRequestsRepository,
+  type EarnWalletWithdrawalRequestTransactionRow,
+} from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import type { OperationClaim, OperationScope } from "@/db/repositories/operations.repository";
 import { conflict, internalError, notFound } from "@/lib/errors";
 import { createOperationsService } from "@/services/operations.service";
@@ -27,11 +30,44 @@ interface FinalizedReleaseTransaction {
 }
 
 type FinalizedTransactionReader = (value: string) => Promise<FinalizedReleaseTransaction | null>;
+type FinalizedHeightReader = () => Promise<bigint>;
+type ClusterRpc = ReturnType<typeof createClusterRpc>;
+
+/**
+ * After expiry, a second finalized miss at least this long after the first proves a
+ * release never ran: the same evidence an absent request create needs.
+ */
+const RELEASE_ABSENCE_RECHECK_MS = 30_000;
+const RELEASE_FAILED = {
+  code: "TRANSACTION_FAILED",
+  message: "The current redemption release failed on chain",
+};
+const RELEASE_EXPIRED = {
+  code: "TRANSACTION_EXPIRED",
+  message: "The current redemption release expired before it landed",
+};
+
+/** One cluster client serves every chain read a release pass makes. */
+function releaseChainReads(): {
+  readTransaction: FinalizedTransactionReader;
+  readFinalizedHeight: FinalizedHeightReader;
+} {
+  let rpc: ClusterRpc | undefined;
+  const client = (): ClusterRpc => {
+    if (rpc === undefined) rpc = createClusterRpc({ timeoutMs: 2_000 });
+    return rpc;
+  };
+  return {
+    readTransaction: (value) => readFinalizedTransaction(client(), value),
+    readFinalizedHeight: () => client().getBlockHeight({ commitment: "finalized" }).send(),
+  };
+}
 
 async function readFinalizedTransaction(
+  rpc: ClusterRpc,
   value: string
 ): Promise<FinalizedReleaseTransaction | null> {
-  const transaction = await createClusterRpc({ timeoutMs: 2_000 })
+  const transaction = await rpc
     .getTransaction(signature(value), {
       commitment: "finalized",
       encoding: "json",
@@ -58,7 +94,8 @@ export async function submitCurrentRedemptionRelease(
     attemptId: string;
     signedTransaction: string;
     broadcast: boolean;
-  }
+  },
+  readFinalizedHeight: FinalizedHeightReader = releaseChainReads().readFinalizedHeight
 ): Promise<OperationReference> {
   if (input.scope.environment !== currentClusterScope().environment)
     throw internalError("Operation cluster scope changed");
@@ -82,9 +119,36 @@ export async function submitCurrentRedemptionRelease(
     signature: verified.signature,
     signedTransaction: verified.signedTransactionBase64,
   });
-  if (input.broadcast)
+  // Past its last valid block height the release can't land and preflight refuses every
+  // resend: hand it to observation, which proves absence before failing it.
+  if (input.broadcast && (await readFinalizedHeight()) <= BigInt(build.last_valid_block_height))
     await broadcastVaultTransaction({ bytes: verified.bytes, deadline: createVaultDeadline() });
   return { kind: "earn.redemption_release", id: build.id };
+}
+
+/**
+ * A missing receipt proves nothing until the release's blockhash has expired at finalized
+ * commitment. After that, two finalized misses RELEASE_ABSENCE_RECHECK_MS apart prove the
+ * release never ran.
+ */
+async function releaseAbsenceVerdict(input: {
+  build: Pick<
+    EarnWalletWithdrawalRequestTransactionRow,
+    "last_valid_block_height" | "release_absence_observed_at"
+  >;
+  readFinalizedHeight: FinalizedHeightReader;
+  recordAbsence: () => Promise<unknown>;
+}): Promise<"pending" | "expired"> {
+  if ((await input.readFinalizedHeight()) <= BigInt(input.build.last_valid_block_height))
+    return "pending";
+  const observedAt = input.build.release_absence_observed_at;
+  if (observedAt == null) {
+    await input.recordAbsence();
+    return "pending";
+  }
+  const firstMiss = Date.parse(observedAt);
+  if (!Number.isFinite(firstMiss)) throw internalError("Release absence observation is unreadable");
+  return Date.now() - firstMiss < RELEASE_ABSENCE_RECHECK_MS ? "pending" : "expired";
 }
 
 interface ReleaseProjection {
@@ -167,7 +231,8 @@ export async function advanceCurrentRedemptionRelease(
   env: Env,
   scope: OperationScope,
   claim: OperationClaim,
-  readTransaction: FinalizedTransactionReader = readFinalizedTransaction
+  readTransaction?: FinalizedTransactionReader,
+  readFinalizedHeight?: FinalizedHeightReader
 ): Promise<Operation> {
   if (scope.environment !== currentClusterScope().environment)
     throw internalError("Operation cluster scope changed");
@@ -189,7 +254,10 @@ export async function advanceCurrentRedemptionRelease(
     signedTransaction: claim.attempt.signedTransaction,
   });
   const service = createOperationsService(env);
-  const update = async (status: "settling" | "completed" | "failed") => {
+  const update = async (
+    status: "settling" | "completed" | "failed",
+    error: { code: string; message: string } = RELEASE_FAILED
+  ) => {
     const operation = await service.transition(scope, claim, {
       status,
       resourceRef: { kind: "earn.redemption_release", id: buildId },
@@ -197,23 +265,23 @@ export async function advanceCurrentRedemptionRelease(
         status === "settling"
           ? { type: "wait", reason: "Waiting for the current redemption release to finalize" }
           : null,
-      error:
-        status === "failed"
-          ? {
-              code: "TRANSACTION_FAILED",
-              message: "The current redemption release failed on chain",
-            }
-          : null,
+      error: status === "failed" ? error : null,
     });
     return projectCurrentRedemptionRelease(env, scope, operation, buildId);
   };
   if (build.release_finalized_at != null) return update("completed");
-  const transaction = await readTransaction(claim.attempt.signature);
-  if (
-    transaction === null ||
-    transaction.signature !== claim.attempt.signature ||
-    !transaction.executionResultKnown
-  )
+  const chain = releaseChainReads();
+  const transaction = await (readTransaction ?? chain.readTransaction)(claim.attempt.signature);
+  if (transaction === null) {
+    const verdict = await releaseAbsenceVerdict({
+      build,
+      readFinalizedHeight: readFinalizedHeight ?? chain.readFinalizedHeight,
+      recordAbsence: () => repository.recordCurrentRedemptionReleaseAbsent(input),
+    });
+    // An expired release with no effect is a definitive failure, which lifts the PDA fence.
+    return verdict === "expired" ? update("failed", RELEASE_EXPIRED) : update("settling");
+  }
+  if (transaction.signature !== claim.attempt.signature || !transaction.executionResultKnown)
     return update("settling");
   // A finalized error proves no instruction effects survived. The terminal
   // operation transition releases the PDA fence in the same DB transaction.

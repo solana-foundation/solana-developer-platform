@@ -154,6 +154,7 @@ export interface EarnWalletWithdrawalRequestTransactionRow {
   consumed_action_id: string | null;
   consumed_attempt_id?: string | null;
   release_finalized_at?: string | null;
+  release_absence_observed_at?: string | null;
   consumed_at: string | null;
   created_by: string | null;
   initiated_by_key_id: string | null;
