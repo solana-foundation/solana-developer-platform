@@ -5,6 +5,7 @@ import {
   LOCAL_CALLER_HEADER,
   type SafeProxyCode,
 } from "@sdp/safe-proxy-endpoints/protocol";
+import type { SafeProxyForwardResult } from "@sdp/types/safe-proxy";
 import { decodeJwt } from "jose";
 import {
   createForwardApp,
@@ -14,8 +15,15 @@ import {
 
 const LIST_WALLETS = "/v1/forward/privy/v1/wallets";
 
-async function ownAnswer(response: Response): Promise<{ result: string | null; body: unknown }> {
-  return { result: response.headers.get("sdp-safe-proxy-result"), body: await response.json() };
+async function assertOwnAnswer(
+  response: Response,
+  result: Exclude<SafeProxyForwardResult, "forwarded">,
+  code: SafeProxyCode
+): Promise<void> {
+  assert.deepEqual(
+    { result: response.headers.get(FORWARD_HEADERS.result), body: await response.json() },
+    { result, body: { code } }
+  );
 }
 
 describe("forward route refusals reach no provider", () => {
@@ -68,7 +76,7 @@ describe("forward route refusals reach no provider", () => {
     it(`refuses ${name}`, async () => {
       const forwardApp = createForwardApp();
       const response = await forwardApp.send(LIST_WALLETS, request);
-      assert.deepEqual(await ownAnswer(response), { result: "refused", body: { code } });
+      await assertOwnAnswer(response, "refused", code);
       assert.equal(forwardApp.calls.length, 0);
     });
   }
@@ -92,9 +100,10 @@ describe("the provider call", () => {
   );
 
   it("carries only the declared request headers and the platform credential", () => {
+    const { appId, appSecret } = PLATFORM_CREDENTIALS.privy;
     assert.deepEqual(forwardApp.calls[0]?.headers, {
-      authorization: "Basic cHJpdnktYXBwLWEzMTpwcml2eS1zZWNyZXQtcTh6",
-      "privy-app-id": "privy-app-a31",
+      authorization: `Basic ${Buffer.from(`${appId}:${appSecret}`).toString("base64")}`,
+      "privy-app-id": appId,
       "privy-idempotency-key": "idem-5e2",
       "content-type": "application/json",
     });
@@ -142,10 +151,7 @@ describe("the provider answer", () => {
       answer: () => new Response(new Uint8Array(8 * 1024 * 1024 + 1)),
     });
     const tooLarge = await forwardApp.send(LIST_WALLETS);
-    assert.deepEqual(await ownAnswer(tooLarge), {
-      result: "no_answer",
-      body: { code: "provider_answer_too_large" },
-    });
+    await assertOwnAnswer(tooLarge, "no_answer", "provider_answer_too_large");
   });
 
   it("is no answer when the call fails after the request left", async () => {
@@ -153,10 +159,7 @@ describe("the provider answer", () => {
       answer: () => Promise.reject(new TypeError("fetch failed")),
     });
     const failed = await forwardApp.send(LIST_WALLETS);
-    assert.deepEqual(await ownAnswer(failed), {
-      result: "no_answer",
-      body: { code: "provider_no_answer" },
-    });
+    await assertOwnAnswer(failed, "no_answer", "provider_no_answer");
     assert.equal(forwardApp.calls.length, 1);
   });
 });
@@ -182,10 +185,7 @@ it("refuses a request whose deadline passes before it is sent", { timeout: 5_000
   await bodyRead;
   t.mock.timers.tick(10_000);
 
-  assert.deepEqual(await ownAnswer(await pending), {
-    result: "refused",
-    body: { code: "deadline_exceeded" },
-  });
+  await assertOwnAnswer(await pending, "refused", "deadline_exceeded");
   assert.equal(forwardApp.calls.length, 0);
 });
 
@@ -216,10 +216,7 @@ it("bounds the provider call by the budget the caller check left", {
   assert.equal(forwardApp.calls[0]?.signal?.aborted, false);
   t.mock.timers.tick(1);
 
-  assert.deepEqual(await ownAnswer(await pending), {
-    result: "no_answer",
-    body: { code: "provider_no_answer" },
-  });
+  await assertOwnAnswer(await pending, "no_answer", "provider_no_answer");
 });
 
 it("signs the Fireblocks target and body exactly as forwarded", async () => {
@@ -285,7 +282,7 @@ it("logs no body, concrete path, credential, reference or error message", async 
     "tx-body-b52",
     "resp-body-c63",
     "privy-g96",
-    "privy-secret-q8z",
+    PLATFORM_CREDENTIALS.privy.appSecret,
     "wallet-d41",
     "vault-e74",
     "peer-f85",
