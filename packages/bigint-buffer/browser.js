@@ -41,8 +41,18 @@ function toBufferLE(value, width) {
 function toBufferBE(value, width) {
   assertBigInt(value);
   assertWidth(width);
-  const hex = value.toString(16);
-  return Buffer.from(hex.padStart(width * 2, "0").slice(0, width * 2), "hex");
+  // Fail closed the way the native binding does: a value wider than `width`
+  // must throw, never encode as a different, smaller amount. The npm
+  // package's pure-JS fallback truncates (`hex.slice(0, width * 2)`), and
+  // this compatibility package exists precisely because that package's
+  // native loader is unsafe, so the fallback is the only path that ever
+  // runs here.
+  if (value >> BigInt(width * 8) !== 0n) {
+    throw new RangeError("BigInt is too large to fit in the requested width");
+  }
+  // A zero value has no hex digits; `padStart` alone sizes the field.
+  const hex = value === 0n ? "" : value.toString(16);
+  return Buffer.from(hex.padStart(width * 2, "0"), "hex");
 }
 
 module.exports = { toBigIntBE, toBigIntLE, toBufferBE, toBufferLE };
