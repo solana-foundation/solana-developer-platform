@@ -1,4 +1,10 @@
-import type { Operation, OperationSource } from "@sdp/types/operations";
+import {
+  isTerminalOperationStatus,
+  type Operation,
+  type OperationSource,
+  type OperationStatus,
+  projectedOperationStatus,
+} from "@sdp/types/operations";
 import { getDb } from "@/db/client";
 import type {
   EarnVaultWithdrawalRequestActionRow,
@@ -66,18 +72,11 @@ export async function projectWithdrawalRecovery(
       : row.custody_wallet_id !== null || row.source.ownerAddress !== row.owner_address)
   )
     throw notFound("Operation withdrawal recovery");
-  const recovered =
-    row.action_status === "finalized" &&
-    row.request_status === "cancelled" &&
-    row.closing_signature === row.signature &&
-    row.cancel_signature === row.signature;
-  const failed =
-    row.action_status === "failed" ||
-    row.request_status === "fulfilled" ||
-    (row.request_status === "cancelled" &&
-      row.closing_signature !== null &&
-      row.closing_signature !== row.signature);
-  const status = recovered ? "completed" : failed ? "failed" : "settling";
+  const evidence = recoveryEvidence(row);
+  // A terminal operation keeps its status and error: later evidence cannot reopen or flip it.
+  const terminal = isTerminalOperationStatus(operation.status);
+  const status = projectedOperationStatus(operation.status, RECOVERY_STATUS[evidence]);
+  const returned = evidence === "returned" && status === "completed";
   return {
     ...operation,
     status,
@@ -85,19 +84,62 @@ export async function projectWithdrawalRecovery(
       status === "settling"
         ? { type: "wait", reason: "Waiting for verified return of escrowed shares" }
         : null,
-    error: failed
-      ? {
-          code: "TRANSACTION_FAILED",
-          message: row.failure_reason ?? "This recovery did not return the escrowed shares",
-        }
-      : null,
+    error: terminal ? operation.error : recoveryError(evidence, row),
     result: {
       positionId: row.position_id,
       ...(row.strategy_id === null ? {} : { strategyId: row.strategy_id }),
       source: row.source,
       signature: row.signature,
-      settledAmount: recovered ? { mint: row.share_mint, value: row.shares } : null,
-      settlementOutcome: recovered ? "recovered" : null,
+      settledAmount: returned ? { mint: row.share_mint, value: row.shares } : null,
+      settlementOutcome: returned ? "recovered" : null,
     },
   };
+}
+
+/** What a recovery's own action and request evidence shows. */
+type RecoveryEvidence = "returned" | "failed" | "pending";
+
+const RECOVERY_STATUS = {
+  returned: "completed",
+  failed: "failed",
+  pending: "settling",
+} as const satisfies Record<RecoveryEvidence, OperationStatus>;
+
+/** Returned only from this exact finalized cancellation; failed when it cannot return the shares. */
+function recoveryEvidence(row: RecoveryRow): RecoveryEvidence {
+  if (
+    row.action_status === "finalized" &&
+    row.request_status === "cancelled" &&
+    row.closing_signature === row.signature &&
+    row.cancel_signature === row.signature
+  ) {
+    return "returned";
+  }
+  if (
+    row.action_status === "failed" ||
+    row.request_status === "fulfilled" ||
+    (row.request_status === "cancelled" &&
+      row.closing_signature !== null &&
+      row.closing_signature !== row.signature)
+  ) {
+    return "failed";
+  }
+  return "pending";
+}
+
+function recoveryError(evidence: RecoveryEvidence, row: RecoveryRow): Operation["error"] {
+  switch (evidence) {
+    case "failed":
+      return {
+        code: "TRANSACTION_FAILED",
+        message: row.failure_reason ?? "This recovery did not return the escrowed shares",
+      };
+    case "returned":
+    case "pending":
+      return null;
+    default: {
+      const unhandled: never = evidence;
+      throw new Error(`Unhandled recovery evidence: ${String(unhandled)}`);
+    }
+  }
 }

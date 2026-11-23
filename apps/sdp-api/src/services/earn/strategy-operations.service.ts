@@ -1,6 +1,6 @@
 import { currentClusterScope } from "@sdp/rpc/scope";
 import type { Operation, OperationProposalBinding, SubmitOperation } from "@sdp/types/operations";
-import { TERMINAL_OPERATION_STATUSES } from "@sdp/types/operations";
+import { isTerminalOperationStatus, projectedOperationStatus } from "@sdp/types/operations";
 import { getDb } from "@/db/client";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
@@ -49,7 +49,7 @@ import { projectWithdrawalRecovery } from "./strategy-withdrawal-recovery-projec
 import { verifySignedWalletTransaction } from "./vault-wallet.service";
 
 export function isTerminalOperation(operation: Operation): boolean {
-  return TERMINAL_OPERATION_STATUSES.some((status) => status === operation.status);
+  return isTerminalOperationStatus(operation.status);
 }
 
 async function projectQueuedOperation(
@@ -90,7 +90,7 @@ async function projectQueuedOperation(
       Date.parse(request.updated_at) > Date.parse(operation.updatedAt)
         ? request.updated_at
         : operation.updatedAt,
-    status: isTerminalOperation(operation) ? operation.status : status,
+    status: projectedOperationStatus(operation.status, status),
     nextAction:
       status === "submitted" || status === "settling"
         ? {
@@ -183,7 +183,7 @@ export async function projectEarnOperation(
   if (source === null) throw internalError("Operation position has no source");
   return {
     ...operation,
-    status: isTerminalOperation(operation) ? operation.status : status,
+    status: projectedOperationStatus(operation.status, status),
     nextAction:
       status === "completed" || status === "failed"
         ? null
