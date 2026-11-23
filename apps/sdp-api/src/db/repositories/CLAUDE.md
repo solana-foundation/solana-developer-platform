@@ -128,6 +128,11 @@ Things that will bite:
   Null legacy history remains protected unless its row is still creating.
   Migration 0212's status trigger captures the previous image's observations
   too; do not replace it with a flag only the new service writes.
+- **A Hastra release proves absence the same way.** 0238's
+  `release_absence_observed_at` records the first finalized miss after the
+  release's blockhash expires, once; a miss at least 30 seconds later fails the
+  release `TRANSACTION_EXPIRED`. After acceptance, the release immutability
+  trigger lets only that write-once marker and finality change.
 - **Retained par intermediate excludes redeemed or reserved amounts.**
   Reconciliation adds intermediate from cancelled share-sourced requests and
   subtracts fulfilled or open zero-share requests for the same position and mint,

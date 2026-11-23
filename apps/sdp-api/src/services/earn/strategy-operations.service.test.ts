@@ -1132,6 +1132,25 @@ describe("live operation exit permission", () => {
     expect(mocks.sign).not.toHaveBeenCalled();
   });
 
+  it("adopts a revoked release for observation before its signature appears", async () => {
+    target.movement = "earn.queued_withdraw_cancel";
+    claim.attempt.signedTransaction = signed;
+    mocks.build.mockImplementation(async () => ({
+      target,
+      transactionScope: { ...scope, custodyWalletId: "wallet" },
+      submit: mocks.submit,
+      currentRelease: true,
+    }));
+    mocks.moneyAdmission.mockRejectedValue(
+      new MoneyMovementRefusedError("action_not_held", "earn.execute")
+    );
+    mocks.signatureStatus.mockResolvedValue({ value: [null] });
+    await scoped(() => advanceEarnOperation(env, scope, claim));
+    expect(mocks.submit).toHaveBeenCalledExactlyOnceWith(signed, false);
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+    expect(mocks.sign).not.toHaveBeenCalled();
+  });
+
   it("does not sponsor a proposal signed after its operation loses permission", async () => {
     target.movement = "earn.queued_withdraw_cancel";
     target.fee_mode = "sponsored";

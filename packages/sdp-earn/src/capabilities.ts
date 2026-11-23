@@ -2,13 +2,11 @@ import type {
   EarnDepositEligibilityProvider,
   EarnLiveMetricsProvider,
   EarnOnboardingProvider,
-  EarnProviderOrderCancellationProvider,
   EarnProviderRedemptionModesProvider,
   EarnProviderSettlementProvider,
   EarnVaultDepositQuoteProvider,
   EarnVaultDirectProvider,
   EarnVaultParRedemptionProvider,
-  EarnVaultPreparationProvider,
   EarnVaultProvider,
   EarnVaultProviderOrderWithdrawProvider,
   EarnVaultQueuedWithdrawProvider,
@@ -32,26 +30,6 @@ export function supportsProviderRedemptionModes(
   return (
     typeof (client as Partial<EarnProviderRedemptionModesProvider>).getProviderRedemptionModes ===
     "function"
-  );
-}
-
-export function supportsVaultPreparation(
-  client: EarnVaultProvider
-): client is EarnVaultPreparationProvider {
-  // SAFETY: optional capability narrowing by method presence.
-  return (
-    typeof (client as Partial<EarnVaultPreparationProvider>).buildVaultPreparation === "function"
-  );
-}
-export function supportsProviderOrderCancellation(
-  client: EarnVaultProvider
-): client is EarnProviderOrderCancellationProvider {
-  // SAFETY: both halves of the cancellation lifecycle must be implemented.
-  const candidate = client as Partial<EarnProviderOrderCancellationProvider>;
-  return (
-    supportsProviderSettlement(client) &&
-    typeof candidate.buildProviderOrderCancellation === "function" &&
-    typeof candidate.readProviderOrderCancellation === "function"
   );
 }
 

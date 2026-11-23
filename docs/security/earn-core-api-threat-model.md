@@ -107,7 +107,12 @@ deposit eligibility nor authority over a wallet.
   burn delegation if present, preserving unrelated delegates. It guarantees no
   unlocked amount.
   The result says `recovered` with no settled amount, not recovered PRIME or USDC.
-  Missing evidence, timeouts and ambiguous broadcasts retain the reservation.
+  Missing evidence, timeouts and ambiguous broadcasts retain the reservation
+  until the release's blockhash expires at finalized commitment. After that,
+  SDP never resends it, and two finalized-history misses at least 30 seconds
+  apart are definitive no-effect failure (`TRANSACTION_EXPIRED`), which lifts
+  the reservation and the freeze. A finalized success whose evidence stays
+  incomplete still keeps them.
 - Indexed due-time scans feed at most four workers, which lease only work ready
   to start. Backoff changes observation timing, never spend authority. Shared
   RPC observations stay within one run and the exact organization, project,

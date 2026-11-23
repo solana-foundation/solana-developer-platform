@@ -113,12 +113,3 @@ export function redeemCompose(
     "hex"
   );
 }
-
-export function cancelCompose(receiver: string, returnValue: bigint): Uint8Array {
-  return Buffer.from(
-    word(64n) +
-      word(returnValue) +
-      sendParam(PLUME_SOLANA_ENDPOINT_ID, solanaWord(receiver), 0n, 2n),
-    "hex"
-  );
-}

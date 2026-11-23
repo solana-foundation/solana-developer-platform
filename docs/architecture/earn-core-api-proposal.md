@@ -188,8 +188,11 @@ is created. Acceptance freezes earlier matching Hastra requests' financial
 reconciliation while the outcome is uncertain. Finalized release retains that
 freeze permanently, so a replacement with the same amount cannot become a
 fictional payout for an earlier request. A definitive no-effect failure lifts
-the freeze. The original recorded outcome stays unchanged and can remain
-unresolved; only the new release operation completes.
+the freeze. A release that never lands is one: once its blockhash expires at
+finalized commitment, SDP never resends it, and two finalized-history misses at
+least 30 seconds apart fail it `TRANSACTION_EXPIRED`. The original recorded
+outcome stays unchanged and can remain unresolved; only the new release
+operation completes.
 
 The guard matches organization, project, environment, position, owner, custody
 source, provider, PDA and mints. Local causal row ordering identifies earlier

@@ -845,34 +845,6 @@ export interface EarnProviderRedemptionModesProvider extends EarnVaultWithdrawPr
   getProviderRedemptionModes(): readonly ("standard" | "instant")[];
 }
 
-export interface EarnVaultPreparationProvider extends EarnVaultDirectProvider {
-  buildVaultPreparation(
-    ctx: EarnRuntimeContext,
-    input: { providerReference: string; owner: string; rentPayer?: string }
-  ): Promise<EarnVaultTransactionPlan>;
-}
-
-export interface EarnProviderOrderCancellationProvider extends EarnProviderSettlementProvider {
-  buildProviderOrderCancellation(
-    ctx: EarnRuntimeContext,
-    input: {
-      providerReference: string;
-      owner: string;
-      sourceTransaction: string;
-      rentPayer?: string;
-    }
-  ): Promise<EarnVaultTransactionPlan>;
-  readProviderOrderCancellation(
-    ctx: EarnRuntimeContext,
-    input: {
-      providerReference: string;
-      owner: string;
-      sourceSignature: string;
-      sourceTransaction: string;
-    }
-  ): ReturnType<EarnProviderSettlementProvider["readProviderSettlement"]>;
-}
-
 export interface EarnDepositEligibilityInput {
   /** API-resolved customer identity, never supplied directly by an API caller. */
   customer?: { moderatorReference: string; customerReference: string };

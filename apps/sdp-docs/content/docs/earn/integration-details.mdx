@@ -90,6 +90,11 @@ reopen the original or enable its `/cancel`. The normal signing, retry and
 post-submit rules still apply. An uncertain broadcast is not permission to
 build another release.
 
+A release that never lands ends `failed` with `TRANSACTION_EXPIRED`. SDP
+decides that only after the transaction's blockhash has expired and two checks
+of finalized history, at least 30 seconds apart, find no trace of it. That frees
+the redemption address, so you can prepare a new release.
+
 ## Retries and idempotency
 
 Save a fresh `Idempotency-Key` with each request body before you send it. After
