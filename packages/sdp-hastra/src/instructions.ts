@@ -1,8 +1,18 @@
 import { randomBytes } from "node:crypto";
 import type { EarnVaultInstruction } from "@sdp/earn/types";
-import { PublicKey, SystemProgram } from "@solana/web3.js";
+import {
+  type Address,
+  address,
+  createAddressWithSeed,
+  createNoopSigner,
+  type Instruction,
+} from "@solana/kit";
+import {
+  getCreateAccountWithSeedInstruction,
+  getTransferSolInstruction,
+} from "@solana-program/system";
 import type { HastraClusterConfig } from "./addresses";
-import { associatedTokenAddress } from "./addresses";
+import { addressBytes, associatedTokenAddress } from "./addresses";
 import { anchorAmountData, anchorNoArgsData } from "./codec";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -22,18 +32,18 @@ export function computeUnitLimitInstruction(units: number): EarnVaultInstruction
   return { programAddress: COMPUTE_BUDGET_PROGRAM_ID, accounts: [], data: data.toString("base64") };
 }
 
-export function createAssociatedTokenInstruction(
-  payer: PublicKey,
-  owner: PublicKey,
-  mint: PublicKey
-): EarnVaultInstruction {
+export async function createAssociatedTokenInstruction(
+  payer: Address,
+  owner: Address,
+  mint: Address
+): Promise<EarnVaultInstruction> {
   return {
     programAddress: ASSOCIATED_TOKEN_PROGRAM_ID,
     accounts: [
-      { address: payer.toBase58(), role: 3 },
-      { address: associatedTokenAddress(owner, mint).toBase58(), role: 1 },
-      { address: owner.toBase58(), role: 0 },
-      { address: mint.toBase58(), role: 0 },
+      { address: payer, role: 3 },
+      { address: await associatedTokenAddress(owner, mint), role: 1 },
+      { address: owner, role: 0 },
+      { address: mint, role: 0 },
       { address: SYSTEM_PROGRAM_ID, role: 0 },
       { address: TOKEN_PROGRAM_ID, role: 0 },
     ],
@@ -51,50 +61,51 @@ export function createAssociatedTokenInstruction(
  * the same fee-payer signature. Same mechanism as Veda's allowed-user prefund.
  */
 export function prefundOwnerRentInstruction(
-  rentPayer: PublicKey,
-  owner: PublicKey,
+  rentPayer: Address,
+  owner: Address,
   lamports: bigint
 ): EarnVaultInstruction {
-  return web3Instruction(
-    SystemProgram.transfer({ fromPubkey: rentPayer, toPubkey: owner, lamports })
+  return planInstruction(
+    getTransferSolInstruction({
+      source: createNoopSigner(rentPayer),
+      destination: owner,
+      amount: lamports,
+    })
   );
 }
 
-function web3Instruction(instruction: {
-  programId: PublicKey;
-  keys: readonly { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[];
-  data: Buffer;
-}): EarnVaultInstruction {
+/** A kit instruction in the plan's own vocabulary; kit's `AccountRole` numbers are the wire roles. */
+function planInstruction(instruction: Instruction): EarnVaultInstruction {
   return {
-    programAddress: instruction.programId.toBase58(),
-    accounts: instruction.keys.map((account) => ({
-      address: account.pubkey.toBase58(),
-      role: (account.isSigner ? 2 : 0) + (account.isWritable ? 1 : 0),
+    programAddress: instruction.programAddress,
+    accounts: (instruction.accounts ?? []).map((account) => ({
+      address: account.address,
+      role: account.role,
     })),
-    data: instruction.data.toString("base64"),
+    data: Buffer.from(instruction.data ?? new Uint8Array()).toString("base64"),
   };
 }
 
 function initializeClassicTokenAccountInstruction(
-  account: PublicKey,
-  mint: PublicKey,
-  owner: PublicKey
+  account: Address,
+  mint: Address,
+  owner: Address
 ): EarnVaultInstruction {
   return {
     programAddress: TOKEN_PROGRAM_ID,
     accounts: [
-      { address: account.toBase58(), role: 1 },
-      { address: mint.toBase58(), role: 0 },
+      { address: account, role: 1 },
+      { address: mint, role: 0 },
     ],
     // SPL Token: InitializeAccount3 { owner }.
-    data: Buffer.concat([Buffer.from([18]), owner.toBuffer()]).toString("base64"),
+    data: Buffer.concat([Buffer.from([18]), addressBytes(owner)]).toString("base64"),
   };
 }
 
 function transferClassicTokensInstruction(
-  source: PublicKey,
-  destination: PublicKey,
-  owner: PublicKey,
+  source: Address,
+  destination: Address,
+  owner: Address,
   amount: bigint
 ): EarnVaultInstruction {
   const data = Buffer.alloc(9);
@@ -103,32 +114,32 @@ function transferClassicTokensInstruction(
   return {
     programAddress: TOKEN_PROGRAM_ID,
     accounts: [
-      { address: source.toBase58(), role: 1 },
-      { address: destination.toBase58(), role: 1 },
-      { address: owner.toBase58(), role: 2 },
+      { address: source, role: 1 },
+      { address: destination, role: 1 },
+      { address: owner, role: 2 },
     ],
     data: data.toString("base64"),
   };
 }
 
 function closeClassicTokenAccountInstruction(
-  account: PublicKey,
-  refundTo: PublicKey,
-  owner: PublicKey
+  account: Address,
+  refundTo: Address,
+  owner: Address
 ): EarnVaultInstruction {
   return {
     programAddress: TOKEN_PROGRAM_ID,
     accounts: [
-      { address: account.toBase58(), role: 1 },
-      { address: refundTo.toBase58(), role: 1 },
-      { address: owner.toBase58(), role: 2 },
+      { address: account, role: 1 },
+      { address: refundTo, role: 1 },
+      { address: owner, role: 2 },
     ],
     data: Buffer.from([9]).toString("base64"), // SPL Token: CloseAccount
   };
 }
 
 interface TransientTokenAccountPlan {
-  address: PublicKey;
+  address: Address;
   setupInstructions: EarnVaultInstruction[];
   settleInstructions: EarnVaultInstruction[];
 }
@@ -142,11 +153,11 @@ interface TransientTokenAccountPlan {
  */
 export async function transientTokenAccountPlan(args: {
   runtime: HastraRuntime;
-  payer: PublicKey;
-  owner: PublicKey;
-  mint: PublicKey;
-  destination: PublicKey;
-  refundTo: PublicKey;
+  payer: Address;
+  owner: Address;
+  mint: Address;
+  destination: Address;
+  refundTo: Address;
   amount: bigint;
 }): Promise<TransientTokenAccountPlan> {
   const rentLamports = await rentExemptMinimum(
@@ -155,26 +166,32 @@ export async function transientTokenAccountPlan(args: {
     "classic token-account"
   );
   const seed = `sdp-hastra-${randomBytes(10).toString("hex")}`;
-  const tokenProgram = new PublicKey(TOKEN_PROGRAM_ID);
-  const address = await PublicKey.createWithSeed(args.owner, seed, tokenProgram);
-  const create = SystemProgram.createAccountWithSeed({
-    fromPubkey: args.payer,
-    newAccountPubkey: address,
-    basePubkey: args.owner,
+  const tokenProgram = address(TOKEN_PROGRAM_ID);
+  const transient = await createAddressWithSeed({
+    baseAddress: args.owner,
+    programAddress: tokenProgram,
     seed,
-    lamports: rentLamports,
+  });
+  const create = getCreateAccountWithSeedInstruction({
+    payer: createNoopSigner(args.payer),
+    newAccount: transient,
+    // The base signs separately only when it is not already the paying signer.
+    baseAccount: args.owner === args.payer ? undefined : createNoopSigner(args.owner),
+    base: args.owner,
+    seed,
+    amount: rentLamports,
     space: CLASSIC_TOKEN_ACCOUNT_BYTES,
-    programId: tokenProgram,
+    programAddress: tokenProgram,
   });
   return {
-    address,
+    address: transient,
     setupInstructions: [
-      web3Instruction(create),
-      initializeClassicTokenAccountInstruction(address, args.mint, args.owner),
+      planInstruction(create),
+      initializeClassicTokenAccountInstruction(transient, args.mint, args.owner),
     ],
     settleInstructions: [
-      transferClassicTokensInstruction(address, args.destination, args.owner, args.amount),
-      closeClassicTokenAccountInstruction(address, args.refundTo, args.owner),
+      transferClassicTokensInstruction(transient, args.destination, args.owner, args.amount),
+      closeClassicTokenAccountInstruction(transient, args.refundTo, args.owner),
     ],
   };
 }
@@ -182,9 +199,9 @@ export async function transientTokenAccountPlan(args: {
 export function mintDepositInstruction(args: {
   config: HastraClusterConfig;
   state: HastraState;
-  owner: PublicKey;
-  userUsdc: PublicKey;
-  userWylds: PublicKey;
+  owner: Address;
+  userUsdc: Address;
+  userWylds: Address;
   amount: bigint;
 }): EarnVaultInstruction {
   return {
@@ -195,9 +212,9 @@ export function mintDepositInstruction(args: {
       { address: args.state.mintVaultTokenAccount, role: 1 },
       { address: args.config.deployment.wYldsMint, role: 1 },
       { address: args.state.addresses.mintAuthority, role: 0 },
-      { address: args.owner.toBase58(), role: 2 },
-      { address: args.userUsdc.toBase58(), role: 1 },
-      { address: args.userWylds.toBase58(), role: 1 },
+      { address: args.owner, role: 2 },
+      { address: args.userUsdc, role: 1 },
+      { address: args.userWylds, role: 1 },
       { address: TOKEN_PROGRAM_ID, role: 0 },
     ],
     data: anchorAmountData("deposit", args.amount),
@@ -207,9 +224,9 @@ export function mintDepositInstruction(args: {
 export function stakeDepositInstruction(args: {
   config: HastraClusterConfig;
   state: HastraState;
-  owner: PublicKey;
-  userWylds: PublicKey;
-  userPrime: PublicKey;
+  owner: Address;
+  userWylds: Address;
+  userPrime: Address;
   amount: bigint;
 }): EarnVaultInstruction {
   return {
@@ -222,9 +239,9 @@ export function stakeDepositInstruction(args: {
       { address: args.config.deployment.primeMint, role: 1 },
       { address: args.config.deployment.wYldsMint, role: 1 },
       { address: args.state.addresses.stakeMintAuthority, role: 0 },
-      { address: args.owner.toBase58(), role: 2 },
-      { address: args.userWylds.toBase58(), role: 1 },
-      { address: args.userPrime.toBase58(), role: 1 },
+      { address: args.owner, role: 2 },
+      { address: args.userWylds, role: 1 },
+      { address: args.userPrime, role: 1 },
       { address: args.state.addresses.stakePriceConfig, role: 0 },
       { address: TOKEN_PROGRAM_ID, role: 0 },
     ],
@@ -235,10 +252,10 @@ export function stakeDepositInstruction(args: {
 export function stakeRedeemInstruction(args: {
   config: HastraClusterConfig;
   state: HastraState;
-  owner: PublicKey;
-  userWylds: PublicKey;
-  userPrime: PublicKey;
-  legacyTicket: PublicKey | null;
+  owner: Address;
+  userWylds: Address;
+  userPrime: Address;
+  legacyTicket: Address | null;
   amount: bigint;
 }): EarnVaultInstruction {
   return {
@@ -248,14 +265,14 @@ export function stakeRedeemInstruction(args: {
       { address: args.state.addresses.stakeVaultTokenAccountConfig, role: 0 },
       { address: args.state.stakeVaultTokenAccount, role: 1 },
       { address: args.state.addresses.stakeVaultAuthority, role: 0 },
-      { address: args.owner.toBase58(), role: 3 },
+      { address: args.owner, role: 3 },
       {
         // Anchor 0.31's Option<Account> sentinel is the executing program id.
-        address: args.legacyTicket?.toBase58() ?? args.config.deployment.vaultStakeProgramAddress,
+        address: args.legacyTicket ?? args.config.deployment.vaultStakeProgramAddress,
         role: args.legacyTicket === null ? 0 : 1,
       },
-      { address: args.userWylds.toBase58(), role: 1 },
-      { address: args.userPrime.toBase58(), role: 1 },
+      { address: args.userWylds, role: 1 },
+      { address: args.userPrime, role: 1 },
       { address: args.config.deployment.primeMint, role: 1 },
       { address: args.config.deployment.wYldsMint, role: 1 },
       { address: args.state.addresses.stakePriceConfig, role: 0 },
@@ -268,17 +285,17 @@ export function stakeRedeemInstruction(args: {
 export function parRequestInstruction(args: {
   config: HastraClusterConfig;
   state: HastraState;
-  owner: PublicKey;
-  userWylds: PublicKey;
-  request: PublicKey;
+  owner: Address;
+  userWylds: Address;
+  request: Address;
   amount: bigint;
 }): EarnVaultInstruction {
   return {
     programAddress: args.config.deployment.vaultMintProgramAddress,
     accounts: [
-      { address: args.owner.toBase58(), role: 3 },
-      { address: args.userWylds.toBase58(), role: 1 },
-      { address: args.request.toBase58(), role: 1 },
+      { address: args.owner, role: 3 },
+      { address: args.userWylds, role: 1 },
+      { address: args.request, role: 1 },
       { address: args.state.addresses.redeemVaultAuthority, role: 0 },
       { address: args.config.deployment.wYldsMint, role: 0 },
       { address: args.state.addresses.mintConfig, role: 0 },
@@ -292,16 +309,16 @@ export function parRequestInstruction(args: {
 export function parCancelInstruction(args: {
   config: HastraClusterConfig;
   state: HastraState;
-  owner: PublicKey;
-  userWylds: PublicKey;
-  request: PublicKey;
+  owner: Address;
+  userWylds: Address;
+  request: Address;
 }): EarnVaultInstruction {
   return {
     programAddress: args.config.deployment.vaultMintProgramAddress,
     accounts: [
-      { address: args.owner.toBase58(), role: 3 },
-      { address: args.userWylds.toBase58(), role: 1 },
-      { address: args.request.toBase58(), role: 1 },
+      { address: args.owner, role: 3 },
+      { address: args.userWylds, role: 1 },
+      { address: args.request, role: 1 },
       { address: args.state.addresses.redeemVaultAuthority, role: 0 },
       { address: args.state.addresses.mintConfig, role: 0 },
       { address: TOKEN_PROGRAM_ID, role: 0 },

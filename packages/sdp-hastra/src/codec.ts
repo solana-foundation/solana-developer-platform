@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { PublicKey } from "@solana/web3.js";
+import { getAddressDecoder } from "@solana/kit";
 import { I128_MODULUS, I128_SIGN, MAX_ADMINISTRATORS } from "./constants";
 import { SdpHastraError } from "./errors";
 
@@ -25,7 +25,7 @@ export function pubkeyAt(data: Buffer, offset: number, label: string): string {
   if (offset < 0 || offset + 32 > data.length) {
     throw new SdpHastraError("PROGRAM_MISMATCH", `Hastra's ${label} account is truncated.`);
   }
-  return new PublicKey(data.subarray(offset, offset + 32)).toBase58();
+  return getAddressDecoder().decode(data.subarray(offset, offset + 32));
 }
 
 export function readU64(data: Buffer, offset: number, label: string): bigint {

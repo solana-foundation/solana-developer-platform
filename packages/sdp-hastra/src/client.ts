@@ -32,10 +32,11 @@ import type {
 } from "@sdp/earn/types";
 import { hastraDeployment } from "@sdp/types/hastra-programs";
 import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types/well-known-tokens";
-import { PublicKey } from "@solana/web3.js";
+import { address } from "@solana/kit";
 import type { HastraClusterConfig } from "./addresses";
 import {
   associatedTokenAddress,
+  deriveHastraAddresses,
   hastraClusterConfig,
   legacyTicketAddress,
   publicKey,
@@ -210,13 +211,13 @@ export class HastraVaultDirectClient
       "Building the Hastra USDC to PRIME deposit",
       async (runtime, config) => {
         this.assertKnownReference(config, input.providerReference);
-        const usdc = new PublicKey(config.depositMint);
-        const wylds = new PublicKey(config.deployment.wYldsMint);
-        const prime = new PublicKey(config.deployment.primeMint);
-        const userUsdc = associatedTokenAddress(owner, usdc);
-        const userWylds = associatedTokenAddress(owner, wylds);
-        const userPrime = associatedTokenAddress(owner, prime);
-        const ownerAccounts = [userUsdc.toBase58(), userWylds.toBase58(), userPrime.toBase58()];
+        const usdc = address(config.depositMint);
+        const wylds = address(config.deployment.wYldsMint);
+        const prime = address(config.deployment.primeMint);
+        const userUsdc = await associatedTokenAddress(owner, usdc);
+        const userWylds = await associatedTokenAddress(owner, wylds);
+        const userPrime = await associatedTokenAddress(owner, prime);
+        const ownerAccounts = [userUsdc, userWylds, userPrime];
         const { state, extra } = await readHastraState(runtime, config, ownerAccounts);
         assertNoBlockingIssues(depositBlockingIssues(state), "DEPOSIT_REFUSED", "The deposit");
         const shares = sharesForAssets(amount.atoms, state.stakePrice);
@@ -235,7 +236,7 @@ export class HastraVaultDirectClient
           userUsdcAccount ?? null,
           "Owner USDC token account",
           config.depositMint,
-          owner.toBase58(),
+          owner,
           "DEPOSIT_REFUSED",
           amount.atoms
         );
@@ -243,14 +244,14 @@ export class HastraVaultDirectClient
           userWyldsAccount ?? null,
           "Owner wYLDS token account",
           config.deployment.wYldsMint,
-          owner.toBase58(),
+          owner,
           "DEPOSIT_REFUSED"
         );
         assertExistingOwnerTokenUsable(
           userPrimeAccount ?? null,
           "Owner PRIME token account",
           config.deployment.primeMint,
-          owner.toBase58(),
+          owner,
           "DEPOSIT_REFUSED"
         );
         const shareAccountExisted = userPrimeAccount !== null;
@@ -259,8 +260,8 @@ export class HastraVaultDirectClient
           cluster: runtime.cluster,
           instructions: [
             computeUnitLimitInstruction(HASTRA_NATIVE_COMPUTE_UNIT_LIMIT),
-            createAssociatedTokenInstruction(rentPayer, owner, wylds),
-            createAssociatedTokenInstruction(rentPayer, owner, prime),
+            await createAssociatedTokenInstruction(rentPayer, owner, wylds),
+            await createAssociatedTokenInstruction(rentPayer, owner, prime),
             mintDepositInstruction({
               config,
               state,
@@ -279,7 +280,7 @@ export class HastraVaultDirectClient
             }),
           ],
           lookupTables: [],
-          assetIdentity: { depositTokenMint: config.depositMint, shareMint: prime.toBase58() },
+          assetIdentity: { depositTokenMint: config.depositMint, shareMint: prime },
           accepted: { amount: amount.text },
           createsShareAccount: !shareAccountExisted,
         };
@@ -350,14 +351,14 @@ export class HastraVaultDirectClient
       "Building the Hastra PRIME DEX exit",
       async (runtime, config, assertActive) => {
         this.assertKnownReference(config, input.providerReference);
-        const wylds = new PublicKey(config.deployment.wYldsMint);
-        const prime = new PublicKey(config.deployment.primeMint);
-        const usdc = new PublicKey(config.depositMint);
-        const userWylds = associatedTokenAddress(owner, wylds);
-        const userPrime = associatedTokenAddress(owner, prime);
-        const userUsdc = associatedTokenAddress(owner, usdc);
-        const ownerAccounts = [userWylds.toBase58(), userPrime.toBase58(), userUsdc.toBase58()];
-        const ticket = legacyTicketAddress(config.deployment, owner).toBase58();
+        const wylds = address(config.deployment.wYldsMint);
+        const prime = address(config.deployment.primeMint);
+        const usdc = address(config.depositMint);
+        const userWylds = await associatedTokenAddress(owner, wylds);
+        const userPrime = await associatedTokenAddress(owner, prime);
+        const userUsdc = await associatedTokenAddress(owner, usdc);
+        const ownerAccounts = [userWylds, userPrime, userUsdc];
+        const ticket = await legacyTicketAddress(config.deployment, owner);
         const { state, extra } = await readHastraState(runtime, config, [...ownerAccounts, ticket]);
         assertNoBlockingIssues(stakeBlockingIssues(state), "WITHDRAW_REFUSED", "The DEX exit");
         const wyldsAtoms = assetsForShares(shares.atoms, state.stakePrice);
@@ -382,7 +383,7 @@ export class HastraVaultDirectClient
           userPrimeAccount ?? null,
           "Owner PRIME token account",
           config.deployment.primeMint,
-          owner.toBase58(),
+          owner,
           "WITHDRAW_REFUSED",
           shares.atoms
         );
@@ -390,22 +391,22 @@ export class HastraVaultDirectClient
           userWyldsAccount ?? null,
           "Owner wYLDS token account",
           config.deployment.wYldsMint,
-          owner.toBase58(),
+          owner,
           "WITHDRAW_REFUSED"
         );
         assertExistingOwnerTokenUsable(
           userUsdcAccount ?? null,
           "Owner USDC token account",
           config.depositMint,
-          owner.toBase58(),
+          owner,
           "WITHDRAW_REFUSED"
         );
-        const legacyTicket = decodeLegacyTicket(
+        const legacyTicket = await decodeLegacyTicket(
           decodeRpcAccount(extra[ownerAccounts.length] ?? null, ticket),
           config,
           owner
         );
-        if (legacyTicket && input.rentRefundTo !== undefined && !rentRefundTo.equals(owner)) {
+        if (legacyTicket && input.rentRefundTo !== undefined && rentRefundTo !== owner) {
           throw new SdpHastraError(
             "WITHDRAW_REFUSED",
             "This wallet has a legacy Hastra ticket whose program-hardcoded rent refund goes to " +
@@ -427,8 +428,8 @@ export class HastraVaultDirectClient
           config,
           amount: { atoms: wyldsAtoms, text: formatAtoms(wyldsAtoms) },
           floor,
-          owner: owner.toBase58(),
-          payer: rentPayer.toBase58(),
+          owner: owner,
+          payer: rentPayer,
           assertActive,
         });
 
@@ -436,8 +437,8 @@ export class HastraVaultDirectClient
           cluster: runtime.cluster,
           instructions: [
             computeUnitLimitInstruction(HASTRA_SWAP_COMPUTE_UNIT_LIMIT),
-            createAssociatedTokenInstruction(rentPayer, owner, wylds),
-            createAssociatedTokenInstruction(rentPayer, owner, usdc),
+            await createAssociatedTokenInstruction(rentPayer, owner, wylds),
+            await createAssociatedTokenInstruction(rentPayer, owner, usdc),
             ...transientWylds.setupInstructions,
             stakeRedeemInstruction({
               config,
@@ -550,8 +551,8 @@ export class HastraVaultDirectClient
       const [primeAccount, wyldsAccount] = await getMultipleAccounts(
         runtime,
         [
-          associatedTokenAddress(owner, new PublicKey(config.deployment.primeMint)).toBase58(),
-          associatedTokenAddress(owner, new PublicKey(config.deployment.wYldsMint)).toBase58(),
+          await associatedTokenAddress(owner, address(config.deployment.primeMint)),
+          await associatedTokenAddress(owner, address(config.deployment.wYldsMint)),
         ],
         "POSITION_UNREADABLE"
       );
@@ -560,7 +561,7 @@ export class HastraVaultDirectClient
             primeAccount,
             "Owner PRIME token account",
             config.deployment.primeMint,
-            owner.toBase58()
+            owner
           )
         : null;
       const wylds = wyldsAccount
@@ -568,7 +569,7 @@ export class HastraVaultDirectClient
             wyldsAccount,
             "Owner wYLDS token account",
             config.deployment.wYldsMint,
-            owner.toBase58()
+            owner
           )
         : null;
       const atoms = prime?.amount ?? 0n;
@@ -584,7 +585,7 @@ export class HastraVaultDirectClient
       return [
         {
           providerReference: config.deployment.primeMint,
-          owner: owner.toBase58(),
+          owner: owner,
           cluster: runtime.cluster,
           shares,
           // Hastra exposes freeze administration on PRIME. Frozen tokens stay
@@ -684,21 +685,21 @@ export class HastraVaultDirectClient
     // minimum: the program's create consumes the prefund in the same
     // transaction, the owner nets zero, and the completion/cancellation refund
     // still lands with the owner. Wallet-pays plans change nothing.
-    const sponsor = rentPayer.equals(owner) ? undefined : rentPayer;
+    const sponsor = rentPayer === owner ? undefined : rentPayer;
     const source = parRedemptionSource(input);
     return this.withRuntime(
       ctx,
       "Building the Hastra par-redemption request",
       async (runtime, config) => {
         this.assertKnownReference(config, input.providerReference);
-        const wylds = new PublicKey(config.deployment.wYldsMint);
-        const prime = new PublicKey(config.deployment.primeMint);
-        const usdc = new PublicKey(config.depositMint);
-        const userWylds = associatedTokenAddress(owner, wylds);
-        const userPrime = associatedTokenAddress(owner, prime);
-        const userUsdc = associatedTokenAddress(owner, usdc);
-        const ownerAccounts = [userWylds.toBase58(), userPrime.toBase58(), userUsdc.toBase58()];
-        const ticket = legacyTicketAddress(config.deployment, owner).toBase58();
+        const wylds = address(config.deployment.wYldsMint);
+        const prime = address(config.deployment.primeMint);
+        const usdc = address(config.depositMint);
+        const userWylds = await associatedTokenAddress(owner, wylds);
+        const userPrime = await associatedTokenAddress(owner, prime);
+        const userUsdc = await associatedTokenAddress(owner, usdc);
+        const ownerAccounts = [userWylds, userPrime, userUsdc];
+        const ticket = await legacyTicketAddress(config.deployment, owner);
         const { state, extra } = await readHastraState(
           runtime,
           config,
@@ -745,7 +746,7 @@ export class HastraVaultDirectClient
             userPrimeAccount ?? null,
             "Owner PRIME token account",
             config.deployment.primeMint,
-            owner.toBase58(),
+            owner,
             "REDEMPTION_REFUSED",
             source.shares.atoms
           );
@@ -753,7 +754,7 @@ export class HastraVaultDirectClient
             userWyldsAccount ?? null,
             "Owner wYLDS token account",
             config.deployment.wYldsMint,
-            owner.toBase58(),
+            owner,
             "REDEMPTION_REFUSED"
           );
         } else {
@@ -761,7 +762,7 @@ export class HastraVaultDirectClient
             userWyldsAccount ?? null,
             "Owner wYLDS token account",
             config.deployment.wYldsMint,
-            owner.toBase58(),
+            owner,
             "REDEMPTION_REFUSED",
             intermediateAtoms
           );
@@ -770,13 +771,13 @@ export class HastraVaultDirectClient
           userUsdcAccount ?? null,
           "Owner USDC token account",
           config.depositMint,
-          owner.toBase58(),
+          owner,
           "REDEMPTION_REFUSED"
         );
 
         let conversion: EarnVaultInstruction[] = [];
         if (source.kind === "shares") {
-          const legacyTicket = decodeLegacyTicket(
+          const legacyTicket = await decodeLegacyTicket(
             decodeRpcAccount(extra[ownerAccounts.length] ?? null, ticket),
             config,
             owner
@@ -812,9 +813,9 @@ export class HastraVaultDirectClient
           instructions: [
             computeUnitLimitInstruction(HASTRA_NATIVE_COMPUTE_UNIT_LIMIT),
             ...(prefund ? [prefund] : []),
-            createAssociatedTokenInstruction(rentPayer, owner, wylds),
+            await createAssociatedTokenInstruction(rentPayer, owner, wylds),
             // Completion is operator-signed, so prepare the user's canonical USDC destination now.
-            createAssociatedTokenInstruction(rentPayer, owner, usdc),
+            await createAssociatedTokenInstruction(rentPayer, owner, usdc),
             ...conversion,
             parRequestInstruction({
               config,
@@ -831,7 +832,7 @@ export class HastraVaultDirectClient
             shareMint: config.deployment.primeMint,
           },
           ...(source.kind === "shares" ? { accepted: { shares: source.shares.text } } : {}),
-          requestAddress: request.toBase58(),
+          requestAddress: request,
           expectedRequest: {
             shares,
             intermediateMint: config.deployment.wYldsMint,
@@ -855,51 +856,49 @@ export class HastraVaultDirectClient
       "Building the Hastra redemption cancel",
       async (runtime, config) => {
         this.assertKnownReference(config, input.providerReference);
-        const expected = redemptionRequestAddress(config.deployment, owner);
-        if (!request.equals(expected)) {
+        const expected = await redemptionRequestAddress(config.deployment, owner);
+        if (request !== expected) {
           throw new SdpHastraError(
             "REDEMPTION_REFUSED",
             "The Hastra request address is not the deterministic request for this owner."
           );
         }
-        const wylds = new PublicKey(config.deployment.wYldsMint);
-        const userWylds = associatedTokenAddress(owner, wylds);
+        const wylds = address(config.deployment.wYldsMint);
+        const userWylds = await associatedTokenAddress(owner, wylds);
+        // Derived first so the identity read is sent before the request read.
+        const addresses = await deriveHastraAddresses(config.deployment);
         // The owner's wYLDS rides the request read; both were REQUEST_UNREADABLE reads.
         const [stateRead, requestRead] = await Promise.allSettled([
-          loadHastraState(runtime, config),
-          getMultipleAccountWires(
-            runtime,
-            [request.toBase58(), userWylds.toBase58()],
-            "REQUEST_UNREADABLE"
-          ),
+          loadHastraState(runtime, config, addresses),
+          getMultipleAccountWires(runtime, [request, userWylds], "REQUEST_UNREADABLE"),
         ]);
         // The identity request went first, so a full outage stays PROGRAM_MISMATCH.
         if (stateRead.status === "rejected") throw stateRead.reason;
         if (requestRead.status === "rejected") throw requestRead.reason;
         const state = stateRead.value;
         const [requestWire, userWyldsWire] = requestRead.value;
-        const account = decodeRpcAccount(requestWire ?? null, request.toBase58());
+        const account = decodeRpcAccount(requestWire ?? null, request);
         if (!account) {
           throw new SdpHastraError("REDEMPTION_REFUSED", "The Hastra request is already closed.");
         }
-        const decoded = decodeRedemptionRequest(account, config, request.toBase58());
-        if (decoded.owner !== owner.toBase58()) {
+        const decoded = await decodeRedemptionRequest(account, config, request);
+        if (decoded.owner !== owner) {
           throw new SdpHastraError(
             "REDEMPTION_REFUSED",
             "The Hastra request belongs to another owner."
           );
         }
         assertExistingOwnerTokenUsable(
-          decodeRpcAccount(userWyldsWire ?? null, userWylds.toBase58()),
+          decodeRpcAccount(userWyldsWire ?? null, userWylds),
           "Owner wYLDS token account",
           config.deployment.wYldsMint,
-          owner.toBase58(),
+          owner,
           "REDEMPTION_REFUSED"
         );
         return {
           cluster: runtime.cluster,
           instructions: [
-            createAssociatedTokenInstruction(owner, owner, wylds),
+            await createAssociatedTokenInstruction(owner, owner, wylds),
             parCancelInstruction({ config, state, owner, userWylds, request }),
           ],
           lookupTables: [],
@@ -916,11 +915,7 @@ export class HastraVaultDirectClient
     ctx: EarnRuntimeContext,
     input: EarnVaultParRedemptionRequestReadInput
   ): Promise<EarnVaultParRedemptionRequestLookup> {
-    const requestAddress = publicKey(
-      "requestAddress",
-      input.requestAddress,
-      "REQUEST_UNREADABLE"
-    ).toBase58();
+    const requestAddress = publicKey("requestAddress", input.requestAddress, "REQUEST_UNREADABLE");
     return this.withRuntime(
       ctx,
       "Reading the Hastra redemption request",
@@ -929,7 +924,7 @@ export class HastraVaultDirectClient
         await loadHastraState(runtime, config);
         const account = await getAccount(runtime, requestAddress, "REQUEST_UNREADABLE");
         if (!account) return { requestAddress, status: "closedOrUnknown", request: null };
-        const decoded = decodeRedemptionRequest(account, config, requestAddress);
+        const decoded = await decodeRedemptionRequest(account, config, requestAddress);
         return {
           requestAddress,
           status: "pending",
@@ -952,6 +947,6 @@ export class HastraVaultDirectClient
     const cluster = CLUSTER_BY_SDP_ENVIRONMENT[ctx.environment];
     const config = hastraClusterConfig(cluster);
     this.assertKnownReference(config, input.providerReference);
-    return parseParLifecycleEvents(config, input);
+    return await parseParLifecycleEvents(config, input);
   }
 }

@@ -5,9 +5,15 @@ import type {
   EarnVaultParRedemptionQuoteInput,
 } from "@sdp/earn/types";
 import { MAX_SUPPORTED_TRANSACTION_VERSION } from "@sdp/rpc/transaction-version";
-import { PublicKey } from "@solana/web3.js";
+import { type Address, address } from "@solana/kit";
 import type { HastraClusterConfig } from "./addresses";
-import { legacyTicketAddress, pda, publicKey, redemptionRequestAddress } from "./addresses";
+import {
+  addressBytes,
+  legacyTicketAddress,
+  pda,
+  publicKey,
+  redemptionRequestAddress,
+} from "./addresses";
 import { canonicalAmount, formatAtoms } from "./amounts";
 import { assertDiscriminator, discriminator, pubkeyAt, readU64 } from "./codec";
 import {
@@ -29,17 +35,17 @@ import { getAccount, nonNegativeSafeInteger, rentExemptMinimum, rpcRequest } fro
 import { assertOwned } from "./state";
 import type { HastraRuntime } from "./types";
 
-/** `account` is the live read of `legacyTicketAddress(owner)`. */
-export function decodeLegacyTicket(
+/** `account` is the live read of `await legacyTicketAddress(owner)`. */
+export async function decodeLegacyTicket(
   account: RpcAccount | null,
   config: HastraClusterConfig,
-  owner: PublicKey
-): PublicKey | null {
-  const ticket = legacyTicketAddress(config.deployment, owner);
+  owner: Address
+): Promise<Address | null> {
+  const ticket = await legacyTicketAddress(config.deployment, owner);
   if (!account) return null;
   assertOwned(account, config.deployment.vaultStakeProgramAddress, "Hastra legacy ticket");
   assertDiscriminator(account.data, "account", "UnbondingTicket");
-  if (account.data.length < 64 || pubkeyAt(account.data, 8, "legacy ticket") !== owner.toBase58()) {
+  if (account.data.length < 64 || pubkeyAt(account.data, 8, "legacy ticket") !== owner) {
     throw new SdpHastraError(
       "PROGRAM_MISMATCH",
       "Hastra's legacy unbonding ticket is truncated or belongs to another owner."
@@ -146,7 +152,7 @@ async function assertRedemptionRequestReuseSafe(
           "The Solana RPC could not authenticate a successful Hastra request-history transaction."
         );
       }
-      const events = parseParLifecycleEvents(config, {
+      const events = await parseParLifecycleEvents(config, {
         providerReference: config.deployment.primeMint,
         requestAddress,
         logs: transaction.meta.logMessages,
@@ -259,17 +265,17 @@ export function parRedemptionSource(input: EarnVaultParRedemptionQuoteInput): Pa
 export async function admitParRequest(args: {
   runtime: HastraRuntime;
   config: HastraClusterConfig;
-  owner: PublicKey;
-  sponsor: PublicKey | undefined;
-}): Promise<{ request: PublicKey; prefund: EarnVaultInstruction | undefined }> {
-  const request = redemptionRequestAddress(args.config.deployment, args.owner);
-  if ((await getAccount(args.runtime, request.toBase58(), "REQUEST_UNREADABLE")) !== null) {
+  owner: Address;
+  sponsor: Address | undefined;
+}): Promise<{ request: Address; prefund: EarnVaultInstruction | undefined }> {
+  const request = await redemptionRequestAddress(args.config.deployment, args.owner);
+  if ((await getAccount(args.runtime, request, "REQUEST_UNREADABLE")) !== null) {
     throw new SdpHastraError(
       "REDEMPTION_REFUSED",
       "This wallet already has an open Hastra redemption request; complete or cancel it first."
     );
   }
-  await assertRedemptionRequestReuseSafe(args.runtime, args.config, request.toBase58());
+  await assertRedemptionRequestReuseSafe(args.runtime, args.config, request);
   // The reuse check above proves the request PDA absent at build time, so a
   // sponsor's prefund is exactly one account's rent and the program's create
   // consumes it at execution. A PDA created in between leaves the owner the
@@ -294,11 +300,11 @@ interface RedemptionRequestState {
   bump: number;
 }
 
-export function decodeRedemptionRequest(
+export async function decodeRedemptionRequest(
   account: RpcAccount,
   config: HastraClusterConfig,
   requestAddress: string
-): RedemptionRequestState {
+): Promise<RedemptionRequestState> {
   assertOwned(account, config.deployment.vaultMintProgramAddress, "Hastra redemption request");
   assertDiscriminator(account.data, "account", "RedemptionRequest");
   if (account.data.length < REDEMPTION_REQUEST_ACCOUNT_BYTES) {
@@ -310,18 +316,17 @@ export function decodeRedemptionRequest(
     mint: pubkeyAt(account.data, 48, "redemption request"),
     bump: account.data[80] ?? -1,
   };
-  const derived = redemptionRequestAddress(
-    config.deployment,
-    new PublicKey(request.owner)
-  ).toBase58();
+  const derived = await redemptionRequestAddress(config.deployment, address(request.owner));
   if (
     derived !== requestAddress ||
     request.mint !== config.deployment.wYldsMint ||
     request.bump !==
-      pda(
-        new PublicKey(config.deployment.vaultMintProgramAddress),
-        "redemption_request",
-        new PublicKey(request.owner).toBytes()
+      (
+        await pda(
+          address(config.deployment.vaultMintProgramAddress),
+          "redemption_request",
+          addressBytes(address(request.owner))
+        )
       )[1] ||
     request.amount === 0n
   ) {
@@ -373,21 +378,17 @@ const REQUESTED_EVENT_DISCRIMINATOR = discriminator("event", "RedemptionRequeste
 const CANCELLED_EVENT_DISCRIMINATOR = discriminator("event", "RedemptionCancelled");
 const FULFILLED_EVENT_DISCRIMINATOR = discriminator("event", "RedeemCompleted");
 
-export function parseParLifecycleEvents(
+export async function parseParLifecycleEvents(
   config: HastraClusterConfig,
   input: EarnVaultParRedemptionLifecycleInput
-): readonly EarnVaultParRedemptionLifecycleEvent[] {
+): Promise<readonly EarnVaultParRedemptionLifecycleEvent[]> {
   if (input.shareDecimals !== TOKEN_DECIMALS || input.assetDecimals !== TOKEN_DECIMALS) {
     throw new SdpHastraError(
       "REQUEST_UNREADABLE",
       "Hastra lifecycle events were requested with a mint scale other than six decimals."
     );
   }
-  const requestedAddress = publicKey(
-    "requestAddress",
-    input.requestAddress,
-    "REQUEST_UNREADABLE"
-  ).toBase58();
+  const requestedAddress = publicKey("requestAddress", input.requestAddress, "REQUEST_UNREADABLE");
   type ParsedLifecycleEvent =
     | {
         kind: "redemptionRequested" | "redemptionCancelled";
@@ -429,10 +430,7 @@ export function parseParLifecycleEvents(
     }
     if (!kind || data.length < vaultOffset + 32) continue;
     const owner = pubkeyAt(data, ownerOffset, `${kind} event`);
-    const requestAddress = redemptionRequestAddress(
-      config.deployment,
-      new PublicKey(owner)
-    ).toBase58();
+    const requestAddress = await redemptionRequestAddress(config.deployment, address(owner));
     if (requestAddress !== requestedAddress) continue;
     const amount = readU64(data, amountOffset, `${kind} event`);
     const mint = pubkeyAt(data, mintOffset, `${kind} event`);
