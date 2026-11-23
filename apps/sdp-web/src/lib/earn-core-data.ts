@@ -207,7 +207,11 @@ export function useEarnOperation(
     if (reported.current.observation === observation) return;
     reported.current.observation = observation;
     if (operation === initial) return;
-    // Shared fetches still reach the activity row after their initiating dialog closes.
+    // A shared request can finish after its initiating dialog unmounts. Notify
+    // the remaining external activity/balance caches after commit; this does
+    // not copy child render state into its parent (covered by the unmount test).
+    // react-doctor-disable-next-line react-doctor/no-pass-data-to-parent
+    // react-doctor-disable-next-line react-doctor/no-pass-live-state-to-parent
     notifyUpdated(operation);
   }, [initial, operation, operationId]);
   return {
