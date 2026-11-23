@@ -1,5 +1,6 @@
 import type { OperationSource } from "@sdp/types/operations";
 import { getDb } from "@/db/client";
+import { isCurrentRedemptionReleaseBuild } from "@/db/repositories/earn-redemption-release.repository";
 import type { OperationClaim, OperationScope } from "@/db/repositories/operations.repository";
 import { conflict, notFound } from "@/lib/errors";
 import type { Env } from "@/types/env";
@@ -7,6 +8,7 @@ import {
   requirePreparedQueuedStrategyTransaction,
   submitPreparedQueuedStrategyAction,
 } from "./strategy-queued-operations.service";
+import { submitCurrentRedemptionRelease } from "./strategy-redemption-release.service";
 import {
   type PreparedStrategySigningTarget,
   requirePreparedStrategyTransaction,
@@ -51,18 +53,27 @@ export async function resolveEarnOperationBuild(
   };
   if (queued) {
     const row = await requirePreparedQueuedStrategyTransaction(env, transactionScope, reference.id);
+    const currentRelease = isCurrentRedemptionReleaseBuild(row);
+    const reviewedRecovery = currentRelease
+      ? claim.operation.terms.options.length === 1 &&
+        claim.operation.terms.options[0]?.id === "release_current_redemption" &&
+        claim.operation.terms.options[0]?.mechanism === "release_current_redemption" &&
+        claim.operation.terms.inputAmount === null &&
+        claim.operation.terms.estimate === null &&
+        claim.operation.terms.minimum === null
+      : row.mechanism === "solver_queue" &&
+        row.withdrawal_request_id !== null &&
+        claim.operation.terms.options.some(
+          (option) =>
+            option.id === `recover_expired_escrow:${row.withdrawal_request_id}` &&
+            option.mechanism === "recover_expired_escrow"
+        );
     if (
       claim.operation.intent.kind !== "earn.withdraw" ||
       (row.action === "cancel" &&
         (claim.operation.intent.amount.kind !== "all" ||
           row.position_id !== claim.operation.intent.positionId ||
-          row.mechanism !== "solver_queue" ||
-          row.withdrawal_request_id === null ||
-          !claim.operation.terms.options.some(
-            (option) =>
-              option.id === `recover_expired_escrow:${row.withdrawal_request_id}` &&
-              option.mechanism === "recover_expired_escrow"
-          )))
+          !reviewedRecovery))
     )
       throw conflict("Prepared transaction does not match the operation action");
     const target: PreparedStrategySigningTarget = {
@@ -75,6 +86,14 @@ export async function resolveEarnOperationBuild(
       target,
       transactionScope,
       submit: async (signedTransaction: string, broadcast: boolean) => {
+        if (currentRelease)
+          return submitCurrentRedemptionRelease(env, {
+            scope,
+            buildId: row.id,
+            attemptId: claim.attempt.id,
+            signedTransaction,
+            broadcast,
+          });
         const principal = claim.attempt.principal;
         const submitted = await submitPreparedQueuedStrategyAction(env, {
           transactionId: row.id,

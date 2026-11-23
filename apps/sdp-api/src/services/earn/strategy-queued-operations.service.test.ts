@@ -1,6 +1,10 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { getDb } from "@/db/client";
+import { createPostgresEarnVaultWithdrawalRequestsRepository } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
+import { type EarnAuthzTenant, seedEarnAuthzTenant } from "@/test/helpers/earn";
 import { env } from "@/test/helpers/env";
+import { seedTestDatabase } from "@/test/mocks/db";
 import {
   prepareQueuedStrategyWithdrawal,
   prepareStrategyWithdrawalChoices,
@@ -12,7 +16,8 @@ vi.mock("./execution-registry", async (original) => ({
   ...(await original<typeof import("./execution-registry")>()),
   resolveEarnExecutionClient: resolve,
 }));
-vi.mock("./vault-queued-withdraw.service", () => ({
+vi.mock("./vault-queued-withdraw.service", async (original) => ({
+  ...(await original<typeof import("./vault-queued-withdraw.service")>()),
   buildWalletQueuedWithdrawalRequest: buildQueued,
   submitWalletQueuedWithdrawalAction: vi.fn(),
 }));
@@ -223,6 +228,194 @@ describe("shared strategy withdrawal options", () => {
         terms: { mechanism: "solver_queue", shares: "2", discountBps: 25, deadlineSeconds: 120 },
       })
     ).rejects.toThrow("authorized position");
+    expect(buildQueued).not.toHaveBeenCalled();
+  });
+});
+
+describe("current Hastra redemption release choices", () => {
+  let tenant: EarnAuthzTenant;
+  const hastraPosition = {
+    ...position,
+    provider: "hastra",
+    ownerAddress: "11111111111111111111111111111111",
+    custodyWalletId: undefined as string | undefined,
+  };
+  const plan = {
+    cluster: "devnet",
+    instructions: [],
+    lookupTables: [],
+    assetIdentity: { depositTokenMint: position.tokenMint, shareMint: position.shareMint },
+  };
+  const actor = () => ({ organizationId: tenant.org.id, projectId: tenant.project.id });
+  const prepare = (
+    overrides: Partial<typeof hastraPosition> = {},
+    actorOverrides: Partial<ReturnType<typeof actor>> = {}
+  ) =>
+    runInClusterScope({ projectId: tenant.project.id, environment: "sandbox" }, () =>
+      prepareStrategyWithdrawalChoices(env, {
+        position: { ...hastraPosition, ...overrides },
+        recovery: { actor: { ...actor(), ...actorOverrides } },
+      })
+    );
+  async function seedPendingRequest(id = "pending_redemption") {
+    await getDb(env).execute(
+      `INSERT INTO earn_vault_withdrawal_requests (
+       id, organization_id, project_id, environment, provider, position_id,
+       owner_address, vault_address, token_mint, share_mint, request_address,
+       status, mechanism, shares, quoted_assets, share_decimals, asset_decimals,
+       intermediate_mint, intermediate_amount, client_request_id,
+       idempotency_fingerprint, creation_signature, provider_state_observed)
+       VALUES (?, ?, ?, 'sandbox', 'hastra', ?, ?, ?, ?, ?, 'owner_request',
+               'pending', 'operator_redemption', '0', '2000', 6, 6,
+               '8fr7WGTVFszfyNWRMXj6fRjZZAnDwmXwEpCrtzmUkdih', '2000', ?, ?, ?, TRUE)`,
+      [
+        id,
+        tenant.org.id,
+        tenant.project.id,
+        position.id,
+        hastraPosition.ownerAddress,
+        position.vaultAddress,
+        position.tokenMint,
+        position.shareMint,
+        id,
+        `${id}_fingerprint`,
+        `${id}_signature`,
+      ]
+    );
+  }
+  beforeEach(async () => {
+    await seedTestDatabase(env);
+    tenant = await seedEarnAuthzTenant(env, "release_choices", { environment: "sandbox" });
+    await getDb(env).execute(
+      `INSERT INTO earn_positions (
+       id, organization_id, project_id, environment, provider, kind, owner_address,
+       vault_address, token_mint, share_mint, label, activated_at)
+       VALUES (?, ?, ?, 'sandbox', 'hastra', 'vault_direct', ?, ?, ?, ?,
+               'Hastra holding', sdp_iso_now())`,
+      [
+        position.id,
+        tenant.org.id,
+        tenant.project.id,
+        hastraPosition.ownerAddress,
+        position.vaultAddress,
+        position.tokenMint,
+        position.shareMint,
+      ]
+    );
+    resolve.mockReturnValue(par);
+    par.buildParRedemptionCancel.mockResolvedValue(plan);
+  });
+
+  it("offers release without free PRIME or undelegated wYLDS and promises no amount", async () => {
+    await seedPendingRequest();
+    const prepared = await prepare();
+    expect(prepared.options).toEqual([
+      {
+        id: "release_current_redemption",
+        label: "Release current pending redemption",
+        settlement: "instant",
+        estimatedSeconds: null,
+        mechanism: "release_current_redemption",
+        minimum: null,
+      },
+    ]);
+    expect(prepared.options[0]).not.toHaveProperty("amount");
+    expect(prepared.choices[0]).toMatchObject({
+      kind: "recovery",
+      currentRedemptionRelease: { request: { id: "pending_redemption" }, plan },
+    });
+    expect(par.buildParRedemptionCancel).toHaveBeenCalledExactlyOnceWith(expect.anything(), {
+      providerReference: position.vaultAddress,
+      owner: hastraPosition.ownerAddress,
+      requestAddress: "owner_request",
+    });
+    expect(par.getParRedemptionOptions).not.toHaveBeenCalled();
+    expect(par.quoteParRedemption).not.toHaveBeenCalled();
+    expect(par.readParRedemptionRequest).not.toHaveBeenCalled();
+    expect(buildQueued).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "none",
+    "fulfilled",
+    "other_project",
+    "other_organization",
+    "other_owner",
+    "other_wallet",
+  ] as const)("does not read provider state for a %s pending context", async (context) => {
+    if (context !== "none") await seedPendingRequest();
+    if (context === "fulfilled") {
+      await getDb(env).execute(
+        "UPDATE earn_vault_withdrawal_requests SET status = 'fulfilled', fulfilled_at = sdp_iso_now()"
+      );
+    }
+    await expect(
+      prepare(
+        context === "other_wallet"
+          ? { custodyWalletId: "another_wallet" }
+          : context === "other_owner"
+            ? { ownerAddress: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM" }
+            : {},
+        context === "other_project"
+          ? { projectId: "prj_release_choices_production" }
+          : context === "other_organization"
+            ? { organizationId: "another_organization" }
+            : {}
+      )
+    ).rejects.toThrow("No supported withdrawal route");
+    expect(par.buildParRedemptionCancel).not.toHaveBeenCalled();
+    expect(par.readParRedemptionRequest).not.toHaveBeenCalled();
+    expect(par.quoteParRedemption).not.toHaveBeenCalled();
+  });
+
+  it("rejects mismatched strategy assets before preparing a release", async () => {
+    await seedPendingRequest();
+    await getDb(env).execute(
+      "UPDATE earn_vault_withdrawal_requests SET token_mint = 'another_mint'"
+    );
+    await expect(prepare()).rejects.toThrow("does not match the withdrawal strategy");
+    expect(par.buildParRedemptionCancel).not.toHaveBeenCalled();
+  });
+
+  it("uses replacement context without rewriting the completed historical request", async () => {
+    await seedPendingRequest("redemption_a");
+    await getDb(env).execute(
+      "UPDATE earn_vault_withdrawal_requests SET status = 'fulfilled', fulfilled_at = sdp_iso_now(), closing_signature = 'fulfilled_a' WHERE id = 'redemption_a'"
+    );
+    await seedPendingRequest("redemption_b");
+    const repository = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
+    const readA = () =>
+      repository.getById({
+        organizationId: tenant.org.id,
+        environment: "sandbox",
+        withdrawalRequestId: "redemption_a",
+      });
+    const originalA = await readA();
+    const prepared = await prepare();
+    expect(prepared.choices[0]?.currentRedemptionRelease?.request.id).toBe("redemption_b");
+    expect(prepared.options[0]).toMatchObject({
+      id: "release_current_redemption",
+      minimum: null,
+    });
+    expect(prepared.options[0]).not.toHaveProperty("amount");
+    expect(await readA()).toEqual(originalA);
+    expect(par.buildParRedemptionCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not offer release when the provider proves the request is no longer pending", async () => {
+    await seedPendingRequest();
+    par.buildParRedemptionCancel.mockRejectedValueOnce(
+      Object.assign(new Error("No current pending redemption"), { code: "REDEMPTION_REFUSED" })
+    );
+    await expect(prepare()).rejects.toThrow("No supported withdrawal route");
+    expect(par.buildParRedemptionCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a provider read failure unresolved instead of advertising release", async () => {
+    await seedPendingRequest();
+    par.buildParRedemptionCancel.mockRejectedValueOnce(new Error("RPC unavailable"));
+    await expect(prepare()).rejects.toThrow();
+    expect(par.buildParRedemptionCancel).toHaveBeenCalledTimes(1);
     expect(buildQueued).not.toHaveBeenCalled();
   });
 });

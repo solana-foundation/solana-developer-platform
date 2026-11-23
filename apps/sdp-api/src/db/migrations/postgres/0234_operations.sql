@@ -76,6 +76,8 @@ CREATE TABLE operation_attempts (
     created_at TEXT NOT NULL DEFAULT sdp_iso_now(),
     CONSTRAINT operation_attempts_action_unique UNIQUE
         (operation_id, action_id, action_version),
+    CONSTRAINT operation_attempts_scoped_id_key UNIQUE
+        (id, organization_id, project_id, environment),
     CONSTRAINT operation_attempts_signed_pair CHECK (
         (signed_transaction IS NULL AND signature IS NULL AND last_valid_block_height IS NULL)
         OR

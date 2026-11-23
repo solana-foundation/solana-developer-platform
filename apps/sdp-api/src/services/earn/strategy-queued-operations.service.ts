@@ -5,7 +5,11 @@ import {
   supportsVaultWithdraw,
   supportsVaultWithdrawQuote,
 } from "@sdp/earn/capabilities";
-import type { EarnVaultQueuedWithdrawalRequestLookup } from "@sdp/earn/types";
+import type {
+  EarnVaultParRedemptionProvider,
+  EarnVaultQueuedWithdrawalRequestLookup,
+  EarnVaultTransactionPlan,
+} from "@sdp/earn/types";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { OperationTerms } from "@sdp/types/operations";
@@ -25,6 +29,7 @@ import { readExpiredStrategyWithdrawalRecoveries } from "./strategy-withdrawal-r
 import { createVaultDeadline } from "./vault-deadline";
 import {
   type AsyncWithdrawalTermsInput,
+  buildCurrentRedemptionRelease,
   buildWalletQueuedWithdrawalRecovery,
   buildWalletQueuedWithdrawalRequest,
   type QueuedWithdrawalActor,
@@ -32,6 +37,7 @@ import {
   submitWalletQueuedWithdrawalAction,
   type WalletQueuedWithdrawalBuiltTransaction,
 } from "./vault-queued-withdraw.service";
+import { rethrowVaultProviderFailure } from "./vault-refusals";
 import type { VaultFeeMode } from "./vault-sponsorship";
 
 export interface PreparedStrategyWithdrawalChoice {
@@ -42,6 +48,11 @@ export interface PreparedStrategyWithdrawalChoice {
   recovery?: EarnVaultWithdrawalRequestRow;
   /** Reuse only the live proof from this call's choice planning. Never store it. */
   recoveryProof?: EarnVaultQueuedWithdrawalRequestLookup;
+  /** The owner authorizes the current request at execution, including replacements. */
+  currentRedemptionRelease?: {
+    request: EarnVaultWithdrawalRequestRow;
+    plan: EarnVaultTransactionPlan;
+  };
 }
 
 export interface PreparedStrategyWithdrawalChoices {
@@ -94,6 +105,65 @@ async function prepareRecoveryChoices(
   });
 }
 
+/** Read one known owner request and reuse the builder's live validation once. */
+async function prepareCurrentRedemptionReleaseChoice(
+  env: Env,
+  input: { position: QueuedWithdrawalPosition; recovery?: { actor: QueuedWithdrawalActor } },
+  client: EarnVaultParRedemptionProvider | null
+): Promise<PreparedStrategyWithdrawalChoice[]> {
+  if (input.recovery === undefined || client === null) return [];
+  const {
+    position,
+    recovery: { actor },
+  } = input;
+  const request = await createPostgresEarnVaultWithdrawalRequestsRepository(
+    getDb(env)
+  ).findCurrentRedemptionRequest({
+    organizationId: actor.organizationId,
+    projectId: actor.projectId,
+    environment: currentClusterScope().environment,
+    positionId: position.id,
+    ownerAddress: position.ownerAddress,
+    custodyWalletId: position.custodyWalletId ?? null,
+  });
+  if (request === null) return [];
+  if (
+    request.provider !== position.provider ||
+    request.vault_address !== position.vaultAddress ||
+    request.token_mint !== position.tokenMint ||
+    request.share_mint !== position.shareMint
+  )
+    throw conflict("Pending redemption does not match the withdrawal strategy");
+  let plan: EarnVaultTransactionPlan;
+  try {
+    plan = await client.buildParRedemptionCancel(earnRuntime(env), {
+      providerReference: position.vaultAddress,
+      owner: position.ownerAddress,
+      requestAddress: request.request_address,
+    });
+  } catch (error) {
+    // A known request may already have closed. Read failures still fail closed.
+    if (error instanceof Error && "code" in error && error.code === "REDEMPTION_REFUSED") return [];
+    rethrowVaultProviderFailure(error);
+  }
+  const id = "release_current_redemption";
+  return [
+    {
+      id,
+      kind: "recovery",
+      currentRedemptionRelease: { request, plan },
+      option: {
+        id,
+        label: "Release current pending redemption",
+        settlement: "instant",
+        estimatedSeconds: null,
+        mechanism: id,
+        minimum: null,
+      },
+    },
+  ];
+}
+
 /**
  * Read independent provider routes once, then quote each eligible route once.
  * No route is selected here. A delayed request never promises a payout time.
@@ -125,7 +195,11 @@ export async function prepareStrategyWithdrawalChoices(
   ]);
   const queue = queueRead.status === "fulfilled" ? queueRead.value : null;
   const par = parRead.status === "fulfilled" ? parRead.value : null;
-  const choices = await prepareRecoveryChoices(env, input, queueClient);
+  const [escrowRecoveries, currentRedemptionReleases] = await Promise.all([
+    prepareRecoveryChoices(env, input, queueClient),
+    prepareCurrentRedemptionReleaseChoice(env, input, parClient),
+  ]);
+  const choices = [...escrowRecoveries, ...currentRedemptionReleases];
   const quotes: Array<Promise<void>> = [];
   if (
     input.shares !== undefined &&
@@ -357,6 +431,18 @@ export async function prepareQueuedStrategyRecovery(
 ): Promise<PreparedQueuedStrategyTransaction> {
   requirePreparationSource(input);
   return prepared(await buildWalletQueuedWithdrawalRecovery(env, input));
+}
+
+/** Prepare a new consent to release the owner's current pending redemption. */
+export async function prepareCurrentRedemptionRelease(
+  env: Env,
+  input: QueuedStrategyPreparation & {
+    request: EarnVaultWithdrawalRequestRow;
+    plan: EarnVaultTransactionPlan;
+  }
+): Promise<PreparedQueuedStrategyTransaction> {
+  requirePreparationSource(input);
+  return prepared(await buildCurrentRedemptionRelease(env, input));
 }
 
 /** Recover exactly the stored build under the operation's authorized source. */

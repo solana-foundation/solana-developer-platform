@@ -658,6 +658,86 @@ export async function buildWalletQueuedWithdrawalRecovery(
   });
 }
 
+/**
+ * Release the current owner-scoped request, including one replaced after review.
+ * No historical request or amount is bound to these bytes. The accepted
+ * operation attempt supplies the durable receipt and PDA fence at submission.
+ */
+export async function buildCurrentRedemptionRelease(
+  env: Env,
+  input: {
+    actor: QueuedWithdrawalActor;
+    position: QueuedWithdrawalPosition;
+    request: EarnVaultWithdrawalRequestRow;
+    /** Live builder output from this same planning call only. */
+    plan: EarnVaultTransactionPlan;
+    feePayer?: string;
+    custodyWalletId?: string;
+    fee?: VaultFeeMode;
+  }
+): Promise<WalletQueuedWithdrawalBuiltTransaction> {
+  const { position, request } = input;
+  const { environment, cluster } = currentClusterScope();
+  if (
+    request.organization_id !== input.actor.organizationId ||
+    request.project_id !== input.actor.projectId ||
+    request.environment !== environment ||
+    request.position_id !== position.id ||
+    request.provider !== position.provider ||
+    request.owner_address !== position.ownerAddress ||
+    request.custody_wallet_id !== (input.custodyWalletId ?? null) ||
+    request.vault_address !== position.vaultAddress ||
+    request.token_mint !== position.tokenMint ||
+    request.share_mint !== position.shareMint ||
+    request.mechanism !== "operator_redemption" ||
+    input.plan.cluster !== cluster ||
+    input.plan.assetIdentity.depositTokenMint !== position.tokenMint ||
+    input.plan.assetIdentity.shareMint !== position.shareMint
+  )
+    throw conflict("Redemption release does not match the authorized position and source");
+  const transactionId = generateEarnWalletWithdrawalRequestTransactionId();
+  const plan = appendVaultRequestMemo(input.plan, "strategy-withdrawal-cancel", transactionId);
+  const feePayer =
+    input.fee === undefined
+      ? input.feePayer === position.ownerAddress
+        ? undefined
+        : input.feePayer
+      : vaultRentPayer(input.fee);
+  const unsigned = await compileWalletPlan({
+    actor: input.actor,
+    position,
+    plan,
+    fee: input.fee,
+    ...(feePayer ? { feePayer } : {}),
+  });
+  return createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env)).createWalletTransaction({
+    id: transactionId,
+    organizationId: input.actor.organizationId,
+    projectId: input.actor.projectId,
+    environment,
+    provider: position.provider,
+    custodyWalletId: input.custodyWalletId ?? null,
+    feeMode: input.fee?.kind === "sponsored" ? "sponsored" : feePayer ? "partner" : "wallet",
+    operationOnly: true,
+    positionId: position.id,
+    action: "cancel",
+    mechanism: "operator_redemption",
+    ownerAddress: position.ownerAddress,
+    vaultAddress: position.vaultAddress,
+    tokenMint: position.tokenMint,
+    shareMint: position.shareMint,
+    requestAddress: request.request_address,
+    shareDecimals: request.share_decimals,
+    assetDecimals: request.asset_decimals,
+    intermediateMint: request.intermediate_mint,
+    feePayer: feePayer ?? null,
+    unsignedTransaction: Buffer.from(unsigned.bytes).toString("base64"),
+    lastValidBlockHeight: unsigned.lastValidBlockHeight,
+    createdBy: input.actor.userId ?? null,
+    initiatedByKeyId: input.actor.apiKeyId ?? null,
+  });
+}
+
 async function requireWalletBuild(
   env: Env,
   input: {

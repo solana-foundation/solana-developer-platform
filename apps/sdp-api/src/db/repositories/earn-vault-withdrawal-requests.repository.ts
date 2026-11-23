@@ -10,6 +10,13 @@ import {
   fulfilledQueueQuantity,
   queuedFulfillmentMovementId,
 } from "@/db/repositories/earn-movements.repository";
+import {
+  CURRENT_REDEMPTION_RELEASE_COVERS_REQUEST_SQL,
+  type CurrentRedemptionReleaseRepository,
+  createCurrentRedemptionReleaseRepository,
+  isQueuedBuildFencedByCurrentRedemptionReleaseWithin,
+  isRequestFencedByCurrentRedemptionReleaseWithin,
+} from "@/db/repositories/earn-redemption-release.repository";
 import { AppError, conflict } from "@/lib/errors";
 
 /** A signed external build can recover this conflict with finalized evidence. */
@@ -145,6 +152,8 @@ export interface EarnWalletWithdrawalRequestTransactionRow {
   unsigned_transaction: string;
   last_valid_block_height: string;
   consumed_action_id: string | null;
+  consumed_attempt_id?: string | null;
+  release_finalized_at?: string | null;
   consumed_at: string | null;
   created_by: string | null;
   initiated_by_key_id: string | null;
@@ -282,7 +291,15 @@ interface FailQueuedWithdrawalActionInput {
   lastIndexError?: string | null;
 }
 
-export interface EarnVaultWithdrawalRequestsRepository {
+export interface EarnVaultWithdrawalRequestsRepository extends CurrentRedemptionReleaseRepository {
+  findCurrentRedemptionRequest(input: {
+    organizationId: string;
+    projectId: string;
+    environment: SdpEnvironment;
+    positionId: string;
+    ownerAddress: string;
+    custodyWalletId: string | null;
+  }): Promise<EarnVaultWithdrawalRequestRow | null>;
   acquireRequestReservation(input: {
     id: string;
     organizationId: string;
@@ -566,6 +583,153 @@ function assertFingerprint(row: { idempotency_fingerprint: string }, fingerprint
   }
 }
 
+/** A finalized broad release ends local occupancy, without assigning old history an outcome. */
+async function findBlockingRecordedRequest(
+  db: DatabaseExecutor,
+  input: {
+    environment: SdpEnvironment;
+    requestAddress: string;
+    mechanism?: EarnVaultWithdrawalMechanism;
+  }
+): Promise<{ id: string } | null> {
+  return db.queryOne<{ id: string }>(
+    `SELECT request.id FROM earn_vault_withdrawal_requests request
+     WHERE request.environment = ? AND request.request_address = ? AND request.status <> 'failed'
+       AND (? = 'solver_queue' OR request.mechanism = 'solver_queue'
+         OR (request.status NOT IN ('fulfilled', 'cancelled') AND NOT EXISTS (
+           SELECT 1 FROM earn_wallet_withdrawal_request_transactions release
+           WHERE ${CURRENT_REDEMPTION_RELEASE_COVERS_REQUEST_SQL}
+             AND release.release_finalized_at IS NOT NULL
+         ))) LIMIT 1`,
+    [input.environment, input.requestAddress, input.mechanism ?? "solver_queue"]
+  );
+}
+
+async function guardSignedParRequestBuild(
+  tx: DatabaseExecutor,
+  input: CreateSignedQueuedWithdrawalRequestInput
+): Promise<void> {
+  if (input.mechanism !== "operator_redemption" || input.walletTransactionId === undefined) return;
+  const stored = await tx.queryOne(
+    `SELECT * FROM earn_wallet_withdrawal_request_transactions
+     WHERE id = ? AND organization_id = ? FOR UPDATE`,
+    [input.walletTransactionId, input.organizationId]
+  );
+  const build = stored === null ? null : mapWalletBuild(stored);
+  if (
+    build === null ||
+    build.action !== "request" ||
+    build.mechanism !== input.mechanism ||
+    build.project_id !== input.projectId ||
+    build.environment !== input.environment ||
+    build.provider !== input.provider ||
+    build.owner_address !== input.ownerAddress ||
+    (build.custody_wallet_id ?? null) !== (input.custodyWalletId ?? null) ||
+    build.vault_address !== input.vaultAddress ||
+    build.request_address !== input.requestAddress ||
+    build.token_mint !== input.tokenMint ||
+    build.share_mint !== input.shareMint ||
+    build.intermediate_mint !== (input.intermediateMint ?? null) ||
+    build.shares !== input.shares ||
+    build.quoted_assets !== input.quotedAssets ||
+    build.intermediate_amount !== (input.intermediateAmount ?? null) ||
+    build.share_decimals !== input.shareDecimals ||
+    build.asset_decimals !== input.assetDecimals ||
+    build.last_valid_block_height !== input.lastValidBlockHeight ||
+    build.id !== input.pdaLeaseToken ||
+    (build.position_id !== null
+      ? build.position_id !== input.positionId
+      : build.strategy_id == null || input.discoveredPosition?.strategyId !== build.strategy_id)
+  )
+    throw conflict("Signed redemption does not match its canonical build");
+  // The chain read may predate a concurrent release. A fresh financial-row
+  // timestamp must never turn that old build into a new redemption cycle.
+  if (
+    await isQueuedBuildFencedByCurrentRedemptionReleaseWithin(tx, {
+      organizationId: input.organizationId,
+      environment: input.environment,
+      transactionId: build.id,
+    })
+  )
+    throw conflict("This signed redemption predates a current redemption release", {
+      reason: "redemption_release_fenced",
+    });
+}
+
+async function releaseTerminalRequestAddressLease(
+  tx: DatabaseExecutor,
+  request: EarnVaultWithdrawalRequestRow,
+  status: EarnVaultWithdrawalRequestStatus
+): Promise<void> {
+  if (
+    request.mechanism === "operator_redemption" &&
+    (status === "fulfilled" || status === "cancelled")
+  ) {
+    // Hastra reuses one owner-derived PDA with no cycle nonce. Keep a
+    // database-side embargo after terminal chain truth so another API
+    // path cannot reserve it immediately. The adapter independently
+    // proves >200 finalized block heights, which remains authoritative
+    // across a chain halt; this five-minute fence closes local races.
+    await tx
+      .prepare(
+        `UPDATE earn_vault_withdrawal_request_pda_leases
+                  SET occupied = FALSE,
+                      expires_at = to_char(
+                        timezone('UTC', now() + INTERVAL '5 minutes'),
+                        'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+                      ),
+                      reuse_not_before = to_char(
+                        timezone('UTC', now() + INTERVAL '5 minutes'),
+                        'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+                      ),
+                      last_valid_block_height = NULL
+                WHERE environment = ? AND request_address = ?
+                  AND lease_token = ? AND occupied`
+      )
+      .bind(request.environment, request.request_address, request.id)
+      .run();
+  } else if (status === "failed") {
+    await tx
+      .prepare(
+        `DELETE FROM earn_vault_withdrawal_request_pda_leases
+                WHERE environment = ? AND request_address = ?
+                  AND lease_token = ? AND occupied`
+      )
+      .bind(request.environment, request.request_address, request.id)
+      .run();
+  }
+}
+
+async function isRequestFinancialWriteFenced(
+  tx: DatabaseExecutor,
+  input: { organizationId: string; withdrawalRequestId: string }
+): Promise<boolean> {
+  const request = await tx.queryOne<EarnVaultWithdrawalRequestRow>(
+    `SELECT * FROM earn_vault_withdrawal_requests WHERE id = ? AND organization_id = ?`,
+    [input.withdrawalRequestId, input.organizationId]
+  );
+  return request !== null && lockAndCheckCurrentRedemptionFence(tx, request);
+}
+
+async function lockAndCheckCurrentRedemptionFence(
+  tx: DatabaseExecutor,
+  request: {
+    id: string;
+    organization_id: string;
+    environment: SdpEnvironment;
+    mechanism: EarnVaultWithdrawalMechanism;
+    request_address: string;
+  }
+): Promise<boolean> {
+  if (request.mechanism !== "operator_redemption") return false;
+  await lockQueuedWithdrawalKey(tx, "pda", `${request.environment}:${request.request_address}`);
+  return isRequestFencedByCurrentRedemptionReleaseWithin(tx, {
+    organizationId: request.organization_id,
+    environment: request.environment,
+    withdrawalRequestId: request.id,
+  });
+}
+
 async function lockQueuedWithdrawalKey(
   db: DatabaseExecutor,
   scope: "client" | "pda",
@@ -792,6 +956,27 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
   db: AppDb
 ): EarnVaultWithdrawalRequestsRepository {
   return {
+    ...createCurrentRedemptionReleaseRepository(db),
+    async findCurrentRedemptionRequest(input) {
+      const row = await db.queryOne(
+        `SELECT * FROM earn_vault_withdrawal_requests
+         WHERE organization_id = ? AND project_id = ? AND environment = ?
+           AND position_id = ? AND owner_address = ?
+           AND custody_wallet_id IS NOT DISTINCT FROM ?
+           AND mechanism = 'operator_redemption'
+           AND status NOT IN ('fulfilled', 'cancelled', 'failed')
+         ORDER BY created_at DESC, id DESC LIMIT 1`,
+        [
+          input.organizationId,
+          input.projectId,
+          input.environment,
+          input.positionId,
+          input.ownerAddress,
+          input.custodyWalletId,
+        ]
+      );
+      return row === null ? null : mapRequest(row);
+    },
     async acquireRequestReservation(input) {
       await db.transaction(async (executor) => {
         const tx = asTransactionalClient(executor);
@@ -804,19 +989,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
           )
           .bind(input.environment, input.requestAddress)
           .run();
-        const recorded = await tx
-          .prepare(
-            `SELECT id FROM earn_vault_withdrawal_requests
-              WHERE environment = ? AND request_address = ?
-                AND status <> 'failed'
-                AND (
-                  ? = 'solver_queue'
-                  OR mechanism = 'solver_queue'
-                  OR status NOT IN ('fulfilled', 'cancelled')
-                )`
-          )
-          .bind(input.environment, input.requestAddress, mechanism)
-          .first<{ id: string }>();
+        const recorded = await findBlockingRecordedRequest(tx, input);
         if (recorded) {
           throw requestAddressConflict(
             mechanism,
@@ -1046,19 +1219,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
           return { request: existing, action, replayed: true };
         }
 
-        const recordedAddress = await tx
-          .prepare(
-            `SELECT id FROM earn_vault_withdrawal_requests
-              WHERE environment = ? AND request_address = ?
-                AND status <> 'failed'
-                AND (
-                  ? = 'solver_queue'
-                  OR mechanism = 'solver_queue'
-                  OR status NOT IN ('fulfilled', 'cancelled')
-                )`
-          )
-          .bind(input.environment, input.requestAddress, input.mechanism)
-          .first<{ id: string }>();
+        const recordedAddress = await findBlockingRecordedRequest(tx, input);
         if (recordedAddress) {
           throw requestAddressConflict(
             input.mechanism,
@@ -1066,6 +1227,8 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
             "A queued withdrawal already uses this provider request address"
           );
         }
+
+        await guardSignedParRequestBuild(tx, input);
 
         const positionId = input.discoveredPosition
           ? (await claimDiscoveredStrategyPosition(input.discoveredPosition, executor)).id
@@ -1079,9 +1242,10 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
                share_decimals, asset_decimals, intermediate_mint, intermediate_amount,
                discount_bps, maturity_timestamp, deadline_timestamp,
                client_request_id, idempotency_fingerprint, creation_signature,
-               created_by, initiated_by_key_id
+               created_by, initiated_by_key_id, created_at
              ) VALUES (
-               ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'creating', FALSE, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+               ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'creating', FALSE, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+               to_char(timezone('UTC', clock_timestamp()), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
              )
              RETURNING *`
           )
@@ -1211,6 +1375,8 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
           return { request: mapRequest(request), action: existingAction, replayed: true };
         }
 
+        if (await isRequestFinancialWriteFenced(tx, input))
+          throw conflict("Historical redemption is fenced by a current release");
         if (built?.consumed_action_id != null)
           throw conflict(
             "This transaction was already submitted under a different idempotency key"
@@ -1387,6 +1553,15 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
       // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: action failure and mechanism-specific request recovery must commit atomically.
       return db.transaction(async (executor) => {
         const tx = asTransactionalClient(executor);
+        const identity = await tx.queryOne<EarnVaultWithdrawalRequestRow>(
+          `SELECT request.* FROM earn_vault_withdrawal_requests request
+           JOIN earn_vault_withdrawal_request_actions action ON action.withdrawal_request_id = request.id
+             AND action.organization_id = request.organization_id
+           WHERE action.id = ? AND action.organization_id = ?`,
+          [input.actionId, input.organizationId]
+        );
+        if (identity !== null && (await lockAndCheckCurrentRedemptionFence(tx, identity)))
+          return null;
         const actionRow = await tx
           .prepare(
             `UPDATE earn_vault_withdrawal_request_actions
@@ -1531,6 +1706,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
       const nextCheckAt = input.nextCheckAt ?? null;
       return db.transaction(async (executor) => {
         const tx = asTransactionalClient(executor);
+        if (await isRequestFinancialWriteFenced(tx, input)) return null;
         const row = await tx
           .prepare(
             `UPDATE earn_vault_withdrawal_requests
@@ -1616,43 +1792,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
             .bind(request.position_id, request.organization_id)
             .run();
         }
-        if (
-          request.mechanism === "operator_redemption" &&
-          (input.toStatus === "fulfilled" || input.toStatus === "cancelled")
-        ) {
-          // Hastra reuses one owner-derived PDA with no cycle nonce. Keep a
-          // database-side embargo after terminal chain truth so another API
-          // path cannot reserve it immediately. The adapter independently
-          // proves >200 finalized block heights, which remains authoritative
-          // across a chain halt; this five-minute fence closes local races.
-          await tx
-            .prepare(
-              `UPDATE earn_vault_withdrawal_request_pda_leases
-                  SET occupied = FALSE,
-                      expires_at = to_char(
-                        timezone('UTC', now() + INTERVAL '5 minutes'),
-                        'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
-                      ),
-                      reuse_not_before = to_char(
-                        timezone('UTC', now() + INTERVAL '5 minutes'),
-                        'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
-                      ),
-                      last_valid_block_height = NULL
-                WHERE environment = ? AND request_address = ?
-                  AND lease_token = ? AND occupied`
-            )
-            .bind(request.environment, request.request_address, request.id)
-            .run();
-        } else if (input.toStatus === "failed") {
-          await tx
-            .prepare(
-              `DELETE FROM earn_vault_withdrawal_request_pda_leases
-                WHERE environment = ? AND request_address = ?
-                  AND lease_token = ? AND occupied`
-            )
-            .bind(request.environment, request.request_address, request.id)
-            .run();
-        }
+        await releaseTerminalRequestAddressLease(tx, request, input.toStatus);
         return request;
       });
     },
@@ -1826,19 +1966,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
             )
             .bind(input.environment, input.requestAddress, input.currentBlockHeight)
             .run();
-          const recorded = await tx
-            .prepare(
-              `SELECT id FROM earn_vault_withdrawal_requests
-                WHERE environment = ? AND request_address = ?
-                  AND status <> 'failed'
-                  AND (
-                    ? = 'solver_queue'
-                    OR mechanism = 'solver_queue'
-                    OR status NOT IN ('fulfilled', 'cancelled')
-                  )`
-            )
-            .bind(input.environment, input.requestAddress, input.mechanism ?? "solver_queue")
-            .first<{ id: string }>();
+          const recorded = await findBlockingRecordedRequest(tx, input);
           if (recorded) {
             throw requestAddressConflict(
               input.mechanism,
@@ -1919,8 +2047,9 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
              asset_decimals, intermediate_mint, intermediate_amount,
              discount_bps, maturity_timestamp, deadline_timestamp,
              fee_payer, unsigned_transaction, last_valid_block_height,
-             created_by, initiated_by_key_id, custody_wallet_id, fee_mode, strategy_id, operation_only
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             created_by, initiated_by_key_id, custody_wallet_id, fee_mode, strategy_id, operation_only, created_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+             to_char(timezone('UTC', clock_timestamp()), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
            ON CONFLICT DO NOTHING
            RETURNING *`
           )

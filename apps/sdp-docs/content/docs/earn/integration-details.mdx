@@ -1,7 +1,7 @@
 ---
 module: earn
 title: Integration details
-description: Next actions, retries, refresh and cancellation, escrow recovery, fees, permissioned tokens and eligibility.
+description: Next actions, retries, refresh and cancellation, withdrawal recovery, fees, permissioned tokens and eligibility.
 ---
 
 ## Next actions
@@ -19,6 +19,10 @@ These calls live under `/v1/operations/{operationId}`. Only `/submit` lets SDP
 send anything; there is no separate approval step. `actionId` and `version`
 name the exact transaction you were shown: each refresh issues a new pair, and
 submitting an old pair returns `409`.
+
+Signing or broadcasting outside SDP does not update the operation. Send the
+exact signed bytes to `/submit` for operation tracking, even if you already
+broadcast them yourself.
 
 ## Refresh and cancel
 
@@ -59,9 +63,32 @@ for the next. The original operation is not reopened, and its `/cancel` stays
 unavailable. Expiry alone, or a missing provider request, does not authorize
 recovery.
 
-Hastra operator redemptions can't be recovered this way: their cancellation
-instruction can't be tied to one reviewed amount or request cycle. Don't treat
-their pending intermediate tokens as delivered USDC or recovered PRIME shares.
+## Release a pending Hastra redemption
+
+For a tracked Hastra position with a recorded pending operator redemption,
+prepare the same `POST /v1/earn/withdraw` with `amount: { "kind": "all" }`.
+SDP checks the current provider request and offers
+**Release current pending redemption**
+(`release_current_redemption`), even with no free PRIME or wYLDS balance.
+Explicitly select it with `/refresh`, review the transaction, then sign and
+submit as usual.
+
+This closes whichever Hastra request is current **when the transaction
+executes**, including a replacement created after review. It revokes Hastra's
+burn delegation if still present and preserves unrelated delegates. Hastra's
+instruction cannot target a historical request cycle or guarantee an unlocked
+amount. Review that scope before signing.
+
+Release does not mint PRIME or deliver USDC. After SDP verifies its cancellation
+transaction, the result is `settlementOutcome: "recovered"` with
+`settledAmount: null`. Read the position's `parIntermediate` for its current
+wYLDS balance. Issuer freezes can still block release.
+
+The original redemption's recorded outcome stays unchanged and can remain
+unresolved. A successful release completes only the new operation; it does not
+reopen the original or enable its `/cancel`. The normal signing, retry and
+post-submit rules still apply. An uncertain broadcast is not permission to
+build another release.
 
 ## Retries and idempotency
 

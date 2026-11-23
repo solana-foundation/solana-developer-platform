@@ -326,7 +326,28 @@ describe("0239 retired Earn storage", () => {
     const beforeRows = await liveRows();
     for (const rows of Object.values(beforeRows)) expect(rows).not.toHaveLength(0);
     const beforeSchema = await preservedSchema();
+    expect(
+      (
+        await client.query(
+          "SELECT to_regclass('idx_earn_vault_withdrawal_requests_operator_live_address')::text AS name"
+        )
+      ).rows
+    ).toEqual([{ name: "idx_earn_vault_withdrawal_requests_operator_live_address" }]);
     await client.query(migrationSql);
+    expect(
+      (
+        await client.query(
+          "SELECT to_regclass('idx_earn_vault_withdrawal_requests_operator_live_address')::text AS name"
+        )
+      ).rows
+    ).toEqual([{ name: null }]);
+    expect(
+      (
+        await client.query(
+          "SELECT to_regclass('idx_earn_vault_withdrawal_requests_live_address')::text AS name"
+        )
+      ).rows
+    ).toEqual([{ name: "idx_earn_vault_withdrawal_requests_live_address" }]);
     expect(await liveRows()).toEqual(beforeRows);
     expect(await preservedSchema()).toEqual(beforeSchema);
     for (const table of retiredTables) {

@@ -596,9 +596,12 @@ signs it: SDP never holds its keys. The wallet signs the exact bytes SDP
 prepared, and SDP rejects any change to them. Preparing grants no permission to
 send: only your `/submit` call does, and only for the transaction you reviewed.
 
-Only `completed` means the funds arrived: a signature, a confirmed request or
-shares held in escrow are not a payout. If SDP can't tell yet whether something
-ran, the operation stays pending until it can.
+`completed` means SDP verified the operation's outcome. A withdrawal payout
+and [recovery](/docs/earn/integration-details#recover-expired-withdrawal-escrow)
+are different outcomes: recovery can return shares or release held tokens
+without delivering the deposit token. A signature, confirmed request or escrow
+balance alone proves neither. If SDP can't tell whether something ran, the
+operation stays pending.
 
 ## Follow the funds
 
@@ -1091,7 +1094,7 @@ An instant exit burns the shares and pays out in one transaction. A queued
 exit files a withdrawal request instead: the shares move into the provider's
 escrow until the provider pays out, which can take days.
 
-When a strategy offers both, `nextAction.type` is `select_option`, and
+When a strategy offers several routes, `nextAction.type` is `select_option`, and
 `terms.options` lists each route with its `settlement`, `estimatedSeconds` and
 `amount`. Call
 `POST /v1/operations/{operationId}/refresh` with the chosen `optionId` and the
@@ -1112,13 +1115,20 @@ poll the [operation](/docs/earn/api-overview#operation):
   seconds: `redemptionDelayDays` on the strategy estimates the wait.
 - A request ID or escrowed shares aren't a payout, and there is no separate
   claim step.
-- `completed` means SDP verified the payout. A `null` `result.settledAmount` is
-  unknown, not zero.
+- `completed` means SDP verified the outcome. Normal withdrawals deliver the
+  payout; recovery returns shares or releases held tokens. A `null`
+  `result.settledAmount` gives no verified amount, not zero.
 
 Once submitted, a withdrawal can't be refreshed or cancelled, even while
 queued. If it ends `failed`, prepare a new one with a new `Idempotency-Key`; an
 unknown outcome is not a failure. If shares get stuck in an expired queue
 request, [recover them](/docs/earn/integration-details#recover-expired-withdrawal-escrow).
+
+A pending Hastra redemption can instead offer
+[Release current pending redemption](/docs/earn/integration-details#release-a-pending-hastra-redemption).
+Recovery always requires an explicit route choice, even when it is the only
+option. Hastra release applies to the request current at execution and reports
+no settled amount; it does not pay USDC or return PRIME.
 
 ---
 
@@ -1165,7 +1175,7 @@ to scope reads per customer, see
 ### Integration details
 Source: https://platform.solana.com/docs/earn/integration-details
 
-> Next actions, retries, refresh and cancellation, escrow recovery, fees, permissioned tokens and eligibility.
+> Next actions, retries, refresh and cancellation, withdrawal recovery, fees, permissioned tokens and eligibility.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
@@ -1184,6 +1194,10 @@ These calls live under `/v1/operations/{operationId}`. Only `/submit` lets SDP
 send anything; there is no separate approval step. `actionId` and `version`
 name the exact transaction you were shown: each refresh issues a new pair, and
 submitting an old pair returns `409`.
+
+Signing or broadcasting outside SDP does not update the operation. Send the
+exact signed bytes to `/submit` for operation tracking, even if you already
+broadcast them yourself.
 
 ## Refresh and cancel
 
@@ -1224,9 +1238,32 @@ for the next. The original operation is not reopened, and its `/cancel` stays
 unavailable. Expiry alone, or a missing provider request, does not authorize
 recovery.
 
-Hastra operator redemptions can't be recovered this way: their cancellation
-instruction can't be tied to one reviewed amount or request cycle. Don't treat
-their pending intermediate tokens as delivered USDC or recovered PRIME shares.
+## Release a pending Hastra redemption
+
+For a tracked Hastra position with a recorded pending operator redemption,
+prepare the same `POST /v1/earn/withdraw` with `amount: { "kind": "all" }`.
+SDP checks the current provider request and offers
+**Release current pending redemption**
+(`release_current_redemption`), even with no free PRIME or wYLDS balance.
+Explicitly select it with `/refresh`, review the transaction, then sign and
+submit as usual.
+
+This closes whichever Hastra request is current **when the transaction
+executes**, including a replacement created after review. It revokes Hastra's
+burn delegation if still present and preserves unrelated delegates. Hastra's
+instruction cannot target a historical request cycle or guarantee an unlocked
+amount. Review that scope before signing.
+
+Release does not mint PRIME or deliver USDC. After SDP verifies its cancellation
+transaction, the result is `settlementOutcome: "recovered"` with
+`settledAmount: null`. Read the position's `parIntermediate` for its current
+wYLDS balance. Issuer freezes can still block release.
+
+The original redemption's recorded outcome stays unchanged and can remain
+unresolved. A successful release completes only the new operation; it does not
+reopen the original or enable its `/cancel`. The normal signing, retry and
+post-submit rules still apply. An uncertain broadcast is not permission to
+build another release.
 
 ## Retries and idempotency
 
@@ -37421,7 +37458,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.e
 
         - **`settlementOutcome`** · `string | null` · required · one of `delivered`, `cancelled`, `recovered`
 
-          Recovered means strategy shares returned, not withdrawal proceeds.
+          Recovered means held assets were released; it does not mean withdrawal proceeds were paid. settledAmount is null when no returned amount is proven.
 
       - **`createdAt`** · `string` · required · format `date-time`
 
@@ -37749,7 +37786,7 @@ Source: https://platform.solana.com/docs/reference/api/earn/prepare-earn-withdra
 
 `POST /v1/earn/withdraw`
 
-The position fixes the strategy and owner; amount.kind is all, shares, token or intermediate. When the strategy offers more than one exit route, nextAction is select_option: call POST /v1/operations/\{operationId\}/refresh with an advertised optionId to prepare that route's transaction, then review and submit its new actionId and version. With amount.kind all, an expired solver escrow can advertise a recovery option even at a zero share balance; it prepares a new transaction that returns the escrowed shares and leaves the original withdrawal unchanged. Hastra par cancellation is not supported, because its reusable request is not bound to a cycle. Preparation never signs or broadcasts, and a queued request is not a payout: track the operation through settlement.
+The position fixes the strategy and owner; amount.kind is all, shares, token or intermediate. When the strategy offers more than one exit route, nextAction is select_option: call POST /v1/operations/\{operationId\}/refresh with an advertised optionId to prepare that route's transaction, then review and submit its new actionId and version. With amount.kind all, an expired solver escrow can advertise a recovery option even at a zero share balance; it prepares a new transaction that returns the escrowed shares and leaves the original withdrawal unchanged. A tracked Hastra operator redemption can advertise release_current_redemption, including with no free PRIME or wYLDS. Select it explicitly: it authorizes releasing the wallet's current pending redemption at execution, including any replacement request. This leaves available wYLDS in the wallet, returns no PRIME or USDC payout, and never rewrites an older withdrawal. Its completed result has settlementOutcome recovered and settledAmount null; position.parIntermediate reports live balances. Preparation never signs or broadcasts, and a queued request is not a payout: track the operation through settlement.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.execute` action.
 
@@ -38055,7 +38092,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.e
 
         - **`settlementOutcome`** · `string | null` · required · one of `delivered`, `cancelled`, `recovered`
 
-          Recovered means strategy shares returned, not withdrawal proceeds.
+          Recovered means held assets were released; it does not mean withdrawal proceeds were paid. settledAmount is null when no returned amount is proven.
 
       - **`createdAt`** · `string` · required · format `date-time`
 
@@ -38681,7 +38718,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
         - **`settlementOutcome`** · `string | null` · required · one of `delivered`, `cancelled`, `recovered`
 
-          Recovered means strategy shares returned, not withdrawal proceeds.
+          Recovered means held assets were released; it does not mean withdrawal proceeds were paid. settledAmount is null when no returned amount is proven.
 
       - **`createdAt`** · `string` · required · format `date-time`
 
@@ -38952,7 +38989,7 @@ Source: https://platform.solana.com/docs/reference/api/earn/get-operation
 
 `GET /v1/operations/{operationId}`
 
-Poll it after submitting. Each nextAction type says what to do next: sign_transaction asks the owner to sign, select_option asks you to choose a route with refresh, and wait means keep polling the same attempt. queued, awaiting_signature, submitted and settling are in progress. For a queued withdrawal, submitted means its request is still confirming, and settling means the provider has yet to pay out. completed means verified delivery; for a selected recovery, result.settlementOutcome recovered means returned strategy shares, never withdrawal proceeds. cancelled means a verified cancellation. canCancel says whether the preparation can still be cancelled, which also needs earn.manage; cancelRequestedAt alone is pending intent. result fields stay null until their source is known. Requires earn.read and source visibility.
+Poll it after submitting. Each nextAction type says what to do next: sign_transaction asks the owner to sign, select_option asks you to choose a route with refresh, and wait means keep polling the same attempt. queued, awaiting_signature, submitted and settling are in progress. For a queued withdrawal, submitted means its request is still confirming, and settling means the provider has yet to pay out. completed means verified delivery; for a selected recovery, result.settlementOutcome recovered means assets were released, never withdrawal proceeds. A Hastra current-redemption release reports settledAmount null; read the position for live available wYLDS. cancelled means a verified cancellation. canCancel says whether the preparation can still be cancelled, which also needs earn.manage; cancelRequestedAt alone is pending intent. result fields stay null until their source is known. Requires earn.read and source visibility.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
 
@@ -39218,7 +39255,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
         - **`settlementOutcome`** · `string | null` · required · one of `delivered`, `cancelled`, `recovered`
 
-          Recovered means strategy shares returned, not withdrawal proceeds.
+          Recovered means held assets were released; it does not mean withdrawal proceeds were paid. settledAmount is null when no returned amount is proven.
 
       - **`createdAt`** · `string` · required · format `date-time`
 
@@ -39697,7 +39734,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.e
 
         - **`settlementOutcome`** · `string | null` · required · one of `delivered`, `cancelled`, `recovered`
 
-          Recovered means strategy shares returned, not withdrawal proceeds.
+          Recovered means held assets were released; it does not mean withdrawal proceeds were paid. settledAmount is null when no returned amount is proven.
 
       - **`createdAt`** · `string` · required · format `date-time`
 
@@ -40218,7 +40255,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.e
 
         - **`settlementOutcome`** · `string | null` · required · one of `delivered`, `cancelled`, `recovered`
 
-          Recovered means strategy shares returned, not withdrawal proceeds.
+          Recovered means held assets were released; it does not mean withdrawal proceeds were paid. settledAmount is null when no returned amount is proven.
 
       - **`createdAt`** · `string` · required · format `date-time`
 
@@ -40743,7 +40780,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.m
 
         - **`settlementOutcome`** · `string | null` · required · one of `delivered`, `cancelled`, `recovered`
 
-          Recovered means strategy shares returned, not withdrawal proceeds.
+          Recovered means held assets were released; it does not mean withdrawal proceeds were paid. settledAmount is null when no returned amount is proven.
 
       - **`createdAt`** · `string` · required · format `date-time`
 

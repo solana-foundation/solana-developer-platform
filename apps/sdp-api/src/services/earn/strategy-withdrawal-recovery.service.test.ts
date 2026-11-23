@@ -12,7 +12,10 @@ import {
   assertStrategyRecoverySource,
   readExpiredStrategyWithdrawalRecoveries,
 } from "./strategy-withdrawal-recovery.service";
-import { buildWalletQueuedWithdrawalRecovery } from "./vault-queued-withdraw.service";
+import {
+  buildCurrentRedemptionRelease,
+  buildWalletQueuedWithdrawalRecovery,
+} from "./vault-queued-withdraw.service";
 
 const mocks = vi.hoisted(() => ({
   resolve: vi.fn(),
@@ -396,6 +399,112 @@ describe("expired strategy escrow recovery", () => {
         })
       )
     ).rejects.toThrow("changed while preparing");
+    expect(mocks.createWalletTransaction).not.toHaveBeenCalled();
+  });
+});
+
+describe("current redemption release preparation", () => {
+  const releaseRequest = () =>
+    request({
+      provider: "hastra",
+      mechanism: "operator_redemption",
+      status: "pending",
+      intermediate_mint: "wylds",
+      intermediate_amount: "9.9",
+    });
+  const releasePosition = { ...position, provider: "hastra" };
+  const releasePlan = { ...plan, cluster: "devnet" as const, accepted: undefined };
+
+  it("stores identity metadata without binding historical amounts or request A", async () => {
+    const historical = releaseRequest();
+    await inScope(() =>
+      buildCurrentRedemptionRelease(env, {
+        actor,
+        position: releasePosition,
+        request: historical,
+        plan: releasePlan,
+        custodyWalletId: position.custodyWalletId,
+      })
+    );
+    const built = mocks.createWalletTransaction.mock.calls[0]?.[0];
+    expect(built).toMatchObject({
+      action: "cancel",
+      mechanism: "operator_redemption",
+      operationOnly: true,
+      positionId: position.id,
+      requestAddress: "request_address",
+      intermediateMint: "wylds",
+      shareDecimals: 6,
+      assetDecimals: 6,
+    });
+    for (const field of ["withdrawalRequestId", "shares", "quotedAssets", "intermediateAmount"])
+      expect(built).not.toHaveProperty(field);
+    expect(historical).toEqual(releaseRequest());
+    expect(mocks.advanceRequest).not.toHaveBeenCalled();
+    expect(mocks.build).not.toHaveBeenCalled();
+    expect(mocks.simulate).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { organization_id: "foreign" },
+    { project_id: "foreign" },
+    { environment: "production" as const },
+    { position_id: "foreign" },
+    { provider: "foreign" },
+    { custody_wallet_id: "foreign" },
+    { owner_address: "foreign" },
+    { vault_address: "foreign" },
+    { token_mint: "foreign" },
+    { share_mint: "foreign" },
+    { mechanism: "solver_queue" as const },
+  ])("refuses a substituted request identity: %j", async (changed) => {
+    await expect(
+      inScope(() =>
+        buildCurrentRedemptionRelease(env, {
+          actor,
+          position: releasePosition,
+          request: { ...releaseRequest(), ...changed },
+          plan: releasePlan,
+          custodyWalletId: position.custodyWalletId,
+        })
+      )
+    ).rejects.toThrow("authorized position and source");
+    expect(mocks.createWalletTransaction).not.toHaveBeenCalled();
+    expect(mocks.simulate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { cluster: "mainnet-beta" as const },
+    { assetIdentity: { depositTokenMint: "foreign", shareMint: position.shareMint } },
+    { assetIdentity: { depositTokenMint: position.tokenMint, shareMint: "foreign" } },
+  ])("refuses a builder outside the reviewed instrument: %j", async (changed) => {
+    await expect(
+      inScope(() =>
+        buildCurrentRedemptionRelease(env, {
+          actor,
+          position: releasePosition,
+          request: releaseRequest(),
+          plan: { ...releasePlan, ...changed },
+          custodyWalletId: position.custodyWalletId,
+        })
+      )
+    ).rejects.toThrow("authorized position and source");
+    expect(mocks.createWalletTransaction).not.toHaveBeenCalled();
+  });
+
+  it("refuses failed simulation before exposing a release transaction", async () => {
+    mocks.simulate.mockResolvedValue({ ok: false, error: "changed current request" });
+    await expect(
+      inScope(() =>
+        buildCurrentRedemptionRelease(env, {
+          actor,
+          position: releasePosition,
+          request: releaseRequest(),
+          plan: releasePlan,
+          custodyWalletId: position.custodyWalletId,
+        })
+      )
+    ).rejects.toThrow("simulation failed");
     expect(mocks.createWalletTransaction).not.toHaveBeenCalled();
   });
 });

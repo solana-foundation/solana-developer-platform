@@ -9,6 +9,12 @@
 -- their positions, signed ledger, canonical builds and queued exits remain.
 -- A remaining dependency aborts the transaction instead of cascading away.
 
+-- A finalized current release leaves earlier financial outcomes unknown.
+-- Retire historical PAR uniqueness only after the parent serves its global
+-- PDA lease, exact token promotion and historical reconciliation guards.
+-- Keep solver uniqueness, occupied leases and the provider reuse cooldown.
+DROP INDEX idx_earn_vault_withdrawal_requests_operator_live_address;
+
 DROP TABLE earn_external_wallet_transactions;
 DROP TABLE earn_external_wallet_withdrawal_request_transactions;
 DROP TABLE earn_split_swap_advisories;

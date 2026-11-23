@@ -194,6 +194,7 @@ function historicalTransaction(blockTime = 1_700_000_000, err: string | null = n
 function fakeLedger(current: EarnVaultWithdrawalRequestRow) {
   return {
     getById: vi.fn().mockResolvedValue(current),
+    isRequestFencedByCurrentRedemptionRelease: vi.fn().mockResolvedValue(false),
     observeExpiredUnknownSignature: vi.fn().mockResolvedValue("repeat"),
     advanceAction: vi.fn().mockResolvedValue(null),
     advanceRequest: vi.fn().mockResolvedValue(null),
@@ -1287,5 +1288,75 @@ describe("queued withdrawal reconciliation", () => {
         cancelledAt: "2023-11-14T22:18:20.000Z",
       })
     );
+  });
+
+  it.each(["10.25", "20.5"])(
+    "never projects replacement B amount %s onto frozen historical A",
+    async (amount) => {
+      const historical = parRequest({ status: "pending" });
+      const ledger = fakeLedger(historical);
+      vi.mocked(ledger.isRequestFencedByCurrentRedemptionRelease).mockResolvedValue(true);
+      const read = vi.fn().mockResolvedValue({
+        requestAddress: historical.request_address,
+        status: "pending",
+        request: {
+          requestAddress: historical.request_address,
+          providerReference: historical.vault_address,
+          owner: historical.owner_address,
+          intermediateMint: historical.intermediate_mint,
+          intermediateAmount: amount,
+        },
+      });
+      parProvider.client = { readParRedemptionRequest: read };
+      expect(await inSandboxScope(() => reconcileParRequest(env, ledger, historical))).toBe(
+        "unchanged"
+      );
+      expect(read).not.toHaveBeenCalled();
+      expect(ledger.advanceRequest).not.toHaveBeenCalled();
+      expect(historical).toMatchObject({
+        status: "pending",
+        closing_signature: null,
+        assets_paid: null,
+      });
+      expect(clusterRpc.calls).toEqual([]);
+    }
+  );
+
+  it("does not rebroadcast an old signed action across an accepted current release", async () => {
+    const ledger = fakeLedger(parRequest());
+    vi.mocked(ledger.isRequestFencedByCurrentRedemptionRelease).mockResolvedValue(true);
+    expect(
+      await reconcileAction(env, ledger, action(), null, { rpc: emptyRpc, currentHeight: 1n })
+    ).toBe("unchanged");
+    expect(broadcast).not.toHaveBeenCalled();
+    expect(ledger.advanceAction).not.toHaveBeenCalled();
+    expect(ledger.advanceRequest).not.toHaveBeenCalled();
+  });
+
+  it("resumes unchanged history after a definitive release failure clears its fence", async () => {
+    const historical = parRequest({ status: "pending" });
+    const ledger = fakeLedger(historical);
+    const fenced = vi.mocked(ledger.isRequestFencedByCurrentRedemptionRelease);
+    fenced.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const read = vi.fn().mockResolvedValue({
+      requestAddress: historical.request_address,
+      status: "pending",
+      request: {
+        requestAddress: historical.request_address,
+        providerReference: historical.vault_address,
+        owner: historical.owner_address,
+        intermediateMint: historical.intermediate_mint,
+        intermediateAmount: historical.intermediate_amount,
+      },
+    });
+    parProvider.client = { readParRedemptionRequest: read };
+    await inSandboxScope(() => reconcileParRequest(env, ledger, historical));
+    expect(read).not.toHaveBeenCalled();
+    await inSandboxScope(() => reconcileParRequest(env, ledger, historical));
+    expect(read).toHaveBeenCalledOnce();
+    expect(ledger.advanceRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ toStatus: "pending" })
+    );
+    expect(historical.assets_paid).toBeNull();
   });
 });

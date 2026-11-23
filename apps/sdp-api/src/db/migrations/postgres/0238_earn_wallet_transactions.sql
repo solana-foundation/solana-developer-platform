@@ -119,7 +119,9 @@ CREATE TABLE earn_wallet_withdrawal_request_transactions (
     unsigned_transaction TEXT NOT NULL,
     last_valid_block_height NUMERIC NOT NULL,
     consumed_action_id TEXT,
+    consumed_attempt_id TEXT,
     consumed_at TEXT,
+    release_finalized_at TEXT,
     created_by TEXT,
     initiated_by_key_id TEXT,
     created_at TEXT NOT NULL DEFAULT sdp_iso_now(),
@@ -145,11 +147,14 @@ CREATE TABLE earn_wallet_withdrawal_request_transactions (
     FOREIGN KEY (withdrawal_request_id, organization_id, environment)
         REFERENCES earn_vault_withdrawal_requests(id, organization_id, environment),
     FOREIGN KEY (consumed_action_id) REFERENCES earn_vault_withdrawal_request_actions(id),
+    FOREIGN KEY (consumed_attempt_id, organization_id, project_id, environment)
+        REFERENCES operation_attempts(id, organization_id, project_id, environment),
     FOREIGN KEY (created_by) REFERENCES users(id),
     FOREIGN KEY (custody_wallet_id) REFERENCES custody_wallets(id),
     FOREIGN KEY (strategy_id) REFERENCES earn_strategies(id),
     CONSTRAINT earn_wallet_withdrawal_request_transactions_consumed_action_key
         UNIQUE (consumed_action_id),
+    CONSTRAINT earn_queued_build_consumed_attempt_key UNIQUE (consumed_attempt_id),
     CONSTRAINT earn_wallet_withdrawal_request_transactions_environment_check
         CHECK (environment IN ('sandbox', 'production')),
     CONSTRAINT earn_wallet_withdrawal_request_transactions_action_check
@@ -162,7 +167,14 @@ CREATE TABLE earn_wallet_withdrawal_request_transactions (
         CHECK (last_valid_block_height = TRUNC(last_valid_block_height)
             AND last_valid_block_height BETWEEN 0 AND 18446744073709551615),
     CONSTRAINT earn_wallet_withdrawal_request_transactions_consumed_check
-        CHECK ((consumed_action_id IS NULL) = (consumed_at IS NULL)),
+        CHECK (num_nonnulls(consumed_action_id, consumed_attempt_id) <= 1
+            AND (num_nonnulls(consumed_action_id, consumed_attempt_id) = 0)
+                = (consumed_at IS NULL)),
+    CONSTRAINT earn_queued_build_release_consumption_check
+        CHECK ((consumed_attempt_id IS NULL OR (action = 'cancel'
+                AND mechanism = 'operator_redemption' AND operation_only
+                AND withdrawal_request_id IS NULL AND project_id IS NOT NULL))
+            AND (release_finalized_at IS NULL OR consumed_attempt_id IS NOT NULL)),
     CONSTRAINT earn_wallet_withdrawal_request_transactions_mechanism_check
         CHECK (mechanism IN ('solver_queue', 'operator_redemption')),
     CONSTRAINT earn_wallet_withdrawal_request_transactions_fee_mode_check
@@ -185,14 +197,23 @@ CREATE TABLE earn_wallet_withdrawal_request_transactions (
                         AND maturity_timestamp IS NULL AND deadline_timestamp IS NULL)
                 ))
             OR
-            (action = 'cancel' AND withdrawal_request_id IS NOT NULL
-                AND shares IS NULL AND quoted_assets IS NULL
-                AND share_decimals IS NULL AND asset_decimals IS NULL
-                AND intermediate_mint IS NULL AND intermediate_amount IS NULL
-                AND discount_bps IS NULL
-                AND maturity_timestamp IS NULL AND deadline_timestamp IS NULL)
+            (action = 'cancel' AND shares IS NULL AND quoted_assets IS NULL
+                AND intermediate_amount IS NULL AND discount_bps IS NULL
+                AND maturity_timestamp IS NULL AND deadline_timestamp IS NULL
+                AND ((withdrawal_request_id IS NOT NULL
+                        AND share_decimals IS NULL AND asset_decimals IS NULL
+                        AND intermediate_mint IS NULL)
+                    OR (withdrawal_request_id IS NULL
+                        AND mechanism = 'operator_redemption' AND operation_only
+                        AND position_id IS NOT NULL AND project_id IS NOT NULL
+                        AND share_decimals IS NOT NULL AND asset_decimals IS NOT NULL
+                        AND intermediate_mint IS NOT NULL)))
         )
 );
+
+CREATE INDEX earn_current_redemption_release_address_proof
+ON earn_wallet_withdrawal_request_transactions (environment, request_address, consumed_at)
+WHERE release_finalized_at IS NOT NULL;
 
 -- The custody FK retains the position claim. Also bind the build's signing
 -- address and project/mints, which are not part of that existing unique key.
@@ -238,6 +259,41 @@ EXECUTE FUNCTION sdp_earn_queued_build_custody_source();
 CREATE TRIGGER earn_queued_transactions_operation_only
 BEFORE UPDATE ON earn_wallet_withdrawal_request_transactions
 FOR EACH ROW EXECUTE FUNCTION sdp_earn_operation_only_build();
+
+
+-- A release records only its own accepted attempt and finality proof. It never
+-- changes a historical redemption, whose owner-derived PDA may have been reused.
+CREATE FUNCTION sdp_earn_current_redemption_release_immutable() RETURNS TRIGGER
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.consumed_attempt_id IS NOT NULL AND
+       NEW.consumed_attempt_id IS DISTINCT FROM OLD.consumed_attempt_id AND NOT EXISTS (
+        SELECT 1 FROM operation_attempts attempt
+        WHERE attempt.id = NEW.consumed_attempt_id
+            AND attempt.organization_id = NEW.organization_id
+            AND attempt.project_id = NEW.project_id
+            AND attempt.environment = NEW.environment
+            AND attempt.build_ref ->> 'kind' = 'earn.queued_transaction'
+            AND attempt.build_ref ->> 'id' = NEW.id
+            AND attempt.execution_requested_at IS NOT NULL
+    ) THEN
+        RAISE EXCEPTION 'Redemption release requires its accepted operation attempt';
+    END IF;
+    IF OLD.consumed_attempt_id IS NOT NULL AND
+       (to_jsonb(NEW) - ARRAY['release_finalized_at', 'updated_at', 'position_owner_address']) IS DISTINCT FROM
+       (to_jsonb(OLD) - ARRAY['release_finalized_at', 'updated_at', 'position_owner_address']) THEN
+        RAISE EXCEPTION 'Accepted redemption release is immutable';
+    END IF;
+    IF OLD.release_finalized_at IS NOT NULL AND
+       NEW.release_finalized_at IS DISTINCT FROM OLD.release_finalized_at THEN
+        RAISE EXCEPTION 'Redemption release finality is immutable';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER earn_current_redemption_release_immutable
+BEFORE INSERT OR UPDATE ON earn_wallet_withdrawal_request_transactions
+FOR EACH ROW EXECUTE FUNCTION sdp_earn_current_redemption_release_immutable();
 
 ALTER TABLE earn_wallet_transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE earn_wallet_transactions FORCE ROW LEVEL SECURITY;

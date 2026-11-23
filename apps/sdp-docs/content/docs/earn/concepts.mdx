@@ -22,9 +22,12 @@ signs it: SDP never holds its keys. The wallet signs the exact bytes SDP
 prepared, and SDP rejects any change to them. Preparing grants no permission to
 send: only your `/submit` call does, and only for the transaction you reviewed.
 
-Only `completed` means the funds arrived: a signature, a confirmed request or
-shares held in escrow are not a payout. If SDP can't tell yet whether something
-ran, the operation stays pending until it can.
+`completed` means SDP verified the operation's outcome. A withdrawal payout
+and [recovery](/docs/earn/integration-details#recover-expired-withdrawal-escrow)
+are different outcomes: recovery can return shares or release held tokens
+without delivering the deposit token. A signature, confirmed request or escrow
+balance alone proves neither. If SDP can't tell whether something ran, the
+operation stays pending.
 
 ## Follow the funds
 

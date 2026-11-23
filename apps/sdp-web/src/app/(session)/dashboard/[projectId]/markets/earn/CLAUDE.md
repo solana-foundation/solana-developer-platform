@@ -34,9 +34,10 @@ The default activity view polls active work and the newest 50 history entries.
 Older pages load on demand and keep their snapshot while expanded; Refresh
 returns to the newest page. Retain a pending row until its existing detail poll
 observes a terminal outcome, even if it leaves the active feed. Completion from
-either feed or detail must refresh holdings. Recovered shares refresh holdings
-and cash observations without becoming withdrawal proceeds. Timestamp-only
-updates must not trigger another balance read.
+either feed or detail must refresh holdings. A recovery refreshes holdings and
+cash observations without becoming withdrawal proceeds. Hastra releases report
+no settled amount; current available wYLDS comes from the live position read.
+Timestamp-only updates must not trigger another balance read.
 
 Render `nextAction` explicitly: `submit`, `sign_transaction`, `select_option`,
 `sign_in_provider`, `wait` or `refresh`. Selecting a withdrawal option
