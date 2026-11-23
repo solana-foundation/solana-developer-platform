@@ -290,7 +290,7 @@ function useEarnPreparation(props: ActionProps) {
 export function EarnCoreActionModal(props: ActionProps) {
   const t = useTranslations();
   const preparation = useEarnPreparation(props);
-  const { form, selectedWallet, prepared, setPrepared, busy, error, prepare } = preparation;
+  const { prepared, setPrepared } = preparation;
   const focusRef = useModalFocus({
     focusKey: prepared?.id ?? "details",
     initialFocusSelector: "[data-modal-focus-target]",
@@ -321,68 +321,107 @@ export function EarnCoreActionModal(props: ActionProps) {
             }}
           />
         ) : (
-          <form className="mt-5 space-y-4" onSubmit={prepare}>
-            {props.kind === "deposit" ? (
-              <EarnFundingSourceFields strategy={props.strategy} preparation={preparation} />
-            ) : (
-              <EarnWithdrawalQuantityFields
-                intermediate={props.intermediate}
-                preparation={preparation}
-              />
-            )}
-            {!form.values.withdrawAll ? (
-              <div className="space-y-2">
-                <Label htmlFor="earn-core-amount">{t("DashboardEarn.core.amount")}</Label>
-                <Input
-                  id="earn-core-amount"
-                  inputMode="decimal"
-                  value={form.values.amount}
-                  onChange={(event) => form.setField("amount", event.target.value)}
-                  autoComplete="off"
-                  aria-invalid={form.errors.amount ? true : undefined}
-                  aria-describedby={form.errors.amount ? "earn-core-amount-error" : undefined}
-                />
-                {form.errors.amount ? (
-                  <p id="earn-core-amount-error" className="text-meta text-error">
-                    {form.errors.amount}
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-            <div className="space-y-2">
-              <Label htmlFor="earn-core-slippage">{t("DashboardEarn.core.slippage")}</Label>
-              <Input
-                id="earn-core-slippage"
-                inputMode="numeric"
-                value={form.values.slippage}
-                onChange={(event) => form.setField("slippage", event.target.value)}
-                aria-invalid={form.errors.slippage ? true : undefined}
-                aria-describedby={form.errors.slippage ? "earn-core-slippage-error" : undefined}
-              />
-              {form.errors.slippage ? (
-                <p id="earn-core-slippage-error" className="text-meta text-error">
-                  {form.errors.slippage}
-                </p>
-              ) : null}
-            </div>
-            <p className="text-caption text-secondary">{t("DashboardEarn.core.prepareNote")}</p>
-            {error ? <Callout variant="danger">{error}</Callout> : null}
-            <div className="flex justify-end gap-3 pt-4">
-              <Button type="button" variant="secondary" onClick={props.onClose}>
-                {t("DashboardEarn.core.close")}
-              </Button>
-              <Button
-                type="submit"
-                loading={busy}
-                disabled={props.kind === "deposit" && !selectedWallet}
-              >
-                {t("DashboardEarn.core.review")}
-              </Button>
-            </div>
-          </form>
+          <EarnPreparationForm action={props} preparation={preparation} />
         )}
       </div>
     </Modal>
+  );
+}
+
+/** The details step: what to move, then a review that prepares terms without signing. */
+function EarnPreparationForm({
+  action,
+  preparation,
+}: {
+  action: ActionProps;
+  preparation: ReturnType<typeof useEarnPreparation>;
+}) {
+  const t = useTranslations();
+  const { form, selectedWallet, busy, error, prepare } = preparation;
+  return (
+    <form className="mt-5 space-y-4" onSubmit={prepare}>
+      {action.kind === "deposit" ? (
+        <EarnFundingSourceFields strategy={action.strategy} preparation={preparation} />
+      ) : (
+        <EarnWithdrawalQuantityFields
+          intermediate={action.intermediate}
+          preparation={preparation}
+        />
+      )}
+      {!form.values.withdrawAll ? (
+        <EarnTextField
+          id="earn-core-amount"
+          label={t("DashboardEarn.core.amount")}
+          inputMode="decimal"
+          autoComplete="off"
+          value={form.values.amount}
+          error={form.errors.amount}
+          onChange={(value) => form.setField("amount", value)}
+        />
+      ) : null}
+      <EarnTextField
+        id="earn-core-slippage"
+        label={t("DashboardEarn.core.slippage")}
+        inputMode="numeric"
+        value={form.values.slippage}
+        error={form.errors.slippage}
+        onChange={(value) => form.setField("slippage", value)}
+      />
+      <p className="text-caption text-secondary">{t("DashboardEarn.core.prepareNote")}</p>
+      {error ? <Callout variant="danger">{error}</Callout> : null}
+      <div className="flex justify-end gap-3 pt-4">
+        <Button type="button" variant="secondary" onClick={action.onClose}>
+          {t("DashboardEarn.core.close")}
+        </Button>
+        <Button
+          type="submit"
+          loading={busy}
+          disabled={action.kind === "deposit" && !selectedWallet}
+        >
+          {t("DashboardEarn.core.review")}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/** A labelled text input whose validation message sits under it and describes it. */
+function EarnTextField({
+  id,
+  label,
+  inputMode,
+  autoComplete,
+  value,
+  error,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  inputMode: "decimal" | "numeric";
+  autoComplete?: string;
+  value: string;
+  error: string | undefined;
+  onChange: (value: string) => void;
+}) {
+  const errorId = `${id}-error`;
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={id}>{label}</Label>
+      <Input
+        id={id}
+        inputMode={inputMode}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        autoComplete={autoComplete}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? errorId : undefined}
+      />
+      {error ? (
+        <p id={errorId} className="text-meta text-error">
+          {error}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
