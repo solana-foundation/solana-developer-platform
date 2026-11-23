@@ -2,7 +2,7 @@
 // The config you add here will be used whenever the server handles a request.
 // https://docs.sentry.io/platforms/javascript/guides/nextjs/
 
-import { sentryScrubbingHooks } from "@sdp/redaction/sentry";
+import { sentryDataCollection, sentryScrubbingHooks } from "@sdp/redaction/sentry";
 import * as Sentry from "@sentry/nextjs";
 
 const sentryDsn =
@@ -18,17 +18,13 @@ if (sentryDsn) {
     // Define how likely traces are sampled. Adjust this value in production, or use tracesSampler for greater control.
     tracesSampleRate: process.env.NODE_ENV === "production" ? 0.1 : 1,
 
-    // Enable logs to be sent to Sentry
-    enableLogs: true,
+    // What the SDK may collect on its own: nothing.
+    dataCollection: sentryDataCollection,
 
-    // Enable sending user PII (Personally Identifiable Information)
-    // https://docs.sentry.io/platforms/javascript/guides/nextjs/configuration/options/#sendDefaultPii
-    sendDefaultPii: false,
-
-    // The scrubbing boundary. `sendDefaultPii: false` only stops the SDK
-    // collecting PII on its own; these hooks strip what the app attaches, on
-    // every payload type — errors, transactions, spans, logs, metrics,
-    // breadcrumbs. Shared with the API so there is one denylist.
+    // The scrubbing boundary. `dataCollection` only stops the SDK collecting
+    // PII on its own; these hooks strip what the app attaches, on every
+    // payload type — errors, spans, logs, metrics, breadcrumbs. Shared with
+    // the API so there is one denylist.
     ...sentryScrubbingHooks,
   });
 }
