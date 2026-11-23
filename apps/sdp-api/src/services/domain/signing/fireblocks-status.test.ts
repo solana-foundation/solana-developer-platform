@@ -1,4 +1,6 @@
 import {
+  FIREBLOCKS_CANCELLABLE_TRANSACTION_STATUSES,
+  FIREBLOCKS_CANCELLED_TRANSACTION_STATUSES,
   FIREBLOCKS_FAILED_TRANSACTION_STATUSES,
   FIREBLOCKS_SIGNING_PROPOSAL_STATUSES,
   isFireblocksProposalCancellable,
@@ -13,7 +15,8 @@ import { required } from "@/test/helpers/required";
 
 // Provider states: https://developers.fireblocks.com/reference/transaction-statuses
 describe("Fireblocks cancellation states", () => {
-  it.each([
+  // This literal list is the spec; the exported set must match it exactly.
+  const preBroadcastStates = [
     "SUBMITTED",
     "QUEUED",
     "PENDING_AML_SCREENING",
@@ -22,9 +25,20 @@ describe("Fireblocks cancellation states", () => {
     "PENDING_3RD_PARTY",
     "PENDING_AUTHORIZATION",
     "PENDING_ENRICHMENT",
-  ])("offers a cancellation request in the pre-broadcast state %s", (status) => {
-    expect(isFireblocksTransactionCancellable(status)).toBe(true);
-    expect(isFireblocksProposalCancellable(status)).toBe(true);
+  ] as const;
+
+  it.each(preBroadcastStates)(
+    "offers a cancellation request in the pre-broadcast state %s",
+    (status) => {
+      expect(isFireblocksTransactionCancellable(status)).toBe(true);
+      expect(isFireblocksProposalCancellable(status)).toBe(true);
+    }
+  );
+
+  it("offers a cancellation request in the pre-broadcast states and no others", () => {
+    expect([...FIREBLOCKS_CANCELLABLE_TRANSACTION_STATUSES].sort()).toEqual(
+      [...preBroadcastStates].sort()
+    );
   });
 
   it.each(FIREBLOCKS_FAILED_TRANSACTION_STATUSES)(
@@ -45,13 +59,21 @@ describe("Fireblocks cancellation states", () => {
 });
 
 describe("Fireblocks cancellation verdicts", () => {
-  it.each(["CANCELLED", "CANCELED"])(
+  const cancelledSpellings = ["CANCELLED", "CANCELED"] as const;
+
+  it.each(cancelledSpellings)(
     "recognizes the provider spelling %s as a terminal failed cancellation",
     (status) => {
       expect(isFireblocksTransactionCancelled(status)).toBe(true);
       expect(isFireblocksTransactionFailed(status)).toBe(true);
     }
   );
+
+  it("recognizes only the provider's cancelled spellings as a terminal cancellation", () => {
+    expect([...FIREBLOCKS_CANCELLED_TRANSACTION_STATUSES].sort()).toEqual(
+      [...cancelledSpellings].sort()
+    );
+  });
 
   it.each(["CANCELLING", "PENDING_SIGNATURE", "COMPLETED", "UNKNOWN_STATE"])(
     "does not mistake %s for a terminal cancellation",
