@@ -11,6 +11,7 @@ import {
   PAYMENT_TRANSFER_TYPES,
   type PaymentTransferBatchStatus,
   type PaymentTransferStatus,
+  type TransferChainVerdictStatus,
 } from "@sdp/types/payments";
 import { SOL_MINT, SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import {
@@ -2349,7 +2350,7 @@ describe("payment transfer batches", () => {
     const created = await readBatch(await sendBatch(await seedTwoChunkRecipients()));
     const [first, second] = created.transfers;
     const repository = createSystemPaymentTransferBatchesRepository(env);
-    const settle = (transferId: string, transferStatus: "confirmed" | "failed") =>
+    const settle = (transferId: string, transferStatus: TransferChainVerdictStatus) =>
       repository.settleTransferBatch({
         transferId,
         organizationId: TEST_ORG.id,
