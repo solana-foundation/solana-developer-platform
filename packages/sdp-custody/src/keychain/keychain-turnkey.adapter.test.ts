@@ -7,12 +7,16 @@ type TurnkeyTransaction = Transaction & TransactionWithinSizeLimit & Transaction
 const DEFAULT_WALLET_PUBLIC_KEY = "1".repeat(32);
 
 describe("turnkey adapter", () => {
-  it("signs transaction message bytes via signMessages", async () => {
+  it.each([
+    ["32-byte scalar", "01".repeat(32)],
+    ["leading-zero scalar", `00${"01".repeat(31)}`],
+  ])("signs transaction message bytes via signMessages (%s)", async (_label, privateKey) => {
     const apiKey = createECDH("prime256v1");
-    apiKey.generateKeys();
+    apiKey.setPrivateKey(Buffer.from(privateKey, "hex"));
     const adapter = new KeychainTurnkeyAdapter({
       apiPublicKey: apiKey.getPublicKey("hex", "compressed"),
-      apiPrivateKey: apiKey.getPrivateKey("hex"),
+      // ECDH exports the scalar without leading zeroes; Turnkey needs all 32 bytes.
+      apiPrivateKey: apiKey.getPrivateKey("hex").padStart(64, "0"),
       organizationId: "org-id",
       defaultWalletId: "turnkey_private-key-id",
       defaultWalletPublicKey: DEFAULT_WALLET_PUBLIC_KEY,
