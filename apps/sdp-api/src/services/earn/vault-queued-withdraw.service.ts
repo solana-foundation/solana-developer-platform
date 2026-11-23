@@ -415,6 +415,18 @@ async function broadcastQueuedAction(
   return { ...result, action: advanced ?? result.action };
 }
 
+/**
+ * The fee payer a queued action's transaction names: a sponsor or partner from the fee mode,
+ * else a caller-provided payer other than the owner, who pays by default.
+ */
+function queuedActionFeePayer(
+  input: { fee?: VaultFeeMode; feePayer?: string },
+  ownerAddress: string
+): string | undefined {
+  if (input.fee !== undefined) return vaultRentPayer(input.fee);
+  return input.feePayer === ownerAddress ? undefined : input.feePayer;
+}
+
 async function compileWalletPlan(input: {
   actor: QueuedWithdrawalActor;
   position: QueuedWithdrawalPosition;
@@ -450,7 +462,7 @@ async function compileWalletPlan(input: {
     expectedAssetIdentity,
     plan: input.plan,
     owner: address(input.position.ownerAddress),
-    ...(payer ? { feePayer: address(payer) } : {}),
+    feePayer: payer ? address(payer) : undefined,
     prepared: simulation.prepared,
   });
 }
@@ -469,12 +481,7 @@ export async function buildWalletQueuedWithdrawalRequest(
   }
 ): Promise<WalletQueuedWithdrawalBuiltTransaction> {
   const transactionId = generateEarnWalletWithdrawalRequestTransactionId();
-  const feePayer =
-    input.fee === undefined
-      ? input.feePayer === input.position.ownerAddress
-        ? undefined
-        : input.feePayer
-      : vaultRentPayer(input.fee);
+  const feePayer = queuedActionFeePayer(input, input.position.ownerAddress);
   const { quote, plan, mechanism } = await quoteAndBuildRequest(env, {
     position: input.position,
     terms: input.terms,
@@ -486,7 +493,7 @@ export async function buildWalletQueuedWithdrawalRequest(
     position: input.position,
     plan,
     fee: input.fee,
-    ...(feePayer ? { feePayer } : {}),
+    feePayer,
   });
   const built: WalletQueuedWithdrawalBuiltTransaction = {
     id: transactionId,
@@ -608,18 +615,13 @@ export async function buildWalletQueuedWithdrawalRecovery(
     compareDecimalAmounts(plan.accepted.shares, request.shares) !== 0
   )
     throw conflict("Escrow recovery builder changed the reviewed asset identity or shares");
-  const feePayer =
-    input.fee === undefined
-      ? input.feePayer === input.position.ownerAddress
-        ? undefined
-        : input.feePayer
-      : vaultRentPayer(input.fee);
+  const feePayer = queuedActionFeePayer(input, input.position.ownerAddress);
   const unsigned = await compileWalletPlan({
     actor: input.actor,
     position: input.position,
     plan,
     fee: input.fee,
-    ...(feePayer ? { feePayer } : {}),
+    feePayer,
   });
   // Persist a live observation, not cancellation intent. The signed action's
   // existing compare-and-set still decides whether submission can proceed.
@@ -697,18 +699,13 @@ export async function buildCurrentRedemptionRelease(
     throw conflict("Redemption release does not match the authorized position and source");
   const transactionId = generateEarnWalletWithdrawalRequestTransactionId();
   const plan = appendVaultRequestMemo(input.plan, "strategy-withdrawal-cancel", transactionId);
-  const feePayer =
-    input.fee === undefined
-      ? input.feePayer === position.ownerAddress
-        ? undefined
-        : input.feePayer
-      : vaultRentPayer(input.fee);
+  const feePayer = queuedActionFeePayer(input, position.ownerAddress);
   const unsigned = await compileWalletPlan({
     actor: input.actor,
     position,
     plan,
     fee: input.fee,
-    ...(feePayer ? { feePayer } : {}),
+    feePayer,
   });
   return createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env)).createWalletTransaction({
     id: transactionId,

@@ -32,6 +32,7 @@ import {
   buildCurrentRedemptionRelease,
   buildWalletQueuedWithdrawalRecovery,
   buildWalletQueuedWithdrawalRequest,
+  type ParRedemptionTermsInput,
   type QueuedWithdrawalActor,
   type QueuedWithdrawalPosition,
   submitWalletQueuedWithdrawalAction,
@@ -183,6 +184,24 @@ function refuseWithoutRoute(reads: readonly PromiseSettledResult<unknown>[]): ne
   throw badRequest("No supported withdrawal route is currently available");
 }
 
+/** The par redemption a withdrawal asks for, when it meets the provider's minimum. */
+function parRedemptionTerms(
+  input: { shares?: string; intermediateAmount?: string },
+  par: { minimumIntermediateAmount: string; minimumShares: string | null }
+): ParRedemptionTermsInput | null {
+  if (input.intermediateAmount !== undefined)
+    return compareDecimalAmounts(input.intermediateAmount, par.minimumIntermediateAmount) >= 0
+      ? { mechanism: "operator_redemption", intermediateAmount: input.intermediateAmount }
+      : null;
+  if (
+    input.shares !== undefined &&
+    par.minimumShares !== null &&
+    compareDecimalAmounts(input.shares, par.minimumShares) >= 0
+  )
+    return { mechanism: "operator_redemption", shares: input.shares };
+  return null;
+}
+
 /**
  * Read independent provider routes once, then quote each eligible route once.
  * No route is selected here. A delayed request never promises a payout time.
@@ -308,16 +327,7 @@ export async function prepareStrategyWithdrawalChoices(
     );
   }
   if (parClient !== null && par !== null && par.assetMint === input.position.tokenMint) {
-    const terms: AsyncWithdrawalTermsInput | null =
-      input.intermediateAmount !== undefined
-        ? compareDecimalAmounts(input.intermediateAmount, par.minimumIntermediateAmount) >= 0
-          ? { mechanism: "operator_redemption", intermediateAmount: input.intermediateAmount }
-          : null
-        : input.shares !== undefined &&
-            par.minimumShares !== null &&
-            compareDecimalAmounts(input.shares, par.minimumShares) >= 0
-          ? { mechanism: "operator_redemption", shares: input.shares }
-          : null;
+    const terms = parRedemptionTerms(input, par);
     if (terms !== null)
       quotes.push(
         (async () => {

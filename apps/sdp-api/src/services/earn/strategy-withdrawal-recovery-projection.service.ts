@@ -87,7 +87,7 @@ export async function projectWithdrawalRecovery(
     error: terminal ? operation.error : recoveryError(evidence, row),
     result: {
       positionId: row.position_id,
-      ...(row.strategy_id === null ? {} : { strategyId: row.strategy_id }),
+      strategyId: row.strategy_id ?? undefined,
       source: row.source,
       signature: row.signature,
       settledAmount: returned ? { mint: row.share_mint, value: row.shares } : null,

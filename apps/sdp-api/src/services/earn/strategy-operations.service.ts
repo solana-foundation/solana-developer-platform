@@ -192,7 +192,7 @@ async function projectQueuedOperation(
     ),
     result: {
       positionId: request.position_id,
-      ...(strategyId ? { strategyId } : {}),
+      strategyId: strategyId ?? undefined,
       source:
         request.custody_wallet_id === null
           ? { ownerAddress: request.owner_address }
@@ -264,7 +264,7 @@ export async function projectEarnOperation(
     ),
     result: {
       positionId: position.id,
-      ...(strategyId ? { strategyId } : {}),
+      strategyId: strategyId ?? undefined,
       source: positionSource(position),
       signature: movement.signature,
       settledAmount:

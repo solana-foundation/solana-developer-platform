@@ -223,7 +223,7 @@ export async function projectCurrentRedemptionRelease(
     error: isTerminalOperationStatus(operation.status) ? operation.error : null,
     result: {
       positionId: row.position_id,
-      ...(row.strategy_id === null ? {} : { strategyId: row.strategy_id }),
+      strategyId: row.strategy_id ?? undefined,
       source: row.source,
       signature: row.signature,
       // Cancellation closes a request and may revoke a delegation. Its event

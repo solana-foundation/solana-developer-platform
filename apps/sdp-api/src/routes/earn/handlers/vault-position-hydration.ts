@@ -297,17 +297,17 @@ export async function hydrateVaultPositions(
 
   if (hydrationJobs.length > 0) {
     const settled = await mapSettledWithConcurrency(hydrationJobs, 8, (job) => job.hydrate());
-    settled.forEach((result, index) => {
-      if (result.status !== "rejected") return;
-      const job = hydrationJobs[index];
+    hydrationJobs.forEach((job, index) => {
+      const result = settled[index];
+      if (result?.status !== "rejected") return;
       // Provider messages may embed the owner, so an end-user owner is
       // scrubbed from them as well as from the fields.
-      const redactedOwner = options.sourceType === "address" ? job?.owner : undefined;
+      const redactedOwner = options.sourceType === "address" ? job.owner : undefined;
       getLogger().warn(
         {
-          provider: job?.provider,
-          ...(job ? ownerTelemetryFields(options.sourceType, job.owner) : {}),
-          positionCount: job?.positionCount,
+          provider: job.provider,
+          ...ownerTelemetryFields(options.sourceType, job.owner),
+          positionCount: job.positionCount,
           error: scrubLoggedText(
             result.reason instanceof Error ? result.reason.message : String(result.reason),
             redactedOwner
