@@ -1,5 +1,9 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import type { Action } from "@sdp/types/actions";
+import {
+  CUSTODY_PROPOSAL_AUTHORIZATION_STATES,
+  CUSTODY_PROPOSAL_PROVIDER_PHASES,
+} from "@sdp/types/custody-proposals";
 import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { Hono } from "hono";
@@ -1440,19 +1444,23 @@ async function recordedProposal(id: string) {
 }
 
 /** The proposal row the recovery worker decides on; the payment row only mirrors it. */
-async function proposalState(id: string) {
-  return getDb(env).queryOne<{
-    provider_phase: string;
-    authorization_state: string;
-    refusal_reason: string | null;
-    cancel_attempt: number;
-    cancel_acknowledged_at: string | null;
-    alerted_at: string | null;
-  }>(
-    `SELECT provider_phase, authorization_state, refusal_reason, cancel_attempt,
-            cancel_acknowledged_at, alerted_at
-       FROM custody_proposals WHERE payment_transfer_id = ?`,
-    [id]
+const proposalStateRow = z.object({
+  provider_phase: z.enum(CUSTODY_PROPOSAL_PROVIDER_PHASES),
+  authorization_state: z.enum(CUSTODY_PROPOSAL_AUTHORIZATION_STATES),
+  refusal_reason: z.string().nullable(),
+  cancel_attempt: z.number(),
+  cancel_acknowledged_at: z.string().nullable(),
+  alerted_at: z.string().nullable(),
+});
+
+async function proposalState(id: string): Promise<z.infer<typeof proposalStateRow>> {
+  return proposalStateRow.parse(
+    await getDb(env).queryOne(
+      `SELECT provider_phase, authorization_state, refusal_reason, cancel_attempt,
+              cancel_acknowledged_at, alerted_at
+         FROM custody_proposals WHERE payment_transfer_id = ?`,
+      [id]
+    )
   );
 }
 
@@ -1550,7 +1558,12 @@ describe("native Fireblocks pending proposal recovery (PRO-2435 D4)", () => {
     expect(response.status, await response.clone().text()).toBe(200);
     const transfer = (await response.json()).data.transfer;
     await getDb(env).execute("UPDATE api_keys SET status = 'revoked' WHERE id = ?", [apiKeyId]);
-    let stagedBeforeCancellation: unknown;
+    let stagedBeforeCancellation:
+      | {
+          payment: Awaited<ReturnType<typeof recordedProposal>>["status"];
+          proposal: z.infer<typeof proposalStateRow>;
+        }
+      | undefined;
     beforeCancellation = async () => {
       stagedBeforeCancellation = {
         payment: (await recordedProposal(transfer.id)).status,
