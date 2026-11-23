@@ -3,9 +3,13 @@ import {
   fireblocksRuleScope,
   fireblocksUngatedRuleJudged,
   inspectFireblocksPolicy,
+  parseFireblocksPolicy,
 } from "./fireblocks-policy";
 
-const inspect = (rules: unknown[]) =>
+/** A hand-built rule matching the envelope's own rule type. */
+type RuleFixture = { type: string } & Record<string, unknown>;
+
+const inspect = (rules: RuleFixture[]) =>
   inspectFireblocksPolicy({ policy: { rules } }, "42", ["SOL", "usdc-asset"]);
 /** A provider-shaped Transfer rule: Fireblocks keeps `type: TRANSFER` fixed and
  * names the operation in `transactionType`. */
@@ -59,6 +63,12 @@ describe("Fireblocks policy presence", () => {
     // A raw-signing approval rule does not prove native-transfer coverage, and it
     // must not shadow a matching transfer rule either.
     expect(inspect([operationRule("RAW")])).toEqual({ status: "missing", reason: "no_policy" });
+    // Nor does a contract-call approval rule prove transfer coverage: without the
+    // transactionType filter this reads as a gated transfer rule.
+    expect(inspect([operationRule("CONTRACT_CALL")])).toEqual({
+      status: "missing",
+      reason: "no_policy",
+    });
     // Nor does an ungated rule for another operation read as missing coverage,
     // or shadow a matching gated transfer rule.
     expect(inspect([operationRule("CONTRACT_CALL", { action: "ALLOW" })])).toEqual({
@@ -88,17 +98,44 @@ describe("Fireblocks policy presence", () => {
       inspect([rule([["42", "VAULT"]], "SOL", { action: "ALLOW", authorizationGroups: {} })])
     ).toEqual({ status: "missing", reason: "no_policy" });
   });
-  it.each([
-    [{ action: "2-TIER" }],
-    [{ action: "BLOCK" }],
-    [{ action: "ALLOW", authorizers: ["usr_1"] }],
-    [{ action: "ALLOW", authorizersCount: 1 }],
-    [{ action: "ALLOW", ...approvers }],
-  ])("recognizes an approval-gated or blocking rule as present: %j", (action) => {
-    expect(inspect([rule([["42", "VAULT"]], "SOL", action)])).toEqual({
+  it("treats an ALLOW rule as ungated whatever approver fields it carries", () => {
+    // Fireblocks defines ALLOW as requiring no additional approvals; populated
+    // approver fields must not read as a policy and hide the warning.
+    expect(
+      inspect([rule([["42", "VAULT"]], "SOL", { action: "ALLOW", authorizers: ["usr_1"] })])
+    ).toEqual({ status: "missing", reason: "no_policy" });
+    expect(
+      inspect([rule([["42", "VAULT"]], "SOL", { action: "ALLOW", authorizersCount: 2 })])
+    ).toEqual({ status: "missing", reason: "no_policy" });
+    expect(inspect([rule([["42", "VAULT"]], "SOL", { action: "ALLOW", ...approvers })])).toEqual({
+      status: "missing",
+      reason: "no_policy",
+    });
+  });
+  it("recognizes an approval-gated or blocking rule as present", () => {
+    expect(inspect([rule([["42", "VAULT"]], "SOL", { action: "2-TIER" })])).toEqual({
       status: "present",
       reason: "policy_detected",
     });
+    expect(inspect([rule([["42", "VAULT"]], "SOL", { action: "BLOCK" })])).toEqual({
+      status: "present",
+      reason: "policy_detected",
+    });
+  });
+  it("judges a wildcard-transaction rule as a transfer rule", () => {
+    // `transactionType: "*"` governs every operation, transfers included: an
+    // ALLOW on it must not hide behind a gated transfer rule.
+    expect(inspect([operationRule("*", { action: "ALLOW" })])).toEqual({
+      status: "missing",
+      reason: "no_policy",
+    });
+    expect(
+      inspect([
+        rule([["42", "VAULT"]], "SOL", { action: "2-TIER" }),
+        operationRule("*", { action: "ALLOW" }),
+      ])
+    ).toEqual({ status: "missing", reason: "no_policy" });
+    expect(inspect([operationRule("*")])).toEqual({ status: "present", reason: "policy_detected" });
   });
   it("warns when any matching rule lets the credential move funds alone", () => {
     expect(
@@ -114,13 +151,33 @@ describe("Fireblocks policy presence", () => {
       reason: "unsupported_response",
     });
   });
-  it.each([
-    {},
-    { policy: {} },
-    { policy: { rules: null } },
-    { policy: { rules: [{ type: "TRANSFER", asset: "SOL", srcId: "42" }] } },
-  ])("keeps unsupported responses unknown: %j", (value) => {
-    expect(inspectFireblocksPolicy(value, "42", ["SOL"])).toEqual({
+  it("keeps a wallet unknown when a matching rule cannot be read beside a gated one", () => {
+    // The readable gated rule must not report presence while a matching rule's
+    // terms are unreadable; only a proven ungated rule may overturn that.
+    expect(
+      inspect([
+        rule([["42", "VAULT"]], "SOL", { action: "2-TIER" }),
+        rule([["42", "VAULT"]], "SOL", { action: "MAYBE" }),
+      ])
+    ).toEqual({ status: "unknown", reason: "unsupported_response" });
+    expect(
+      inspect([
+        rule([["42", "VAULT"]], "SOL", { action: "2-TIER" }),
+        rule([["42", "VAULT"]], "SOL", { action: "ALLOW" }),
+      ])
+    ).toEqual({ status: "missing", reason: "no_policy" });
+  });
+  it("maps bodies the envelope cannot read to null before any rule walk", () => {
+    expect(parseFireblocksPolicy(null)).toBeNull();
+    expect(parseFireblocksPolicy({})).toBeNull();
+    expect(parseFireblocksPolicy({ policy: {} })).toBeNull();
+    expect(parseFireblocksPolicy({ policy: { rules: null } })).toBeNull();
+    // A well-formed envelope with unreadable rules parses; the walk keeps it unknown.
+    const parsed = parseFireblocksPolicy({
+      policy: { rules: [{ type: "TRANSFER", asset: "SOL", srcId: "42" }] },
+    });
+    expect(parsed).not.toBeNull();
+    expect(inspectFireblocksPolicy(parsed as NonNullable<typeof parsed>, "42", ["SOL"])).toEqual({
       status: "unknown",
       reason: "unsupported_response",
     });
@@ -146,7 +203,7 @@ describe("Fireblocks policy presence", () => {
 });
 
 describe("Fireblocks ungated-rule proof", () => {
-  const judged = (rules: unknown[], assets = ["SOL"]) =>
+  const judged = (rules: RuleFixture[], assets = ["SOL"]) =>
     fireblocksUngatedRuleJudged({ policy: { rules } }, "42", assets);
   it("is true only for an allow-without-approvers rule the asset list names", () => {
     expect(judged([rule([["42", "VAULT"]], "SOL", { action: "ALLOW" })])).toBe(true);
@@ -162,7 +219,7 @@ describe("Fireblocks ungated-rule proof", () => {
 });
 
 describe("Fireblocks rule scope", () => {
-  const scope = (rules: unknown[]) => fireblocksRuleScope({ policy: { rules } }, "42", ["SOL"]);
+  const scope = (rules: RuleFixture[]) => fireblocksRuleScope({ policy: { rules } }, "42", ["SOL"]);
   it("keeps native, wildcard and foreign-vault rules catalogue-free", () => {
     expect(scope([rule([["42", "VAULT"]]), rule([["42", "VAULT"]], "*")])).toBe("native");
     expect(scope([rule([["42", "VAULT"]], "SOL", { action: "MAYBE" })])).toBe("native");

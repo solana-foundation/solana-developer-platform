@@ -17,6 +17,14 @@ const policySchema = z.object({
     rules: z.array(z.object({ type: z.string() }).passthrough()),
   }),
 });
+/** The envelope of the provider's active-policy response, ready for the rule walk. */
+export type FireblocksPolicyEnvelope = z.infer<typeof policySchema>;
+
+/** The one place a raw provider body becomes a policy envelope; null keeps it unread. */
+export function parseFireblocksPolicy(value: unknown): FireblocksPolicyEnvelope | null {
+  const parsed = policySchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
 /** A Transfer rule's asset selector is the provider's asset id or `*`. */
 const transferRuleSchema = z.object({
   asset: z.string(),
@@ -33,25 +41,26 @@ const transferRuleSchema = z.object({
 /**
  * Whether a parsed rule governs account transfers, the only operation this check
  * speaks about. A `transactionType` naming anything else (raw signing, contract
- * calls, staking, …) puts the rule out of scope rather than in the verdict.
+ * calls, staking, …) puts the rule out of scope rather than in the verdict; `*`
+ * governs every operation, transfers included.
  */
 function isTransferOperation(rule: z.infer<typeof transferRuleSchema>): boolean {
-  return rule.transactionType === undefined || rule.transactionType === "TRANSFER";
+  return (
+    rule.transactionType === undefined ||
+    rule.transactionType === "TRANSFER" ||
+    rule.transactionType === "*"
+  );
 }
 
 /**
  * Whether a matching rule stops SDP's credential from moving funds alone.
  * A `2-TIER` action requires approvers by definition and `BLOCK` allows nothing;
- * a plain `ALLOW` needs the legacy `authorizers` fields or configured authorization
- * groups. Unrecognised action terms return `null` and keep the rule unknown.
+ * an `ALLOW` rule needs no additional approvals however its approver fields are
+ * populated. Unrecognised action terms return `null` and keep the rule unknown.
  */
 function ruleRequiresApproval(rule: z.infer<typeof transferRuleSchema>): boolean | null {
   if (rule.action === "2-TIER" || rule.action === "BLOCK") return true;
-  if (rule.action === "ALLOW") {
-    if (rule.authorizers?.length || (rule.authorizersCount ?? 0) > 0) return true;
-    if (rule.authorizationGroups) return (rule.authorizationGroups.groups ?? []).length > 0;
-    return false;
-  }
+  if (rule.action === "ALLOW") return false;
   return null;
 }
 
@@ -89,65 +98,73 @@ function sourceMatchesVault(
 export type FireblocksRuleScope = "native" | "outside" | "unknown";
 
 export function fireblocksRuleScope(
-  value: unknown,
+  policy: FireblocksPolicyEnvelope,
   vaultId: string,
   assets: string[]
 ): FireblocksRuleScope {
-  const parsed = policySchema.safeParse(value);
-  if (!parsed.success) return "native";
-  let unknown = false;
-  for (const rule of parsed.data.policy.rules) {
-    if (rule.type !== "TRANSFER") continue;
-    const transfer = transferRuleSchema.safeParse(rule);
-    if (!transfer.success) {
-      unknown = true;
-      continue;
-    }
-    if (!isTransferOperation(transfer.data)) continue;
-    if (transfer.data.asset === "*" || assets.includes(transfer.data.asset)) continue;
-    const src = z.object({ ids: z.array(sourceSchema) }).safeParse(transfer.data.src);
-    if (!src.success) {
-      unknown = true;
-      continue;
-    }
-    const source = sourceMatchesVault(src.data.ids, vaultId);
-    if (!source.interpretable) unknown = true;
-    if (!source.matches) continue;
-    if (ruleRequiresApproval(transfer.data) !== null) return "outside";
-    unknown = true;
-  }
-  return unknown ? "unknown" : "native";
+  const walk = walkTransferRules(policy, vaultId, assets);
+  if (walk.outside) return "outside";
+  return walk.unknownOutside ? "unknown" : "native";
 }
 
-/** How one readable-rule walk judged a policy: any ungated matching rule, any
- * gated one, and whether some rule could not be read at all. */
-type TransferWalk = { unknown: boolean; gated: boolean; ungated: boolean };
+/**
+ * What one walk over the policy's Transfer rules judged. `gated` and `ungated`
+ * are matching readable rules on the assets the walk was given; `unknown` covers
+ * a rule that might match the vault but could not be read, and `unknownOutside`
+ * the same for a rule naming an asset outside `assets`, which only the token
+ * catalogue can name; `outside` is a matching readable rule the catalogue may name.
+ */
+type PolicyWalk = {
+  unknown: boolean;
+  unknownOutside: boolean;
+  gated: boolean;
+  ungated: boolean;
+  outside: boolean;
+};
 
-function walkTransferRules(value: unknown, vaultId: string, assets: string[] | null): TransferWalk {
-  const parsed = policySchema.safeParse(value);
-  if (!parsed.success) return { unknown: true, gated: false, ungated: false };
-  const walk: TransferWalk = { unknown: false, gated: false, ungated: false };
-  for (const rule of parsed.data.policy.rules) {
+function walkTransferRules(
+  policy: FireblocksPolicyEnvelope,
+  vaultId: string,
+  assets: string[] | null
+): PolicyWalk {
+  const walk: PolicyWalk = {
+    unknown: false,
+    unknownOutside: false,
+    gated: false,
+    ungated: false,
+    outside: false,
+  };
+  for (const rule of policy.policy.rules) {
     if (rule.type !== "TRANSFER") continue;
     const transfer = transferRuleSchema.safeParse(rule);
     if (!transfer.success) {
       walk.unknown = true;
+      walk.unknownOutside = true;
       continue;
     }
     if (!isTransferOperation(transfer.data)) continue;
-    if (assets !== null && transfer.data.asset !== "*" && !assets.includes(transfer.data.asset))
-      continue;
+    const ours =
+      assets === null || transfer.data.asset === "*" || assets.includes(transfer.data.asset);
     const src = z.object({ ids: z.array(sourceSchema) }).safeParse(transfer.data.src);
     if (!src.success) {
-      walk.unknown = true;
+      if (ours) walk.unknown = true;
+      else walk.unknownOutside = true;
       continue;
     }
     const source = sourceMatchesVault(src.data.ids, vaultId);
-    if (!source.interpretable) walk.unknown = true;
+    if (!source.interpretable) {
+      if (ours) walk.unknown = true;
+      else walk.unknownOutside = true;
+    }
     if (!source.matches) continue;
     const approval = ruleRequiresApproval(transfer.data);
     if (approval === null) {
-      walk.unknown = true;
+      if (ours) walk.unknown = true;
+      else walk.unknownOutside = true;
+      continue;
+    }
+    if (!ours) {
+      walk.outside = true;
       continue;
     }
     if (approval) walk.gated = true;
@@ -162,40 +179,41 @@ function walkTransferRules(value: unknown, vaultId: string, assets: string[] | n
  * are out of scope and ignored: this check speaks for transfer coverage only.
  * Source tuples are [id, type, subtype], not [type, id]. Unrecognised selectors stay unknown.
  * A matching rule proves coverage only when it stops SDP's credential from moving funds
- * alone: it must require approval (a `2-TIER` action or configured approvers) or block the
- * transfer. An `ALLOW` rule without approvers is missing. A null `assets` list judges every
- * readable rule whatever asset it names, keeping proven findings while refusing to report
- * absence past an unreadable rule. Presence says nothing about initiators, limits,
- * destinations or rule order.
+ * alone: it must require approval (a `2-TIER` action or a block) or block the
+ * transfer. An `ALLOW` rule is ungated whatever approver fields it carries. A null
+ * `assets` list judges every readable rule whatever asset it names, keeping proven
+ * findings while refusing to report absence past an unreadable rule. Presence says
+ * nothing about initiators, limits, destinations or rule order.
  */
 export function inspectFireblocksPolicy(
-  value: unknown,
+  policy: FireblocksPolicyEnvelope,
   vaultId: string,
   assets: string[] | null
 ): PolicyResult {
-  const walk = walkTransferRules(value, vaultId, assets);
-  // An allow rule without approvers wins over any safer matching rule: the credential
-  // could move funds alone, so the wallet reports missing coverage.
+  const walk = walkTransferRules(policy, vaultId, assets);
+  // An allow rule wins over any safer matching rule: the credential could move
+  // funds alone, so the wallet reports missing coverage.
   if (walk.ungated) return { status: "missing", reason: "no_policy" };
+  // A matching rule that could not be read keeps the wallet's coverage unread,
+  // however the readable rules around it judge.
+  if (walk.unknown) return { status: "unknown", reason: "unsupported_response" };
   if (walk.gated) return { status: "present", reason: "policy_detected" };
-  return walk.unknown
-    ? { status: "unknown", reason: "unsupported_response" }
-    : { status: "missing", reason: "no_policy" };
+  return { status: "missing", reason: "no_policy" };
 }
 
 /**
  * Whether the walk for `assets` judged a rule that lets the credential move funds
- * alone (an `ALLOW` without approvers on a named asset or a wildcard). That missing
+ * alone (an `ALLOW` on a named asset or a wildcard). That missing
  * reading is the one the token catalogue cannot revise: every other absence the
  * native-only judgement reports may still be overturned by a rule only the
  * catalogue can name.
  */
 export function fireblocksUngatedRuleJudged(
-  value: unknown,
+  policy: FireblocksPolicyEnvelope,
   vaultId: string,
   assets: string[]
 ): boolean {
-  return walkTransferRules(value, vaultId, assets).ungated;
+  return walkTransferRules(policy, vaultId, assets).ungated;
 }
 
 /** One read per credential in a check batch, shared across its vaults. Never writes policy. */
@@ -206,9 +224,9 @@ export async function readFireblocksPolicy(
     apiSecretPem: string;
     apiBaseUrl?: string;
   }
-): Promise<{ value: z.infer<typeof policySchema> } | { error: PolicyResult }> {
+): Promise<{ value: FireblocksPolicyEnvelope } | { error: PolicyResult }> {
   try {
-    const parsed = policySchema.safeParse(
+    const parsed = parseFireblocksPolicy(
       await fireblocksRequest<unknown>(runtime, {
         apiBaseUrl: assertHttpsBaseUrl(
           config.apiBaseUrl ?? "https://api.fireblocks.io",
@@ -220,8 +238,8 @@ export async function readFireblocksPolicy(
         uri: "/v1/tap/active_policy",
       })
     );
-    return parsed.success
-      ? { value: parsed.data }
+    return parsed
+      ? { value: parsed }
       : { error: { status: "unknown", reason: "unsupported_response" } };
   } catch (error) {
     return {
