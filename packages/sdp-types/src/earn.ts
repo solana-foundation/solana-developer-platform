@@ -498,17 +498,6 @@ export interface EarnVaultWithdrawalOptions {
   parRedemption?: EarnVaultParRedemptionTerms | null;
 }
 
-export type EarnVaultWithdrawalRequestStatus =
-  | "creating"
-  | "pending"
-  | "fulfillable"
-  | "expiredCancelable"
-  | "cancelling"
-  | "fulfilled"
-  | "cancelled"
-  | "closedOrUnknown"
-  | "failed";
-
 /**
  * `pending_approval` is synthesized by the provider client, never reported
  * top-level by the provider: a provider may park the affected payout leg in
@@ -697,3 +686,155 @@ export const EARN_MOVEMENT_TRANSITIONS = {
     >
   >;
 };
+
+/**
+ * A queued or operator-redemption withdrawal request's lifecycle, as
+ * `earn_vault_withdrawal_requests.status` stores it.
+ */
+export const EARN_VAULT_WITHDRAWAL_REQUEST_STATUSES = [
+  "creating",
+  "pending",
+  "fulfillable",
+  "expired_cancelable",
+  "cancelling",
+  "closed_or_unknown",
+  "fulfilled",
+  "cancelled",
+  "failed",
+] as const;
+export type EarnVaultWithdrawalRequestStatus =
+  (typeof EARN_VAULT_WITHDRAWAL_REQUEST_STATUSES)[number];
+
+/** Requests that never change again: paid, cancelled, or never landed. */
+export const EARN_TERMINAL_VAULT_WITHDRAWAL_REQUEST_STATUSES = [
+  "fulfilled",
+  "cancelled",
+  "failed",
+] as const satisfies readonly EarnVaultWithdrawalRequestStatus[];
+
+/** Requests the provider closed on chain: paid out or cancelled. */
+export const EARN_CLOSED_VAULT_WITHDRAWAL_REQUEST_STATUSES = [
+  "fulfilled",
+  "cancelled",
+] as const satisfies readonly EarnVaultWithdrawalRequestStatus[];
+
+/** Requests that are not final yet. */
+export const EARN_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES = [
+  "creating",
+  "pending",
+  "fulfillable",
+  "expired_cancelable",
+  "cancelling",
+  "closed_or_unknown",
+] as const satisfies readonly EarnVaultWithdrawalRequestStatus[];
+
+/** Landed requests waiting on the provider; the request account still holds the shares. */
+export const EARN_LIVE_VAULT_WITHDRAWAL_REQUEST_STATUSES = [
+  "pending",
+  "fulfillable",
+  "expired_cancelable",
+] as const satisfies readonly EarnVaultWithdrawalRequestStatus[];
+
+/** Landed and not final, a cancellation in flight included. */
+export const EARN_LANDED_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES = [
+  ...EARN_LIVE_VAULT_WITHDRAWAL_REQUEST_STATUSES,
+  "cancelling",
+] as const satisfies readonly EarnVaultWithdrawalRequestStatus[];
+
+/** Not proven on chain yet, or closed without an outcome SDP could identify. */
+export const EARN_UNRESOLVED_VAULT_WITHDRAWAL_REQUEST_STATUSES = [
+  "creating",
+  "closed_or_unknown",
+] as const satisfies readonly EarnVaultWithdrawalRequestStatus[];
+
+const TERMINAL_REQUEST_STATUSES = new Set<EarnVaultWithdrawalRequestStatus>(
+  EARN_TERMINAL_VAULT_WITHDRAWAL_REQUEST_STATUSES
+);
+const CLOSED_REQUEST_STATUSES = new Set<EarnVaultWithdrawalRequestStatus>(
+  EARN_CLOSED_VAULT_WITHDRAWAL_REQUEST_STATUSES
+);
+const LIVE_REQUEST_STATUSES = new Set<EarnVaultWithdrawalRequestStatus>(
+  EARN_LIVE_VAULT_WITHDRAWAL_REQUEST_STATUSES
+);
+
+/** Whether a request status is final. */
+export function isTerminalVaultWithdrawalRequestStatus(
+  status: EarnVaultWithdrawalRequestStatus
+): boolean {
+  return TERMINAL_REQUEST_STATUSES.has(status);
+}
+
+/** Whether the provider closed the request on chain (paid out or cancelled). */
+export function isClosedVaultWithdrawalRequestStatus(
+  status: EarnVaultWithdrawalRequestStatus
+): boolean {
+  return CLOSED_REQUEST_STATUSES.has(status);
+}
+
+/** Whether a landed request still waits on the provider with its shares held. */
+export function isLiveVaultWithdrawalRequestStatus(
+  status: EarnVaultWithdrawalRequestStatus
+): boolean {
+  return LIVE_REQUEST_STATUSES.has(status);
+}
+
+/**
+ * Legal request transitions, keyed by TARGET status to the statuses it may be
+ * reached from, the shape `EARN_MOVEMENT_TRANSITIONS` uses.
+ * `earn-vault-withdrawal-requests.repository.ts` applies them as a
+ * compare-and-swap, and terminal statuses appear in no source list, so a final
+ * request cannot regress.
+ */
+export const EARN_VAULT_WITHDRAWAL_REQUEST_TRANSITIONS = {
+  creating: [],
+  pending: ["creating", "pending", "closed_or_unknown"],
+  fulfillable: ["creating", "pending", "fulfillable", "closed_or_unknown"],
+  // A synchronous cancel eligibility read may be the first observer after a
+  // finalized request transaction. Permit it to close the short `creating`
+  // window instead of making recovery wait for the background sweep.
+  expired_cancelable: [
+    "creating",
+    "pending",
+    "fulfillable",
+    "expired_cancelable",
+    "closed_or_unknown",
+  ],
+  cancelling: ["expired_cancelable", "cancelling"],
+  closed_or_unknown: EARN_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES,
+  fulfilled: EARN_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES,
+  cancelled: EARN_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES,
+  failed: EARN_UNRESOLVED_VAULT_WITHDRAWAL_REQUEST_STATUSES,
+} as const satisfies Record<
+  EarnVaultWithdrawalRequestStatus,
+  readonly EarnVaultWithdrawalRequestStatus[]
+>;
+
+/**
+ * A request or cancel action is one signed transaction, so it shares the
+ * vault-direct movement lifecycle: the same statuses and transitions.
+ */
+export const EARN_VAULT_WITHDRAWAL_ACTION_STATUSES = EARN_MOVEMENT_STATUSES.vault_direct;
+export type EarnVaultWithdrawalActionStatus = EarnVaultDirectMovementStatus;
+
+/** Actions whose transaction may still land. */
+export const EARN_IN_FLIGHT_VAULT_WITHDRAWAL_ACTION_STATUSES = [
+  "requested",
+  "submitted",
+  "confirmed",
+] as const satisfies readonly EarnVaultWithdrawalActionStatus[];
+
+/** Actions whose transaction reached the chain. */
+export const EARN_LANDED_VAULT_WITHDRAWAL_ACTION_STATUSES = [
+  "submitted",
+  "confirmed",
+  "finalized",
+] as const satisfies readonly EarnVaultWithdrawalActionStatus[];
+
+/** Legal action transitions, the vault-direct movement matrix with its insert state. */
+export const EARN_VAULT_WITHDRAWAL_ACTION_TRANSITIONS = {
+  requested: [],
+  ...EARN_MOVEMENT_TRANSITIONS.vault_direct,
+} as const satisfies Record<
+  EarnVaultWithdrawalActionStatus,
+  readonly EarnVaultWithdrawalActionStatus[]
+>;

@@ -5,7 +5,13 @@ import type {
   EarnMovementDirection,
   EarnMovementStatus,
 } from "@sdp/types/earn";
-import { EARN_MOVEMENT_TRANSITIONS } from "@sdp/types/earn";
+import {
+  EARN_CLOSED_VAULT_WITHDRAWAL_REQUEST_STATUSES,
+  EARN_LANDED_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES,
+  EARN_MOVEMENT_TRANSITIONS,
+  EARN_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES,
+  EARN_UNRESOLVED_VAULT_WITHDRAWAL_REQUEST_STATUSES,
+} from "@sdp/types/earn";
 import {
   type EarnProviderSettlement,
   earnProviderSettlementSchema,
@@ -19,6 +25,7 @@ import {
   asTransactionalClient,
   type DatabaseExecutor,
 } from "@/db/client";
+import { sqlLiteralList } from "@/db/postgres-utils";
 import { conflict } from "@/lib/errors";
 
 /**
@@ -1225,10 +1232,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                FROM earn_vault_withdrawal_requests queued
               WHERE queued.organization_id = ?
                 AND queued.environment = ?
-                AND queued.status IN (
-                  'creating', 'pending', 'fulfillable',
-                  'expired_cancelable', 'cancelling', 'closed_or_unknown'
-                )
+                AND queued.status IN (${sqlLiteralList(EARN_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES)})
               GROUP BY queued.position_id
            ),
            redemption_history AS (
@@ -1257,10 +1261,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                 AND redemption.environment = ?
                 AND redemption.mechanism = 'operator_redemption'
                 AND redemption.intermediate_mint IS NOT NULL
-                AND redemption.status IN (
-                  'cancelled', 'fulfilled', 'creating', 'pending', 'fulfillable',
-                  'expired_cancelable', 'cancelling', 'closed_or_unknown'
-                )
+                AND redemption.status IN (${sqlLiteralList([...EARN_CLOSED_VAULT_WITHDRAWAL_REQUEST_STATUSES, ...EARN_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES])})
            ),
            redemption_balances AS (
              SELECT redemption_history.*,
@@ -1281,17 +1282,13 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                       + GREATEST(MAX(redemption.retained_floor
                         - redemption.running_retained), 0))::text AS retained,
                     COALESCE(SUM(redemption.intermediate_amount::numeric)
-                      FILTER (WHERE redemption.status IN (
-                        'pending', 'fulfillable', 'expired_cancelable', 'cancelling'
-                      )), 0)::text
+                      FILTER (WHERE redemption.status IN (${sqlLiteralList(EARN_LANDED_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES)})), 0)::text
                       AS in_flight,
                     -- May or may not hold its intermediate: a 'creating'
                     -- request can land before the request row advances, and a
                     -- 'closed_or_unknown' one was either burned or cancelled.
                     COALESCE(SUM(redemption.intermediate_amount::numeric)
-                      FILTER (WHERE redemption.status IN (
-                        'creating', 'closed_or_unknown'
-                      )), 0)::text
+                      FILTER (WHERE redemption.status IN (${sqlLiteralList(EARN_UNRESOLVED_VAULT_WITHDRAWAL_REQUEST_STATUSES)})), 0)::text
                       AS unresolved
                FROM redemption_balances redemption
               GROUP BY redemption.position_id, redemption.intermediate_mint
@@ -1435,10 +1432,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                 AND NOT EXISTS (
                   SELECT 1 FROM earn_vault_withdrawal_requests queued
                    WHERE queued.position_id = earn_positions.id
-                     AND queued.status IN (
-                       'creating', 'pending', 'fulfillable',
-                       'expired_cancelable', 'cancelling', 'closed_or_unknown'
-                     )
+                     AND queued.status IN (${sqlLiteralList(EARN_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES)})
                 )
               RETURNING id`
           )
@@ -1694,10 +1688,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                      CASE WHEN request.status = 'fulfilled' AND request.assets_paid IS NULL
                           THEN 1 ELSE 0 END,
                      0,
-                     CASE WHEN request.status IN (
-                            'creating', 'pending', 'fulfillable',
-                            'expired_cancelable', 'cancelling', 'closed_or_unknown'
-                          ) THEN 1 ELSE 0 END
+                     CASE WHEN request.status IN (${sqlLiteralList(EARN_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES)}) THEN 1 ELSE 0 END
                 FROM earn_vault_withdrawal_requests request
                WHERE request.organization_id = ?
                  AND request.project_id = ?

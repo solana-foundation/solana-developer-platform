@@ -1,9 +1,23 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
+  EARN_CLOSED_VAULT_WITHDRAWAL_REQUEST_STATUSES,
+  EARN_IN_FLIGHT_VAULT_WITHDRAWAL_ACTION_STATUSES,
+  EARN_LANDED_VAULT_WITHDRAWAL_ACTION_STATUSES,
+  EARN_LIVE_VAULT_WITHDRAWAL_REQUEST_STATUSES,
+  EARN_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES,
+  EARN_TERMINAL_VAULT_WITHDRAWAL_REQUEST_STATUSES,
+  EARN_VAULT_WITHDRAWAL_ACTION_TRANSITIONS,
+  EARN_VAULT_WITHDRAWAL_REQUEST_TRANSITIONS,
+  type EarnVaultWithdrawalActionStatus,
+  type EarnVaultWithdrawalRequestStatus,
+  isClosedVaultWithdrawalRequestStatus,
+} from "@sdp/types/earn";
+import {
   type DatabaseClient as AppDb,
   asTransactionalClient,
   type DatabaseExecutor,
 } from "@/db/client";
+import { sqlLiteralList } from "@/db/postgres-utils";
 import {
   type ClaimDiscoveredStrategyPositionInput,
   claimDiscoveredStrategyPosition,
@@ -29,25 +43,8 @@ export class QueuedWithdrawalLeaseConflictError extends AppError {
   }
 }
 
-export type EarnVaultWithdrawalRequestStatus =
-  | "creating"
-  | "pending"
-  | "fulfillable"
-  | "expired_cancelable"
-  | "cancelling"
-  | "closed_or_unknown"
-  | "fulfilled"
-  | "cancelled"
-  | "failed";
-
 type EarnVaultWithdrawalRequestActionKind = "request" | "cancel";
 export type EarnVaultWithdrawalMechanism = "solver_queue" | "operator_redemption";
-type EarnVaultWithdrawalRequestActionStatus =
-  | "requested"
-  | "submitted"
-  | "confirmed"
-  | "finalized"
-  | "failed";
 
 export interface EarnVaultWithdrawalRequestRow {
   id: string;
@@ -103,7 +100,7 @@ export interface EarnVaultWithdrawalRequestActionRow {
   environment: SdpEnvironment;
   withdrawal_request_id: string;
   action: EarnVaultWithdrawalRequestActionKind;
-  status: EarnVaultWithdrawalRequestActionStatus;
+  status: EarnVaultWithdrawalActionStatus;
   signature: string;
   signed_transaction: string;
   last_valid_block_height: string;
@@ -373,7 +370,7 @@ export interface EarnVaultWithdrawalRequestsRepository extends CurrentRedemption
   advanceAction(input: {
     actionId: string;
     organizationId: string;
-    toStatus: EarnVaultWithdrawalRequestActionStatus;
+    toStatus: EarnVaultWithdrawalActionStatus;
     failureReason?: string | null;
   }): Promise<EarnVaultWithdrawalRequestActionRow | null>;
   failActionAndRecoverRequest(input: FailQueuedWithdrawalActionInput): Promise<{
@@ -486,62 +483,6 @@ function mapWalletBuild(row: Record<string, unknown>): EarnWalletWithdrawalReque
   };
 }
 
-const ACTION_SOURCES: Record<
-  EarnVaultWithdrawalRequestActionStatus,
-  readonly EarnVaultWithdrawalRequestActionStatus[]
-> = {
-  requested: [],
-  submitted: ["requested"],
-  confirmed: ["requested", "submitted"],
-  finalized: ["requested", "submitted", "confirmed"],
-  failed: ["requested", "submitted"],
-};
-
-const REQUEST_SOURCES: Record<
-  EarnVaultWithdrawalRequestStatus,
-  readonly EarnVaultWithdrawalRequestStatus[]
-> = {
-  creating: [],
-  pending: ["creating", "pending", "closed_or_unknown"],
-  fulfillable: ["creating", "pending", "fulfillable", "closed_or_unknown"],
-  // A synchronous cancel eligibility read may be the first observer after a
-  // finalized request transaction. Permit it to close the short `creating`
-  // window instead of making recovery wait for the background sweep.
-  expired_cancelable: [
-    "creating",
-    "pending",
-    "fulfillable",
-    "expired_cancelable",
-    "closed_or_unknown",
-  ],
-  cancelling: ["expired_cancelable", "cancelling"],
-  closed_or_unknown: [
-    "creating",
-    "pending",
-    "fulfillable",
-    "expired_cancelable",
-    "cancelling",
-    "closed_or_unknown",
-  ],
-  fulfilled: [
-    "creating",
-    "pending",
-    "fulfillable",
-    "expired_cancelable",
-    "cancelling",
-    "closed_or_unknown",
-  ],
-  cancelled: [
-    "creating",
-    "pending",
-    "fulfillable",
-    "expired_cancelable",
-    "cancelling",
-    "closed_or_unknown",
-  ],
-  failed: ["creating", "closed_or_unknown"],
-};
-
 const UNPROVEN_CREATE_SQL = `(
   nonce IS NULL AND creation_timestamp IS NULL
   AND (provider_state_observed = FALSE
@@ -597,7 +538,7 @@ async function findBlockingRecordedRequest(
     `SELECT request.id FROM earn_vault_withdrawal_requests request
      WHERE request.environment = ? AND request.request_address = ? AND request.status <> 'failed'
        AND (? = 'solver_queue' OR request.mechanism = 'solver_queue'
-         OR (request.status NOT IN ('fulfilled', 'cancelled') AND NOT EXISTS (
+         OR (request.status NOT IN (${sqlLiteralList(EARN_CLOSED_VAULT_WITHDRAWAL_REQUEST_STATUSES)}) AND NOT EXISTS (
            SELECT 1 FROM earn_wallet_withdrawal_request_transactions release
            WHERE ${CURRENT_REDEMPTION_RELEASE_COVERS_REQUEST_SQL}
              AND release.release_finalized_at IS NOT NULL
@@ -662,10 +603,7 @@ async function releaseTerminalRequestAddressLease(
   request: EarnVaultWithdrawalRequestRow,
   status: EarnVaultWithdrawalRequestStatus
 ): Promise<void> {
-  if (
-    request.mechanism === "operator_redemption" &&
-    (status === "fulfilled" || status === "cancelled")
-  ) {
+  if (request.mechanism === "operator_redemption" && isClosedVaultWithdrawalRequestStatus(status)) {
     // Hastra reuses one owner-derived PDA with no cycle nonce. Keep a
     // database-side embargo after terminal chain truth so another API
     // path cannot reserve it immediately. The adapter independently
@@ -965,7 +903,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
            AND position_id = ? AND owner_address = ?
            AND custody_wallet_id IS NOT DISTINCT FROM ?
            AND mechanism = 'operator_redemption'
-           AND status NOT IN ('fulfilled', 'cancelled', 'failed')
+           AND status NOT IN (${sqlLiteralList(EARN_TERMINAL_VAULT_WITHDRAWAL_REQUEST_STATUSES)})
          ORDER BY created_at DESC, id DESC LIMIT 1`,
         [
           input.organizationId,
@@ -1096,7 +1034,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
         .prepare(
           `SELECT * FROM earn_vault_withdrawal_requests
             WHERE environment = ? AND provider = ? AND request_address = ?
-              AND status NOT IN ('failed', 'fulfilled', 'cancelled')
+              AND status NOT IN (${sqlLiteralList(EARN_TERMINAL_VAULT_WITHDRAWAL_REQUEST_STATUSES)})
             ORDER BY created_at DESC, id DESC
             LIMIT 1`
         )
@@ -1112,7 +1050,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
            AND position_id = ? AND owner_address = ?
            AND custody_wallet_id IS NOT DISTINCT FROM ?::text
            AND mechanism = 'solver_queue'
-           AND status IN ('pending', 'fulfillable', 'expired_cancelable')
+           AND status IN (${sqlLiteralList(EARN_LIVE_VAULT_WITHDRAWAL_REQUEST_STATUSES)})
            AND nonce IS NOT NULL AND creation_timestamp IS NOT NULL
            AND deadline_timestamp IS NOT NULL AND deadline_timestamp::numeric < ?::numeric
          ORDER BY created_at ASC, id ASC LIMIT 1`,
@@ -1155,11 +1093,8 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
       if (params.settled !== undefined) {
         conditions.push(
           params.settled
-            ? "status IN ('fulfilled', 'cancelled', 'failed')"
-            : `status IN (
-                'creating', 'pending', 'fulfillable', 'expired_cancelable',
-                'cancelling', 'closed_or_unknown'
-              )`
+            ? `status IN (${sqlLiteralList(EARN_TERMINAL_VAULT_WITHDRAWAL_REQUEST_STATUSES)})`
+            : `status IN (${sqlLiteralList(EARN_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES)})`
         );
       }
       if (params.before !== undefined) {
@@ -1426,7 +1361,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
           throw conflict(
             `Queued withdrawal cannot be cancelled while status is ${request.status}`,
             request.closing_signature !== null &&
-              (request.status === "fulfilled" || request.status === "cancelled")
+              isClosedVaultWithdrawalRequestStatus(request.status)
               ? { reason: "withdrawal_recovery_unavailable" }
               : undefined
           );
@@ -1520,7 +1455,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
     },
 
     async advanceAction(input) {
-      const sources = ACTION_SOURCES[input.toStatus];
+      const sources = EARN_VAULT_WITHDRAWAL_ACTION_TRANSITIONS[input.toStatus];
       if (sources.length === 0) return null;
       const nowConfirmed = input.toStatus === "confirmed" || input.toStatus === "finalized";
       const row = await db
@@ -1576,8 +1511,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
               RETURNING *`
           )
           .bind(input.failureReason, input.actionId, input.organizationId, [
-            "requested",
-            "submitted",
+            ...EARN_VAULT_WITHDRAWAL_ACTION_TRANSITIONS.failed,
           ])
           .first<Record<string, unknown>>();
         if (!actionRow) return null;
@@ -1629,8 +1563,8 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
             action.withdrawal_request_id,
             input.organizationId,
             action.action === "cancel"
-              ? [...REQUEST_SOURCES[requestStatus], "cancelling"]
-              : [...REQUEST_SOURCES[requestStatus]],
+              ? [...EARN_VAULT_WITHDRAWAL_REQUEST_TRANSITIONS[requestStatus], "cancelling"]
+              : [...EARN_VAULT_WITHDRAWAL_REQUEST_TRANSITIONS[requestStatus]],
             requestStatus
           )
           .first<Record<string, unknown>>();
@@ -1640,7 +1574,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
               .prepare(
                 `SELECT * FROM earn_vault_withdrawal_requests
                   WHERE id = ? AND organization_id = ?
-                    AND status IN ('fulfilled', 'cancelled', 'failed')
+                    AND status IN (${sqlLiteralList(EARN_TERMINAL_VAULT_WITHDRAWAL_REQUEST_STATUSES)})
                   FOR UPDATE`
               )
               .bind(action.withdrawal_request_id, input.organizationId)
@@ -1684,7 +1618,9 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
               AND ${column} IS NULL
             RETURNING id`
         )
-        .bind(input.actionId, input.organizationId, [...ACTION_SOURCES.failed])
+        .bind(input.actionId, input.organizationId, [
+          ...EARN_VAULT_WITHDRAWAL_ACTION_TRANSITIONS.failed,
+        ])
         .first<{ id: string }>();
       if (first) return "first";
       const existing = await db
@@ -1695,14 +1631,16 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
              FROM earn_vault_withdrawal_request_actions
             WHERE id = ? AND organization_id = ? AND status = ANY (?::text[])`
         )
-        .bind(input.actionId, input.organizationId, [...ACTION_SOURCES.failed])
+        .bind(input.actionId, input.organizationId, [
+          ...EARN_VAULT_WITHDRAWAL_ACTION_TRANSITIONS.failed,
+        ])
         .first<{ observed_at: string | null; old_enough: boolean }>();
       if (!existing?.observed_at) return "gone";
       return existing.old_enough ? "repeat" : "first";
     },
 
     async advanceRequest(input) {
-      const sources = REQUEST_SOURCES[input.toStatus];
+      const sources = EARN_VAULT_WITHDRAWAL_REQUEST_TRANSITIONS[input.toStatus];
       if (sources.length === 0) return null;
       const nextCheckAt = input.nextCheckAt ?? null;
       return db.transaction(async (executor) => {
@@ -1726,18 +1664,18 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
                   cancelled_at = CASE WHEN ? = 'cancelled'
                     THEN COALESCE(?, cancelled_at, sdp_iso_now()) ELSE NULL END,
                   next_check_at = CASE
-                    WHEN ? IN ('fulfilled', 'cancelled', 'failed') THEN NULL
+                    WHEN ? IN (${sqlLiteralList(EARN_TERMINAL_VAULT_WITHDRAWAL_REQUEST_STATUSES)}) THEN NULL
                     WHEN ?::text IS NULL THEN next_check_at
                     ELSE ?
                   END,
                   updated_at = sdp_iso_now()
             WHERE id = ? AND organization_id = ? AND status = ANY (?::text[])
               AND (? <> 'failed' OR ${UNPROVEN_CREATE_SQL})
-              AND (? NOT IN ('pending', 'fulfillable', 'expired_cancelable') OR NOT EXISTS (
+              AND (? NOT IN (${sqlLiteralList(EARN_LIVE_VAULT_WITHDRAWAL_REQUEST_STATUSES)}) OR NOT EXISTS (
                 SELECT 1 FROM earn_vault_withdrawal_request_actions action
                  WHERE action.withdrawal_request_id = earn_vault_withdrawal_requests.id
                    AND action.action = 'cancel'
-                   AND action.status IN ('requested', 'submitted', 'confirmed')
+                   AND action.status IN (${sqlLiteralList(EARN_IN_FLIGHT_VAULT_WITHDRAWAL_ACTION_STATUSES)})
               ))
             RETURNING *`
           )
@@ -1831,8 +1769,8 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
                FROM earn_vault_withdrawal_request_actions action
               INNER JOIN earn_vault_withdrawal_requests request
                  ON request.id = action.withdrawal_request_id
-              WHERE action.status IN ('requested', 'submitted', 'confirmed')
-                AND request.status NOT IN ('fulfilled', 'cancelled', 'failed')
+              WHERE action.status IN (${sqlLiteralList(EARN_IN_FLIGHT_VAULT_WITHDRAWAL_ACTION_STATUSES)})
+                AND request.status NOT IN (${sqlLiteralList(EARN_TERMINAL_VAULT_WITHDRAWAL_REQUEST_STATUSES)})
                 AND action.environment = ?
               ORDER BY COALESCE(action.last_checked_at, action.updated_at), action.id
               LIMIT ?
@@ -1858,17 +1796,14 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
           `WITH candidates AS MATERIALIZED (
              SELECT request.id
                FROM earn_vault_withdrawal_requests request
-              WHERE request.status IN (
-                'creating', 'pending', 'fulfillable', 'expired_cancelable',
-                'cancelling', 'closed_or_unknown'
-              )
+              WHERE request.status IN (${sqlLiteralList(EARN_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES)})
                 AND request.environment = ?
                 AND COALESCE(request.next_check_at, request.updated_at) <= sdp_iso_now()
                 AND EXISTS (
                   SELECT 1 FROM earn_vault_withdrawal_request_actions action
                    WHERE action.withdrawal_request_id = request.id
                      AND action.action = 'request'
-                     AND action.status IN ('submitted', 'confirmed', 'finalized')
+                     AND action.status IN (${sqlLiteralList(EARN_LANDED_VAULT_WITHDRAWAL_ACTION_STATUSES)})
                 )
               ORDER BY COALESCE(request.next_check_at, request.updated_at), request.id
               LIMIT ?
