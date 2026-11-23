@@ -24,6 +24,7 @@
     "bn.js": "5.2.5"
   },
   "devDependencies": {
+    "@sdp/custody": "workspace:*",
     "@types/bn.js": "5.2.0",
     "@types/node": "26.6.5",
     "typescript": "6.0.3",
