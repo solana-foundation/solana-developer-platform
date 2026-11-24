@@ -9,15 +9,16 @@ import type {
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import {
+  type ChainHeight,
   getChainHeight,
   getSignatureStatuses,
-  reReadExpiredStatuses,
+  proveExpiredAbsence,
   type SignatureStatusInfo,
   type SolanaRpc,
 } from "@sdp/rpc/solana";
 import { MAX_SUPPORTED_TRANSACTION_VERSION } from "@sdp/rpc/transaction-version";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
-import { address, type Signature, type Slot } from "@solana/kit";
+import { address, type Signature } from "@solana/kit";
 import { getDb } from "@/db/client";
 import {
   createPostgresEarnVaultWithdrawalRequestsRepository,
@@ -139,11 +140,6 @@ function emptyStats(actions: number, requests: number): QueueReconciliationStats
   };
 }
 
-interface ChainHeight {
-  blockHeight: bigint;
-  absoluteSlot: Slot;
-}
-
 /** Whether an action still waits on the chain: its batch status is null and it is not confirmed. */
 function awaitsChain(
   row: EarnVaultWithdrawalRequestActionRow,
@@ -165,32 +161,34 @@ function awaitsChain(
  * @returns The statuses with every expired action's re-read applied, and the indexes of expired
  * actions whose re-read failed, which stay unjudged this tick.
  */
-async function proveExpiredActions(
+function proveExpiredActions(
   rpc: SolanaRpc,
   environment: SdpEnvironment,
   rows: readonly EarnVaultWithdrawalRequestActionRow[],
   statuses: ReadonlyArray<SignatureStatusInfo | null>,
   height: ChainHeight
 ): Promise<{ statuses: Array<SignatureStatusInfo | null>; unproven: Set<number> }> {
-  const expired = rows.flatMap((row, index) =>
-    awaitsChain(row, statuses[index]) && height.blockHeight > BigInt(row.last_valid_block_height)
-      ? // SAFETY: an action row stores the base58 signature of the owner-signed transaction SDP
-        // verified at submit, the same value the batch status read sent.
-        [{ index, signature: row.signature as Signature }]
-      : []
+  return proveExpiredAbsence(
+    rpc,
+    rows,
+    statuses,
+    height,
+    (row, index) =>
+      awaitsChain(row, statuses[index])
+        ? {
+            // SAFETY: an action row stores the base58 signature of the owner-signed transaction
+            // SDP verified at submit, the same value the batch status read sent.
+            signature: row.signature as Signature,
+            lastValidBlockHeight: BigInt(row.last_valid_block_height),
+          }
+        : null,
+    (error, expired) => {
+      getLogger().error(
+        { environment, actions: expired, error },
+        "earn queued withdrawal reconciliation: expired signatures unreadable at the height's slot"
+      );
+    }
   );
-  try {
-    return {
-      statuses: await reReadExpiredStatuses(rpc, statuses, expired, height.absoluteSlot),
-      unproven: new Set(),
-    };
-  } catch (error) {
-    getLogger().error(
-      { environment, actions: expired.length, error },
-      "earn queued withdrawal reconciliation: expired signatures unreadable at the height's slot"
-    );
-    return { statuses: [...statuses], unproven: new Set(expired.map(({ index }) => index)) };
-  }
 }
 
 /**

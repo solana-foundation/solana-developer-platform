@@ -17,7 +17,7 @@ The movement ledger records the financial outcome of current operations.
 Companion docs:
 
 - [Core API design](../../docs/architecture/earn-core-api-proposal.md)
-- [Threat model](../../docs/security/earn-core-api-threat-model.md)
+- [Threat model](https://www.notion.so/422d36dad52d81e2bcf2cbd62c8e4622)
 - [Provider playbook](../../docs/contributing/earn-pluggability-playbook.md)
 - [Historical V1 design](../../docs/architecture/earn-v1-data-flow.md)
 

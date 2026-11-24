@@ -52,7 +52,10 @@ New shared references use `strategy_id` and `strategy_reference`.
 Migration 0236 synchronizes `strategy_reference` with `vault_address` on
 positions, movements and direct builds while previous revisions serve traffic;
 keep the alias until deployment drain. A discovered holding receives unknown
-cost basis (0236), never a synthetic deposit or earnings. Current operations
+cost basis (0236), never a synthetic deposit or earnings; a selector that names
+a holding SDP already tracks keeps that holding's cost basis. `cost_basis_known
+= false` marks an imported holding: visibility needs no movement for it, and a
+failed movement never deactivates it. Current operations
 use the same movement ledger and provider obligations; do not create a second
 financial ledger or adopt old prelaunch actions. The schema-only companion
 removes unused legacy storage after the rewrite is serving.
@@ -128,6 +131,20 @@ Things that will bite:
   Null legacy history remains protected unless its row is still creating.
   Migration 0212's status trigger captures the previous image's observations
   too; do not replace it with a flag only the new service writes.
+- **A Hastra release proves absence the same way.** 0238's
+  `release_absence_observed_at` records the first finalized miss after the
+  release's blockhash expires, once. A miss at least 30 seconds later fails the
+  release `TRANSACTION_EXPIRED` only when every RPC endpoint, read at a
+  finalized slot past the expiry, also misses it (`unsentVerdict`), with at least
+  two distinct endpoints answering. One endpoint leaves it pending; a pooled
+  null can come from a lagging or pruned backend. After acceptance, the release
+  immutability trigger lets only that write-once marker and finality change.
+- **Finalized releases supersede tracking, not financial history.** The exact
+  finalized release fence makes the earlier operation terminal with
+  `REDEMPTION_SUPERSEDED` and no payout claim. Covered requests and actions leave
+  sweep queues, and cannot regain address occupancy after another release
+  fails. Their original financial rows retain the previous status and evidence
+  so a rolling previous revision can still read them.
 - **Retained par intermediate excludes redeemed or reserved amounts.**
   Reconciliation adds intermediate from cancelled share-sourced requests and
   subtracts fulfilled or open zero-share requests for the same position and mint,

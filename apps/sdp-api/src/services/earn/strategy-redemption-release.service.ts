@@ -3,16 +3,23 @@ import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { MAX_SUPPORTED_TRANSACTION_VERSION } from "@sdp/rpc/transaction-version";
 import type { Operation, OperationReference, OperationSource } from "@sdp/types/operations";
-import { TERMINAL_OPERATION_STATUSES } from "@sdp/types/operations";
+import { isTerminalOperationStatus, projectedOperationStatus } from "@sdp/types/operations";
 import { signature } from "@solana/kit";
 import { getDb } from "@/db/client";
 import { isCurrentRedemptionReleaseBuild } from "@/db/repositories/earn-redemption-release.repository";
-import { createPostgresEarnVaultWithdrawalRequestsRepository } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
+import {
+  createPostgresEarnVaultWithdrawalRequestsRepository,
+  type EarnWalletWithdrawalRequestTransactionRow,
+} from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import type { OperationClaim, OperationScope } from "@/db/repositories/operations.repository";
 import { conflict, internalError, notFound } from "@/lib/errors";
 import { createOperationsService } from "@/services/operations.service";
 import type { Env } from "@/types/env";
 import { resolveVaultParRedemptionClient } from "./execution-registry";
+import type {
+  OperationObservationRpc,
+  UnsentTransactionVerdict,
+} from "./operation-observation-rpc";
 import { earnRuntime } from "./runtime";
 import { createVaultDeadline } from "./vault-deadline";
 import { broadcastVaultTransaction } from "./vault-execution.service";
@@ -27,11 +34,45 @@ interface FinalizedReleaseTransaction {
 }
 
 type FinalizedTransactionReader = (value: string) => Promise<FinalizedReleaseTransaction | null>;
+type FinalizedHeightReader = () => Promise<bigint>;
+type ClusterRpc = ReturnType<typeof createClusterRpc>;
 
-async function readFinalizedTransaction(
+/**
+ * After expiry, a second finalized miss at least this long after the first proves a
+ * release never ran: the same evidence an absent request create needs.
+ */
+const RELEASE_ABSENCE_RECHECK_MS = 30_000;
+const RELEASE_FAILED = {
+  code: "TRANSACTION_FAILED",
+  message: "The current redemption release failed on chain",
+};
+const RELEASE_EXPIRED = {
+  code: "TRANSACTION_EXPIRED",
+  message: "The current redemption release expired before it landed",
+};
+
+/** One cluster client serves every chain read a release pass makes. */
+function releaseChainReads(): {
+  readTransaction: FinalizedTransactionReader;
+  readFinalizedHeight: FinalizedHeightReader;
+} {
+  let rpc: ClusterRpc | undefined;
+  const client = (): ClusterRpc => {
+    if (rpc === undefined) rpc = createClusterRpc({ timeoutMs: 2_000 });
+    return rpc;
+  };
+  return {
+    readTransaction: (value) => readFinalizedTransaction(client(), value),
+    readFinalizedHeight: () => client().getBlockHeight({ commitment: "finalized" }).send(),
+  };
+}
+
+/** The exact finalized receipt; missing logs remain unknown evidence for automatic recovery. */
+export async function readFinalizedTransaction(
+  rpc: ClusterRpc,
   value: string
 ): Promise<FinalizedReleaseTransaction | null> {
-  const transaction = await createClusterRpc({ timeoutMs: 2_000 })
+  const transaction = await rpc
     .getTransaction(signature(value), {
       commitment: "finalized",
       encoding: "json",
@@ -58,7 +99,8 @@ export async function submitCurrentRedemptionRelease(
     attemptId: string;
     signedTransaction: string;
     broadcast: boolean;
-  }
+  },
+  readFinalizedHeight: FinalizedHeightReader = releaseChainReads().readFinalizedHeight
 ): Promise<OperationReference> {
   if (input.scope.environment !== currentClusterScope().environment)
     throw internalError("Operation cluster scope changed");
@@ -82,9 +124,40 @@ export async function submitCurrentRedemptionRelease(
     signature: verified.signature,
     signedTransaction: verified.signedTransactionBase64,
   });
-  if (input.broadcast)
+  // Past its last valid block height the release can't land and preflight refuses every
+  // resend: hand it to observation, which proves absence before failing it.
+  if (input.broadcast && (await readFinalizedHeight()) <= BigInt(build.last_valid_block_height))
     await broadcastVaultTransaction({ bytes: verified.bytes, deadline: createVaultDeadline() });
   return { kind: "earn.redemption_release", id: build.id };
+}
+
+/**
+ * A missing receipt proves nothing until the release's blockhash has expired at finalized
+ * commitment. After that, a second finalized miss RELEASE_ABSENCE_RECHECK_MS after the first
+ * hands the release to the shared absence proof: a lagging or pruned history backend can miss
+ * a finalized transaction twice, so only every endpoint's retained history, read at a
+ * finalized slot past the expiry, proves the release never ran.
+ */
+async function releaseAbsenceVerdict(input: {
+  build: Pick<
+    EarnWalletWithdrawalRequestTransactionRow,
+    "last_valid_block_height" | "release_absence_observed_at"
+  >;
+  readFinalizedHeight: FinalizedHeightReader;
+  recordAbsence: () => Promise<unknown>;
+  proveAbsence: () => Promise<UnsentTransactionVerdict>;
+}): Promise<"pending" | "expired"> {
+  const observedAt = input.build.release_absence_observed_at;
+  if (observedAt == null) {
+    if ((await input.readFinalizedHeight()) > BigInt(input.build.last_valid_block_height))
+      await input.recordAbsence();
+    return "pending";
+  }
+  const firstMiss = Date.parse(observedAt);
+  if (!Number.isFinite(firstMiss)) throw internalError("Release absence observation is unreadable");
+  if (Date.now() - firstMiss < RELEASE_ABSENCE_RECHECK_MS) return "pending";
+  // The marker already records expiry; the proof reads its own finalized height.
+  return (await input.proveAbsence()) === "expired" ? "expired" : "pending";
 }
 
 interface ReleaseProjection {
@@ -134,8 +207,7 @@ export async function projectCurrentRedemptionRelease(
   )
     throw notFound("Operation current redemption release");
   const recovered = row.release_finalized_at !== null;
-  const terminal = TERMINAL_OPERATION_STATUSES.some((status) => status === operation.status);
-  const status = terminal ? operation.status : recovered ? "completed" : "settling";
+  const status = projectedOperationStatus(operation.status, recovered ? "completed" : "settling");
   return {
     ...operation,
     status,
@@ -148,10 +220,11 @@ export async function projectCurrentRedemptionRelease(
       status === "settling"
         ? { type: "wait", reason: "Waiting for the current redemption release to finalize" }
         : null,
-    error: status === "completed" ? null : operation.error,
+    // Release evidence replaces an earlier pass's recovery error; a terminal operation keeps its own.
+    error: isTerminalOperationStatus(operation.status) ? operation.error : null,
     result: {
       positionId: row.position_id,
-      ...(row.strategy_id === null ? {} : { strategyId: row.strategy_id }),
+      strategyId: row.strategy_id ?? undefined,
       source: row.source,
       signature: row.signature,
       // Cancellation closes a request and may revoke a delegation. Its event
@@ -167,7 +240,9 @@ export async function advanceCurrentRedemptionRelease(
   env: Env,
   scope: OperationScope,
   claim: OperationClaim,
-  readTransaction: FinalizedTransactionReader = readFinalizedTransaction
+  observations: Pick<OperationObservationRpc, "unsentVerdict">,
+  readTransaction?: FinalizedTransactionReader,
+  readFinalizedHeight?: FinalizedHeightReader
 ): Promise<Operation> {
   if (scope.environment !== currentClusterScope().environment)
     throw internalError("Operation cluster scope changed");
@@ -179,7 +254,7 @@ export async function advanceCurrentRedemptionRelease(
     claim.attempt.signedTransaction === null
   )
     throw conflict("Current redemption release has no recorded signed attempt");
-  if (TERMINAL_OPERATION_STATUSES.some((status) => status === claim.operation.status))
+  if (isTerminalOperationStatus(claim.operation.status))
     return projectCurrentRedemptionRelease(env, scope, claim.operation, buildId);
   const repository = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
   const input = { ...scope, transactionId: buildId, attemptId: claim.attempt.id };
@@ -189,7 +264,10 @@ export async function advanceCurrentRedemptionRelease(
     signedTransaction: claim.attempt.signedTransaction,
   });
   const service = createOperationsService(env);
-  const update = async (status: "settling" | "completed" | "failed") => {
+  const update = async (
+    status: "settling" | "completed" | "failed",
+    error: { code: string; message: string } = RELEASE_FAILED
+  ) => {
     const operation = await service.transition(scope, claim, {
       status,
       resourceRef: { kind: "earn.redemption_release", id: buildId },
@@ -197,23 +275,26 @@ export async function advanceCurrentRedemptionRelease(
         status === "settling"
           ? { type: "wait", reason: "Waiting for the current redemption release to finalize" }
           : null,
-      error:
-        status === "failed"
-          ? {
-              code: "TRANSACTION_FAILED",
-              message: "The current redemption release failed on chain",
-            }
-          : null,
+      error: status === "failed" ? error : null,
     });
     return projectCurrentRedemptionRelease(env, scope, operation, buildId);
   };
   if (build.release_finalized_at != null) return update("completed");
-  const transaction = await readTransaction(claim.attempt.signature);
-  if (
-    transaction === null ||
-    transaction.signature !== claim.attempt.signature ||
-    !transaction.executionResultKnown
-  )
+  const chain = releaseChainReads();
+  const transaction = await (readTransaction ?? chain.readTransaction)(claim.attempt.signature);
+  if (transaction === null) {
+    const released = claim.attempt.signature;
+    const verdict = await releaseAbsenceVerdict({
+      build,
+      readFinalizedHeight: readFinalizedHeight ?? chain.readFinalizedHeight,
+      recordAbsence: () => repository.recordCurrentRedemptionReleaseAbsent(input),
+      proveAbsence: () =>
+        observations.unsentVerdict(scope, released, BigInt(build.last_valid_block_height)),
+    });
+    // An expired release with no effect is a definitive failure, which lifts the PDA fence.
+    return verdict === "expired" ? update("failed", RELEASE_EXPIRED) : update("settling");
+  }
+  if (transaction.signature !== claim.attempt.signature || !transaction.executionResultKnown)
     return update("settling");
   // A finalized error proves no instruction effects survived. The terminal
   // operation transition releases the PDA fence in the same DB transaction.

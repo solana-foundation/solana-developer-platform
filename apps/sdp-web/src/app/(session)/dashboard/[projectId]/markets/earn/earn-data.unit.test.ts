@@ -637,15 +637,13 @@ describe("batched confirmation reads", () => {
       const batch =
         new URL(input, "https://example.test").searchParams.get("afterMovementIds")?.split(",") ??
         [];
+      const page = { positions: [vaultPosition("a")], hasMore: false, nextCursor: null };
+      // Only the full first batch proves its movements; the second answers without evidence.
       return Response.json({
-        data: {
-          positions: [vaultPosition("a")],
-          hasMore: false,
-          nextCursor: null,
-          ...(batch.length === 100
-            ? { balanceReadContext: { afterMovementIds: batch, minimumSlot: 200 } }
-            : {}),
-        },
+        data:
+          batch.length === 100
+            ? { ...page, balanceReadContext: { afterMovementIds: batch, minimumSlot: 200 } }
+            : page,
       });
     });
     vi.stubGlobal("fetch", fetchMock);

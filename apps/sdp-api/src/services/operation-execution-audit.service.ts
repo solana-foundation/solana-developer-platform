@@ -13,8 +13,8 @@ function acceptanceEntry(scope: OperationScope, claim: OperationClaim): AuditLog
   const principal = claim.attempt.principal;
   return {
     organizationId: scope.organizationId,
-    ...(principal.kind === "member" ? { userId: principal.userId } : {}),
-    ...(principal.kind === "api_key" ? { apiKeyId: principal.apiKeyId } : {}),
+    userId: principal.kind === "member" ? principal.userId : undefined,
+    apiKeyId: principal.kind === "api_key" ? principal.apiKeyId : undefined,
     action: "submit",
     resourceType: "earn_operation",
     resourceId: claim.operation.id,

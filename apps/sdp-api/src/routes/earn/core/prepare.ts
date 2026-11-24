@@ -259,7 +259,7 @@ async function prepareDepositAction(
     feePayer: intent.feePayer,
     // A swap-funded deposit always pays its own fees.
     ...(await custodySigning(c, resolved, "earn.deposit", swap === null)),
-    ...(swap === null ? {} : { swap }),
+    swap: swap ?? undefined,
   });
   const terms = emptyTerms();
   terms.inputAmount = intent.amount;
@@ -423,7 +423,7 @@ function withdrawalAdapterPosition(position: WithdrawalPosition, source: EarnStr
     tokenMint: position.token_mint,
     shareMint: position.share_mint,
     ownerAddress: source.ownerAddress,
-    ...(source.wallet === null ? {} : { custodyWalletId: source.wallet.id }),
+    custodyWalletId: source.wallet?.id,
   };
 }
 
@@ -442,9 +442,10 @@ async function prepareWithdrawalAction(
     shares,
     intermediateAmount: intermediate?.value,
     slippageBps: intent.slippageBps,
-    ...(intent.amount.kind === "all" && !amounts.discovered
-      ? { recovery: { actor: preparationContext(resolved.actor) } }
-      : {}),
+    recovery:
+      intent.amount.kind === "all" && !amounts.discovered
+        ? { actor: preparationContext(resolved.actor) }
+        : undefined,
   });
   const terms = emptyTerms();
   terms.inputAmount =
@@ -545,9 +546,7 @@ async function buildSelectedWithdrawalAction(
       terms: selected.terms,
       feePayer: intent.feePayer,
       ...(await custodySigning(c, resolved, "earn.queued_withdraw_request")),
-      ...(discovered && position.strategy_id != null
-        ? { discoveredStrategyId: position.strategy_id }
-        : {}),
+      discoveredStrategyId: discovered ? (position.strategy_id ?? undefined) : undefined,
     });
     if (built.build.quoted_assets !== null)
       terms.estimate = {

@@ -17,7 +17,7 @@ import {
 } from "@/services/earn/cluster-rpc";
 import type { Env } from "@/types/env";
 import { createHastraSwapPort } from "./earn/hastra-swap-port";
-import { createOndoSwapPort } from "./earn/ondo-swap-port";
+import { createJupiterSwapPort } from "./earn/jupiter-swap-port";
 import { createVaultDeadline } from "./earn/vault-deadline";
 
 /**
@@ -55,7 +55,7 @@ const wisdomtree = new WisdomTreeVaultDirectClient(resolveProvenRpcUrl, runVault
 // constructs `ctx.env` from `Env`), because these are process singletons and
 // the Jupiter credential is request-environment state, same as the RPC URL.
 const ondo = new OndoVaultDirectClient(resolveProvenRpcUrl, runVaultOperation, (ctx) =>
-  createOndoSwapPort(ctx.env as unknown as Env)
+  createJupiterSwapPort(ctx.env as unknown as Env, "Jupiter swaps")
 );
 const hastra = new HastraVaultDirectClient(resolveProvenRpcUrl, runVaultOperation, (ctx) =>
   createHastraSwapPort(ctx.env as unknown as Env)

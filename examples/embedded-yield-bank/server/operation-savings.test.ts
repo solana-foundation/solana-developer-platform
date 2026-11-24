@@ -42,7 +42,7 @@ function operation(
       positionId: "position",
       strategyId: "strategy",
       signature: "signature",
-      settledAmount: { mint, value: "105" },
+      settledAmount: { mint, value: kind === "earn.deposit" ? "100" : "105" },
       settlementOutcome: "delivered",
     },
     canCancel: false,
@@ -129,6 +129,52 @@ describe("operation savings adapter", () => {
               settledAmount: null,
             },
           },
+        ],
+        mint
+      ).earned
+    ).toBeUndefined();
+  });
+  it("counts a deposit's observed debit, not its requested maximum", () => {
+    const deposit = operation("earn.deposit");
+    expect(
+      summarizeSavingsOperations(
+        { amount: "105" },
+        null,
+        [
+          {
+            ...deposit,
+            result: {
+              positionId: "position",
+              strategyId: "strategy",
+              signature: "signature",
+              settledAmount: { mint, value: "99.9" },
+              settlementOutcome: "delivered",
+            },
+          },
+          operation("earn.withdraw"),
+        ],
+        mint
+      )
+    ).toMatchObject({ earned: "5.1" });
+  });
+  it("withholds earnings while a completed deposit's debit is unobserved", () => {
+    const deposit = operation("earn.deposit");
+    expect(
+      summarizeSavingsOperations(
+        { amount: "105" },
+        null,
+        [
+          {
+            ...deposit,
+            result: {
+              positionId: "position",
+              strategyId: "strategy",
+              signature: "signature",
+              settledAmount: null,
+              settlementOutcome: "delivered",
+            },
+          },
+          operation("earn.withdraw"),
         ],
         mint
       ).earned

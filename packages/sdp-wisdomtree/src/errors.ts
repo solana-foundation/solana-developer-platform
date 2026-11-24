@@ -1,3 +1,5 @@
+import type { VaultProviderErrorCodeOf } from "@sdp/earn/types";
+
 /**
  * Error taxonomy for `@sdp/wisdomtree` — the package's own class, per the
  * provider-package convention (`SdpKaminoError` precedent): the API layer maps
@@ -7,7 +9,7 @@
  * `WITHDRAW_REFUSED` are caller-fixable 400s, `VAULT_UNREADABLE` is a
  * retryable 503, and everything else keeps bubbling as an internal fault.
  */
-export type SdpWisdomTreeErrorCode =
+export type SdpWisdomTreeErrorCode = VaultProviderErrorCodeOf<
   /** The fund's instrument does not exist on the requested cluster. */
   | "CLUSTER_UNSUPPORTED"
   /** Caller-fault amount problems: unparsable, zero, or sub-atomic precision. */
@@ -31,7 +33,8 @@ export type SdpWisdomTreeErrorCode =
    * decimals, or transfer-hook program). Refusing is the point: building
    * against a drifted instrument moves money under stale assumptions.
    */
-  | "MINT_MISMATCH";
+  | "MINT_MISMATCH"
+>;
 
 export class SdpWisdomTreeError extends Error {
   constructor(

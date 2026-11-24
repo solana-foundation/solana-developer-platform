@@ -143,7 +143,9 @@ const plan = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.findOldestExpiredEscrow.mockResolvedValue(request());
+  mocks.findOldestExpiredEscrow.mockImplementation(async (input: { after?: { id: string } }) =>
+    input.after === undefined ? request() : null
+  );
   mocks.getById.mockResolvedValue(request());
   mocks.advanceRequest.mockResolvedValue(request());
   mocks.createWalletTransaction.mockImplementation(async (input: { id: string }) => ({
@@ -254,6 +256,7 @@ describe("expired strategy escrow recovery", () => {
   });
 
   it("does not manufacture recovery for closed or unavailable provider requests", async () => {
+    mocks.findOldestExpiredEscrow.mockResolvedValueOnce(request()).mockResolvedValueOnce(null);
     mocks.read.mockResolvedValue({
       requestAddress: "request_address",
       status: "closedOrUnknown",
@@ -266,6 +269,61 @@ describe("expired strategy escrow recovery", () => {
     await expect(
       inScope(() => readExpiredStrategyWithdrawalRecoveries(env, { actor, position }))
     ).rejects.toThrow("provider unavailable");
+  });
+
+  it("skips stale requests and reads each candidate once before offering live escrow", async () => {
+    const closed = request({ id: "closed", request_address: "closed_address" });
+    const unexpired = request({ id: "unexpired", request_address: "unexpired_address" });
+    const recoverable = request({ id: "recoverable", request_address: "recoverable_address" });
+    const proof = lookup();
+    proof.requestAddress = recoverable.request_address;
+    proof.request.requestAddress = recoverable.request_address;
+    const unexpiredProof = lookup();
+    mocks.findOldestExpiredEscrow
+      .mockResolvedValueOnce(closed)
+      .mockResolvedValueOnce(unexpired)
+      .mockResolvedValueOnce(recoverable);
+    mocks.read
+      .mockResolvedValueOnce({
+        requestAddress: closed.request_address,
+        status: "closedOrUnknown",
+        request: null,
+      })
+      .mockResolvedValueOnce({
+        ...unexpiredProof,
+        requestAddress: unexpired.request_address,
+        status: "fulfillable",
+        request: {
+          ...unexpiredProof.request,
+          requestAddress: unexpired.request_address,
+          status: "fulfillable",
+        },
+      })
+      .mockResolvedValueOnce(proof);
+
+    await expect(
+      inScope(() => readExpiredStrategyWithdrawalRecoveries(env, { actor, position }))
+    ).resolves.toEqual([{ request: recoverable, proof }]);
+    expect(mocks.findOldestExpiredEscrow).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ after: undefined })
+    );
+    expect(mocks.findOldestExpiredEscrow).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ after: { createdAt: closed.created_at, id: closed.id } })
+    );
+    expect(mocks.findOldestExpiredEscrow).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({ after: { createdAt: unexpired.created_at, id: unexpired.id } })
+    );
+    expect(mocks.read).toHaveBeenCalledTimes(3);
+    expect(mocks.read.mock.calls.map(([, input]) => input.requestAddress)).toEqual([
+      closed.request_address,
+      unexpired.request_address,
+      recoverable.request_address,
+    ]);
+    expect(mocks.resolve).toHaveBeenCalledTimes(1);
+    expect(mocks.build).not.toHaveBeenCalled();
   });
 
   it("advertises returned shares with no wallet balance or provider payout", async () => {

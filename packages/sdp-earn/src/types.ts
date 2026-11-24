@@ -177,6 +177,120 @@ export interface EarnLiveMetricsProvider extends EarnVaultProvider {
 }
 
 /**
+ * The build-failure vocabulary every vault-direct provider package raises on
+ * its own error class (`SdpVedaError`, `SdpKaminoError` and the rest), so the
+ * API answers a code the same way whichever provider raised it. The API
+ * classifies every member in `vault-refusals.ts`. Separate from
+ * `SdpEarnError`'s catalogue taxonomy on purpose: an instruction-builder
+ * failure must not look like a provider outage to code matching on that class.
+ */
+export type VaultProviderErrorCode =
+  /** A caller amount that is malformed, zero, over-precise, or out of range. */
+  | "INVALID_AMOUNT"
+  /** The vault refuses this deposit right now (paused, capped, asset off). */
+  | "DEPOSIT_REFUSED"
+  /** The vault refuses this exit right now (paused, locked, restricted). */
+  | "WITHDRAW_REFUSED"
+  /** The provider refuses this redemption request or its cancellation. */
+  | "REDEMPTION_REFUSED"
+  /** The vault requires an external compliance approval SDP does not implement. */
+  | "COMPLIANCE_APPROVAL_REQUIRED"
+  /** Queue discount/deadline values are invalid, or cancellation is too early. */
+  | "INVALID_QUEUE_PARAMETERS"
+  /** The named queue request is already closed or does not exist. */
+  | "WITHDRAWAL_REQUEST_NOT_FOUND"
+  /** Vault, asset or position state could not be read on this cluster. */
+  | "VAULT_UNREADABLE"
+  /** A provider redemption request could not be read. */
+  | "REQUEST_UNREADABLE"
+  /** The owner's position could not be read. */
+  | "POSITION_UNREADABLE"
+  /** The swap a deposit or exit depends on came back unusable. */
+  | "SWAP_UNAVAILABLE"
+  /** SDP has no confirmed deployment for the cluster in play. */
+  | "DEPLOYMENT_NOT_CONFIGURED"
+  /** The instrument does not exist on the requested cluster. */
+  | "CLUSTER_UNSUPPORTED"
+  /** The vault's configuration cannot be expressed by SDP's deposit contract. */
+  | "UNSUPPORTED_VAULT"
+  /** The live deployment does not satisfy what SDP requires of it. */
+  | "INCOMPATIBLE_DEPLOYMENT"
+  /** An instruction or account named a program that is not this cluster's. */
+  | "PROGRAM_MISMATCH"
+  /** The live mint does not match SDP's measured registry. */
+  | "MINT_MISMATCH";
+
+/**
+ * One provider's subset of `VaultProviderErrorCode`. Declaring a provider's
+ * codes through this makes a code outside the shared vocabulary a compile
+ * error instead of a status the API silently answers with a 500.
+ */
+export type VaultProviderErrorCodeOf<Code extends VaultProviderErrorCode> = Code;
+
+/**
+ * The swap seam an execution package builds through, injected by the API:
+ * Ondo's USDC to USDY swap and Hastra's wYLDS to USDC exit leg.
+ *
+ * The API already owns a reviewed trust boundary for admitting Jupiter's
+ * response-controlled instructions into a transaction a wallet authorizes
+ * wholesale (`apps/sdp-api/src/services/earn/jupiter-swap.service.ts`).
+ * Injecting it as a port keeps that boundary single-owner, so no package
+ * re-implements instruction admission, and keeps execution packages free of
+ * Jupiter credentials. Unit tests stub the port; smoke tests provide a live one.
+ */
+export interface EarnSwapPort {
+  /**
+   * Build an ExactIn swap as admitted, plan-vocabulary instructions.
+   *
+   * The implementation must guarantee what the API's swap service guarantees:
+   * instructions only from the pinned aggregator/ATA programs, no signer other
+   * than `owner` and an explicitly requested `payer`, the encoded amounts
+   * matching `amount`/`slippageBps`, and a `minOutAmount` equal to the route's
+   * guaranteed threshold.
+   */
+  buildSwapLeg(request: EarnSwapBuildRequest): Promise<EarnSwapLeg>;
+  /** Price an ExactIn swap without building instructions (no owner needed). */
+  quoteSwap(request: EarnSwapQuoteRequest): Promise<EarnSwapQuote>;
+}
+
+export interface EarnSwapQuoteRequest {
+  cluster: SolanaCluster;
+  inputMint: string;
+  outputMint: string;
+  /** ExactIn amount in the INPUT token's units, decimal string. */
+  amount: string;
+}
+
+export interface EarnSwapBuildRequest extends EarnSwapQuoteRequest {
+  /** The wallet that signs and receives; it also pays unless `payer` is set. */
+  owner: string;
+  /** Optional distinct payer for the setup accounts the route creates. */
+  payer?: string;
+  /** Tolerance the route encodes; the threshold it yields is the real floor. */
+  slippageBps: number;
+  /** Bound route account fan-out so a composed transaction still fits. */
+  maxAccounts?: number;
+}
+
+export interface EarnSwapLeg {
+  /** Setup + swap in execution order, already in the plan's own vocabulary. */
+  instructions: EarnVaultInstruction[];
+  lookupTableAddresses: string[];
+  /** Quoted output at the live rate, OUTPUT token units, decimal string. */
+  quotedAmount: string;
+  /** The guaranteed output floor the instructions encode, OUTPUT token units. */
+  minOutAmount: string;
+  priceImpactPct: string;
+  routeLabels: string[];
+}
+
+export interface EarnSwapQuote {
+  /** Output at the live rate, OUTPUT token units, decimal string. */
+  outAmount: string;
+  priceImpactPct: string;
+}
+
+/**
  * One account slot in a built instruction.
  *
  * `role` mirrors `@solana/kit`'s `AccountRole` numeric enum (0 readonly,
@@ -843,34 +957,6 @@ export interface EarnVaultProviderOrderWithdrawProvider extends EarnVaultWithdra
 
 export interface EarnProviderRedemptionModesProvider extends EarnVaultWithdrawProvider {
   getProviderRedemptionModes(): readonly ("standard" | "instant")[];
-}
-
-export interface EarnVaultPreparationProvider extends EarnVaultDirectProvider {
-  buildVaultPreparation(
-    ctx: EarnRuntimeContext,
-    input: { providerReference: string; owner: string; rentPayer?: string }
-  ): Promise<EarnVaultTransactionPlan>;
-}
-
-export interface EarnProviderOrderCancellationProvider extends EarnProviderSettlementProvider {
-  buildProviderOrderCancellation(
-    ctx: EarnRuntimeContext,
-    input: {
-      providerReference: string;
-      owner: string;
-      sourceTransaction: string;
-      rentPayer?: string;
-    }
-  ): Promise<EarnVaultTransactionPlan>;
-  readProviderOrderCancellation(
-    ctx: EarnRuntimeContext,
-    input: {
-      providerReference: string;
-      owner: string;
-      sourceSignature: string;
-      sourceTransaction: string;
-    }
-  ): ReturnType<EarnProviderSettlementProvider["readProviderSettlement"]>;
 }
 
 export interface EarnDepositEligibilityInput {

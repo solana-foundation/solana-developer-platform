@@ -1,6 +1,6 @@
 "use client";
 
-import { type Operation, TERMINAL_OPERATION_STATUSES } from "@sdp/types/operations";
+import { isTerminalOperationStatus, type Operation } from "@sdp/types/operations";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { earnQueryKeys } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-query-key";
@@ -27,7 +27,7 @@ export const earnCoreClient = createEarnClient((path, init) => {
 
 /** Settlement, rejection and confirmed cancellation stop active operation polling. */
 export function isEarnOperationTerminal(operation: Operation): boolean {
-  return TERMINAL_OPERATION_STATUSES.some((status) => status === operation.status);
+  return isTerminalOperationStatus(operation.status);
 }
 
 const OPERATIONS_HISTORY_PAGE_SIZE = 50;

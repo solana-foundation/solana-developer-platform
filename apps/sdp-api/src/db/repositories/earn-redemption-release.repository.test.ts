@@ -321,6 +321,109 @@ describe("current redemption release storage", () => {
     ).toEqual({ status: "pending", cancel_signature: null });
   });
 
+  it.each([false, true])(
+    "does not restore a previously released request after a later release fails (signed=%s)",
+    async (signed) => {
+      await pendingRequest();
+      const first = await prepare("release_1");
+      await operations().requestExecution(scope, first.claim, first.signed);
+      await queues().recordCurrentRedemptionReleaseFinalized(first.input);
+      await operations().transition(scope, first.claim, {
+        status: "queued",
+        nextAction: null,
+        resourceRef: null,
+        error: null,
+      });
+      await operations().transition(scope, first.claim, {
+        status: "completed",
+        nextAction: null,
+        resourceRef: { kind: "earn.redemption_release", id: "release_1" },
+        error: null,
+      });
+      await getDb(env).execute(
+        "UPDATE earn_vault_withdrawal_request_pda_leases SET expires_at = '2000-01-01', reuse_not_before = '2000-01-01' WHERE lease_token = 'release_1'"
+      );
+
+      const second = await prepare("release_2");
+      await operations().requestExecution(scope, second.claim, signed ? second.signed : undefined);
+      await fail(second);
+
+      expect(await lease()).toMatchObject({ lease_token: "release_2", occupied: false });
+      await expect(
+        queues().findCurrentRedemptionRequest({
+          ...scope,
+          positionId: position(scope),
+          ownerAddress: OWNER,
+          custodyWalletId: null,
+        })
+      ).resolves.toBeNull();
+      await expect(
+        queues().isRequestFencedByCurrentRedemptionRelease({
+          ...scope,
+          withdrawalRequestId: "historical_A",
+        })
+      ).resolves.toBe(true);
+      expect(
+        await getDb(env).queryOne(
+          "SELECT status, closing_signature FROM earn_vault_withdrawal_requests WHERE id = 'historical_A'"
+        )
+      ).toEqual({ status: "pending", closing_signature: null });
+
+      await getDb(env).execute(
+        "UPDATE earn_vault_withdrawal_request_pda_leases SET expires_at = '2000-01-01', reuse_not_before = '2000-01-01' WHERE lease_token = 'release_2'"
+      );
+      await expect(
+        queues().acquireRequestReservation({
+          ...scope,
+          id: "fresh_redemption",
+          provider: "hastra",
+          vaultAddress: VAULT,
+          ownerAddress: OWNER,
+          requestAddress: PDA,
+          clientRequestId: "fresh_redemption",
+          idempotencyFingerprint: "fresh_redemption",
+          expiresAt: "2099-01-01T00:00:00.000Z",
+          mechanism: "operator_redemption",
+        })
+      ).resolves.toBeUndefined();
+    }
+  );
+
+  it("keeps one immutable absence marker, and an expiry failure frees the address for a new release", async () => {
+    await pendingRequest();
+    const p = await prepare("release_1");
+    await operations().requestExecution(scope, p.claim, p.signed);
+    const first = await queues().recordCurrentRedemptionReleaseAbsent(p.input);
+    expect(first.release_absence_observed_at).toEqual(expect.any(String));
+    const again = await queues().recordCurrentRedemptionReleaseAbsent(p.input);
+    expect(again.release_absence_observed_at).toBe(first.release_absence_observed_at);
+    await expect(
+      getDb(env).execute(
+        "UPDATE earn_wallet_withdrawal_request_transactions SET release_absence_observed_at = '2000-01-01T00:00:00.000Z' WHERE id = 'release_1'"
+      )
+    ).rejects.toThrow("absence observation is immutable");
+    await operations().transition(scope, p.claim, {
+      status: "failed",
+      nextAction: null,
+      resourceRef: null,
+      error: {
+        code: "TRANSACTION_EXPIRED",
+        message: "The current redemption release expired before it landed",
+      },
+    });
+    expect(
+      await queues().isRequestFencedByCurrentRedemptionRelease({
+        organizationId: scope.organizationId,
+        environment: scope.environment,
+        withdrawalRequestId: "historical_A",
+      })
+    ).toBe(false);
+    expect(await lease()).toMatchObject({ lease_token: "historical_A", occupied: true });
+    const next = await prepare("release_2");
+    await operations().requestExecution(scope, next.claim, next.signed);
+    expect(await lease()).toMatchObject({ lease_token: "release_2", occupied: true });
+  });
+
   it("rejects cross-scope consumption and restores occupancy after a pre-sign refusal", async () => {
     await pendingRequest();
     const p = await prepare("release_1");
@@ -351,6 +454,93 @@ describe("current redemption release storage", () => {
     });
     await operations().requestExecution(scope, p.claim, p.signed);
     expect(await lease()).toMatchObject({ lease_token: "release_1", occupied: true });
+  });
+
+  it("ends active tracking from finalized release proof without changing financial history", async () => {
+    await pendingRequest();
+    await queues().advanceAction({
+      actionId: "action_historical_A",
+      organizationId: scope.organizationId,
+      toStatus: "confirmed",
+    });
+    const requestScope = { ...scope, withdrawalRequestId: "historical_A" };
+    const historical = await getDb(env).queryOne(
+      "SELECT status, closing_signature, assets_paid, fulfilled_at, cancelled_at FROM earn_vault_withdrawal_requests WHERE id = 'historical_A'"
+    );
+    const p = await prepare("release_1");
+    await operations().requestExecution(scope, p.claim, p.signed);
+    await expect(queues().findSupersedingRedemptionRelease(requestScope)).resolves.toBeNull();
+    await expect(
+      queues().claimUnsettledActions({ environment: "sandbox", limit: 10 })
+    ).resolves.toHaveLength(1);
+    await expect(
+      queues().claimOpenRequests({ environment: "sandbox", limit: 10 })
+    ).resolves.toHaveLength(1);
+    expect((await queues().list({ ...scope, settled: false, limit: 10 })).rows).toHaveLength(1);
+
+    const [, staleObservation] = await Promise.all([
+      queues().recordCurrentRedemptionReleaseFinalized(p.input),
+      queues().advanceRequest({
+        ...requestScope,
+        toStatus: "fulfilled",
+        assetsPaid: "10",
+        closingSignature: "replacement_B_signature",
+      }),
+    ]);
+    expect(staleObservation).toBeNull();
+    await expect(queues().findSupersedingRedemptionRelease(requestScope)).resolves.toEqual({
+      id: "release_1",
+      finalizedAt: expect.any(String),
+    });
+    for (const changed of [
+      { organizationId: foreign.organizationId },
+      { projectId: foreign.projectId },
+      { environment: "production" as const },
+      { withdrawalRequestId: "foreign_request" },
+    ]) {
+      await expect(
+        queues().findSupersedingRedemptionRelease({ ...requestScope, ...changed })
+      ).resolves.toBeNull();
+    }
+    await expect(
+      queues().claimUnsettledActions({ environment: "sandbox", limit: 10 })
+    ).resolves.toEqual([]);
+    await getDb(env).execute(
+      "UPDATE earn_vault_withdrawal_requests SET next_check_at = '2000-01-01' WHERE id = 'historical_A'"
+    );
+    await expect(
+      queues().claimOpenRequests({ environment: "sandbox", limit: 10 })
+    ).resolves.toEqual([]);
+    expect((await queues().list({ ...scope, settled: false, limit: 10 })).rows).toEqual([]);
+    expect(
+      await getDb(env).queryOne(
+        "SELECT status, closing_signature, assets_paid, fulfilled_at, cancelled_at FROM earn_vault_withdrawal_requests WHERE id = 'historical_A'"
+      )
+    ).toEqual(historical);
+    expect(await getDb(env).queryOne("SELECT COUNT(*)::int AS count FROM earn_movements")).toEqual({
+      count: 0,
+    });
+  });
+
+  it("preserves an already terminal historical request despite a later release", async () => {
+    await pendingRequest();
+    await queues().advanceRequest({
+      organizationId: scope.organizationId,
+      withdrawalRequestId: "historical_A",
+      toStatus: "cancelled",
+      closingSignature: "historical_cancellation",
+    });
+    const p = await prepare("release_1");
+    await operations().requestExecution(scope, p.claim, p.signed);
+    await queues().recordCurrentRedemptionReleaseFinalized(p.input);
+    await expect(
+      queues().findSupersedingRedemptionRelease({ ...scope, withdrawalRequestId: "historical_A" })
+    ).resolves.toBeNull();
+    expect(
+      await getDb(env).queryOne(
+        "SELECT status, closing_signature FROM earn_vault_withdrawal_requests WHERE id = 'historical_A'"
+      )
+    ).toEqual({ status: "cancelled", closing_signature: "historical_cancellation" });
   });
 
   it("fences stale financial observations after acceptance and lifts only after definite failure", async () => {

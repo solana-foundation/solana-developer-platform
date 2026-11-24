@@ -317,11 +317,15 @@ export async function submitPreparedStrategyTransaction(
         label: built.label,
         requestedAmount: built.amount_requested,
         acceptedMinSharesOut: built.min_shares_out,
-        admit: ledgerVaultExposureGate(env, {
-          provider: built.provider,
-          vaultAddress: built.vault_address,
-          amount: built.amount_requested,
-        }),
+        // Observed chain effects must be recorded even when new deposits are refused.
+        admit:
+          input.broadcast === false
+            ? undefined
+            : ledgerVaultExposureGate(env, {
+                provider: built.provider,
+                vaultAddress: built.vault_address,
+                amount: built.amount_requested,
+              }),
       };
       recorded =
         custodyWalletId === null

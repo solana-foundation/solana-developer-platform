@@ -32,12 +32,17 @@ import {
   buildCurrentRedemptionRelease,
   buildWalletQueuedWithdrawalRecovery,
   buildWalletQueuedWithdrawalRequest,
+  type ParRedemptionTermsInput,
   type QueuedWithdrawalActor,
   type QueuedWithdrawalPosition,
   submitWalletQueuedWithdrawalAction,
   type WalletQueuedWithdrawalBuiltTransaction,
 } from "./vault-queued-withdraw.service";
-import { rethrowVaultProviderFailure } from "./vault-refusals";
+import {
+  isVaultProviderUnavailable,
+  rethrowVaultProviderFailure,
+  vaultProviderErrorCode,
+} from "./vault-refusals";
 import type { VaultFeeMode } from "./vault-sponsorship";
 
 export interface PreparedStrategyWithdrawalChoice {
@@ -80,11 +85,17 @@ async function prepareRecoveryChoices(
   client: Parameters<typeof readExpiredStrategyWithdrawalRecoveries>[2]
 ): Promise<PreparedStrategyWithdrawalChoice[]> {
   if (input.recovery === undefined) return [];
-  const recoveries = await readExpiredStrategyWithdrawalRecoveries(
-    env,
-    { actor: input.recovery.actor, position: input.position },
-    client
-  );
+  let recoveries: Awaited<ReturnType<typeof readExpiredStrategyWithdrawalRecoveries>>;
+  try {
+    recoveries = await readExpiredStrategyWithdrawalRecoveries(
+      env,
+      { actor: input.recovery.actor, position: input.position },
+      client
+    );
+  } catch (error) {
+    // Like a pending release, a recorded escrow SDP can't read fails closed.
+    rethrowVaultProviderFailure(error);
+  }
   return recoveries.map(({ request, proof }) => {
     const id = `recover_expired_escrow:${request.id}`;
     return {
@@ -143,7 +154,7 @@ async function prepareCurrentRedemptionReleaseChoice(
     });
   } catch (error) {
     // A known request may already have closed. Read failures still fail closed.
-    if (error instanceof Error && "code" in error && error.code === "REDEMPTION_REFUSED") return [];
+    if (vaultProviderErrorCode(error) === "REDEMPTION_REFUSED") return [];
     rethrowVaultProviderFailure(error);
   }
   const id = "release_current_redemption";
@@ -162,6 +173,33 @@ async function prepareCurrentRedemptionReleaseChoice(
       },
     },
   ];
+}
+
+/** No route survived: an unreadable provider is an outage (503), not a missing route. */
+function refuseWithoutRoute(reads: readonly PromiseSettledResult<unknown>[]): never {
+  const outage = reads
+    .flatMap((read): unknown[] => (read.status === "rejected" ? [read.reason] : []))
+    .find(isVaultProviderUnavailable);
+  if (outage !== undefined) rethrowVaultProviderFailure(outage);
+  throw badRequest("No supported withdrawal route is currently available");
+}
+
+/** The par redemption a withdrawal asks for, when it meets the provider's minimum. */
+function parRedemptionTerms(
+  input: { shares?: string; intermediateAmount?: string },
+  par: { minimumIntermediateAmount: string; minimumShares: string | null }
+): ParRedemptionTermsInput | null {
+  if (input.intermediateAmount !== undefined)
+    return compareDecimalAmounts(input.intermediateAmount, par.minimumIntermediateAmount) >= 0
+      ? { mechanism: "operator_redemption", intermediateAmount: input.intermediateAmount }
+      : null;
+  if (
+    input.shares !== undefined &&
+    par.minimumShares !== null &&
+    compareDecimalAmounts(input.shares, par.minimumShares) >= 0
+  )
+    return { mechanism: "operator_redemption", shares: input.shares };
+  return null;
 }
 
 /**
@@ -289,16 +327,7 @@ export async function prepareStrategyWithdrawalChoices(
     );
   }
   if (parClient !== null && par !== null && par.assetMint === input.position.tokenMint) {
-    const terms: AsyncWithdrawalTermsInput | null =
-      input.intermediateAmount !== undefined
-        ? compareDecimalAmounts(input.intermediateAmount, par.minimumIntermediateAmount) >= 0
-          ? { mechanism: "operator_redemption", intermediateAmount: input.intermediateAmount }
-          : null
-        : input.shares !== undefined &&
-            par.minimumShares !== null &&
-            compareDecimalAmounts(input.shares, par.minimumShares) >= 0
-          ? { mechanism: "operator_redemption", shares: input.shares }
-          : null;
+    const terms = parRedemptionTerms(input, par);
     if (terms !== null)
       quotes.push(
         (async () => {
@@ -332,10 +361,9 @@ export async function prepareStrategyWithdrawalChoices(
         })()
       );
   }
-  await Promise.allSettled(quotes);
+  const quoteReads = await Promise.allSettled(quotes);
   choices.sort((left, right) => left.id.localeCompare(right.id));
-  if (choices.length === 0)
-    throw badRequest("No supported withdrawal route is currently available");
+  if (choices.length === 0) refuseWithoutRoute([queueRead, parRead, ...quoteReads]);
   return { choices, options: choices.map((choice) => choice.option) };
 }
 

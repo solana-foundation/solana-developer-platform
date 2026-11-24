@@ -72,6 +72,10 @@ same way. `discovery.unavailableStrategyCount` counts strategies SDP couldn't
 read: their balances are unknown, not zero. Holdings found this way have no
 purchase history, so their `costBasisKnown` is `false`.
 
+A withdrawal starts tracking a discovered holding, and it stays listed while it
+holds a balance, even if that withdrawal fails. Withdrawing through a discovered
+ID of a holding SDP already tracks uses that holding and keeps its cost basis.
+
 ## Totals and earnings
 
 `includeSummary=true` totals everything the filter selects, not only the

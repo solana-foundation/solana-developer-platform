@@ -26,18 +26,19 @@ const retiredTables = [
   "earn_provider_actions",
   "earn_provider_wallets",
 ] as const;
-const preservedTables = [
-  "earn_positions",
-  "earn_movements",
-  "earn_wallet_transactions",
-  "earn_wallet_withdrawal_request_transactions",
-  "earn_vault_withdrawal_requests",
-  "earn_vault_withdrawal_request_actions",
-  "earn_vault_withdrawal_request_reservations",
-  "earn_vault_withdrawal_request_pda_leases",
-  "operations",
-  "operation_attempts",
-] as const;
+const preservedTableFilters = {
+  earn_positions: "WHERE kind = 'vault_direct'",
+  earn_movements: "WHERE execution_model = 'vault_direct'",
+  earn_wallet_transactions: "",
+  earn_wallet_withdrawal_request_transactions: "",
+  earn_vault_withdrawal_requests: "",
+  earn_vault_withdrawal_request_actions: "",
+  earn_vault_withdrawal_request_reservations: "",
+  earn_vault_withdrawal_request_pda_leases: "",
+  operations: "",
+  operation_attempts: "",
+} as const;
+const preservedTables = Object.keys(preservedTableFilters);
 const org = "org_earn_schema_cleanup";
 const project = "proj_earn_schema_cleanup";
 const owner = "11111111111111111111111111111111";
@@ -269,13 +270,7 @@ async function seedGraph(): Promise<void> {
 
 async function liveRows(): Promise<Record<string, unknown>> {
   const rows: Record<string, unknown> = {};
-  for (const table of preservedTables) {
-    const filter =
-      table === "earn_positions"
-        ? "WHERE kind = 'vault_direct'"
-        : table === "earn_movements"
-          ? "WHERE execution_model = 'vault_direct'"
-          : "";
+  for (const [table, filter] of Object.entries(preservedTableFilters)) {
     rows[table] = (
       await client.query(
         `SELECT to_jsonb(row) - 'provider_wallet_id' AS row FROM ${table} row ${filter}
@@ -286,7 +281,7 @@ async function liveRows(): Promise<Record<string, unknown>> {
   return rows;
 }
 
-async function preservedSchema(): Promise<unknown> {
+async function preservedSchema() {
   const constraints = await client.query(
     `SELECT conrelid::regclass::text AS table_name, conname, pg_get_constraintdef(oid) AS definition
      FROM pg_constraint WHERE conrelid = ANY($1::regclass[])

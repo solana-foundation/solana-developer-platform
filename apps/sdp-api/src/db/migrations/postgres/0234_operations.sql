@@ -60,6 +60,7 @@ CREATE TABLE operation_attempts (
     organization_id TEXT NOT NULL REFERENCES organizations(id),
     project_id TEXT NOT NULL,
     environment TEXT NOT NULL CHECK (environment IN ('sandbox', 'production')),
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
     action_id TEXT NOT NULL,
     action_version INTEGER NOT NULL CHECK (action_version > 0),
     principal JSONB NOT NULL CHECK (jsonb_typeof(principal) = 'object'),

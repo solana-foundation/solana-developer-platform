@@ -1,18 +1,21 @@
+import type { VaultProviderErrorCodeOf } from "@sdp/earn/types";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import type { Address } from "@solana/kit";
 
 /**
  * Errors this package raises, mirroring `@sdp/earn/errors` in shape: a `code`
  * the API can map to a status, and a message that says what was actually wrong.
- * Deliberately NOT re-using `@sdp/earn`'s constructors — that would put an
- * `@sdp/kamino → @sdp/earn` edge in place for three error shapes.
+ * Deliberately NOT re-using `@sdp/earn`'s constructors: they raise the
+ * catalogue taxonomy (`SdpEarnError`), and a builder failure must not look like
+ * a provider outage. The codes are the shared `VaultProviderErrorCode` subset.
  */
-export type SdpKaminoErrorCode =
+export type SdpKaminoErrorCode = VaultProviderErrorCodeOf<
   | "INVALID_AMOUNT"
   | "VAULT_UNREADABLE"
   | "PROGRAM_MISMATCH"
   | "DEPOSIT_REFUSED"
-  | "WITHDRAW_REFUSED";
+  | "WITHDRAW_REFUSED"
+>;
 
 export class SdpKaminoError extends Error {
   constructor(

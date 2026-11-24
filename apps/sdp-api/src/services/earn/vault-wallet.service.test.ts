@@ -14,9 +14,10 @@ import {
   SOLANA_ERROR__TRANSACTION_ERROR__BLOCKHASH_NOT_FOUND,
   SolanaError,
 } from "@solana/kit";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { generateEarnPositionId } from "@/db/repositories/earn-movements.repository";
+import { serviceUnavailable, vaultExposureCapExceeded } from "@/lib/errors";
 import { installClusterRpcResponder, signatureStatusesReplyAt } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
@@ -27,6 +28,7 @@ import {
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 import { submitPreparedStrategyTransaction } from "./strategy-transactions.service";
+import * as exposure from "./vault-exposure";
 import type {
   WalletBuiltTransaction,
   WalletDepositBuildInput,
@@ -318,6 +320,32 @@ function submitCore(
 }
 
 describe("shared asynchronous strategy ledger writer", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each([
+    ["an enforced cap", () => vaultExposureCapExceeded("Vault is exit-only")],
+    ["unreadable exposure", () => serviceUnavailable("Vault exposure is unavailable")],
+  ])("records observed deposit bytes despite %s without broadcasting", async (_name, refusal) => {
+    const built = await buildDepositRow(depositInput());
+    const signedTransaction = await signBuiltTransaction(built);
+    vi.spyOn(exposure, "ledgerVaultExposureGate").mockReturnValue(async () => {
+      throw refusal();
+    });
+
+    await expect(submitPrepared(built, signedTransaction, "new-deposit")).rejects.toThrow(
+      refusal().message
+    );
+    expect(await countRows("earn_movements")).toBe(0);
+    const observed = await submitCore(built, signedTransaction);
+    expect(observed.movement).toMatchObject({
+      direction: "deposit",
+      signed_transaction: signedTransaction,
+      amount_requested: "25",
+    });
+    expect(await countRows("earn_movements")).toBe(1);
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+
   it("claims discovered holdings only with signed intent, without a synthetic deposit", async () => {
     const built = await buildWalletWithdrawalTransaction(
       env,

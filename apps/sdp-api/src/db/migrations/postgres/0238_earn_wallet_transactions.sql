@@ -6,6 +6,7 @@ CREATE TABLE earn_wallet_transactions (
     organization_id TEXT NOT NULL,
     project_id TEXT,
     environment TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
     provider TEXT NOT NULL,
     strategy_id TEXT,
     custody_wallet_id TEXT,
@@ -92,6 +93,7 @@ CREATE TABLE earn_wallet_withdrawal_request_transactions (
     organization_id TEXT NOT NULL,
     project_id TEXT,
     environment TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
     provider TEXT NOT NULL,
     position_id TEXT,
     withdrawal_request_id TEXT,
@@ -122,6 +124,7 @@ CREATE TABLE earn_wallet_withdrawal_request_transactions (
     consumed_attempt_id TEXT,
     consumed_at TEXT,
     release_finalized_at TEXT,
+    release_absence_observed_at TEXT,
     created_by TEXT,
     initiated_by_key_id TEXT,
     created_at TEXT NOT NULL DEFAULT sdp_iso_now(),
@@ -174,7 +177,8 @@ CREATE TABLE earn_wallet_withdrawal_request_transactions (
         CHECK ((consumed_attempt_id IS NULL OR (action = 'cancel'
                 AND mechanism = 'operator_redemption' AND operation_only
                 AND withdrawal_request_id IS NULL AND project_id IS NOT NULL))
-            AND (release_finalized_at IS NULL OR consumed_attempt_id IS NOT NULL)),
+            AND (release_finalized_at IS NULL OR consumed_attempt_id IS NOT NULL)
+            AND (release_absence_observed_at IS NULL OR consumed_attempt_id IS NOT NULL)),
     CONSTRAINT earn_wallet_withdrawal_request_transactions_mechanism_check
         CHECK (mechanism IN ('solver_queue', 'operator_redemption')),
     CONSTRAINT earn_wallet_withdrawal_request_transactions_fee_mode_check
@@ -261,8 +265,9 @@ BEFORE UPDATE ON earn_wallet_withdrawal_request_transactions
 FOR EACH ROW EXECUTE FUNCTION sdp_earn_operation_only_build();
 
 
--- A release records only its own accepted attempt and finality proof. It never
--- changes a historical redemption, whose owner-derived PDA may have been reused.
+-- A release records only its own accepted attempt, finality proof and first
+-- post-expiry absence observation. It never changes a historical redemption,
+-- whose owner-derived PDA may have been reused.
 CREATE FUNCTION sdp_earn_current_redemption_release_immutable() RETURNS TRIGGER
 LANGUAGE plpgsql AS $$
 BEGIN
@@ -280,13 +285,19 @@ BEGIN
         RAISE EXCEPTION 'Redemption release requires its accepted operation attempt';
     END IF;
     IF OLD.consumed_attempt_id IS NOT NULL AND
-       (to_jsonb(NEW) - ARRAY['release_finalized_at', 'updated_at', 'position_owner_address']) IS DISTINCT FROM
-       (to_jsonb(OLD) - ARRAY['release_finalized_at', 'updated_at', 'position_owner_address']) THEN
+       (to_jsonb(NEW) - ARRAY['release_finalized_at', 'release_absence_observed_at', 'updated_at',
+         'position_owner_address']) IS DISTINCT FROM
+       (to_jsonb(OLD) - ARRAY['release_finalized_at', 'release_absence_observed_at', 'updated_at',
+         'position_owner_address']) THEN
         RAISE EXCEPTION 'Accepted redemption release is immutable';
     END IF;
     IF OLD.release_finalized_at IS NOT NULL AND
        NEW.release_finalized_at IS DISTINCT FROM OLD.release_finalized_at THEN
         RAISE EXCEPTION 'Redemption release finality is immutable';
+    END IF;
+    IF OLD.release_absence_observed_at IS NOT NULL AND
+       NEW.release_absence_observed_at IS DISTINCT FROM OLD.release_absence_observed_at THEN
+        RAISE EXCEPTION 'Redemption release absence observation is immutable';
     END IF;
     RETURN NEW;
 END;

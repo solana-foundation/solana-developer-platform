@@ -5,7 +5,11 @@ import {
   readFireblocksTransfer,
 } from "@sdp/custody/provisioning/fireblocks-transfers";
 import { currentClusterScope } from "@sdp/rpc/scope";
-import { isFireblocksTransactionCancellable } from "@sdp/types/fireblocks";
+import {
+  isFireblocksTransactionCancellable,
+  isFireblocksTransactionCancelled,
+  isFireblocksTransactionFailed,
+} from "@sdp/types/fireblocks";
 import type { WaistMovement } from "@sdp/types/movements";
 import {
   type OperationProposalBinding,
@@ -164,19 +168,30 @@ async function observe(
       }),
     };
   }
-  if (["BROADCASTING", "CONFIRMING", "COMPLETED"].includes(result.status))
-    throw conflict("Sign-only custody proposal unexpectedly attempted broadcast");
-  const phase = ["CANCELLED", "CANCELED"].includes(result.status)
-    ? "cancelled"
-    : ["FAILED", "REJECTED", "BLOCKED"].includes(result.status)
-      ? "failed"
-      : "pending";
   return {
     providerTransactionId: result.id,
     status: result.status,
-    phase,
+    phase: unsignedProposalPhase(result.status),
     signedTransaction: null,
   };
+}
+
+/**
+ * Where an unsigned Fireblocks proposal stands. Fireblocks' status set is open, so any status
+ * it adds stays pending: an unrecognized one never ends or broadcasts the operation.
+ */
+function unsignedProposalPhase(
+  status: string
+): Exclude<TransactionProposalObservation["phase"], "signed"> {
+  switch (status) {
+    case "BROADCASTING":
+    case "CONFIRMING":
+    case "COMPLETED":
+      throw conflict("Sign-only custody proposal unexpectedly attempted broadcast");
+    default:
+      if (isFireblocksTransactionCancelled(status)) return "cancelled";
+      return isFireblocksTransactionFailed(status) ? "failed" : "pending";
+  }
 }
 
 /**

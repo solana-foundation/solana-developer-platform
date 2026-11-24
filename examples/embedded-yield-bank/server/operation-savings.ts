@@ -31,6 +31,29 @@ export function operationsForSavingsStrategy(
   );
 }
 
+/** Where an operation stands in the savings ledger; cancelled ones never reach it. */
+function ledgerStatus(
+  status: EarnOperation["status"]
+): SavingsLedgerEntry["status"] {
+  switch (status) {
+    case "completed":
+      return "completed";
+    case "failed":
+      return "failed";
+    case "prepared":
+    case "queued":
+    case "awaiting_signature":
+    case "submitted":
+    case "settling":
+    case "cancelled":
+      return "pending";
+    default: {
+      const unknownStatus: never = status;
+      throw new Error(`Unknown operation status: ${unknownStatus}`);
+    }
+  }
+}
+
 /** Only completed inputs and verified delivered payouts enter earnings. */
 export function summarizeSavingsOperations(
   checking: Pick<TokenBalance, "amount">,
@@ -54,20 +77,17 @@ export function summarizeSavingsOperations(
       operation.resourceRef !== null
     )
       pendingWithdrawal = true;
+    // Only observed amounts enter earnings. A deposit's intent is a ceiling
+    // (Kamino can debit less), so a completed one counts its settled amount, and
+    // stays unknown until SDP observes it.
     const amount =
-      operation.intent.kind === "earn.deposit"
-        ? operation.intent.amount
-        : operation.result?.settlementOutcome === "delivered"
-          ? operation.result.settledAmount
-          : null;
+      operation.intent.kind === "earn.deposit" ||
+      operation.result?.settlementOutcome === "delivered"
+        ? (operation.result?.settledAmount ?? null)
+        : null;
     entries.push({
       direction: operation.kind === "earn.deposit" ? "deposit" : "withdrawal",
-      status:
-        operation.status === "completed"
-          ? "completed"
-          : operation.status === "failed"
-            ? "failed"
-            : "pending",
+      status: ledgerStatus(operation.status),
       tokenAmount: amount?.mint === tokenMint ? amount.value : null,
     });
   }

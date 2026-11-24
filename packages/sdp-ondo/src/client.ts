@@ -1,6 +1,8 @@
 import { OndoEarnClient } from "@sdp/earn/providers/ondo/client";
 import type {
   EarnRuntimeContext,
+  EarnSwapLeg,
+  EarnSwapPort,
   EarnVaultDepositInput,
   EarnVaultDepositQuote,
   EarnVaultDepositQuoteInput,
@@ -19,12 +21,18 @@ import type {
 import { contextAwareRpcFetch } from "@sdp/rpc/read-context";
 import { markRpcAttemptDeadline } from "@sdp/rpc/telemetry";
 import { deriveAssociatedTokenAddress } from "@sdp/solana/address";
-import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
+import {
+  AmountError,
+  acceptTokenAmount,
+  formatDecimalAmount,
+  parseDecimalAmount,
+  TokenAmountError,
+} from "@sdp/solana/amount";
 import { type OndoDeployment, ondoDeployment, ondoDepositMints } from "@sdp/types/ondo-programs";
 import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import { isAddress } from "@solana/kit";
 import { SdpOndoError } from "./errors";
-import type { OndoRuntime, OndoSwapLeg, OndoSwapPort, OndoVaultOperationRunner } from "./types";
+import type { OndoRuntime, OndoVaultOperationRunner } from "./types";
 
 /**
  * Ondo as an EXECUTING provider: the catalogue client plus the vault-direct,
@@ -40,7 +48,7 @@ import type { OndoRuntime, OndoSwapLeg, OndoSwapPort, OndoVaultOperationRunner }
  * not protection (Veda's rule, inherited).
  *
  * ── Where the trust boundary lives ──────────────────────────────────────────
- * Everything on-chain-executable comes through the injected `OndoSwapPort`;
+ * Everything on-chain-executable comes through the injected `EarnSwapPort`;
  * the API's implementation admits Jupiter's instructions against the reviewed
  * contract in `services/earn/jupiter-swap.service.ts` (pinned programs, no
  * foreign signer, encoded amounts matching the request). This class treats a
@@ -129,10 +137,16 @@ export function ondoClusterConfig(cluster: SolanaCluster): OndoClusterConfig {
 
 /** Canonical decimal amount at the pair's scale, or a typed refusal. */
 function canonicalAmount(value: string, label: string): { text: string; atoms: bigint } {
-  let atoms: bigint;
   try {
-    atoms = parseDecimalAmount(value, TOKEN_DECIMALS);
+    const { baseUnits, canonical } = acceptTokenAmount(value, TOKEN_DECIMALS, { positive: true });
+    return { text: canonical, atoms: baseUnits };
   } catch (error) {
+    if (
+      error instanceof TokenAmountError &&
+      (error.reason === "out_of_range" || error.reason === "not_positive")
+    ) {
+      throw new SdpOndoError("INVALID_AMOUNT", `${label} must fit a positive SPL token amount`);
+    }
     if (error instanceof AmountError) {
       throw new SdpOndoError(
         "INVALID_AMOUNT",
@@ -141,10 +155,6 @@ function canonicalAmount(value: string, label: string): { text: string; atoms: b
     }
     throw error;
   }
-  if (atoms <= 0n || atoms > MAX_TOKEN_ATOMS) {
-    throw new SdpOndoError("INVALID_AMOUNT", `${label} must fit a positive SPL token amount`);
-  }
-  return { text: formatDecimalAmount(atoms, TOKEN_DECIMALS), atoms };
 }
 
 interface OndoTokenAccount {
@@ -171,7 +181,7 @@ export class OndoVaultDirectClient
    * Injected seams, same construction shape as the Kamino/Veda clients: the
    * API resolves and genesis-proves the per-request RPC endpoint, bounds every
    * operation with its vault deadline, and supplies the admitted swap builder
-   * (see `OndoSwapPort`). Nothing here reads `ctx.env` directly.
+   * (see `EarnSwapPort`). Nothing here reads `ctx.env` directly.
    */
   constructor(
     private readonly resolveProvenRpcUrl: (
@@ -184,7 +194,7 @@ export class OndoVaultDirectClient
      * reads platform credentials (the Jupiter swap key) from the request's
      * environment, which this package never sees directly.
      */
-    private readonly resolveSwapPort: (ctx: EarnRuntimeContext) => OndoSwapPort
+    private readonly resolveSwapPort: (ctx: EarnRuntimeContext) => EarnSwapPort
   ) {
     super();
   }
@@ -459,7 +469,7 @@ export class OndoVaultDirectClient
    * floor must refuse rather than build a transaction that will fail on chain.
    */
   private async buildLegWithFloor(args: {
-    swapPort: OndoSwapPort;
+    swapPort: EarnSwapPort;
     runtime: OndoRuntime;
     inputMint: string;
     outputMint: string;
@@ -468,7 +478,7 @@ export class OndoVaultDirectClient
     owner: string;
     direction: "deposit" | "withdrawal";
     assertActive: () => void;
-  }): Promise<OndoSwapLeg> {
+  }): Promise<EarnSwapLeg> {
     const refusalCode = args.direction === "deposit" ? "DEPOSIT_REFUSED" : "WITHDRAW_REFUSED";
     const quote = await args.swapPort.quoteSwap({
       cluster: args.runtime.cluster,

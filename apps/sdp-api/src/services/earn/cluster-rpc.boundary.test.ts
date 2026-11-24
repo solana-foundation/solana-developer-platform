@@ -101,11 +101,16 @@ describe("Earn's cluster RPC boundary", () => {
   });
 
   it("imports the URL helpers only in services/earn/cluster-rpc.ts", () => {
+    // Both readers take the open scope's managed pool, never a URL: the client, and the floored
+    // history read across that pool's endpoints that proves an unsent transaction never landed.
     expect(
       offenders(
         EARN_API_FILES.filter((file) => file !== DOOR),
         (body) =>
-          importedNames(body, "@sdp/rpc/factory").some((name) => name !== "createClusterRpc")
+          importedNames(body, "@sdp/rpc/factory").some(
+            (name) =>
+              name !== "createClusterRpc" && name !== "getSignatureStatusesFromEveryEndpoint"
+          )
       )
     ).toEqual([]);
   });

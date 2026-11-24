@@ -142,7 +142,7 @@ export function summarizeEarnPositions(
         providerReference: holding.providerReference,
         label: holding.label,
         owners: new Set(),
-        ...(options.includePositions ? { positions: [] } : {}),
+        positions: options.includePositions ? [] : undefined,
         positionCount: 0,
         tokens: new Map(),
       };
@@ -168,18 +168,14 @@ export function summarizeEarnPositions(
         // omitted by default and only present on an explicit opt-in. Omitted,
         // not emptied, so a consumer cannot mistake "not requested" for "no
         // owners".
-        ...(options.includeOwnerAddresses
-          ? { ownerAddresses: [...strategy.owners].sort(compareWireStrings) }
-          : {}),
-        ...(strategy.positions
-          ? {
-              positions: strategy.positions.sort(
-                (left, right) =>
-                  compareWireStrings(left.ownerAddress, right.ownerAddress) ||
-                  compareWireStrings(left.id, right.id)
-              ),
-            }
-          : {}),
+        ownerAddresses: options.includeOwnerAddresses
+          ? [...strategy.owners].sort(compareWireStrings)
+          : undefined,
+        positions: strategy.positions?.sort(
+          (left, right) =>
+            compareWireStrings(left.ownerAddress, right.ownerAddress) ||
+            compareWireStrings(left.id, right.id)
+        ),
         walletCount: strategy.owners.size,
         positionCount: strategy.positionCount,
         totalsByToken: [...strategy.tokens.values()].map(finalizeTokenTotal).sort(tokenTotalOrder),
@@ -222,9 +218,7 @@ function finalizeTokenTotal(total: MutableTokenTotal): EarnWalletTokenTotal {
     walletCount: total.owners.size,
     positionCount: total.positionCount,
     unavailablePositionCount: total.unavailablePositionCount,
-    ...(total.unavailablePositionCount === 0
-      ? { tokenValue: sumDecimalAmounts(total.values) }
-      : {}),
+    tokenValue: total.unavailablePositionCount === 0 ? sumDecimalAmounts(total.values) : undefined,
   };
 }
 

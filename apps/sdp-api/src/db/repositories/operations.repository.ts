@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
 import {
+  isTerminalOperationStatus,
   OPERATION_STATUSES,
   OPERATION_TRANSITIONS,
   type Operation,
@@ -19,10 +20,12 @@ import {
   operationSchema,
   operationSourceSchema,
   operationTermsSchema,
+  operationTransitionRequiresResourceReference,
   TERMINAL_OPERATION_STATUSES,
 } from "@sdp/types/operations";
 import { z } from "zod";
 import type { DatabaseClient, DatabaseExecutor } from "@/db/client";
+import { sqlLiteralList } from "@/db/postgres-utils";
 import {
   acceptCurrentRedemptionReleaseWithin,
   releaseCurrentRedemptionReleaseWithin,
@@ -264,9 +267,6 @@ function parseAttempt(value: unknown): OperationAttempt {
     resourceRef: row.resource_ref,
   };
 }
-function isTerminal(status: OperationStatus): boolean {
-  return TERMINAL_OPERATION_STATUSES.some((candidate) => candidate === status);
-}
 function assertCurrentAction(
   operation: Operation,
   action: { actionId: string; version: number }
@@ -397,6 +397,12 @@ export function createOperationsRepository(db: DatabaseClient) {
   return {
     get: (scope: OperationScope, id: string) => read(db, scope, id, false),
 
+    /** The exact current action's attempt, without claiming or starting execution. */
+    async getCurrentAttempt(scope: OperationScope, id: string): Promise<OperationAttempt | null> {
+      const row = await requireRecord(db, scope, id, false);
+      return currentAttempt(db, scope, row.operation);
+    },
+
     async findByRequest(scope: OperationScope, kind: Operation["kind"], requestKey: string) {
       const row = await db.queryOne(
         `SELECT ${OPERATION_COLUMNS} FROM operations WHERE ${scopeSql} AND kind = ? AND request_key = ?`,
@@ -469,9 +475,7 @@ export function createOperationsRepository(db: DatabaseClient) {
         values.push(input.kind);
       }
       if (input.status === "active") {
-        filters.push(
-          `status NOT IN (${TERMINAL_OPERATION_STATUSES.map((status) => `'${status}'`).join(", ")})`
-        );
+        filters.push(`status NOT IN (${sqlLiteralList(TERMINAL_OPERATION_STATUSES)})`);
       } else if (input.status !== undefined) {
         filters.push("status = ?");
         values.push(input.status);
@@ -540,7 +544,8 @@ export function createOperationsRepository(db: DatabaseClient) {
       return db.transaction(async (tx) => {
         const row = await requireRecord(tx, scope, id, true);
         assertCurrentAction(row.operation, action);
-        if (isTerminal(row.operation.status)) throw conflict("Operation is already terminal");
+        if (isTerminalOperationStatus(row.operation.status))
+          throw conflict("Operation is already terminal");
         if (row.claimUntil !== null && Date.parse(row.claimUntil) > Date.now())
           throw conflict("Operation action is already in progress", {
             reason: "operation_in_progress",
@@ -620,7 +625,7 @@ export function createOperationsRepository(db: DatabaseClient) {
            AND attempt.organization_id = operation.organization_id
            AND attempt.project_id = operation.project_id AND attempt.environment = operation.environment
            AND attempt.action_id = operation.action_id AND attempt.action_version = operation.action_version
-         WHERE operation.environment = ? AND operation.status NOT IN ('completed', 'failed', 'cancelled')
+         WHERE operation.environment = ? AND operation.status NOT IN (${sqlLiteralList(TERMINAL_OPERATION_STATUSES)})
            AND operation.next_check_at IS NOT NULL AND operation.next_check_at <= now()
            AND (attempt.execution_requested_at IS NOT NULL OR attempt.dispatch_started_at IS NOT NULL OR attempt.signed_transaction IS NOT NULL)
            AND (operation.claim_until IS NULL OR operation.claim_until <= now())
@@ -639,7 +644,7 @@ export function createOperationsRepository(db: DatabaseClient) {
     async claimRecovery(scope: OperationScope, id: string): Promise<OperationClaim | null> {
       return db.transaction(async (tx) => {
         const row = await requireRecord(tx, scope, id, true);
-        if (isTerminal(row.operation.status)) return null;
+        if (isTerminalOperationStatus(row.operation.status)) return null;
         if (row.claimUntil !== null && Date.parse(row.claimUntil) > Date.now()) return null;
         const attempt = await currentAttempt(tx, scope, row.operation);
         if (
@@ -676,7 +681,7 @@ export function createOperationsRepository(db: DatabaseClient) {
     async cancelUndispatched(scope: OperationScope, id: string): Promise<Operation | null> {
       return db.transaction(async (tx) => {
         const row = await requireRecord(tx, scope, id, true);
-        if (isTerminal(row.operation.status)) return row.operation;
+        if (isTerminalOperationStatus(row.operation.status)) return row.operation;
         if (row.operation.cancelRequestedAt === null) return null;
         const attempt = await currentAttempt(tx, scope, row.operation);
         const definitelyNotSent =
@@ -862,15 +867,16 @@ export function createOperationsRepository(db: DatabaseClient) {
         const legal: readonly string[] = OPERATION_TRANSITIONS[before.status];
         if (before.status !== update.status && !legal.includes(update.status))
           throw conflict("Operation cannot make this status transition");
-        if (isTerminal(before.status)) throw conflict("Terminal operation cannot change");
+        if (isTerminalOperationStatus(before.status))
+          throw conflict("Terminal operation cannot change");
         if (
-          (update.status === "completed" || update.status === "cancelled") &&
+          operationTransitionRequiresResourceReference(update.status) &&
           update.resourceRef === null
         )
           throw conflict("Terminal settlement requires an authoritative resource reference");
         if (before.resourceRef !== null && !sameJson(before.resourceRef, update.resourceRef))
           throw conflict("Operation settlement resource changed");
-        const nextAction = isTerminal(update.status)
+        const nextAction = isTerminalOperationStatus(update.status)
           ? null
           : operationNextActionSchema.nullable().parse(update.nextAction);
         const resourceRef = operationReferenceSchema.nullable().parse(update.resourceRef);
@@ -897,7 +903,7 @@ export function createOperationsRepository(db: DatabaseClient) {
             `UPDATE operation_attempts SET resource_ref = ?::jsonb WHERE id = ? AND ${scopeSql}`,
             [JSON.stringify(resourceRef), claim.attempt.id, ...scopeValues(scope)]
           );
-        if (isTerminal(update.status))
+        if (isTerminalOperationStatus(update.status))
           await releaseCurrentRedemptionReleaseWithin(tx, scope, claim.attempt);
         return parseRecord(changed).operation;
       });
@@ -908,7 +914,7 @@ export function createOperationsRepository(db: DatabaseClient) {
       const row = await db.queryOne(
         `UPDATE operations SET cancel_requested_at = COALESCE(cancel_requested_at, sdp_iso_now()),
            updated_at = sdp_iso_now() WHERE id = ? AND ${scopeSql}
-           AND status NOT IN ('completed', 'failed', 'cancelled') RETURNING ${OPERATION_COLUMNS}`,
+           AND status NOT IN (${sqlLiteralList(TERMINAL_OPERATION_STATUSES)}) RETURNING ${OPERATION_COLUMNS}`,
         [id, ...scopeValues(scope)]
       );
       if (row !== null) return parseRecord(row).operation;
@@ -954,7 +960,7 @@ export function createOperationsRepository(db: DatabaseClient) {
         const row = await requireRecord(tx, scope, id, true);
         await assertUnsubmitted(tx, scope, row);
         assertCurrentAction(row.operation, action);
-        if (isTerminal(row.operation.status))
+        if (isTerminalOperationStatus(row.operation.status))
           throw conflict("Terminal operation cannot be refreshed");
         if (row.operation.cancelRequestedAt !== null)
           throw conflict("Operation cancellation was requested");
@@ -988,7 +994,7 @@ export function createOperationsRepository(db: DatabaseClient) {
             ? row.actionPrincipal
             : moneyPrincipalSchema.parse(actionPrincipal);
         assertCurrentAction(row.operation, action);
-        if (isTerminal(row.operation.status))
+        if (isTerminalOperationStatus(row.operation.status))
           throw conflict("Terminal operation cannot be refreshed");
         if (row.claimUntil !== null && Date.parse(row.claimUntil) > Date.now())
           throw conflict("Operation execution is in progress");

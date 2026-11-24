@@ -136,9 +136,20 @@ and retain it across action versions. Pending provider signing and queued
 withdrawals have no public refresh or cancellation path after submit.
 
 Permission/expiry cleanup remains an internal worker safety mechanism.
-Observation-only attempts never regain broadcast authority. Only verified
-chain/provider observations establish payout; never copy expected amounts into
-settled fields.
+Observation-only attempts never regain broadcast authority. Signed bytes such
+an attempt never sent end only on proven nonexecution (`unsentVerdict` in
+`operation-observation-rpc.ts`): the finalized height is past their last valid
+block height and every pool endpoint, floored at that finalized slot, misses
+them inside `VERDICT_HISTORY_HORIZON_BLOCKS`. Then the operation is `failed`
+`TRANSACTION_EXPIRED`, even after a cancellation request: a terminal `cancelled`
+needs an authoritative resource reference, which unsent bytes never have. An
+endpoint that cannot answer, or an expiry past the horizon, keeps waiting and
+logs. A
+synchronous signer's `CUSTODY_POLICY_REFUSED` is a definitive refusal: the
+operation ends `failed` with that code, as a rejected proposal does. Only
+verified chain/provider observations establish payout; never copy expected
+amounts into settled fields. A projection of movement or request evidence
+replaces an earlier pass's recovery error; a terminal operation keeps its own.
 
 ## Replacement boundary
 
@@ -165,6 +176,10 @@ Summary totals cover the whole selected scope, not just a position page.
 Unavailable values remain absent; a partial total cannot appear complete.
 Customer drill-down requires explicit owner/position flags. Discovered holdings
 have unknown acquisition time and cost basis. A live balance is not earned yield.
+A withdrawal through a selector that names a tracked holding resolves to it,
+as position detail does, and keeps its cost basis. An imported holding stays
+visible and active without a successful movement, so a failed first exit never
+hides it.
 
 Apply `packages/sdp-earn/CLAUDE.md`'s RPC budget: batch independent inputs, share
 identical concurrent work only within exact authorized scope, cache static facts
@@ -182,14 +197,24 @@ exact organization, project, environment and recorded principal. Four concurrent
 same-authority status requests become one batch; two custody-proposal height
 reads become one. Batch at most 256 signatures, evict finished status batches
 and failed heights, and never treat absence or a cached failure as nonexecution.
+An unsent-bytes proof adds one finalized height read per run and scope, and only
+past expiry one floored status read per pool endpoint, once; before this the
+operation polled forever.
 
 Expired solver recovery adds zero provider reads without an eligible recorded
-request and one live proof read for the position's oldest candidate. Reusing
-that call's validated proof in build admission reduces selection from two API
-proof reads to one, before existing provider validation and simulation. Never
-persist that evidence or accept it from a caller; every later preparation or
-refresh must read fresh provider state.
-Offer one recovery choice, not an owner-wide scan or one read per old request.
+request and one live proof read on the usual path. Skip stale closed or no-longer
+expired candidates in position-scoped creation order: N stale candidates before
+the first recoverable escrow need N+1 proof reads, each candidate once. Stop at
+the first proven recovery; never scan another position. Reusing that call's
+validated proof in build admission avoids a duplicate proof read before existing
+provider validation and simulation. Never persist that evidence or accept it
+from a caller; every later preparation or refresh reads fresh provider state.
+Offer one recovery choice per review.
+Route reads degrade independently, but when no route survives, an unreadable
+provider or an unusable swap quote (`SWAP_UNAVAILABLE`) answers `503`, never
+the no-route `400`. Reads of a recorded
+obligation (expired escrow, pending release) fail closed through
+`rethrowVaultProviderFailure`.
 Returning shares is `settlementOutcome: recovered`, not delivered asset payout.
 The new reviewed withdrawal retains source grants and leaves the original
 operation's post-submit cancellation barrier intact.
@@ -204,16 +229,33 @@ consumed attempt and PDA reservation fence competing SDP actions while pending.
 Complete only from its own finalized cancellation signature and provider
 proof, not a missing account or an unrelated closure. Acceptance freezes
 financial reconciliation of earlier matching Hastra requests until definitive
-no-effect failure; finalized release keeps that freeze permanently. Match the
-organization, project, environment, position, owner, custody source, provider,
-PDA and mints. Causal row ordering is local bookkeeping, never onchain cycle
-proof. Leave the historical request's recorded outcome unchanged; it can remain
-unresolved while only the new release completes. Close the current request and
+no-effect failure; finalized release keeps that freeze permanently. A release
+that never lands is such a failure: once finalized height passes its last valid
+block height SDP never resends it. A second finalized miss at least 30
+seconds after the first hands it to the shared `unsentVerdict` proof, and only
+every endpoint's floored history missing it, with at least two distinct
+endpoints answering, fails it `TRANSACTION_EXPIRED`. A single endpoint leaves
+it pending; two pooled misses can come from a lagging or pruned backend. An observation-only
+release is adopted for the same proof. Match the organization, project, environment,
+position, owner, custody source, provider, PDA and mints. Causal row ordering is local bookkeeping, never onchain cycle
+proof. Leave the historical financial row unchanged; end its operation with
+`REDEMPTION_SUPERSEDED`, null settled amount and null settlement outcome. This
+terminates tracking without proving nonexecution or permitting an automatic
+retry. Covered requests and actions leave background polling. Close the current request and
 revoke only Hastra's burn delegation if still present; preserve unrelated
 delegates. Guarantee no unlocked
 amount. Completion is `settlementOutcome: recovered` with `settledAmount: null`,
 with no PRIME return, USDC payout or payout movement.
 Keep the existing exact-byte signing and post-submit cancel/refresh barriers.
+
+A trusted operator can recover a finalized release with unreadable events
+through `earn:redemption-release:recover`, using exact accepted identifiers,
+independently verified evidence and an explicit attestation. The command checks
+its finalized successful receipt and commits evidence, completion, cooldown and
+audit atomically under a fresh worker claim. See
+`docs/ops/earn-redemption-release-recovery.md`. Automatic event verification
+remains required in the normal worker.
+
 
 Atomic swap-funded builds retain one compute probe and one final simulation per
 attempt. An oversized request no longer reads a split baseline balance or runs

@@ -118,13 +118,7 @@ export function OverviewDashboard({
             available={savings.balance}
             strategy={strategy}
             busy={busy}
-            disabledReason={
-              !savings.position
-                ? "Savings is empty"
-                : savings.balance === undefined
-                  ? "Savings balance is unavailable"
-                  : undefined
-            }
+            disabledReason={withdrawDisabledReason(savings)}
             onSubmit={onWithdraw}
           />
         </div>
@@ -209,6 +203,14 @@ function depositDisabledReason(
 
 function savingsBalance(balance: string | undefined, symbol: string): string {
   return balance === undefined ? "—" : formatAmount(balance, symbol);
+}
+
+function withdrawDisabledReason(
+  savings: DashboardData["savings"]
+): string | undefined {
+  if (!savings.position) return "Savings is empty";
+  if (savings.balance === undefined) return "Savings balance is unavailable";
+  return undefined;
 }
 
 function savingsFooter(savings: DashboardData["savings"]): string {

@@ -113,6 +113,21 @@ function intermediatePosition(withdrawableAmount: string): EarnVaultPosition {
   };
 }
 
+/** A tracked position whose every share sits in a provider withdrawal request's escrow. */
+const escrowedPosition: EarnVaultPosition = {
+  id: "position",
+  provider: "veda",
+  providerReference: "strategy",
+  label: "Treasury holding",
+  custodyWalletId: "wallet",
+  tokenMint: "usdc",
+  shareMint: "shares",
+  feeSponsored: false,
+  createdAt: "2026-11-18T00:00:00Z",
+  closedAt: null,
+  shares: "0",
+};
+
 beforeEach(() => {
   vi.resetAllMocks();
   sessionStorage.clear();
@@ -221,6 +236,84 @@ describe("Earn operation review", () => {
     expect(mocks.withdraw.mock.calls[1]?.[1]).not.toBe(mocks.withdraw.mock.calls[0]?.[1]);
   });
 
+  it("opens a recovery exit with All selected and reaches the API's recovery route", async () => {
+    const choice = operation({
+      kind: "earn.withdraw",
+      intent: { kind: "earn.withdraw", positionId: "position", amount: { kind: "all" } },
+      nextAction: { type: "select_option" },
+      terms: {
+        expiresAt: null,
+        estimate: null,
+        minimum: null,
+        fees: null,
+        options: [
+          {
+            id: "recover_expired_escrow:request",
+            label: "Recover expired escrowed shares",
+            settlement: "instant",
+            estimatedSeconds: null,
+            mechanism: "recover_expired_escrow",
+            amount: { mint: "shares", value: "10" },
+            minimum: { mint: "shares", value: "10" },
+          },
+        ],
+      },
+    });
+    mocks.withdraw.mockResolvedValue(choice);
+    mocks.refresh.mockResolvedValue(
+      operation({ ...choice, actionId: "recovery", version: 2, nextAction: { type: "submit" } })
+    );
+    render(
+      <EarnCoreActionModal
+        kind="withdraw"
+        position={escrowedPosition}
+        defaultWithdrawAll
+        onClose={vi.fn()}
+      />
+    );
+    expect(screen.queryByLabelText("amount")).toBeNull();
+    expect(screen.getByRole("button", { name: "customAmount" })).toBeDefined();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
+    expect(mocks.withdraw).toHaveBeenCalledExactlyOnceWith(
+      { positionId: "position", amount: { kind: "all" }, slippageBps: 50 },
+      expect.any(String)
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("combobox", { name: "route" }));
+    await user.click(
+      await screen.findByRole("option", { name: "Recover expired escrowed shares" })
+    );
+    expect(mocks.refresh).toHaveBeenCalledExactlyOnceWith(
+      "operation",
+      { actionId: "action", version: 1, optionId: "recover_expired_escrow:request" },
+      expect.any(String)
+    );
+    expect(await screen.findByRole("button", { name: "submit" })).toBeDefined();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("shows the API's refusal when nothing is recoverable yet, and retries the same request", async () => {
+    mocks.withdraw.mockRejectedValue(
+      new Error("No supported withdrawal route is currently available")
+    );
+    render(
+      <EarnCoreActionModal
+        kind="withdraw"
+        position={escrowedPosition}
+        defaultWithdrawAll
+        onClose={vi.fn()}
+      />
+    );
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
+    expect(screen.getByText("No supported withdrawal route is currently available")).toBeDefined();
+    // The API stores no 400, so the same key prepares afresh once the escrow expires.
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
+    expect(mocks.withdraw).toHaveBeenCalledTimes(2);
+    expect(mocks.withdraw.mock.calls[1]).toEqual(mocks.withdraw.mock.calls[0]);
+    expect(mocks.refresh).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
   it("rejects slippage beyond the API limit before preparing a transaction", async () => {
     render(<EarnCoreActionModal kind="deposit" strategy={strategy} onClose={vi.fn()} />);
     fireEvent.change(screen.getByLabelText("amount"), { target: { value: "10" } });
@@ -228,6 +321,90 @@ describe("Earn operation review", () => {
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
     expect(screen.getByText("invalidSlippage")).toBeDefined();
     expect(mocks.deposit).not.toHaveBeenCalled();
+  });
+
+  it("names a missing amount before an invalid slippage, and prepares nothing", async () => {
+    render(<EarnCoreActionModal kind="deposit" strategy={strategy} onClose={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("slippage"), { target: { value: "501" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
+    expect(screen.getByText("positiveAmount")).toBeDefined();
+    expect(screen.queryByText("invalidSlippage")).toBeNull();
+    expect(mocks.deposit).not.toHaveBeenCalled();
+  });
+
+  it("prepares a deposit from the first eligible wallet and the strategy's mint", async () => {
+    mocks.deposit.mockResolvedValue(operation());
+    render(<EarnCoreActionModal kind="deposit" strategy={strategy} onClose={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("amount"), { target: { value: "10" } });
+    fireEvent.change(screen.getByLabelText("slippage"), { target: { value: "75" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
+    expect(mocks.deposit).toHaveBeenCalledExactlyOnceWith(
+      {
+        strategyId: "strategy",
+        source: { walletId: "wallet" },
+        amount: { mint: "usdc", value: "10" },
+        slippageBps: 75,
+      },
+      expect.any(String)
+    );
+  });
+
+  it("withdraws All without reading the hidden custom amount", async () => {
+    mocks.withdraw.mockResolvedValue(operation());
+    render(<EarnCoreActionModal kind="withdraw" position={escrowedPosition} onClose={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("amount"), { target: { value: "not a number" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "withdrawAll" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
+    expect(mocks.withdraw).toHaveBeenCalledExactlyOnceWith(
+      { positionId: "position", amount: { kind: "all" }, slippageBps: 50 },
+      expect.any(String)
+    );
+  });
+
+  it("prepares a share-denominated withdrawal from the unit picker", async () => {
+    mocks.withdraw.mockResolvedValue(operation());
+    render(<EarnCoreActionModal kind="withdraw" position={escrowedPosition} onClose={vi.fn()} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("combobox", { name: "amountUnit" }));
+    await user.click(await screen.findByRole("option", { name: "shares" }));
+    fireEvent.change(screen.getByLabelText("amount"), { target: { value: "2.5" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
+    expect(mocks.withdraw).toHaveBeenCalledExactlyOnceWith(
+      { positionId: "position", amount: { kind: "shares", value: "2.5" }, slippageBps: 50 },
+      expect.any(String)
+    );
+  });
+
+  it("locks the deposit's choices while its preparation is in flight", async () => {
+    let finish: ((value: Operation) => void) | undefined;
+    mocks.deposit.mockReturnValue(
+      new Promise<Operation>((resolve) => {
+        finish = resolve;
+      })
+    );
+    render(<EarnCoreActionModal kind="deposit" strategy={strategy} onClose={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("amount"), { target: { value: "10" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
+    for (const label of ["wallet", "asset", "amount", "slippage"]) {
+      expect(screen.getByLabelText(label).hasAttribute("disabled")).toBe(true);
+    }
+    await act(async () => finish?.(operation()));
+  });
+
+  it("locks the withdrawal's unit and All choice while its preparation is in flight", async () => {
+    let finish: ((value: Operation) => void) | undefined;
+    mocks.withdraw.mockReturnValue(
+      new Promise<Operation>((resolve) => {
+        finish = resolve;
+      })
+    );
+    render(<EarnCoreActionModal kind="withdraw" position={escrowedPosition} onClose={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("amount"), { target: { value: "2" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
+    const unit = screen.getByRole("combobox", { name: "amountUnit" });
+    expect(unit.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "withdrawAll" }).hasAttribute("disabled")).toBe(true);
+    await act(async () => finish?.(operation()));
   });
 
   it("lets the same withdrawal choice retry a failed preparation with the same key", async () => {

@@ -119,9 +119,9 @@ function preparedStrategyFee(
     : { kind: "caller-provided", feePayer: address(feePayer) };
 }
 
-function preparedFeePayer(fee: VaultFeeMode): { feePayer?: ReturnType<typeof address> } {
+function preparedFeePayer(fee: VaultFeeMode): ReturnType<typeof address> | undefined {
   const payer = vaultRentPayer(fee);
-  return payer === undefined ? {} : { feePayer: address(payer) };
+  return payer === undefined ? undefined : address(payer);
 }
 
 function storedFeeMode(fee: VaultFeeMode): "wallet" | "partner" | "sponsored" {
@@ -354,9 +354,9 @@ export async function buildWalletDepositTransaction(
         outputMint: input.tokenMint,
         sourceAmount: input.amount,
         owner: input.ownerAddress,
-        ...(rentPayer === undefined ? {} : { payer: rentPayer }),
+        payer: rentPayer,
         slippageBps: input.swap.slippageBps,
-        ...(maxAccounts === undefined ? {} : { maxAccounts }),
+        maxAccounts,
       });
       // Sized to the swap's guaranteed floor, never its quote: the deposit
       // instruction encodes a static amount, and an ExactIn swap only promises
@@ -444,7 +444,7 @@ export async function buildWalletDepositTransaction(
         expectedAssetIdentity,
         plan,
         owner: address(input.ownerAddress),
-        ...preparedFeePayer(fee),
+        feePayer: preparedFeePayer(fee),
         prepared: simulation.prepared,
       });
       return {
@@ -453,8 +453,8 @@ export async function buildWalletDepositTransaction(
         plan,
         depositAmount,
         minSharesOut: accepted.minSharesOut,
-        ...(swapLeg === undefined ? {} : { swapLeg }),
-        ...(quote === undefined ? {} : { quote }),
+        swapLeg,
+        quote,
       };
     } catch (error) {
       // Retry oversized swap routes with fewer accounts. Every successful
@@ -514,8 +514,8 @@ export async function buildWalletDepositTransaction(
   return {
     kind: "built",
     built,
-    ...(swapLeg === undefined ? {} : { swap: swapLeg }),
-    ...(quote === undefined ? {} : { quote }),
+    swap: swapLeg,
+    quote,
   };
 }
 
@@ -669,7 +669,7 @@ export async function buildWalletWithdrawalTransaction(
       expectedAssetIdentity,
       plan,
       owner: address(input.ownerAddress),
-      ...preparedFeePayer(fee),
+      feePayer: preparedFeePayer(fee),
       prepared: simulation.prepared,
     });
   };

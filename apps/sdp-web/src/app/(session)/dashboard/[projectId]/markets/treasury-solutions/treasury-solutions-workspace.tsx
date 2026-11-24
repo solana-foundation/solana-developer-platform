@@ -21,13 +21,14 @@ import { earnQueryKeys } from "@/app/(session)/dashboard/[projectId]/markets/ear
 import type { EarnProviderAccess } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-surfacing";
 import type { EarnVaultParRedemptionSource } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-vault-holding";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { useCanWrite, useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { type EarnOperationsFeed, isEarnOperationTerminal } from "@/lib/earn-core-data";
 import { filterSandboxDevnetStrategies } from "./devnet-mainnet-intersection";
 import { kaminoAllocationsVaults, useKaminoVaultAllocations } from "./kamino-allocations";
 import {
   estimatedTreasuryApy,
+  isOpenVaultPosition,
   summarizeTreasuryAllocation,
   type TreasuryAllocation,
   type VaultShareMintVocabulary,
@@ -277,16 +278,23 @@ export function TreasurySolutionsWorkspace({
   );
   const kaminoAllocations = useKaminoVaultAllocations(kaminoAllocationVaults);
   const [depositStrategy, setDepositStrategy] = useState<EarnStrategy | null>(null);
-  const [withdrawPosition, setWithdrawPosition] = useState<EarnVaultPosition | null>(null);
-  const [withdrawParSource, setWithdrawParSource] =
-    useState<EarnVaultParRedemptionSource>("shares");
+  // One value, so an exit opened from a holding row never inherits a recovery's All.
+  const [vaultExit, setVaultExit] = useState<{
+    position: EarnVaultPosition;
+    parSource: EarnVaultParRedemptionSource;
+    withdrawAll: boolean;
+  } | null>(null);
   const openVaultExit = useCallback(
-    (position: EarnVaultPosition, parSource: EarnVaultParRedemptionSource = "shares") => {
-      setWithdrawParSource(parSource);
-      setWithdrawPosition(position);
-    },
+    (position: EarnVaultPosition, parSource: EarnVaultParRedemptionSource = "shares") =>
+      setVaultExit({ position, parSource, withdrawAll: false }),
     []
   );
+  const openWithdrawalRecovery = useCallback(
+    (position: EarnVaultPosition) =>
+      setVaultExit({ position, parSource: "shares", withdrawAll: true }),
+    []
+  );
+  const canWrite = useCanWrite();
   const {
     positions,
     positionsError,
@@ -339,6 +347,23 @@ export function TreasurySolutionsWorkspace({
       }
     },
     [mutateCore, refreshOperation, refreshTreasuryBalances]
+  );
+
+  // A queued exit can escrow every share, which drops its position from the holdings table
+  // while the provider request is open, including after it expires unfilled. Its activity row
+  // reopens that exit with All selected, where the API offers any recovery route. A viewer
+  // gets no exit here, as in the table.
+  const withdrawalRecovery = useMemo(
+    () =>
+      canWrite
+        ? {
+            positions: (positions ?? []).filter(
+              (position) => position.closedAt === null && !isOpenVaultPosition(position)
+            ),
+            onOpen: openWithdrawalRecovery,
+          }
+        : undefined,
+    [canWrite, openWithdrawalRecovery, positions]
   );
 
   const activeWallets = useMemo(() => wallets ?? [], [wallets]);
@@ -425,6 +450,7 @@ export function TreasurySolutionsWorkspace({
         onUpdated={onCoreUpdated}
         strategies={catalogueStrategies}
         positions={positions}
+        withdrawalRecovery={withdrawalRecovery}
       />
 
       {depositStrategy ? (
@@ -436,12 +462,13 @@ export function TreasurySolutionsWorkspace({
         />
       ) : null}
 
-      {withdrawPosition ? (
+      {vaultExit ? (
         <EarnCoreActionModal
           kind="withdraw"
-          position={withdrawPosition}
-          intermediate={withdrawParSource === "intermediate"}
-          onClose={() => setWithdrawPosition(null)}
+          position={vaultExit.position}
+          intermediate={vaultExit.parSource === "intermediate"}
+          defaultWithdrawAll={vaultExit.withdrawAll}
+          onClose={() => setVaultExit(null)}
           onUpdated={onCoreUpdated}
         />
       ) : null}

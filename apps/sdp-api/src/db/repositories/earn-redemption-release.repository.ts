@@ -1,6 +1,8 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
-import type { OperationReference } from "@sdp/types/operations";
+import { EARN_TERMINAL_VAULT_WITHDRAWAL_REQUEST_STATUSES } from "@sdp/types/earn";
+import { type OperationReference, TERMINAL_OPERATION_STATUSES } from "@sdp/types/operations";
 import type { DatabaseClient, DatabaseExecutor } from "@/db/client";
+import { sqlLiteralList } from "@/db/postgres-utils";
 import type { EarnWalletWithdrawalRequestTransactionRow } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import { conflict, internalError, notFound } from "@/lib/errors";
 
@@ -42,6 +44,13 @@ export const CURRENT_REDEMPTION_RELEASE_COVERS_REQUEST_SQL = `
   AND release.withdrawal_request_id IS NULL AND release.operation_only
   AND release.consumed_attempt_id IS NOT NULL AND release.consumed_at >= request.created_at`;
 
+/** Finalized release ends active tracking without inventing a historical payout or cancellation. */
+export const FINALIZED_CURRENT_REDEMPTION_RELEASE_COVERS_REQUEST_SQL = `EXISTS (
+  SELECT 1 FROM earn_wallet_withdrawal_request_transactions release
+  WHERE ${CURRENT_REDEMPTION_RELEASE_COVERS_REQUEST_SQL}
+    AND release.release_finalized_at IS NOT NULL
+)`;
+
 /** Scope for freezing a historical request without assigning it a later cycle's outcome. */
 export interface CurrentRedemptionRequestFenceInput {
   organizationId: string;
@@ -71,7 +80,7 @@ async function isSourceFencedByCurrentRedemptionRelease(
          AND operation.project_id = attempt.project_id AND operation.environment = attempt.environment
        WHERE request.id = ? AND request.organization_id = ? AND request.environment = ?
          AND (release.release_finalized_at IS NOT NULL
-           OR operation.status NOT IN ('completed', 'failed', 'cancelled'))
+           OR operation.status NOT IN (${sqlLiteralList(TERMINAL_OPERATION_STATUSES)}))
      ) AS fenced`,
     [input.id, input.organizationId, input.environment]
   );
@@ -107,6 +116,12 @@ export function isQueuedBuildFencedByCurrentRedemptionReleaseWithin(
 
 /** Releasing a provider request changes no historical financial request row. */
 export interface CurrentRedemptionReleaseRepository {
+  findSupersedingRedemptionRelease(input: {
+    organizationId: string;
+    projectId: string;
+    environment: SdpEnvironment;
+    withdrawalRequestId: string;
+  }): Promise<{ id: string; finalizedAt: string } | null>;
   isRequestFencedByCurrentRedemptionRelease(
     input: CurrentRedemptionRequestFenceInput
   ): Promise<boolean>;
@@ -117,6 +132,10 @@ export interface CurrentRedemptionReleaseRepository {
     }
   ): Promise<EarnWalletWithdrawalRequestTransactionRow>;
   recordCurrentRedemptionReleaseFinalized(
+    input: CurrentRedemptionReleaseInput
+  ): Promise<EarnWalletWithdrawalRequestTransactionRow>;
+  /** First finalized miss after expiry; only a later miss can prove the release never ran. */
+  recordCurrentRedemptionReleaseAbsent(
     input: CurrentRedemptionReleaseInput
   ): Promise<EarnWalletWithdrawalRequestTransactionRow>;
 }
@@ -208,7 +227,7 @@ export async function acceptCurrentRedemptionReleaseWithin(
            AND request.token_mint = ? AND request.share_mint = ?
            AND request.request_address = EXCLUDED.request_address
            AND request.mechanism = 'operator_redemption'
-           AND request.status NOT IN ('fulfilled', 'cancelled', 'failed')))
+           AND request.status NOT IN (${sqlLiteralList(EARN_TERMINAL_VAULT_WITHDRAWAL_REQUEST_STATUSES)})))
      RETURNING lease_token`,
     [
       scope.environment,
@@ -256,14 +275,19 @@ export async function releaseCurrentRedemptionReleaseWithin(
        reuse_not_before = CASE WHEN request.id IS NOT NULL THEN lease.reuse_not_before
          ELSE to_char(timezone('UTC', now() + INTERVAL '5 minutes'), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') END,
        last_valid_block_height = NULL
-     FROM (SELECT (SELECT id FROM earn_vault_withdrawal_requests
-       WHERE organization_id = ? AND project_id = ? AND environment = ?
-         AND position_id = ? AND owner_address = ? AND custody_wallet_id IS NOT DISTINCT FROM ?
-         AND provider = ? AND vault_address = ? AND token_mint = ? AND share_mint = ?
-         AND request_address = ? AND mechanism = 'operator_redemption'
-         AND status NOT IN ('fulfilled', 'cancelled', 'failed')
+     FROM (SELECT (SELECT request.id FROM earn_vault_withdrawal_requests request
+       WHERE request.organization_id = ? AND request.project_id = ? AND request.environment = ?
+         AND request.position_id = ? AND request.owner_address = ? AND request.custody_wallet_id IS NOT DISTINCT FROM ?
+         AND request.provider = ? AND request.vault_address = ? AND request.token_mint = ? AND request.share_mint = ?
+         AND request.request_address = ? AND request.mechanism = 'operator_redemption'
+         AND request.status NOT IN (${sqlLiteralList(EARN_TERMINAL_VAULT_WITHDRAWAL_REQUEST_STATUSES)})
          AND ?::text IS NULL
-       ORDER BY created_at DESC, id DESC LIMIT 1) AS id) request
+         AND NOT EXISTS (
+           SELECT 1 FROM earn_wallet_withdrawal_request_transactions release
+           WHERE ${CURRENT_REDEMPTION_RELEASE_COVERS_REQUEST_SQL}
+             AND release.release_finalized_at IS NOT NULL
+         )
+       ORDER BY request.created_at DESC, request.id DESC LIMIT 1) AS id) request
      WHERE lease.environment = ? AND lease.request_address = ? AND lease.lease_token = ? AND lease.occupied`,
     [
       ...values(scope),
@@ -288,6 +312,21 @@ export function createCurrentRedemptionReleaseRepository(
   db: DatabaseClient
 ): CurrentRedemptionReleaseRepository {
   return {
+    async findSupersedingRedemptionRelease(input) {
+      const row = await db.queryOne<{ id: string; finalized_at: string }>(
+        `SELECT release.id, release.release_finalized_at AS finalized_at
+         FROM earn_vault_withdrawal_requests request
+         JOIN earn_wallet_withdrawal_request_transactions release
+           ON ${CURRENT_REDEMPTION_RELEASE_COVERS_REQUEST_SQL}
+         WHERE request.id = ? AND request.organization_id = ?
+           AND request.project_id = ? AND request.environment = ?
+           AND request.status NOT IN (${sqlLiteralList(EARN_TERMINAL_VAULT_WITHDRAWAL_REQUEST_STATUSES)})
+           AND release.release_finalized_at IS NOT NULL
+         ORDER BY release.release_finalized_at DESC, release.id DESC LIMIT 1`,
+        [input.withdrawalRequestId, ...values(input)]
+      );
+      return row === null ? null : { id: row.id, finalizedAt: row.finalized_at };
+    },
     isRequestFencedByCurrentRedemptionRelease(input) {
       return isRequestFencedByCurrentRedemptionReleaseWithin(db, input);
     },
@@ -328,6 +367,29 @@ export function createCurrentRedemptionReleaseRepository(
           [input.transactionId, ...values(input)]
         );
         if (updated === null) throw notFound("Current redemption release");
+        return { ...updated, last_valid_block_height: String(updated.last_valid_block_height) };
+      });
+    },
+    async recordCurrentRedemptionReleaseAbsent(input) {
+      return db.transaction(async (tx) => {
+        const build = await requireAttempt(tx, input);
+        if (
+          build.consumed_attempt_id !== input.attemptId ||
+          build.execution_requested_at === null ||
+          build.signed_transaction === null ||
+          build.signature === null
+        )
+          throw conflict("Redemption release has no accepted signed attempt");
+        // Keep the first miss: only a later miss may complete the absence proof.
+        const updated = await tx.queryOne<EarnWalletWithdrawalRequestTransactionRow>(
+          `UPDATE earn_wallet_withdrawal_request_transactions
+           SET release_absence_observed_at = COALESCE(release_absence_observed_at, sdp_iso_now()),
+             updated_at = sdp_iso_now()
+           WHERE id = ? AND organization_id = ? AND project_id = ? AND environment = ?
+             AND release_finalized_at IS NULL RETURNING *`,
+          [input.transactionId, ...values(input)]
+        );
+        if (updated === null) throw conflict("Redemption release already finalized");
         return { ...updated, last_valid_block_height: String(updated.last_valid_block_height) };
       });
     },

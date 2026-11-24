@@ -1,4 +1,4 @@
-import type { OperationStatus } from "@sdp/types/operations";
+import { type OperationStatus, TERMINAL_OPERATION_STATUSES } from "@sdp/types/operations";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";
@@ -334,8 +334,7 @@ describe("durable operations repository", () => {
       "SELECT pg_get_indexdef(indexrelid) AS definition FROM pg_index WHERE indexrelid = 'operations_recovery_due'::regclass"
     );
     expect(index?.definition).toContain("environment, next_check_at, id");
-    for (const status of ["completed", "failed", "cancelled"])
-      expect(index?.definition).toContain(status);
+    for (const status of TERMINAL_OPERATION_STATUSES) expect(index?.definition).toContain(status);
   });
 
   it("backs off unchanged recovery, resets on progress and preserves exact bytes and observation-only authority", async () => {

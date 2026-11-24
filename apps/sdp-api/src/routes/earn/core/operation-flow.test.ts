@@ -1,3 +1,4 @@
+import { SigningError } from "@sdp/custody/signing";
 import { currentClusterScope, runInClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { MovementId } from "@sdp/types/movements";
@@ -20,7 +21,7 @@ import {
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
@@ -38,17 +39,26 @@ import { app } from "@/index";
 import { AppError } from "@/lib/errors";
 import { decideMovement, readMoneyAdmissionFacts } from "@/lib/money-admission";
 import * as meteredQuota from "@/middleware/metered-quota";
+import * as admission from "@/routes/earn/handlers/admission";
+import * as catalogue from "@/routes/earn/strategy-catalogue";
 import { AuditService } from "@/services/audit.service";
 import { admittedSigner } from "@/services/domain/signing/admitted-signer";
+import * as executionRegistry from "@/services/earn/execution-registry";
+import * as observationRpc from "@/services/earn/operation-observation-rpc";
 import type {
   prepareCurrentRedemptionRelease,
   prepareQueuedStrategyRecovery,
 } from "@/services/earn/strategy-queued-operations.service";
+import * as queuedOperations from "@/services/earn/strategy-queued-operations.service";
+import * as vaultExecution from "@/services/earn/vault-execution.service";
+import * as intentExecution from "@/services/earn/vault-intent-execution.service";
 import type {
   WalletDepositBuildInput,
   WalletWithdrawalBuildInput,
 } from "@/services/earn/vault-wallet.service";
+import * as vaultWallet from "@/services/earn/vault-wallet.service";
 import { reconcileOperations } from "@/services/jobs/reconcile-operations";
+import * as signers from "@/services/solana/signer";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import {
@@ -62,7 +72,27 @@ import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 
-const mocks = vi.hoisted(() => ({
+/** Switches a test flips, beside the collaborators it replaces. */
+interface FlowSwitches {
+  recoveryRequest: EarnVaultWithdrawalRequestRow | null;
+  withdrawalEnabled: boolean;
+  withdrawalChoices: boolean;
+  directWithdrawalAvailable: boolean;
+}
+const mocks: FlowSwitches &
+  Record<
+    | "build"
+    | "withdrawBuild"
+    | "quoteWithdrawal"
+    | "readPositions"
+    | "choiceReads"
+    | "recoveryBuild"
+    | "releaseBuild"
+    | "sign"
+    | "proposer"
+    | "broadcast",
+    Mock
+  > = {
   build: vi.fn(),
   withdrawBuild: vi.fn(),
   quoteWithdrawal: vi.fn(),
@@ -70,154 +100,142 @@ const mocks = vi.hoisted(() => ({
   choiceReads: vi.fn(),
   recoveryBuild: vi.fn(),
   releaseBuild: vi.fn(),
-  recoveryRequest: null as EarnVaultWithdrawalRequestRow | null,
+  recoveryRequest: null,
   withdrawalEnabled: false,
   withdrawalChoices: false,
   directWithdrawalAvailable: true,
   sign: vi.fn(),
   proposer: vi.fn(),
   broadcast: vi.fn(),
-}));
-vi.mock("@/services/earn/vault-wallet.service", async (original) => ({
-  ...(await original<typeof import("@/services/earn/vault-wallet.service")>()),
-  buildWalletDepositTransaction: mocks.build,
-  buildWalletWithdrawalTransaction: mocks.withdrawBuild,
-}));
-vi.mock("@/services/earn/execution-registry", async (original) => {
-  const actual = await original<typeof import("@/services/earn/execution-registry")>();
-  return {
-    ...actual,
-    resolveEarnExecutionClient: (...args: Parameters<typeof actual.resolveEarnExecutionClient>) =>
-      mocks.withdrawalEnabled
-        ? {
-            provider: "kamino",
-            buildVaultDeposit: vi.fn(),
-            buildVaultWithdrawal: vi.fn(),
-            readVaultPositions: mocks.readPositions,
-            sponsoredPrograms: () => [],
-            quoteVaultWithdrawal: mocks.quoteWithdrawal,
-          }
-        : actual.resolveEarnExecutionClient(...args),
+};
+// Captured before any spy replaces them, so a fake can fall back to the real behavior.
+const actualResolveClient = executionRegistry.resolveEarnExecutionClient;
+const actualPrepareChoices = queuedOperations.prepareStrategyWithdrawalChoices;
+
+/** The configured strategy's client, or a Kamino stand-in while a test enables withdrawals. */
+function resolveFlowClient(...args: Parameters<typeof actualResolveClient>) {
+  if (!mocks.withdrawalEnabled) return actualResolveClient(...args);
+  const client = {
+    provider: "kamino",
+    buildVaultDeposit: vi.fn(),
+    buildVaultWithdrawal: vi.fn(),
+    readVaultPositions: mocks.readPositions,
+    sponsoredPrograms: () => [],
+    quoteVaultWithdrawal: mocks.quoteWithdrawal,
   };
-});
-vi.mock("@/services/earn/vault-execution.service", async (original) => ({
-  ...(await original<typeof import("@/services/earn/vault-execution.service")>()),
-  broadcastVaultTransaction: mocks.broadcast,
-}));
-vi.mock("@/services/earn/strategy-queued-operations.service", async (original) => {
-  const actual =
-    await original<typeof import("@/services/earn/strategy-queued-operations.service")>();
-  return {
-    ...actual,
-    prepareQueuedStrategyRecovery: mocks.recoveryBuild,
-    prepareCurrentRedemptionRelease: mocks.releaseBuild,
-    prepareStrategyWithdrawalChoices: (
-      ...args: Parameters<typeof actual.prepareStrategyWithdrawalChoices>
-    ) => {
-      mocks.choiceReads(...args);
-      if (mocks.recoveryRequest !== null) {
-        const request = mocks.recoveryRequest;
-        if (request.mechanism === "operator_redemption") {
-          const id = "release_current_redemption";
-          const choice = {
-            id,
-            kind: "recovery" as const,
-            currentRedemptionRelease: {
-              request,
-              plan: {
-                cluster: "devnet" as const,
-                instructions: [],
-                lookupTables: [],
-                assetIdentity: {
-                  depositTokenMint: request.token_mint,
-                  shareMint: request.share_mint,
-                },
-              },
+  return client;
+}
+
+/** Withdrawal routes a test configures; anything else reads the real provider routes. */
+function prepareFlowChoices(...args: Parameters<typeof actualPrepareChoices>) {
+  mocks.choiceReads(...args);
+  if (mocks.recoveryRequest !== null) {
+    const request = mocks.recoveryRequest;
+    if (request.mechanism === "operator_redemption") {
+      const id = "release_current_redemption";
+      const choice = {
+        id,
+        kind: "recovery" as const,
+        currentRedemptionRelease: {
+          request,
+          plan: {
+            cluster: "devnet" as const,
+            instructions: [],
+            lookupTables: [],
+            assetIdentity: {
+              depositTokenMint: request.token_mint,
+              shareMint: request.share_mint,
             },
-            option: {
-              id,
-              label: "Release current pending redemption",
-              settlement: "instant" as const,
-              estimatedSeconds: null,
-              mechanism: id,
-              minimum: null,
-            },
-          };
-          return Promise.resolve({ choices: [choice], options: [choice.option] });
-        }
-        const id = `recover_expired_escrow:${request.id}`;
-        const choice = {
-          id,
-          kind: "recovery" as const,
-          recovery: request,
-          option: {
-            id,
-            label: "Recover expired escrowed shares",
-            settlement: "instant" as const,
-            estimatedSeconds: null,
-            mechanism: "recover_expired_escrow",
-            amount: { mint: request.share_mint, value: request.shares },
-            minimum: { mint: request.share_mint, value: request.shares },
-          },
-        };
-        return Promise.resolve({ choices: [choice], options: [choice.option] });
-      }
-      if (!mocks.withdrawalChoices) return actual.prepareStrategyWithdrawalChoices(...args);
-      const choices = [
-        ...(mocks.directWithdrawalAvailable
-          ? [
-              {
-                id: "direct",
-                kind: "direct" as const,
-                option: {
-                  id: "direct",
-                  label: "Direct withdrawal",
-                  settlement: "instant" as const,
-                  estimatedSeconds: null,
-                },
-              },
-            ]
-          : []),
-        {
-          id: "queued",
-          kind: "queued" as const,
-          option: {
-            id: "queued",
-            label: "Delayed withdrawal",
-            settlement: "delayed" as const,
-            estimatedSeconds: null,
           },
         },
-      ];
-      return Promise.resolve({ choices, options: choices.map((choice) => choice.option) });
+        option: {
+          id,
+          label: "Release current pending redemption",
+          settlement: "instant" as const,
+          estimatedSeconds: null,
+          mechanism: id,
+          minimum: null,
+        },
+      };
+      return Promise.resolve({ choices: [choice], options: [choice.option] });
+    }
+    const id = `recover_expired_escrow:${request.id}`;
+    const choice = {
+      id,
+      kind: "recovery" as const,
+      recovery: request,
+      option: {
+        id,
+        label: "Recover expired escrowed shares",
+        settlement: "instant" as const,
+        estimatedSeconds: null,
+        mechanism: "recover_expired_escrow",
+        amount: { mint: request.share_mint, value: request.shares },
+        minimum: { mint: request.share_mint, value: request.shares },
+      },
+    };
+    return Promise.resolve({ choices: [choice], options: [choice.option] });
+  }
+  if (!mocks.withdrawalChoices) return actualPrepareChoices(...args);
+  const choices = [
+    ...(mocks.directWithdrawalAvailable
+      ? [
+          {
+            id: "direct",
+            kind: "direct" as const,
+            option: {
+              id: "direct",
+              label: "Direct withdrawal",
+              settlement: "instant" as const,
+              estimatedSeconds: null,
+            },
+          },
+        ]
+      : []),
+    {
+      id: "queued",
+      kind: "queued" as const,
+      option: {
+        id: "queued",
+        label: "Delayed withdrawal",
+        settlement: "delayed" as const,
+        estimatedSeconds: null,
+      },
     },
-  };
-});
-vi.mock("@/services/solana/signer", async (original) => ({
-  ...(await original<typeof import("@/services/solana/signer")>()),
-  createOrgSignerForCustodyWallet: mocks.sign,
-  createOrgTransactionProposerForCustodyWallet: mocks.proposer,
-}));
-vi.mock("@/routes/earn/handlers/admission", async (original) => ({
-  ...(await original<typeof import("@/routes/earn/handlers/admission")>()),
-  assertVaultDepositAdmissible: async () => "kamino",
-  assertRecordedStrategyDepositAdmitted: async () => undefined,
-}));
-vi.mock("@/routes/earn/strategy-catalogue", async (original) => ({
-  ...(await original<typeof import("@/routes/earn/strategy-catalogue")>()),
-  isEarnStrategyInExecutionShelf: () => true,
-}));
-vi.mock("@/services/earn/vault-intent-execution.service", async (original) => ({
-  ...(await original<typeof import("@/services/earn/vault-intent-execution.service")>()),
-  readConfirmedBlockHeight: async () => 50n,
-}));
-vi.mock("@/services/earn/operation-observation-rpc", () => ({
-  createOperationObservationRpc: () => ({
-    confirmedHeight: async () => 50n,
-    hasSignature: async () => false,
-  }),
-}));
+  ];
+  return Promise.resolve({ choices, options: choices.map((choice) => choice.option) });
+}
 
+/**
+ * Real modules with spies on the boundaries this suite replaces: transaction builders, provider
+ * routes and broadcasts, custody signers, deposit admission and the chain height.
+ */
+function spyOnFlowBoundaries() {
+  vi.spyOn(vaultWallet, "buildWalletDepositTransaction").mockImplementation(mocks.build);
+  vi.spyOn(vaultWallet, "buildWalletWithdrawalTransaction").mockImplementation(mocks.withdrawBuild);
+  vi.mocked(vi.spyOn(executionRegistry, "resolveEarnExecutionClient"), {
+    partial: true,
+  }).mockImplementation(resolveFlowClient);
+  vi.spyOn(vaultExecution, "broadcastVaultTransaction").mockImplementation(mocks.broadcast);
+  vi.spyOn(queuedOperations, "prepareQueuedStrategyRecovery").mockImplementation(
+    mocks.recoveryBuild
+  );
+  vi.spyOn(queuedOperations, "prepareCurrentRedemptionRelease").mockImplementation(
+    mocks.releaseBuild
+  );
+  vi.mocked(vi.spyOn(queuedOperations, "prepareStrategyWithdrawalChoices"), {
+    partial: true,
+    deep: true,
+  }).mockImplementation(prepareFlowChoices);
+  vi.spyOn(signers, "createOrgSignerForCustodyWallet").mockImplementation(mocks.sign);
+  vi.spyOn(signers, "createOrgTransactionProposerForCustodyWallet").mockImplementation(
+    mocks.proposer
+  );
+  vi.spyOn(admission, "assertVaultDepositAdmissible").mockResolvedValue("kamino");
+  vi.spyOn(admission, "assertRecordedStrategyDepositAdmitted").mockResolvedValue(undefined);
+  vi.spyOn(catalogue, "isEarnStrategyInExecutionShelf").mockReturnValue(true);
+  vi.spyOn(intentExecution, "readConfirmedBlockHeight").mockResolvedValue(50n);
+}
 const TOKEN = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SHARE = "So11111111111111111111111111111111111111112";
 const VAULT = "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx";
@@ -287,11 +305,22 @@ async function seedOperationScope(environment: SdpEnvironment) {
   strategyId = strategy.id;
 }
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 beforeEach(async () => {
   requestEnv = env;
   await seedTestDatabase(env);
   await clearKVStores(env);
   vi.resetAllMocks();
+  spyOnFlowBoundaries();
+  // Chain observations are this suite's boundary: nothing is seen landing or expiring.
+  vi.spyOn(observationRpc, "createOperationObservationRpc").mockReturnValue({
+    confirmedHeight: async () => 50n,
+    hasSignature: async () => false,
+    unsentVerdict: async () => "pending",
+  });
   mocks.withdrawalEnabled = false;
   mocks.withdrawalChoices = false;
   mocks.directWithdrawalAvailable = true;
@@ -1113,7 +1142,7 @@ describe("Earn core operation HTTP flow", () => {
     );
     expect((await readOperation(replay)).id).toBe(operation.id);
     expect(mocks.build).toHaveBeenCalledTimes(1);
-    expect(mocks.build.mock.calls[0]?.[1]).not.toHaveProperty("swap");
+    expect(mocks.build.mock.calls[0]?.[1]?.swap).toBeUndefined();
     const accepted = await request(
       `operations/${operation.id}/submit`,
       "POST",
@@ -1535,6 +1564,149 @@ describe("Earn core operation HTTP flow", () => {
     expect(mocks.broadcast).toHaveBeenCalledTimes(1);
     expect(mocks.sign).not.toHaveBeenCalled();
     expect(mocks.proposer).not.toHaveBeenCalled();
+  });
+
+  describe("unsent and refused submissions in the real operation store", () => {
+    const reconcile = () =>
+      runWithSystemDatabaseIdentity("cron:reconcile-operations", () =>
+        runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+          reconcileOperations(env)
+        )
+      );
+    const stored = (id: string) =>
+      getDb(env).queryOne<{ status: string; fence: number }>(
+        "SELECT status, fence FROM operations WHERE id = ?",
+        [id]
+      );
+    function proveUnsent(verdict: "expired" | "pending") {
+      const unsentVerdict = vi
+        .fn<observationRpc.OperationObservationRpc["unsentVerdict"]>()
+        .mockResolvedValue(verdict);
+      vi.spyOn(observationRpc, "createOperationObservationRpc").mockReturnValue({
+        confirmedHeight: async () => 50n,
+        hasSignature: async () => false,
+        unsentVerdict,
+      });
+      return unsentVerdict;
+    }
+    async function acceptOwnerDeposit(key: string) {
+      const operation = await prepare();
+      const accepted = await request(
+        `operations/${operation.id}/submit`,
+        "POST",
+        action(operation),
+        key
+      );
+      expect(accepted.status, await accepted.clone().text()).toBe(202);
+      return operation;
+    }
+
+    it("fails revoked owner bytes once history proves they expired unsent, and keeps them failed", async () => {
+      const operation = await acceptOwnerDeposit("execute-then-revoke");
+      await getDb(env).execute("UPDATE api_keys SET grants = '{earn.read}' WHERE id = ?", [
+        apiKey.id,
+      ]);
+      const unsentVerdict = proveUnsent("expired");
+      await reconcile();
+      expect(await readOperation(await request(`operations/${operation.id}`))).toMatchObject({
+        status: "failed",
+        nextAction: null,
+        resourceRef: null,
+        error: { code: "TRANSACTION_EXPIRED" },
+      });
+      const ended = await stored(operation.id);
+      await reconcile();
+      expect(await stored(operation.id)).toEqual(ended);
+      expect(unsentVerdict).toHaveBeenCalledTimes(1);
+      expect(mocks.broadcast).not.toHaveBeenCalled();
+      expect(await unfinishedCounts()).toEqual({ movements: 0, positions: 0 });
+    });
+
+    it("keeps revoked owner bytes waiting while they can still land", async () => {
+      const operation = await acceptOwnerDeposit("execute-then-revoke-pending");
+      await getDb(env).execute("UPDATE api_keys SET grants = '{earn.read}' WHERE id = ?", [
+        apiKey.id,
+      ]);
+      proveUnsent("pending");
+      await reconcile();
+      expect(await readOperation(await request(`operations/${operation.id}`))).toMatchObject({
+        status: "awaiting_signature",
+        nextAction: { type: "wait" },
+        error: null,
+      });
+      expect(mocks.broadcast).not.toHaveBeenCalled();
+    });
+
+    it("fails bytes whose cancellation was recorded beside an accepted submit once they provably never landed", async () => {
+      const operation = await acceptOwnerDeposit("execute-then-cancel");
+      await getDb(env).execute(
+        "UPDATE operations SET cancel_requested_at = sdp_iso_now() WHERE id = ?",
+        [operation.id]
+      );
+      proveUnsent("expired");
+      await reconcile();
+      expect(await readOperation(await request(`operations/${operation.id}`))).toMatchObject({
+        status: "failed",
+        nextAction: null,
+        error: { code: "TRANSACTION_EXPIRED" },
+      });
+      expect(mocks.broadcast).not.toHaveBeenCalled();
+    });
+
+    it("ends a custody deposit its wallet policy refused without asking the provider again", async () => {
+      const walletId = await seedOperationCustodyWallet("policy_refused");
+      mocks.proposer.mockResolvedValue(null);
+      const rawSigner = await createSignerFromKeyPair(keyPair);
+      const providerSign = vi.fn<typeof rawSigner.signTransactions>(async () => {
+        throw new SigningError("Blocked by wallet policy", "POLICY_REFUSED");
+      });
+      mocks.sign.mockImplementation(
+        async (
+          binding: Env,
+          organizationId: string,
+          projectId: string,
+          custodyWalletId: string,
+          movement: MovementId
+        ) => {
+          const scope = { organizationId, projectId };
+          const subject = { custodyWalletId };
+          return admittedSigner(
+            { address: rawSigner.address, signTransactions: providerSign },
+            async () =>
+              decideMovement(
+                movement,
+                await readMoneyAdmissionFacts(binding, scope, movement, subject),
+                subject
+              ),
+            { ...scope, ...subject, movement, provider: "privy", credential: null }
+          );
+        }
+      );
+      const prepared = await request(
+        "earn/deposit",
+        "POST",
+        { strategyId, source: { walletId }, amount: { mint: TOKEN, value: "10" } },
+        "prepare-policy-refused"
+      );
+      expect(prepared.status, await prepared.clone().text()).toBe(202);
+      const deposit = await readOperation(prepared);
+      const accepted = await request(
+        `operations/${deposit.id}/submit`,
+        "POST",
+        { actionId: deposit.actionId, version: deposit.version },
+        "submit-policy-refused"
+      );
+      expect(accepted.status, await accepted.clone().text()).toBe(202);
+      await reconcile();
+      expect(await readOperation(await request(`operations/${deposit.id}`))).toMatchObject({
+        status: "failed",
+        nextAction: null,
+        error: { code: "CUSTODY_POLICY_REFUSED" },
+      });
+      await reconcile();
+      expect(providerSign).toHaveBeenCalledTimes(1);
+      expect(mocks.broadcast).not.toHaveBeenCalled();
+    });
   });
 
   it("fails closed when deposit audit admission cannot persist", async () => {
