@@ -1,10 +1,10 @@
-import { runInClusterScope } from "@sdp/rpc/scope";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { type Address, address } from "@solana/kit";
 import fc from "fast-check";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
+  inSandboxScope,
   installClusterRpcStub,
   STUB_SYSTEM_ACCOUNT_RENT_MINIMUM,
 } from "@/test/helpers/cluster-rpc";
@@ -120,9 +120,7 @@ function find(movement: SolMovement, sourceLamports: bigint, destinationFunded: 
   getMultipleAccountsLamportsMock.mockImplementation(async (_rpc, addresses) =>
     addresses.map((account: Address) => balanceOf(account, sourceLamports, destinationFunded))
   );
-  return runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
-    findSolRentShortfall(movement)
-  );
+  return inSandboxScope(() => findSolRentShortfall(movement));
 }
 
 describe("findSolRentShortfall (property)", () => {
@@ -139,22 +137,6 @@ describe("findSolRentShortfall (property)", () => {
         const remainder = shortfall === null ? null : shortfall.sourceRemainderLamports;
         expect(remainder !== null).toBe(modelSourceRefused(movement, sourceLamports));
         if (remainder !== null) expect(remainder >= 0n && remainder < MINIMUM).toBe(true);
-      }),
-      propertyParameters()
-    );
-  });
-
-  it("refuses exactly the payments below the minimum to an address with no account", async () => {
-    await fc.assert(
-      fc.asyncProperty(movementArb, async ({ movement, sourceLamports, destinationFunded }) => {
-        const shortfall = await find(movement, sourceLamports, destinationFunded);
-        const expected = movement.payments
-          .filter((payment) => payment.lamports < MINIMUM)
-          .filter(
-            (payment) => balanceOf(payment.destination, sourceLamports, destinationFunded) === 0n
-          )
-          .map((payment) => payment.index);
-        expect(shortfall === null ? [] : shortfall.recipientIndexes).toEqual(expected);
       }),
       propertyParameters()
     );

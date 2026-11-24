@@ -1,12 +1,12 @@
 import { SignerError, type SolanaSigner } from "@solana/keychain-core";
 import { PrivySigner } from "@solana/keychain-privy";
 import {
-  address,
   assertIsTransactionWithinSizeLimit,
   blockhash,
   compileTransaction,
   createSignableMessage,
   createTransactionMessage,
+  generateKeyPairSigner,
   pipe,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
@@ -15,13 +15,13 @@ import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import { SigningError } from "#/signing";
 import { KeychainPrivyAdapter } from "./keychain-privy.adapter";
 
-const WALLET_ADDRESS = "11111111111111111111111111111111";
+const { address: WALLET_ADDRESS } = await generateKeyPairSigner();
 
 function signTestTransaction(signer: SolanaSigner) {
   const transaction = compileTransaction(
     pipe(
       createTransactionMessage({ version: 0 }),
-      (message) => setTransactionMessageFeePayer(address(WALLET_ADDRESS), message),
+      (message) => setTransactionMessageFeePayer(WALLET_ADDRESS, message),
       (message) =>
         setTransactionMessageLifetimeUsingBlockhash(
           {

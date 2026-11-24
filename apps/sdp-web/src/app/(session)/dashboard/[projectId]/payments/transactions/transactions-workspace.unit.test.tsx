@@ -4,49 +4,26 @@ import {
   UNIFIED_TRANSACTION_MODULES,
   type UnifiedTransactionModule,
 } from "@sdp/types/unified-transactions";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { SWRConfig } from "swr";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import {
+  dashboardDataResponse,
+  sentDashboardRequests,
+  stubDashboardFetch,
+} from "@/test/dashboard-fetch";
+import { resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { EnglishI18n } from "@/test/i18n";
+import { stubMatchMedia } from "@/test/media-queries";
+import { required } from "@/test/required";
+import { FreshSWRCache } from "@/test/swr";
+import { restoreWindowLocation, setWindowPathname } from "@/test/window-location";
 import { enabledPaymentTransactionKinds } from "./transaction-modules";
 import type { TransactionFilters } from "./transactions-query";
 import { TransactionsWorkspace } from "./transactions-workspace";
 
-// jsdom implements no matchMedia, while the workspace's motion components read
-// it through useReducedMotion.
-if (!window.matchMedia) {
-  window.matchMedia = ((query: string) => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addEventListener: () => {},
-    removeEventListener: () => {},
-    addListener: () => {},
-    removeListener: () => {},
-    dispatchEvent: () => false,
-  })) as unknown as typeof window.matchMedia;
-}
-
-const replace = vi.fn();
-
-vi.mock("@/lib/dashboard-url-state", () => ({
-  replaceDashboardSearchParams: (updates: Record<string, string | null>) => replace(updates),
-}));
-vi.mock("@/lib/dashboard-fetch", () => ({
-  dashboardFetch: async () => ({
-    ok: true,
-    data: { data: { transactions: [], nextCursor: null } },
-    status: 200,
-  }),
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/lib/use-solana-cluster", () => ({ useSolanaCluster: () => "devnet" }));
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn() }),
-  useParams: () => ({ projectId: "prj_test_sandbox" }),
-  usePathname: () => "/dashboard/prj_test_sandbox/payments/transactions",
-}));
 
 // The real menu is a Radix dropdown; render its sections flat so a test can read the options (labels
 // stay out of the text, so the chips are the only text match).
@@ -74,13 +51,20 @@ vi.mock("@sdp/ui/filter-menu", () => ({
   ),
 }));
 
+const TRANSACTIONS_PATH = "/dashboard/prj_test_sandbox/payments/transactions";
+
+let fetchMock: Mock<typeof fetch>;
+
+/** Renders the workspace on the transactions page, its URL carrying `query`. */
 function renderWorkspace(
   filters: TransactionFilters,
-  modules: readonly UnifiedTransactionModule[]
+  modules: readonly UnifiedTransactionModule[],
+  query = ""
 ) {
+  setWindowPathname(`${TRANSACTIONS_PATH}${query}`);
   return render(
-    <SWRConfig value={{ provider: () => new Map() }}>
-      <I18nProvider locale="en" messages={getMessages("en")}>
+    <FreshSWRCache>
+      <EnglishI18n>
         <TransactionsWorkspace
           initialFilters={filters}
           initialResult={{ transactions: [], nextCursor: null }}
@@ -90,48 +74,76 @@ function renderWorkspace(
           modules={modules}
           paymentKinds={enabledPaymentTransactionKinds({ ramps: true })}
         />
-      </I18nProvider>
-    </SWRConfig>
+      </EnglishI18n>
+    </FreshSWRCache>
+  );
+}
+
+async function expectListReads(paths: string[]) {
+  await waitFor(() =>
+    expect(sentDashboardRequests(fetchMock).map((request) => request.path)).toEqual(paths)
   );
 }
 
 beforeEach(() => {
-  replace.mockReset();
+  resetDashboardNavigation();
+  stubMatchMedia();
+  fetchMock = stubDashboardFetch(() =>
+    dashboardDataResponse(200, { transactions: [], nextCursor: null })
+  );
 });
-afterEach(cleanup);
+
+afterEach(() => {
+  cleanup();
+  restoreWindowLocation();
+  vi.unstubAllGlobals();
+});
 
 describe("TransactionsWorkspace", () => {
-  it("commits a search only once it has three characters", () => {
-    renderWorkspace({ cursors: [] }, UNIFIED_TRANSACTION_MODULES);
+  it("commits a search only once it has three characters, from the first page", async () => {
+    renderWorkspace(
+      { cursor: "b", cursors: ["a"] },
+      UNIFIED_TRANSACTION_MODULES,
+      "?cursor=b&cursors=a"
+    );
     const search = screen.getByRole("searchbox", { name: "Search transactions" });
 
     fireEvent.change(search, { target: { value: "xf" } });
     fireEvent.keyDown(search, { key: "Enter" });
-    expect(replace).not.toHaveBeenCalled();
+    expect(window.location.search).toBe("?cursor=b&cursors=a");
 
     fireEvent.change(search, { target: { value: "xfr_" } });
     act(() => {
       fireEvent.keyDown(search, { key: "Enter" });
     });
-    expect(replace).toHaveBeenLastCalledWith(
-      expect.objectContaining({ search: "xfr_", cursor: null, cursors: null })
-    );
+    expect(window.location.search).toBe("?search=xfr_");
+    await expectListReads(["/api/dashboard/payments/transactions?limit=25&search=xfr_"]);
   });
 
-  it("names an active contact filter and clears it from its chip", () => {
-    renderWorkspace({ counterpartyId: "cpty_42", cursors: [] }, UNIFIED_TRANSACTION_MODULES);
+  it("names an active contact filter and clears it from its chip", async () => {
+    renderWorkspace(
+      { counterpartyId: "cpty_42", cursors: [] },
+      UNIFIED_TRANSACTION_MODULES,
+      "?counterpartyId=cpty_42"
+    );
 
     expect(screen.getByText("Acme Treasury")).toBeDefined();
     act(() => fireEvent.click(screen.getByLabelText("Clear Contact filter")));
-    expect(replace).toHaveBeenLastCalledWith(expect.objectContaining({ counterpartyId: null }));
+    expect(window.location.search).toBe("");
+    await expectListReads(["/api/dashboard/payments/transactions?limit=25"]);
   });
 
-  it("clears the module and kind together from the type chip", () => {
-    renderWorkspace({ module: "earn", kind: "deposit", cursors: [] }, UNIFIED_TRANSACTION_MODULES);
+  it("clears the module and kind together from the type chip", async () => {
+    renderWorkspace(
+      { module: "earn", kind: "deposit", cursors: [] },
+      UNIFIED_TRANSACTION_MODULES,
+      "?module=earn&kind=deposit"
+    );
 
     expect(screen.getByText("Earn · Deposit")).toBeDefined();
     act(() => fireEvent.click(screen.getByLabelText("Clear Type filter")));
-    expect(replace).toHaveBeenLastCalledWith(expect.objectContaining({ module: null, kind: null }));
+    expect(window.location.search).toBe("");
+    await expectListReads(["/api/dashboard/payments/transactions?limit=25"]);
   });
 
   it("offers only the modules the channel leaves on in the Type filter", () => {
@@ -139,12 +151,7 @@ describe("TransactionsWorkspace", () => {
 
     const types = [
       ...container.querySelectorAll('[data-filter-section="type"] [data-filter-option]'),
-    ].map((option) => option.getAttribute("data-filter-option")?.split(":")[0]);
+    ].map((option) => required(option.getAttribute("data-filter-option")).split(":")[0]);
     expect(new Set(types)).toEqual(new Set(["payments"]));
-  });
-
-  it("writes a new page size and restarts on the first page", () => {
-    renderWorkspace({ cursors: ["a"], cursor: "b" }, UNIFIED_TRANSACTION_MODULES);
-    expect(screen.getByRole("combobox", { name: "Rows per page" })).toBeDefined();
   });
 });

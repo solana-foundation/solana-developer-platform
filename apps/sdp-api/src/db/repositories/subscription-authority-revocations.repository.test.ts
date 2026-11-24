@@ -5,6 +5,7 @@ import {
   type PaymentSubscriptionCollectionAttemptMetadata,
   RECURRING_PAYMENT_STATUSES_CLAIMING_AUTHORITY,
 } from "@sdp/types/payments";
+import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import {
@@ -12,6 +13,7 @@ import {
   refuseWhileSubscriptionAuthorityRevokes,
 } from "@/services/payments/recurring-payments/shared";
 import { TEST_ORG } from "@/test/fixtures/organizations";
+import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import { required } from "@/test/helpers/required";
 import {
@@ -26,10 +28,7 @@ import {
   type SubscriptionAuthorityRevocationsRepository,
 } from "./subscription-authority-revocations.repository";
 
-const WALLET = "Sender111111111111111111111111111111111";
-const AUTHORITY = "Authority1111111111111111111111111111111";
-const OTHER_AUTHORITY = "Authority2222222222222222222222222222222";
-const MINT = "Mint111111111111111111111111111111111111";
+const { wallet1: WALLET, wallet2: AUTHORITY, wallet3: OTHER_AUTHORITY } = TEST_SOLANA_ADDRESSES;
 const NOW = "2026-10-21T12:00:00.000Z";
 const RETRY_FAILED_BEFORE = "2026-10-21T06:00:00.000Z";
 /** Past a period-24 subscription's 24h period plus the 1h margin. */
@@ -62,7 +61,7 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
   function canceledSchedule(changedAt = LONG_AGO, authority = AUTHORITY) {
     return seedAuthoritySubscription(tenant, {
       authority,
-      tokenMint: MINT,
+      tokenMint: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
       status: "canceled",
       changedAt,
       recurring: { status: "canceled" },
@@ -78,6 +77,12 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
     });
   }
 
+  async function offered(idleBefore = NOW, retryFailedBefore = RETRY_FAILED_BEFORE) {
+    return (await list(idleBefore, retryFailedBefore)).map(
+      (row) => row.subscription_authority_address
+    );
+  }
+
   function claim(id: string, authority = AUTHORITY) {
     return getDb(env).transaction(async (tx) => {
       const transactionRepo = createPostgresSubscriptionAuthorityRevocationsRepository(tx);
@@ -90,7 +95,7 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
         environment: "sandbox",
         custodyWalletId: tenant.custodyWalletId,
         walletAddress: WALLET,
-        tokenMint: MINT,
+        tokenMint: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
         subscriptionAuthorityAddress: authority,
         idleBefore: NOW,
         retryFailedBefore: RETRY_FAILED_BEFORE,
@@ -108,7 +113,7 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
         project_id: tenant.projectId,
         custody_wallet_id: tenant.custodyWalletId,
         wallet_address: WALLET,
-        token: MINT,
+        token: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
         subscription_authority_address: AUTHORITY,
       },
     ]);
@@ -118,20 +123,20 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
     // The recurring payment now names another authority; only its old subscription names this one.
     await seedAuthoritySubscription(tenant, {
       authority: AUTHORITY,
-      tokenMint: MINT,
+      tokenMint: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
       status: "canceled",
       changedAt: LONG_AGO,
       recurring: null,
     });
 
-    expect((await list()).map((row) => row.subscription_authority_address)).toEqual([AUTHORITY]);
+    expect(await offered()).toEqual([AUTHORITY]);
   });
 
   it("releases a subscription left awaiting authorization once nothing can still authorize it", async () => {
     const { recurringPaymentId } = await canceledSchedule();
     const pending = await seedAuthoritySubscription(tenant, {
       authority: AUTHORITY,
-      tokenMint: MINT,
+      tokenMint: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
       status: "pending_authorization",
       changedAt: LONG_AGO,
       recurring: null,
@@ -167,7 +172,7 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
       "UPDATE payment_recurring_payments SET status = 'canceled' WHERE id = ?",
       [required(recurringPaymentId)]
     );
-    expect((await list()).map((row) => row.subscription_authority_address)).toEqual([AUTHORITY]);
+    expect(await offered()).toEqual([AUTHORITY]);
   });
 
   it("keeps an authority a standalone subscription awaiting authorization may be using", async () => {
@@ -176,7 +181,7 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
     // pending after the caller's authorization lands.
     await seedAuthoritySubscription(tenant, {
       authority: AUTHORITY,
-      tokenMint: MINT,
+      tokenMint: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
       status: "pending_authorization",
       changedAt: LONG_AGO,
       recurring: null,
@@ -187,11 +192,11 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
 
   it("frees a recurring payment's canceled subscription at once but holds a standalone one through its period", async () => {
     await canceledSchedule(RECENTLY);
-    expect((await list()).map((row) => row.subscription_authority_address)).toEqual([AUTHORITY]);
+    expect(await offered()).toEqual([AUTHORITY]);
 
     await seedAuthoritySubscription(tenant, {
       authority: AUTHORITY,
-      tokenMint: MINT,
+      tokenMint: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
       status: "canceled",
       changedAt: RECENTLY,
       recurring: null,
@@ -204,7 +209,7 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
     await canceledSchedule();
     const live = await seedAuthoritySubscription(tenant, {
       authority: AUTHORITY,
-      tokenMint: MINT,
+      tokenMint: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
       status: "active",
       changedAt: LONG_AGO,
       recurring: null,
@@ -217,7 +222,7 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
     // A recurring payment still canceling holds it too, whatever its subscription says.
     await seedAuthoritySubscription(tenant, {
       authority: AUTHORITY,
-      tokenMint: MINT,
+      tokenMint: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
       status: "canceled",
       changedAt: LONG_AGO,
       recurring: { status: "canceling" },
@@ -229,7 +234,7 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
   it("names the schedules sharing an authority in every project of the environment", async () => {
     const live = await seedAuthoritySubscription(tenant, {
       authority: AUTHORITY,
-      tokenMint: MINT,
+      tokenMint: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
       status: "active",
       changedAt: LONG_AGO,
       recurring: { status: "canceling" },
@@ -272,7 +277,7 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
     for (const status of RECURRING_PAYMENT_STATUSES_CLAIMING_AUTHORITY) {
       const claiming = await seedAuthoritySubscription(tenant, {
         authority: OTHER_AUTHORITY,
-        tokenMint: MINT,
+        tokenMint: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
         status: "pending_authorization",
         changedAt: NOW,
         recurring: { status },
@@ -304,7 +309,7 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
         "UPDATE payment_recurring_payment_update_attempts SET status = 'confirmed' WHERE id = 'rpua_moving'"
       );
     }
-    expect(await list()).toHaveLength(1);
+    expect(await offered()).toEqual([AUTHORITY]);
   });
 
   it.each(PAYMENT_SUBSCRIPTION_COLLECTION_ATTEMPT_STATUSES)(
@@ -326,7 +331,7 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
           TEST_ORG.id,
           tenant.projectId,
           subscriptionId,
-          MINT,
+          WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
           LONG_AGO,
           status,
           JSON.stringify(metadata),
@@ -364,7 +369,7 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
       "UPDATE payment_subscriptions SET canceled_at = ?, updated_at = ? WHERE id = ?",
       ["2026-10-21T12:00:01.000Z", "2026-10-21T12:00:01.000Z", subscriptionId]
     );
-    expect(await list("2026-10-23T12:00:00.000Z")).toHaveLength(1);
+    expect(await offered("2026-10-23T12:00:00.000Z")).toEqual([AUTHORITY]);
   });
 
   it("waits out the retry window after a failed revoke", async () => {
@@ -379,7 +384,7 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
     });
 
     expect(await list()).toEqual([]);
-    expect(await list(NOW, "2026-10-21T12:00:01.000Z")).toHaveLength(1);
+    expect(await offered(NOW, "2026-10-21T12:00:01.000Z")).toEqual([AUTHORITY]);
   });
 
   it("refuses an activation, update or resume claim on the wallet while a revoke holds it", async () => {
@@ -427,7 +432,7 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
         environment: "sandbox",
         custodyWalletId: tenant.custodyWalletId,
         walletAddress: WALLET,
-        tokenMint: MINT,
+        tokenMint: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
         subscriptionAuthorityAddress: AUTHORITY,
         now: NOW,
       })
@@ -490,8 +495,10 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
       now: NOW,
       limit: 25,
     };
-    const [takenOver] = await repo.claimStaleRevocations(staleInput);
-    expect(takenOver?.lease_id).not.toBe(claimed.lease_id);
+    const takeovers = await repo.claimStaleRevocations(staleInput);
+    expect(takeovers.map((row) => row.id)).toEqual([claimed.id]);
+    const takenOver = required(takeovers[0]);
+    expect(takenOver.lease_id).not.toBe(claimed.lease_id);
     expect(await repo.claimStaleRevocations(staleInput)).toEqual([]);
     expect(await repo.clearSend({ ...send, leaseId: claimed.lease_id })).toBe(false);
     expect(
@@ -503,6 +510,6 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
         updatedAt: NOW,
       })
     ).toBeNull();
-    expect(await repo.clearSend({ ...send, leaseId: required(takenOver).lease_id })).toBe(true);
+    expect(await repo.clearSend({ ...send, leaseId: takenOver.lease_id })).toBe(true);
   });
 });

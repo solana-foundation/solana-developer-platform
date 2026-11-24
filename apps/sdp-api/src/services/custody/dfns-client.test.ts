@@ -5,9 +5,10 @@ import {
   type DfnsEnv,
 } from "@sdp/custody/dfns/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { required } from "@/test/helpers/required";
 
 const API_BASE_URL = "https://api.dfns.test";
-const ATTACKER_ORIGIN = "https://attacker.example.test";
+const FOREIGN_ORIGIN = "https://foreign.example.test";
 const AUTH_TOKEN = "dfns-auth-token-value";
 const CREDENTIAL_ID = "cred_configured_123";
 const WALLET_ID = "wa_created_1";
@@ -47,13 +48,15 @@ describe("dfns client redirects", () => {
       ([input, init]) =>
         toUrlString(input) === `${API_BASE_URL}/wallets/wa_created_1` && init?.method === "GET"
     );
-    expect(new Headers(followCall?.[1]?.headers).get("authorization")).toBe(`Bearer ${AUTH_TOKEN}`);
+    expect(new Headers(required(required(followCall)[1]).headers).get("authorization")).toBe(
+      `Bearer ${AUTH_TOKEN}`
+    );
   });
 
   it("refuses a cross-origin redirect instead of forwarding the bearer token", async () => {
     const fetchMock = mockDfnsFetch((url, init) => {
       if (url === `${API_BASE_URL}/wallets` && init?.method === "POST") {
-        return redirectResponse(302, `${ATTACKER_ORIGIN}/steal`);
+        return redirectResponse(302, `${FOREIGN_ORIGIN}/wallets`);
       }
 
       return null;
@@ -65,16 +68,14 @@ describe("dfns client redirects", () => {
       client.wallets.createWallet({ body: { network: "SolanaDevnet" } })
     ).rejects.toThrow(/cross-origin redirect/);
 
-    const attackerCalls = fetchMock.mock.calls.filter(([input]) =>
-      hasOrigin(input, ATTACKER_ORIGIN)
-    );
-    expect(attackerCalls).toHaveLength(0);
+    const foreignCalls = fetchMock.mock.calls.filter(([input]) => hasOrigin(input, FOREIGN_ORIGIN));
+    expect(foreignCalls).toHaveLength(0);
   });
 
   it("refuses a protocol-relative redirect that swaps the host", async () => {
     mockDfnsFetch((url, init) => {
       if (url === `${API_BASE_URL}/wallets` && init?.method === "POST") {
-        return redirectResponse(307, "//attacker.example.test/steal");
+        return redirectResponse(307, "//foreign.example.test/wallets");
       }
 
       return null;
@@ -106,7 +107,7 @@ describe("dfns client redirects", () => {
   it("applies the same-origin rule to the IBM Haven white-label client", async () => {
     const fetchMock = mockDfnsFetch((url, init) => {
       if (url === `${API_BASE_URL}/wallets` && init?.method === "POST") {
-        return redirectResponse(302, `${ATTACKER_ORIGIN}/steal`);
+        return redirectResponse(302, `${FOREIGN_ORIGIN}/wallets`);
       }
 
       return null;
@@ -123,10 +124,8 @@ describe("dfns client redirects", () => {
       client.wallets.createWallet({ body: { network: "SolanaDevnet" } })
     ).rejects.toThrow(/IBM Digital Asset Haven API returned a cross-origin redirect/);
 
-    const attackerCalls = fetchMock.mock.calls.filter(([input]) =>
-      hasOrigin(input, ATTACKER_ORIGIN)
-    );
-    expect(attackerCalls).toHaveLength(0);
+    const foreignCalls = fetchMock.mock.calls.filter(([input]) => hasOrigin(input, FOREIGN_ORIGIN));
+    expect(foreignCalls).toHaveLength(0);
   });
 
   it("does not follow redirects for read requests", async () => {
@@ -301,11 +300,7 @@ function toUrlString(input: string | URL | Request): string {
   return input.url;
 }
 
-/**
- * Exact origin match. A `startsWith` prefix test would also accept
- * `attacker.example.test.somewhere-else`, so it cannot prove a request never
- * reached the attacker — and it is the comparison the client itself makes.
- */
+/** Exact origin match, so a host that only shares a prefix never counts as the same origin. */
 function hasOrigin(input: string | URL | Request, origin: string): boolean {
   return new URL(toUrlString(input)).origin === origin;
 }
@@ -325,7 +320,8 @@ async function captureError(run: () => Promise<unknown>): Promise<Error> {
   try {
     await run();
   } catch (error) {
-    return error as Error;
+    if (error instanceof Error) return error;
+    throw error;
   }
 
   throw new Error("Expected the call to reject");

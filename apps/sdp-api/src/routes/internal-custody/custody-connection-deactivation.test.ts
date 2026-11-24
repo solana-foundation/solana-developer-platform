@@ -6,7 +6,6 @@ import type {
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
-import { verifyClerkJwt } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { databaseIdentityBoundary } from "@/middleware/database-identity";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
@@ -14,8 +13,8 @@ import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import { TEST_ORG } from "@/test/fixtures/organizations";
 import { setupTestAuth } from "@/test/helpers/auth";
-import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { insertTestCustodyWalletRow } from "@/test/helpers/custody";
+import { seedCustodyAdmin } from "@/test/helpers/custody-admin";
 import {
   activateTestCustodyConnection,
   insertTestCustodyConnection,
@@ -24,7 +23,7 @@ import {
 } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
-import { seedDefaultProjects } from "@/test/helpers/projects";
+import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -52,8 +51,9 @@ app.use("*", async (c, next) => {
   await next();
 });
 app.route("/internal/dashboard/custody", internalCustody);
-app.onError((error, c) => {
-  if (error instanceof AppError) return c.json(error.toResponse(), error.statusCode as 400);
+app.onError((error) => {
+  if (error instanceof AppError)
+    return Response.json(error.toResponse(), { status: error.statusCode });
   throw error;
 });
 
@@ -147,7 +147,7 @@ async function seedActiveConnection(walletStatus: CustodyWalletStatus) {
     id: "cwlt_connection_deactivation",
     owner: { kind: "connection", custodyConnectionId: CONNECTION },
     walletId: "provider-wallet-deactivation",
-    publicKey: "address-deactivation",
+    publicKey: syntheticAddress(1),
     label: null,
     purpose: null,
     status: walletStatus,
@@ -174,30 +174,12 @@ describe("custody Connection deactivation", () => {
   beforeEach(async () => {
     custodyReleaseChannel.outOfChannelMode = null;
     await seedTestDatabase(env);
-    const db = getDb(env);
-    await db.execute(
-      `INSERT INTO organizations (id, name, slug, tier, status)
-      VALUES (?, 'Deactivation', 'connection-deactivation', 'enterprise', 'active')`,
-      [ORG]
-    );
-    await db.execute(
-      `INSERT INTO users (id, email, email_verified, status)
-      VALUES (?, 'connection-deactivation@example.com', 1, 'active')`,
-      [USER]
-    );
-    await db.execute(
-      `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-      VALUES ('mem_connection_deactivation', ?, ?, 'admin', 'active')`,
-      [ORG, USER]
-    );
-    await seedDefaultProjects(db, {
+    clerkToken = await seedCustodyAdmin(env, {
       organizationId: ORG,
-      createdBy: USER,
-      members: [USER],
-      ids: { sandbox: PROJECT, production: `${PROJECT}_production` },
+      userId: USER,
+      projectId: PROJECT,
+      tier: "enterprise",
     });
-    clerkToken = await signSeededClerkMember(env, db, USER, ORG);
-    await verifyClerkJwt(clerkToken, env);
     vi.stubGlobal(
       "fetch",
       vi.fn(() => {
@@ -228,7 +210,6 @@ describe("custody Connection deactivation", () => {
         authenticated: true,
         method: "POST",
         projectId: PROJECT,
-        ...{},
       });
       expect(result.status).toBe(409);
       expect(await result.json()).toMatchObject({ error: { code: "CONFLICT" } });
@@ -271,7 +252,6 @@ describe("custody Connection deactivation", () => {
       authenticated: true,
       method: "POST",
       projectId: PROJECT,
-      ...{},
     });
     expect(result.status).toBe(409);
     expect((await result.json()).error).toEqual({
@@ -295,7 +275,6 @@ describe("custody Connection deactivation", () => {
       authenticated: true,
       method: "POST",
       projectId: PROJECT,
-      ...{},
     });
     expect(result.status).toBe(200);
     const body = await result.json();
@@ -315,7 +294,6 @@ describe("custody Connection deactivation", () => {
       authenticated: true,
       method: "POST",
       projectId: PROJECT,
-      ...{},
     });
     expect(replay.status).toBe(200);
     expect((await replay.json()).data).toEqual(body.data);
@@ -324,7 +302,11 @@ describe("custody Connection deactivation", () => {
       projectId: PROJECT,
       method: "GET",
     });
-    expect((await read.json()).data.connection).toEqual(body.data.custodyConnection);
+    // The read adds the connection's advisory policy observation to the same projection.
+    expect((await read.json()).data.connection).toEqual({
+      ...body.data.custodyConnection,
+      providerPolicy: { checkedAt: null, reason: "not_checked", status: "unknown" },
+    });
     expect(await lifecycleAudits()).toMatchObject([{ action: "deactivate", status: "success" }]);
     expect(
       await getDb(env).queryOne(
@@ -342,7 +324,6 @@ describe("custody Connection deactivation", () => {
       authenticated: true,
       method: "POST",
       projectId: PROJECT,
-      ...{},
     });
     expect(result.status).toBe(409);
     expect((await result.json()).error).toEqual({
@@ -372,7 +353,6 @@ describe("custody Connection deactivation", () => {
       authenticated: true,
       method: "POST",
       projectId: PROJECT,
-      ...{},
     });
 
     expect(response.status).toBe(409);
@@ -426,7 +406,6 @@ describe("custody Connection deactivation", () => {
         authenticated: true,
         method: "POST",
         projectId: PROJECT,
-        ...{},
       });
       expect(result.status).toBe(200);
       expect((await result.json()).data.custodyConnection).toMatchObject({
@@ -457,13 +436,11 @@ describe("custody Connection deactivation", () => {
         authenticated: true,
         method: "POST",
         projectId: PROJECT,
-        ...{},
       }),
       request(`/connections/${CONNECTION}/deactivate`, {
         authenticated: true,
         method: "POST",
         projectId: PROJECT,
-        ...{},
       }),
     ]);
     expect(responses.map((response) => response.status)).toEqual([200, 200]);
@@ -500,7 +477,6 @@ describe("custody Connection deactivation", () => {
         authenticated: true,
         method: "POST",
         projectId: PROJECT,
-        ...{},
       });
       expect(response.status).toBe(503);
       expect((await response.json()).error).toEqual({
@@ -544,7 +520,7 @@ describe("custody Connection deactivation", () => {
         id: "cwlt_racing_creation",
         owner: { kind: "connection", custodyConnectionId: CONNECTION },
         walletId: "racing-provider-wallet",
-        publicKey: "racing-address",
+        publicKey: syntheticAddress(2),
         label: null,
         purpose: null,
         status: "active",
@@ -555,7 +531,6 @@ describe("custody Connection deactivation", () => {
       authenticated: true,
       method: "POST",
       projectId: PROJECT,
-      ...{},
     });
     try {
       await vi.waitFor(
@@ -639,7 +614,6 @@ describe("custody Connection deactivation", () => {
         authenticated: true,
         method: "POST",
         projectId: PROJECT,
-        ...{},
       });
 
       expect(response.status).toBe(409);
@@ -734,7 +708,6 @@ describe("custody Connection deactivation", () => {
           authenticated: true,
           method: "POST",
           projectId: PROJECT,
-          ...{},
         })
       ).status
     ).toBe(403);

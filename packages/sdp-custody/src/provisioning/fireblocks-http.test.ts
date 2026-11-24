@@ -28,9 +28,10 @@ describe("Fireblocks HTTP contract", () => {
   it("keeps retries stable and separate requests distinct within the 40-character limit", async () => {
     const keys: string[] = [];
     const rt = runtime(async (_url, init) => {
-      const key = new Headers(init?.headers).get("Idempotency-Key");
+      assert.ok(init);
+      const key = new Headers(init.headers).get("Idempotency-Key");
       assert.ok(key && key.length <= 40, "Fireblocks rejects longer keys with HTTP 400 / 9003");
-      assert.deepEqual(JSON.parse(String(init?.body)), params.body);
+      assert.deepEqual(JSON.parse(String(init.body)), params.body);
       keys.push(key);
       return Response.json({ id: "transaction" });
     });
@@ -39,7 +40,7 @@ describe("Fireblocks HTTP contract", () => {
       await fireblocksRequest(rt, { ...params, idempotencyKey: `${request}-${suffix}` });
     assert.equal(keys[0], keys[1]);
     assert.notEqual(keys[0], keys[2]);
-    // Existing valid payment keys must not change after deploying this fix.
+    // A key within the limit reaches the provider unchanged.
     const paymentKey = "xfr_9246a4cf-86f4-415b-b91c-1d9f4d11eed8";
     await fireblocksRequest(rt, { ...params, idempotencyKey: paymentKey });
     assert.equal(keys[3], paymentKey);

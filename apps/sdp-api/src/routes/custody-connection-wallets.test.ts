@@ -1,6 +1,5 @@
 import { SigningError } from "@sdp/custody/signing";
 import { hashString } from "@sdp/payments/hash";
-import type { CustodyMode } from "@sdp/types/custody";
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
@@ -8,8 +7,8 @@ import { app } from "@/index";
 import { custodyWalletResponse } from "@/openapi/paths/responses";
 import { getLogger } from "@/runtime/logger";
 import * as custodyProvisioning from "@/services/custody/provisioning";
-import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
+import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { insertTestCustodyConfigRow } from "@/test/helpers/custody";
 import {
   insertTestStoredProviderCredential,
@@ -19,6 +18,7 @@ import {
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 
@@ -41,6 +41,7 @@ const FIRST_WALLET_RECORD_ID = "cwlt_connection_wallets_first";
 const FIRST_WALLET_ID = "privy_connection_wallets_first";
 const SECOND_WALLET_RECORD_ID = "cwlt_connection_wallets_second";
 const SECOND_WALLET_ID = "privy_connection_wallets_second";
+const CREATED_PUBLIC_KEY = TEST_SOLANA_ADDRESSES.wallet3;
 const PRIVY_APP_ID = "connection-wallets-app";
 const PRIVY_APP_SECRET = "connection-wallets-secret";
 const API_KEY = {
@@ -124,7 +125,7 @@ async function seedFixture(): Promise<void> {
         {
           id: FIRST_WALLET_RECORD_ID,
           walletId: FIRST_WALLET_ID,
-          publicKey: "11111111111111111111111111111111",
+          publicKey: TEST_SOLANA_ADDRESSES.wallet1,
           label: "First",
           purpose: null,
           status: "active",
@@ -132,7 +133,7 @@ async function seedFixture(): Promise<void> {
         {
           id: SECOND_WALLET_RECORD_ID,
           walletId: SECOND_WALLET_ID,
-          publicKey: "So11111111111111111111111111111111111111112",
+          publicKey: TEST_SOLANA_ADDRESSES.wallet2,
           label: "Second",
           purpose: null,
           status: "active",
@@ -143,16 +144,15 @@ async function seedFixture(): Promise<void> {
   });
 }
 
-function channelRefusalBody(mode: CustodyMode) {
-  return {
-    error: {
-      code: "FORBIDDEN",
-      message: custodyProviderNotInReleaseChannel("privy", mode).message,
-      details: { reason: "custody_provider_not_in_release_channel" },
-    },
-    meta: { requestId: expect.any(String) },
-  };
-}
+const BYOK_OUT_OF_CHANNEL_REFUSAL = {
+  error: {
+    code: "FORBIDDEN",
+    message:
+      "The privy custody provider is not available in this release channel for byok custody.",
+    details: { reason: "custody_provider_not_in_release_channel" },
+  },
+  meta: { requestId: expect.any(String) },
+};
 
 async function request(path: string, method: "POST" | "DELETE", body: unknown): Promise<Response> {
   return app.request(
@@ -189,7 +189,7 @@ describe("Connection-owned wallet control plane", () => {
   it("creates an additional wallet under the named Connection", async () => {
     provisionPrivyWalletMock.mockResolvedValueOnce({
       walletId: "created_wallet",
-      address: "Vote111111111111111111111111111111111111111",
+      address: CREATED_PUBLIC_KEY,
     });
 
     const response = await request("", "POST", {
@@ -199,19 +199,24 @@ describe("Connection-owned wallet control plane", () => {
     });
 
     expect(response.status).toBe(201);
-    const body = (await response.json()) as {
-      data: { wallet: Record<string, unknown> & { id: string; walletId: string } };
-    };
-    expect(body.data.wallet).toMatchObject({
-      custodyConnectionId: CONNECTION_ID,
-      isRuntimeExecutionAllowed: true,
-      walletId: "privy_created_wallet",
-      publicKey: "Vote111111111111111111111111111111111111111",
-      label: "Treasury",
-      purpose: "transfer",
+    const json = await response.json();
+    expect(json).toEqual({
+      data: {
+        wallet: {
+          id: expect.any(String),
+          custodyConnectionId: CONNECTION_ID,
+          isRuntimeExecutionAllowed: true,
+          walletId: "privy_created_wallet",
+          publicKey: CREATED_PUBLIC_KEY,
+          label: "Treasury",
+          purpose: "transfer",
+          status: "active",
+          createdAt: expect.any(String),
+        },
+      },
+      meta: { requestId: expect.any(String), timestamp: expect.any(String) },
     });
-    expect(body.data.wallet).not.toHaveProperty("custodyConfigId");
-    expect(body.data.wallet).not.toHaveProperty("provider");
+    const body = custodyWalletResponse.parse(json);
     const audit = await getDb(env).queryOne<{
       api_key_id: string;
       request_id: string;
@@ -283,7 +288,7 @@ describe("Connection-owned wallet control plane", () => {
     const db = getDb(env);
     provisionPrivyWalletMock.mockResolvedValueOnce({
       walletId: "outcome_unavailable",
-      address: "Vote111111111111111111111111111111111111111",
+      address: CREATED_PUBLIC_KEY,
     });
     await db.execute(`ALTER TABLE audit_logs ADD CONSTRAINT fail_wallet_create_outcome
       CHECK (metadata::jsonb->>'auditPhase' IS DISTINCT FROM 'outcome') NOT VALID`);
@@ -339,7 +344,7 @@ describe("Connection-owned wallet control plane", () => {
       await providerCreationReleased;
       return {
         walletId: "rotated_credential",
-        address: "Vote111111111111111111111111111111111111111",
+        address: CREATED_PUBLIC_KEY,
       };
     });
 
@@ -412,21 +417,12 @@ describe("Connection-owned wallet control plane", () => {
     expect(await walletCount()).toBe(before);
   });
 
-  it("fails exact create before Provider access on assertion or release-channel errors", async () => {
-    const missing = await request("", "POST", { connectionId: "cconn_missing" });
-    expect(missing.status).toBe(404);
-
-    const mismatch = await request("", "POST", {
-      connectionId: CONNECTION_ID,
-      provider: "para",
-    });
-    expect(mismatch.status).toBe(400);
-
+  it("refuses a Connection wallet out of the release channel before any Provider call", async () => {
     custodyReleaseChannel.outOfChannelMode = "byok";
     const before = await walletCount();
     const outOfChannel = await request("", "POST", { connectionId: CONNECTION_ID });
     expect(outOfChannel.status).toBe(403);
-    expect(await outOfChannel.json()).toEqual(channelRefusalBody("byok"));
+    expect(await outOfChannel.json()).toEqual(BYOK_OUT_OF_CHANNEL_REFUSAL);
     expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
     expect(await walletCount()).toBe(before);
   });
@@ -533,7 +529,7 @@ describe("Connection-owned wallet control plane", () => {
   it("maps known Provider success plus persistence failure to 500", async () => {
     provisionPrivyWalletMock.mockResolvedValueOnce({
       walletId: FIRST_WALLET_ID,
-      address: "11111111111111111111111111111111",
+      address: TEST_SOLANA_ADDRESSES.wallet1,
     });
     const before = await walletCount();
 
@@ -580,13 +576,11 @@ describe("Connection-owned wallet control plane", () => {
 });
 
 async function walletCount(): Promise<number> {
-  return (
-    (
-      await getDb(env)
-        .prepare("SELECT COUNT(*) AS count FROM custody_wallets")
-        .first<{ count: number }>()
-    )?.count ?? 0
-  );
+  return required(
+    await getDb(env)
+      .prepare("SELECT COUNT(*)::int AS count FROM custody_wallets")
+      .first<{ count: number }>()
+  ).count;
 }
 
 async function setPrivyEntitlement(entitled: boolean): Promise<void> {

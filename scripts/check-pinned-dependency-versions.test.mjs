@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 import {
+  checkPinnedDependencyVersions,
   isPinnedVersion,
   validateManifest,
   validatePnpmCatalog,
@@ -139,4 +144,72 @@ test("checks named pnpm catalogs", () => {
   assert.deepEqual(violations, [
     "pnpm-workspace.yaml: catalogs.solana.@solana/kit must be an exact version (found ^6.5.0).",
   ]);
+});
+
+/** A throwaway tracked git repo; the caller removes it in a finally. */
+function trackedRepo(files) {
+  const root = mkdtempSync(path.join(tmpdir(), "pinned-deps-"));
+  execFileSync("git", ["init", root]);
+  for (const [file, content] of Object.entries(files)) {
+    const target = path.join(root, file);
+    mkdirSync(path.dirname(target), { recursive: true });
+    writeFileSync(target, content);
+  }
+  // `git ls-files` reads the index, so the fixtures must be tracked to be
+  // discovered — the same way the real check sees this repo.
+  execFileSync("git", ["-C", root, "add", "-A"]);
+  return root;
+}
+
+test("the repo walk flags a range dependency and a catalog range end to end", () => {
+  const root = trackedRepo({
+    "package.json": JSON.stringify({
+      name: "fixture-root",
+      private: true,
+      dependencies: { pino: "^10.3.1" },
+    }),
+    "apps/example/package.json": JSON.stringify({
+      name: "fixture-app",
+      dependencies: { "@solana/earn": "workspace:*" },
+    }),
+    "pnpm-workspace.yaml": "catalog:\n  '@solana/kit': ^6.5.0\n",
+  });
+
+  try {
+    const violations = checkPinnedDependencyVersions(root);
+    assert.deepEqual(violations, [
+      "apps/example/package.json: dependencies.@solana/earn must use an exact registry version or catalog: (found workspace:*).",
+      "package.json: dependencies.pino must be an exact version (found ^10.3.1).",
+      "pnpm-workspace.yaml: catalog.@solana/kit must be an exact version (found ^6.5.0).",
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a missing pnpm-workspace.yaml is a violation, not a silent skip", () => {
+  const root = trackedRepo({
+    "package.json": JSON.stringify({
+      name: "fixture-root",
+      dependencies: { pino: "10.3.1" },
+    }),
+  });
+
+  try {
+    assert.deepEqual(checkPinnedDependencyVersions(root), [
+      "pnpm-workspace.yaml is missing: the catalog exact-pin policy cannot be enforced.",
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an empty manifest listing fails the walk instead of passing vacuously", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "pinned-deps-"));
+  try {
+    execFileSync("git", ["init", root]);
+    assert.throws(() => checkPinnedDependencyVersions(root), /found no package\.json manifests/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

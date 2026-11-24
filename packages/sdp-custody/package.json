@@ -128,6 +128,11 @@
       "types": "./src/test/fireblocks-proposal.ts",
       "import": "./src/test/fireblocks-proposal.ts",
       "default": "./src/test/fireblocks-proposal.ts"
+    },
+    "./provisioning/fireblocks-policy": {
+      "types": "./src/provisioning/fireblocks-policy.ts",
+      "import": "./src/provisioning/fireblocks-policy.ts",
+      "default": "./src/provisioning/fireblocks-policy.ts"
     }
   },
   "imports": {

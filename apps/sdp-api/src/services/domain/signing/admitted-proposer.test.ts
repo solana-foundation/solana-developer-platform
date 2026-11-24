@@ -1,8 +1,10 @@
 import { generateKeyPairSync } from "node:crypto";
 import type { CustodyProvisioningRuntime } from "@sdp/custody/provisioning/runtime";
 import { runInClusterScope } from "@sdp/rpc/scope";
+import { generateKeyPairSigner } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
 import type { MoneyAdmissionDecision } from "@/lib/money-admission";
+import { required } from "@/test/helpers/required";
 import {
   admittedTransferProposer,
   type ProposalAccess,
@@ -12,7 +14,8 @@ import {
   proposalRuntime,
 } from "./admitted-proposer";
 
-const SOURCE = "11111111111111111111111111111111";
+const { address: SOURCE } = await generateKeyPairSigner();
+const { address: DESTINATION } = await generateKeyPairSigner();
 const access: ProposalAccess = {
   apiKey: "tenant-key",
   // A real RSA key: the Fireblocks client signs a JWT before it sends anything.
@@ -36,7 +39,7 @@ const request = {
   externalId: "xfr_1",
   intent,
   sourceAddress: SOURCE,
-  destination: "So11111111111111111111111111111111111111112",
+  destination: DESTINATION,
   amount: "0.01",
   memo: "rent",
 };
@@ -113,18 +116,28 @@ describe("admittedTransferProposer (PRO-2435 D2)", () => {
       context,
       rt
     );
-    await devnet(() => proposer.propose(request));
+    await expect(devnet(() => proposer.propose(request))).resolves.toMatchObject({
+      id: "fb-1",
+      status: "SUBMITTED",
+    });
     expect(decide).toHaveBeenCalledTimes(1);
     // Proposing reads the credential fresh; nothing captured at prepare time is submitted.
     expect(loadPropose).toHaveBeenCalledTimes(1);
     expect(loadPrepare).not.toHaveBeenCalled();
-    const posts = fetch.mock.calls.filter(([, init]) => init?.method === "POST");
+    const posts = fetch.mock.calls.filter(([, init]) => required(init).method === "POST");
     expect(posts).toHaveLength(1);
-    expect(JSON.parse(String(posts[0]?.[1]?.body))).toMatchObject({
+    const [url, init] = required(posts[0]);
+    expect(String(url)).toBe(`${access.apiBaseUrl}/v1/transactions`);
+    expect(new Headers(required(init).headers).get("X-API-Key")).toBe("tenant-key");
+    expect(JSON.parse(String(required(init).body))).toEqual({
       operation: "TRANSFER",
       externalTxId: "xfr_1",
+      assetId: "SOL_TEST",
       source: { type: "VAULT_ACCOUNT", id: "0" },
-      destination: { type: "ONE_TIME_ADDRESS" },
+      destination: { type: "ONE_TIME_ADDRESS", oneTimeAddress: { address: DESTINATION } },
+      amount: "0.01",
+      treatAsGrossAmount: false,
+      note: "SDP xfr_1: rent",
     });
   });
 
@@ -146,6 +159,21 @@ describe("admittedTransferProposer (PRO-2435 D2)", () => {
     expect(prepared.intent).toEqual(intent);
   });
 
+  it("refuses to prepare when the Connection's wallet is not the wallet the payment names", async () => {
+    const { fetch, runtime: rt } = runtime();
+    const { address: otherWallet } = await generateKeyPairSigner();
+    const proposer = admittedTransferProposer(
+      { prepare: async () => ({ ...access, publicKey: otherWallet }), propose: async () => access },
+      async () => admitted,
+      context,
+      rt
+    );
+    await expect(
+      devnet(() => proposer.prepare({ token: "SOL", amount: "0.01", native: true }))
+    ).rejects.toMatchObject({ code: "CONFLICT", message: "Fireblocks source wallet changed" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("gives recovery only a reader: it can GET a proposal but never create one", async () => {
     const { fetch, runtime: rt } = runtime();
     const reader = proposalReader(async () => access, rt);
@@ -156,9 +184,9 @@ describe("admittedTransferProposer (PRO-2435 D2)", () => {
       status: "PENDING_AUTHORIZATION",
       externalTxId: "xfr_1",
     });
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(String(fetch.mock.calls[0]?.[0])).toContain("/v1/transactions/external_tx_id/xfr_1");
-    expect(fetch.mock.calls[0]?.[1]?.method ?? "GET").toBe("GET");
+    expect(fetch.mock.calls.map(([url, init]) => [String(url), required(init).method])).toEqual([
+      [`${access.apiBaseUrl}/v1/transactions/external_tx_id/xfr_1`, "GET"],
+    ]);
   });
 });
 
@@ -205,12 +233,12 @@ describe("proposalRecovery (PRO-2435 D4)", () => {
     await expect(recovery.admit()).rejects.toThrow("principal revoked");
     await expect(recovery.cancel(request.externalId)).resolves.toBe(true);
     expect(admit).toHaveBeenCalledTimes(1);
-    expect(fetch.mock.calls.map(([url, init]) => [String(url), init?.method])).toEqual([
+    expect(fetch.mock.calls.map(([url, init]) => [String(url), required(init).method])).toEqual([
       [`${access.apiBaseUrl}/v1/transactions/external_tx_id/${request.externalId}`, "GET"],
       [`${access.apiBaseUrl}/v1/transactions/${detail.id}/cancel`, "POST"],
     ]);
     for (const [, init] of fetch.mock.calls)
-      expect(new Headers(init?.headers).get("X-API-Key")).toBe(access.apiKey);
+      expect(new Headers(required(init).headers).get("X-API-Key")).toBe(access.apiKey);
   });
 
   it("reloads account-bound access after the worker read before a cancellation mutation", async () => {
@@ -223,8 +251,7 @@ describe("proposalRecovery (PRO-2435 D4)", () => {
     await recovery.read(request.externalId);
     await expect(recovery.cancel(request.externalId)).rejects.toThrow("binding changed");
     expect(loadAccess).toHaveBeenCalledTimes(2);
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch.mock.calls[0]?.[1]?.method).toBe("GET");
+    expect(fetch.mock.calls.map(([, init]) => required(init).method)).toEqual(["GET"]);
   });
 
   it("rechecks provider progress across the durable claim before cancelling", async () => {
@@ -237,10 +264,10 @@ describe("proposalRecovery (PRO-2435 D4)", () => {
       ...proposalRuntime,
       fetch,
     });
-    expect((await recovery.read(request.externalId))?.status).toBe("PENDING_SIGNATURE");
+    expect(required(await recovery.read(request.externalId)).status).toBe("PENDING_SIGNATURE");
     await expect(recovery.cancel(request.externalId)).resolves.toBe(false);
     expect(loadAccess).toHaveBeenCalledTimes(2);
-    expect(fetch.mock.calls.map(([, init]) => init?.method)).toEqual(["GET", "GET"]);
+    expect(fetch.mock.calls.map(([, init]) => required(init).method)).toEqual(["GET", "GET"]);
   });
 
   it.each([
@@ -263,8 +290,7 @@ describe("proposalRecovery (PRO-2435 D4)", () => {
       await expect(recovery.cancel(request.externalId)).rejects.toThrow(
         "does not match the payment intent"
       );
-      expect(fetch).toHaveBeenCalledTimes(1);
-      expect(fetch.mock.calls[0]?.[1]?.method).toBe("GET");
+      expect(fetch.mock.calls.map(([, init]) => required(init).method)).toEqual(["GET"]);
     }
   );
 
@@ -279,7 +305,7 @@ describe("proposalRecovery (PRO-2435 D4)", () => {
         rt
       );
       await expect(recovery.cancel(request.externalId)).resolves.toBe(false);
-      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(fetch.mock.calls.map(([, init]) => required(init).method)).toEqual(["GET"]);
     }
   );
 
@@ -301,7 +327,7 @@ describe("proposalRecovery (PRO-2435 D4)", () => {
     );
     await expect(recovery.cancel(request.externalId)).resolves.toBe(false);
     await expect(recovery.cancel(request.externalId)).resolves.toBe(true);
-    expect(fetch.mock.calls.map(([, init]) => init?.method)).toEqual([
+    expect(fetch.mock.calls.map(([, init]) => required(init).method)).toEqual([
       "GET",
       "POST",
       "GET",
@@ -343,6 +369,6 @@ describe("proposalRecovery (PRO-2435 D4)", () => {
     await expect(recovery.cancel(request.externalId)).rejects.toThrow(
       "connection lost after acceptance"
     );
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch.mock.calls.map(([, init]) => required(init).method)).toEqual(["GET", "POST"]);
   });
 });

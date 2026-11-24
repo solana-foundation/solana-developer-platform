@@ -13,6 +13,7 @@ import {
   type CustodyWalletsResponse,
   type CustodyWalletTokenBalance,
   type DeleteWalletResponse,
+  isByokCustodyProvider,
 } from "@sdp/types/custody";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import type { Address } from "@solana/kit";
@@ -61,6 +62,7 @@ import {
 } from "@/services/helius-das.service";
 import { assertCustodyProviderAvailable } from "@/services/provider-availability.service";
 import type { CustodyWalletIdempotency } from "@/services/stores/custody-config.store";
+import { CustodyPolicyStore } from "@/services/stores/custody-policy.store";
 
 export function clearWalletCaches() {
   clearWalletBalanceCache();
@@ -578,9 +580,14 @@ export const getWalletById = async (c: AppContext) => {
     throw new AppError("NOT_FOUND", "Wallet not found");
   }
 
-  const walletMetadata: CustodyWalletMetadataResponse["wallet"] = {
-    ...wallet,
-  };
+  const walletMetadata: CustodyWalletMetadataResponse["wallet"] = { ...wallet };
+  if (wallet.custodyConnectionId && isByokCustodyProvider(wallet.provider)) {
+    walletMetadata.providerPolicy = await new CustodyPolicyStore(getDb(c.env)).read(
+      getAuth(c).organizationId,
+      requireProjectId(c),
+      { walletId: wallet.id }
+    );
+  }
   const includeBalanceQuery = c.req.query("includeBalance");
   const includeBalance = includeBalanceQuery?.trim().toLowerCase() !== "false";
 

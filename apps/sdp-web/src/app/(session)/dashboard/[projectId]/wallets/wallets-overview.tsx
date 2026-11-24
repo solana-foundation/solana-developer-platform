@@ -199,10 +199,7 @@ function WalletCard({
   const { wallet } = item;
 
   return (
-    <article
-      className="relative flex min-w-0 flex-col rounded-card bg-surface-tile"
-      data-wallet-card={wallet.walletId}
-    >
+    <article className="relative flex min-w-0 flex-col rounded-card bg-surface-tile">
       {/* The whole card opens the wallet; its buttons and copy targets sit above this link. */}
       <Link
         href={item.href}
@@ -268,7 +265,7 @@ function WalletsList({
 }) {
   const t = useTranslations();
   return (
-    <Table className="min-w-0 rounded-none border-0 -mx-3 [&_table]:table-fixed" data-wallet-list>
+    <Table className="min-w-0 rounded-none border-0 -mx-3 [&_table]:table-fixed">
       <TableHeader>
         <TableRow>
           <TableHead className="w-[32%]">{t("DashboardCustody.wallet")}</TableHead>
@@ -282,7 +279,7 @@ function WalletsList({
       </TableHeader>
       <TableBody>
         {items.map((item) => (
-          <TableRow key={item.wallet.walletId} data-wallet-row={item.wallet.walletId}>
+          <TableRow key={item.wallet.walletId}>
             <TableCell>
               <Link
                 href={item.href}
@@ -384,9 +381,7 @@ function WalletsToolbar({
           />
         </Button>
         {refreshedAt ? (
-          <time dateTime={refreshedAt.toISOString()} data-wallets-refreshed-at>
-            {refreshedAtFormat.format(refreshedAt)}
-          </time>
+          <time dateTime={refreshedAt.toISOString()}>{refreshedAtFormat.format(refreshedAt)}</time>
         ) : null}
       </span>
       <SegmentedControl
@@ -584,7 +579,7 @@ export function WalletsOverview({
       {configsError ? <p className="text-body text-secondary">{configsError}</p> : null}
 
       {searchable ? (
-        <div className="max-w-md" data-wallet-search-toolbar>
+        <div className="max-w-md">
           <SearchInput
             value={searchValue}
             maxLength={WALLET_SEARCH_MAX_LENGTH}

@@ -1,23 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { JsonValue } from "@/lib/idempotency";
+import { translateServerMessagesToKeys } from "@/test/i18n-server";
+import { revalidatePath } from "@/test/next-cache";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { setPageRequest } from "@/test/request-project";
+import { type StubSdpApiClient, sentSdpApiRequests, stubSdpApiClient } from "@/test/sdp-api-client";
 
-const mocks = vi.hoisted(() => ({
-  createSdpApiClient: vi.fn(),
-  revalidatePath: vi.fn(),
-}));
-
-vi.mock("next/cache", () => ({
-  revalidatePath: mocks.revalidatePath,
-}));
-vi.mock("@/i18n/server", () => ({
-  getTranslations: vi.fn(async () => (key: string) => key),
-}));
+vi.mock("next/cache", () => import("@/test/next-cache"));
 vi.mock("next/headers", () => import("@/test/next-headers"));
-vi.mock("@/lib/sdp-api", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/sdp-api")>()),
-  createSdpApiClient: mocks.createSdpApiClient,
-}));
 
 import { recheckPrivyCredentialAction, submitPrivyCredentialAction } from "./byok-actions";
 
@@ -30,18 +20,20 @@ const credential = {
   displayMetadata: { appIdSuffix: "1234" },
 };
 
-beforeEach(() => setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/setup`));
+let client: StubSdpApiClient;
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/setup`);
+  translateServerMessagesToKeys();
+  client = stubSdpApiClient();
+});
 
 function completionResult(status: string, code?: string) {
-  return {
-    providerCredential: credential,
-    connectionId: "conn_test",
-    completion: {
-      status,
-      attemptedAt: "2026-08-12T00:00:00.000Z",
-      ...(code ? { code } : {}),
-    },
-  };
+  const attemptedAt = "2026-08-12T00:00:00.000Z";
+  const completion: JsonValue =
+    code === undefined ? { status, attemptedAt } : { status, attemptedAt, code };
+  return { providerCredential: credential, connectionId: "conn_test", completion };
 }
 
 function apiError(status: number, message: string): Error {
@@ -58,13 +50,6 @@ function submitForm(): FormData {
 }
 
 describe("recheckPrivyCredentialAction", () => {
-  const client = { fetch: vi.fn() };
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.createSdpApiClient.mockResolvedValue(client);
-  });
-
   it("returns success and revalidates when the completion passes", async () => {
     client.fetch.mockResolvedValue(completionResult("success"));
 
@@ -72,11 +57,15 @@ describe("recheckPrivyCredentialAction", () => {
       status: "success",
       connectionId: "conn_test",
     });
-    expect(client.fetch).toHaveBeenCalledWith(
-      "/internal/dashboard/custody/connections/conn_test/complete-installation",
-      expect.objectContaining({ method: "POST" })
-    );
-    expect(mocks.revalidatePath.mock.calls).toEqual([
+    expect(sentSdpApiRequests(client)).toEqual([
+      {
+        path: "/internal/dashboard/custody/connections/conn_test/complete-installation",
+        method: "POST",
+        headers: undefined,
+        body: {},
+      },
+    ]);
+    expect(revalidatePath.mock.calls).toEqual([
       [`/dashboard/${PRODUCTION_PROJECT.id}/wallets`],
       [`/dashboard/${PRODUCTION_PROJECT.id}/integrations/privy`],
     ]);
@@ -163,13 +152,6 @@ describe("recheckPrivyCredentialAction", () => {
 });
 
 describe("submitPrivyCredentialAction outcome classification", () => {
-  const client = { fetch: vi.fn() };
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.createSdpApiClient.mockResolvedValue(client);
-  });
-
   it("submits Fireblocks credentials and refreshes the Fireblocks integration", async () => {
     const fireblocksCredential = { ...credential, provider: "fireblocks" };
     client.fetch
@@ -197,41 +179,86 @@ describe("submitPrivyCredentialAction outcome classification", () => {
       status: "success",
       connectionId: "conn_test",
     });
-    expect(JSON.parse(client.fetch.mock.calls[0]?.[1]?.body)).toEqual({
-      provider: "fireblocks",
-      fireblocksVaultAccountIds: ["0", "7"],
-      fields: {
-        credentialLabel: "Treasury",
-        scope: "project",
-        apiKey: "api-user",
-        signingKeyId: "fbcsr_11111111-1111-4111-8111-111111111111",
-        vaultAccountId: "0",
+    expect(sentSdpApiRequests(client)[0]).toEqual({
+      path: "/internal/dashboard/custody/provider-credentials",
+      method: "POST",
+      headers: { "Idempotency-Key": "fireblocks-key" },
+      body: {
+        provider: "fireblocks",
+        fireblocksVaultAccountIds: ["0", "7"],
+        fields: {
+          credentialLabel: "Treasury",
+          scope: "project",
+          apiKey: "api-user",
+          signingKeyId: "fbcsr_11111111-1111-4111-8111-111111111111",
+          vaultAccountId: "0",
+        },
       },
     });
-    expect(mocks.revalidatePath).toHaveBeenCalledWith(
-      `/dashboard/${PRODUCTION_PROJECT.id}/integrations/fireblocks`
-    );
+    expect(revalidatePath.mock.calls).toEqual([
+      [`/dashboard/${PRODUCTION_PROJECT.id}/wallets`],
+      [`/dashboard/${PRODUCTION_PROJECT.id}/integrations/fireblocks`],
+    ]);
   });
-  it("runs the connection completion after storing the credential", async () => {
+
+  // The vault the connection signs from has to be one of the vaults it may use.
+  it("refuses a Fireblocks vault outside the chosen vaults without sending anything", async () => {
+    const data = new FormData();
+    for (const [name, value] of Object.entries({
+      provider: "fireblocks",
+      credentialLabel: "Treasury",
+      idempotencyKey: "fireblocks-key",
+      apiKey: "api-user",
+      signingKeyId: "fbcsr_11111111-1111-4111-8111-111111111111",
+      vaultAccountId: "3",
+    }))
+      data.set(name, value);
+    data.append("fireblocksVaultAccountIds", "0");
+    data.append("fireblocksVaultAccountIds", "7");
+
+    expect(await submitPrivyCredentialAction(data)).toEqual({
+      status: "invalid",
+      message: "DashboardCustody.byokMissingFields",
+    });
+    expect(client.fetch).not.toHaveBeenCalled();
+  });
+
+  // The browser's key rides on the stored credential, the one write a retry must not repeat;
+  // the completion is lease-guarded and carries none.
+  it("stores the credential under the browser's key, then runs the connection completion", async () => {
     client.fetch
       .mockResolvedValueOnce({ providerCredential: credential, connectionId: "conn_test" })
       .mockResolvedValueOnce(completionResult("success"));
+    const form = submitForm();
+    form.set("walletLabel", "Ops");
 
-    await expect(submitPrivyCredentialAction(submitForm())).resolves.toEqual({
+    await expect(submitPrivyCredentialAction(form)).resolves.toEqual({
       status: "success",
       connectionId: "conn_test",
     });
-    expect(client.fetch).toHaveBeenCalledTimes(2);
-    expect(client.fetch).toHaveBeenNthCalledWith(
-      1,
-      "/internal/dashboard/custody/provider-credentials",
-      expect.objectContaining({ method: "POST" })
-    );
-    expect(client.fetch).toHaveBeenNthCalledWith(
-      2,
-      "/internal/dashboard/custody/connections/conn_test/complete-installation",
-      expect.objectContaining({ method: "POST" })
-    );
+    expect(sentSdpApiRequests(client)).toEqual([
+      {
+        path: "/internal/dashboard/custody/provider-credentials",
+        method: "POST",
+        headers: { "Idempotency-Key": "key_test" },
+        body: {
+          provider: "privy",
+          walletLabel: "Ops",
+          fields: {
+            credentialLabel: "Production app",
+            scope: "project",
+            appId: "app_test",
+            appSecret: "secret_test",
+          },
+        },
+      },
+      {
+        path: "/internal/dashboard/custody/connections/conn_test/complete-installation",
+        method: "POST",
+        headers: undefined,
+        body: {},
+      },
+    ]);
   });
 
   it("replaces the credentials on a failed connection when the form carries its id", async () => {
@@ -245,11 +272,10 @@ describe("submitPrivyCredentialAction outcome classification", () => {
       status: "success",
       connectionId: "conn_test",
     });
-    expect(client.fetch).toHaveBeenNthCalledWith(
-      1,
+    expect(sentSdpApiRequests(client).map((request) => request.path)).toEqual([
       "/internal/dashboard/custody/connections/conn_test/provider-credentials",
-      expect.objectContaining({ method: "POST" })
-    );
+      "/internal/dashboard/custody/connections/conn_test/complete-installation",
+    ]);
   });
 
   it("keeps the replacement target when a replacement submission is rejected", async () => {
@@ -300,16 +326,20 @@ describe("submitPrivyCredentialAction outcome classification", () => {
 
       // The submission may have committed server-side; the frozen replay
       // under the same idempotency key is the only path that converges.
-      const result = await submitPrivyCredentialAction(submitForm());
-      expect(result.status).toBe("error");
+      await expect(submitPrivyCredentialAction(submitForm())).resolves.toEqual({
+        status: "error",
+        message: "try later",
+      });
     }
   );
 
   it("keeps a response-less failure in the unknown, replayable state", async () => {
     client.fetch.mockRejectedValueOnce(new Error("fetch failed: socket hang up"));
 
-    const result = await submitPrivyCredentialAction(submitForm());
-    expect(result.status).toBe("error");
+    await expect(submitPrivyCredentialAction(submitForm())).resolves.toEqual({
+      status: "error",
+      message: "fetch failed: socket hang up",
+    });
   });
 
   it("rejects whitespace-only fields as invalid without sending anything", async () => {
@@ -318,8 +348,10 @@ describe("submitPrivyCredentialAction outcome classification", () => {
     const form = submitForm();
     form.set("credentialLabel", "   ");
 
-    const result = await submitPrivyCredentialAction(form);
-    expect(result.status).toBe("invalid");
+    await expect(submitPrivyCredentialAction(form)).resolves.toEqual({
+      status: "invalid",
+      message: "DashboardCustody.byokMissingFields",
+    });
     expect(client.fetch).not.toHaveBeenCalled();
   });
 });

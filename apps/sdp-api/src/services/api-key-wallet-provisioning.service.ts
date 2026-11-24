@@ -26,7 +26,7 @@ export async function provisionApiKeyWallet(
   env: Env,
   params: {
     auditContext: Context<{ Bindings: Env }>;
-    creationReason: "api_key" | "dvp_settlement_authority";
+    creationReason: "dvp_settlement_authority";
     organizationId: string;
     projectId: string;
     owner: CustodyWalletOwnerTarget;

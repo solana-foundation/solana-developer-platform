@@ -1,7 +1,20 @@
 import { apiTestSupport } from "@sdp/api/test-support";
-import { createRpc, getSignatureStatuses } from "@sdp/rpc/solana";
-import { type Commitment, generateKeyPairSigner, type Signature } from "@solana/kit";
+import { createRpc, getSignatureStatuses, type SolanaRpc } from "@sdp/rpc/solana";
+import {
+  ONCHAIN_TRANSFER_SETTLED_STATUSES,
+  PAYMENT_TRANSFER_BATCH_RECIPIENT_STATUSES,
+  PAYMENT_TRANSFER_BATCH_STATUSES,
+  PAYMENT_TRANSFER_STATUSES,
+} from "@sdp/types/payments";
+import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
+import {
+  type Commitment,
+  generateKeyPairSigner,
+  type Signature,
+  signature as toSignature,
+} from "@solana/kit";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import {
   cleanupIntegrationSuite,
   createFundedIntegrationWallet,
@@ -15,46 +28,51 @@ import { env } from "#env-impl";
 
 const { trackPendingTransfers } = apiTestSupport;
 
-type CounterpartyApiResponse = {
-  data: { counterparty: { id: string } };
-};
-
-type CounterpartyAccountApiResponse = {
-  data: { account: { id: string } };
-};
-
-type TransferBatchApiResponse = {
-  data: {
-    batch: { id: string; status: string; recipientCount: number; transactionCount: number };
-    recipients: Array<{ status: string; transferId: string | null; destination: string }>;
-    transfers: Array<{ id: string; status: string; signature: string | null }>;
-  };
-};
+const counterpartyResponseSchema = z.object({
+  data: z.object({ counterparty: z.object({ id: z.string() }) }),
+});
+const counterpartyAccountResponseSchema = z.object({
+  data: z.object({ account: z.object({ id: z.string() }) }),
+});
+const transferBatchResponseSchema = z.object({
+  data: z.object({
+    batch: z.object({
+      id: z.string(),
+      status: z.enum(PAYMENT_TRANSFER_BATCH_STATUSES),
+      recipientCount: z.number(),
+      transactionCount: z.number(),
+    }),
+    recipients: z.array(z.object({ status: z.enum(PAYMENT_TRANSFER_BATCH_RECIPIENT_STATUSES) })),
+    transfers: z.array(
+      z.object({ status: z.enum(PAYMENT_TRANSFER_STATUSES), signature: z.string().nullable() })
+    ),
+  }),
+});
 
 const RECIPIENT_COUNT = 4;
 const RECIPIENT_AMOUNT_SOL = "0.002";
-const RECIPIENT_AMOUNT_LAMPORTS = 2_000_000;
+const RECIPIENT_AMOUNT_LAMPORTS = 2_000_000n;
+
+function integrationRpc(): SolanaRpc {
+  const solanaRpcUrl = env.SOLANA_RPC_URL;
+  if (!solanaRpcUrl) {
+    throw new Error("SOLANA_RPC_URL is not configured for integration tests.");
+  }
+  return createRpc(solanaRpcUrl);
+}
 
 /**
  * Polls surfpool for the given signatures until every one reports at least the
  * target commitment, so reconciliation observes real on-chain statuses.
  * Searches transaction history because finalization can outlive the node's
  * recent-status cache.
- *
- * @param signatures - Transaction signatures returned by the batch create.
- * @param target - Commitment level every signature must reach.
- * @param timeoutMs - How long to keep polling before failing the test.
  */
 async function waitForSignatureCommitment(
   signatures: Signature[],
   target: Exclude<Commitment, "processed">,
   timeoutMs: number
 ): Promise<void> {
-  const solanaRpcUrl = env.SOLANA_RPC_URL;
-  if (!solanaRpcUrl) {
-    throw new Error("SOLANA_RPC_URL is not configured for integration tests.");
-  }
-  const rpc = createRpc(solanaRpcUrl);
+  const rpc = integrationRpc();
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     const statuses = await getSignatureStatuses(rpc, signatures, {
@@ -75,27 +93,6 @@ async function waitForSignatureCommitment(
   throw new Error(
     `Timed out waiting for batch signatures to reach ${target} on-chain after ${timeoutMs}ms`
   );
-}
-
-/**
- * Reads an address's lamport balance from the integration validator.
- *
- * @param address - Account to read.
- * @returns Balance in lamports.
- */
-async function getLamports(address: string): Promise<number> {
-  const response = await fetch(env.SOLANA_RPC_URL as string, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "getBalance",
-      params: [address, { commitment: "confirmed" }],
-    }),
-  });
-  const payload = (await response.json()) as { result: { value: number } };
-  return payload.result.value;
 }
 
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Transfer Batches On-Chain", () => {
@@ -133,8 +130,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Transfer Batches 
       }),
     });
     expect(counterpartyRes.status).toBe(201);
-    const counterparty = (await counterpartyRes.json()) as CounterpartyApiResponse;
-    const counterpartyId = counterparty.data.counterparty.id;
+    const counterpartyId = counterpartyResponseSchema.parse(await counterpartyRes.json()).data
+      .counterparty.id;
 
     const destinationSigners = await Promise.all(
       Array.from({ length: RECIPIENT_COUNT }, () => generateKeyPairSigner())
@@ -151,8 +148,9 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Transfer Batches 
         }),
       });
       expect(accountRes.status).toBe(201);
-      const account = (await accountRes.json()) as CounterpartyAccountApiResponse;
-      accountIds.push(account.data.account.id);
+      accountIds.push(
+        counterpartyAccountResponseSchema.parse(await accountRes.json()).data.account.id
+      );
     }
 
     const createRes = await request("/v1/payments/transfer-batches/execute", {
@@ -161,7 +159,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Transfer Batches 
       body: JSON.stringify({
         externalId: `batch-integration-run-${Date.now()}`,
         sourceCustodyWalletId: sourceWallet.id,
-        token: "SOL",
+        token: WELL_KNOWN_TOKENS.SOL.symbol,
         recipients: accountIds.map((counterpartyAccountId, index) => ({
           externalId: `batch-integration-recipient-${index}`,
           counterpartyId,
@@ -172,48 +170,56 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Transfer Batches 
     });
 
     expect(createRes.status).toBe(200);
-    const created = (await createRes.json()) as TransferBatchApiResponse;
-    expect(created.data.batch.status).toBe("processing");
-    expect(created.data.batch.recipientCount).toBe(RECIPIENT_COUNT);
-    expect(created.data.batch.transactionCount).toBe(1);
-    expect(created.data.transfers).toHaveLength(1);
-    expect(created.data.recipients.every((r) => r.status === "processing")).toBe(true);
-
-    const signatures = created.data.transfers.map((transfer) => {
-      expect(transfer.status).toBe("processing");
-      expect(transfer.signature).toMatch(/^[1-9A-HJ-NP-Za-km-z]{64,88}$/);
-      return transfer.signature as Signature;
+    const created = transferBatchResponseSchema.parse(await createRes.json()).data;
+    expect(created.batch).toMatchObject({
+      status: "processing",
+      recipientCount: RECIPIENT_COUNT,
+      transactionCount: 1,
+    });
+    expect(created.recipients.map((recipient) => recipient.status)).toEqual(
+      Array.from({ length: RECIPIENT_COUNT }, () => "processing")
+    );
+    expect(created.transfers.map((transfer) => transfer.status)).toEqual(["processing"]);
+    const signatures = created.transfers.map((transfer) => {
+      if (transfer.signature === null) {
+        throw new Error("A processing batch chunk answered without its signature");
+      }
+      return toSignature(transfer.signature);
     });
 
     await waitForSignatureCommitment(signatures, "confirmed", 60_000);
     await trackPendingTransfers(env);
 
-    const detailRes = await request(`/v1/payments/transfer-batches/${created.data.batch.id}`);
+    const detailRes = await request(`/v1/payments/transfer-batches/${created.batch.id}`);
     expect(detailRes.status).toBe(200);
-    const settled = (await detailRes.json()) as TransferBatchApiResponse;
-    expect(settled.data.batch.status).toBe("confirmed");
-    expect(settled.data.recipients).toHaveLength(RECIPIENT_COUNT);
-    expect(settled.data.recipients.every((r) => r.status === "confirmed")).toBe(true);
-    expect(
-      settled.data.transfers.every(
-        (transfer) => transfer.status === "confirmed" || transfer.status === "finalized"
-      )
-    ).toBe(true);
+    const settled = transferBatchResponseSchema.parse(await detailRes.json()).data;
+    expect(settled.batch.status).toBe("confirmed");
+    expect(settled.recipients.map((recipient) => recipient.status)).toEqual(
+      Array.from({ length: RECIPIENT_COUNT }, () => "confirmed")
+    );
+    // The chain may finalize the chunk before reconciliation reads it.
+    for (const transfer of settled.transfers) {
+      expect(ONCHAIN_TRANSFER_SETTLED_STATUSES).toContain(transfer.status);
+    }
 
+    const rpc = integrationRpc();
     for (const destinationSigner of destinationSigners) {
-      expect(await getLamports(destinationSigner.address)).toBe(RECIPIENT_AMOUNT_LAMPORTS);
+      const { value } = await rpc
+        .getBalance(destinationSigner.address, { commitment: "confirmed" })
+        .send();
+      expect(value).toBe(RECIPIENT_AMOUNT_LAMPORTS);
     }
 
     await waitForSignatureCommitment(signatures, "finalized", 120_000);
     await trackPendingTransfers(env);
 
-    const finalizedRes = await request(`/v1/payments/transfer-batches/${created.data.batch.id}`);
+    const finalizedRes = await request(`/v1/payments/transfer-batches/${created.batch.id}`);
     expect(finalizedRes.status).toBe(200);
-    const finalized = (await finalizedRes.json()) as TransferBatchApiResponse;
-    expect(finalized.data.transfers.every((transfer) => transfer.status === "finalized")).toBe(
-      true
+    const finalized = transferBatchResponseSchema.parse(await finalizedRes.json()).data;
+    expect(finalized.transfers.map((transfer) => transfer.status)).toEqual(["finalized"]);
+    expect(finalized.batch.status).toBe("confirmed");
+    expect(finalized.recipients.map((recipient) => recipient.status)).toEqual(
+      Array.from({ length: RECIPIENT_COUNT }, () => "confirmed")
     );
-    expect(finalized.data.batch.status).toBe("confirmed");
-    expect(finalized.data.recipients.every((r) => r.status === "confirmed")).toBe(true);
   });
 });

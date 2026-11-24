@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ISSUED_TOKEN, ISSUED_TOKEN_MINT } from "@/test/issued-tokens";
 
 const flags = vi.hoisted(() => ({ issuance: vi.fn() }));
 
@@ -9,44 +10,41 @@ import {
   fetchIssuedTokenSymbolsWhenIssuanceEnabled,
   fetchIssuedTokensByMintWhenIssuanceEnabled,
 } from "./issued-tokens.server";
-import * as paymentsPageData from "./payments-page.data";
 
 describe("issued token reads behind the Issuance gate", () => {
-  const request = vi.fn();
-  const symbol = { id: "tok_1", mintAddress: "Mint111", symbol: "ACME", imageUrl: null };
+  const symbol = ISSUED_TOKEN;
+  const request = vi.fn(async (_path: string) =>
+    Response.json({ data: [symbol], meta: { hasMore: false } })
+  );
 
   beforeEach(() => {
-    vi.restoreAllMocks();
-    vi.spyOn(paymentsPageData, "fetchPaymentsIssuedTokenSymbols").mockResolvedValue({
-      ok: true,
-      data: [symbol],
-    });
-    vi.spyOn(paymentsPageData, "fetchIssuedTokensByMint").mockResolvedValue({ Mint111: symbol });
+    request.mockClear();
   });
 
   it("reads nothing where Issuance is off, so stable never asks for a refused route", async () => {
     flags.issuance.mockResolvedValue(false);
 
-    await expect(fetchIssuedTokenSymbolsWhenIssuanceEnabled(request)).resolves.toEqual({
+    expect(await fetchIssuedTokenSymbolsWhenIssuanceEnabled(request)).toEqual({
       ok: true,
       data: [],
     });
-    await expect(fetchIssuedTokensByMintWhenIssuanceEnabled(request)).resolves.toEqual({});
-    expect(paymentsPageData.fetchPaymentsIssuedTokenSymbols).not.toHaveBeenCalled();
-    expect(paymentsPageData.fetchIssuedTokensByMint).not.toHaveBeenCalled();
+    expect(await fetchIssuedTokensByMintWhenIssuanceEnabled(request)).toEqual({});
+    expect(request).not.toHaveBeenCalled();
   });
 
   it("reads the organization's issued tokens where Issuance is on", async () => {
     flags.issuance.mockResolvedValue(true);
 
-    await expect(fetchIssuedTokenSymbolsWhenIssuanceEnabled(request)).resolves.toEqual({
+    expect(await fetchIssuedTokenSymbolsWhenIssuanceEnabled(request)).toEqual({
       ok: true,
       data: [symbol],
     });
-    await expect(fetchIssuedTokensByMintWhenIssuanceEnabled(request)).resolves.toEqual({
-      Mint111: symbol,
+    expect(await fetchIssuedTokensByMintWhenIssuanceEnabled(request)).toEqual({
+      [ISSUED_TOKEN_MINT]: symbol,
     });
-    expect(paymentsPageData.fetchPaymentsIssuedTokenSymbols).toHaveBeenCalledWith(request);
-    expect(paymentsPageData.fetchIssuedTokensByMint).toHaveBeenCalledWith(request);
+    expect(request.mock.calls.map(([path]) => path)).toEqual([
+      "/v1/issuance/tokens?page=1&pageSize=100",
+      "/v1/issuance/tokens?page=1&pageSize=100",
+    ]);
   });
 });

@@ -265,7 +265,9 @@ function pruneProperties(
     if (kept === EMPTY) {
       const gated =
         isJsonObject(schema) &&
-        (schema[MODULE_GATE] !== undefined || schema[CUSTODY_PROVIDER_GATE] !== undefined);
+        (schema[MODULE_GATE] !== undefined ||
+          schema[CUSTODY_PROVIDER_GATE] !== undefined ||
+          schema[CUSTODY_MODE_GATE] !== undefined);
       if (!gated) dropped.add(name);
     } else properties[name] = kept;
   }
@@ -303,8 +305,18 @@ function pruneNode(node: Json, context: Context): Json | typeof EMPTY {
   if (module !== undefined && !context.modules.has(module)) return EMPTY;
   const custodyMode = custodyModeGateSchema.parse(node[CUSTODY_MODE_GATE]);
   if (custodyMode !== undefined) {
-    const published = context.published;
     const { releaseChannel } = context;
+    // A mode no published provider serves leaves the node nothing to describe.
+    if (
+      !CUSTODY_PROVIDERS.some(
+        (provider) =>
+          isCustodyProviderPublished(releaseChannel, provider) &&
+          isCustodyProviderInReleaseChannel(releaseChannel, provider, custodyMode)
+      )
+    )
+      return EMPTY;
+    // Provider-owned values stay published only for providers serving this mode.
+    const published = context.published;
     context = {
       ...context,
       published: (value) => {
