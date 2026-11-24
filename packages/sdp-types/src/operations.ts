@@ -25,6 +25,21 @@ export function isTerminalOperationStatus(status: OperationStatus): boolean {
   return TERMINAL_OPERATION_STATUS_SET.has(status);
 }
 
+/** The execution transition path requires a domain resource for these terminal outcomes. */
+export const RESOURCE_REQUIRED_OPERATION_TRANSITION_STATUSES = [
+  "completed",
+  "cancelled",
+] as const satisfies readonly OperationStatus[];
+
+const RESOURCE_REQUIRED_OPERATION_TRANSITION_STATUS_SET = new Set<OperationStatus>(
+  RESOURCE_REQUIRED_OPERATION_TRANSITION_STATUSES
+);
+
+/** Whether an execution transition requires an authoritative domain resource reference. */
+export function operationTransitionRequiresResourceReference(status: OperationStatus): boolean {
+  return RESOURCE_REQUIRED_OPERATION_TRANSITION_STATUS_SET.has(status);
+}
+
 /** Operator recovery may finish a settling release or replay an existing completion. */
 export const REDEMPTION_RELEASE_OPERATOR_RECOVERY_STATUSES = [
   "settling",

@@ -1,6 +1,6 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { EARN_TERMINAL_VAULT_WITHDRAWAL_REQUEST_STATUSES } from "@sdp/types/earn";
-import type { OperationReference } from "@sdp/types/operations";
+import { type OperationReference, TERMINAL_OPERATION_STATUSES } from "@sdp/types/operations";
 import type { DatabaseClient, DatabaseExecutor } from "@/db/client";
 import { sqlLiteralList } from "@/db/postgres-utils";
 import type { EarnWalletWithdrawalRequestTransactionRow } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
@@ -80,7 +80,7 @@ async function isSourceFencedByCurrentRedemptionRelease(
          AND operation.project_id = attempt.project_id AND operation.environment = attempt.environment
        WHERE request.id = ? AND request.organization_id = ? AND request.environment = ?
          AND (release.release_finalized_at IS NOT NULL
-           OR operation.status NOT IN ('completed', 'failed', 'cancelled'))
+           OR operation.status NOT IN (${sqlLiteralList(TERMINAL_OPERATION_STATUSES)}))
      ) AS fenced`,
     [input.id, input.organizationId, input.environment]
   );
