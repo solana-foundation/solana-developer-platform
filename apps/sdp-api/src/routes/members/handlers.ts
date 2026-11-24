@@ -1,4 +1,8 @@
-import { INVITATION_STATUSES, INVITEE_NOT_ALLOWED_REASON } from "@sdp/types/organizations";
+import {
+  INVITATION_STATUSES,
+  INVITEE_NOT_ALLOWED_REASON,
+  MAX_ORGANIZATION_MEMBERS,
+} from "@sdp/types/organizations";
 import { normalizeOrganizationRole } from "@sdp/types/roles";
 import type { Context } from "hono";
 import { z } from "zod";
@@ -49,12 +53,6 @@ const invitationStatusSchema = z.object({ status: z.enum(INVITATION_STATUSES) })
 
 /** How long an invitation admits its address, in SDP and in Clerk's link alike. */
 const INVITATION_TTL_DAYS = 7;
-
-/**
- * Members an organization may hold, pending invitations included, as Clerk
- * counts its own membership limit: refusing here spends no Clerk call.
- */
-const MAX_ORGANIZATION_MEMBERS = 20;
 
 /** Clerk user id for an SDP user, or null when they have no Clerk identity. */
 async function getClerkUserId(db: DatabaseClient, userId: string): Promise<string | null> {

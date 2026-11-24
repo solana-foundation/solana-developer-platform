@@ -25,6 +25,16 @@ export type ApiKeySigningWalletStatus = (typeof API_KEY_SIGNING_WALLET_STATUSES)
 
 export type RateLimitTier = "standard" | "elevated" | "unlimited";
 
+/**
+ * Requests an API key may make per minute, by its rate limit tier. A key starts on `standard`,
+ * the Free plan's limit; the API enforces these per key id.
+ */
+export const API_KEY_REQUESTS_PER_MINUTE = {
+  standard: 100,
+  elevated: 500,
+  unlimited: 10_000,
+} as const satisfies Record<RateLimitTier, number>;
+
 export const API_KEY_WALLET_SCOPES = ["all", "selected"] as const;
 
 /**

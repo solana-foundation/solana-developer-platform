@@ -1,4 +1,4 @@
-import type { RateLimitTier } from "@sdp/types/api-keys";
+import { API_KEY_REQUESTS_PER_MINUTE } from "@sdp/types/api-keys";
 import type { Context, Next } from "hono";
 import { routePath } from "hono/route";
 import { presentsApiKey } from "@/lib/api-key-format";
@@ -13,12 +13,8 @@ import { matchesFreePath } from "./path-match";
 /** Length of every rate limit window; counter buckets align to it. */
 export const RATE_LIMIT_WINDOW_MS = 60_000;
 
-/** Maximum admitted requests per window, per API key, by tier. */
-export const RATE_LIMIT_TIERS = {
-  standard: 100,
-  elevated: 500,
-  unlimited: 10_000,
-} as const satisfies Record<RateLimitTier, number>;
+/** Maximum admitted requests per window, per API key, by tier (the window is one minute). */
+export const RATE_LIMIT_TIERS = API_KEY_REQUESTS_PER_MINUTE;
 
 /** Maximum admitted requests per window, per client IP, for a request without a credential. */
 export const ANONYMOUS_MAX_REQUESTS = 20;
