@@ -791,7 +791,7 @@ describe("current redemption release storage", () => {
       );
     } else {
       await expect(pendingRequest("replacement_B")).resolves.toBe("replacement_B");
-      await expect(pendingRequest("replacement_C")).rejects.toThrow("request address");
+      await expect(pendingRequest("replacement_C")).rejects.toMatchObject({ code: "CONFLICT" });
     }
   });
 });

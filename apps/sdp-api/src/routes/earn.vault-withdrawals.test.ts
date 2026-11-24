@@ -183,20 +183,17 @@ async function seedPosition(
     projectId: string | null;
     environment: string;
     provider: string;
-    kind: string;
     custodyWalletId: string;
     vaultAddress: string;
   }> = {}
 ): Promise<string> {
   const id = overrides.id ?? generateEarnPositionId();
-  const kind = overrides.kind ?? "vault_direct";
   await getDb(env)
     .prepare(
       `INSERT INTO earn_positions (
          id, organization_id, project_id, environment, provider, kind,
-         custody_wallet_id, vault_address, share_mint, token_mint,
-         provider_wallet_id, label, activated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'Exit Vault', sdp_iso_now())`
+         custody_wallet_id, vault_address, share_mint, token_mint, label, activated_at
+       ) VALUES (?, ?, ?, ?, ?, 'vault_direct', ?, ?, ?, ?, 'Exit Vault', sdp_iso_now())`
     )
     .bind(
       id,
@@ -204,7 +201,6 @@ async function seedPosition(
       overrides.projectId === undefined ? TEST_PROJECT.id : overrides.projectId,
       overrides.environment ?? "sandbox",
       overrides.provider ?? "kamino",
-      kind,
       overrides.custodyWalletId ?? CUSTODY_WALLET_ID,
       overrides.vaultAddress ?? VAULT,
       SHARE_MINT,
@@ -441,34 +437,6 @@ describe("POST /v1/earn/withdraw request validation", () => {
       environment: "production",
       projectId: TEST_PRODUCTION_PROJECT.id,
     });
-    const res = await postVaultWithdrawal({ positionId, shares: "10" });
-    expect(res.status).toBe(404);
-  });
-
-  it("refuses a provider-managed account through the direct-position withdrawal path", async () => {
-    await seedAuth();
-    // A custodial position needs a provider wallet; the simplest honest seed is
-    // a vault position whose kind check the route must refuse — so build one
-    // via the earn_provider_wallets path.
-    await getDb(env)
-      .prepare(
-        `INSERT INTO earn_provider_wallets
-           (id, organization_id, project_id, environment, provider, provider_wallet_ref, created_by)
-         VALUES ('epw_earn_vw', ?, ?, 'sandbox', 'upshift', 'ref_earn_vw', ?)`
-      )
-      .bind(TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id)
-      .run();
-    const positionId = generateEarnPositionId();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO earn_positions (
-           id, organization_id, project_id, environment, provider, kind,
-           provider_wallet_id, label, activated_at
-         ) VALUES (?, ?, ?, 'sandbox', 'upshift', 'custodial', 'epw_earn_vw', 'Program', sdp_iso_now())`
-      )
-      .bind(positionId, TEST_ORG.id, TEST_PROJECT.id)
-      .run();
-
     const res = await postVaultWithdrawal({ positionId, shares: "10" });
     expect(res.status).toBe(404);
   });

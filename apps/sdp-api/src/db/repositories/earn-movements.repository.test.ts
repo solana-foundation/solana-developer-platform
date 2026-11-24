@@ -83,13 +83,7 @@ describe("Unified earn movement ledger (postgres)", () => {
   beforeEach(async () => {
     const db = getDb(env);
 
-    for (const table of [
-      "earn_provider_actions",
-      "earn_wallet_transactions",
-      "earn_movements",
-      "earn_positions",
-      "earn_provider_wallets",
-    ]) {
+    for (const table of ["earn_wallet_transactions", "earn_movements", "earn_positions"]) {
       await db
         .prepare(`DELETE FROM ${table} WHERE organization_id IN (?, ?)`)
         .bind(ORG, ORG_OTHER)
@@ -620,7 +614,6 @@ describe("Unified earn movement ledger (postgres)", () => {
         signature: created.movement.signature,
         request_id: created.movement.request_id,
         idempotency_fingerprint: created.movement.idempotency_fingerprint,
-        // Never a custodial column.
         payout_token: null,
         fee_amount: null,
       });
