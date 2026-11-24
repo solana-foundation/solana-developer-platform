@@ -58,6 +58,8 @@ function spyOnCollaborators() {
       partial: true,
     }),
     read: vi.spyOn(client, "readQueuedWithdrawalRequest"),
+    withdrawalOptions: vi.spyOn(client, "getWithdrawalOptions"),
+    quoteWithdrawal: vi.spyOn(client, "quoteVaultWithdrawal"),
     build: vi.spyOn(client, "buildQueuedWithdrawalCancel"),
     simulate: vi.spyOn(vaultExecution, "simulateVaultPlan"),
     compile: vi.spyOn(vaultExecution, "compileUnsignedVaultTransaction"),
@@ -372,6 +374,122 @@ describe("expired strategy escrow recovery", () => {
       expect(mocks.read).toHaveBeenCalledTimes(3);
       expect(mocks.findOldestExpiredEscrow).toHaveBeenCalledTimes(4);
       expect(mocks.advanceRequest).not.toHaveBeenCalled();
+      expect(mocks.build).not.toHaveBeenCalled();
+    }
+  );
+
+  function deferRecoveryCandidates(): void {
+    mocks.findOldestExpiredEscrow
+      .mockResolvedValueOnce(request({ id: "stale_1" }))
+      .mockResolvedValueOnce(request({ id: "stale_2" }))
+      .mockResolvedValueOnce(request({ id: "stale_3" }))
+      .mockResolvedValueOnce(request({ id: "later" }));
+    mocks.read.mockResolvedValue({
+      requestAddress: "request_address",
+      status: "closedOrUnknown",
+      request: null,
+    });
+  }
+
+  function configureShareWithdrawal(instant: boolean): void {
+    mocks.withdrawalOptions.mockResolvedValue({
+      instant,
+      providerOrder: false,
+      queued: false,
+      withdrawAuthority: null,
+      queueState: null,
+      queueAsset: null,
+      parRedemption: null,
+    });
+    mocks.quoteWithdrawal.mockResolvedValue({
+      assetsOut: "9.9",
+      assetDecimals: 6,
+      blockingIssues: [],
+    });
+  }
+
+  it("keeps the direct share route when escrow recovery discovery is deferred", async () => {
+    deferRecoveryCandidates();
+    configureShareWithdrawal(true);
+
+    const choices = await inScope(() =>
+      prepareStrategyWithdrawalChoices(env, {
+        position,
+        shares: "10",
+        recovery: { actor },
+      })
+    );
+    expect(choices.options.map((option) => option.id)).toEqual(["direct"]);
+    expect(mocks.read).toHaveBeenCalledTimes(3);
+    expect(mocks.findOldestExpiredEscrow).toHaveBeenCalledTimes(4);
+    expect(mocks.quoteWithdrawal).toHaveBeenCalledTimes(1);
+    expect(mocks.build).not.toHaveBeenCalled();
+    expect(mocks.advanceRequest).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])(
+    "keeps deferred recovery retryable when no other route survives, with shares: %s",
+    async (hasShares) => {
+      deferRecoveryCandidates();
+      configureShareWithdrawal(false);
+
+      await expect(
+        inScope(() =>
+          prepareStrategyWithdrawalChoices(env, {
+            position,
+            shares: hasShares ? "10" : undefined,
+            recovery: { actor },
+          })
+        )
+      ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE", statusCode: 503 });
+      expect(mocks.read).toHaveBeenCalledTimes(3);
+      expect(mocks.findOldestExpiredEscrow).toHaveBeenCalledTimes(4);
+      expect(mocks.quoteWithdrawal).not.toHaveBeenCalled();
+      expect(mocks.build).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(["provider", "source", "proof"] as const)(
+    "fails closed on a recovery %s failure even with an available share route",
+    async (failure) => {
+      configureShareWithdrawal(true);
+      let code: "PROVIDER_UNAVAILABLE" | "CONFLICT";
+      switch (failure) {
+        case "provider":
+          mocks.read.mockRejectedValue(
+            Object.assign(new Error("Withdrawal request is unreadable"), {
+              code: "REQUEST_UNREADABLE",
+            })
+          );
+          code = "PROVIDER_UNAVAILABLE";
+          break;
+        case "source":
+          mocks.findOldestExpiredEscrow.mockResolvedValue(request({ owner_address: "foreign" }));
+          code = "CONFLICT";
+          break;
+        case "proof": {
+          const changed = lookup();
+          changed.request.nonce = "8";
+          mocks.read.mockResolvedValue(changed);
+          code = "CONFLICT";
+          break;
+        }
+        default: {
+          const exhaustive: never = failure;
+          throw new Error(`Unexpected recovery failure: ${exhaustive}`);
+        }
+      }
+
+      await expect(
+        inScope(() =>
+          prepareStrategyWithdrawalChoices(env, {
+            position,
+            shares: "10",
+            recovery: { actor },
+          })
+        )
+      ).rejects.toMatchObject({ code });
+      expect(mocks.quoteWithdrawal).not.toHaveBeenCalled();
       expect(mocks.build).not.toHaveBeenCalled();
     }
   );

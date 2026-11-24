@@ -158,8 +158,10 @@ accepted operation is not reopened; its `/cancel` remains unavailable.
 Scoped, ordered queries inspect at most three candidates for the position and
 select the first recoverable live escrow. Closed or no-longer-expired candidates
 are skipped. After three stale candidates, one database lookahead returns no
-recovery if history is exhausted, or retryable `503 SERVICE_UNAVAILABLE` if more
-remain. Retry after reconciliation catches up.
+recovery if history is exhausted, or defers the recovery option if more remain.
+Other available withdrawal routes remain usable; preparation returns retryable
+`503 SERVICE_UNAVAILABLE` only if no route survives. Actual proof or provider
+failures still fail closed.
 
 Live provider proof must match its tenant/source, mints, nonce, creation time,
 deadline and share quantity. The private builder and simulation recheck that
@@ -323,10 +325,11 @@ Solver recovery adds zero provider reads without an eligible recorded candidate
 and one on the usual path. Worst-case proof reads fall from unbounded to three:
 it skips stale candidates in this position's creation order and stops at the
 first proven recovery. After three stale reads, one database lookahead detects
-remaining candidates without another provider call. If any remain, preparation
-returns retryable `503 SERVICE_UNAVAILABLE`. Selecting recovery reuses that
-call's validated proof during build admission, avoiding a duplicate read before
-the provider builder's existing validation and simulation.
+remaining candidates without another provider call. If any remain, omit the
+recovery option while preserving other available routes; return retryable
+`503 SERVICE_UNAVAILABLE` only if no route survives. Selecting recovery reuses
+that call's validated proof during build admission, avoiding a duplicate read
+before the provider builder's existing validation and simulation.
 That proof is never persisted or accepted from a caller; later preparation or
 refresh reads provider state again. Each review offers at most one recovery
 option and never scans another position or fans out provider reads.

@@ -10,7 +10,7 @@ import {
   createPostgresEarnVaultWithdrawalRequestsRepository,
   type EarnVaultWithdrawalRequestRow,
 } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
-import { conflict, serviceUnavailable } from "@/lib/errors";
+import { AppError, conflict } from "@/lib/errors";
 import type { Env } from "@/types/env";
 import { resolveVaultQueuedWithdrawClient } from "./execution-registry";
 import { earnRuntime } from "./runtime";
@@ -21,6 +21,14 @@ import type {
 } from "./vault-queued-withdraw.service";
 
 const MAX_RECOVERY_CANDIDATES = 3;
+
+/** Only the recovery search is deferred when its read budget is exhausted. */
+export class StrategyWithdrawalRecoveryDeferredError extends AppError {
+  constructor() {
+    super("SERVICE_UNAVAILABLE", "Withdrawal recovery state is catching up. Try again.");
+    this.name = "StrategyWithdrawalRecoveryDeferredError";
+  }
+}
 
 /** Live evidence belongs only to this preparation call and is never persisted. */
 export interface ProvenStrategyWithdrawalRecovery {
@@ -121,6 +129,6 @@ export async function readExpiredStrategyWithdrawalRecoveries(
   }
   // An unchecked candidate is deferred, not proof that no recovery exists.
   if ((await repository.findOldestExpiredEscrow({ ...scope, after })) !== null)
-    throw serviceUnavailable("Withdrawal recovery state is catching up. Try again.");
+    throw new StrategyWithdrawalRecoveryDeferredError();
   return [];
 }

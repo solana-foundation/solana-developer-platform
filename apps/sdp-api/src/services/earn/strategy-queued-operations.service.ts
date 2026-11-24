@@ -25,7 +25,10 @@ import type { Env } from "@/types/env";
 import { isEarnDirectWithdrawalConfigured, resolveEarnExecutionClient } from "./execution-registry";
 import { earnRuntime } from "./runtime";
 import { strategyOutputFloor } from "./strategy-terms";
-import { readExpiredStrategyWithdrawalRecoveries } from "./strategy-withdrawal-recovery.service";
+import {
+  readExpiredStrategyWithdrawalRecoveries,
+  StrategyWithdrawalRecoveryDeferredError,
+} from "./strategy-withdrawal-recovery.service";
 import { createVaultDeadline } from "./vault-deadline";
 import {
   type AsyncWithdrawalTermsInput,
@@ -83,8 +86,11 @@ async function prepareRecoveryChoices(
   env: Env,
   input: { position: QueuedWithdrawalPosition; recovery?: { actor: QueuedWithdrawalActor } },
   client: Parameters<typeof readExpiredStrategyWithdrawalRecoveries>[2]
-): Promise<PreparedStrategyWithdrawalChoice[]> {
-  if (input.recovery === undefined) return [];
+): Promise<{
+  choices: PreparedStrategyWithdrawalChoice[];
+  deferred: StrategyWithdrawalRecoveryDeferredError | null;
+}> {
+  if (input.recovery === undefined) return { choices: [], deferred: null };
   let recoveries: Awaited<ReturnType<typeof readExpiredStrategyWithdrawalRecoveries>>;
   try {
     recoveries = await readExpiredStrategyWithdrawalRecoveries(
@@ -93,10 +99,12 @@ async function prepareRecoveryChoices(
       client
     );
   } catch (error) {
+    if (error instanceof StrategyWithdrawalRecoveryDeferredError)
+      return { choices: [], deferred: error };
     // Like a pending release, a recorded escrow SDP can't read fails closed.
     rethrowVaultProviderFailure(error);
   }
-  return recoveries.map(({ request, proof }) => {
+  const choices = recoveries.map<PreparedStrategyWithdrawalChoice>(({ request, proof }) => {
     const id = `recover_expired_escrow:${request.id}`;
     return {
       id,
@@ -114,6 +122,7 @@ async function prepareRecoveryChoices(
       },
     };
   });
+  return { choices, deferred: null };
 }
 
 /** Read one known owner request and reuse the builder's live validation once. */
@@ -237,7 +246,7 @@ export async function prepareStrategyWithdrawalChoices(
     prepareRecoveryChoices(env, input, queueClient),
     prepareCurrentRedemptionReleaseChoice(env, input, parClient),
   ]);
-  const choices = [...escrowRecoveries, ...currentRedemptionReleases];
+  const choices = [...escrowRecoveries.choices, ...currentRedemptionReleases];
   const quotes: Array<Promise<void>> = [];
   if (
     input.shares !== undefined &&
@@ -363,7 +372,10 @@ export async function prepareStrategyWithdrawalChoices(
   }
   const quoteReads = await Promise.allSettled(quotes);
   choices.sort((left, right) => left.id.localeCompare(right.id));
-  if (choices.length === 0) refuseWithoutRoute([queueRead, parRead, ...quoteReads]);
+  if (choices.length === 0) {
+    if (escrowRecoveries.deferred !== null) throw escrowRecoveries.deferred;
+    refuseWithoutRoute([queueRead, parRead, ...quoteReads]);
+  }
   return { choices, options: choices.map((choice) => choice.option) };
 }
 

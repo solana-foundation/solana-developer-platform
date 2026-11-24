@@ -206,9 +206,12 @@ request and one live proof read on the usual path. Skip stale closed or no-longe
 expired candidates in position-scoped creation order, capped at three proof
 reads instead of unbounded N+1 reads. Stop at the first proven recovery; never
 scan another position. After three stale candidates, one database lookahead
-returns no recovery if exhausted or retryable `503 SERVICE_UNAVAILABLE` if more
-remain. Reusing that call's validated proof in build admission avoids a duplicate
-proof read before existing provider validation and simulation. Never persist
+returns no recovery if exhausted or defers recovery if more remain. Deferred
+recovery omits only that option; other available routes remain usable. With no
+surviving route, return retryable `503 SERVICE_UNAVAILABLE`. Actual proof or
+provider-read failures still fail closed. Reusing that call's validated proof
+in build admission avoids a duplicate proof read before existing provider
+validation and simulation. Never persist
 that evidence or accept it from a caller; every later preparation or refresh
 reads fresh provider state.
 Offer one recovery choice per review.

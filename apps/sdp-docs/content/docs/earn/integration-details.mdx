@@ -60,8 +60,9 @@ After SDP verifies the transaction and the provider's outcome, the result has
 
 Each review checks up to three recorded requests in creation order and offers
 the first escrow that is still recoverable. Closed or no-longer-expired requests
-are skipped. If all three are stale and more remain, preparation returns
-`503 SERVICE_UNAVAILABLE`; retry after reconciliation catches up.
+are skipped. If all three are stale and more remain, the recovery option is
+omitted while other available withdrawal routes remain usable. Preparation
+returns `503 SERVICE_UNAVAILABLE` only if no route remains.
 
 Recover one request per review, then prepare another withdrawal for the next.
 The original operation is not reopened, and its `/cancel` stays unavailable.
