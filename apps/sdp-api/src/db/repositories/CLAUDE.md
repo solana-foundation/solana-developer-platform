@@ -17,7 +17,7 @@ The mechanism-split predecessors
 longer have writers, and their code is retired.
 
 `operations.repository.ts` coordinates asynchronous Earn execution through
-`operations` and `operation_attempts` (0234); it does not replace the movement
+`operations` and `operation_attempts` (0236); it does not replace the movement
 ledger or provider withdrawal obligations. Every access includes organization,
 project and environment. Immutable intent/source/principal and versioned actions
 bind each attempt to its reviewed transaction. Recovery uses a fenced lease;
@@ -44,15 +44,15 @@ remain separate.
 Provider cleanup for permission loss or expiry does not reopen this capability.
 
 Deposit acceptance commits verified owner-signed bytes, `audit_intent_id`
-and `execution_requested_at` together (0234). No audit admission means no queued
+and `execution_requested_at` together (0236). No audit admission means no queued
 deposit. Exits retain their durable execution request if auditing is unavailable.
 Neither acceptance nor an operation status proves settlement.
 
 New shared references use `strategy_id` and `strategy_reference`.
-Migration 0236 synchronizes `strategy_reference` with `vault_address` on
+Migration 0238 synchronizes `strategy_reference` with `vault_address` on
 positions, movements and direct builds while previous revisions serve traffic;
 keep the alias until deployment drain. A discovered holding receives unknown
-cost basis (0236), never a synthetic deposit or earnings; a selector that names
+cost basis (0238), never a synthetic deposit or earnings; a selector that names
 a holding SDP already tracks keeps that holding's cost basis. `cost_basis_known
 = false` marks an imported holding: visibility needs no movement for it, and a
 failed movement never deactivates it. Current operations
@@ -131,7 +131,7 @@ Things that will bite:
   Null legacy history remains protected unless its row is still creating.
   Migration 0212's status trigger captures the previous image's observations
   too; do not replace it with a flag only the new service writes.
-- **A Hastra release proves absence the same way.** 0238's
+- **A Hastra release proves absence the same way.** 0240's
   `release_absence_observed_at` records the first finalized miss after the
   release's blockhash expires, once. A miss at least 30 seconds later fails the
   release `TRANSACTION_EXPIRED` only when every RPC endpoint, read at a

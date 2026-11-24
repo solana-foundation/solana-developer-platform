@@ -27,6 +27,13 @@ live feed with an idle back-off) uses `useCadencedSWR` (`src/lib`), which
 passes SWR a number derived from the last read so only a cadence change
 restarts the timer.
 
+A poll faster than 10 s sets its own `dedupingInterval` below its cadence.
+SWR's poll revalidates with dedupe, and the dashboard dedupes for 10 s
+(`DASHBOARD_SWR_CONFIG`), so a 2 s poll otherwise reads every 10 s. SWR
+clears the window only after a read lands, so a window equal to the cadence
+still drops every other tick. Tests that pass `dedupingInterval: 0` cannot
+see this; test a poll's cadence under the dashboard config.
+
 The public pay page (`app/pay/[token]`) reads the API's `/pay/:token` on the
 web server, whose one address every payer shares under the API's per-address
 limit for link reads (20 a minute, counted apart from the wallet's

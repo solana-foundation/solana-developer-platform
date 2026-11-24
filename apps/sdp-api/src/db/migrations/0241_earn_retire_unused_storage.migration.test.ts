@@ -16,7 +16,7 @@ import {
 } from "@/test/helpers/migration-db";
 import { TEST_RUNTIME_ROLE } from "@/test/runtime-role";
 
-const migrationFile = "0239_earn_retire_unused_storage.sql";
+const migrationFile = "0241_earn_retire_unused_storage.sql";
 const migrationsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "postgres");
 const migrationSql = readFileSync(path.join(migrationsDir, migrationFile), "utf8");
 const retiredTables = [
@@ -315,11 +315,11 @@ async function preservedSchema() {
   };
 }
 
-describe("0239 retired Earn storage", () => {
+describe("0241 retired Earn storage", () => {
   it("contracts the complete parent graph and preserves live data, RLS and recovery guards", async () => {
     const applied = await client.query("SELECT version FROM schema_migrations");
     expect(applied.rowCount).toBeGreaterThan(200);
-    expect(applied.rows.some((row) => row.version === "0238_earn_wallet_transactions.sql")).toBe(
+    expect(applied.rows.some((row) => row.version === "0240_earn_wallet_transactions.sql")).toBe(
       true
     );
     const beforeRows = await liveRows();

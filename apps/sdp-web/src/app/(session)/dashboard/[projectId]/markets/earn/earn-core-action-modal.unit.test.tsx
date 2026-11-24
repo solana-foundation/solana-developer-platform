@@ -150,7 +150,7 @@ describe("Earn operation review", () => {
       />
     );
     fireEvent.change(screen.getByLabelText("amount"), { target: { value: "3" } });
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "withdrawAll" })));
+    await act(async () => fireEvent.click(screen.getByRole("radio", { name: "withdrawAll" })));
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
     expect(mocks.withdraw.mock.calls[0]?.[0].amount).toEqual({
       kind: "intermediate",
@@ -177,10 +177,10 @@ describe("Earn operation review", () => {
         onClose={vi.fn()}
       />
     );
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "withdrawAll" })));
+    await act(async () => fireEvent.click(screen.getByRole("radio", { name: "withdrawAll" })));
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
     expect(mocks.withdraw.mock.calls[2]).toEqual(mocks.withdraw.mock.calls[0]);
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "customAmount" })));
+    await act(async () => fireEvent.click(screen.getByRole("radio", { name: "customAmount" })));
     fireEvent.change(screen.getByLabelText("amount"), { target: { value: "5" } });
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
     expect(mocks.withdraw.mock.calls[3]?.[0].amount.value).toBe("5");
@@ -197,7 +197,7 @@ describe("Earn operation review", () => {
         onClose={vi.fn()}
       />
     );
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "withdrawAll" })));
+    await act(async () => fireEvent.click(screen.getByRole("radio", { name: "withdrawAll" })));
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
     const stored = sessionStorage.getItem("sdp:earn:core-actions:v1");
     expect(stored).not.toBeNull();
@@ -219,7 +219,7 @@ describe("Earn operation review", () => {
         onClose={vi.fn()}
       />
     );
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "withdrawAll" })));
+    await act(async () => fireEvent.click(screen.getByRole("radio", { name: "withdrawAll" })));
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
     view.unmount();
     render(
@@ -230,7 +230,7 @@ describe("Earn operation review", () => {
         onClose={vi.fn()}
       />
     );
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "withdrawAll" })));
+    await act(async () => fireEvent.click(screen.getByRole("radio", { name: "withdrawAll" })));
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
     expect(mocks.withdraw.mock.calls[1]?.[0].amount.value).toBe("12");
     expect(mocks.withdraw.mock.calls[1]?.[1]).not.toBe(mocks.withdraw.mock.calls[0]?.[1]);
@@ -272,7 +272,7 @@ describe("Earn operation review", () => {
       />
     );
     expect(screen.queryByLabelText("amount")).toBeNull();
-    expect(screen.getByRole("button", { name: "customAmount" })).toBeDefined();
+    expect(screen.getByRole("radio", { name: "withdrawAll" })).toHaveProperty("checked", true);
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
     expect(mocks.withdraw).toHaveBeenCalledExactlyOnceWith(
       { positionId: "position", amount: { kind: "all" }, slippageBps: 50 },
@@ -353,7 +353,7 @@ describe("Earn operation review", () => {
     mocks.withdraw.mockResolvedValue(operation());
     render(<EarnCoreActionModal kind="withdraw" position={escrowedPosition} onClose={vi.fn()} />);
     fireEvent.change(screen.getByLabelText("amount"), { target: { value: "not a number" } });
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "withdrawAll" })));
+    await act(async () => fireEvent.click(screen.getByRole("radio", { name: "withdrawAll" })));
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
     expect(mocks.withdraw).toHaveBeenCalledExactlyOnceWith(
       { positionId: "position", amount: { kind: "all" }, slippageBps: 50 },
@@ -403,7 +403,7 @@ describe("Earn operation review", () => {
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "review" })));
     const unit = screen.getByRole("combobox", { name: "amountUnit" });
     expect(unit.hasAttribute("disabled")).toBe(true);
-    expect(screen.getByRole("button", { name: "withdrawAll" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("radio", { name: "withdrawAll" }).matches(":disabled")).toBe(true);
     await act(async () => finish?.(operation()));
   });
 
@@ -535,6 +535,7 @@ describe("Earn operation review", () => {
       { actionId: "action", version: 1 },
       expect.any(String)
     );
+    expect(screen.getByText("Confirming")).toBeDefined();
   });
 
   it("does not replace a newer observed action with a late preparation response", async () => {
@@ -691,5 +692,110 @@ describe("Earn operation review", () => {
     render(<EarnOperationReview operation={expired} />);
     expect(screen.getByRole("button", { name: "submit" }).hasAttribute("disabled")).toBe(true);
     expect(screen.getByText("expired")).toBeDefined();
+  });
+
+  it("reads amounts in the strategy's share mint as shares and leaves other mints as they are", () => {
+    const quoted = operation({
+      terms: {
+        expiresAt: null,
+        estimate: { mint: "shares", value: "9.99" },
+        minimum: { mint: "unlisted", value: "9.5" },
+        fees: null,
+        options: [],
+      },
+    });
+    render(<EarnOperationReview operation={quoted} shareMint="shares" />);
+    expect(screen.getByText("9.99 shareUnit")).toBeDefined();
+    expect(screen.getByText(/^9\.5 /).textContent).not.toContain("share");
+    cleanup();
+    render(<EarnOperationReview operation={quoted} />);
+    expect(screen.queryByText("9.99 shareUnit")).toBeNull();
+    expect(screen.getByText(/^9\.99 /)).toBeDefined();
+  });
+
+  it("ends a finished operation with one exit: done when completed, close otherwise", () => {
+    const onDone = vi.fn();
+    render(
+      <EarnOperationReview
+        operation={operation({ status: "completed", nextAction: null })}
+        onDone={onDone}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "done" }));
+    expect(onDone).toHaveBeenCalledOnce();
+    cleanup();
+    render(
+      <EarnOperationReview
+        operation={operation({ status: "failed", nextAction: null })}
+        onDone={onDone}
+      />
+    );
+    expect(screen.getByRole("button", { name: "close" })).toBeDefined();
+    cleanup();
+    render(
+      <EarnOperationReview operation={operation({ status: "completed", nextAction: null })} />
+    );
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("lets accepted work continue in activity, but not an undecided preparation", () => {
+    const onDone = vi.fn();
+    render(
+      <EarnOperationReview
+        operation={operation({
+          status: "submitted",
+          nextAction: { type: "wait", reason: "Confirming" },
+        })}
+        onDone={onDone}
+      />
+    );
+    expect(screen.getByText("continuesInActivity")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "close" }));
+    expect(onDone).toHaveBeenCalledOnce();
+    cleanup();
+    render(
+      <EarnOperationReview
+        operation={operation({
+          nextAction: { type: "select_option" },
+          terms: {
+            expiresAt: null,
+            estimate: null,
+            minimum: null,
+            fees: null,
+            options: [
+              {
+                id: "direct",
+                label: "Direct withdrawal",
+                settlement: "instant",
+                estimatedSeconds: null,
+              },
+            ],
+          },
+        })}
+        onDone={onDone}
+      />
+    );
+    expect(screen.queryByText("continuesInActivity")).toBeNull();
+  });
+
+  it("animates only short SDP-side waits", () => {
+    const view = render(
+      <EarnOperationReview
+        operation={operation({ status: "queued", nextAction: { type: "wait", reason: "Queued" } })}
+      />
+    );
+    expect(view.container.querySelector('[class*="earn-pending-halo"]')).not.toBeNull();
+    expect(screen.getByText("Queued").className).toContain("earn-pending-breathe");
+    cleanup();
+    const settling = render(
+      <EarnOperationReview
+        operation={operation({
+          status: "settling",
+          nextAction: { type: "wait", reason: "Provider settlement" },
+        })}
+      />
+    );
+    expect(settling.container.querySelector('[class*="earn-pending-halo"]')).toBeNull();
+    expect(screen.getByText("Provider settlement").className).not.toContain("earn-pending");
   });
 });

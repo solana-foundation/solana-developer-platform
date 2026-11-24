@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { SWRConfig, useSWRConfig } from "swr";
 import { afterEach, expect, it, vi } from "vitest";
 import { earnQueryKeys } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-query-key";
+import { DASHBOARD_SWR_CONFIG } from "./dashboard-swr-config";
 import { type EarnOperationsFeed, useEarnOperation, useEarnOperations } from "./earn-core-data";
 
 const transport = vi.hoisted(() => vi.fn());
@@ -280,19 +281,53 @@ it("does not expose a late response after switching the project cache scope", as
   expect(result.current.operations?.map(({ id }) => id)).toEqual(["second-project"]);
 });
 
-it("keeps detail polling on time while unrelated workspace renders continue", async () => {
-  vi.useFakeTimers();
-  transport.mockImplementation(async () => Response.json({ data: { operation: prepared } }));
+const queued: Operation = {
+  ...prepared,
+  status: "queued",
+  nextAction: { type: "wait", reason: "Execution queued" },
+};
+
+/** Counts detail reads under the dashboard's own SWR defaults, not a test-only dedupe of 0. */
+function renderDetailPoll(operation: Operation, foreground?: boolean) {
+  transport.mockImplementation(async () => Response.json({ data: { operation } }));
   const cache = new Map();
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <SWRConfig value={{ provider: () => cache, dedupingInterval: 0 }}>{children}</SWRConfig>
+    <SWRConfig value={{ ...DASHBOARD_SWR_CONFIG, provider: () => cache }}>{children}</SWRConfig>
   );
-  const { rerender } = renderHook(() => useEarnOperation(prepared.id, prepared), { wrapper });
+  return renderHook(() => useEarnOperation(operation.id, operation, undefined, foreground), {
+    wrapper,
+  });
+}
+
+it("keeps detail polling on time while unrelated workspace renders continue", async () => {
+  vi.useFakeTimers();
+  const { rerender } = renderDetailPoll(queued, true);
   for (let tick = 0; tick < 5; tick += 1) {
     await act(() => vi.advanceTimersByTimeAsync(1_000));
     rerender();
   }
   expect(transport.mock.calls.length).toBeGreaterThanOrEqual(3);
+});
+
+it("reads the dialog's operation every two seconds while SDP is moving it", async () => {
+  vi.useFakeTimers();
+  renderDetailPoll(queued, true);
+  await act(() => vi.advanceTimersByTimeAsync(6_500));
+  expect(transport.mock.calls.length).toBeGreaterThanOrEqual(4);
+});
+
+it("keeps activity rows and provider waits on the slow cadence", async () => {
+  vi.useFakeTimers();
+  renderDetailPoll(queued);
+  await act(() => vi.advanceTimersByTimeAsync(25_000));
+  expect(transport.mock.calls).toHaveLength(1);
+  await act(() => vi.advanceTimersByTimeAsync(6_000));
+  expect(transport.mock.calls).toHaveLength(2);
+  cleanup();
+  transport.mockClear();
+  renderDetailPoll({ ...queued, status: "settling" }, true);
+  await act(() => vi.advanceTimersByTimeAsync(25_000));
+  expect(transport.mock.calls).toHaveLength(1);
 });
 
 it("refreshes an expanded history snapshot without blanking the rows being read", async () => {

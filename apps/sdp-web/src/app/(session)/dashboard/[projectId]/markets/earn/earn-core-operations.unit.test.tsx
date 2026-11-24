@@ -89,6 +89,20 @@ it("reports a visible completion when the feed wins before the detail poll", () 
   expect(onUpdated).toHaveBeenCalledTimes(1);
 });
 
+it("says why a finished operation failed, and nothing for one that completed", () => {
+  feed.operations = [
+    {
+      ...operation("expired", "failed"),
+      error: { code: "TRANSACTION_EXPIRED", message: "The transaction expired before signing" },
+    },
+    operation("delivered", "completed"),
+  ];
+  render(<EarnCoreOperations onUpdated={vi.fn()} />);
+  expect(screen.getByText("The transaction expired before signing")).toBeDefined();
+  expect(screen.getByText("failed")).toBeDefined();
+  expect(screen.getByText("completed")).toBeDefined();
+});
+
 it("does not refresh historical completions or a different source's completed history", () => {
   const onUpdated = vi.fn();
   feed.operations = [operation("first-source", "settling")];
@@ -177,7 +191,8 @@ it("keeps the action's height while the positions read decides whether it shows"
     onOpen: vi.fn(),
   };
   const view = render(<EarnCoreOperations onUpdated={vi.fn()} withdrawalRecovery={loading} />);
-  const header = () => screen.getByRole("heading", { name: "withdraw" }).parentElement?.className;
+  const header = () =>
+    screen.getByRole("heading", { name: "withdraw: allHoldings" }).parentElement?.className;
   const reserved = header();
   expect(reserved).toContain("min-h-[var(--button-height-md)]");
   expect(screen.queryByRole("button", { name: "recoveryOptions" })).toBeNull();
@@ -196,9 +211,9 @@ it("leaves recovery to the parent: no handler or an unlisted position offers non
   const view = render(<EarnCoreOperations onUpdated={vi.fn()} positions={[escrowedPosition]} />);
   expect(screen.getByText("Escrowed vault")).toBeDefined();
   expect(screen.queryByRole("button", { name: "recoveryOptions" })).toBeNull();
-  expect(screen.getByRole("heading", { name: "withdraw" }).parentElement?.className).not.toContain(
-    "min-h-"
-  );
+  expect(
+    screen.getByRole("heading", { name: "withdraw: allHoldings" }).parentElement?.className
+  ).not.toContain("min-h-");
   view.rerender(
     <EarnCoreOperations
       onUpdated={vi.fn()}

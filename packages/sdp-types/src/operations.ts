@@ -25,6 +25,23 @@ export function isTerminalOperationStatus(status: OperationStatus): boolean {
   return TERMINAL_OPERATION_STATUS_SET.has(status);
 }
 
+/**
+ * Accepted work SDP's own pipeline is moving (queue, custody signature, confirmation), as
+ * opposed to waiting on the user (`prepared`) or on a provider (`settling`, which can take days).
+ */
+export const SDP_PROGRESS_OPERATION_STATUSES = [
+  "queued",
+  "awaiting_signature",
+  "submitted",
+] as const satisfies readonly OperationStatus[];
+
+const SDP_PROGRESS_OPERATION_STATUS_SET = new Set<OperationStatus>(SDP_PROGRESS_OPERATION_STATUSES);
+
+/** Whether SDP's own pipeline is moving an operation in this status. */
+export function isSdpProgressOperationStatus(status: OperationStatus): boolean {
+  return SDP_PROGRESS_OPERATION_STATUS_SET.has(status);
+}
+
 /** The execution transition path requires a domain resource for these terminal outcomes. */
 export const RESOURCE_REQUIRED_OPERATION_TRANSITION_STATUSES = [
   "completed",

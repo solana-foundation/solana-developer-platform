@@ -155,10 +155,14 @@ the new action and follows the normal signing and `/submit` flow. It uses
 `earn.execute` and the inherited source's current wallet grants. The original
 accepted operation is not reopened; its `/cancel` remains unavailable.
 
-Scoped, ordered queries select the position's oldest recorded candidate whose
-live escrow remains recoverable. Closed or no-longer-expired candidates are
-skipped without waiting for reconciliation. Each candidate is read once; the
-usual path still needs one live proof, and N stale candidates need N+1 reads.
+Scoped, ordered queries inspect at most three candidates for the position and
+select the first recoverable live escrow. Closed or no-longer-expired candidates
+are skipped. After three stale candidates, one database lookahead returns no
+recovery if history is exhausted, or defers the recovery option if more remain.
+Other available withdrawal routes remain usable; preparation returns retryable
+`503 SERVICE_UNAVAILABLE` only if no route survives. Actual proof or provider
+failures still fail closed.
+
 Live provider proof must match its tenant/source, mints, nonce, creation time,
 deadline and share quantity. The private builder and simulation recheck that
 the expired escrow can return those shares. A different or closed request is
@@ -318,11 +322,14 @@ concurrent precision reads share work and failures are not cached. Required
 simulation remains before returning unsigned bytes.
 
 Solver recovery adds zero provider reads without an eligible recorded candidate
-and one on the usual path. It skips stale candidates in this position's creation
-order, reading each once and stopping at the first proven recovery: K stale
-candidates followed by a valid escrow need K+1 serial proof reads. Selecting
-recovery reuses that call's validated proof during build admission, avoiding a
-duplicate read before the provider builder's existing validation and simulation.
+and one on the usual path. Worst-case proof reads fall from unbounded to three:
+it skips stale candidates in this position's creation order and stops at the
+first proven recovery. After three stale reads, one database lookahead detects
+remaining candidates without another provider call. If any remain, omit the
+recovery option while preserving other available routes; return retryable
+`503 SERVICE_UNAVAILABLE` only if no route survives. Selecting recovery reuses
+that call's validated proof during build admission, avoiding a duplicate read
+before the provider builder's existing validation and simulation.
 That proof is never persisted or accepted from a caller; later preparation or
 refresh reads provider state again. Each review offers at most one recovery
 option and never scans another position or fans out provider reads.
@@ -365,10 +372,11 @@ migration. Recovery after removal is a forward fix. No production database is
 changed by preparing these PRs. Do not restore HTTP aliases or historical
 execution paths.
 
-Parent migration `0238` retains the existing Hastra address index while the
-previous revision can serve. Schema-only `0239` removes it only after this
-guarded parent is serving; reusing a released Hastra address requires that
-cleanup. The global PDA lock and durable lease remain the concurrency authority.
+Parent migration `0240` retains the existing Hastra address index while the
+previous revision can serve. The schema-only companion removes it only after
+this guarded parent is serving. Its pending migration must sort after every
+parent migration. Reusing a released Hastra address requires that cleanup. The
+global PDA lock and durable lease remain the concurrency authority.
 Index retirement assigns no financial outcome to historical requests.
 
 See the [threat model](https://www.notion.so/422d36dad52d81e2bcf2cbd62c8e4622) and

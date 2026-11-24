@@ -1,8 +1,16 @@
-import type { EarnVaultQueuedWithdrawalRequestLookup } from "@sdp/earn/types";
+import type {
+  EarnVaultQueuedWithdrawalRequestLookup,
+  EarnVaultTransactionPlan,
+} from "@sdp/earn/types";
 import { runInClusterScope } from "@sdp/rpc/scope";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { VedaVaultDirectClient } from "@sdp/veda/client";
+import { blockhash } from "@solana/kit";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getDb } from "@/db/client";
 import type { EarnVaultWithdrawalRequestRow } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
+import * as withdrawalRepositories from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import { env } from "@/test/helpers/env";
+import * as executionRegistry from "./execution-registry";
 import {
   prepareQueuedStrategyRecovery,
   prepareStrategyWithdrawalChoices,
@@ -12,43 +20,51 @@ import {
   assertStrategyRecoverySource,
   readExpiredStrategyWithdrawalRecoveries,
 } from "./strategy-withdrawal-recovery.service";
+import * as vaultExecution from "./vault-execution.service";
 import {
   buildCurrentRedemptionRelease,
   buildWalletQueuedWithdrawalRecovery,
 } from "./vault-queued-withdraw.service";
 
-const mocks = vi.hoisted(() => ({
-  resolve: vi.fn(),
-  findOldestExpiredEscrow: vi.fn(),
-  getById: vi.fn(),
-  advanceRequest: vi.fn(),
-  createWalletTransaction: vi.fn(),
-  read: vi.fn(),
-  build: vi.fn(),
-  simulate: vi.fn(),
-  compile: vi.fn(),
-}));
-vi.mock("@/db/repositories/earn-vault-withdrawal-requests.repository", async (original) => ({
-  ...(await original<
-    typeof import("@/db/repositories/earn-vault-withdrawal-requests.repository")
-  >()),
-  createPostgresEarnVaultWithdrawalRequestsRepository: () => ({
-    findOldestExpiredEscrow: mocks.findOldestExpiredEscrow,
-    getById: mocks.getById,
-    advanceRequest: mocks.advanceRequest,
-    createWalletTransaction: mocks.createWalletTransaction,
-  }),
-}));
-vi.mock("./execution-registry", async (original) => ({
-  ...(await original<typeof import("./execution-registry")>()),
-  resolveEarnExecutionClient: mocks.resolve,
-  resolveVaultQueuedWithdrawClient: mocks.resolve,
-}));
-vi.mock("./vault-execution.service", async (original) => ({
-  ...(await original<typeof import("./vault-execution.service")>()),
-  simulateVaultPlan: mocks.simulate,
-  compileUnsignedVaultTransaction: mocks.compile,
-}));
+let mocks: ReturnType<typeof spyOnCollaborators>;
+
+function spyOnCollaborators() {
+  const repository = withdrawalRepositories.createPostgresEarnVaultWithdrawalRequestsRepository(
+    getDb(env)
+  );
+  vi.spyOn(
+    withdrawalRepositories,
+    "createPostgresEarnVaultWithdrawalRequestsRepository"
+  ).mockReturnValue(repository);
+  const client = new VedaVaultDirectClient(
+    async () => {
+      throw new Error("Unexpected provider RPC lookup");
+    },
+    async () => {
+      throw new Error("Unexpected provider execution");
+    }
+  );
+  const resolve = vi
+    .fn<typeof executionRegistry.resolveVaultQueuedWithdrawClient>()
+    .mockReturnValue(client);
+  vi.spyOn(executionRegistry, "resolveEarnExecutionClient").mockImplementation(resolve);
+  vi.spyOn(executionRegistry, "resolveVaultQueuedWithdrawClient").mockImplementation(resolve);
+  return {
+    resolve,
+    findOldestExpiredEscrow: vi.spyOn(repository, "findOldestExpiredEscrow"),
+    getById: vi.spyOn(repository, "getById"),
+    advanceRequest: vi.spyOn(repository, "advanceRequest"),
+    createWalletTransaction: vi.mocked(vi.spyOn(repository, "createWalletTransaction"), {
+      partial: true,
+    }),
+    read: vi.spyOn(client, "readQueuedWithdrawalRequest"),
+    withdrawalOptions: vi.spyOn(client, "getWithdrawalOptions"),
+    quoteWithdrawal: vi.spyOn(client, "quoteVaultWithdrawal"),
+    build: vi.spyOn(client, "buildQueuedWithdrawalCancel"),
+    simulate: vi.spyOn(vaultExecution, "simulateVaultPlan"),
+    compile: vi.spyOn(vaultExecution, "compileUnsignedVaultTransaction"),
+  };
+}
 
 const actor = { organizationId: "org_recovery", projectId: "prj_recovery" };
 const position = {
@@ -139,10 +155,10 @@ const plan = {
   lookupTables: [],
   assetIdentity: { depositTokenMint: position.tokenMint, shareMint: position.shareMint },
   accepted: { shares: "10" },
-};
+} satisfies EarnVaultTransactionPlan;
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  mocks = spyOnCollaborators();
   mocks.findOldestExpiredEscrow.mockImplementation(async (input: { after?: { id: string } }) =>
     input.after === undefined ? request() : null
   );
@@ -153,20 +169,20 @@ beforeEach(() => {
   }));
   mocks.read.mockResolvedValue(lookup());
   mocks.build.mockResolvedValue(plan);
-  mocks.simulate.mockResolvedValue({ ok: true, prepared: {} });
-  mocks.compile.mockResolvedValue({ bytes: Uint8Array.of(1), lastValidBlockHeight: "100" });
-  mocks.resolve.mockReturnValue({
-    buildVaultDeposit: vi.fn(),
-    readVaultPositions: vi.fn(),
-    sponsoredPrograms: vi.fn(),
-    getWithdrawalOptions: vi.fn(),
-    quoteQueuedWithdrawal: vi.fn(),
-    buildQueuedWithdrawalRequest: vi.fn(),
-    buildQueuedWithdrawalCancel: mocks.build,
-    readQueuedWithdrawalRequests: vi.fn(),
-    readQueuedWithdrawalRequest: mocks.read,
-    decodeQueuedWithdrawalLifecycleEvents: vi.fn(),
-  });
+  mocks.simulate.mockImplementation(async ({ plan }) => ({
+    ok: true,
+    prepared: {
+      plan,
+      lookupTables: {},
+      blockhash: blockhash("11111111111111111111111111111111"),
+      lastValidBlockHeight: 100n,
+    },
+  }));
+  mocks.compile.mockReturnValue({ bytes: Uint8Array.of(1), lastValidBlockHeight: "100" });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("expired strategy escrow recovery", () => {
@@ -325,6 +341,158 @@ describe("expired strategy escrow recovery", () => {
     expect(mocks.resolve).toHaveBeenCalledTimes(1);
     expect(mocks.build).not.toHaveBeenCalled();
   });
+
+  it.each([false, true])(
+    "bounds stale escrow reads when later candidates remain: %s",
+    async (hasMore) => {
+      mocks.findOldestExpiredEscrow
+        .mockResolvedValueOnce(request({ id: "stale_1" }))
+        .mockResolvedValueOnce(request({ id: "stale_2" }))
+        .mockResolvedValueOnce(request({ id: "stale_3" }))
+        .mockResolvedValueOnce(hasMore ? request({ id: "later" }) : null);
+      const closed = {
+        requestAddress: "request_address",
+        status: "closedOrUnknown",
+        request: null,
+      } as const;
+      mocks.read
+        .mockResolvedValueOnce(closed)
+        .mockResolvedValueOnce(closed)
+        .mockResolvedValueOnce(closed);
+
+      const recovery = inScope(() =>
+        readExpiredStrategyWithdrawalRecoveries(env, { actor, position })
+      );
+      if (hasMore) {
+        await expect(recovery).rejects.toMatchObject({
+          code: "SERVICE_UNAVAILABLE",
+          statusCode: 503,
+        });
+      } else {
+        await expect(recovery).resolves.toEqual([]);
+      }
+      expect(mocks.read).toHaveBeenCalledTimes(3);
+      expect(mocks.findOldestExpiredEscrow).toHaveBeenCalledTimes(4);
+      expect(mocks.advanceRequest).not.toHaveBeenCalled();
+      expect(mocks.build).not.toHaveBeenCalled();
+    }
+  );
+
+  function deferRecoveryCandidates(): void {
+    mocks.findOldestExpiredEscrow
+      .mockResolvedValueOnce(request({ id: "stale_1" }))
+      .mockResolvedValueOnce(request({ id: "stale_2" }))
+      .mockResolvedValueOnce(request({ id: "stale_3" }))
+      .mockResolvedValueOnce(request({ id: "later" }));
+    mocks.read.mockResolvedValue({
+      requestAddress: "request_address",
+      status: "closedOrUnknown",
+      request: null,
+    });
+  }
+
+  function configureShareWithdrawal(instant: boolean): void {
+    mocks.withdrawalOptions.mockResolvedValue({
+      instant,
+      providerOrder: false,
+      queued: false,
+      withdrawAuthority: null,
+      queueState: null,
+      queueAsset: null,
+      parRedemption: null,
+    });
+    mocks.quoteWithdrawal.mockResolvedValue({
+      assetsOut: "9.9",
+      assetDecimals: 6,
+      blockingIssues: [],
+    });
+  }
+
+  it("keeps the direct share route when escrow recovery discovery is deferred", async () => {
+    deferRecoveryCandidates();
+    configureShareWithdrawal(true);
+
+    const choices = await inScope(() =>
+      prepareStrategyWithdrawalChoices(env, {
+        position,
+        shares: "10",
+        recovery: { actor },
+      })
+    );
+    expect(choices.options.map((option) => option.id)).toEqual(["direct"]);
+    expect(mocks.read).toHaveBeenCalledTimes(3);
+    expect(mocks.findOldestExpiredEscrow).toHaveBeenCalledTimes(4);
+    expect(mocks.quoteWithdrawal).toHaveBeenCalledTimes(1);
+    expect(mocks.build).not.toHaveBeenCalled();
+    expect(mocks.advanceRequest).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])(
+    "keeps deferred recovery retryable when no other route survives, with shares: %s",
+    async (hasShares) => {
+      deferRecoveryCandidates();
+      configureShareWithdrawal(false);
+
+      await expect(
+        inScope(() =>
+          prepareStrategyWithdrawalChoices(env, {
+            position,
+            shares: hasShares ? "10" : undefined,
+            recovery: { actor },
+          })
+        )
+      ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE", statusCode: 503 });
+      expect(mocks.read).toHaveBeenCalledTimes(3);
+      expect(mocks.findOldestExpiredEscrow).toHaveBeenCalledTimes(4);
+      expect(mocks.quoteWithdrawal).not.toHaveBeenCalled();
+      expect(mocks.build).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(["provider", "source", "proof"] as const)(
+    "fails closed on a recovery %s failure even with an available share route",
+    async (failure) => {
+      configureShareWithdrawal(true);
+      let code: "PROVIDER_UNAVAILABLE" | "CONFLICT";
+      switch (failure) {
+        case "provider":
+          mocks.read.mockRejectedValue(
+            Object.assign(new Error("Withdrawal request is unreadable"), {
+              code: "REQUEST_UNREADABLE",
+            })
+          );
+          code = "PROVIDER_UNAVAILABLE";
+          break;
+        case "source":
+          mocks.findOldestExpiredEscrow.mockResolvedValue(request({ owner_address: "foreign" }));
+          code = "CONFLICT";
+          break;
+        case "proof": {
+          const changed = lookup();
+          changed.request.nonce = "8";
+          mocks.read.mockResolvedValue(changed);
+          code = "CONFLICT";
+          break;
+        }
+        default: {
+          const exhaustive: never = failure;
+          throw new Error(`Unexpected recovery failure: ${exhaustive}`);
+        }
+      }
+
+      await expect(
+        inScope(() =>
+          prepareStrategyWithdrawalChoices(env, {
+            position,
+            shares: "10",
+            recovery: { actor },
+          })
+        )
+      ).rejects.toMatchObject({ code });
+      expect(mocks.quoteWithdrawal).not.toHaveBeenCalled();
+      expect(mocks.build).not.toHaveBeenCalled();
+    }
+  );
 
   it("advertises returned shares with no wallet balance or provider payout", async () => {
     const choices = await inScope(() =>
@@ -551,7 +719,12 @@ describe("current redemption release preparation", () => {
   });
 
   it("refuses failed simulation before exposing a release transaction", async () => {
-    mocks.simulate.mockResolvedValue({ ok: false, error: "changed current request" });
+    mocks.simulate.mockResolvedValue({
+      ok: false,
+      error: "changed current request",
+      fault: "caller",
+      logs: [],
+    });
     await expect(
       inScope(() =>
         buildCurrentRedemptionRelease(env, {
