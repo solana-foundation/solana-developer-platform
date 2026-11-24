@@ -45,6 +45,7 @@ import { AuditService } from "@/services/audit.service";
 import { admittedSigner } from "@/services/domain/signing/admitted-signer";
 import * as executionRegistry from "@/services/earn/execution-registry";
 import * as observationRpc from "@/services/earn/operation-observation-rpc";
+import * as strategyMint from "@/services/earn/strategy-mint";
 import type {
   prepareCurrentRedemptionRelease,
   prepareQueuedStrategyRecovery,
@@ -1283,6 +1284,49 @@ describe("Earn core operation HTTP flow", () => {
       await getDb(env).queryOne("SELECT count(*)::int AS wallets FROM custody_wallets")
     ).toEqual({ wallets: 0 });
   });
+
+  it.each(["9".repeat(80), `0.${"0".repeat(77)}1`])(
+    "rejects unsupported token withdrawal amounts before preparing an action: %s",
+    async (value) => {
+      mocks.withdrawalEnabled = true;
+      vi.spyOn(strategyMint, "strategyShareDecimals").mockResolvedValue(6);
+      mocks.readPositions.mockResolvedValue([
+        {
+          providerReference: VAULT,
+          owner,
+          tokenMint: TOKEN,
+          shareMint: SHARE,
+          cluster: "devnet",
+          shares: "10",
+          tokenValue: "30",
+        },
+      ]);
+      const positionId = generateEarnPositionId();
+      await getDb(env).execute(
+        `INSERT INTO earn_positions (id, organization_id, project_id, environment, provider,
+         kind, owner_address, vault_address, share_mint, token_mint, label, activated_at)
+         VALUES (?, ?, ?, 'sandbox', 'kamino', 'vault_direct', ?, ?, ?, ?, 'Holding', sdp_iso_now())`,
+        [positionId, tenant.org.id, tenant.project.id, owner, VAULT, SHARE, TOKEN]
+      );
+      const response = await request(
+        "earn/withdraw",
+        "POST",
+        { positionId, amount: { kind: "token", mint: TOKEN, value } },
+        "unsupported-token-withdrawal"
+      );
+      expect(response.status, await response.clone().text()).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: {
+          code: "BAD_REQUEST",
+          message: "Withdrawal token amount is out of range or has unsupported precision",
+        },
+      });
+      expect(mocks.choiceReads).not.toHaveBeenCalled();
+      expect(mocks.withdrawBuild).not.toHaveBeenCalled();
+      expect(mocks.sign).not.toHaveBeenCalled();
+      expect(mocks.broadcast).not.toHaveBeenCalled();
+    }
+  );
 
   it("prepares an existing legacy custody position withdrawal and queues it without any inline signer", async () => {
     mocks.withdrawalEnabled = true;

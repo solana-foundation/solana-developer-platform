@@ -203,10 +203,6 @@ operations.post(
         !record.operation.terms.options.some((option) => option.id === body.optionId))
     )
       throw badRequest("Operation option is not advertised for selection");
-    if (isTerminalOperation(record.operation))
-      return success(c, {
-        operation: await projectEarnOperation(c.env, record.scope, record.operation),
-      });
     if (preparation === null) throw badRequest("Operation has no refreshable action");
     await admitOperationStart(c, record);
     const attempt = await service.repository.getAttempt(record.scope, record.operation.id);

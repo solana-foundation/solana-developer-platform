@@ -71,6 +71,7 @@ export class OperationsService {
       requestKeySchema.parse(input.requestKey)
     );
     if (record === null) return null;
+    // Closed intent schemas fix nested key order; retain persisted hash bytes.
     const fingerprint = createHash("sha256").update(JSON.stringify(intent)).digest("hex");
     if (
       fingerprint !== record.fingerprint ||
