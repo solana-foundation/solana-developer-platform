@@ -6,8 +6,8 @@ Embedded Yield use the same core API. Provider integrations add capabilities,
 not product-specific HTTP routes.
 
 See the [core contract](../architecture/earn-core-api-proposal.md) and
-[threat model](../security/earn-core-api-threat-model.md) before changing
-execution or recovery. Publication follows Earn's existing module tags and
+[threat model](https://www.notion.so/422d36dad52d81e2bcf2cbd62c8e4622) before
+changing execution or recovery. Publication follows Earn's existing module tags and
 release-channel rules. Provider registration does not change those rules.
 
 ## Catalogue changes

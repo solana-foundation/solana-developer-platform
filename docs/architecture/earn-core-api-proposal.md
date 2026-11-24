@@ -351,7 +351,7 @@ guarded parent is serving; reusing a released Hastra address requires that
 cleanup. The global PDA lock and durable lease remain the concurrency authority.
 Index retirement assigns no financial outcome to historical requests.
 
-See the [threat model](../security/earn-core-api-threat-model.md) and
+See the [threat model](https://www.notion.so/422d36dad52d81e2bcf2cbd62c8e4622) and
 [integration guide](../../apps/sdp-docs/content/docs/earn/integration-details.mdx).
 Provider sandbox execution, signed-in browser verification and security review
 remain release gates. Local tests do not establish those external outcomes.
