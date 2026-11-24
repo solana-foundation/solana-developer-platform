@@ -9,11 +9,14 @@ import { RecordBlock } from "@/components/refresh-record";
 import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { fetchResultAnswer } from "@/lib/idempotency";
+import { settleIdempotencyKey } from "@/lib/idempotency-key-store";
 import { formatEpochSecondsOr, formatTokenValue, shortenMarketAddress } from "./earn-format";
 import {
   cancelEarnVaultWithdrawalRequest,
   useEarnVaultWithdrawalRequests,
 } from "./earn-program-data";
+import { vaultAsyncWithdrawalIdempotencyKeyStore } from "./earn-vault-async-withdrawal-tracking";
 import {
   earnVaultParRedemptionStatusPresentation,
   isEarnVaultParRedemptionCancelable,
@@ -135,7 +138,6 @@ function WithdrawalRequestItem({
 export function EarnVaultWithdrawalRequestsCard({ onChanged }: { onChanged?: () => void }) {
   const t = useTranslations();
   const { withdrawalRequests, error, refresh } = useEarnVaultWithdrawalRequests();
-  const cancelKeys = useRef(new Map<string, string>());
   const observedOpenRequestIds = useRef<ReadonlySet<string> | null>(null);
   const reportedDisappearances = useRef(new Set<string>());
   const [cancelling, setCancelling] = useState<ReadonlySet<string>>(() => new Set());
@@ -176,8 +178,20 @@ export function EarnVaultWithdrawalRequestsCard({ onChanged }: { onChanged?: () 
   async function cancel(request: EarnVaultWithdrawalRequestRecord) {
     if (cancelling.has(request.withdrawalRequestId)) return;
     const id = request.withdrawalRequestId;
-    const key = cancelKeys.current.get(id) ?? crypto.randomUUID();
-    cancelKeys.current.set(id, key);
+    // The cancel key is durable, in the shared asynchronous-exit store under
+    // the same fingerprint the par-redemption modal keeps (`cancel:` + the
+    // request id): a retry after a reload or a remount must carry the SAME
+    // key, or the API takes it as a second request. A React ref dies with the
+    // card and with the tab's page load, so it cannot do that job.
+    const fingerprint = `cancel:${id}`;
+    const { key, persisted } = vaultAsyncWithdrawalIdempotencyKeyStore.claim(fingerprint);
+    if (!persisted) {
+      setCancelError((current) => ({
+        ...current,
+        [id]: t("DashboardEarn.intentStorageUnavailable"),
+      }));
+      return;
+    }
     setCancelling((current) => new Set(current).add(id));
     setCancelError((current) => {
       const next = { ...current };
@@ -191,10 +205,18 @@ export function EarnVaultWithdrawalRequestsCard({ onChanged }: { onChanged?: () 
       return next;
     });
     if (!result.ok) {
+      // Only an answer that retires the key releases it: a refused or
+      // unreadable one keeps it, so a retry replays the same cancellation.
+      settleIdempotencyKey(
+        vaultAsyncWithdrawalIdempotencyKeyStore,
+        fingerprint,
+        key,
+        fetchResultAnswer(result)
+      );
       setCancelError((current) => ({ ...current, [id]: result.error }));
       return;
     }
-    cancelKeys.current.delete(id);
+    vaultAsyncWithdrawalIdempotencyKeyStore.release(fingerprint, key);
     setCancelResults((current) => ({ ...current, [id]: result.data }));
     refresh();
   }

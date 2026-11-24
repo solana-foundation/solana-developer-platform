@@ -4,6 +4,7 @@ import type { EarnVaultWithdrawalRequestRecord } from "@sdp/types/earn";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EnglishTestI18n } from "@/app/(session)/dashboard/[projectId]/markets/test-i18n";
+import { resetAsyncWithdrawalTrackingStateForTests } from "./earn-vault-async-withdrawal-tracking";
 
 const mocks = vi.hoisted(() => ({
   cancelRequest: vi.fn(),
@@ -75,6 +76,10 @@ function renderCard(onChanged = vi.fn()) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // The cancel key is kept in the shared durable store: clear its memory
+  // tiers and this jsdom tab's sessionStorage so specs are order-independent.
+  resetAsyncWithdrawalTrackingStateForTests();
+  sessionStorage.clear();
   // Each mint returns a DISTINCT value, otherwise "the retry reused the key"
   // would pass against a constant mock that proves nothing.
   let minted = 0;
@@ -135,7 +140,8 @@ describe("EarnVaultWithdrawalRequestsCard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Get shares back" }));
     await waitFor(() => expect(mocks.cancelRequest).toHaveBeenCalledTimes(2));
     // The UUID source now mints a fresh value for every call, so a retry can
-    // only arrive under the SAME key if the card memoized the original one.
+    // only arrive under the SAME key if the card found the original one kept
+    // in the durable idempotency-key store.
     expect(mocks.cancelRequest.mock.calls[1]).toEqual([
       recoverable.withdrawalRequestId,
       IDEMPOTENCY_KEY,
@@ -156,6 +162,47 @@ describe("EarnVaultWithdrawalRequestsCard", () => {
 
     view.rerender(view.renderUi());
     expect(view.onChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a transport-failed cancel under the same key after a remount", async () => {
+    const refresh = vi.fn();
+    const recoverable = request("request_recoverable", "expiredCancelable");
+    mocks.useRequests.mockReturnValue({
+      withdrawalRequests: [recoverable],
+      error: undefined,
+      isLoading: false,
+      refresh,
+    });
+    mocks.cancelRequest
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        error: "Recovery temporarily unavailable",
+        body: null,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        data: { ...recoverable, status: "cancelled" },
+      });
+
+    const first = renderCard();
+    fireEvent.click(screen.getByRole("button", { name: "Get shares back" }));
+    await screen.findByRole("alert");
+    first.unmount();
+
+    // A fresh mount holds no React state: only the durable key store can
+    // still offer the first attempt's key here. A retry that minted a second
+    // one could cancel twice at the API.
+    renderCard();
+    fireEvent.click(screen.getByRole("button", { name: "Get shares back" }));
+    await waitFor(() => expect(mocks.cancelRequest).toHaveBeenCalledTimes(2));
+    expect(mocks.cancelRequest.mock.calls[1]).toEqual([
+      recoverable.withdrawalRequestId,
+      IDEMPOTENCY_KEY,
+    ]);
+    // The successful cancel retires the key, so the card reports settlement.
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 
   it("refreshes once when solver fulfillment removes an active request", async () => {
