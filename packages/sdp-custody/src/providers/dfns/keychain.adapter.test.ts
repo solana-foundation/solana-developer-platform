@@ -1,7 +1,7 @@
 import { generateKeyPairSigner } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
-import type { DfnsApiClient } from "#/dfns/client";
-import { KeychainDfnsAdapter } from "./keychain-dfns.adapter";
+import type { DfnsApiClient } from "#/providers/dfns/client";
+import { KeychainDfnsAdapter } from "./keychain.adapter";
 
 const { address: WALLET_ADDRESS } = await generateKeyPairSigner();
 

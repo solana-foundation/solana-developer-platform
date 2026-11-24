@@ -1,4 +1,4 @@
-import type { FireblocksTransferResult } from "@sdp/custody/provisioning/fireblocks-transfers";
+import type { FireblocksTransferResult } from "@sdp/custody/providers/fireblocks/transfers";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import {
   CUSTODY_PROPOSAL_ACCEPTED_ACTIVE_PHASES,

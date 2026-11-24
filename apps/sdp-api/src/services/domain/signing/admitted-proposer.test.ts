@@ -1,5 +1,5 @@
 import { generateKeyPairSync } from "node:crypto";
-import type { CustodyProvisioningRuntime } from "@sdp/custody/provisioning/runtime";
+import type { CustodyProvisioningRuntime } from "@sdp/custody/shared/runtime";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import { generateKeyPairSigner } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";

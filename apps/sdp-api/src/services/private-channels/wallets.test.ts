@@ -1,4 +1,4 @@
-import { KeychainPrivyAdapter } from "@sdp/custody/keychain/keychain-privy.adapter";
+import { KeychainPrivyAdapter } from "@sdp/custody/providers/privy/keychain.adapter";
 import { SigningError } from "@sdp/custody/signing";
 import * as authPkg from "@sdp/private-channels/auth";
 import { PrivateChannelError } from "@sdp/private-channels/errors";

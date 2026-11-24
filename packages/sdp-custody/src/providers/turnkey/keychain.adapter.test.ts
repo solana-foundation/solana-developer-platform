@@ -13,7 +13,7 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { afterEach, assert, describe, expect, it, vi } from "vitest";
-import { KeychainTurnkeyAdapter } from "./keychain-turnkey.adapter";
+import { KeychainTurnkeyAdapter } from "./keychain.adapter";
 
 afterEach(() => {
   vi.restoreAllMocks();

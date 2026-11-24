@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildKeychainUtilaConfig } from "./utila-config";
+import { buildKeychainUtilaConfig } from "./config";
 
 describe("buildKeychainUtilaConfig", () => {
   it("takes the network from the cluster when neither the config nor env names one", () => {

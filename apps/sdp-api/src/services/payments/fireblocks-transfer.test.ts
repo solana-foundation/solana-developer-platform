@@ -185,7 +185,7 @@ const paymentApp = createApp({
   rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
 });
 let walletId: string;
-let createBody: import("@sdp/custody/provisioning/fireblocks-transfers").FireblocksTransferRequest;
+let createBody: import("@sdp/custody/providers/fireblocks/transfers").FireblocksTransferRequest;
 let providerStatus: string;
 let lostResponse = false;
 let readMissing = false;

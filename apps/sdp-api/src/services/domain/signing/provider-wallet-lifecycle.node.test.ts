@@ -1,4 +1,4 @@
-import * as dfnsClient from "@sdp/custody/dfns/client";
+import * as dfnsClient from "@sdp/custody/providers/dfns/client";
 import { generateKeyPairSigner } from "@solana/kit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as custodyProvisioning from "@/services/custody/provisioning";

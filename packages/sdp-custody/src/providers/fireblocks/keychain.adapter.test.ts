@@ -14,7 +14,7 @@ import {
 import type { MockInstance } from "vitest";
 import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import { SigningError } from "#/signing";
-import { KeychainFireblocksAdapter } from "./keychain-fireblocks.adapter";
+import { KeychainFireblocksAdapter } from "./keychain.adapter";
 
 type SolanaSigner = Awaited<ReturnType<KeychainFireblocksAdapter["getTransactionSigner"]>>;
 

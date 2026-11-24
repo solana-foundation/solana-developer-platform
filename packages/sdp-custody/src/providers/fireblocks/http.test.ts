@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync, webcrypto } from "node:crypto";
 import { describe, it } from "vitest";
-import { FireblocksApiError, fireblocksRequest } from "./fireblocks-http";
-import type { CustodyProvisioningRuntime } from "./runtime";
+import type { CustodyProvisioningRuntime } from "#/shared/runtime";
+import { FireblocksApiError, fireblocksRequest } from "./http";
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const params = {

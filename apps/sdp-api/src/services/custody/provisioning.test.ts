@@ -1,5 +1,5 @@
 import { generateKeyPairSync } from "node:crypto";
-import { provisionUtilaWallet as provisionUtilaWalletInCustody } from "@sdp/custody/provisioning";
+import { provisionUtilaWallet as provisionUtilaWalletInCustody } from "@sdp/custody/providers/utila/provisioning";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";

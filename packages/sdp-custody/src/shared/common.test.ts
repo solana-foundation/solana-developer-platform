@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createDfnsApiClient } from "#/dfns/client";
+import { createDfnsApiClient } from "#/providers/dfns/client";
 import { SigningError } from "#/signing";
 import { assertHttpsBaseUrl } from "./common";
 

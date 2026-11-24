@@ -2,7 +2,7 @@ import { generateKeyPairSync } from "node:crypto";
 import { SignerErrorCode } from "@solana/keychain-core";
 import { generateKeyPairSigner } from "@solana/kit";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { KeychainCoinbaseAdapter } from "./keychain-coinbase.adapter";
+import { KeychainCoinbaseAdapter } from "./keychain.adapter";
 
 const { address: WALLET_ADDRESS } = await generateKeyPairSigner();
 

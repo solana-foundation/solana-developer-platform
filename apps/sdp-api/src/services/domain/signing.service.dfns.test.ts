@@ -1,4 +1,4 @@
-import { KeychainDfnsAdapter } from "@sdp/custody/keychain/keychain-dfns.adapter";
+import { KeychainDfnsAdapter } from "@sdp/custody/providers/dfns/keychain.adapter";
 import { isFullSigningPort } from "@sdp/custody/signing";
 import { aroundEach, describe, expect, it } from "vitest";
 import type { SigningConfigRecord } from "@/services/adapters/signing";

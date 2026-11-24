@@ -13,7 +13,7 @@ import {
 } from "@solana/kit";
 import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import { SigningError } from "#/signing";
-import { KeychainPrivyAdapter } from "./keychain-privy.adapter";
+import { KeychainPrivyAdapter } from "./keychain.adapter";
 
 const { address: WALLET_ADDRESS } = await generateKeyPairSigner();
 

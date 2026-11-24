@@ -1,4 +1,4 @@
-import { invalidateFireblocksAddressBook } from "@sdp/custody/provisioning/fireblocks-address-book";
+import { invalidateFireblocksAddressBook } from "@sdp/custody/providers/fireblocks/address-book";
 import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { Hono } from "hono";

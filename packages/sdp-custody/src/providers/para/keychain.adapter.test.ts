@@ -1,6 +1,6 @@
 import { generateKeyPairSigner } from "@solana/kit";
 import { afterEach, assert, describe, expect, it, vi } from "vitest";
-import { KeychainParaAdapter } from "./keychain-para.adapter";
+import { KeychainParaAdapter } from "./keychain.adapter";
 
 const { address: WALLET_ADDRESS } = await generateKeyPairSigner();
 const WALLET_ID = "0b6f4a8e-2c1d-4e5f-9a7b-3c8d2e1f4a6b";

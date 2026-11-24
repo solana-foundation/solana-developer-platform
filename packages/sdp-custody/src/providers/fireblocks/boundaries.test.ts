@@ -1,11 +1,11 @@
 import { generateKeyPairSync, webcrypto } from "node:crypto";
 import { generateKeyPairSigner } from "@solana/kit";
 import { describe, expect, it } from "vitest";
-import { readFireblocksAddressBook } from "./fireblocks-address-book";
-import { readFireblocksTransfer, resolveFireblocksTransferAsset } from "./fireblocks-transfers";
-import { listFireblocksVaults } from "./fireblocks-vaults";
-import { provisionFireblocksVaultAccount } from "./index";
-import type { CustodyProvisioningRuntime } from "./runtime";
+import type { CustodyProvisioningRuntime } from "#/shared/runtime";
+import { readFireblocksAddressBook } from "./address-book";
+import { provisionFireblocksVaultAccount } from "./provisioning";
+import { readFireblocksTransfer, resolveFireblocksTransferAsset } from "./transfers";
+import { listFireblocksVaults } from "./vaults";
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const { address: VAULT_ADDRESS } = await generateKeyPairSigner();

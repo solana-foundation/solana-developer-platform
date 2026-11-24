@@ -4,7 +4,7 @@ import {
   fireblocksUngatedRuleJudged,
   inspectFireblocksPolicy,
   parseFireblocksPolicy,
-} from "./fireblocks-policy";
+} from "./policy";
 
 /** A hand-built rule matching the envelope's own rule type. */
 type RuleFixture = { type: string } & Record<string, unknown>;

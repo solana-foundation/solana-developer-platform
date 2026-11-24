@@ -1,7 +1,7 @@
 import { generateKeyPairSync, webcrypto } from "node:crypto";
 import { assert, describe, expect, it, vi } from "vitest";
-import { cancelFireblocksTransfer } from "./fireblocks-transfers";
-import type { CustodyProvisioningRuntime } from "./runtime";
+import type { CustodyProvisioningRuntime } from "#/shared/runtime";
+import { cancelFireblocksTransfer } from "./transfers";
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const access = {

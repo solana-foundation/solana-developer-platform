@@ -1,4 +1,4 @@
-import { KeychainPrivyAdapter } from "@sdp/custody/keychain/keychain-privy.adapter";
+import { KeychainPrivyAdapter } from "@sdp/custody/providers/privy/keychain.adapter";
 import { type FullSigningPort, isFullSigningPort, type SigningPort } from "@sdp/custody/signing";
 import type { CustodyMode } from "@sdp/types/custody";
 import { SignerErrorCode } from "@solana/keychain-core";
