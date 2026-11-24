@@ -18,9 +18,9 @@ import { SignerErrorCode } from "@solana/keychain-core";
 import { createFireblocksSigner } from "@solana/keychain-fireblocks";
 import type { Address } from "@solana/kit";
 import { z } from "zod";
+import { BaseKeychainAdapter } from "#/providers/base-keychain.adapter";
 import { SigningError } from "#/signing";
-import { BaseKeychainAdapter } from "./base-keychain.adapter";
-import type { KeychainFireblocksConfig } from "./types";
+import type { KeychainFireblocksConfig } from "./keychain-config";
 
 /**
  * The context keychain attaches when a Fireblocks transaction ends in a

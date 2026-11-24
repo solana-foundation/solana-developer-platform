@@ -12,10 +12,10 @@
  */
 
 import type { Address } from "@solana/kit";
-import { IBM_HAVEN_PROVIDER_LABEL } from "#/dfns/client";
-import type { DfnsSigner } from "#/dfns/signer";
 import { denormalizeIbmHavenWalletId } from "#/provider-wallet-ids";
-import { KeychainDfnsAdapter } from "./keychain-dfns.adapter";
+import { IBM_HAVEN_PROVIDER_LABEL } from "#/providers/dfns/client";
+import { KeychainDfnsAdapter } from "#/providers/dfns/keychain.adapter";
+import type { DfnsSigner } from "#/providers/dfns/signer";
 
 export class KeychainIbmHavenAdapter extends KeychainDfnsAdapter {
   override readonly providerId = "ibm_haven";

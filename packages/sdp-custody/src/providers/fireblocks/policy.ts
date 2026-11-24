@@ -1,8 +1,8 @@
 import type { ProviderPolicyCheck } from "@sdp/types/custody";
 import { z } from "zod";
-import { assertHttpsBaseUrl } from "./common";
-import { FireblocksApiError, fireblocksRequest } from "./fireblocks-http";
-import type { CustodyProvisioningRuntime } from "./runtime";
+import { assertHttpsBaseUrl } from "#/shared/common";
+import type { CustodyProvisioningRuntime } from "#/shared/runtime";
+import { FireblocksApiError, fireblocksRequest } from "./http";
 
 export type PolicyResult = Pick<ProviderPolicyCheck, "status" | "reason">;
 const sourceSchema = z.union([

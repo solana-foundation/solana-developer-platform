@@ -7,8 +7,8 @@
 
 import { ParaSigner } from "@solana/keychain-para";
 import type { Address } from "@solana/kit";
-import { BaseKeychainAdapter } from "./base-keychain.adapter";
-import type { KeychainParaConfig } from "./types";
+import { BaseKeychainAdapter } from "#/providers/base-keychain.adapter";
+import type { KeychainParaConfig } from "./keychain-config";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Adapter Implementation

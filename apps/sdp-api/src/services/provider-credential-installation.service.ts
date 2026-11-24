@@ -1,5 +1,5 @@
 import { normalizePrivyWalletId } from "@sdp/custody/provider-wallet-ids";
-import type { ProvisionPrivyResult } from "@sdp/custody/provisioning";
+import type { ProvisionPrivyResult } from "@sdp/custody/providers/privy/provisioning";
 import { SigningError } from "@sdp/custody/signing";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import type { ByokCustodyProvider, ProviderPolicyCheck } from "@sdp/types/custody";

@@ -1,5 +1,5 @@
 import { createPrivateKey } from "node:crypto";
-import { checkFireblocksCredential } from "@sdp/custody/provisioning/fireblocks-credential";
+import { checkFireblocksCredential } from "@sdp/custody/providers/fireblocks/credential";
 import { hashString } from "@sdp/payments/hash";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { ByokCustodyProvider } from "@sdp/types/custody";

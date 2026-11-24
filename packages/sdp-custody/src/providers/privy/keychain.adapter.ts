@@ -10,9 +10,9 @@ import { PrivySigner } from "@solana/keychain-privy";
 import type { Address } from "@solana/kit";
 import { z } from "zod";
 import { denormalizePrivyWalletId } from "#/provider-wallet-ids";
+import { BaseKeychainAdapter } from "#/providers/base-keychain.adapter";
 import { SigningError } from "#/signing";
-import { BaseKeychainAdapter } from "./base-keychain.adapter";
-import type { KeychainPrivyConfig } from "./types";
+import type { KeychainPrivyConfig } from "./keychain-config";
 
 /**
  * Keychain retains the top-level provider code before truncating the error

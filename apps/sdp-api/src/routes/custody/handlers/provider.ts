@@ -1,4 +1,4 @@
-import { normalizePem } from "@sdp/custody/provisioning/common";
+import { normalizePem } from "@sdp/custody/shared/common";
 import { SigningError } from "@sdp/custody/signing";
 import { redactCredentialString } from "@sdp/redaction/credentials";
 import type { InitializeSigningResponse } from "@sdp/types/custody";

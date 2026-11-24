@@ -13,8 +13,8 @@ import type {
   TransactionWithLifetime,
 } from "@solana/kit";
 import { createSignableMessage, type SignatureDictionary } from "@solana/signers";
-import { BaseKeychainAdapter } from "./base-keychain.adapter";
-import type { KeychainTurnkeyConfig } from "./types";
+import { BaseKeychainAdapter } from "#/providers/base-keychain.adapter";
+import type { KeychainTurnkeyConfig } from "./keychain-config";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Adapter Implementation

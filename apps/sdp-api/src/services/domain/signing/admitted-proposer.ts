@@ -1,7 +1,7 @@
 import {
   type FireblocksAddressEntry,
   readFireblocksAddressBook,
-} from "@sdp/custody/provisioning/fireblocks-address-book";
+} from "@sdp/custody/providers/fireblocks/address-book";
 import {
   cancelFireblocksTransaction,
   cancelFireblocksTransfer,
@@ -10,8 +10,8 @@ import {
   type FireblocksTransferResult,
   readFireblocksTransfer,
   resolveFireblocksTransferAsset,
-} from "@sdp/custody/provisioning/fireblocks-transfers";
-import type { CustodyProvisioningRuntime } from "@sdp/custody/provisioning/runtime";
+} from "@sdp/custody/providers/fireblocks/transfers";
+import type { CustodyProvisioningRuntime } from "@sdp/custody/shared/runtime";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import { isFireblocksPaymentMint, isFireblocksTransactionCancellable } from "@sdp/types/fireblocks";

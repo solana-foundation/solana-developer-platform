@@ -1,16 +1,16 @@
 import { createHash, randomUUID } from "node:crypto";
-import { createDfnsApiClient, createIbmHavenApiClient } from "@sdp/custody/dfns/client";
-import type { FireblocksProposalTracking } from "@sdp/custody/fireblocks-proposals";
-import { KeychainCoinbaseAdapter } from "@sdp/custody/keychain/keychain-coinbase.adapter";
-import { KeychainDfnsAdapter } from "@sdp/custody/keychain/keychain-dfns.adapter";
-import { KeychainFireblocksAdapter } from "@sdp/custody/keychain/keychain-fireblocks.adapter";
-import { KeychainIbmHavenAdapter } from "@sdp/custody/keychain/keychain-ibm-haven.adapter";
-import { KeychainMemoryAdapter } from "@sdp/custody/keychain/keychain-memory.adapter";
-import { KeychainParaAdapter } from "@sdp/custody/keychain/keychain-para.adapter";
-import { KeychainPrivyAdapter } from "@sdp/custody/keychain/keychain-privy.adapter";
-import { KeychainTurnkeyAdapter } from "@sdp/custody/keychain/keychain-turnkey.adapter";
-import { KeychainUtilaAdapter } from "@sdp/custody/keychain/keychain-utila.adapter";
-import { buildKeychainUtilaConfig } from "@sdp/custody/keychain/utila-config";
+import { KeychainCoinbaseAdapter } from "@sdp/custody/providers/coinbase/keychain.adapter";
+import { createDfnsApiClient, createIbmHavenApiClient } from "@sdp/custody/providers/dfns/client";
+import { KeychainDfnsAdapter } from "@sdp/custody/providers/dfns/keychain.adapter";
+import { KeychainFireblocksAdapter } from "@sdp/custody/providers/fireblocks/keychain.adapter";
+import type { FireblocksProposalTracking } from "@sdp/custody/providers/fireblocks/proposals";
+import { KeychainIbmHavenAdapter } from "@sdp/custody/providers/ibm-haven/keychain.adapter";
+import { KeychainMemoryAdapter } from "@sdp/custody/providers/local/keychain.adapter";
+import { KeychainParaAdapter } from "@sdp/custody/providers/para/keychain.adapter";
+import { KeychainPrivyAdapter } from "@sdp/custody/providers/privy/keychain.adapter";
+import { KeychainTurnkeyAdapter } from "@sdp/custody/providers/turnkey/keychain.adapter";
+import { buildKeychainUtilaConfig } from "@sdp/custody/providers/utila/config";
+import { KeychainUtilaAdapter } from "@sdp/custody/providers/utila/keychain.adapter";
 import {
   type FullSigningPort,
   isFullSigningPort,

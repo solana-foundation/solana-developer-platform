@@ -1,10 +1,10 @@
 import { FIREBLOCKS_ADDRESS_STATUSES, type FireblocksAddressStatus } from "@sdp/types/fireblocks";
 import { z } from "zod";
+import { assertHttpsBaseUrl } from "#/shared/common";
+import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
-import { assertHttpsBaseUrl } from "./common";
-import { fireblocksRequest } from "./fireblocks-http";
-import type { FireblocksTransferAccess } from "./fireblocks-transfers";
-import type { CustodyProvisioningRuntime } from "./runtime";
+import { fireblocksRequest } from "./http";
+import type { FireblocksTransferAccess } from "./transfers";
 
 export interface FireblocksAddressEntry {
   walletId: string;

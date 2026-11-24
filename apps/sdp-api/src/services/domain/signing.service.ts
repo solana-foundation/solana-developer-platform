@@ -6,14 +6,6 @@
  */
 
 import {
-  createDfnsApiClient,
-  createIbmHavenApiClient,
-  IBM_HAVEN_PROVIDER_LABEL,
-  normalizeDfnsWalletId,
-  resolveDfnsNetwork,
-} from "@sdp/custody/dfns/client";
-import { KeychainFireblocksAdapter } from "@sdp/custody/keychain/keychain-fireblocks.adapter";
-import {
   normalizeAnchorageWalletId,
   normalizeCoinbaseCdpWalletId,
   normalizeIbmHavenWalletId,
@@ -22,6 +14,14 @@ import {
   normalizeTurnkeyWalletId,
   normalizeUtilaWalletId,
 } from "@sdp/custody/provider-wallet-ids";
+import {
+  createDfnsApiClient,
+  createIbmHavenApiClient,
+  IBM_HAVEN_PROVIDER_LABEL,
+  normalizeDfnsWalletId,
+  resolveDfnsNetwork,
+} from "@sdp/custody/providers/dfns/client";
+import { KeychainFireblocksAdapter } from "@sdp/custody/providers/fireblocks/keychain.adapter";
 import type { SigningPort } from "@sdp/custody/signing";
 import { SigningError } from "@sdp/custody/signing";
 import type { CustodyProvider } from "@sdp/types/custody";

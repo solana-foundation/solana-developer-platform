@@ -1,6 +1,6 @@
+import { parseJsonResponse, readErrorResponseText } from "#/shared/common";
+import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
-import { parseJsonResponse, readErrorResponseText } from "./common";
-import type { CustodyProvisioningRuntime } from "./runtime";
 
 const PARA_WALLET_READY_MAX_ATTEMPTS = 8;
 const PARA_WALLET_READY_DELAY_MS = 500;

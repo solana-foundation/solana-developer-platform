@@ -47,7 +47,7 @@ const API = "apps/sdp-api/src";
 const FEE_PAYMENT = "packages/sdp-fee-payment/src";
 /** The repo root, from this file's location, so the check runs from any directory. */
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const KEYCHAIN = "packages/sdp-custody/src/keychain";
+const KEYCHAIN = "packages/sdp-custody/src/providers";
 /**
  * The packages that define these constructors. They build, subclass and pass
  * their own adapters around freely; every other package is checked like API
@@ -84,7 +84,7 @@ export const CAPABILITIES = [
     why: "Creates a provider-signed payment; only the custody waist's proposer may (PRO-2435 D2).",
     symbols: [
       {
-        file: "packages/sdp-custody/src/provisioning/fireblocks-transfers.ts",
+        file: "packages/sdp-custody/src/providers/fireblocks/transfers.ts",
         name: "createFireblocksTransfer",
       },
     ],
@@ -96,11 +96,11 @@ export const CAPABILITIES = [
     why: "Cancels a provider transaction; only the account-bound custody waist may (PRO-2435 D4).",
     symbols: [
       {
-        file: "packages/sdp-custody/src/provisioning/fireblocks-transfers.ts",
+        file: "packages/sdp-custody/src/providers/fireblocks/transfers.ts",
         name: "cancelFireblocksTransfer",
       },
       {
-        file: "packages/sdp-custody/src/provisioning/fireblocks-transfers.ts",
+        file: "packages/sdp-custody/src/providers/fireblocks/transfers.ts",
         name: "cancelFireblocksTransaction",
       },
     ],
@@ -168,7 +168,7 @@ export const CAPABILITIES = [
   {
     id: "keychain-signing-adapter",
     why: "Holds a provider secret and can sign; only the adapter factory and the wallet lifecycle may build one.",
-    symbols: readdirSync(path.join(REPO_ROOT, KEYCHAIN))
+    symbols: readdirSync(path.join(REPO_ROOT, KEYCHAIN), { recursive: true })
       .filter((file) => file.endsWith(".adapter.ts") && !file.endsWith(".test.ts"))
       .sort()
       .map((file) => ({ file: `${KEYCHAIN}/${file}`, name: "*" })),
@@ -183,10 +183,13 @@ export const CAPABILITIES = [
     id: "provider-signer",
     why: "A provider signer or API client builds signing authority from a stored credential; only the signing service, the adapter factory and the wallet lifecycle may use one.",
     symbols: [
-      ...readdirSync(path.join(REPO_ROOT, "packages/sdp-custody/src/dfns"))
-        .filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts"))
+      ...readdirSync(path.join(REPO_ROOT, "packages/sdp-custody/src/providers/dfns"))
+        .filter(
+          (file) =>
+            file.endsWith(".ts") && !file.endsWith(".test.ts") && !file.startsWith("keychain")
+        )
         .sort()
-        .map((file) => ({ file: `packages/sdp-custody/src/dfns/${file}`, name: "*" })),
+        .map((file) => ({ file: `packages/sdp-custody/src/providers/dfns/${file}`, name: "*" })),
       ...KEYCHAIN_SDKS.map((module) => ({ module, name: "*" })),
     ],
     owners: [CUSTODY_PACKAGE],
@@ -255,7 +258,7 @@ export const CAPABILITIES = [
     allow: [
       `${API}/services/domain/signing.service.ts`,
       // Each builds the keypair inside a constructor that is pinned itself.
-      `${KEYCHAIN}/keychain-memory.adapter.ts`,
+      `${KEYCHAIN}/local/keychain.adapter.ts`,
     ],
   },
 ];

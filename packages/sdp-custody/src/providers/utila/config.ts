@@ -1,7 +1,7 @@
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { normalizeUtilaWalletId } from "#/provider-wallet-ids";
 import { SigningError } from "#/signing";
-import type { KeychainUtilaConfig } from "./types";
+import type { KeychainUtilaConfig } from "./keychain-config";
 
 type UtilaNetwork = "networks/solana-mainnet" | "networks/solana-devnet";
 

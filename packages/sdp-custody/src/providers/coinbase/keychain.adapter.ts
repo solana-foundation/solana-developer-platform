@@ -8,8 +8,8 @@
 import { createCdpSigner } from "@solana/keychain-cdp";
 import type { SolanaSigner } from "@solana/keychain-core";
 import type { Address } from "@solana/kit";
-import { BaseKeychainAdapter } from "./base-keychain.adapter";
-import type { KeychainCoinbaseConfig } from "./types";
+import { BaseKeychainAdapter } from "#/providers/base-keychain.adapter";
+import type { KeychainCoinbaseConfig } from "./keychain-config";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Adapter Implementation

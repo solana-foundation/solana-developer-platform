@@ -5,11 +5,11 @@
  */
 
 import type { Address } from "@solana/kit";
-import { DFNS_PROVIDER_LABEL } from "#/dfns/client";
-import { DfnsSigner } from "#/dfns/signer";
+import { BaseKeychainAdapter } from "#/providers/base-keychain.adapter";
 import { SigningError } from "#/signing";
-import { BaseKeychainAdapter } from "./base-keychain.adapter";
-import type { KeychainDfnsConfig } from "./types";
+import { DFNS_PROVIDER_LABEL } from "./client";
+import type { KeychainDfnsConfig } from "./keychain-config";
+import { DfnsSigner } from "./signer";
 
 export class KeychainDfnsAdapter extends BaseKeychainAdapter {
   // Widened from the "dfns" literal to `string` so the KeychainIbmHavenAdapter

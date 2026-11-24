@@ -1,8 +1,8 @@
 import { z } from "zod";
+import { assertHttpsBaseUrl } from "#/shared/common";
+import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
-import { assertHttpsBaseUrl } from "./common";
-import { FireblocksApiError, fireblocksRequest } from "./fireblocks-http";
-import type { CustodyProvisioningRuntime } from "./runtime";
+import { FireblocksApiError, fireblocksRequest } from "./http";
 
 export interface FireblocksTransferAccess {
   apiKey: string;

@@ -1,5 +1,4 @@
 import { importJWK, importPKCS8, SignJWT } from "jose";
-import { SigningError } from "#/signing";
 import {
   decodeBase64ToBytes,
   encodePkcs8Pem,
@@ -9,8 +8,9 @@ import {
   sha256Hex,
   sortJsonKeys,
   toBase64Url,
-} from "./common";
-import type { CustodyProvisioningRuntime } from "./runtime";
+} from "#/shared/common";
+import type { CustodyProvisioningRuntime } from "#/shared/runtime";
+import { SigningError } from "#/signing";
 
 export interface CoinbaseCdpRequestParams {
   method: "GET" | "POST" | "PUT" | "DELETE";

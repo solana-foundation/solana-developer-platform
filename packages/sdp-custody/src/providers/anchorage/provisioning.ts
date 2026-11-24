@@ -1,6 +1,6 @@
+import { assertHttpsBaseUrl, parseJsonResponse, readErrorResponseText } from "#/shared/common";
+import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
-import { assertHttpsBaseUrl, parseJsonResponse, readErrorResponseText } from "./common";
-import type { CustodyProvisioningRuntime } from "./runtime";
 
 const DEFAULT_ANCHORAGE_API_BASE_URL = "https://api.anchorage.com";
 
