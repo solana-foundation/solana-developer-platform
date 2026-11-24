@@ -5,6 +5,7 @@ import type { EarnStrategyRow, UpsertEarnStrategyInput } from "@/db/repositories
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { generateEarnPositionId } from "@/db/repositories/earn-movements.repository";
 import { app } from "@/index";
+import { RATE_LIMIT_WINDOW_MS } from "@/middleware/rate-limit";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { recordCallScopes } from "@/test/helpers/cluster-scope";
 import { env } from "@/test/helpers/env";
@@ -609,17 +610,42 @@ describe("exit safety (ADR 0002): the exit outlives every money-in gate", () => 
 describe("metered quotas (PRO-1994): the deposit build is metered, the exit never is", () => {
   const ACTOR_SCOPE = `metered:earn-provider-read:org:${TEST_ORG.id}:key:${TEST_API_KEY.id}`;
 
-  it("429s a keyed deposit build once the actor's quota is exhausted", async () => {
+  beforeEach(() => {
+    const windowStart = Math.floor(Date.now() / RATE_LIMIT_WINDOW_MS) * RATE_LIMIT_WINDOW_MS;
+    vi.spyOn(Date, "now").mockReturnValue(windowStart + RATE_LIMIT_WINDOW_MS / 2);
+  });
+
+  it.each([0, RATE_LIMIT_WINDOW_MS - 1])(
+    "429s an exhausted keyed deposit build at window offset %i ms",
+    async (offset) => {
+      const windowStart = Math.floor(Date.now() / RATE_LIMIT_WINDOW_MS) * RATE_LIMIT_WINDOW_MS;
+      vi.mocked(Date.now).mockReturnValue(windowStart + offset);
+      await seedAuth();
+      const strategy = await seedStrategy();
+      await seedRateLimit(env, ACTOR_SCOPE, 60);
+
+      const res = await prepareDeposit(depositBody(strategy.id));
+
+      expect(res.status).toBe(429);
+      expect(await res.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
+      // Refused before the RPC probe was paid for, which is the whole point.
+      expect(buildWalletDepositTransaction).not.toHaveBeenCalled();
+    }
+  );
+
+  it("admits a deposit when the previous bucket decays after rollover", async () => {
     await seedAuth();
     const strategy = await seedStrategy();
+    const windowEnd =
+      Math.floor(Date.now() / RATE_LIMIT_WINDOW_MS) * RATE_LIMIT_WINDOW_MS + RATE_LIMIT_WINDOW_MS;
+    vi.mocked(Date.now).mockReturnValue(windowEnd - 1);
     await seedRateLimit(env, ACTOR_SCOPE, 60);
+    vi.mocked(Date.now).mockReturnValue(windowEnd + 1);
 
     const res = await prepareDeposit(depositBody(strategy.id));
 
-    expect(res.status).toBe(429);
-    expect(await res.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
-    // Refused before the RPC probe was paid for, which is the whole point.
-    expect(buildWalletDepositTransaction).not.toHaveBeenCalled();
+    expect(res.status, await res.clone().text()).toBe(202);
+    expect(buildWalletDepositTransaction).toHaveBeenCalledTimes(1);
   });
 
   it("charges nothing for a keyed request the body validator refuses", async () => {
