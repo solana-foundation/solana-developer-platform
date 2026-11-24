@@ -241,6 +241,27 @@ describe("operator redemption release recovery", () => {
     expect(after.lease?.occupied).toBe(true);
     expect(after.audits).toHaveLength(0);
   });
+  it("refuses a failed release before reading evidence or reopening the operation", async () => {
+    const claim = await operations().claimRecovery(scope, input.operationId);
+    if (claim === null) throw new Error("Expected a recovery claim");
+    await operations().transition(scope, claim, {
+      status: "failed",
+      resourceRef: { kind: "earn.redemption_release", id: BUILD },
+      nextAction: null,
+      error: { code: "TRANSACTION_FAILED", message: "The release failed on chain" },
+    });
+    await operations().release(scope, claim);
+    const read = vi.fn(async () => receipt());
+    await expect(scoped(() => recoverCurrentRedemptionRelease(env, input, read))).rejects.toThrow(
+      "Only a settling redemption release"
+    );
+    expect(read).not.toHaveBeenCalled();
+    const after = await state();
+    expect(after.operation?.status).toBe("failed");
+    expect(after.release?.release_finalized_at).toBeNull();
+    expect(after.audits).toHaveLength(0);
+  });
+
   it("refuses an active worker claim without changing its fence", async () => {
     const worker = await operations().claimRecovery(scope, input.operationId);
     if (worker === null) throw new Error("Expected a worker claim");

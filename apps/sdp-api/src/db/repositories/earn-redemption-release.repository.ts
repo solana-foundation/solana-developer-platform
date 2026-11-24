@@ -227,7 +227,7 @@ export async function acceptCurrentRedemptionReleaseWithin(
            AND request.token_mint = ? AND request.share_mint = ?
            AND request.request_address = EXCLUDED.request_address
            AND request.mechanism = 'operator_redemption'
-           AND request.status NOT IN ('fulfilled', 'cancelled', 'failed')))
+           AND request.status NOT IN (${sqlLiteralList(EARN_TERMINAL_VAULT_WITHDRAWAL_REQUEST_STATUSES)})))
      RETURNING lease_token`,
     [
       scope.environment,
@@ -280,7 +280,7 @@ export async function releaseCurrentRedemptionReleaseWithin(
          AND request.position_id = ? AND request.owner_address = ? AND request.custody_wallet_id IS NOT DISTINCT FROM ?
          AND request.provider = ? AND request.vault_address = ? AND request.token_mint = ? AND request.share_mint = ?
          AND request.request_address = ? AND request.mechanism = 'operator_redemption'
-         AND request.status NOT IN ('fulfilled', 'cancelled', 'failed')
+         AND request.status NOT IN (${sqlLiteralList(EARN_TERMINAL_VAULT_WITHDRAWAL_REQUEST_STATUSES)})
          AND ?::text IS NULL
          AND NOT EXISTS (
            SELECT 1 FROM earn_wallet_withdrawal_request_transactions release

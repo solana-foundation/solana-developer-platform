@@ -25,6 +25,21 @@ export function isTerminalOperationStatus(status: OperationStatus): boolean {
   return TERMINAL_OPERATION_STATUS_SET.has(status);
 }
 
+/** Operator recovery may finish a settling release or replay an existing completion. */
+export const REDEMPTION_RELEASE_OPERATOR_RECOVERY_STATUSES = [
+  "settling",
+  "completed",
+] as const satisfies readonly OperationStatus[];
+
+const REDEMPTION_RELEASE_OPERATOR_RECOVERY_STATUS_SET = new Set<OperationStatus>(
+  REDEMPTION_RELEASE_OPERATOR_RECOVERY_STATUSES
+);
+
+/** Whether a release status permits operator recovery or its idempotent replay. */
+export function isRedemptionReleaseOperatorRecoveryStatus(status: OperationStatus): boolean {
+  return REDEMPTION_RELEASE_OPERATOR_RECOVERY_STATUS_SET.has(status);
+}
+
 /**
  * The status an operation projection reports: live evidence may advance an
  * operation, but never moves one that is already terminal.

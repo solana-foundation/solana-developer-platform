@@ -2,7 +2,7 @@ import { parseArgs } from "node:util";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { SDP_ENVIRONMENTS } from "@sdp/types/api-keys";
-import type { Operation } from "@sdp/types/operations";
+import { isRedemptionReleaseOperatorRecoveryStatus, type Operation } from "@sdp/types/operations";
 import { signature } from "@solana/kit";
 import { z } from "zod";
 import { getDb } from "@/db/client";
@@ -103,7 +103,7 @@ function requireAcceptedRelease(
     attempt.executionRequestedAt === null
   )
     throw conflict("Recovery does not match the exact accepted redemption release");
-  if (operation.status !== "settling" && operation.status !== "completed")
+  if (!isRedemptionReleaseOperatorRecoveryStatus(operation.status))
     throw conflict("Only a settling redemption release can be recovered");
   return { ...attempt, signature: input.signature, signedTransaction: attempt.signedTransaction };
 }
