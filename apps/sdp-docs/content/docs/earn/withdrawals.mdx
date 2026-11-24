@@ -26,6 +26,10 @@ owner. To check its balance first, [read the position](/docs/earn/balances#read-
 | `token` | Shares worth `value` of the strategy's deposit token `mint`. |
 | `intermediate` | `value` of a held intermediate token `mint`. Some strategies redeem in two steps, through a token you hold in between. |
 
+For `amount.kind: "token"`, values outside the supported numeric range or
+precision return `400 BAD_REQUEST`:
+`Withdrawal token amount is out of range or has unsupported precision`.
+
 ## Choose an exit route
 
 An instant exit burns the shares and pays out in one transaction. A queued

@@ -1,4 +1,9 @@
-import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
+import {
+  AmountError,
+  decimalScale,
+  formatDecimalAmount,
+  parseDecimalAmount,
+} from "@sdp/solana/amount";
 import { EARN_SWAP_MAX_SLIPPAGE_BPS } from "@sdp/types/earn";
 import { badRequest } from "@/lib/errors";
 
@@ -25,12 +30,18 @@ export function strategySharesForTokenAmount(input: {
   tokenAmount: string;
   shareDecimals: number;
 }): string {
-  const scale = Math.max(
-    input.tokenValue.split(".")[1]?.length ?? 0,
-    input.tokenAmount.split(".")[1]?.length ?? 0
-  );
-  const value = parseDecimalAmount(input.tokenValue, scale);
-  const amount = parseDecimalAmount(input.tokenAmount, scale);
+  const valueScale = decimalScale(input.tokenValue);
+  let value = parseDecimalAmount(input.tokenValue, valueScale);
+  const scale = Math.max(valueScale, decimalScale(input.tokenAmount));
+  let amount: bigint;
+  try {
+    if (scale > valueScale) value = parseDecimalAmount(input.tokenValue, scale);
+    amount = parseDecimalAmount(input.tokenAmount, scale);
+  } catch (error) {
+    if (error instanceof AmountError)
+      throw badRequest("Withdrawal token amount is out of range or has unsupported precision");
+    throw error;
+  }
   if (value <= 0n || amount <= 0n || amount > value)
     throw badRequest("Withdrawal exceeds the live strategy token value");
   const shares = parseDecimalAmount(input.shares, input.shareDecimals);

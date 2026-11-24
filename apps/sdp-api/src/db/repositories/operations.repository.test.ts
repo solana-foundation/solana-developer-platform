@@ -1,4 +1,8 @@
-import { type OperationStatus, TERMINAL_OPERATION_STATUSES } from "@sdp/types/operations";
+import {
+  type OperationIntent,
+  type OperationStatus,
+  TERMINAL_OPERATION_STATUSES,
+} from "@sdp/types/operations";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";
@@ -619,6 +623,77 @@ describe("durable operations repository", () => {
       )
     ).rejects.toThrow("authenticated action principal");
   });
+
+  it.each<{
+    name: string;
+    intent: OperationIntent;
+    reorderedIntent: OperationIntent;
+    legacyFingerprint: string;
+  }>([
+    {
+      name: "deposit",
+      intent: {
+        kind: "earn.deposit",
+        strategyId: "strategy_1",
+        source: { ownerAddress: "owner" },
+        amount: { mint: "mint", value: "1" },
+        slippageBps: 100,
+        feePayer: "payer",
+      },
+      reorderedIntent: {
+        feePayer: "payer",
+        slippageBps: 100,
+        amount: { value: "001.00", mint: "mint" },
+        source: { ownerAddress: "owner" },
+        strategyId: "strategy_1",
+        kind: "earn.deposit",
+      },
+      legacyFingerprint: "9141f98b6bea1f47458f42df7852404e8491365b718d19c8f67ae26c6814ceba",
+    },
+    {
+      name: "withdrawal",
+      intent: {
+        kind: "earn.withdraw",
+        positionId: "position_1",
+        amount: { kind: "token", mint: "mint", value: "1" },
+        slippageBps: 100,
+        feePayer: "payer",
+      },
+      reorderedIntent: {
+        feePayer: "payer",
+        slippageBps: 100,
+        amount: { value: "001.00", mint: "mint", kind: "token" },
+        positionId: "position_1",
+        kind: "earn.withdraw",
+      },
+      legacyFingerprint: "7b707c7406a4feef91909d6525244042fad449953b10e2786613402d3716ef35",
+    },
+  ])(
+    "replays a persisted $name after nested JSON keys reorder",
+    async ({ intent, reorderedIntent, legacyFingerprint }) => {
+      const service = new OperationsService(repository());
+      const persisted = input({ intent, fingerprint: legacyFingerprint });
+      // Pin the stored hash from the original schema-order serialization.
+      const { record } = await repository().createOrReplay(persisted);
+      await runAsMoneyPrincipal(persisted.principal, async () => {
+        const replay = await service.prepare(scope, {
+          source: persisted.source,
+          intent: reorderedIntent,
+          requestKey: persisted.requestKey,
+          prepared: persisted.prepared,
+        });
+        expect(replay.replayed).toBe(true);
+        expect(replay.operation.id).toBe(record.operation.id);
+        const preparation = await service.replayPreparation(scope, {
+          intent: reorderedIntent,
+          requestKey: persisted.requestKey,
+        });
+        expect(preparation?.id).toBe(record.operation.id);
+      });
+      const stored = await repository().get(scope, record.operation.id);
+      expect(stored?.fingerprint).toBe(legacyFingerprint);
+    }
+  );
 
   it("reclaims accepted queued work without changing its attempt or reviewed authority", async () => {
     const service = new OperationsService(repository());
