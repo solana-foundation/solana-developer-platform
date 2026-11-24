@@ -29,6 +29,9 @@ Preparation never signs or broadcasts. `submit` returns 202 after durable
 acceptance; workers request signatures, broadcast and track settlement. Keep
 polling queued and active operations, including custody providers that require
 a signature in another application. Read requests never trigger submission.
+Only the operation open in the dialog is read every 2 s, and only while SDP is
+moving it; activity rows and provider waits are read every 30 s beside the
+15 s feed, so many pending rows stay under the dashboard's shared request limit.
 
 The default activity view polls active work and the newest 50 history entries.
 Older pages load on demand and keep their snapshot while expanded; Refresh
@@ -105,8 +108,8 @@ never submits on Enter.
 
 An amount in the strategy's own share mint reads as shares
 (`formatShareAmount`); every other mint formats as itself, never as shares.
-Only SDP-side waits (queued, awaiting signature, submitted) pulse; provider
-settlement can take days and stays still.
+Only statuses `isSdpProgressOperationStatus` (`@sdp/types/operations`) names
+pulse; provider settlement can take days and stays still.
 
 Keep loading, empty and error states at the ready layout footprint. Long names
 wrap or clamp inside child spans; amounts remain whole. In a `DetailRow`, use

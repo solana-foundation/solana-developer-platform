@@ -1,6 +1,10 @@
 "use client";
 
-import { isTerminalOperationStatus, type Operation } from "@sdp/types/operations";
+import {
+  isSdpProgressOperationStatus,
+  isTerminalOperationStatus,
+  type Operation,
+} from "@sdp/types/operations";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { earnQueryKeys } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-query-key";
@@ -175,8 +179,16 @@ export function useEarnOperations() {
   };
 }
 
-/** How often an active operation's detail is read. */
-const OPERATION_POLL_MS = 2_000;
+/** How often the operation open in the viewer's dialog is read while SDP is moving it. */
+const OPERATION_WATCH_POLL_MS = 2_000;
+
+/**
+ * How often every other pending operation is read: activity rows, and provider settlements that
+ * can take days. The shared feed already refreshes active rows every 15 s, so this is the safety
+ * net for a row that leaves it, and it keeps many pending rows under the dashboard's shared
+ * request limit.
+ */
+const OPERATION_BACKGROUND_POLL_MS = 30_000;
 
 /**
  * SWR's poll revalidates with dedupe, so under the dashboard's 10 s default a 2 s poll lands
@@ -184,13 +196,37 @@ const OPERATION_POLL_MS = 2_000;
  * lands, so a window equal to the cadence still swallows every other tick. Half still joins the
  * dialog and its activity row when both watch one operation.
  */
-const OPERATION_POLL_DEDUPE_MS = OPERATION_POLL_MS / 2;
+const OPERATION_POLL_DEDUPE_MS = OPERATION_WATCH_POLL_MS / 2;
 
-/** Fast detail polling is scoped to the operation; closing a modal never owns progress. */
+/**
+ * The detail read cadence for one operation.
+ *
+ * @param operation - The latest observation, if any.
+ * @param foreground - Whether the viewer has this operation open in a dialog.
+ * @returns The poll interval in milliseconds, 0 once the operation is terminal.
+ */
+function operationPollInterval(operation: Operation | undefined, foreground: boolean): number {
+  if (operation && isEarnOperationTerminal(operation)) return 0;
+  return foreground && operation && isSdpProgressOperationStatus(operation.status)
+    ? OPERATION_WATCH_POLL_MS
+    : OPERATION_BACKGROUND_POLL_MS;
+}
+
+/**
+ * Detail polling is scoped to the operation; closing a modal never owns progress.
+ *
+ * @param operationId - The operation to read.
+ * @param initial - The observation the caller already holds.
+ * @param onUpdated - Told about each new observation after commit.
+ * @param foreground - True for the operation open in the viewer's dialog, read every 2 s while
+ *   SDP is moving it. Activity rows leave it out and are read every 30 s beside the feed.
+ * @returns The current observation, its read error, and refresh and update handles.
+ */
 export function useEarnOperation(
   operationId: string | undefined,
   initial?: Operation,
-  onUpdated?: (operation: Operation) => void
+  onUpdated?: (operation: Operation) => void,
+  foreground?: boolean
 ) {
   const reported = useRef({
     id: operationId,
@@ -199,10 +235,8 @@ export function useEarnOperation(
   const { data, error, mutate } = useCadencedSWR(
     operationId ? earnQueryKeys.operation(operationId) : null,
     () => earnCoreClient.operation(operationId ?? ""),
-    (latest) => {
-      const operation = currentObservation(operationId, initial, latest);
-      return operation && isEarnOperationTerminal(operation) ? 0 : OPERATION_POLL_MS;
-    },
+    (latest) =>
+      operationPollInterval(currentObservation(operationId, initial, latest), foreground === true),
     {
       fallbackData: initial,
       dedupingInterval: OPERATION_POLL_DEDUPE_MS,

@@ -6,9 +6,9 @@ import {
   type EarnVaultPosition,
 } from "@sdp/types/earn";
 import {
+  isSdpProgressOperationStatus,
   type Operation,
   type OperationIntent,
-  type OperationStatus,
   operationIntentSchema,
 } from "@sdp/types/operations";
 import { Button } from "@sdp/ui/button";
@@ -337,6 +337,7 @@ export function EarnCoreActionModal(props: ActionProps) {
                 props.onUpdated?.(operation);
               }}
               onDone={props.onClose}
+              foreground
               shareMint={
                 props.kind === "deposit" ? props.strategy.shareMint : props.position.shareMint
               }
@@ -361,13 +362,6 @@ function actionStep(operation: Operation | undefined): "details" | "review" | "p
   if (isEarnOperationTerminal(operation)) return "done";
   return operation.status === "prepared" ? "review" : "progress";
 }
-
-/** SDP-side waits that end in seconds; provider settlement can take days, so it stays still. */
-const SHORT_WAIT_STATUSES: ReadonlySet<OperationStatus> = new Set([
-  "queued",
-  "awaiting_signature",
-  "submitted",
-]);
 
 /** The details step: what to move, then a review that prepares terms without signing. */
 function EarnPreparationForm({
@@ -573,6 +567,7 @@ export function EarnOperationReview({
   onUpdated,
   onDone,
   shareMint,
+  foreground,
 }: {
   operation: Operation;
   onUpdated?: (operation: Operation) => void;
@@ -580,6 +575,8 @@ export function EarnOperationReview({
   onDone?: () => void;
   /** The strategy's share mint, so amounts in it read as shares; unknown leaves mints as they are. */
   shareMint?: string;
+  /** Set by the dialog the viewer has open: its operation is read every 2 s while SDP moves it. */
+  foreground?: boolean;
 }) {
   const t = useTranslations();
   const {
@@ -587,7 +584,7 @@ export function EarnOperationReview({
     error: readError,
     refresh,
     update,
-  } = useEarnOperation(initial.id, initial, onUpdated);
+  } = useEarnOperation(initial.id, initial, onUpdated, foreground);
   const operation = observed ?? initial;
   const terminal = isEarnOperationTerminal(operation);
   const expired =
@@ -773,7 +770,7 @@ function EarnOperationStatus({
       {nextAction?.type === "wait" ? (
         <EarnOperationPending
           reason={nextAction.reason}
-          live={SHORT_WAIT_STATUSES.has(operation.status)}
+          live={isSdpProgressOperationStatus(operation.status)}
         />
       ) : null}
       {nextAction?.type === "sign_transaction" ? (
