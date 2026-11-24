@@ -1,35 +1,58 @@
+import { JupiterLendVaultDirectClient } from "@sdp/jupiter-lend/client";
 import { hashString } from "@sdp/payments/hash";
+import * as providerAccess from "@sdp/types/provider-access";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import type { EarnStrategyRow, UpsertEarnStrategyInput } from "@/db/repositories/earn.repository";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { generateEarnPositionId } from "@/db/repositories/earn-movements.repository";
+import type { EarnWalletTransactionRow } from "@/db/repositories/earn-wallet-transactions.repository";
 import { app } from "@/index";
 import { RATE_LIMIT_WINDOW_MS } from "@/middleware/rate-limit";
+import * as redisStores from "@/runtime/kv-redis";
+import * as executionRegistry from "@/services/earn/execution-registry";
+import * as vaultWallet from "@/services/earn/vault-wallet.service";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { recordCallScopes } from "@/test/helpers/cluster-scope";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, readRateLimitCount, seedRateLimit } from "@/test/mocks/kv";
-import type { Env } from "@/types/env";
 
-const buildWalletDepositTransaction = vi.hoisted(() => vi.fn());
-const buildWalletWithdrawalTransaction = vi.hoisted(() => vi.fn());
-const quoteVaultWithdrawal = vi.hoisted(() => vi.fn());
-const resolveVaultWithdrawClient = vi.hoisted(() =>
-  vi.fn(() => ({
-    buildVaultDeposit: vi.fn(),
-    buildVaultWithdrawal: vi.fn(),
-    quoteVaultWithdrawal,
-    readVaultPositions: vi.fn(),
-    sponsoredPrograms: vi.fn(() => []),
-  }))
-);
-const surfacingEnabled = vi.hoisted(() => ({ value: true }));
-// Flip to simulate a rate-limit counter-store outage for the requests that
-// follow. Only the rateLimits store breaks; auth reads the key's rows from Postgres.
-const rateLimitStoreDown = vi.hoisted(() => ({ value: false }));
+let spies: ReturnType<typeof spyOnCollaborators>;
+const surfacingEnabled = { value: true };
+const rateLimitStoreDown = { value: false };
+
+function spyOnCollaborators() {
+  const client = new JupiterLendVaultDirectClient(
+    async () => {
+      throw new Error("Unexpected provider RPC lookup");
+    },
+    async () => {
+      throw new Error("Unexpected provider execution");
+    }
+  );
+  vi.spyOn(executionRegistry, "resolveVaultWithdrawClient").mockReturnValue(client);
+  vi.spyOn(executionRegistry, "resolveEarnExecutionClient").mockReturnValue(client);
+  vi.spyOn(executionRegistry, "isEarnDirectWithdrawalConfigured").mockReturnValue(true);
+  vi.spyOn(providerAccess, "isEarnProviderSurfaced").mockImplementation(
+    () => surfacingEnabled.value
+  );
+
+  const stores = redisStores.createKVStoreSet(env);
+  const admit = stores.rateLimits.admitSlidingWindow.bind(stores.rateLimits);
+  vi.spyOn(stores.rateLimits, "admitSlidingWindow").mockImplementation(async (...args) => {
+    if (rateLimitStoreDown.value) throw new Error("counter store down");
+    return admit(...args);
+  });
+  vi.spyOn(redisStores, "createKVStoreSet").mockReturnValue(stores);
+
+  return {
+    deposit: vi.spyOn(vaultWallet, "buildWalletDepositTransaction"),
+    withdrawal: vi.spyOn(vaultWallet, "buildWalletWithdrawalTransaction"),
+    quote: vi.spyOn(client, "quoteVaultWithdrawal"),
+  };
+}
 
 // Pin admission behavior, not the editorial address shelf chosen for a release.
 vi.mock("@/routes/earn/handlers/curation", async (original) => ({
@@ -38,49 +61,6 @@ vi.mock("@/routes/earn/handlers/curation", async (original) => ({
   HIDDEN_VAULTS: {},
   HIDDEN_STRATEGY_TERMS: [],
 }));
-
-vi.mock("@/services/earn/vault-wallet.service", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/earn/vault-wallet.service")>()),
-  buildWalletDepositTransaction,
-  buildWalletWithdrawalTransaction,
-}));
-
-vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/earn/execution-registry")>()),
-  resolveVaultWithdrawClient,
-  resolveEarnExecutionClient: resolveVaultWithdrawClient,
-  isEarnDirectWithdrawalConfigured: () => true,
-}));
-
-vi.mock("@sdp/types/provider-access", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/types/provider-access")>()),
-  isEarnProviderSurfaced: () => surfacingEnabled.value,
-}));
-
-vi.mock("@/runtime/kv-redis", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@/runtime/kv-redis")>();
-  return {
-    ...original,
-    createKVStoreSet: (env: Env) => {
-      const stores = original.createKVStoreSet(env);
-      if (!rateLimitStoreDown.value) {
-        return stores;
-      }
-      return {
-        ...stores,
-        rateLimits: new Proxy(stores.rateLimits, {
-          get(target, property) {
-            if (property === "admitSlidingWindow") {
-              return () => Promise.reject(new Error("counter store down"));
-            }
-            const value = Reflect.get(target, property);
-            return typeof value === "function" ? value.bind(target) : value;
-          },
-        }),
-      };
-    },
-  };
-});
 
 /**
  * The wallet (caller-signed) routes — the gates, and the ADR 0002
@@ -247,13 +227,16 @@ async function seedWalletPosition(
   return id;
 }
 
-function builtRow(overrides: Record<string, unknown> = {}) {
+function builtRow(overrides: Partial<EarnWalletTransactionRow> = {}): EarnWalletTransactionRow {
   return {
     id: `earn_wallet_transaction_${crypto.randomUUID()}`,
     organization_id: TEST_ORG.id,
     project_id: TEST_PROJECT.id,
     environment: "sandbox",
     provider: "kamino",
+    strategy_id: null,
+    custody_wallet_id: null,
+    fee_mode: "wallet",
     direction: "deposit",
     owner_address: OWNER,
     vault_address: VAULT,
@@ -282,11 +265,11 @@ function builtRow(overrides: Record<string, unknown> = {}) {
 beforeEach(async () => {
   surfacingEnabled.value = true;
   rateLimitStoreDown.value = false;
+  spies = spyOnCollaborators();
   await seedTestDatabase(env);
   await clearKVStores(env);
-  vi.clearAllMocks();
-  buildWalletDepositTransaction.mockResolvedValue({ kind: "built", built: builtRow() });
-  buildWalletWithdrawalTransaction.mockResolvedValue(
+  spies.deposit.mockResolvedValue({ kind: "built", built: builtRow() });
+  spies.withdrawal.mockResolvedValue(
     builtRow({
       direction: "withdrawal",
       position_id: "earn_position_ext_test",
@@ -294,7 +277,7 @@ beforeEach(async () => {
       amount_requested: "10",
     })
   );
-  quoteVaultWithdrawal.mockResolvedValue({
+  spies.quote.mockResolvedValue({
     assetsOut: "9.95",
     assetDecimals: 6,
     blockingIssues: [],
@@ -358,7 +341,7 @@ describe("core deposit preparation replaces legacy deposit builds", () => {
   it("prepares one scoped operation and never submits the transaction", async () => {
     await seedAuth();
     const strategy = await seedStrategy();
-    const scopes = recordCallScopes(buildWalletDepositTransaction);
+    const scopes = recordCallScopes(spies.deposit);
     const response = await prepareDeposit(depositBody(strategy.id));
     expect(response.status, await response.clone().text()).toBe(202);
     const body = await response.json();
@@ -382,7 +365,7 @@ describe("core deposit preparation replaces legacy deposit builds", () => {
         },
       },
     });
-    expect(buildWalletDepositTransaction).toHaveBeenCalledWith(
+    expect(spies.deposit).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         organizationId: TEST_ORG.id,
@@ -406,7 +389,7 @@ describe("core deposit preparation replaces legacy deposit builds", () => {
     const initial = await first.json();
     const second = await prepareDeposit(depositBody(strategy.id), { idempotencyKey });
     expect((await second.json()).data.operation.id).toBe(initial.data.operation.id);
-    expect(buildWalletDepositTransaction).toHaveBeenCalledTimes(1);
+    expect(spies.deposit).toHaveBeenCalledTimes(1);
   });
 
   it("requires idempotency before provider preparation", async () => {
@@ -426,7 +409,7 @@ describe("core deposit preparation replaces legacy deposit builds", () => {
     );
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({ error: { code: "IDEMPOTENCY_KEY_REQUIRED" } });
-    expect(buildWalletDepositTransaction).not.toHaveBeenCalled();
+    expect(spies.deposit).not.toHaveBeenCalled();
   });
 
   it.each(["paused", "deprecated"] as const)(
@@ -436,7 +419,7 @@ describe("core deposit preparation replaces legacy deposit builds", () => {
       const strategy = await seedStrategy({ status });
       const response = await prepareDeposit(depositBody(strategy.id));
       expect(response.status).toBe(400);
-      expect(buildWalletDepositTransaction).not.toHaveBeenCalled();
+      expect(spies.deposit).not.toHaveBeenCalled();
     }
   );
 
@@ -445,7 +428,7 @@ describe("core deposit preparation replaces legacy deposit builds", () => {
     expect((await prepareDeposit(depositBody("missing"))).status).toBe(404);
     const strategy = await seedStrategy({ hostCluster: "mainnet-beta" });
     expect((await prepareDeposit(depositBody(strategy.id))).status).toBe(400);
-    expect(buildWalletDepositTransaction).not.toHaveBeenCalled();
+    expect(spies.deposit).not.toHaveBeenCalled();
   });
 
   it.each(["surfacing", "entitlement"] as const)("rechecks provider %s", async (gate) => {
@@ -455,7 +438,7 @@ describe("core deposit preparation replaces legacy deposit builds", () => {
     expect((await prepareDeposit(depositBody(strategy.id))).status).toBe(
       gate === "surfacing" ? 400 : 403
     );
-    expect(buildWalletDepositTransaction).not.toHaveBeenCalled();
+    expect(spies.deposit).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -468,7 +451,7 @@ describe("core deposit preparation replaces legacy deposit builds", () => {
     await seedAuth();
     const strategy = await seedStrategy();
     expect((await prepareDeposit(depositBody(strategy.id, invalid))).status).toBe(400);
-    expect(buildWalletDepositTransaction).not.toHaveBeenCalled();
+    expect(spies.deposit).not.toHaveBeenCalled();
   });
 
   it("preserves a valid partner payer in its immutable intent and build", async () => {
@@ -478,7 +461,7 @@ describe("core deposit preparation replaces legacy deposit builds", () => {
     const response = await prepareDeposit(depositBody(strategy.id, { feePayer }));
     expect(response.status).toBe(202);
     expect((await response.json()).data.operation.intent.feePayer).toBe(feePayer);
-    expect(buildWalletDepositTransaction).toHaveBeenCalledWith(
+    expect(spies.deposit).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ feePayer })
     );
@@ -496,7 +479,7 @@ describe("core wallet withdrawal preparation", () => {
     });
 
     expect(res.status).toBe(400);
-    expect(buildWalletWithdrawalTransaction).not.toHaveBeenCalled();
+    expect(spies.withdrawal).not.toHaveBeenCalled();
   });
 
   it("404s another project's position for withdrawal preparation", async () => {
@@ -529,7 +512,7 @@ describe("core wallet withdrawal preparation", () => {
         },
       },
     });
-    expect(buildWalletWithdrawalTransaction).toHaveBeenCalledWith(
+    expect(spies.withdrawal).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         positionId,
@@ -550,7 +533,7 @@ describe("core wallet withdrawal preparation", () => {
     const res = await prepareWithdrawal(withdrawalBody(positionId));
 
     expect(res.status, await res.clone().text()).toBe(202);
-    expect(buildWalletWithdrawalTransaction).toHaveBeenCalledWith(
+    expect(spies.withdrawal).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ minAmountOut: "9.94005" })
     );
@@ -573,8 +556,8 @@ describe("core wallet withdrawal preparation", () => {
     const res = await prepareWithdrawal(withdrawalBody(positionId, { slippageBps: 250 }));
 
     expect(res.status, await res.clone().text()).toBe(202);
-    expect(buildWalletWithdrawalTransaction).toHaveBeenCalledTimes(1);
-    expect(buildWalletWithdrawalTransaction).toHaveBeenCalledWith(
+    expect(spies.withdrawal).toHaveBeenCalledTimes(1);
+    expect(spies.withdrawal).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ minAmountOut: "9.70125" })
     );
@@ -595,7 +578,7 @@ describe("exit safety (ADR 0002): the exit outlives every money-in gate", () => 
     const deposit = await prepareDeposit(depositBody(strategy.id));
     expect(deposit.status).toBe(400);
     expect(await deposit.json()).toMatchObject({ error: { code: "BAD_REQUEST" } });
-    expect(buildWalletDepositTransaction).not.toHaveBeenCalled();
+    expect(spies.deposit).not.toHaveBeenCalled();
   });
 });
 
@@ -629,7 +612,7 @@ describe("metered quotas (PRO-1994): the deposit build is metered, the exit neve
       expect(res.status).toBe(429);
       expect(await res.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
       // Refused before the RPC probe was paid for, which is the whole point.
-      expect(buildWalletDepositTransaction).not.toHaveBeenCalled();
+      expect(spies.deposit).not.toHaveBeenCalled();
     }
   );
 
@@ -645,7 +628,7 @@ describe("metered quotas (PRO-1994): the deposit build is metered, the exit neve
     const res = await prepareDeposit(depositBody(strategy.id));
 
     expect(res.status, await res.clone().text()).toBe(202);
-    expect(buildWalletDepositTransaction).toHaveBeenCalledTimes(1);
+    expect(spies.deposit).toHaveBeenCalledTimes(1);
   });
 
   it("charges nothing for a keyed request the body validator refuses", async () => {
@@ -675,7 +658,7 @@ describe("metered quotas (PRO-1994): the deposit build is metered, the exit neve
 
     const exit = await prepareWithdrawal(withdrawalBody(positionId));
     expect(exit.status, await exit.clone().text()).toBe(202);
-    expect(buildWalletWithdrawalTransaction).toHaveBeenCalledTimes(1);
+    expect(spies.withdrawal).toHaveBeenCalledTimes(1);
 
     const deposit = await prepareDeposit(depositBody(strategy.id));
     expect(deposit.status).toBe(429);
@@ -693,6 +676,6 @@ describe("metered quotas (PRO-1994): the deposit build is metered, the exit neve
     const deposit = await prepareDeposit(depositBody(strategy.id));
     expect(deposit.status).toBe(503);
     expect(await deposit.json()).toMatchObject({ error: { code: "SERVICE_UNAVAILABLE" } });
-    expect(buildWalletDepositTransaction).not.toHaveBeenCalled();
+    expect(spies.deposit).not.toHaveBeenCalled();
   });
 });
