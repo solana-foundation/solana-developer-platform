@@ -1,6 +1,8 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
+import { EARN_TERMINAL_VAULT_WITHDRAWAL_REQUEST_STATUSES } from "@sdp/types/earn";
 import type { OperationReference } from "@sdp/types/operations";
 import type { DatabaseClient, DatabaseExecutor } from "@/db/client";
+import { sqlLiteralList } from "@/db/postgres-utils";
 import type { EarnWalletWithdrawalRequestTransactionRow } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import { conflict, internalError, notFound } from "@/lib/errors";
 
@@ -41,6 +43,13 @@ export const CURRENT_REDEMPTION_RELEASE_COVERS_REQUEST_SQL = `
   AND release.action = 'cancel' AND release.mechanism = 'operator_redemption'
   AND release.withdrawal_request_id IS NULL AND release.operation_only
   AND release.consumed_attempt_id IS NOT NULL AND release.consumed_at >= request.created_at`;
+
+/** Finalized release ends active tracking without inventing a historical payout or cancellation. */
+export const FINALIZED_CURRENT_REDEMPTION_RELEASE_COVERS_REQUEST_SQL = `EXISTS (
+  SELECT 1 FROM earn_wallet_withdrawal_request_transactions release
+  WHERE ${CURRENT_REDEMPTION_RELEASE_COVERS_REQUEST_SQL}
+    AND release.release_finalized_at IS NOT NULL
+)`;
 
 /** Scope for freezing a historical request without assigning it a later cycle's outcome. */
 export interface CurrentRedemptionRequestFenceInput {
@@ -107,6 +116,12 @@ export function isQueuedBuildFencedByCurrentRedemptionReleaseWithin(
 
 /** Releasing a provider request changes no historical financial request row. */
 export interface CurrentRedemptionReleaseRepository {
+  findSupersedingRedemptionRelease(input: {
+    organizationId: string;
+    projectId: string;
+    environment: SdpEnvironment;
+    withdrawalRequestId: string;
+  }): Promise<{ id: string; finalizedAt: string } | null>;
   isRequestFencedByCurrentRedemptionRelease(
     input: CurrentRedemptionRequestFenceInput
   ): Promise<boolean>;
@@ -260,14 +275,19 @@ export async function releaseCurrentRedemptionReleaseWithin(
        reuse_not_before = CASE WHEN request.id IS NOT NULL THEN lease.reuse_not_before
          ELSE to_char(timezone('UTC', now() + INTERVAL '5 minutes'), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') END,
        last_valid_block_height = NULL
-     FROM (SELECT (SELECT id FROM earn_vault_withdrawal_requests
-       WHERE organization_id = ? AND project_id = ? AND environment = ?
-         AND position_id = ? AND owner_address = ? AND custody_wallet_id IS NOT DISTINCT FROM ?
-         AND provider = ? AND vault_address = ? AND token_mint = ? AND share_mint = ?
-         AND request_address = ? AND mechanism = 'operator_redemption'
-         AND status NOT IN ('fulfilled', 'cancelled', 'failed')
+     FROM (SELECT (SELECT request.id FROM earn_vault_withdrawal_requests request
+       WHERE request.organization_id = ? AND request.project_id = ? AND request.environment = ?
+         AND request.position_id = ? AND request.owner_address = ? AND request.custody_wallet_id IS NOT DISTINCT FROM ?
+         AND request.provider = ? AND request.vault_address = ? AND request.token_mint = ? AND request.share_mint = ?
+         AND request.request_address = ? AND request.mechanism = 'operator_redemption'
+         AND request.status NOT IN ('fulfilled', 'cancelled', 'failed')
          AND ?::text IS NULL
-       ORDER BY created_at DESC, id DESC LIMIT 1) AS id) request
+         AND NOT EXISTS (
+           SELECT 1 FROM earn_wallet_withdrawal_request_transactions release
+           WHERE ${CURRENT_REDEMPTION_RELEASE_COVERS_REQUEST_SQL}
+             AND release.release_finalized_at IS NOT NULL
+         )
+       ORDER BY request.created_at DESC, request.id DESC LIMIT 1) AS id) request
      WHERE lease.environment = ? AND lease.request_address = ? AND lease.lease_token = ? AND lease.occupied`,
     [
       ...values(scope),
@@ -292,6 +312,21 @@ export function createCurrentRedemptionReleaseRepository(
   db: DatabaseClient
 ): CurrentRedemptionReleaseRepository {
   return {
+    async findSupersedingRedemptionRelease(input) {
+      const row = await db.queryOne<{ id: string; finalized_at: string }>(
+        `SELECT release.id, release.release_finalized_at AS finalized_at
+         FROM earn_vault_withdrawal_requests request
+         JOIN earn_wallet_withdrawal_request_transactions release
+           ON ${CURRENT_REDEMPTION_RELEASE_COVERS_REQUEST_SQL}
+         WHERE request.id = ? AND request.organization_id = ?
+           AND request.project_id = ? AND request.environment = ?
+           AND request.status NOT IN (${sqlLiteralList(EARN_TERMINAL_VAULT_WITHDRAWAL_REQUEST_STATUSES)})
+           AND release.release_finalized_at IS NOT NULL
+         ORDER BY release.release_finalized_at DESC, release.id DESC LIMIT 1`,
+        [input.withdrawalRequestId, ...values(input)]
+      );
+      return row === null ? null : { id: row.id, finalizedAt: row.finalized_at };
+    },
     isRequestFencedByCurrentRedemptionRelease(input) {
       return isRequestFencedByCurrentRedemptionReleaseWithin(db, input);
     },

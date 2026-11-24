@@ -28,6 +28,7 @@ import {
   CURRENT_REDEMPTION_RELEASE_COVERS_REQUEST_SQL,
   type CurrentRedemptionReleaseRepository,
   createCurrentRedemptionReleaseRepository,
+  FINALIZED_CURRENT_REDEMPTION_RELEASE_COVERS_REQUEST_SQL,
   isQueuedBuildFencedByCurrentRedemptionReleaseWithin,
   isRequestFencedByCurrentRedemptionReleaseWithin,
 } from "@/db/repositories/earn-redemption-release.repository";
@@ -327,6 +328,7 @@ export interface EarnVaultWithdrawalRequestsRepository extends CurrentRedemption
     ownerAddress: string;
     custodyWalletId: string | null;
     beforeUnixSeconds: string;
+    after?: { createdAt: string; id: string };
   }): Promise<EarnVaultWithdrawalRequestRow | null>;
   list(params: {
     organizationId: string;
@@ -885,13 +887,18 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
     ...createCurrentRedemptionReleaseRepository(db),
     async findCurrentRedemptionRequest(input) {
       const row = await db.queryOne(
-        `SELECT * FROM earn_vault_withdrawal_requests
-         WHERE organization_id = ? AND project_id = ? AND environment = ?
-           AND position_id = ? AND owner_address = ?
-           AND custody_wallet_id IS NOT DISTINCT FROM ?
-           AND mechanism = 'operator_redemption'
-           AND status NOT IN (${sqlLiteralList(EARN_TERMINAL_VAULT_WITHDRAWAL_REQUEST_STATUSES)})
-         ORDER BY created_at DESC, id DESC LIMIT 1`,
+        `SELECT request.* FROM earn_vault_withdrawal_requests request
+         WHERE request.organization_id = ? AND request.project_id = ? AND request.environment = ?
+           AND request.position_id = ? AND request.owner_address = ?
+           AND request.custody_wallet_id IS NOT DISTINCT FROM ?
+           AND request.mechanism = 'operator_redemption'
+           AND request.status NOT IN (${sqlLiteralList(EARN_TERMINAL_VAULT_WITHDRAWAL_REQUEST_STATUSES)})
+           AND NOT EXISTS (
+             SELECT 1 FROM earn_wallet_withdrawal_request_transactions release
+             WHERE ${CURRENT_REDEMPTION_RELEASE_COVERS_REQUEST_SQL}
+               AND release.release_finalized_at IS NOT NULL
+           )
+         ORDER BY request.created_at DESC, request.id DESC LIMIT 1`,
         [
           input.organizationId,
           input.projectId,
@@ -1027,6 +1034,20 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
     },
 
     async findOldestExpiredEscrow(params) {
+      const bindings: unknown[] = [
+        params.organizationId,
+        params.projectId,
+        params.environment,
+        params.positionId,
+        params.ownerAddress,
+        params.custodyWalletId,
+        params.beforeUnixSeconds,
+      ];
+      let cursor = "";
+      if (params.after !== undefined) {
+        cursor = "AND (created_at, id) > (?, ?)";
+        bindings.push(params.after.createdAt, params.after.id);
+      }
       const row = await db.queryOne<Record<string, unknown>>(
         `SELECT * FROM earn_vault_withdrawal_requests
          WHERE organization_id = ? AND project_id = ? AND environment = ?
@@ -1036,16 +1057,9 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
            AND status IN (${sqlLiteralList(EARN_LIVE_VAULT_WITHDRAWAL_REQUEST_STATUSES)})
            AND nonce IS NOT NULL AND creation_timestamp IS NOT NULL
            AND deadline_timestamp IS NOT NULL AND deadline_timestamp::numeric < ?::numeric
+           ${cursor}
          ORDER BY created_at ASC, id ASC LIMIT 1`,
-        [
-          params.organizationId,
-          params.projectId,
-          params.environment,
-          params.positionId,
-          params.ownerAddress,
-          params.custodyWalletId,
-          params.beforeUnixSeconds,
-        ]
+        bindings
       );
       return row === null ? null : mapRequest(row);
     },
@@ -1077,7 +1091,8 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
         conditions.push(
           params.settled
             ? `status IN (${sqlLiteralList(EARN_TERMINAL_VAULT_WITHDRAWAL_REQUEST_STATUSES)})`
-            : `status IN (${sqlLiteralList(EARN_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES)})`
+            : `status IN (${sqlLiteralList(EARN_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES)})
+               AND NOT ${FINALIZED_CURRENT_REDEMPTION_RELEASE_COVERS_REQUEST_SQL}`
         );
       }
       if (params.before !== undefined) {
@@ -1087,7 +1102,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
       bindings.push(params.limit + 1);
       const result = await db
         .prepare(
-          `SELECT * FROM earn_vault_withdrawal_requests
+          `SELECT * FROM earn_vault_withdrawal_requests request
             WHERE ${conditions.join(" AND ")}
             ORDER BY created_at DESC, id DESC
             LIMIT ?`
@@ -1742,6 +1757,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
                  ON request.id = action.withdrawal_request_id
               WHERE action.status IN (${sqlLiteralList(EARN_IN_FLIGHT_VAULT_WITHDRAWAL_ACTION_STATUSES)})
                 AND request.status NOT IN (${sqlLiteralList(EARN_TERMINAL_VAULT_WITHDRAWAL_REQUEST_STATUSES)})
+                AND NOT ${FINALIZED_CURRENT_REDEMPTION_RELEASE_COVERS_REQUEST_SQL}
                 AND action.environment = ?
               ORDER BY COALESCE(action.last_checked_at, action.updated_at), action.id
               LIMIT ?
@@ -1768,6 +1784,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
              SELECT request.id
                FROM earn_vault_withdrawal_requests request
               WHERE request.status IN (${sqlLiteralList(EARN_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES)})
+                AND NOT ${FINALIZED_CURRENT_REDEMPTION_RELEASE_COVERS_REQUEST_SQL}
                 AND request.environment = ?
                 AND COALESCE(request.next_check_at, request.updated_at) <= sdp_iso_now()
                 AND EXISTS (

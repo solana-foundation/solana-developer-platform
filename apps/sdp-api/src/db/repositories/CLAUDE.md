@@ -135,9 +135,16 @@ Things that will bite:
   `release_absence_observed_at` records the first finalized miss after the
   release's blockhash expires, once. A miss at least 30 seconds later fails the
   release `TRANSACTION_EXPIRED` only when every RPC endpoint, read at a
-  finalized slot past the expiry, also misses it (`unsentVerdict`); a pooled
+  finalized slot past the expiry, also misses it (`unsentVerdict`), with at least
+  two distinct endpoints answering. One endpoint leaves it pending; a pooled
   null can come from a lagging or pruned backend. After acceptance, the release
   immutability trigger lets only that write-once marker and finality change.
+- **Finalized releases supersede tracking, not financial history.** The exact
+  finalized release fence makes the earlier operation terminal with
+  `REDEMPTION_SUPERSEDED` and no payout claim. Covered requests and actions leave
+  sweep queues, and cannot regain address occupancy after another release
+  fails. Their original financial rows retain the previous status and evidence
+  so a rolling previous revision can still read them.
 - **Retained par intermediate excludes redeemed or reserved amounts.**
   Reconciliation adds intermediate from cancelled share-sourced requests and
   subtracts fulfilled or open zero-share requests for the same position and mint,

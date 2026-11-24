@@ -1626,6 +1626,51 @@ describe("Earn queued withdrawal repository", () => {
       ).toMatchObject({ id: first.request.id });
     });
 
+    it("advances past stale candidates in creation order without repeating a timestamp", async () => {
+      const candidates = [];
+      for (const suffix of ["b", "a", "c"]) {
+        const created = await createRequest({ requestId: `expired_candidate_${suffix}` });
+        await repository.advanceRequest({
+          organizationId: ORG,
+          withdrawalRequestId: created.request.id,
+          toStatus: "expired_cancelable",
+          nonce: "7",
+          creationTimestamp: "1700000000",
+        });
+        await getDb(env)
+          .prepare("UPDATE earn_vault_withdrawal_requests SET created_at = ? WHERE id = ?")
+          .bind("2026-11-01T00:00:00.000Z", created.request.id)
+          .run();
+        candidates.push(created.request.id);
+      }
+      const scope = {
+        organizationId: ORG,
+        projectId: PROJECT,
+        environment: "sandbox" as const,
+        positionId: POSITION,
+        ownerAddress: OWNER,
+        custodyWalletId: WALLET,
+        beforeUnixSeconds: "1800000000",
+      };
+      const found = [];
+      let after: { createdAt: string; id: string } | undefined;
+      for (let index = 0; index < candidates.length; index += 1) {
+        const candidate = await repository.findOldestExpiredEscrow({ ...scope, after });
+        expect(candidate).not.toBeNull();
+        if (candidate === null) throw new Error("Expected the next scoped recovery candidate");
+        found.push(candidate.id);
+        after = { createdAt: candidate.created_at, id: candidate.id };
+      }
+      expect(found).toEqual([...candidates].sort());
+      await expect(repository.findOldestExpiredEscrow({ ...scope, after })).resolves.toBeNull();
+      await expect(
+        repository.findOldestExpiredEscrow({ ...scope, projectId: OTHER_PROJECT })
+      ).resolves.toBeNull();
+      await expect(
+        repository.findOldestExpiredEscrow({ ...scope, environment: "production" })
+      ).resolves.toBeNull();
+    });
+
     async function recoveryBuild() {
       const created = await createRequest();
       await repository.advanceRequest({

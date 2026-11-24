@@ -157,7 +157,8 @@ async function projectQueuedOperation(
   operation: Operation,
   requestId: string
 ): Promise<Operation> {
-  const request = await createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env)).getById({
+  const requests = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
+  const request = await requests.getById({
     organizationId: scope.organizationId,
     environment: scope.environment,
     withdrawalRequestId: requestId,
@@ -170,23 +171,35 @@ async function projectQueuedOperation(
     positionId: request.position_id,
   });
   const strategyId = position?.strategy_id;
-  const progress = queuedRequestProgress(request.status, operation.status);
+  const supersedingRelease =
+    request.mechanism === "operator_redemption"
+      ? await requests.findSupersedingRedemptionRelease({
+          ...scope,
+          withdrawalRequestId: requestId,
+        })
+      : null;
+  const progress =
+    supersedingRelease === null
+      ? queuedRequestProgress(request.status, operation.status)
+      : { status: "failed" as const, waitingFor: null, outcome: null };
   const { status } = progress;
+  const observedAt = supersedingRelease?.finalizedAt ?? request.updated_at;
   return {
     ...operation,
     // Request evidence can advance before the operation worker records progress.
     updatedAt:
-      Date.parse(request.updated_at) > Date.parse(operation.updatedAt)
-        ? request.updated_at
-        : operation.updatedAt,
+      Date.parse(observedAt) > Date.parse(operation.updatedAt) ? observedAt : operation.updatedAt,
     status: projectedOperationStatus(operation.status, status),
     nextAction: waitFor(progress),
     error: projectedError(
       operation,
       status === "failed"
         ? {
-            code: "TRANSACTION_FAILED",
-            message: request.failure_reason ?? "Withdrawal request failed",
+            code: supersedingRelease === null ? "TRANSACTION_FAILED" : "REDEMPTION_SUPERSEDED",
+            message:
+              supersedingRelease === null
+                ? (request.failure_reason ?? "Withdrawal request failed")
+                : "A finalized redemption release ended tracking without establishing a payout",
           }
         : null
     ),
@@ -200,7 +213,7 @@ async function projectQueuedOperation(
       signature:
         request.closing_signature ?? request.cancel_signature ?? request.creation_signature,
       settledAmount:
-        request.assets_paid === null
+        supersedingRelease !== null || request.assets_paid === null
           ? null
           : { mint: request.token_mint, value: request.assets_paid },
       settlementOutcome: progress.outcome,
@@ -389,7 +402,11 @@ async function admitOperationEffect(
  * transaction. They end failed even after a cancellation request: a terminal cancellation needs
  * an authoritative resource reference, and bytes SDP never sent have none.
  */
-function unsentSignatureUpdate(verdict: UnsentTransactionVerdict): OperationUpdate | undefined {
+function unsentSignatureUpdate(
+  verdict: UnsentTransactionVerdict,
+  operationError: Operation["error"]
+): OperationUpdate | undefined {
+  const depositRefused = operationError?.code === "DEPOSIT_REFUSED";
   switch (verdict) {
     case "landed":
       return undefined;
@@ -401,17 +418,19 @@ function unsentSignatureUpdate(verdict: UnsentTransactionVerdict): OperationUpda
           reason: "Reconciling the signed transaction without sending it",
         },
         resourceRef: null,
-        error: null,
+        error: depositRefused ? operationError : null,
       };
     case "expired":
       return {
         status: "failed",
         nextAction: null,
         resourceRef: null,
-        error: {
-          code: "TRANSACTION_EXPIRED",
-          message: "The signed transaction expired before it was sent",
-        },
+        error: depositRefused
+          ? operationError
+          : {
+              code: "TRANSACTION_EXPIRED",
+              message: "The signed transaction expired before it was sent",
+            },
       };
     default: {
       const unknownVerdict: never = verdict;
@@ -431,6 +450,7 @@ async function observeUnsentSignature(input: {
   built: PreparedStrategySigningTarget;
   signedTransaction: string;
   currentRelease: boolean;
+  operationError: Operation["error"];
   observations: OperationObservationRpc;
   workerBudget: OperationWorkerBudget;
 }): Promise<OperationUpdate | undefined> {
@@ -443,7 +463,34 @@ async function observeUnsentSignature(input: {
     signed.signature,
     BigInt(input.built.last_valid_block_height)
   );
-  return unsentSignatureUpdate(verdict);
+  return unsentSignatureUpdate(verdict, input.operationError);
+}
+
+/** A ledger admission refusal does not prove that exposed signed bytes never landed. */
+function depositExposureRefusal(
+  cause: unknown,
+  built: PreparedStrategySigningTarget,
+  broadcast: boolean
+): EffectRefusal | null {
+  if (
+    !broadcast ||
+    built.movement !== "earn.deposit" ||
+    !(cause instanceof AppError) ||
+    cause.code !== "VAULT_EXPOSURE_CAP"
+  )
+    return null;
+  return { code: "DEPOSIT_REFUSED", message: cause.message };
+}
+
+function isUnavailableWithdrawalRecovery(
+  cause: unknown,
+  built: PreparedStrategySigningTarget
+): boolean {
+  return (
+    built.movement === "earn.queued_withdraw_cancel" &&
+    cause instanceof AppError &&
+    cause.details?.reason === "withdrawal_recovery_unavailable"
+  );
 }
 
 /**
@@ -778,6 +825,7 @@ export async function advanceEarnOperation(
       built,
       signedTransaction,
       currentRelease,
+      operationError: claim.operation.error,
       observations,
       workerBudget,
     });
@@ -789,12 +837,21 @@ export async function advanceEarnOperation(
   try {
     resourceRef = await submit(signedTransaction, broadcast);
   } catch (error) {
-    if (
-      built.movement !== "earn.queued_withdraw_cancel" ||
-      !(error instanceof AppError) ||
-      error.details?.reason !== "withdrawal_recovery_unavailable"
-    )
-      throw error;
+    const exposureRefusal = depositExposureRefusal(error, built, broadcast);
+    if (exposureRefusal !== null) {
+      // The ledger refused before broadcast, but exposed bytes can still land independently.
+      await service.repository.restrictToObservation(scope, claim);
+      return update({
+        status: "awaiting_signature",
+        nextAction: {
+          type: "wait",
+          reason: "Reconciling the refused deposit without sending it",
+        },
+        resourceRef: null,
+        error: exposureRefusal,
+      });
+    }
+    if (!isUnavailableWithdrawalRecovery(error, built)) throw error;
     return update({
       status: "failed",
       nextAction: null,

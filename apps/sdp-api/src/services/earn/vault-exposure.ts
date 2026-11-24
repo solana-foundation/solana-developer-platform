@@ -459,8 +459,10 @@ export async function assertVaultExposureWithinCap(
 /**
  * The LATE half: the `admit` hook the ledger runs inside the transaction that
  * records a deposit's `requested` row (`LedgerAdmissionHook`,
- * earn-movements.repository.ts). The operation worker passes it when submitting
- * a signed wallet deposit. Unsigned builds have no ledger transaction.
+ * earn-movements.repository.ts). The operation worker passes it before a new
+ * deposit broadcast. Recording signed bytes already observed on chain bypasses
+ * admission: a cap refusal or unreadable exposure cannot erase economic activity.
+ * Unsigned builds have no ledger transaction.
  *
  * Order, and why each step is where it is:
  *

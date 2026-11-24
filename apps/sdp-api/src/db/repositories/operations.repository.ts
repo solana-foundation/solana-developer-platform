@@ -397,6 +397,12 @@ export function createOperationsRepository(db: DatabaseClient) {
   return {
     get: (scope: OperationScope, id: string) => read(db, scope, id, false),
 
+    /** The exact current action's attempt, without claiming or starting execution. */
+    async getCurrentAttempt(scope: OperationScope, id: string): Promise<OperationAttempt | null> {
+      const row = await requireRecord(db, scope, id, false);
+      return currentAttempt(db, scope, row.operation);
+    },
+
     async findByRequest(scope: OperationScope, kind: Operation["kind"], requestKey: string) {
       const row = await db.queryOne(
         `SELECT ${OPERATION_COLUMNS} FROM operations WHERE ${scopeSql} AND kind = ? AND request_key = ?`,

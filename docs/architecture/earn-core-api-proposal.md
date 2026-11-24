@@ -155,7 +155,10 @@ the new action and follows the normal signing and `/submit` flow. It uses
 `earn.execute` and the inherited source's current wallet grants. The original
 accepted operation is not reopened; its `/cancel` remains unavailable.
 
-One bounded query selects the position's oldest eligible recorded request.
+Scoped, ordered queries select the position's oldest recorded candidate whose
+live escrow remains recoverable. Closed or no-longer-expired candidates are
+skipped without waiting for reconciliation. Each candidate is read once; the
+usual path still needs one live proof, and N stale candidates need N+1 reads.
 Live provider proof must match its tenant/source, mints, nonce, creation time,
 deadline and share quantity. The private builder and simulation recheck that
 the expired escrow can return those shares. A different or closed request is
@@ -191,9 +194,13 @@ fictional payout for an earlier request. A definitive no-effect failure lifts
 the freeze. A release that never lands is one: once its blockhash expires at
 finalized commitment, SDP never resends it. A second finalized-history miss at
 least 30 seconds after the first fails it `TRANSACTION_EXPIRED` only when every
-RPC endpoint, read at a finalized slot past the expiry, also misses it. The original recorded
-outcome stays unchanged and can remain unresolved; only the new release
-operation completes.
+RPC endpoint, with at least two distinct endpoints answering at a finalized
+slot past the expiry, also misses it. One endpoint alone keeps the outcome
+pending. The historical financial record stays unchanged. Its operation ends
+`failed` with `REDEMPTION_SUPERSEDED` and no settled amount or settlement outcome;
+that ends tracking, not proof of nonexecution or a historical payout. Covered
+requests and actions leave background polling. Only the new release completes;
+never automatically retry the superseded withdrawal.
 
 The guard matches organization, project, environment, position, owner, custody
 source, provider, PDA and mints. Local causal row ordering identifies earlier
@@ -209,6 +216,13 @@ no payout movement. A PDA-scoped reservation excludes other SDP release or
 redemption attempts while execution is unresolved. It does not stop the owner
 or provider from replacing the onchain request, which the reviewed scope
 explicitly permits. Issuer freezes can still prevent release.
+
+If this exact transaction finalized successfully but its provider events stay
+unreadable, an operator can use the [audited recovery tool](../ops/earn-redemption-release-recovery.md).
+It requires independent release evidence and an explicit attestation, verifies
+the accepted signature's finalized receipt, and commits the evidence,
+completion and cooldown atomically with the audit record. It creates no token
+amount or financial payout. Ordinary automatic verification is unchanged.
 
 Source authorization, exact-byte signing, idempotency, retries and post-submit
 cancel/refresh barriers stay unchanged. A different signature, a missing
@@ -255,6 +269,10 @@ not weaken the async lifecycle for new actions.
   Observation-only attempts can never regain broadcast authority.
 - Deposit acceptance atomically commits signed bytes, execution acceptance and
   its critical audit intent. Exit auditing retains its best-effort posture.
+- An exposure-cap refusal restricts signed deposits to observation and reports
+  `DEPOSIT_REFUSED`, final only after proven nonexecution. Already observed
+  deposits reach the ledger even when current caps or exposure reads refuse
+  new deposits.
 - The movement ledger and provider requests remain the authority for settlement.
   Operation status does not manufacture settled amounts or acquisition history.
 
@@ -299,13 +317,15 @@ Token-sized exits add one cold share-mint precision read, zero warm reads;
 concurrent precision reads share work and failures are not cached. Required
 simulation remains before returning unsigned bytes.
 
-Solver recovery adds no provider request read when its bounded lookup finds no
-candidate, and one live request read when it does. Selecting recovery reuses the
-same call's validated choice proof during build admission: two API proof reads
-become one, before the provider builder's existing validation and simulation.
+Solver recovery adds zero provider reads without an eligible recorded candidate
+and one on the usual path. It skips stale candidates in this position's creation
+order, reading each once and stopping at the first proven recovery: K stale
+candidates followed by a valid escrow need K+1 serial proof reads. Selecting
+recovery reuses that call's validated proof during build admission, avoiding a
+duplicate read before the provider builder's existing validation and simulation.
 That proof is never persisted or accepted from a caller; later preparation or
-refresh calls read provider state again. Each review offers at most one recovery
-option; it never scans all owner requests or fans out provider reads across them.
+refresh reads provider state again. Each review offers at most one recovery
+option and never scans another position or fans out provider reads.
 Hastra release also adds no request read without a known pending candidate and
 one live request read when present. It targets the current owner request, not a
 historical cycle. No provider account is fetched twice in one choice read.

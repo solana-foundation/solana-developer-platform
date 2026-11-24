@@ -1237,7 +1237,9 @@ usual. Recovery returns the shares to the same owner, not the deposit token.
 After SDP verifies the transaction and the provider's outcome, the result has
 `settlementOutcome: "recovered"` with the returned share mint and amount.
 
-Each review recovers at most one expired request; prepare another withdrawal
+Each review offers the oldest request whose live escrow is still recoverable.
+A stale request that has closed or is no longer expired does not hide a later
+eligible escrow. Recover one request per review, then prepare another withdrawal
 for the next. The original operation is not reopened, and its `/cancel` stays
 unavailable. Expiry alone, or a missing provider request, does not authorize
 recovery.
@@ -1263,17 +1265,19 @@ transaction, the result is `settlementOutcome: "recovered"` with
 `settledAmount: null`. Read the position's `parIntermediate` for its current
 wYLDS balance. Issuer freezes can still block release.
 
-The original redemption's recorded outcome stays unchanged and can remain
-unresolved. A successful release completes only the new operation; it does not
-reopen the original or enable its `/cancel`. The normal signing, retry and
-post-submit rules still apply. An uncertain broadcast is not permission to
-build another release.
+The historical redemption's financial record stays unchanged. Its operation
+ends `failed` with `REDEMPTION_SUPERSEDED`, no settled amount and no settlement
+outcome. That ends tracking without proving nonexecution or establishing a
+historical payout. Do not automatically retry the original withdrawal. The new
+release operation completes; it does not reopen the original or enable its
+`/cancel`. An uncertain broadcast is not permission to build another release.
 
 A release that never lands ends `failed` with `TRANSACTION_EXPIRED`. SDP
 decides that only after the transaction's blockhash has expired and finalized
 history misses it twice, at least 30 seconds apart, the second time on every
-RPC endpoint SDP uses. That frees the redemption address, so you can prepare a
-new release.
+RPC endpoint SDP uses, with at least two distinct endpoints answering. A
+single-endpoint pool keeps an uncertain outcome pending. Proven nonexecution
+frees the redemption address, so you can prepare a new release.
 
 ## Retries and idempotency
 
@@ -1291,15 +1295,26 @@ after a later submit; it builds nothing new. Read
 `GET /v1/operations/{operationId}` for the current state.
 
 Once you submit, start over with a new key only after the operation is
-`failed`. A timeout, an expired blockhash, an unknown provider response or
-missing RPC history doesn't prove a submitted transaction never ran: keep
+`failed` with a definitive rejection or proven nonexecution. A
+`REDEMPTION_SUPERSEDED` result ends tracking without that proof and must not
+trigger an automatic retry.
+
+A timeout, an expired blockhash, an unknown provider response or missing RPC
+history doesn't prove a submitted transaction never ran: keep
 tracking until SDP knows. A transaction you never submitted or sent can't land
 once the network passes its `lastValidBlockHeight`, so you can prepare again.
 
 When SDP stops before sending signed bytes, for example because the key lost
 `earn.execute`, it keeps watching for them. Once their blockhash has expired
-and no RPC endpoint's finalized history holds the signature, the operation ends
-`failed` with `TRANSACTION_EXPIRED`.
+and every configured RPC endpoint misses the signature at a finalized read
+floor, with at least two distinct endpoints answering, the operation ends
+`failed` with `TRANSACTION_EXPIRED`. One endpoint alone leaves it pending.
+
+If the vault exposure cap refuses a deposit before broadcast, SDP stops trying
+to send it and reports `DEPOSIT_REFUSED` while watching the exposed bytes. The
+refusal becomes final only when SDP proves they never executed. A deposit
+observed on chain is still recorded even when current caps or an unreadable
+exposure figure prevent new deposits.
 
 ## Fees and rates
 
@@ -37801,7 +37816,7 @@ Source: https://platform.solana.com/docs/reference/api/earn/prepare-earn-withdra
 
 `POST /v1/earn/withdraw`
 
-The position fixes the strategy and owner; amount.kind is all, shares, token or intermediate. When the strategy offers more than one exit route, nextAction is select_option: call POST /v1/operations/\{operationId\}/refresh with an advertised optionId to prepare that route's transaction, then review and submit its new actionId and version. With amount.kind all, an expired solver escrow can advertise a recovery option even at a zero share balance; it prepares a new transaction that returns the escrowed shares and leaves the original withdrawal unchanged. A tracked Hastra operator redemption can advertise release_current_redemption, including with no free PRIME or wYLDS. Select it explicitly: it authorizes releasing the wallet's current pending redemption at execution, including any replacement request. This leaves available wYLDS in the wallet, returns no PRIME or USDC payout, and never rewrites an older withdrawal. Its completed result has settlementOutcome recovered and settledAmount null; position.parIntermediate reports live balances. A release that never lands fails with TRANSACTION_EXPIRED once its blockhash expires. Preparation never signs or broadcasts, and a queued request is not a payout: track the operation through settlement.
+The position fixes the strategy and owner; amount.kind is all, shares, token or intermediate. When the strategy offers more than one exit route, nextAction is select_option: call POST /v1/operations/\{operationId\}/refresh with an advertised optionId to prepare that route's transaction, then review and submit its new actionId and version. With amount.kind all, an expired solver escrow can advertise a recovery option even at a zero share balance; it prepares a new transaction that returns the escrowed shares and leaves the original withdrawal unchanged. Recovery selects the oldest recorded request whose live escrow is still recoverable, skipping closed or no-longer-expired candidates. A tracked Hastra operator redemption can advertise release_current_redemption, including with no free PRIME or wYLDS. Select it explicitly: it authorizes releasing the wallet's current pending redemption at execution, including any replacement request. This leaves available wYLDS in the wallet, returns no PRIME or USDC payout, and never rewrites an older withdrawal. Its completed result has settlementOutcome recovered and settledAmount null; position.parIntermediate reports live balances. A release that never lands fails with TRANSACTION_EXPIRED once its blockhash expires. Preparation never signs or broadcasts, and a queued request is not a payout: track the operation through settlement.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.execute` action.
 
@@ -39004,7 +39019,7 @@ Source: https://platform.solana.com/docs/reference/api/earn/get-operation
 
 `GET /v1/operations/{operationId}`
 
-Poll it after submitting. Each nextAction type says what to do next: sign_transaction asks the owner to sign, select_option asks you to choose a route with refresh, and wait means keep polling the same attempt. queued, awaiting_signature, submitted and settling are in progress. For a queued withdrawal, submitted means its request is still confirming, and settling means the provider has yet to pay out. completed means verified delivery; for a selected recovery, result.settlementOutcome recovered means assets were released, never withdrawal proceeds. A Hastra current-redemption release reports settledAmount null; read the position for live available wYLDS. cancelled means a verified cancellation. canCancel says whether the preparation can still be cancelled, which also needs earn.manage; cancelRequestedAt alone is pending intent. result fields stay null until their source is known. Requires earn.read and source visibility.
+Poll it after submitting. Each nextAction type says what to do next: sign_transaction asks the owner to sign, select_option asks you to choose a route with refresh, and wait means keep polling the same attempt. queued, awaiting_signature, submitted and settling are in progress. For a queued withdrawal, submitted means its request is still confirming, and settling means the provider has yet to pay out. completed means verified delivery; for a selected recovery, result.settlementOutcome recovered means assets were released, never withdrawal proceeds. A Hastra current-redemption release reports settledAmount null; read the position for live available wYLDS. An earlier redemption operation covered by a finalized release ends failed with REDEMPTION_SUPERSEDED and no settled amount or settlement outcome. This ends tracking without proving nonexecution or establishing a historical payout; never automatically retry that original withdrawal. cancelled means a verified cancellation. canCancel says whether the preparation can still be cancelled, which also needs earn.manage; cancelRequestedAt alone is pending intent. result fields stay null until their source is known. Requires earn.read and source visibility.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
 
@@ -39467,7 +39482,7 @@ Source: https://platform.solana.com/docs/reference/api/earn/submit-operation
 
 `POST /v1/operations/{operationId}/submit`
 
-Pass the current actionId and version and, for an ownerAddress source, signedTransaction: the prepared transaction signed in the owner's wallet, base64-encoded. SDP verifies the exact stored message and required signatures and records the authorization; a worker then broadcasts and tracks the transaction, so poll GET /v1/operations/\{operationId\}. Stale actions return 409. Requires earn.execute and the current action principal. Before each new signing or broadcast effect, the worker rechecks the credential, execute permission, project membership and wallet binding; losing authority stops new effects but never proves a transaction did not execute. Signed bytes the worker then never sends end failed with TRANSACTION_EXPIRED only once their blockhash has expired and no RPC endpoint's finalized history holds them. For an SDP custody wallet, omit signedTransaction: the worker requests the custody provider's signature, which can return sign_in_provider instructions but never needs a second submit. A wallet policy at the provider that refuses to sign ends the operation failed with CUSTODY_POLICY_REFUSED.
+Pass the current actionId and version and, for an ownerAddress source, signedTransaction: the prepared transaction signed in the owner's wallet, base64-encoded. SDP verifies the exact stored message and required signatures and records the authorization; a worker then broadcasts and tracks the transaction, so poll GET /v1/operations/\{operationId\}. Stale actions return 409. Requires earn.execute and the current action principal. Before each new signing or broadcast effect, the worker rechecks the credential, execute permission, project membership and wallet binding; losing authority stops new effects but never proves a transaction did not execute. Signed bytes the worker then never sends end failed with TRANSACTION_EXPIRED only once their blockhash has expired and every configured RPC endpoint, with at least two distinct endpoints answering, misses them at a finalized read floor. A single-endpoint pool leaves uncertain outcomes pending. A vault exposure-cap refusal stops further broadcasts and reports DEPOSIT_REFUSED while SDP keeps observing exposed bytes; only proven nonexecution makes that refusal final. Deposits observed on chain are still recorded when current caps or exposure reads refuse new deposits. For an SDP custody wallet, omit signedTransaction: the worker requests the custody provider's signature, which can return sign_in_provider instructions but never needs a second submit. A wallet policy at the provider that refuses to sign ends the operation failed with CUSTODY_POLICY_REFUSED.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.execute` action.
 

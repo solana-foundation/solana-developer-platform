@@ -25,7 +25,13 @@ import * as movementRepositories from "@/db/repositories/earn-movements.reposito
 import type { EarnVaultWithdrawalRequestRow } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import * as withdrawalRepositories from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import type { OperationClaim, OperationScope } from "@/db/repositories/operations.repository";
-import { conflict, custodyPolicyRefused, forbidden, serviceUnavailable } from "@/lib/errors";
+import {
+  conflict,
+  custodyPolicyRefused,
+  forbidden,
+  serviceUnavailable,
+  vaultExposureCapExceeded,
+} from "@/lib/errors";
 import * as moneyAdmission from "@/lib/money-admission";
 import * as idempotency from "@/middleware/idempotency";
 import * as depositAdmission from "@/routes/earn/handlers/admission";
@@ -113,6 +119,7 @@ function spyOnCollaborators() {
     depositAdmission: vi.spyOn(depositAdmission, "assertRecordedStrategyDepositAdmitted"),
     moneyAdmission: vi.spyOn(moneyAdmission, "assertMoneyStartAdmitted"),
     withdrawal: vi.mocked(vi.spyOn(requests, "getById"), { partial: true }),
+    supersedingRelease: vi.spyOn(requests, "findSupersedingRedemptionRelease"),
     movement: vi.mocked(vi.spyOn(ledger, "getMovementById"), { partial: true }),
     position: vi.mocked(vi.spyOn(ledger, "getPositionById"), { partial: true }),
     prepareProposal: vi.fn<CustodyTransactionProposer["prepare"]>(),
@@ -336,6 +343,7 @@ beforeEach(async () => {
   mocks.sponsor.mockImplementation(async (_env, _scope, _built, ownerSigned) => ownerSigned);
   mocks.submit.mockResolvedValue({ kind: "earn.movement", id: "movement" });
   mocks.withdrawal.mockResolvedValue(null);
+  mocks.supersedingRelease.mockResolvedValue(null);
   mocks.movement.mockResolvedValue(null);
   mocks.position.mockResolvedValue(null);
 });
@@ -401,6 +409,46 @@ describe("asynchronous operation execution", () => {
     expect(mocks.proposer).not.toHaveBeenCalled();
     expect(mocks.sign).not.toHaveBeenCalled();
   });
+
+  it.each(["pending", "expired", "landed"] as const)(
+    "observes a capped deposit until its signed bytes are %s without retrying admission",
+    async (verdict) => {
+      walletBuild();
+      claim.attempt.signedTransaction = signed;
+      claim.attempt.signature = transactionSignature;
+      claim.attempt.lastValidBlockHeight = target.last_valid_block_height;
+      mocks.submit.mockRejectedValueOnce(vaultExposureCapExceeded("Vault is exit-only"));
+
+      claim.operation = await advance();
+      expect(claim.operation).toMatchObject({
+        status: "awaiting_signature",
+        nextAction: { type: "wait" },
+        error: { code: "DEPOSIT_REFUSED", message: "Vault is exit-only" },
+      });
+      expect(mocks.restrict).toHaveBeenCalledWith(scope, claim);
+      expect(mocks.submit).toHaveBeenCalledExactlyOnceWith(signed, true);
+      claim.attempt.observationOnly = true;
+      mocks.signatureStatus.mockResolvedValue(verdict === "landed");
+      mocks.unsent.mockResolvedValue(verdict === "expired" ? "expired" : "pending");
+
+      const result = await advance();
+      if (verdict === "landed") {
+        expect(result).toMatchObject({
+          status: "submitted",
+          error: null,
+          resourceRef: { kind: "earn.movement", id: "movement" },
+        });
+        expect(mocks.submit).toHaveBeenLastCalledWith(signed, false);
+      } else {
+        expect(result).toMatchObject({
+          status: verdict === "expired" ? "failed" : "awaiting_signature",
+          error: { code: "DEPOSIT_REFUSED", message: "Vault is exit-only" },
+        });
+        expect(mocks.submit).toHaveBeenCalledTimes(1);
+      }
+      expect(mocks.dispatch).toHaveBeenCalledTimes(1);
+    }
+  );
 
   it("keeps a custody deposit's withdrawn permission as SIGNING_REJECTED", async () => {
     mocks.moneyAdmission.mockRejectedValue(
@@ -891,6 +939,53 @@ describe("operation settlement projection", () => {
       },
     });
     expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("ends superseded redemption activity without claiming payout or cancellation", async () => {
+    queue("pending", "operator_redemption");
+    const finalizedAt = "2026-11-18T00:01:00.000Z";
+    mocks.supersedingRelease.mockResolvedValue({ id: "later-release", finalizedAt });
+    expect(await scoped(() => projectEarnOperation(env, scope, claim.operation))).toMatchObject({
+      status: "failed",
+      updatedAt: finalizedAt,
+      nextAction: null,
+      error: { code: "REDEMPTION_SUPERSEDED" },
+      result: {
+        signature: "escrow-signature",
+        settledAmount: null,
+        settlementOutcome: null,
+      },
+    });
+    expect(await advance()).toMatchObject({
+      status: "failed",
+      nextAction: null,
+      error: { code: "REDEMPTION_SUPERSEDED" },
+    });
+    expect(mocks.transition).toHaveBeenCalledWith(
+      scope,
+      claim,
+      expect.objectContaining({
+        status: "failed",
+        error: { code: "REDEMPTION_SUPERSEDED", message: expect.any(String) },
+      })
+    );
+    expect(mocks.sign).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("keeps an existing terminal operation after a later release supersedes its request", async () => {
+    queue("pending", "operator_redemption");
+    claim.operation.status = "failed";
+    claim.operation.error = { code: "ORIGINAL_FAILURE", message: "Original failure" };
+    mocks.supersedingRelease.mockResolvedValue({
+      id: "later-release",
+      finalizedAt: "2026-11-18T00:01:00.000Z",
+    });
+    expect(await scoped(() => projectEarnOperation(env, scope, claim.operation))).toMatchObject({
+      status: "failed",
+      error: claim.operation.error,
+      result: { settledAmount: null, settlementOutcome: null },
+    });
   });
 
   it("keeps a closed position's strategy on its withdrawal history", async () => {

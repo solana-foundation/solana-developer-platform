@@ -27,7 +27,7 @@ export type UnsentTransactionVerdict =
   | "landed"
   /** It can still land, or no endpoint could prove otherwise yet. */
   | "pending"
-  /** Its blockhash expired at finalized commitment and no endpoint's history has it. */
+  /** Its blockhash expired and at least two distinct endpoints corroborate its absence. */
   | "expired";
 
 /** Read-only observations shared only within one worker run and exact authority scope. */
@@ -37,8 +37,9 @@ export interface OperationObservationRpc {
   /**
    * Whether a signature a cheaper read missed can never land. Only once the `finalized` block
    * height is past `lastValidBlockHeight` does every pool endpoint, read at that finalized slot,
-   * answer for it; `expired` needs every endpoint to miss it inside the history horizon. An
-   * endpoint that cannot answer, or an expiry past the horizon, stays `pending`.
+   * answer for it; `expired` needs at least two distinct endpoint URLs and every endpoint to
+   * miss it inside the history horizon. A single-endpoint pool, an endpoint that cannot answer,
+   * or an expiry past the horizon stays `pending`.
    *
    * @param scope - The operation's authority scope.
    * @param value - The transaction signature.
@@ -165,6 +166,16 @@ export function createOperationObservationRpc(): OperationObservationRpc {
             logEvent("error", {
               event: "sdp_api_earn_operation_unsent_verdict_unprovable",
               ...evidence,
+            });
+            return "pending";
+          }
+          // A snapshot-booted or nonhistorical node can return null even inside the horizon.
+          // Never release an attempt's fence on one node's uncorroborated absence.
+          if (read.answeringEndpointCount < 2) {
+            logEvent("warn", {
+              event: "sdp_api_earn_operation_unsent_uncorroborated",
+              ...evidence,
+              answering_endpoint_count: read.answeringEndpointCount,
             });
             return "pending";
           }

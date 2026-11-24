@@ -67,7 +67,8 @@ function releaseChainReads(): {
   };
 }
 
-async function readFinalizedTransaction(
+/** The exact finalized receipt; missing logs remain unknown evidence for automatic recovery. */
+export async function readFinalizedTransaction(
   rpc: ClusterRpc,
   value: string
 ): Promise<FinalizedReleaseTransaction | null> {

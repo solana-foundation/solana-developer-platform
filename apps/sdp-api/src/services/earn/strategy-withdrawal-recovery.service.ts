@@ -81,7 +81,7 @@ export function assertExpiredStrategyEscrow(
     throw conflict("Live escrow identity or deadline differs from the recorded withdrawal");
 }
 
-/** Offer one recorded request per review: one bounded query and one live provider read. */
+/** Offer the oldest recoverable escrow, skipping stale candidates without changing history. */
 export async function readExpiredStrategyWithdrawalRecoveries(
   env: Env,
   input: { actor: QueuedWithdrawalActor; position: QueuedWithdrawalPosition },
@@ -93,7 +93,7 @@ export async function readExpiredStrategyWithdrawalRecoveries(
 ): Promise<ProvenStrategyWithdrawalRecovery[]> {
   if (client === null) return [];
   const repository = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
-  const request = await repository.findOldestExpiredEscrow({
+  const scope = {
     organizationId: input.actor.organizationId,
     projectId: input.actor.projectId,
     environment: currentClusterScope().environment,
@@ -101,14 +101,20 @@ export async function readExpiredStrategyWithdrawalRecoveries(
     ownerAddress: input.position.ownerAddress,
     custodyWalletId: input.position.custodyWalletId ?? null,
     beforeUnixSeconds: String(Math.floor(Date.now() / 1000)),
-  });
-  if (request === null) return [];
-  assertStrategyRecoverySource(request, input.actor, input.position);
-  const lookup = await client.readQueuedWithdrawalRequest(earnRuntime(env), {
-    providerReference: request.vault_address,
-    requestAddress: request.request_address,
-  });
-  if (lookup.status !== "expiredCancelable") return [];
-  assertExpiredStrategyEscrow(request, lookup);
-  return [{ request, proof: lookup }];
+  };
+  let after: { createdAt: string; id: string } | undefined;
+  for (;;) {
+    const request = await repository.findOldestExpiredEscrow({ ...scope, after });
+    if (request === null) return [];
+    assertStrategyRecoverySource(request, input.actor, input.position);
+    const lookup = await client.readQueuedWithdrawalRequest(earnRuntime(env), {
+      providerReference: request.vault_address,
+      requestAddress: request.request_address,
+    });
+    if (lookup.status === "expiredCancelable") {
+      assertExpiredStrategyEscrow(request, lookup);
+      return [{ request, proof: lookup }];
+    }
+    after = { createdAt: request.created_at, id: request.id };
+  }
 }

@@ -58,7 +58,9 @@ usual. Recovery returns the shares to the same owner, not the deposit token.
 After SDP verifies the transaction and the provider's outcome, the result has
 `settlementOutcome: "recovered"` with the returned share mint and amount.
 
-Each review recovers at most one expired request; prepare another withdrawal
+Each review offers the oldest request whose live escrow is still recoverable.
+A stale request that has closed or is no longer expired does not hide a later
+eligible escrow. Recover one request per review, then prepare another withdrawal
 for the next. The original operation is not reopened, and its `/cancel` stays
 unavailable. Expiry alone, or a missing provider request, does not authorize
 recovery.
@@ -84,17 +86,19 @@ transaction, the result is `settlementOutcome: "recovered"` with
 `settledAmount: null`. Read the position's `parIntermediate` for its current
 wYLDS balance. Issuer freezes can still block release.
 
-The original redemption's recorded outcome stays unchanged and can remain
-unresolved. A successful release completes only the new operation; it does not
-reopen the original or enable its `/cancel`. The normal signing, retry and
-post-submit rules still apply. An uncertain broadcast is not permission to
-build another release.
+The historical redemption's financial record stays unchanged. Its operation
+ends `failed` with `REDEMPTION_SUPERSEDED`, no settled amount and no settlement
+outcome. That ends tracking without proving nonexecution or establishing a
+historical payout. Do not automatically retry the original withdrawal. The new
+release operation completes; it does not reopen the original or enable its
+`/cancel`. An uncertain broadcast is not permission to build another release.
 
 A release that never lands ends `failed` with `TRANSACTION_EXPIRED`. SDP
 decides that only after the transaction's blockhash has expired and finalized
 history misses it twice, at least 30 seconds apart, the second time on every
-RPC endpoint SDP uses. That frees the redemption address, so you can prepare a
-new release.
+RPC endpoint SDP uses, with at least two distinct endpoints answering. A
+single-endpoint pool keeps an uncertain outcome pending. Proven nonexecution
+frees the redemption address, so you can prepare a new release.
 
 ## Retries and idempotency
 
@@ -112,15 +116,26 @@ after a later submit; it builds nothing new. Read
 `GET /v1/operations/{operationId}` for the current state.
 
 Once you submit, start over with a new key only after the operation is
-`failed`. A timeout, an expired blockhash, an unknown provider response or
-missing RPC history doesn't prove a submitted transaction never ran: keep
+`failed` with a definitive rejection or proven nonexecution. A
+`REDEMPTION_SUPERSEDED` result ends tracking without that proof and must not
+trigger an automatic retry.
+
+A timeout, an expired blockhash, an unknown provider response or missing RPC
+history doesn't prove a submitted transaction never ran: keep
 tracking until SDP knows. A transaction you never submitted or sent can't land
 once the network passes its `lastValidBlockHeight`, so you can prepare again.
 
 When SDP stops before sending signed bytes, for example because the key lost
 `earn.execute`, it keeps watching for them. Once their blockhash has expired
-and no RPC endpoint's finalized history holds the signature, the operation ends
-`failed` with `TRANSACTION_EXPIRED`.
+and every configured RPC endpoint misses the signature at a finalized read
+floor, with at least two distinct endpoints answering, the operation ends
+`failed` with `TRANSACTION_EXPIRED`. One endpoint alone leaves it pending.
+
+If the vault exposure cap refuses a deposit before broadcast, SDP stops trying
+to send it and reports `DEPOSIT_REFUSED` while watching the exposed bytes. The
+refusal becomes final only when SDP proves they never executed. A deposit
+observed on chain is still recorded even when current caps or an unreadable
+exposure figure prevent new deposits.
 
 ## Fees and rates
 

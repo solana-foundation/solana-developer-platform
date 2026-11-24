@@ -208,9 +208,17 @@ describe("unsent transaction absence proof", () => {
     expect(historyReads()).toEqual([{ method: "getEpochInfo", params: [] }]);
   });
 
-  it("proves an expired send absent, reading the finalized height first and flooring history at its slot", async () => {
+  it("keeps a single endpoint's floored history miss unresolved, even inside the horizon", async () => {
     answerChain(HORIZON_EDGE_HEIGHT, null);
-    expect(await verdict(first)).toBe("expired");
+    const warn = spyOnLog("warn");
+    expect(await verdict(first)).toBe("pending");
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "sdp_api_earn_operation_unsent_uncorroborated",
+        answering_endpoint_count: 1,
+      }),
+      "sdp_api_earn_operation_unsent_uncorroborated"
+    );
     expect(historyReads()).toEqual([
       { method: "getEpochInfo", params: [] },
       {
@@ -225,6 +233,21 @@ describe("unsent transaction absence proof", () => {
         ],
       },
     ]);
+  });
+
+  it("proves expiry when two distinct endpoints corroborate the floored history miss", async () => {
+    answerChain(HORIZON_EDGE_HEIGHT, null);
+    const history = vi
+      .spyOn(rpcFactory, "getSignatureStatusesFromEveryEndpoint")
+      .mockImplementation(async () => {
+        expect(historyReads()).toEqual([{ method: "getEpochInfo", params: [] }]);
+        return [{ kind: "absent", answeringEndpointCount: 2 }];
+      });
+    expect(await verdict(first)).toBe("expired");
+    expect(history).toHaveBeenCalledExactlyOnceWith([first], {
+      minContextSlot: BigInt(FINALIZED_SLOT),
+      commitment: "finalized",
+    });
   });
 
   it("reports a send an endpoint's floored history holds as landed", async () => {
