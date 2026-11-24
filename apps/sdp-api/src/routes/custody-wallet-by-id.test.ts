@@ -168,6 +168,54 @@ describe("Custody wallet by ID route", () => {
     return clusterRpc.requests.filter(({ method }) => method === "getAccountInfo");
   }
 
+  it("returns only the selected wallet's advisory and never the credential identity", async () => {
+    const connection = await seedConnectionWallet();
+    // A sibling wallet on the same connection carries a different observation,
+    // so returning it would fail the "only the selected wallet's" assertion.
+    const siblingId = "cwlt_wallet_by_id_connection_2";
+    const siblingWalletId = "privy_wallet_by_id_connection_2";
+    await insertTestCustodyWalletRow(getDb(env), {
+      id: siblingId,
+      owner: { kind: "connection", custodyConnectionId: connection.connectionId },
+      walletId: siblingWalletId,
+      publicKey: TEST_SOLANA_ADDRESSES.wallet1,
+      label: "Connection wallet 2",
+      purpose: null,
+      status: "active",
+    });
+    const observed = (credentialId: string, status: "missing" | "present") => ({
+      credentialId,
+      status,
+      reason: status === "missing" ? "no_policy" : "policy_detected",
+      checkedAt: new Date().toISOString(),
+    });
+    await getDb(env).batch([
+      getDb(env)
+        .prepare("UPDATE custody_wallets SET provider_policy = ?::jsonb WHERE id = ?")
+        .bind(
+          JSON.stringify(observed("pcred_wallet_by_id_connection", "present")),
+          connection.walletRecordId
+        ),
+      getDb(env)
+        .prepare("UPDATE custody_wallets SET provider_policy = ?::jsonb WHERE id = ?")
+        .bind(JSON.stringify(observed("pcred_wallet_by_id_connection", "missing")), siblingId),
+    ]);
+    const response = await app.request(
+      `/v1/wallets/${connection.walletId}?includeBalance=false`,
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(response.status).toBe(200);
+    const result = await response.json();
+    // A read that reached past this wallet to its connection would prefer the
+    // sibling's missing observation and fail here.
+    expect(result.data.wallet.providerPolicy).toMatchObject({
+      status: "present",
+      reason: "policy_detected",
+    });
+    expect(result.data.wallet.providerPolicy).not.toHaveProperty("credentialId");
+  });
+
   it("reads and labels a Connection wallet without exposing a Config owner", async () => {
     const connection = await seedConnectionWallet();
 
@@ -193,6 +241,7 @@ describe("Custody wallet by ID route", () => {
             label: "Connection wallet",
             purpose: null,
             status: "active",
+            providerPolicy: { checkedAt: null, reason: "not_checked", status: "unknown" },
             createdAt: expect.any(String),
           },
         },

@@ -4,8 +4,9 @@ import { badRequest } from "@/lib/errors";
 import type { Env } from "@/types/env";
 
 const PRIVY_CHECK_TIMEOUT_MS = 10_000;
-const PRIVY_INVALID_CREDENTIALS_CODE = "missing_or_invalid_privy_app_id";
-const privyErrorBodySchema = z.object({ code: z.string() });
+/** Privy answers a wrong secret or an unknown app ID with this 400 code, never with 401. */
+export const PRIVY_INVALID_CREDENTIALS_CODE = "missing_or_invalid_privy_app_id";
+export const privyErrorBodySchema = z.object({ code: z.string() });
 const PRIVY_CREDENTIALS_REJECTED_MESSAGE =
   "The provider rejected these credentials. Check the credential fields, then connect again.";
 const PRIVY_CREDENTIALS_UNCONFIRMED_MESSAGE =
