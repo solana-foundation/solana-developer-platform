@@ -397,6 +397,9 @@
     "environmentProductionDetail": "Mainnet · real funds",
     "environmentProductionLockedDetail": "Mainnet · after review",
     "environmentProductionHostedDetail": "Mainnet · {host}",
+    "network": "Network",
+    "networkDevnet": "Devnet",
+    "networkMainnet": "Mainnet",
     "mainnetAccessAdminOnly": "Only an admin can request mainnet access.",
     "requestMainnetAccess": "Request access",
     "organizationSettings": "Organization settings"
@@ -711,6 +714,16 @@
     },
     "detailsTitle": "Details",
     "name": "Name",
+    "planTitle": "Plan",
+    "plan": "Plan",
+    "planFree": "Free",
+    "planNetworks": "Networks",
+    "planNetworksDevnet": "Devnet. Mainnet after review.",
+    "planNetworksBoth": "Devnet and mainnet",
+    "planApiKeys": "API keys",
+    "planApiKeysLimit": "{count} requests per minute per key",
+    "planMembers": "Members",
+    "planMembersLimit": "Up to {count}",
     "dangerZoneTitle": "Danger zone"
   },
   "account": {

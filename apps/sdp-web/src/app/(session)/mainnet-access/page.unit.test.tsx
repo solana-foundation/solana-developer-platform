@@ -28,10 +28,20 @@ vi.mock("@/flags", () => ({
   sandboxOnBeta: async () => state.sandboxOnBeta,
   betaLabel: async () => state.betaLabel,
 }));
-// Clerk's prebuilt switcher needs a loaded Clerk; the page's own controls around it are real.
+// The page's organization picker is SDP's own over Clerk's hooks, never Clerk's prebuilt switcher.
 vi.mock("@clerk/nextjs", () => ({
-  OrganizationSwitcher: () => <button type="button">Switch organization</button>,
   useClerk: () => ({ signOut: vi.fn() }),
+  useOrganization: () => ({ organization: { id: "org_test_acme", name: "Acme" } }),
+  useOrganizationList: () => ({
+    isLoaded: true,
+    setActive: vi.fn(),
+    userMemberships: {
+      data: [
+        { organization: { id: "org_test_acme", name: "Acme" } },
+        { organization: { id: "org_test_globex", name: "Globex" } },
+      ],
+    },
+  }),
 }));
 
 const LOCKED: MainnetAccess = {
@@ -102,6 +112,7 @@ describe("mainnet request page", () => {
     ).toBeTruthy();
     expect(screen.getByRole("button", { name: "Request mainnet access" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Sign out" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Acme" })).toBeTruthy();
     const sandbox = screen.getByRole("link", { name: "Try the sandbox" });
     expect(sandbox.getAttribute("href")).toBe("https://platform-devnet.solana.com");
     expect(sandbox.getAttribute("target")).toBe("_blank");

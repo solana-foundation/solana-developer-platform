@@ -238,6 +238,15 @@
                   "@sdp/types/provider-access": {
                     "importNames": ["RAMP_PROVIDERS"],
                     "message": "Raw module and provider lists ignore the release channel. Derive the list from the channel-capped flags: enabledTransactionModules(flags), getEnabledRampProviders(), isModuleInDeploymentReleaseChannel(). See docs/decisions/0005-release-channels.md."
+                  },
+                  "@clerk/nextjs": {
+                    "importNames": [
+                      "CreateOrganization",
+                      "OrganizationList",
+                      "OrganizationProfile",
+                      "OrganizationSwitcher"
+                    ],
+                    "message": "The dashboard exposes no Clerk organization UI (ADR 0012): Clerk shows every person as org:member and its admin role could write memberships. Use the SDP workspace switcher and Settings > Members."
                   }
                 },
                 "patterns": [

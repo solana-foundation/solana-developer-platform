@@ -43,6 +43,7 @@ import {
 import { DashboardQuickStart } from "@/components/dashboard-quick-start";
 import { DashboardRouteTabs } from "@/components/dashboard-route-tabs";
 import { NetworkDebugPanel } from "@/components/network-debug-panel";
+import { NetworkToggle } from "@/components/network-toggle";
 import { SentryUserContext } from "@/components/sentry-user-context";
 import { SidebarUserMenu } from "@/components/sidebar-user-menu";
 import { useWalletFavorites } from "@/components/use-wallet-favorites";
@@ -285,6 +286,7 @@ function DashboardSidebarContent({
               onOrganizationSwitchingChange={onOrganizationSwitchingChange}
             />
           )}
+          {isCollapsed ? null : <NetworkToggle />}
         </div>
         {navSections.map((section, idx) => (
           <SidebarGroup
