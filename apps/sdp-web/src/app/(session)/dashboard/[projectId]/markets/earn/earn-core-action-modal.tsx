@@ -5,15 +5,22 @@ import {
   type EarnStrategy,
   type EarnVaultPosition,
 } from "@sdp/types/earn";
-import { type Operation, type OperationIntent, operationIntentSchema } from "@sdp/types/operations";
+import {
+  type Operation,
+  type OperationIntent,
+  type OperationStatus,
+  operationIntentSchema,
+} from "@sdp/types/operations";
 import { Button } from "@sdp/ui/button";
 import { Callout } from "@sdp/ui/callout";
 import { DetailList, DetailRow } from "@sdp/ui/detail-list";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import { Modal } from "@sdp/ui/modal";
+import { SegmentedControl } from "@sdp/ui/segmented-control";
 import { Select, SelectItem } from "@sdp/ui/select";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { StatusText } from "@sdp/ui/status-text";
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
@@ -21,10 +28,18 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { earnCoreClient, isEarnOperationTerminal, useEarnOperation } from "@/lib/earn-core-data";
 import { createIdempotencyKeyStore } from "@/lib/idempotency-key-store";
 import { useModalFocus } from "@/lib/use-modal-focus";
+import { useStepFade } from "@/lib/use-step-fade";
 import { useZodForm } from "@/lib/use-zod-form";
 import { useEarnFundingWallets, walletDisplayName } from "./deposit/earn-funding-wallets";
 import { isPositiveDecimal } from "./earn-decimal";
-import { formatTokenValue, tokenSymbol } from "./earn-format";
+import {
+  EARN_OPERATION_STATUS_TONE,
+  formatIntentAmount,
+  formatProviderAmount,
+  formatShareAmount,
+  formatTokenValue,
+  tokenSymbol,
+} from "./earn-format";
 import { EARN_TRANSACTION_MODAL_FRAME } from "./earn-modal";
 
 const operationKeys = createIdempotencyKeyStore("sdp:earn:core-actions:v1");
@@ -297,36 +312,62 @@ export function EarnCoreActionModal(props: ActionProps) {
     fallbackAttribute: "data-earn-strategy-id",
     fallbackValue: props.kind === "deposit" ? props.strategy.id : props.position.id,
   });
+  const stepRef = useStepFade<HTMLDivElement>(actionStep(prepared));
   const title =
     props.kind === "deposit" ? t("DashboardEarn.core.deposit") : t("DashboardEarn.core.withdraw");
   const strategyName = props.kind === "deposit" ? props.strategy.name : props.position.label;
 
   return (
     <Modal {...EARN_TRANSACTION_MODAL_FRAME} isOpen ariaLabel={title} onClose={props.onClose}>
-      <div ref={focusRef}>
+      <div className="p-6" ref={focusRef}>
         <h2
-          className="text-subheading font-medium text-primary"
+          className="pr-8 text-subheading font-medium text-primary outline-none"
           data-modal-focus-target
           tabIndex={-1}
         >
           {title}
         </h2>
         <p className="mt-2 text-body text-secondary">{strategyName}</p>
-        {prepared ? (
-          <EarnOperationReview
-            operation={prepared}
-            onUpdated={(operation) => {
-              setPrepared(operation);
-              props.onUpdated?.(operation);
-            }}
-          />
-        ) : (
-          <EarnPreparationForm action={props} preparation={preparation} />
-        )}
+        <div ref={stepRef}>
+          {prepared ? (
+            <EarnOperationReview
+              operation={prepared}
+              onUpdated={(operation) => {
+                setPrepared(operation);
+                props.onUpdated?.(operation);
+              }}
+              onDone={props.onClose}
+              shareMint={
+                props.kind === "deposit" ? props.strategy.shareMint : props.position.shareMint
+              }
+            />
+          ) : (
+            <EarnPreparationForm action={props} preparation={preparation} />
+          )}
+        </div>
       </div>
     </Modal>
   );
 }
+
+/**
+ * The dialog's step, so moving between them fades instead of snapping.
+ *
+ * @param operation - The operation the dialog holds, once prepared.
+ * @returns The step on screen.
+ */
+function actionStep(operation: Operation | undefined): "details" | "review" | "progress" | "done" {
+  if (!operation) return "details";
+  if (isEarnOperationTerminal(operation)) return "done";
+  return operation.status === "prepared" ? "review" : "progress";
+}
+
+/** SDP-side waits that end in seconds; provider settlement can take days, so it stays still. */
+const SHORT_WAIT_STATUSES: ReadonlySet<OperationStatus> = new Set([
+  "queued",
+  "awaiting_signature",
+  "submitted",
+]);
 
 /** The details step: what to move, then a review that prepares terms without signing. */
 function EarnPreparationForm({
@@ -344,6 +385,7 @@ function EarnPreparationForm({
         <EarnFundingSourceFields strategy={action.strategy} preparation={preparation} />
       ) : (
         <EarnWithdrawalQuantityFields
+          position={action.position}
           intermediate={action.intermediate}
           preparation={preparation}
         />
@@ -358,6 +400,11 @@ function EarnPreparationForm({
           error={form.errors.amount}
           disabled={busy}
           onChange={(value) => form.setField("amount", value)}
+          trailing={
+            action.kind === "withdraw" && !action.intermediate ? (
+              <EarnWithdrawalUnitSelect preparation={preparation} />
+            ) : null
+          }
         />
       ) : null}
       <EarnTextField
@@ -387,7 +434,11 @@ function EarnPreparationForm({
   );
 }
 
-/** A labelled text input whose validation message sits under it and describes it. */
+/**
+ * A labelled text input whose validation message sits under it and describes it.
+ *
+ * @param props.trailing - A control that qualifies the value, such as its unit, set beside it.
+ */
 function EarnTextField({
   id,
   label,
@@ -397,6 +448,7 @@ function EarnTextField({
   error,
   disabled,
   onChange,
+  trailing,
 }: {
   id: string;
   label: string;
@@ -406,21 +458,32 @@ function EarnTextField({
   error: string | undefined;
   disabled: boolean;
   onChange: (value: string) => void;
+  trailing?: ReactNode;
 }) {
   const errorId = `${id}-error`;
+  const input = (
+    <Input
+      id={id}
+      inputMode={inputMode}
+      value={value}
+      disabled={disabled}
+      onChange={(event) => onChange(event.target.value)}
+      autoComplete={autoComplete}
+      aria-invalid={error ? true : undefined}
+      aria-describedby={error ? errorId : undefined}
+    />
+  );
   return (
     <div className="space-y-2">
       <Label htmlFor={id}>{label}</Label>
-      <Input
-        id={id}
-        inputMode={inputMode}
-        value={value}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
-        autoComplete={autoComplete}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={error ? errorId : undefined}
-      />
+      {trailing ? (
+        <div className="flex items-end gap-3">
+          <div className="min-w-0 flex-1">{input}</div>
+          <div className="w-32 shrink-0">{trailing}</div>
+        </div>
+      ) : (
+        input
+      )}
       {error ? (
         <p id={errorId} className="text-meta text-error">
           {error}
@@ -430,42 +493,77 @@ function EarnTextField({
   );
 }
 
+/**
+ * What the position holds, then whether to take part of it or all of it. The figures are the
+ * same live position read the holdings table shows, formatted the same way.
+ */
 function EarnWithdrawalQuantityFields({
+  position,
   intermediate,
   preparation,
 }: {
+  position: EarnVaultPosition;
   intermediate?: boolean;
   preparation: ReturnType<typeof useEarnPreparation>;
 }) {
   const t = useTranslations();
-  const { form, tokenMint, busy } = preparation;
-  const { withdrawAll, withdrawUnit } = form.values;
+  const locale = useLocale();
+  const { form, busy } = preparation;
+  const pending = intermediate ? position.parIntermediate : undefined;
   return (
-    <div className="space-y-2">
-      {!intermediate ? (
-        <Select
-          value={withdrawUnit}
-          ariaLabel={t("DashboardEarn.core.amountUnit")}
-          disabled={busy}
-          onValueChange={(value) => {
-            // Only the listed units can be chosen; anything else leaves the unit as it was.
-            const unit = WITHDRAWAL_UNITS.find((candidate) => candidate === value);
-            if (unit) form.setField("withdrawUnit", unit);
-          }}
-        >
-          <SelectItem value="token">{tokenSymbol(tokenMint ?? "")}</SelectItem>
-          <SelectItem value="shares">{t("DashboardEarn.core.shares")}</SelectItem>
-        </Select>
-      ) : null}
-      <Button
-        type="button"
-        variant="secondary"
+    <div className="space-y-4">
+      <DetailList variant="summary">
+        {pending ? (
+          <DetailRow label={t("DashboardEarn.core.balance")} fit="figure">
+            {formatTokenValue(pending.withdrawableAmount, pending.mint, locale)}
+          </DetailRow>
+        ) : (
+          <>
+            <DetailRow label={t("DashboardEarn.core.balance")} fit="figure">
+              {formatTokenValue(position.tokenValue, position.tokenMint, locale)}
+            </DetailRow>
+            <DetailRow label={t("DashboardEarn.core.shares")} fit="figure">
+              {formatProviderAmount(position.shares, locale)}
+            </DetailRow>
+          </>
+        )}
+      </DetailList>
+      <SegmentedControl
+        ariaLabel={t("DashboardEarn.core.withdrawalQuantity")}
         disabled={busy}
-        onClick={() => form.setField("withdrawAll", !withdrawAll)}
-      >
-        {withdrawAll ? t("DashboardEarn.core.customAmount") : t("DashboardEarn.core.withdrawAll")}
-      </Button>
+        options={[
+          { value: "amount", label: t("DashboardEarn.core.customAmount") },
+          { value: "all", label: t("DashboardEarn.core.withdrawAll") },
+        ]}
+        value={form.values.withdrawAll ? "all" : "amount"}
+        onChange={(value) => form.setField("withdrawAll", value === "all")}
+      />
     </div>
+  );
+}
+
+/** The unit a custom withdrawal amount is read in: the deposit token or the vault's shares. */
+function EarnWithdrawalUnitSelect({
+  preparation,
+}: {
+  preparation: ReturnType<typeof useEarnPreparation>;
+}) {
+  const t = useTranslations();
+  const { form, tokenMint, busy } = preparation;
+  return (
+    <Select
+      value={form.values.withdrawUnit}
+      ariaLabel={t("DashboardEarn.core.amountUnit")}
+      disabled={busy}
+      onValueChange={(value) => {
+        // Only the listed units can be chosen; anything else leaves the unit as it was.
+        const unit = WITHDRAWAL_UNITS.find((candidate) => candidate === value);
+        if (unit) form.setField("withdrawUnit", unit);
+      }}
+    >
+      <SelectItem value="token">{tokenSymbol(tokenMint ?? "")}</SelectItem>
+      <SelectItem value="shares">{t("DashboardEarn.core.shares")}</SelectItem>
+    </Select>
   );
 }
 
@@ -473,9 +571,15 @@ function EarnWithdrawalQuantityFields({
 export function EarnOperationReview({
   operation: initial,
   onUpdated,
+  onDone,
+  shareMint,
 }: {
   operation: Operation;
   onUpdated?: (operation: Operation) => void;
+  /** Closes the dialog hosting this review; activity rows leave it out. */
+  onDone?: () => void;
+  /** The strategy's share mint, so amounts in it read as shares; unknown leaves mints as they are. */
+  shareMint?: string;
 }) {
   const t = useTranslations();
   const {
@@ -492,13 +596,16 @@ export function EarnOperationReview({
   const { busy, error, act } = useEarnOperationActions(operation, onUpdated, update, refresh);
 
   const statusKey = `DashboardEarn.core.status.${operation.status}` as const;
+  const statusTone = EARN_OPERATION_STATUS_TONE[operation.status];
   return (
     <div className="mt-5 space-y-4" aria-live="polite">
-      <p className="text-body font-medium text-primary">{t(statusKey)}</p>
+      <p className="text-body font-medium text-primary">
+        {statusTone ? <StatusText tone={statusTone}>{t(statusKey)}</StatusText> : t(statusKey)}
+      </p>
       {operation.terms.description ? (
         <p className="text-body text-secondary">{operation.terms.description}</p>
       ) : null}
-      <EarnOperationTerms operation={operation} />
+      <EarnOperationTerms operation={operation} shareMint={shareMint} />
       {operation.status === "prepared" && operation.nextAction?.type === "select_option" ? (
         <div className="space-y-2">
           <Label htmlFor={`earn-option-${operation.id}`}>{t("DashboardEarn.core.route")}</Label>
@@ -525,7 +632,13 @@ export function EarnOperationReview({
       {readError ? (
         <Callout variant="warning">{t("DashboardEarn.core.refreshFailed")}</Callout>
       ) : null}
-      <EarnOperationActions operation={operation} busy={busy} expired={expired} onAction={act} />
+      <EarnOperationActions
+        operation={operation}
+        busy={busy}
+        expired={expired}
+        onAction={act}
+        onDone={onDone}
+      />
     </div>
   );
 }
@@ -535,16 +648,41 @@ function EarnOperationActions({
   busy,
   expired,
   onAction,
+  onDone,
 }: {
   operation: Operation;
   busy: boolean;
   expired: boolean;
   onAction: (action: "submit" | "cancel" | "refresh") => Promise<void>;
+  onDone?: () => void;
 }) {
   const t = useTranslations();
-  if (isEarnOperationTerminal(operation)) return null;
+  if (isEarnOperationTerminal(operation)) {
+    return onDone ? (
+      <div className="flex justify-end pt-4">
+        <Button onClick={onDone}>
+          {t(
+            operation.status === "completed"
+              ? "DashboardEarn.core.done"
+              : "DashboardEarn.core.close"
+          )}
+        </Button>
+      </div>
+    ) : null;
+  }
   const nextAction = operation.nextAction;
   const canRefresh = operation.status === "prepared" && nextAction?.type === "refresh";
+  if (operation.status !== "prepared" && !operation.canCancel && nextAction?.type !== "submit") {
+    // Accepted work with nothing left to decide: the dialog can close while it carries on.
+    return onDone ? (
+      <div className="flex items-center justify-between gap-3 pt-4">
+        <p className="text-caption text-secondary">{t("DashboardEarn.core.continuesInActivity")}</p>
+        <Button variant="secondary" onClick={onDone}>
+          {t("DashboardEarn.core.close")}
+        </Button>
+      </div>
+    ) : null;
+  }
   return (
     <div className="flex flex-wrap justify-end gap-3 pt-4">
       {operation.canCancel ? (
@@ -566,10 +704,16 @@ function EarnOperationActions({
   );
 }
 
-function EarnOperationTerms({ operation }: { operation: Operation }) {
+function EarnOperationTerms({
+  operation,
+  shareMint,
+}: {
+  operation: Operation;
+  shareMint: string | undefined;
+}) {
   const t = useTranslations();
   const locale = useLocale();
-  const requestedAmount = requestedOperationAmount(operation, locale, t);
+  const requestedAmount = requestedOperationAmount(operation, shareMint, locale, t);
   return (
     <DetailList variant="summary">
       <DetailRow
@@ -583,12 +727,12 @@ function EarnOperationTerms({ operation }: { operation: Operation }) {
       </DetailRow>
       {operation.terms.estimate ? (
         <DetailRow label={t("DashboardEarn.core.estimate")}>
-          {formatTokenValue(operation.terms.estimate.value, operation.terms.estimate.mint, locale)}
+          {formatOperationAmount(operation.terms.estimate, shareMint, locale, t)}
         </DetailRow>
       ) : null}
       {operation.terms.minimum ? (
         <DetailRow label={t("DashboardEarn.core.minimum")}>
-          {formatTokenValue(operation.terms.minimum.value, operation.terms.minimum.mint, locale)}
+          {formatOperationAmount(operation.terms.minimum, shareMint, locale, t)}
         </DetailRow>
       ) : null}
       <DetailRow label={t("DashboardEarn.core.fees")}>
@@ -627,7 +771,10 @@ function EarnOperationStatus({
         </Callout>
       ) : null}
       {nextAction?.type === "wait" ? (
-        <p className="text-body text-secondary">{nextAction.reason}</p>
+        <EarnOperationPending
+          reason={nextAction.reason}
+          live={SHORT_WAIT_STATUSES.has(operation.status)}
+        />
       ) : null}
       {nextAction?.type === "sign_transaction" ? (
         <Callout variant="info">{t("DashboardEarn.core.walletSignature")}</Callout>
@@ -642,21 +789,67 @@ function EarnOperationStatus({
   );
 }
 
+/**
+ * Work still under way, centred so progress reads at a glance. While SDP itself is moving
+ * (`live`), a halo leaves the dot and the words breathe on one beat (keyframes in
+ * `globals.css`); a provider wait that can last days keeps the dot still. Reduced motion keeps
+ * both still, and the review's polite live region announces the words.
+ *
+ * @param props.reason - The API's own words for what the operation is waiting on.
+ * @param props.live - Whether the wait is a short SDP-side step worth animating.
+ * @returns The pending status line.
+ */
+function EarnOperationPending({ reason, live }: { reason: string; live: boolean }) {
+  return (
+    <p className="flex items-center justify-center gap-2.5 py-3 text-body text-secondary">
+      <span aria-hidden="true" className="relative flex size-2 shrink-0">
+        {live ? (
+          <span className="absolute inset-0 rounded-full bg-info motion-safe:animate-[earn-pending-halo_2.4s_cubic-bezier(0,0,0.2,1)_infinite]" />
+        ) : null}
+        <span className="relative size-2 rounded-full bg-info" />
+      </span>
+      <span
+        className={
+          live ? "motion-safe:animate-[earn-pending-breathe_2.4s_ease-in-out_infinite]" : undefined
+        }
+      >
+        {reason}
+      </span>
+    </p>
+  );
+}
+
+/**
+ * An amount in an operation's terms. A strategy's share token carries no symbol, so an amount in
+ * the strategy's own share mint reads as shares; every other mint formats as itself, an unknown
+ * one as its shortened address rather than a unit it might not be.
+ *
+ * @param amount - The quoted mint and decimal value.
+ * @param shareMint - The strategy's share mint, when the caller knows it.
+ * @param locale - The viewer's locale.
+ * @param t - The translator.
+ * @returns The amount as the review shows it.
+ */
+function formatOperationAmount(
+  amount: { mint: string; value: string },
+  shareMint: string | undefined,
+  locale: string,
+  t: ReturnType<typeof useTranslations>
+): string {
+  return amount.mint === shareMint
+    ? formatShareAmount(amount.value, locale, t)
+    : formatTokenValue(amount.value, amount.mint, locale);
+}
+
 function requestedOperationAmount(
   operation: Operation,
+  shareMint: string | undefined,
   locale: string,
   t: ReturnType<typeof useTranslations>
 ): string {
   const input = operation.terms.inputAmount;
-  if (input) return formatTokenValue(input.value, input.mint, locale);
-  if (operation.intent.kind === "earn.deposit") {
-    const { amount } = operation.intent;
-    return formatTokenValue(amount.value, amount.mint, locale);
-  }
-  const { amount } = operation.intent;
-  if (amount.kind === "all") return t("DashboardEarn.core.allHoldings");
-  if (amount.kind === "shares") return `${amount.value} ${t("DashboardEarn.core.shares")}`;
-  return formatTokenValue(amount.value, amount.mint, locale);
+  if (input) return formatOperationAmount(input, shareMint, locale, t);
+  return formatIntentAmount(operation.intent, locale, t);
 }
 
 function quotedOperationFees(

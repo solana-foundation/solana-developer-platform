@@ -1,10 +1,13 @@
 import { isDecimalString } from "@sdp/solana/amount";
 import type { EarnStrategy } from "@sdp/types/earn";
+import type { OperationIntent, OperationStatus } from "@sdp/types/operations";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import { SOLANA_CLUSTER_LABELS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
+import type { StatusTone } from "@sdp/ui/status-text";
 import { truncateMiddle } from "@/app/(session)/dashboard/[projectId]/markets/truncate-middle";
 import type { MessageKey } from "@/i18n/messages";
 import type { TranslationValues } from "@/i18n/translate";
+import { compareUnsignedDecimals } from "./earn-decimal";
 import {
   type EarnVaultDepositAvailability,
   earnVaultDepositOnlyEnvironment,
@@ -87,6 +90,21 @@ function isBelowOneCent(value: string): boolean {
 }
 
 /** The parts of a table row's detail line, joined by the design's middle dot. */
+/**
+ * How each operation status reads, in the design system's status tones. A prepared operation
+ * still waits on the user's decision, so it reads as plain text.
+ */
+export const EARN_OPERATION_STATUS_TONE: Record<OperationStatus, StatusTone | null> = {
+  prepared: null,
+  queued: "progress",
+  awaiting_signature: "progress",
+  submitted: "progress",
+  settling: "progress",
+  completed: "positive",
+  failed: "critical",
+  cancelled: "neutral",
+};
+
 export function earnDetailLine(parts: readonly string[]): string {
   return parts.join(" · ");
 }
@@ -139,6 +157,59 @@ export function formatTokenValue(
   return WELL_KNOWN_TOKEN_BY_MINT.get(tokenMint)?.isUsdStable
     ? formatUsd(value, locale)
     : formatTokenQuantity(value, locale, tokenSymbol(tokenMint));
+}
+
+/**
+ * A share count with its unit, singular for exactly one. A strategy's share token carries no
+ * symbol of its own, so shares read as shares rather than a shortened mint.
+ *
+ * @param value - The decimal share count.
+ * @param locale - The viewer's locale.
+ * @param t - The translator.
+ * @returns The count with its unit.
+ */
+export function formatShareAmount(
+  value: string,
+  locale: string,
+  t: (key: MessageKey, values?: TranslationValues) => string
+): string {
+  const unit =
+    compareUnsignedDecimals(value, "1") === 0
+      ? "DashboardEarn.core.shareUnitOne"
+      : "DashboardEarn.core.shareUnit";
+  return formatTokenQuantity(value, locale, t(unit));
+}
+
+/**
+ * The amount an operation's intent asks to move: the deposit, or the withdrawal as requested.
+ *
+ * @param intent - The operation's intent.
+ * @param locale - The viewer's locale.
+ * @param t - The translator.
+ * @returns The requested amount as Earn surfaces name it.
+ */
+export function formatIntentAmount(
+  intent: OperationIntent,
+  locale: string,
+  t: (key: MessageKey, values?: TranslationValues) => string
+): string {
+  if (intent.kind === "earn.deposit") {
+    return formatTokenValue(intent.amount.value, intent.amount.mint, locale);
+  }
+  const { amount } = intent;
+  switch (amount.kind) {
+    case "all":
+      return t("DashboardEarn.core.allHoldings");
+    case "shares":
+      return formatShareAmount(amount.value, locale, t);
+    case "token":
+    case "intermediate":
+      return formatTokenValue(amount.value, amount.mint, locale);
+    default: {
+      const unknownAmount: never = amount;
+      throw new Error(`Unknown withdrawal amount: ${JSON.stringify(unknownAmount)}`);
+    }
+  }
 }
 
 /** Turn a provider duration into one short, human unit for product copy. */

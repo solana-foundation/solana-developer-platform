@@ -103,6 +103,11 @@ monospace is only for code. Use `EARN_TRANSACTION_MODAL_FRAME` for action
 modals. Input steps are forms; money execution requires its own button and
 never submits on Enter.
 
+An amount in the strategy's own share mint reads as shares
+(`formatShareAmount`); every other mint formats as itself, never as shares.
+Only SDP-side waits (queued, awaiting signature, submitted) pulse; provider
+settlement can take days and stays still.
+
 Keep loading, empty and error states at the ready layout footprint. Long names
 wrap or clamp inside child spans; amounts remain whole. In a `DetailRow`, use
 `fit="figure"` for amounts and `fit="wrap"` for names. Design-system `cn` joins
