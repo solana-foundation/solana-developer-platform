@@ -73,8 +73,8 @@ re-checked, not remembered.
 
 `VedaVaultDirectClient` implements `buildVaultWithdrawal` (ADR 0003 — "instant
 lands first, and alone"): burn shares, receive the vault asset, one
-transaction, carried by the same `POST /withdrawals/execute` movement model
-Kamino uses. `quoteVaultWithdrawal` (`supportsVaultWithdrawQuote`) is the read
+transaction, prepared through `POST /v1/earn/withdraw` and executed by the
+shared asynchronous operation worker. Kamino uses the same API lifecycle. `quoteVaultWithdrawal` (`supportsVaultWithdrawQuote`) is the read
 the exit floor derives from, exactly as `quoteVaultDeposit` feeds the deposit
 floor; `minAmountOut` is required for the same reason `minSharesOut` is.
 
@@ -120,7 +120,8 @@ only two options are refuse or round. `amounts.ts` (deliberately outside the
 firewall, so it is unit-testable without loading the SDK) refuses any value
 finer than its mint can represent and returns the canonical form the instruction
 actually encodes — surfaced as `VedaInstructionPlan.accepted`, which is what the
-ledger persists.
+ledger persists. The grammar is the shared `acceptTokenAmount`
+(`@sdp/solana/amount`); `amounts.ts` maps its refusals to `SdpVedaError`.
 
 Two bugs hide under rounding: a deposit of `1.0000009` on a six-decimal mint
 would be RECORDED as 1.0000009 while 1.000000 moved, and a `minSharesOut` below

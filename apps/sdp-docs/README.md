@@ -14,9 +14,8 @@ SDP Docs is the comprehensive external-facing documentation for the SDP platform
 - **Payments** — Sending funds with compliance screening
 - **Compliance** — Using AML/KYC integrations
 - **On/Off Ramps** — Fiat integration guides
-- **Embedded Yield:** Strategy reads, previews, withdrawal-route discovery,
-  unsigned builds, submission, queued actions, and tracking, all with an API
-  key
+- **Earn** — Discovering strategies, reading positions, and depositing or
+  withdrawing through tracked operations
 - **API Keys & Auth** — Authentication and authorization
 - **Projects & Organizations** — Multi-tenant management
 

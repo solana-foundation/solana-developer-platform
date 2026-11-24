@@ -14,10 +14,10 @@ import { custodyProviderPoliciesCron } from "@/cron/custody-provider-policies";
 import { dvpTradesCron } from "@/cron/dvp-trades";
 import { earnCatalogueSyncCron } from "@/cron/earn-catalogue-sync";
 import { earnMetricsRefreshCron } from "@/cron/earn-metrics-refresh";
-import { earnSplitSwapsCron } from "@/cron/earn-split-swaps";
 import { earnVaultMovementsCron } from "@/cron/earn-vault-movements";
 import { fireblocksProposalsCron } from "@/cron/fireblocks-proposals";
 import { idempotencyKeyPruneCron } from "@/cron/idempotency-keys";
+import { operationsCron } from "@/cron/operations";
 import { paymentRequestsCron } from "@/cron/payment-requests";
 import { paymentRequestsExpiryCron } from "@/cron/payment-requests-expiry";
 import { paymentRequestsHotCron } from "@/cron/payment-requests-hot";
@@ -58,6 +58,7 @@ export const CRON_DEFINITIONS: readonly CronDefinition[] = [
   pendingTransfersCron,
   custodyProposalsCron,
   fireblocksProposalsCron,
+  operationsCron,
   paymentRequestsHotCron,
   paymentRequestsCron,
   paymentRequestsExpiryCron,
@@ -68,7 +69,6 @@ export const CRON_DEFINITIONS: readonly CronDefinition[] = [
   rampDeliveriesCron,
   rampTransferStatusesCron,
   earnVaultMovementsCron,
-  earnSplitSwapsCron,
   dvpTradesCron,
   ringsIndexingCron,
   pendingDepositsCron,

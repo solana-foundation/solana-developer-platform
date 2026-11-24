@@ -1,43 +1,35 @@
-import { isPendingMovement, isSettledMovement } from "../src/lib/movements";
 import "server-only";
 
 import type { KeyPairSigner } from "@solana/kit";
-import { floorForTolerance, isPositiveDecimal } from "../src/lib/decimal";
-import type { PreparedIntent } from "../src/lib/prepared-intent";
+import { isPositiveDecimal } from "../src/lib/decimal";
 import type {
   DashboardData,
+  SlippagePolicy,
   WithdrawalIntent,
-  YieldMovement,
   YieldStrategy,
 } from "../src/types";
 import { getConfig, getDemoSigner, getFeePayerSigner } from "./env";
 import {
-  assertQueuedWithdrawalTerms,
+  operationsForSavingsStrategy,
+  summarizeSavingsOperations,
+} from "./operation-savings";
+import {
   belongsToStrategy,
   canDeposit,
   isOpenPosition,
   pickSavingsStrategy,
   requireDepositMint,
-  sharesForAmount,
-  summarizeSavings,
 } from "./savings";
 import { EmbeddedYieldClient, SdpApiError } from "./sdp-client";
 import { assertRpcCluster, readTokenBalance, signTransaction } from "./solana";
 
-const DEFAULT_WITHDRAWAL_TOLERANCE_BPS = 10;
 const STRATEGY_CACHE_MS = 5 * 60_000;
 
 let strategyCache:
   | { strategies: YieldStrategy[]; expiresAt: number }
   | undefined;
 
-/**
- * The catalogue changes rarely and the dashboard polls often. Reading it once
- * every few minutes keeps it out of the steady-state refresh. The live refresh
- * reads positions, movements, queued requests, withdrawal routes, and the
- * token balance. An actively watched movement adds one short-lived chain-aware
- * detail read so confirmation reaches the UI without waiting for the sweep.
- */
+/** Cache the catalogue; poll durable operations, live positions and token balances. */
 async function listStrategies(
   client: EmbeddedYieldClient
 ): Promise<YieldStrategy[]> {
@@ -49,11 +41,9 @@ async function listStrategies(
   return strategies;
 }
 
-export async function loadDashboard(
-  activeMovementIds: readonly string[] = []
-): Promise<DashboardData> {
+export async function loadDashboard(): Promise<DashboardData> {
   const config = getConfig();
-  const { owner, feePayer } = await getTransactionSigners();
+  const owner = await getDemoSigner();
   const client = new EmbeddedYieldClient(config);
   await assertRpcCluster(config.SOLANA_RPC_URL, config.SOLANA_CLUSTER);
   const strategy = pickSavingsStrategy(
@@ -63,346 +53,43 @@ export async function loadDashboard(
   );
   const tokenMint = requireDepositMint(strategy);
 
-  const allMovements = await client.listMovements(owner.address);
-
-  // Scope by strategy, never by open-position ids: SDP drops a position from
-  // the list once it closes, but its movements (and their payouts) remain.
-  const confirmation = await refreshConfirmingMovements(
-    client,
-    allMovements.filter((movement) => belongsToStrategy(movement, strategy)),
-    activeMovementIds
-  );
-  const movements = confirmation.movements;
-
-  // Start balances after the ledger/detail observations. This also covers a
-  // movement already confirmed in the list, not only a detail-read transition.
-  const [positions, checking, allWithdrawalRequests] = await Promise.all([
+  // Observe durable work before reading either side of the balance.
+  const operations = await client.listOperations(owner.address);
+  const [positions, checking] = await Promise.all([
     client.listPositions(owner.address),
     readTokenBalance(config.SOLANA_RPC_URL, owner.address, tokenMint),
-    client.listPendingWithdrawalRequests(owner.address),
   ]);
-
-  const position =
-    positions
-      .filter((candidate) => belongsToStrategy(candidate, strategy))
-      .find(isOpenPosition) ?? null;
-  const withdrawalRequests = allWithdrawalRequests.filter((request) =>
-    belongsToStrategy(request, strategy)
+  const strategyPositions = positions.filter((candidate) =>
+    belongsToStrategy(candidate, strategy)
   );
-  const withdrawalOptions = position
-    ? await client.getWithdrawalOptions(position.id).catch(() => null)
-    : null;
-  const { total, ...savings } = summarizeSavings(
+  const position = strategyPositions.find(isOpenPosition) ?? null;
+  const strategyOperations = operationsForSavingsStrategy(
+    operations,
+    strategy.id,
+    strategyPositions
+  );
+  const { total, ...savings } = summarizeSavingsOperations(
     checking,
     position,
-    movements,
-    withdrawalRequests
+    strategyOperations,
+    tokenMint
   );
 
   return {
     wallet: {
       address: owner.address,
       cluster: config.SOLANA_CLUSTER,
-      feesPaidBy: feePayer ? "northstar" : "customer",
     },
     token: { mint: tokenMint, symbol: checking.symbol },
     checking: { balance: checking.amount },
-    savings: { strategy, position, withdrawalOptions, ...savings },
+    savings: { strategy, position, ...savings },
     total,
-    movements,
-    withdrawalRequests,
+    operations: strategyOperations,
     connection: {
       apiLabel: localApiLabel(config.SDP_API_BASE_URL),
       checkedAt: new Date().toISOString(),
     },
   };
-}
-
-/**
- * Detail reads check the exact signature on Solana and advance a submitted
- * movement immediately. Confirmation is the UI finish line; finalized rows no
- * longer need a fast read because SDP continues that bookkeeping itself.
- */
-export async function refreshConfirmingMovements(
-  client: Pick<EmbeddedYieldClient, "getMovement">,
-  movements: readonly YieldMovement[],
-  activeMovementIds: readonly string[]
-): Promise<{
-  movements: YieldMovement[];
-  reachedConfirmation: boolean;
-}> {
-  const active = new Set(activeMovementIds);
-  const refreshed = await Promise.all(
-    movements.map(async (movement) => {
-      if (!active.has(movement.movementId) || !isPendingMovement(movement)) {
-        return movement;
-      }
-      try {
-        return await client.getMovement(movement.movementId);
-      } catch {
-        // Keep the last durable state on a transient detail-read failure. The
-        // next browser refresh and SDP's background reconciler both retry.
-        return movement;
-      }
-    })
-  );
-  return {
-    movements: refreshed,
-    reachedConfirmation: refreshed.some((movement, index) => {
-      const previous = movements[index];
-      return (
-        previous !== undefined &&
-        isPendingMovement(previous) &&
-        isSettledMovement(movement)
-      );
-    }),
-  };
-}
-
-/** Move money from checking into savings. */
-export async function prepareDeposit(amount: string): Promise<PreparedIntent> {
-  assertAmount(amount);
-  const config = getConfig();
-  const { owner, feePayer, all } = await getTransactionSigners();
-  const client = new EmbeddedYieldClient(config);
-  await assertRpcCluster(config.SOLANA_RPC_URL, config.SOLANA_CLUSTER);
-  const strategy = pickSavingsStrategy(
-    await listStrategies(client),
-    config.SOLANA_CLUSTER,
-    config.DEMO_STRATEGY_ID
-  );
-  if (!canDeposit(strategy)) {
-    throw new Error(`${strategy.name} is not accepting deposits right now`);
-  }
-  const sourceTokenMint = requireDepositMint(strategy);
-
-  // 1. Preview only when the strategy requires a quote-derived floor.
-  let minSharesOut: string | undefined;
-  if (strategy.depositSlippage?.quoteRequired) {
-    const preview = await client.previewDeposit(strategy.id, amount);
-    assertNoBlockingIssues(preview.blockingIssues);
-    minSharesOut = floorForTolerance(
-      preview.sharesOut,
-      preview.shareDecimals,
-      strategy.depositSlippage.defaultToleranceBps
-    );
-  }
-
-  // 2. Build an unsigned transaction for the customer's managed wallet.
-  const built = await client.buildDeposit({
-    strategyId: strategy.id,
-    ownerAddress: owner.address,
-    ...(feePayer ? { feePayer: feePayer.address } : {}),
-    amount,
-    sourceTokenMint,
-    ...(minSharesOut ? { minSharesOut } : {}),
-  });
-  assertBuiltFeePayer(built.feePayer, feePayer?.address);
-
-  // 3. The owner signs on the server, joined by Northstar when it pays fees.
-  // Private keys never reach the browser.
-  const signedTransaction = await signTransaction(
-    built.transaction,
-    all,
-    feePayer?.address ?? owner.address
-  );
-
-  return {
-    kind: "deposit",
-    transactionId: built.transactionId,
-    signedTransaction,
-    idempotencyKey: `northstar-deposit-${crypto.randomUUID()}`,
-  };
-}
-
-/** Move money from savings back into checking. */
-export async function prepareWithdrawal(
-  input: WithdrawalIntent
-): Promise<PreparedIntent> {
-  assertAmount(input.amount);
-  const config = getConfig();
-  const { owner, feePayer, all } = await getTransactionSigners();
-  const client = new EmbeddedYieldClient(config);
-  await assertRpcCluster(config.SOLANA_RPC_URL, config.SOLANA_CLUSTER);
-  const [strategies, positions] = await Promise.all([
-    listStrategies(client),
-    client.listPositions(owner.address),
-  ]);
-  const strategy = pickSavingsStrategy(
-    strategies,
-    config.SOLANA_CLUSTER,
-    config.DEMO_STRATEGY_ID
-  );
-  const position = positions
-    .filter((candidate) => belongsToStrategy(candidate, strategy))
-    .find(isOpenPosition);
-  if (!position) throw new Error("Savings is empty");
-
-  // The customer thinks in tokens; the vault redeems shares.
-  const shares = sharesForAmount(input.amount, position);
-  const options = await client.getWithdrawalOptions(position.id);
-
-  if (input.route === "queued") {
-    assertQueuedWithdrawalTerms(
-      options,
-      shares,
-      input.discountBps,
-      input.deadlineSeconds
-    );
-    const preview = await client.previewQueuedWithdrawal({
-      positionId: position.id,
-      shares,
-      discountBps: input.discountBps,
-      deadlineSeconds: input.deadlineSeconds,
-    });
-    assertNoBlockingIssues(preview.blockingIssues);
-    const built = await client.buildQueuedWithdrawalRequest({
-      positionId: position.id,
-      shares,
-      discountBps: input.discountBps,
-      deadlineSeconds: input.deadlineSeconds,
-      ...(feePayer ? { feePayer: feePayer.address } : {}),
-    });
-    assertBuiltFeePayer(built.feePayer, feePayer?.address);
-    const signedTransaction = await signTransaction(
-      built.transaction,
-      all,
-      feePayer?.address ?? owner.address
-    );
-    return {
-      kind: "queued",
-      transactionId: built.transactionId,
-      signedTransaction,
-      idempotencyKey: `northstar-queued-withdrawal-${crypto.randomUUID()}`,
-    };
-  }
-
-  if (!options.instant && !options.providerOrder) {
-    throw new Error("A direct withdrawal is not currently available");
-  }
-  const minAmountOut = await deriveWithdrawalFloor(
-    client,
-    position,
-    shares,
-    strategy
-  );
-  const built = await client.buildWithdrawal({
-    positionId: position.id,
-    shares,
-    ...(minAmountOut ? { minAmountOut } : {}),
-    ...(feePayer ? { feePayer: feePayer.address } : {}),
-  });
-  assertBuiltFeePayer(built.feePayer, feePayer?.address);
-  const signedTransaction = await signTransaction(
-    built.transaction,
-    all,
-    feePayer?.address ?? owner.address
-  );
-  return {
-    kind: "withdrawal",
-    transactionId: built.transactionId,
-    signedTransaction,
-    idempotencyKey: `northstar-withdrawal-${crypto.randomUUID()}`,
-  };
-}
-
-/** Recover escrowed shares after SDP reports that the queue deadline passed. */
-export async function prepareQueuedWithdrawalCancellation(
-  withdrawalRequestId: string
-): Promise<PreparedIntent> {
-  const config = getConfig();
-  const { owner, feePayer, all } = await getTransactionSigners();
-  const client = new EmbeddedYieldClient(config);
-  await assertRpcCluster(config.SOLANA_RPC_URL, config.SOLANA_CLUSTER);
-  const built = await client.buildQueuedWithdrawalCancellation({
-    withdrawalRequestId,
-    ...(feePayer ? { feePayer: feePayer.address } : {}),
-  });
-  assertBuiltFeePayer(built.feePayer, feePayer?.address);
-  const signedTransaction = await signTransaction(
-    built.transaction,
-    all,
-    feePayer?.address ?? owner.address
-  );
-  return {
-    kind: "cancel",
-    transactionId: built.transactionId,
-    signedTransaction,
-    idempotencyKey: `northstar-withdrawal-cancel-${crypto.randomUUID()}`,
-  };
-}
-
-/** Submit only the exact signed intent saved by the browser. Never rebuild here. */
-export async function submitPreparedIntent(intent: PreparedIntent) {
-  const client = new EmbeddedYieldClient(getConfig());
-  const args = [
-    intent.transactionId,
-    intent.signedTransaction,
-    intent.idempotencyKey,
-  ] as const;
-  switch (intent.kind) {
-    case "deposit":
-      return {
-        kind: "movement" as const,
-        movement: await retryUncertainSubmit(() =>
-          client.submitDeposit(...args)
-        ),
-      };
-    case "withdrawal":
-      return {
-        kind: "movement" as const,
-        movement: await retryUncertainSubmit(() =>
-          client.submitWithdrawal(...args)
-        ),
-      };
-    case "queued":
-      return {
-        kind: "queued" as const,
-        withdrawalRequest: await retryUncertainSubmit(() =>
-          client.submitQueuedWithdrawalRequest(...args)
-        ),
-      };
-    case "cancel":
-      return {
-        kind: "cancel" as const,
-        withdrawalRequest: await retryUncertainSubmit(() =>
-          client.submitQueuedWithdrawalCancellation(...args)
-        ),
-      };
-  }
-}
-
-export async function deriveWithdrawalFloor(
-  client: Pick<EmbeddedYieldClient, "previewWithdrawal">,
-  position: { id: string },
-  shares: string,
-  strategy: YieldStrategy | undefined
-): Promise<string | undefined> {
-  const policy = strategy?.withdrawalSlippage;
-  if (strategy && !policy?.quoteRequired) return undefined;
-
-  try {
-    const preview = await client.previewWithdrawal(position.id, shares);
-    assertNoBlockingIssues(preview.blockingIssues);
-    return floorForTolerance(
-      preview.assetsOut,
-      preview.assetDecimals,
-      policy?.defaultToleranceBps ?? DEFAULT_WITHDRAWAL_TOLERANCE_BPS
-    );
-  } catch (error) {
-    if (!strategy && error instanceof SdpApiError && error.status === 501)
-      return undefined;
-    throw error;
-  }
-}
-
-export function assertBuiltFeePayer(
-  builtFeePayer: string | undefined,
-  expectedFeePayer: string | undefined
-): void {
-  if (builtFeePayer !== expectedFeePayer) {
-    throw new Error("SDP returned a transaction with an unexpected fee payer");
-  }
 }
 
 async function getTransactionSigners(): Promise<{
@@ -443,14 +130,25 @@ async function retryUncertainSubmit<T>(submit: () => Promise<T>): Promise<T> {
   throw lastError;
 }
 
+/** What a preparation may add to its request; an absent term is omitted, never sent empty. */
+interface PreparationTerms {
+  slippageBps?: number;
+  feePayer?: string;
+}
+
+function preparationTerms(
+  slippage: SlippagePolicy | null,
+  feePayer: KeyPairSigner | undefined
+): PreparationTerms {
+  const terms: PreparationTerms = {};
+  if (slippage) terms.slippageBps = slippage.defaultToleranceBps;
+  if (feePayer) terms.feePayer = feePayer.address;
+  return terms;
+}
+
 function assertAmount(amount: string): void {
   if (!isPositiveDecimal(amount))
     throw new Error("Enter a positive decimal amount");
-}
-
-function assertNoBlockingIssues(issues: Array<{ message: string }>): void {
-  if (issues.length)
-    throw new Error(issues.map((issue) => issue.message).join("; "));
 }
 
 function localApiLabel(baseUrl: string): string {
@@ -458,4 +156,137 @@ function localApiLabel(baseUrl: string): string {
   return ["localhost", "127.0.0.1"].includes(url.hostname)
     ? "Local SDP"
     : url.hostname;
+}
+
+/** New transfers prepare one generic operation; signing waits for explicit execution. */
+export async function prepareCoreDeposit(
+  amount: string,
+  idempotencyKey: string
+) {
+  assertAmount(amount);
+  const config = getConfig();
+  const { owner, feePayer } = await getTransactionSigners();
+  const client = new EmbeddedYieldClient(config);
+  const strategy = pickSavingsStrategy(
+    await listStrategies(client),
+    config.SOLANA_CLUSTER,
+    config.DEMO_STRATEGY_ID
+  );
+  if (!canDeposit(strategy))
+    throw new Error("This strategy is not accepting deposits");
+  return client.prepareDeposit(
+    {
+      strategyId: strategy.id,
+      source: { ownerAddress: owner.address },
+      amount: { mint: requireDepositMint(strategy), value: amount },
+      ...preparationTerms(strategy.depositSlippage, feePayer),
+    },
+    idempotencyKey
+  );
+}
+
+export async function prepareCoreWithdrawal(
+  input: WithdrawalIntent,
+  idempotencyKey: string
+) {
+  assertAmount(input.amount);
+  const config = getConfig();
+  const { owner, feePayer } = await getTransactionSigners();
+  const client = new EmbeddedYieldClient(config);
+  const strategy = pickSavingsStrategy(
+    await listStrategies(client),
+    config.SOLANA_CLUSTER,
+    config.DEMO_STRATEGY_ID
+  );
+  const position = (await client.listPositions(owner.address)).find(
+    (candidate) =>
+      belongsToStrategy(candidate, strategy) && isOpenPosition(candidate)
+  );
+  if (!position) throw new Error("Savings is empty");
+  return client.prepareWithdrawal(
+    {
+      positionId: position.id,
+      amount: { kind: "token", mint: position.tokenMint, value: input.amount },
+      ...preparationTerms(strategy.withdrawalSlippage, feePayer),
+    },
+    idempotencyKey
+  );
+}
+
+/** The browser persists this action before asking the server-held demo owner to sign. */
+export async function submitCoreOperation(
+  id: string,
+  action: {
+    actionId: string;
+    version: number;
+    idempotencyKey: string;
+  }
+) {
+  const config = getConfig();
+  const client = new EmbeddedYieldClient(config);
+  const { owner, feePayer, all } = await getTransactionSigners();
+  const operation = await getOwnedOperation(client, id, owner.address);
+  // A lost response can leave the original action durably advanced already.
+  if (
+    operation.actionId !== action.actionId ||
+    operation.version !== action.version
+  )
+    return operation;
+  const nextAction = operation.nextAction;
+  if (nextAction?.type !== "sign_transaction" && nextAction?.type !== "submit")
+    return operation;
+  await assertRpcCluster(config.SOLANA_RPC_URL, config.SOLANA_CLUSTER);
+  const submission: {
+    actionId: string;
+    version: number;
+    signedTransaction?: string;
+  } = { actionId: action.actionId, version: action.version };
+  if (nextAction.type === "sign_transaction")
+    submission.signedTransaction = await signTransaction(
+      nextAction.transaction,
+      all,
+      feePayer?.address ?? owner.address
+    );
+  return retryUncertainSubmit(() =>
+    client.submitOperation(id, submission, action.idempotencyKey)
+  );
+}
+
+async function getOwnedOperation(
+  client: EmbeddedYieldClient,
+  id: string,
+  ownerAddress: string
+) {
+  const operation = await client.getOperation(id);
+  const source =
+    operation.intent.kind === "earn.deposit"
+      ? operation.intent.source
+      : operation.result?.source;
+  if (source) {
+    if (!("ownerAddress" in source && source.ownerAddress === ownerAddress))
+      throw new Error("Operation owner does not match the demo wallet");
+  } else if (operation.intent.kind === "earn.withdraw") {
+    const positionId = operation.intent.positionId;
+    const positions = await client.listPositions(ownerAddress);
+    if (!positions.some((position) => position.id === positionId))
+      throw new Error("Operation position is not owned by the demo wallet");
+  }
+  return operation;
+}
+
+export async function cancelCoreOperation(id: string, idempotencyKey: string) {
+  const client = new EmbeddedYieldClient(getConfig());
+  await getOwnedOperation(client, id, (await getDemoSigner()).address);
+  return client.cancelOperation(id, idempotencyKey);
+}
+
+/** Preparing a selected route or replacement terms never requests a signature. */
+export async function refreshCoreOperation(
+  id: string,
+  action: { actionId: string; version: number; optionId?: string },
+  idempotencyKey: string
+) {
+  const client = new EmbeddedYieldClient(getConfig());
+  await getOwnedOperation(client, id, (await getDemoSigner()).address);
+  return client.refreshOperation(id, action, idempotencyKey);
 }

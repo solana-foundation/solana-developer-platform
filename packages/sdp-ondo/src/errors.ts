@@ -1,3 +1,5 @@
+import type { VaultProviderErrorCodeOf } from "@sdp/earn/types";
+
 /**
  * Typed failures for the Ondo execution client, using the SHARED vault-direct
  * refusal vocabulary: `apps/sdp-api/src/services/earn/vault-refusals.ts`
@@ -6,14 +8,15 @@
  * carrying this class's own sentence, and anything else stays a 500 for SDP to
  * look at. Same shape as `SdpVedaError` / `SdpKaminoError`.
  */
-export type SdpOndoErrorCode =
+export type SdpOndoErrorCode = VaultProviderErrorCodeOf<
   | "INVALID_AMOUNT"
   | "DEPOSIT_REFUSED"
   | "WITHDRAW_REFUSED"
   | "UNSUPPORTED_VAULT"
   | "DEPLOYMENT_NOT_CONFIGURED"
   | "POSITION_UNREADABLE"
-  | "SWAP_UNAVAILABLE";
+  | "SWAP_UNAVAILABLE"
+>;
 
 export class SdpOndoError extends Error {
   constructor(

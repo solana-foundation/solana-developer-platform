@@ -176,7 +176,7 @@ async function readAllowedVaults(
   for (let page = 1; page <= STRATEGIES_PAGE_LIMIT; page += 1) {
     const response = strategiesPageSchema.parse(
       await listStrategies(
-        `/v1/earn/strategies?cluster=${ALLOWLIST_CLUSTER}&page=${page}&pageSize=${STRATEGIES_PAGE_SIZE}`
+        `/v1/earn/discovery?cluster=${ALLOWLIST_CLUSTER}&page=${page}&pageSize=${STRATEGIES_PAGE_SIZE}`
       )
     );
     for (const strategy of response.strategies) {

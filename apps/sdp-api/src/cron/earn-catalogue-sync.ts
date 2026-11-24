@@ -372,6 +372,7 @@ async function fetchAcceptedSnapshots(
     return { ok: false, steadyState: false };
   }
 
+  const observedAt = new Date().toISOString();
   const accepted: ProviderStrategySnapshot[] = [];
   for (const snapshot of snapshots) {
     // A snapshot outside the provider's declared support envelope is provider
@@ -389,7 +390,11 @@ async function fetchAcceptedSnapshots(
       );
       continue;
     }
-    accepted.push(snapshot);
+    accepted.push({
+      ...snapshot,
+      rateObservedAt:
+        snapshot.currentApy === undefined ? undefined : (snapshot.rateObservedAt ?? observedAt),
+    });
   }
   return { ok: true, snapshots: accepted };
 }
@@ -472,6 +477,7 @@ async function writeCatalogueLane(
       shareMint: snapshot.shareMint ?? null,
       apyType: snapshot.apyType,
       currentApy: snapshot.currentApy ?? null,
+      rateObservedAt: snapshot.rateObservedAt ?? null,
       liquidityTerm: snapshot.liquidityTerm,
       redemptionDelayDays: snapshot.redemptionDelayDays ?? null,
       riskMetadata: snapshot.riskMetadata ?? {},

@@ -1,5 +1,7 @@
+import type { VaultProviderErrorCodeOf } from "@sdp/earn/types";
+
 /** Stable execution failures understood by the Earn vault refusal adapter. */
-export type SdpHastraErrorCode =
+export type SdpHastraErrorCode = VaultProviderErrorCodeOf<
   | "INVALID_AMOUNT"
   | "DEPOSIT_REFUSED"
   | "WITHDRAW_REFUSED"
@@ -9,7 +11,8 @@ export type SdpHastraErrorCode =
   | "POSITION_UNREADABLE"
   | "REQUEST_UNREADABLE"
   | "PROGRAM_MISMATCH"
-  | "SWAP_UNAVAILABLE";
+  | "SWAP_UNAVAILABLE"
+>;
 
 export class SdpHastraError extends Error {
   constructor(

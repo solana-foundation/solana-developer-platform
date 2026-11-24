@@ -1,3 +1,4 @@
+import type { VaultProviderErrorCode } from "@sdp/earn/types";
 import {
   RpcHttpStatusError,
   RpcTimeoutError,
@@ -16,16 +17,47 @@ class TestProviderError extends Error {
   }
 }
 
+/**
+ * Every shared vault provider code and the answer the API gives it. A change
+ * to this table is a public status change; review it as one.
+ */
+const STATUS_BY_CODE = {
+  INVALID_AMOUNT: 400,
+  DEPOSIT_REFUSED: 400,
+  WITHDRAW_REFUSED: 400,
+  REDEMPTION_REFUSED: 400,
+  COMPLIANCE_APPROVAL_REQUIRED: 400,
+  INVALID_QUEUE_PARAMETERS: 400,
+  WITHDRAWAL_REQUEST_NOT_FOUND: 409,
+  VAULT_UNREADABLE: 503,
+  REQUEST_UNREADABLE: 503,
+  POSITION_UNREADABLE: 503,
+  SWAP_UNAVAILABLE: 503,
+  DEPLOYMENT_NOT_CONFIGURED: "rethrown",
+  CLUSTER_UNSUPPORTED: "rethrown",
+  UNSUPPORTED_VAULT: "rethrown",
+  INCOMPATIBLE_DEPLOYMENT: "rethrown",
+  PROGRAM_MISMATCH: "rethrown",
+  MINT_MISMATCH: "rethrown",
+} as const satisfies Record<VaultProviderErrorCode, 400 | 409 | 503 | "rethrown">;
+
 describe("rethrowVaultProviderFailure", () => {
-  it.each([
-    "INVALID_AMOUNT",
-    "DEPOSIT_REFUSED",
-    "WITHDRAW_REFUSED",
-    "COMPLIANCE_APPROVAL_REQUIRED",
-    "INVALID_QUEUE_PARAMETERS",
-  ])("maps provider refusal %s to a caller 400", (code) => {
+  it.each(Object.entries(STATUS_BY_CODE))("answers %s with %s", (code, status) => {
+    const error = new TestProviderError(code, "provider failure");
+    if (status === "rethrown") {
+      expect(() => rethrowVaultProviderFailure(error)).toThrow(error);
+    } else {
+      expect(() => rethrowVaultProviderFailure(error)).toThrow(
+        expect.objectContaining({ statusCode: status })
+      );
+    }
+  });
+
+  it("carries a provider refusal's own sentence to the caller", () => {
     expect(() =>
-      rethrowVaultProviderFailure(new TestProviderError(code, "provider refused the request"))
+      rethrowVaultProviderFailure(
+        new TestProviderError("DEPOSIT_REFUSED", "provider refused the request")
+      )
     ).toThrow(
       expect.objectContaining({
         code: "BAD_REQUEST",

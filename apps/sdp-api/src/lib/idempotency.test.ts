@@ -2,7 +2,6 @@ import { canonicalJson } from "@sdp/types/idempotency";
 import { describe, expect, it } from "vitest";
 import { AppError } from "@/lib/errors";
 import {
-  buildEarnVaultDepositFingerprint,
   buildEarnVaultParRedemptionFingerprint,
   normalizeForFingerprint,
   resolveIdempotencyReplay,
@@ -12,33 +11,6 @@ describe("canonicalJson", () => {
   it("orders keys by UTF-16 code unit at every depth, whatever their insertion order", () => {
     expect(canonicalJson({ b: 1, B: 2, a: { é: 1, z: [2, 1] }, "10": 0, "9": 0 })).toBe(
       '{"10":0,"9":0,"B":2,"a":{"z":[2,1],"é":1},"b":1}'
-    );
-  });
-});
-
-describe("buildEarnVaultDepositFingerprint", () => {
-  const base = {
-    environment: "sandbox",
-    provider: "kamino",
-    providerReference: "vault_1",
-    custodyWalletId: "cwlt_1",
-    amount: "1",
-    minSharesOut: "0.5",
-  };
-
-  it("normalizes insignificant decimal zeroes without rounding", () => {
-    expect(buildEarnVaultDepositFingerprint(base)).toBe(
-      buildEarnVaultDepositFingerprint({
-        ...base,
-        amount: "0001.000000",
-        minSharesOut: "00.5000",
-      })
-    );
-  });
-
-  it("keeps different exact decimal magnitudes distinct", () => {
-    expect(buildEarnVaultDepositFingerprint(base)).not.toBe(
-      buildEarnVaultDepositFingerprint({ ...base, amount: "1.000001" })
     );
   });
 });

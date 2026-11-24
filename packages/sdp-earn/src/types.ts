@@ -4,15 +4,6 @@ import type {
   EarnApyType,
   EarnDepositTokenSymbol,
   EarnLiquidityTerm,
-  EarnPortfolioAllocationInput,
-  EarnPortfolioDepositsPage,
-  EarnPortfolioTargetAllocations,
-  EarnPortfolioToken,
-  EarnPortfolioWalletSnapshot,
-  EarnPortfolioWalletStatus,
-  EarnPortfolioWithdrawal,
-  EarnPortfolioWithdrawalPreview,
-  EarnPortfolioYield,
   EarnStrategyRiskMetadata,
   EarnStrategySourceKind,
   EarnVaultPositionIntermediate,
@@ -81,6 +72,8 @@ export interface ProviderStrategySnapshot {
   shareMint?: string;
   apyType: EarnApyType;
   currentApy?: string;
+  /** When SDP observed this provider-reported rate, preserved across mirrors. */
+  rateObservedAt?: string;
   liquidityTerm: EarnLiquidityTerm;
   redemptionDelayDays?: number;
   riskMetadata?: EarnStrategyRiskMetadata;
@@ -99,13 +92,10 @@ export interface ProviderStrategySnapshot {
 }
 
 /**
- * Base vault-infra provider contract: the catalogue, and nothing speculative.
- * Every member is real and called (V1 is portfolio-only — per-strategy
- * quote/execution seams live in git history until PRO-1634 gives them a
- * consumer). All HTTP lives behind this; the route handler owns DB interaction
- * and passes pre-resolved inputs. Optional surfaces are capability extensions
- * (see EarnPortfolioWalletProvider / EarnWithdrawalApprovalProvider) detected
- * by method presence in capabilities.ts — never provider-id checks.
+ * Every provider supplies a strategy catalogue. Deposit, withdrawal,
+ * settlement and onboarding capabilities extend this contract and are
+ * detected by method presence in capabilities.ts. The API owns persistence
+ * and passes resolved runtime inputs to the provider.
  */
 export interface EarnVaultProvider {
   provider: EarnProviderId;
@@ -186,214 +176,118 @@ export interface EarnLiveMetricsProvider extends EarnVaultProvider {
   listStrategyMetrics(ctx: EarnRuntimeContext): Promise<ProviderStrategyMetrics[]>;
 }
 
-export interface EarnPortfolioWalletCreateInput {
-  label: string;
-  allocations: EarnPortfolioAllocationInput;
-  /**
-   * Idempotency key (UUIDv4), REQUIRED since PRO-1670 — the same reason the
-   * withdrawal input requires one. Until then an organization held at most one
-   * program per (environment, provider) and a DB unique constraint caught a
-   * retried create; with N programs legal, nothing downstream can tell a retry
-   * from a genuine second program, so the key is the ONLY defence against
-   * provisioning a duplicate wallet the customer may then fund.
-   */
-  requestId: string;
-}
-
-export interface EarnPortfolioWalletCreateResult {
-  providerWalletRef: string;
-  status: EarnPortfolioWalletStatus;
-}
-
-export interface EarnPortfolioWalletRefInput {
-  providerWalletRef: string;
-}
-
-export interface EarnPortfolioStrategyUpdateInput {
-  providerWalletRef: string;
-  allocations: EarnPortfolioAllocationInput;
-  /** Idempotency key (UUIDv4) forwarded to the provider; generated when omitted. */
-  requestId?: string;
-}
-
-export interface EarnPortfolioStrategyUpdateResult {
-  /** Provider-confirmed weights the wallet will rebalance toward. */
-  allocations: EarnPortfolioTargetAllocations;
-}
-
-export interface EarnPortfolioDepositsInput {
-  providerWalletRef: string;
-  cursor?: string;
-}
-
-export interface EarnPortfolioWithdrawalPreviewInput {
-  providerWalletRef: string;
-  /**
-   * USD amount as a decimal string. OPTIONAL: omit it to ask the provider what
-   * the lane can pay right now, which is the preview's liquidity-read form
-   * (PRO-1675). With an amount the preview also validates feasibility; without
-   * one it answers `withdrawableUsd` alone and leaves `amountRequestedUsd`
-   * unset. A provider must OMIT the field from its wire call when absent —
-   * never substitute `0`, which asks a different question.
-   */
-  amountUsd?: string;
-  token: EarnPortfolioToken;
-}
-
-export interface EarnPortfolioWithdrawalCreateInput {
-  providerWalletRef: string;
-  /**
-   * Idempotency key (UUIDv4), REQUIRED here unlike the create/update inputs:
-   * a withdrawal retry without a stable key can double-send funds, so the
-   * caller (which owns the retry loop) must own the key.
-   */
-  requestId: string;
-  /** USD amount as a decimal string. */
-  amountUsd: string;
-  token: EarnPortfolioToken;
-  /** Solana address for this environment's cluster — the only rail SDP surfaces. */
-  destinationAddress: string;
-}
-
-export interface EarnPortfolioWithdrawalStatusInput {
-  providerWalletRef: string;
-  withdrawalRef: string;
-}
-
-export interface EarnPortfolioAddressBookEntryInput {
-  /** Solana address to whitelist as a withdrawal destination. */
-  address: string;
-  label: string;
-}
-
-export interface EarnPortfolioAddressBookEntryResult {
-  entryRef: string;
-}
-
-export type EarnWithdrawalApprovalAction = "approve" | "reject";
+/**
+ * The build-failure vocabulary every vault-direct provider package raises on
+ * its own error class (`SdpVedaError`, `SdpKaminoError` and the rest), so the
+ * API answers a code the same way whichever provider raised it. The API
+ * classifies every member in `vault-refusals.ts`. Separate from
+ * `SdpEarnError`'s catalogue taxonomy on purpose: an instruction-builder
+ * failure must not look like a provider outage to code matching on that class.
+ */
+export type VaultProviderErrorCode =
+  /** A caller amount that is malformed, zero, over-precise, or out of range. */
+  | "INVALID_AMOUNT"
+  /** The vault refuses this deposit right now (paused, capped, asset off). */
+  | "DEPOSIT_REFUSED"
+  /** The vault refuses this exit right now (paused, locked, restricted). */
+  | "WITHDRAW_REFUSED"
+  /** The provider refuses this redemption request or its cancellation. */
+  | "REDEMPTION_REFUSED"
+  /** The vault requires an external compliance approval SDP does not implement. */
+  | "COMPLIANCE_APPROVAL_REQUIRED"
+  /** Queue discount/deadline values are invalid, or cancellation is too early. */
+  | "INVALID_QUEUE_PARAMETERS"
+  /** The named queue request is already closed or does not exist. */
+  | "WITHDRAWAL_REQUEST_NOT_FOUND"
+  /** Vault, asset or position state could not be read on this cluster. */
+  | "VAULT_UNREADABLE"
+  /** A provider redemption request could not be read. */
+  | "REQUEST_UNREADABLE"
+  /** The owner's position could not be read. */
+  | "POSITION_UNREADABLE"
+  /** The swap a deposit or exit depends on came back unusable. */
+  | "SWAP_UNAVAILABLE"
+  /** SDP has no confirmed deployment for the cluster in play. */
+  | "DEPLOYMENT_NOT_CONFIGURED"
+  /** The instrument does not exist on the requested cluster. */
+  | "CLUSTER_UNSUPPORTED"
+  /** The vault's configuration cannot be expressed by SDP's deposit contract. */
+  | "UNSUPPORTED_VAULT"
+  /** The live deployment does not satisfy what SDP requires of it. */
+  | "INCOMPATIBLE_DEPLOYMENT"
+  /** An instruction or account named a program that is not this cluster's. */
+  | "PROGRAM_MISMATCH"
+  /** The live mint does not match SDP's measured registry. */
+  | "MINT_MISMATCH";
 
 /**
- * One provider-side signing activity parked on customer approval, joined with
- * whatever withdrawal context the provider reports. `providerStatus` and
- * `kind` are provider vocabulary passed through open. The destination fields
- * are provider plumbing that may name non-Solana rails — they exist for
- * operator correlation and must be re-synthesized before ever reaching wire
- * types or UI (ADR 0002 invariant 5).
+ * One provider's subset of `VaultProviderErrorCode`. Declaring a provider's
+ * codes through this makes a code outside the shared vocabulary a compile
+ * error instead of a status the API silently answers with a 500.
  */
-export interface EarnPendingWithdrawalApproval {
-  approvalRef: string;
-  providerStatus: string;
-  kind?: string;
-  withdrawalRef?: string;
-  withdrawalLegRef?: string;
-  providerWalletRef?: string;
-  destinationChain?: string;
-  destinationToken?: string;
-  destinationAddress?: string;
-  amountNativeUnits?: string;
-  firstSeenAt?: string;
-}
-
-export interface EarnWithdrawalApprovalRequestInput {
-  approvalRef: string;
-  action: EarnWithdrawalApprovalAction;
-}
+export type VaultProviderErrorCodeOf<Code extends VaultProviderErrorCode> = Code;
 
 /**
- * The payload the customer's signer must stamp. `signingPayload` is the exact
- * string to sign, byte-for-byte — re-serializing `providerRequest` can reorder
- * keys and invalidate the signature. `providerRequest` is echoed unmodified
- * into the vote submission so the provider can verify what was signed.
+ * The swap seam an execution package builds through, injected by the API:
+ * Ondo's USDC to USDY swap and Hastra's wYLDS to USDC exit leg.
+ *
+ * The API already owns a reviewed trust boundary for admitting Jupiter's
+ * response-controlled instructions into a transaction a wallet authorizes
+ * wholesale (`apps/sdp-api/src/services/earn/jupiter-swap.service.ts`).
+ * Injecting it as a port keeps that boundary single-owner, so no package
+ * re-implements instruction admission, and keeps execution packages free of
+ * Jupiter credentials. Unit tests stub the port; smoke tests provide a live one.
  */
-export interface EarnWithdrawalApprovalRequest {
-  approvalRef: string;
-  action: EarnWithdrawalApprovalAction;
-  signingPayload: string;
-  providerRequest: Record<string, unknown>;
-}
-
-/**
- * Signature produced by the customer's signer, outside SDP and outside the
- * provider. Either an opaque string or a header pair, matching the shapes
- * signer SDKs emit.
- */
-export type EarnWithdrawalApprovalStamp = string | { headerName: string; headerValue: string };
-
-export interface EarnWithdrawalApprovalVoteInput {
-  approvalRef: string;
-  action: EarnWithdrawalApprovalAction;
-  stamp: EarnWithdrawalApprovalStamp;
-  /** The untouched `providerRequest` from `createWithdrawalApprovalRequest`. */
-  providerRequest: Record<string, unknown>;
-}
-
-export interface EarnWithdrawalApprovalVoteResult {
-  action: EarnWithdrawalApprovalAction;
-  /** The provider recorded this vote. */
-  applied: boolean;
-  /** The activity had already reached a terminal state before this vote. */
-  alreadyResolved: boolean;
-  providerStatus?: string;
-}
-
-/**
- * Optional capability: managed portfolio wallets (one omnibus wallet whose
- * funds spread across yield sources by a target strategy). Declared the same
- * way ramp providers declare optional operations — a provider opts in by
- * implementing the methods, and callers discover it via
- * `supportsPortfolioWallets` (see capabilities.ts) instead of dispatching on
- * provider ids, so the next portfolio provider is a client change only.
- * Chain rails are implicit: SDP is Solana-only, so deposit addresses and
- * withdrawal destinations always ride the environment's Solana cluster.
- */
-export interface EarnPortfolioWalletProvider extends EarnVaultProvider {
-  createPortfolioWallet(
-    ctx: EarnRuntimeContext,
-    input: EarnPortfolioWalletCreateInput
-  ): Promise<EarnPortfolioWalletCreateResult>;
-  getPortfolioWallet(
-    ctx: EarnRuntimeContext,
-    input: EarnPortfolioWalletRefInput
-  ): Promise<EarnPortfolioWalletSnapshot>;
-  updatePortfolioStrategy(
-    ctx: EarnRuntimeContext,
-    input: EarnPortfolioStrategyUpdateInput
-  ): Promise<EarnPortfolioStrategyUpdateResult>;
+export interface EarnSwapPort {
   /**
-   * Yield metrics for the program (earned to date + the blended current rate).
-   * Separate from `getPortfolioWallet` because providers serve it from a
-   * distinct endpoint; callers that only need balances must not pay for it.
+   * Build an ExactIn swap as admitted, plan-vocabulary instructions.
+   *
+   * The implementation must guarantee what the API's swap service guarantees:
+   * instructions only from the pinned aggregator/ATA programs, no signer other
+   * than `owner` and an explicitly requested `payer`, the encoded amounts
+   * matching `amount`/`slippageBps`, and a `minOutAmount` equal to the route's
+   * guaranteed threshold.
    */
-  getPortfolioYield(
-    ctx: EarnRuntimeContext,
-    input: EarnPortfolioWalletRefInput
-  ): Promise<EarnPortfolioYield>;
-  listPortfolioDeposits(
-    ctx: EarnRuntimeContext,
-    input: EarnPortfolioDepositsInput
-  ): Promise<EarnPortfolioDepositsPage>;
-  previewPortfolioWithdrawal(
-    ctx: EarnRuntimeContext,
-    input: EarnPortfolioWithdrawalPreviewInput
-  ): Promise<EarnPortfolioWithdrawalPreview>;
-  createPortfolioWithdrawal(
-    ctx: EarnRuntimeContext,
-    input: EarnPortfolioWithdrawalCreateInput
-  ): Promise<EarnPortfolioWithdrawal>;
-  getPortfolioWithdrawal(
-    ctx: EarnRuntimeContext,
-    input: EarnPortfolioWithdrawalStatusInput
-  ): Promise<EarnPortfolioWithdrawal>;
-  /**
-   * Whitelist a withdrawal destination in the provider's address book.
-   * Providers may enforce (or later enable) destination whitelisting; exposing
-   * it on the contract lets the API pre-register destinations instead of
-   * folding an implicit write into the withdrawal flow.
-   */
-  createPortfolioAddressBookEntry(
-    ctx: EarnRuntimeContext,
-    input: EarnPortfolioAddressBookEntryInput
-  ): Promise<EarnPortfolioAddressBookEntryResult>;
+  buildSwapLeg(request: EarnSwapBuildRequest): Promise<EarnSwapLeg>;
+  /** Price an ExactIn swap without building instructions (no owner needed). */
+  quoteSwap(request: EarnSwapQuoteRequest): Promise<EarnSwapQuote>;
+}
+
+export interface EarnSwapQuoteRequest {
+  cluster: SolanaCluster;
+  inputMint: string;
+  outputMint: string;
+  /** ExactIn amount in the INPUT token's units, decimal string. */
+  amount: string;
+}
+
+export interface EarnSwapBuildRequest extends EarnSwapQuoteRequest {
+  /** The wallet that signs and receives; it also pays unless `payer` is set. */
+  owner: string;
+  /** Optional distinct payer for the setup accounts the route creates. */
+  payer?: string;
+  /** Tolerance the route encodes; the threshold it yields is the real floor. */
+  slippageBps: number;
+  /** Bound route account fan-out so a composed transaction still fits. */
+  maxAccounts?: number;
+}
+
+export interface EarnSwapLeg {
+  /** Setup + swap in execution order, already in the plan's own vocabulary. */
+  instructions: EarnVaultInstruction[];
+  lookupTableAddresses: string[];
+  /** Quoted output at the live rate, OUTPUT token units, decimal string. */
+  quotedAmount: string;
+  /** The guaranteed output floor the instructions encode, OUTPUT token units. */
+  minOutAmount: string;
+  priceImpactPct: string;
+  routeLabels: string[];
+}
+
+export interface EarnSwapQuote {
+  /** Output at the live rate, OUTPUT token units, decimal string. */
+  outAmount: string;
+  priceImpactPct: string;
 }
 
 /**
@@ -503,7 +397,7 @@ export interface EarnVaultDepositInput {
    * Omitted means the `owner` funds it, which is what an owner-paid deposit
    * wants. SDP names an address here only when someone else pays: its Kora
    * sponsor under sponsorship, or the partner's caller-provided fee payer on
-   * the external-wallet builds — and then the SAME address is also the fee
+   * the wallet builds — and then the SAME address is also the fee
    * payer, so one extra signature covers both roles. See
    * docs/decisions/0002-earn-provider-pluggability.md.
    */
@@ -534,7 +428,7 @@ export interface EarnVaultWithdrawInput {
    * Omitted means the `owner` funds it, which is what an owner-paid deposit
    * wants. SDP names an address here only when someone else pays: its Kora
    * sponsor under sponsorship, or the partner's caller-provided fee payer on
-   * the external-wallet builds — and then the SAME address is also the fee
+   * the wallet builds — and then the SAME address is also the fee
    * payer, so one extra signature covers both roles. See
    * docs/decisions/0002-earn-provider-pluggability.md.
    */
@@ -981,13 +875,9 @@ export interface EarnVaultPositionSnapshot {
  * Optional capability: NON-CUSTODIAL vaults the customer's own wallet deposits
  * into (Kamino's K-Vaults; `earnDepositStyle` calls these `vault_direct`).
  *
- * The shape difference from `EarnPortfolioWalletProvider` is the whole point.
- * A portfolio provider CUSTODIES: SDP asks it to provision a wallet and the
- * customer funds that address. A vault-direct provider custodies nothing —
- * there is no address to send to, and stablecoins sent to the vault's program
- * account are LOST. Money moves only when a wallet SDP can sign for submits an
- * instruction, so this capability builds unsigned plans and SDP's own custody
- * and signing services do the rest.
+ * This capability builds unsigned transaction plans. SDP compiles them and
+ * coordinates the wallet's signing and execution through its operation
+ * lifecycle. A strategy reference is never a generic deposit address.
  *
  * Everything crossing this contract is plain data (see the types above), so a
  * provider client may speak whatever chain SDK it likes without that SDK
@@ -1067,34 +957,6 @@ export interface EarnVaultProviderOrderWithdrawProvider extends EarnVaultWithdra
 
 export interface EarnProviderRedemptionModesProvider extends EarnVaultWithdrawProvider {
   getProviderRedemptionModes(): readonly ("standard" | "instant")[];
-}
-
-export interface EarnVaultPreparationProvider extends EarnVaultDirectProvider {
-  buildVaultPreparation(
-    ctx: EarnRuntimeContext,
-    input: { providerReference: string; owner: string; rentPayer?: string }
-  ): Promise<EarnVaultTransactionPlan>;
-}
-
-export interface EarnProviderOrderCancellationProvider extends EarnProviderSettlementProvider {
-  buildProviderOrderCancellation(
-    ctx: EarnRuntimeContext,
-    input: {
-      providerReference: string;
-      owner: string;
-      sourceTransaction: string;
-      rentPayer?: string;
-    }
-  ): Promise<EarnVaultTransactionPlan>;
-  readProviderOrderCancellation(
-    ctx: EarnRuntimeContext,
-    input: {
-      providerReference: string;
-      owner: string;
-      sourceSignature: string;
-      sourceTransaction: string;
-    }
-  ): ReturnType<EarnProviderSettlementProvider["readProviderSettlement"]>;
 }
 
 export interface EarnDepositEligibilityInput {
@@ -1240,28 +1102,6 @@ export interface EarnVaultParRedemptionProvider extends EarnVaultDirectProvider 
     ctx: EarnRuntimeContext,
     input: EarnVaultParRedemptionLifecycleInput
   ): Promise<readonly EarnVaultParRedemptionLifecycleEvent[]>;
-}
-
-/**
- * Optional capability: customer-approval flows for withdrawal payouts. Some
- * providers gate payout legs on a customer-side signature (Turnkey consensus
- * voting, engaged by an org-level approval policy rather than by
- * default). SDP relays the provider's signing payload and the customer's
- * stamp; the signing key itself never enters SDP — if no signer is available,
- * this capability surfaces the parked state but cannot advance it. Discovered
- * via `supportsWithdrawalApprovals` (capabilities.ts), never provider-id
- * checks.
- */
-export interface EarnWithdrawalApprovalProvider extends EarnVaultProvider {
-  listPendingWithdrawalApprovals(ctx: EarnRuntimeContext): Promise<EarnPendingWithdrawalApproval[]>;
-  createWithdrawalApprovalRequest(
-    ctx: EarnRuntimeContext,
-    input: EarnWithdrawalApprovalRequestInput
-  ): Promise<EarnWithdrawalApprovalRequest>;
-  submitWithdrawalApprovalVote(
-    ctx: EarnRuntimeContext,
-    input: EarnWithdrawalApprovalVoteInput
-  ): Promise<EarnWithdrawalApprovalVoteResult>;
 }
 
 /**

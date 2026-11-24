@@ -357,7 +357,7 @@ describe("proxyToSdpApi", () => {
     const response = await proxyToSdpApi({
       request: browserCall(SANDBOX_PROJECT.id),
       traceSource: "test.proxy.headers",
-      path: "/v1/earn/deposits/execute",
+      path: "/v1/earn/deposit",
       upstreamHeaders: { "Idempotency-Key": "deposit-key" },
     });
 
@@ -365,7 +365,7 @@ describe("proxyToSdpApi", () => {
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     expect(response.headers.get("Vary")).toBe("x-project-id");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const headers = headersOfCall(fetchMock, "/v1/earn/deposits/execute");
+    const headers = headersOfCall(fetchMock, "/v1/earn/deposit");
     expect(headers.get("x-project-id")).toBe(SANDBOX_PROJECT.id);
     expect(headers.get("Idempotency-Key")).toBe("deposit-key");
     expect(headers.get("Authorization")).toBe("Bearer token_test");
@@ -408,13 +408,11 @@ describe("proxyToSdpApi", () => {
     await proxyToSdpApi({
       request,
       traceSource: "test.proxy.idempotency-route",
-      path: "/v1/earn/deposits/execute",
+      path: "/v1/earn/deposit",
       upstreamHeaders: { "Idempotency-Key": "route-key" },
     });
 
-    expect(headersOfCall(fetchMock, "/v1/earn/deposits/execute").get("Idempotency-Key")).toBe(
-      "route-key"
-    );
+    expect(headersOfCall(fetchMock, "/v1/earn/deposit").get("Idempotency-Key")).toBe("route-key");
   });
 
   it("relays an organization-scoped call from a page outside any project, sending no project", async () => {
@@ -449,7 +447,7 @@ describe("proxyToSdpApi", () => {
         body: "{}",
       }),
       traceSource: "test.proxy.missing-project",
-      path: "/v1/earn/deposits/execute",
+      path: "/v1/earn/deposit",
     });
 
     expect(response.status).toBe(400);
@@ -469,7 +467,7 @@ describe("proxyToSdpApi", () => {
     const response = await proxyToSdpApi({
       request: browserCall(SANDBOX_PROJECT.id),
       traceSource: "test.proxy.cache",
-      path: "/v1/earn/deposits/execute",
+      path: "/v1/earn/deposit",
     });
 
     expect(response.status).toBe(401);

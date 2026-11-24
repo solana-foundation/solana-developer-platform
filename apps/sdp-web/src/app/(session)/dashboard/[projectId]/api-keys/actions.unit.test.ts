@@ -86,6 +86,19 @@ describe("saveApiKeyAuthoringAction: create", () => {
     expect(client.fetch).not.toHaveBeenCalled();
   });
 
+  it("creates an address-signing Earn key with no SDP signing wallets", async () => {
+    const result = await saveApiKeyAuthoringAction({
+      mode: "create",
+      draft: draft({ grants: ["earn.execute"], walletScope: "selected", selectedWalletIds: [] }),
+    });
+    expect(result.ok).toBe(true);
+    expect(lastBody()).toMatchObject({
+      grants: ["earn.execute"],
+      walletScope: "selected",
+      walletIds: [],
+    });
+  });
+
   it("creates selected-wallet keys with their custody wallet ids", async () => {
     await saveApiKeyAuthoringAction({
       mode: "create",

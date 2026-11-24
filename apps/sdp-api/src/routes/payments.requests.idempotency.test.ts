@@ -144,7 +144,7 @@ describe("Payments routes — payment request token cluster", () => {
   );
 });
 
-describe("Payments routes — subscription plan wallets before the key", () => {
+describe("Payments routes — subscription pla wallets before the key", () => {
   installPaymentsRouteTestHooks();
 
   function postPlan(body: Record<string, unknown>, idempotencyKey: string) {

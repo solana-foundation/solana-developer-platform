@@ -20,6 +20,7 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { useCopy } from "@/lib/use-copy";
 import { useProjectHref } from "@/lib/use-dashboard-project";
+import { useEarnStrategies } from "./earn-data";
 import {
   type EarnDepositAvailabilityLabels,
   earnDepositAvailabilityLabel,
@@ -32,7 +33,6 @@ import {
   type EarnIntegrationSections,
 } from "./earn-integration-snippets";
 import { formatProviderApy } from "./earn-market-presentation";
-import { useEarnStrategies } from "./earn-program-data";
 import {
   type EarnProviderAccess,
   type EarnVaultDepositAvailability,
@@ -50,33 +50,33 @@ type EarnIntegrationGuideProps = {
 const GUIDE_SECTIONS = [
   {
     id: "client",
-    navigationKey: "DashboardMarkets.earnProgram.guideClientNavigation",
-    titleKey: "DashboardMarkets.earnProgram.guideClientTitle",
-    descriptionKey: "DashboardMarkets.earnProgram.guideClientDescription",
+    navigationKey: "DashboardMarkets.embeddedYield.guideClientNavigation",
+    titleKey: "DashboardMarkets.embeddedYield.guideClientTitle",
+    descriptionKey: "DashboardMarkets.embeddedYield.guideClientDescription",
   },
   {
     id: "deposit",
-    navigationKey: "DashboardMarkets.earnProgram.guideDepositNavigation",
-    titleKey: "DashboardMarkets.earnProgram.guideDepositTitle",
-    descriptionKey: "DashboardMarkets.earnProgram.guideDepositDescription",
+    navigationKey: "DashboardMarkets.embeddedYield.guideDepositNavigation",
+    titleKey: "DashboardMarkets.embeddedYield.guideDepositTitle",
+    descriptionKey: "DashboardMarkets.embeddedYield.guideDepositDescription",
   },
   {
     id: "portfolio",
-    navigationKey: "DashboardMarkets.earnProgram.guidePortfolioNavigation",
-    titleKey: "DashboardMarkets.earnProgram.guidePortfolioTitle",
-    descriptionKey: "DashboardMarkets.earnProgram.guidePortfolioDescription",
+    navigationKey: "DashboardMarkets.embeddedYield.guidePortfolioNavigation",
+    titleKey: "DashboardMarkets.embeddedYield.guidePortfolioTitle",
+    descriptionKey: "DashboardMarkets.embeddedYield.guidePortfolioDescription",
   },
   {
     id: "withdraw",
-    navigationKey: "DashboardMarkets.earnProgram.guideWithdrawNavigation",
-    titleKey: "DashboardMarkets.earnProgram.guideWithdrawTitle",
-    descriptionKey: "DashboardMarkets.earnProgram.guideWithdrawDescription",
+    navigationKey: "DashboardMarkets.embeddedYield.guideWithdrawNavigation",
+    titleKey: "DashboardMarkets.embeddedYield.guideWithdrawTitle",
+    descriptionKey: "DashboardMarkets.embeddedYield.guideWithdrawDescription",
   },
   {
     id: "asyncWithdraw",
-    navigationKey: "DashboardMarkets.earnProgram.guideAsyncWithdrawNavigation",
-    titleKey: "DashboardMarkets.earnProgram.guideAsyncWithdrawTitle",
-    descriptionKey: "DashboardMarkets.earnProgram.guideAsyncWithdrawDescription",
+    navigationKey: "DashboardMarkets.embeddedYield.guideAsyncWithdrawNavigation",
+    titleKey: "DashboardMarkets.embeddedYield.guideAsyncWithdrawTitle",
+    descriptionKey: "DashboardMarkets.embeddedYield.guideAsyncWithdrawDescription",
   },
 ] as const satisfies ReadonlyArray<{
   id: keyof EarnIntegrationSections;
@@ -86,13 +86,13 @@ const GUIDE_SECTIONS = [
 }>;
 
 const PROGRAM_AVAILABILITY_LABELS = {
-  available: "DashboardMarkets.earnProgram.sandboxReady",
-  cluster_unavailable: "DashboardMarkets.earnProgram.clusterUnavailable",
-  strategy_unavailable: "DashboardMarkets.earnProgram.unavailable",
-  environment_unavailable: "DashboardMarkets.earnProgram.productionUnavailable",
-  access_unavailable: "DashboardMarkets.earnProgram.accessUnavailable",
-  provider_unavailable: "DashboardMarkets.earnProgram.providerUnavailable",
-  production_only: "DashboardMarkets.earnProgram.sandboxUnavailable",
+  available: "DashboardMarkets.embeddedYield.sandboxReady",
+  cluster_unavailable: "DashboardMarkets.embeddedYield.clusterUnavailable",
+  strategy_unavailable: "DashboardMarkets.embeddedYield.unavailable",
+  environment_unavailable: "DashboardMarkets.embeddedYield.productionUnavailable",
+  access_unavailable: "DashboardMarkets.embeddedYield.accessUnavailable",
+  provider_unavailable: "DashboardMarkets.embeddedYield.providerUnavailable",
+  production_only: "DashboardMarkets.embeddedYield.sandboxUnavailable",
 } as const satisfies EarnDepositAvailabilityLabels;
 
 function unavailableDescriptionKey(
@@ -101,17 +101,17 @@ function unavailableDescriptionKey(
 ): MessageKey {
   switch (availability) {
     case "cluster_unavailable":
-      return "DashboardMarkets.earnProgram.unavailableClusterDescription";
+      return "DashboardMarkets.embeddedYield.unavailableClusterDescription";
     case "environment_unavailable":
       return earnVaultDepositOnlyEnvironment(provider) === "production"
-        ? "DashboardMarkets.earnProgram.unavailableEnvironmentProductionDescription"
-        : "DashboardMarkets.earnProgram.unavailableEnvironmentDescription";
+        ? "DashboardMarkets.embeddedYield.unavailableEnvironmentProductionDescription"
+        : "DashboardMarkets.embeddedYield.unavailableEnvironmentDescription";
     case "access_unavailable":
-      return "DashboardMarkets.earnProgram.unavailableAccessDescription";
+      return "DashboardMarkets.embeddedYield.unavailableAccessDescription";
     case "provider_unavailable":
-      return "DashboardMarkets.earnProgram.unavailableProviderDescription";
+      return "DashboardMarkets.embeddedYield.unavailableProviderDescription";
     default:
-      return "DashboardMarkets.earnProgram.unavailableStrategyDescription";
+      return "DashboardMarkets.embeddedYield.unavailableStrategyDescription";
   }
 }
 
@@ -177,7 +177,7 @@ export function EarnIntegrationGuide({
     <DashboardWorkspaceOverviewPanel>
       <div className="flex min-w-0 flex-col gap-8">
         <p className="text-body text-pretty text-secondary">
-          {t("DashboardMarkets.earnProgram.guideIntro")}
+          {t("DashboardMarkets.embeddedYield.guideIntro")}
         </p>
 
         <CatalogueContent
@@ -230,16 +230,16 @@ function CatalogueContent({
   if (catalogueError) {
     return (
       <ListEmptyState
-        description={t("DashboardMarkets.earnProgram.catalogueErrorDescription")}
-        message={t("DashboardMarkets.earnProgram.catalogueErrorTitle")}
+        description={t("DashboardMarkets.embeddedYield.catalogueErrorDescription")}
+        message={t("DashboardMarkets.embeddedYield.catalogueErrorTitle")}
       />
     );
   }
   if (options.length === 0) {
     return (
       <ListEmptyState
-        description={t("DashboardMarkets.earnProgram.catalogueEmptyDescription")}
-        message={t("DashboardMarkets.earnProgram.catalogueEmptyTitle")}
+        description={t("DashboardMarkets.embeddedYield.catalogueEmptyDescription")}
+        message={t("DashboardMarkets.embeddedYield.catalogueEmptyTitle")}
       />
     );
   }
@@ -248,7 +248,7 @@ function CatalogueContent({
 
   return (
     <RecordStack>
-      <RecordBlock title={t("DashboardMarkets.earnProgram.stepChooseStrategy")}>
+      <RecordBlock title={t("DashboardMarkets.embeddedYield.stepChooseStrategy")}>
         <StrategyPicker
           locale={locale}
           onStrategyChange={onStrategyChange}
@@ -295,9 +295,9 @@ function StrategyPicker({
   const t = useTranslations();
   return (
     <Select
-      ariaLabel={t("DashboardMarkets.earnProgram.selectTitle")}
+      ariaLabel={t("DashboardMarkets.embeddedYield.selectTitle")}
       onValueChange={onStrategyChange}
-      placeholder={t("DashboardMarkets.earnProgram.selectTitle")}
+      placeholder={t("DashboardMarkets.embeddedYield.selectTitle")}
       value={selectedOption?.strategy.id ?? null}
     >
       {options.map(({ availability, selectable, strategy }) => (
@@ -333,15 +333,15 @@ function StrategySelectionEmptyState({
   selectionIssue: MessageKey | undefined;
 }) {
   const t = useTranslations();
-  let descriptionKey: MessageKey = "DashboardMarkets.earnProgram.missingStrategyDescription";
-  let messageKey: MessageKey = "DashboardMarkets.earnProgram.missingStrategyTitle";
+  let descriptionKey: MessageKey = "DashboardMarkets.embeddedYield.missingStrategyDescription";
+  let messageKey: MessageKey = "DashboardMarkets.embeddedYield.missingStrategyTitle";
   if (initialStrategyMissing) {
-    descriptionKey = "DashboardMarkets.earnProgram.unknownStrategyDescription";
-    messageKey = "DashboardMarkets.earnProgram.unknownStrategyTitle";
+    descriptionKey = "DashboardMarkets.embeddedYield.unknownStrategyDescription";
+    messageKey = "DashboardMarkets.embeddedYield.unknownStrategyTitle";
   }
   if (selectionIssue) {
     descriptionKey = selectionIssue;
-    messageKey = "DashboardMarkets.earnProgram.unavailableStrategyTitle";
+    messageKey = "DashboardMarkets.embeddedYield.unavailableStrategyTitle";
   }
   return <ListEmptyState description={t(descriptionKey)} message={t(messageKey)} />;
 }
@@ -358,14 +358,14 @@ function StrategyDetails({ locale, strategy }: { locale: string; strategy: EarnS
   const apy = formatProviderApy(strategy.currentApy, locale);
   const facts = [
     earnProviderLabel(strategy.provider),
-    liquidity ? t("DashboardMarkets.earnProgram.liquidityFact", { liquidity }) : undefined,
-    apy === "—" ? undefined : t("DashboardMarkets.earnProgram.apyFact", { apy }),
+    liquidity ? t("DashboardMarkets.embeddedYield.liquidityFact", { liquidity }) : undefined,
+    apy === "—" ? undefined : t("DashboardMarkets.embeddedYield.apyFact", { apy }),
   ].filter((fact): fact is string => Boolean(fact));
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <p className="text-meta text-secondary tabular-nums">{facts.join(" · ")}</p>
-      <CodeBlock code={strategy.id} title={t("DashboardMarkets.earnProgram.strategyId")} />
+      <CodeBlock code={strategy.id} title={t("DashboardMarkets.embeddedYield.strategyId")} />
     </div>
   );
 }
@@ -400,31 +400,31 @@ function IntegrationReference({
           variant="outline"
         >
           {t(
-            copied ? "Shared.SharedComponents.copied" : "DashboardMarkets.earnProgram.copyAllCode"
+            copied ? "Shared.SharedComponents.copied" : "DashboardMarkets.embeddedYield.copyAllCode"
           )}
         </Button>
       }
-      title={t("DashboardMarkets.earnProgram.stepServerCode")}
+      title={t("DashboardMarkets.embeddedYield.stepServerCode")}
     >
       {/* The one thing the copied module needs that this page cannot generate: a key.
           Informational rather than a warning, and it links to where the key is made, because a
           warning with no way to act on it only says "no". The sentence is split around the link
           since the catalog has no rich-text helper. */}
       <Callout variant="info">
-        {t("DashboardMarkets.earnProgram.apiKeyCalloutBefore")}{" "}
+        {t("DashboardMarkets.embeddedYield.apiKeyCalloutBefore")}{" "}
         <Link
           className="font-medium underline underline-offset-2"
           href={href(DASHBOARD_SIDE_NAV_HREFS.apiKeys)}
         >
-          {t("DashboardMarkets.earnProgram.apiKeyCalloutLink")}
+          {t("DashboardMarkets.embeddedYield.apiKeyCalloutLink")}
         </Link>{" "}
-        {t("DashboardMarkets.earnProgram.apiKeyCalloutAfter")}
+        {t("DashboardMarkets.embeddedYield.apiKeyCalloutAfter")}
       </Callout>
 
       {/* Five reference sections, not wizard steps: on a phone the segments tighten so all five
           stay on one row. */}
       <SegmentedControl
-        ariaLabel={t("DashboardMarkets.earnProgram.guideNavigationTitle")}
+        ariaLabel={t("DashboardMarkets.embeddedYield.guideNavigationTitle")}
         className="w-full @2xl:w-fit"
         onChange={(value) => {
           const section = GUIDE_SECTIONS.find(({ id }) => id === value);
@@ -450,7 +450,7 @@ function IntegrationReference({
         <CodeBlock
           code={sections[activeSection.id]}
           language="typescript"
-          title={t("DashboardMarkets.earnProgram.serverExample")}
+          title={t("DashboardMarkets.embeddedYield.serverExample")}
           viewportClassName="max-h-[36rem]"
         />
       </div>

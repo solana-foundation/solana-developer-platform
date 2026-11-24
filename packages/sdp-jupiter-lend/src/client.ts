@@ -6,7 +6,6 @@ import {
   getOrCreateATAInstruction,
   getWithdrawContext,
 } from "@jup-ag/lend/earn";
-import { supportsPortfolioWallets } from "@sdp/earn/capabilities";
 import { badRequest } from "@sdp/earn/errors";
 import { JupiterLendEarnClient } from "@sdp/earn/providers/jupiter_lend/client";
 import type {
@@ -576,15 +575,6 @@ export class JupiterLendVaultDirectClient
           );
         }
       }
-    );
-  }
-}
-
-export function assertJupiterLendNotPortfolioProvider(client: JupiterLendVaultDirectClient): void {
-  if (supportsPortfolioWallets(client)) {
-    throw new SdpJupiterLendError(
-      "PROGRAM_MISMATCH",
-      "Jupiter Lend is non-custodial and must not expose portfolio-wallet capabilities"
     );
   }
 }

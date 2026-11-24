@@ -64,6 +64,11 @@
       "import": "./src/earn.ts",
       "default": "./src/earn.ts"
     },
+    "./earn-core": {
+      "types": "./src/earn-core.ts",
+      "import": "./src/earn-core.ts",
+      "default": "./src/earn-core.ts"
+    },
     "./earn-wire": {
       "types": "./src/earn-wire.ts",
       "import": "./src/earn-wire.ts",
@@ -153,6 +158,11 @@
       "types": "./src/organizations.ts",
       "import": "./src/organizations.ts",
       "default": "./src/organizations.ts"
+    },
+    "./operations": {
+      "types": "./src/operations.ts",
+      "import": "./src/operations.ts",
+      "default": "./src/operations.ts"
     },
     "./pagination": {
       "types": "./src/pagination.ts",

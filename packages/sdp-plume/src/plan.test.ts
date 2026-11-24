@@ -30,7 +30,7 @@ import {
 } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { cancelCompose, evmWord, mintHook, redeemCompose } from "./abi";
+import { evmWord, mintHook, redeemCompose } from "./abi";
 import { admitPlumeTransaction } from "./plan";
 
 const vault = PLUME_VAULTS[0];
@@ -219,7 +219,7 @@ describe("Plume transaction admission", () => {
   });
 });
 
-async function redemptionFixture(mode: "standard" | "instant" | "cancel", wrongReceiver = false) {
+async function redemptionFixture(mode: "standard" | "instant", wrongReceiver = false) {
   const owner = await generateKeyPairSigner();
   const shareAta = await deriveAssociatedTokenAddress(
     owner.address,
@@ -231,11 +231,10 @@ async function redemptionFixture(mode: "standard" | "instant" | "cancel", wrongR
     usdc,
     SPL_TOKEN_PROGRAMS["spl-token"]
   );
-  const atoms = mode === "cancel" ? 0n : 1_000_000n;
-  const composer = mode === "cancel" ? `0x${"12".repeat(20)}` : vault.redemptionComposer;
+  const atoms = 1_000_000n;
+  const composer = vault.redemptionComposer;
   const receiver = wrongReceiver ? "11111111111111111111111111111111" : usdcAta;
-  const compose =
-    mode === "cancel" ? cancelCompose(receiver, 0n) : redeemCompose(receiver, atoms, mode);
+  const compose = redeemCompose(receiver, atoms, mode);
   const u64 = (value: bigint) => Buffer.from(getU64Encoder().encode(value));
   const u32 = (value: number) => Buffer.from(getU32Encoder().encode(value));
   const data = Buffer.concat([
@@ -283,9 +282,8 @@ async function redemptionFixture(mode: "standard" | "instant" | "cancel", wrongR
     feePayer: owner.address,
     depositMint: usdc,
     atoms,
-    canonicalAmount: mode === "cancel" ? "0" : "1",
+    canonicalAmount: "1",
     mode,
-    originalComposer: composer,
     transactionBase64: Buffer.from(
       getTransactionEncoder().encode(compileTransaction(message))
     ).toString("base64"),
@@ -293,15 +291,12 @@ async function redemptionFixture(mode: "standard" | "instant" | "cancel", wrongR
 }
 
 describe("Plume redemption admission", () => {
-  it.each(["standard", "instant", "cancel"] as const)(
+  it.each(["standard", "instant"] as const)(
     "admits the exact %s route without inventing an atomic settlement",
     async (mode) => {
       const input = await redemptionFixture(mode),
         plan = await admitPlumeTransaction(rpc(), input);
-      expect(plan.accepted).toEqual({
-        shares: mode === "cancel" ? "0" : "1",
-        redemptionMode: mode === "cancel" ? undefined : mode,
-      });
+      expect(plan.accepted).toEqual({ shares: "1", redemptionMode: mode });
       expect(plan.providerTransaction).toBeUndefined();
       await assertFireblocksProposal(plan, input.owner);
     }
@@ -310,11 +305,5 @@ describe("Plume redemption admission", () => {
     await expect(
       admitPlumeTransaction(rpc(), await redemptionFixture("standard", true))
     ).rejects.toThrow("receiver or mode");
-  });
-  it("rejects cancellation through a composer other than the original order's", async () => {
-    const input = await redemptionFixture("cancel");
-    await expect(
-      admitPlumeTransaction(rpc(), { ...input, originalComposer: vault.redemptionComposer })
-    ).rejects.toThrow("route");
   });
 });

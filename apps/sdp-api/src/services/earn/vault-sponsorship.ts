@@ -46,7 +46,7 @@ export type VaultFeeMode =
   | { kind: "sponsored"; feePayment: FeePaymentPort; sponsor: Address }
   /**
    * A fee payer the API CALLER named and will co-sign itself (the partner
-   * fee payer on the external-wallet builds, PRO-1722). SDP holds no signer
+   * fee payer on the wallet builds, PRO-1722). SDP holds no signer
    * for it and no paymaster stands behind it: the compiled transaction simply
    * requires its signature alongside the owner's. The same one-identity rule
    * as sponsorship applies — this address is also the rent payer, or rent

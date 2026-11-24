@@ -161,7 +161,7 @@ let calls: { path: string; method: string; body: unknown; key: string | null }[]
 let failRead = false;
 function entry(status = "APPROVED", assetId = "SOL_TEST", address = OTHER_ADDRESS) {
   return {
-    id: "external-wallet",
+    id: "wallet",
     name: "Fireblocks contact",
     assets: [{ id: assetId, address, status }],
   };

@@ -8,24 +8,14 @@ import {
   AccountRole,
   type Address,
   address,
-  addSignersToTransactionMessage,
-  appendTransactionMessageInstruction,
   type Blockhash,
   createNoopSigner,
-  createTransactionMessage,
   generateKeyPairSigner,
   getCompiledTransactionMessageDecoder,
-  getSignatureFromTransaction,
   getTransactionDecoder,
-  getTransactionEncoder,
-  partiallySignTransaction,
-  partiallySignTransactionMessageWithSigners,
   type Signature,
-  setTransactionMessageFeePayer,
-  setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SponsorMessageMismatchError } from "@/services/sponsorship-integrity";
 import { parseJsonRpcRequest } from "@/test/helpers/cluster-rpc";
 import { fetchFailedError, rpcHttpError } from "@/test/helpers/rpc-errors";
 import { createVaultDeadline } from "./vault-deadline";
@@ -42,7 +32,6 @@ function inSandbox<TArgs extends unknown[], TResult>(
 
 const broadcastVaultTransaction = inSandbox(execution.broadcastVaultTransaction);
 const compileUnsignedVaultTransaction = inSandbox(execution.compileUnsignedVaultTransaction);
-const signVaultPlan = inSandbox(execution.signVaultPlan);
 const simulateVaultPlan = inSandbox(execution.simulateVaultPlan);
 
 const ownerAddress = address("11111111111111111111111111111112");
@@ -159,7 +148,7 @@ function useRealPoolWithDevnetGenesis(genesis: string): string[] {
 describe("vault execution validation", () => {
   it("refuses caller-signed transactions that require any signer besides the owner", async () => {
     const extraSigner = await generateKeyPairSigner();
-    const externalPlan: EarnVaultTransactionPlan = {
+    const walletPlan: EarnVaultTransactionPlan = {
       ...plan,
       instructions: [
         {
@@ -173,11 +162,11 @@ describe("vault execution validation", () => {
     expect(() =>
       compileUnsignedVaultTransaction({
         deadline: createVaultDeadline(),
-        expectedAssetIdentity: externalPlan.assetIdentity,
-        plan: externalPlan,
+        expectedAssetIdentity: walletPlan.assetIdentity,
+        plan: walletPlan,
         owner: ownerAddress,
         prepared: {
-          plan: externalPlan,
+          plan: walletPlan,
           lookupTables: {},
           blockhash,
           lastValidBlockHeight: 100n,
@@ -187,15 +176,15 @@ describe("vault execution validation", () => {
   });
 
   it("compiles a caller-provided fee payer into slot zero beside the owner", () => {
-    const externalPlan = planForOwner(ownerAddress);
+    const walletPlan = planForOwner(ownerAddress);
     const unsigned = compileUnsignedVaultTransaction({
       deadline: createVaultDeadline(),
-      expectedAssetIdentity: externalPlan.assetIdentity,
-      plan: externalPlan,
+      expectedAssetIdentity: walletPlan.assetIdentity,
+      plan: walletPlan,
       owner: ownerAddress,
       feePayer: feePayerAddress,
       prepared: {
-        plan: externalPlan,
+        plan: walletPlan,
         lookupTables: {},
         blockhash,
         lastValidBlockHeight: 100n,
@@ -210,7 +199,7 @@ describe("vault execution validation", () => {
 
   it("still refuses a smuggled third signer when a fee payer is requested", async () => {
     const extraSigner = await generateKeyPairSigner();
-    const externalPlan: EarnVaultTransactionPlan = {
+    const walletPlan: EarnVaultTransactionPlan = {
       ...plan,
       instructions: [
         {
@@ -227,12 +216,12 @@ describe("vault execution validation", () => {
     expect(() =>
       compileUnsignedVaultTransaction({
         deadline: createVaultDeadline(),
-        expectedAssetIdentity: externalPlan.assetIdentity,
-        plan: externalPlan,
+        expectedAssetIdentity: walletPlan.assetIdentity,
+        plan: walletPlan,
         owner: ownerAddress,
         feePayer: feePayerAddress,
         prepared: {
-          plan: externalPlan,
+          plan: walletPlan,
           lookupTables: {},
           blockhash,
           lastValidBlockHeight: 100n,
@@ -242,18 +231,18 @@ describe("vault execution validation", () => {
   });
 
   it("treats a fee payer equal to the owner as absent", () => {
-    const externalPlan = planForOwner(ownerAddress);
+    const walletPlan = planForOwner(ownerAddress);
     // Solana deduplicates account keys, so owner-as-fee-payer compiles to ONE
     // signer slot; the compile normalizes rather than tripping its own
     // two-slot assertion on a legitimate build.
     const unsigned = compileUnsignedVaultTransaction({
       deadline: createVaultDeadline(),
-      expectedAssetIdentity: externalPlan.assetIdentity,
-      plan: externalPlan,
+      expectedAssetIdentity: walletPlan.assetIdentity,
+      plan: walletPlan,
       owner: ownerAddress,
       feePayer: ownerAddress,
       prepared: {
-        plan: externalPlan,
+        plan: walletPlan,
         lookupTables: {},
         blockhash,
         lastValidBlockHeight: 100n,
@@ -287,31 +276,10 @@ describe("vault execution validation", () => {
     expect(simulateSend).not.toHaveBeenCalled();
   });
 
-  it("refuses to sign a caller-provided fee mode", async () => {
-    await expect(
-      signVaultPlan({
-        deadline: createVaultDeadline(),
-        expectedAssetIdentity: plan.assetIdentity,
-        plan,
-        owner: createNoopSigner(ownerAddress),
-        fee: { kind: "caller-provided", feePayer: feePayerAddress },
-      })
-    ).rejects.toThrow("compile the transaction unsigned");
-  });
-
-  it("blocks every raw execution path before RPC or signing on wrong genesis", async () => {
+  it("blocks simulation and broadcast on wrong genesis", async () => {
     const methods = useRealPoolWithDevnetGenesis(GENESIS_HASH_BY_CLUSTER["mainnet-beta"]);
-    const owner = createNoopSigner(ownerAddress);
+    const _owner = createNoopSigner(ownerAddress);
 
-    await expect(
-      signVaultPlan({
-        deadline: createVaultDeadline(),
-        expectedAssetIdentity: plan.assetIdentity,
-        plan,
-        owner,
-        fee: { kind: "wallet-pays" },
-      })
-    ).rejects.toMatchObject({ code: "RPC_UNAVAILABLE", reason: "cluster_mismatch" });
     await expect(
       simulateVaultPlan({
         deadline: createVaultDeadline(),
@@ -337,11 +305,11 @@ describe("vault execution validation", () => {
     const mainnetPlan = { ...plan, cluster: "mainnet-beta" } as const;
 
     await expect(
-      signVaultPlan({
+      simulateVaultPlan({
         deadline: createVaultDeadline(),
         expectedAssetIdentity: plan.assetIdentity,
         plan: mainnetPlan,
-        owner: createNoopSigner(ownerAddress),
+        owner: ownerAddress,
         fee: { kind: "wallet-pays" },
       })
     ).rejects.toThrow("Vault plan targets mainnet-beta, not the expected devnet cluster");
@@ -355,15 +323,6 @@ describe("vault execution validation", () => {
       shareMint: "11111111111111111111111111111112",
     };
 
-    await expect(
-      signVaultPlan({
-        deadline: createVaultDeadline(),
-        expectedAssetIdentity,
-        plan,
-        owner: createNoopSigner(ownerAddress),
-        fee: { kind: "wallet-pays" },
-      })
-    ).rejects.toThrow(/share mint.*does not match/);
     await expect(
       simulateVaultPlan({
         deadline: createVaultDeadline(),
@@ -572,126 +531,25 @@ describe("vault lookup-table reads", () => {
   });
 });
 
-describe("vault signing lifecycle", () => {
-  it("reuses successful simulation preparation for signing", async () => {
-    const owner = await generateKeyPairSigner();
+describe("strategy execution preparation", () => {
+  it("reuses simulation preparation for the exact unsigned message without another RPC read", async () => {
     const simulation = await simulateVaultPlan({
       deadline: createVaultDeadline(),
       expectedAssetIdentity: plan.assetIdentity,
       plan,
-      owner: owner.address,
+      owner: ownerAddress,
       fee: { kind: "wallet-pays" },
     });
     if (!simulation.ok) throw new Error("expected simulation to succeed");
-
-    await signVaultPlan({
+    compileUnsignedVaultTransaction({
       deadline: createVaultDeadline(),
       expectedAssetIdentity: plan.assetIdentity,
       plan,
-      owner,
-      fee: { kind: "wallet-pays" },
+      owner: ownerAddress,
       prepared: simulation.prepared,
     });
-
-    // Signing a prepared plan asks the chain nothing: one client, one blockhash.
     expect(factory.createClusterRpc).toHaveBeenCalledTimes(1);
-    expect(factory.createClusterRpc).toHaveBeenCalledWith();
     expect(solanaRpc.getRecentBlockhash).toHaveBeenCalledTimes(1);
-  });
-
-  it("rejects a signed transaction above Solana's byte limit", async () => {
-    const owner = await generateKeyPairSigner();
-    const oversizedPlan: EarnVaultTransactionPlan = {
-      ...plan,
-      instructions: [
-        {
-          programAddress: "11111111111111111111111111111111",
-          accounts: [{ address: owner.address, role: AccountRole.READONLY_SIGNER }],
-          data: Buffer.alloc(1_500).toString("base64"),
-        },
-      ],
-    };
-
-    await expect(
-      signVaultPlan({
-        deadline: createVaultDeadline(),
-        expectedAssetIdentity: plan.assetIdentity,
-        plan: oversizedPlan,
-        owner,
-        fee: { kind: "wallet-pays" },
-      })
-    ).rejects.toThrow("Solana allows at most 1232");
-  });
-
-  it("fully signs a sponsored transaction without sending it", async () => {
-    const owner = await generateKeyPairSigner();
-    const sponsor = await generateKeyPairSigner();
-    const signAsFeePayer = vi.fn(async (ownerSignedBytes: Uint8Array) => {
-      const ownerSigned = getTransactionDecoder().decode(ownerSignedBytes);
-      expect(ownerSigned.signatures[owner.address]).not.toBeNull();
-      expect(ownerSigned.signatures[sponsor.address]).toBeNull();
-      const fullySigned = await partiallySignTransaction([sponsor.keyPair], ownerSigned);
-      return new Uint8Array(getTransactionEncoder().encode(fullySigned));
-    });
-    const fee = feePayment({
-      getFeePayer: vi.fn().mockResolvedValue(sponsor.address),
-      signAsFeePayer,
-    });
-
-    const result = await signVaultPlan({
-      deadline: createVaultDeadline(),
-      expectedAssetIdentity: plan.assetIdentity,
-      plan: planForOwner(owner.address),
-      owner,
-      fee: { kind: "sponsored", feePayment: fee, sponsor: sponsor.address },
-    });
-
-    const decoded = getTransactionDecoder().decode(result.bytes);
-    expect(decoded.signatures[owner.address]).not.toBeNull();
-    expect(decoded.signatures[sponsor.address]).not.toBeNull();
-    expect(result.signature).toBe(getSignatureFromTransaction(decoded));
-    expect(signAsFeePayer).toHaveBeenCalledOnce();
-    expect(solanaRpc.sendTransaction).not.toHaveBeenCalled();
-  });
-
-  it("surfaces the port's sponsor-response refusal without broadcasting", async () => {
-    const owner = await generateKeyPairSigner();
-    const sponsor = await generateKeyPairSigner();
-    const refusal = new SponsorMessageMismatchError();
-    const signAsFeePayer = vi.fn().mockRejectedValue(refusal);
-    const fee = feePayment({
-      getFeePayer: vi.fn().mockResolvedValue(sponsor.address),
-      signAsFeePayer,
-    });
-
-    await expect(
-      signVaultPlan({
-        deadline: createVaultDeadline(),
-        expectedAssetIdentity: plan.assetIdentity,
-        plan: planForOwner(owner.address),
-        owner,
-        fee: { kind: "sponsored", feePayment: fee, sponsor: sponsor.address },
-      })
-    ).rejects.toBe(refusal);
-
-    expect(solanaRpc.sendTransaction).not.toHaveBeenCalled();
-  });
-
-  it("signs wallet-paid bytes without broadcasting before durable persistence", async () => {
-    const owner = await generateKeyPairSigner();
-
-    const result = await signVaultPlan({
-      deadline: createVaultDeadline(),
-      expectedAssetIdentity: plan.assetIdentity,
-      plan: planForOwner(owner.address),
-      owner,
-      fee: { kind: "wallet-pays" },
-    });
-
-    const decoded = getTransactionDecoder().decode(result.bytes);
-    expect(decoded.signatures[owner.address]).not.toBeNull();
-    expect(result.signature).toBe(getSignatureFromTransaction(decoded));
-    expect(solanaRpc.sendTransaction).not.toHaveBeenCalled();
   });
 });
 
@@ -699,51 +557,19 @@ describe("vault execution deadline", () => {
   it("bounds blockhash work with the stage-labelled deadline", async () => {
     vi.useFakeTimers();
     vi.mocked(solanaRpc.getRecentBlockhash).mockReturnValue(new Promise(() => undefined));
-    const result = signVaultPlan({
+    const result = simulateVaultPlan({
       deadline: createVaultDeadline(25),
       expectedAssetIdentity: plan.assetIdentity,
       plan,
-      owner: createNoopSigner(ownerAddress),
+      owner: ownerAddress,
       fee: { kind: "wallet-pays" },
     });
     const rejection = expect(result).rejects.toThrow(
-      "Fetching the vault transaction blockhash timed out after 25ms"
+      "Fetching the vault simulation blockhash timed out after 25ms"
     );
 
     await vi.advanceTimersByTimeAsync(25);
     await rejection;
-  });
-
-  it("signs with the sponsor it was given and never re-reads it", async () => {
-    // The sponsor address travelled into the provider's instructions as the rent
-    // payer before this point, so the instructions already commit to it.
-    // Re-reading it here could name a DIFFERENT address than they name, which is
-    // why signing must not ask the paymaster who it is.
-    const owner = await generateKeyPairSigner();
-    const sponsor = await generateKeyPairSigner();
-    const getFeePayer = vi.fn<() => Promise<Address>>();
-    const signAsFeePayer = vi.fn(async (ownerSignedBytes: Uint8Array) => {
-      const ownerSigned = getTransactionDecoder().decode(ownerSignedBytes);
-      const fullySigned = await partiallySignTransaction([sponsor.keyPair], ownerSigned);
-      return new Uint8Array(getTransactionEncoder().encode(fullySigned));
-    });
-
-    const result = await signVaultPlan({
-      deadline: createVaultDeadline(),
-      expectedAssetIdentity: plan.assetIdentity,
-      plan: planForOwner(owner.address),
-      owner,
-      fee: {
-        kind: "sponsored",
-        feePayment: feePayment({ getFeePayer, signAsFeePayer }),
-        sponsor: sponsor.address,
-      },
-    });
-
-    expect(getFeePayer).not.toHaveBeenCalled();
-    const decoded = getTransactionDecoder().decode(result.bytes);
-    expect(decoded.signatures[sponsor.address]).not.toBeNull();
-    expect(decoded.signatures[owner.address]).not.toBeNull();
   });
 
   it("bounds broadcast with the same stage-labelled deadline", async () => {
@@ -759,88 +585,5 @@ describe("vault execution deadline", () => {
 
     await vi.advanceTimersByTimeAsync(25);
     await rejection;
-  });
-});
-
-async function protocolSignedPlan(
-  owner: Address,
-  payer: Address = owner
-): Promise<EarnVaultTransactionPlan> {
-  const protocol = await generateKeyPairSigner();
-  const instruction = {
-    programAddress: address("11111111111111111111111111111111"),
-    accounts: [
-      { address: owner, role: AccountRole.READONLY_SIGNER },
-      { address: protocol.address, role: AccountRole.READONLY_SIGNER },
-    ],
-    data: Uint8Array.of(1),
-  };
-  const message = appendTransactionMessageInstruction(
-    instruction,
-    setTransactionMessageLifetimeUsingBlockhash(
-      { blockhash, lastValidBlockHeight: 999n },
-      setTransactionMessageFeePayer(payer, createTransactionMessage({ version: 0 }))
-    )
-  );
-  const transaction = await partiallySignTransactionMessageWithSigners(
-    addSignersToTransactionMessage([protocol], message)
-  );
-  return {
-    ...planForOwner(owner),
-    providerTransaction: {
-      transactionBase64: Buffer.from(getTransactionEncoder().encode(transaction)).toString(
-        "base64"
-      ),
-      additionalSigners: [protocol.address],
-      lastValidBlockHeight: "999",
-    },
-  };
-}
-
-describe("immutable provider signing", () => {
-  it("adds the custody owner signature without changing a protocol-signed message", async () => {
-    const owner = await generateKeyPairSigner(),
-      providerPlan = await protocolSignedPlan(owner.address);
-    const signed = await signVaultPlan({
-      plan: providerPlan,
-      owner,
-      fee: { kind: "wallet-pays" },
-      deadline: createVaultDeadline(),
-      expectedAssetIdentity: providerPlan.assetIdentity,
-    });
-    const original = providerPlan.providerTransaction;
-    if (original === undefined) throw new Error("Missing provider fixture");
-    execution.assertVaultSignaturesPreserved(
-      Buffer.from(original.transactionBase64, "base64"),
-      signed.bytes
-    );
-    expect(
-      Object.values(getTransactionDecoder().decode(signed.bytes).signatures).every(
-        (value) => value !== null
-      )
-    ).toBe(true);
-  });
-  it("keeps owner and protocol signatures when preparing an owned sponsor submission", async () => {
-    const [owner, sponsor] = await Promise.all([generateKeyPairSigner(), generateKeyPairSigner()]);
-    const providerPlan = await protocolSignedPlan(owner.address, sponsor.address),
-      payment = feePayment();
-    const partial = await inSandbox(execution.signVaultOwnerOnly)({
-      plan: providerPlan,
-      owner,
-      fee: { kind: "sponsored", sponsor: sponsor.address, feePayment: payment },
-      deadline: createVaultDeadline(),
-      expectedAssetIdentity: providerPlan.assetIdentity,
-      prepared: { plan: providerPlan, lookupTables: {}, blockhash, lastValidBlockHeight: 999n },
-    });
-    const original = providerPlan.providerTransaction;
-    if (original === undefined) throw new Error("Missing provider fixture");
-    execution.assertVaultSignaturesPreserved(
-      Buffer.from(original.transactionBase64, "base64"),
-      partial.bytes
-    );
-    const signatures = getTransactionDecoder().decode(partial.bytes).signatures;
-    expect(signatures[owner.address]).not.toBeNull();
-    expect(signatures[sponsor.address]).toBeNull();
-    expect(payment.signAsFeePayer).not.toHaveBeenCalled();
   });
 });

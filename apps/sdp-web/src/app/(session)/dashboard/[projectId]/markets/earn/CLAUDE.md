@@ -1,797 +1,127 @@
-# dashboard/markets/earn — agent notes
+# Earn dashboard
 
-The Earn dashboard module. **All live data** — there is no mock seam; do not
-reintroduce fixture modules. Data flows: BFF proxies
-(`src/app/api/dashboard/markets/earn/*` → `/v1/earn/*`) → SWR hooks → UI.
+Treasury and Embedded Yield share the core Earn API. New money uses
+`/v1/earn/discovery`, `/positions`, `/deposit`, `/withdraw`, then the shared
+`/v1/operations` lifecycle. Do not add product-specific write flows or restore
+program creation and allocation configuration.
 
-This module was rebuilt on live provider and organization capability. The
-Markets prototype it replaced (the deposit wizard, `earn-workspace`, the
-opportunities table, the playground, the route skeletons) is gone; nothing
-here fabricates a position, a rate, or a success state.
+## Data and action seams
 
-## The BFF proxy tree
+- `src/lib/earn-client.ts` is the typed HTTP client with an injected transport.
+  `earn-response-schemas.ts` validates reads; shared operation schemas validate
+  writes and polling. `earn-core-data.ts` owns dashboard transport and polling.
+- `earn-core-action-modal.tsx` collects intent, shows current operation terms,
+  then requires explicit submission. A funding swap and deposit are atomic.
+- `earn-core-operations.tsx` shows requested and verified settled amounts
+  separately. Queue acceptance or Solana submission never means payout.
+- BFF routes under `src/app/api/dashboard/markets/earn` forward the five core
+  endpoints, including single-position reads. Shared operation proxies live under `api/dashboard/operations`.
+  Preserve project, environment, auth and idempotency headers through the seam.
+- `earn-data.ts` supplies shared discovery and position reads. Activity and
+  outstanding exits use current operations.
+  Do not add a second history model or obsolete API proxies.
+- `earn-integration-snippets.ts` supplies every guide code tab and Copy all.
+  Keep it on the same core contract as the application.
 
-Mirrors the API's collection shape (PRO-1670 — there is no singular `program/`
-folder):
+## Operations and recovery
 
-```
-api/dashboard/markets/earn/
-  provider-query.ts                  allowlisted query passthrough — lives at
-                                     the earn/ ROOT because its importers sit
-                                     at several depths under programs/
-  kamino-allocations/route.ts        NOT a proxy: the one route that fetches a
-                                     THIRD PARTY (Kamino's public allocations
-                                     endpoint) server-side for the Treasury
-                                     "Information" column. One batched read
-                                     per table (`?vaults=a,b,c`, zod-parsed,
-                                     at most 100 per request; the hook splits
-                                     a longer list and merges the answers)
-                                     fans out to a per-vault TTL cache (45s,
-                                     in-flight reads shared), so the browser
-                                     sends one request and Kamino still sees
-                                     one read per vault (its API has no batch
-                                     path). Zod-parsed through the schema
-                                     module in treasury-solutions/. Auth comes
-                                     from the proxy middleware. Kamino's
-                                     allocations source is mainnet-only, so
-                                     the handler refuses any other cluster
-                                     with a 400 before reading anything else,
-                                     and a vault that is not even a public key
-                                     is a client bug — 400 before anything
-                                     downstream. The rest of the request is
-                                     policed by the store module —
-                                     the server boundary: Kamino would answer
-                                     any well-formed mainnet vault, so the
-                                     store admits a vault only if it is a
-                                     public key AND the strategy catalogue
-                                     fronts it. The allowlist is resolved
-                                     from `/v1/earn/strategies` (provider
-                                     kamino, mainnet-beta) through
-                                     `createSdpApiClient`, cached beside the
-                                     allocations cache. A refused vault, a
-                                     failed upstream read and a failed
-                                     catalogue read all leave the vault out
-                                     of a 200 (fail closed, nothing cached),
-                                     so a refusal is indistinguishable from
-                                     an outage and its cell degrades to the
-                                     placeholder. Answers the BARE parsed
-                                     batch, never an envelope:
-                                     `dashboardFetch` hands the body straight
-                                     to the SWR hook, which re-parses it with
-                                     the same schema (an envelope once failed
-                                     every cell to "—" while both unit suites
-                                     stayed green; the seam test in
-                                     treasury-solutions/kamino-allocations-bff
-                                     wires route → dashboardFetch → hook).
-  strategies/route.ts
-  programs/route.ts                  GET list (page window) · POST create
-  programs/[programId]/route.ts      GET one · PUT re-target
-  programs/[programId]/
-    deposits/                        GET (cursor)
-    withdrawal-preview/              POST
-    withdrawals/                     POST create · GET ledger list
-    withdrawals/[withdrawalRef]/     GET detail
-  vault-deposits/route.ts            POST create (vault_direct)
-  vault-deposits/route.ts            …and GET the workspace list (recovery)
-  vault-deposits/[movementId]/       GET one recorded deposit (poll to terminal)
-  vault-withdrawals/route.ts         POST create (vault exit) · GET the movement list
-  vault-withdrawals/[movementId]/    GET one recorded withdrawal
-  vault-withdrawal-options/route.ts  POST atomic/provider-order/queue discovery
-  vault-queued-withdrawal-previews/  POST live queue terms preview
-  vault-withdrawal-requests/         POST create · GET durable request list
-    [withdrawalRequestId]/           GET one request (poll to terminal)
-    [withdrawalRequestId]/cancel/    POST cancel after the recovery deadline
-  vault-positions/route.ts           GET list (keyset cursor)
-  movements/route.ts                 GET the cross-provider ledger feed
-                                     (keyset cursor + equality filters)
-```
+Preparation never signs or broadcasts. `submit` returns 202 after durable
+acceptance; workers request signatures, broadcast and track settlement. Keep
+polling queued and active operations, including custody providers that require
+a signature in another application. Read requests never trigger submission.
+Only the operation open in the dialog is read every 2 s, and only while SDP is
+moving it; activity rows and provider waits are read every 30 s beside the
+15 s feed, so many pending rows stay under the dashboard's shared request limit.
 
-`provider-query.ts` holds SEVEN validators with deliberately different failure
-modes. `programProxyQuery` is permissive-by-omission — an unrecognized param is
-dropped — because those routes predate the typed client and are reachable with
-arbitrary query strings. `vaultPositionsProxyQuery` is **strict**: it is
-consumed only by our own typed client, so an unknown key, a repeated key, an
-out-of-range `limit` or a non-base64url cursor **400s** instead of silently
-reshaping the page. A typo must not return a different page of someone's money.
-`vaultDepositsProxyQuery` is the same posture over the deposits list, sharing
-`ProxyQueryValidation` and `MAX_CURSOR_LENGTH` rather than restating them; its
-`requestId` is validated to the API's OWN `[\x20-\x7e]{1,255}` idempotency-key
-shape, because a tidier rule would 400 a legitimate key containing a slash.
-`vaultWithdrawalsProxyQuery` is its exit mirror, parameter for parameter.
-`vaultWithdrawalRequestsProxyQuery` adds a strict `settled=true|false` filter so
-the recovery surface asks the server for open requests instead of downloading
-and filtering terminal history.
-`earnMovementsProxyQuery` (PRO-1705) is strict in the same way over the
-cross-provider feed, and its filter values are checked for SHAPE and length only,
-never against a vocabulary: `status` is per execution model and `provider` is an
-open registry string, so a copy of either list here would need revising every time
-one grows — and the API already answers an unknown value with an empty page, which
-is the honest result.
+The default activity view polls active work and the newest 50 history entries.
+Older pages load on demand and keep their snapshot while expanded; Refresh
+returns to the newest page. Retain a pending row until its existing detail poll
+observes a terminal outcome, even if it leaves the active feed. Completion from
+either feed or detail must refresh holdings. A recovery refreshes holdings and
+cash observations without becoming withdrawal proceeds. Hastra releases report
+no settled amount; current available wYLDS comes from the live position read.
+Timestamp-only updates must not trigger another balance read.
 
-`proxyToSdpApi` never copies the inbound header bag — auth, project scope and
-tracing stay server-owned — so a client-set `Idempotency-Key` never reaches the
-API on its own. A route forwards one deliberately, per header, through the
-optional `upstreamHeaders` argument, spelling it `IDEMPOTENCY_KEY_HEADER`
-(`src/lib/idempotency.ts`). `vault-deposits/`, `vault-withdrawals/`, and the
-queued request create/cancel routes opt in, forwarding that single header and
-nothing else; the program create still sends the body `requestId` form.
+Render `nextAction` explicitly: `submit`, `sign_transaction`, `select_option`,
+`sign_in_provider`, `wait` or `refresh`. Selecting a withdrawal option
+prepares its terms through version-bound refresh, followed by separate review
+and submission. Only the API can decide whether a
+message is safe to replace. A pending or uncertain provider outcome remains
+`wait`. Refresh prepares new terms only before submission acceptance, for separate
+review and submission. Definitively failed submissions stay terminal; a new
+intent needs a new deposit or withdrawal request.
 
-## Routes
+A queued exit that escrows every share drops its position from the holdings
+table while the request stays open, expired included, and its operation stays
+`wait`. Treasury passes those positions as `withdrawalRecovery`, so the settling
+row offers Recovery options: the withdraw dialog with All selected, whose
+preparation returns any recovery route or the API's refusal.
 
-- `/dashboard/markets/embedded-yield` → `EmbeddedYieldDashboard`: the live
-  customer portfolio. It opens with the portfolio's live value in dollars (the
-  token totals summed at par, withheld while any position is unread or a token
-  is not a dollar stablecoin) over a stat line of wallets, positions and assets,
-  then a borderless table by strategy. Integrate is the shell's page action. A
-  row opens its customer wallets from the positions already hydrated by the
-  project summary; it must not fan out one metered request per customer
-  wallet.
-- `/dashboard/markets/embedded-yield/configure` → `EarnIntegrationGuide`: one
-  configuration surface with a strategy dropdown, the selected strategy ID,
-  live APY and liquidity, and code that updates in place (`?strategy=`
-  selects the strategy). No network
-  toggle: sandbox reads both shelves (`useIntegrationCatalogue`) and lists the
-  devnet rows first, then the mirrored mainnet rows disabled as "Mainnet only",
-  the same posture as the Treasury table. There is no mainnet "preview" mode
-  in the guide any more: a mainnet deep link in sandbox is refused as a
-  network mismatch.
-  The guide covers the sectioned **server-side, authenticated**
-  EXTERNAL-WALLET flow:
-  the WHOLE loop (PRO-1722 + PRO-1772), not just the deposit: build via
-  `POST /v1/earn/deposits/build-unsigned-transaction`, the customer's wallet
-  signs, submit via `POST /v1/earn/deposits/submit-signed-transaction`, then poll
-  `GET …/movements/:movementId`, read `GET …/earnings?ownerAddress=`
-  (balance + earned; `earned` can be ABSENT with `earnedUnavailableReason` —
-  render a dash, never $0), list `GET …/movements?ownerAddress=` and
-  `GET …/positions?ownerAddress=` (the owner rides the query on every
-  per-owner read), and exit directly via
-  `…/withdrawal-transactions` + `…/withdrawals` or through the queued lifecycle:
-  options, queued preview, request build/submit, request list/detail, and
-  post-deadline cancellation build/submit. The treasury
-  route (`/deposits/provider-signed` + `custodyWalletId`) must not reappear in the
-  snippets — a B2B2C partner cannot name a custody wallet. The optional
-  partner `feePayer` (the implementor sponsoring its customers' fees) is
-  documented in
-  `apps/sdp-docs/content/docs/earn/integration-details.mdx`. The flow guide
-  is `apps/sdp-docs/content/docs/guides/embedded-yield.mdx`; both follow Earn's
-  release-channel visibility. Keep the shared authenticated flow
-  and signed-intent retry advice aligned with the snippets. The
-  guide is entirely derived from the strategy catalogue: nothing is persisted,
-  there is no styling to save, and no public handoff token exists. (The UI
-  builder that used to hold those was removed with its styled previews, saved
-  per-project configuration, the public `/embedded-yield/integrate/:token`
-  handoff page and its `/v1/earn/button-configurations/*` API; migration 0074
-  dropped its table. Do not reintroduce persisted presentation state here.)
-- Both routes are `dynamic = "force-dynamic"` and resolve
-  `loadEarnProviderAccess()` server-side per request. Provider access is
-  organization-scoped; caching it would hand one org's entitlement to another.
-- Gates by segment: `../layout.tsx` holds `markets()`, which every Markets
-  surface shares, and each Earn segment (`../embedded-yield`,
-  `../treasury-solutions`) holds `earn()` in its own layout (`notFound()`), so
-  DvP is not hidden by it. Pages hold no flag checks: a new Earn route goes
-  under one of those segments.
-- Loading states come from `../markets-route-skeletons`, with distinct portfolio,
-  configuration and integration-guide shapes. The shell's navigation-loading
-  resolver (`lib/dashboard-navigation-loading.ts`) maps each pathname to the
-  same route-specific skeleton used by its `loading.tsx` boundary.
-- The portfolio's zero-position state is the empty state alone: the live value
-  and its counts are hidden at zero positions because a zero hero and empty
-  counts read as data rather than "nothing yet". Its Integrate action repeats
-  the page's, so the state hides the header's copy (`hidesPageAction`). The
-  removed UI builder persisted the only former configuration state, so there
-  is no honest "configured but awaiting a deposit" distinction to infer from
-  the live position summary.
+Persist retry keys before sending. A lost response retries the same request
+and exact signed bytes. Wire amounts stay fixed across an ambiguous retry,
+including an intermediate-token All amount; live quotes and balances cannot
+change the retained request. Do not prepare another transaction because an RPC read
+is missing or a signature expired. Show cancellation only when the API returns
+`canCancel: true`. It discards an unsubmitted preparation. Once `/submit` has
+been accepted, cancellation and refresh stay unavailable. Cancellation never
+revokes an onchain transaction or a provider withdrawal request.
 
-## Module map
+## Positions and balances
 
-- `earn-surfacing.ts` — the availability brain. `SURFACED_VAULT_DIRECT_EARN_PROVIDERS`,
-  `earnVaultDepositAvailability` and
-  `earnVaultDepositOnlyEnvironment` (which side an `environment_unavailable`
-  verdict points at, so Jupiter/Ondo read "Production only" rather than the
-  sandbox-era "Sandbox only"), all DERIVED from `@sdp/types` — **no provider id
-  is hand-set here**. Carries no
-  `"use client"` directive, on purpose (see "The client/server boundary bug").
-- `earn-provider-access.server.ts` — `loadEarnProviderAccess()`: reads the
-  onboarding status through `requestOnboardingStatus()` (`@/lib/sdp-api`, one
-  `/v1/onboarding/status` call per request, shared with the layout's quick
-  start) then provider availability for that organization.
-  Every failure path returns `null`, and `null` disables deposit actions. A
-  catalogue row says a strategy EXISTS; it never says this organization may
-  fund it.
-- `earn-integration-guide.tsx` — owns strategy selection and re-checks
-  availability rather than trusting a deep link. Unavailable strategies stay
-  visible but disabled, with the reason beside their APY. The selected
-  strategy's provider, liquidity and APY sit in one plain line under the
-  dropdown ("Kamino · Instant liquidity · 6.2% APY", APY omitted when unknown)
-  with the ID as its own copyable code block; only a fundable strategy gets
-  there, so no availability is restated. The shell sets the way back and the
-  title; a short intro paragraph explains the loop, then one segmented control
-  of five freely navigable reference sections (client setup, deposits, reads,
-  direct withdraw, queued withdraw), tightened on a phone so all five fit.
-  "Copy all code" copies the whole module (`buildEarnServerIntegration`), not
-  just the active tab. The snippets remain server-only and the page says so in
-  an info callout that links to the API keys page, because the module they
-  document carries a secret API key. Keys hold explicit grants, not roles: the
-  module needs Earn Read and Execute, plus Manage, which the queued-withdrawal
-  cancellation build and submit routes require. The
-  module needs only the strategy id and that key: no strategy object, no
-  `sourceTokenMint` on a direct deposit.
-- `earn-integration-snippets.ts` — the snippet source,
-  `buildEarnIntegrationSections(strategy)` (+ `buildEarnServerIntegration`,
-  the sections joined). Pure string building so the exact wire contract is
-  unit-testable without rendering.
-- `earn-program-data.ts` — THE data seam, over the BFF proxies above.
-  `useEarnStrategies()` is what this module's pages read today — it takes an
-  optional `{ cluster }` (PRO-1742), the explicit opt-in that browses the
-  mirrored mainnet shelf; the cluster is part of the SWR key. In sandbox,
-  Treasury's strategies card always requests that mirror and lists it above
-  the default (devnet) shelf, and deliberately keeps the SECOND, default hook
-  call alive: the default read doubles as the allocation summary's share-mint
-  vocabulary, and repointing it at mainnet would blank the devnet vocabulary
-  under the page. Neither shelf gates the other (PRO-1961): whichever has
-  loaded renders, a failed or slow shelf is reported inline above the other's
-  rows, and the full-card error is reserved for both failing. Devnet rows are
-  the only ones sandbox can deposit into, so a mirror outage must never hide
-  them. Neither shelf refetches on focus: catalogue figures move only on the
-  five-minute metrics cron, so a reload or the page's Refresh reads them. The
-  program,
-  vault-position and vault-deposit seams serve Treasury Solutions next door (see
-  "Where these seams are consumed"). **No provider id is spelled in this file** — surfacing comes
-  from `./earn-surfacing`, and reads are provider-agnostic on purpose so a
-  position taken while a provider was offered stays visible after it is
-  un-surfaced (ADR 0002 — un-surfacing closes the door in, never the door out).
-  All three paginated readers **page to the end** and fail loudly rather than
-  truncating: `fetchEarnStrategies` stops on the reported total or a short page
-  and throws if pagination ends early, and `fetchEarnVaultPositions` follows the
-  opaque keyset cursor, throwing if the cursor repeats or does not advance. A
-  silently short page is hidden MONEY.
-- `earn-outcome-trackers.tsx`: the tiny always-loaded polling mounts for
-  custodial withdrawals and vault deposits/withdrawals. Treasury imports these
-  directly and dynamically loads the three large transaction modals only when
-  an action opens, so moving a tracker back into a modal would pull that modal's
-  client graph into the initial portfolio route. The modal files re-export the
-  trackers only for compatibility; new callers import this module. Every
-  deferred surface uses the shared `EarnTransactionModalLoading` fallback so
-  the first click opens an accessible loading modal while its chunk arrives.
-- `earn-withdraw-modal.tsx` — portfolio-level withdrawal: stablecoin, amount,
-  Solana destination; preview → confirm → submitted. Every figure it quotes
-  comes from the PROVIDER, never a local estimate (PRO-1675) — see
-  "Withdrawal rules" below. The selected token is `EarnPortfolioToken |
-  undefined` and the form subtree renders only once it is a REAL lane: seeding
-  state with a default stablecoin would make every read below depend on
-  remembering to fail closed, and the provider-unavailable case would silently
-  hold a lane that cannot pay out.
-  Its retry protection is the dashboard's shared action key
-  (`dashboardRequest`'s `sendUnderActionKey`), NOT a body `requestId`: the API
-  refuses a withdrawal carrying both key sources, and a ref- or session-held
-  body UUID dies on reload. The create body's `amountUsd` goes out canonical
-  (`canonicalDecimalAmount`) so a cosmetic re-spell of the same value after an
-  ambiguous failure resolves the same kept key — a replay, never a second
-  payout.
-- `earn-vault-deposit-modal.tsx` — the `vault_direct` deposit: one SDP custody
-  wallet funds one strategy, and that same wallet signs on chain and holds the
-  shares. A vault address is never presented as a funding address. The
-  idempotency key is derived from a request SIGNATURE — `(strategy, wallet,
-  amount)` — so re-pressing submit after a timeout replays the same key, while
-  editing any of the three mints a new one: a retry is not a second deposit, and
-  a changed deposit is not a retry. `validateVaultDepositAmount` never touches a
-  JavaScript number; trailing zeroes past the mint scale are harmless, but a
-  non-zero digit below one atom is REJECTED rather than rounded before a
-  value-moving request. `walletBalanceForMint` distinguishes an absent or
-  malformed RPC observation (`undefined`) from a successful observation with no
-  row for the mint (a real zero) — only the latter may read as "no funds".
-  It re-exports `EarnVaultDepositOutcomeTracker` for compatibility; the
-  null-rendering watcher lives in `earn-outcome-trackers.tsx` so Treasury can
-  poll without eagerly loading this modal. The modal's success screen is a
-  receipt for a SIGNATURE, and the customer closes it long before the chain has
-  decided.
-- `earn-vault-deposit-tracking.ts` — the per-tab `sessionStorage` holding the
-  deposit IDEMPOTENCY KEY, and nothing else (PRO-1692). A retry inside the
-  record-before-broadcast window must carry the SAME key or the chain accepts
-  the transfer twice — there is no provider-side dedupe behind this route — and
-  a React ref dies with the modal and with the page load.
-  - The fingerprint is `(project, strategy, wallet, amount, toleranceBps)` —
-    the USER'S tolerance, never the quote-derived floor, because the
-    fingerprint must be reproducible from what the user can re-enter after a
-    reload or the cross-reload replay is fiction. "Raise the tolerance and
-    retry" still mints a fresh key. The floor a reused key was minted with is
-    remembered separately and replayed verbatim (the API's own fingerprint
-    includes `minSharesOut` and refuses a replay whose floor changed); see
-    `rememberVaultDepositFloor` in earn-vault-deposit-tracking.ts. The PROJECT is in
-    there because the API's replay lookup is org-scoped: a key reused under
-    another project would resolve the FIRST project's movement. Custody wallets
-    belong to one project, so the wallet already implies it; naming it keeps the
-    key from depending on that.
-    A ref-scoped key never survived a project switch, so this only became
-    reachable once the key outlived the component. The API refuses that case too
-    (see `routes/earn/CLAUDE.md`) — this keeps the client from asking.
-  - **The value-moving POST takes no abort signal.** The server processes the
-    request whether or not the component survives it. The key is already pinned
-    before posting, and the store still needs the parsed response to know the
-    intent was recorded. Aborting on unmount would hide that acknowledgment. The controller gates state updates and the outcome
-    screen; key bookkeeping (`settleIdempotencyKey`) runs unconditionally, before
-    the abort check.
-  - `vaultDepositIdempotencyKeyStore.claim` mints once per fingerprint and
-    writes it before the POST; a storage failure (`persisted: false`) blocks
-    submission. **The dashboard-wide rule (`answerRetiresKey`) retires it: a
-    success, a replay or a 422. Anything else keeps it.** A 5xx is the dangerous
-    one — a gateway timing out downstream of an API that already recorded and
-    broadcast looks exactly like a provider being unavailable before it did. A
-    key released too early is a double deposit; a key held too long is a replay
-    the API reports honestly. Kept keys never expire and are never evicted.
-  - Entries are zod-parsed per row on read, and the row type is derived from that
-    schema — same convention as `deposit/earn-funding-wallets.ts`, and for the same
-    reason: this store is untrusted JSON written as often by an older build of the
-    page as by the current one.
-  - A store that refuses every operation falls back to a module-scope map, so a
-    dead store costs DURABILITY across a reload and never the answer to "is this
-    the same request". Failing soft must not mean failing open.
-  - A PARTIALLY dead store — quota: `setItem` throws while `getItem` keeps
-    serving the stale previous state — is the trap in that design. Every write
-    lands in memory unconditionally, so memory is always the newest complete
-    snapshot and a readable storage can only be equal or OLDER; serving it after
-    a failed write un-writes the just-claimed key (fresh mint → a second deposit for one intent). A failed write therefore flips that store key to
-    memory-preferred (`storageDivergedKeys`); the next successful write syncs
-    the full snapshot back and returns authority to storage, so an external
-    clear only ever means something when storage is actually keeping up.
-    Residual, stated honestly: a failed write followed by a RELOAD serves stale
-    storage — durability was refused, nothing client-side can close it — which
-    is why the server independently re-checks every reused key.
-  - It deliberately does NOT track which deposits are in flight any more. That
-    was browser state pretending to be a ledger: it could not see a deposit
-    signed in another tab, and it restored the previous project's watches after
-    a workspace switch. `GET /v1/earn/deposits/provider-signed` owns it now and is
-    workspace-scoped by construction.
+Use `discover=true` only with an explicit wallet ID or owner address. It adds
+verified pre-existing holdings within the integrated catalogue; default reads
+cover tracked positions. Preserve API coverage and unavailable-read metadata.
+Discovered acquisition dates may be null. Unknown cost basis means unknown
+earnings, never zero principal or profit equal to the imported balance.
 
-- `earn-vault-withdraw-modal.tsx` — the `vault_direct` EXIT (PRO-1702):
-  redeem a position's shares back into the custody wallet that holds them,
-  shares-denominated with a Max fill from the live position read (soft warning
-  over the last observed balance — the network stays the authority). Mirrors
-  the deposit modal's key lifecycle exactly. The result screen links the withdrawal transaction in Explorer.
-  It re-exports `EarnVaultWithdrawalOutcomeTracker` from the lightweight
-  tracker module, mounted once per withdrawal.
-  Its five-second detail poll reports the terminal movement back to Treasury;
-  Treasury keeps the latest state in the Active positions status column rather
-  than announcing a long-running chain result with a toast.
-- `earn-vault-exit-modal.tsx` and `earn-vault-queued-withdraw-modal.tsx` — route
-  discovery is live per position. Atomic, provider-order, and queued routes are
-  presented as distinct settlement choices; when multiple routes coexist the
-  customer must choose explicitly. Queue discount/deadline defaults and bounds
-  come from the provider's live terms, and the provider preview must resolve
-  before shares can be escrowed. A provider-order route takes exact shares,
-  never a dollar estimate: its cash amount does not exist until the later NAV
-  strike and provider settlement. A held par intermediate opens straight into
-  the par route over it (`parSource: "intermediate"`, Treasury's "Redeem
-  wYLDS"), since no other exit can redeem it.
-- `earn-vault-withdrawal-requests-card.tsx` — durable queued-request recovery.
-  Its discovery read asks the server for `settled=false`, then polls request
-  detail through terminal state. An expired request exposes an idempotent cancel
-  action that recovers escrowed shares; closing the create modal never hides it.
-- `earn-vault-withdraw-tracking.ts` — the withdrawal idempotency-key store
-  (fingerprint: the format tag, project, position, the TYPED quantity — the
-  dollar amount an atomic exit starts from, the shares a provider order starts
-  from — and the user's tolerance; the DERIVED share intent and the derived
-  exit floor move with the live positions polls and live quotes, so neither is
-  in the fingerprint, and each is remembered beside the key instead —
-  `rememberVaultWithdrawalShares` / `rememberVaultWithdrawalFloor` — to be
-  replayed verbatim for a kept key, because the API's own idempotency
-  fingerprint pins both `shares` and `minAmountOut`) under its own versioned
-  `sessionStorage` key. The tag is the upgrade bridge: the previous build
-  keyed its entries on the DERIVED shares, so no fingerprint this build
-  computes finds them again, and `recallLegacyVaultWithdrawalKeptKey` is the
-  recovery — a MOUNT-TIME snapshot the modal keeps in state and surfaces on
-  the review step as a warning notice (the recovered shares and floor are
-  generally not the amount the form shows), which the submit's resolver
-  consumes: the adoption replays the legacy attempt exactly, under the legacy
-  key with the shares parsed out of the legacy identity and the memo'd minted
-  floor, oldest entry first — instead of minting a second key over an attempt
-  that may already have executed. A re-scan only runs once an adopted replay
-  has retired its own key; a floor memo the scan finds LOST stops the submit
-  (nothing sendable), a recovered key answered between mount and confirm
-  stops the submit too — that confirm was approved as a replay, never a
-  fresh exit over it, so the review refreshes instead — and a legacy entry
-  that appears after mount is never silently adopted.
-- `earn-vault-async-withdrawal-tracking.ts` — the ASYNCHRONOUS exits'
-  idempotency-key store (queued withdrawals and par redemptions; fingerprint:
-  the format tag, project, position, the TYPED dollar amount, and the queue's
-  own discount and deadline — both share routes DERIVE their shares from the
-  live position value, so the derived shares are not in the fingerprint and
-  are remembered beside the key instead — `rememberAsyncWithdrawalShares` —
-  to be replayed verbatim for a kept key, because the API's own idempotency
-  fingerprint pins `shares`). The held-intermediate par route is the exception:
-  its typed input IS the wire quantity, so its identity keeps the previous
-  build's shape (no tag, no memo) and its kept keys stay reachable through
-  `has`. The format tag is the upgrade bridge: the previous build keyed both
-  share routes on the DERIVED shares, and `recallLegacyAsyncWithdrawalKeptKey`
-  is the recovery — a MOUNT-TIME snapshot the modal keeps in state and
-  surfaces on the review step through the shared `KeptAsyncAttemptNotice`
-  (`earn-vault-kept-attempt-notice.tsx`, one copy for both async modals; an
-  adopted queue replay also discloses its restored discount and deadline
-  there, because the preview rows above show the form's current terms, not
-  the replay's), which
-  the submit's resolver consumes: the adoption replays the legacy attempt
-  exactly, under the legacy key with the shares and queue terms parsed out of
-  the legacy identity, oldest entry first. The same stops as the instant exit:
-  a lost memo stops the submit (nothing sendable), a recovered key answered
-  between mount and confirm stops it too, and a re-scan only runs after a
-  resolution the customer watched.
-- `earn-vault-slippage.ts` — the slippage-floor machinery BOTH vault modals
-  share: `parseSlippageToleranceBps`, `floorForTolerance` (BigInt at the quoted
-  mint's scale, floored, one-atom minimum; a quote FINER than that scale is a
-  malformed response and answers `null`, while `isZeroQuote` reads it `false` —
-  not provably zero — so both fail closed like an unavailable quote),
-  `isSlippageExceededRefusal` (the API's `details.reason` seam), the debounced
-  quote hook and (in `earn-vault-slippage-section.tsx`) the disclosure section. One copy on
-  purpose — two copies of a funds-protection rule is how one drifts, the same
-  reasoning as the idempotency-key store. The floor is derived from a LIVE
-  provider quote, never from the caller's own input; an unavailable quote
-  DISABLES the action rather than guessing. Quotes EXPIRE (PRO-1691): past
-  `VAULT_QUOTE_TTL_MS` the hook re-quotes on its own, silently in place (the
-  standing quote stays on screen and swaps when the fresh one lands — never a
-  loading flicker or a disarmed confirm), and each modal's
-  `floorSafeToSubmit` additionally refuses to SUBMIT a floor whose quote aged
-  past the TTL without re-quoting first (the shared `revalidateExpiredFloor`
-  is the read half; the withdrawal passes its own preview read and its
-  `assetsOut`): still satisfiable proceeds with the
-  floor the user reviewed, a rate beyond it stops client-side through the
-  blown-floor copy and control. Replayed floors bypass the check — a replay must
-  carry the floor its key was minted with, verbatim. The floor POLICY (whether
-  the control renders at all, and its default tolerance) is the catalogue row's
-  `depositSlippage`, which the API answers per environment and per row cluster
-  (`earnDepositSlippagePolicy` in @sdp/types: Kamino declares 10 bps wherever
-  its program can enforce one, every production row is non-null, a DEVNET
-  Kamino row is null because that program lacks the floor instruction, and a
-  next-NAV provider order is null because its later transfer-agent settlement
-  cannot be bounded by the Solana payment leg), never the provider map, so a
-  mainnet Kamino deposit is always floored and a devnet one never asks for a
-  floor the chain would reject.
-- `earn-vault-movement.ts`: the submit-outcome rules BOTH vault modals share:
-  when a submission counts as money moved (`observableVaultMovement`), how a
-  watcher's fresher record folds into it, the stepper position and focus-panel
-  key per state. One copy on purpose, same
-  reasoning as the slippage machinery; the deposit and withdrawal modals
-  resolving "did my submission move anything" differently is how a double-count
-  ships.
-- `@/lib/idempotency-key-store.ts` — the shared machinery behind BOTH tracking
-  modules (storage tiers, quota divergence), plus `settleIdempotencyKey`, which
-  applies the shared retire rule (`answerRetiresKey`). Extracted
-  when the withdrawal flow arrived; two copies of a double-spend guard is how
-  one drifts.
-- **The withdrawal outcome poll uses the UNIFIED ledger vocabulary**:
-  `EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct` (`finalized | failed`),
-  because `EarnVaultWithdrawal` speaks the ledger's own words. That backend
-  polling contract is intentionally stricter than atomic-route presentation:
-  an atomic withdrawal may treat `confirmed` as complete and refresh its
-  resulting balance while polling continues to protocol finality. A
-  provider-order withdrawal stays visibly pending: `confirmed` covers only
-  the share leg. Balance reads never infer a payout from that status. Its
-  WATCH, however, is terminal at `confirmed`
-  (`PROVIDER_ORDER_WATCH_TERMINAL_STATUSES`): the reconciler caps a
-  provider-order row there, the NAV strike after it has no wire state to
-  observe, and watching past the strongest wire fact would poll forever with
-  `onSettled` never firing. This is the OPPOSITE of the deposit poll's rule
-  (legacy DTO, legacy terminal set); the sets sit side by side in
-  `earn-program-data.ts` with the reasoning attached to each.
+Use paired position and funding-wallet refreshes after an operation obtains a
+movement reference. Pass `afterMovementIds` into positions and retain the
+returned minimum-slot read context until both snapshots succeed. Keep polling
+single-flight and quiet. Missing shares or token value remain unavailable.
+Use decimal strings and exact decimal helpers, never `Number` for money.
 
-## Where these seams are consumed — do not delete them as dead code
+## Catalogue and availability
 
-`useEarnPrograms`, `useEarnVaultPositions`, `useEarnVaultDeposits`,
-`useEarnVaultWithdrawals`, `createEarnVaultDeposit`,
-`createEarnVaultWithdrawal`, `useEarnVaultDepositOutcome`,
-`useEarnVaultWithdrawalOutcome`, `isEarnVaultDepositInFlight`,
-`isEarnVaultWithdrawalInFlight`, `earn-vault-deposit-tracking.ts`,
-`earn-vault-withdraw-tracking.ts`, `EarnWithdrawModal`, `EarnVaultDepositModal`,
-`EarnVaultWithdrawModal`, `EarnVaultDepositOutcomeTracker` and
-`EarnVaultWithdrawalOutcomeTracker` have **no caller inside this module**. That is a module boundary, not an oversight: this module is the Earn
-Program page (select a strategy → integrate the API), and the
-surface that reads positions, opens the vault-deposit modal and drives
-withdrawals is **Treasury Solutions**
-(`../treasury-solutions/treasury-solutions-workspace.tsx`), which consumes all
-of them. The deposit modal itself lives HERE, beside the strategy, decimal and
-funding-wallet helpers it is built from, and is rendered from there.
+Strategy visibility, executability and wallet funding are separate decisions.
+Show returned catalogue rows even when deposits are unavailable, with their
+reason. The API owns provider surfacing and filtering. Display APY basis and
+observation time; do not imply stale or unavailable APY is a current quote.
+Provider-unconfigured reads degrade to a quiet notice. Inspect error codes,
+not only HTTP status, when describing unavailable execution.
 
-Grep before deleting: a seam whose only caller is one directory over still looks
-unreferenced from inside this one.
+Only Solana addresses render. Render provider position labels as supplied.
+Keep cluster checks and provider availability at the shared seam, including
+mainnet strategies visible but unavailable to a sandbox project.
 
-`createEarnVaultDeposit` rebuilds its request body field-by-field rather than
-spreading the caller's input, so even an untyped caller cannot smuggle
-`requestId` (the legacy custodial-program contract) or arbitrary fields into a
-value-moving request. The RESPONSE is parsed at the boundary — a zod schema
-over the success envelope, with the outcome type derived via `z.infer` — so the
-deposit record itself is checked rather than asserted.
+## UI rules
 
-`useEarnVaultDepositOutcome` keeps the deposit half of the polling pattern
-`useEarnWithdrawalOutcomeToast` established, but owns no toast. It polls at 1s
-for the first 15s, 2.5s through the first minute, then 5s until terminal, when
-the interval becomes `0`. A ref guard makes `onSettled` fire exactly once, and
-`undefined` args issue no requests. `onUpdated` projects every changed status
-into Treasury's Active positions table without replacing settled content with
-a skeleton; `onSettled` refreshes balances once the movement is done.
-Terminal for a vault movement is `confirmed | failed`
-(`EARN_TERMINAL_VAULT_MOVEMENT_STATUSES`) — note `pending` is NOT terminal: it
-reads like a failure and is not one, it means SDP could not establish that the
-transaction reached the network, which is the one case where the customer's
-money is genuinely in the air. **Keep using
-`EARN_TERMINAL_VAULT_MOVEMENT_STATUSES` here, not the similarly named
-`EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct`** (PRO-1705): that one is the
-unified ledger's vocabulary, where the background watcher continues past
-`confirmed` because `finalized` exists after it. This legacy poll still stops
-at `confirmed` because no later wire state exists — for either settlement
-kind: a provider-order deposit parks at `confirmed` the same way, so the
-"provider settlement" step is presentation-only, never a watch state. Atomic
-presentation may call `confirmed` Done, while provider-order presentation
-stays pending provider settlement. Switching to the
-unified set would make the poll wait for a `finalized` nothing writes yet and
-never stop. An unreadable
-poll returns `undefined` and keeps polling; a read that failed says nothing
-about whether the deposit landed.
+Use the existing release-channel segment gates and flags in
+`src/flags/definitions.ts`; do not introduce environment-variable twins.
+Edit English `messages/en/dashboard-earn.json` only. Translation updates land
+separately.
 
-A position's value is its whole holding: `tokenValue` plus any
-`parIntermediate` (`earnVaultHoldingValue`), and a position stays open while
-either is non-zero (`isEarnVaultHoldingEmpty`, the API close-out's own rule),
-so a cancelled Hastra request's wYLDS never drops out of Treasury.
+Use `@sdp/design-tokens`, shared UI primitives and the established row, summary
+and table blocks. Keep Inter, status as words and `tabular-nums` for numbers;
+monospace is only for code. Use `EARN_TRANSACTION_MODAL_FRAME` for action
+modals. Input steps are forms; money execution requires its own button and
+never submits on Enter.
 
-Treasury's balance display lives in `../treasury-solutions/treasury-vault-balance.ts`.
-`use-treasury-balances.ts` coordinates modal submission, the shared movement
-cache, and paired wallet/position refreshes. Submission observers start before
-any POST and release only their own attempt. An early chain read cannot reveal
-changed balances while that movement is still pending, so a submit reads
-nothing: the confirmation's floored pair is the one read per movement (a POST
-that answers already confirmed triggers it at once). Atomic movements show
-Done at confirmation; affected amounts wait for a verified read and the paired
-wallet refresh. A failed wallet read never releases an affected position; only a
-successful pair clears that gate, including retries and overlapping completions.
-Keep the custody wallet ID from the intent while a deposit is provisional and
-resolve recovered movements from the returned position read. An unknown wallet
-scope remains pending; it must never become a global freshness bound. Overlapping
-confirmations each trigger refresh, including recovery. Unpaired movements remain
-tracked independently of the bounded activity list until both reads succeed.
-Retired, verified history is pruned. More than 100 outstanding movements are read
-in bounded batches, keeping each position's evidence together. A position that
-spans batches uses the snapshot with its greatest proven slot; unrelated reads
-must never replace that snapshot. Publish the combined read only after every
-batch verifies its evidence, then finish the paired wallet refresh.
+An amount in the strategy's own share mint reads as shares
+(`formatShareAmount`); every other mint formats as itself, never as shares.
+Only statuses `isSdpProgressOperationStatus` (`@sdp/types/operations`) names
+pulse; provider settlement can take days and stays still.
 
-Post-confirmation position reads send `afterMovementIds`. The API authorizes the
-movements and bounds only the affected positions by each position's maximum
-confirmed slot. Unrelated owners, vaults and providers keep independent reads.
-`balanceReadContext` acknowledges that bound on every page. Request timestamps
-and changed share counts are not freshness evidence. Funding-wallet reads carry
-the minimum slot only for affected wallets (including aliases of the same chain
-address), and subsequent revalidation keeps those bounds. The poll, retries and
-explicit refreshes join an in-flight read only when the request is identical
-(same movement ids and position grouping; for wallets, the same floors and read
-mode). A floored read never joins an unfloored one, and nothing is reused once it
-settles.
+Keep loading, empty and error states at the ready layout footprint. Long names
+wrap or clamp inside child spans; amounts remain whole. In a `DetailRow`, use
+`fit="figure"` for amounts and `fit="wrap"` for names. Design-system `cn` joins
+classes without Tailwind merging, so conflicting parent classes are unsafe.
 
-A transient failure retains an unaffected holding's last verified value, explicitly
-labelled with its observation time. It never becomes a current API value or enters
-fresh portfolio totals. A new movement still waits for evidence covering its own
-confirmation; requested amounts are never added to balances. Missing values with
-no verified history stay unknown, never zero. Wallet errors do not erase position
-rows; failed paired refreshes retry after 5, 10, 20 and 40 s, then every 60 s,
-restart at 5 s after a success, and hold while the tab is hidden (a due retry runs
-when it returns). The history retains at most one verified value per current
-holding plus the latest raw read, including across a prolonged outage. Fresh data
-clears the label; removed holdings drop their history.
+## Checks
 
-These are observed values, not an atomic portfolio snapshot: provider/RPC
-freshness remains an external dependency.
+Use Vitest with a jsdom docblock for DOM tests. Mock the data/client seam and
+cover review before execution, unknown outcomes, retries and refresh behavior.
+Run the Earn and Treasury unit suites, web typecheck and Biome. Browser checks
+require the app's built-in Browser; report when it is unavailable.
 
-Two tiers, deliberately at different clocks, exactly as the withdrawal side
-does it. `useEarnVaultDeposits` is the **discovery** tier at 30s — a cheap
-server read that only decides WHICH deposits are worth watching, and the reason
-a deposit signed before a reload, or in another tab becomes visible again.
-An empty list idles at 120s (`earnLedgerRefreshInterval`, the same for the
-withdrawal and queued-request lists); a local submit adds its watch directly,
-so only another tab's movement waits for the slower pass. Position values
-idle the same way while no position exists (`earnVaultPositionsRefreshInterval`).
-These list, feed and program cadences reach SWR as numbers through
-`useCadencedSWR` (`@/lib`): a stable function never starts after a cold mount,
-and an inline one is restarted by every render of this busy page. Only the
-short, self-stopping per-movement watches keep inline functions.
-`useEarnVaultDepositOutcome` is the
-adaptive **outcome** tier per watched deposit, self-stopping on terminal. Each
-detail read is a scoped, fail-soft chain observation that advances the guarded
-ledger row immediately; the scheduled reconciler remains the recovery path.
-Do not collapse the tiers: one fast poll over the whole list would hammer a list
-read that exists only to seed watches.
-
-## Availability is the whole design
-
-`earnVaultDepositAvailability` answers with a REASON, not a boolean, and every
-surface renders that reason:
-
-| Result                    | Means                                                                                                                                                                                                |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `available`               | this org can open this position, here, now                                                                                                                                                           |
-| `cluster_unavailable`     | the instrument lives on another cluster (`fundable: false`) — checked FIRST, and the badge names the row's `hostCluster` ("Mainnet only") instead of collapsing into a bare "Unavailable" (PRO-1742) |
-| `strategy_unavailable`    | inactive / not a `vault_direct` provider / provider not surfaced                                                                                                                                     |
-| `environment_unavailable` | that provider has no deposit deployment in the environment (`isVaultDirectDepositEnabled`)                                                                                                           |
-| `access_unavailable`      | provider access could not be resolved — **fails closed**                                                                                                                                             |
-| `provider_unavailable`    | resolved, but this org's provider entry is not enabled                                                                                                                                               |
-
-Two rules hold it together:
-
-- **Static gates client-side, entitlement server-side.** Surfacing, deposit
-  style and environment are static facts and may be read in the browser.
-  Organization entitlement and provider configuration are request-scoped and
-  must not be guessed there — they arrive as `providerAccess` from the server
-  component, and `null` disables the action.
-- **Disabled with an explanation beats hidden.** An unavailable strategy still
-  renders its row, its APY and a badge naming why. Hiding it makes a customer
-  hunt for a strategy they were shown yesterday.
-
-`strategy.provider` is an OPEN read-model string (a TEXT column a newer deploy
-may have written). Surfacing proves it is a registered provider before the cast
-to `EarnProviderId`; an unknown value has already failed closed as
-`strategy_unavailable`.
-
-## Withdrawal rules
-
-Measured against a live provider sandbox 2026-08-13 (see
-`packages/sdp-earn/CLAUDE.md` → Conventions). All still hold:
-
-- **A 409 can be the answer.** The amount-less preview may refuse while still
-  reporting the lane balance, so a 409 carrying
-  `error.details.balance.withdrawableUsd` resolves the read instead of failing it.
-- **`Max` floors to whole cents.** The reported figure is a balance, not a
-  fillable amount — a lane reporting `20.001241` refuses exactly that and
-  accepts `20.00`. Validation still permits the full figure, so this narrows
-  what SDP offers, never what it allows.
-- **An unresolved read never blocks the exit.** Pending or failed, the modal
-  shows no number and validates shape only; the provider decides at confirm
-  (ADR 0002 — money out must not gate on a read we could not complete).
-- **Token lanes are per provider, not hardcoded.** The select renders
-  `earnProgramSolanaPayoutTokens(provider)` from `@sdp/types` — the same
-  registry the provider client gates on, so the button and the server cannot
-  disagree. A token the provider never routes to Solana is NOT OFFERED at all.
-  Do not reintroduce a module-level per-provider constant here.
-- **Never disable a money verb on status.** Withdraw gates on `withdrawableUsd`
-  alone: the provider already reserves an in-flight amount out of that figure,
-  so the balance expresses the constraint without a status lock that could trap
-  an exit.
-- Preview failures render TRANSLATED copy naming the per-lane reality — never
-  the provider's wire text ("provider request failed with status 409" explains
-  nothing).
-
-## Money is a decimal STRING, end to end
-
-The API deliberately carries amounts as strings, and JavaScript numbers cannot
-distinguish every six-decimal value once balances exceed 2^53. So:
-
-- `earn-decimal.ts` parses and canonicalizes without a `Number` cast, and
-  delegates scale and ordering to `@sdp/solana/amount` (`decimalScale`,
-  `compareDecimalAmounts`) rather than restating that arithmetic.
-- `earn-format.ts` hands the decimal string straight to `Intl.NumberFormat`,
-  which formats it exactly — no `Number` round trip, no manual grouping.
-- Dollars are `formatUsd`: two decimals, truncated, `<$0.01` for a non-zero
-  sub-cent value, never a third decimal. A deposit-token amount (a position's
-  `tokenValue`, a wallet balance in the deposit token, a withdrawal ceiling or
-  quote) goes through `formatTokenValue(value, mint, locale)`, which renders a
-  USD-stable mint as dollars at par and anything else as a token quantity with
-  its symbol. Every Earn deposit token is a USD stablecoin
-  (`EARN_DEPOSIT_TOKEN_SYMBOLS`), so today that is always dollars; the
-  `isUsdStable` guard is what keeps a future non-stable vault from lying. Do
-  not call `formatProviderAmount` or `formatTokenQuantity` on a deposit-token
-  amount directly.
-- `sumDecimalStrings` (`earn-market-presentation.tsx`) adds at the widest scale
-  in `BigInt` and formats back.
-- The one deliberate `Number` is `formatProviderApy`, on a RATE (`0.062`) rather
-  than an amount, for `Intl.NumberFormat` percent output. Keep it that way.
-
-Anything unparseable renders `—`. Never `0`, never a fabricated rate.
-
-Shared machinery belongs OUTSIDE this directory: the modal focus trap lives at
-`@/lib/use-modal-focus` (generic a11y, not Earn domain — its fallback attribute
-is a plain parameter), beside `use-escape-key`. `Modal` still owns Escape.
-
-## The client/server boundary bug — why `earn-surfacing.ts` exists
-
-The surfacing constants live in **`earn-surfacing.ts`, which carries NO
-`"use client"` directive**; client callers import them from that file directly
-(never through `earn-program-data.ts`, whose former re-export hop is retired).
-Do not move them back.
-
-They started in `earn-program-data.ts` (a client module). A Server Component
-importing a _value_ from a client module receives a **client-reference proxy,
-not the value** — an object, so always truthy. The program-creation guard (since
-retired with the custodial provider) was therefore dead code and the deposit
-route happily rendered the full wizard with no provider that could create
-anything.
-
-What makes this worth a section: **nothing catches it but a browser.** The types
-are correct, so `tsc` passes; the unit tests mock the module, so they pass; lint
-sees nothing. Any future server-side read of a dashboard constant belongs in a
-directive-free module for the same reason — and a surfacing change wants one
-browser pass on `/dashboard/markets/embedded-yield` and
-`/dashboard/markets/embedded-yield/configure`.
-
-## Rules
-
-- **Flags: declare in `src/flags/definitions.ts`, gate by segment.** `markets`
-  and `earn` default on inside the release channel (the Vercel flag is the
-  only override) and are resolved in the dashboard layout and enforced by segment
-  layouts: `markets()` in `../layout.tsx`, `earn()` in each Earn segment's (see
-  "Routes"). A bespoke env helper, a `process.env` read, or a `NEXT_PUBLIC_*`
-  twin is wrong.
-- **i18n: English only.** Edit `messages/en/dashboard-earn.json` (this module's
-  copy is the `DashboardMarkets.earnProgram.*` and `DashboardEarn.*` namespaces;
-  `DashboardMarkets.treasury.*` in the same file belongs to Treasury Solutions
-  next door — one catalogue file, several surfaces); NEVER touch
-  `messages/{es,fr,pt}` — or any future non-`en` locale — in the same PR. CI's
-  Translation Catalog Policy fails a branch that edits English and localized
-  catalogs together, because translations land on the automated release PR.
-- **Solana-only surface**: only Solana deposit addresses/destinations render.
-  Position labels arrive display-ready from the provider client — render
-  `position.label` as given, and treat a chain name appearing in the UI as a
-  provider-client bug, not something to patch here.
-- **The catalogue shows strategies this module cannot select, on purpose.**
-  Visibility and eligibility are different questions: a row is visible because
-  the API returned it, and selectable because `earnVaultDepositAvailability`
-  said so. Do not collapse them, and do not filter a row out of the table to
-  express "not available" — that is what the availability label is for.
-- **Two visibility rules live in the API and this module never sees either.**
-  `/strategies` omits Aave- and Morpho-related rows (`HIDDEN_STRATEGY_TERMS`)
-  and every row of a provider SDP does not currently offer
-  (`EARN_PROVIDER_SURFACING`), while the sync keeps storing both so the DB stays
-  a truthful provider inventory. Do not reimplement either here: a client-side
-  copy would drift, and a hidden row never reaches the browser to begin with.
-- Design system: type, colour and shapes come from `@sdp/design-tokens`; pages
-  compose the shared blocks (`RecordStack` and
-  `RecordBlock`, `StatusText` for status as words, the borderless design-system
-  `Table` in the Payments list type, `ActionTile`, `ListEmptyState`) rather than
-  bordered cards. Treasury and Embedded Yield share their summary hero and a
-  row's identity (`EarnSummary`, `EarnRowIdentity` in `earn-page-blocks.tsx`)
-  and their table frame (`earn-table-layout.ts`). Monospace is forbidden,
-  including for addresses; use `tabular-nums` for numeric alignment. The ONE
-  exception is a genuine code surface: the integration guide's
-  `ui/code-block`, which is mono by design.
-  Selection state is `border-primary bg-fill-subtle` across the whole module.
-  `Badge` is status-only.
-- **Transaction dialogs share one frame.** Every deposit, withdrawal, exit,
-  queued and par dialog, and the placeholder Treasury shows while one loads,
-  spreads `EARN_TRANSACTION_MODAL_FRAME` (`earn-modal.ts`): one width, and a
-  top edge that stays put as steps change height. A step that only gathers
-  input is a `<form>`, so Enter continues; a step whose primary action moves
-  money never submits on Enter: its button is the only way to confirm.
-- **Zero layout shift on Treasury and Embedded Yield.** Every loading, empty
-  and error state keeps the ready footprint: the route skeleton and the
-  in-page states share the column widths (`treasury-solutions/treasury-layout.ts`
-  with the positions body's two-row floor, `embedded-yield-layout.ts`), the
-  summary's geometry (`EarnSummarySkeleton`) and `markets-route-skeletons.tsx`,
-  and sections that most treasuries never show (queued requests, custodial
-  programs) render nothing until they have rows. A table's columns drop below
-  `@2xl`, never its action; a dropped status reads under the row's balance.
-  The integration guide's skeleton draws its intro and API key callout at the
-  English copy's wrap widths, so editing `guideIntro` or the callout copy means
-  re-measuring it against the page from 360 to 1440. Those blocks query their
-  own width (`@container` on the block), not the work area: the page's side
-  padding steps from 16px to 24px at the `md` viewport, so one work-area
-  breakpoint cannot match a wrap point in both layouts.
-- **Nothing may overlap — provider and fund names run long.**
-  `@solana/design-system`'s `cn` is a plain string join — **no tailwind-merge**.
-  A class handed to `Table*` that conflicts with one of its own base classes
-  does not win; it loses to CSS source order (`.whitespace-nowrap` is emitted
-  after `.whitespace-normal`), and under `table-fixed` the still-unwrapped text
-  overflows into the next column. Declare wrapping and clamping on the child
-  spans, where nothing competes. Long text wraps inside a bounded clamp or truncates with
-  a `title` carrying the full string; numbers never truncate. In a dialog's
-  `DetailRow`, an amount takes `fit="figure"` (whole on one line, its label
-  wraps) and a name `fit="wrap"`.
-- Provider-unconfigured (503) must degrade to a quiet notice, never crash. Note
-  the asymmetry: the money-in writes answer 403 even for _missing credentials_,
-  so read `error.code`, not just the status, before labelling a failure.
-- Tests: vitest, `environment: "node"` by default — a test that touches
-  `document` needs a `// @vitest-environment jsdom` docblock. Mock the data-hook
-  seam (`./earn-program-data`), not fetch. Run:
-  `pnpm --filter sdp-web exec vitest run src/app/(session)/dashboard/markets/earn`.
-  CI runs them via the root `pnpm test` (`turbo run test` includes sdp-web).
-
-## Running this locally
-
-The web app alone shows nothing useful: the module needs the API, Postgres,
-Redis, the flags, and live provider credentials. Full runbook — ports, env,
-catalogue data, org entitlement, troubleshooting table:
-`packages/sdp-earn/CLAUDE.md` → "Local development". The custody boundary and
-each provider's on-chain flow: `packages/sdp-earn/README.md`.
+Local setup and RPC rules live in `packages/sdp-earn/CLAUDE.md`. Run SDP-owned
+services locally; do not load shared runtime secrets for a local demo.

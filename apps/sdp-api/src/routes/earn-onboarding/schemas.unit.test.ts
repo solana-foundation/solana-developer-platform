@@ -43,7 +43,7 @@ describe("wallet registration schema", () => {
     signature: "1".repeat(87),
   };
 
-  it("lets an external wallet prove control with a signature", () => {
+  it("lets a wallet prove control with a signature", () => {
     expect(onboardingWalletSchema.safeParse(wallet).success).toBe(true);
   });
 

@@ -4,14 +4,10 @@ import { WELL_KNOWN_TOKENS } from "./well-known-tokens";
 /**
  * Solana Earn (SDP Markets V1) — shared wire contracts.
  *
- * Earn is a stablecoin deposit facility: organizations and external-wallet
- * integrators browse a catalogue of DeFi vaults and tokenized RWAs, then use
- * provider-built transactions to enter or exit a strategy. Current providers
- * are non-custodial; the retained portfolio-wallet contracts support a future
- * custodial provider. Durable movements and position claims live in SDP's
- * unified ledger while balances are hydrated live. "Record"-suffixed types are
- * ledger rows; `EarnPortfolio*` types are live provider reads (PRO-1628 / ADR
- * 0002 addendum).
+ * Organizations and wallet integrators browse strategies across DeFi and
+ * tokenized RWAs, then prepare provider-built transactions to enter or exit
+ * a strategy. Operations track signing, submission and settlement. Durable
+ * movements and positions live in SDP's ledger; balances are read live.
  *
  * Registries follow ADR 0001 (asset profiles): closed unions defined in code,
  * open TEXT columns in Postgres, Zod validation at the app layer — adding a
@@ -88,35 +84,6 @@ export function earnSwapSourceTokens(cluster: SolanaCluster): EarnSwapSourceToke
 export const EARN_SWAP_DEFAULT_SLIPPAGE_BPS = 2;
 export const EARN_SWAP_MAX_SLIPPAGE_BPS = 500;
 
-/**
- * The swap leg SDP attached (or, for a split flow, built) for a swap-funded
- * deposit — what was paid, what the vault deposit was sized to, and what the
- * route looked like when it was quoted. Reported on build responses only;
- * the durable movement stays denominated in the vault's own token.
- */
-export interface EarnDepositSwap {
-  /** Mint the customer pays with. */
-  sourceTokenMint: string;
-  /** What the swap consumes, source-token units, decimal string. */
-  sourceAmount: string;
-  /**
-   * The deposit amount the transaction encodes, vault-token units. Sized to
-   * the swap's WORST-CASE output (the quote minus the slippage tolerance), so
-   * the deposit instruction can never find less than it needs: any output
-   * above this floor stays in the owner's token account rather than failing
-   * the transaction.
-   */
-  depositAmount: string;
-  /** The swap's quoted output at the live rate, vault-token units. */
-  quotedAmount: string;
-  /** Slippage tolerance the swap leg encodes, basis points. */
-  slippageBps: number;
-  /** Quoted price impact as a decimal ratio string, e.g. "0.0001". */
-  priceImpactPct: string;
-  /** Venue labels along the quoted route, for display and diagnostics. */
-  routeLabels: string[];
-}
-
 export const EARN_STRATEGY_SOURCE_KINDS = ["defi", "rwa"] as const;
 export type EarnStrategySourceKind = (typeof EARN_STRATEGY_SOURCE_KINDS)[number];
 
@@ -128,53 +95,6 @@ export type EarnLiquidityTerm = (typeof EARN_LIQUIDITY_TERMS)[number];
 
 export const EARN_STRATEGY_STATUSES = ["active", "paused", "deprecated"] as const;
 export type EarnStrategyStatus = (typeof EARN_STRATEGY_STATUSES)[number];
-
-/**
- * Curators (Gauntlet, Steakhouse, Sentora, ...) publish strategy/risk
- * frameworks but are NOT code integrations: `EarnStrategyRiskMetadata.curator`
- * is an open string written during catalogue sync, so onboarding a new curator
- * is a data change — zero code, zero migration. This registry only maps known
- * ids to display labels; unknown ids render as-is.
- */
-/**
- * Display labels ONLY — never a matching vocabulary. Order is irrelevant and
- * adding an entry can never change how any provider derives a curator: that
- * derivation is provider-specific and keeps its own vocabulary. Keeping the
- * two apart is what makes "onboarding a curator is a data change" literally
- * true.
- */
-export const EARN_KNOWN_CURATOR_LABELS: Readonly<Record<string, string>> = {
-  // Curator houses.
-  gauntlet: "Gauntlet",
-  steakhouse: "Steakhouse Financial",
-  sentora: "Sentora",
-  smokehouse: "Smokehouse",
-  morpho: "Morpho",
-  allez: "Allez Labs",
-  rockawayx: "RockawayX",
-  august: "August",
-  superstate: "Superstate",
-  maple: "Maple",
-  centrifuge: "Centrifuge",
-  // Issuer-curated tokenized funds (WTGXX et al.) — the id the WisdomTree
-  // catalogue client writes, establishable from the mint's issuer-controlled
-  // on-chain metadata.
-  wisdomtree: "WisdomTree",
-  // Ids providers report when a protocol or fund curates its own vaults. Some
-  // stored rows (Aave/Morpho) are hidden by strategy API policy, but inventory
-  // tooling still renders their metadata.
-  kamino: "Kamino",
-  jupiter: "Jupiter",
-  // The USDY issuer; `providers/ondo/client.ts` reports it as the row's curator.
-  ondo: "Ondo",
-  // Hastra operates the PRIME wrapper and vault programs over Figure's assets.
-  hastra: "Hastra",
-  aave_v3: "Aave V3",
-};
-
-export function earnCuratorLabel(curator: string): string {
-  return EARN_KNOWN_CURATOR_LABELS[curator] ?? curator;
-}
 
 /**
  * Curator/risk metadata surfaced on the strategy catalogue. Curators publish
@@ -199,13 +119,13 @@ export interface EarnStrategySlippagePolicy {
 export interface EarnStrategy {
   id: string;
   /**
-   * Vault-infra provider id. Open string on the read model: catalogue rows
+   * Strategy provider ID. Open string on the read model: catalogue rows
    * persist as open TEXT and may reference a provider this deployment no
    * longer (or does not yet) register, so dispatch always resolves fail-closed
    * server-side.
    */
   provider: string;
-  /** Provider-side identifier for the vault/strategy. */
+  /** Provider-side identifier for the strategy. */
   providerReference: string;
   name: string;
   sourceKind: EarnStrategySourceKind;
@@ -368,8 +288,8 @@ export interface EarnVaultPositionsPage {
   balanceReadContext?: { afterMovementIds: string[]; minimumSlot: number };
 }
 
-/** One live position held by a partner end user's external wallet. */
-export interface EarnExternalWalletPosition {
+/** One live position held by a partner end user's wallet. */
+export interface EarnWalletPosition {
   id: string;
   ownerAddress: string;
   provider: string;
@@ -395,15 +315,7 @@ export interface EarnExternalWalletPosition {
   parIntermediate?: EarnVaultPositionIntermediate;
 }
 
-/** Keyset page for exactly one external wallet. */
-export interface EarnExternalWalletPositionsPage {
-  ownerAddress: string;
-  positions: EarnExternalWalletPosition[];
-  hasMore: boolean;
-  nextCursor: string | null;
-}
-
-export interface EarnExternalWalletTokenTotal {
+export interface EarnWalletTokenTotal {
   tokenMint: string;
   walletCount: number;
   positionCount: number;
@@ -416,7 +328,7 @@ export interface EarnExternalWalletTokenTotal {
   tokenValue?: string;
 }
 
-export interface EarnExternalWalletStrategyTotal {
+export interface EarnWalletStrategyTotal {
   provider: string;
   providerReference: string;
   label: string;
@@ -434,45 +346,19 @@ export interface EarnExternalWalletStrategyTotal {
    * `includeOwnerAddresses=true`; absent from totals-only responses so
    * analytics consumers do not receive per-customer details.
    */
-  positions?: EarnExternalWalletPosition[];
+  positions?: EarnWalletPosition[];
   walletCount: number;
   positionCount: number;
-  totalsByToken: EarnExternalWalletTokenTotal[];
+  totalsByToken: EarnWalletTokenTotal[];
 }
 
 /** Complete live aggregate for one partner project across its end-user wallets. */
-export interface EarnExternalWalletPositionSummary {
+export interface EarnWalletPositionSummary {
   walletCount: number;
   positionCount: number;
   unavailablePositionCount: number;
-  totalsByStrategy: EarnExternalWalletStrategyTotal[];
-  totalsByToken: EarnExternalWalletTokenTotal[];
-}
-
-export interface EarnExternalWalletPositionSummaryResponse {
-  summary: EarnExternalWalletPositionSummary;
-}
-
-/** JSON body for POST /v1/earn/deposits/execute. Idempotency is header-only. */
-export interface EarnVaultDepositRequest {
-  strategyId: string;
-  custodyWalletId: string;
-  /**
-   * Decimal string. Vault-token units ordinarily; SOURCE-token units when
-   * `sourceTokenMint` requests a swap-funded deposit (the amount is what
-   * leaves the wallet, and the vault deposit is sized from the swap quote).
-   */
-  amount: string;
-  minSharesOut?: string;
-  /**
-   * Fund the deposit in a different stablecoin (one of
-   * `earnSwapSourceTokens(cluster)`), atomically swapped to the vault's own
-   * token via Jupiter inside the same transaction. Omitted — or equal to the
-   * strategy's deposit mint — means no swap.
-   */
-  sourceTokenMint?: string;
-  /** Swap slippage tolerance, bps (default EARN_SWAP_DEFAULT_SLIPPAGE_BPS). */
-  swapSlippageBps?: number;
+  totalsByStrategy: EarnWalletStrategyTotal[];
+  totalsByToken: EarnWalletTokenTotal[];
 }
 
 export const EARN_VAULT_MOVEMENT_STATUSES = [
@@ -482,24 +368,6 @@ export const EARN_VAULT_MOVEMENT_STATUSES = [
   "failed",
 ] as const;
 export type EarnVaultMovementStatus = (typeof EARN_VAULT_MOVEMENT_STATUSES)[number];
-
-/**
- * Statuses a vault movement never moves on from — in migration 0059's LEGACY
- * vocabulary, which is what `earn_vault_movements` and every existing wire
- * contract still speak.
- *
- * **Do not reach for this in new code.** The unified ledger's answer is
- * `EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct`, and the two deliberately
- * disagree: `confirmed` is terminal HERE because 0059 had no state after chain
- * commitment, and is NOT terminal there because `finalized` now exists and a
- * confirmed transaction can still be dropped by a fork. Treating `confirmed` as
- * settled is exactly the conflation the unification exists to end, so this set
- * is correct only for a consumer reading the legacy table or a legacy wire
- * field. Both names are retired together when the legacy tables are dropped.
- */
-export const EARN_TERMINAL_VAULT_MOVEMENT_STATUSES = ["confirmed", "failed"] as const;
-export type EarnTerminalVaultMovementStatus =
-  (typeof EARN_TERMINAL_VAULT_MOVEMENT_STATUSES)[number];
 
 /** Durable result of a submitted vault deposit (fresh or idempotently replayed). */
 export interface EarnVaultDeposit {
@@ -553,42 +421,6 @@ export interface EarnVaultDepositRecord {
   confirmedAt: string | null;
 }
 
-/** Response body of GET /v1/earn/deposits/provider-signed/:movementId. */
-export interface EarnVaultDepositResponse {
-  deposit: EarnVaultDepositRecord;
-}
-
-/**
- * Response body of GET /v1/earn/deposits/provider-signed — one workspace's recorded
- * deposits, newest first.
- *
- * A bounded window, not a complete history: it exists so a client can re-derive
- * which of its deposits are still in flight after losing local state, and the
- * reconciliation sweep settles a movement within about ninety seconds, so
- * anything unsettled is by construction recent. Follow `nextCursor` for more.
- */
-export interface EarnVaultDepositsPage {
-  deposits: EarnVaultDepositRecord[];
-  hasMore: boolean;
-  nextCursor: string | null;
-}
-
-/** JSON body for POST /v1/earn/withdrawals/execute. Idempotency is header-only. */
-export interface EarnVaultWithdrawalRequest {
-  redemptionMode?: "standard" | "instant";
-  /** The vault position being exited — from GET /v1/earn/positions/provider-signed. */
-  positionId: string;
-  /** Shares to redeem; the position's `withdrawableShares` is the observed ceiling. */
-  shares: string;
-  /**
-   * Optional exit slippage floor: the minimum deposit-token amount to accept,
-   * decimal string in the token's own units. Required in practice by providers
-   * whose builder refuses an implicit tolerance (Veda); the dashboard derives
-   * it from the live withdrawal quote.
-   */
-  minAmountOut?: string;
-}
-
 /** One signed vault withdrawal movement. */
 export interface EarnVaultWithdrawal {
   redemptionMode?: "standard" | "instant";
@@ -612,18 +444,6 @@ export interface EarnVaultWithdrawal {
   settledAt: string | null;
   /** Present on POST responses; true when the idempotency anchor was replayed. */
   replayed?: boolean;
-}
-
-/** Response body of GET /v1/earn/withdrawals/provider-signed/:movementId and POST. */
-export interface EarnVaultWithdrawalResponse {
-  withdrawal: EarnVaultWithdrawal;
-}
-
-/** Response body of GET /v1/earn/withdrawals/provider-signed: logical withdrawals, newest first. */
-export interface EarnVaultWithdrawalsPage {
-  withdrawals: EarnVaultWithdrawal[];
-  hasMore: boolean;
-  nextCursor: string | null;
 }
 
 /** BoringQueue's hard upper bound for a solver window: 90 days. */
@@ -678,549 +498,6 @@ export interface EarnVaultWithdrawalOptions {
   parRedemption?: EarnVaultParRedemptionTerms | null;
 }
 
-/** Queue quote inputs shared by preview and request creation. */
-export interface EarnVaultQueuedWithdrawalTermsRequest {
-  positionId: string;
-  /** Decimal string in vault-share units. */
-  shares: string;
-  discountBps: number;
-  /** Solver window, in seconds after maturity. */
-  deadlineSeconds: number;
-}
-
-/**
- * Request inputs for an operator-completed par redemption: position shares
- * (vault-share units), or intermediate the position already holds outside any
- * request (`parIntermediate`, in that token's units). Never both.
- */
-export type EarnVaultParRedemptionTermsRequest =
-  | {
-      positionId: string;
-      shares: string;
-      intermediateAmount?: undefined;
-      mechanism: "operatorRedemption";
-    }
-  | {
-      positionId: string;
-      intermediateAmount: string;
-      shares?: undefined;
-      mechanism: "operatorRedemption";
-    };
-
-/** Backwards-compatible queue input or the explicit par-redemption variant. */
-export type EarnVaultAsyncWithdrawalTermsRequest =
-  | (EarnVaultQueuedWithdrawalTermsRequest & { mechanism?: "solverQueue" })
-  | EarnVaultParRedemptionTermsRequest;
-
-/** Pre-execution queue quote. Landed request state replaces these expected values. */
-export interface EarnVaultQueuedWithdrawalPreview {
-  positionId: string;
-  assetMint: string;
-  shares: string;
-  shareDecimals: number;
-  assets: string;
-  assetDecimals: number;
-  discountBps: number;
-  /** Unix epoch seconds, kept as a decimal string for JSON safety. */
-  maturityTimestamp: string;
-  /** Unix epoch seconds, kept as a decimal string for JSON safety. */
-  deadlineTimestamp: string;
-  blockingIssues: Array<{ code: string; message: string }>;
-}
-
-export interface EarnVaultParRedemptionPreview {
-  positionId: string;
-  mechanism: "operatorRedemption";
-  shares: string;
-  shareDecimals: number;
-  intermediateMint: string;
-  intermediateAmount: string;
-  assetMint: string;
-  assets: string;
-  assetDecimals: number;
-  blockingIssues: Array<{ code: string; message: string }>;
-}
-
-export type EarnVaultWithdrawalRequestStatus =
-  | "creating"
-  | "pending"
-  | "fulfillable"
-  | "expiredCancelable"
-  | "cancelling"
-  | "fulfilled"
-  | "cancelled"
-  | "closedOrUnknown"
-  | "failed";
-
-/** Durable queued-withdrawal lifecycle; request creation itself is not a payout. */
-export interface EarnVaultWithdrawalRequestRecord {
-  withdrawalRequestId: string;
-  positionId: string;
-  provider: string;
-  providerReference: string;
-  ownerAddress: string;
-  requestAddress: string;
-  status: EarnVaultWithdrawalRequestStatus;
-  mechanism?: "solverQueue" | "operatorRedemption";
-  assetMint: string;
-  shareMint: string;
-  intermediateMint?: string | null;
-  intermediateAmount?: string | null;
-  shares: string;
-  quotedAssets: string;
-  shareDecimals: number;
-  assetDecimals: number;
-  discountBps: number | null;
-  /** Provider request nonce, populated only after the request lands on chain. */
-  nonce: string | null;
-  /** Provider-recorded Unix creation time, populated from landed chain state. */
-  creationTimestamp: string | null;
-  maturityTimestamp: string | null;
-  deadlineTimestamp: string | null;
-  creationSignature: string | null;
-  cancelSignature: string | null;
-  closingSignature: string | null;
-  assetsPaid: string | null;
-  failureReason: string | null;
-  fulfilledAt: string | null;
-  cancelledAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-  /** Present on mutation responses when the Idempotency-Key replayed. */
-  replayed?: boolean;
-}
-
-export interface EarnVaultWithdrawalRequestResponse {
-  withdrawalRequest: EarnVaultWithdrawalRequestRecord;
-}
-
-export interface EarnVaultWithdrawalRequestsPage {
-  withdrawalRequests: EarnVaultWithdrawalRequestRecord[];
-  hasMore: boolean;
-  nextCursor: string | null;
-}
-
-/**
- * External-wallet (caller-signed) vault flows — the B2B2C money path (PRO-1722).
- *
- * An external wallet is a NON-CUSTODIAL wallet the partner's platform
- * connects; SDP holds no key for it and never signs. A BUILD returns an
- * unsigned transaction, and the integration SUBMITs the signed bytes for a
- * durable movement and SDP broadcast. These surfaces postdate the unified ledger,
- * so recorded statuses use its vault vocabulary (`requested … finalized`).
- */
-
-/** One unsigned transaction SDP built for an external wallet to sign. */
-export interface EarnExternalWalletTransaction {
-  /** Opaque build id, single-use on submit. */
-  transactionId: string;
-  /**
-   * Base64 wire bytes of the UNSIGNED transaction. The external wallet signs
-   * exactly these bytes. The fee payer is the owner, or the partner's
-   * `feePayer`. The integration returns the signed encoding on submit.
-   */
-  transaction: string;
-  /** Block height after which these exact bytes can no longer land. */
-  lastValidBlockHeight: string;
-  /** Whether SDP supplied and signed the transaction's fee payer. */
-  sponsored: boolean;
-  ownerAddress: string;
-  /**
-   * The partner fee payer compiled into the transaction, echoed from the
-   * build request. Present, the transaction requires this wallet's signature
-   * IN ADDITION to the owner's — co-sign server-side before submitting — and
-   * this wallet pays the network fee plus any account rent the transaction
-   * creates. Absent, the owner pays everything and signs alone.
-   */
-  feePayer?: string;
-  provider: string;
-  /** The vault's on-chain address — the instrument. */
-  providerReference: string;
-  tokenMint: string;
-  shareMint: string;
-}
-
-/** Response body of POST /v1/earn/deposits/build-unsigned-transaction. */
-export interface EarnExternalWalletDepositTransactionResponse {
-  transaction: EarnExternalWalletTransaction & {
-    /** Deposit amount encoded in the transaction, vault-token units. */
-    amount: string;
-    /** Slippage floor encoded in the transaction, share units, or null. */
-    minSharesOut: string | null;
-    /**
-     * Present when the build was swap-funded: a Jupiter swap from
-     * `swap.sourceTokenMint` is prepended inside this same transaction, and
-     * `amount` above equals `swap.depositAmount`.
-     */
-    swap?: EarnDepositSwap;
-    strategy: {
-      id: string;
-      name: string;
-      provider: string;
-      providerReference: string;
-      hostCluster: SolanaCluster;
-    };
-  };
-}
-
-/**
- * Response body of POST /v1/earn/deposits/build-unsigned-transaction when a
- * swap-funded deposit could not fit in ONE Solana transaction (the packet
- * limit is 1,232 bytes and some Jupiter routes leave no room for the vault
- * instructions). No CONSUMABLE build is persisted for this answer: SDP hands
- * back an unsigned SWAP-ONLY transaction for the owner to sign and broadcast
- * itself, plus the exact follow-up deposit to build once the swap lands. The
- * follow-up build then takes the ordinary single-transaction path. SDP
- * records an advisory and flags owners whose swap landed without a follow-up
- * deposit (PRO-1864); recovery stays the caller's duty.
- */
-export interface EarnExternalWalletDepositSwapSplitResponse {
-  /** Discriminates from the atomic response, which carries `transaction`. */
-  requiresSeparateSwap: true;
-  /** Split swap transactions are never sponsored by SDP. */
-  sponsored: false;
-  swap: EarnDepositSwap & {
-    /**
-     * Base64 wire bytes of the UNSIGNED swap transaction. The fee payer is
-     * the owner, or the original request's `feePayer` (which then co-signs
-     * this transaction too). The partner broadcasts it itself; it moves only
-     * the owner's own funds between the owner's own token accounts, so SDP
-     * records no movement; the build records an orphan-detection advisory.
-     */
-    transaction: string;
-    /** Block height after which these exact bytes can no longer land. */
-    lastValidBlockHeight: string;
-  };
-  /** The deposit build to request after the swap is confirmed. */
-  followUp: {
-    strategyId: string;
-    /** `swap.depositAmount`, restated as the follow-up build's `amount`. */
-    amount: string;
-    /**
-     * The share floor from the ORIGINAL request, carried through so the
-     * follow-up build keeps the protection the caller asked for (production
-     * requires one, and without it Kamino's pinned SDK builds the legacy
-     * floor-less deposit instruction). Absent only when the original request
-     * carried none.
-     */
-    minSharesOut?: string;
-    /**
-     * The fee payer from the ORIGINAL request, carried through for the same
-     * reason as the floor: a follow-up build that dropped it would bill the
-     * customer's wallet. Absent when the original request named none.
-     */
-    feePayer?: string;
-  };
-}
-
-interface EarnExternalWalletExitReference {
-  /** The tenant position being exited. */
-  positionId: string;
-}
-
-/** Response body of POST /v1/earn/withdrawals/build-unsigned-transaction. */
-export interface EarnExternalWalletWithdrawalTransactionResponse {
-  transaction: EarnExternalWalletTransaction &
-    EarnExternalWalletExitReference & {
-      /** Shares encoded in the transaction, share units. */
-      shares: string;
-      /** Minimum deposit-token amount encoded in the transaction, or null. */
-      minAmountOut: string | null;
-    };
-}
-
-/** The two signed actions in a queued external-wallet withdrawal lifecycle. */
-export type EarnExternalWalletWithdrawalRequestAction = "request" | "cancel";
-
-/**
- * Unsigned queued-withdrawal action for the owner (and optional partner fee
- * payer) to sign. Request builds carry the expected quote fields; cancellation
- * builds identify only the already-landed request.
- */
-export interface EarnExternalWalletWithdrawalRequestTransactionResponse {
-  transaction: EarnExternalWalletTransaction &
-    Partial<EarnExternalWalletExitReference> & {
-      action: EarnExternalWalletWithdrawalRequestAction;
-      /** Present for a cancellation of an already-landed request. */
-      withdrawalRequestId?: string;
-      requestAddress: string;
-      mechanism: "solverQueue" | "operatorRedemption";
-      shares?: string;
-      assets?: string;
-      intermediateMint?: string;
-      intermediateAmount?: string;
-      discountBps?: number;
-      maturityTimestamp?: string;
-      deadlineTimestamp?: string;
-    };
-}
-
-/** One recorded external-wallet vault movement, either direction. */
-export interface EarnExternalWalletMovement {
-  /** Verified cross-chain fulfillment; cancelled means shares returned and no USDC payout. */
-  settlementOutcome?: "delivered" | "cancelled";
-  movementId: string;
-  positionId: string;
-  provider: string;
-  /** The vault's on-chain address — the instrument. */
-  providerReference: string;
-  direction: EarnMovementDirection;
-  status: EarnVaultDirectMovementStatus;
-  /** Atomic transfers can show Done at confirmation; provider orders still await fulfillment.
-   * Older servers omit this field; clients must not infer atomic settlement from status alone. */
-  settlement?: "atomic" | "provider_order";
-  signature: string;
-  ownerAddress: string;
-  /** Requested quantity, denominated in `denomination`. */
-  amount: string;
-  /** Token mint for a deposit; share mint for a withdrawal. */
-  denomination: string;
-  /** The position's deposit-token mint: the unit an activity feed renders in. */
-  tokenMint: string;
-  /**
-   * Quantity in `tokenMint` units. Kamino deposits and withdrawals require a
-   * finalized observation; null before that or when it could not be observed.
-   * `amount`/`denomination` stay the on-chain quantity (shares on a withdrawal).
-   */
-  tokenAmount: string | null;
-  failureReason: string | null;
-  createdAt: string;
-  confirmedAt: string | null;
-  settledAt: string | null;
-  /** Present on POST responses; true when the idempotency anchor was replayed. */
-  replayed?: boolean;
-}
-
-/** Response body of POST /v1/earn/deposits/submit-signed-transaction. */
-export interface EarnExternalWalletDepositResponse {
-  deposit: EarnExternalWalletMovement;
-}
-
-/** Response body of POST /v1/earn/withdrawals/submit-signed-transaction. */
-export interface EarnExternalWalletWithdrawalResponse {
-  withdrawal: EarnExternalWalletMovement;
-}
-
-/** Keyset activity page for exactly one external wallet, newest first. */
-export interface EarnExternalWalletMovementsPage {
-  ownerAddress: string;
-  movements: EarnExternalWalletMovement[];
-  hasMore: boolean;
-  nextCursor: string | null;
-}
-
-/** Response body of GET /v1/earn/movements/caller-signed/:movementId. */
-export interface EarnExternalWalletMovementResponse {
-  movement: EarnExternalWalletMovement;
-}
-
-/**
- * Why an earned figure is absent. Unavailable is never encoded as zero:
- * - `live_value_unavailable`: the provider could not hydrate current value.
- * - `movements_pending`: a movement is still settling, so live value and the
- *   ledger describe different moments.
- * - `withdrawals_pending`: a currently held position has an open queued
- *   withdrawal request. Its shares leave the wallet (escrowed or burned)
- *   before the payout becomes a ledger fact, which can take days.
- * - `deposits_not_valued`: a finalized deposit has no observed receipt, so
- *   totalDeposited excludes it and earned cannot be stated accurately.
- * - `withdrawals_not_valued`: a currently held position has a finalized
- *   withdrawal whose token payout was not observed at settlement (rows that
- *   predate the observation, or a settlement whose transaction read failed),
- *   so `totalWithdrawn` is incomplete and earned cannot be exact (ADR 0002).
- *
- * Every earnings figure covers the wallet's CURRENTLY HELD positions: a fully
- * exited position drops out entirely (its deposits leave `totalDeposited`
- * along with its withdrawals), so one full exit does not withhold the open
- * positions' earned. The exited history stays on the movements list.
- */
-export type EarnExternalWalletEarnedUnavailableReason =
-  | "live_value_unavailable"
-  | "movements_pending"
-  | "withdrawals_pending"
-  | "deposits_not_valued"
-  | "withdrawals_not_valued";
-
-/** Earnings for one deposit token across an external wallet's positions. */
-export interface EarnExternalWalletTokenEarnings {
-  tokenMint: string;
-  positionCount: number;
-  /** Positions whose live value could not hydrate. */
-  unavailablePositionCount: number;
-  /**
-   * Live value across the token's positions, including any par intermediate;
-   * absent when any position is unavailable.
-   */
-  currentValue?: string;
-  /** Sum of observed finalized SDP deposits; excludes unvalued deposits. */
-  totalDeposited: string;
-  /**
-   * Sum of the observed token payouts of finalized withdrawals, a ledger fact,
-   * always present. Excludes withdrawals whose payout was not observed; those
-   * are what `withdrawals_not_valued` reports.
-   */
-  totalWithdrawn: string;
-  /**
-   * `currentValue + totalWithdrawn − totalDeposited`, signed. Absent (with the
-   * reason below) whenever it cannot be stated exactly. Live value reads the
-   * owner's WHOLE vault balance, so shares acquired outside SDP inflate this
-   * figure, a documented property of non-custodial hydration, not a bug
-   * (ADR 0002).
-   */
-  earned?: string;
-  earnedUnavailableReason?: EarnExternalWalletEarnedUnavailableReason;
-}
-
-/** Balance and earnings for one external wallet, grouped by deposit token. */
-export interface EarnExternalWalletEarnings {
-  ownerAddress: string;
-  positionCount: number;
-  unavailablePositionCount: number;
-  totalsByToken: EarnExternalWalletTokenEarnings[];
-}
-
-/** Response body of GET /v1/earn/earnings/caller-signed?ownerAddress=…. */
-export interface EarnExternalWalletEarningsResponse {
-  earnings: EarnExternalWalletEarnings;
-}
-
-/**
- * Portfolio wallets — provider-neutral wire contracts.
- *
- * Some vault-infra providers front a managed multi-source portfolio (one
- * omnibus wallet whose funds are spread across yield sources by a target
- * strategy) instead of per-strategy vault positions. Each such wallet is one
- * SDP "program"; an organization may hold several per environment (PRO-1670),
- * each pinned to a single vault, with nothing rebalancing across them.
- * Selecting a strategy re-targets one program's weights. All USD figures are
- * decimal strings; allocation weights are percent on the way in (what
- * strategies are authored in) and basis points on the way out (what providers
- * report back).
- */
-
-/** Deposit tokens a portfolio strategy is keyed by (provider-neutral lowercase). */
-export const EARN_PORTFOLIO_TOKENS = ["usdc", "usdt"] as const;
-export type EarnPortfolioToken = (typeof EARN_PORTFOLIO_TOKENS)[number];
-
-/** One authored strategy weight: percent of the token's funds, 0–100 in 0.1 steps. */
-export interface EarnPortfolioAllocation {
-  yieldSourceId: string;
-  pct: number;
-}
-
-/** Desired strategy per deposit token; tokens omitted keep their current allocation. */
-export type EarnPortfolioAllocationInput = Partial<
-  Record<EarnPortfolioToken, EarnPortfolioAllocation[]>
->;
-
-/** One provider-confirmed strategy weight, in basis points of the token's funds. */
-export interface EarnPortfolioTargetWeight {
-  yieldSourceId: string;
-  weightBps: number;
-}
-
-export type EarnPortfolioTargetAllocations = Partial<
-  Record<EarnPortfolioToken, EarnPortfolioTargetWeight[]>
->;
-
-/**
- * Neutral wallet lifecycle. `busy` covers every provider-side workflow state
- * (withdrawal/rebalance in flight) where funds stay visible but strategy
- * mutations should wait; unmapped provider statuses normalize to it.
- */
-export const EARN_PORTFOLIO_WALLET_STATUSES = ["creating", "ready", "busy", "failed"] as const;
-export type EarnPortfolioWalletStatus = (typeof EARN_PORTFOLIO_WALLET_STATUSES)[number];
-
-/** Wallet balances in USD decimal strings. */
-export interface EarnPortfolioBalance {
-  totalUsd: string;
-  withdrawableUsd: string;
-  reservedUsd: string;
-  earnedUsd: string;
-}
-
-/**
- * Where a slice of the portfolio currently sits. `bridge`/`external_payout`
- * are funds in transit between sources or out to a destination; unmapped
- * provider kinds normalize to `unknown` rather than being dropped, so the
- * position list always sums to the wallet total.
- */
-export const EARN_PORTFOLIO_POSITION_KINDS = [
-  "yield_source",
-  "cash",
-  "bridge",
-  "external_payout",
-  "unknown",
-] as const;
-export type EarnPortfolioPositionKind = (typeof EARN_PORTFOLIO_POSITION_KINDS)[number];
-
-export interface EarnPortfolioPosition {
-  kind: EarnPortfolioPositionKind;
-  label: string;
-  /** USD decimal string. */
-  valueUsd: string;
-  /** Share of the wallet total, 0–100. */
-  pct?: number;
-  /** Set for `yield_source` positions; joins back to the strategy catalogue. */
-  yieldSourceId?: string;
-  token?: EarnPortfolioToken;
-}
-
-/**
- * What a `busy` wallet is actually doing, in provider-neutral terms.
- *
- * `status` alone answers "can it take a mutation"; this answers "what is
- * happening to my money", which is the question a reader waiting on a screen
- * is asking. Every provider client derives it from its OWN status vocabulary,
- * so no consumer ever parses a provider's raw strings — the same reason
- * position labels arrive display-ready.
- *
- * Optional by design: absent whenever the wallet is not busy, and absent for a
- * busy state the provider client does not recognize (which still reports
- * `busy`, never a guessed activity).
- */
-export const EARN_PORTFOLIO_WALLET_ACTIVITIES = ["withdrawing", "rebalancing"] as const;
-export type EarnPortfolioWalletActivity = (typeof EARN_PORTFOLIO_WALLET_ACTIVITIES)[number];
-
-/** Live provider read of the shared wallet; never persisted, always fetched. */
-export interface EarnPortfolioWalletSnapshot {
-  providerWalletRef: string;
-  status: EarnPortfolioWalletStatus;
-  /** Named operation behind `busy`; see {@link EarnPortfolioWalletActivity}. */
-  activity?: EarnPortfolioWalletActivity;
-  /** Raw provider status string, for diagnostics/detail display. */
-  providerStatus?: string;
-  /**
-   * Funding address on the Solana rail for this environment. The only rail
-   * SDP surfaces; absent while the wallet is still `creating`.
-   */
-  solanaDepositAddress?: string;
-  balance: EarnPortfolioBalance;
-  positions: EarnPortfolioPosition[];
-  allocations: EarnPortfolioTargetAllocations;
-}
-
-export const EARN_PORTFOLIO_DEPOSIT_STATUSES = ["processing", "completed", "failed"] as const;
-export type EarnPortfolioDepositStatus = (typeof EARN_PORTFOLIO_DEPOSIT_STATUSES)[number];
-
-/** One on-chain deposit detected against the wallet's funding address. */
-export interface EarnPortfolioDeposit {
-  id: string;
-  /** USD decimal string. */
-  amountUsd: string;
-  token: EarnPortfolioToken;
-  status: EarnPortfolioDepositStatus;
-  fromAddress?: string;
-  transactionSignature?: string;
-  createdAt: string;
-  completedAt?: string;
-}
-
-export interface EarnPortfolioDepositsPage {
-  deposits: EarnPortfolioDeposit[];
-  nextCursor: string | null;
-}
-
 /**
  * `pending_approval` is synthesized by the provider client, never reported
  * top-level by the provider: a provider may park the affected payout leg in
@@ -1237,7 +514,6 @@ export const EARN_PORTFOLIO_WITHDRAWAL_STATUSES = [
   "failed",
   "cancelled",
 ] as const;
-export type EarnPortfolioWithdrawalStatus = (typeof EARN_PORTFOLIO_WITHDRAWAL_STATUSES)[number];
 
 /**
  * Statuses a withdrawal never moves on from. One declaration for every
@@ -1250,7 +526,7 @@ export const EARN_TERMINAL_WITHDRAWAL_STATUSES = [
   "partially_completed",
   "failed",
   "cancelled",
-] as const satisfies readonly EarnPortfolioWithdrawalStatus[];
+] as const satisfies readonly (typeof EARN_PORTFOLIO_WITHDRAWAL_STATUSES)[number][];
 
 /**
  * Ledger-row status vocabulary: `requested` is SDP-only pre-provider intent
@@ -1261,170 +537,6 @@ export const EARN_PROGRAM_WITHDRAWAL_RECORD_STATUSES = [
   "requested",
   ...EARN_PORTFOLIO_WITHDRAWAL_STATUSES,
 ] as const;
-export type EarnProgramWithdrawalRecordStatus =
-  (typeof EARN_PROGRAM_WITHDRAWAL_RECORD_STATUSES)[number];
-
-/** A portfolio-level withdrawal to a Solana destination address — the LIVE provider read. */
-export interface EarnPortfolioWithdrawal {
-  withdrawalRef: string;
-  status: EarnPortfolioWithdrawalStatus;
-  /** USD decimal strings. */
-  amountRequestedUsd?: string;
-  amountPaidUsd?: string;
-  feeUsd?: string;
-  token?: EarnPortfolioToken;
-  destinationAddress: string;
-  failureReason?: string;
-  createdAt: string;
-  completedAt?: string;
-}
-
-/**
- * One row of the SDP withdrawal ledger — the durable record of what SDP
- * initiated ("Record" always means ledger; `EarnPortfolioWithdrawal` is the
- * live provider read). Written at intent and on every observation; the
- * provider stays authoritative for live status and final amounts.
- */
-export interface EarnProgramWithdrawalRecord {
-  id: string;
-  /** Open string on the read model — a row can outlive its provider's registry entry. */
-  provider: string;
-  status: EarnProgramWithdrawalRecordStatus;
-  /** USD decimal strings. */
-  amountRequestedUsd: string;
-  amountPaidUsd?: string;
-  feeUsd?: string;
-  token: EarnPortfolioToken;
-  destinationAddress: string;
-  failureReason?: string;
-  /** Provider-side withdrawal reference; absent while the row is still `requested`. */
-  withdrawalRef?: string;
-  createdAt: string;
-  updatedAt: string;
-  completedAt?: string;
-}
-
-/** Provider settlement-time estimate, ISO-8601 durations. */
-export interface EarnPortfolioProcessingEstimate {
-  basis: "elapsed_seconds" | "banking_days";
-  typicalMinDuration: string;
-  typicalMaxDuration: string;
-}
-
-/** Per-yield-source yield metrics behind a program's blended rate. */
-export interface EarnPortfolioYieldPosition {
-  yieldSourceId: string;
-  name: string;
-  /** Decimal rate (`0.0453` = 4.53%), converted from the provider's basis points. */
-  apy: string;
-  /** Target allocation percentage (0-100). */
-  pct: number;
-  deployedValueUsd: string;
-}
-
-/**
- * Yield metrics for a program. Providers report per-position rates rather than
- * one wallet rate, so `currentApy` is **derived**: a weighted blend of the
- * position rates, weighted by deployed value when anything is deployed and by
- * target allocation otherwise (a funded-but-unrebalanced program still has a
- * meaningful forward rate). Absent when no position carries a rate — e.g. a
- * program held entirely as cash.
- */
-export interface EarnPortfolioYield {
-  currentApy?: string;
-  /** Cumulative yield since the program was created. */
-  earnedUsd: string;
-  /** Estimated annualized yield in USD at current rates. */
-  annualizedUsd?: string;
-  positions: EarnPortfolioYieldPosition[];
-}
-
-export interface EarnPortfolioWithdrawalPreview {
-  /**
-   * USD decimal strings. Absent when the preview was asked WITHOUT an amount —
-   * the liquidity-read form, which answers `withdrawableUsd` for the lane and
-   * validates no particular request (PRO-1675).
-   */
-  amountRequestedUsd?: string;
-  feeUsd: string;
-  withdrawableUsd: string;
-  totalUsdAfterWithdrawal: string;
-  processingEstimate?: EarnPortfolioProcessingEstimate;
-}
-
-/**
- * A destination lane's balance breakdown, as reported alongside a provider's
- * refusal to pay out more than it holds. Carried on `error.details.balance` of
- * a 409 so the caller can say how short the request was instead of echoing
- * provider wire text; every field is optional because it reflects whatever the
- * provider actually sent. USD decimal strings, like every other Earn amount.
- */
-export interface EarnPortfolioLiquidityBalance {
-  totalUsd?: string;
-  withdrawableUsd?: string;
-  reservedUsd?: string;
-}
-
-// API response envelopes (mirrors the asset-profiles response naming).
-
-/**
- * One provider-managed Earn program, hydrated from the provider on every read.
- * The program id, label, and creation time are SDP-owned; wallet and yield state
- * remain provider-authoritative and are never replaced with persisted balances.
- */
-export interface EarnProgram {
-  /** SDP's own program id — how every `/programs/:programId` route names it. */
-  id: string;
-  /** Open provider id because a persisted program can outlive its registry entry. */
-  provider: string;
-  label: string | null;
-  createdAt: string;
-  wallet: EarnPortfolioWalletSnapshot;
-  /**
-   * Absent when the provider's yield lookup fails. Balances remain available,
-   * while consumers render an unavailable rate rather than fabricating 0%.
-   */
-  yield?: EarnPortfolioYield;
-}
-
-export interface EarnProgramResponse {
-  program: EarnProgram;
-}
-
-export interface ListEarnProgramsResponse {
-  programs: EarnProgram[];
-  total: number;
-  page: number;
-  pageSize: number;
-}
-
-export type EarnProgramDepositsResponse = EarnPortfolioDepositsPage;
-
-export interface EarnProgramWithdrawalPreviewResponse {
-  preview: EarnPortfolioWithdrawalPreview;
-}
-
-export interface EarnProgramWithdrawalResponse {
-  withdrawal: EarnPortfolioWithdrawal;
-}
-
-export interface EarnStrategyResponse {
-  strategy: EarnStrategy;
-}
-
-export interface ListEarnStrategiesResponse {
-  strategies: EarnStrategy[];
-  total: number;
-  page: number;
-  pageSize: number;
-}
-
-export interface ListEarnProgramWithdrawalsResponse {
-  withdrawals: EarnProgramWithdrawalRecord[];
-  total: number;
-  page: number;
-  pageSize: number;
-}
 
 /**
  * The unified movement ledger (PRO-1705, migration 0062).
@@ -1495,29 +607,6 @@ export const EARN_TERMINAL_MOVEMENT_STATUSES = {
 } as const satisfies {
   [Model in EarnExecutionModel]: readonly (typeof EARN_MOVEMENT_STATUSES)[Model][number][];
 };
-
-export function isTerminalEarnMovementStatus(
-  executionModel: EarnExecutionModel,
-  status: string
-): boolean {
-  return (EARN_TERMINAL_MOVEMENT_STATUSES[executionModel] as readonly string[]).includes(status);
-}
-
-/**
- * Vault-direct statuses whose transaction the chain has committed. `confirmed`
- * is what the dashboard reports as done, though a fork can still drop it;
- * `finalized` is irreversible.
- */
-export const EARN_LANDED_VAULT_DIRECT_MOVEMENT_STATUSES = [
-  "confirmed",
-  "finalized",
-] as const satisfies readonly EarnVaultDirectMovementStatus[];
-
-export function isLandedEarnVaultDirectMovementStatus(
-  status: EarnVaultDirectMovementStatus
-): status is (typeof EARN_LANDED_VAULT_DIRECT_MOVEMENT_STATUSES)[number] {
-  return EARN_LANDED_VAULT_DIRECT_MOVEMENT_STATUSES.some((landed) => landed === status);
-}
 
 /**
  * Legal transitions, keyed by TARGET status to the statuses it may be reached
@@ -1599,75 +688,153 @@ export const EARN_MOVEMENT_TRANSITIONS = {
 };
 
 /**
- * One row of the unified Earn ledger — the cross-provider movement record.
- *
- * This is the read PRO-1669 asked for and neither legacy shape could serve: one
- * chronological history of every money movement an organization made through
- * Earn, whichever provider executed it and whichever way. `EarnVaultDepositRecord`
- * and `EarnProgramWithdrawalRecord` remain the per-family views, and both are
- * projections of this same row.
- *
- * Unlike those two, this speaks the ledger's own vocabulary — `requested` and
- * `finalized` included — because it is a new contract with no client to keep
- * compatible. A consumer reads `executionModel` to know which optional fields to
- * expect.
- *
- * Every amount is denominated in `denomination`: `usd` for a custodial movement,
- * the token MINT for a vault one. Never sum across rows without grouping by it.
- * Share quantities appear only in the share-named fields and are not comparable
- * to the amounts.
+ * A queued or operator-redemption withdrawal request's lifecycle, as
+ * `earn_vault_withdrawal_requests.status` stores it.
  */
-export interface EarnMovementRecord {
-  id: string;
-  /** Open string — a row can outlive its provider's registry entry. */
-  provider: string;
-  executionModel: EarnExecutionModel;
-  direction: EarnMovementDirection;
-  status: EarnMovementStatus;
-  /** The holding this movement belongs to; every movement has exactly one. */
-  positionId: string;
-  /** `usd`, or the token mint. The unit of every amount below. */
-  denomination: string;
-  amountRequested: string;
-  /** What actually moved, once the provider or the chain has said so. */
-  amountSettled?: string;
-  /**
-   * Deposit-token payout observed for a finalized vault withdrawal. These two
-   * fields are paired and remain absent when settlement could not be valued.
-   * `amountSettled` remains share-denominated for vault withdrawals.
-   */
-  tokenAmount?: string;
-  tokenMint?: string;
-  feeAmount?: string;
-  /** Share units (vault movements only). */
-  minSharesOut?: string;
-  sharesOut?: string;
-  /** Payout stablecoin symbol for a custodial withdrawal; not the unit. */
-  payoutToken?: string;
-  /** The vault's on-chain address (vault movements only). */
-  vaultAddress?: string;
-  /** Where the money came from and went, when SDP observed either. */
-  sourceAddress?: string;
-  destinationAddress?: string;
-  /** The provider's own id for THIS movement, when it has one. */
-  providerReference?: string;
-  /** Solana transaction signature (vault movements only). */
-  signature?: string;
-  failureReason?: string;
-  /** Who moved it: a dashboard user, an API key, or neither for a system write. */
-  createdBy?: string;
-  initiatedByKeyId?: string;
-  createdAt: string;
-  updatedAt: string;
-  /** Optimistic chain commitment; not settlement. */
-  confirmedAt?: string;
-  /** Success-terminal: finalization, or provider completion. */
-  settledAt?: string;
+export const EARN_VAULT_WITHDRAWAL_REQUEST_STATUSES = [
+  "creating",
+  "pending",
+  "fulfillable",
+  "expired_cancelable",
+  "cancelling",
+  "closed_or_unknown",
+  "fulfilled",
+  "cancelled",
+  "failed",
+] as const;
+export type EarnVaultWithdrawalRequestStatus =
+  (typeof EARN_VAULT_WITHDRAWAL_REQUEST_STATUSES)[number];
+
+/** Requests that never change again: paid, cancelled, or never landed. */
+export const EARN_TERMINAL_VAULT_WITHDRAWAL_REQUEST_STATUSES = [
+  "fulfilled",
+  "cancelled",
+  "failed",
+] as const satisfies readonly EarnVaultWithdrawalRequestStatus[];
+
+/** Requests the provider closed on chain: paid out or cancelled. */
+export const EARN_CLOSED_VAULT_WITHDRAWAL_REQUEST_STATUSES = [
+  "fulfilled",
+  "cancelled",
+] as const satisfies readonly EarnVaultWithdrawalRequestStatus[];
+
+/** Requests that are not final yet. */
+export const EARN_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES = [
+  "creating",
+  "pending",
+  "fulfillable",
+  "expired_cancelable",
+  "cancelling",
+  "closed_or_unknown",
+] as const satisfies readonly EarnVaultWithdrawalRequestStatus[];
+
+/** Landed requests waiting on the provider; the request account still holds the shares. */
+export const EARN_LIVE_VAULT_WITHDRAWAL_REQUEST_STATUSES = [
+  "pending",
+  "fulfillable",
+  "expired_cancelable",
+] as const satisfies readonly EarnVaultWithdrawalRequestStatus[];
+
+/** Landed and not final, a cancellation in flight included. */
+export const EARN_LANDED_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES = [
+  ...EARN_LIVE_VAULT_WITHDRAWAL_REQUEST_STATUSES,
+  "cancelling",
+] as const satisfies readonly EarnVaultWithdrawalRequestStatus[];
+
+/** Not proven on chain yet, or closed without an outcome SDP could identify. */
+export const EARN_UNRESOLVED_VAULT_WITHDRAWAL_REQUEST_STATUSES = [
+  "creating",
+  "closed_or_unknown",
+] as const satisfies readonly EarnVaultWithdrawalRequestStatus[];
+
+const TERMINAL_REQUEST_STATUSES = new Set<EarnVaultWithdrawalRequestStatus>(
+  EARN_TERMINAL_VAULT_WITHDRAWAL_REQUEST_STATUSES
+);
+const CLOSED_REQUEST_STATUSES = new Set<EarnVaultWithdrawalRequestStatus>(
+  EARN_CLOSED_VAULT_WITHDRAWAL_REQUEST_STATUSES
+);
+const LIVE_REQUEST_STATUSES = new Set<EarnVaultWithdrawalRequestStatus>(
+  EARN_LIVE_VAULT_WITHDRAWAL_REQUEST_STATUSES
+);
+
+/** Whether a request status is final. */
+export function isTerminalVaultWithdrawalRequestStatus(
+  status: EarnVaultWithdrawalRequestStatus
+): boolean {
+  return TERMINAL_REQUEST_STATUSES.has(status);
 }
 
-/** Response body of GET /v1/earn/treasury/movements — newest first, keyset-paged. */
-export interface EarnMovementsPage {
-  movements: EarnMovementRecord[];
-  hasMore: boolean;
-  nextCursor: string | null;
+/** Whether the provider closed the request on chain (paid out or cancelled). */
+export function isClosedVaultWithdrawalRequestStatus(
+  status: EarnVaultWithdrawalRequestStatus
+): boolean {
+  return CLOSED_REQUEST_STATUSES.has(status);
 }
+
+/** Whether a landed request still waits on the provider with its shares held. */
+export function isLiveVaultWithdrawalRequestStatus(
+  status: EarnVaultWithdrawalRequestStatus
+): boolean {
+  return LIVE_REQUEST_STATUSES.has(status);
+}
+
+/**
+ * Legal request transitions, keyed by TARGET status to the statuses it may be
+ * reached from, the shape `EARN_MOVEMENT_TRANSITIONS` uses.
+ * `earn-vault-withdrawal-requests.repository.ts` applies them as a
+ * compare-and-swap, and terminal statuses appear in no source list, so a final
+ * request cannot regress.
+ */
+export const EARN_VAULT_WITHDRAWAL_REQUEST_TRANSITIONS = {
+  creating: [],
+  pending: ["creating", "pending", "closed_or_unknown"],
+  fulfillable: ["creating", "pending", "fulfillable", "closed_or_unknown"],
+  // A synchronous cancel eligibility read may be the first observer after a
+  // finalized request transaction. Permit it to close the short `creating`
+  // window instead of making recovery wait for the background sweep.
+  expired_cancelable: [
+    "creating",
+    "pending",
+    "fulfillable",
+    "expired_cancelable",
+    "closed_or_unknown",
+  ],
+  cancelling: ["expired_cancelable", "cancelling"],
+  closed_or_unknown: EARN_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES,
+  fulfilled: EARN_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES,
+  cancelled: EARN_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES,
+  failed: EARN_UNRESOLVED_VAULT_WITHDRAWAL_REQUEST_STATUSES,
+} as const satisfies Record<
+  EarnVaultWithdrawalRequestStatus,
+  readonly EarnVaultWithdrawalRequestStatus[]
+>;
+
+/**
+ * A request or cancel action is one signed transaction, so it shares the
+ * vault-direct movement lifecycle: the same statuses and transitions.
+ */
+export const EARN_VAULT_WITHDRAWAL_ACTION_STATUSES = EARN_MOVEMENT_STATUSES.vault_direct;
+export type EarnVaultWithdrawalActionStatus = EarnVaultDirectMovementStatus;
+
+/** Actions whose transaction may still land. */
+export const EARN_IN_FLIGHT_VAULT_WITHDRAWAL_ACTION_STATUSES = [
+  "requested",
+  "submitted",
+  "confirmed",
+] as const satisfies readonly EarnVaultWithdrawalActionStatus[];
+
+/** Actions whose transaction reached the chain. */
+export const EARN_LANDED_VAULT_WITHDRAWAL_ACTION_STATUSES = [
+  "submitted",
+  "confirmed",
+  "finalized",
+] as const satisfies readonly EarnVaultWithdrawalActionStatus[];
+
+/** Legal action transitions, the vault-direct movement matrix with its insert state. */
+export const EARN_VAULT_WITHDRAWAL_ACTION_TRANSITIONS = {
+  requested: [],
+  ...EARN_MOVEMENT_TRANSITIONS.vault_direct,
+} as const satisfies Record<
+  EarnVaultWithdrawalActionStatus,
+  readonly EarnVaultWithdrawalActionStatus[]
+>;

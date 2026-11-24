@@ -84,6 +84,8 @@ const entryPoints = {
   // backoffice-ops.js runs allowlisted routine operator work (mainnet access status, reset and
   // jurisdiction correction) via the backoffice-ops Cloud Run job, apart from the incident page.
   "backoffice-ops": "scripts/backoffice-ops.ts",
+  // Explicit, audited recovery for finalized Earn releases with unavailable provider event evidence.
+  "recover-redemption-release": "scripts/recover-redemption-release.ts",
 };
 
 const zkSdkNodeEntries = new Set();

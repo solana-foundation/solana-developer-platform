@@ -38,12 +38,12 @@ function MarketsPathGroup({
  * is on: the same check its segment layout 404s on.
  */
 export async function MarketsLanding() {
-  const [t, earnEnabled, dvpEnabled, treasuryHref, earnProgramHref, dvpHref] = await Promise.all([
+  const [t, earnEnabled, dvpEnabled, treasuryHref, embeddedYieldHref, dvpHref] = await Promise.all([
     getTranslations(),
     earn(),
     dvp(),
     requestProjectHref(DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions),
-    requestProjectHref(DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram),
+    requestProjectHref(DASHBOARD_MARKETS_SUBNAV_HREFS.embeddedYield),
     requestProjectHref(DASHBOARD_MARKETS_SUBNAV_HREFS.dvp),
   ]);
 
@@ -62,9 +62,9 @@ export async function MarketsLanding() {
               description={t("DashboardMarkets.landing.treasuryTileDescription")}
             />
             <ActionTile
-              href={earnProgramHref}
+              href={embeddedYieldHref}
               icon={UsersRoundIcon}
-              label={t("Shared.dashboardShell.earnProgram")}
+              label={t("Shared.dashboardShell.embeddedYield")}
               description={t("DashboardMarkets.landing.programTileDescription")}
             />
           </MarketsPathGroup>

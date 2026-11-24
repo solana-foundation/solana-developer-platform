@@ -1,5 +1,4 @@
 import {
-  supportsPortfolioWallets,
   supportsVaultDepositQuote,
   supportsVaultDirect,
   supportsVaultQueuedWithdraw,
@@ -10,7 +9,6 @@ import type { VedaDeployment } from "@sdp/types/veda-programs";
 import { address } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  assertNotPortfolioProvider,
   toEarnVaultQueuedWithdrawalRequestPlan,
   toEarnVaultTransactionPlan,
   VEDA_POSITION_READ_CONCURRENCY,
@@ -168,20 +166,6 @@ describe("VedaVaultDirectClient capabilities", () => {
 
   it("reports the complete queued-withdraw lifecycle separately from instant exit", () => {
     expect(supportsVaultQueuedWithdraw(client)).toBe(true);
-  });
-
-  /**
-   * THE INVARIANT THAT PROTECTS CUSTOMER FUNDS.
-   *
-   * The portfolio capability means "SDP can give you an address to send
-   * stablecoins to". Veda has no such address — its vault state is a program
-   * account. If this client ever answered yes to both, a portfolio route could
-   * render that account as a deposit target. The two must stay mutually
-   * exclusive.
-   */
-  it("NEVER reports the portfolio-wallet capability", () => {
-    expect(supportsPortfolioWallets(client)).toBe(false);
-    expect(() => assertNotPortfolioProvider(client)).not.toThrow();
   });
 
   it("still catalogues — the execution client is a superset, not a replacement", () => {

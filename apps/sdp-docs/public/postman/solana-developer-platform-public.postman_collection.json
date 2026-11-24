@@ -1912,118 +1912,34 @@
       "name": "Earn",
       "item": [
         {
-          "name": "List strategies",
+          "name": "Discover strategies",
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/v1/earn/strategies",
-            "description": "Lists the strategies your project can see, largest first by total value locked. The list defaults to your project's cluster: devnet for sandbox, mainnet for production. Pass `cluster` to browse the other cluster's strategies; those rows are always `fundable: false`. A listed strategy is not always open for deposits, so check `fundable` and `status` before you offer it."
+            "url": "{{baseUrl}}/v1/earn/discovery",
+            "description": "Lists the strategies you can deposit into, with their rates and capabilities. rate.value is the provider-reported APY as a decimal fraction; null means unknown, not zero. capabilities.deposit is false for discovery-only rows, and preparation still checks admission live for each wallet."
           }
         },
         {
-          "name": "Get a strategy",
+          "name": "List positions",
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/v1/earn/strategies/{{strategyId}}",
-            "description": "Gets one strategy by ID, on either cluster. `fundable` still reports whether the strategy exists on your project's cluster."
+            "url": "{{baseUrl}}/v1/earn/positions",
+            "description": "Lists positions, filtered by ownerAddress; the wallet needs no registration in SDP. Without a filter, the page covers every position the key can see, and sourceType=address or sourceType=wallet narrows it. walletId filters to one SDP custody wallet instead. discover=true, with one owner filter, adds holdings in integrated strategies that SDP did not open, without importing ownership or inventing acquisition history. Unavailable live reads stay unavailable, never zero. includeSummary=true totals the whole selected scope; costBasisKnown and costBasisCoverage mark unknown earnings history. Pending queue shares and intermediate-token balances stay visible."
           }
         },
         {
-          "name": "Preview a deposit",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/earn/deposits/preview",
-            "description": "Quotes how many shares a deposit would receive right now, from the provider's live accounting. When the strategy's `depositSlippage` is not null, set `minSharesOut` from this quote: take your tolerance off `sharesOut`. Resolve every `blockingIssues` entry before you build. The preview is read-only, takes no Idempotency-Key, and applies a deposit's access checks, provider activation included. It returns 501 when the provider cannot quote deposits.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"strategyId\": \"earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e\",\n  \"amount\": \"25\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Get caller-signed project position totals",
+          "name": "Get a position",
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/v1/earn/positions/caller-signed/project-summary",
-            "description": "Gets live position totals across every customer wallet in your project, grouped by strategy and token. Wallet addresses are left out unless you pass `includeOwnerAddresses=true`; add `includePositions=true` to also receive each wallet's positions, which saves one read per wallet. A total that depends on an unavailable live value is left out, never reported as zero or partial."
+            "url": "{{baseUrl}}/v1/earn/positions/{{positionId}}",
+            "description": "Returns one position, with the same fields and live values as the positions list. Pass any position ID the list returns, including a holding found with discover=true; no wallet filter or SDP wallet registration is needed, and the authenticated project and environment still control visibility. A discovered holding is verified live without importing it or inventing acquisition history; if SDP already tracks it, the response carries the tracked position ID, pending queued withdrawals included. An unknown or inaccessible position returns 404. Values SDP can't read live are left out of a tracked position, never shown as zero; a discovered holding SDP can't verify returns 503. afterMovementIds reads the balance from a point that includes those movements, which must belong to this position (another position's movement returns 404). Reading never prepares, signs or submits a transaction."
           }
         },
         {
-          "name": "List one caller-signed wallet's positions",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/earn/positions/caller-signed",
-            "description": "Lists one customer wallet's live positions, one page at a time. `ownerAddress` is required. A wallet with no positions in your project (never deposited, fully withdrawn, or held under another organization) returns an empty `positions` list, not 404. Live fields are left out, never set to zero, when the provider read is unavailable."
-          }
-        },
-        {
-          "name": "List one caller-signed wallet's activity",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/earn/movements/caller-signed",
-            "description": "Lists one customer wallet's deposits and withdrawals, newest first, one page at a time. Movement statuses are `requested`, `submitted`, `confirmed`, `finalized` and `failed`; only `finalized` and `failed` are final. `ownerAddress` is required, and a wallet with no movements returns an empty `movements` list, not 404. Show `tokenAmount` in `tokenMint` units: on a withdrawal it is the observed payout once finalized, while `amount` and `denomination` carry the onchain quantity, which is shares. Reads keep working after a provider stops taking deposits."
-          }
-        },
-        {
-          "name": "Get one caller-signed movement",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/earn/movements/caller-signed/{{movementId}}",
-            "description": "Gets one deposit or withdrawal and refreshes its onchain status when it can. Use it to track a movement after submit, or to recover a submit whose response was lost. If the chain read fails, you get the last recorded status while SDP keeps reconciling in the background. An atomic movement can show as done at `confirmed`, but only `finalized` and `failed` are final. For `settlement: provider_order`, chain confirmation is not payout: the provider still has to complete the order."
-          }
-        },
-        {
-          "name": "Get one caller-signed wallet's balance and earnings",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/earn/earnings/caller-signed",
-            "description": "Gets one customer wallet's live balance and earnings per deposit token. `earned` is live value plus observed withdrawal payouts (`totalWithdrawn`) minus finalized deposits (`totalDeposited`), and appears only when it is exact. Otherwise it is left out with an `earnedUnavailableReason`, such as a live value that is unavailable, movements that are still settling, or a withdrawal payout SDP did not observe; never show it as zero. A wallet with no positions returns `positionCount: 0` and an empty `totalsByToken`, not 404. Totals cover the positions the wallet holds now: a fully withdrawn position drops out here but stays in the movements list. Live value reads the wallet's whole balance in the strategy, so shares acquired outside SDP raise it."
-          }
-        },
-        {
-          "name": "Build an unsigned deposit transaction",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/earn/deposits/build-unsigned-transaction",
-            "description": "Builds an unsigned deposit transaction for the customer's wallet to sign. Nothing moves until you submit the signed transaction. The build applies provider access checks and can name your own `feePayer`, which then signs alongside the customer. A swap-funded deposit that cannot fit in one transaction returns a separate swap and follow-up deposit instead of `transaction`, so check the response before you request a signature.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"strategyId\": \"earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e\",\n  \"ownerAddress\": \"9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM\",\n  \"amount\": \"25\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Submit a caller-signed deposit",
+          "name": "Prepare a deposit",
           "request": {
             "method": "POST",
             "header": [
@@ -2034,15 +1950,15 @@
               },
               {
                 "key": "Idempotency-Key",
-                "value": "{{idempotencyKey.createEarnExternalWalletDeposit}}",
+                "value": "{{idempotencyKey.prepareEarnDeposit}}",
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/earn/deposits/submit-signed-transaction",
-            "description": "Submits a deposit transaction signed by the customer's wallet. SDP checks that the signed bytes match the built transaction and that every required signature is valid (the customer's, plus your fee payer's when the build named one), records the movement, then broadcasts. Idempotency-Key is required: a retry with the same key returns the original movement with `replayed: true`, and each built transaction can be submitted once. Reusing a key with a different body, or submitting one build under a second key, returns `409 CONFLICT`. Submit the original signed bytes even after the blockhash expires, since the wallet may already have broadcast them. After an uncertain response, retry with the same key and body, then read the movement; never replace a signed transaction whose outcome is unknown.",
+            "url": "{{baseUrl}}/v1/earn/deposit",
+            "description": "Prepares a deposit and returns an operation to review, sign and submit. Send strategyId, source.ownerAddress and the amount; the wallet needs no registration in SDP. nextAction sign_transaction carries the unsigned transaction: sign its exact message in the owner's wallet, then send signedTransaction with actionId and version to POST /v1/operations/{operationId}/submit. Preparation never signs or broadcasts. Funding with another token puts the swap and the deposit in one transaction; a pair too large for one transaction is refused before signing, never split. An SDP custody wallet can use source.walletId instead: nextAction is then submit, and SDP requests the signature from its custody provider. After an uncertain response, retry with the original Idempotency-Key and body.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"transactionId\": \"earn_external_wallet_transaction_e7a88258-1d19-48f3-8d0e-81fefa4bf3b3\",\n  \"signedTransaction\": \"AUyx/sEc49/1l6jxo3nbViPAIUqdrXCo8Qx5SfDvIbtUI0zex3Bi6Cyhhn1QTVU8zWDzXTRyIX2aCmq9v7yk5AOA\"\n}",
+              "raw": "{\n  \"strategyId\": \"earn_strategy_3b6a81ce-00b0-4c5a-9761-cb359932e97e\",\n  \"source\": {\n    \"ownerAddress\": \"9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM\"\n  },\n  \"amount\": {\n    \"mint\": \"4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU\",\n    \"value\": \"100\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2052,55 +1968,7 @@
           }
         },
         {
-          "name": "Preview a caller-signed withdrawal",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/earn/withdrawals/caller-signed/preview",
-            "description": "Quotes what withdrawing these shares would pay right now, from the strategy's live accounting. When the strategy's `withdrawalSlippage` is not null, set `minAmountOut` from this quote: take your tolerance off `assetsOut`, rounded down to `assetDecimals`. The preview is read-only, takes no Idempotency-Key, and still works after a strategy is deprecated or its provider stops taking deposits. It does not check the wallet's balance, so keep `shares` within the position's `withdrawableShares`. It returns 501 when the provider cannot quote withdrawals.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"positionId\": \"earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b\",\n  \"shares\": \"10\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Build an unsigned withdrawal transaction",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/earn/withdrawals/build-unsigned-transaction",
-            "description": "Builds an unsigned withdrawal transaction for a position, for the customer's wallet to sign. Withdrawals keep working after a provider stops taking deposits. Send `minAmountOut` when the strategy's `withdrawalSlippage` is not null, and omit it when null. A provider-order route may not support a preview: it places an order that pays out later, not an instant redemption.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"positionId\": \"earn_position_2f8b6b04-7147-487e-b760-b1caa4fbcb8b\",\n  \"shares\": \"10\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Submit a caller-signed withdrawal",
+          "name": "Prepare a withdrawal",
           "request": {
             "method": "POST",
             "header": [
@@ -2111,15 +1979,15 @@
               },
               {
                 "key": "Idempotency-Key",
-                "value": "{{idempotencyKey.createEarnExternalWalletWithdrawal}}",
+                "value": "{{idempotencyKey.prepareEarnWithdrawal}}",
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/earn/withdrawals/submit-signed-transaction",
-            "description": "Submits a withdrawal transaction signed by the customer's wallet. It works like a deposit submit: SDP checks every signature against the exact built message, records the movement before broadcast, requires an Idempotency-Key, and accepts each built transaction once, with the same `409 CONFLICT` answers. Submit the original signed bytes even after the blockhash expires, since the wallet may already have broadcast them. After an uncertain response, retry with the same key and body, then read the movement instead of building a new withdrawal. Withdrawals stay available while Earn is disabled.",
+            "url": "{{baseUrl}}/v1/earn/withdraw",
+            "description": "Prepares a withdrawal from a position and returns an operation to review, sign and submit. The position fixes the strategy and owner; amount.kind is all, shares, token or intermediate. With amount.kind token, an amount outside the supported numeric range or precision returns 400 BAD_REQUEST. When the strategy offers more than one exit route, nextAction is select_option: call POST /v1/operations/{operationId}/refresh with an advertised optionId to prepare that route's transaction, then review and submit its new actionId and version. With amount.kind all, an expired solver escrow can advertise a recovery option even at a zero share balance; it prepares a new transaction that returns the escrowed shares and leaves the original withdrawal unchanged. Recovery checks up to three recorded requests in creation order and offers the first recoverable live escrow, skipping closed or no-longer-expired candidates. If all three are stale and more remain, the recovery option is omitted while other available withdrawal routes remain usable. Preparation returns 503 SERVICE_UNAVAILABLE only if no route remains. A tracked Hastra operator redemption can advertise release_current_redemption, including with no free PRIME or wYLDS. Select it explicitly: it authorizes releasing the wallet's current pending redemption at execution, including any replacement request. This leaves available wYLDS in the wallet, returns no PRIME or USDC payout, and never rewrites an older withdrawal. Its completed result has settlementOutcome recovered and settledAmount null; position.parIntermediate reports live balances. A release that never lands fails with TRANSACTION_EXPIRED once its blockhash expires. Preparation never signs or broadcasts, and a queued request is not a payout: track the operation through settlement.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"transactionId\": \"earn_external_wallet_transaction_0ebe7320-4b8e-4d1a-a5f0-6c2d9e8b1f47\",\n  \"signedTransaction\": \"AUyx/sEc49/1l6jxo3nbViPAIUqdrXCo8Qx5SfDvIbtUI0zex3Bi6Cyhhn1QTVU8zWDzXTRyIX2aCmq9v7yk5AOA\"\n}",
+              "raw": "{\n  \"positionId\": \"earn_position_3b6a81ce-00b0-4c5a-9761-cb359932e97e\",\n  \"amount\": {\n    \"kind\": \"all\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2129,150 +1997,25 @@
           }
         },
         {
-          "name": "Discover caller-signed withdrawal routes",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/earn/withdrawals/caller-signed/options",
-            "description": "Lists the withdrawal routes a position supports right now: instant, provider order, solver queue and operator redemption, each read from live provider state. A position offers instant or provider order, never both; the withdrawal endpoints build whichever it offers. Call this when the customer starts a withdrawal, and let them choose when more than one route is available. Never infer a route from the strategy's `liquidityTerm`.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"positionId\": \"earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Preview an asynchronous caller-signed withdrawal",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/earn/withdrawal-requests/caller-signed/preview",
-            "description": "Previews a withdrawal request: a solver queue's discounted payout and timing, or an operator redemption's intermediate-token conversion and payout. Check the mechanism against the position's withdrawal options first, and resolve every `blockingIssues` entry before the customer confirms. The preview is read-only and safe to retry. It does not check the wallet's balance, so keep `shares` within the position's `withdrawableShares`.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"positionId\": \"earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc\",\n  \"mechanism\": \"solverQueue\",\n  \"shares\": \"15\",\n  \"discountBps\": 10,\n  \"deadlineSeconds\": 60\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Build a withdrawal request transaction",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/earn/withdrawal-requests/build-unsigned-transaction",
-            "description": "Builds an unsigned withdrawal request transaction for a position, for the customer's wallet to sign. A solver queue request escrows shares; an operator redemption converts shares into an intermediate token that the operator settles later. Neither transaction pays the customer. Save the `withdrawalRequestId` the submit returns and track the request until it is fulfilled, canceled, or failed.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"positionId\": \"earn_position_0432ffeb-c574-4b11-80dc-a09defb68fcc\",\n  \"mechanism\": \"solverQueue\",\n  \"shares\": \"15\",\n  \"discountBps\": 10,\n  \"deadlineSeconds\": 60\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Submit a withdrawal request",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              },
-              {
-                "key": "Idempotency-Key",
-                "value": "{{idempotencyKey.createEarnExternalWalletWithdrawalRequest}}",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/earn/withdrawal-requests/submit-signed-transaction",
-            "description": "Submits a withdrawal request transaction signed by the customer's wallet. SDP checks every signature against the exact built message, records the request before broadcast, then sends it. Idempotency-Key is required: a retry with the same key returns the original request, and each built transaction can be submitted once. Reusing a key with a different body, or submitting one build under a second key, returns `409 CONFLICT`. An expired build can still be submitted late. If its reservation was released or replaced, SDP accepts it only once the exact signed transaction is finalized as successful, so after a `409 CONFLICT` retry the same bytes and key until that shows. A late operator redemption whose original cycle already closed is refused for operator reconciliation, so it cannot claim a newer request at the same address. A transaction that recovery finds finalized as failed returns `400 TRANSACTION_FAILED`; build a new one. A recovery RPC outage returns `503 PROVIDER_UNAVAILABLE`: retry the original bytes and key. An unresolved 16-signature history window returns `503` and needs support to reconcile. An expired operator redemption build whose creation history is unavailable also returns `503`: keep and retry the original signed intent rather than signing a replacement.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"transactionId\": \"earn_external_wallet_withdrawal_request_transaction_54c50679-1b52-494d-84fa-106df66452ff\",\n  \"signedTransaction\": \"AUyx/sEc49/1l6jxo3nbViPAIUqdrXCo8Qx5SfDvIbtUI0zex3Bi6Cyhhn1QTVU8zWDzXTRyIX2aCmq9v7yk5AOA\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "List a caller-signed wallet's asynchronous withdrawals",
+          "name": "List operations",
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/v1/earn/withdrawal-requests/caller-signed",
-            "description": "Lists one customer wallet's withdrawal requests, one page at a time. `ownerAddress` is required. On startup and after reconnecting, pass `settled=false` to restore every request that still needs fulfillment, classification or cancellation, and page until `hasMore` is false."
+            "url": "{{baseUrl}}/v1/operations",
+            "description": "Lists deposits and withdrawals in the authenticated project and environment, newest first. Pass ownerAddress to list a wallet's operations; the wallet needs no registration in SDP. Without a filter, the list holds only SDP custody wallet operations, and walletId narrows it to one. status=active returns every operation not yet final, preparations included; an exact status returns only that state, and no status returns full history. kind=earn.deposit or kind=earn.withdraw returns one type. Every filter applies before cursor pagination. A returned operation can already show a newer final result than the status the filter matched. Requires earn.read. Reading never starts execution."
           }
         },
         {
-          "name": "Get a withdrawal request",
+          "name": "Get an operation",
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/v1/earn/withdrawal-requests/caller-signed/{{withdrawalRequestId}}",
-            "description": "Gets one withdrawal request with its latest recorded status. Creating a request escrows shares or converts them to an intermediate token; it does not pay out. Only `fulfilled`, `cancelled` and `failed` are final. Keep polling a `closedOrUnknown` request: SDP has not yet confirmed whether it paid out or returned the customer's tokens."
+            "url": "{{baseUrl}}/v1/operations/{{operationId}}",
+            "description": "Returns an operation's status, terms, current actionId and version, nextAction and settlement result. Poll it after submitting. Each nextAction type says what to do next: sign_transaction asks the owner to sign, select_option asks you to choose a route with refresh, and wait means keep polling the same attempt. queued, awaiting_signature, submitted and settling are in progress. For a queued withdrawal, submitted means its request is still confirming, and settling means the provider has yet to pay out. completed means verified delivery; for a selected recovery, result.settlementOutcome recovered means assets were released, never withdrawal proceeds. A Hastra current-redemption release reports settledAmount null; read the position for live available wYLDS. An earlier redemption operation covered by a finalized release ends failed with REDEMPTION_SUPERSEDED and no settled amount or settlement outcome. This ends tracking without proving nonexecution or establishing a historical payout; never automatically retry that original withdrawal. cancelled means a verified cancellation. canCancel says whether the preparation can still be cancelled, which also needs earn.manage; cancelRequestedAt alone is pending intent. result fields stay null until their source is known. Requires earn.read and source visibility."
           }
         },
         {
-          "name": "Build a cancellation transaction",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/earn/withdrawal-requests/cancel/build-unsigned-transaction",
-            "description": "Builds an unsigned transaction that cancels a withdrawal request, for the customer's wallet to sign. A solver queue request can be canceled only at `expiredCancelable`, because a solver may fulfill it until its deadline; before then the build returns `409 CONFLICT`. An operator redemption that allows cancellation can be canceled while `pending`, which leaves the customer holding the intermediate token, not the original shares. Requires `earn.manage`. Cancellation stays available without production access and while Earn is disabled; a suspended organization still cannot authenticate.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"withdrawalRequestId\": \"earn_vault_withdrawal_request_3c905ad2-c92c-4258-9675-1899c41569b9\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Submit a cancellation",
+          "name": "Submit an operation",
           "request": {
             "method": "POST",
             "header": [
@@ -2283,15 +2026,73 @@
               },
               {
                 "key": "Idempotency-Key",
-                "value": "{{idempotencyKey.createEarnExternalWalletWithdrawalRequestCancellation}}",
+                "value": "{{idempotencyKey.submitOperation}}",
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/earn/withdrawal-requests/cancel/submit-signed-transaction",
-            "description": "Submits a cancellation transaction signed by the customer's wallet. SDP verifies it, records it before broadcast, and returns the withdrawal request. Idempotency-Key is required, with the same `409 CONFLICT` answers as the other submits. Requires `earn.manage`, and stays available without production access and while Earn is disabled; a suspended organization still cannot authenticate. Keep polling until the request is `cancelled`, `fulfilled` or `failed`, because a fulfillment can race the cancellation.",
+            "url": "{{baseUrl}}/v1/operations/{{operationId}}/submit",
+            "description": "Submits the reviewed transaction for asynchronous broadcast and returns 202. Pass the current actionId and version and, for an ownerAddress source, signedTransaction: the prepared transaction signed in the owner's wallet, base64-encoded. SDP verifies the exact stored message and required signatures and records the authorization; a worker then broadcasts and tracks the transaction, so poll GET /v1/operations/{operationId}. Stale actions return 409. Requires earn.execute and the current action principal. Before each new signing or broadcast effect, the worker rechecks the credential, execute permission, project membership and wallet binding; losing authority stops new effects but never proves a transaction did not execute. Signed bytes the worker then never sends end failed with TRANSACTION_EXPIRED only once their blockhash has expired and every configured RPC endpoint, with at least two distinct endpoints answering, misses them at a finalized read floor. A single-endpoint pool leaves uncertain outcomes pending. A vault exposure-cap refusal stops further broadcasts and reports DEPOSIT_REFUSED while SDP keeps observing exposed bytes; only proven nonexecution makes that refusal final. Deposits observed on chain are still recorded when current caps or exposure reads refuse new deposits. For an SDP custody wallet, omit signedTransaction: the worker requests the custody provider's signature, which can return sign_in_provider instructions but never needs a second submit. A wallet policy at the provider that refuses to sign ends the operation failed with CUSTODY_POLICY_REFUSED.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"transactionId\": \"earn_external_wallet_withdrawal_request_transaction_9a3c1e27-5d84-4f0b-b6e2-7f19c4a8d035\",\n  \"signedTransaction\": \"AUyx/sEc49/1l6jxo3nbViPAIUqdrXCo8Qx5SfDvIbtUI0zex3Bi6Cyhhn1QTVU8zWDzXTRyIX2aCmq9v7yk5AOA\"\n}",
+              "raw": "{\n  \"actionId\": \"opa_example\",\n  \"version\": 1,\n  \"signedTransaction\": \"AQ==\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Refresh an operation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey.refreshOperation}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operations/{{operationId}}/refresh",
+            "description": "Prepares a new unsigned transaction and terms before submission; it never signs, broadcasts or cancels. Pass the current actionId and version, plus an optionId from terms.options when nextAction is select_option; the chosen route stays fixed on later refreshes. Review the returned action and sign it before submitting. After any accepted submit, refresh returns 409 CONFLICT with details.reason operation_already_submitted, even after a definitive failure: track that operation, and start a new deposit or withdrawal only after a known failure. Once an owner transaction is exposed for signing, refresh returns 409 with details.reason wallet_transaction_outcome_unknown, because SDP cannot invalidate bytes the owner holds. Timeout, blockhash expiry and missing RPC history never authorize a replacement. Replaying the original Idempotency-Key returns the original response without rebuilding; GET returns the current state. Requires earn.execute and fresh source admission.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"actionId\": \"opa_example\",\n  \"version\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Cancel a preparation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey.cancelOperation}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operations/{{operationId}}/cancel",
+            "description": "Cancels a preparation while canCancel is true, before any submission has been accepted. Otherwise it returns 409 CONFLICT: details.reason operation_already_submitted after an accepted submit, including while queued or waiting for a signature; wallet_transaction_outcome_unknown once an owner transaction is exposed for signing, because SDP cannot invalidate bytes the owner holds; operation_not_cancellable for any other state. It never cancels an onchain transaction, revokes a signature or cancels a submitted queued withdrawal, and closing your own wallet's signing prompt needs no API call. Success marks only an undispatched preparation cancelled. Requires earn.manage and current source authority.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
               "options": {
                 "raw": {
                   "language": "json"

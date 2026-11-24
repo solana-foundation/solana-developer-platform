@@ -36,13 +36,12 @@ describe("CRON_DEFINITIONS", () => {
     expect(
       [
         "reconcile-earn-vault-movements",
-        "detect-orphaned-earn-split-swaps",
         "refresh-earn-metrics",
         "track-pending-withdrawals",
         "track-pending-deposits",
         "poll-rings-indexing",
       ].map((name) => scopeByName.get(name))
-    ).toEqual(["cluster", "cluster", "cluster", "cluster", "cluster", "cluster"]);
+    ).toEqual(["cluster", "cluster", "cluster", "cluster", "cluster"]);
   });
 
   it("runs the payment request hot lane every 30 seconds and its sweep and expiry every minute", () => {
@@ -76,6 +75,16 @@ describe("CRON_DEFINITIONS", () => {
       schedule: "*/30 * * * * *",
       scope: "cluster",
       effect: "observes",
+    });
+    expect(cron?.enabled({ ...env, SDP_RELEASE_CHANNEL: "stable" })).toBe(true);
+  });
+
+  it("keeps recorded operation recovery enabled every 15 seconds in each environment", () => {
+    const cron = CRON_DEFINITIONS.find((definition) => definition.name === "reconcile-operations");
+    expect(cron).toMatchObject({
+      schedule: "*/15 * * * * *",
+      scope: "cluster",
+      effect: "finishes",
     });
     expect(cron?.enabled({ ...env, SDP_RELEASE_CHANNEL: "stable" })).toBe(true);
   });
