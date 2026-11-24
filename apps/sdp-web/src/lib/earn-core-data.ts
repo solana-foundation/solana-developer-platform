@@ -175,6 +175,17 @@ export function useEarnOperations() {
   };
 }
 
+/** How often an active operation's detail is read. */
+const OPERATION_POLL_MS = 2_000;
+
+/**
+ * SWR's poll revalidates with dedupe, so under the dashboard's 10 s default a 2 s poll lands
+ * every 10 s. The window must also stay under the cadence: SWR clears it only after a read
+ * lands, so a window equal to the cadence still swallows every other tick. Half still joins the
+ * dialog and its activity row when both watch one operation.
+ */
+const OPERATION_POLL_DEDUPE_MS = OPERATION_POLL_MS / 2;
+
 /** Fast detail polling is scoped to the operation; closing a modal never owns progress. */
 export function useEarnOperation(
   operationId: string | undefined,
@@ -190,10 +201,11 @@ export function useEarnOperation(
     () => earnCoreClient.operation(operationId ?? ""),
     (latest) => {
       const operation = currentObservation(operationId, initial, latest);
-      return operation && isEarnOperationTerminal(operation) ? 0 : 2_000;
+      return operation && isEarnOperationTerminal(operation) ? 0 : OPERATION_POLL_MS;
     },
     {
       fallbackData: initial,
+      dedupingInterval: OPERATION_POLL_DEDUPE_MS,
     }
   );
   const operation = currentObservation(operationId, initial, data);

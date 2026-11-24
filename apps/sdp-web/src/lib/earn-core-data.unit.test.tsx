@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { SWRConfig, useSWRConfig } from "swr";
 import { afterEach, expect, it, vi } from "vitest";
 import { earnQueryKeys } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-query-key";
+import { DASHBOARD_SWR_CONFIG } from "./dashboard-swr-config";
 import { type EarnOperationsFeed, useEarnOperation, useEarnOperations } from "./earn-core-data";
 
 const transport = vi.hoisted(() => vi.fn());
@@ -293,6 +294,18 @@ it("keeps detail polling on time while unrelated workspace renders continue", as
     rerender();
   }
   expect(transport.mock.calls.length).toBeGreaterThanOrEqual(3);
+});
+
+it("polls an active operation every two seconds under the dashboard's SWR defaults", async () => {
+  vi.useFakeTimers();
+  transport.mockImplementation(async () => Response.json({ data: { operation: prepared } }));
+  const cache = new Map();
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <SWRConfig value={{ ...DASHBOARD_SWR_CONFIG, provider: () => cache }}>{children}</SWRConfig>
+  );
+  renderHook(() => useEarnOperation(prepared.id, prepared), { wrapper });
+  await act(() => vi.advanceTimersByTimeAsync(6_500));
+  expect(transport.mock.calls.length).toBeGreaterThanOrEqual(4);
 });
 
 it("refreshes an expanded history snapshot without blanking the rows being read", async () => {
