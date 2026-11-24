@@ -375,7 +375,8 @@ execution paths.
 Parent migration `0240` retains the existing Hastra address index while the
 previous revision can serve. The schema-only companion removes it only after
 this guarded parent is serving. Its pending migration must sort after every
-parent migration. Reusing a released Hastra address requires that cleanup. The global PDA lock and durable lease remain the concurrency authority.
+parent migration. Reusing a released Hastra address requires that cleanup. The
+global PDA lock and durable lease remain the concurrency authority.
 Index retirement assigns no financial outcome to historical requests.
 
 See the [threat model](https://www.notion.so/422d36dad52d81e2bcf2cbd62c8e4622) and
