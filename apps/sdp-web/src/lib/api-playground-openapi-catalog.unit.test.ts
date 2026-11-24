@@ -43,6 +43,10 @@ describe("API playground module coverage", () => {
       const publicEndpoints = getOpenApiPlaygroundEndpoints(module as keyof typeof configsByModule);
       const publicKeys = publicEndpoints.map(operationKey);
 
+      // A generated catalog that lost a module would turn every check below
+      // into a vacuous pass, so floor it: an empty scan cannot tell clean from
+      // scanned nothing.
+      expect(publicKeys.length, `${module}: generated catalog operations`).toBeGreaterThan(0);
       expect(configuredKeys.size).toBe(configs.length);
       expect(publicKeys.every((key) => configuredKeys.has(key))).toBe(true);
       for (const publicEndpoint of publicEndpoints) {
@@ -312,6 +316,16 @@ describe("API playground key contract", () => {
         getOpenApiPlaygroundEndpoints(module).map((endpoint) => [operationKey(endpoint), endpoint])
       )
     );
+    // A form whose operation is missing from the generated catalog would
+    // silently skip its cross-check in the loop below, so pin exactly which
+    // forms sit outside it: only the off-ramp start, which the catalog does
+    // not publish. A drifted form path or a lost catalog module fails here
+    // instead of skipping its check.
+    const outsideCatalog = built
+      .filter((endpoint) => !generated.has(operationKey(endpoint)))
+      .map((endpoint) => operationKey(endpoint))
+      .sort();
+    expect(outsideCatalog).toEqual(["POST /v1/payments/ramps/offramp/start"]);
     for (const endpoint of built) {
       const reference = generated.get(operationKey(endpoint));
       if (reference === undefined) continue;

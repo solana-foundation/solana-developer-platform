@@ -27,14 +27,25 @@ describe("Earn API contract coverage", () => {
             })
         )
     );
+    // An empty scan cannot tell clean from scanned nothing: if the Earn router
+    // stopped mounting, both sets below would be empty and the comparison
+    // would pass. The public experimental document alone pins 21 Earn
+    // operations, and this internal one is a superset of it.
+    expect(runtime.size, "mounted Earn operations").toBeGreaterThan(20);
     expect([...documented].sort()).toEqual([...runtime].sort());
   });
 
   it("keeps every Earn operation authenticated and internal groups out of the public document", () => {
     const internal = createOpenApiDocument();
     const published = createPublicOpenApiDocument({ releaseChannel: "experimental" });
-    for (const [path, item] of Object.entries(internal.paths)) {
-      if (!path.startsWith("/v1/earn/")) continue;
+    const earnOperations = Object.entries(internal.paths).filter(([path]) =>
+      path.startsWith("/v1/earn/")
+    );
+    // Same floor as above: a document with no Earn paths would pass the loop
+    // below with every operation unchecked. The public experimental contract
+    // alone pins 21, and this internal one is a superset of it.
+    expect(earnOperations.length, "Earn paths in the internal document").toBeGreaterThan(20);
+    for (const [path, item] of earnOperations) {
       for (const method of ["get", "post", "put", "patch", "delete"] as const) {
         const operation = item[method];
         if (!operation) continue;
