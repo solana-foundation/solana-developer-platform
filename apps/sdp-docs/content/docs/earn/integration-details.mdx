@@ -58,12 +58,14 @@ usual. Recovery returns the shares to the same owner, not the deposit token.
 After SDP verifies the transaction and the provider's outcome, the result has
 `settlementOutcome: "recovered"` with the returned share mint and amount.
 
-Each review offers the oldest request whose live escrow is still recoverable.
-A stale request that has closed or is no longer expired does not hide a later
-eligible escrow. Recover one request per review, then prepare another withdrawal
-for the next. The original operation is not reopened, and its `/cancel` stays
-unavailable. Expiry alone, or a missing provider request, does not authorize
-recovery.
+Each review checks up to three recorded requests in creation order and offers
+the first escrow that is still recoverable. Closed or no-longer-expired requests
+are skipped. If all three are stale and more remain, preparation returns
+`503 SERVICE_UNAVAILABLE`; retry after reconciliation catches up.
+
+Recover one request per review, then prepare another withdrawal for the next.
+The original operation is not reopened, and its `/cancel` stays unavailable.
+Expiry alone, or a missing provider request, does not authorize recovery.
 
 ## Release a pending Hastra redemption
 

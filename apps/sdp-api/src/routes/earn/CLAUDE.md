@@ -203,12 +203,14 @@ operation polled forever.
 
 Expired solver recovery adds zero provider reads without an eligible recorded
 request and one live proof read on the usual path. Skip stale closed or no-longer
-expired candidates in position-scoped creation order: N stale candidates before
-the first recoverable escrow need N+1 proof reads, each candidate once. Stop at
-the first proven recovery; never scan another position. Reusing that call's
-validated proof in build admission avoids a duplicate proof read before existing
-provider validation and simulation. Never persist that evidence or accept it
-from a caller; every later preparation or refresh reads fresh provider state.
+expired candidates in position-scoped creation order, capped at three proof
+reads instead of unbounded N+1 reads. Stop at the first proven recovery; never
+scan another position. After three stale candidates, one database lookahead
+returns no recovery if exhausted or retryable `503 SERVICE_UNAVAILABLE` if more
+remain. Reusing that call's validated proof in build admission avoids a duplicate
+proof read before existing provider validation and simulation. Never persist
+that evidence or accept it from a caller; every later preparation or refresh
+reads fresh provider state.
 Offer one recovery choice per review.
 Route reads degrade independently, but when no route survives, an unreadable
 provider or an unusable swap quote (`SWAP_UNAVAILABLE`) answers `503`, never

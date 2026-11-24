@@ -155,10 +155,12 @@ the new action and follows the normal signing and `/submit` flow. It uses
 `earn.execute` and the inherited source's current wallet grants. The original
 accepted operation is not reopened; its `/cancel` remains unavailable.
 
-Scoped, ordered queries select the position's oldest recorded candidate whose
-live escrow remains recoverable. Closed or no-longer-expired candidates are
-skipped without waiting for reconciliation. Each candidate is read once; the
-usual path still needs one live proof, and N stale candidates need N+1 reads.
+Scoped, ordered queries inspect at most three candidates for the position and
+select the first recoverable live escrow. Closed or no-longer-expired candidates
+are skipped. After three stale candidates, one database lookahead returns no
+recovery if history is exhausted, or retryable `503 SERVICE_UNAVAILABLE` if more
+remain. Retry after reconciliation catches up.
+
 Live provider proof must match its tenant/source, mints, nonce, creation time,
 deadline and share quantity. The private builder and simulation recheck that
 the expired escrow can return those shares. A different or closed request is
@@ -318,11 +320,13 @@ concurrent precision reads share work and failures are not cached. Required
 simulation remains before returning unsigned bytes.
 
 Solver recovery adds zero provider reads without an eligible recorded candidate
-and one on the usual path. It skips stale candidates in this position's creation
-order, reading each once and stopping at the first proven recovery: K stale
-candidates followed by a valid escrow need K+1 serial proof reads. Selecting
-recovery reuses that call's validated proof during build admission, avoiding a
-duplicate read before the provider builder's existing validation and simulation.
+and one on the usual path. Worst-case proof reads fall from unbounded to three:
+it skips stale candidates in this position's creation order and stops at the
+first proven recovery. After three stale reads, one database lookahead detects
+remaining candidates without another provider call. If any remain, preparation
+returns retryable `503 SERVICE_UNAVAILABLE`. Selecting recovery reuses that
+call's validated proof during build admission, avoiding a duplicate read before
+the provider builder's existing validation and simulation.
 That proof is never persisted or accepted from a caller; later preparation or
 refresh reads provider state again. Each review offers at most one recovery
 option and never scans another position or fans out provider reads.

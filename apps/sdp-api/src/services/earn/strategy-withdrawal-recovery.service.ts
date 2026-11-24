@@ -10,7 +10,7 @@ import {
   createPostgresEarnVaultWithdrawalRequestsRepository,
   type EarnVaultWithdrawalRequestRow,
 } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
-import { conflict } from "@/lib/errors";
+import { conflict, serviceUnavailable } from "@/lib/errors";
 import type { Env } from "@/types/env";
 import { resolveVaultQueuedWithdrawClient } from "./execution-registry";
 import { earnRuntime } from "./runtime";
@@ -19,6 +19,8 @@ import type {
   QueuedWithdrawalActor,
   QueuedWithdrawalPosition,
 } from "./vault-queued-withdraw.service";
+
+const MAX_RECOVERY_CANDIDATES = 3;
 
 /** Live evidence belongs only to this preparation call and is never persisted. */
 export interface ProvenStrategyWithdrawalRecovery {
@@ -103,7 +105,7 @@ export async function readExpiredStrategyWithdrawalRecoveries(
     beforeUnixSeconds: String(Math.floor(Date.now() / 1000)),
   };
   let after: { createdAt: string; id: string } | undefined;
-  for (;;) {
+  for (let checked = 0; checked < MAX_RECOVERY_CANDIDATES; checked++) {
     const request = await repository.findOldestExpiredEscrow({ ...scope, after });
     if (request === null) return [];
     assertStrategyRecoverySource(request, input.actor, input.position);
@@ -117,4 +119,8 @@ export async function readExpiredStrategyWithdrawalRecoveries(
     }
     after = { createdAt: request.created_at, id: request.id };
   }
+  // An unchecked candidate is deferred, not proof that no recovery exists.
+  if ((await repository.findOldestExpiredEscrow({ ...scope, after })) !== null)
+    throw serviceUnavailable("Withdrawal recovery state is catching up. Try again.");
+  return [];
 }

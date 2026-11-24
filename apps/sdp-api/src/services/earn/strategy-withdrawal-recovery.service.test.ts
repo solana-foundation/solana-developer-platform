@@ -326,6 +326,42 @@ describe("expired strategy escrow recovery", () => {
     expect(mocks.build).not.toHaveBeenCalled();
   });
 
+  it.each([false, true])(
+    "bounds stale escrow reads when later candidates remain: %s",
+    async (hasMore) => {
+      mocks.findOldestExpiredEscrow
+        .mockResolvedValueOnce(request({ id: "stale_1" }))
+        .mockResolvedValueOnce(request({ id: "stale_2" }))
+        .mockResolvedValueOnce(request({ id: "stale_3" }))
+        .mockResolvedValueOnce(hasMore ? request({ id: "later" }) : null);
+      const closed = {
+        requestAddress: "request_address",
+        status: "closedOrUnknown",
+        request: null,
+      } as const;
+      mocks.read
+        .mockResolvedValueOnce(closed)
+        .mockResolvedValueOnce(closed)
+        .mockResolvedValueOnce(closed);
+
+      const recovery = inScope(() =>
+        readExpiredStrategyWithdrawalRecoveries(env, { actor, position })
+      );
+      if (hasMore) {
+        await expect(recovery).rejects.toMatchObject({
+          code: "SERVICE_UNAVAILABLE",
+          statusCode: 503,
+        });
+      } else {
+        await expect(recovery).resolves.toEqual([]);
+      }
+      expect(mocks.read).toHaveBeenCalledTimes(3);
+      expect(mocks.findOldestExpiredEscrow).toHaveBeenCalledTimes(4);
+      expect(mocks.advanceRequest).not.toHaveBeenCalled();
+      expect(mocks.build).not.toHaveBeenCalled();
+    }
+  );
+
   it("advertises returned shares with no wallet balance or provider payout", async () => {
     const choices = await inScope(() =>
       prepareStrategyWithdrawalChoices(env, { position, recovery: { actor } })
