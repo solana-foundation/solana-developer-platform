@@ -83,9 +83,9 @@ export function earnVaultDepositAvailability(
     return "access_unavailable";
   }
 
-  // `strategy.provider` is an open read-model string. Surfacing above proves it
-  // is a registered provider before this cast; an unknown value already failed
-  // closed as `strategy_unavailable`.
+  // SAFETY: `strategy.provider` is an open read-model string. Surfacing above
+  // proves it is a registered provider before this cast; an unknown value
+  // already failed closed as `strategy_unavailable`.
   const entry = providerAccess[strategy.provider as EarnProviderId];
   if (entry === undefined) {
     return "access_unavailable";

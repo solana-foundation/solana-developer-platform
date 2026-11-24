@@ -127,8 +127,11 @@ function catalogueRuntime(env: Env, environment: SdpEnvironment): EarnRuntimeCon
  * @returns The env without any key in `EARN_CREDENTIAL_ENV_KEYS`.
  */
 function withoutEarnCredentials(env: Env): Env {
-  const credentialKeys = new Set(EARN_CREDENTIAL_ENV_KEYS);
-  return Object.fromEntries(Object.entries(env).filter(([key]) => !credentialKeys.has(key))) as Env;
+  const stripped: Env = { ...env };
+  for (const key of EARN_CREDENTIAL_ENV_KEYS) {
+    Reflect.deleteProperty(stripped, key);
+  }
+  return stripped;
 }
 
 async function syncEarnCatalogue(env: Env): Promise<void> {

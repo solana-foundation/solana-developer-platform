@@ -1790,7 +1790,8 @@ describe("TreasurySolutionsWorkspace — provider plan", () => {
     const section = screen
       .getByRole("heading", { name: "Available strategies" })
       .closest("section");
-    expect(within(section as HTMLElement).getByText(planNotice)).toBeTruthy();
+    if (!section) throw new Error("Expected the strategies section");
+    expect(within(section).getByText(planNotice)).toBeTruthy();
     const row = devnetStrategyRow("Steakhouse USDC");
     if (!row) throw new Error("Expected the devnet Steakhouse row");
     expect(within(row).getByText("Not on your plan")).toBeTruthy();
