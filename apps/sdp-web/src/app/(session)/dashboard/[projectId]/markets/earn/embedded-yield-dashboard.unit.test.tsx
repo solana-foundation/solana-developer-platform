@@ -360,13 +360,13 @@ describe("EmbeddedYieldDashboard", () => {
 
     renderDashboard();
 
-    expect(screen.getByText(/Live values are unavailable for 1 position/)).toBeTruthy();
+    expect(screen.getByText(/1 position has no live value yet/)).toBeTruthy();
     expect(screen.getByText("Unavailable")).toBeTruthy();
     // The hero withholds the sum too, and says why behind its (i).
     expect(liveValueFigure()).toBe("—");
     expect(
       screen.getByRole("button", {
-        name: "Withheld until every position's live value is read, so it never shows as partial.",
+        name: "Shows once every position's live value is read.",
       })
     ).toBeTruthy();
     expect(document.body.textContent).not.toContain("$0.00");
@@ -504,10 +504,10 @@ describe("EmbeddedYieldDashboard", () => {
 
     renderDashboard();
 
-    expect(screen.getByText("Your customer portfolio will show here")).toBeTruthy();
+    expect(screen.getByText("No customer deposits yet")).toBeTruthy();
     expect(screen.getByText(/Showing the last complete portfolio/)).toBeTruthy();
     expect(screen.getByRole("status").textContent).toContain("Showing the last complete portfolio");
-    expect(screen.queryByText("Customer portfolio unavailable")).toBeNull();
+    expect(screen.queryByText("Portfolio could not be loaded")).toBeNull();
   });
 
   it("renders more wallets than the chain-read quota from one summary request", () => {

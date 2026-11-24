@@ -477,11 +477,13 @@ describe("runEarnCatalogueSyncIfDue", () => {
     expect(mocks.compareAndDelete).not.toHaveBeenCalled();
   });
 
-  it("reads no production shelf on a deployment that admits no production project", async () => {
-    const listStrategies = vi.fn(async (ctx: { environment: string }) => [
-      makeSnapshot(`vault-${ctx.environment}`),
-    ]);
-    installProviders({ upshift: makeProvider("upshift", listStrategies) });
+  it("mirrors the mainnet shelf into sandbox on a devnet-only deployment, writing no production lane", async () => {
+    const listStrategies = vi.fn(async (ctx: EarnRuntimeContext) =>
+      ctx.environment === "production"
+        ? [makeSnapshot("mainnet-vault", "mainnet-beta")]
+        : [makeSnapshot("devnet-vault", "devnet")]
+    );
+    installProviders({ kamino: makeProvider("kamino", listStrategies) });
 
     const outcome = await runEarnCatalogueSyncIfDue({
       ...env,
@@ -489,15 +491,74 @@ describe("runEarnCatalogueSyncIfDue", () => {
     });
 
     expect(outcome).toBe("synced");
-    expect(listStrategies.mock.calls.map(([ctx]) => ctx.environment)).toEqual(["sandbox"]);
-    const written = mocks.upsertStrategies.mock.calls
+    expect(listStrategies.mock.calls.map(([ctx]) => ctx.environment)).toEqual([
+      "production",
+      "sandbox",
+    ]);
+    const written = [...mocks.upsertStrategy.mock.calls, ...mocks.upsertStrategies.mock.calls]
       .flat(2)
       .map((row: { environment: string }) => row.environment);
-    expect(written).toContain("sandbox");
     expect(written).not.toContain("production");
-    // The mirror converges to empty, as when production has no credentials.
+    expect(mocks.upsertStrategy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerReference: "mainnet-vault",
+        environment: "sandbox",
+        hostCluster: "mainnet-beta",
+      })
+    );
     expect(mocks.deprecateUnlistedStrategies).toHaveBeenCalledWith({
-      provider: "upshift",
+      provider: "kamino",
+      environment: "sandbox",
+      hostCluster: "mainnet-beta",
+      listedProviderReferences: ["mainnet-vault"],
+      allowEmptyKeepSet: true,
+    });
+    expect(mocks.deprecateUnlistedStrategies).not.toHaveBeenCalledWith(
+      expect.objectContaining({ environment: "production" })
+    );
+  });
+
+  it("reads the mainnet shelf with no provider credential only where production is refused", async () => {
+    const credentials = {
+      WISDOMTREE_API_KEY: "production-credential",
+      WISDOMTREE_SANDBOX_API_KEY: "sandbox-credential",
+    };
+    const listed = () =>
+      vi.fn(async (_ctx: EarnRuntimeContext): Promise<ProviderStrategySnapshot[]> => []);
+    const envOf = (listStrategies: ReturnType<typeof listed>, environment: string) =>
+      listStrategies.mock.calls.find(([ctx]) => ctx.environment === environment)?.[0].env;
+
+    const devnetOnly = listed();
+    installProviders({ wisdomtree: makeProvider("wisdomtree", devnetOnly) });
+    await runEarnCatalogueSyncIfDue({
+      ...env,
+      ...credentials,
+      SDP_ALLOW_PRODUCTION_PROJECTS: "false",
+    });
+    expect(envOf(devnetOnly, "production")).toBeDefined();
+    expect(envOf(devnetOnly, "production")?.WISDOMTREE_API_KEY).toBeUndefined();
+    expect(envOf(devnetOnly, "sandbox")?.WISDOMTREE_SANDBOX_API_KEY).toBe("sandbox-credential");
+
+    vi.clearAllMocks();
+    const both = listed();
+    installProviders({ wisdomtree: makeProvider("wisdomtree", both) });
+    await runEarnCatalogueSyncIfDue({ ...env, ...credentials });
+    expect(envOf(both, "production")?.WISDOMTREE_API_KEY).toBe("production-credential");
+  });
+
+  it("converges the devnet-only mirror to empty when the mainnet read has no RPC pool", async () => {
+    const listStrategies = vi.fn(async (ctx: EarnRuntimeContext) => {
+      if (ctx.environment === "production") throw new SdpEarnError("PROVIDER_NOT_CONFIGURED");
+      return [makeSnapshot("devnet-vault", "devnet")];
+    });
+    installProviders({ veda: makeProvider("veda", listStrategies) });
+
+    expect(
+      await runEarnCatalogueSyncIfDue({ ...env, SDP_ALLOW_PRODUCTION_PROJECTS: "false" })
+    ).toBe("synced");
+
+    expect(mocks.deprecateUnlistedStrategies).toHaveBeenCalledWith({
+      provider: "veda",
       environment: "sandbox",
       hostCluster: "mainnet-beta",
       listedProviderReferences: [],

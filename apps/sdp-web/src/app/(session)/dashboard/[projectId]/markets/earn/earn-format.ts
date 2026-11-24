@@ -82,6 +82,25 @@ export function formatUsd(value: string | undefined, locale: string): string {
   return amount === undefined ? "—" : `$${amount}`;
 }
 
+/**
+ * A provider-reported dollar total in compact notation ("$32M", "$1.23B"), where cents and whole
+ * dollars are noise. It truncates like every Earn figure, so it never overstates.
+ *
+ * @param value - The total as a decimal string, or undefined when the provider reports none.
+ * @param locale - The viewer's locale.
+ * @returns The compact figure, or "—" when the total is unknown.
+ */
+export function formatCompactUsd(value: string | undefined, locale: string): string {
+  if (value === undefined || !isIntlDecimalLiteral(value)) return "—";
+  return new Intl.NumberFormat(locale, {
+    style: "currency",
+    currency: "USD",
+    notation: "compact",
+    maximumSignificantDigits: 3,
+    roundingMode: "trunc",
+  }).format(value);
+}
+
 /** Above zero but under one cent: exactly what a two-decimal truncation prints as zero. */
 function isBelowOneCent(value: string): boolean {
   const [whole = "", fraction = ""] = value.split(".");

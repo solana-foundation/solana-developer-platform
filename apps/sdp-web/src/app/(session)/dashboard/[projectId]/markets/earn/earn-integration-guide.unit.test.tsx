@@ -220,7 +220,7 @@ describe("EarnIntegrationGuide", () => {
     expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();
   });
 
-  it("lists mainnet strategies disabled in sandbox, with no network toggle", async () => {
+  it("lists mainnet strategies in sandbox as plain options, with no network toggle", async () => {
     const user = userEvent.setup();
     renderWithEnglish(
       <EarnIntegrationGuide providerAccess={providerAccess} strategyId={mainnetStrategy.id} />
@@ -230,20 +230,16 @@ describe("EarnIntegrationGuide", () => {
     expect(mocks.strategyClusters).toContain("mainnet-beta");
     expect(screen.queryByLabelText("Strategy network")).toBeNull();
 
-    // A mainnet deep link is refused, named as a network mismatch, and never
-    // rendered as code.
-    expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
-    expect(screen.getByText(/different network from this project/)).toBeTruthy();
-    expect(screen.queryByText(/STRATEGY_ID = "earn_strategy_mainnet"/)).toBeNull();
+    // A mainnet pick names the network beside its code, which stays readable.
+    expect(
+      screen.getByText("This strategy runs on Mainnet, so this project can't fund it.")
+    ).toBeTruthy();
+    expect(screen.getByText(/STRATEGY_ID = "earn_strategy_mainnet"/)).toBeTruthy();
 
     await user.click(screen.getByRole("combobox", { name: "Choose a strategy" }));
-    const mainnetRow = await screen.findByRole("option", {
-      name: /Kamino JLP Vault.*Mainnet only/,
-    });
-    expect(mainnetRow.getAttribute("aria-disabled")).toBe("true");
-    expect(
-      screen.getByRole("option", { name: /Kamino USDC Vault/ }).getAttribute("aria-disabled")
-    ).not.toBe("true");
+    const mainnetRow = await screen.findByRole("option", { name: /Kamino JLP Vault/ });
+    expect(mainnetRow.getAttribute("aria-disabled")).not.toBe("true");
+    expect(mainnetRow.textContent).not.toMatch(/only|unavailable|plan/i);
   });
 
   it("keeps loading until the mainnet shelf answers, so a mainnet deep link never flashes as unknown", () => {
@@ -253,11 +249,11 @@ describe("EarnIntegrationGuide", () => {
     );
 
     expect(container.querySelector('[data-embedded-yield-loading="integrate"]')).toBeTruthy();
-    expect(screen.queryByText("Strategy no longer available")).toBeNull();
+    expect(screen.queryByText("Strategy not found")).toBeNull();
     expect(screen.queryByRole("combobox")).toBeNull();
   });
 
-  it("does not let a mainnet deep link bypass the cluster check even with provider access", () => {
+  it("names the network, not the plan, for a mainnet pick the organization is not entitled to", () => {
     renderWithEnglish(
       <EarnIntegrationGuide
         providerAccess={{ kamino: { entitled: false, configured: true, enabled: false } }}
@@ -265,8 +261,8 @@ describe("EarnIntegrationGuide", () => {
       />
     );
 
-    expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
-    expect(screen.queryByText(/STRATEGY_ID = "earn_strategy_mainnet"/)).toBeNull();
+    expect(screen.getByText(/runs on Mainnet/)).toBeTruthy();
+    expect(screen.queryByText(/your plan/)).toBeNull();
   });
 
   it("lets the API derive enforceable floors from caller slippage", () => {
@@ -293,8 +289,8 @@ describe("EarnIntegrationGuide", () => {
       <EarnIntegrationGuide providerAccess={providerAccess} strategyId="earn_strategy_removed" />
     );
 
-    expect(screen.getByText("Strategy no longer available")).toBeTruthy();
-    expect(screen.getByText(/no longer in the live catalogue/)).toBeTruthy();
+    expect(screen.getByText("Strategy not found")).toBeTruthy();
+    expect(screen.getByText(/no longer listed/)).toBeTruthy();
     expect(screen.getByRole("combobox", { name: "Choose a strategy" })).toBeTruthy();
   });
 
@@ -322,17 +318,15 @@ describe("EarnIntegrationGuide", () => {
       />
     );
 
-    // Deep link: the explanation says production-only, not sandbox-only.
-    expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
-    expect(screen.getByText(/Production projects only/)).toBeTruthy();
-    expect(screen.queryByText(/Sandbox projects only/)).toBeNull();
+    // Deep link: the note says production-only, not sandbox-only.
+    expect(screen.getByText("Jupiter Lend takes deposits in Production only.")).toBeTruthy();
+    expect(screen.queryByText(/Sandbox only/)).toBeNull();
 
-    // Dropdown: the disabled row carries the same verdict.
+    // Dropdown: the row is a plain, selectable option.
     await user.click(screen.getByRole("combobox", { name: "Choose a strategy" }));
-    expect(
-      await screen.findByRole("option", { name: /Jupiter Lend USDT.*Production only/ })
-    ).toBeTruthy();
-    expect(screen.queryByRole("option", { name: /Jupiter Lend USDT.*Sandbox only/ })).toBeNull();
+    const row = await screen.findByRole("option", { name: /Jupiter Lend USDT/ });
+    expect(row.getAttribute("aria-disabled")).not.toBe("true");
+    expect(row.textContent).not.toMatch(/only/);
   });
 
   it("opens a production deep link to Veda when its mainnet vault is live", () => {
@@ -347,12 +341,43 @@ describe("EarnIntegrationGuide", () => {
       />
     );
 
-    expect(screen.queryByText("Strategy deposits unavailable")).toBeNull();
+    expect(
+      screen.queryByText(/can't fund|deposits are off|your plan|takes deposits|isn't taking/)
+    ).toBeNull();
     expect(screen.getByText("2. Set up the server code")).toBeTruthy();
     expect(screen.getByText(/STRATEGY_ID = "earn_strategy_veda"/)).toBeTruthy();
   });
 
-  it("names provider setup as the reason an otherwise live strategy cannot be integrated", () => {
+  it("says a strategy is off the organization's plan while its code stays readable", () => {
+    renderWithEnglish(
+      <EarnIntegrationGuide
+        providerAccess={{ kamino: { entitled: false, configured: true, enabled: false } }}
+        strategyId="earn_strategy_live"
+      />
+    );
+
+    expect(screen.getByText("Kamino isn't on your plan. Contact us to enable it.")).toBeTruthy();
+    expect(screen.queryByText(/Setup required/)).toBeNull();
+    expect(screen.getByText(/STRATEGY_ID = "earn_strategy_live"/)).toBeTruthy();
+  });
+
+  it("opens on the first listed strategy when the organization can fund none", () => {
+    renderWithEnglish(
+      <EarnIntegrationGuide
+        providerAccess={{
+          kamino: { entitled: false, configured: true, enabled: false },
+          veda: { entitled: false, configured: true, enabled: false },
+          jupiter_lend: { entitled: false, configured: true, enabled: false },
+        }}
+      />
+    );
+
+    expect(screen.getByText(/STRATEGY_ID = "earn_strategy_live"/)).toBeTruthy();
+    expect(screen.getByText(/Kamino isn't on your plan/)).toBeTruthy();
+    expect(screen.queryByText("No strategy selected")).toBeNull();
+  });
+
+  it("names missing provider credentials apart from the plan", () => {
     renderWithEnglish(
       <EarnIntegrationGuide
         providerAccess={{ kamino: { entitled: true, configured: false, enabled: false } }}
@@ -360,7 +385,20 @@ describe("EarnIntegrationGuide", () => {
       />
     );
 
-    expect(screen.getByText("Strategy deposits unavailable")).toBeTruthy();
-    expect(screen.getByText(/provider is not enabled/)).toBeTruthy();
+    expect(
+      screen.getByText("Kamino credentials aren't configured here, so deposits are off.")
+    ).toBeTruthy();
+    expect(screen.queryByText(/your plan/)).toBeNull();
+  });
+
+  it("says provider access could not be checked when it was not read", () => {
+    renderWithEnglish(
+      <EarnIntegrationGuide providerAccess={null} strategyId="earn_strategy_live" />
+    );
+
+    expect(
+      screen.getByText("Couldn't check provider access, so deposits are off. Reload to try again.")
+    ).toBeTruthy();
+    expect(screen.getByText(/STRATEGY_ID = "earn_strategy_live"/)).toBeTruthy();
   });
 });

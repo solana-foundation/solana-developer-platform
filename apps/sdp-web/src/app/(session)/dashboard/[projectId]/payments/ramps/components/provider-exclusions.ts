@@ -4,11 +4,15 @@ import {
   getCryptoRailAssetLabel,
   type RampProviderDirectionSupport,
 } from "@sdp/types/payment-rails";
-import type { ProviderAvailabilityEntry, RampProviderId } from "@sdp/types/provider-access";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import type { AppLocale } from "@/i18n/config";
 import type { MessageKey } from "@/i18n/messages";
 import type { TranslationValues } from "@/i18n/translate";
-import type { RampProviderAccess } from "@/lib/provider-availability";
+import {
+  type ProviderAccessRefusal,
+  providerAccessRefusal,
+  type RampProviderAccess,
+} from "@/lib/provider-availability";
 import type { RampDirection, RampPair, RampProviderOption, SelectedRampPair } from "@/lib/ramps";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
@@ -36,18 +40,11 @@ export function getDirectionSupport(
   return RAMP_PROVIDER_SUPPORT_DETAILS[provider][direction];
 }
 
-function providerAccessReason(access: ProviderAvailabilityEntry, t: Translate): string | null {
-  if (!access.entitled) {
-    return t("DashboardPayments.ramps.providerReasons.notOnPlan");
-  }
-  if (!access.configured) {
-    return t("DashboardPayments.ramps.providerReasons.credentialsNotConfigured");
-  }
-  if (!access.enabled) {
-    return t("DashboardPayments.ramps.providerReasons.disabledForOrganization");
-  }
-  return null;
-}
+const PROVIDER_ACCESS_REASON_KEYS = {
+  not_entitled: "DashboardPayments.ramps.providerReasons.notOnPlan",
+  not_configured: "DashboardPayments.ramps.providerReasons.credentialsNotConfigured",
+  disabled: "DashboardPayments.ramps.providerReasons.disabledForOrganization",
+} as const satisfies Record<ProviderAccessRefusal, MessageKey>;
 
 function unsupportedPairReason(
   direction: RampDirection,
@@ -158,9 +155,9 @@ export function buildProviderExclusion(args: {
     if (access === undefined) {
       reasons.push(t("DashboardPayments.ramps.providerReasons.availabilityNotReported"));
     } else {
-      const reason = providerAccessReason(access, t);
-      if (reason !== null) {
-        reasons.push(reason);
+      const refusal = providerAccessRefusal(access);
+      if (refusal !== null) {
+        reasons.push(t(PROVIDER_ACCESS_REASON_KEYS[refusal]));
       }
     }
   }
