@@ -238,6 +238,7 @@ function DashboardSidebarContent({
   isCollapsed,
   variant,
   showQuickStart,
+  isOrganizationSwitching,
   onOrganizationSwitchingChange,
   openSubnavs,
   onSubnavToggle,
@@ -250,6 +251,7 @@ function DashboardSidebarContent({
   isCollapsed: boolean;
   variant: "desktop" | "mobile";
   showQuickStart: boolean;
+  isOrganizationSwitching: boolean;
   onOrganizationSwitchingChange: (isSwitching: boolean) => void;
   openSubnavs: Record<DashboardSubnavKey, boolean>;
   onSubnavToggle: (key: DashboardSubnavKey) => void;
@@ -286,7 +288,7 @@ function DashboardSidebarContent({
               onOrganizationSwitchingChange={onOrganizationSwitchingChange}
             />
           )}
-          {isCollapsed ? null : <NetworkToggle />}
+          {isCollapsed ? null : <NetworkToggle disabled={isOrganizationSwitching} />}
         </div>
         {navSections.map((section, idx) => (
           <SidebarGroup
@@ -656,6 +658,7 @@ export function DashboardShell({
               isCollapsed={!isSidebarOpen}
               variant="desktop"
               showQuickStart={!isWorkspaceSwitching}
+              isOrganizationSwitching={isOrganizationSwitching}
               onOrganizationSwitchingChange={setOrganizationSwitching}
               openSubnavs={openSubnavs}
               onSubnavToggle={toggleSubnav}
@@ -700,6 +703,7 @@ export function DashboardShell({
                   isCollapsed={false}
                   variant="mobile"
                   showQuickStart={!isWorkspaceSwitching}
+                  isOrganizationSwitching={isOrganizationSwitching}
                   onOrganizationSwitchingChange={setOrganizationSwitching}
                   openSubnavs={openSubnavs}
                   onSubnavToggle={toggleSubnav}

@@ -67,7 +67,12 @@ export function MainnetAccessAccountActions() {
           </DropdownMenuContent>
         </DropdownMenu>
       ) : null}
-      <Button variant="ghost" size="sm" onClick={() => void signOut({ redirectUrl: "/" })}>
+      <Button
+        variant="ghost"
+        size="sm"
+        disabled={isSwitching}
+        onClick={() => void signOut({ redirectUrl: "/" })}
+      >
         {t("Shared.dashboardShell.signOut")}
       </Button>
     </div>

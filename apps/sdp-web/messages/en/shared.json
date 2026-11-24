@@ -720,6 +720,7 @@
     "planNetworks": "Networks",
     "planNetworksDevnet": "Devnet. Mainnet after review.",
     "planNetworksBoth": "Devnet and mainnet",
+    "planNetworksDevnetOnly": "Devnet",
     "planApiKeys": "API keys",
     "planApiKeysLimit": "{count} requests per minute per key",
     "planMembers": "Members",

@@ -5,17 +5,24 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as workspaceContext from "@/contexts/dashboard-workspace-context";
 import { EnglishI18n } from "@/test/i18n";
-import { PRODUCTION_PROJECT } from "@/test/projects";
+import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
 import { PlanSection } from "./plan-section";
+
+const deployment = vi.hoisted(() => ({ sandboxOnly: false }));
+
+vi.mock("@/lib/deployment-sandbox-only", () => ({
+  useDeploymentSandboxOnly: () => deployment.sandboxOnly,
+}));
 
 function renderPlan(productionProject: Project | null) {
   vi.mocked(vi.spyOn(workspaceContext, "useDashboardWorkspace"), {
     partial: true,
-  }).mockReturnValue({ productionProject });
+  }).mockReturnValue({ sandboxProject: SANDBOX_PROJECT, productionProject });
   render(<PlanSection />, { wrapper: EnglishI18n });
 }
 
 afterEach(() => {
+  deployment.sandboxOnly = false;
   cleanup();
   vi.restoreAllMocks();
 });
@@ -34,5 +41,13 @@ describe("PlanSection", () => {
     renderPlan(PRODUCTION_PROJECT);
 
     expect(screen.getByText("Devnet and mainnet")).toBeDefined();
+  });
+
+  it("names devnet alone on a deployment that takes no mainnet request", () => {
+    deployment.sandboxOnly = true;
+    renderPlan(null);
+
+    expect(screen.getByText("Devnet")).toBeDefined();
+    expect(screen.queryByText("Devnet. Mainnet after review.")).toBeNull();
   });
 });

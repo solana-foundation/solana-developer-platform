@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import * as clerkSdk from "@clerk/nextjs";
 import type { MainnetAccess } from "@sdp/types/mainnet-access";
 import type { OrganizationRole } from "@sdp/types/roles";
 import { cleanup, render, screen } from "@testing-library/react";
@@ -28,21 +29,26 @@ vi.mock("@/flags", () => ({
   sandboxOnBeta: async () => state.sandboxOnBeta,
   betaLabel: async () => state.betaLabel,
 }));
-// The page's organization picker is SDP's own over Clerk's hooks, never Clerk's prebuilt switcher.
-vi.mock("@clerk/nextjs", () => ({
-  useClerk: () => ({ signOut: vi.fn() }),
-  useOrganization: () => ({ organization: { id: "org_test_acme", name: "Acme" } }),
-  useOrganizationList: () => ({
+
+/** The page's organization picker is SDP's own over Clerk's hooks, never Clerk's switcher. */
+function spyOnClerkOrganizations() {
+  const acme = { id: "org_test_acme", name: "Acme" };
+  const globex = { id: "org_test_globex", name: "Globex" };
+  vi.mocked(vi.spyOn(clerkSdk, "useClerk"), { partial: true }).mockReturnValue({
+    signOut: vi.fn(),
+  });
+  // SAFETY: the picker reads only the active organization's id and name, and the memberships'
+  // organization ids and names; Clerk's loaded-state unions demand whole resources.
+  vi.spyOn(clerkSdk, "useOrganization").mockReturnValue({
+    organization: acme,
+  } as unknown as ReturnType<typeof clerkSdk.useOrganization>);
+  // SAFETY: as above, for the membership list.
+  vi.spyOn(clerkSdk, "useOrganizationList").mockReturnValue({
     isLoaded: true,
     setActive: vi.fn(),
-    userMemberships: {
-      data: [
-        { organization: { id: "org_test_acme", name: "Acme" } },
-        { organization: { id: "org_test_globex", name: "Globex" } },
-      ],
-    },
-  }),
-}));
+    userMemberships: { data: [{ organization: acme }, { organization: globex }] },
+  } as unknown as ReturnType<typeof clerkSdk.useOrganizationList>);
+}
 
 const LOCKED: MainnetAccess = {
   state: "not_requested",
@@ -69,6 +75,7 @@ async function renderPage() {
 }
 
 beforeEach(() => {
+  spyOnClerkOrganizations();
   resetDashboardNavigation();
   state.orgId = "org_clerk_test";
   state.sandboxOnBeta = false;

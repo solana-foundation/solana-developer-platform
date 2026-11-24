@@ -287,10 +287,12 @@ async function activateOrganization(
       )
       .bind(`mem_${crypto.randomUUID()}`, params.organizationId, params.creatorUserId)
       .run();
-    // Only the environments this deployment admits: the sandbox one alone on a devnet-only
-    // deployment, the production one alone on a mainnet-only one.
-    const defaultProjects = DEFAULT_PROJECTS.filter((project) =>
-      environmentAllowed(c.env, project.environment)
+    // The sandbox project always, so an organization admitted while a deployment refuses sandbox
+    // projects (hidden and refused there) has one the moment the deployment serves both again
+    // (PRO-2579). The production project only where the deployment admits production.
+    const defaultProjects = DEFAULT_PROJECTS.filter(
+      (project) =>
+        project.environment === "sandbox" || environmentAllowed(c.env, project.environment)
     );
     await tx
       .prepare(

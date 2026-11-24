@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
 
 import type { Project } from "@sdp/types/projects";
+import type { OrganizationRole } from "@sdp/types/roles";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as workspaceContext from "@/contexts/dashboard-workspace-context";
+import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import {
   dashboardRouter,
   resetDashboardNavigation,
@@ -22,6 +25,7 @@ const mocks = vi.hoisted(() => ({
     isProjectSwitching: false,
   },
   deployment: { sandboxOnly: false },
+  member: { role: "admin" as OrganizationRole },
   selectProject: vi.fn<(projectId: string) => void>(),
 }));
 
@@ -35,8 +39,20 @@ function show(project: Project) {
   mocks.workspace.sdpEnvironment = project.environment;
 }
 
-function renderToggle() {
-  render(<NetworkToggle />, { wrapper: EnglishI18n });
+function renderToggle(disabled = false) {
+  render(<NetworkToggle disabled={disabled} />, { wrapper: EnglishI18n });
+}
+
+function radio(name: string): HTMLInputElement {
+  const element = screen.getByRole("radio", { name });
+  if (!(element instanceof HTMLInputElement)) throw new Error(`${name} is not a radio input`);
+  return element;
+}
+
+function networkGroup(): HTMLFieldSetElement {
+  const element = screen.getByRole("group", { name: "Network" });
+  if (!(element instanceof HTMLFieldSetElement)) throw new Error("Network is not a fieldset");
+  return element;
 }
 
 beforeEach(() => {
@@ -45,10 +61,15 @@ beforeEach(() => {
   mocks.workspace.productionProject = PRODUCTION_PROJECT;
   mocks.workspace.isProjectSwitching = false;
   mocks.deployment.sandboxOnly = false;
+  mocks.member.role = "admin";
   mocks.selectProject.mockReset();
   vi.mocked(vi.spyOn(workspaceContext, "useDashboardWorkspace"), {
     partial: true,
-  }).mockImplementation(() => ({ ...mocks.workspace, selectProject: mocks.selectProject }));
+  }).mockImplementation(() => ({
+    ...mocks.workspace,
+    dashboardAccess: resolveDashboardAccess(mocks.member.role),
+    selectProject: mocks.selectProject,
+  }));
 });
 
 afterEach(() => {
@@ -60,11 +81,11 @@ describe("NetworkToggle", () => {
   it("checks the current network and switches to the other network's project", async () => {
     show(SANDBOX_PROJECT);
     renderToggle();
-    const devnet = screen.getByRole("radio", { name: "Devnet" });
-    const mainnet = screen.getByRole("radio", { name: "Mainnet" });
-    expect(screen.getByRole("group", { name: "Network" })).toBeDefined();
-    expect((devnet as HTMLInputElement).checked).toBe(true);
-    expect((mainnet as HTMLInputElement).checked).toBe(false);
+    const devnet = radio("Devnet");
+    const mainnet = radio("Mainnet");
+    expect(networkGroup().disabled).toBe(false);
+    expect(devnet.checked).toBe(true);
+    expect(mainnet.checked).toBe(false);
 
     await userEvent.setup().click(mainnet);
 
@@ -75,17 +96,17 @@ describe("NetworkToggle", () => {
     show(PRODUCTION_PROJECT);
     renderToggle();
 
-    await userEvent.setup().click(screen.getByRole("radio", { name: "Devnet" }));
+    await userEvent.setup().click(radio("Devnet"));
 
     expect(mocks.selectProject).toHaveBeenCalledWith(SANDBOX_PROJECT.id);
   });
 
-  it("opens the mainnet request in Settings while mainnet is not approved", async () => {
+  it("opens the mainnet request in Settings for an admin while mainnet is not approved", async () => {
     mocks.workspace.productionProject = null;
     show(SANDBOX_PROJECT);
     renderToggle();
 
-    await userEvent.setup().click(screen.getByRole("radio", { name: "Mainnet" }));
+    await userEvent.setup().click(radio("Mainnet"));
 
     expect(mocks.selectProject).not.toHaveBeenCalled();
     expect(dashboardRouter.push).toHaveBeenCalledWith(
@@ -93,14 +114,29 @@ describe("NetworkToggle", () => {
     );
   });
 
-  it("holds while a switch is in flight", () => {
-    mocks.workspace.isProjectSwitching = true;
+  it("tells a member that an admin requests mainnet, without leaving the page", async () => {
+    mocks.workspace.productionProject = null;
+    mocks.member.role = "member";
+    const info = vi.spyOn(toast, "info");
     show(SANDBOX_PROJECT);
     renderToggle();
 
-    expect((screen.getByRole("group", { name: "Network" }) as HTMLFieldSetElement).disabled).toBe(
-      true
-    );
+    await userEvent.setup().click(radio("Mainnet"));
+
+    expect(dashboardRouter.push).not.toHaveBeenCalled();
+    expect(info).toHaveBeenCalledWith("Only an admin can request mainnet access.");
+  });
+
+  it("holds while a project or organization switch is in flight", () => {
+    mocks.workspace.isProjectSwitching = true;
+    show(SANDBOX_PROJECT);
+    renderToggle();
+    expect(networkGroup().disabled).toBe(true);
+
+    cleanup();
+    mocks.workspace.isProjectSwitching = false;
+    renderToggle(true);
+    expect(networkGroup().disabled).toBe(true);
   });
 
   it("shows nothing on a deployment that serves one network", () => {

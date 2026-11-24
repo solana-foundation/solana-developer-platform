@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { MemberStatus, OrganizationStatus } from "@sdp/types/organizations";
+import type { OrganizationRole } from "@sdp/types/roles";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -23,7 +25,7 @@ const seatRowsSchema = z.array(z.object({ user_id: z.string() }));
 let client: Client;
 
 /** An organization admitted on a mainnet-only deployment: its production project alone. */
-async function seedMainnetOnlyOrganization(tag: string, status = "active") {
+async function seedMainnetOnlyOrganization(tag: string, status: OrganizationStatus = "active") {
   const seeded = await seedOrgProject(client, tag);
   await client.query("UPDATE organizations SET status = $2 WHERE id = $1", [
     seeded.organizationId,
@@ -34,7 +36,12 @@ async function seedMainnetOnlyOrganization(tag: string, status = "active") {
   return seeded;
 }
 
-async function addMember(organizationId: string, userId: string, role: string, status: string) {
+async function addMember(
+  organizationId: string,
+  userId: string,
+  role: OrganizationRole,
+  status: MemberStatus
+) {
   await client.query("INSERT INTO users (id, email) VALUES ($1, $2) ON CONFLICT DO NOTHING", [
     userId,
     `${userId}@example.test`,
