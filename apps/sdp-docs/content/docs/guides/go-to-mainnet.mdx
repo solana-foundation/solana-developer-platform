@@ -5,17 +5,15 @@ icon: Rocket
 breadcrumbParent: /docs
 ---
 
-You build in the Devnet sandbox at platform-devnet.solana.com. Mainnet runs on
-[platform.solana.com](https://platform.solana.com/dashboard), with its own
-accounts, organizations, and API keys. The SDP team must approve your
-organization there before it can use mainnet.
+You build on Devnet at [platform.solana.com](https://platform.solana.com/dashboard).
+Mainnet runs in the same dashboard, for the same organization, once the SDP team
+approves it.
 
 ## 1. Request mainnet access
 
-On platform.solana.com, click **Create account** and create your organization,
-as you did in the sandbox; see [Set up your workspace](/docs/guides/setup-organization).
-Until SDP approves it, the organization opens on a page that says it isn't on
-mainnet yet. An **organization admin** clicks **Request mainnet access** there;
+Click **Mainnet** in the toggle under your organization's name, or open
+**Settings**. Until SDP approves your organization, **Mainnet access** there
+offers the request. An **organization admin** clicks **Request mainnet access**;
 anyone else asks an admin.
 
 Select your organization's registered **Country or region** and click
@@ -72,8 +70,7 @@ the summary. Click **Create key**.
 [![API key review showing Production, selected permissions, and the Treasury wallet](/images/go-to-mainnet/05-production-api-key.png)](/docs/images/go-to-mainnet/05-production-api-key.png)
 
 Copy the key to your secret manager; it's shown once. Replace your backend's
-sandbox key, and point it at `https://api.solana.com` instead of
-`https://api-devnet.solana.com`. See
+sandbox key with it; the API URL, `https://api.solana.com`, stays the same. See
 [API key grants and wallet access](/docs/developing-with-sdp/manage-api-keys).
 
 ## 5. Fund your wallet with mainnet USDC

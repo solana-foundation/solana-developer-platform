@@ -1,23 +1,23 @@
 ---
 title: Set up your workspace
-description: Create your account and organization in the Devnet sandbox, or on mainnet once SDP approves you.
+description: Create your account and organization. Devnet works right away; mainnet opens once SDP approves you.
 breadcrumbParent: /docs
 ---
 
 Everything you do in SDP belongs to an **organization**, your team's workspace. An organization holds **projects**, and each project has its own API keys, wallets, and members. This guide creates your account and organization.
 
-SDP runs in two places, each with its own accounts, organizations, and API keys:
+SDP runs at [platform.solana.com](https://platform.solana.com/dashboard), with the API at `https://api.solana.com`. One account and one organization cover both networks:
 
-| | Dashboard | API | Network |
-| --- | --- | --- | --- |
-| Devnet sandbox | [platform-devnet.solana.com](https://platform-devnet.solana.com) | `https://api-devnet.solana.com` | devnet, open to everyone |
-| Mainnet | [platform.solana.com](https://platform.solana.com/dashboard) | `https://api.solana.com` | mainnet, after SDP approves your organization |
+| | Network | Access |
+| --- | --- | --- |
+| Devnet | devnet | every organization, right away, on the Free plan |
+| Mainnet | mainnet | after SDP approves your organization |
 
-Start in the Devnet sandbox. Nothing there holds real value. Request mainnet when your integration works there; see [Go to mainnet](/docs/guides/go-to-mainnet).
+Start on Devnet. Nothing there holds real value. Request mainnet when your integration works there; see [Go to mainnet](/docs/guides/go-to-mainnet).
 
 ### 1. Create your account
 
-Go to [platform-devnet.solana.com](https://platform-devnet.solana.com) and click **Create account**. The sign-in screen has the same button at the top right. On platform.solana.com, **Try the sandbox** leads to the same place.
+Go to [platform.solana.com](https://platform.solana.com) and click **Create account**. The sign-in screen has the same button at the top right.
 
 Enter your email address and a password to create your account.
 
@@ -31,7 +31,7 @@ To switch organizations or projects later, click your organization's name at the
 
 ### 3. Work in a project
 
-Your organization comes with **Default Sandbox Project** on devnet. Build there. The switcher's **Production** row opens platform.solana.com, where mainnet lives. To read projects with an API key, see the [Projects API reference](/docs/reference/api/projects).
+Your organization comes with **Default Sandbox Project** on devnet, and the dashboard opens there. Build there. The **Devnet** / **Mainnet** toggle under your organization's name switches networks; until SDP approves mainnet, **Mainnet** opens the request in **Settings**. **Settings** also shows your plan and its limits, and as the organization's admin you invite your team under **Members**. To read projects with an API key, see the [Projects API reference](/docs/reference/api/projects).
 
 ### 4. Next steps
 
