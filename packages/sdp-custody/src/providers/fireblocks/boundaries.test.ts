@@ -1,7 +1,7 @@
-import { generateKeyPairSync, webcrypto } from "node:crypto";
+import { generateKeyPairSync } from "node:crypto";
 import { generateKeyPairSigner } from "@solana/kit";
 import { describe, expect, it } from "vitest";
-import type { CustodyProvisioningRuntime } from "#/shared/runtime";
+import { testRuntime } from "#/test/runtime";
 import { readFireblocksAddressBook } from "./address-book";
 import { provisionFireblocksVaultAccount } from "./provisioning";
 import { readFireblocksTransfer, resolveFireblocksTransferAsset } from "./transfers";
@@ -16,21 +16,11 @@ function access() {
     apiBaseUrl: "https://fireblocks.example.test",
   };
 }
-function runtime(fetch: CustodyProvisioningRuntime["fetch"]): CustodyProvisioningRuntime {
-  return {
-    fetch,
-    sleep: async () => {},
-    now: Date.now,
-    randomUUID: () => crypto.randomUUID(),
-    getRandomValues: (data) => webcrypto.getRandomValues(new Uint8Array(data)),
-    sha256: async (data) => webcrypto.subtle.digest("SHA-256", new Uint8Array(data)),
-  };
-}
 describe("Fireblocks provider boundaries", () => {
   it("allows unrelated catalogue assets without optional metadata, requiring the selected token's decimals", async () => {
     const token = { id: "USDC_SOL", type: "SOL_ASSET", nativeAsset: "SOL", issuerAddress: "mint" };
     const catalogue = (decimals: number | undefined) =>
-      runtime(async () =>
+      testRuntime(async () =>
         Response.json([
           { id: "BTC", type: "BASE_ASSET" },
           { ...token, decimals },
@@ -49,7 +39,7 @@ describe("Fireblocks provider boundaries", () => {
     { feeInfo: { networkFee: 1 } },
     { status: "untrusted status" },
   ])("rejects malformed transfer detail %j", async (patch) => {
-    const rt = runtime(async () => Response.json({ id: "tx", status: "COMPLETED", ...patch }));
+    const rt = testRuntime(async () => Response.json({ id: "tx", status: "COMPLETED", ...patch }));
     await expect(readFireblocksTransfer(rt, access(), "external-id")).rejects.toThrow(
       "Invalid Fireblocks transfer response"
     );
@@ -57,7 +47,7 @@ describe("Fireblocks provider boundaries", () => {
   it("does not cache malformed address-book replies", async () => {
     let malformed = true;
     let reads = 0;
-    const rt = runtime(async () => {
+    const rt = testRuntime(async () => {
       reads++;
       return Response.json([
         {
@@ -84,7 +74,7 @@ describe("Fireblocks provider boundaries", () => {
     ]) {
       await expect(
         listFireblocksVaults(
-          runtime(async () => Response.json(page)),
+          testRuntime(async () => Response.json(page)),
           { ...access(), assetId: "SOL" }
         )
       ).rejects.toThrow("Invalid Fireblocks vault page");
@@ -92,7 +82,7 @@ describe("Fireblocks provider boundaries", () => {
   });
   it("uses distinct stable idempotency keys for vault and asset creation", async () => {
     const writes: Array<{ uri: string; key: string | null }> = [];
-    const rt = runtime(async (url, init) => {
+    const rt = testRuntime(async (url, init) => {
       const uri = new URL(String(url)).pathname;
       if (init?.method === "POST") {
         writes.push({ uri, key: new Headers(init.headers).get("Idempotency-Key") });

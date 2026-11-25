@@ -1,13 +1,27 @@
+import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { testRuntime } from "#/test/runtime";
 import {
   fireblocksRuleScope,
   fireblocksUngatedRuleJudged,
   inspectFireblocksPolicy,
-  parseFireblocksPolicy,
+  readFireblocksPolicy,
 } from "./policy";
 
 /** A hand-built rule matching the envelope's own rule type. */
 type RuleFixture = { type: string } & Record<string, unknown>;
+
+const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+/** Reads the active policy from a Fireblocks that answers `body`. */
+const readPolicyAnswering = (body: unknown) =>
+  readFireblocksPolicy(
+    testRuntime(async () => Response.json(body)),
+    {
+      apiKey: "api-key",
+      apiSecretPem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+      apiBaseUrl: "https://fireblocks.example.test",
+    }
+  );
 
 const inspect = (rules: RuleFixture[]) =>
   inspectFireblocksPolicy({ policy: { rules } }, "42", ["SOL", "usdc-asset"]);
@@ -83,22 +97,11 @@ describe("Fireblocks policy presence", () => {
     expect(inspect([rule([["42", "VAULT"]], "usdc-asset")]).status).toBe("present");
     expect(inspect([])).toEqual({ status: "missing", reason: "no_policy" });
   });
-  it("does not call an allow rule without approvers a policy", () => {
+  it("treats an ALLOW rule as ungated whatever approver fields it carries", () => {
     expect(inspect([rule([["42", "VAULT"]], "SOL", { action: "ALLOW" })])).toEqual({
       status: "missing",
       reason: "no_policy",
     });
-    expect(inspect([rule([["42", "VAULT"]], "SOL", { action: "ALLOW", authorizers: [] })])).toEqual(
-      {
-        status: "missing",
-        reason: "no_policy",
-      }
-    );
-    expect(
-      inspect([rule([["42", "VAULT"]], "SOL", { action: "ALLOW", authorizationGroups: {} })])
-    ).toEqual({ status: "missing", reason: "no_policy" });
-  });
-  it("treats an ALLOW rule as ungated whatever approver fields it carries", () => {
     // Fireblocks defines ALLOW as requiring no additional approvals; populated
     // approver fields must not read as a policy and hide the warning.
     expect(
@@ -167,17 +170,18 @@ describe("Fireblocks policy presence", () => {
       ])
     ).toEqual({ status: "missing", reason: "no_policy" });
   });
-  it("maps bodies the envelope cannot read to null before any rule walk", () => {
-    expect(parseFireblocksPolicy(null)).toBeNull();
-    expect(parseFireblocksPolicy({})).toBeNull();
-    expect(parseFireblocksPolicy({ policy: {} })).toBeNull();
-    expect(parseFireblocksPolicy({ policy: { rules: null } })).toBeNull();
+  it("reports a body the envelope cannot read as unsupported before any rule walk", async () => {
+    for (const body of [null, {}, { policy: {} }, { policy: { rules: null } }]) {
+      await expect(readPolicyAnswering(body)).resolves.toEqual({
+        error: { status: "unknown", reason: "unsupported_response" },
+      });
+    }
     // A well-formed envelope with unreadable rules parses; the walk keeps it unknown.
-    const parsed = parseFireblocksPolicy({
+    const read = await readPolicyAnswering({
       policy: { rules: [{ type: "TRANSFER", asset: "SOL", srcId: "42" }] },
     });
-    if (!parsed) throw new Error("An envelope with unreadable rules must still parse");
-    expect(inspectFireblocksPolicy(parsed, "42", ["SOL"])).toEqual({
+    if (!("value" in read)) throw new Error("An envelope with unreadable rules must still parse");
+    expect(inspectFireblocksPolicy(read.value, "42", ["SOL"])).toEqual({
       status: "unknown",
       reason: "unsupported_response",
     });

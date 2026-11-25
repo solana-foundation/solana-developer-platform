@@ -1,6 +1,7 @@
-import { generateKeyPairSync, webcrypto } from "node:crypto";
+import { generateKeyPairSync } from "node:crypto";
 import { assert, describe, expect, it, vi } from "vitest";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
+import { testRuntime } from "#/test/runtime";
 import { cancelFireblocksTransfer } from "./transfers";
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
@@ -10,23 +11,12 @@ const access = {
   apiSecretPem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
 };
 
-function runtime(fetch: CustodyProvisioningRuntime["fetch"]): CustodyProvisioningRuntime {
-  return {
-    fetch,
-    sleep: async () => {},
-    now: Date.now,
-    randomUUID: () => crypto.randomUUID(),
-    getRandomValues: (data) => webcrypto.getRandomValues(new Uint8Array(data)),
-    sha256: async (data) => webcrypto.subtle.digest("SHA-256", new Uint8Array(data)),
-  };
-}
-
 describe("Fireblocks cancellation adapter", () => {
   it("POSTs only the encoded cancellation endpoint without an idempotency cache", async () => {
     const fetch = vi.fn<CustodyProvisioningRuntime["fetch"]>(async () =>
       Response.json({ success: true })
     );
-    const rt = runtime(fetch);
+    const rt = testRuntime(fetch);
     for (const transactionId of ["provider/id?part", "provider/id?part", "another-id"])
       await expect(cancelFireblocksTransfer(rt, access, transactionId)).resolves.toBe(true);
     expect(fetch.mock.calls.map(([url]) => String(url))).toEqual([
@@ -48,7 +38,7 @@ describe("Fireblocks cancellation adapter", () => {
     async (success) => {
       await expect(
         cancelFireblocksTransfer(
-          runtime(async () =>
+          testRuntime(async () =>
             Response.json({
               success,
               status: "CANCELLING",
@@ -74,7 +64,7 @@ describe("Fireblocks cancellation adapter", () => {
   ])("rejects malformed cancellation acknowledgments: %j", async (response) => {
     await expect(
       cancelFireblocksTransfer(
-        runtime(async () => Response.json(response)),
+        testRuntime(async () => Response.json(response)),
         access,
         "provider-id"
       )
@@ -86,7 +76,7 @@ describe("Fireblocks cancellation adapter", () => {
       .fn<CustodyProvisioningRuntime["fetch"]>()
       .mockResolvedValueOnce(Response.json({ success: false }))
       .mockResolvedValueOnce(Response.json({ success: true }));
-    const rt = runtime(fetch);
+    const rt = testRuntime(fetch);
     await expect(cancelFireblocksTransfer(rt, access, "provider-id")).resolves.toBe(false);
     await expect(cancelFireblocksTransfer(rt, access, "provider-id")).resolves.toBe(true);
     expect(fetch).toHaveBeenCalledTimes(2);
