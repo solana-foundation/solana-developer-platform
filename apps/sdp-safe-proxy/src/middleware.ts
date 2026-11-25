@@ -1,4 +1,8 @@
-import { CallerIdentityError, createCallerIdentityVerifier } from "@sdp/metadata-server/receiver";
+import {
+  type CallerIdentity,
+  CallerIdentityError,
+  createCallerIdentityVerifier,
+} from "@sdp/metadata-server/receiver";
 import type { MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { RequestIdVariables } from "hono/request-id";
@@ -69,10 +73,13 @@ export function googleCaller(options: {
     now: Date.now,
   });
   return async (c, next) => {
-    const identity = await verify(c.req.header("authorization")).catch((error: unknown) => {
+    let identity: CallerIdentity;
+    try {
+      identity = await verify(c.req.header("authorization"));
+    } catch (error) {
       if (!(error instanceof CallerIdentityError)) throw error;
       throw error.code === "keys_unavailable" ? serviceUnavailable() : unauthorized();
-    });
+    }
     const caller = SAFE_PROXY_CALLERS.find((name) => options.callerEmails[name] === identity.email);
     if (caller === undefined) throw forbidden("caller_not_allowed");
     c.set("caller", caller);
