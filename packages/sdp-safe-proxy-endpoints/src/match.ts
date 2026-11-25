@@ -1,7 +1,6 @@
 import { z } from "zod";
 import type { AllowedEndpoint, BodyRule } from "./endpoint";
 import { pathSegments, patternSegments, segmentAccepts } from "./path-pattern";
-import type { SafeProxyCode } from "./protocol";
 import { SAFE_PROXY_PROVIDERS, type SafeProxyProvider } from "./providers";
 
 export interface ProviderRequest {
@@ -17,10 +16,7 @@ export type MatchResult =
   | { allowed: true; provider: SafeProxyProvider; endpoint: AllowedEndpoint }
   | {
       allowed: false;
-      code: Extract<
-        SafeProxyCode,
-        "provider_not_allowed" | "endpoint_not_allowed" | "body_not_allowed"
-      >;
+      code: "provider_not_allowed" | "endpoint_not_allowed" | "body_not_allowed";
     };
 
 const QUERY_PAIR = /^([A-Za-z]+)=((?:[A-Za-z0-9._~*+-]|%[0-9A-Fa-f]{2})+)$/;

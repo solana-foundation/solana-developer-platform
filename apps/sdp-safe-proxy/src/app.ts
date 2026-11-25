@@ -2,19 +2,13 @@ import { createHash, randomUUID } from "node:crypto";
 import { type CallerIdentity, CallerIdentityError } from "@sdp/metadata-server/receiver";
 import { SAFE_PROXY_CALLERS, type SafeProxyCaller } from "@sdp/safe-proxy-endpoints/callers";
 import { matchEndpoint } from "@sdp/safe-proxy-endpoints/match";
-import {
-  LOCAL_CALLER_HEADER,
-  REQUEST_ID_HEADER,
-  RESULT_HEADER,
-  SAFE_PROXY_CODES,
-  type SafeProxyCode,
-} from "@sdp/safe-proxy-endpoints/protocol";
+import { LOCAL_CALLER_HEADER, REQUEST_ID_HEADER } from "@sdp/safe-proxy-endpoints/protocol";
 import { SAFE_PROXY_PROVIDERS, type SafeProxyProvider } from "@sdp/safe-proxy-endpoints/providers";
-import type { SafeProxyForwardResult } from "@sdp/types/safe-proxy";
-import { type Context, Hono } from "hono";
+import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import type { ContentfulStatusCode } from "hono/utils/http-status";
+import { HTTPException } from "hono/http-exception";
 import { SignJWT } from "jose";
+import { badGateway, forbidden, notFound, serviceUnavailable, unauthorized } from "./errors";
 
 type IdentifyCaller = (headers: Headers) => Promise<SafeProxyCaller>;
 
@@ -32,23 +26,14 @@ export interface AppDependencies {
   revision: string;
 }
 
-// Thrown only while nothing has been sent to the provider.
-export class Refusal extends Error {
-  constructor(public readonly code: SafeProxyCode) {
-    super(code);
-    this.name = "Refusal";
-  }
-}
-
 export interface RequestLogLine {
   request_id: string | null;
   caller: SafeProxyCaller | null;
   provider: string | null;
   // The declared method and path pattern, never the path that was requested.
   endpoint: string | null;
-  result: SafeProxyForwardResult | null;
-  code: SafeProxyCode | null;
-  error_name: string | null;
+  // Set when the answer is the proxy's own and not the provider's.
+  error: string | null;
   status: number;
   duration_ms: number;
   revision: string;
@@ -59,28 +44,8 @@ type AppEnv = { Variables: { line: RequestLogLine } };
 const MAX_BODY_BYTES = 1024 * 1024;
 const REQUEST_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
-const OWN_ANSWER_STATUS = {
-  unknown_route: 404,
-  unauthenticated: 401,
-  caller_check_unavailable: 503,
-  invalid_request: 400,
-  provider_not_allowed: 403,
-  endpoint_not_allowed: 403,
-  body_not_allowed: 403,
-  caller_not_allowed: 403,
-  internal: 500,
-  provider_no_answer: 502,
-} as const satisfies Record<SafeProxyCode, ContentfulStatusCode>;
-
 export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
-
-  function ownAnswer(c: Context<AppEnv>, code: SafeProxyCode): Response {
-    const line = c.get("line");
-    line.code = code;
-    line.result = SAFE_PROXY_CODES[code];
-    return c.json({ code }, OWN_ANSWER_STATUS[code], { [RESULT_HEADER]: SAFE_PROXY_CODES[code] });
-  }
 
   app.get("/health", (c) => c.json({ status: "ok" }));
   app.get("/health/ready", (c) =>
@@ -97,9 +62,7 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
       caller: null,
       provider: null,
       endpoint: null,
-      result: null,
-      code: null,
-      error_name: null,
+      error: null,
       status: 0,
       duration_ms: 0,
       revision: dependencies.revision,
@@ -112,80 +75,73 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
   });
 
   // METHOD /<provider>/<the provider's own path and query>
-  app.all(
-    "/:provider/*",
-    bodyLimit({
-      maxSize: MAX_BODY_BYTES,
-      onError: () => {
-        throw new Refusal("invalid_request");
-      },
-    }),
-    async (c) => {
-      const line = c.get("line");
-      const caller = await dependencies.identifyCaller(c.req.raw.headers);
-      line.caller = caller;
+  app.all("/:provider/*", bodyLimit({ maxSize: MAX_BODY_BYTES }), async (c) => {
+    const line = c.get("line");
+    const caller = await dependencies.identifyCaller(c.req.raw.headers);
+    line.caller = caller;
 
-      const { pathname, search } = new URL(c.req.url);
-      const providerEnd = pathname.indexOf("/", 1);
-      if (providerEnd === -1) throw new Refusal("unknown_route");
-      const target = pathname.slice(providerEnd) + search;
-      const body = await c.req.text();
+    const { pathname, search } = new URL(c.req.url);
+    const providerEnd = pathname.indexOf("/", 1);
+    if (providerEnd === -1) throw notFound();
+    const target = pathname.slice(providerEnd) + search;
+    const body = await c.req.text();
 
-      const match = matchEndpoint({
-        provider: pathname.slice(1, providerEnd),
-        method: c.req.method,
-        path: target,
-        body,
-      });
-      if (!match.allowed) throw new Refusal(match.code);
-      const { provider, endpoint } = match;
-      line.provider = provider;
-      line.endpoint = `${endpoint.method} ${endpoint.path}`;
+    const match = matchEndpoint({
+      provider: pathname.slice(1, providerEnd),
+      method: c.req.method,
+      path: target,
+      body,
+    });
+    if (!match.allowed) throw forbidden(match.code);
+    const { provider, endpoint } = match;
+    line.provider = provider;
+    line.endpoint = `${endpoint.method} ${endpoint.path}`;
 
-      if (!endpoint.callers.includes(caller)) throw new Refusal("caller_not_allowed");
+    if (!endpoint.callers.includes(caller)) throw forbidden("caller_not_allowed");
 
-      // Only the headers the endpoint declares are passed through; the auth is set last.
-      const headers = new Headers();
-      for (const name of endpoint.requestHeaders) {
-        const value = c.req.header(name);
-        if (value !== undefined) headers.set(name, value);
-      }
-      if (body !== "") headers.set("content-type", "application/json");
-      const auth = await authHeaders(provider, dependencies.credentials, target, body);
-      for (const [name, value] of Object.entries(auth)) headers.set(name, value);
-
-      // From here the request may have reached the provider: a failure is no answer, never a
-      // refusal.
-      let answer: Response;
-      try {
-        answer = await dependencies.fetch(
-          `https://${SAFE_PROXY_PROVIDERS[provider].hosts[0]}${target}`,
-          {
-            method: endpoint.method,
-            headers,
-            body: body === "" ? null : body,
-            redirect: "manual",
-            signal: AbortSignal.timeout(dependencies.providerTimeoutMs),
-          }
-        );
-      } catch {
-        return ownAnswer(c, "provider_no_answer");
-      }
-
-      line.result = "forwarded";
-      const answerHeaders = new Headers({ [RESULT_HEADER]: line.result });
-      const contentType = answer.headers.get("content-type");
-      if (contentType !== null) answerHeaders.set("content-type", contentType);
-      return new Response(answer.body, { status: answer.status, headers: answerHeaders });
+    // Only the headers the endpoint declares are passed through; the auth is set last.
+    const headers = new Headers();
+    for (const name of endpoint.requestHeaders) {
+      const value = c.req.header(name);
+      if (value !== undefined) headers.set(name, value);
     }
-  );
+    if (body !== "") headers.set("content-type", "application/json");
+    const auth = await authHeaders(provider, dependencies.credentials, target, body);
+    for (const [name, value] of Object.entries(auth)) headers.set(name, value);
 
-  app.notFound((c) => ownAnswer(c, "unknown_route"));
+    let answer: Response;
+    try {
+      answer = await dependencies.fetch(
+        `https://${SAFE_PROXY_PROVIDERS[provider].hosts[0]}${target}`,
+        {
+          method: endpoint.method,
+          headers,
+          body: body === "" ? null : body,
+          redirect: "manual",
+          signal: AbortSignal.timeout(dependencies.providerTimeoutMs),
+        }
+      );
+    } catch {
+      throw badGateway();
+    }
+
+    // The provider's answer goes back as it came: its status, its body, its content type.
+    const contentType = answer.headers.get("content-type");
+    return new Response(answer.body, {
+      status: answer.status,
+      headers: contentType === null ? undefined : { "content-type": contentType },
+    });
+  });
+
+  app.notFound(() => {
+    throw notFound();
+  });
 
   app.onError((error, c) => {
-    if (error instanceof Refusal) return ownAnswer(c, error.code);
-    c.get("line").error_name = error.constructor.name;
-    return ownAnswer(c, "internal");
+    c.get("line").error = error instanceof HTTPException ? error.message : error.constructor.name;
+    return error instanceof HTTPException
+      ? error.getResponse()
+      : c.json({ error: "internal" }, 500);
   });
 
   return app;
@@ -202,12 +158,10 @@ export function createTokenCallerCheck(options: {
       identity = await options.verify(headers.get("authorization") ?? undefined);
     } catch (error) {
       if (!(error instanceof CallerIdentityError)) throw error;
-      throw new Refusal(
-        error.code === "keys_unavailable" ? "caller_check_unavailable" : "unauthenticated"
-      );
+      throw error.code === "keys_unavailable" ? serviceUnavailable() : unauthorized();
     }
     const caller = SAFE_PROXY_CALLERS.find((name) => options.callerEmails[name] === identity.email);
-    if (caller === undefined) throw new Refusal("caller_not_allowed");
+    if (caller === undefined) throw forbidden("caller_not_allowed");
     return caller;
   };
 }
@@ -222,7 +176,7 @@ export function createLocalCallerCheck(listensOn: {
   return async (headers) => {
     const named = headers.get(LOCAL_CALLER_HEADER);
     const caller = SAFE_PROXY_CALLERS.find((name) => name === named);
-    if (headers.get("host") !== host || caller === undefined) throw new Refusal("unauthenticated");
+    if (headers.get("host") !== host || caller === undefined) throw unauthorized();
     return caller;
   };
 }
