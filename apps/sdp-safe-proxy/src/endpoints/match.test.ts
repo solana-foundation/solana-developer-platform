@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
+import { SOLANA_CLUSTERS } from "@sdp/types/well-known-tokens";
+import { SERVED_CLUSTER } from "@/test/helpers/clusters";
 import { matchEndpoint } from "./match";
+import { PRIVY } from "./privy";
 
 const TRANSACTIONS = ["fireblocks", "POST", "/v1/transactions"] as const;
 
@@ -88,10 +91,26 @@ const cases = [
 
 for (const [name, provider, method, path, body, expected] of cases) {
   it(`matchEndpoint ${name}`, () => {
-    const result = matchEndpoint({ provider, method, path, body });
+    const result = matchEndpoint({ provider, cluster: SERVED_CLUSTER, method, path, body });
     const got = result.allowed
       ? `${result.endpoint.path} for ${result.endpoint.callers.join(" ")}`
       : result.code;
     assert.equal(got, expected);
   });
 }
+
+it("matchEndpoint yields the host a provider declares for the cluster and refuses a cluster it has none for", () => {
+  const wallets = { provider: "privy", method: "GET", path: "/v1/wallets", body: "" };
+  const outcome = (cluster: string) => {
+    const result = matchEndpoint({ ...wallets, cluster });
+    return result.allowed ? { cluster: result.cluster, host: result.host } : result.code;
+  };
+  const declared = SOLANA_CLUSTERS.map((cluster) => {
+    const host = PRIVY.hosts[cluster];
+    return host === null ? "cluster_not_allowed" : { cluster, host };
+  });
+  assert.deepEqual([...SOLANA_CLUSTERS, "cluster-x9"].map(outcome), [
+    ...declared,
+    "cluster_not_allowed",
+  ]);
+});

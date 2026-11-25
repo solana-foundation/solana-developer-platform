@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
 import type { TestContext } from "node:test";
 import type { SdpReleaseChannel } from "@sdp/types/release-channels";
+import { SOLANA_CLUSTERS } from "@sdp/types/well-known-tokens";
 import { createLocalJWKSet, importPKCS8, type JWTVerifyGetKey, SignJWT } from "jose";
 import { z } from "zod";
 import { type AppDependencies, createApp, type ProviderCredentials } from "@/app";
@@ -53,6 +54,7 @@ const LogLine = z.strictObject({
   request_id: z.string(),
   caller: z.enum(SAFE_PROXY_CALLERS).nullable(),
   provider: z.string().nullable(),
+  cluster: z.enum(SOLANA_CLUSTERS).nullable(),
   endpoint: z.string().nullable(),
   error: z.string().nullable(),
   status: z.number(),

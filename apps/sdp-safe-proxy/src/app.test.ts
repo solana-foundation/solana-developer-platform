@@ -5,6 +5,7 @@ import type { ProviderCredentials } from "@/app";
 import { FROM_PROVIDER_HEADER, LOCAL_CALLER_HEADER } from "@/endpoints/protocol";
 import type { SafeProxyProvider } from "@/endpoints/providers";
 import { localCaller } from "@/middleware";
+import { SERVED_CLUSTER, servedHost } from "@/test/helpers/clusters";
 import {
   createForwardApp,
   FIREBLOCKS_PUBLIC_KEY_PEM,
@@ -15,8 +16,10 @@ import {
 } from "./test/helpers/forward-app";
 import { channelOfferingOne } from "./test/helpers/release-channels";
 
-const WALLETS = "/privy/v1/wallets";
-const VAULTS = "/fireblocks/v1/vault/accounts_paged?namePrefix=vault-e74";
+const PRIVY_BASE = `/privy/${SERVED_CLUSTER}`;
+const FIREBLOCKS_BASE = `/fireblocks/${SERVED_CLUSTER}`;
+const WALLETS = `${PRIVY_BASE}/v1/wallets`;
+const VAULTS = `${FIREBLOCKS_BASE}/v1/vault/accounts_paged?namePrefix=vault-e74`;
 
 const FAILING_CREDENTIALS = {
   privy: PLATFORM_CREDENTIALS.privy,
@@ -65,13 +68,14 @@ const ownAnswers: [string, number, string, string, ForwardRequest?, ForwardAppOp
     WALLETS,
     { token: "cron" },
   ],
-  ["an undeclared provider", 403, "sdp_safe_proxy_provider_not_allowed", "/acme/v1/wallets"],
-  ["an undeclared endpoint", 403, "sdp_safe_proxy_endpoint_not_allowed", "/privy/v1/users"],
+  ["an undeclared provider", 403, "sdp_safe_proxy_provider_not_allowed", "/acme/devnet/v1/wallets"],
+  ["an unknown cluster", 403, "sdp_safe_proxy_cluster_not_allowed", "/privy/cluster-x9/v1/wallets"],
+  ["an undeclared endpoint", 403, "sdp_safe_proxy_endpoint_not_allowed", `${PRIVY_BASE}/v1/users`],
   [
     "a body outside the body rule",
     403,
     "sdp_safe_proxy_body_not_allowed",
-    "/privy/v1/wallets/wallet-d41/rpc",
+    `${PRIVY_BASE}/v1/wallets/wallet-d41/rpc`,
     { method: "POST", body: '{"method":"exportWallet"}' },
   ],
   [
@@ -81,7 +85,7 @@ const ownAnswers: [string, number, string, string, ForwardRequest?, ForwardAppOp
     WALLETS,
     { method: "POST", body: "a".repeat(1024 * 1024 + 1) },
   ],
-  ["a provider with no provider path", 404, "sdp_safe_proxy_not_found", "/privy"],
+  ["a provider and cluster with no provider path", 404, "sdp_safe_proxy_not_found", PRIVY_BASE],
   ["a path naming no provider", 404, "sdp_safe_proxy_not_found", "/"],
   [
     "its own failure",
@@ -139,7 +143,7 @@ it("sends the provider only its declared headers and the platform's Privy auth",
 
   assert.deepEqual(forwardApp.calls, [
     {
-      url: "https://api.privy.io/v1/wallets",
+      url: `https://${servedHost("privy")}/v1/wallets`,
       method: "POST",
       headers: {
         authorization: "Basic YXBwXzdrMjpzw6ljcmV0",
@@ -156,8 +160,8 @@ it("sends the provider only its declared headers and the platform's Privy auth",
 it("signs the Fireblocks target and body exactly as sent", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: 1_800_000_000_750 });
   const forwardApp = createForwardApp(t);
-  await forwardApp.send("/fireblocks/v1/vault/accounts_paged?namePrefix=vault-e74&limit=5");
-  await forwardApp.send("/fireblocks/v1/transactions", {
+  await forwardApp.send(`${FIREBLOCKS_BASE}/v1/vault/accounts_paged?namePrefix=vault-e74&limit=5`);
+  await forwardApp.send(`${FIREBLOCKS_BASE}/v1/transactions`, {
     method: "POST",
     body: '{"operation":"TRANSFER"}',
   });
@@ -178,7 +182,7 @@ it("signs the Fireblocks target and body exactly as sent", async (t) => {
     sent.map(({ nonce, ...call }) => call),
     [
       {
-        url: "https://api.fireblocks.io/v1/vault/accounts_paged?namePrefix=vault-e74&limit=5",
+        url: `https://${servedHost("fireblocks")}/v1/vault/accounts_paged?namePrefix=vault-e74&limit=5`,
         body: null,
         headers: { "x-api-key": "fireblocks-key-k4w" },
         claims: {
@@ -188,7 +192,7 @@ it("signs the Fireblocks target and body exactly as sent", async (t) => {
         },
       },
       {
-        url: "https://api.fireblocks.io/v1/transactions",
+        url: `https://${servedHost("fireblocks")}/v1/transactions`,
         body: '{"operation":"TRANSFER"}',
         headers: { "content-type": "application/json", "x-api-key": "fireblocks-key-k4w" },
         claims: {
@@ -253,12 +257,12 @@ const written = (level: LoggedLine["level"], severity: string, line: Written): L
   return { level, severity, event, message: event, ...line };
 };
 
-it("logs the request id, the endpoint's pattern and the outcome at its severity, never a path, body, secret or token", async (t) => {
+it("logs the request id, the cluster, the endpoint's pattern and the outcome at its severity, never a path, body, secret or token", async (t) => {
   const forwardApp = createForwardApp(t, {
     answer: () => new Response('{"signed":"resp-body-c63"}'),
     credentials: FAILING_CREDENTIALS,
   });
-  await forwardApp.send("/privy/v1/wallets/wallet-d41/rpc", {
+  await forwardApp.send(`${PRIVY_BASE}/v1/wallets/wallet-d41/rpc`, {
     method: "POST",
     body: '{"method":"signTransaction","params":{"transaction":"tx-body-b52"}}',
   });
@@ -275,6 +279,7 @@ it("logs the request id, the endpoint's pattern and the outcome at its severity,
       request_id: "req-7d1",
       caller: "api",
       provider: "privy",
+      cluster: SERVED_CLUSTER,
       endpoint: "POST /v1/wallets/{wallet}/rpc",
       error: null,
       status: 200,
@@ -283,6 +288,7 @@ it("logs the request id, the endpoint's pattern and the outcome at its severity,
       request_id: "req-7d1",
       caller: "cron",
       provider: "privy",
+      cluster: SERVED_CLUSTER,
       endpoint: "GET /v1/wallets",
       error: "sdp_safe_proxy_caller_not_allowed",
       status: 403,
@@ -291,6 +297,7 @@ it("logs the request id, the endpoint's pattern and the outcome at its severity,
       request_id: "req-7d1",
       caller: null,
       provider: null,
+      cluster: null,
       endpoint: null,
       error: "sdp_safe_proxy_not_found",
       status: 404,
@@ -299,6 +306,7 @@ it("logs the request id, the endpoint's pattern and the outcome at its severity,
       request_id: replacedId,
       caller: "api",
       provider: "fireblocks",
+      cluster: SERVED_CLUSTER,
       endpoint: "GET /v1/vault/accounts_paged",
       error: "Error",
       status: 500,
