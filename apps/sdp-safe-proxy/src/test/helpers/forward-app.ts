@@ -5,7 +5,7 @@ import { createLocalJWKSet, importPKCS8, type JWTVerifyGetKey, SignJWT } from "j
 import { z } from "zod";
 import { type AppDependencies, createApp, type ProviderCredentials } from "@/app";
 import { SAFE_PROXY_CALLERS, type SafeProxyCaller } from "@/endpoints/callers";
-import { googleCaller, type RequestLogLine } from "@/middleware";
+import { googleCaller, logger, type RequestLogLine } from "@/middleware";
 
 const AUDIENCE = "https://safe-proxy.mock.invalid";
 const CALLER_EMAILS = {
@@ -45,6 +45,8 @@ export interface ProviderCall {
 // Strict, so a key the written line gains fails the parse; typed against the line, so a field the
 // type gains fails the typecheck.
 const LogLine = z.strictObject({
+  event: z.string(),
+  severity: z.string(),
   request_id: z.string(),
   caller: z.enum(SAFE_PROXY_CALLERS).nullable(),
   provider: z.string().nullable(),
@@ -53,6 +55,14 @@ const LogLine = z.strictObject({
   status: z.number(),
   duration_ms: z.number(),
 }) satisfies z.ZodType<RequestLogLine>;
+
+// The logger methods a request line can be written at.
+const LOG_LEVELS = ["info", "warn", "error"] as const;
+
+export type LoggedLine = Omit<z.infer<typeof LogLine>, "duration_ms"> & {
+  level: (typeof LOG_LEVELS)[number];
+  message: string;
+};
 
 type IdentityToken = SafeProxyCaller | "stranger" | "forged";
 
@@ -91,10 +101,11 @@ async function identityToken(token: IdentityToken): Promise<string> {
     .sign(token === "forged" ? forgedKeys.privateKey : callerKeys.privateKey);
 }
 
-// Takes over the platform's `fetch` and `console.log` until the test ends, so build one app per test.
+// Takes over the platform's `fetch` and the proxy's logger until the test ends, so build one app
+// per test.
 export function createForwardApp(t: TestContext, options: ForwardAppOptions = {}) {
   const calls: ProviderCall[] = [];
-  const logged: Omit<RequestLogLine, "duration_ms">[] = [];
+  const logged: LoggedLine[] = [];
 
   const provider: typeof fetch = async (input, init) => {
     assert.ok(init, "the provider call carries its options");
@@ -109,11 +120,13 @@ export function createForwardApp(t: TestContext, options: ForwardAppOptions = {}
     return (options.answer ?? (() => new Response('{"id":"wallet-1"}')))(call);
   };
   t.mock.method(globalThis, "fetch", provider);
-  t.mock.method(console, "log", (text: string) => {
-    // The duration is the one field a test cannot fix in advance: the schema holds it to a number.
-    const { duration_ms, ...rest } = LogLine.parse(JSON.parse(text));
-    logged.push(rest);
-  });
+  for (const level of LOG_LEVELS) {
+    t.mock.method(logger, level, (fields: object, message: string) => {
+      // The duration is the one field a test cannot fix in advance: the schema holds it to a number.
+      const { duration_ms, ...line } = LogLine.parse(fields);
+      logged.push({ level, message, ...line });
+    });
+  }
 
   const app = createApp({
     caller:
@@ -135,6 +148,6 @@ export function createForwardApp(t: TestContext, options: ForwardAppOptions = {}
     return app.request(path, { method: request.method ?? "GET", headers, body: request.body });
   }
 
-  // `calls` holds every provider call as sent, `logged` every request log line written to stdout.
+  // `calls` holds every provider call as sent, `logged` every line handed to the logger.
   return { calls, logged, send };
 }
