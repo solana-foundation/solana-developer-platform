@@ -14,6 +14,9 @@ interface AuthRequest {
   body: string;
 }
 
+type FireblocksAuthHeaders = { Authorization: string; "X-API-Key": string };
+type PrivyAuthHeaders = { Authorization: string; "privy-app-id": string };
+
 const FIREBLOCKS_TOKEN_LIFETIME_SECONDS = 30;
 
 // The token covers the exact target and body in the request, so both must be forwarded as given
@@ -21,7 +24,7 @@ const FIREBLOCKS_TOKEN_LIFETIME_SECONDS = 30;
 async function fireblocksAuth(
   credential: ProviderCredentials["fireblocks"],
   request: AuthRequest
-): Promise<Record<string, string>> {
+): Promise<FireblocksAuthHeaders> {
   const privateKey = await importPKCS8(credential.apiSecretPem, "RS256");
   const bodyHash = createHash("sha256").update(request.body, "utf8").digest("hex");
   const now = Math.floor(Date.now() / 1000);
@@ -36,7 +39,7 @@ async function fireblocksAuth(
   return { Authorization: `Bearer ${token}`, "X-API-Key": credential.apiKey };
 }
 
-function privyAuth(credential: ProviderCredentials["privy"]): Record<string, string> {
+function privyAuth(credential: ProviderCredentials["privy"]): PrivyAuthHeaders {
   const basic = Buffer.from(`${credential.appId}:${credential.appSecret}`, "utf8");
   return { Authorization: `Basic ${basic.toString("base64")}`, "privy-app-id": credential.appId };
 }
@@ -45,7 +48,7 @@ export async function authHeaders(
   provider: SafeProxyProvider,
   credentials: ProviderCredentials,
   request: AuthRequest
-): Promise<Record<string, string>> {
+): Promise<FireblocksAuthHeaders | PrivyAuthHeaders> {
   switch (provider) {
     case "fireblocks":
       return fireblocksAuth(credentials.fireblocks, request);

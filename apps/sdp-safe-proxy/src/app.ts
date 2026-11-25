@@ -7,6 +7,7 @@ import {
   type SafeProxyCode,
 } from "@sdp/safe-proxy-endpoints/protocol";
 import { SAFE_PROXY_PROVIDERS } from "@sdp/safe-proxy-endpoints/providers";
+import type { SafeProxyForwardResult } from "@sdp/types/safe-proxy";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
@@ -35,7 +36,7 @@ export interface RequestLogLine {
   provider: string | null;
   // The declared method and path pattern, never the path that was requested.
   endpoint: string | null;
-  result: string | null;
+  result: SafeProxyForwardResult | null;
   code: SafeProxyCode | null;
   error_name: string | null;
   status: number;
@@ -65,7 +66,9 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
   function ownAnswer(c: Context<AppEnv>, code: SafeProxyCode): Response {
-    c.get("line").code = code;
+    const line = c.get("line");
+    line.code = code;
+    line.result = SAFE_PROXY_CODES[code];
     return c.json({ code }, OWN_ANSWER_STATUS[code], { [RESULT_HEADER]: SAFE_PROXY_CODES[code] });
   }
 
@@ -93,7 +96,6 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
     };
     c.set("line", line);
     await next();
-    line.result = c.res.headers.get(RESULT_HEADER);
     line.status = c.res.status;
     line.duration_ms = Date.now() - startedAt;
     dependencies.writeLog(line);
@@ -160,7 +162,8 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
         return ownAnswer(c, "provider_no_answer");
       }
 
-      const answerHeaders = new Headers({ [RESULT_HEADER]: "forwarded" });
+      line.result = "forwarded";
+      const answerHeaders = new Headers({ [RESULT_HEADER]: line.result });
       const contentType = answer.headers.get("content-type");
       if (contentType !== null) answerHeaders.set("content-type", contentType);
       return new Response(answer.body, { status: answer.status, headers: answerHeaders });
