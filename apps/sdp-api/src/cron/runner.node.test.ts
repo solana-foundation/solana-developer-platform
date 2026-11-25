@@ -27,7 +27,6 @@ import { required } from "@/test/helpers/required";
 import type { Env } from "@/types/env";
 import { earnCatalogueSyncCron } from "./earn-catalogue-sync";
 import { fireblocksProposalsCron } from "./fireblocks-proposals";
-import { operationsCron } from "./operations";
 import { pendingTransfersCron } from "./pending-transfers";
 import { CRON_RUN_EVENT, type CronRegistration } from "./run-event";
 import { assertCronConfig, CRON_DEFINITIONS, type CronHandle, startCron } from "./runner";
@@ -127,13 +126,14 @@ async function startWorker(workerEnv: Env = env): Promise<Worker> {
     const observed = observations.length;
     task.fire();
     await bg.awaitAll();
-    const { cron, environment } = lastLoggedRegistration();
+    const ran = observations.slice(observed);
+    const { cron, environment } = ran.at(-1) ?? lastLoggedRegistration();
     registrations.set(registrationKey(cron, environment), task);
     discovered.push({
       cron,
       environment,
       schedule: task.expression,
-      ran: observations.slice(observed),
+      ran,
     });
   }
   logEventSpy.mockClear();
@@ -185,8 +185,8 @@ beforeEach(() => {
     wake: () => {},
     stop: async () => {},
   });
-  vi.spyOn(operationWorker, "startOperationWorker").mockImplementation((workerEnv) => ({
-    wake: () => operationsCron.run(workerEnv),
+  vi.spyOn(operationWorker, "startOperationWorker").mockImplementation(() => ({
+    wake: () => {},
     stop: async () => {},
   }));
   scheduler.tasks.length = 0;
@@ -230,10 +230,7 @@ describe("startCron", () => {
       }))
     );
     await Promise.all(fire(worker, "reconcile-operations", "sandbox"));
-    expect(runEvents("reconcile-operations", "sandbox")).toContainEqual([
-      "info",
-      expect.objectContaining({ status: "ok", wakeup_only: true }),
-    ]);
+    expect(runEvents("reconcile-operations", "sandbox")).toEqual([]);
     await worker.handle.stop();
   });
 

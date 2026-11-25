@@ -181,6 +181,7 @@ async function observeEarnVaultMovement(
  */
 export interface EarnVaultReconciliationStats {
   claimed: number;
+  skippedLeased: number;
   settled: number;
   failed: number;
   confirmed: number;
@@ -208,6 +209,7 @@ function errorMessage(error: unknown): string {
 function emptyStats(claimed: number): EarnVaultReconciliationStats {
   return {
     claimed,
+    skippedLeased: 0,
     settled: 0,
     failed: 0,
     confirmed: 0,
@@ -235,7 +237,9 @@ export async function reconcileEarnVaultMovementBatch(
   const ledger = createPostgresEarnMovementsRepository(db);
   // Observing an unleased snapshot leaves the entire backlog available to the
   // fast worker. Only the four reducers ready to run acquire ownership below.
-  rows = await ledger.readRecoveryObservations(rows);
+  const snapshot = await ledger.readRecoveryObservations(rows);
+  stats.skippedLeased = snapshot.skippedLeased;
+  rows = snapshot.rows;
   if (rows.length === 0) return stats;
   const { environment } = currentClusterScope();
   // SAFETY: these are vault_direct rows, whose signature `earn_movements_model_shape_check` (0062)

@@ -1,7 +1,7 @@
-import { currentClusterScope } from "@sdp/rpc/scope";
+import { currentClusterScope, runInClusterScope } from "@sdp/rpc/scope";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as cronEvents from "@/cron/run-event";
-import { currentDatabaseIdentity } from "@/db/identity";
+import { currentDatabaseIdentity, runWithSystemDatabaseIdentity } from "@/db/identity";
 import type { BackgroundRunner } from "@/runtime/background";
 import { getLogContext, runWithLogContext } from "@/runtime/logger";
 import { deferred } from "@/test/helpers/deferred";
@@ -34,7 +34,15 @@ afterEach(async () => {
 });
 
 function start() {
-  observer = startEarnTransactionObserver(env, bg, ["sandbox"]);
+  observer = startEarnTransactionObserver(bg, ["sandbox"], (environment) =>
+    runWithLogContext({ cron: "earn-transaction-observer" }, () =>
+      runWithSystemDatabaseIdentity("cron:earn-transaction-observer", () =>
+        runInClusterScope({ projectId: null, environment }, () =>
+          observation.observeEarnTransactions(env)
+        )
+      )
+    )
+  );
   return observer;
 }
 

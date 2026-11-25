@@ -109,7 +109,7 @@ it("slows long custody waits and stops provider waits without forgetting newly o
   expect(read).toHaveBeenCalledTimes(30);
   await vi.advanceTimersByTimeAsync(10_000);
   expect(read).toHaveBeenCalledTimes(32);
-  observer.recordObservation(operation("recent", "settling"));
+  observer.recordRead(operation("recent", "settling"));
   await vi.advanceTimersByTimeAsync(30_000);
   expect(read).toHaveBeenCalledTimes(32);
   close();
@@ -205,7 +205,8 @@ it("does not retire operation IDs on transport failures", async () => {
   await vi.advanceTimersByTimeAsync(120_000);
   expect(read.mock.calls.length).toBeGreaterThan(3);
   read.mockResolvedValue([operation("pending", "completed")]);
-  await vi.advanceTimersByTimeAsync(30_000);
+  observer.focus("pending");
+  await vi.advanceTimersByTimeAsync(1_000);
   expect(publish).toHaveBeenCalledExactlyOnceWith([operation("pending", "completed")]);
   release();
 });
@@ -227,5 +228,41 @@ it("resets missing-row retries after a successful observation", async () => {
   read.mockResolvedValueOnce([operation("temporary", "completed")]);
   await vi.advanceTimersByTimeAsync(4_000);
   expect(read).toHaveBeenCalledTimes(6);
+  release();
+});
+
+it("hands a long foreground watch to the feed after two minutes until explicitly reopened", async () => {
+  vi.useFakeTimers();
+  const read = vi.fn(async (ids: readonly string[]) => ids.map((id) => operation(id)));
+  const { observer } = createObserver(read);
+  const release = observer.retain();
+  observer.recordObservation(operation("long"), true);
+  await vi.advanceTimersByTimeAsync(120_000);
+  const count = read.mock.calls.length;
+  observer.recordObservation(operation("long"), true);
+  await vi.advanceTimersByTimeAsync(120_000);
+  expect(read).toHaveBeenCalledTimes(count);
+  observer.focus("long");
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(read).toHaveBeenCalledTimes(count + 1);
+  release();
+});
+
+it("does not restart a missing settlement backlog from stale feed rows", async () => {
+  vi.useFakeTimers();
+  const ids = Array.from({ length: 1_000 }, (_, index) => `settling-${index}`);
+  const read = vi.fn(async (_ids: readonly string[]) => []);
+  const { observer } = createObserver(read);
+  const release = observer.retain();
+  observer.recover(ids);
+  await vi.advanceTimersByTimeAsync(15_000);
+  for (const id of ids) observer.recordObservation(operation(id, "settling"));
+  observer.recover(ids);
+  await vi.advanceTimersByTimeAsync(15_000);
+  expect(read).toHaveBeenCalledTimes(30);
+  for (const id of ids) observer.recordObservation(operation(id, "settling"));
+  observer.recover(ids);
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(read).toHaveBeenCalledTimes(30);
   release();
 });

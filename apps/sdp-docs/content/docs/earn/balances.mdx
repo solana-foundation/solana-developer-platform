@@ -28,6 +28,9 @@ Each position's `id` is the `positionId` you [withdraw](/docs/earn/withdrawals)
 with; the [position object](/docs/earn/api-overview#position) lists its fields. Without `ownerAddress`, the list covers every position your key can see
 in the project. See [position filters](/docs/reference/api/earn/list-earn-core-positions).
 
+Tracked holdings verified empty during a read are omitted from the list. Keep
+tracking outstanding withdrawals through their operations.
+
 ## Read one position
 
 `GET /v1/earn/positions/{positionId}` returns one position, with the same fields

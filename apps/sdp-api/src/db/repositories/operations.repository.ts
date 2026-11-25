@@ -54,11 +54,6 @@ export interface OperationListFilters {
   allowedWalletIds?: readonly string[];
 }
 
-/** An unclaimed recovery candidate; listing never reserves an execution lease. */
-export interface OperationRecoveryCandidate extends OperationScope {
-  id: string;
-}
-
 /** The current version's execution record; signed bytes and account binding are first-write-wins. */
 export interface OperationAttempt {
   id: string;
@@ -110,6 +105,8 @@ export interface OperationClaim {
   /** Once dispatch may have started, a takeover may observe/retry exact bytes only. */
   recoveryRequired: boolean;
   purpose: "execute" | "cancel";
+  /** True only for the durable first recovery claim of this accepted attempt. */
+  firstExecutionClaim?: boolean;
 }
 
 /** A validated, side-effect-free action ready for display. */
@@ -402,7 +399,6 @@ export function createOperationsRepository(db: DatabaseClient) {
     row: OperationRecord
   ): Promise<OperationClaim | null> {
     if (isTerminalOperationStatus(row.operation.status)) return null;
-    if (row.claimUntil !== null && Date.parse(row.claimUntil) > Date.now()) return null;
     const { scope } = row;
     const attempt = await currentAttempt(tx, scope, row.operation);
     if (
@@ -414,9 +410,16 @@ export function createOperationsRepository(db: DatabaseClient) {
       return null;
     const token = randomUUID();
     const changed = await tx.queryOne(
-      `UPDATE operations SET claim_token = ?, claim_until = now() + (? * interval '1 second'), fence = fence + 1
-       WHERE id = ? AND ${scopeSql} AND next_check_at <= now() RETURNING ${OPERATION_COLUMNS}`,
-      [token, OPERATION_WORKER_LEASE_MS / 1000, row.operation.id, ...scopeValues(scope)]
+      `WITH leased AS (
+        UPDATE operations SET claim_token = ?, claim_until = now() + (? * interval '1 second'), fence = fence + 1
+        WHERE id = ? AND ${scopeSql} AND next_check_at <= now()
+          AND (claim_until IS NULL OR claim_until <= now()) RETURNING ${OPERATION_COLUMNS}
+      ), first_pickup AS (
+        UPDATE operation_attempts SET first_execution_claimed_at = sdp_iso_now()
+        WHERE id = ? AND operation_id IN (SELECT id FROM leased)
+          AND first_execution_claimed_at IS NULL RETURNING id
+      ) SELECT leased.*, EXISTS (SELECT 1 FROM first_pickup) AS first_execution_claim FROM leased`,
+      [token, OPERATION_WORKER_LEASE_MS / 1000, row.operation.id, ...scopeValues(scope), attempt.id]
     );
     if (changed === null) return null;
     const current = parseRecord(changed);
@@ -425,6 +428,7 @@ export function createOperationsRepository(db: DatabaseClient) {
       attempt,
       token,
       fence: current.fence,
+      firstExecutionClaim: changed.first_execution_claim === true,
       purpose: current.actionPurpose,
       recoveryRequired:
         attempt.dispatchStartedAt !== null ||
@@ -648,39 +652,6 @@ export function createOperationsRepository(db: DatabaseClient) {
     async getAttempt(scope: OperationScope, id: string): Promise<OperationAttempt | null> {
       const record = await requireRecord(db, scope, id, false);
       return currentAttempt(db, scope, record.operation);
-    },
-
-    /** Index-backed due scan; every joined attempt has the same tenant and current action. */
-    async listDueRecovery(
-      environment: SdpEnvironment,
-      limit = 100
-    ): Promise<OperationRecoveryCandidate[]> {
-      if (!Number.isInteger(limit) || limit < 1 || limit > 100)
-        throw new Error("Recovery candidate limit must be between 1 and 100");
-      const rows = await db.queryMany<{
-        id: string;
-        organization_id: string;
-        project_id: string;
-      }>(
-        `SELECT operation.id, operation.organization_id, operation.project_id
-         FROM operations operation JOIN operation_attempts attempt
-           ON attempt.operation_id = operation.id
-           AND attempt.organization_id = operation.organization_id
-           AND attempt.project_id = operation.project_id AND attempt.environment = operation.environment
-           AND attempt.action_id = operation.action_id AND attempt.action_version = operation.action_version
-         WHERE operation.environment = ? AND operation.status NOT IN (${sqlLiteralList(TERMINAL_OPERATION_STATUSES)})
-           AND operation.next_check_at IS NOT NULL AND operation.next_check_at <= now()
-           AND (attempt.execution_requested_at IS NOT NULL OR attempt.dispatch_started_at IS NOT NULL OR attempt.signed_transaction IS NOT NULL)
-           AND (operation.claim_until IS NULL OR operation.claim_until <= now())
-         ORDER BY operation.next_check_at, operation.id LIMIT ?`,
-        [environment, limit]
-      );
-      return rows.map((row) => ({
-        id: row.id,
-        organizationId: row.organization_id,
-        projectId: row.project_id,
-        environment,
-      }));
     },
 
     /** Competing workers skip leased or locked rows and claim only work ready to start. */
@@ -1074,7 +1045,7 @@ export function createOperationsRepository(db: DatabaseClient) {
         (await db.execute(
           `UPDATE operations SET claim_token = NULL, claim_until = NULL,
            next_check_at = now() + make_interval(secs => CASE
-             WHEN error IS NULL AND status IN (${sqlLiteralList(SDP_PROGRESS_OPERATION_STATUSES)})
+             WHEN error IS NULL AND (next_action ->> 'type') IS DISTINCT FROM 'sign_in_provider' AND status IN (${sqlLiteralList(SDP_PROGRESS_OPERATION_STATUSES)})
                AND EXISTS (SELECT 1 FROM operation_attempts attempt
                  WHERE attempt.operation_id = operations.id
                    AND attempt.organization_id = operations.organization_id
@@ -1086,7 +1057,17 @@ export function createOperationsRepository(db: DatabaseClient) {
              WHEN status <> ? THEN 15 ELSE
              LEAST(CASE WHEN next_action ->> 'type' = 'sign_in_provider' THEN 60 ELSE 300 END,
                15 * power(2, LEAST(recovery_check_count, 5))) END),
-           recovery_check_count = CASE WHEN status <> ? THEN 0 ELSE LEAST(recovery_check_count + 1, 5) END
+           recovery_check_count = CASE WHEN status <> ? THEN 0
+             WHEN error IS NULL AND (next_action ->> 'type') IS DISTINCT FROM 'sign_in_provider' AND status IN (${sqlLiteralList(SDP_PROGRESS_OPERATION_STATUSES)})
+               AND EXISTS (SELECT 1 FROM operation_attempts attempt
+                 WHERE attempt.operation_id = operations.id
+                   AND attempt.organization_id = operations.organization_id
+                   AND attempt.project_id = operations.project_id
+                   AND attempt.environment = operations.environment
+                   AND attempt.action_id = operations.action_id
+                   AND attempt.action_version = operations.action_version
+                   AND attempt.execution_requested_at::timestamptz > now() - interval '2 minutes') THEN recovery_check_count
+             ELSE LEAST(recovery_check_count + 1, 5) END
          WHERE id = ? AND ${scopeSql} AND claim_token = ? AND fence = ? AND claim_until > now()`,
           [
             claim.operation.status,

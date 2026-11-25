@@ -41,9 +41,10 @@ import type { BackgroundRunner } from "@/runtime/background";
 import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
 import { runWithLogContext } from "@/runtime/logger";
 import { startEarnTransactionObserver } from "@/services/jobs/earn-transaction-observer";
+import { observeEarnTransactions } from "@/services/jobs/observe-earn-transactions";
 import { startOperationWorker } from "@/services/jobs/operation-worker";
 import type { Env } from "@/types/env";
-import type { CronDefinition } from "./define-cron";
+import type { CronDefinition, CronRunContext } from "./define-cron";
 import { type CronRegistration, logCronRun } from "./run-event";
 
 export interface CronDeps {
@@ -187,23 +188,24 @@ function registrationEnvironments(
 async function runSlot(
   definition: CronDefinition,
   registration: CronRegistration,
-  env: Env
+  env: Env,
+  context: CronRunContext
 ): Promise<void> {
   const startedAt = Date.now();
   const environment = registration.environment;
+  const run = () => (definition.wakeupOnly ? definition.run(env, context) : definition.run(env));
   try {
     await runWithLogContext({ cron: definition.name }, () =>
       runWithSystemDatabaseIdentity(`cron:${definition.name}`, () =>
-        environment === null
-          ? definition.run(env)
-          : runInEnvironmentClusterScope(environment, () => definition.run(env))
+        environment === null ? run() : runInEnvironmentClusterScope(environment, run)
       )
     );
   } catch (error) {
     logCronRun(registration, { status: "error", durationMs: Date.now() - startedAt, cause: error });
     throw error;
   }
-  logCronRun(registration, { status: "ok", durationMs: Date.now() - startedAt });
+  if (!definition.wakeupOnly)
+    logCronRun(registration, { status: "ok", durationMs: Date.now() - startedAt });
 }
 
 /**
@@ -230,9 +232,14 @@ export function startCron(deps: CronDeps): CronHandle | null {
     (environment): environment is SdpEnvironment => environment !== null
   );
   const transactionObserver = startEarnTransactionObserver(
-    deps.env,
     deps.bg,
-    operationEnvironments
+    operationEnvironments,
+    (environment) =>
+      runWithLogContext({ cron: "earn-transaction-observer" }, () =>
+        runWithSystemDatabaseIdentity("cron:earn-transaction-observer", () =>
+          runInEnvironmentClusterScope(environment, () => observeEarnTransactions(deps.env))
+        )
+      )
   );
   const operationWorker = startOperationWorker(deps.env, deps.bg, operationEnvironments, {
     wakeObserver: (environment) => transactionObserver.wake(environment),
@@ -245,7 +252,7 @@ export function startCron(deps: CronDeps): CronHandle | null {
         cron: definition.name,
         environment,
       };
-      if (definition === operationsCron) registration.wakeupOnly = true;
+      if (definition.wakeupOnly) registration.wakeupOnly = true;
       // The in-flight run's own token, so a run abandoned at the deadline that settles later
       // cannot free the registration from under its successor.
       let inFlight: symbol | null = null;
@@ -275,13 +282,10 @@ export function startCron(deps: CronDeps): CronHandle | null {
           });
         }, CRON_SLOT_DEADLINE_MS);
         deadline.unref();
-        // Notifications and periodic recovery wake the same bounded consumers.
-        const scheduledDefinition =
-          definition === operationsCron && environment !== null
-            ? { ...definition, run: async () => operationWorker.wake(environment) }
-            : definition;
         deps.bg.run(
-          runSlot(scheduledDefinition, registration, deps.env).finally(() => {
+          runSlot(definition, registration, deps.env, {
+            wakeOperations: operationWorker.wake,
+          }).finally(() => {
             clearTimeout(deadline);
             if (inFlight === slot) {
               inFlight = null;

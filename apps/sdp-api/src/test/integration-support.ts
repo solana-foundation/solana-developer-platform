@@ -41,7 +41,6 @@ import {
 } from "@/services/earn/vault-wallet.service";
 import { createMosaicService } from "@/services/issuance/mosaic";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
-import { reconcileOperations } from "@/services/jobs/reconcile-operations";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import {
   type RevokeIdleSubscriptionAuthoritiesResult,
@@ -56,6 +55,7 @@ import {
   TEST_PROJECT_CACHED_KEY,
 } from "@/test/fixtures/tokens";
 import { ensureTestClerkIssuer, signTestClerkJwt } from "@/test/helpers/clerk";
+import { reconcileOperations } from "@/test/helpers/reconcile-operations";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 

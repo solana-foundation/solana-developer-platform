@@ -333,7 +333,7 @@ async function reconcileActions(
   actions: readonly EarnVaultWithdrawalRequestActionRow[],
   stats: QueueReconciliationStats
 ): Promise<void> {
-  const candidates = await ledger.readRecoveryObservations(actions);
+  const { rows: candidates } = await ledger.readRecoveryObservations(actions);
   if (candidates.length === 0) return;
   const { environment } = currentClusterScope();
   let rpc: SolanaRpc;

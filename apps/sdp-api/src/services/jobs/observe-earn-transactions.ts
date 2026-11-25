@@ -8,6 +8,7 @@ import {
   type EarnMovementRow,
 } from "@/db/repositories/earn-movements.repository";
 import {
+  EARN_FAST_OBSERVATION_LEASE_SECONDS,
   earnObservationDelay,
   releaseEarnObservations,
 } from "@/db/repositories/earn-observation-claims";
@@ -43,12 +44,12 @@ export async function observeEarnTransactions(
   let advanced = 0;
   const released = new Set<Target>();
   async function releaseTargets(selected: readonly Target[]): Promise<void> {
-    const groups = new Map<string, { targets: Target[]; delayMs: number }>();
+    const groups = new Map<string, { targets: Target[]; delayMs: number | null }>();
     for (const target of selected) {
       let release: "unattempted" | "attempted" | "status_read_failed" = "unattempted";
       if (attempted.has(target.row.id)) release = "attempted";
       if (statusReadFailed) release = "status_read_failed";
-      let delayMs: number;
+      let delayMs: number | null;
       switch (release) {
         case "unattempted":
           delayMs = 0;
@@ -88,8 +89,43 @@ export async function observeEarnTransactions(
       throw new AggregateError(errors, "Earn observation or claim release failed");
     }
   }
+  async function claimObservedTargets(pending: readonly Target[]): Promise<Target[]> {
+    const order = new Map(pending.map((target, index) => [target.row.id, index]));
+    // Scan tokens only fence scheduling writes. Acquire financial-processing
+    // leases after positive evidence, so slow RPC cannot hide resend candidates.
+    const direct = pending
+      .filter((target) => target.kind === "movement")
+      .map((target) => target.row);
+    if (direct.length > 0) {
+      const claimed = await createPostgresEarnMovementsRepository(db).claimRecoveryObservations(
+        direct,
+        EARN_FAST_OBSERVATION_LEASE_SECONDS
+      );
+      for (const target of pending) if (target.kind === "movement") released.add(target);
+      targets.push(
+        ...claimed.rows.map((row): Target => ({ kind: "movement", row, token: claimed.token }))
+      );
+    }
+    const queued = pending
+      .filter((target) => target.kind === "withdrawal_action")
+      .map((target) => target.row);
+    if (queued.length > 0) {
+      const claimed = await createPostgresEarnVaultWithdrawalRequestsRepository(
+        db
+      ).claimRecoveryObservations(queued, EARN_FAST_OBSERVATION_LEASE_SECONDS);
+      for (const target of pending) if (target.kind === "withdrawal_action") released.add(target);
+      targets.push(
+        ...claimed.rows.map(
+          (row): Target => ({ kind: "withdrawal_action", row, token: claimed.token })
+        )
+      );
+    }
+    return targets
+      .filter((target) => !released.has(target))
+      .sort((left, right) => (order.get(left.row.id) ?? 0) - (order.get(right.row.id) ?? 0));
+  }
   const run = async () => {
-    const movements = await createPostgresEarnMovementsRepository(db).claimDueObservations(
+    const movements = await createPostgresEarnMovementsRepository(db).scheduleDueObservations(
       environment,
       BATCH_PER_KIND
     );
@@ -98,7 +134,7 @@ export async function observeEarnTransactions(
     );
     const actions = await createPostgresEarnVaultWithdrawalRequestsRepository(
       db
-    ).claimDueObservations(environment, BATCH_PER_KIND);
+    ).scheduleDueObservations(environment, BATCH_PER_KIND);
     targets.length = 0;
     // Give direct and queued actions equal access to the bounded processing budget.
     for (let index = 0; index < Math.max(movements.rows.length, actions.rows.length); index += 1) {
@@ -120,6 +156,7 @@ export async function observeEarnTransactions(
         })
       ),
     ];
+    const scannedCount = targets.length;
     const rpc = createClusterRpc({ timeoutMs: 2_000 });
     statusReadFailed = true;
     const statuses = await getSignatureStatuses(rpc, signatures, {
@@ -137,29 +174,26 @@ export async function observeEarnTransactions(
     // work so minute recovery can rebroadcast or prove expiry during this pass.
     for (const target of unobserved) attempted.add(target.row.id);
     await releaseTargets(unobserved);
+    const ready = await claimObservedTargets(targets.filter((target) => !released.has(target)));
     const expiresAt = Date.now() + PASS_BUDGET_MS;
-    const results = await mapSettledWithConcurrency(
-      targets.filter((target) => !released.has(target)),
-      4,
-      async (target) => {
-        if (Date.now() >= expiresAt) return;
-        attempted.add(target.row.id);
-        const observed =
-          target.row.signature === null ? null : bySignature.get(signature(target.row.signature));
-        // Absence carries no finality, resend or expiry authority in this lane.
-        if (observed === null || observed === undefined) return;
-        try {
-          const outcome =
-            target.kind === "movement"
-              ? await observeEarnVaultMovementStatus(env, target.row, observed, rpc)
-              : await observeEarnWithdrawalActionStatus(env, target.row, observed, rpc);
-          if (outcome !== "unchanged") advanced += 1;
-        } catch (error) {
-          failed.add(target.row.id);
-          throw error;
-        }
+    const results = await mapSettledWithConcurrency(ready, 4, async (target) => {
+      if (Date.now() >= expiresAt) return;
+      attempted.add(target.row.id);
+      const observed =
+        target.row.signature === null ? null : bySignature.get(signature(target.row.signature));
+      // Absence carries no finality, resend or expiry authority in this lane.
+      if (observed === null || observed === undefined) return;
+      try {
+        const outcome =
+          target.kind === "movement"
+            ? await observeEarnVaultMovementStatus(env, target.row, observed, rpc)
+            : await observeEarnWithdrawalActionStatus(env, target.row, observed, rpc);
+        if (outcome !== "unchanged") advanced += 1;
+      } catch (error) {
+        failed.add(target.row.id);
+        throw error;
       }
-    );
+    });
     for (const result of results) {
       if (result.status === "rejected") {
         getLogger().error(
@@ -171,7 +205,7 @@ export async function observeEarnTransactions(
     logEvent(failed.size > 0 ? "error" : "info", {
       event: "sdp_api_earn_transaction_observation_tick",
       environment,
-      claimed: targets.length,
+      claimed: scannedCount,
       signatures: signatures.length,
       advanced,
       errors: failed.size,
@@ -179,7 +213,7 @@ export async function observeEarnTransactions(
     });
     if (failed.size > 0) throw new Error(`${failed.size} Earn transactions could not be observed`);
     return {
-      claimed: targets.length,
+      claimed: scannedCount,
       saturated,
     };
   };

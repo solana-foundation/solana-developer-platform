@@ -1,12 +1,8 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { logCronRun } from "@/cron/run-event";
-import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import type { BackgroundRunner } from "@/runtime/background";
-import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
-import { runWithLogContext } from "@/runtime/logger";
-import type { Env } from "@/types/env";
 import { startEarnWorkerTelemetry } from "./earn-worker-telemetry";
-import { observeEarnTransactions } from "./observe-earn-transactions";
+import type { observeEarnTransactions } from "./observe-earn-transactions";
 
 interface EnvironmentLane {
   tasks: Set<Promise<void>>;
@@ -17,9 +13,9 @@ interface EnvironmentLane {
 
 /** Notifications wake bounded, competing batches; a slow pass leaves room for fresh work. */
 export function startEarnTransactionObserver(
-  env: Env,
   bg: BackgroundRunner,
-  environments: readonly SdpEnvironment[]
+  environments: readonly SdpEnvironment[],
+  observe: (environment: SdpEnvironment) => ReturnType<typeof observeEarnTransactions>
 ): { wake(environment: SdpEnvironment): void; stop(): Promise<void> } {
   const lanes = new Map<SdpEnvironment, EnvironmentLane>(
     environments.map((environment) => [
@@ -48,11 +44,7 @@ export function startEarnTransactionObserver(
     const startedAt = Date.now();
     const run = async () => {
       try {
-        const result = await runWithLogContext({ cron: "earn-transaction-observer" }, () =>
-          runWithSystemDatabaseIdentity("cron:earn-transaction-observer", () =>
-            runInEnvironmentClusterScope(environment, () => observeEarnTransactions(env))
-          )
-        );
+        const result = await observe(environment);
         telemetry.completed(environment);
         if (result.claimed > 0 || result.saturated) {
           lane.saturatedRetry = result.saturated;

@@ -130,7 +130,7 @@ operations.get(
       throw notFound("Wallet");
     const page = await createOperationsService(c.env).list(actor, {
       ...filters,
-      operationIds: operationIds?.split(","),
+      operationIds,
       allowedWalletIds: wallets.map((wallet) => wallet.id),
     });
     return success(c, {

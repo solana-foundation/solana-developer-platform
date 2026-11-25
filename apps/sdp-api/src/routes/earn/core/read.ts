@@ -346,16 +346,22 @@ async function loadEarnPositions(
     completedScopes: new Set<string>(),
     rejectedPositionIds: new Set<string>(),
   };
-  const { holdings, live } = await hydrateEarnPositionRows(c, candidateRows, addresses, {
-    sourceType: includeAddress ? "address" : "wallet",
-    minimumSlotByPositionId: balanceContext?.minimumSlotByPositionId,
-    discoveredIds,
-    discoverAll: query.discover,
-    discoveryObservations: query.discover ? discoveryObservations : undefined,
-  });
+  const { holdings, live, closedPositionIds } = await hydrateEarnPositionRows(
+    c,
+    candidateRows,
+    addresses,
+    {
+      sourceType: includeAddress ? "address" : "wallet",
+      minimumSlotByPositionId: balanceContext?.minimumSlotByPositionId,
+      discoveredIds,
+      discoverAll: query.discover,
+      discoveryObservations: query.discover ? discoveryObservations : undefined,
+    }
+  );
   const strategyIds = earnStrategyIdsByInstrument(strategies);
   const holdingsById = new Map(holdings.map((holding) => [holding.id, holding]));
   const observedRows = candidateRows.filter((row) => {
+    if (closedPositionIds.has(row.id)) return false;
     if (!discoveredIds.has(row.id)) return true;
     const observed = live.get(row.id);
     return observed !== undefined && !isEarnVaultHoldingEmpty(observed);

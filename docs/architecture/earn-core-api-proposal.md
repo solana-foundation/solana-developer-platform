@@ -358,18 +358,20 @@ Status progress resets the delay to 15 seconds. Terminal operations are
 excluded from due scans.
 
 The same listener wakes an observation-only lane for direct movement and queued
-action signatures. Each pass claims up to 64 rows of each kind with expiring,
-fenced PostgreSQL claims, then makes one batched status request. At most two
-passes and four reducers per pass run per environment and replica. Direct and
-queued work share the processing budget fairly. Recent pending transactions
-retry after 250 ms and older work after 30 seconds. Failed reads retry after
-five seconds for rows created within two minutes, then once a minute. Signature
-misses release their claims before receipt or provider work, leaving rebroadcast
-and expiry recovery available while positive observations settle. Obsolete
-queued hints retire in bounded indexed pages without changing financial history.
-Fast observation never signs, broadcasts or treats missing evidence as failure.
-Both paths use the same financial reducers; queued escrow is not payout and
-missing amounts stay unknown.
+action signatures. Each pass rotates up to 64 fast scan hints of each kind, then
+makes one batched status request without leasing the rows away from recovery.
+Positive signatures receive fenced ten-second processing leases; scan tokens
+only fence scheduling writes. At most two passes and four reducers per pass run
+per environment and replica. Direct and queued work share the processing budget
+fairly. Recent pending transactions retry after 250 ms and older work after 30
+seconds. Failed reads retry after five seconds for rows created within two
+minutes. An older failure clears its fast hint and leaves the obligation with
+minute recovery. Signature misses release their scan tokens before receipt or
+provider work, leaving rebroadcast and expiry recovery available while positive
+observations settle. Obsolete queued hints retire in bounded indexed pages
+without changing financial history. Fast observation never signs, broadcasts or
+treats missing evidence as failure. Both paths use the same financial reducers;
+queued escrow is not payout and missing amounts stay unknown.
 
 The minute recovery sweep reads one available snapshot, up to 256 movements or
 128 queued actions, without reserving it. Each batch needs one status request,
@@ -443,52 +445,8 @@ Detail reads retain a bounded observation-only chain read-through. Neither UI
 polling nor a lost notification is required for recovery, and stopping new Earn
 admission does not stop existing money obligations from completing.
 
-## Local latency evidence (PRO-2578)
-
-These checks cover scheduling, request budgets and balance freshness on top of
-main `c65066528`. They do not measure live signing, provider settlement or a
-signed-in browser. The local PostgreSQL and Redis instances are disposable;
-chain and provider responses are simulated.
-
-- Operation pickup: 16 accepted operations reached their fenced worker claim
-  in 28.40 ms median and 34.49 ms p95/max. The controlled-clock comparison
-  places acceptance just after a tick: 14,999 ms previously, zero timer delay
-  with notifications, and 1,999 ms with a lost notification.
-- UI budget: with 500 pending activity rows mounted, the foreground completion
-  reaches the cache within one second using one status request. Passive rows add
-  no individual timers. A 350-row disappearing backlog drains in four requests
-  capped at 100 IDs each.
-- Projection budget: 50 direct operations or 50 queued requests need two DB
-  reads instead of 100, with equivalent results. A mixed page needs three.
-  Validating 100 balance proofs also drops from 100 serial DB reads to one;
-  signature observation remains one shared RPC read.
-- Refresh budget: affected positions and wallets refresh together; 120
-  successive actions keep at most two movement proofs in each detail request
-  and one retained proof in the next portfolio read.
-  In the two-wallet fixture, refreshing one affected wallet drops from three
-  HTTP requests (inventory and both balances) to one balance request.
-- Recovery backlog: 256 movements or 128 queued actions use one status request
-  per batch. Twelve expired rows spanning three processing groups share one
-  finalized height and one corroborating status read per endpoint per sweep.
-  Repeating the movement sweep reads again; evidence does not survive between
-  invocations.
-- Backlog isolation: no rows are leased while the shared RPC waits. With four
-  provider reads blocked, the fast observer still advances later work and a
-  newly submitted movement or queued action. Competing workers take disjoint
-  four-row claims. With four fast-observer projections blocked, null-status
-  direct and queued transactions release their leases and both recovery paths
-  rebroadcast their original bytes. This uses the existing three status reads
-  (observer, movement recovery and queued recovery). Changed absence markers or
-  signed bytes cannot reuse earlier recovery evidence.
-
-The competing-observer burst processes 129 finalized movements with three
-status reads. It took 70 ms locally and 201 ms during a concurrent test run;
-these mocked-chain results establish bounded draining, not a production SLA.
-
-Provider approval and asynchronous redemption waits remain explicit operation
-states. Live Treasury/Embedded Yield timings, preparation/initial-loading
-profiles and deployment-scale load measurements remain PRO-2578 acceptance
-work; these local results do not close that ticket.
+Local scheduling and request-budget evidence lives in
+[Earn latency checks](../testing/earn-latency.md).
 
 ## Rollout and remaining gates
 
@@ -516,24 +474,5 @@ See the [threat model](https://www.notion.so/422d36dad52d81e2bcf2cbd62c8e4622) a
 Provider sandbox execution, signed-in browser verification and security review
 remain release gates. Local tests do not establish those external outcomes.
 
-### Worker health
-
-Worker health summaries report completed scans/passes, active consumers,
-interval error counts, maximum queued-action pickup delay and listener state
-once a minute per environment. Scheduled operation ticks carry
-`wakeup_only=true`: they do not prove an asynchronous consumer completed work.
-Idle observers need no passes; only active stalls and overdue durable work
-are actionable.
-
-The minute movement job reads one independent database snapshot of execution,
-observation, provider polling/delivery, queued polling/delivery and valuation
-obligations. It neither claims rows nor changes financial state. Existing due
-indexes and the partial missing-valuation index keep finalized history out of
-the read. Snapshot failures never fabricate zero backlog. RPC count for this
-telemetry is **0 before, 0 after**.
-
-Recorded queue maturity/deadline controls the useful polling time. Unknown
-provider delivery deadlines get a one-day investigation budget; missing
-finalized valuation gets one hour. Neither changes fulfillment guarantees.
-The companion sdp-infra rules warn on sustained delays, retain recovery and
-integrity pages, and require manual resolution for one-shot integrity loss.
+Worker summaries and alert budgets are documented in
+[Earn worker health](../ops/earn-worker-health.md).

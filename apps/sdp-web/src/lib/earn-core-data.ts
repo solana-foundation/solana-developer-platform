@@ -160,18 +160,23 @@ export function useEarnOperations() {
       expanded ? undefined : earnCoreClient.operations({ limit: OPERATIONS_HISTORY_PAGE_SIZE }),
     ]);
     const previous = currentFeed();
-    await config.mutate<EarnObservationProgress>(
-      earnQueryKeys.operationProgress(),
-      (current) => ({ error: undefined, unavailableIds: current?.unavailableIds ?? [] }),
-      { revalidate: false }
-    );
     for (const operation of mergeOperations(
       previous?.operations ?? [],
       recent?.operations ?? [],
       active
     ))
       observer.recordObservation(operation);
-    const observedIds = new Set([...active, ...(recent?.operations ?? [])].map(({ id }) => id));
+    const observed = [...active, ...(recent?.operations ?? [])];
+    const observedIds = new Set(observed.map(({ id }) => id));
+    for (const operation of observed) observer.recordRead(operation);
+    await config.mutate<EarnObservationProgress>(
+      earnQueryKeys.operationProgress(),
+      (current) => ({
+        error: undefined,
+        unavailableIds: current?.unavailableIds.filter((id) => !observedIds.has(id)) ?? [],
+      }),
+      { revalidate: false }
+    );
     observer.recover(
       previous?.operations
         .filter(
@@ -317,6 +322,8 @@ export function useEarnOperation(
     // react-doctor-disable-next-line react-doctor/no-pass-live-state-to-parent
     notifyUpdated(operation);
   }, [initial, operation, operationId]);
+  const transportError =
+    operationId && observer.isWatching(operationId) ? progress?.error : undefined;
   return {
     operation,
     error:
@@ -325,10 +332,10 @@ export function useEarnOperation(
       progress?.unavailableIds.includes(operationId) &&
       (!operation || !isEarnOperationTerminal(operation))
         ? new Error("An operation observation is unavailable")
-        : progress?.error),
+        : transportError),
     refresh: () => mutate(),
     update: (operation: Operation) => {
-      observer.recordObservation(operation, true);
+      observer.recordRead(operation, true);
       return mutate(operation, { revalidate: false });
     },
   };

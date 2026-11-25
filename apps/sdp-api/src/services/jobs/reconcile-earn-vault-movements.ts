@@ -133,6 +133,7 @@ export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
     event: "sdp_api_earn_vault_reconciliation_tick",
     environment,
     claimed: stats.claimed,
+    skipped_leased: stats.skippedLeased,
     settled: stats.settled,
     failed: stats.failed,
     confirmed: stats.confirmed,

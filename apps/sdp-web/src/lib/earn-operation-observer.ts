@@ -1,4 +1,8 @@
-import { isSdpProgressOperationStatus, type Operation } from "@sdp/types/operations";
+import {
+  isSdpProgressOperationStatus,
+  isTerminalOperationStatus,
+  type Operation,
+} from "@sdp/types/operations";
 import { EarnApiError } from "./earn-client";
 
 /** The foreground budget is one batch per second, independent of activity row count. */
@@ -37,6 +41,7 @@ interface ObserverPorts {
 export class EarnOperationObserver {
   private readonly watches = new Map<string, Watch>();
   private readonly unavailable = new Set<string>();
+  private readonly retired = new Set<string>();
   private consumers = 0;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private running = false;
@@ -58,17 +63,25 @@ export class EarnOperationObserver {
 
   /** Record operation state in shared tracking; retain() owns the timer lifetime. */
   recordObservation(operation: Operation, foreground = false): void {
-    if (!isSdpProgressOperationStatus(operation.status)) {
+    if (isTerminalOperationStatus(operation.status)) {
       this.watches.delete(operation.id);
-      this.unavailable.delete(operation.id);
       return;
     }
-    if (foreground) this.recover([operation.id]);
+    if (foreground && isSdpProgressOperationStatus(operation.status)) this.recover([operation.id]);
+  }
+
+  /** A successful feed read can restore availability; retained cache rows cannot. */
+  recordRead(operation: Operation, foreground = false): void {
+    this.unavailable.delete(operation.id);
+    if (!isSdpProgressOperationStatus(operation.status)) this.watches.delete(operation.id);
+    this.recordObservation(operation, foreground);
   }
 
   /** Reopening active work restores its short watch without bypassing server retry limits. */
   focus(id: string): void {
-    if (this.unavailable.delete(id)) this.recover([id]);
+    const unavailable = this.unavailable.delete(id);
+    const retired = this.retired.delete(id);
+    if (unavailable || retired) this.recover([id]);
     const watch = this.watches.get(id);
     if (!watch) return;
     watch.startedAt = Date.now();
@@ -79,7 +92,7 @@ export class EarnOperationObserver {
   /** Resolve disappeared active rows in bounded batches, including old completed withdrawals. */
   recover(ids: readonly string[]): void {
     for (const id of ids) {
-      if (!this.watches.has(id) && !this.unavailable.has(id)) {
+      if (!this.watches.has(id) && !this.unavailable.has(id) && !this.retired.has(id)) {
         const now = Date.now();
         this.watches.set(id, { nextAt: now, startedAt: now, failures: 0, misses: 0 });
       }
@@ -110,6 +123,11 @@ export class EarnOperationObserver {
     }, EARN_OPERATION_OBSERVATION_MS);
   }
 
+  /** Only active watches share a batch's transport error. */
+  isWatching(id: string): boolean {
+    return this.watches.has(id);
+  }
+
   private async readDue(): Promise<void> {
     if (this.consumers === 0) return;
     if (!this.ports.visible()) {
@@ -117,6 +135,12 @@ export class EarnOperationObserver {
       return;
     }
     const now = Date.now();
+    for (const [id, watch] of this.watches) {
+      if (now - watch.startedAt >= WATCH_WINDOW_MS) {
+        this.watches.delete(id);
+        this.retired.add(id);
+      }
+    }
     const due = [...this.watches]
       .filter(([, watch]) => watch.nextAt <= now)
       .sort((left, right) => left[1].nextAt - right[1].nextAt)
@@ -144,6 +168,7 @@ export class EarnOperationObserver {
         if (this.watches.get(id) !== watch) continue;
         const operation = observed.get(id);
         if (operation === undefined) continue;
+        this.unavailable.delete(id);
         if (!isSdpProgressOperationStatus(operation.status)) {
           this.watches.delete(id);
         } else {
@@ -172,6 +197,5 @@ export class EarnOperationObserver {
 
 function observationCadence(age: number): number {
   if (age < FAST_WINDOW_MS) return EARN_OPERATION_OBSERVATION_MS;
-  if (age < WATCH_WINDOW_MS) return BACKGROUND_MS;
-  return 15_000;
+  return BACKGROUND_MS;
 }

@@ -29,8 +29,8 @@ const CRON_RUN_LOG_LEVELS = {
 } as const satisfies Record<CronRunStatus, "info" | "warn" | "error">;
 
 /**
- * Log one slot of a Cron Definition to Loki. Every slot logs exactly one event, whatever its
- * status, so liveness alerts can count crons per window.
+ * Log a cron outcome to Loki. Regular definitions log every slot; wake-only definitions
+ * report failures here and completed scans through their minute worker-health summaries.
  *
  * @param registration - The registration whose slot fired.
  * @param record - The slot's outcome.

@@ -286,8 +286,10 @@ function mergeFundingWalletRead(
     )
       return { ...wallet, balances: previous.balances };
     const minimumSlot = read.minimumSlots.get(address);
-    if ((minimumSlot ?? 0) < requiredSlot)
+    if ((minimumSlot ?? 0) < requiredSlot) {
+      if (previous !== undefined) return { ...wallet, balances: previous.balances };
       throw new Error("A newer wallet balance confirmation is pending");
+    }
     const incoming = incomingByAddress.get(address);
     if (incoming === undefined) throw new Error("Refreshed wallet balance is missing");
     observations.set(address, { version: read.version, minimumSlot });
@@ -398,6 +400,18 @@ export function useEarnFundingWallets() {
           throwOnError: true,
         }
       );
+      if (published !== undefined) {
+        const required = fundingWalletSlotsByAddress(
+          published.wallets,
+          coordinator.minimumSlot ?? coordinator.walletMinimumSlots
+        );
+        for (const address of read.addresses) {
+          if (
+            (published.observations.get(address)?.minimumSlot ?? 0) < (required.get(address) ?? 0)
+          )
+            throw new Error("A newer wallet balance confirmation is pending");
+        }
+      }
       return published?.wallets;
     },
     [coordinator, data?.wallets, mutate, sweep]

@@ -1049,7 +1049,7 @@ describe("reconcileEarnVaultMovements", () => {
         [ORG]
       )
     ).toEqual({ claimed: 0 });
-    const fast = await createPostgresEarnMovementsRepository(getDb(env)).claimDueObservations(
+    const fast = await createPostgresEarnMovementsRepository(getDb(env)).scheduleDueObservations(
       "sandbox",
       64
     );
@@ -1064,7 +1064,7 @@ describe("reconcileEarnVaultMovements", () => {
         confirmationStatus: "confirmed",
       }))
     );
-    expect(await recovery).toMatchObject({ claimed: 0, confirmed: 0 });
+    expect(await recovery).toMatchObject({ claimed: seeded.length, confirmed: seeded.length });
     expect(getSignatureStatuses).toHaveBeenCalledTimes(1);
   });
 
@@ -1194,7 +1194,7 @@ describe("reconcileEarnVaultMovements", () => {
     try {
       await vi.waitFor(() => expect(readKaminoDepositReceipt).toHaveBeenCalledTimes(4));
       const newcomer = await seedMovement("100", "veda");
-      const fast = await createPostgresEarnMovementsRepository(getDb(env)).claimDueObservations(
+      const fast = await createPostgresEarnMovementsRepository(getDb(env)).scheduleDueObservations(
         "sandbox",
         64
       );

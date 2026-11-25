@@ -2,7 +2,7 @@ import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { logCronRun } from "@/cron/run-event";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import { listenForOperationNotifications } from "@/db/operation-notifications";
-import type { OperationClaim } from "@/db/repositories/operations.repository";
+import type { OperationClaim, OperationScope } from "@/db/repositories/operations.repository";
 import type { BackgroundRunner } from "@/runtime/background";
 import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
 import { getLogger, runWithLogContext } from "@/runtime/logger";
@@ -17,6 +17,7 @@ const OBSERVATION_WINDOW_MS = 25;
 
 interface EnvironmentConsumer {
   generation: number;
+  working: number;
   tasks: Set<Promise<void>>;
   observations?: { expiresAt: number; rpc: ReturnType<typeof createOperationObservationRpc> };
 }
@@ -51,7 +52,10 @@ export function startOperationWorker(
 ): OperationWorker {
   let stopping = false;
   const consumers = new Map<SdpEnvironment, EnvironmentConsumer>(
-    environments.map((environment) => [environment, { generation: 0, tasks: new Set() }])
+    environments.map((environment) => [
+      environment,
+      { generation: 0, working: 0, tasks: new Set() },
+    ])
   );
   let listenerConnected = false;
   const telemetry = startEarnWorkerTelemetry("operations", environments, (environment) => ({
@@ -60,8 +64,43 @@ export function startOperationWorker(
   }));
 
   function recordPickup(environment: SdpEnvironment, claim: OperationClaim): void {
-    if (claim.operation.status === "queued" && claim.attempt.executionRequestedAt !== null)
+    if (
+      claim.firstExecutionClaim &&
+      !claim.recoveryRequired &&
+      claim.operation.status === "queued" &&
+      claim.attempt.executionRequestedAt !== null
+    )
       telemetry.pickedUp(environment, claim.attempt.executionRequestedAt);
+  }
+
+  async function executeClaim(
+    environment: SdpEnvironment,
+    consumer: EnvironmentConsumer,
+    scope: OperationScope,
+    claim: OperationClaim
+  ): Promise<void> {
+    // Expand only after a useful claim. Idle wakeups make one due scan.
+    consumer.working += 1;
+    startFreeConsumers(environment, consumer);
+    const startedAt = Date.now();
+    recordPickup(environment, claim);
+    let advanced: boolean;
+    try {
+      advanced = await recoverOperationClaim(env, scope, claim, observationBatch(consumer));
+    } finally {
+      consumer.working -= 1;
+    }
+    if (!advanced) {
+      telemetry.failed(environment);
+      logCronRun(
+        { cron: "reconcile-operations", environment, worker: "operations" },
+        {
+          status: "error",
+          durationMs: Date.now() - startedAt,
+          cause: new Error("An accepted operation could not advance; recovery remains scheduled"),
+        }
+      );
+    }
   }
 
   async function consume(
@@ -87,27 +126,7 @@ export function startOperationWorker(
               await service.repository.release(next.scope, next.claim);
               return;
             }
-            const startedAt = Date.now();
-            recordPickup(environment, next.claim);
-            const advanced = await recoverOperationClaim(
-              env,
-              next.scope,
-              next.claim,
-              observationBatch(consumer)
-            );
-            if (!advanced) {
-              telemetry.failed(environment);
-              logCronRun(
-                { cron: "reconcile-operations", environment, worker: "operations" },
-                {
-                  status: "error",
-                  durationMs: Date.now() - startedAt,
-                  cause: new Error(
-                    "An accepted operation could not advance; recovery remains scheduled"
-                  ),
-                }
-              );
-            }
+            await executeClaim(environment, consumer, next.scope, next.claim);
           }
         })
       )
@@ -116,7 +135,7 @@ export function startOperationWorker(
 
   function startFreeConsumers(environment: SdpEnvironment, consumer: EnvironmentConsumer): void {
     if (stopping || bg.draining) return;
-    while (consumer.tasks.size < OPERATION_WORKER_CONCURRENCY) {
+    if (consumer.tasks.size < OPERATION_WORKER_CONCURRENCY) {
       const observation = { generation: consumer.generation };
       const startedAt = Date.now();
       const task = consume(environment, consumer, observation)
@@ -144,7 +163,8 @@ export function startOperationWorker(
     if (stopping || consumer === undefined || bg.draining) return;
     options.wakeObserver?.(environment);
     consumer.generation += 1;
-    startFreeConsumers(environment, consumer);
+    if (consumer.tasks.size === 0 || consumer.working > 0)
+      startFreeConsumers(environment, consumer);
   }
 
   const listener = listenForOperationNotifications(env, {

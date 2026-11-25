@@ -5,8 +5,8 @@ import { conflict } from "@/lib/errors";
 import { OPERATION_WORKER_BUDGET_MS } from "@/services/earn/operation-worker-budget";
 import { deferred } from "@/test/helpers/deferred";
 import { env } from "@/test/helpers/env";
+import { reconcileOperations } from "@/test/helpers/reconcile-operations";
 import type { Env } from "@/types/env";
-import { reconcileOperations } from "./reconcile-operations";
 
 const mocks = vi.hoisted(() => ({
   candidates: vi.fn(),
@@ -22,7 +22,16 @@ vi.mock("@/services/operations.service", () => ({
   createOperationsService: () => ({
     repository: {
       claimRecovery: mocks.claim,
-      listDueRecovery: mocks.candidates,
+      claimNextRecovery: async () => {
+        const candidate = (await mocks.candidates()).shift();
+        if (candidate === undefined) return null;
+        const scope: OperationScope = {
+          organizationId: candidate.organizationId,
+          projectId: candidate.projectId,
+          environment: "sandbox",
+        };
+        return { scope, claim: await mocks.claim(scope, candidate.id) };
+      },
       releaseRecovery: mocks.release,
       get: mocks.get,
       getAttempt: mocks.getAttempt,

@@ -24,7 +24,7 @@ export interface OperationNotificationListener {
  * handles missed hints. No notification contains tenant identity or permission to execute.
  */
 export function listenForOperationNotifications(
-  bindings: DatabaseBindings,
+  bindings: DatabaseBindings & { DATABASE_LISTENER_URL?: string | null },
   options: OperationNotificationOptions
 ): OperationNotificationListener {
   let stopped = false;
@@ -58,7 +58,12 @@ export function listenForOperationNotifications(
 
   async function connect(): Promise<void> {
     const client = new Client({
-      connectionString: getConnectionString(bindings),
+      connectionString:
+        bindings.DATABASE_LISTENER_URL?.trim() ||
+        process.env.DATABASE_LISTENER_URL?.trim() ||
+        getConnectionString(bindings),
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10_000,
       connectionTimeoutMillis: 5_000,
       query_timeout: 5_000,
       application_name: "sdp-operations-notifications",
@@ -101,8 +106,10 @@ export function listenForOperationNotifications(
       reconnectTimer = null;
       const client = current;
       current = null;
-      if (client !== null) close(client);
+      // pg.end() during pg.connect() can leave connect's promise unsettled.
+      // Its connection/query deadlines bound this wait; close after it settles.
       await connectionWork;
+      if (client !== null) close(client);
       await Promise.allSettled([...closing]);
     },
   };

@@ -45,6 +45,9 @@ export const earnCorePositionSchema = earnWalletPositionSchema.omit({ ownerAddre
   createdAt: nullableDate,
   discovered: z.boolean().optional(),
   costBasisKnown: z.boolean(),
+});
+/** Detail reads attach the floor needed for a paired wallet balance refresh. */
+export const earnCorePositionDetailSchema = earnCorePositionSchema.extend({
   balanceReadContext: earnBalanceReadContextSchema.optional(),
 });
 const summarySchema = earnWalletPositionSummaryResponse.shape.data.shape.summary;

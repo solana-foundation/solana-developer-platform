@@ -1007,6 +1007,9 @@ Each position's `id` is the `positionId` you [withdraw](/docs/earn/withdrawals)
 with; the [position object](/docs/earn/api-overview#position) lists its fields. Without `ownerAddress`, the list covers every position your key can see
 in the project. See [position filters](/docs/reference/api/earn/list-earn-core-positions).
 
+Tracked holdings verified empty during a read are omitted from the list. Keep
+tracking outstanding withdrawals through their operations.
+
 ## Read one position
 
 `GET /v1/earn/positions/{positionId}` returns one position, with the same fields
@@ -36520,7 +36523,7 @@ Source: https://platform.solana.com/docs/reference/api/earn/list-earn-core-posit
 
 `GET /v1/earn/positions`
 
-Without a filter, the page covers every position the key can see, and sourceType=address or sourceType=wallet narrows it. walletId filters to one SDP custody wallet instead. discover=true, with one owner filter, adds holdings in integrated strategies that SDP did not open, without importing ownership or inventing acquisition history. Unavailable live reads stay unavailable, never zero. includeSummary=true totals the whole selected scope; costBasisKnown and costBasisCoverage mark unknown earnings history. Pending queue shares and intermediate-token balances stay visible.
+Without a filter, the page covers every position the key can see, and sourceType=address or sourceType=wallet narrows it. walletId filters to one SDP custody wallet instead. discover=true, with one owner filter, adds holdings in integrated strategies that SDP did not open, without importing ownership or inventing acquisition history. Unavailable live reads stay unavailable, never zero. includeSummary=true totals the whole selected scope; costBasisKnown and costBasisCoverage mark unknown earnings history. Pending queue shares and intermediate-token balances stay visible. Tracked holdings verified empty during this read are omitted; an outstanding withdrawal remains visible through its operation.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
 
@@ -36637,16 +36640,6 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
       - **`discovered`** · `boolean`
 
       - **`costBasisKnown`** · `boolean` · required
-
-      - **`balanceReadContext`** · `object`
-
-        - **`afterMovementIds`** · `string[]` · required · max items 100
-
-        - **`minimumSlot`** · `integer` · required · min 0 · max 9007199254740991
-
-        - **`minimumSlotMovementId`** · `string`
-
-          On a position detail read, the accepted movement establishing minimumSlot. Retain this ID as that position's freshness floor instead of accumulating completed movements.
 
     - **`hasMore`** · `boolean` · required
 
@@ -36898,13 +36891,7 @@ r = requests.get("https://api.solana.com/v1/earn/positions",
         "source": {
           "ownerAddress": "11111111111111111111111111111111"
         },
-        "costBasisKnown": false,
-        "balanceReadContext": {
-          "afterMovementIds": [
-            "example"
-          ],
-          "minimumSlot": 1
-        }
+        "costBasisKnown": false
       }
     ],
     "hasMore": false,

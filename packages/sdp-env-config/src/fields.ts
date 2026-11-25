@@ -144,6 +144,16 @@ export const FIELDS: EnvField[] = [
     visibleWhen: isProvider("DATABASE_MODE", "external"),
   },
 
+  {
+    key: "DATABASE_LISTENER_URL",
+    section: "database",
+    kind: "url",
+    label: "Notification listener database URL",
+    help: "Direct or session-pooled connection to the same database, required when the external URL uses transaction pooling.",
+    pattern: /^postgres(ql)?:\/\//,
+    visibleWhen: isProvider("DATABASE_MODE", "external"),
+  },
+
   // Cache
   {
     key: "CACHE_MODE",

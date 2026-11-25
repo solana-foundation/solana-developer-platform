@@ -305,42 +305,76 @@ describe("shared Earn transaction observation", () => {
   it("partitions due work across replicas and fences stale releases after takeover", async () => {
     await Promise.all(Array.from({ length: 8 }, () => seedMovement()));
     const [one, two] = await Promise.all([
-      repository().claimDueObservations("sandbox", 4),
-      repository().claimDueObservations("sandbox", 4),
+      repository().scheduleDueObservations("sandbox", 4),
+      repository().scheduleDueObservations("sandbox", 4),
     ]);
     expect(one.rows).toHaveLength(4);
     expect(two.rows).toHaveLength(4);
     expect(new Set([...one.rows, ...two.rows].map((row) => row.id)).size).toBe(8);
-    expect((await repository().claimDueObservations("sandbox", 4)).rows).toHaveLength(0);
+    expect((await repository().scheduleDueObservations("sandbox", 4)).rows).toHaveLength(0);
     const row = one.rows[0];
     if (row === undefined) throw new Error("Missing claimed fixture");
+    const lease = await claimSelectedEarnObservations(getDb(env), "movement", [row]);
+    expect(lease.ids.size).toBe(1);
     expect((await claimSelectedEarnObservations(getDb(env), "movement", [row])).ids.size).toBe(0);
     await getDb(env).execute(
       "UPDATE earn_movements SET observation_claim_until = now() - interval '1 second', observation_due_at = now() - interval '1 second' WHERE id = ?",
       [row.id]
     );
-    const takeover = await repository().claimDueObservations("sandbox", 1);
+    const takeover = await repository().scheduleDueObservations("sandbox", 1);
     expect(takeover.rows.map((item) => item.id)).toEqual([row.id]);
     await releaseEarnObservation(getDb(env), "movement", row, one.token, 0);
-    expect((await repository().claimDueObservations("sandbox", 1)).rows).toHaveLength(0);
+    expect((await repository().scheduleDueObservations("sandbox", 1)).rows).toHaveLength(0);
     await releaseEarnObservation(getDb(env), "movement", row, takeover.token, 0);
-    expect((await repository().claimDueObservations("sandbox", 1)).rows).toHaveLength(1);
+    expect((await repository().scheduleDueObservations("sandbox", 1)).rows).toHaveLength(1);
   });
 
   it("prevents the recovery sweep from spending RPC on a fast-observer claim", async () => {
     const seeded = await seedMovement();
     finalized();
-    const claim = await repository().claimDueObservations("sandbox", 1);
+    const scheduled = await repository().scheduleDueObservations("sandbox", 1);
+    const claim = await repository().claimRecoveryObservations(scheduled.rows);
     const result = await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
       reconcileEarnVaultMovementBatch(env, [seeded.movement])
     );
     expect(result.claimed).toBe(0);
+    expect(result.skippedLeased).toBe(1);
     expect(rpc.calls).toHaveLength(0);
     await releaseEarnObservation(getDb(env), "movement", seeded.movement, claim.token, 0);
     await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
       reconcileEarnVaultMovementBatch(env, [seeded.movement])
     );
     expect((await readMovement(seeded.movement.id))?.status).toBe("finalized");
+  });
+
+  it("leaves recovery available while the fast observer waits on signature statuses", async () => {
+    const direct = await seedMovement();
+    const queued = await seedQueuedAction();
+    await postponeQueuedProviderReads();
+    rpc.respondSignatureStatuses(() => null);
+    rpc.answer("getEpochInfo", epochInfoResult({ absoluteSlot: 50, blockHeight: 50 }));
+    rpc.answer("sendTransaction", syntheticSignature(999));
+    const statuses = deferred<Array<solanaRpc.SignatureStatusInfo | null>>();
+    const read = vi.spyOn(solanaRpc, "getSignatureStatuses").mockReturnValueOnce(statuses.promise);
+    const observing = observe();
+    try {
+      await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(1));
+      const available = await repository().readRecoveryObservations([direct.movement]);
+      expect(available.rows).toHaveLength(1);
+      const recovered = await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+        reconcileEarnVaultMovementBatch(env, [direct.movement])
+      );
+      expect(recovered.resubmitted).toBe(1);
+      await queueRecovery();
+      expect(
+        rpc.requests
+          .filter(({ method }) => method === "sendTransaction")
+          .map(({ params }) => params[0])
+      ).toEqual([direct.movement.signed_transaction, queued.action.signed_transaction]);
+    } finally {
+      statuses.resolve([null, null]);
+      await observing;
+    }
   });
 
   it("releases unknown signatures before slow projections so recovery can rebroadcast", async () => {
@@ -449,12 +483,15 @@ describe("shared Earn transaction observation", () => {
       [ORG]
     );
     const fresh = await seedQueuedAction();
-    const first = await queue.claimDueObservations("sandbox", 4);
+    const first = await queue.scheduleDueObservations("sandbox", 4);
     expect(first).toMatchObject({ rows: [], scanned: 4 });
-    const next = await queue.claimDueObservations("sandbox", 4);
+    const next = await queue.scheduleDueObservations("sandbox", 4);
     expect(next.scanned).toBe(3);
     expect(next.rows.map(({ id }) => id)).toEqual([fresh.action.id]);
-    expect(await queue.claimDueObservations("sandbox", 4)).toMatchObject({ rows: [], scanned: 0 });
+    expect(await queue.scheduleDueObservations("sandbox", 4)).toMatchObject({
+      rows: [],
+      scanned: 0,
+    });
     expect(
       await getDb(env).queryMany(
         `SELECT action.status, request.status AS request_status,
@@ -486,7 +523,10 @@ describe("shared Earn transaction observation", () => {
       "UPDATE earn_vault_withdrawal_request_actions SET observation_due_at = NULL WHERE id = ?",
       [queued.action.id]
     );
-    expect(await queue.claimDueObservations("sandbox", 64)).toMatchObject({ rows: [], scanned: 0 });
+    expect(await queue.scheduleDueObservations("sandbox", 64)).toMatchObject({
+      rows: [],
+      scanned: 0,
+    });
     expect(
       (await queue.claimRecoveryObservations([queued.action])).rows.map(({ id }) => id)
     ).toEqual([queued.action.id]);
@@ -499,7 +539,7 @@ describe("shared Earn transaction observation", () => {
     expect(rpc.calls).toHaveLength(0);
     await observe();
     expect((await readMovement(seeded.movement.id))?.status).toBe("finalized");
-    expect((await repository().claimDueObservations("sandbox", 64)).rows).toHaveLength(0);
+    expect((await repository().scheduleDueObservations("sandbox", 64)).rows).toHaveLength(0);
   });
 
   it("projects authenticated queued creation promptly without claiming a payout", async () => {
@@ -517,10 +557,9 @@ describe("shared Earn transaction observation", () => {
     ).toMatchObject({ status: "pending", assets_paid: null, fulfilled_at: null });
     expect(
       (
-        await createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env)).claimDueObservations(
-          "sandbox",
-          64
-        )
+        await createPostgresEarnVaultWithdrawalRequestsRepository(
+          getDb(env)
+        ).scheduleDueObservations("sandbox", 64)
       ).rows
     ).toHaveLength(0);
   });
@@ -627,7 +666,7 @@ describe("shared Earn transaction observation", () => {
     ).toEqual({ observation_claim_token: null, backed_off: true });
   });
 
-  it("backs off old projection failures without slowing fresh transactions", async () => {
+  it("hands old projection failures to recovery without slowing fresh transactions", async () => {
     const recent = await seedQueuedAction();
     const older = await seedQueuedAction();
     await getDb(env).execute(
@@ -648,15 +687,16 @@ describe("shared Earn transaction observation", () => {
     expect(required(delays.find(({ id }) => id === recent.action.id)).seconds).toBeLessThanOrEqual(
       5
     );
-    expect(required(delays.find(({ id }) => id === older.action.id)).seconds).toBeGreaterThan(50);
-    expect(required(delays.find(({ id }) => id === older.action.id)).seconds).toBeLessThanOrEqual(
-      60
-    );
+    expect(required(delays.find(({ id }) => id === older.action.id)).seconds).toBeNull();
+    const recoverable = await createPostgresEarnVaultWithdrawalRequestsRepository(
+      getDb(env)
+    ).readRecoveryObservations([older.action]);
+    expect(recoverable.rows.map(({ id }) => id)).toEqual([older.action.id]);
     expect(await observe()).toEqual({ claimed: 0, saturated: false });
     expect(rpc.requests.filter(({ method }) => method === "getSignatureStatuses")).toHaveLength(1);
   });
 
-  it("backs off old rows after a shared status-read failure", async () => {
+  it("hands old rows to recovery after a shared status-read failure", async () => {
     const older = await seedMovement();
     await getDb(env).execute("UPDATE earn_movements SET created_at = ? WHERE id = ?", [
       new Date(Date.now() - 180_000).toISOString(),
@@ -670,8 +710,8 @@ describe("shared Earn transaction observation", () => {
         [older.movement.id]
       )
     );
-    expect(delay.seconds).toBeGreaterThan(50);
-    expect(delay.seconds).toBeLessThanOrEqual(60);
+    expect(delay.seconds).toBeNull();
+    expect((await repository().readRecoveryObservations([older.movement])).rows).toHaveLength(1);
   });
 
   it("reserves queued action capacity when slow direct receipts exhaust a pass", async () => {
@@ -711,7 +751,9 @@ describe("shared Earn transaction observation", () => {
         })
       )?.status
     ).toBe("pending");
-    expect((await repository().claimDueObservations("sandbox", 64)).rows.length).toBeGreaterThan(0);
+    expect((await repository().scheduleDueObservations("sandbox", 64)).rows.length).toBeGreaterThan(
+      0
+    );
   });
 
   it("keeps provider-order economic settlement pending after chain finality", async () => {
@@ -723,7 +765,7 @@ describe("shared Earn transaction observation", () => {
       settled_at: null,
     });
     expect((await readMovement(seeded.movement.id))?.chain_finalized_at).not.toBeNull();
-    expect((await repository().claimDueObservations("sandbox", 64)).rows).toHaveLength(0);
+    expect((await repository().scheduleDueObservations("sandbox", 64)).rows).toHaveLength(0);
   });
 });
 
@@ -821,6 +863,7 @@ describe("queued recovery shared evidence", () => {
 
   it("leaves every action unleased while its shared RPC waits", async () => {
     const seeded = await Promise.all(Array.from({ length: 9 }, () => seedQueuedAction()));
+    await postponeQueuedProviderReads();
     const statuses = deferred<Array<solanaRpc.SignatureStatusInfo | null>>();
     const read = vi.spyOn(solanaRpc, "getSignatureStatuses").mockReturnValueOnce(statuses.promise);
     const recovery = queueRecovery();
@@ -834,7 +877,7 @@ describe("queued recovery shared evidence", () => {
       ).toEqual({ claimed: 0 });
       const fast = await createPostgresEarnVaultWithdrawalRequestsRepository(
         getDb(env)
-      ).claimDueObservations("sandbox", 64);
+      ).scheduleDueObservations("sandbox", 64);
       expect(new Set(fast.rows.map(({ id }) => id))).toEqual(
         new Set(seeded.map(({ action }) => action.id))
       );
@@ -870,7 +913,7 @@ describe("queued recovery shared evidence", () => {
       await postponeQueuedProviderReads();
       const fast = await createPostgresEarnVaultWithdrawalRequestsRepository(
         getDb(env)
-      ).claimDueObservations("sandbox", 64);
+      ).scheduleDueObservations("sandbox", 64);
       expect(fast.rows).toHaveLength(13);
       const fresh = fast.rows.find(({ id }) => id === newcomer.action.id);
       if (!fresh) throw new Error("New action was blocked behind recovery");

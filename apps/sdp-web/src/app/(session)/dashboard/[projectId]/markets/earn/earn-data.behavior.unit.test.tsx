@@ -388,3 +388,22 @@ it("stops starting position groups and proof batches after either reader fails",
   expect(detail).toHaveBeenCalledTimes(2);
   expect(result.current.positions?.[0]?.tokenValue).toBe("10");
 });
+
+it("refreshes the full portfolio if completion arrives before the initial collection", async () => {
+  const { requests } = stubPositionReads();
+  const detail = vi.spyOn(earnCoreClient, "position");
+  const { result } = renderHook(() => useEarnVaultPositions(), { wrapper });
+  await waitFor(() => expect(requests).toHaveLength(1));
+  let refreshing: Promise<unknown> | undefined;
+  act(() => {
+    refreshing = result.current.refresh(["deposit"], new Map([["deposit", "new-position"]]));
+  });
+  await waitFor(() => expect(requests).toHaveLength(2));
+  expect(detail).not.toHaveBeenCalled();
+  await act(async () => {
+    requests[1]?.answer();
+    await refreshing;
+  });
+  expect(result.current.positions?.some(({ id }) => id === "position")).toBe(true);
+  await act(async () => requests[0]?.answer());
+});

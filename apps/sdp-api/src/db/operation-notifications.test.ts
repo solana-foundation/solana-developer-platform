@@ -78,6 +78,16 @@ describe("operation commit notification session", () => {
     expect(mocks.disconnected).not.toHaveBeenCalled();
   });
 
+  it("uses a separate direct listener URL while normal queries keep their pooler URL", async () => {
+    listener = listenForOperationNotifications(
+      { ...bindings, DATABASE_LISTENER_URL: "postgresql://localhost:5433/sdp-notification-test" },
+      mocks.options
+    );
+    await Promise.all(mocks.tasks);
+    expect(required(mocks.clients[0]).port).toBe(5433);
+    expect(mocks.connected).toHaveBeenCalledTimes(1);
+  });
+
   it("reconnects and rescans after session failure without trusting missed notifications", async () => {
     await start();
     const first = required(mocks.clients[0]);
@@ -123,6 +133,7 @@ describe("operation commit notification session", () => {
     });
     listener = listenForOperationNotifications(bindings, mocks.options);
     const stopping = listener.stop();
+    expect(mocks.end).not.toHaveBeenCalled();
     connecting.resolve();
     await stopping;
     expect(mocks.query).not.toHaveBeenCalled();

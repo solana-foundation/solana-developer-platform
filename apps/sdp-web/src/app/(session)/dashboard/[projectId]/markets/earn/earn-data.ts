@@ -594,6 +594,9 @@ export function useEarnVaultPositions() {
         }
         movementPositionIds.current = retained;
         afterMovementIds.current = [...new Set([...afterMovementIds.current, ...movementIds])];
+        // A detail response cannot establish the rest of an uninitialized portfolio.
+        if (latest.current === undefined)
+          return mutate(read(), { revalidate: false, throwOnError: true });
         const targets = new Set(movementIds.map((id) => positionIds.get(id)));
         const proofIds = afterMovementIds.current.filter((id) => targets.has(retained.get(id)));
         const key = `targeted:${vaultPositionsReadKey(proofIds, retained)}`;

@@ -58,7 +58,9 @@ carry only an environment hint. Durable rows, current principal authorization
 and fenced claims remain the authority to execute.
 
 An observation-only lane shares this wakeup and the minute movement sweep's
-per-row claims. It batches transaction status reads without signing,
+per-row processing claims. It reads transaction statuses before acquiring a
+processing lease, so a slow RPC leaves resend candidates available. It batches
+transaction status reads without signing,
 rebroadcasting or inferring expiry. Signature misses release their claims before
 slow receipt/provider projections, leaving recovery free to retry original
 bytes. The cron service's environment and shutdown gates apply to both lanes.

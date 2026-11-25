@@ -31,8 +31,8 @@ polling queued and active operations, including custody providers that require
 a signature in another application. Read requests never trigger submission.
 Recent and foreground work shares one `operationIds` batch per second, capped
 at 100 IDs per request and scoped to the dashboard cache. Recent work stays hot
-for 30 seconds, then backs off to five seconds until two minutes and 15 seconds
-afterward. The active feed stays at 15 seconds. Never add per-row poll timers.
+for 30 seconds, then backs off to five seconds until two minutes and stops.
+The active feed stays at 15 seconds; explicitly reopening restores a fast watch. Never add per-row poll timers.
 Open dialogs subscribe to that same feed cache for provider-settlement updates;
 they must not freeze after their fast watch stops or add another provider poller.
 Stop an ID's automatic watch after three successful batch reads omit it. Keep

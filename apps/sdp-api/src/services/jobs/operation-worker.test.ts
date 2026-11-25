@@ -51,6 +51,7 @@ function claimed(id: string, environment: SdpEnvironment = "sandbox"): ClaimedOp
     token: `claim-${id}`,
     fence: 1,
     purpose: "execute",
+    firstExecutionClaim: true,
     recoveryRequired: false,
     attempt: {
       id: `attempt-${id}`,
@@ -192,6 +193,33 @@ describe("database-notified operation consumers", () => {
     expect(wakeObserver).toHaveBeenCalledTimes(3);
   });
 
+  it("makes one due scan for an idle wake", async () => {
+    const consumer = start();
+    consumer.wake("sandbox");
+    await mocks.bg.awaitAll();
+    expect(mocks.claim).toHaveBeenCalledTimes(1);
+  });
+
+  it("counts pickup only on an attempt's durable first execution claim", async () => {
+    vi.useFakeTimers();
+    const first = claimed("first");
+    const retry = claimed("retry");
+    retry.claim.firstExecutionClaim = false;
+    mocks.claim.mockResolvedValueOnce(first).mockResolvedValueOnce(retry);
+    const consumer = start();
+    consumer.wake("sandbox");
+    await mocks.bg.awaitAll();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(mocks.logEvent).toHaveBeenCalledWith(
+      "info",
+      expect.objectContaining({
+        event: "sdp_api_earn_worker_health",
+        worker: "operations",
+        pickups: 1,
+      })
+    );
+  });
+
   it("scans after LISTEN and reconnect, restoring only the worker entry identity", async () => {
     const next = claimed("accepted");
     mocks.claim.mockResolvedValueOnce(next);
@@ -228,7 +256,7 @@ describe("database-notified operation consumers", () => {
     const consumer = start();
     expect(consumer.wake("sandbox")).toBeUndefined();
     await vi.waitFor(() => expect(mocks.execute).toHaveBeenCalledTimes(1));
-    await vi.waitFor(() => expect(mocks.claim).toHaveBeenCalledTimes(4));
+    await vi.waitFor(() => expect(mocks.claim).toHaveBeenCalledTimes(2));
     // Model the next periodic recovery tick; it cannot await the blocked signer.
     mocks.claim.mockResolvedValueOnce(claimed("new"));
     expect(consumer.wake("sandbox")).toBeUndefined();
@@ -254,15 +282,15 @@ describe("database-notified operation consumers", () => {
     expect(new Set(mocks.execute.mock.calls.map((call) => call[2].operation.id)).size).toBe(12);
   });
 
-  it("rescans a coalesced hint while all four empty claims are in flight", async () => {
-    const empty = Array.from({ length: 4 }, () => deferred<ClaimedOperation | null>());
+  it("rescans a coalesced hint while an empty claim is in flight", async () => {
+    const empty = Array.from({ length: 1 }, () => deferred<ClaimedOperation | null>());
     for (const claim of empty) mocks.claim.mockReturnValueOnce(claim.promise);
     start();
     mocks.options().wake("sandbox");
-    await vi.waitFor(() => expect(mocks.claim).toHaveBeenCalledTimes(4));
+    await vi.waitFor(() => expect(mocks.claim).toHaveBeenCalledTimes(1));
     mocks.claim.mockResolvedValueOnce(claimed("after-commit"));
     mocks.options().wake("sandbox");
-    expect(mocks.claim).toHaveBeenCalledTimes(4);
+    expect(mocks.claim).toHaveBeenCalledTimes(1);
     for (const claim of empty) claim.resolve(null);
     await vi.waitFor(() => expect(mocks.execute).toHaveBeenCalledTimes(1));
   });
@@ -273,7 +301,7 @@ describe("database-notified operation consumers", () => {
     mocks.claim.mockReturnValueOnce(acquiring.promise);
     const consumer = start();
     consumer.wake("sandbox");
-    await vi.waitFor(() => expect(mocks.claim).toHaveBeenCalledTimes(4));
+    await vi.waitFor(() => expect(mocks.claim).toHaveBeenCalledTimes(1));
     const stopping = consumer.stop();
     acquiring.resolve(next);
     await stopping;

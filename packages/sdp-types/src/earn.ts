@@ -1,3 +1,5 @@
+import type { z } from "zod";
+import type { earnBalanceReadContextSchema } from "./earn-wire";
 import type { SolanaCluster, WellKnownTokenSymbol } from "./well-known-tokens";
 import { WELL_KNOWN_TOKENS } from "./well-known-tokens";
 
@@ -285,12 +287,7 @@ export interface EarnVaultPositionsPage {
   hasMore: boolean;
   nextCursor: string | null;
   /** Present when afterMovementIds constrained reads of their affected positions. */
-  balanceReadContext?: {
-    afterMovementIds: string[];
-    minimumSlot: number;
-    /** Single-position reads identify the movement proving the strongest floor. */
-    minimumSlotMovementId?: string;
-  };
+  balanceReadContext?: z.infer<typeof earnBalanceReadContextSchema>;
 }
 
 /** One live position held by a partner end user's wallet. */

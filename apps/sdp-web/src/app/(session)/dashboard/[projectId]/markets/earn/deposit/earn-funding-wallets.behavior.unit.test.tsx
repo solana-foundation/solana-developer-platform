@@ -275,7 +275,9 @@ describe("shared funding wallet coordination", () => {
       older.complete("10");
       await rejectedOld;
     });
-    expect(result.current.treasury.wallets).toBe(original);
+    expect(result.current.treasury.wallets).toEqual(original);
+    expect(result.current.treasury.error).toBeUndefined();
+    expect(result.current.dialog.error).toBeUndefined();
     fetchMock.mockResolvedValueOnce(
       Response.json({
         data: {

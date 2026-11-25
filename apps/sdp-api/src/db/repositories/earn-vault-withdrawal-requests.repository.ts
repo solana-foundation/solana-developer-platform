@@ -34,9 +34,9 @@ import {
 } from "@/db/repositories/earn-redemption-release.repository";
 import { AppError, conflict } from "@/lib/errors";
 import {
-  claimEarnObservations,
   claimSelectedEarnObservations,
   readEarnRecoveryObservations,
+  scheduleEarnObservations,
 } from "./earn-observation-claims";
 
 /** A signed external build can recover this conflict with finalized evidence. */
@@ -415,14 +415,17 @@ export interface EarnVaultWithdrawalRequestsRepository extends CurrentRedemption
   /** Read fresh unleased candidates for one shared recovery observation. */
   readRecoveryObservations(
     rows: readonly EarnVaultWithdrawalRequestActionRow[]
-  ): Promise<EarnVaultWithdrawalRequestActionRow[]>;
+  ): Promise<{ rows: EarnVaultWithdrawalRequestActionRow[]; skippedLeased: number }>;
   /** Reserve recovery candidates and return their current state after taking ownership. */
-  claimRecoveryObservations(rows: readonly EarnVaultWithdrawalRequestActionRow[]): Promise<{
+  claimRecoveryObservations(
+    rows: readonly EarnVaultWithdrawalRequestActionRow[],
+    leaseSeconds?: number
+  ): Promise<{
     rows: EarnVaultWithdrawalRequestActionRow[];
     token: string;
   }>;
-  /** Claim signed creation/cancellation actions, including unfinished finality projection. */
-  claimDueObservations(
+  /** Rotate signed-action scan hints without taking processing leases. */
+  scheduleDueObservations(
     environment: SdpEnvironment,
     limit: number
   ): Promise<{
@@ -1788,16 +1791,22 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
     },
 
     async readRecoveryObservations(rows) {
-      return (await readEarnRecoveryObservations(db, "withdrawal_action", rows)).map(mapAction);
+      const snapshot = await readEarnRecoveryObservations(db, "withdrawal_action", rows);
+      return { ...snapshot, rows: snapshot.rows.map(mapAction) };
     },
 
-    async claimRecoveryObservations(rows) {
-      const claimed = await claimSelectedEarnObservations(db, "withdrawal_action", rows);
+    async claimRecoveryObservations(rows, leaseSeconds) {
+      const claimed = await claimSelectedEarnObservations(
+        db,
+        "withdrawal_action",
+        rows,
+        leaseSeconds
+      );
       return { rows: claimed.rows.map(mapAction), token: claimed.token };
     },
 
-    async claimDueObservations(environment, limit) {
-      const claimed = await claimEarnObservations(db, "withdrawal_action", environment, limit);
+    async scheduleDueObservations(environment, limit) {
+      const claimed = await scheduleEarnObservations(db, "withdrawal_action", environment, limit);
       return { rows: claimed.rows.map(mapAction), scanned: claimed.scanned, token: claimed.token };
     },
 

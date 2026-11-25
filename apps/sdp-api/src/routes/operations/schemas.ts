@@ -34,6 +34,7 @@ export const operationsListQuerySchema = z
           ids.every((id) => id.length > 0 && id.length <= 256 && !/\s/.test(id))
         );
       }, "Choose between 1 and 100 comma-separated operation IDs")
+      .transform((value) => [...new Set(value.split(","))])
       .describe(
         "Read up to 100 known operations together. All source visibility and other filters still apply."
       )

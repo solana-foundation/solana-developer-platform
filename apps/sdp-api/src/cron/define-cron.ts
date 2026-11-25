@@ -1,3 +1,4 @@
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { Env } from "@/types/env";
 
 /**
@@ -14,6 +15,11 @@ import type { Env } from "@/types/env";
 const CRON_MONEY_EFFECTS = ["starts", "finishes", "observes"] as const;
 
 type CronMoneyEffect = (typeof CRON_MONEY_EFFECTS)[number];
+
+/** Runtime ports injected into wake-only definitions by the cron runner. */
+export interface CronRunContext {
+  wakeOperations(environment: SdpEnvironment): void;
+}
 
 /**
  * One named piece of recurring background work, run by the Worker (ADR 0011).
@@ -32,9 +38,11 @@ export type CronDefinition = {
   scope: "global" | "cluster";
   effect: CronMoneyEffect;
   enabled: (env: Env) => boolean;
-  run: (env: Env) => Promise<void>;
   runOnStart?: boolean;
-};
+} & (
+  | { wakeupOnly: true; run: (env: Env, context: CronRunContext) => Promise<void> }
+  | { wakeupOnly?: false; run: (env: Env) => Promise<void> }
+);
 
 /**
  * Declare a Cron Definition. The runner registers it; the definition only says what it is.
@@ -42,7 +50,7 @@ export type CronDefinition = {
  * @param definition - The definition.
  * @returns The same definition.
  */
-export function defineCron(definition: CronDefinition): CronDefinition {
+export function defineCron<const T extends CronDefinition>(definition: T): T {
   return definition;
 }
 

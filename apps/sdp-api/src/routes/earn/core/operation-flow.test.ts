@@ -58,7 +58,6 @@ import type {
   WalletWithdrawalBuildInput,
 } from "@/services/earn/vault-wallet.service";
 import * as vaultWallet from "@/services/earn/vault-wallet.service";
-import { reconcileOperations } from "@/services/jobs/reconcile-operations";
 import * as signers from "@/services/solana/signer";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
@@ -69,6 +68,7 @@ import {
   seedEarnAuthzTenant,
 } from "@/test/helpers/earn";
 import { env } from "@/test/helpers/env";
+import { reconcileOperations } from "@/test/helpers/reconcile-operations";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";

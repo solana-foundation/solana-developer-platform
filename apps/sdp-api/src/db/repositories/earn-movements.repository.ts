@@ -25,9 +25,9 @@ import {
 import { sqlLiteralList } from "@/db/postgres-utils";
 import { conflict } from "@/lib/errors";
 import {
-  claimEarnObservations,
   claimSelectedEarnObservations,
   readEarnRecoveryObservations,
+  scheduleEarnObservations,
 } from "./earn-observation-claims";
 
 /**
@@ -387,14 +387,19 @@ export interface EarnMovementsRepository {
     vaultAddress: string;
   }): Promise<string>;
   /** Read fresh unleased candidates for one shared recovery observation. */
-  readRecoveryObservations(rows: readonly EarnMovementRow[]): Promise<EarnMovementRow[]>;
+  readRecoveryObservations(
+    rows: readonly EarnMovementRow[]
+  ): Promise<{ rows: EarnMovementRow[]; skippedLeased: number }>;
   /** Reserve recovery candidates and return their current state after taking ownership. */
-  claimRecoveryObservations(rows: readonly EarnMovementRow[]): Promise<{
+  claimRecoveryObservations(
+    rows: readonly EarnMovementRow[],
+    leaseSeconds?: number
+  ): Promise<{
     rows: EarnMovementRow[];
     token: string;
   }>;
-  /** Claim due signed rows for the shared fast observation worker. */
-  claimDueObservations(
+  /** Rotate due fast-scan hints without taking processing leases. */
+  scheduleDueObservations(
     environment: SdpEnvironment,
     limit: number
   ): Promise<{
@@ -1443,16 +1448,17 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
     },
 
     async readRecoveryObservations(rows) {
-      return (await readEarnRecoveryObservations(db, "movement", rows)).map(mapMovementRow);
+      const snapshot = await readEarnRecoveryObservations(db, "movement", rows);
+      return { ...snapshot, rows: snapshot.rows.map(mapMovementRow) };
     },
 
-    async claimRecoveryObservations(rows) {
-      const claimed = await claimSelectedEarnObservations(db, "movement", rows);
+    async claimRecoveryObservations(rows, leaseSeconds) {
+      const claimed = await claimSelectedEarnObservations(db, "movement", rows, leaseSeconds);
       return { rows: claimed.rows.map(mapMovementRow), token: claimed.token };
     },
 
-    async claimDueObservations(environment, limit) {
-      const claimed = await claimEarnObservations(db, "movement", environment, limit);
+    async scheduleDueObservations(environment, limit) {
+      const claimed = await scheduleEarnObservations(db, "movement", environment, limit);
       return {
         rows: claimed.rows.map(mapMovementRow),
         scanned: claimed.scanned,

@@ -13,8 +13,10 @@ import { FINALIZED_CURRENT_REDEMPTION_RELEASE_COVERS_REQUEST_SQL } from "./earn-
 /** Scheduler ownership only; financial transitions stay in their domain repositories. */
 export type EarnObservationKind = "movement" | "withdrawal_action";
 
-/** A short claim spans one bounded observation pass, including its RPC reads. */
-export const EARN_OBSERVATION_LEASE_SECONDS = 60;
+/** Recovery can perform slower provider reads; fast projections have a four-second pass budget. */
+const EARN_RECOVERY_LEASE_SECONDS = 60;
+/** Four-second fast pass plus bounded projection and release headroom. */
+export const EARN_FAST_OBSERVATION_LEASE_SECONDS = 10;
 
 const tables = {
   movement: "earn_movements",
@@ -41,8 +43,8 @@ export const EARN_OBSERVATION_PREDICATES = {
 
 const predicates = EARN_OBSERVATION_PREDICATES;
 
-/** Claim disjoint due rows without holding a database transaction during RPC work. */
-export async function claimEarnObservations(
+/** Rotate fast scan hints without leasing rows away from resend/expiry recovery. */
+export async function scheduleEarnObservations(
   db: DatabaseClient,
   kind: EarnObservationKind,
   environment: SdpEnvironment,
@@ -54,7 +56,7 @@ export async function claimEarnObservations(
   const token = randomUUID();
   // Scan only the indexed page before checking parent/provider eligibility.
   // Retiring obsolete hints prevents settled parent history accumulating at
-  // the head of every fast scan. Legacy NULL actions stay with minute recovery.
+  // the head of every fast scan. NULL hints stay with minute recovery.
   const candidatePredicate =
     kind === "movement"
       ? predicates.movement
@@ -64,7 +66,7 @@ export async function claimEarnObservations(
     `WITH candidates AS MATERIALIZED (
       SELECT item.id FROM ${tables[kind]} item
       WHERE ${candidatePredicate} AND item.environment = ?
-        AND (item.observation_due_at IS NULL OR item.observation_due_at <= now())
+        AND item.observation_due_at <= now()
         AND (item.observation_claim_until IS NULL OR item.observation_claim_until <= now())
       ORDER BY item.observation_due_at NULLS FIRST, item.id LIMIT ?
       FOR UPDATE OF item SKIP LOCKED
@@ -73,12 +75,11 @@ export async function claimEarnObservations(
       FROM ${tables[kind]} item JOIN candidates ON item.id = candidates.id
     ) UPDATE ${tables[kind]} item
       SET observation_claim_token = CASE WHEN decisions.eligible THEN ? ELSE NULL END,
-          observation_claim_until = CASE WHEN decisions.eligible
-            THEN now() + make_interval(secs => ?) ELSE NULL END,
+          observation_claim_until = NULL,
           observation_due_at = CASE WHEN decisions.eligible
-            THEN now() + make_interval(secs => ${EARN_OBSERVATION_LEASE_SECONDS}) ELSE NULL END
+            THEN now() + make_interval(secs => ?) ELSE NULL END
       FROM decisions WHERE item.id = decisions.id RETURNING item.*`,
-    [environment, limit, token, EARN_OBSERVATION_LEASE_SECONDS]
+    [environment, limit, token, EARN_FAST_OBSERVATION_LEASE_SECONDS]
   );
   return {
     rows: scanned.filter((row) => row.observation_claim_token === token),
@@ -92,15 +93,14 @@ export async function readEarnRecoveryObservations(
   db: DatabaseClient,
   kind: EarnObservationKind,
   rows: readonly { id: string; organization_id: string; environment: SdpEnvironment }[]
-): Promise<Record<string, unknown>[]> {
-  if (rows.length === 0) return [];
-  return db.queryMany<Record<string, unknown>>(
-    `SELECT item.* FROM ${tables[kind]} item
+): Promise<{ rows: Record<string, unknown>[]; skippedLeased: number }> {
+  if (rows.length === 0) return { rows: [], skippedLeased: 0 };
+  const observed = await db.queryMany<Record<string, unknown>>(
+    `SELECT item.*, (item.observation_claim_until > now()) IS TRUE AS observation_leased FROM ${tables[kind]} item
       JOIN unnest(?::text[], ?::text[], ?::text[]) AS selected(id, organization_id, environment)
         ON item.id = selected.id AND item.organization_id = selected.organization_id
           AND item.environment = selected.environment
       WHERE ${predicates[kind]}
-        AND (item.observation_claim_until IS NULL OR item.observation_claim_until <= now())
       ORDER BY item.id`,
     [
       rows.map((row) => row.id),
@@ -108,13 +108,16 @@ export async function readEarnRecoveryObservations(
       rows.map((row) => row.environment),
     ]
   );
+  const available = observed.filter((row) => row.observation_leased !== true);
+  return { rows: available, skippedLeased: observed.length - available.length };
 }
 
 /** Reserve only the recovery rows whose reducers are ready to run after shared observation. */
 export async function claimSelectedEarnObservations(
   db: DatabaseClient,
   kind: EarnObservationKind,
-  rows: readonly { id: string; organization_id: string; environment: SdpEnvironment }[]
+  rows: readonly { id: string; organization_id: string; environment: SdpEnvironment }[],
+  leaseSeconds = EARN_RECOVERY_LEASE_SECONDS
 ): Promise<{ rows: Record<string, unknown>[]; ids: Set<string>; token: string }> {
   const token = randomUUID();
   const claimed = await db.queryMany<{ id: string } & Record<string, unknown>>(
@@ -128,14 +131,15 @@ export async function claimSelectedEarnObservations(
       ORDER BY item.id FOR UPDATE OF item SKIP LOCKED
     ) UPDATE ${tables[kind]} item SET observation_claim_token = ?,
       observation_claim_until = now() + make_interval(secs => ?),
-          observation_due_at = now() + make_interval(secs => ${EARN_OBSERVATION_LEASE_SECONDS})
+          observation_due_at = now() + make_interval(secs => ?)
       FROM candidates WHERE item.id = candidates.id RETURNING item.*`,
     [
       rows.map((row) => row.id),
       rows.map((row) => row.organization_id),
       rows.map((row) => row.environment),
       token,
-      EARN_OBSERVATION_LEASE_SECONDS,
+      leaseSeconds,
+      leaseSeconds,
     ]
   );
   return { rows: claimed, ids: new Set(claimed.map((row) => row.id)), token };
@@ -151,11 +155,11 @@ export async function renewEarnObservation(
   const renewed = await db.queryOne<{ id: string }>(
     `UPDATE ${tables[kind]} item
       SET observation_claim_until = now() + make_interval(secs => ?),
-          observation_due_at = now() + make_interval(secs => ${EARN_OBSERVATION_LEASE_SECONDS})
+          observation_due_at = now() + make_interval(secs => ${EARN_RECOVERY_LEASE_SECONDS})
       WHERE id = ? AND organization_id = ? AND environment = ?
         AND observation_claim_token = ? AND observation_claim_until > now()
         AND ${predicates[kind]} RETURNING id`,
-    [EARN_OBSERVATION_LEASE_SECONDS, row.id, row.organization_id, row.environment, token]
+    [EARN_RECOVERY_LEASE_SECONDS, row.id, row.organization_id, row.environment, token]
   );
   return renewed !== null;
 }
@@ -166,7 +170,7 @@ export function releaseEarnObservation(
   kind: EarnObservationKind,
   row: { id: string; organization_id: string; environment: SdpEnvironment },
   token: string,
-  delayMs: number
+  delayMs: number | null
 ): Promise<void> {
   return releaseEarnObservations(db, kind, [row], token, delayMs);
 }
@@ -177,13 +181,13 @@ export async function releaseEarnObservations(
   kind: EarnObservationKind,
   rows: readonly { id: string; organization_id: string; environment: SdpEnvironment }[],
   token: string,
-  delayMs: number
+  delayMs: number | null
 ): Promise<void> {
   await db.execute(
     `UPDATE ${tables[kind]} item SET observation_claim_token = NULL,
       observation_claim_until = NULL,
       observation_due_at = CASE WHEN ${predicates[kind]}
-        THEN now() + (? * interval '1 millisecond') ELSE NULL END
+        THEN now() + (?::double precision * interval '1 millisecond') ELSE NULL END
       FROM unnest(?::text[], ?::text[], ?::text[]) AS owned(id, organization_id, environment)
       WHERE item.id = owned.id AND item.organization_id = owned.organization_id
         AND item.environment = owned.environment AND item.observation_claim_token = ?`,
@@ -198,8 +202,9 @@ export async function releaseEarnObservations(
 }
 
 /** Recent signatures stay responsive; old or unreadable work does not monopolize RPC. */
-export function earnObservationDelay(createdAt: string, failed: boolean): number {
+export function earnObservationDelay(createdAt: string, failed: boolean): number | null {
   const recent = Date.now() - Date.parse(createdAt) < 120_000;
-  if (failed) return recent ? 5_000 : 60_000;
+  // Old failing work leaves the hot lane; minute recovery remains responsible.
+  if (failed) return recent ? 5_000 : null;
   return recent ? 250 : 30_000;
 }
