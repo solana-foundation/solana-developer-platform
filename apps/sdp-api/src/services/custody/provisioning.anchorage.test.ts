@@ -88,8 +88,5 @@ function createRuntime(fetch: typeof globalThis.fetch): CustodyProvisioningRunti
     fetch,
     sleep: async () => undefined,
     now: () => 0,
-    randomUUID: () => "test-uuid",
-    getRandomValues: (values) => values,
-    sha256: (data) => crypto.subtle.digest("SHA-256", new Uint8Array(data)),
   };
 }

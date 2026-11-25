@@ -24,10 +24,7 @@ function runtime(fetch: CustodyProvisioningRuntime["fetch"]): CustodyProvisionin
   return {
     fetch,
     now: Date.now,
-    randomUUID: () => crypto.randomUUID(),
     sleep: async () => {},
-    getRandomValues: (data) => crypto.getRandomValues(new Uint8Array(data)),
-    sha256: (data) => crypto.subtle.digest("SHA-256", new Uint8Array(data)),
   };
 }
 
