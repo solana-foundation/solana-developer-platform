@@ -290,7 +290,7 @@ describe("Fireblocks BYOK transaction proposals", () => {
       });
       expect(fetch).toHaveBeenCalledTimes(4);
       expect(String(required(fetch.mock.calls[3])[0])).toMatch(
-        /^https:\/\/fireblocks\.example\.test\/v1\/transactions\/external_tx_id\/sdp-sign-/
+        /^https:\/\/api\.fireblocks\.io\/v1\/transactions\/external_tx_id\/sdp-sign-/
       );
     }
   );
