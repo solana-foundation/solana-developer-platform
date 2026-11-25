@@ -742,16 +742,23 @@ describe("TreasurySolutionsWorkspace", () => {
     const response = new Promise<Operation>((resolve) => {
       finish = resolve;
     });
-    const list = vi.spyOn(earnCoreClient, "operations").mockImplementation(async (query) => ({
-      operations: query?.operationIds
-        ? [await response]
-        : query?.status === "active"
-          ? ++activeReads === 1
-            ? [pending]
-            : []
-          : recent,
-      nextCursor: null,
-    }));
+    const list = vi.spyOn(earnCoreClient, "operations").mockImplementation(async (query) => {
+      let responseCase: "selected" | "active" | "recent" = "recent";
+      if (query?.operationIds) responseCase = "selected";
+      else if (query?.status === "active") responseCase = "active";
+      switch (responseCase) {
+        case "selected":
+          return { operations: [await response], nextCursor: null };
+        case "active":
+          return { operations: ++activeReads === 1 ? [pending] : [], nextCursor: null };
+        case "recent":
+          return { operations: recent, nextCursor: null };
+        default: {
+          const unexpected: never = responseCase;
+          throw new Error(`Unexpected operations response: ${unexpected}`);
+        }
+      }
+    });
     let poll: () => Promise<unknown> = async () => undefined;
     const cache = new Map();
     try {
