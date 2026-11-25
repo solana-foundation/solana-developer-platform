@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 import * as crypto from "node:crypto";
 import { summarizeUpstreamErrorBody } from "@sdp/redaction/upstream-error";
+import { custodyClusterConfig } from "#/cluster-config";
 import { SigningError } from "#/signing";
 
 /**
@@ -22,16 +23,10 @@ export interface IbmHavenEnv {
   IBM_HAVEN_PRIVATE_KEY?: string;
 }
 
-const DFNS_API_ORIGIN = "https://api.dfns.io";
-// IBM Digital Asset Haven is a white-label Dfns deployment fronted by IBM's host.
-const IBM_HAVEN_API_ORIGIN = "https://api.digitalassets.ibm.com";
 // Provider display labels interpolated into error messages so each white-label
 // deployment self-identifies (a Haven credential failure must not read "DFNS").
 export const DFNS_PROVIDER_LABEL = "DFNS";
 export const IBM_HAVEN_PROVIDER_LABEL = "IBM Digital Asset Haven";
-export const DEFAULT_DFNS_NETWORK = "SolanaDevnet";
-
-export type DfnsNetwork = "Solana" | "SolanaDevnet";
 
 export interface DfnsWallet {
   id?: string;
@@ -133,7 +128,7 @@ export interface DfnsApiClient {
   wallets: {
     getWallet: (request: { walletId: string }) => Promise<DfnsWallet>;
     listWallets: (request?: { query?: DfnsListWalletsQuery }) => Promise<DfnsListWalletsResponse>;
-    createWallet: (request: { body: DfnsCreateWalletBody }) => Promise<DfnsWallet>;
+    createWallet: (request: { body: Omit<DfnsCreateWalletBody, "network"> }) => Promise<DfnsWallet>;
   };
   keySignatures: {
     createSignature: (request: {
@@ -152,6 +147,8 @@ interface DfnsClientContext {
   credentialId: string;
   privateKey: string;
   baseUrl: string;
+  /** The Solana network wallet creation names; signing reads it from the wallet. */
+  network: string;
   /** Provider display label for error messages ("DFNS" or the white-label name). */
   providerLabel: string;
   userAgent: string;
@@ -307,11 +304,13 @@ function resolveDfnsContext(env: DfnsEnv): DfnsClientContext {
     );
   }
 
+  const { origin, network } = custodyClusterConfig().dfns;
   return {
     authToken,
     credentialId,
     privateKey,
-    baseUrl: DFNS_API_ORIGIN,
+    baseUrl: origin,
+    network,
     providerLabel: DFNS_PROVIDER_LABEL,
     userAgent: DFNS_USER_AGENT,
   };
@@ -537,24 +536,6 @@ export function denormalizeDfnsWalletId(walletId: string): string {
   return walletId.startsWith("dfns_") ? walletId.slice("dfns_".length) : walletId;
 }
 
-export function resolveDfnsNetwork(
-  value?: string,
-  providerLabel: string = DFNS_PROVIDER_LABEL
-): DfnsNetwork {
-  if (!value) {
-    return DEFAULT_DFNS_NETWORK;
-  }
-
-  if (value === "Solana" || value === "SolanaDevnet") {
-    return value;
-  }
-
-  throw new SigningError(
-    `${providerLabel} network must be one of: Solana, SolanaDevnet`,
-    "PROVIDER_NOT_CONFIGURED"
-  );
-}
-
 function buildDfnsApiClient(ctx: DfnsClientContext): DfnsApiClient {
   return {
     wallets: {
@@ -573,8 +554,11 @@ function buildDfnsApiClient(ctx: DfnsClientContext): DfnsApiClient {
             : undefined,
           requireUserAction: false,
         }),
-      createWallet: async (request: { body: DfnsCreateWalletBody }) =>
-        dfnsRequestJson<DfnsWallet>(ctx, "POST", "/wallets", request.body),
+      createWallet: async (request: { body: Omit<DfnsCreateWalletBody, "network"> }) =>
+        dfnsRequestJson<DfnsWallet>(ctx, "POST", "/wallets", {
+          network: ctx.network,
+          ...request.body,
+        } satisfies DfnsCreateWalletBody),
     },
     keySignatures: {
       createSignature: async (request: { keyId: string; body: DfnsCreateSignatureBody }) =>
@@ -616,11 +600,13 @@ function resolveIbmHavenContext(env: IbmHavenEnv): DfnsClientContext {
     );
   }
 
+  const { origin, network } = custodyClusterConfig().ibm_haven;
   return {
     authToken,
     credentialId,
     privateKey,
-    baseUrl: IBM_HAVEN_API_ORIGIN,
+    baseUrl: origin,
+    network,
     providerLabel: IBM_HAVEN_PROVIDER_LABEL,
     userAgent: IBM_HAVEN_USER_AGENT,
   };

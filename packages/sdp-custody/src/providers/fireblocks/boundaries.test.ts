@@ -1,21 +1,71 @@
 import { generateKeyPairSync } from "node:crypto";
 import { generateKeyPairSigner } from "@solana/kit";
-import { describe, expect, it } from "vitest";
+import { aroundEach, describe, expect, it } from "vitest";
+import { inClusterScope } from "#/test/cluster-scope";
 import { testRuntime } from "#/test/runtime";
 import { readFireblocksAddressBook } from "./address-book";
+import { isFireblocksNativeAsset } from "./native-asset";
 import { provisionFireblocksVaultAccount } from "./provisioning";
-import { readFireblocksTransfer, resolveFireblocksTransferAsset } from "./transfers";
+import {
+  type FireblocksTransferAccess,
+  readFireblocksTransfer,
+  resolveFireblocksTransferAsset,
+} from "./transfers";
 import { listFireblocksVaults } from "./vaults";
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const { address: VAULT_ADDRESS } = await generateKeyPairSigner();
-function access() {
+function access(): FireblocksTransferAccess {
   return {
     apiKey: crypto.randomUUID(),
     apiSecretPem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
   };
 }
+describe("Fireblocks cluster boundaries", () => {
+  it.each([
+    ["devnet", "SOL_TEST", true],
+    ["devnet", "SOL", false],
+    ["mainnet-beta", "SOL", true],
+    ["mainnet-beta", "SOL_TEST", false],
+  ] as const)("on %s, reads a recorded %s asset as native: %s", (cluster, asset, native) => {
+    expect(inClusterScope(cluster, () => isFireblocksNativeAsset(asset))).toBe(native);
+  });
+  it.each([
+    ["devnet", "SOL_TEST"],
+    ["mainnet-beta", "SOL"],
+  ] as const)(
+    "creates the %s vault and %s asset wallet under distinct stable idempotency keys",
+    async (cluster, asset) => {
+      const writes: Array<{ uri: string; key: string | null }> = [];
+      const rt = testRuntime(async (url, init) => {
+        const uri = new URL(String(url)).pathname;
+        if (init?.method === "POST") {
+          writes.push({ uri, key: new Headers(init.headers).get("Idempotency-Key") });
+          return Response.json({ id: "0" });
+        }
+        return Response.json({ addresses: [{ address: VAULT_ADDRESS }] });
+      });
+      for (let attempt = 0; attempt < 2; attempt++)
+        await inClusterScope(cluster, () =>
+          provisionFireblocksVaultAccount(rt, access(), {
+            orgId: "org",
+            orgSlug: "project",
+            idempotencyKey: "create-wallet",
+          })
+        );
+      expect(writes).toEqual([
+        { uri: "/v1/vault/accounts", key: "create-wallet:vault" },
+        { uri: `/v1/vault/accounts/0/${asset}`, key: "create-wallet:asset" },
+        { uri: "/v1/vault/accounts", key: "create-wallet:vault" },
+        { uri: `/v1/vault/accounts/0/${asset}`, key: "create-wallet:asset" },
+      ]);
+    }
+  );
+});
+
 describe("Fireblocks provider boundaries", () => {
+  aroundEach((runTest) => inClusterScope("devnet", runTest));
+
   it("allows unrelated catalogue assets without optional metadata, requiring the selected token's decimals", async () => {
     const token = { id: "USDC_SOL", type: "SOL_ASSET", nativeAsset: "SOL", issuerAddress: "mint" };
     const catalogue = (decimals: number | undefined) =>
@@ -78,28 +128,5 @@ describe("Fireblocks provider boundaries", () => {
         )
       ).rejects.toThrow("Invalid Fireblocks vault page");
     }
-  });
-  it("uses distinct stable idempotency keys for vault and asset creation", async () => {
-    const writes: Array<{ uri: string; key: string | null }> = [];
-    const rt = testRuntime(async (url, init) => {
-      const uri = new URL(String(url)).pathname;
-      if (init?.method === "POST") {
-        writes.push({ uri, key: new Headers(init.headers).get("Idempotency-Key") });
-        return Response.json({ id: "0" });
-      }
-      return Response.json({ addresses: [{ address: VAULT_ADDRESS }] });
-    });
-    for (let attempt = 0; attempt < 2; attempt++)
-      await provisionFireblocksVaultAccount(
-        rt,
-        { ...access(), assetId: "SOL" },
-        { orgId: "org", orgSlug: "project", idempotencyKey: "create-wallet" }
-      );
-    expect(writes).toEqual([
-      { uri: "/v1/vault/accounts", key: "create-wallet:vault" },
-      { uri: "/v1/vault/accounts/0/SOL", key: "create-wallet:asset" },
-      { uri: "/v1/vault/accounts", key: "create-wallet:vault" },
-      { uri: "/v1/vault/accounts/0/SOL", key: "create-wallet:asset" },
-    ]);
   });
 });

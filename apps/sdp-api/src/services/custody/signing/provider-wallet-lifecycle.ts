@@ -12,9 +12,7 @@ import {
 import {
   createDfnsApiClient,
   createIbmHavenApiClient,
-  IBM_HAVEN_PROVIDER_LABEL,
   normalizeDfnsWalletId,
-  resolveDfnsNetwork,
 } from "@sdp/custody/providers/dfns/client";
 import { KeychainFireblocksAdapter } from "@sdp/custody/providers/fireblocks/keychain.adapter";
 import { SigningError } from "@sdp/custody/signing";
@@ -95,14 +93,12 @@ const providerWalletLifecycleRegistry = {
           orgSlug: orgId,
           apiKey: parsed.apiKey,
           apiSecretPem,
-          assetId: parsed.assetId,
         })
       );
       const adapter = new KeychainFireblocksAdapter({
         apiKey: parsed.apiKey,
         apiSecretPem,
         vaultAccountId: provisioned.vaultAccountId,
-        assetId: provisioned.assetId,
       });
 
       return {
@@ -143,7 +139,6 @@ const providerWalletLifecycleRegistry = {
           orgId,
           projectId,
           walletSeed: params.requestId ?? crypto.randomUUID(),
-          network: parsed.network ?? env.COINBASE_CDP_NETWORK,
           accountPolicy: parsed.accountPolicy,
           idempotencyKey: params.requestId,
           reuseExisting: params.requestId !== undefined,
@@ -188,14 +183,11 @@ const providerWalletLifecycleRegistry = {
     },
   },
   dfns: {
-    create: async ({ env, params, parsed }) => {
+    create: async ({ env, params }) => {
       const provisioned = await withProvisioningError("DFNS", async () => {
         const client = await createDfnsApiClient(env);
         return client.wallets.createWallet({
-          body: {
-            network: resolveDfnsNetwork(parsed.network),
-            ...(params.label ? { name: params.label } : {}),
-          },
+          body: params.label ? { name: params.label } : {},
         });
       });
 
@@ -210,14 +202,11 @@ const providerWalletLifecycleRegistry = {
     },
   },
   ibm_haven: {
-    create: async ({ env, params, parsed }) => {
+    create: async ({ env, params }) => {
       const provisioned = await withProvisioningError("IBM Digital Asset Haven", async () => {
         const client = await createIbmHavenApiClient(env);
         return client.wallets.createWallet({
-          body: {
-            network: resolveDfnsNetwork(parsed.network, IBM_HAVEN_PROVIDER_LABEL),
-            ...(params.label ? { name: params.label } : {}),
-          },
+          body: params.label ? { name: params.label } : {},
         });
       });
 
@@ -235,11 +224,10 @@ const providerWalletLifecycleRegistry = {
     },
   },
   anchorage: {
-    create: async ({ env, params, parsed }) => {
+    create: async ({ env, params }) => {
       const provisioned = await withProvisioningError("Anchorage", () =>
         provisionAnchorageWallet(env, {
           walletLabel: params.label,
-          network: parsed.network,
         })
       );
 
@@ -260,7 +248,6 @@ const providerWalletLifecycleRegistry = {
       const provisioned = await withProvisioningError("Utila", () =>
         provisionUtilaWallet(env, {
           vaultId: parsed.vaultId,
-          network: parsed.network,
           displayName: params.label,
         })
       );

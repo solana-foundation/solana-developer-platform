@@ -522,8 +522,6 @@ export const CUSTODY_PROVIDER_CATALOG: readonly CustodyProviderCatalogEntry[] = 
   CUSTODY_PROVIDER_CATALOG_BY_ID
 );
 
-export type SolanaCustodyNetwork = "solana" | "solana-devnet";
-export type DfnsCustodyNetwork = "Solana" | "SolanaDevnet";
 export type CustodyWalletPurpose =
   | "root"
   | "mint_authority"
@@ -586,7 +584,6 @@ export interface PrivyCustodyOptions {
 
 export interface CoinbaseCdpCustodyOptions {
   provider: "coinbase_cdp";
-  network?: SolanaCustodyNetwork;
   walletAddress?: string;
   accountPolicy?: string;
 }
@@ -605,7 +602,6 @@ export interface TurnkeyCustodyOptions {
 
 export interface DfnsCustodyOptions {
   provider: "dfns";
-  network?: DfnsCustodyNetwork;
   walletId?: string;
   signingKeyId?: string;
 }
@@ -614,7 +610,6 @@ export interface DfnsCustodyOptions {
 // reuses the Dfns request/signing surface with an IBM-hosted base URL.
 export interface IbmHavenCustodyOptions {
   provider: "ibm_haven";
-  network?: DfnsCustodyNetwork;
   walletId?: string;
   signingKeyId?: string;
 }
@@ -622,7 +617,6 @@ export interface IbmHavenCustodyOptions {
 export interface AnchorageCustodyOptions {
   provider: "anchorage";
   walletId?: string;
-  network?: SolanaCustodyNetwork;
 }
 
 export interface UtilaCustodyOptions {

@@ -743,7 +743,7 @@ async function verifySelectedFireblocksVaults(
         const verified =
           id === credential.vaultAccountId
             ? { status: "success" as const, wallet: primaryWallet }
-            : await checkByokCredential(context.c.env, { ...credential, vaultAccountId: id });
+            : await checkByokCredential({ ...credential, vaultAccountId: id });
         if (verified.status !== "success" || !verified.wallet)
           return verified.status === "failed"
             ? { kind: "failed", code: "invalid_credentials" }
@@ -781,7 +781,7 @@ async function completeFireblocksInstallation(
   credential: Extract<ByokCredentialAuthentication, { provider: "fireblocks" }>,
   leaseToken: string
 ): Promise<ProviderOutcome> {
-  const checked = await checkByokCredential(context.c.env, credential);
+  const checked = await checkByokCredential(credential);
   if (checked.status !== "success")
     return checked.status === "failed"
       ? { kind: "failed", code: "invalid_credentials" }

@@ -1,5 +1,6 @@
 import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { inClusterScope } from "#/test/cluster-scope";
 import { testRuntime } from "#/test/runtime";
 import {
   fireblocksRuleScope,
@@ -14,12 +15,14 @@ type RuleFixture = { type: string } & Record<string, unknown>;
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 /** Reads the active policy from a Fireblocks that answers `body`. */
 const readPolicyAnswering = (body: unknown) =>
-  readFireblocksPolicy(
-    testRuntime(async () => Response.json(body)),
-    {
-      apiKey: "api-key",
-      apiSecretPem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
-    }
+  inClusterScope("devnet", () =>
+    readFireblocksPolicy(
+      testRuntime(async () => Response.json(body)),
+      {
+        apiKey: "api-key",
+        apiSecretPem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+      }
+    )
   );
 
 const inspect = (rules: RuleFixture[]) =>

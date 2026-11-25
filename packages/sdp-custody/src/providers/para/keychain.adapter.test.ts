@@ -1,11 +1,13 @@
 import { generateKeyPairSigner } from "@solana/kit";
-import { afterEach, assert, describe, expect, it, vi } from "vitest";
+import { afterEach, aroundEach, assert, describe, expect, it, vi } from "vitest";
+import { inClusterScope } from "#/test/cluster-scope";
 import { KeychainParaAdapter } from "./keychain.adapter";
 
 const { address: WALLET_ADDRESS } = await generateKeyPairSigner();
 const WALLET_ID = "0b6f4a8e-2c1d-4e5f-9a7b-3c8d2e1f4a6b";
 
 describe("para adapter", () => {
+  aroundEach((runTest) => inClusterScope("devnet", runTest));
   afterEach(() => {
     vi.restoreAllMocks();
   });

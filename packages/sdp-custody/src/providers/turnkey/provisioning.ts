@@ -1,4 +1,5 @@
 import { ApiKeyStamper } from "@solana/keychain-turnkey";
+import { custodyClusterConfig } from "#/cluster-config";
 import {
   normalizeProviderNameFragment,
   parseJsonResponse,
@@ -8,8 +9,6 @@ import {
 } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
-
-const TURNKEY_API_ORIGIN = "https://api.turnkey.com";
 
 interface TurnkeyActivityResponse {
   activity?: {
@@ -113,9 +112,10 @@ async function turnkeyRequest<T>(
   // ApiKeyStamper is currently synchronous, but normalize in case the SDK
   // ever changes stamp() to return a Promise.
   const stamp = await Promise.resolve(stamper.stamp(body));
+  const url = `${custodyClusterConfig().turnkey.origin}${params.path}`;
 
   try {
-    const response = await runtime.fetch(`${TURNKEY_API_ORIGIN}${params.path}`, {
+    const response = await runtime.fetch(url, {
       method: params.method,
       headers: {
         "Content-Type": "application/json",

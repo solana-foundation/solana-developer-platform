@@ -36,15 +36,13 @@ describe("createProviderWallet", () => {
       params: { label: "DFNS treasury" },
       parsed: {
         provider: "dfns",
-        network: "SolanaDevnet",
         walletId: "wa-12345-abcde-rootwallet",
         signingKeyId: "key-12345-abcde-rootwallet",
       },
     });
 
-    expect(createWallet).toHaveBeenCalledExactlyOnceWith({
-      body: { network: "SolanaDevnet", name: "DFNS treasury" },
-    });
+    expect(dfnsClient.createDfnsApiClient).toHaveBeenCalledExactlyOnceWith(env);
+    expect(createWallet).toHaveBeenCalledExactlyOnceWith({ body: { name: "DFNS treasury" } });
     expect(wallet).toEqual({
       walletId: "dfns_wa-12345-abcde-newdfnswallet",
       publicKey: CREATED_WALLET_ADDRESS,
@@ -61,15 +59,13 @@ describe("createProviderWallet", () => {
       params: { label: "Haven treasury" },
       parsed: {
         provider: "ibm_haven",
-        network: "SolanaDevnet",
         walletId: "wa-12345-abcde-rootwallet",
         signingKeyId: "key-12345-abcde-rootwallet",
       },
     });
 
-    expect(createWallet).toHaveBeenCalledExactlyOnceWith({
-      body: { network: "SolanaDevnet", name: "Haven treasury" },
-    });
+    expect(dfnsClient.createIbmHavenApiClient).toHaveBeenCalledExactlyOnceWith(env);
+    expect(createWallet).toHaveBeenCalledExactlyOnceWith({ body: { name: "Haven treasury" } });
     expect(wallet).toEqual({
       walletId: "ibmhaven_wa-12345-abcde-newdfnswallet",
       publicKey: CREATED_WALLET_ADDRESS,
@@ -108,13 +104,13 @@ describe("createProviderWallet", () => {
     it("reaches Coinbase CDP as its idempotency key and account seed, reusing the account", async () => {
       const provision = vi
         .spyOn(custodyProvisioning, "provisionCoinbaseCdpAccount")
-        .mockResolvedValue({ address: CREATED_WALLET_ADDRESS, network: "solana-devnet" });
+        .mockResolvedValue({ address: CREATED_WALLET_ADDRESS });
       const context = {
         env,
         orgId: "org_cdp",
         projectId: "project_cdp",
         params: { requestId: REQUEST_ID },
-        parsed: { provider: "coinbase_cdp" as const, network: "solana-devnet" as const },
+        parsed: { provider: "coinbase_cdp" as const },
       };
 
       await createProviderWallet(context);
@@ -134,7 +130,7 @@ describe("createProviderWallet", () => {
     it("is absent from an unkeyed create, which gets a fresh Coinbase CDP account", async () => {
       const provisionCdp = vi
         .spyOn(custodyProvisioning, "provisionCoinbaseCdpAccount")
-        .mockResolvedValue({ address: CREATED_WALLET_ADDRESS, network: "solana-devnet" });
+        .mockResolvedValue({ address: CREATED_WALLET_ADDRESS });
       const provisionPrivy = vi
         .spyOn(custodyProvisioning, "provisionPrivyWallet")
         .mockResolvedValue({ walletId: "privy_wallet", address: CREATED_WALLET_ADDRESS });
@@ -144,7 +140,7 @@ describe("createProviderWallet", () => {
         orgId: "org_cdp",
         projectId: "project_cdp",
         params: {},
-        parsed: { provider: "coinbase_cdp", network: "solana-devnet" },
+        parsed: { provider: "coinbase_cdp" },
       });
       await createProviderWallet({
         env,

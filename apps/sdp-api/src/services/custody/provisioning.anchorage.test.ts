@@ -1,9 +1,12 @@
 import { provisionAnchorageWallet as provisionAnchorageWalletInCustody } from "@sdp/custody/providers/anchorage/provisioning";
 import type { CustodyProvisioningRuntime } from "@sdp/custody/shared/runtime";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { provisionAnchorageWallet } from "@/services/custody/provisioning";
+import { inSandboxScope } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { syntheticAddress } from "@/test/helpers/parsed-transactions";
+import { required } from "@/test/helpers/required";
 import type { Env } from "@/types/env";
 
 describe("anchorage wallet provisioning", () => {
@@ -11,19 +14,26 @@ describe("anchorage wallet provisioning", () => {
     vi.restoreAllMocks();
   });
 
-  it("sends wallet creation to the Anchorage API origin", async () => {
+  it.each([
+    ["sandbox", "solana-devnet"],
+    ["production", "solana"],
+  ] as const)("creates the %s wallet on the Anchorage %s network", async (environment, network) => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(
         jsonResponse({ walletId: "wa_anch_env", address: syntheticAddress(1) }, 200)
       );
 
-    await provisionAnchorageWallet(createAnchorageEnv(), {});
+    await runInClusterScope({ projectId: null, environment }, () =>
+      provisionAnchorageWallet(createAnchorageEnv(), { walletLabel: "Treasury" })
+    );
 
-    expect(fetchMock).toHaveBeenCalledWith(
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
       "https://api.anchorage.com/v1/wallets",
       expect.objectContaining({ method: "POST" })
     );
+    const [, init] = required(fetchMock.mock.calls[0]);
+    expect(JSON.parse(String(required(init).body))).toEqual({ network, label: "Treasury" });
   });
 
   it("falls back to Bearer auth when Api-Key auth is rejected", async () => {
@@ -44,7 +54,7 @@ describe("anchorage wallet provisioning", () => {
         return jsonResponse({ walletId: "wa_anch_2", address: syntheticAddress(2) }, 200);
       });
 
-    const result = await provisionAnchorageWallet(createAnchorageEnv(), {});
+    const result = await inSandboxScope(() => provisionAnchorageWallet(createAnchorageEnv(), {}));
 
     expect(result).toEqual({ walletId: "wa_anch_2", address: syntheticAddress(2) });
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -58,10 +68,12 @@ describe("anchorage wallet provisioning", () => {
       );
 
     await expect(
-      provisionAnchorageWalletInCustody(
-        createRuntime(fetchMock),
-        { apiKey: "anchorage-explicit-key" },
-        {}
+      inSandboxScope(() =>
+        provisionAnchorageWalletInCustody(
+          createRuntime(fetchMock),
+          { apiKey: "anchorage-explicit-key" },
+          {}
+        )
       )
     ).resolves.toEqual({ walletId: "wa_anch_4", address: syntheticAddress(4) });
   });

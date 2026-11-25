@@ -149,6 +149,16 @@
       "import": "./src/providers/fireblocks/vaults.ts",
       "default": "./src/providers/fireblocks/vaults.ts"
     },
+    "./providers/fireblocks/native-asset": {
+      "types": "./src/providers/fireblocks/native-asset.ts",
+      "import": "./src/providers/fireblocks/native-asset.ts",
+      "default": "./src/providers/fireblocks/native-asset.ts"
+    },
+    "./cluster-config": {
+      "types": "./src/cluster-config.ts",
+      "import": "./src/cluster-config.ts",
+      "default": "./src/cluster-config.ts"
+    },
     "./providers/fireblocks/credential": {
       "types": "./src/providers/fireblocks/credential.ts",
       "import": "./src/providers/fireblocks/credential.ts",
@@ -163,6 +173,11 @@
       "types": "./src/test/fireblocks-proposal.ts",
       "import": "./src/test/fireblocks-proposal.ts",
       "default": "./src/test/fireblocks-proposal.ts"
+    },
+    "./testing/provider-fetch": {
+      "types": "./src/test/provider-fetch.ts",
+      "import": "./src/test/provider-fetch.ts",
+      "default": "./src/test/provider-fetch.ts"
     },
     "./providers/fireblocks/policy": {
       "types": "./src/providers/fireblocks/policy.ts",
@@ -184,6 +199,7 @@
   },
   "dependencies": {
     "@sdp/redaction": "workspace:*",
+    "@sdp/rpc": "workspace:*",
     "@sdp/types": "workspace:*",
     "@solana/addresses": "catalog:",
     "@solana/codecs": "catalog:",

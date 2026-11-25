@@ -205,7 +205,7 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
     await inSandboxScope(() => checkDueProviderPolicies(testEnv));
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(fetch).toHaveBeenCalledWith(
-      "https://api.fireblocks.io/v1/vault/accounts/0/SOL_TEST/addresses_paginated",
+      "https://sandbox-api.fireblocks.io/v1/vault/accounts/0/SOL_TEST/addresses_paginated",
       expect.objectContaining({
         method: "GET",
         headers: expect.objectContaining({ "X-API-Key": fields.apiKey }),
@@ -626,15 +626,17 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
       .mockResolvedValueOnce(Response.json({}))
       .mockResolvedValueOnce(Response.json({ addresses: [{ address: OTHER_ADDRESS }] }));
     const resolver = new CustodyRuntimeTargets(getDb(env), testEnv, new Map());
-    const wallet = await resolver.createConnectionWallet({
-      auditContext,
-      creationReason: "wallet_api",
-      organizationId: ORGANIZATION_ID,
-      projectId: PROJECT_ID,
-      connectionId: connected.connectionId,
-      label: "Operations",
-      purpose: "transfer",
-    });
+    const wallet = await inSandboxScope(() =>
+      resolver.createConnectionWallet({
+        auditContext,
+        creationReason: "wallet_api",
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        connectionId: connected.connectionId,
+        label: "Operations",
+        purpose: "transfer",
+      })
+    );
     expect(wallet).toMatchObject({
       walletId: "fb_42",
       publicKey: OTHER_ADDRESS,
@@ -844,7 +846,7 @@ describe("Fireblocks vault discovery and selection", () => {
     });
     const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = new URL(String(input));
-      expect(url.origin).toBe("https://api.fireblocks.io");
+      expect(url.origin).toBe("https://sandbox-api.fireblocks.io");
       expect(url.pathname).toBe("/v1/vault/accounts_paged");
       expect(url.searchParams.get("assetId")).toBe("SOL_TEST");
       expect(url.searchParams.get("limit")).toBe("50");

@@ -1,8 +1,7 @@
+import { custodyClusterConfig } from "#/cluster-config";
 import { parseJsonResponse, readErrorResponseText } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
-
-const ANCHORAGE_API_ORIGIN = "https://api.anchorage.com";
 
 type AnchorageHttpMethod = "GET" | "POST" | "DELETE";
 
@@ -17,7 +16,6 @@ type AnchorageAuthStrategy = "api-key" | "bearer";
 
 export interface ProvisionAnchorageOptions {
   walletLabel?: string;
-  network?: "solana" | "solana-devnet";
 }
 
 export interface ProvisionAnchorageResult {
@@ -45,7 +43,7 @@ export async function provisionAnchorageWallet(
     apiKey,
     path: "/v1/wallets",
     body: {
-      network: options.network ?? "solana-devnet",
+      network: custodyClusterConfig().anchorage.network,
       ...(options.walletLabel ? { label: options.walletLabel } : {}),
     },
   });
@@ -83,9 +81,10 @@ async function anchorageRequest<T>(
   runtime: CustodyProvisioningRuntime,
   params: AnchorageRequestParams
 ): Promise<T> {
+  const url = `${custodyClusterConfig().anchorage.origin}${params.path}`;
   try {
     const requestWithAuth = (authStrategy: AnchorageAuthStrategy) =>
-      runtime.fetch(`${ANCHORAGE_API_ORIGIN}${params.path}`, {
+      runtime.fetch(url, {
         method: params.method,
         headers: buildAnchorageHeaders(params, authStrategy),
         body: params.body ? JSON.stringify(params.body) : undefined,

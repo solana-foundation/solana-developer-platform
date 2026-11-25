@@ -17,9 +17,7 @@ import {
 import {
   createDfnsApiClient,
   createIbmHavenApiClient,
-  IBM_HAVEN_PROVIDER_LABEL,
   normalizeDfnsWalletId,
-  resolveDfnsNetwork,
 } from "@sdp/custody/providers/dfns/client";
 import { KeychainFireblocksAdapter } from "@sdp/custody/providers/fireblocks/keychain.adapter";
 import type { SigningPort } from "@sdp/custody/signing";
@@ -129,7 +127,6 @@ export interface InitFireblocksSigningOptions {
   apiKey: string;
   apiSecretPem: string;
   vaultAccountId: string;
-  assetId?: string;
   walletLabel?: string;
 }
 
@@ -145,7 +142,6 @@ export interface InitPrivySigningOptions {
  * Options for initializing org signing with Coinbase CDP provider.
  */
 export interface InitCoinbaseCdpSigningOptions {
-  network?: "solana" | "solana-devnet";
   accountPolicy?: string;
   walletLabel?: string;
 }
@@ -170,7 +166,6 @@ export interface InitTurnkeySigningOptions {
  * Options for initializing org signing with DFNS provider.
  */
 export interface InitDfnsSigningOptions {
-  network?: "Solana" | "SolanaDevnet";
   walletLabel?: string;
 }
 
@@ -181,7 +176,6 @@ export interface InitDfnsSigningOptions {
  * platform-managed via IBM_HAVEN_* env bindings.
  */
 export interface InitIbmHavenSigningOptions {
-  network?: "Solana" | "SolanaDevnet";
   walletLabel?: string;
 }
 
@@ -192,7 +186,6 @@ export interface InitIbmHavenSigningOptions {
  */
 export interface InitAnchorageSigningOptions {
   walletLabel?: string;
-  network?: "solana" | "solana-devnet";
 }
 
 /**
@@ -522,7 +515,6 @@ export class SigningService {
       apiKey: options.apiKey,
       apiSecretEncrypted: encryptedSecret,
       vaultAccountId: options.vaultAccountId,
-      assetId: options.assetId ?? "SOL",
     };
 
     // Create the adapter to get the public key
@@ -530,7 +522,6 @@ export class SigningService {
       apiKey: options.apiKey,
       apiSecretPem: options.apiSecretPem,
       vaultAccountId: options.vaultAccountId,
-      assetId: options.assetId ?? "SOL",
     });
 
     const publicKey = await adapter.getPublicKey();
@@ -637,7 +628,6 @@ export class SigningService {
     if (reusable) {
       const configJson: CoinbaseCdpProviderConfig = {
         provider: "coinbase_cdp",
-        network: options.network ?? this.env.COINBASE_CDP_NETWORK,
         accountPolicy: options.accountPolicy,
       };
 
@@ -650,7 +640,6 @@ export class SigningService {
     const provisioned = await custodyProvisioning.provisionCoinbaseCdpAccount(this.env, {
       orgId,
       projectId,
-      network: options.network,
       accountPolicy: options.accountPolicy,
       reuseExisting: true,
     });
@@ -660,7 +649,6 @@ export class SigningService {
 
     const configJson: CoinbaseCdpProviderConfig = {
       provider: "coinbase_cdp",
-      network: provisioned.network,
       accountPolicy: options.accountPolicy,
     };
 
@@ -823,13 +811,9 @@ export class SigningService {
     }
 
     const client = await createDfnsApiClient(this.env);
-    const resolvedNetwork = resolveDfnsNetwork(options.network);
 
     const wallet = await client.wallets.createWallet({
-      body: {
-        network: resolvedNetwork,
-        ...(options.walletLabel ? { name: options.walletLabel } : {}),
-      },
+      body: options.walletLabel ? { name: options.walletLabel } : {},
     });
 
     if (!wallet?.id || !wallet?.address) {
@@ -841,14 +825,9 @@ export class SigningService {
 
     const walletId = normalizeDfnsWalletId(wallet.id);
     const publicKey = wallet.address as Address;
-    const walletNetwork =
-      wallet.network === "Solana" || wallet.network === "SolanaDevnet"
-        ? wallet.network
-        : resolvedNetwork;
 
     const configJson: DfnsProviderConfig = {
       provider: "dfns",
-      network: walletNetwork,
       walletId: wallet.id,
       signingKeyId: wallet.signingKey?.id,
     };
@@ -883,13 +862,9 @@ export class SigningService {
     }
 
     const client = await createIbmHavenApiClient(this.env);
-    const resolvedNetwork = resolveDfnsNetwork(options.network, IBM_HAVEN_PROVIDER_LABEL);
 
     const wallet = await client.wallets.createWallet({
-      body: {
-        network: resolvedNetwork,
-        ...(options.walletLabel ? { name: options.walletLabel } : {}),
-      },
+      body: options.walletLabel ? { name: options.walletLabel } : {},
     });
 
     if (!wallet?.id || !wallet?.address) {
@@ -901,14 +876,9 @@ export class SigningService {
 
     const walletId = normalizeIbmHavenWalletId(wallet.id);
     const publicKey = wallet.address as Address;
-    const walletNetwork =
-      wallet.network === "Solana" || wallet.network === "SolanaDevnet"
-        ? wallet.network
-        : resolvedNetwork;
 
     const configJson: IbmHavenProviderConfig = {
       provider: "ibm_haven",
-      network: walletNetwork,
       walletId: wallet.id,
       signingKeyId: wallet.signingKey?.id,
     };
@@ -943,7 +913,6 @@ export class SigningService {
 
     const provisioned = await custodyProvisioning.provisionAnchorageWallet(this.env, {
       walletLabel: options.walletLabel,
-      network: options.network,
     });
 
     const walletId = normalizeAnchorageWalletId(provisioned.walletId);
@@ -951,7 +920,6 @@ export class SigningService {
     const configJson: AnchorageProviderConfig = {
       provider: "anchorage",
       walletId: provisioned.walletId,
-      network: options.network,
     };
 
     return this.persistInitializedProvider({
@@ -1010,7 +978,6 @@ export class SigningService {
       const configJson: UtilaProviderConfig = {
         provider: "utila",
         vaultId: this.env.UTILA_VAULT_ID,
-        network: this.env.UTILA_NETWORK,
       };
 
       return this.persistReusedProvider(orgId, projectId, configJson, reusable);
@@ -1025,7 +992,6 @@ export class SigningService {
     const configJson: UtilaProviderConfig = {
       provider: "utila",
       vaultId: provisioned.vaultId,
-      network: provisioned.network,
     };
 
     return this.persistInitializedProvider({

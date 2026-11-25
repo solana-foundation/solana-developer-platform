@@ -1,11 +1,10 @@
 import { isAddress } from "@solana/addresses";
 import type { VaultAddressesResponse } from "@solana/keychain-fireblocks";
+import { custodyClusterConfig } from "#/cluster-config";
 import { normalizePem } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
 import { fireblocksRequest } from "./http";
-
-const DEFAULT_FIREBLOCKS_ASSET_ID = "SOL";
 
 interface FireblocksVaultAccountResponse {
   id: string;
@@ -22,13 +21,11 @@ export interface ProvisionFireblocksOptions {
 export interface FireblocksProvisioningConfig {
   apiKey?: string;
   apiSecretPem?: string;
-  assetId?: string;
 }
 
 export interface ProvisionFireblocksResult {
   publicKey: string;
   vaultAccountId: string;
-  assetId: string;
 }
 
 export async function provisionFireblocksVaultAccount(
@@ -46,7 +43,7 @@ export async function provisionFireblocksVaultAccount(
     );
   }
 
-  const assetId = config.assetId ?? DEFAULT_FIREBLOCKS_ASSET_ID;
+  const assetId = custodyClusterConfig().fireblocks.nativeAsset;
 
   let vaultAccountId = options.vaultAccountId;
 
@@ -98,7 +95,7 @@ export async function provisionFireblocksVaultAccount(
     );
   }
 
-  return { vaultAccountId, assetId, publicKey };
+  return { vaultAccountId, publicKey };
 }
 
 interface FireblocksAddressesParams {

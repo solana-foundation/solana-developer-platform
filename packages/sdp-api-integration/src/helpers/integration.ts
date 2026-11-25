@@ -1,4 +1,5 @@
 import { type ApiTestCustodyWallet, apiTestSupport } from "@sdp/api/test-support";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import {
   confirmTransaction,
   createRpc,
@@ -430,9 +431,13 @@ async function ensurePrivyCustodyWallet(): Promise<IntegrationCustodyWallet> {
   const configId = existing
     ? existing.id
     : (
-        await signingService.initializePrivySigning(TEST_ORG.id, TEST_PROJECT.id, {
-          walletLabel: "Integration Root Wallet",
-        })
+        await runInClusterScope(
+          { projectId: TEST_PROJECT.id, environment: TEST_PROJECT.environment },
+          () =>
+            signingService.initializePrivySigning(TEST_ORG.id, TEST_PROJECT.id, {
+              walletLabel: "Integration Root Wallet",
+            })
+        )
       ).configId;
 
   const walletRows = await listActiveConfigWallets(configId);
@@ -763,11 +768,15 @@ export async function createFundedPrivyWallet(input: {
   fundLamports?: number;
 }): Promise<ApiTestCustodyWallet> {
   const signingService = createSigningService(env);
-  const wallet = await signingService.createWallet(TEST_ORG.id, TEST_PROJECT.id, {
-    provider: "privy",
-    label: input.label,
-    purpose: "transfer",
-  });
+  const wallet = await runInClusterScope(
+    { projectId: TEST_PROJECT.id, environment: TEST_PROJECT.environment },
+    () =>
+      signingService.createWallet(TEST_ORG.id, TEST_PROJECT.id, {
+        provider: "privy",
+        label: input.label,
+        purpose: "transfer",
+      })
+  );
 
   if (input.fundLamports && input.fundLamports > 0) {
     await fundAddressToLamports(wallet.publicKey, input.fundLamports);

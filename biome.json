@@ -319,6 +319,7 @@
         "**/packages/**/*.test.ts",
         "**/packages/**/*.spec.ts",
         "**/packages/**/test/**/*.ts",
+        "**/packages/sdp-api-integration/src/helpers/**/*.ts",
         "**/apps/sdp-api/src/middleware/project-context.ts",
         "**/apps/sdp-api/src/runtime/cluster-scope-runs.ts",
         "**/apps/sdp-api/src/routes/pay/context.ts"

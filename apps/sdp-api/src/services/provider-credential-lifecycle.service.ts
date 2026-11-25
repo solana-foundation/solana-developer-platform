@@ -524,12 +524,7 @@ export async function completeRotationCandidate(
           loaded.predecessor.id
         )
       : [];
-  const checked = await checkCredentialReplacement(
-    c.env,
-    authentication,
-    loaded.references,
-    wallets
-  );
+  const checked = await checkCredentialReplacement(authentication, loaded.references, wallets);
   const check = checked.status;
   if (check === "retry_unknown") {
     const race = await settleCandidateOutcome(context, loaded, "retry_unknown", auditIntent);
@@ -687,12 +682,7 @@ export async function rollbackProviderCredential(
         current.credential.id
       );
     }
-    const checked = await checkCredentialReplacement(
-      c.env,
-      authentication,
-      current.references,
-      wallets
-    );
+    const checked = await checkCredentialReplacement(authentication, current.references, wallets);
     const check = checked.status;
     if (check === "retry_unknown") {
       throw providerUnavailable("Credential provider is temporarily unavailable");
@@ -1587,12 +1577,11 @@ async function deactivationCommitIsVisible(
 
 /** One live keychain address read per distinct vault, including the primary vault. */
 async function checkCredentialReplacement(
-  env: Env,
   authentication: ByokCredentialAuthentication,
   references: readonly CredentialReferenceRow[],
   wallets: readonly CredentialWalletReferenceRow[]
 ): Promise<ProviderCredentialRotationResult["rotation"]> {
-  const primary = await checkByokCredential(env, authentication);
+  const primary = await checkByokCredential(authentication);
   if (primary.status !== "success")
     return primary.status === "failed"
       ? { status: "failed", code: "invalid_credentials" }
@@ -1608,7 +1597,7 @@ async function checkCredentialReplacement(
       return { status: "failed", code: "provider_account_mismatch" };
     let address = addresses.get(vaultId);
     if (address === undefined) {
-      const checked = await checkByokCredential(env, {
+      const checked = await checkByokCredential({
         ...authentication,
         vaultAccountId: vaultId,
       });

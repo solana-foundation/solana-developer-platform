@@ -632,7 +632,6 @@ export class CustodyRuntimeTargets {
           idempotencyKey: params.idempotency?.requestId,
           apiKey: authentication.apiKey,
           apiSecretPem: authentication.apiSecretPem,
-          assetId: authentication.assetId,
         }).then((wallet) => ({
           walletId: `fb_${wallet.vaultAccountId}`,
           address: wallet.publicKey,

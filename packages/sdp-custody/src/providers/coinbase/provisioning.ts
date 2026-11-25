@@ -1,3 +1,4 @@
+import { custodyClusterConfig } from "#/cluster-config";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
 import {
@@ -6,8 +7,6 @@ import {
   extractCoinbaseCdpAccountAddress,
   isCoinbaseCdpAlreadyExistsError,
 } from "./api";
-
-const DEFAULT_COINBASE_CDP_NETWORK = "solana-devnet";
 
 interface CoinbaseCdpSolanaAccountResponse {
   address: string;
@@ -43,13 +42,11 @@ export interface CoinbaseCdpProvisioningConfig {
   apiKeyId?: string;
   apiKeySecret?: string;
   walletSecret?: string;
-  network?: "solana" | "solana-devnet";
   accountScope?: string;
 }
 
 export interface ProvisionCoinbaseCdpResult {
   address: string;
-  network: "solana" | "solana-devnet";
 }
 
 export async function provisionCoinbaseCdpAccount(
@@ -68,13 +65,11 @@ export async function provisionCoinbaseCdpAccount(
     );
   }
 
-  const network = config.network ?? DEFAULT_COINBASE_CDP_NETWORK;
-
   const name = await deriveCoinbaseCdpAccountName({
     accountScope: config.accountScope,
     organizationId: options.orgId,
     projectId: options.projectId,
-    network,
+    network: custodyClusterConfig().coinbase_cdp.network,
     walletSeed: options.walletSeed,
   });
 
@@ -97,7 +92,7 @@ export async function provisionCoinbaseCdpAccount(
       throw new SigningError("Coinbase CDP wallet creation failed", "PROVIDER_NOT_CONFIGURED");
     }
 
-    return { address: createdAddress, network };
+    return { address: createdAddress };
   } catch (error) {
     if (!isCoinbaseCdpAlreadyExistsError(error)) {
       throw error;
@@ -122,7 +117,7 @@ export async function provisionCoinbaseCdpAccount(
 
       const existingAddressByName = extractCoinbaseCdpAccountAddress(existingByName);
       if (existingAddressByName) {
-        return { address: existingAddressByName, network };
+        return { address: existingAddressByName };
       }
 
       throw new SigningError(

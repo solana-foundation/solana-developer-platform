@@ -1,8 +1,8 @@
+import { custodyClusterConfig } from "#/cluster-config";
 import { parseJsonResponse, readErrorResponseText } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
 
-export const PARA_API_ORIGIN = "https://api.beta.getpara.com";
 const PARA_WALLET_READY_MAX_ATTEMPTS = 8;
 const PARA_WALLET_READY_DELAY_MS = 500;
 
@@ -26,8 +26,9 @@ export async function paraRequest<T>(
   runtime: CustodyProvisioningRuntime,
   params: ParaRequestParams
 ): Promise<T> {
+  const url = `${custodyClusterConfig().para.origin}${params.path}`;
   try {
-    const response = await runtime.fetch(`${PARA_API_ORIGIN}${params.path}`, {
+    const response = await runtime.fetch(url, {
       method: params.method,
       headers: {
         "X-API-Key": params.apiKey,

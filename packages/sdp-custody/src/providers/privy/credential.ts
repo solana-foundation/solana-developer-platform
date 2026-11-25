@@ -1,6 +1,6 @@
 import { z } from "zod";
+import { custodyClusterConfig } from "#/cluster-config";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
-import { PRIVY_API_ORIGIN } from "./api";
 
 const PRIVY_CHECK_TIMEOUT_MS = 10_000;
 /** Privy answers a wrong secret or an unknown app ID with this 400 code, never with 401. */
@@ -11,9 +11,10 @@ export async function checkPrivyCredential(
   runtime: CustodyProvisioningRuntime,
   credential: { appId: string; appSecret: string }
 ): Promise<"success" | "failed" | "retry_unknown"> {
+  const origin = custodyClusterConfig().privy.origin;
   try {
     // Privy can return 500 for an empty app with limit=1; use its default first page.
-    const response = await runtime.fetch(`${PRIVY_API_ORIGIN}/wallets`, {
+    const response = await runtime.fetch(`${origin}/wallets`, {
       method: "GET",
       headers: {
         Authorization: `Basic ${Buffer.from(`${credential.appId}:${credential.appSecret}`).toString("base64")}`,

@@ -380,19 +380,6 @@ export const FIELDS: EnvField[] = [
     visibleWhen: listIncludes("SIGNING_PROVIDERS", "utila"),
   },
   {
-    key: "UTILA_NETWORK",
-    section: "signing",
-    kind: "select",
-    label: "Utila network",
-    defaultValue: "networks/solana-devnet",
-    required: true,
-    visibleWhen: listIncludes("SIGNING_PROVIDERS", "utila"),
-    options: [
-      { value: "networks/solana-devnet", label: "Solana devnet" },
-      { value: "networks/solana-mainnet", label: "Solana mainnet" },
-    ],
-  },
-  {
     key: "UTILA_POLL_INTERVAL_MS",
     section: "signing",
     kind: "text",

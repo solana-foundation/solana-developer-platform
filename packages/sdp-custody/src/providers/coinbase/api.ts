@@ -1,4 +1,5 @@
 import { importJWK, importPKCS8, SignJWT } from "jose";
+import { custodyClusterConfig } from "#/cluster-config";
 import {
   decodeBase64ToBytes,
   encodePkcs8Pem,
@@ -11,8 +12,6 @@ import {
 } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
-
-const COINBASE_CDP_API_ORIGIN = "https://api.cdp.coinbase.com/platform";
 
 export interface CoinbaseCdpRequestParams {
   method: "GET" | "POST" | "PUT" | "DELETE";
@@ -51,7 +50,10 @@ export async function coinbaseCdpRequest<T>(
   runtime: CustodyProvisioningRuntime,
   params: CoinbaseCdpRequestParams
 ): Promise<T> {
-  const { requestPath, url } = resolveCoinbaseCdpRequestUrl(params.path);
+  const { requestPath, url } = resolveCoinbaseCdpRequestUrl(
+    custodyClusterConfig().coinbase_cdp.origin,
+    params.path
+  );
   const normalizedBody = params.body ? sortJsonKeys(params.body) : undefined;
   const bodyJson = normalizedBody ? JSON.stringify(normalizedBody) : undefined;
 
@@ -109,9 +111,12 @@ export async function coinbaseCdpRequest<T>(
   }
 }
 
-function resolveCoinbaseCdpRequestUrl(path: string): { requestPath: string; url: URL } {
+function resolveCoinbaseCdpRequestUrl(
+  origin: string,
+  path: string
+): { requestPath: string; url: URL } {
   const normalizedPath = path.startsWith("/") ? path.slice(1) : path;
-  const url = new URL(normalizedPath, `${COINBASE_CDP_API_ORIGIN}/`);
+  const url = new URL(normalizedPath, `${origin}/`);
 
   return {
     requestPath: `${url.pathname}${url.search}`,

@@ -1,7 +1,7 @@
+import { custodyClusterConfig } from "#/cluster-config";
 import { encodeBasicAuth, parseJsonResponse, readErrorResponseText } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
-import { PRIVY_API_ORIGIN } from "./api";
 
 const PRIVY_REQUEST_TIMEOUT_MS = 10_000;
 
@@ -166,8 +166,9 @@ async function privyRequest<T>(
   runtime: CustodyProvisioningRuntime,
   params: PrivyRequestParams
 ): Promise<T> {
+  const url = `${custodyClusterConfig().privy.origin}${params.path}`;
   try {
-    const response = await runtime.fetch(`${PRIVY_API_ORIGIN}${params.path}`, {
+    const response = await runtime.fetch(url, {
       method: params.method,
       headers: {
         Authorization: params.authHeader,

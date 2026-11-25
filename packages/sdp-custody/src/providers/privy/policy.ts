@@ -1,8 +1,8 @@
 import type { ProviderPolicyCheck } from "@sdp/types/custody";
 import { z } from "zod";
+import { custodyClusterConfig } from "#/cluster-config";
 import { denormalizePrivyWalletId } from "#/provider-wallet-ids";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
-import { PRIVY_API_ORIGIN } from "./api";
 import { PRIVY_INVALID_CREDENTIALS_CODE, privyErrorBodySchema } from "./credential";
 
 const walletSchema = z.object({ id: z.string(), policy_ids: z.array(z.string().min(1)) });
@@ -14,8 +14,9 @@ export async function readPrivyWalletPolicy(
   walletId: string
 ): Promise<Pick<ProviderPolicyCheck, "status" | "reason">> {
   const id = denormalizePrivyWalletId(walletId);
+  const origin = custodyClusterConfig().privy.origin;
   try {
-    const response = await runtime.fetch(`${PRIVY_API_ORIGIN}/wallets/${encodeURIComponent(id)}`, {
+    const response = await runtime.fetch(`${origin}/wallets/${encodeURIComponent(id)}`, {
       headers: {
         Authorization: `Basic ${Buffer.from(`${credential.appId}:${credential.appSecret}`).toString("base64")}`,
         "privy-app-id": credential.appId,

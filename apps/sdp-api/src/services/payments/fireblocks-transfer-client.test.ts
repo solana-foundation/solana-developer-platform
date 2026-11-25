@@ -1,21 +1,23 @@
 import { createHash, generateKeyPairSync } from "node:crypto";
 import {
   createFireblocksTransfer,
+  type FireblocksTransferAccess,
   type FireblocksTransferRequest,
   readFireblocksTransfer,
   resolveFireblocksTransferAsset,
 } from "@sdp/custody/providers/fireblocks/transfers";
 import type { CustodyProvisioningRuntime } from "@sdp/custody/shared/runtime";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { jwtVerify } from "jose";
-import { describe, expect, it, vi } from "vitest";
+import { aroundEach, describe, expect, it, vi } from "vitest";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 
 const USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address;
 const USDT_MINT = WELL_KNOWN_TOKENS.USDT.mints["mainnet-beta"].address;
 
 const rsa = generateKeyPairSync("rsa", { modulusLength: 2048 });
-const access = () => ({
+const access = (): FireblocksTransferAccess => ({
   apiKey: crypto.randomUUID(),
   apiSecretPem: rsa.privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
 });
@@ -28,6 +30,10 @@ function runtime(fetch: CustodyProvisioningRuntime["fetch"]): CustodyProvisionin
 }
 
 describe("native Fireblocks HTTP protocol", () => {
+  aroundEach((runTest) =>
+    runInClusterScope({ projectId: null, environment: "production" }, runTest)
+  );
+
   it.each([
     { source: { type: "VAULT_ACCOUNT", id: 0 } },
     { destinationAddress: {} },

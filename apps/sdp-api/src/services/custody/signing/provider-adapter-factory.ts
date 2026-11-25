@@ -84,7 +84,7 @@ const providerAdapterFactories = {
     const privateKeyBase58 = await cipher.decrypt(orgId, parsed.encryptedPrivateKey);
     return KeychainMemoryAdapter.fromBase58(privateKeyBase58);
   },
-  fireblocks: async ({ env, orgId, parsed, cipher }) => {
+  fireblocks: async ({ orgId, parsed, cipher }) => {
     if (!("apiSecretEncrypted" in parsed) || !parsed.apiSecretEncrypted) {
       throw new SigningError(
         "Fireblocks config missing encrypted API secret",
@@ -98,7 +98,6 @@ const providerAdapterFactories = {
       apiKey: parsed.apiKey,
       apiSecretPem,
       vaultAccountId: parsed.vaultAccountId,
-      assetId: parsed.assetId,
     });
   },
   privy: async ({ env, parsed }) => {
@@ -186,8 +185,6 @@ const providerAdapterFactories = {
   utila: async ({ env, parsed }) => {
     return new KeychainUtilaAdapter(
       buildKeychainUtilaConfig(env, {
-        cluster: currentClusterScope().cluster,
-        network: parsed.network,
         vaultId: parsed.vaultId,
       })
     );
@@ -408,7 +405,6 @@ export function createFireblocksAdapterFromCredential(
       apiKey: input.apiKey,
       apiSecretPem: input.apiSecretPem,
       vaultAccountId: input.walletId.startsWith("fb_") ? input.walletId.slice(3) : input.walletId,
-      assetId: input.assetId,
       // BYOK transactions use sign-only program calls; SDP owns broadcast.
       useProgramCall: true,
       createExternalTxId: () => {

@@ -41,23 +41,19 @@ import {
   provisionUtilaWallet as provisionUtilaWalletInCustody,
 } from "@sdp/custody/providers/utila/provisioning";
 import type { CustodyProvisioningRuntime } from "@sdp/custody/shared/runtime";
-import { currentClusterScope } from "@sdp/rpc/scope";
 import type { PrivyCredentialAuthentication } from "@/services/custody/privy-credential";
 import type { Env } from "@/types/env";
 
 // Credential-bearing provider requests must resolve destinations from trusted
 // server configuration. Operation options intentionally cannot override URLs.
 export type ProvisionFireblocksOptions = CustodyProvisionFireblocksOptions & {
-  assetId?: string;
   apiKey?: string;
   apiSecretPem?: string;
 };
 
 export type ProvisionPrivyOptions = CustodyProvisionPrivyOptions;
 
-export type ProvisionCoinbaseCdpOptions = CustodyProvisionCoinbaseCdpOptions & {
-  network?: "solana" | "solana-devnet";
-};
+export type ProvisionCoinbaseCdpOptions = CustodyProvisionCoinbaseCdpOptions;
 
 export type ProvisionParaOptions = CustodyProvisionParaOptions;
 
@@ -67,7 +63,6 @@ export type ProvisionUtilaOptions = CustodyProvisionUtilaOptions & {
   serviceAccountEmail?: string;
   serviceAccountPrivateKeyPem?: string;
   vaultId?: string;
-  network?: "networks/solana-mainnet" | "networks/solana-devnet";
 };
 
 export type ProvisionAnchorageOptions = CustodyProvisionAnchorageOptions;
@@ -83,7 +78,6 @@ export async function provisionFireblocksVaultAccount(
     {
       apiKey: options.apiKey ?? env.FIREBLOCKS_API_KEY,
       apiSecretPem: options.apiSecretPem ?? env.FIREBLOCKS_API_SECRET,
-      assetId: options.assetId ?? env.FIREBLOCKS_ASSET_ID,
     },
     options
   );
@@ -129,7 +123,6 @@ export async function provisionCoinbaseCdpAccount(
       apiKeyId: env.COINBASE_CDP_API_KEY_ID,
       apiKeySecret: env.COINBASE_CDP_API_KEY_SECRET,
       walletSecret: env.COINBASE_CDP_WALLET_SECRET,
-      network: options.network ?? env.COINBASE_CDP_NETWORK,
       accountScope: env.COINBASE_CDP_ACCOUNT_NAMESPACE?.trim() || env.ENVIRONMENT,
     },
     options
@@ -169,12 +162,6 @@ export async function provisionUtilaWallet(
       serviceAccountPrivateKeyPem:
         options.serviceAccountPrivateKeyPem ?? env.UTILA_SERVICE_ACCOUNT_PRIVATE_KEY,
       vaultId: options.vaultId ?? env.UTILA_VAULT_ID,
-      network:
-        options.network ??
-        env.UTILA_NETWORK ??
-        (currentClusterScope().cluster === "mainnet-beta"
-          ? "networks/solana-mainnet"
-          : "networks/solana-devnet"),
     },
     options
   );
@@ -207,14 +194,14 @@ export function createRuntime(): CustodyProvisioningRuntime {
 }
 
 export function listFireblocksVaults(
-  credential: { apiKey: string; apiSecretPem: string; assetId: "SOL" | "SOL_TEST" },
+  access: Parameters<typeof listFireblocksVaultsInCustody>[1],
   options: { after?: string; namePrefix?: string }
 ) {
-  return listFireblocksVaultsInCustody(createRuntime(), credential, options);
+  return listFireblocksVaultsInCustody(createRuntime(), access, options);
 }
 export function getFireblocksVault(
-  credential: { apiKey: string; apiSecretPem: string; assetId: "SOL" | "SOL_TEST" },
+  access: Parameters<typeof getFireblocksVaultInCustody>[1],
   id: string
 ) {
-  return getFireblocksVaultInCustody(createRuntime(), credential, id);
+  return getFireblocksVaultInCustody(createRuntime(), access, id);
 }

@@ -394,7 +394,7 @@ describe("retained proposal recovery waist", () => {
       status: "PENDING_SIGNATURE",
     });
     await expect(controller.cancel("xfr_original")).resolves.toBe(true);
-    const base = "https://api.fireblocks.io";
+    const base = "https://sandbox-api.fireblocks.io";
     expect(fetch.mock.calls.map(([url, init]) => [String(url), required(init).method])).toEqual([
       [`${base}/v1/transactions/external_tx_id/xfr_original`, "GET"],
       [`${base}/v1/transactions/external_tx_id/xfr_original`, "GET"],

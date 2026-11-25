@@ -14,9 +14,6 @@ export interface KeychainFireblocksConfig extends FireblocksProposalTracking {
   /** Fireblocks vault account ID */
   vaultAccountId: string;
 
-  /** Asset ID (default: "SOL", use "SOL_TEST" for devnet) */
-  assetId?: string;
-
   /** Polling interval in milliseconds (default: 1000) */
   pollIntervalMs?: number;
 

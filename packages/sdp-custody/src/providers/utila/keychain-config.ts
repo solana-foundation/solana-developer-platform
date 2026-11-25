@@ -12,9 +12,6 @@ export interface KeychainUtilaConfig {
   /** Utila vault ID */
   vaultId: string;
 
-  /** Utila Solana network resource (for example, "networks/solana-devnet") */
-  network: string;
-
   /** Polling interval in milliseconds (default: 1000) */
   pollIntervalMs?: number;
 

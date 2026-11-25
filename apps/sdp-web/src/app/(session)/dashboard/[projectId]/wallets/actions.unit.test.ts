@@ -59,7 +59,6 @@ describe("initializeCustodySetupAction", () => {
       walletForm({
         provider: "privy",
         walletLabel: "Treasury",
-        network: "devnet",
         idempotencyKey: "browser-key",
       })
     );
@@ -69,16 +68,16 @@ describe("initializeCustodySetupAction", () => {
       path: "/v1/wallets/managed-signing/initialize-with-wallet",
       method: "POST",
       headers: { "Idempotency-Key": "browser-key" },
-      body: { provider: "privy", walletLabel: "Treasury", network: "devnet" },
+      body: { provider: "privy", walletLabel: "Treasury" },
     });
     expect(revalidatePath.mock.calls).toEqual([[WALLETS_PATH]]);
   });
 
-  it("sends Fireblocks setup without a network or account policy", async () => {
+  it("sends Fireblocks setup without an account policy", async () => {
     client.fetch.mockResolvedValue({ configId: "cfg_new", walletId: "fb_wallet_first" });
 
     await initializeCustodySetupAction(
-      walletForm({ provider: "fireblocks", network: "devnet", accountPolicy: "shared" })
+      walletForm({ provider: "fireblocks", accountPolicy: "shared" })
     );
 
     expect(sentRequest().body).toEqual({ provider: "fireblocks" });

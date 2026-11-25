@@ -32,7 +32,6 @@ const initializePrivySchema = z.strictObject({
 
 const initializeCoinbaseCdpSchema = z.strictObject({
   provider: z.literal("coinbase_cdp"),
-  network: z.enum(["solana", "solana-devnet"]).optional(),
   accountPolicy: z
     .string()
     .regex(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/)
@@ -54,20 +53,17 @@ const initializeTurnkeySchema = z.strictObject({
 
 const initializeDfnsSchema = z.strictObject({
   provider: z.literal("dfns"),
-  network: z.enum(["Solana", "SolanaDevnet"]).optional(),
   walletLabel: z.string().max(100).optional(),
 });
 
 const initializeIbmHavenSchema = z.strictObject({
   provider: z.literal("ibm_haven"),
-  network: z.enum(["Solana", "SolanaDevnet"]).optional(),
   walletLabel: z.string().max(100).optional(),
 });
 
 const initializeAnchorageSchema = z.strictObject({
   provider: z.literal("anchorage"),
   walletLabel: z.string().max(100).optional(),
-  network: z.enum(["solana", "solana-devnet"]).optional(),
 });
 
 // Utila is platform-managed (single configured vault); connecting only needs an

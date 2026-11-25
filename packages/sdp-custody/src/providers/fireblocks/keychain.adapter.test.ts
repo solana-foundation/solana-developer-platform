@@ -12,9 +12,12 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import type { MockInstance } from "vitest";
-import { afterEach, assert, describe, expect, it, vi } from "vitest";
+import { afterEach, aroundEach, assert, describe, expect, it, vi } from "vitest";
 import { SigningError } from "#/signing";
+import { inClusterScope } from "#/test/cluster-scope";
+import { stubProviderFetch } from "#/test/provider-fetch";
 import { KeychainFireblocksAdapter } from "./keychain.adapter";
+import type { KeychainFireblocksConfig } from "./keychain-config";
 
 type SolanaSigner = Awaited<ReturnType<KeychainFireblocksAdapter["getTransactionSigner"]>>;
 
@@ -23,7 +26,7 @@ const CONFIG = {
   apiKey: "api-key",
   apiSecretPem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
   vaultAccountId: "default-vault",
-};
+} satisfies KeychainFireblocksConfig;
 const { address: WALLET_ADDRESS } = await generateKeyPairSigner();
 
 /** The URL and init of the fetch call at `index`, which must exist. */
@@ -85,12 +88,14 @@ interface FireblocksPoll {
 
 /**
  * Signs once against Fireblocks accepting the RAW proposal and answering its
- * first status read with `poll`.
+ * first status read with `poll`. The terminal status sends the signer looking
+ * the proposal up by external ID, and Fireblocks still records it.
  */
 async function signAgainstPoll(poll: FireblocksPoll, sign: typeof signTestTransaction) {
-  vi.spyOn(globalThis, "fetch")
+  stubProviderFetch()
     .mockResolvedValueOnce(Response.json({ addresses: [{ address: WALLET_ADDRESS }] }))
     .mockResolvedValueOnce(Response.json({ id: "tx-1", status: "SUBMITTED" }))
+    .mockResolvedValueOnce(Response.json({ id: "tx-1", ...poll }))
     .mockResolvedValueOnce(Response.json({ id: "tx-1", ...poll }));
   const adapter = new KeychainFireblocksAdapter(CONFIG);
   return sign(await adapter.getTransactionSigner("fb_vault-1"));
@@ -100,10 +105,45 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe("fireblocks adapter on each cluster", () => {
+  it.each([
+    ["devnet", "https://sandbox-api.fireblocks.io", "SOL_TEST"],
+    ["mainnet-beta", "https://api.fireblocks.io", "SOL"],
+  ] as const)(
+    "sends every %s signer request to %s with the %s native asset",
+    async (cluster, host, asset) => {
+      const fetch = stubProviderFetch()
+        .mockResolvedValueOnce(Response.json({ addresses: [{ address: WALLET_ADDRESS }] }))
+        .mockResolvedValueOnce(Response.json({ id: "tx-1", status: "SUBMITTED" }))
+        .mockResolvedValueOnce(Response.json({ id: "tx-1", status: "FAILED" }))
+        .mockResolvedValueOnce(Response.json({ id: "tx-1", status: "FAILED" }));
+      const adapter = new KeychainFireblocksAdapter({
+        ...CONFIG,
+        createExternalTxId: () => "sdp-test-request-1",
+      });
+
+      await inClusterScope(cluster, async () => {
+        const signer = await adapter.getTransactionSigner("fb_vault-1");
+        await expect(signTestMessage(signer)).rejects.toThrow(
+          "Transaction failed with status: FAILED"
+        );
+      });
+      expect(fetch.mock.calls.map(([url]) => String(url))).toEqual([
+        `${host}/v1/vault/accounts/vault-1/${asset}/addresses_paginated`,
+        `${host}/v1/transactions`,
+        `${host}/v1/transactions/tx-1`,
+        `${host}/v1/transactions/external_tx_id/sdp-test-request-1`,
+      ]);
+      expect(JSON.parse(String(fetchCall(fetch, 1).init.body))).toMatchObject({ assetId: asset });
+    }
+  );
+});
+
 describe("fireblocks adapter", () => {
+  aroundEach((runTest) => inClusterScope("devnet", runTest));
+
   it("evicts failed signer initialization so subsequent calls can retry", async () => {
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
+    const fetchSpy = stubProviderFetch()
       .mockRejectedValueOnce(new TypeError("temporary fireblocks outage"))
       .mockResolvedValueOnce(Response.json({ addresses: [{ address: WALLET_ADDRESS }] }));
     const adapter = new KeychainFireblocksAdapter(CONFIG);
@@ -116,7 +156,7 @@ describe("fireblocks adapter", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(2);
     for (const [url] of fetchSpy.mock.calls) {
       expect(String(url)).toBe(
-        "https://api.fireblocks.io/v1/vault/accounts/vault-1/SOL/addresses_paginated"
+        "https://sandbox-api.fireblocks.io/v1/vault/accounts/vault-1/SOL_TEST/addresses_paginated"
       );
     }
   });
@@ -129,8 +169,7 @@ describe("fireblocks adapter", () => {
     const message = createSignableMessage("secret-signing-payload");
     const [expectedSignatures] = await wallet.signMessages([message]);
     const signatureHex = Buffer.from(expectedSignatures[wallet.address]).toString("hex");
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
+    const fetchSpy = stubProviderFetch()
       .mockResolvedValueOnce(Response.json({ addresses: [{ address: wallet.address }] }))
       .mockResolvedValueOnce(Response.json({ id: "tx-1", note: "response-secret-value" }))
       .mockResolvedValueOnce(
@@ -153,7 +192,7 @@ describe("fireblocks adapter", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(5);
     const payloadHex = Buffer.from(message.content).toString("hex");
     expect(fetchSpy).toHaveBeenCalledWith(
-      "https://api.fireblocks.io/v1/transactions",
+      "https://sandbox-api.fireblocks.io/v1/transactions",
       expect.objectContaining({ method: "POST", body: expect.stringContaining(payloadHex) })
     );
     const logged = collectLogLines(...sinks);
@@ -166,6 +205,8 @@ describe("fireblocks adapter", () => {
 });
 
 describe("fireblocks adapter policy refusals", () => {
+  aroundEach((runTest) => inClusterScope("devnet", runTest));
+
   it.each([
     ["signTransactions", signTestTransaction],
     ["signMessages", signTestMessage],
@@ -222,8 +263,7 @@ describe("fireblocks adapter policy refusals", () => {
     const message = createSignableMessage("approval-pending-payload");
     const [expectedSignatures] = await wallet.signMessages([message]);
     const signatureHex = Buffer.from(expectedSignatures[wallet.address]).toString("hex");
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
+    const fetchSpy = stubProviderFetch()
       .mockResolvedValueOnce(Response.json({ addresses: [{ address: wallet.address }] }))
       .mockResolvedValueOnce(Response.json({ id: "tx-1", status: "SUBMITTED" }))
       .mockResolvedValueOnce(Response.json({ id: "tx-1", status: "PENDING_AUTHORIZATION" }))
@@ -264,6 +304,8 @@ describe.each([
   ["RAW", signTestMessage],
   ["PROGRAM_CALL", signTestTransaction],
 ] as const)("Fireblocks %s proposal cancellation", (operation, sign) => {
+  aroundEach((runTest) => inClusterScope("devnet", runTest));
+
   function adapter(onSigningCleanup = vi.fn()) {
     return new KeychainFireblocksAdapter({
       ...CONFIG,
@@ -279,8 +321,7 @@ describe.each([
     "requests cancellation once on poll exhaustion (acknowledged: %s)",
     async (success) => {
       const cleanup = vi.fn();
-      const fetch = vi
-        .spyOn(globalThis, "fetch")
+      const fetch = stubProviderFetch()
         .mockResolvedValueOnce(Response.json({ addresses: [{ address: WALLET_ADDRESS }] }))
         .mockResolvedValueOnce(Response.json({ id: "tx-1" }))
         .mockResolvedValueOnce(Response.json({ status: "PENDING_AUTHORIZATION" }))
@@ -298,7 +339,9 @@ describe.each([
         operation,
         externalTxId: "sdp-test-request-1",
       });
-      expect(fetchCall(fetch, 3).url).toBe("https://api.fireblocks.io/v1/transactions/tx-1/cancel");
+      expect(fetchCall(fetch, 3).url).toBe(
+        "https://sandbox-api.fireblocks.io/v1/transactions/tx-1/cancel"
+      );
       expect(fetchCall(fetch, 3).init.method).toBe("POST");
       expect(fetch).toHaveBeenCalledTimes(4);
       expect(cleanup).toHaveBeenCalledExactlyOnceWith({
@@ -312,8 +355,7 @@ describe.each([
   it("looks up an aborted create by external ID and cancels without resubmitting", async () => {
     const controller = new AbortController();
     const cleanup = vi.fn();
-    const fetch = vi
-      .spyOn(globalThis, "fetch")
+    const fetch = stubProviderFetch()
       .mockResolvedValueOnce(Response.json({ addresses: [{ address: WALLET_ADDRESS }] }))
       .mockImplementationOnce(async () => {
         controller.abort();
@@ -330,9 +372,11 @@ describe.each([
       "did not finish before its deadline"
     );
     expect(fetchCall(fetch, 2).url).toBe(
-      "https://api.fireblocks.io/v1/transactions/external_tx_id/sdp-test-request-1"
+      "https://sandbox-api.fireblocks.io/v1/transactions/external_tx_id/sdp-test-request-1"
     );
-    expect(fetchCall(fetch, 3).url).toBe("https://api.fireblocks.io/v1/transactions/tx-1/cancel");
+    expect(fetchCall(fetch, 3).url).toBe(
+      "https://sandbox-api.fireblocks.io/v1/transactions/tx-1/cancel"
+    );
     expect(fetch).toHaveBeenCalledTimes(4);
     expect(cleanup).toHaveBeenCalledExactlyOnceWith({
       externalTxId: "sdp-test-request-1",
@@ -343,8 +387,7 @@ describe.each([
 
   it("retains the timeout and identifiers when cancellation fails", async () => {
     const cleanup = vi.fn();
-    const fetch = vi
-      .spyOn(globalThis, "fetch")
+    const fetch = stubProviderFetch()
       .mockResolvedValueOnce(Response.json({ addresses: [{ address: WALLET_ADDRESS }] }))
       .mockResolvedValueOnce(Response.json({ id: "tx-1" }))
       .mockResolvedValueOnce(Response.json({ status: "PENDING_AUTHORIZATION" }))
@@ -362,9 +405,9 @@ describe.each([
   });
 
   it("does not propose anything for an already aborted caller", async () => {
-    const fetch = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(Response.json({ addresses: [{ address: WALLET_ADDRESS }] }));
+    const fetch = stubProviderFetch().mockResolvedValueOnce(
+      Response.json({ addresses: [{ address: WALLET_ADDRESS }] })
+    );
     const signer = await adapter().getTransactionSigner();
     await expect(sign(signer, { abortSignal: AbortSignal.abort() })).rejects.toMatchObject({
       name: "AbortError",
@@ -373,70 +416,73 @@ describe.each([
   });
 });
 
-it("awaits the proposal acceptance hook before delivering a valid signature", async () => {
-  const wallet = await generateKeyPairSigner();
-  const message = createSignableMessage("cancelled signing request");
-  const [signatures] = await wallet.signMessages([message]);
-  vi.spyOn(globalThis, "fetch")
-    .mockResolvedValueOnce(Response.json({ addresses: [{ address: wallet.address }] }))
-    .mockResolvedValueOnce(Response.json({ id: "proposal-1" }))
-    .mockResolvedValueOnce(
-      Response.json({
-        status: "COMPLETED",
-        signedMessages: [
-          { signature: { fullSig: Buffer.from(signatures[wallet.address]).toString("hex") } },
-        ],
-      })
-    )
-    // The refusal sends the patch looking for a transaction to reconcile; there is none.
-    .mockRejectedValueOnce(new TypeError("lookup unavailable"));
-  const adapter = new KeychainFireblocksAdapter({
-    ...CONFIG,
-    onSigningStatus: async ({ status }) => {
-      if (status === "COMPLETED") throw new Error("Proposal cancelled locally");
-    },
-  });
-  const signer = await adapter.getTransactionSigner();
-  await expect(signer.signMessages([message])).rejects.toThrow("Proposal cancelled locally");
-});
+describe("fireblocks adapter proposal hooks", () => {
+  aroundEach((runTest) => inClusterScope("devnet", runTest));
 
-it("reports a create the provider never recorded through the failure hook", async () => {
-  const failure = vi.fn();
-  const fetch = vi
-    .spyOn(globalThis, "fetch")
-    .mockResolvedValueOnce(Response.json({ addresses: [{ address: WALLET_ADDRESS }] }))
-    .mockResolvedValueOnce(Response.json({ message: "refused" }, { status: 400 }))
-    .mockResolvedValueOnce(Response.json({ message: "missing" }, { status: 404 }));
-  const signer = await new KeychainFireblocksAdapter({
-    ...CONFIG,
-    createExternalTxId: () => "sdp-test-request-1",
-    onSigningFailure: failure,
-  }).getTransactionSigner();
-  await expect(signTestMessage(signer)).rejects.toThrow("Fireblocks API error: 400");
-  // One lookup by external ID confirms the provider never recorded the create.
-  expect(fetchCall(fetch, 2).url).toBe(
-    "https://api.fireblocks.io/v1/transactions/external_tx_id/sdp-test-request-1"
-  );
-  expect(failure).toHaveBeenCalledExactlyOnceWith({
-    externalTxId: "sdp-test-request-1",
-    providerTransactionId: undefined,
-    cause: expect.anything(),
+  it("awaits the proposal acceptance hook before delivering a valid signature", async () => {
+    const wallet = await generateKeyPairSigner();
+    const message = createSignableMessage("cancelled signing request");
+    const [signatures] = await wallet.signMessages([message]);
+    stubProviderFetch()
+      .mockResolvedValueOnce(Response.json({ addresses: [{ address: wallet.address }] }))
+      .mockResolvedValueOnce(Response.json({ id: "proposal-1" }))
+      .mockResolvedValueOnce(
+        Response.json({
+          status: "COMPLETED",
+          signedMessages: [
+            { signature: { fullSig: Buffer.from(signatures[wallet.address]).toString("hex") } },
+          ],
+        })
+      )
+      // The refusal sends the patch looking for a transaction to reconcile; there is none.
+      .mockRejectedValueOnce(new TypeError("lookup unavailable"));
+    const adapter = new KeychainFireblocksAdapter({
+      ...CONFIG,
+      onSigningStatus: async ({ status }) => {
+        if (status === "COMPLETED") throw new Error("Proposal cancelled locally");
+      },
+    });
+    const signer = await adapter.getTransactionSigner();
+    await expect(signer.signMessages([message])).rejects.toThrow("Proposal cancelled locally");
   });
-});
 
-it("keeps a live proposal pending when the failure lookup itself fails", async () => {
-  const failure = vi.fn();
-  vi.spyOn(globalThis, "fetch")
-    .mockResolvedValueOnce(Response.json({ addresses: [{ address: WALLET_ADDRESS }] }))
-    .mockResolvedValueOnce(Response.json({ message: "refused" }, { status: 400 }))
-    // A lookup outage proves nothing: the proposal may still await approval,
-    // so only a 404 from the lookup may close the row through the hook.
-    .mockRejectedValueOnce(new TypeError("lookup unavailable"));
-  const signer = await new KeychainFireblocksAdapter({
-    ...CONFIG,
-    createExternalTxId: () => "sdp-test-request-1",
-    onSigningFailure: failure,
-  }).getTransactionSigner();
-  await expect(signTestMessage(signer)).rejects.toThrow("Fireblocks API error: 400");
-  expect(failure).not.toHaveBeenCalled();
+  it("reports a create the provider never recorded through the failure hook", async () => {
+    const failure = vi.fn();
+    const fetch = stubProviderFetch()
+      .mockResolvedValueOnce(Response.json({ addresses: [{ address: WALLET_ADDRESS }] }))
+      .mockResolvedValueOnce(Response.json({ message: "refused" }, { status: 400 }))
+      .mockResolvedValueOnce(Response.json({ message: "missing" }, { status: 404 }));
+    const signer = await new KeychainFireblocksAdapter({
+      ...CONFIG,
+      createExternalTxId: () => "sdp-test-request-1",
+      onSigningFailure: failure,
+    }).getTransactionSigner();
+    await expect(signTestMessage(signer)).rejects.toThrow("Fireblocks API error: 400");
+    // One lookup by external ID confirms the provider never recorded the create.
+    expect(fetchCall(fetch, 2).url).toBe(
+      "https://sandbox-api.fireblocks.io/v1/transactions/external_tx_id/sdp-test-request-1"
+    );
+    expect(failure).toHaveBeenCalledExactlyOnceWith({
+      externalTxId: "sdp-test-request-1",
+      providerTransactionId: undefined,
+      cause: expect.anything(),
+    });
+  });
+
+  it("keeps a live proposal pending when the failure lookup itself fails", async () => {
+    const failure = vi.fn();
+    stubProviderFetch()
+      .mockResolvedValueOnce(Response.json({ addresses: [{ address: WALLET_ADDRESS }] }))
+      .mockResolvedValueOnce(Response.json({ message: "refused" }, { status: 400 }))
+      // A lookup outage proves nothing: the proposal may still await approval,
+      // so only a 404 from the lookup may close the row through the hook.
+      .mockRejectedValueOnce(new TypeError("lookup unavailable"));
+    const signer = await new KeychainFireblocksAdapter({
+      ...CONFIG,
+      createExternalTxId: () => "sdp-test-request-1",
+      onSigningFailure: failure,
+    }).getTransactionSigner();
+    await expect(signTestMessage(signer)).rejects.toThrow("Fireblocks API error: 400");
+    expect(failure).not.toHaveBeenCalled();
+  });
 });

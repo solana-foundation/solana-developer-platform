@@ -1,5 +1,8 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, aroundEach, describe, expect, it, vi } from "vitest";
 import { assertPrivyCredentialAccepted } from "@/services/custody/privy-credential";
+import { inSandboxScope } from "@/test/helpers/cluster-rpc";
+
+aroundEach((runTest) => inSandboxScope(runTest));
 
 describe("assertPrivyCredentialAccepted", () => {
   afterEach(() => {

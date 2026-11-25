@@ -1,5 +1,6 @@
 import { generateKeyPairSync, sign } from "node:crypto";
 import { isFullSigningPort } from "@sdp/custody/signing";
+import { stubProviderFetch } from "@sdp/custody/testing/provider-fetch";
 import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
 import {
   AccountRole,
@@ -87,8 +88,7 @@ describe("Fireblocks BYOK transaction proposals", () => {
   it("proposes a sign-only PROGRAM_CALL, waits for SIGNED and never broadcasts", async () => {
     const transaction = testTransaction();
     const signature = sign(null, Buffer.from(transaction.messageBytes), ed25519.privateKey);
-    const fetch = vi
-      .spyOn(globalThis, "fetch")
+    const fetch = stubProviderFetch()
       .mockResolvedValueOnce(Response.json({ addresses: [{ address: publicKey }] }))
       .mockResolvedValueOnce(Response.json({ id: "proposal-1", status: "PENDING_AUTHORIZATION" }))
       .mockResolvedValueOnce(Response.json({ id: "proposal-1", status: "PENDING_AUTHORIZATION" }))
@@ -108,7 +108,7 @@ describe("Fireblocks BYOK transaction proposals", () => {
     expect(Buffer.from(required(required(signatures)[publicKey]))).toEqual(signature);
     expect(fetch).toHaveBeenCalledTimes(4);
     const [proposalUrl, proposalInit] = required(fetch.mock.calls[1]);
-    expect(proposalUrl).toBe("https://api.fireblocks.io/v1/transactions");
+    expect(proposalUrl).toBe("https://sandbox-api.fireblocks.io/v1/transactions");
     expect(JSON.parse(String(required(proposalInit).body))).toEqual({
       externalTxId: expect.stringMatching(/^sdp-sign-/),
       operation: "PROGRAM_CALL",
@@ -135,8 +135,7 @@ describe("Fireblocks BYOK transaction proposals", () => {
         testTransaction(version, sponsor.address)
       );
       const signature = sign(null, Buffer.from(transaction.messageBytes), ed25519.privateKey);
-      const fetch = vi
-        .spyOn(globalThis, "fetch")
+      const fetch = stubProviderFetch()
         .mockResolvedValueOnce(Response.json({ addresses: [{ address: publicKey }] }))
         .mockResolvedValueOnce(Response.json({ id: "proposal-sponsored", status: "SUBMITTED" }))
         .mockResolvedValueOnce(
@@ -175,8 +174,7 @@ describe("Fireblocks BYOK transaction proposals", () => {
         status: "SIGNED",
         signedMessages: [{ signature: { fullSig: signature.toString("hex") } }],
       });
-    const fetch = vi
-      .spyOn(globalThis, "fetch")
+    const fetch = stubProviderFetch()
       .mockResolvedValueOnce(Response.json({ addresses: [{ address: publicKey }] }))
       .mockResolvedValueOnce(Response.json({ id: "proposal-1" }))
       .mockResolvedValueOnce(signed())
@@ -207,8 +205,7 @@ describe("Fireblocks BYOK transaction proposals", () => {
   it("keeps off-chain message signing on RAW when program calls are enabled", async () => {
     const message = createSignableMessage("ownership proof");
     const signature = sign(null, message.content, ed25519.privateKey);
-    const fetch = vi
-      .spyOn(globalThis, "fetch")
+    const fetch = stubProviderFetch()
       .mockResolvedValueOnce(Response.json({ addresses: [{ address: publicKey }] }))
       .mockResolvedValueOnce(Response.json({ id: "message-1", status: "SUBMITTED" }))
       .mockResolvedValueOnce(
@@ -232,8 +229,7 @@ describe("Fireblocks BYOK transaction proposals", () => {
 
   it("stops polling a pending proposal when the caller aborts", async () => {
     const controller = new AbortController();
-    const fetch = vi
-      .spyOn(globalThis, "fetch")
+    const fetch = stubProviderFetch()
       .mockResolvedValueOnce(Response.json({ addresses: [{ address: publicKey }] }))
       .mockResolvedValueOnce(Response.json({ id: "proposal-1", status: "SUBMITTED" }))
       .mockImplementationOnce(async () => {
@@ -254,10 +250,13 @@ describe("Fireblocks BYOK transaction proposals", () => {
       context: { providerTransactionId: "proposal-1", cancelRequested: true },
     });
     expect(fetch.mock.calls.map(([url, init]) => [String(url), required(init).method])).toEqual([
-      ["https://api.fireblocks.io/v1/vault/accounts/42/SOL_TEST/addresses_paginated", "GET"],
-      ["https://api.fireblocks.io/v1/transactions", "POST"],
-      ["https://api.fireblocks.io/v1/transactions/proposal-1", "GET"],
-      ["https://api.fireblocks.io/v1/transactions/proposal-1/cancel", "POST"],
+      [
+        "https://sandbox-api.fireblocks.io/v1/vault/accounts/42/SOL_TEST/addresses_paginated",
+        "GET",
+      ],
+      ["https://sandbox-api.fireblocks.io/v1/transactions", "POST"],
+      ["https://sandbox-api.fireblocks.io/v1/transactions/proposal-1", "GET"],
+      ["https://sandbox-api.fireblocks.io/v1/transactions/proposal-1/cancel", "POST"],
     ]);
   });
 
@@ -266,8 +265,7 @@ describe("Fireblocks BYOK transaction proposals", () => {
     async (status) => {
       const transaction = testTransaction();
       const signature = sign(null, Buffer.from(transaction.messageBytes), ed25519.privateKey);
-      const fetch = vi
-        .spyOn(globalThis, "fetch")
+      const fetch = stubProviderFetch()
         .mockResolvedValueOnce(Response.json({ addresses: [{ address: publicKey }] }))
         .mockResolvedValueOnce(Response.json({ id: "proposal-1", status: "SUBMITTED" }))
         .mockResolvedValueOnce(
@@ -290,15 +288,14 @@ describe("Fireblocks BYOK transaction proposals", () => {
       });
       expect(fetch).toHaveBeenCalledTimes(4);
       expect(String(required(fetch.mock.calls[3])[0])).toMatch(
-        /^https:\/\/api\.fireblocks\.io\/v1\/transactions\/external_tx_id\/sdp-sign-/
+        /^https:\/\/sandbox-api\.fireblocks\.io\/v1\/transactions\/external_tx_id\/sdp-sign-/
       );
     }
   );
 
   it("rejects a signature over different message bytes without trying RAW", async () => {
     const signature = sign(null, Buffer.from("changed transaction"), ed25519.privateKey);
-    const fetch = vi
-      .spyOn(globalThis, "fetch")
+    const fetch = stubProviderFetch()
       .mockResolvedValueOnce(Response.json({ addresses: [{ address: publicKey }] }))
       .mockResolvedValueOnce(Response.json({ id: "proposal-1", status: "SUBMITTED" }))
       .mockResolvedValueOnce(
@@ -320,11 +317,16 @@ describe("Fireblocks BYOK transaction proposals", () => {
 });
 
 describe("Fireblocks BYOK policy refusals", () => {
-  /** Signs through the shared custody signer while Fireblocks answers the proposal with `poll`. */
+  /**
+   * Signs through the shared custody signer while Fireblocks answers the proposal with `poll`.
+   * The terminal status sends the signer looking the proposal up by external ID, and
+   * Fireblocks still records it.
+   */
   async function signAgainstPoll(poll: { status: string; subStatus?: string; note?: string }) {
-    vi.spyOn(globalThis, "fetch")
+    stubProviderFetch()
       .mockResolvedValueOnce(Response.json({ addresses: [{ address: publicKey }] }))
       .mockResolvedValueOnce(Response.json({ id: "proposal-1", status: "SUBMITTED" }))
+      .mockResolvedValueOnce(Response.json({ id: "proposal-1", ...poll }))
       .mockResolvedValueOnce(Response.json({ id: "proposal-1", ...poll }));
     const adapter = createFireblocksAdapterFromCredential(env, CREDENTIAL);
     if (!isFullSigningPort(adapter)) throw new Error("Expected signing adapter");

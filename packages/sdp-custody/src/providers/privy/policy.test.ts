@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { aroundEach, describe, expect, it, vi } from "vitest";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
+import { inClusterScope } from "#/test/cluster-scope";
 import { testRuntime } from "#/test/runtime";
 import { readPrivyWalletPolicy } from "./policy";
 
@@ -10,6 +11,8 @@ function readAgainst(answer: () => Promise<Response>) {
 }
 
 describe("Privy wallet policy inspection", () => {
+  aroundEach((runTest) => inClusterScope("devnet", runTest));
+
   it.each([
     [[], { status: "missing", reason: "no_policy" }],
     [["policy-1"], { status: "present", reason: "policy_detected" }],
