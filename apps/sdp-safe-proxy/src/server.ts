@@ -19,33 +19,41 @@ function positiveInteger(name: string): number {
   return value;
 }
 
-// Cloud Run sets K_SERVICE on every container. Anywhere else this is the local proxy: it listens
-// on loopback only and its callers name themselves.
-const onCloudRun = process.env.K_SERVICE !== undefined;
-const local = onCloudRun
-  ? null
-  : { hostname: "127.0.0.1", port: positiveInteger("SDP_SAFE_PROXY_PORT") };
-
-async function tokenCallerCheck() {
+// On Cloud Run the caller is the service account its Google identity token names.
+async function cloudRun() {
   const keys = createGoogleIdentityKeys();
   // The port opens only once the identity keys have been fetched.
   await keys.reload();
-  return createTokenCallerCheck({
-    verify: createCallerIdentityVerifier({
-      audience: setting("SAFE_PROXY_AUDIENCE"),
-      keys,
-      maxTokenAgeSeconds: positiveInteger("SAFE_PROXY_MAX_TOKEN_AGE_SECONDS"),
-      now: Date.now,
+  return {
+    identifyCaller: createTokenCallerCheck({
+      verify: createCallerIdentityVerifier({
+        audience: setting("SAFE_PROXY_AUDIENCE"),
+        keys,
+        maxTokenAgeSeconds: positiveInteger("SAFE_PROXY_MAX_TOKEN_AGE_SECONDS"),
+        now: Date.now,
+      }),
+      callerEmails: {
+        api: setting("SAFE_PROXY_API_CALLER"),
+        cron: setting("SAFE_PROXY_CRON_CALLER"),
+      },
     }),
-    callerEmails: {
-      api: setting("SAFE_PROXY_API_CALLER"),
-      cron: setting("SAFE_PROXY_CRON_CALLER"),
-    },
-  });
+    listensOn: { port: positiveInteger("PORT") },
+    revision: setting("K_REVISION"),
+  };
 }
 
+// Anywhere else this is the local proxy: it listens on loopback only and its callers name
+// themselves.
+function local() {
+  const listensOn = { hostname: "127.0.0.1", port: positiveInteger("SDP_SAFE_PROXY_PORT") };
+  return { identifyCaller: createLocalCallerCheck(listensOn), listensOn, revision: "local" };
+}
+
+// The one place the runtime is chosen: Cloud Run sets K_SERVICE on every container.
+const runtime = process.env.K_SERVICE === undefined ? local() : await cloudRun();
+
 const app = createApp({
-  identifyCaller: local === null ? await tokenCallerCheck() : createLocalCallerCheck(local),
+  identifyCaller: runtime.identifyCaller,
   credentials: {
     fireblocks: {
       apiKey: setting("FIREBLOCKS_API_KEY"),
@@ -60,8 +68,8 @@ const app = createApp({
   fetch: globalThis.fetch,
   providerTimeoutMs: positiveInteger("SAFE_PROXY_PROVIDER_TIMEOUT_MS"),
   writeLog: (line) => process.stdout.write(`${JSON.stringify(line)}\n`),
-  revision: onCloudRun ? setting("K_REVISION") : "local",
+  revision: runtime.revision,
 });
 
-const server = serve({ fetch: app.fetch, ...(local ?? { port: positiveInteger("PORT") }) });
+const server = serve({ fetch: app.fetch, ...runtime.listensOn });
 process.on("SIGTERM", () => server.close());
