@@ -17,9 +17,7 @@ export interface RequestLogLine {
   request_id: string;
   caller: SafeProxyCaller | null;
   provider: string | null;
-  // The declared method and path pattern, never the path that was requested.
   endpoint: string | null;
-  // Set when the answer is the proxy's own and not the provider's.
   error: string | null;
   status: number;
   duration_ms: number;
@@ -33,10 +31,8 @@ const MAX_BODY_BYTES = 1024 * 1024;
 
 const REQUEST_EVENT = "sdp_safe_proxy_request";
 
-// The severity names Cloud Logging reads.
 const SEVERITY = { info: "INFO", warn: "WARNING", error: "ERROR" } as const;
 
-// The same JSON lines sdp-api writes, with every argument scrubbed before it is written.
 export const logger = pino({
   base: undefined,
   messageKey: "message",
@@ -53,8 +49,6 @@ function levelFor(status: number): keyof typeof SEVERITY {
   return status >= 400 ? "warn" : "info";
 }
 
-// One log line per request, written once the answer is known: a refusal is a warning, a failure
-// an error. Runs after `requestId()`.
 export const requestLog: MiddlewareHandler<AppEnv> = async (c, next) => {
   const startedAt = Date.now();
   const line: RequestLogLine = {
@@ -68,7 +62,6 @@ export const requestLog: MiddlewareHandler<AppEnv> = async (c, next) => {
   };
   c.set("line", line);
   await next();
-  // Sent back on every answer, the provider's included, so both sides log the same id.
   c.header("X-Request-Id", line.request_id);
   line.status = c.res.status;
   line.duration_ms = Date.now() - startedAt;
@@ -83,8 +76,6 @@ export const bodyWithinLimit = bodyLimit({
   },
 });
 
-// On Cloud Run: the caller is the service account its Google identity token names. The token is
-// verified here as well as by Cloud Run.
 export function googleCaller(options: {
   audience: string;
   keys: JWTVerifyGetKey;
@@ -112,8 +103,6 @@ export function googleCaller(options: {
   };
 }
 
-// Locally: the caller addresses the loopback address and port the proxy listens on, and names
-// itself.
 export function localCaller(listensOn: {
   hostname: string;
   port: number;

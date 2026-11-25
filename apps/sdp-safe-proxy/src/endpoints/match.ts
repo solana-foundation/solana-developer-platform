@@ -5,9 +5,7 @@ import { SAFE_PROXY_PROVIDERS, type SafeProxyProvider } from "./providers";
 export interface ProviderRequest {
   provider: string;
   method: string;
-  // The request target as it will be sent: path, then an optional query.
   path: string;
-  // The body as it will be sent; empty when the request has none.
   body: string;
 }
 
@@ -22,7 +20,6 @@ type PatternSegment =
   | { is: "literal"; value: string }
   | { is: "parameter"; parameter: PathParameter };
 
-// Every path segment Safe Proxy forwards is made of these characters only.
 const segmentsSchema = z.array(z.string().regex(/^[A-Za-z0-9_-]+$/));
 
 const FORMAT_PATTERNS = {
@@ -60,7 +57,6 @@ function segmentAccepts(pattern: PatternSegment, segment: string): boolean {
     : parameterAccepts(pattern.parameter, segment);
 }
 
-// A query is `name=value` pairs joined by `&`, each name at most once.
 const querySchema = z
   .array(
     z.strictObject({
@@ -94,7 +90,6 @@ function pathMatches(endpoint: AllowedEndpoint, segments: string[], query: strin
   );
 }
 
-// The body must be the exact string JSON.stringify writes for it.
 function bodyAllowed(rule: BodyRule, body: string): boolean {
   let parsed: unknown;
   try {

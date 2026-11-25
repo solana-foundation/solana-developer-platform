@@ -1,7 +1,6 @@
 import { HTTPException } from "hono/http-exception";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 
-// Every error the proxy answers with is named `sdp_safe_proxy_<what>`, in the answer and the log.
 function httpError(status: ContentfulStatusCode, name: string): HTTPException {
   const error = `sdp_safe_proxy_${name}`;
   return new HTTPException(status, { message: error, res: Response.json({ error }, { status }) });

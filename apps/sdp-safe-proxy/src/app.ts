@@ -16,7 +16,6 @@ export interface ProviderCredentials {
 }
 
 export interface AppDependencies {
-  // `googleCaller` on Cloud Run, `localCaller` anywhere else.
   caller: MiddlewareHandler<AppEnv>;
   credentials: ProviderCredentials;
   providerTimeoutMs: number;
@@ -27,12 +26,10 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
 
   app.get("/health", (c) => c.json({ status: "ok" }));
 
-  // The caller's `X-Request-Id`, or a new one when it sent none.
   app.use(requestId());
 
   app.use(requestLog);
 
-  // METHOD /<provider>/<the provider's own path and query>
   app.all("/:provider/*", bodyWithinLimit, dependencies.caller, async (c) => {
     const line = c.get("line");
     const caller = c.get("caller");
@@ -51,7 +48,6 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
 
     if (!endpoint.callers.includes(caller)) throw forbidden("caller_not_allowed");
 
-    // Only the headers the endpoint declares are passed through; the auth is set last.
     const headers = new Headers();
     for (const name of endpoint.requestHeaders) {
       const value = c.req.header(name);
@@ -74,14 +70,12 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
       throw badGateway();
     }
 
-    // The provider's answer goes back as it came: its status, its body, its content type.
     const answerHeaders = new Headers({ [FROM_PROVIDER_HEADER]: "1" });
     const contentType = answer.headers.get("content-type");
     if (contentType !== null) answerHeaders.set("content-type", contentType);
     return new Response(answer.body, { status: answer.status, headers: answerHeaders });
   });
 
-  // Returned, not thrown: an error thrown here would skip the request log.
   app.notFound((c) => {
     const error = notFound();
     c.get("line").error = error.message;
@@ -99,7 +93,6 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
 type FireblocksAuthHeaders = { Authorization: string; "X-API-Key": string };
 type PrivyAuthHeaders = { Authorization: string; "privy-app-id": string };
 
-// `target` and `body` are the request exactly as it is sent: the Fireblocks token covers both.
 async function authHeaders(
   provider: SafeProxyProvider,
   credentials: ProviderCredentials,
