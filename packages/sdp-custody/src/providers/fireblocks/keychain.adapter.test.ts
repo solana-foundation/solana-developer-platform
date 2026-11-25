@@ -165,7 +165,7 @@ describe("fireblocks adapter", () => {
   });
 });
 
-describe("fireblocks adapter policy refusals (HOO-2478)", () => {
+describe("fireblocks adapter policy refusals", () => {
   it.each([
     ["signTransactions", signTestTransaction],
     ["signMessages", signTestMessage],

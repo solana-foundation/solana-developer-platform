@@ -42,7 +42,7 @@ describe("dfns adapter", () => {
     expect(getWallet).toHaveBeenCalledTimes(2);
   });
 
-  it("reuses one signer construction across successful calls", async () => {
+  it("hands out one signer per wallet and reads the wallet once", async () => {
     const getWallet = vi.fn<DfnsApiClient["wallets"]["getWallet"]>().mockResolvedValue({
       id: "wa-1",
       network: "SolanaDevnet",
