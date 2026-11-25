@@ -6,7 +6,7 @@ import { SignJWT } from "jose";
 import { matchEndpoint } from "./endpoints/match";
 import { FROM_PROVIDER_HEADER } from "./endpoints/protocol";
 import { SAFE_PROXY_PROVIDERS, type SafeProxyProvider } from "./endpoints/providers";
-import { badGateway, forbidden, notFound } from "./errors";
+import { badGateway, forbidden, internal, notFound } from "./errors";
 import { type AppEnv, bodyWithinLimit, requestLog } from "./middleware";
 import { providerTarget } from "./utils";
 
@@ -90,9 +90,7 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
 
   app.onError((error, c) => {
     c.get("line").error = error instanceof HTTPException ? error.message : error.constructor.name;
-    return error instanceof HTTPException
-      ? error.getResponse()
-      : c.json({ error: "internal" }, 500);
+    return error instanceof HTTPException ? error.getResponse() : internal().getResponse();
   });
 
   return app;
