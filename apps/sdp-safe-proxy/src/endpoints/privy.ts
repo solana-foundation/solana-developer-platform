@@ -57,6 +57,6 @@ const endpoints: readonly AllowedEndpoint[] = [
 ];
 
 export const PRIVY = {
-  hosts: ["api.privy.io"],
+  hosts: { devnet: "api.privy.io", "mainnet-beta": null },
   endpoints,
 } as const satisfies ProviderDeclaration;

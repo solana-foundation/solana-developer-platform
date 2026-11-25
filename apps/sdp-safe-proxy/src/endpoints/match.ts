@@ -1,19 +1,31 @@
+import { SOLANA_CLUSTERS, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
 import type { AllowedEndpoint } from "./endpoint";
 import { SAFE_PROXY_PROVIDERS, type SafeProxyProvider } from "./providers";
 
 export interface ProviderRequest {
   provider: string;
+  cluster: string;
   method: string;
   path: string;
   body: string;
 }
 
 export type MatchResult =
-  | { allowed: true; provider: SafeProxyProvider; endpoint: AllowedEndpoint }
+  | {
+      allowed: true;
+      provider: SafeProxyProvider;
+      cluster: SolanaCluster;
+      host: string;
+      endpoint: AllowedEndpoint;
+    }
   | {
       allowed: false;
-      code: "provider_not_allowed" | "endpoint_not_allowed" | "body_not_allowed";
+      code:
+        | "provider_not_allowed"
+        | "cluster_not_allowed"
+        | "endpoint_not_allowed"
+        | "body_not_allowed";
     };
 
 type PatternSegment =
@@ -102,9 +114,16 @@ function bodyAllowed(rule: z.ZodType, body: string): boolean {
   );
 }
 
+const clusterSchema = z.enum(SOLANA_CLUSTERS);
+
 export function matchEndpoint(request: ProviderRequest): MatchResult {
   const provider = providerSchema.safeParse(request.provider);
   if (!provider.success) return { allowed: false, code: "provider_not_allowed" };
+  const declared = SAFE_PROXY_PROVIDERS[provider.data];
+
+  const cluster = clusterSchema.safeParse(request.cluster);
+  const host = cluster.success ? declared.hosts[cluster.data] : null;
+  if (!cluster.success || host === null) return { allowed: false, code: "cluster_not_allowed" };
 
   const queryStart = request.path.indexOf("?");
   const segments = pathSegments(
@@ -113,7 +132,7 @@ export function matchEndpoint(request: ProviderRequest): MatchResult {
   const query = queryStart === -1 ? [] : queryNames(request.path.slice(queryStart + 1));
   if (segments === null || query === null) return { allowed: false, code: "endpoint_not_allowed" };
 
-  const candidates = SAFE_PROXY_PROVIDERS[provider.data].endpoints.filter(
+  const candidates = declared.endpoints.filter(
     (endpoint) => endpoint.method === request.method && pathMatches(endpoint, segments, query)
   );
   if (candidates.length === 0) return { allowed: false, code: "endpoint_not_allowed" };
@@ -123,5 +142,5 @@ export function matchEndpoint(request: ProviderRequest): MatchResult {
   );
   if (endpoint === undefined) return { allowed: false, code: "body_not_allowed" };
 
-  return { allowed: true, provider: provider.data, endpoint };
+  return { allowed: true, provider: provider.data, cluster: cluster.data, host, endpoint };
 }

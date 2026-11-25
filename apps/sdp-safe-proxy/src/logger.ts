@@ -6,6 +6,7 @@ export interface RequestLogLine {
   request_id: string;
   caller: SafeProxyCaller | null;
   provider: string | null;
+  cluster: string | null;
   endpoint: string | null;
   error: string | null;
   status: number;

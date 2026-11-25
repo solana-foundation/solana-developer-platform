@@ -1,3 +1,4 @@
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
 import type { SafeProxyCaller } from "./callers";
 
@@ -15,6 +16,6 @@ export interface AllowedEndpoint {
 }
 
 export interface ProviderDeclaration {
-  hosts: readonly [string, ...string[]];
+  hosts: Readonly<Record<SolanaCluster, string | null>>;
   endpoints: readonly AllowedEndpoint[];
 }

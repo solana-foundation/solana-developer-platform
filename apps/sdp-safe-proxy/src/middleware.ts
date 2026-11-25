@@ -24,6 +24,7 @@ export const requestLog: MiddlewareHandler<AppEnv> = async (c, next) => {
     request_id: c.get("requestId"),
     caller: null,
     provider: null,
+    cluster: null,
     endpoint: null,
     error: null,
     status: 0,

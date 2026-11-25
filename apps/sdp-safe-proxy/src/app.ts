@@ -5,7 +5,7 @@ import { requestId } from "hono/request-id";
 import { SignJWT } from "jose";
 import { matchEndpoint } from "./endpoints/match";
 import { FROM_PROVIDER_HEADER } from "./endpoints/protocol";
-import { SAFE_PROXY_PROVIDERS, type SafeProxyProvider } from "./endpoints/providers";
+import type { SafeProxyProvider } from "./endpoints/providers";
 import { badGateway, forbidden, internal, notFound } from "./errors";
 import { type AppEnv, bodyWithinLimit, requestLog } from "./middleware";
 import { inReleaseChannel, providerTarget } from "./utils";
@@ -30,20 +30,21 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
 
   app.use(requestLog);
 
-  app.all("/:provider/*", bodyWithinLimit, dependencies.caller, async (c) => {
+  app.all("/:provider/:cluster/*", bodyWithinLimit, dependencies.caller, async (c) => {
     const line = c.get("line");
     const caller = c.get("caller");
     line.caller = caller;
 
-    const provider = c.req.param("provider");
-    const target = providerTarget(c.req.url, provider);
+    const { provider, cluster } = c.req.param();
+    const target = providerTarget(c.req.url, provider, cluster);
     if (target === null) throw notFound();
     const body = await c.req.text();
 
-    const match = matchEndpoint({ provider, method: c.req.method, path: target, body });
+    const match = matchEndpoint({ provider, cluster, method: c.req.method, path: target, body });
     if (!match.allowed) throw forbidden(match.code);
     const { endpoint } = match;
     line.provider = match.provider;
+    line.cluster = match.cluster;
     line.endpoint = `${endpoint.method} ${endpoint.path}`;
 
     if (!inReleaseChannel(match.provider)) throw forbidden("provider_not_in_release_channel");
@@ -60,7 +61,7 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
 
     let answer: Response;
     try {
-      answer = await fetch(`https://${SAFE_PROXY_PROVIDERS[match.provider].hosts[0]}${target}`, {
+      answer = await fetch(`https://${match.host}${target}`, {
         method: endpoint.method,
         headers,
         body: body === "" ? null : body,

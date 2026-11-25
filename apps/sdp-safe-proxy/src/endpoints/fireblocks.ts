@@ -153,6 +153,6 @@ const endpoints: readonly AllowedEndpoint[] = [
 ];
 
 export const FIREBLOCKS = {
-  hosts: ["api.fireblocks.io"],
+  hosts: { devnet: "sandbox-api.fireblocks.io", "mainnet-beta": null },
   endpoints,
 } as const satisfies ProviderDeclaration;

@@ -16,10 +16,11 @@ export function readEnv<Settings extends z.ZodRawShape>(
   throw new Error(`invalid settings: ${names.join(", ")}`);
 }
 
-export function providerTarget(url: string, provider: string): string | null {
+export function providerTarget(url: string, provider: string, cluster: string): string | null {
   const { pathname, search } = new URL(url);
-  if (!pathname.startsWith(`/${provider}/`)) return null;
-  return pathname.slice(provider.length + 1) + search;
+  const prefix = `/${provider}/${cluster}`;
+  if (!pathname.startsWith(`${prefix}/`)) return null;
+  return pathname.slice(prefix.length) + search;
 }
 
 export function inReleaseChannel(provider: SafeProxyProvider): boolean {
