@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
+import { createCallerIdentityVerifier } from "@sdp/metadata-server/receiver";
 import type { SafeProxyCaller } from "@sdp/safe-proxy-endpoints/callers";
 import { REQUEST_ID_HEADER } from "@sdp/safe-proxy-endpoints/protocol";
-import { createCallerIdentityVerifier } from "@sdp/metadata-server/receiver";
 import { createLocalJWKSet, importPKCS8, type JWTVerifyGetKey, SignJWT } from "jose";
 import {
   createApp,

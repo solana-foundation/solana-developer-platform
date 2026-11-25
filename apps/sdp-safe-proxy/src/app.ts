@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { type CallerIdentity, CallerIdentityError } from "@sdp/metadata-server/receiver";
 import { SAFE_PROXY_CALLERS, type SafeProxyCaller } from "@sdp/safe-proxy-endpoints/callers";
 import { matchEndpoint } from "@sdp/safe-proxy-endpoints/match";
 import {
@@ -9,7 +10,6 @@ import {
   type SafeProxyCode,
 } from "@sdp/safe-proxy-endpoints/protocol";
 import { SAFE_PROXY_PROVIDERS, type SafeProxyProvider } from "@sdp/safe-proxy-endpoints/providers";
-import { type CallerIdentity, CallerIdentityError } from "@sdp/metadata-server/receiver";
 import type { SafeProxyForwardResult } from "@sdp/types/safe-proxy";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
