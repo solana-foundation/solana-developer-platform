@@ -1,3 +1,4 @@
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { ApiKeyStamper } from "@solana/keychain-turnkey";
 import {
   normalizeProviderNameFragment,
@@ -8,8 +9,7 @@ import {
 } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
-
-const TURNKEY_API_ORIGIN = "https://api.turnkey.com";
+import { TURNKEY_BY_CLUSTER } from "./cluster-config";
 
 interface TurnkeyActivityResponse {
   activity?: {
@@ -34,6 +34,7 @@ export interface ProvisionTurnkeyOptions {
 }
 
 export interface TurnkeyProvisioningConfig {
+  cluster: SolanaCluster;
   apiPublicKey?: string;
   apiPrivateKey?: string;
   organizationId?: string;
@@ -61,6 +62,7 @@ export async function provisionTurnkeyPrivateKey(
   }
 
   const created = await turnkeyRequest<TurnkeyActivityResponse>(runtime, {
+    cluster: config.cluster,
     apiPublicKey,
     apiPrivateKey,
     method: "POST",
@@ -94,6 +96,7 @@ export async function provisionTurnkeyPrivateKey(
 }
 
 interface TurnkeyRequestParams {
+  cluster: SolanaCluster;
   method: "POST";
   path: string;
   apiPublicKey: string;
@@ -115,14 +118,17 @@ async function turnkeyRequest<T>(
   const stamp = await Promise.resolve(stamper.stamp(body));
 
   try {
-    const response = await runtime.fetch(`${TURNKEY_API_ORIGIN}${params.path}`, {
-      method: params.method,
-      headers: {
-        "Content-Type": "application/json",
-        [stamp.stampHeaderName]: stamp.stampHeaderValue,
-      },
-      body,
-    });
+    const response = await runtime.fetch(
+      `${TURNKEY_BY_CLUSTER[params.cluster].origin}${params.path}`,
+      {
+        method: params.method,
+        headers: {
+          "Content-Type": "application/json",
+          [stamp.stampHeaderName]: stamp.stampHeaderValue,
+        },
+        body,
+      }
+    );
 
     if (!response.ok) {
       const errorText = await readErrorResponseText(response);

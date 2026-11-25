@@ -1,10 +1,10 @@
 import { summarizeUpstreamErrorBody } from "@sdp/redaction/upstream-error";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { importPKCS8, SignJWT } from "jose";
 import { normalizePem } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
-
-const DEFAULT_UTILA_NETWORK = "networks/solana-devnet";
+import { UTILA_BY_CLUSTER } from "./cluster-config";
 
 export interface ProvisionUtilaOptions {
   /** Display name for the new sub-wallet inside the vault. */
@@ -12,17 +12,16 @@ export interface ProvisionUtilaOptions {
 }
 
 export interface UtilaProvisioningConfig {
+  cluster: SolanaCluster;
   serviceAccountEmail?: string;
   serviceAccountPrivateKeyPem?: string;
   vaultId?: string;
-  network?: "networks/solana-mainnet" | "networks/solana-devnet";
 }
 
 export interface ProvisionUtilaResult {
   walletId: string;
   address: string;
   vaultId: string;
-  network: "networks/solana-mainnet" | "networks/solana-devnet";
 }
 
 export async function provisionUtilaWallet(
@@ -33,7 +32,7 @@ export async function provisionUtilaWallet(
   const serviceAccountEmail = config.serviceAccountEmail;
   const serviceAccountPrivateKeyPem = config.serviceAccountPrivateKeyPem;
   const configuredVaultId = config.vaultId;
-  const network = config.network ?? DEFAULT_UTILA_NETWORK;
+  const { origin, network } = UTILA_BY_CLUSTER[config.cluster];
 
   if (!serviceAccountEmail || !serviceAccountPrivateKeyPem || !configuredVaultId) {
     throw new SigningError(
@@ -54,12 +53,13 @@ export async function provisionUtilaWallet(
   // makes Utila derive the Solana address as part of wallet creation.
   const token = await mintUtilaAccessToken(
     runtime,
+    origin,
     serviceAccountEmail,
     serviceAccountPrivateKeyPem
   );
 
   const response = await runtime.fetch(
-    `${UTILA_API_ORIGIN}/v2/vaults/${encodeURIComponent(vaultId)}/wallets`,
+    `${origin}/v2/vaults/${encodeURIComponent(vaultId)}/wallets`,
     {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
@@ -89,7 +89,7 @@ export async function provisionUtilaWallet(
     );
   }
 
-  return { walletId, address, vaultId, network };
+  return { walletId, address, vaultId };
 }
 
 interface UtilaCreateWalletResponse {
@@ -99,24 +99,25 @@ interface UtilaCreateWalletResponse {
   };
 }
 
-const UTILA_API_AUDIENCE = "https://api.utila.io/";
-const UTILA_API_ORIGIN = "https://api.utila.io";
-
 /** Mint a short-lived Utila service-account JWT for the REST API. */
 async function mintUtilaAccessToken(
   runtime: CustodyProvisioningRuntime,
+  origin: string,
   serviceAccountEmail: string,
   serviceAccountPrivateKeyPem: string
 ): Promise<string> {
   const privateKey = await importPKCS8(normalizePem(serviceAccountPrivateKeyPem), "RS256");
   const now = Math.floor(runtime.now() / 1000);
-  return new SignJWT({})
-    .setProtectedHeader({ alg: "RS256" })
-    .setSubject(serviceAccountEmail)
-    .setAudience(UTILA_API_AUDIENCE)
-    .setIssuedAt(now)
-    .setExpirationTime(now + 5 * 60)
-    .sign(privateKey);
+  return (
+    new SignJWT({})
+      .setProtectedHeader({ alg: "RS256" })
+      .setSubject(serviceAccountEmail)
+      // Utila's token audience is the API origin with a trailing slash.
+      .setAudience(`${origin}/`)
+      .setIssuedAt(now)
+      .setExpirationTime(now + 5 * 60)
+      .sign(privateKey)
+  );
 }
 
 function normalizeUtilaVaultId(value: string): string {

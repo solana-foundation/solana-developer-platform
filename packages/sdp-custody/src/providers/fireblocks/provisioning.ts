@@ -1,11 +1,11 @@
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { isAddress } from "@solana/addresses";
 import type { VaultAddressesResponse } from "@solana/keychain-fireblocks";
 import { normalizePem } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
+import { FIREBLOCKS_BY_CLUSTER } from "./cluster-config";
 import { fireblocksRequest } from "./http";
-
-const DEFAULT_FIREBLOCKS_ASSET_ID = "SOL";
 
 interface FireblocksVaultAccountResponse {
   id: string;
@@ -20,15 +20,14 @@ export interface ProvisionFireblocksOptions {
 }
 
 export interface FireblocksProvisioningConfig {
+  cluster: SolanaCluster;
   apiKey?: string;
   apiSecretPem?: string;
-  assetId?: string;
 }
 
 export interface ProvisionFireblocksResult {
   publicKey: string;
   vaultAccountId: string;
-  assetId: string;
 }
 
 export async function provisionFireblocksVaultAccount(
@@ -46,13 +45,15 @@ export async function provisionFireblocksVaultAccount(
     );
   }
 
-  const assetId = config.assetId ?? DEFAULT_FIREBLOCKS_ASSET_ID;
+  const { cluster } = config;
+  const assetId = FIREBLOCKS_BY_CLUSTER[cluster].nativeAsset;
 
   let vaultAccountId = options.vaultAccountId;
 
   if (!vaultAccountId) {
     const name = `sdp-${options.orgSlug || options.orgId}`.slice(0, 64);
     const response = await fireblocksRequest<FireblocksVaultAccountResponse>(runtime, {
+      cluster,
       apiKey,
       apiSecretPem,
       method: "POST",
@@ -73,6 +74,7 @@ export async function provisionFireblocksVaultAccount(
 
   // Ensure the asset wallet exists for this vault account.
   await fireblocksRequest<void>(runtime, {
+    cluster,
     apiKey,
     apiSecretPem,
     method: "POST",
@@ -84,6 +86,7 @@ export async function provisionFireblocksVaultAccount(
 
   // Ensure the address exists (Fireblocks signer expects addresses_paginated to return at least one).
   const addresses = await fetchFireblocksAddressesWithRetry(runtime, {
+    cluster,
     apiKey,
     apiSecretPem,
     vaultAccountId,
@@ -98,10 +101,11 @@ export async function provisionFireblocksVaultAccount(
     );
   }
 
-  return { vaultAccountId, assetId, publicKey };
+  return { vaultAccountId, publicKey };
 }
 
 interface FireblocksAddressesParams {
+  cluster: SolanaCluster;
   apiKey: string;
   apiSecretPem: string;
   vaultAccountId: string;
@@ -117,6 +121,7 @@ async function fetchFireblocksAddressesWithRetry(
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const response = await fireblocksRequest<VaultAddressesResponse>(runtime, {
+      cluster: params.cluster,
       apiKey: params.apiKey,
       apiSecretPem: params.apiSecretPem,
       method: "GET",

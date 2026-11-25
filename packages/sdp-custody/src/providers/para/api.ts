@@ -1,12 +1,14 @@
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { parseJsonResponse, readErrorResponseText } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
+import { PARA_BY_CLUSTER } from "./cluster-config";
 
-export const PARA_API_ORIGIN = "https://api.beta.getpara.com";
 const PARA_WALLET_READY_MAX_ATTEMPTS = 8;
 const PARA_WALLET_READY_DELAY_MS = 500;
 
 export interface ParaRequestParams {
+  cluster: SolanaCluster;
   method: "GET" | "POST";
   path: string;
   apiKey: string;
@@ -27,14 +29,17 @@ export async function paraRequest<T>(
   params: ParaRequestParams
 ): Promise<T> {
   try {
-    const response = await runtime.fetch(`${PARA_API_ORIGIN}${params.path}`, {
-      method: params.method,
-      headers: {
-        "X-API-Key": params.apiKey,
-        ...(params.body ? { "Content-Type": "application/json" } : {}),
-      },
-      body: params.body ? JSON.stringify(params.body) : undefined,
-    });
+    const response = await runtime.fetch(
+      `${PARA_BY_CLUSTER[params.cluster].origin}${params.path}`,
+      {
+        method: params.method,
+        headers: {
+          "X-API-Key": params.apiKey,
+          ...(params.body ? { "Content-Type": "application/json" } : {}),
+        },
+        body: params.body ? JSON.stringify(params.body) : undefined,
+      }
+    );
 
     if (!response.ok) {
       const errorText = await readErrorResponseText(response);
@@ -66,6 +71,7 @@ export async function paraRequest<T>(
 export async function waitForParaWalletReady(
   runtime: CustodyProvisioningRuntime,
   params: {
+    cluster: SolanaCluster;
     apiKey: string;
     walletId: string;
   }
@@ -77,6 +83,7 @@ export async function waitForParaWalletReady(
     let wallet: ParaWalletResponse;
     try {
       wallet = await paraRequest<ParaWalletResponse>(runtime, {
+        cluster: params.cluster,
         apiKey: params.apiKey,
         method: "GET",
         path: `/v1/wallets/${encodeURIComponent(params.walletId)}`,

@@ -1,14 +1,16 @@
 import { createPrivateKey } from "node:crypto";
+import { FIREBLOCKS_BY_CLUSTER } from "@sdp/custody/providers/fireblocks/cluster-config";
 import { checkFireblocksCredential } from "@sdp/custody/providers/fireblocks/credential";
 import { checkPrivyCredential } from "@sdp/custody/providers/privy/credential";
 import { hashString } from "@sdp/payments/hash";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { ByokCustodyProvider } from "@sdp/types/custody";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
 import { badRequest, internalError } from "@/lib/errors";
 import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";
 import { createRuntime } from "@/services/custody/provisioning";
-import type { Env } from "@/types/env";
 
 export const privyAuthenticationSchema = z
   .object({
@@ -73,7 +75,7 @@ export function credentialPayload(
   return {
     ...parsed.data,
     apiSecretPem,
-    assetId: environment === "production" ? "SOL" : "SOL_TEST",
+    assetId: FIREBLOCKS_BY_CLUSTER[CLUSTER_BY_SDP_ENVIRONMENT[environment]].nativeAsset,
   };
 }
 
@@ -118,11 +120,14 @@ export type ByokCredentialCheck = z.infer<typeof byokCredentialCheckSchema>;
 
 /** One authenticated provider read; checking a Fireblocks connection never proposes a signature. */
 export async function checkByokCredential(
-  env: Env,
   credential: ByokCredentialAuthentication
 ): Promise<ByokCredentialCheck> {
   if (credential.provider === "privy") {
-    const status = await checkPrivyCredential(createRuntime(), credential);
+    const status = await checkPrivyCredential(createRuntime(), {
+      cluster: currentClusterScope().cluster,
+      appId: credential.appId,
+      appSecret: credential.appSecret,
+    });
     return status === "success"
       ? { status, fingerprint: await getPrivyProviderAccountFingerprint(credential.appId) }
       : { status };

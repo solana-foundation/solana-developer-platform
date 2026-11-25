@@ -1,3 +1,4 @@
+import { isFireblocksNativeAsset } from "@sdp/custody/providers/fireblocks/cluster-config";
 import {
   cancelFireblocksTransaction,
   createFireblocksProgramCall,
@@ -104,14 +105,14 @@ export interface AdmittedTransactionContext {
 }
 
 function assertAccount(access: ProposalAccess, binding: OperationProposalBinding): void {
-  const nativeAsset = currentClusterScope().cluster === "mainnet-beta" ? "SOL" : "SOL_TEST";
+  const { cluster } = currentClusterScope();
   if (
     access.connectionId !== binding.connectionId ||
     access.accountFingerprint !== binding.accountFingerprint ||
     access.vaultAccountId !== binding.vaultAccountId ||
     access.publicKey !== binding.sourceAddress ||
-    access.assetId !== nativeAsset ||
-    binding.assetId !== nativeAsset
+    !isFireblocksNativeAsset(cluster, access.assetId) ||
+    !isFireblocksNativeAsset(cluster, binding.assetId)
   )
     throw conflict("Custody transaction proposal account changed");
 }

@@ -1,12 +1,13 @@
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { parseJsonResponse, readErrorResponseText } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
-
-const ANCHORAGE_API_ORIGIN = "https://api.anchorage.com";
+import { ANCHORAGE_BY_CLUSTER } from "./cluster-config";
 
 type AnchorageHttpMethod = "GET" | "POST" | "DELETE";
 
 interface AnchorageRequestParams {
+  cluster: SolanaCluster;
   method: AnchorageHttpMethod;
   apiKey: string;
   path: string;
@@ -17,7 +18,6 @@ type AnchorageAuthStrategy = "api-key" | "bearer";
 
 export interface ProvisionAnchorageOptions {
   walletLabel?: string;
-  network?: "solana" | "solana-devnet";
 }
 
 export interface ProvisionAnchorageResult {
@@ -30,6 +30,7 @@ export interface DeleteAnchorageOptions {
 }
 
 export interface AnchorageProvisioningConfig {
+  cluster: SolanaCluster;
   apiKey?: string;
 }
 
@@ -41,11 +42,12 @@ export async function provisionAnchorageWallet(
   const { apiKey } = resolveAnchorageConfig(config);
 
   const created = await anchorageRequest<unknown>(runtime, {
+    cluster: config.cluster,
     method: "POST",
     apiKey,
     path: "/v1/wallets",
     body: {
-      network: options.network ?? "solana-devnet",
+      network: ANCHORAGE_BY_CLUSTER[config.cluster].network,
       ...(options.walletLabel ? { label: options.walletLabel } : {}),
     },
   });
@@ -61,6 +63,7 @@ export async function deleteAnchorageWallet(
   const { apiKey } = resolveAnchorageConfig(config);
 
   await anchorageRequest<void>(runtime, {
+    cluster: config.cluster,
     method: "DELETE",
     apiKey,
     path: `/v1/wallets/${encodeURIComponent(options.walletId)}`,
@@ -85,7 +88,7 @@ async function anchorageRequest<T>(
 ): Promise<T> {
   try {
     const requestWithAuth = (authStrategy: AnchorageAuthStrategy) =>
-      runtime.fetch(`${ANCHORAGE_API_ORIGIN}${params.path}`, {
+      runtime.fetch(`${ANCHORAGE_BY_CLUSTER[params.cluster].origin}${params.path}`, {
         method: params.method,
         headers: buildAnchorageHeaders(params, authStrategy),
         body: params.body ? JSON.stringify(params.body) : undefined,

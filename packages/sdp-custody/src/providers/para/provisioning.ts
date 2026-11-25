@@ -1,3 +1,4 @@
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
 import {
@@ -15,6 +16,7 @@ export interface ProvisionParaOptions {
 }
 
 export interface ParaProvisioningConfig {
+  cluster: SolanaCluster;
   apiKey?: string;
 }
 
@@ -43,6 +45,7 @@ export async function provisionParaWallet(
     projectId: options.projectId,
   });
   const created = await paraRequest<ParaWalletResponse>(runtime, {
+    cluster: config.cluster,
     apiKey,
     method: "POST",
     path: "/v1/wallets",
@@ -59,6 +62,7 @@ export async function provisionParaWallet(
   }
 
   const readyWallet = await waitForParaWalletReady(runtime, {
+    cluster: config.cluster,
     apiKey,
     walletId: created.id,
   });

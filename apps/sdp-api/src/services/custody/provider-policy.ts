@@ -55,12 +55,18 @@ async function inspectBatch(
         credentials.set(target.provider_credential_id, credentialRead);
       }
       const credential = await credentialRead;
+      const { cluster } = currentClusterScope();
       if (credential.provider === "privy") {
-        return await readPrivyWalletPolicy(proposalRuntime, credential, target.wallet_id);
+        return await readPrivyWalletPolicy(
+          proposalRuntime,
+          { ...credential, cluster },
+          target.wallet_id
+        );
       }
+      const access = { ...credential, cluster };
       let policyRead = policies.get(target.provider_credential_id);
       if (!policyRead) {
-        policyRead = readFireblocksPolicy(proposalRuntime, credential);
+        policyRead = readFireblocksPolicy(proposalRuntime, access);
         policies.set(target.provider_credential_id, policyRead);
       }
       const policy = await policyRead;
@@ -90,7 +96,7 @@ async function inspectBatch(
       if (!mint) throw new Error("No canonical USDC mint for this cluster");
       const usdc = await resolveFireblocksTransferAsset(
         proposalRuntime,
-        credential,
+        access,
         credential.assetId,
         mint
       );

@@ -738,12 +738,15 @@ async function verifySelectedFireblocksVaults(
     // Only selected vaults are read; each address is verified once by solana-keychain.
     for (const id of selectedIds) {
       try {
-        const vault = await getFireblocksVault(credential, id);
+        const vault = await getFireblocksVault(
+          { ...credential, cluster: currentClusterScope().cluster },
+          id
+        );
         if (!vault.hasSolanaWallet) return { kind: "failed", code: "invalid_credentials" };
         const verified =
           id === credential.vaultAccountId
             ? { status: "success" as const, wallet: primaryWallet }
-            : await checkByokCredential(context.c.env, { ...credential, vaultAccountId: id });
+            : await checkByokCredential({ ...credential, vaultAccountId: id });
         if (verified.status !== "success" || !verified.wallet)
           return verified.status === "failed"
             ? { kind: "failed", code: "invalid_credentials" }
@@ -781,7 +784,7 @@ async function completeFireblocksInstallation(
   credential: Extract<ByokCredentialAuthentication, { provider: "fireblocks" }>,
   leaseToken: string
 ): Promise<ProviderOutcome> {
-  const checked = await checkByokCredential(context.c.env, credential);
+  const checked = await checkByokCredential(credential);
   if (checked.status !== "success")
     return checked.status === "failed"
       ? { kind: "failed", code: "invalid_credentials" }
@@ -840,7 +843,10 @@ async function executeCompletionMode(
     return lookupProviderWallet(context.c.env, externalId, credential);
   }
 
-  const validation = await checkPrivyCredential(createRuntime(), credential);
+  const validation = await checkPrivyCredential(createRuntime(), {
+    ...credential,
+    cluster: currentClusterScope().cluster,
+  });
   if (validation !== "success") {
     return validation === "failed"
       ? { kind: "failed", code: "invalid_credentials" }

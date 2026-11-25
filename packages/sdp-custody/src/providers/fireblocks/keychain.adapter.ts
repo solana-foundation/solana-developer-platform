@@ -20,6 +20,7 @@ import type { Address } from "@solana/kit";
 import { z } from "zod";
 import { BaseKeychainAdapter } from "#/providers/base-keychain.adapter";
 import { SigningError } from "#/signing";
+import { FIREBLOCKS_BY_CLUSTER } from "./cluster-config";
 import type { KeychainFireblocksConfig } from "./keychain-config";
 
 /**
@@ -90,7 +91,7 @@ export class KeychainFireblocksAdapter extends BaseKeychainAdapter {
       apiKey: this.config.apiKey,
       privateKeyPem: this.config.apiSecretPem,
       vaultAccountId,
-      assetId: this.config.assetId ?? "SOL",
+      assetId: FIREBLOCKS_BY_CLUSTER[this.config.cluster].nativeAsset,
       pollIntervalMs: this.config.pollIntervalMs,
       maxPollAttempts: this.config.maxPollAttempts,
       requestDelayMs: this.config.requestDelayMs,

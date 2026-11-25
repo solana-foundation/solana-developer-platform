@@ -1,9 +1,9 @@
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { importPKCS8, SignJWT } from "jose";
 import { parseJsonResponse, sha256Hex } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
-
-const FIREBLOCKS_API_ORIGIN = "https://api.fireblocks.io";
+import { FIREBLOCKS_BY_CLUSTER } from "./cluster-config";
 
 export class FireblocksApiError extends SigningError {
   constructor(
@@ -19,6 +19,7 @@ export class FireblocksApiError extends SigningError {
 }
 
 interface FireblocksRequestParams {
+  cluster: SolanaCluster;
   apiKey: string;
   apiSecretPem: string;
   method: "GET" | "POST";
@@ -54,13 +55,16 @@ export async function fireblocksRequest<T>(
   };
   if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
   if (params.body) headers["Content-Type"] = "application/json";
-  const response = await runtime.fetch(`${FIREBLOCKS_API_ORIGIN}${params.uri}`, {
-    method: params.method,
-    redirect: "error",
-    signal: AbortSignal.timeout(10_000),
-    headers,
-    body: params.body ? bodyStr : undefined,
-  });
+  const response = await runtime.fetch(
+    `${FIREBLOCKS_BY_CLUSTER[params.cluster].origin}${params.uri}`,
+    {
+      method: params.method,
+      redirect: "error",
+      signal: AbortSignal.timeout(10_000),
+      headers,
+      body: params.body ? bodyStr : undefined,
+    }
+  );
 
   if (!response.ok && !(params.allowStatuses ?? []).includes(response.status)) {
     // Keep diagnostic identifiers, never arbitrary provider text or response bodies.

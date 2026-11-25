@@ -13,7 +13,6 @@ export interface FireblocksProviderConfig {
   apiKey: string;
   apiSecretEncrypted: string;
   vaultAccountId: string;
-  assetId: string;
 }
 
 export interface PrivyProviderConfig {
@@ -25,7 +24,6 @@ export interface PrivyProviderConfig {
 
 export interface CoinbaseCdpProviderConfig {
   provider: "coinbase_cdp";
-  network?: "solana" | "solana-devnet";
   accountPolicy?: string;
   requestDelayMs?: number;
 }
@@ -47,14 +45,12 @@ export interface TurnkeyProviderConfig {
 
 export interface DfnsProviderConfig {
   provider: "dfns";
-  network?: "Solana" | "SolanaDevnet";
   walletId?: string;
   signingKeyId?: string;
 }
 
 export interface IbmHavenProviderConfig {
   provider: "ibm_haven";
-  network?: "Solana" | "SolanaDevnet";
   walletId?: string;
   signingKeyId?: string;
 }
@@ -62,13 +58,11 @@ export interface IbmHavenProviderConfig {
 export interface AnchorageProviderConfig {
   provider: "anchorage";
   walletId?: string;
-  network?: "solana" | "solana-devnet";
 }
 
 export interface UtilaProviderConfig {
   provider: "utila";
   vaultId?: string;
-  network?: "networks/solana-mainnet" | "networks/solana-devnet";
 }
 
 export type ProviderConfigRecord =

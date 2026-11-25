@@ -8,7 +8,7 @@
 import { ParaSigner } from "@solana/keychain-para";
 import type { Address } from "@solana/kit";
 import { BaseKeychainAdapter } from "#/providers/base-keychain.adapter";
-import { PARA_API_ORIGIN } from "./api";
+import { PARA_BY_CLUSTER } from "./cluster-config";
 import type { KeychainParaConfig } from "./keychain-config";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -47,7 +47,7 @@ export class KeychainParaAdapter extends BaseKeychainAdapter {
 
     const created = ParaSigner.create({
       apiKey: this.config.apiKey,
-      apiBaseUrl: PARA_API_ORIGIN,
+      apiBaseUrl: PARA_BY_CLUSTER[this.config.cluster].origin,
       requestDelayMs: this.config.requestDelayMs,
       walletId: denormalizeParaWalletId(normalizedWalletId),
     }).catch((error: unknown) => {

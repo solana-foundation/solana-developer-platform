@@ -1,3 +1,5 @@
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Para Configuration
 // ═══════════════════════════════════════════════════════════════════════════
@@ -5,6 +7,9 @@
 export interface KeychainParaConfig {
   /** Para API key (X-API-Key) */
   apiKey: string;
+
+  /** The cluster whose Para API host the signer calls. */
+  cluster: SolanaCluster;
 
   /** Optional delay in ms between concurrent signing requests (default: 0) */
   requestDelayMs?: number;

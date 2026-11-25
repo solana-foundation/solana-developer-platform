@@ -149,6 +149,11 @@
       "import": "./src/providers/fireblocks/vaults.ts",
       "default": "./src/providers/fireblocks/vaults.ts"
     },
+    "./providers/fireblocks/cluster-config": {
+      "types": "./src/providers/fireblocks/cluster-config.ts",
+      "import": "./src/providers/fireblocks/cluster-config.ts",
+      "default": "./src/providers/fireblocks/cluster-config.ts"
+    },
     "./providers/fireblocks/credential": {
       "types": "./src/providers/fireblocks/credential.ts",
       "import": "./src/providers/fireblocks/credential.ts",

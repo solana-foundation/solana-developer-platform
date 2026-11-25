@@ -1,3 +1,4 @@
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import type { FireblocksProposalTracking } from "./proposals";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -14,8 +15,8 @@ export interface KeychainFireblocksConfig extends FireblocksProposalTracking {
   /** Fireblocks vault account ID */
   vaultAccountId: string;
 
-  /** Asset ID (default: "SOL", use "SOL_TEST" for devnet) */
-  assetId?: string;
+  /** The cluster whose native asset the signer proposes with. */
+  cluster: SolanaCluster;
 
   /** Polling interval in milliseconds (default: 1000) */
   pollIntervalMs?: number;

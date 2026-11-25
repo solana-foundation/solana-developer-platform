@@ -3,8 +3,6 @@ import { normalizeUtilaWalletId } from "#/provider-wallet-ids";
 import { SigningError } from "#/signing";
 import type { KeychainUtilaConfig } from "./keychain-config";
 
-type UtilaNetwork = "networks/solana-mainnet" | "networks/solana-devnet";
-
 /**
  * Structural env slice consumed by the Utila keychain config builder. The API
  * app passes its full doppler-injected `Env`; only these fields are read here.
@@ -14,19 +12,16 @@ export interface UtilaEnv {
   UTILA_SERVICE_ACCOUNT_PRIVATE_KEY?: string;
   UTILA_VAULT_ID?: string;
   UTILA_WALLET_ID?: string;
-  UTILA_NETWORK?: UtilaNetwork;
   UTILA_POLL_INTERVAL_MS?: string;
   UTILA_MAX_POLL_ATTEMPTS?: string;
   UTILA_DESIGNATED_SIGNERS?: string;
 }
 
 interface BuildUtilaConfigOptions {
-  /** The cluster the work runs on; picks the Utila network when neither the config nor env names one. */
   cluster: SolanaCluster;
   defaultWalletId?: string | null;
   defaultWalletIdFromEnv?: boolean;
   missingMessage?: string;
-  network?: UtilaNetwork;
   vaultId?: string;
 }
 
@@ -53,7 +48,7 @@ export function buildKeychainUtilaConfig(
     serviceAccountEmail,
     serviceAccountPrivateKeyPem,
     vaultId,
-    network: resolveUtilaNetwork(env, options.cluster, options.network),
+    cluster: options.cluster,
     pollIntervalMs: parseOptionalPositiveInteger(
       env.UTILA_POLL_INTERVAL_MS,
       "UTILA_POLL_INTERVAL_MS"
@@ -65,20 +60,6 @@ export function buildKeychainUtilaConfig(
     designatedSigners: parseCsvList(env.UTILA_DESIGNATED_SIGNERS),
     defaultWalletId: defaultWalletId ? normalizeUtilaWalletId(defaultWalletId) : undefined,
   };
-}
-
-function resolveUtilaNetwork(
-  env: UtilaEnv,
-  cluster: SolanaCluster,
-  configured?: UtilaNetwork
-): UtilaNetwork {
-  if (configured) {
-    return configured;
-  }
-  if (env.UTILA_NETWORK) {
-    return env.UTILA_NETWORK;
-  }
-  return cluster === "mainnet-beta" ? "networks/solana-mainnet" : "networks/solana-devnet";
 }
 
 function parseOptionalPositiveInteger(

@@ -1,3 +1,4 @@
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { importJWK, importPKCS8, SignJWT } from "jose";
 import {
   decodeBase64ToBytes,
@@ -11,10 +12,10 @@ import {
 } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
-
-const COINBASE_CDP_API_ORIGIN = "https://api.cdp.coinbase.com/platform";
+import { COINBASE_CDP_BY_CLUSTER } from "./cluster-config";
 
 export interface CoinbaseCdpRequestParams {
+  cluster: SolanaCluster;
   method: "GET" | "POST" | "PUT" | "DELETE";
   path: string;
   apiKeyId: string;
@@ -51,7 +52,10 @@ export async function coinbaseCdpRequest<T>(
   runtime: CustodyProvisioningRuntime,
   params: CoinbaseCdpRequestParams
 ): Promise<T> {
-  const { requestPath, url } = resolveCoinbaseCdpRequestUrl(params.path);
+  const { requestPath, url } = resolveCoinbaseCdpRequestUrl(
+    COINBASE_CDP_BY_CLUSTER[params.cluster].origin,
+    params.path
+  );
   const normalizedBody = params.body ? sortJsonKeys(params.body) : undefined;
   const bodyJson = normalizedBody ? JSON.stringify(normalizedBody) : undefined;
 
@@ -109,9 +113,12 @@ export async function coinbaseCdpRequest<T>(
   }
 }
 
-function resolveCoinbaseCdpRequestUrl(path: string): { requestPath: string; url: URL } {
+function resolveCoinbaseCdpRequestUrl(
+  origin: string,
+  path: string
+): { requestPath: string; url: URL } {
   const normalizedPath = path.startsWith("/") ? path.slice(1) : path;
-  const url = new URL(normalizedPath, `${COINBASE_CDP_API_ORIGIN}/`);
+  const url = new URL(normalizedPath, `${origin}/`);
 
   return {
     requestPath: `${url.pathname}${url.search}`,

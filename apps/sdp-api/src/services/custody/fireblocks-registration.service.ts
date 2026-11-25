@@ -1,8 +1,10 @@
+import { FIREBLOCKS_BY_CLUSTER } from "@sdp/custody/providers/fireblocks/cluster-config";
 import { FireblocksApiError } from "@sdp/custody/providers/fireblocks/http";
 import {
   type ByokCustodyProvider,
   isProviderCredentialCreationInProgress,
 } from "@sdp/types/custody";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import type { Context } from "hono";
 import { type DatabaseClient, getDb } from "@/db/client";
 import {
@@ -232,12 +234,14 @@ export async function discoverFireblocksVaults(
     throw internalError("Fireblocks registration key is unavailable");
   const environment = c.get("projectEnvironment");
   if (!environment) throw internalError("Project environment is required");
+  const cluster = CLUSTER_BY_SDP_ENVIRONMENT[environment];
   try {
     return await listFireblocksVaults(
       {
+        cluster,
         apiKey: input.apiKey,
         apiSecretPem: secret.privateKeyPem,
-        assetId: environment === "production" ? "SOL" : "SOL_TEST",
+        assetId: FIREBLOCKS_BY_CLUSTER[cluster].nativeAsset,
       },
       { after: input.after, namePrefix: input.namePrefix }
     );

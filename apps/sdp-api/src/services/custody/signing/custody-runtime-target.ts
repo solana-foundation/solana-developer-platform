@@ -1,5 +1,6 @@
 import { normalizePrivyWalletId } from "@sdp/custody/provider-wallet-ids";
 import { isFullSigningPort, SigningError, type SigningPort } from "@sdp/custody/signing";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import {
   CUSTODY_PROVIDERS,
   type CustodyConfigStatus,
@@ -632,7 +633,6 @@ export class CustodyRuntimeTargets {
           idempotencyKey: params.idempotency?.requestId,
           apiKey: authentication.apiKey,
           apiSecretPem: authentication.apiSecretPem,
-          assetId: authentication.assetId,
         }).then((wallet) => ({
           walletId: `fb_${wallet.vaultAccountId}`,
           address: wallet.publicKey,
@@ -1093,6 +1093,7 @@ export class CustodyRuntimeTargets {
       throw conflict("Invalid Fireblocks wallet");
     return {
       ...secret,
+      cluster: currentClusterScope().cluster,
       vaultAccountId: target.wallet.walletId.slice(3),
       publicKey: target.wallet.publicKey,
       connectionId: target.connectionId,
