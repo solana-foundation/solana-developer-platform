@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ProviderCredentials } from "./provider-auth";
 
 const port = z.coerce.number().int().min(1).max(65535);
 const positiveInteger = z
@@ -12,11 +13,12 @@ const pkcs8PrivateKey = z
   .transform((value) => value.replace(/\\n/g, "\n").trim())
   .pipe(z.string().regex(/^-----BEGIN PRIVATE KEY-----\n[\s\S]+\n-----END PRIVATE KEY-----$/));
 
+// Below the platform's own request timeout, so the proxy answers before the platform cuts it off.
 const PLATFORM_REQUEST_TIMEOUT_MS = 300_000;
 const IDENTITY_TOKEN_LIFETIME_SECONDS = 3600;
 
 const sharedSettings = {
-  SAFE_PROXY_MAX_BUDGET_MS: positiveInteger.pipe(z.number().lt(PLATFORM_REQUEST_TIMEOUT_MS)),
+  SAFE_PROXY_PROVIDER_TIMEOUT_MS: positiveInteger.pipe(z.number().lt(PLATFORM_REQUEST_TIMEOUT_MS)),
   PRIVY_APP_ID: z.string().min(1),
   PRIVY_APP_SECRET: z.string().min(1),
   FIREBLOCKS_API_KEY: z.string().min(1),
@@ -63,4 +65,14 @@ export function parseServerSettings(env: Env): ServerSettings {
 
 export function parseLocalSettings(env: Env): LocalSettings {
   return parse(localSettingsSchema, env);
+}
+
+export function platformCredentials(settings: ServerSettings | LocalSettings): ProviderCredentials {
+  return {
+    fireblocks: {
+      apiKey: settings.FIREBLOCKS_API_KEY,
+      apiSecretPem: settings.FIREBLOCKS_API_SECRET,
+    },
+    privy: { appId: settings.PRIVY_APP_ID, appSecret: settings.PRIVY_APP_SECRET },
+  };
 }

@@ -1,23 +1,51 @@
-import { FORWARD_HEADERS, type SafeProxyCode } from "@sdp/safe-proxy-endpoints/protocol";
-import type { SafeProxyReadiness } from "@sdp/types/safe-proxy";
-import { type Context, Hono } from "hono";
-import type { ContentfulStatusCode } from "hono/utils/http-status";
+import type { SafeProxyCaller } from "@sdp/safe-proxy-endpoints/callers";
+import { matchEndpoint } from "@sdp/safe-proxy-endpoints/match";
 import {
-  type AppEnv,
-  createForwardHandler,
-  FORWARD_ROUTE,
-  type ForwardDependencies,
-  readRequestId,
-} from "./forward";
-import { Refusal } from "./refusal";
-import { requestLogLine, type WriteRequestLog } from "./request-log";
-import { failureOutcome, type RequestOutcome } from "./request-result";
+  REQUEST_ID_HEADER,
+  RESULT_HEADER,
+  SAFE_PROXY_CODES,
+  type SafeProxyCode,
+} from "@sdp/safe-proxy-endpoints/protocol";
+import { SAFE_PROXY_PROVIDERS } from "@sdp/safe-proxy-endpoints/providers";
+import { type Context, Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
+import { authHeaders, type ProviderCredentials } from "./provider-auth";
 
-export interface AppDependencies extends ForwardDependencies {
-  writeRequestLog: WriteRequestLog;
-  readiness: () => SafeProxyReadiness;
+export interface AppDependencies {
+  identifyCaller: (headers: Headers) => Promise<SafeProxyCaller>;
+  credentials: ProviderCredentials;
+  fetch: typeof fetch;
+  providerTimeoutMs: number;
+  writeLog: (line: RequestLogLine) => void;
   revision: string;
 }
+
+// Thrown only while nothing has been sent to the provider.
+export class Refusal extends Error {
+  constructor(public readonly code: SafeProxyCode) {
+    super(code);
+    this.name = "Refusal";
+  }
+}
+
+export interface RequestLogLine {
+  request_id: string | null;
+  caller: SafeProxyCaller | null;
+  provider: string | null;
+  // The declared method and path pattern, never the path that was requested.
+  endpoint: string | null;
+  result: string | null;
+  code: SafeProxyCode | null;
+  error_name: string | null;
+  status: number;
+  duration_ms: number;
+  revision: string;
+}
+
+type AppEnv = { Variables: { line: RequestLogLine } };
+
+const MAX_BODY_BYTES = 1024 * 1024;
 
 const OWN_ANSWER_STATUS = {
   unknown_route: 404,
@@ -28,71 +56,120 @@ const OWN_ANSWER_STATUS = {
   endpoint_not_allowed: 403,
   body_not_allowed: 403,
   caller_not_allowed: 403,
-  credential_store_unavailable: 501,
-  deadline_exceeded: 504,
   internal: 500,
   provider_no_answer: 502,
-  provider_answer_too_large: 502,
 } as const satisfies Record<SafeProxyCode, ContentfulStatusCode>;
 
 export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
-  const forward = createForwardHandler(dependencies);
 
-  // The clock starts on receipt, before anything is checked.
-  app.use(async (c, next) => {
-    c.set("receivedAt", dependencies.now());
-    c.set("requestId", readRequestId(c.req.header(FORWARD_HEADERS.requestId)));
-    c.set("progress", { stage: "received" });
-    await next();
-  });
-
-  function logRequest(c: Context<AppEnv>, outcome: RequestOutcome): void {
-    dependencies.writeRequestLog(
-      requestLogLine({
-        requestId: c.get("requestId"),
-        progress: c.get("progress"),
-        outcome,
-        durationMs: dependencies.now() - c.get("receivedAt"),
-        revision: dependencies.revision,
-      })
-    );
+  function ownAnswer(c: Context<AppEnv>, code: SafeProxyCode): Response {
+    c.get("line").code = code;
+    return c.json({ code }, OWN_ANSWER_STATUS[code], { [RESULT_HEADER]: SAFE_PROXY_CODES[code] });
   }
 
-  // Liveness is constant and touches no dependency.
   app.get("/health", (c) => c.json({ status: "ok" }));
+  app.get("/health/ready", (c) =>
+    c.json({ service: "sdp-safe-proxy", revision: dependencies.revision })
+  );
 
-  app.get("/health/ready", (c) => {
-    const readiness = dependencies.readiness();
-    switch (readiness) {
-      case "starting":
-        return c.json({ status: "starting" }, 503);
-      case "ready":
-        return c.json({ service: "sdp-safe-proxy", revision: dependencies.revision });
-      default: {
-        const unreachable: never = readiness;
-        return unreachable;
+  // One log line per request, written once the answer is known.
+  app.use(async (c, next) => {
+    const startedAt = Date.now();
+    const line: RequestLogLine = {
+      request_id: c.req.header(REQUEST_ID_HEADER) ?? null,
+      caller: null,
+      provider: null,
+      endpoint: null,
+      result: null,
+      code: null,
+      error_name: null,
+      status: 0,
+      duration_ms: 0,
+      revision: dependencies.revision,
+    };
+    c.set("line", line);
+    await next();
+    line.result = c.res.headers.get(RESULT_HEADER);
+    line.status = c.res.status;
+    line.duration_ms = Date.now() - startedAt;
+    dependencies.writeLog(line);
+  });
+
+  // METHOD /<provider>/<the provider's own path and query>
+  app.all(
+    "/:provider/*",
+    bodyLimit({
+      maxSize: MAX_BODY_BYTES,
+      onError: () => {
+        throw new Refusal("invalid_request");
+      },
+    }),
+    async (c) => {
+      const line = c.get("line");
+      const caller = await dependencies.identifyCaller(c.req.raw.headers);
+      line.caller = caller;
+
+      const { pathname, search } = new URL(c.req.url);
+      const providerEnd = pathname.indexOf("/", 1);
+      const target = pathname.slice(providerEnd) + search;
+      const body = await c.req.text();
+
+      const match = matchEndpoint({
+        provider: pathname.slice(1, providerEnd),
+        method: c.req.method,
+        path: target,
+        body,
+      });
+      if (!match.allowed) throw new Refusal(match.code);
+      const { provider, endpoint } = match;
+      line.provider = provider;
+      line.endpoint = `${endpoint.method} ${endpoint.path}`;
+
+      if (!endpoint.callers.includes(caller)) throw new Refusal("caller_not_allowed");
+      if (endpoint.method === "GET" && body !== "") throw new Refusal("body_not_allowed");
+
+      // Only the headers the endpoint declares are passed through; the auth is set last.
+      const headers = new Headers();
+      for (const name of endpoint.requestHeaders) {
+        const value = c.req.header(name);
+        if (value !== undefined) headers.set(name, value);
       }
+      if (body !== "") headers.set("content-type", "application/json");
+      const auth = await authHeaders(provider, dependencies.credentials, { path: target, body });
+      for (const [name, value] of Object.entries(auth)) headers.set(name, value);
+
+      // From here the request may have reached the provider: a failure is no answer, never a
+      // refusal.
+      let answer: Response;
+      try {
+        answer = await dependencies.fetch(
+          `https://${SAFE_PROXY_PROVIDERS[provider].hosts[0]}${target}`,
+          {
+            method: endpoint.method,
+            headers,
+            body: body === "" ? null : body,
+            redirect: "manual",
+            signal: AbortSignal.timeout(dependencies.providerTimeoutMs),
+          }
+        );
+      } catch {
+        return ownAnswer(c, "provider_no_answer");
+      }
+
+      const answerHeaders = new Headers({ [RESULT_HEADER]: "forwarded" });
+      const contentType = answer.headers.get("content-type");
+      if (contentType !== null) answerHeaders.set("content-type", contentType);
+      return new Response(answer.body, { status: answer.status, headers: answerHeaders });
     }
-  });
+  );
 
-  app.all(FORWARD_ROUTE, async (c) => {
-    const answer = await forward(c);
-    logRequest(c, { result: "forwarded" });
-    return answer;
-  });
+  app.notFound((c) => ownAnswer(c, "unknown_route"));
 
-  app.notFound(() => {
-    throw new Refusal("unknown_route");
-  });
-
-  // Every failure is answered and logged here, from how far the request got.
   app.onError((error, c) => {
-    const outcome = failureOutcome(error, c.get("progress"));
-    logRequest(c, outcome);
-    return c.json({ code: outcome.code }, OWN_ANSWER_STATUS[outcome.code], {
-      [FORWARD_HEADERS.result]: outcome.result,
-    });
+    if (error instanceof Refusal) return ownAnswer(c, error.code);
+    c.get("line").error_name = error.constructor.name;
+    return ownAnswer(c, "internal");
   });
 
   return app;

@@ -3,18 +3,12 @@ import {
   createCallerIdentityVerifier,
   createGoogleIdentityKeys,
 } from "@sdp/service-call/caller-identity";
-
-import type { SafeProxyReadiness } from "@sdp/types/safe-proxy";
 import { createApp } from "./app";
 import { createTokenCallerCheck } from "./caller";
-import { createPlatformCredentialLoader } from "./credentials";
-import { createRequestLog } from "./request-log";
-import { parseServerSettings } from "./settings";
-import { exitWithMessage, settingsOrExit } from "./start-up";
+import { parseServerSettings, platformCredentials } from "./settings";
 
-const settings = settingsOrExit(parseServerSettings);
+const settings = parseServerSettings(process.env);
 const identityKeys = createGoogleIdentityKeys();
-let readiness: SafeProxyReadiness = "starting";
 
 const app = createApp({
   identifyCaller: createTokenCallerCheck({
@@ -28,30 +22,15 @@ const app = createApp({
       api: settings.SAFE_PROXY_API_CALLER,
       cron: settings.SAFE_PROXY_CRON_CALLER,
     },
-    now: Date.now,
   }),
-  loadCredential: createPlatformCredentialLoader({
-    fireblocks: {
-      apiKey: settings.FIREBLOCKS_API_KEY,
-      apiSecretPem: settings.FIREBLOCKS_API_SECRET,
-    },
-    privy: { appId: settings.PRIVY_APP_ID, appSecret: settings.PRIVY_APP_SECRET },
-  }),
+  credentials: platformCredentials(settings),
   fetch: globalThis.fetch,
-  now: Date.now,
-  maxBudgetMs: settings.SAFE_PROXY_MAX_BUDGET_MS,
-  writeRequestLog: createRequestLog(process.stdout),
-  readiness: () => readiness,
+  providerTimeoutMs: settings.SAFE_PROXY_PROVIDER_TIMEOUT_MS,
+  writeLog: (line) => process.stdout.write(`${JSON.stringify(line)}\n`),
   revision: settings.K_REVISION,
 });
 
+// The port opens only once the identity keys have been fetched.
+await identityKeys.reload();
 const server = serve({ fetch: app.fetch, port: settings.PORT });
 process.on("SIGTERM", () => server.close());
-
-// Ready only once the identity keys have been fetched.
-try {
-  await identityKeys.reload();
-} catch {
-  exitWithMessage("identity keys could not be fetched");
-}
-readiness = "ready";

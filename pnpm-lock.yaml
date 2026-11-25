@@ -407,9 +407,6 @@ importers:
       '@hono/node-server':
         specifier: 2.1.6
         version: 2.1.6(hono@4.13.16)
-      '@sdp/redaction':
-        specifier: workspace:*
-        version: link:../../packages/sdp-redaction
       '@sdp/safe-proxy-endpoints':
         specifier: workspace:*
         version: link:../../packages/sdp-safe-proxy-endpoints
@@ -425,9 +422,6 @@ importers:
       jose:
         specifier: 6.2.13
         version: 6.2.13
-      pino:
-        specifier: 10.4.0
-        version: 10.4.0
       zod:
         specifier: 4.6.7
         version: 4.6.7
