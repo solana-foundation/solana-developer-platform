@@ -1,5 +1,6 @@
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { ApiKeyStamper } from "@solana/keychain-turnkey";
+import { CUSTODY_CLUSTER_CONFIG } from "#/cluster-config";
 import {
   normalizeProviderNameFragment,
   parseJsonResponse,
@@ -9,7 +10,6 @@ import {
 } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
-import { TURNKEY_BY_CLUSTER } from "./cluster-config";
 
 interface TurnkeyActivityResponse {
   activity?: {
@@ -119,7 +119,7 @@ async function turnkeyRequest<T>(
 
   try {
     const response = await runtime.fetch(
-      `${TURNKEY_BY_CLUSTER[params.cluster].origin}${params.path}`,
+      `${CUSTODY_CLUSTER_CONFIG[params.cluster].turnkey.origin}${params.path}`,
       {
         method: params.method,
         headers: {

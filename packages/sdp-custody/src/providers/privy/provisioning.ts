@@ -1,8 +1,8 @@
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
+import { CUSTODY_CLUSTER_CONFIG } from "#/cluster-config";
 import { encodeBasicAuth, parseJsonResponse, readErrorResponseText } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
-import { PRIVY_BY_CLUSTER } from "./cluster-config";
 
 const PRIVY_REQUEST_TIMEOUT_MS = 10_000;
 
@@ -173,7 +173,7 @@ async function privyRequest<T>(
 ): Promise<T> {
   try {
     const response = await runtime.fetch(
-      `${PRIVY_BY_CLUSTER[params.cluster].origin}${params.path}`,
+      `${CUSTODY_CLUSTER_CONFIG[params.cluster].privy.origin}${params.path}`,
       {
         method: params.method,
         headers: {

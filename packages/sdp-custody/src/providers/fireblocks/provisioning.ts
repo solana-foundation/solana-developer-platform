@@ -1,10 +1,10 @@
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { isAddress } from "@solana/addresses";
 import type { VaultAddressesResponse } from "@solana/keychain-fireblocks";
+import { CUSTODY_CLUSTER_CONFIG } from "#/cluster-config";
 import { normalizePem } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
-import { FIREBLOCKS_BY_CLUSTER } from "./cluster-config";
 import { fireblocksRequest } from "./http";
 
 interface FireblocksVaultAccountResponse {
@@ -46,7 +46,7 @@ export async function provisionFireblocksVaultAccount(
   }
 
   const { cluster } = config;
-  const assetId = FIREBLOCKS_BY_CLUSTER[cluster].nativeAsset;
+  const assetId = CUSTODY_CLUSTER_CONFIG[cluster].fireblocks.nativeAsset;
 
   let vaultAccountId = options.vaultAccountId;
 

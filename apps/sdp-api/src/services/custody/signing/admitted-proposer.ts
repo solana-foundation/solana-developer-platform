@@ -1,11 +1,9 @@
+import { CUSTODY_CLUSTER_CONFIG } from "@sdp/custody/cluster-config";
 import {
   type FireblocksAddressEntry,
   readFireblocksAddressBook,
 } from "@sdp/custody/providers/fireblocks/address-book";
-import {
-  FIREBLOCKS_BY_CLUSTER,
-  isFireblocksNativeAsset,
-} from "@sdp/custody/providers/fireblocks/cluster-config";
+import { isFireblocksNativeAsset } from "@sdp/custody/providers/fireblocks/native-asset";
 import {
   cancelFireblocksTransaction,
   cancelFireblocksTransfer,
@@ -204,7 +202,7 @@ async function resolvePaymentAsset(
   return resolveFireblocksTransferAsset(
     runtime,
     access,
-    FIREBLOCKS_BY_CLUSTER[network].nativeAsset,
+    CUSTODY_CLUSTER_CONFIG[network].fireblocks.nativeAsset,
     operation.native ? null : operation.token
   );
 }

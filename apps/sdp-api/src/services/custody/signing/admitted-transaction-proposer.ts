@@ -1,4 +1,4 @@
-import { isFireblocksNativeAsset } from "@sdp/custody/providers/fireblocks/cluster-config";
+import { isFireblocksNativeAsset } from "@sdp/custody/providers/fireblocks/native-asset";
 import {
   cancelFireblocksTransaction,
   createFireblocksProgramCall,

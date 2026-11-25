@@ -149,10 +149,15 @@
       "import": "./src/providers/fireblocks/vaults.ts",
       "default": "./src/providers/fireblocks/vaults.ts"
     },
-    "./providers/fireblocks/cluster-config": {
-      "types": "./src/providers/fireblocks/cluster-config.ts",
-      "import": "./src/providers/fireblocks/cluster-config.ts",
-      "default": "./src/providers/fireblocks/cluster-config.ts"
+    "./providers/fireblocks/native-asset": {
+      "types": "./src/providers/fireblocks/native-asset.ts",
+      "import": "./src/providers/fireblocks/native-asset.ts",
+      "default": "./src/providers/fireblocks/native-asset.ts"
+    },
+    "./cluster-config": {
+      "types": "./src/cluster-config.ts",
+      "import": "./src/cluster-config.ts",
+      "default": "./src/cluster-config.ts"
     },
     "./providers/fireblocks/credential": {
       "types": "./src/providers/fireblocks/credential.ts",

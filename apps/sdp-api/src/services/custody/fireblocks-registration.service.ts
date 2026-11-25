@@ -1,4 +1,4 @@
-import { FIREBLOCKS_BY_CLUSTER } from "@sdp/custody/providers/fireblocks/cluster-config";
+import { CUSTODY_CLUSTER_CONFIG } from "@sdp/custody/cluster-config";
 import { FireblocksApiError } from "@sdp/custody/providers/fireblocks/http";
 import {
   type ByokCustodyProvider,
@@ -241,7 +241,7 @@ export async function discoverFireblocksVaults(
         cluster,
         apiKey: input.apiKey,
         apiSecretPem: secret.privateKeyPem,
-        assetId: FIREBLOCKS_BY_CLUSTER[cluster].nativeAsset,
+        assetId: CUSTODY_CLUSTER_CONFIG[cluster].fireblocks.nativeAsset,
       },
       { after: input.after, namePrefix: input.namePrefix }
     );

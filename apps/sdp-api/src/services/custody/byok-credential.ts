@@ -1,5 +1,5 @@
 import { createPrivateKey } from "node:crypto";
-import { FIREBLOCKS_BY_CLUSTER } from "@sdp/custody/providers/fireblocks/cluster-config";
+import { CUSTODY_CLUSTER_CONFIG } from "@sdp/custody/cluster-config";
 import { checkFireblocksCredential } from "@sdp/custody/providers/fireblocks/credential";
 import { checkPrivyCredential } from "@sdp/custody/providers/privy/credential";
 import { hashString } from "@sdp/payments/hash";
@@ -75,7 +75,7 @@ export function credentialPayload(
   return {
     ...parsed.data,
     apiSecretPem,
-    assetId: FIREBLOCKS_BY_CLUSTER[CLUSTER_BY_SDP_ENVIRONMENT[environment]].nativeAsset,
+    assetId: CUSTODY_CLUSTER_CONFIG[CLUSTER_BY_SDP_ENVIRONMENT[environment]].fireblocks.nativeAsset,
   };
 }
 

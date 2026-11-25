@@ -201,11 +201,7 @@ export const CAPABILITIES = [
       ...readdirSync(path.join(REPO_ROOT, "packages/sdp-custody/src/providers/dfns"))
         .filter(
           (file) =>
-            file.endsWith(".ts") &&
-            !file.endsWith(".test.ts") &&
-            !file.startsWith("keychain") &&
-            // The cluster table is data: it holds no credential and builds no client.
-            file !== "cluster-config.ts"
+            file.endsWith(".ts") && !file.endsWith(".test.ts") && !file.startsWith("keychain")
         )
         .sort()
         .map((file) => ({ file: `packages/sdp-custody/src/providers/dfns/${file}`, name: "*" })),

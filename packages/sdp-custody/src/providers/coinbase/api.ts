@@ -1,5 +1,6 @@
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { importJWK, importPKCS8, SignJWT } from "jose";
+import { CUSTODY_CLUSTER_CONFIG } from "#/cluster-config";
 import {
   decodeBase64ToBytes,
   encodePkcs8Pem,
@@ -12,7 +13,6 @@ import {
 } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
-import { COINBASE_CDP_BY_CLUSTER } from "./cluster-config";
 
 export interface CoinbaseCdpRequestParams {
   cluster: SolanaCluster;
@@ -53,7 +53,7 @@ export async function coinbaseCdpRequest<T>(
   params: CoinbaseCdpRequestParams
 ): Promise<T> {
   const { requestPath, url } = resolveCoinbaseCdpRequestUrl(
-    COINBASE_CDP_BY_CLUSTER[params.cluster].origin,
+    CUSTODY_CLUSTER_CONFIG[params.cluster].coinbase_cdp.origin,
     params.path
   );
   const normalizedBody = params.body ? sortJsonKeys(params.body) : undefined;

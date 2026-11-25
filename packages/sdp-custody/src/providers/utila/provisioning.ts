@@ -1,10 +1,10 @@
 import { summarizeUpstreamErrorBody } from "@sdp/redaction/upstream-error";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { importPKCS8, SignJWT } from "jose";
+import { CUSTODY_CLUSTER_CONFIG } from "#/cluster-config";
 import { normalizePem } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
-import { UTILA_BY_CLUSTER } from "./cluster-config";
 
 export interface ProvisionUtilaOptions {
   /** Display name for the new sub-wallet inside the vault. */
@@ -32,7 +32,7 @@ export async function provisionUtilaWallet(
   const serviceAccountEmail = config.serviceAccountEmail;
   const serviceAccountPrivateKeyPem = config.serviceAccountPrivateKeyPem;
   const configuredVaultId = config.vaultId;
-  const { origin, network } = UTILA_BY_CLUSTER[config.cluster];
+  const { origin, network } = CUSTODY_CLUSTER_CONFIG[config.cluster].utila;
 
   if (!serviceAccountEmail || !serviceAccountPrivateKeyPem || !configuredVaultId) {
     throw new SigningError(

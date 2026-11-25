@@ -1,7 +1,7 @@
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
+import { CUSTODY_CLUSTER_CONFIG } from "#/cluster-config";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
-import { PRIVY_BY_CLUSTER } from "./cluster-config";
 
 const PRIVY_CHECK_TIMEOUT_MS = 10_000;
 /** Privy answers a wrong secret or an unknown app ID with this 400 code, never with 401. */
@@ -14,14 +14,17 @@ export async function checkPrivyCredential(
 ): Promise<"success" | "failed" | "retry_unknown"> {
   try {
     // Privy can return 500 for an empty app with limit=1; use its default first page.
-    const response = await runtime.fetch(`${PRIVY_BY_CLUSTER[credential.cluster].origin}/wallets`, {
-      method: "GET",
-      headers: {
-        Authorization: `Basic ${Buffer.from(`${credential.appId}:${credential.appSecret}`).toString("base64")}`,
-        "privy-app-id": credential.appId,
-      },
-      signal: AbortSignal.timeout(PRIVY_CHECK_TIMEOUT_MS),
-    });
+    const response = await runtime.fetch(
+      `${CUSTODY_CLUSTER_CONFIG[credential.cluster].privy.origin}/wallets`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${credential.appId}:${credential.appSecret}`).toString("base64")}`,
+          "privy-app-id": credential.appId,
+        },
+        signal: AbortSignal.timeout(PRIVY_CHECK_TIMEOUT_MS),
+      }
+    );
     if (response.status === 401) return "failed";
     // Privy answers a wrong secret or an unknown app ID with this 400, never with 401.
     if (response.status === 400) {

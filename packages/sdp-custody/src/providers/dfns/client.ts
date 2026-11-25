@@ -2,8 +2,8 @@ import { Buffer } from "node:buffer";
 import * as crypto from "node:crypto";
 import { summarizeUpstreamErrorBody } from "@sdp/redaction/upstream-error";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
+import { CUSTODY_CLUSTER_CONFIG } from "#/cluster-config";
 import { SigningError } from "#/signing";
-import { DFNS_BY_CLUSTER, IBM_HAVEN_BY_CLUSTER } from "./cluster-config";
 
 /**
  * Structural env slice consumed by the DFNS client factory. The API app passes
@@ -309,8 +309,8 @@ function resolveDfnsContext(env: DfnsEnv, cluster: SolanaCluster): DfnsClientCon
     authToken,
     credentialId,
     privateKey,
-    baseUrl: DFNS_BY_CLUSTER[cluster].origin,
-    network: DFNS_BY_CLUSTER[cluster].network,
+    baseUrl: CUSTODY_CLUSTER_CONFIG[cluster].dfns.origin,
+    network: CUSTODY_CLUSTER_CONFIG[cluster].dfns.network,
     providerLabel: DFNS_PROVIDER_LABEL,
     userAgent: DFNS_USER_AGENT,
   };
@@ -607,8 +607,8 @@ function resolveIbmHavenContext(env: IbmHavenEnv, cluster: SolanaCluster): DfnsC
     authToken,
     credentialId,
     privateKey,
-    baseUrl: IBM_HAVEN_BY_CLUSTER[cluster].origin,
-    network: IBM_HAVEN_BY_CLUSTER[cluster].network,
+    baseUrl: CUSTODY_CLUSTER_CONFIG[cluster].ibm_haven.origin,
+    network: CUSTODY_CLUSTER_CONFIG[cluster].ibm_haven.network,
     providerLabel: IBM_HAVEN_PROVIDER_LABEL,
     userAgent: IBM_HAVEN_USER_AGENT,
   };

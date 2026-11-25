@@ -1,9 +1,9 @@
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { importPKCS8, SignJWT } from "jose";
+import { CUSTODY_CLUSTER_CONFIG } from "#/cluster-config";
 import { parseJsonResponse, sha256Hex } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
-import { FIREBLOCKS_BY_CLUSTER } from "./cluster-config";
 
 export class FireblocksApiError extends SigningError {
   constructor(
@@ -56,7 +56,7 @@ export async function fireblocksRequest<T>(
   if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
   if (params.body) headers["Content-Type"] = "application/json";
   const response = await runtime.fetch(
-    `${FIREBLOCKS_BY_CLUSTER[params.cluster].origin}${params.uri}`,
+    `${CUSTODY_CLUSTER_CONFIG[params.cluster].fireblocks.origin}${params.uri}`,
     {
       method: params.method,
       redirect: "error",

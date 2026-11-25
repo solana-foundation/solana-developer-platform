@@ -1,8 +1,8 @@
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
+import { CUSTODY_CLUSTER_CONFIG } from "#/cluster-config";
 import { parseJsonResponse, readErrorResponseText } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
-import { PARA_BY_CLUSTER } from "./cluster-config";
 
 const PARA_WALLET_READY_MAX_ATTEMPTS = 8;
 const PARA_WALLET_READY_DELAY_MS = 500;
@@ -30,7 +30,7 @@ export async function paraRequest<T>(
 ): Promise<T> {
   try {
     const response = await runtime.fetch(
-      `${PARA_BY_CLUSTER[params.cluster].origin}${params.path}`,
+      `${CUSTODY_CLUSTER_CONFIG[params.cluster].para.origin}${params.path}`,
       {
         method: params.method,
         headers: {

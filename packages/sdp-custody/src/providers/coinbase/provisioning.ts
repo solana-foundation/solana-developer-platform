@@ -1,4 +1,5 @@
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
+import { CUSTODY_CLUSTER_CONFIG } from "#/cluster-config";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
 import {
@@ -7,7 +8,6 @@ import {
   extractCoinbaseCdpAccountAddress,
   isCoinbaseCdpAlreadyExistsError,
 } from "./api";
-import { COINBASE_CDP_BY_CLUSTER } from "./cluster-config";
 
 interface CoinbaseCdpSolanaAccountResponse {
   address: string;
@@ -72,7 +72,7 @@ export async function provisionCoinbaseCdpAccount(
     accountScope: config.accountScope,
     organizationId: options.orgId,
     projectId: options.projectId,
-    network: COINBASE_CDP_BY_CLUSTER[cluster].network,
+    network: CUSTODY_CLUSTER_CONFIG[cluster].coinbase_cdp.network,
     walletSeed: options.walletSeed,
   });
 

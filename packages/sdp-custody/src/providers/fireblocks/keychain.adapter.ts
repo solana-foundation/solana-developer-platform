@@ -18,9 +18,9 @@ import { SignerErrorCode } from "@solana/keychain-core";
 import { createFireblocksSigner } from "@solana/keychain-fireblocks";
 import type { Address } from "@solana/kit";
 import { z } from "zod";
+import { CUSTODY_CLUSTER_CONFIG } from "#/cluster-config";
 import { BaseKeychainAdapter } from "#/providers/base-keychain.adapter";
 import { SigningError } from "#/signing";
-import { FIREBLOCKS_BY_CLUSTER } from "./cluster-config";
 import type { KeychainFireblocksConfig } from "./keychain-config";
 
 /**
@@ -91,7 +91,7 @@ export class KeychainFireblocksAdapter extends BaseKeychainAdapter {
       apiKey: this.config.apiKey,
       privateKeyPem: this.config.apiSecretPem,
       vaultAccountId,
-      assetId: FIREBLOCKS_BY_CLUSTER[this.config.cluster].nativeAsset,
+      assetId: CUSTODY_CLUSTER_CONFIG[this.config.cluster].fireblocks.nativeAsset,
       pollIntervalMs: this.config.pollIntervalMs,
       maxPollAttempts: this.config.maxPollAttempts,
       requestDelayMs: this.config.requestDelayMs,

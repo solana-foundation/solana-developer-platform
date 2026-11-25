@@ -1,8 +1,8 @@
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
+import { CUSTODY_CLUSTER_CONFIG } from "#/cluster-config";
 import { parseJsonResponse, readErrorResponseText } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
-import { ANCHORAGE_BY_CLUSTER } from "./cluster-config";
 
 type AnchorageHttpMethod = "GET" | "POST" | "DELETE";
 
@@ -47,7 +47,7 @@ export async function provisionAnchorageWallet(
     apiKey,
     path: "/v1/wallets",
     body: {
-      network: ANCHORAGE_BY_CLUSTER[config.cluster].network,
+      network: CUSTODY_CLUSTER_CONFIG[config.cluster].anchorage.network,
       ...(options.walletLabel ? { label: options.walletLabel } : {}),
     },
   });
@@ -88,7 +88,7 @@ async function anchorageRequest<T>(
 ): Promise<T> {
   try {
     const requestWithAuth = (authStrategy: AnchorageAuthStrategy) =>
-      runtime.fetch(`${ANCHORAGE_BY_CLUSTER[params.cluster].origin}${params.path}`, {
+      runtime.fetch(`${CUSTODY_CLUSTER_CONFIG[params.cluster].anchorage.origin}${params.path}`, {
         method: params.method,
         headers: buildAnchorageHeaders(params, authStrategy),
         body: params.body ? JSON.stringify(params.body) : undefined,
