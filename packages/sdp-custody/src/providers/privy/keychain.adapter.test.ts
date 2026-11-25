@@ -102,7 +102,7 @@ describe("privy adapter", () => {
     });
   });
 
-  it("reuses one signer construction across successful calls", async () => {
+  it("hands out one signer per wallet and reads the wallet once", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(

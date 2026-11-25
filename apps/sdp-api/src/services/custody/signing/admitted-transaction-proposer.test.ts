@@ -16,6 +16,7 @@ import {
 } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
 import type { MoneyAdmissionDecision } from "@/lib/money-admission";
+import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import { type ProposalAccess, ProposalNotSentError } from "./admitted-proposer";
 import {
   admittedTransactionProposer,
@@ -57,11 +58,11 @@ const refused: MoneyAdmissionDecision = { admitted: false, reason: "movement_dis
 const inScope = <T>(work: () => Promise<T>) =>
   runInClusterScope({ projectId: "project_1", environment: "sandbox" }, work);
 
-function transaction(text = "deposit") {
+function transaction(text = "deposit", feePayer = address(owner)) {
   return compileTransaction(
     pipe(
       createTransactionMessage({ version: 0 }),
-      (message) => setTransactionMessageFeePayer(address(owner), message),
+      (message) => setTransactionMessageFeePayer(feePayer, message),
       (message) =>
         setTransactionMessageLifetimeUsingBlockhash(
           { blockhash: blockhash("11111111111111111111111111111111"), lastValidBlockHeight: 100n },
@@ -127,7 +128,7 @@ describe("Earn transaction proposal admission boundary", () => {
     expect(provider.propose).not.toHaveBeenCalled();
   });
 
-  it("changed credential account and wrong transaction owner refuse before provider I/O", async () => {
+  it("changed credential account, changed source address and wrong transaction owner refuse before provider I/O", async () => {
     const provider = port();
     await expect(
       inScope(() =>
@@ -143,6 +144,16 @@ describe("Earn transaction proposal admission boundary", () => {
         create(provider).propose({
           binding: { ...binding, sourceAddress: "11111111111111111111111111111111" },
           unsignedTransaction: unsigned,
+        })
+      )
+    ).rejects.toBeInstanceOf(ProposalNotSentError);
+    await expect(
+      inScope(() =>
+        create(provider).propose({
+          binding,
+          unsignedTransaction: getBase64EncodedWireTransaction(
+            transaction("deposit", syntheticAddress(1))
+          ),
         })
       )
     ).rejects.toBeInstanceOf(ProposalNotSentError);

@@ -517,9 +517,9 @@ describe("privy wallet provisioning", () => {
   });
 
   it.each([
-    ["wallet lookup", { walletId: "wallet-existing" }, "GET"],
-    ["legacy creation", {}, "POST"],
-  ] as const)("preserves %s", async (_case, options, method) => {
+    ["looks up an existing wallet by ID", { walletId: "wallet-existing" }, "GET"],
+    ["creates a wallet without an external ID", {}, "POST"],
+  ] as const)("reads or creates a Managed wallet (%s)", async (_case, options, method) => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(jsonResponse({ id: "wallet-existing", address: EXISTING_ADDRESS }, 200));
@@ -535,7 +535,7 @@ describe("privy wallet provisioning", () => {
     [401, "PROVIDER_NOT_CONFIGURED"],
     [400, "PROVIDER_NOT_CONFIGURED"],
     [503, "PROVIDER_NOT_CONFIGURED"],
-  ] as const)("preserves legacy HTTP %s create classification as %s", async (status, code) => {
+  ] as const)("classifies a Managed create's HTTP %s failure as %s", async (status, code) => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ error: "rejected" }, status));
 
     await expect(provisionTestPrivyWallet({})).rejects.toMatchObject({ code });
@@ -564,7 +564,7 @@ describe("privy wallet provisioning", () => {
     });
   });
 
-  it("preserves the legacy malformed create response", async () => {
+  it("reports a malformed Managed create response as a failed creation", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({}, 200));
 
     await expect(

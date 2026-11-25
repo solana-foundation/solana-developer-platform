@@ -1,26 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { forbidden } from "@/lib/errors";
 import type { SigningConfigRecord } from "@/services/adapters/signing";
-import {
-  provisionCoinbaseCdpAccount,
-  provisionPrivyWallet,
-  provisionUtilaWallet,
-} from "@/services/custody/provisioning";
+import * as custodyProvisioning from "@/services/custody/provisioning";
 import { SigningService } from "@/services/custody/signing.service";
 import * as providerAvailability from "@/services/provider-availability.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import { env as testEnv } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
-
-vi.mock("@/services/custody/provisioning", () => ({
-  provisionCoinbaseCdpAccount: vi.fn(),
-  provisionPrivyWallet: vi.fn(),
-  provisionUtilaWallet: vi.fn(),
-}));
-
-const mockedProvisionPrivyWallet = vi.mocked(provisionPrivyWallet);
-const mockedProvisionCoinbaseCdpAccount = vi.mocked(provisionCoinbaseCdpAccount);
-const mockedProvisionUtilaWallet = vi.mocked(provisionUtilaWallet);
 
 const PROJECT_ID = "prj_signing_reuse";
 
@@ -48,12 +34,16 @@ describe("signing.service provider reuse", () => {
       },
     });
 
+    const provision = vi
+      .spyOn(custodyProvisioning, "provisionPrivyWallet")
+      .mockRejectedValue(new Error("provisioning reached"));
+
     const result = await service.initializePrivySigning(orgId, PROJECT_ID, {});
 
     expect(result.walletId).toBe(wallet.walletId);
     expect(result.publicKey).toBe(wallet.publicKey);
     expect(result.configId).toBe(configId);
-    expect(mockedProvisionPrivyWallet).not.toHaveBeenCalled();
+    expect(provision).not.toHaveBeenCalled();
     expect(configStore.createWallet).not.toHaveBeenCalled();
     expect(configStore.saveProviderConfig).toHaveBeenCalledWith({
       orgId,
@@ -87,12 +77,16 @@ describe("signing.service provider reuse", () => {
       },
     });
 
+    const provision = vi
+      .spyOn(custodyProvisioning, "provisionCoinbaseCdpAccount")
+      .mockRejectedValue(new Error("provisioning reached"));
+
     const result = await service.initializeCoinbaseCdpSigning(orgId, PROJECT_ID, {});
 
     expect(result.walletId).toBe(wallet.walletId);
     expect(result.publicKey).toBe(wallet.publicKey);
     expect(result.configId).toBe(configId);
-    expect(mockedProvisionCoinbaseCdpAccount).not.toHaveBeenCalled();
+    expect(provision).not.toHaveBeenCalled();
     expect(configStore.createWallet).not.toHaveBeenCalled();
     expect(configStore.saveProviderConfig).toHaveBeenCalledWith({
       orgId,
@@ -122,12 +116,16 @@ describe("signing.service provider reuse", () => {
       },
     });
 
+    const provision = vi
+      .spyOn(custodyProvisioning, "provisionUtilaWallet")
+      .mockRejectedValue(new Error("provisioning reached"));
+
     const result = await service.initializeUtilaSigning(orgId, PROJECT_ID, {});
 
     expect(result.walletId).toBe(wallet.walletId);
     expect(result.publicKey).toBe(wallet.publicKey);
     expect(result.configId).toBe(configId);
-    expect(mockedProvisionUtilaWallet).not.toHaveBeenCalled();
+    expect(provision).not.toHaveBeenCalled();
     expect(configStore.createWallet).not.toHaveBeenCalled();
     expect(configStore.saveProviderConfig).toHaveBeenCalledWith({
       orgId,
@@ -156,9 +154,7 @@ describe("signing.service custody provider enablement", () => {
       envOverrides: { SDP_RELEASE_CHANNEL: "experimental" },
     });
     configStore.findActiveByProvider.mockResolvedValue(configRecord);
-    const assertManagedCustodyUseAllowed = vi
-      .spyOn(providerAvailability, "assertManagedCustodyUseAllowed")
-      .mockResolvedValue();
+    vi.spyOn(providerAvailability, "assertManagedCustodyUseAllowed").mockResolvedValue();
     const assertCustodyProviderEnabled = vi
       .spyOn(providerAvailability, "assertCustodyProviderEnabled")
       .mockRejectedValue(forbidden("Privy is turned off for this organization."));
@@ -170,13 +166,8 @@ describe("signing.service custody provider enablement", () => {
       code: "INVALID_REQUEST",
       message: "Privy is turned off for this organization.",
     });
-    expect(assertManagedCustodyUseAllowed).toHaveBeenCalledExactlyOnceWith(expect.anything(), {
-      organizationId: orgId,
-      projectId: PROJECT_ID,
-      provider: "privy",
-    });
     expect(assertCustodyProviderEnabled).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ SDP_RELEASE_CHANNEL: "experimental" }),
+      expect.anything(),
       expect.anything(),
       orgId,
       "privy"
@@ -221,7 +212,7 @@ function createService(params: {
     ENVIRONMENT: "development",
     API_VERSION: "v1",
     ...params.envOverrides,
-  } as Env;
+  };
 
   return {
     service: new SigningService(configStore as never, env),

@@ -30,7 +30,7 @@ describe("para adapter", () => {
     expect(String(retry[0])).toContain(`/v1/wallets/${WALLET_ID}`);
   });
 
-  it("reuses one signer construction across successful calls", async () => {
+  it("hands out one signer per wallet and reads the wallet once", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(Response.json({ id: WALLET_ID, type: "SOLANA", address: WALLET_ADDRESS }));

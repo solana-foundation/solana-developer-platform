@@ -74,7 +74,7 @@ function runtime() {
 const devnet = <T>(fn: () => Promise<T>) =>
   runInClusterScope({ projectId: "prj_1", environment: "sandbox" }, fn);
 
-describe("admittedTransferProposer (PRO-2435 D2)", () => {
+describe("admittedTransferProposer", () => {
   it("refuses before any provider request when the waist's live decision refuses", async () => {
     const { fetch, runtime: rt } = runtime();
     const loadPropose = vi.fn(async () => access);
@@ -190,7 +190,7 @@ describe("admittedTransferProposer (PRO-2435 D2)", () => {
   });
 });
 
-describe("proposalRecovery (PRO-2435 D4)", () => {
+describe("proposalRecovery", () => {
   const detail = {
     id: "provider-transaction",
     externalTxId: request.externalId,

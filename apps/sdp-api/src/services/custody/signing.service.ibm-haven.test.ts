@@ -14,6 +14,8 @@ import type { SigningConfigRecord } from "@/services/adapters/signing";
 import { createAdapterFromEncryptedConfig } from "@/services/custody/signing/provider-adapter-factory";
 import { createEncryptionService } from "@/services/encryption.service";
 import { inSandboxScope } from "@/test/helpers/cluster-rpc";
+import { env as testEnv } from "@/test/helpers/env";
+import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import type { Env } from "@/types/env";
 
 const TEST_ORG_ID = "org_ibm_haven";
@@ -45,7 +47,7 @@ describe("ibm_haven wallet id prefixing", () => {
     expect(denormalizeIbmHavenWalletId("dfns_wa-1")).toBe("dfns_wa-1");
   });
 
-  it("sends the raw (unprefixed) wallet id to the Dfns-shaped API when signing", async () => {
+  it("sends the raw (unprefixed) wallet id to the Dfns-shaped API when reading a public key", async () => {
     const requested: string[] = [];
     const adapter = new KeychainIbmHavenAdapter({
       client: createMockDfnsClient(requested),
@@ -84,7 +86,7 @@ describe("ibm_haven provider labeling", () => {
 });
 
 function createMockDfnsClient(requested: string[]): DfnsApiClient {
-  const address = "So11111111111111111111111111111111111111112";
+  const address = syntheticAddress(1);
   return {
     wallets: {
       getWallet: async ({ walletId }: { walletId: string }) => {
@@ -103,21 +105,18 @@ function createMockDfnsClient(requested: string[]): DfnsApiClient {
       createSignature: async () => ({ id: "sig-1", status: "Signed" as const }),
       getSignature: async () => ({ id: "sig-1", status: "Signed" as const }),
     },
-  } as unknown as DfnsApiClient;
+  };
 }
 
-function createTestEnv(overrides?: Partial<Env>): Env {
+function createTestEnv(): Env {
   return {
-    DB: {} as DatabaseClient,
+    ...testEnv,
     CUSTODY_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
     IBM_HAVEN_AUTH_TOKEN: "ibm-haven-auth-token",
     IBM_HAVEN_CREDENTIAL_ID: "ibm-haven-credential-id",
     IBM_HAVEN_PRIVATE_KEY: "ibm-haven-test-private-key",
-    ENVIRONMENT: "development",
-    API_VERSION: "v1",
     SDP_RELEASE_CHANNEL: "beta",
-    ...overrides,
-  } as Env;
+  };
 }
 
 async function encryptConfig(env: Env, plaintext: string): Promise<string> {

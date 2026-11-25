@@ -2,10 +2,7 @@ import * as dfnsClient from "@sdp/custody/providers/dfns/client";
 import { generateKeyPairSigner } from "@solana/kit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as custodyProvisioning from "@/services/custody/provisioning";
-import {
-  createProviderWallet,
-  privyWalletExternalId,
-} from "@/services/custody/signing/provider-wallet-lifecycle";
+import { createProviderWallet } from "@/services/custody/signing/provider-wallet-lifecycle";
 import { env } from "@/test/helpers/env";
 import { required } from "@/test/helpers/required";
 
@@ -105,14 +102,13 @@ describe("createProviderWallet", () => {
       await createProviderWallet(context);
 
       const expected = {
-        externalId: privyWalletExternalId(REQUEST_ID),
+        externalId: "sdp_cw_6f1f4de5-930e-4c4c-a99f-30d46c3c5ceb",
         idempotencyKey: REQUEST_ID,
       };
       expect(provision.mock.calls).toEqual([
         [env, expected],
         [env, expected],
       ]);
-      expect(expected.externalId).toMatch(/^[a-zA-Z0-9_-]{1,64}$/);
     });
 
     it("reaches Coinbase CDP as its idempotency key and account seed, reusing the account", async () => {

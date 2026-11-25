@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { generateKeyPairSync, webcrypto } from "node:crypto";
+import { generateKeyPairSync } from "node:crypto";
 import { describe, it } from "vitest";
-import type { CustodyProvisioningRuntime } from "#/shared/runtime";
+import { testRuntime } from "#/test/runtime";
 import { FireblocksApiError, fireblocksRequest } from "./http";
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
@@ -13,21 +13,11 @@ const params = {
   uri: "/v1/transactions",
   body: { operation: "TRANSFER", assetId: "SOL" },
 };
-function runtime(fetch: CustodyProvisioningRuntime["fetch"]): CustodyProvisioningRuntime {
-  return {
-    fetch,
-    sleep: async () => {},
-    now: Date.now,
-    randomUUID: () => crypto.randomUUID(),
-    getRandomValues: (data) => webcrypto.getRandomValues(new Uint8Array(data)),
-    sha256: async (data) => webcrypto.subtle.digest("SHA-256", new Uint8Array(data)),
-  };
-}
 
 describe("Fireblocks HTTP contract", () => {
   it("keeps retries stable and separate requests distinct within the 40-character limit", async () => {
     const keys: string[] = [];
-    const rt = runtime(async (_url, init) => {
+    const rt = testRuntime(async (_url, init) => {
       assert.ok(init);
       const key = new Headers(init.headers).get("Idempotency-Key");
       assert.ok(key && key.length <= 40, "Fireblocks rejects longer keys with HTTP 400 / 9003");
@@ -49,7 +39,7 @@ describe("Fireblocks HTTP contract", () => {
   it("retains numeric error codes and request IDs without retaining provider message text", async () => {
     await assert.rejects(
       fireblocksRequest(
-        runtime(async () =>
+        testRuntime(async () =>
           Response.json(
             { code: 9003, message: "sensitive provider text" },
             { status: 400, headers: { "x-request-id": "provider-request-123" } }
@@ -76,7 +66,7 @@ describe("Fireblocks HTTP contract", () => {
     ]) {
       await assert.rejects(
         fireblocksRequest(
-          runtime(async () => response),
+          testRuntime(async () => response),
           params
         ),
         (error) => {

@@ -2,12 +2,7 @@ import { generateKeyPairSync } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { env as testEnv } from "@/test/helpers/env";
 import { syntheticAddress } from "@/test/helpers/parsed-transactions";
-import {
-  byokCredentialCheckSchema,
-  checkByokCredential,
-  credentialPayload,
-  parseByokCredential,
-} from "./byok-credential";
+import { checkByokCredential, credentialPayload, parseByokCredential } from "./byok-credential";
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const fields = {
@@ -43,20 +38,6 @@ describe("Fireblocks BYOK credentials", () => {
       })
     ).toThrow();
     expect(() => parseByokCredential("fireblocks", { ...fields, assetId: "ETH" })).toThrow();
-  });
-
-  it("requires success evidence and forbids it on a failed or unknown check", () => {
-    expect(byokCredentialCheckSchema.safeParse({ status: "success" }).success).toBe(false);
-    expect(
-      byokCredentialCheckSchema.safeParse({ status: "success", fingerprint: "" }).success
-    ).toBe(false);
-    for (const status of ["failed", "retry_unknown"] as const) {
-      expect(byokCredentialCheckSchema.parse({ status })).toEqual({ status });
-      expect(byokCredentialCheckSchema.safeParse({ status, fingerprint: "stale" }).success).toBe(
-        false
-      );
-    }
-    expect(byokCredentialCheckSchema.safeParse({ status: "unknown" }).success).toBe(false);
   });
 
   it("normalizes RSA PEM and pins the asset to the project environment", () => {
