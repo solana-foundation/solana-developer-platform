@@ -40,7 +40,7 @@ afterEach(() => {
 });
 
 describe("PayStatusWatch", () => {
-  it("redraws the page once an open link is paid, reading the API from the browser", async () => {
+  it("redraws the page once an open link is paid, reading the API from the browser, then stops", async () => {
     const fetchMock = respondWith("paid", PAY_URL);
     renderWatch("awaiting_payment", true);
 
@@ -50,6 +50,10 @@ describe("PayStatusWatch", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(STATUS_URL, { cache: "no-store" });
     expect(dashboardRouter.refresh).toHaveBeenCalledOnce();
+
+    // A paid link is final: the watch reads it no more.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("keeps reading, without redrawing, while the link stays open", async () => {

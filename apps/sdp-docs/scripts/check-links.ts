@@ -1,10 +1,12 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { SDP_GITHUB_REPO_URL } from "@sdp/types/site";
 
 import { expandDocsBlocks } from "@/lib/docs-blocks";
 import { isPageSourcePublished, publicSurface } from "@/lib/release-channel";
 import { docsPageSlugOf, getDocsMarkdownPath, getDocsPagePath } from "@/lib/site";
+import { probeExternalUrl } from "./lib/external-link";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,7 +15,8 @@ const docsContentDir = path.resolve(__dirname, "../content/docs");
 const docsPublicDir = path.resolve(__dirname, "../public");
 const docsMetaPath = path.resolve(docsContentDir, "meta.json");
 const configPath = path.resolve(__dirname, "link-check.config.json");
-const EXTERNAL_URL_TIMEOUT_MS = 10_000;
+const repoRoot = path.resolve(__dirname, "../../..");
+const repoMainLink = new RegExp(`^${SDP_GITHUB_REPO_URL}/(?:tree|blob)/main/([^?#]+)`);
 
 // Links are checked as the build for src/generated/public-surface.json renders
 // them: pages a `module:` or `rampProvider:` tag leaves out do not exist, and
@@ -192,61 +195,32 @@ function stripQueryAndFragment(destination: string): string {
   return destination.split("#")[0]?.split("?")[0] ?? destination;
 }
 
+/**
+ * This repository's `main` links resolve against the checkout, so a page can
+ * link a file its own change adds, and a wrong path fails without a network call.
+ */
+async function findMissingRepoMainPaths(links: LinkReference[]): Promise<string[]> {
+  const findings = await Promise.all(
+    links.map(async (link) => {
+      const repoPath = repoMainLink.exec(link.destination.trim())?.[1];
+      if (repoPath === undefined) return null;
+      const exists = await fs.access(path.join(repoRoot, decodeURIComponent(repoPath))).then(
+        () => true,
+        () => false
+      );
+      return exists
+        ? null
+        : `${link.sourcePath}:${link.line} links "${repoPath}", which is not in this checkout`;
+    })
+  );
+  return findings.filter((finding): finding is string => finding !== null);
+}
+
 function shouldIgnoreExternalUrl(url: URL, config: LinkCheckConfig): boolean {
   return (
     config.ignoredExternalUrls.includes(url.toString()) ||
     config.ignoredExternalHosts.includes(url.host)
   );
-}
-
-async function probeExternalUrl(
-  url: string
-): Promise<{ ok: boolean; status?: number; error?: string }> {
-  const attempt = async (method: "HEAD" | "GET") => {
-    const response = await fetch(url, {
-      method,
-      redirect: "follow",
-      signal: AbortSignal.timeout(EXTERNAL_URL_TIMEOUT_MS),
-      headers: {
-        "user-agent": "sdp-docs-link-checker/1.0",
-      },
-    });
-
-    return response.status;
-  };
-
-  try {
-    const headStatus = await attempt("HEAD");
-    if ([401, 403, 429].includes(headStatus) || (headStatus >= 200 && headStatus < 400)) {
-      return { ok: true, status: headStatus };
-    }
-    if (headStatus !== 405) {
-      return { ok: false, status: headStatus };
-    }
-  } catch {
-    try {
-      const getStatus = await attempt("GET");
-      if ([401, 403, 429].includes(getStatus) || (getStatus >= 200 && getStatus < 400)) {
-        return { ok: true, status: getStatus };
-      }
-      return { ok: false, status: getStatus };
-    } catch (nestedError) {
-      return {
-        ok: false,
-        error: nestedError instanceof Error ? nestedError.message : String(nestedError),
-      };
-    }
-  }
-
-  try {
-    const getStatus = await attempt("GET");
-    if ([401, 403, 429].includes(getStatus) || (getStatus >= 200 && getStatus < 400)) {
-      return { ok: true, status: getStatus };
-    }
-    return { ok: false, status: getStatus };
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
-  }
 }
 
 async function collectLinks(pages: Map<string, string>): Promise<LinkReference[]> {
@@ -300,6 +274,7 @@ async function run(): Promise<void> {
   const findings: string[] = [...findMissingNavEntries(meta, pages, sectionDirs)];
 
   const links = await collectLinks(pages);
+  findings.push(...(await findMissingRepoMainPaths(links)));
   const externalUrls = new Map<string, LinkReference[]>();
 
   for (const link of links) {
@@ -313,7 +288,7 @@ async function run(): Promise<void> {
 
     if (destination.startsWith("http://") || destination.startsWith("https://")) {
       const url = new URL(destination);
-      if (shouldIgnoreExternalUrl(url, config)) {
+      if (shouldIgnoreExternalUrl(url, config) || repoMainLink.test(url.toString())) {
         continue;
       }
       const refs = externalUrls.get(url.toString()) ?? [];

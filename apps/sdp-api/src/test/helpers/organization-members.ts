@@ -1,3 +1,4 @@
+import type { OrganizationTier } from "@sdp/types/organizations";
 import type { OrganizationRole } from "@sdp/types/roles";
 import type { DatabaseClient } from "@/db/client";
 
@@ -13,11 +14,14 @@ export function organizationMember(key: string, role: OrganizationRole): SeededO
   return { memberId: `mem_${key}`, userId: `usr_${key}`, email: `${key}@example.com`, role };
 }
 
-/** Seeds an active organization, its users, and their active memberships. */
+/**
+ * Seeds an active organization, its users, and their active memberships. The
+ * organization is on the individual tier unless `organization.tier` names one.
+ */
 export async function seedOrganizationMembers(
   db: DatabaseClient,
   input: {
-    organization: { id: string; slug: string };
+    organization: { id: string; slug: string; tier?: OrganizationTier };
     members: readonly SeededOrganizationMember[];
   }
 ): Promise<void> {
@@ -25,9 +29,14 @@ export async function seedOrganizationMembers(
   await db.batch([
     db
       .prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
+        "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, 'active')"
       )
-      .bind(organization.id, organization.slug, organization.slug),
+      .bind(
+        organization.id,
+        organization.slug,
+        organization.slug,
+        organization.tier ?? "individual"
+      ),
     ...activeMembershipStatements(db, organization.id, members),
   ]);
 }

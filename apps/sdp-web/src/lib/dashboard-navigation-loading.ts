@@ -18,7 +18,7 @@ export const DASHBOARD_FEEDBACK_FROM_PARAM = "from";
 
 export const DASHBOARD_MARKETS_SUBNAV_HREFS = {
   treasurySolutions: "/dashboard/markets/treasury-solutions",
-  earnProgram: "/dashboard/markets/embedded-yield",
+  embeddedYield: "/dashboard/markets/embedded-yield",
   dvp: "/dashboard/markets/dvp",
 } as const;
 
@@ -96,8 +96,8 @@ function resolveMarketsLoadingRoute(pathname: string): DashboardLoadingRoute | n
   if (pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions) {
     return "treasury-solutions";
   }
-  if (pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram) return "embedded-yield-portfolio";
-  if (pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/configure`) {
+  if (pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.embeddedYield) return "embedded-yield-portfolio";
+  if (pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.embeddedYield}/configure`) {
     return "embedded-yield-configure";
   }
   if (pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.dvp) return "dvp-trades";

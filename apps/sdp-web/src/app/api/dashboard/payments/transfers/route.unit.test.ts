@@ -1,133 +1,131 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import * as paymentsPageData from "@/app/(session)/dashboard/[projectId]/payments/payments-page.data";
+import { NextResponse } from "next/server";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as sdpApi from "@/lib/sdp-api";
 import { expectDashboardNoStore } from "@/test/dashboard-response";
-
-const mocks = vi.hoisted(() => ({
-  proxyToSdpApi: vi.fn(),
-  proxyFailure: vi.fn(),
-  createSdpApiClient: vi.fn(),
-}));
-
-const trace = {
-  traceId: "trace_test",
-  serverTiming: () => "app;dur=1",
-  childContext: () => undefined,
-};
-
-vi.mock("@/lib/sdp-api", () => ({
-  proxyToSdpApi: mocks.proxyToSdpApi,
-  proxyFailure: mocks.proxyFailure,
-  createSdpApiClient: mocks.createSdpApiClient,
-}));
-
-vi.mock("@/lib/request-tracing", () => ({
-  createTimedTrace: () => trace,
-  logRouteResult: vi.fn(),
-}));
-
 import { GET, POST } from "./route";
 
-const fetchDashboardPaymentTransfers = vi.spyOn(paymentsPageData, "fetchDashboardPaymentTransfers");
+const TRANSFER = {
+  id: "xfr_1",
+  custodyWalletId: "cwlt_1",
+  providerWalletId: "wallet_1",
+  status: "confirmed",
+  signature: "signature_1",
+  rampsMemo: {},
+  createdAt: "2026-11-01T10:00:00.000Z",
+};
 
-describe("GET /api/dashboard/payments/transfers", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.proxyToSdpApi.mockResolvedValue(new Response(null, { status: 204 }));
+const aggregateRequest = (query = "") =>
+  new Request(`https://dashboard.example/api/dashboard/payments/transfers${query}`, {
+    headers: { "x-project-id": "proj_1" },
   });
 
-  it.each(["?custodyWalletId=cwlt_1&includeObserved=true", "?wallet=provider-wallet"])(
-    "passes the filtered query %s straight to the SDP API to accept or reject",
-    async (query) => {
-      const request = new Request(
-        `https://dashboard.example/api/dashboard/payments/transfers${query}`
-      );
-
-      await GET(request);
-
-      expect(mocks.proxyToSdpApi).toHaveBeenCalledWith({
-        request,
-        traceSource: "route.dashboard.payments.transfers.get",
-        path: `/v1/payments/transfers${query}`,
-      });
-    }
+/** Answers the aggregate's upstream reads through the real client: the transfer list, and no wallets. */
+function answerUpstream(transfers: () => Response) {
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    return url.pathname === "/v1/wallets" ? Response.json({ data: { wallets: [] } }) : transfers();
+  });
+  vi.spyOn(sdpApi, "createSdpApiClient").mockImplementation(async () =>
+    sdpApi.createTokenSdpApiClient("test-session-token")
   );
+  return fetchMock;
+}
+
+beforeEach(() => {
+  vi.stubEnv("SDP_API_BASE_URL", "https://api.sdp.test");
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+});
+
+describe("GET /api/dashboard/payments/transfers", () => {
+  it("passes a filtered query straight to the SDP API to accept or reject", async () => {
+    const proxy = vi
+      .spyOn(sdpApi, "proxyToSdpApi")
+      .mockResolvedValue(NextResponse.json({ data: [] }));
+    const request = new Request(
+      "https://dashboard.example/api/dashboard/payments/transfers?custodyWalletId=cwlt_1&includeObserved=true"
+    );
+
+    await GET(request);
+
+    expect(proxy).toHaveBeenCalledWith({
+      request,
+      traceSource: "route.dashboard.payments.transfers.get",
+      path: "/v1/payments/transfers?custodyWalletId=cwlt_1&includeObserved=true",
+    });
+  });
 
   it("refuses the unfiltered aggregate without the tab's Project header", async () => {
-    mocks.proxyFailure.mockReturnValue(new Response(null, { status: 400 }));
+    const createClient = vi.spyOn(sdpApi, "createSdpApiClient");
 
     const response = await GET(
       new Request("https://dashboard.example/api/dashboard/payments/transfers")
     );
 
     expect(response.status).toBe(400);
-    expect(mocks.proxyFailure).toHaveBeenCalledWith(trace, 400, "x-project-id header required");
-    expect(mocks.createSdpApiClient).not.toHaveBeenCalled();
+    expect(await response.json()).toEqual({ error: { message: "x-project-id header required" } });
+    expect(createClient).not.toHaveBeenCalled();
   });
 
-  const unfiltered = () =>
-    new Request("https://dashboard.example/api/dashboard/payments/transfers", {
-      headers: { "x-project-id": "proj_1" },
-    });
+  it("lists the aggregate at the page size asked for, uncacheable", async () => {
+    const fetchMock = answerUpstream(() => Response.json({ data: [TRANSFER] }));
 
-  it("marks the unfiltered aggregate uncacheable and traced", async () => {
-    mocks.createSdpApiClient.mockResolvedValue({ request: vi.fn() });
-    fetchDashboardPaymentTransfers.mockResolvedValue({ ok: true, data: [], walletsNotLoaded: 0 });
-
-    const response = await GET(unfiltered());
+    const response = await GET(aggregateRequest("?pageSize=5"));
 
     expect(response.status).toBe(200);
     expectDashboardNoStore(response);
-    expect(response.headers.get("X-SDP-Trace-ID")).toBe("trace_test");
-    expect(response.headers.get("Server-Timing")).toBe("app;dur=1");
-    expect(await response.json()).toEqual({ data: [] });
+    expect(await response.json()).toEqual({ data: [TRANSFER] });
+    expect(fetchMock.mock.calls.map(([input]) => String(input)).sort()).toEqual([
+      "https://api.sdp.test/v1/payments/transfers?page=1&pageSize=5&includeObserved=false",
+      "https://api.sdp.test/v1/wallets?view=summary",
+    ]);
   });
 
-  it("marks an upstream failure of the aggregate uncacheable", async () => {
-    mocks.createSdpApiClient.mockResolvedValue({ request: vi.fn() });
-    fetchDashboardPaymentTransfers.mockResolvedValue({
-      ok: false,
-      status: 503,
-      error: "unavailable",
-      walletsNotLoaded: null,
-    });
+  it("relays the API's refusal of the aggregate with its status, uncacheable", async () => {
+    answerUpstream(() =>
+      Response.json({ error: { message: "Transfers unavailable" } }, { status: 503 })
+    );
 
-    const response = await GET(unfiltered());
+    const response = await GET(aggregateRequest());
 
     expect(response.status).toBe(503);
     expectDashboardNoStore(response);
-    expect(response.headers.get("X-SDP-Trace-ID")).toBe("trace_test");
+    expect(await response.json()).toEqual({ error: { message: "Transfers unavailable" } });
   });
 
-  it("marks a thrown aggregate failure uncacheable", async () => {
-    mocks.createSdpApiClient.mockRejectedValue(new Error("client unavailable"));
+  it("answers a 500, uncacheable, when the aggregate cannot reach the API", async () => {
+    vi.spyOn(sdpApi, "createSdpApiClient").mockRejectedValue(new Error("client unavailable"));
 
-    const response = await GET(unfiltered());
+    const response = await GET(aggregateRequest());
 
     expect(response.status).toBe(500);
     expectDashboardNoStore(response);
-    expect(response.headers.get("X-SDP-Trace-ID")).toBe("trace_test");
+    const body = await response.text();
+    expect(JSON.parse(body)).toEqual({ error: { message: "Transfer list request failed" } });
+    expect(body).not.toContain("client unavailable");
   });
 });
 
 describe("POST /api/dashboard/payments/transfers", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.proxyToSdpApi.mockResolvedValue(new Response(null, { status: 202 }));
-  });
-
-  // Without the key a retried send is a new payment.
+  // Without the key a retried send is a new payment; the proxy forwards it.
   it("leaves the Idempotency-Key to proxyToSdpApi and adds no upstream headers", async () => {
+    const proxy = vi
+      .spyOn(sdpApi, "proxyToSdpApi")
+      .mockResolvedValue(NextResponse.json({ data: {} }, { status: 201 }));
     const request = new Request("https://dashboard.example/api/dashboard/payments/transfers", {
       method: "POST",
-      headers: { "Idempotency-Key": "transfer-key-1", Cookie: "session=secret" },
+      headers: { "Idempotency-Key": "transfer-key-1" },
     });
 
     await POST(request);
 
-    expect(mocks.proxyToSdpApi).toHaveBeenCalledWith({
+    expect(proxy).toHaveBeenCalledWith({
       request,
       traceSource: "route.dashboard.payments.transfers.post",
-      path: "/v1/payments/transfers",
+      path: "/v1/payments/transfers/execute",
     });
   });
 });

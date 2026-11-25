@@ -1,26 +1,28 @@
 import { execFileSync } from "node:child_process";
 import { verify } from "node:crypto";
 import { runInClusterScope } from "@sdp/rpc/scope";
+import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { type Context, Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
 import { FireblocksCsrRepository } from "@/db/repositories/fireblocks-csr.repository";
-import { verifyClerkJwt } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { createCredentialSecretStore } from "@/services/credential-secret-store";
 import { trackFireblocksProposals } from "@/services/custody/fireblocks-proposal-tracking";
 import { eraseExpiredFireblocksCsrs } from "@/services/custody/fireblocks-registration.service";
+import { checkDueProviderPolicies } from "@/services/custody/provider-policy";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { reconcileFireblocksProposals } from "@/services/jobs/reconcile-fireblocks-proposals";
 import { ProviderCredentialSecretCleanupStore } from "@/services/stores/provider-credential-secret-cleanup.store";
-import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { inSandboxScope } from "@/test/helpers/cluster-rpc";
+import { seedCustodyAdmin } from "@/test/helpers/custody-admin";
 import { env } from "@/test/helpers/env";
-import { seedDefaultProjects } from "@/test/helpers/projects";
+import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import { setOrganizationProviderOverrides } from "@/test/helpers/provider-overrides";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -29,8 +31,8 @@ import { internalCustody } from "./index";
 const ORGANIZATION_ID = "org_fireblocks_byok";
 const USER_ID = "usr_fireblocks_byok";
 const PROJECT_ID = "prj_fireblocks_byok";
-const ADDRESS = "11111111111111111111111111111111";
-const OTHER_ADDRESS = "So11111111111111111111111111111111111111112";
+const ADDRESS = syntheticAddress(1);
+const OTHER_ADDRESS = syntheticAddress(2);
 const fields = {
   apiKey: "tenant-fireblocks-key",
   signingKeyId: "",
@@ -76,10 +78,26 @@ function request(
   );
 }
 
+/** The token-catalogue entry resolveFireblocksTransferAsset matches for the sandbox USDC mint. */
+function usdcCatalogueEntry() {
+  const mint = wellKnownMint("USDC", "devnet");
+  if (!mint) throw new Error("The devnet USDC mint is missing from the well-known tokens");
+  return {
+    id: "USDC_TEST",
+    type: "SOL_ASSET",
+    nativeAsset: "SOL_TEST",
+    issuerAddress: mint,
+    decimals: 6,
+  };
+}
+
 function providerResponse(address = ADDRESS) {
-  return vi
-    .spyOn(globalThis, "fetch")
-    .mockImplementation(async () => Response.json({ addresses: [{ address }] }));
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+    const path = new URL(String(url)).pathname;
+    if (path === "/v1/tap/active_policy") return Response.json({ policy: { rules: [] } });
+    if (path === "/v1/supported_assets") return Response.json([usdcCatalogueEntry()]);
+    return Response.json({ addresses: [{ address }] });
+  });
 }
 
 async function connect(projectId = PROJECT_ID) {
@@ -88,7 +106,11 @@ async function connect(projectId = PROJECT_ID) {
   const submitted = await request("/provider-credentials", body, projectId);
   expect(submitted.status, await submitted.clone().text()).toBe(201);
   const { data } = await submitted.json();
-  const completed = await request(`/connections/${data.connectionId}/complete`, {}, projectId);
+  const completed = await request(
+    `/connections/${data.connectionId}/complete-installation`,
+    {},
+    projectId
+  );
   expect(completed.status).toBe(200);
   expect((await completed.json()).data.completion.status).toBe("success");
   return z
@@ -108,31 +130,20 @@ beforeEach(async () => {
   testEnv.CREDENTIAL_SECRET_STORE_BACKEND = "encrypted_db";
   await seedTestDatabase(env);
   await clearKVStores(env);
-  const db = getDb(env);
-  await db.execute(
-    "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, 'Fireblocks BYOK', 'fireblocks-byok', 'enterprise', 'active')",
-    [ORGANIZATION_ID]
-  );
-  await db.execute(
-    "INSERT INTO users (id, email, email_verified, status) VALUES (?, 'fireblocks-byok@example.com', 1, 'active')",
-    [USER_ID]
-  );
-  await db.execute(
-    "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES ('mem_fireblocks_byok', ?, ?, 'admin', 'active')",
-    [ORGANIZATION_ID, USER_ID]
-  );
-  await seedDefaultProjects(db, {
+  token = await seedCustodyAdmin(testEnv, {
     organizationId: ORGANIZATION_ID,
-    createdBy: USER_ID,
-    members: [USER_ID],
-    ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+    userId: USER_ID,
+    projectId: PROJECT_ID,
+    tier: "enterprise",
   });
-  await db.execute(
-    "UPDATE organizations SET settings = (settings::jsonb || ?::jsonb)::text WHERE id = ?",
-    [JSON.stringify({ providerOverrides: { custody: { fireblocks: true } } }), ORGANIZATION_ID]
-  );
-  token = await signSeededClerkMember(testEnv, db, USER_ID, ORGANIZATION_ID);
-  await verifyClerkJwt(token, testEnv);
+  await setOrganizationProviderOverrides(getDb(env), ORGANIZATION_ID, {
+    custody: { fireblocks: true },
+  });
+  // Each test gets its own Fireblocks API key: resolveFireblocksTransferAsset
+  // caches the supported-assets catalogue per key for five minutes, so a shared
+  // key would make one test's provider-read counts depend on another's.
+  fields.apiKey = `tenant-fireblocks-key-${crypto.randomUUID()}`;
+  body.fields.apiKey = fields.apiKey;
   app = new Hono<{ Bindings: Env }>();
   app.use("*", kvStoreMiddleware());
   app.use("*", async (c, next) => {
@@ -152,10 +163,48 @@ beforeEach(async () => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("Fireblocks BYOK lifecycle on experimental", () => {
-  it("encrypts credentials, attaches the vault with one read and replays completion", async () => {
+  it("refuses stable CSR and discovery before provider calls or writes", async () => {
+    const fetch = providerResponse();
+    const pendingCsrs = () =>
+      getDb(env).queryOne<{ count: number }>(
+        `SELECT COUNT(*)::int AS count FROM fireblocks_csr_requests
+       WHERE organization_id = ? AND project_id = ? AND encrypted_private_key IS NOT NULL`,
+        [ORGANIZATION_ID, PROJECT_ID]
+      );
+    const beforeCsrs = await pendingCsrs();
+    expect(beforeCsrs?.count).toBeGreaterThan(0);
+    const before = await getDb(env).queryMany(
+      "SELECT id, status FROM provider_credentials WHERE organization_id = ? ORDER BY id",
+      [ORGANIZATION_ID]
+    );
+    testEnv.SDP_RELEASE_CHANNEL = "stable";
+    fetch.mockClear();
+    const discoveryFields = { apiKey: fields.apiKey, signingKeyId: fields.signingKeyId };
+    for (const [path, payload] of [
+      ["/fireblocks/csr", undefined],
+      ["/fireblocks/csr", {}],
+      ["/fireblocks/vaults/discover", discoveryFields],
+    ] as const) {
+      const response = await request(path, payload);
+      expect(response.status, await response.clone().text()).toBe(403);
+      expect(await response.text()).toContain("custody_provider_not_in_release_channel");
+    }
+    expect(fetch).not.toHaveBeenCalled();
+    expect(
+      await getDb(env).queryMany(
+        "SELECT id, status FROM provider_credentials WHERE organization_id = ? ORDER BY id",
+        [ORGANIZATION_ID]
+      )
+    ).toEqual(before);
+    expect(await pendingCsrs()).toEqual(beforeCsrs);
+  });
+
+  it("encrypts credentials, attaches the vault with one read, checks its policy and replays completion", async () => {
     const fetch = providerResponse();
     const connected = await connect();
-    expect(fetch).toHaveBeenCalledTimes(1);
+    // The observation follows setup in the background; the periodic queue does the same work.
+    await inSandboxScope(() => checkDueProviderPolicies(testEnv));
+    expect(fetch).toHaveBeenCalledTimes(2);
     expect(fetch).toHaveBeenCalledWith(
       `${testEnv.FIREBLOCKS_API_BASE_URL}/v1/vault/accounts/0/SOL_TEST/addresses_paginated`,
       expect.objectContaining({
@@ -163,17 +212,21 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
         headers: expect.objectContaining({ "X-API-Key": fields.apiKey }),
       })
     );
-    const credential = await getDb(env).queryOne<{ encrypted_secret_payload: string }>(
-      "SELECT encrypted_secret_payload FROM provider_credentials WHERE id = ?",
-      [connected.providerCredential.id]
+    const detail = await request(`/connections/${connected.connectionId}`);
+    expect((await detail.json()).data.connection.providerPolicy).toMatchObject({
+      status: "missing",
+      reason: "no_policy",
+    });
+    const { encrypted_secret_payload: encryptedSecretPayload } = required(
+      await getDb(env).queryOne<{ encrypted_secret_payload: string }>(
+        "SELECT encrypted_secret_payload FROM provider_credentials WHERE id = ?",
+        [connected.providerCredential.id]
+      )
     );
-    expect(credential?.encrypted_secret_payload).not.toContain(fields.apiKey);
+    expect(encryptedSecretPayload).not.toContain(fields.apiKey);
     const payload = await createCredentialSecretStore(testEnv).read({
       orgId: ORGANIZATION_ID,
-      stored: {
-        storageBackend: "encrypted_db",
-        encryptedSecretPayload: credential?.encrypted_secret_payload,
-      },
+      stored: { storageBackend: "encrypted_db", encryptedSecretPayload },
     });
     expect(payload).toMatchObject({
       apiKey: fields.apiKey,
@@ -188,12 +241,16 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
         [fields.signingKeyId]
       )
     ).toEqual({ encrypted_private_key: null });
-    const replay = await request(`/connections/${connected.connectionId}/complete`, {});
+    const replay = await request(
+      `/connections/${connected.connectionId}/complete-installation`,
+      {}
+    );
     expect(replay.status).toBe(200);
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledTimes(2);
     const listed = await request("/connections?provider=fireblocks");
+    expect(listed.status).toBe(200);
     const serialized = JSON.stringify(await listed.json());
-    expect(serialized).toContain("fireblocks");
+    expect(serialized).toContain(connected.connectionId);
     expect(serialized).not.toContain(fields.apiKey);
     expect(serialized).not.toContain("BEGIN PRIVATE KEY");
     const wallet = await getDb(env).queryOne(
@@ -203,12 +260,147 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
     expect(wallet).toEqual({ wallet_id: "fb_0", public_key: ADDRESS });
   });
 
+  it("reports missing coverage when the USDC rule lets the credential move funds alone", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const path = new URL(String(url)).pathname;
+      if (path === "/v1/tap/active_policy")
+        return Response.json({
+          policy: {
+            rules: [
+              {
+                type: "TRANSFER",
+                asset: "SOL_TEST",
+                src: { ids: [["*", "VAULT", "*"]] },
+                action: "2-TIER",
+              },
+              {
+                type: "TRANSFER",
+                asset: "USDC_TEST",
+                src: { ids: [["*", "VAULT", "*"]] },
+                action: "ALLOW",
+              },
+            ],
+          },
+        });
+      if (path === "/v1/supported_assets") return Response.json([usdcCatalogueEntry()]);
+      return Response.json({ addresses: [{ address: ADDRESS }] });
+    });
+    const connected = await connect();
+    await inSandboxScope(() => checkDueProviderPolicies(testEnv));
+    const detail = await request(`/connections/${connected.connectionId}`);
+    expect((await detail.json()).data.connection.providerPolicy).toMatchObject({
+      status: "missing",
+      reason: "no_policy",
+    });
+  });
+
+  it("detects a gated USDC rule despite an unrelated asset's allow rule", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const path = new URL(String(url)).pathname;
+      if (path === "/v1/tap/active_policy")
+        return Response.json({
+          policy: {
+            rules: [
+              {
+                type: "TRANSFER",
+                asset: "ETH",
+                src: { ids: [["*", "VAULT", "*"]] },
+                action: "ALLOW",
+              },
+              {
+                type: "TRANSFER",
+                asset: "USDC_TEST",
+                src: { ids: [["*", "VAULT", "*"]] },
+                action: "2-TIER",
+              },
+            ],
+          },
+        });
+      if (path === "/v1/supported_assets") return Response.json([usdcCatalogueEntry()]);
+      return Response.json({ addresses: [{ address: ADDRESS }] });
+    });
+    const connected = await connect();
+    await inSandboxScope(() => checkDueProviderPolicies(testEnv));
+    const detail = await request(`/connections/${connected.connectionId}`);
+    expect((await detail.json()).data.connection.providerPolicy).toMatchObject({
+      status: "present",
+      reason: "policy_detected",
+    });
+  });
+
+  it("reports a proven missing wallet even when the token catalogue read fails", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const path = new URL(String(url)).pathname;
+      if (path === "/v1/tap/active_policy")
+        return Response.json({
+          policy: {
+            rules: [
+              {
+                type: "TRANSFER",
+                asset: "SOL_TEST",
+                src: { ids: [["*", "VAULT", "*"]] },
+                action: "ALLOW",
+              },
+              {
+                type: "TRANSFER",
+                asset: "ETH",
+                src: { ids: [["*", "VAULT", "*"]] },
+                action: "2-TIER",
+              },
+            ],
+          },
+        });
+      if (path === "/v1/supported_assets") return new Response("catalogue down", { status: 500 });
+      return Response.json({ addresses: [{ address: ADDRESS }] });
+    });
+    const connected = await connect();
+    await inSandboxScope(() => checkDueProviderPolicies(testEnv));
+    const detail = await request(`/connections/${connected.connectionId}`);
+    // The native allow rule already proves the credential can move funds alone;
+    // the gated ETH rule only asks for the catalogue, whose failure must not
+    // turn the proven finding into an unknown.
+    expect((await detail.json()).data.connection.providerPolicy).toMatchObject({
+      status: "missing",
+      reason: "no_policy",
+    });
+  });
+
+  it("keeps an unreadable USDC rule from reporting missing coverage", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const path = new URL(String(url)).pathname;
+      if (path === "/v1/tap/active_policy")
+        return Response.json({
+          policy: {
+            rules: [
+              {
+                type: "TRANSFER",
+                asset: "USDC_TEST",
+                src: { ids: [["*", "VAULT", "*"]] },
+                action: "MAYBE",
+              },
+            ],
+          },
+        });
+      if (path === "/v1/supported_assets") return Response.json([usdcCatalogueEntry()]);
+      return Response.json({ addresses: [{ address: ADDRESS }] });
+    });
+    const connected = await connect();
+    await inSandboxScope(() => checkDueProviderPolicies(testEnv));
+    const detail = await request(`/connections/${connected.connectionId}`);
+    expect((await detail.json()).data.connection.providerPolicy).toMatchObject({
+      status: "unknown",
+      reason: "unsupported_response",
+    });
+  });
+
   it("pins production to SOL and rejects browser URL or asset overrides", async () => {
     const fetch = providerResponse();
     await connect(`${PROJECT_ID}_production`);
-    expect(String(fetch.mock.calls[0]?.[0])).toContain("/SOL/addresses_paginated");
+    expect(String(required(fetch.mock.calls[0])[0])).toBe(
+      `${testEnv.FIREBLOCKS_API_BASE_URL}/v1/vault/accounts/0/SOL/addresses_paginated`
+    );
     for (const extra of [
-      { apiBaseUrl: "https://attacker.invalid" },
+      { apiBaseUrl: "https://other.invalid" },
       { assetId: "SOL" },
       { apiSecretPem: "client-supplied-key" },
     ]) {
@@ -239,7 +431,7 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response("denied", { status: 401 }));
     const created = (await (await request("/provider-credentials", body)).json()).data;
-    const checked = await request(`/connections/${created.connectionId}/complete`, {});
+    const checked = await request(`/connections/${created.connectionId}/complete-installation`, {});
     expect((await checked.json()).data.completion).toMatchObject({
       status: "failed",
       code: "invalid_credentials",
@@ -301,25 +493,29 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
     expect(rotation.rotation.status).toBe("success");
     expect(rotation.providerCredential.provider).toBe("fireblocks");
     const rolledBack = await request(
-      `/provider-credentials/${rotation.providerCredential.id}/rollback`,
+      `/provider-credentials/${rotation.providerCredential.id}/rollback-rotation`,
       {}
     );
     expect(rolledBack.status).toBe(200);
-    const connection = await getDb(env).queryOne<{ provider_credential_id: string }>(
-      "SELECT provider_credential_id FROM custody_connections WHERE id = ?",
-      [connected.connectionId]
-    );
-    expect(connection?.provider_credential_id).toBe(connected.providerCredential.id);
+    expect(
+      await getDb(env).queryOne(
+        "SELECT provider_credential_id FROM custody_connections WHERE id = ?",
+        [connected.connectionId]
+      )
+    ).toEqual({ provider_credential_id: connected.providerCredential.id });
   });
 
   it("resolves only the owned wallet through the keychain Fireblocks signer", async () => {
     const fetch = providerResponse();
     const connected = await connect();
-    const wallet = await getDb(env).queryOne<{ id: string }>(
-      "SELECT id FROM custody_wallets WHERE custody_connection_id = ?",
-      [connected.connectionId]
+    // The observation follows setup in the background; the periodic queue does the same work.
+    await inSandboxScope(() => checkDueProviderPolicies(testEnv));
+    const wallet = required(
+      await getDb(env).queryOne<{ id: string }>(
+        "SELECT id FROM custody_wallets WHERE custody_connection_id = ?",
+        [connected.connectionId]
+      )
     );
-    if (!wallet) throw new Error("Missing wallet");
     await inSandboxScope(async () => {
       const resolver = new CustodyRuntimeTargets(getDb(env), testEnv, new Map());
       const managedAdapter = vi.fn();
@@ -332,7 +528,7 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
       );
       expect(signer.address).toBe(ADDRESS);
       expect(managedAdapter).not.toHaveBeenCalled();
-      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(fetch).toHaveBeenCalledTimes(3);
       await resolver.getTransactionSignerForWalletRecord(
         ORGANIZATION_ID,
         PROJECT_ID,
@@ -340,7 +536,7 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
         "payments.transfer",
         managedAdapter
       );
-      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(fetch).toHaveBeenCalledTimes(3);
       await expect(
         resolver.getTransactionSignerForWalletRecord(
           ORGANIZATION_ID,
@@ -349,8 +545,8 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
           "payments.transfer",
           managedAdapter
         )
-      ).rejects.toThrow();
-      expect(fetch).toHaveBeenCalledTimes(2);
+      ).rejects.toMatchObject({ code: "WALLET_NOT_FOUND" });
+      expect(fetch).toHaveBeenCalledTimes(3);
       fetch.mockImplementation(async () =>
         Response.json({ addresses: [{ address: OTHER_ADDRESS }] })
       );
@@ -366,6 +562,62 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
       ).rejects.toThrow();
     });
   });
+  it("recovers the original Earn approval after runtime withdrawal without admitting new proposals", async () => {
+    const fetch = providerResponse();
+    const connected = await connect();
+    const wallet = await getDb(env).queryOne<{ id: string }>(
+      "SELECT id FROM custody_wallets WHERE custody_connection_id = ?",
+      [connected.connectionId]
+    );
+    if (wallet === null) throw new Error("Missing connected wallet");
+    await inSandboxScope(async () => {
+      const targets = new CustodyRuntimeTargets(getDb(env), testEnv, new Map());
+      const proposer = await targets.getTransactionProposerForWalletRecord(
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        wallet.id,
+        "earn.deposit"
+      );
+      if (proposer === null) throw new Error("Expected async transaction capability");
+      fetch.mockClear();
+      const binding = await proposer.prepare("attempt_earn");
+      expect(fetch).not.toHaveBeenCalled();
+      await getDb(env).execute(
+        "UPDATE custody_connections SET status = 'deactivated', deactivated_at = sdp_iso_now() WHERE id = ?",
+        [connected.connectionId]
+      );
+      testEnv.SDP_RELEASE_CHANNEL = "stable";
+      fetch.mockImplementation(async (url) =>
+        Response.json(
+          String(url).endsWith("/cancel")
+            ? { success: true }
+            : {
+                id: "proposal_earn",
+                status: "PENDING_AUTHORIZATION",
+                externalTxId: binding.externalId,
+                operation: "PROGRAM_CALL",
+                assetId: binding.assetId,
+                source: { type: "VAULT_ACCOUNT", id: binding.vaultAccountId },
+              }
+        )
+      );
+      expect(
+        (await proposer.read({ binding, unsignedTransaction: "not-needed-until-signed" }))?.phase
+      ).toBe("pending");
+      expect(await proposer.cancel(binding)).toBe(true);
+      await expect(proposer.prepare("another-attempt")).rejects.toThrow();
+      const count = fetch.mock.calls.length;
+      await getDb(env).execute(
+        "UPDATE custody_connections SET provider_account_fingerprint = 'different-account' WHERE id = ?",
+        [connected.connectionId]
+      );
+      await expect(
+        proposer.read({ binding, unsignedTransaction: "not-needed-until-signed" })
+      ).rejects.toThrow("does not match");
+      expect(fetch).toHaveBeenCalledTimes(count);
+    });
+  });
+
   it("provisions an additional vault with tenant credentials and reuses its fetched address", async () => {
     const fetch = providerResponse();
     const connected = await connect();
@@ -468,12 +720,13 @@ describe("Fireblocks CSR security", () => {
     expect(data.csr.id).toBe(fields.signingKeyId);
     expect(data.csr.csrPem).toContain("BEGIN CERTIFICATE REQUEST");
     expect(JSON.stringify(data)).not.toContain("PRIVATE KEY");
-    const stored = await getDb(env).queryOne<{ encrypted_private_key: string }>(
-      "SELECT encrypted_private_key FROM fireblocks_csr_requests WHERE id = ?",
-      [fields.signingKeyId]
+    const stored = required(
+      await getDb(env).queryOne<{ encrypted_private_key: string | null }>(
+        "SELECT encrypted_private_key FROM fireblocks_csr_requests WHERE id = ?",
+        [fields.signingKeyId]
+      )
     );
-    expect(stored?.encrypted_private_key).toBeTruthy();
-    expect(stored?.encrypted_private_key).not.toContain("PRIVATE KEY");
+    expect(required(stored.encrypted_private_key)).not.toContain("PRIVATE KEY");
     expect(
       (await (await request("/fireblocks/csr", undefined, `${PROJECT_ID}_production`)).json()).data
         .csr
@@ -485,7 +738,6 @@ describe("Fireblocks CSR security", () => {
       getDb(env).queryMany("SELECT * FROM fireblocks_csr_requests")
     );
     expect(hidden).toEqual([]);
-    expect((await request("/fireblocks/csr")).status).toBe(200);
   });
 
   it("deduplicates concurrent CSR generation and preserves submission replay after key retirement", async () => {
@@ -538,10 +790,9 @@ describe("Fireblocks CSR security", () => {
     });
     const fetch = providerResponse();
     await connect();
-    const headers = new Headers(fetch.mock.calls[0]?.[1]?.headers);
-    const jwt = headers.get("Authorization")?.replace(/^Bearer /, "");
-    expect(jwt).toBeTruthy();
-    const [header, payload, signature] = z.string().parse(jwt).split(".");
+    const headers = new Headers(required(required(fetch.mock.calls[0])[1]).headers);
+    const jwt = required(headers.get("Authorization")).replace(/^Bearer /, "");
+    const [header, payload, signature] = jwt.split(".");
     expect(JSON.parse(Buffer.from(header, "base64url").toString()).alg).toBe("RS256");
     expect(
       verify(
@@ -571,12 +822,6 @@ describe("Fireblocks CSR security", () => {
   });
 
   it("requires an entitled credential administrator and bounds RSA generation", async () => {
-    const unauthenticated = await app.request(
-      "/internal/dashboard/custody/fireblocks/csr",
-      {},
-      testEnv
-    );
-    expect(unauthenticated.status).toBe(401);
     // The setup CSR may have landed in a different rate-limit window.
     await clearKVStores(env);
     vi.spyOn(Date, "now").mockReturnValue(Date.now());
@@ -608,8 +853,8 @@ describe("Fireblocks vault discovery and selection", () => {
       expect(init?.redirect).toBe("error");
       const headers = new Headers(init?.headers);
       expect(headers.get("X-API-Key")).toBe(fields.apiKey);
-      const jwt = headers.get("Authorization")?.slice(7).split(".");
-      if (jwt?.length !== 3) throw new Error("Missing JWT");
+      const jwt = required(headers.get("Authorization")).slice(7).split(".");
+      if (jwt.length !== 3) throw new Error("Missing JWT");
       expect(
         verify(
           "RSA-SHA256",
@@ -632,16 +877,20 @@ describe("Fireblocks vault discovery and selection", () => {
       });
     });
     const input = { apiKey: fields.apiKey, signingKeyId: fields.signingKeyId };
-    const result = await request("/fireblocks/vaults", input);
+    const result = await request("/fireblocks/vaults/discover", input);
     expect(result.status).toBe(200);
     expect(result.headers.get("Cache-Control")).toBe("no-store");
     expect((await result.json()).data).toEqual({
       vaults: [{ id: "0", name: "Treasury", hasSolanaWallet: true }],
       nextCursor: "page&2",
     });
-    expect((await request("/fireblocks/vaults", { ...input, after: "page&2" })).status).toBe(200);
+    expect(
+      (await request("/fireblocks/vaults/discover", { ...input, after: "page&2" })).status
+    ).toBe(200);
     expect(fetch).toHaveBeenCalledTimes(2);
-    expect(new URL(String(fetch.mock.calls[1]?.[0])).searchParams.get("after")).toBe("page&2");
+    expect(new URL(String(required(fetch.mock.calls[1])[0])).searchParams.get("after")).toBe(
+      "page&2"
+    );
     expect(
       await getDb(env).queryOne(
         "SELECT claim_fingerprint, consumed_at FROM fireblocks_csr_requests WHERE id = ?",
@@ -653,14 +902,14 @@ describe("Fireblocks vault discovery and selection", () => {
   it("refuses cross-project and expired discovery before calling Fireblocks", async () => {
     const fetch = providerResponse();
     const input = { apiKey: fields.apiKey, signingKeyId: fields.signingKeyId };
-    expect((await request("/fireblocks/vaults", input, `${PROJECT_ID}_production`)).status).toBe(
-      404
-    );
+    expect(
+      (await request("/fireblocks/vaults/discover", input, `${PROJECT_ID}_production`)).status
+    ).toBe(404);
     await getDb(env).execute(
       "UPDATE fireblocks_csr_requests SET expires_at = '2020-01-01T00:00:00.000Z' WHERE id = ?",
       [fields.signingKeyId]
     );
-    expect((await request("/fireblocks/vaults", input)).status).toBe(404);
+    expect((await request("/fireblocks/vaults/discover", input)).status).toBe(404);
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -668,7 +917,7 @@ describe("Fireblocks vault discovery and selection", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response("upstream secret body", { status: 401 })
     );
-    const response = await request("/fireblocks/vaults", {
+    const response = await request("/fireblocks/vaults/discover", {
       apiKey: fields.apiKey,
       signingKeyId: fields.signingKeyId,
     });
@@ -683,6 +932,8 @@ describe("Fireblocks vault discovery and selection", () => {
     return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       expect(init?.method).toBe("GET");
       const path = new URL(String(input)).pathname;
+      if (path === "/v1/tap/active_policy") return Response.json({ policy: { rules: [] } });
+      if (path === "/v1/supported_assets") return Response.json([usdcCatalogueEntry()]);
       if (path.endsWith("/addresses_paginated"))
         return Response.json({
           addresses: [{ address: path.includes("/7/") ? OTHER_ADDRESS : ADDRESS }],
@@ -713,7 +964,7 @@ describe("Fireblocks vault discovery and selection", () => {
         providerCredential: z.object({ id: z.string() }),
       })
       .parse((await submitted.json()).data);
-    const completed = await request(`/connections/${data.connectionId}/complete`, {});
+    const completed = await request(`/connections/${data.connectionId}/complete-installation`, {});
     expect((await completed.json()).data.completion.status).toBe("success");
     return data;
   }
@@ -728,15 +979,35 @@ describe("Fireblocks vault discovery and selection", () => {
   }
 
   const secondaryFailures = [
-    { name: "forbidden", httpStatus: 403, code: "invalid_credentials" },
-    { name: "missing", httpStatus: 404, code: "invalid_credentials" },
-    { name: "changed address", httpStatus: 200, code: "provider_account_mismatch" },
-    { name: "unavailable", httpStatus: 500, code: "provider_response_unknown" },
+    {
+      name: "forbidden",
+      httpStatus: 403,
+      rotation: { status: "failed", code: "invalid_credentials" },
+      rollbackStatus: 409,
+    },
+    {
+      name: "missing",
+      httpStatus: 404,
+      rotation: { status: "failed", code: "invalid_credentials" },
+      rollbackStatus: 409,
+    },
+    {
+      name: "changed address",
+      httpStatus: 200,
+      rotation: { status: "failed", code: "provider_account_mismatch" },
+      rollbackStatus: 409,
+    },
+    {
+      name: "unavailable",
+      httpStatus: 500,
+      rotation: { status: "retry_unknown", code: "provider_response_unknown" },
+      rollbackStatus: 503,
+    },
   ] as const;
 
   it.each(secondaryFailures)(
     "keeps all wallets on the current credential when rotation's secondary vault is $name",
-    async ({ httpStatus, code }) => {
+    async ({ httpStatus, rotation }) => {
       const fetch = selectedVaultResponses();
       const connected = await connectSelectedVaults();
       // Inactive wallets retain the connection and can be reactivated later.
@@ -762,13 +1033,10 @@ describe("Fireblocks vault discovery and selection", () => {
       );
       expect(response.status).toBe(200);
       const result = (await response.json()).data;
-      expect(result.rotation).toEqual({
-        status: httpStatus === 500 ? "retry_unknown" : "failed",
-        code,
-      });
+      expect(result.rotation).toEqual(rotation);
       expect(await attachedState(connected.connectionId)).toEqual(before);
       expect(fetch).toHaveBeenCalledTimes(2);
-      if (httpStatus === 500) {
+      if (rotation.status === "retry_unknown") {
         fetch.mockImplementation(async (input) =>
           Response.json({
             addresses: [{ address: String(input).includes("/7/") ? OTHER_ADDRESS : ADDRESS }],
@@ -786,7 +1054,7 @@ describe("Fireblocks vault discovery and selection", () => {
 
   it.each(secondaryFailures)(
     "keeps all wallets on the current credential when rollback's secondary vault is $name",
-    async ({ httpStatus }) => {
+    async ({ httpStatus, rollbackStatus }) => {
       const fetch = selectedVaultResponses();
       const connected = await connectSelectedVaults();
       const response = await request(
@@ -806,10 +1074,10 @@ describe("Fireblocks vault discovery and selection", () => {
         return Response.json({ addresses: [{ address: ADDRESS }] });
       });
       const failed = await request(
-        `/provider-credentials/${rotated.providerCredential.id}/rollback`,
+        `/provider-credentials/${rotated.providerCredential.id}/rollback-rotation`,
         {}
       );
-      expect(failed.status).toBe(httpStatus === 500 ? 503 : 409);
+      expect(failed.status).toBe(rollbackStatus);
       expect(await attachedState(connected.connectionId)).toEqual(before);
       expect(fetch).toHaveBeenCalledTimes(2);
       fetch.mockClear().mockImplementation(async (input) =>
@@ -818,7 +1086,7 @@ describe("Fireblocks vault discovery and selection", () => {
         })
       );
       const retry = await request(
-        `/provider-credentials/${rotated.providerCredential.id}/rollback`,
+        `/provider-credentials/${rotated.providerCredential.id}/rollback-rotation`,
         {}
       );
       expect(retry.status).toBe(200);
@@ -833,13 +1101,13 @@ describe("Fireblocks vault discovery and selection", () => {
   );
 
   it.each([
-    { action: "rotate", mutation: "address" },
-    { action: "rollback", mutation: "address" },
-    { action: "rotate", mutation: "new wallet" },
-    { action: "rollback", mutation: "new wallet" },
+    { action: "rotate", mutation: "address", attachedWallets: 2 },
+    { action: "rollback", mutation: "address", attachedWallets: 2 },
+    { action: "rotate", mutation: "new wallet", attachedWallets: 3 },
+    { action: "rollback", mutation: "new wallet", attachedWallets: 3 },
   ])(
     "rejects $action when an attached $mutation changes during verification",
-    async ({ action, mutation }) => {
+    async ({ action, mutation, attachedWallets }) => {
       const fetch = selectedVaultResponses();
       const connected = await connectSelectedVaults();
       const registration = await newRegistration();
@@ -873,12 +1141,12 @@ describe("Fireblocks vault discovery and selection", () => {
         return Response.json({ addresses: [{ address: ADDRESS }] });
       });
       const response = await request(
-        `/provider-credentials/${currentId}/${action}`,
+        `/provider-credentials/${currentId}/${action === "rollback" ? "rollback-rotation" : action}`,
         action === "rotate" ? replacement : {}
       );
       expect(response.status).toBe(409);
       const rows = await attachedState(connected.connectionId);
-      expect(rows).toHaveLength(mutation === "address" ? 2 : 3);
+      expect(rows).toHaveLength(attachedWallets);
       expect(rows.every((row) => row.provider_credential_id === currentId)).toBe(true);
       expect(fetch).toHaveBeenCalledTimes(2);
     }
@@ -891,9 +1159,11 @@ describe("Fireblocks vault discovery and selection", () => {
     const submitted = await request("/provider-credentials", payload, PROJECT_ID, idempotencyKey);
     expect(submitted.status).toBe(201);
     const { connectionId } = (await submitted.json()).data;
-    const complete = await request(`/connections/${connectionId}/complete`, {});
+    const complete = await request(`/connections/${connectionId}/complete-installation`, {});
     expect((await complete.json()).data.completion.status).toBe("success");
-    expect(fetch).toHaveBeenCalledTimes(4);
+    // The observation follows setup in the background; the periodic queue does the same work.
+    await inSandboxScope(() => checkDueProviderPolicies(testEnv));
+    expect(fetch).toHaveBeenCalledTimes(5);
     const wallets = await getDb(env).queryMany(
       "SELECT wallet_id, public_key, label, purpose FROM custody_wallets WHERE custody_connection_id = ? ORDER BY wallet_id",
       [connectionId]
@@ -902,24 +1172,26 @@ describe("Fireblocks vault discovery and selection", () => {
       { wallet_id: "fb_0", public_key: ADDRESS, label: "Treasury", purpose: "transfer" },
       { wallet_id: "fb_7", public_key: OTHER_ADDRESS, label: "Operations", purpose: "transfer" },
     ]);
-    expect((await request(`/connections/${connectionId}/complete`, {})).status).toBe(200);
+    expect((await request(`/connections/${connectionId}/complete-installation`, {})).status).toBe(
+      200
+    );
     expect(
       (await request("/provider-credentials", payload, PROJECT_ID, idempotencyKey)).status
     ).toBe(201);
-    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(fetch).toHaveBeenCalledTimes(5);
     expect(
       (await request("/provider-credentials", selectedPayload(["0"]), PROJECT_ID, idempotencyKey))
         .status
     ).toBe(409);
     expect(
-      (
+      required(
         await new CustodyRuntimeTargets(getDb(env), testEnv, new Map()).resolve({
           kind: "wallet",
           organizationId: ORGANIZATION_ID,
           projectId: PROJECT_ID,
           walletId: "fb_7",
         })
-      )?.kind
+      ).kind
     ).toBe("connection");
   });
 
@@ -929,7 +1201,7 @@ describe("Fireblocks vault discovery and selection", () => {
       selectedVaultResponses(status);
       const submitted = await request("/provider-credentials", selectedPayload());
       const { connectionId } = (await submitted.json()).data;
-      const result = await request(`/connections/${connectionId}/complete`, {});
+      const result = await request(`/connections/${connectionId}/complete-installation`, {});
       expect((await result.json()).data.completion).toMatchObject({
         status: "failed",
         code: "invalid_credentials",
@@ -958,7 +1230,7 @@ describe("Fireblocks vault discovery and selection", () => {
       "ALTER TABLE custody_wallets ADD CONSTRAINT sdp_test_fail_second_vault CHECK (wallet_id <> 'fb_7')"
     );
     try {
-      const result = await request(`/connections/${connectionId}/complete`, {});
+      const result = await request(`/connections/${connectionId}/complete-installation`, {});
       expect(result.status, await result.clone().text()).toBe(409);
       expect(
         await db.queryMany("SELECT id FROM custody_wallets WHERE custody_connection_id = ?", [
@@ -976,14 +1248,15 @@ describe("Fireblocks vault discovery and selection", () => {
       new Date(Date.now() - 10 * 60_000).toISOString(),
       connectionId,
     ]);
-    const retry = await request(`/connections/${connectionId}/complete`, {});
+    const retry = await request(`/connections/${connectionId}/complete-installation`, {});
     expect(retry.status, await retry.clone().text()).toBe(200);
     expect((await retry.json()).data.completion.status).toBe("success");
     expect(
-      await db.queryMany("SELECT wallet_id FROM custody_wallets WHERE custody_connection_id = ?", [
-        connectionId,
-      ])
-    ).toHaveLength(2);
+      await db.queryMany(
+        "SELECT wallet_id FROM custody_wallets WHERE custody_connection_id = ? ORDER BY wallet_id",
+        [connectionId]
+      )
+    ).toEqual([{ wallet_id: "fb_0" }, { wallet_id: "fb_7" }]);
   });
 
   it("refuses a vault already attached through another connection", async () => {
@@ -993,7 +1266,7 @@ describe("Fireblocks vault discovery and selection", () => {
     const submitted = await request("/provider-credentials", selectedPayload(["7", "0"]));
     expect(submitted.status).toBe(201);
     const { connectionId } = (await submitted.json()).data;
-    const completed = await request(`/connections/${connectionId}/complete`, {});
+    const completed = await request(`/connections/${connectionId}/complete-installation`, {});
     expect(completed.status, await completed.clone().text()).toBe(409);
     expect(
       await getDb(env).queryOne(

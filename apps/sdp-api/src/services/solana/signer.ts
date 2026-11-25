@@ -8,6 +8,7 @@ import type {
   CustodyTransferProposer,
   TransferProposalIntent,
 } from "@/services/domain/signing/admitted-proposer";
+import type { CustodyTransactionProposer } from "@/services/domain/signing/admitted-transaction-proposer";
 import { createSigningService } from "@/services/domain/signing.service";
 import type { Env } from "@/types/env";
 
@@ -28,6 +29,22 @@ export async function createOrgSignerForCustodyWallet<Module extends SdpModule =
 ): Promise<TransactionSigner> {
   const signingService = createSigningService(env);
   return signingService.getTransactionSignerForWalletRecord(
+    orgId,
+    projectId,
+    custodyWalletId,
+    movement
+  );
+}
+
+/** Earn's optional durable sign-only capability, resolved through the existing custody waist. */
+export async function createOrgTransactionProposerForCustodyWallet(
+  env: Env,
+  orgId: string,
+  projectId: string,
+  custodyWalletId: string,
+  movement: WaistMovement<"earn">
+): Promise<CustodyTransactionProposer | null> {
+  return createSigningService(env).getTransactionProposerForWalletRecord(
     orgId,
     projectId,
     custodyWalletId,

@@ -91,7 +91,7 @@ export class EarnOnboardingService {
   ) {}
 
   /**
-   * Proof of control before anything is claimed or written. External wallets
+   * Proof of control before anything is claimed or written. Wallets
    * sign the scope-bound registration message with the wallet's own Ed25519
    * key. An SDP-managed custody wallet has no private key or arbitrary-message
    * signing endpoint to expose, so its authorized project binding — an active

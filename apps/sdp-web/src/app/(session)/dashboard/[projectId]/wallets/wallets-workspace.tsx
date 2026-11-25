@@ -19,7 +19,7 @@ const WalletsPlayground = dynamic(
   () => import("./wallets-playground").then((module) => module.WalletsPlayground),
   {
     loading: () => (
-      <div aria-busy="true" className="contents" data-wallet-panel="playground-pending">
+      <div aria-busy="true" className="contents">
         <ApiPlaygroundShellSkeleton />
       </div>
     ),
@@ -63,7 +63,7 @@ export function WalletsWorkspace({
   }, [isPlaygroundTab]);
 
   return (
-    <div className="h-full min-h-0 w-full" data-wallet-root>
+    <div className="h-full min-h-0 w-full">
       <DashboardWorkspaceTabShell
         panels={[
           {
@@ -71,7 +71,7 @@ export function WalletsWorkspace({
             className: cn(dashboardWorkspaceOverviewPanelClassName, "space-y-6"),
             disableInitialAnimation: true,
             content: (
-              <div className="contents" data-wallet-panel="overview">
+              <div className="contents">
                 <WalletsOverview
                   configsError={configsError}
                   wallets={wallets}

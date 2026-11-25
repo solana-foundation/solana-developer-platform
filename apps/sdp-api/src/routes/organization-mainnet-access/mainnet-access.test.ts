@@ -460,6 +460,8 @@ describe("Organization mainnet access (HOO-2427)", () => {
   });
 
   it("meters submits and notifies together, since each may call Iterable", async () => {
+    // Keep all six requests in one quota window.
+    vi.spyOn(Date, "now").mockReturnValue(Date.now());
     const statuses = [(await post(SUBMISSION)).status, (await post(SUBMISSION)).status];
     for (let attempt = 0; attempt < 4; attempt += 1) statuses.push((await notify()).status);
     expect(statuses).toEqual([201, 409, 409, 409, 409, 429]);

@@ -202,6 +202,7 @@ async function refreshProviderMetrics(
     return;
   }
 
+  const observedAt = new Date().toISOString();
   // Figure anomaly check (PRO-1867) against the stored shelf BEFORE the
   // writes. Read-only and never fatal; entries for references the catalogue
   // does not hold are skipped exactly as the update below no-ops on them.
@@ -243,6 +244,7 @@ async function refreshProviderMetrics(
     // Explicit null, not undefined: a provider that stops reporting a rate
     // must clear the stored one rather than leave a figure with no source.
     currentApy: entry.currentApy ?? null,
+    rateObservedAt: entry.currentApy === undefined ? null : observedAt,
     riskMetadata: entry.riskMetadata ?? {},
   }));
   try {

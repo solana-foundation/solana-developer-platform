@@ -91,7 +91,7 @@ export async function getPaymentRequest(c: AppContext) {
  * (anyone holding it can build the request's fee-sponsored transaction), so
  * the route needs `payment_requests.manage`.
  */
-export async function getPaymentRequestLink(c: AppContext) {
+export async function getPaymentRequestLinkToken(c: AppContext) {
   const row = getAuthorized<PaymentRequestRow>(c);
 
   const response: PaymentRequestLink = { id: row.id, publicToken: row.public_token };

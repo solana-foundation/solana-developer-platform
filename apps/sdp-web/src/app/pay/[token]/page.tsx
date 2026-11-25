@@ -1,4 +1,4 @@
-import type { PaymentRequestStatus } from "@sdp/types/payments";
+import { type ClosedPaymentRequestStatus, isClosedPaymentRequestStatus } from "@sdp/types/payments";
 import { SOLANA_CLUSTER_LABELS } from "@sdp/types/well-known-tokens";
 import { Badge } from "@sdp/ui/badge";
 import { ArrowUpRightIcon, BanIcon, CheckCircle2Icon, ClockIcon, XIcon } from "lucide-react";
@@ -42,7 +42,7 @@ function getStatusPanels(t: Awaited<ReturnType<typeof getTranslations>>) {
       title: t("Shared.pay.requestCanceled"),
       body: t("Shared.pay.requestCanceledDescription"),
     },
-  } as const satisfies Record<Exclude<PaymentRequestStatus, "awaiting_payment">, StatusPanel>;
+  } as const satisfies Record<ClosedPaymentRequestStatus, StatusPanel>;
 }
 
 /**
@@ -119,7 +119,7 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
   const payUrl =
     request.solanaPayUrl && isRenderablePayUrl(request.solanaPayUrl) ? request.solanaPayUrl : null;
   let statusPanel: StatusPanel | null = null;
-  if (request.status !== "awaiting_payment") {
+  if (isClosedPaymentRequestStatus(request.status)) {
     statusPanel = getStatusPanels(t)[request.status];
   } else if (!payUrl) {
     statusPanel = getUnavailablePanel(t);

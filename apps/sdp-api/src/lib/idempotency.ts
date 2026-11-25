@@ -132,104 +132,6 @@ export const normalizeForFingerprint = (value: unknown): unknown => {
   return value;
 };
 
-export interface EarnVaultDepositFingerprintInput {
-  environment: string;
-  provider: string;
-  /** The vault address. */
-  providerReference: string;
-  /** The `custody_wallets` row id that signs and holds the shares. */
-  custodyWalletId: string;
-  amount: string;
-  /** The slippage floor, or null when none applies. */
-  minSharesOut: string | null;
-  /**
-   * Swap-funded deposits only (both fields together, or neither): the funding
-   * mint changes WHAT MOVES out of the wallet, and the swap tolerance changes
-   * the deposit the transaction encodes. Deliberately optional rather than
-   * null-defaulted so every fingerprint recorded before swaps existed keeps
-   * matching byte-for-byte.
-   */
-  swapSourceTokenMint?: string;
-  swapSlippageBps?: number;
-}
-
-/**
- * Fingerprint for a non-custodial vault deposit.
- *
- * Every field here changes WHAT MOVES, which is the whole test for inclusion.
- * `minSharesOut` earns its place for a reason that is easy to miss: the floor is
- * baked into the built instruction, so omitting it would let a caller reuse a
- * key with a weaker floor — or none — and get a silent `replayed: true` for the
- * original, stricter deposit. `environment` is included because the same key
- * arriving in sandbox and in production is two requests against two chains.
- *
- * Decimal spelling is normalized without rounding. The builder accepts
- * insignificant zeroes and canonicalizes them to the same mint atoms, so `1`
- * and `1.000000` are one intent. Non-zero sub-atom precision remains distinct
- * here and is rejected by the provider builder before anything is signed.
- */
-export const buildEarnVaultDepositFingerprint = (input: EarnVaultDepositFingerprintInput): string =>
-  JSON.stringify(
-    normalizeForFingerprint({
-      scope: "earn_vault_deposit",
-      environment: input.environment,
-      provider: input.provider,
-      providerReference: input.providerReference,
-      custodyWalletId: input.custodyWalletId,
-      direction: "deposit",
-      amount: normalizeDecimalString(input.amount),
-      minSharesOut: input.minSharesOut === null ? null : normalizeDecimalString(input.minSharesOut),
-      ...(input.swapSourceTokenMint === undefined
-        ? {}
-        : {
-            swapSourceTokenMint: input.swapSourceTokenMint,
-            swapSlippageBps: input.swapSlippageBps ?? null,
-          }),
-    })
-  );
-
-export interface EarnVaultWithdrawalFingerprintInput {
-  redemptionMode?: "standard" | "instant";
-  environment: string;
-  provider: string;
-  /** The `earn_positions` row being exited. */
-  positionId: string;
-  /** Shares to redeem, decimal string in share units. */
-  shares: string;
-  /** Exit slippage floor, or null when the provider takes none. */
-  minAmountOut: string | null;
-}
-
-/**
- * Fingerprint for a non-custodial vault withdrawal.
- *
- * Same inclusion test as the deposit's: every field changes WHAT MOVES. The
- * position id carries the vault and the signing wallet transitively (a holding
- * is one (org, environment, provider, vault, wallet) claim), so naming it is
- * naming both; `environment` is included because the same key arriving in
- * sandbox and production is two requests against two chains. Decimal spelling
- * is normalized without rounding, exactly like the deposit — `1` and `1.000000`
- * are one intent to the share mint. `minAmountOut` earns its place the same way
- * the deposit's `minSharesOut` does: the floor is baked into the built
- * instruction, so omitting it would let a caller reuse a key with a weaker
- * floor and get a silent `replayed: true` for the original, stricter exit.
- */
-export const buildEarnVaultWithdrawalFingerprint = (
-  input: EarnVaultWithdrawalFingerprintInput
-): string =>
-  JSON.stringify(
-    normalizeForFingerprint({
-      scope: "earn_vault_withdrawal",
-      environment: input.environment,
-      provider: input.provider,
-      positionId: input.positionId,
-      direction: "withdrawal",
-      redemptionMode: input.redemptionMode,
-      shares: normalizeDecimalString(input.shares),
-      minAmountOut: input.minAmountOut === null ? null : normalizeDecimalString(input.minAmountOut),
-    })
-  );
-
 export interface EarnVaultQueuedWithdrawalFingerprintInput {
   environment: string;
   provider: string;
@@ -237,7 +139,7 @@ export interface EarnVaultQueuedWithdrawalFingerprintInput {
   shares: string;
   discountBps: number;
   deadlineSeconds: number;
-  /** Exact unsigned build consumed by an external-wallet submit. */
+  /** Exact unsigned build consumed by a wallet submit. */
   transactionId?: string;
 }
 
@@ -262,7 +164,7 @@ export type EarnVaultParRedemptionFingerprintInput = {
   environment: string;
   provider: string;
   positionId: string;
-  /** Exact unsigned build consumed by an external-wallet submit. */
+  /** Exact unsigned build consumed by a wallet submit. */
   transactionId?: string;
 } & (
   | { shares: string; intermediateAmount?: undefined }
@@ -295,7 +197,7 @@ export interface EarnVaultQueuedWithdrawalCancelFingerprintInput {
   environment: string;
   withdrawalRequestId: string;
   requestAddress: string;
-  /** Exact unsigned build consumed by an external-wallet submit. */
+  /** Exact unsigned build consumed by a wallet submit. */
   transactionId?: string;
 }
 
@@ -310,74 +212,6 @@ export const buildEarnVaultQueuedWithdrawalCancelFingerprint = (
       withdrawalRequestId: input.withdrawalRequestId,
       requestAddress: input.requestAddress,
       transactionId: input.transactionId ?? null,
-    })
-  );
-
-export interface EarnExternalWalletDepositFingerprintInput {
-  environment: string;
-  provider: string;
-  /** The vault address. */
-  providerReference: string;
-  /** The external wallet that signs and holds the shares. */
-  ownerAddress: string;
-  amount: string;
-  minSharesOut: string | null;
-  /** The built transaction being submitted (`earn_external_wallet_transactions.id`). */
-  transactionId: string;
-}
-
-/**
- * Fingerprint for an external-wallet (caller-signed) vault deposit submit.
- *
- * Same inclusion test as the custody deposit's: every field changes WHAT MOVES.
- * `transactionId` earns its place because the submit names one specific built
- * transaction: two builds are two distinct signable transactions, so a key
- * retried against a REBUILT transaction is a different request and must 409
- * rather than silently answer with the first build's movement.
- */
-export const buildEarnExternalWalletDepositFingerprint = (
-  input: EarnExternalWalletDepositFingerprintInput
-): string =>
-  JSON.stringify(
-    normalizeForFingerprint({
-      scope: "earn_external_wallet_deposit",
-      environment: input.environment,
-      provider: input.provider,
-      providerReference: input.providerReference,
-      ownerAddress: input.ownerAddress,
-      direction: "deposit",
-      amount: normalizeDecimalString(input.amount),
-      minSharesOut: input.minSharesOut === null ? null : normalizeDecimalString(input.minSharesOut),
-      transactionId: input.transactionId,
-    })
-  );
-
-export interface EarnExternalWalletWithdrawalFingerprintInput {
-  environment: string;
-  provider: string;
-  /** The `earn_positions` row being exited. */
-  positionId: string;
-  /** The external wallet whose shares redeem. */
-  ownerAddress: string;
-  shares: string;
-  /** The built transaction being submitted (`earn_external_wallet_transactions.id`). */
-  transactionId: string;
-}
-
-/** Fingerprint for an external-wallet withdrawal submit; see the deposit's note. */
-export const buildEarnExternalWalletWithdrawalFingerprint = (
-  input: EarnExternalWalletWithdrawalFingerprintInput
-): string =>
-  JSON.stringify(
-    normalizeForFingerprint({
-      scope: "earn_external_wallet_withdrawal",
-      environment: input.environment,
-      provider: input.provider,
-      positionId: input.positionId,
-      ownerAddress: input.ownerAddress,
-      direction: "withdrawal",
-      shares: normalizeDecimalString(input.shares),
-      transactionId: input.transactionId,
     })
   );
 
@@ -483,27 +317,5 @@ export const buildPrivateChannelTransferFingerprint = (
       mint: input.mint,
       direction: "transfer",
       amount: normalizeDecimalString(input.amount),
-    })
-  );
-
-export interface EarnWithdrawalFingerprintInput {
-  providerWalletRef: string;
-  amountUsd: string;
-  token: string;
-  destinationAddress: string;
-}
-
-export const buildEarnWithdrawalFingerprint = (input: EarnWithdrawalFingerprintInput): string =>
-  JSON.stringify(
-    normalizeForFingerprint({
-      scope: "earn_program_withdrawal",
-      providerWalletRef: input.providerWalletRef,
-      // Normalized exactly as the provider wire is: portfolio clients send
-      // amountUsd as a JSON number, so '100' and '100.00' are one request to
-      // the provider and must be one fingerprint — SDP's conflict judgment
-      // must never be stricter than the provider request it guards.
-      amountUsd: String(Number(input.amountUsd)),
-      token: input.token,
-      destinationAddress: input.destinationAddress,
     })
   );

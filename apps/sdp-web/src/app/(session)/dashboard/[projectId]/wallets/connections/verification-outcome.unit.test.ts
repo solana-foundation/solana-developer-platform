@@ -50,11 +50,14 @@ describe("verification outcomes", () => {
       code: "provider_response_unknown",
     });
 
-    for (const outcome of [fromCompletion, fromRotation]) {
-      expect(outcome).toMatchObject({ kind: "unknown", tone: "neutral" });
-      expect(outcome?.tone).not.toBe("danger");
-      expect(outcome?.actions).toEqual(["check_current_state"]);
-    }
+    const unknown = {
+      kind: "unknown",
+      tone: "neutral",
+      actions: ["check_current_state"],
+      retryable: true,
+    };
+    expect(fromCompletion).toEqual(unknown);
+    expect(fromRotation).toEqual(unknown);
   });
 
   it("offers no retry for a wallet conflict, which retrying cannot resolve", () => {
@@ -64,8 +67,12 @@ describe("verification outcomes", () => {
       code: "wallet_conflict",
     });
 
-    expect(outcome).toMatchObject({ kind: "wallet_conflict", retryable: false });
-    expect(outcome?.actions).toEqual(["copy_connection_id", "contact_support"]);
+    expect(outcome).toEqual({
+      kind: "wallet_conflict",
+      tone: "danger",
+      actions: ["copy_connection_id", "contact_support"],
+      retryable: false,
+    });
   });
 
   it("treats a failure with an unfamiliar code as conclusive, not unknown", () => {

@@ -2,7 +2,7 @@
 import type { EarnVaultPosition } from "@sdp/types/earn";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { EarnVaultPositionsRead } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-program-data";
+import type { EarnVaultPositionsRead } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-data";
 import type { VaultActivity } from "./treasury-vault-balance";
 import { treasuryRefreshRetryDelay, useTreasuryBalances } from "./use-treasury-balances";
 
@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   refreshWallets: vi.fn(),
   error: undefined as Error | undefined,
 }));
-vi.mock("@/app/(session)/dashboard/[projectId]/markets/earn/earn-program-data", () => ({
+vi.mock("@/app/(session)/dashboard/[projectId]/markets/earn/earn-data", () => ({
   useEarnVaultPositions: () => ({
     reads: mocks.reads,
     positions: mocks.positions,
@@ -116,6 +116,18 @@ describe("Treasury balance coordinator", () => {
     expect(result.current.balanceOf(position).syncing).toBe(true);
     await act(async () => finishWallet());
     expect(result.current.balanceOf(position)).toEqual({ value: "20", syncing: false });
+    expect(result.current.balancesRefreshing).toBe(false);
+  });
+
+  it("refreshes the exact funding wallet after a core operation closes its last position", async () => {
+    mocks.positions = [];
+    const { result } = renderHook(() => useTreasuryBalances([]));
+    await act(async () => {
+      await result.current.refreshOperation("operation-movement", "closed-position", "wallet");
+    });
+    expect(mocks.refreshPositions).toHaveBeenCalledWith(["operation-movement"]);
+    expect(mocks.refreshWallets).toHaveBeenCalledWith(101, ["wallet"]);
+    expect(result.current.walletsError).toBeUndefined();
     expect(result.current.balancesRefreshing).toBe(false);
   });
 
@@ -344,8 +356,8 @@ it("retains an unpaired holding after its movement leaves visible activity", asy
 it("recovers more than 100 outstanding pairs through bounded HTTP reads", async () => {
   vi.useFakeTimers();
   const { readEarnVaultPositions } = await vi.importActual<
-    typeof import("@/app/(session)/dashboard/[projectId]/markets/earn/earn-program-data")
-  >("@/app/(session)/dashboard/[projectId]/markets/earn/earn-program-data");
+    typeof import("@/app/(session)/dashboard/[projectId]/markets/earn/earn-data")
+  >("@/app/(session)/dashboard/[projectId]/markets/earn/earn-data");
   const batchSizes: number[] = [];
   vi.stubGlobal(
     "fetch",
@@ -357,7 +369,7 @@ it("recovers more than 100 outstanding pairs through bounded HTTP reads", async 
       if (ids.length > 100) return Response.json({}, { status: 400 });
       return Response.json({
         data: {
-          positions: [position],
+          positions: [{ ...position, source: { walletId: position.custodyWalletId } }],
           hasMore: false,
           nextCursor: null,
           balanceReadContext: { afterMovementIds: ids, minimumSlot: 101 },

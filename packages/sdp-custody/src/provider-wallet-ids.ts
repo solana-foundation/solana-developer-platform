@@ -2,6 +2,10 @@ export function normalizePrivyWalletId(walletId: string): string {
   return walletId.startsWith("privy_") ? walletId : `privy_${walletId}`;
 }
 
+export function denormalizePrivyWalletId(walletId: string): string {
+  return walletId.startsWith("privy_") ? walletId.slice("privy_".length) : walletId;
+}
+
 export function normalizeCoinbaseCdpWalletId(walletAddress: string): string {
   return walletAddress.startsWith("cdp_") ? walletAddress : `cdp_${walletAddress}`;
 }

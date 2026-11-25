@@ -45,6 +45,12 @@ webhooks.use(
 );
 
 webhooks.post(
+  "/clerk",
+  publicRoute("signed webhook: Clerk's signature authenticates it"),
+  handleClerkWebhook
+);
+// Signed alias for Clerk endpoints registered at the legacy path.
+webhooks.post(
   "/clerk/link-orgs",
   publicRoute("signed webhook: Clerk's signature authenticates it"),
   handleClerkWebhook

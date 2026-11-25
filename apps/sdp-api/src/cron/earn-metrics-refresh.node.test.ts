@@ -112,6 +112,7 @@ describe("refreshEarnStrategyMetrics", () => {
           providerReference: "vault-a",
           environment,
           currentApy: "0.051",
+          rateObservedAt: expect.any(String),
           riskMetadata: { tvlUsd: 1_000_000 },
         },
         {
@@ -119,6 +120,7 @@ describe("refreshEarnStrategyMetrics", () => {
           providerReference: "vault-b",
           environment,
           currentApy: "0.062",
+          rateObservedAt: expect.any(String),
           riskMetadata: { tvlUsd: 1_000_000 },
         },
       ]);

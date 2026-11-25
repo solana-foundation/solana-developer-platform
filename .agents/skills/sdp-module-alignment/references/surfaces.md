@@ -59,8 +59,9 @@ What a module exposes beyond its code, and where it runs. `api/` =
   `pnpm generate:module-map`, never by hand) describe the module as it is after
   the change. Kit versions and other pins in package `CLAUDE.md` files match
   the catalog.
-- **Earn:** `packages/sdp-kamino/CLAUDE.md` still says the repo pins kit 6.8.0
-  while the catalog pins 7.1.1.
+- **Earn:** `packages/sdp-kamino/CLAUDE.md` named kit 6.8.0 for months after
+  the catalog moved to 7.1.1, and cited a `decimal.js` override that never
+  existed.
 
 ## E1 Where it runs
 

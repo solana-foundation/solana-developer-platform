@@ -68,8 +68,8 @@ export interface DashboardFetchOptions {
  * shared list fails this build until it is mapped here.
  */
 const DASHBOARD_REQUIRED_ROUTES = {
-  "POST /v1/payments/transfers": "POST /api/dashboard/payments/transfers",
-  "POST /v1/payments/transfer-batches": "POST /api/dashboard/payments/transfers/batch",
+  "POST /v1/payments/transfers/execute": "POST /api/dashboard/payments/transfers",
+  "POST /v1/payments/transfer-batches/execute": "POST /api/dashboard/payments/transfers/batch",
   "POST /v1/payments/transfer-batches/:batchId/retry":
     "POST /api/dashboard/payments/transfers/batch/:batchId/retry",
   "POST /v1/payments/recurring-payments": "POST /api/dashboard/payments/recurring-payments",
@@ -85,6 +85,16 @@ const DASHBOARD_REQUIRED_ROUTES = {
     "POST /api/dashboard/payments/recurring-payments/:id/resume",
 } as const satisfies Record<IdempotencyRequiredRoute, string>;
 
+// Earn requires persisted intent before its experimental routes enter the
+// stable-module inventory above. Preparing and executing share this boundary.
+const EARN_REQUIRED_ROUTES = [
+  "POST /api/dashboard/markets/earn/deposit",
+  "POST /api/dashboard/markets/earn/withdraw",
+  "POST /api/dashboard/operations/:operationId/submit",
+  "POST /api/dashboard/operations/:operationId/refresh",
+  "POST /api/dashboard/operations/:operationId/cancel",
+] as const;
+
 function matchesRoute(pattern: string, method: string, path: string): boolean {
   const [patternMethod, patternPath = ""] = pattern.split(" ", 2);
   if (patternMethod !== method) return false;
@@ -97,23 +107,10 @@ function matchesRoute(pattern: string, method: string, path: string): boolean {
   );
 }
 
-/**
- * Dashboard money routes the API replays from its own movement ledger rather
- * than the shared `idempotent()` step, so they are absent from the shared
- * `IdempotencyRequiredRoute` list yet move money all the same (an earn
- * program's custodial payout). The refusal below protects them identically: a
- * reload must never mint a fresh key for a payout that may have landed.
- */
-const DASHBOARD_MONEY_ROUTES = [
-  "POST /api/dashboard/markets/earn/programs/:programId/withdrawals",
-] as const;
-
 /** Whether this mutation moves money, so it must never send under a key that cannot be kept. */
 function requiresPersistedKey(method: string, path: string): boolean {
-  return (
-    Object.values(DASHBOARD_REQUIRED_ROUTES).some((pattern) =>
-      matchesRoute(pattern, method, path)
-    ) || DASHBOARD_MONEY_ROUTES.some((pattern) => matchesRoute(pattern, method, path))
+  return [...Object.values(DASHBOARD_REQUIRED_ROUTES), ...EARN_REQUIRED_ROUTES].some((pattern) =>
+    matchesRoute(pattern, method, path)
   );
 }
 

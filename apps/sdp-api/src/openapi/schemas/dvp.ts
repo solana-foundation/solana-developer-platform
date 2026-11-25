@@ -112,7 +112,7 @@ const dvpTradePartySchema = z
       }),
     wallet: dvpCallerWalletSchema.openapi({
       description:
-        "The caller's custody wallet holding this address, or null when the caller custodies nothing for it. Truthy = the caller custodies this party. Derived per caller from the same custody map discovery and funding authorize against; never stored.",
+        "A wallet in the caller's project that holds this address, or null when none exists. This is attribution, not permission to act: funding also requires the dvp.execute grant and an active custody wallet permitted by the credential’s wallet bindings. Derived per request; never stored.",
     }),
   })
   .openapi({ description: "One party of the trade, as the caller may see it." });
@@ -219,7 +219,7 @@ const dvpTradeSchema = z
     legs: z.object({ a: dvpTradeLegSchema, b: dvpTradeLegSchema }),
     kind: z.enum(["agent", "principal", "bilateral"]).openapi({
       description:
-        "The caller's standing on this trade, derived per caller and never stored. Display copy only: how many sides the caller holds an active custody wallet for — 0 is an agent trade (the terms were set for two other parties), 1 is a principal trade, 2 is bilateral. Follows the same custody map discovery and funding authorize against, so a wallet-scoped key's kind reflects its own bindings.",
+        "The project's standing on this trade, derived per request and never stored. Display copy only: how many sides have an active wallet in the caller's project — 0 is an agent trade (the terms were set for two other parties), 1 is a principal trade, 2 is bilateral. This does not describe the credential's wallet bindings or permission to execute.",
     }),
     nonce: z.string().openapi({
       description:

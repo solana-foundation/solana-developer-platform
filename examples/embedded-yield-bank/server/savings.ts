@@ -1,26 +1,8 @@
 import "server-only";
 
-import {
-  addDecimals,
-  compareDecimals,
-  decimalScale,
-  isPositiveDecimal,
-  multiplyDivideDecimals,
-} from "../src/lib/decimal";
-import type {
-  TokenBalance,
-  YieldMovement,
-  YieldPosition,
-  YieldStrategy,
-  YieldWithdrawalOptions,
-  YieldWithdrawalRequest,
-} from "../src/types";
-import { ApiRequestError } from "./http";
+import { addDecimals, isPositiveDecimal } from "../src/lib/decimal";
+import type { TokenBalance, YieldPosition, YieldStrategy } from "../src/types";
 import { type SolanaCluster, USDC_MINTS } from "./solana";
-
-/** Every current stablecoin vault quotes in six-decimal tokens. */
-export const SAVINGS_AMOUNT_DECIMALS = 6;
-const MAX_SHARE_DECIMALS = 9;
 
 /**
  * Northstar offers one savings product, backed by one Embedded Yield strategy.
@@ -93,37 +75,42 @@ export function isOpenPosition(position: YieldPosition): boolean {
   return position.shares === undefined || isPositiveDecimal(position.shares);
 }
 
+/** Only these observed ledger fields enter savings arithmetic. */
+export interface SavingsLedgerEntry {
+  direction: "deposit" | "withdrawal";
+  status: "pending" | "completed" | "failed";
+  tokenAmount: string | null;
+}
+
 export interface SavingsSummary {
   balance?: string;
-  withdrawable?: string;
   earned?: string;
   total?: string;
 }
 
 /**
- * `movements` must already be scoped to the savings strategy. Earnings follow
- * SDP's own rule for a wallet, applied to this one strategy: live value plus
- * finalized withdrawal payouts minus finalized deposits, stated only when it
- * is exact (no pending movement, no unvalued payout, no missing valuation).
- * SDP's earnings endpoint groups by token across every strategy the wallet
- * touches, which is the wrong scope for a single savings account.
+ * Entries must be scoped to the savings strategy. Earnings equal live value
+ * plus completed withdrawal payouts minus completed deposits, and remain
+ * unknown while an entry is pending or an observed amount is unavailable.
  */
 export function summarizeSavings(
   checking: Pick<TokenBalance, "amount">,
   position: YieldPosition | null,
-  movements: readonly YieldMovement[],
-  withdrawalRequests: readonly YieldWithdrawalRequest[] = []
+  entries: readonly SavingsLedgerEntry[],
+  pendingOperationWithdrawal = false
 ): SavingsSummary {
   const positionBalance = position ? position.tokenValue : "0";
-  const queuedBalance = queuedWithdrawalValue(withdrawalRequests);
+  const queuedBalance = pendingOperationWithdrawal ? undefined : "0";
   const balance =
     positionBalance === undefined || queuedBalance === undefined
       ? undefined
       : addDecimals([positionBalance, queuedBalance]);
   return {
     balance,
-    withdrawable: position ? withdrawableAmount(position) : "0",
-    earned: earnedFromLedger(balance, movements),
+    earned:
+      position?.discovered || position?.costBasisKnown === false
+        ? undefined
+        : earnedFromLedger(balance, entries),
     total:
       balance === undefined
         ? undefined
@@ -131,176 +118,24 @@ export function summarizeSavings(
   };
 }
 
-/** Queued quotes describe expected payout, not an observed current asset value. */
-export function queuedWithdrawalValue(
-  requests: readonly YieldWithdrawalRequest[]
-): string | undefined {
-  return requests.some(
-    (request) => !["fulfilled", "cancelled", "failed"].includes(request.status)
-  )
-    ? undefined
-    : "0";
-}
-
-/** Refuse stale or out-of-range queue choices before asking SDP to build. */
-export function assertQueuedWithdrawalTerms(
-  options: YieldWithdrawalOptions,
-  shares: string,
-  discountBps: number,
-  deadlineSeconds: number
-): void {
-  const terms = options.queueAsset;
-  if (!options.queued || !terms?.allowWithdrawals) {
-    throw new ApiRequestError(
-      400,
-      "WITHDRAWAL_ROUTE_UNAVAILABLE",
-      "Queued withdrawals are not currently available"
-    );
-  }
-  if (compareDecimals(shares, terms.minimumShares) === -1) {
-    throw new ApiRequestError(
-      400,
-      "INVALID_REQUEST",
-      `Queued withdrawals require at least ${terms.minimumShares} shares`
-    );
-  }
-  if (
-    !Number.isInteger(discountBps) ||
-    discountBps < terms.minimumDiscountBps ||
-    discountBps > terms.maximumDiscountBps
-  ) {
-    throw new ApiRequestError(
-      400,
-      "INVALID_REQUEST",
-      `Choose a discount from ${terms.minimumDiscountBps} to ${terms.maximumDiscountBps} basis points`
-    );
-  }
-  if (
-    !Number.isInteger(deadlineSeconds) ||
-    deadlineSeconds < terms.minimumSecondsToDeadline ||
-    deadlineSeconds > terms.maximumSecondsToDeadline
-  ) {
-    throw new ApiRequestError(
-      400,
-      "INVALID_REQUEST",
-      `Choose a solver window from ${terms.minimumSecondsToDeadline} to ${terms.maximumSecondsToDeadline} seconds`
-    );
-  }
-}
-
 export function earnedFromLedger(
   currentValue: string | undefined,
-  movements: readonly YieldMovement[]
+  entries: readonly SavingsLedgerEntry[]
 ): string | undefined {
   if (currentValue === undefined) return undefined;
-  if (movements.some((movement) => isPendingMovement(movement)))
-    return undefined;
-  const finalized = movements.filter(
-    (movement) => movement.status === "finalized"
+  if (entries.some((entry) => entry.status === "pending")) return undefined;
+  const completed = entries.filter((entry) => entry.status === "completed");
+  const valued = completed.filter(
+    (entry): entry is SavingsLedgerEntry & { tokenAmount: string } =>
+      entry.tokenAmount !== null
   );
-  const valued = finalized.filter(
-    (movement): movement is YieldMovement & { tokenAmount: string } =>
-      movement.tokenAmount !== null
-  );
-  if (valued.length !== finalized.length) return undefined;
+  if (valued.length !== completed.length) return undefined;
   return addDecimals([
     currentValue,
-    ...valued.map((movement) =>
-      movement.direction === "withdrawal"
-        ? movement.tokenAmount
-        : `-${movement.tokenAmount}`
+    ...valued.map((entry) =>
+      entry.direction === "withdrawal"
+        ? entry.tokenAmount
+        : `-${entry.tokenAmount}`
     ),
   ]);
-}
-
-function isPendingMovement(movement: YieldMovement): boolean {
-  return movement.status !== "finalized" && movement.status !== "failed";
-}
-
-/** Current token value that can be redeemed immediately, rounded down. */
-export function withdrawableAmount(
-  position: Pick<YieldPosition, "shares" | "withdrawableShares" | "tokenValue">
-): string | undefined {
-  if (
-    position.shares === undefined ||
-    position.withdrawableShares === undefined ||
-    position.tokenValue === undefined ||
-    !isPositiveDecimal(position.shares)
-  ) {
-    return undefined;
-  }
-  return multiplyDivideDecimals(
-    position.withdrawableShares,
-    position.tokenValue,
-    position.shares,
-    SAVINGS_AMOUNT_DECIMALS
-  );
-}
-
-/**
- * Convert a customer's token amount into the share quantity SDP redeems.
- * A full withdrawal sends the exact withdrawable share count so nothing is
- * stranded by rounding; partial withdrawals scale by the live share price.
- */
-export function sharesForAmount(
-  amount: string,
-  position: Pick<YieldPosition, "shares" | "withdrawableShares" | "tokenValue">
-): string {
-  if (
-    !isPositiveDecimal(amount) ||
-    decimalScale(amount) > SAVINGS_AMOUNT_DECIMALS
-  ) {
-    throw new ApiRequestError(
-      400,
-      "INVALID_REQUEST",
-      `Enter a positive amount with up to ${SAVINGS_AMOUNT_DECIMALS} decimal places`
-    );
-  }
-  const available = withdrawableAmount(position);
-  if (
-    available === undefined ||
-    position.shares === undefined ||
-    position.withdrawableShares === undefined ||
-    position.tokenValue === undefined
-  ) {
-    // Missing valuation fields are provider state, not malformed client
-    // input, so report a retryable 503 instead of a client-correcting 400.
-    throw new ApiRequestError(
-      503,
-      "VALUATION_UNAVAILABLE",
-      "Savings balance is still updating; refresh and try again"
-    );
-  }
-  const comparison = compareDecimals(amount, available);
-  if (comparison === 1) {
-    throw new ApiRequestError(
-      400,
-      "INVALID_REQUEST",
-      `Only ${available} is available to move right now`
-    );
-  }
-  if (comparison === 0) return position.withdrawableShares;
-
-  const shareDecimals = Math.min(
-    MAX_SHARE_DECIMALS,
-    Math.max(
-      SAVINGS_AMOUNT_DECIMALS,
-      decimalScale(position.shares),
-      decimalScale(position.withdrawableShares)
-    )
-  );
-  const shares = multiplyDivideDecimals(
-    amount,
-    position.shares,
-    position.tokenValue,
-    shareDecimals
-  );
-  if (!isPositiveDecimal(shares)) {
-    throw new ApiRequestError(
-      400,
-      "INVALID_REQUEST",
-      "That amount is too small to move"
-    );
-  }
-  return shares;
 }

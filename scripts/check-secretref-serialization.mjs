@@ -38,7 +38,7 @@
  * sibling .test.mjs (see check-module-boundaries.mjs).
  */
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
@@ -280,13 +280,10 @@ function collectSourceFiles(repositoryRoot) {
 
   for (const root of SCAN_ROOTS) {
     const absoluteRoot = path.join(repositoryRoot, root);
-    let entries;
-    try {
-      if (!statSync(absoluteRoot).isDirectory()) continue;
-      entries = readdirSync(absoluteRoot, { recursive: true, encoding: "utf8" });
-    } catch {
-      continue;
-    }
+    // A scan root that cannot be read fails the walk here: `readdirSync`
+    // throws ENOENT naming the missing root, so the check cannot quietly
+    // shrink to nothing and still print "passed" below.
+    const entries = readdirSync(absoluteRoot, { recursive: true, encoding: "utf8" });
 
     for (const entry of entries) {
       if (!/\.(ts|tsx|mts)$/.test(entry)) continue;

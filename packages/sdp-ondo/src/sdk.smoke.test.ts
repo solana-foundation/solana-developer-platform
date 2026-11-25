@@ -1,4 +1,4 @@
-import type { EarnRuntimeContext, EarnVaultTransactionPlan } from "@sdp/earn/types";
+import type { EarnRuntimeContext, EarnSwapPort, EarnVaultTransactionPlan } from "@sdp/earn/types";
 import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
@@ -18,7 +18,6 @@ import {
 } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import { OndoVaultDirectClient } from "./client";
-import type { OndoSwapPort } from "./types";
 
 /**
  * On-chain smoke test. **Opt-in, and never runs in CI** — the package's other
@@ -41,7 +40,7 @@ import type { OndoSwapPort } from "./types";
  *
  * The swap port here speaks Jupiter's keyless lite API (v1 quote +
  * swap-instructions) so the test needs no credential. Production uses the
- * API-owned keyed port (`services/earn/ondo-swap-port.ts`), whose instruction
+ * API-owned keyed port (`services/earn/jupiter-swap-port.ts`), whose instruction
  * ADMISSION this test does not exercise — that boundary has its own suite.
  */
 const RPC_URL = process.env.ONDO_SMOKE_RPC_URL;
@@ -88,7 +87,7 @@ async function liteQuote(inputMint: string, outputMint: string, amount: string, 
 }
 
 /** Keyless lite-API implementation of the swap seam, for the fork only. */
-const litePort: OndoSwapPort = {
+const litePort: EarnSwapPort = {
   async quoteSwap(request) {
     const quote = await liteQuote(request.inputMint, request.outputMint, request.amount);
     return {

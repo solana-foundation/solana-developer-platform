@@ -22,6 +22,7 @@ import {
   idempotent,
   MAX_STORED_RESPONSE_BYTES,
   markIdempotencyCommitted,
+  markIdempotencyReleased,
   requestFingerprint,
   runIdempotency,
 } from "./idempotency";
@@ -667,6 +668,77 @@ describe("idempotent()", () => {
     expect(await storedRows()).toMatchObject([{ status: "completed", response_status: 201 }]);
   });
 
+  it("recovers a committed payment record after a 5xx on a rerun route", async () => {
+    const rows = new Map<string, { payment: { id: string; status: string } }>();
+    const create = vi.fn((c: Context<{ Bindings: Env }>) => {
+      const recordKey = getIdempotencyRecordKey(c);
+      if (recordKey === undefined) throw new Error("expected a claimed key");
+      rows.set(recordKey, { payment: { id: "payment_saved", status: "processing" } });
+      markIdempotencyCommitted(c);
+      throw new Error("response failed after the payment record committed");
+    });
+    const app = testApp();
+    app.post(
+      "/v1/payments/transfers",
+      idempotent({ key: "required", serverErrors: "rerun", recovery: "record" }),
+      replayFromRecord(async (c, _input, recordKey) => {
+        const row = rows.get(recordKey);
+        return row === undefined ? null : { fingerprint: null, respond: () => c.json(row, 202) };
+      }),
+      (c) => create(c)
+    );
+
+    expect((await post(app, "/v1/payments/transfers", { amount: "1" }, KEY)).status).toBe(500);
+    const recovered = await post(app, "/v1/payments/transfers", { amount: "1" }, KEY);
+    expect(recovered.status).toBe(202);
+    expect(await recovered.json()).toEqual({
+      payment: { id: "payment_saved", status: "processing" },
+    });
+    expect(recovered.headers.get(IDEMPOTENT_REPLAYED_HEADER)).toBe("true");
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(rows.size).toBe(1);
+    expect(await storedRows()).toMatchObject([{ status: "completed", response_status: 202 }]);
+  });
+
+  it("replays a committed operation's exact 5xx when the route opts in", async () => {
+    const { app, create } = buildApp(
+      { key: "required", serverErrors: "rerun", committedServerErrors: "store" },
+      (c) => {
+        markIdempotencyCommitted(c);
+        throw new Error("response failed after operation acceptance");
+      }
+    );
+    const first = await post(app, "/v1/other", { actionId: "action", version: 1 }, KEY);
+    expect(first.status).toBe(500);
+    const replay = await post(app, "/v1/other", { actionId: "action", version: 1 }, KEY);
+    expect(replay.status).toBe(500);
+    expect(await replay.text()).toBe(await first.text());
+    expect(replay.headers.get(IDEMPOTENT_REPLAYED_HEADER)).toBe("true");
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(await storedRows()).toMatchObject([{ status: "completed", response_status: 500 }]);
+  });
+
+  it("still reruns a 5xx after the handler rolls its domain write back", async () => {
+    let fail = true;
+    const { app, create } = buildApp(
+      { key: "required", serverErrors: "rerun", committedServerErrors: "store" },
+      (c) => {
+        markIdempotencyCommitted(c);
+        if (fail) {
+          markIdempotencyReleased(c);
+          throw new Error("domain write rolled back");
+        }
+        return c.json({ ok: true }, 201);
+      }
+    );
+    expect((await post(app, "/v1/other", { a: 1 }, KEY)).status).toBe(500);
+    fail = false;
+    const retried = await post(app, "/v1/other", { a: 1 }, KEY);
+    expect(retried.status).toBe(201);
+    expect(retried.headers.get(IDEMPOTENT_REPLAYED_HEADER)).toBeNull();
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps a taken-over key bound to its request when the retry is refused", async () => {
     let step = 0;
     const { app } = buildApp({ key: "required", serverErrors: "rerun" }, () => {
@@ -866,23 +938,89 @@ describe("idempotent()", () => {
     expect(create).toHaveBeenCalledTimes(1);
   });
 
-  it("replays a key saved under the route's previous canonical form", async () => {
-    // Before: the fingerprint kept an option sent at its default.
-    const before = buildApp({ key: "required" }, created);
-    await post(before.app, "/v1/other", { amount: "1", preflight: true }, KEY);
+  it.each([false, true])(
+    "replays a domain row from the previous operation (canonical form changed: %s)",
+    async (canonicalFormChanged) => {
+      // The rename also moves the key record's scope (it includes the matched
+      // route), so the key layer cannot match across it: the row is what
+      // answers. Shared domain rows between the before and after routes.
+      const rows = new Map<string, { fingerprint: string; row: { thing: string } }>();
+      const create = vi.fn((c: Context<{ Bindings: Env }>) => {
+        const recordKey = getIdempotencyRecordKey(c);
+        const fingerprint = getIdempotencyFingerprint(c);
+        if (recordKey === undefined || fingerprint === undefined)
+          throw new Error("expected a claim");
+        rows.set(recordKey, { fingerprint, row: { thing: "original" } });
+        return c.json({ thing: "original" }, 201);
+      });
+      const finder = replayFromRecord(async (c, _input, recordKey) => {
+        const found = rows.get(recordKey);
+        return found === undefined
+          ? null
+          : { fingerprint: found.fingerprint, respond: () => c.json(found.row, 201) };
+      });
+      const before = testApp();
+      before.post(
+        "/v1/other",
+        idempotent({ key: "required", serverErrors: "rerun", recovery: "record" }),
+        finder,
+        (c) => create(c)
+      );
+      const body = { a: 1, preflight: true };
+      const saved = await post(before, "/v1/other", body, KEY);
+      expect(saved.status).toBe(201);
 
-    // After: the option is dropped at its default, so the new fingerprint differs.
-    const dropDefault = (body: JsonValue) => {
-      // SAFETY: the test always sends an object body.
-      const { preflight, ...rest } = body as { preflight?: boolean };
-      return preflight === true ? rest : body;
-    };
-    const after = buildApp(
-      { key: "required", canonicalize: dropDefault, previousCanonicalize: (body) => body },
-      created
-    );
-    const retried = await post(after.app, "/v1/other", { amount: "1", preflight: true }, KEY);
-    expect(retried.headers.get(IDEMPOTENT_REPLAYED_HEADER)).toBe("true");
-    expect(after.create).not.toHaveBeenCalled();
-  });
+      // After: the execute step moved to its own path, so the fingerprint built
+      // from the matched route differs. Declaring the old operation lets the row
+      // saved under it answer the retry; without it the row is a 422.
+      const renamed = (previousForms: IdempotencyOptions["previousForms"]) => {
+        const app = testApp();
+        app.post(
+          "/v1/other/execute",
+          idempotent({
+            key: "required",
+            serverErrors: "rerun",
+            recovery: "record",
+            canonicalize: canonicalFormChanged
+              ? (body) => {
+                  // SAFETY: this test always sends an object with preflight at its default.
+                  const { preflight: _preflight, ...rest } = body as { preflight: boolean };
+                  return rest;
+                }
+              : undefined,
+            previousForms,
+          }),
+          finder,
+          (c) => create(c)
+        );
+        return app;
+      };
+      // An operation rename alone cannot recover a row whose body form also
+      // changed. Retain both earlier forms for that case.
+      const refused = await post(
+        renamed(canonicalFormChanged ? [{ operation: "POST /v1/other" }] : undefined),
+        "/v1/other/execute",
+        body,
+        KEY
+      );
+      expect(refused.status).toBe(422);
+      expect(await errorCode(refused)).toBe("IDEMPOTENCY_KEY_REUSED");
+
+      const retried = await post(
+        renamed([
+          { operation: "POST /v1/other" },
+          ...(canonicalFormChanged
+            ? [{ operation: "POST /v1/other", canonicalize: (body: JsonValue) => body }]
+            : []),
+        ]),
+        "/v1/other/execute",
+        body,
+        KEY
+      );
+      expect(retried.status).toBe(201);
+      expect(await retried.json()).toEqual({ thing: "original" });
+      expect(retried.headers.get(IDEMPOTENT_REPLAYED_HEADER)).toBe("true");
+      expect(create).toHaveBeenCalledTimes(1);
+    }
+  );
 });

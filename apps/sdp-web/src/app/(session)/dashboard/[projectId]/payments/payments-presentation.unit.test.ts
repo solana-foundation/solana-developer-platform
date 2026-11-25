@@ -6,26 +6,13 @@ import {
   formatDecimalAmount,
   formatElapsedShort,
   formatSignedAmount,
-  PAYMENT_STATUS_TONE,
   rampFiatSide,
   summarizeBatch,
 } from "./payments-presentation";
 
-describe("PAYMENT_STATUS_TONE", () => {
-  it("separates rails in motion from states waiting on someone", () => {
-    expect(PAYMENT_STATUS_TONE.processing).toBe("progress");
-    expect(PAYMENT_STATUS_TONE.settling).toBe("progress");
-    expect(PAYMENT_STATUS_TONE.pending).toBe("attention");
-    expect(PAYMENT_STATUS_TONE.awaiting_payment).toBe("attention");
-    expect(PAYMENT_STATUS_TONE.finalized).toBe("positive");
-    expect(PAYMENT_STATUS_TONE.failed).toBe("critical");
-    expect(PAYMENT_STATUS_TONE.expired).toBe("neutral");
-  });
-});
-
 describe("activityKind", () => {
-  it("prefers the ledger kind", () => {
-    expect(activityKind({ kind: "offramp", type: "offramp" })).toBe("pay");
+  it("prefers the ledger kind over type and direction", () => {
+    expect(activityKind({ kind: "pay", type: "transfer", direction: "inbound" })).toBe("pay");
     expect(activityKind({ kind: "request_deposit", type: "transfer" })).toBe("deposit");
     expect(activityKind({ kind: "batch_pay", type: "transfer" })).toBe("batch");
   });
@@ -124,21 +111,39 @@ describe("summarizeBatch", () => {
         recipient("pending"),
         recipient("pending"),
       ])
-    ).toMatchObject({ key: "DashboardPayments.batchSummary.confirmedOf", tone: "progress" });
+    ).toEqual({
+      key: "DashboardPayments.batchSummary.confirmedOf",
+      values: { confirmed: 1, count: 3 },
+      tone: "progress",
+    });
     expect(
       summarizeBatch({ status: "confirmed", recipientCount: 2 }, [
         recipient("confirmed"),
         recipient("confirmed"),
       ])
-    ).toMatchObject({ key: "DashboardPayments.batchSummary.allSettled", tone: "positive" });
+    ).toEqual({
+      key: "DashboardPayments.batchSummary.allSettled",
+      values: { count: 2 },
+      tone: "positive",
+    });
+    expect(summarizeBatch({ status: "failed", recipientCount: 1 }, [recipient("failed")])).toEqual({
+      key: "DashboardPayments.batchSummary.allFailed",
+      values: { count: 1 },
+      tone: "critical",
+    });
   });
 
   it("reads the batch status without recipients", () => {
-    expect(summarizeBatch({ status: "partially_failed", recipientCount: 8 })).toMatchObject({
+    expect(summarizeBatch({ status: "partially_failed", recipientCount: 8 })).toEqual({
       key: "DashboardPayments.batchSummary.partiallyFailed",
       values: { count: 8 },
+      tone: "attention",
     });
-    expect(summarizeBatch({ status: "archived", recipientCount: 4 }).tone).toBe("neutral");
+    expect(summarizeBatch({ status: "archived", recipientCount: 4 })).toEqual({
+      key: "DashboardPayments.batchSummary.archived",
+      values: { count: 4 },
+      tone: "neutral",
+    });
   });
 });
 
@@ -156,9 +161,10 @@ describe("rampFiatSide", () => {
   } as const;
 
   it("reads a paid sale as the payout the provider reported, not its quote", () => {
-    expect(
-      rampFiatSide({ ...sale, fiatPayout: { amount: "20.82", currency: "USD" } })
-    ).toMatchObject({ amount: "20.82", currency: "USD" });
+    expect(rampFiatSide({ ...sale, fiatPayout: { amount: "20.82", currency: "USD" } })).toEqual({
+      amount: "20.82",
+      currency: "USD",
+    });
   });
 
   it("falls back to the quote until the provider reports a payout, and to nothing", () => {

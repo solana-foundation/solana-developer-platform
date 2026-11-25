@@ -103,7 +103,11 @@ describe("requestDevnetFaucetAirdrop", () => {
       err: { InstructionError: [0, "InsufficientFunds"] },
     }));
 
-    await expect(airdropThroughConfirmationWindow()).resolves.toMatchObject({ status: "failed" });
+    await expect(airdropThroughConfirmationWindow()).resolves.toEqual({
+      signature: AIRDROP_SIGNATURE,
+      status: "failed",
+      lamports: "1000000000",
+    });
     expect(statusReads()).toHaveLength(1);
   });
 
@@ -119,8 +123,10 @@ describe("requestDevnetFaucetAirdrop", () => {
         : signatureStatusesReply([CONFIRMED_STATUS])
     );
 
-    await expect(airdropThroughConfirmationWindow()).resolves.toMatchObject({
+    await expect(airdropThroughConfirmationWindow()).resolves.toEqual({
+      signature: AIRDROP_SIGNATURE,
       status: "confirmed",
+      lamports: "1000000000",
     });
     expect(statusReads()).toHaveLength(2);
   });
@@ -128,7 +134,11 @@ describe("requestDevnetFaucetAirdrop", () => {
   it("returns timeout when the airdrop never confirms within the window", async () => {
     respondStatusPerRead(() => PROCESSED_STATUS);
 
-    await expect(airdropThroughConfirmationWindow()).resolves.toMatchObject({ status: "timeout" });
+    await expect(airdropThroughConfirmationWindow()).resolves.toEqual({
+      signature: AIRDROP_SIGNATURE,
+      status: "timeout",
+      lamports: "1000000000",
+    });
     expect(airdropRequestCount()).toBe(1);
     expect(statusReads()).toHaveLength(14);
   });

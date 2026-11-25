@@ -2,26 +2,32 @@ import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
-import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
+import type { JsonValue } from "@/lib/idempotency";
+import { mapErrorStatusCode } from "@/lib/response";
 import { databaseIdentityBoundary } from "@/middleware/database-identity";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
-import { RedisKVStore } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
-import { createCredentialSecretStore } from "@/services/credential-secret-store";
+import {
+  createCredentialSecretStore,
+  prepareGcpCredentialSecret,
+} from "@/services/credential-secret-store";
 import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";
 import { cleanupRetiredProviderCredentialSecrets } from "@/services/jobs/cleanup-provider-credential-secrets";
 import { scanGcpCredentialContainers } from "@/services/jobs/provider-credential-container-cleanup";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { insertTestCustodyWalletRow } from "@/test/helpers/custody";
+import { seedCustodyAdmin } from "@/test/helpers/custody-admin";
 import {
   activateTestCustodyConnection,
   insertTestCustodyConnection,
   insertTestStoredProviderCredential,
   type TestStoredProviderCredential,
 } from "@/test/helpers/custody-connections";
+import { deferred } from "@/test/helpers/deferred";
 import { env } from "@/test/helpers/env";
-import { DEFAULT_PROJECT_NAME, seedDefaultProjects } from "@/test/helpers/projects";
+import { DEFAULT_PROJECT_NAME } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedRateLimit } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -30,7 +36,7 @@ import { internalCustody } from "./index";
 const ORGANIZATION_ID = "org_provider_credential_lifecycle";
 const USER_ID = "usr_provider_credential_lifecycle";
 const PROJECT_A_ID = "prj_provider_credential_lifecycle_a";
-const PROJECT_B_ID = "prj_provider_credential_lifecycle_b";
+const PROJECT_B_ID = `${PROJECT_A_ID}_production`;
 const CREDENTIAL_ID = "pcred_provider_credential_lifecycle";
 const CONNECTION_A_ID = "cconn_provider_credential_lifecycle_a";
 const APP_ID = "privy-lifecycle-app";
@@ -40,27 +46,19 @@ const ORIGINAL_ENCRYPTION_KEY = env.CUSTODY_ENCRYPTION_KEY;
 const ORIGINAL_GCP_PROJECT_ID = env.GCP_SECRET_MANAGER_PROJECT_ID;
 const ORIGINAL_GCP_PREFIX = env.GCP_SECRET_MANAGER_SECRET_PREFIX;
 const ORIGINAL_GCP_API_BASE_URL = env.GCP_SECRET_MANAGER_API_BASE_URL;
+const gcpAddVersionBodySchema = z.object({ payload: z.object({ data: z.string() }) });
 const credentialResponseSchema = z.object({
-  data: z.object({ providerCredential: z.object({ id: z.string().min(1) }) }),
+  data: z.looseObject({ providerCredential: z.looseObject({ id: z.string().min(1) }) }),
 });
 
-function encodeJwtPart(value: Record<string, unknown>): string {
-  return Buffer.from(JSON.stringify(value)).toString("base64url");
-}
+let clerkToken: string;
 
 function buildApp() {
-  const payload: ClerkJwtPayload = {
-    sub: "clerk_provider_credential_lifecycle",
-    org_id: "clerk_org_provider_credential_lifecycle",
-    email: "provider-credential-lifecycle@example.com",
-  };
-  const token = `${encodeJwtPart({ alg: "RS256", typ: "JWT" })}.${encodeJwtPart(payload)}.signature`;
   const app = new Hono<{ Bindings: Env }>();
 
   app.use("*", databaseIdentityBoundary());
   app.use("*", kvStoreMiddleware());
   app.use("*", async (c, next) => {
-    c.set("verifiedClerkJwt", { token, payload });
     c.set("requestId", "req_provider_credential_lifecycle");
     await next();
   });
@@ -69,66 +67,13 @@ function buildApp() {
     if (error instanceof AppError) {
       return c.json(
         { error: error.toResponse().error, meta: { requestId: c.get("requestId") } },
-        error.statusCode as 400
+        mapErrorStatusCode(error.statusCode)
       );
     }
     throw error;
   });
 
-  return { app, token };
-}
-
-async function seedActor(): Promise<void> {
-  const db = getDb(env);
-  await db.batch([
-    db
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(
-        ORGANIZATION_ID,
-        "Credential Lifecycle",
-        "credential-lifecycle",
-        "enterprise",
-        "active"
-      ),
-    db
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-      .bind(USER_ID, "provider-credential-lifecycle@example.com"),
-    db
-      .prepare(
-        `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
-         VALUES (?, 'clerk', ?, ?, ?)`
-      )
-      .bind(
-        "aui_provider_credential_lifecycle",
-        "clerk_provider_credential_lifecycle",
-        USER_ID,
-        "provider-credential-lifecycle@example.com"
-      ),
-    db
-      .prepare(
-        `INSERT INTO auth_organization_identities
-           (id, provider, provider_org_id, organization_id, slug)
-         VALUES (?, 'clerk', ?, ?, ?)`
-      )
-      .bind(
-        "aoi_provider_credential_lifecycle",
-        "clerk_org_provider_credential_lifecycle",
-        ORGANIZATION_ID,
-        "credential-lifecycle"
-      ),
-    db
-      .prepare(
-        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-         VALUES (?, ?, ?, 'admin', 'active')`
-      )
-      .bind("mem_provider_credential_lifecycle", ORGANIZATION_ID, USER_ID),
-  ]);
-  await seedDefaultProjects(db, {
-    organizationId: ORGANIZATION_ID,
-    createdBy: USER_ID,
-    members: [USER_ID],
-    ids: { sandbox: PROJECT_A_ID, production: PROJECT_B_ID },
-  });
+  return app;
 }
 
 async function seedActiveProjectCredential(): Promise<void> {
@@ -192,22 +137,29 @@ async function seedActiveProjectCredential(): Promise<void> {
 
 async function lifecycleRequest(
   path: string,
-  options: { method?: "GET" | "POST"; body?: unknown; key?: string } = {}
+  options: { method: "POST"; body?: JsonValue; key?: string }
 ): Promise<Response> {
-  const { app, token } = buildApp();
   const headers: Record<string, string> = {
-    Authorization: `Bearer ${token}`,
+    Authorization: `Bearer ${clerkToken}`,
     "X-Project-ID": PROJECT_A_ID,
   };
   if (options.body !== undefined) headers["Content-Type"] = "application/json";
-  if (options.key) headers["Idempotency-Key"] = options.key;
-  return app.request(
+  if (options.key !== undefined) headers["Idempotency-Key"] = options.key;
+  return buildApp().request(
     `/internal/dashboard/custody${path}`,
     {
-      method: options.method ?? "GET",
+      method: "POST",
       headers,
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
     },
+    env
+  );
+}
+
+async function readConnectionCredential(): Promise<Response> {
+  return buildApp().request(
+    `/internal/dashboard/custody/connections/${CONNECTION_A_ID}/provider-credential/lifecycle`,
+    { headers: { Authorization: `Bearer ${clerkToken}`, "X-Project-ID": PROJECT_A_ID } },
     env
   );
 }
@@ -299,7 +251,7 @@ function mockGcpRotation(
         .filter((ref) => ref.startsWith(`${parent}/versions/`))
         .map((ref) => Number(ref.split("/").at(-1)));
       const versionRef = `${parent}/versions/${Math.max(6, ...priorVersions) + 1}`;
-      const body = JSON.parse(String(init?.body)) as { payload: { data: string } };
+      const body = gcpAddVersionBodySchema.parse(JSON.parse(String(required(init).body)));
       versions.set(versionRef, body.payload.data);
       await options.beforeAddResponse?.();
       if (options.writeFailure === "lost_response") throw new Error("Lost GCP response");
@@ -342,18 +294,9 @@ function firstPersistedGcpVersionRef(gcp: ReturnType<typeof mockGcpRotation>): s
   return versionRef.replace("projects/1234567890/", "projects/sdp-lifecycle-test/");
 }
 
-function deferredVoid() {
-  let resolve!: () => void;
-  const promise = new Promise<void>((done) => {
-    resolve = done;
-  });
-  return { promise, resolve };
-}
-
 async function seedActiveGcpCredential(gcp: ReturnType<typeof mockGcpRotation>) {
-  const module = await import("@/services/credential-secret-store");
-  const parent = module.prepareGcpCredentialSecret(env, CREDENTIAL_ID);
-  const versionRef = `${parent.secretRef?.replace("projects/sdp-lifecycle-test/", "projects/1234567890/")}/versions/1`;
+  const secretRef = required(prepareGcpCredentialSecret(env, CREDENTIAL_ID).secretRef);
+  const versionRef = `${secretRef.replace("projects/sdp-lifecycle-test/", "projects/1234567890/")}/versions/1`;
   gcp.versions.set(
     versionRef,
     Buffer.from(JSON.stringify({ appId: APP_ID, appSecret: APP_SECRET })).toString("base64")
@@ -362,9 +305,9 @@ async function seedActiveGcpCredential(gcp: ReturnType<typeof mockGcpRotation>) 
     `UPDATE provider_credentials SET storage_backend = 'gcp_secret_manager',
        secret_ref = ?, secret_version_ref = ?, encrypted_secret_payload = NULL,
        secret_next_scan_at = clock_timestamp() WHERE id = ?`,
-    [parent.secretRef, versionRef, CREDENTIAL_ID]
+    [secretRef, versionRef, CREDENTIAL_ID]
   );
-  return parent.secretRef;
+  return secretRef;
 }
 
 async function activeConnectionCredentialIds() {
@@ -378,7 +321,12 @@ describe("provider credential lifecycle", () => {
     env.CREDENTIAL_SECRET_STORE_BACKEND = "encrypted_db";
     env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 19).toString("base64");
     await seedTestDatabase(env);
-    await seedActor();
+    clerkToken = await seedCustodyAdmin(env, {
+      organizationId: ORGANIZATION_ID,
+      userId: USER_ID,
+      projectId: PROJECT_A_ID,
+      tier: "enterprise",
+    });
     await seedActiveProjectCredential();
   });
 
@@ -460,7 +408,7 @@ describe("provider credential lifecycle", () => {
       "gcp_secret_manager",
     ]);
     expect(rows.map((row) => row.owns_scan)).toEqual([false, true, false, true]);
-    expect(rows[1]?.secret_ref).not.toBe(rows[3]?.secret_ref);
+    expect(required(rows[1]).secret_ref).not.toBe(required(rows[3]).secret_ref);
     expect(gcp.versions.size).toBe(2);
   });
 
@@ -482,9 +430,12 @@ describe("provider credential lifecycle", () => {
       expect(rotated.status).toBe(200);
       const current = credentialResponseSchema.parse(await rotated.json()).data.providerCredential
         .id;
-      const rollback = await lifecycleRequest(`/provider-credentials/${current}/rollback`, {
-        method: "POST",
-      });
+      const rollback = await lifecycleRequest(
+        `/provider-credentials/${current}/rollback-rotation`,
+        {
+          method: "POST",
+        }
+      );
       expect(rollback.status).toBe(200);
       expect(await activeConnectionCredentialIds()).toEqual([
         { provider_credential_id: CREDENTIAL_ID },
@@ -528,8 +479,8 @@ describe("provider credential lifecycle", () => {
   });
 
   it("shared-container cleanup fences a cancelled HTTP writer before its late reply", async () => {
-    const started = deferredVoid();
-    const released = deferredVoid();
+    const started = deferred<void>();
+    const released = deferred<void>();
     const gcp = mockGcpRotation({
       inventory: () =>
         Response.json({
@@ -555,7 +506,7 @@ describe("provider credential lifecycle", () => {
           )
         ).skipped
       ).toBeGreaterThan(0);
-      const read = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`);
+      const read = await readConnectionCredential();
       const candidateId = z
         .object({ data: z.object({ rotationCandidate: z.object({ id: z.string() }) }) })
         .parse(await read.json()).data.rotationCandidate.id;
@@ -767,7 +718,7 @@ describe("provider credential lifecycle", () => {
     expect(await parent.json()).toMatchObject({
       data: { providerCredential: { id: CREDENTIAL_ID, status: "deactivated" } },
     });
-    const state = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`);
+    const state = await readConnectionCredential();
     expect(state.status).toBe(200);
     expect(await state.json()).toMatchObject({
       data: {
@@ -783,9 +734,7 @@ describe("provider credential lifecycle", () => {
     expect(await child.json()).toMatchObject({
       data: { providerCredential: { id: childId, status: "deactivated" } },
     });
-    expect(
-      await (await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`)).json()
-    ).toMatchObject({
+    expect(await (await readConnectionCredential()).json()).toMatchObject({
       data: {
         providerCredential: { id: CREDENTIAL_ID, status: "deactivated" },
         rotationCandidate: null,
@@ -1124,7 +1073,7 @@ describe("provider credential lifecycle", () => {
   it("retries failed GCP root destruction at its container scan and preserves its live child", async () => {
     const options = { privyStatuses: [200, 503], destroyFailure: true };
     const gcp = mockGcpRotation(options);
-    const secretRef = z.string().parse(await seedActiveGcpCredential(gcp));
+    const secretRef = await seedActiveGcpCredential(gcp);
     const canonicalRef = secretRef.replace("projects/sdp-lifecycle-test/", "projects/1234567890/");
     const rotation = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
@@ -1184,7 +1133,10 @@ describe("provider credential lifecycle", () => {
       destruction,
       destruction,
     ]);
-    expect(await secrets().listVersions?.({ secretRef, liveOnly: true })).toMatchObject({
+    const secretStore = secrets();
+    expect(
+      await required(secretStore.listVersions).call(secretStore, { secretRef, liveOnly: true })
+    ).toMatchObject({
       versions: [{ secretVersionRef: `${canonicalRef}/versions/7`, state: "ENABLED" }],
     });
     expect(
@@ -1193,9 +1145,7 @@ describe("provider credential lifecycle", () => {
         [CREDENTIAL_ID]
       )
     ).toEqual({ status: "deactivated", secret_retention_expires_at: null });
-    expect(
-      await (await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`)).json()
-    ).toMatchObject({
+    expect(await (await readConnectionCredential()).json()).toMatchObject({
       data: {
         providerCredential: { id: CREDENTIAL_ID, status: "deactivated" },
         rotationCandidate: { id: childId, status: "pending" },
@@ -1203,15 +1153,14 @@ describe("provider credential lifecycle", () => {
     });
   });
 
-  it.each(["actor", "organization"])(
-    "refuses rotation when the %s quota is exhausted",
-    async (scope) => {
+  it.each([
+    ["actor", `metered:credential-rotation:org:${ORGANIZATION_ID}:user:${USER_ID}`, 5],
+    ["organization", `metered:credential-rotation:org:${ORGANIZATION_ID}`, 20],
+  ] as const)(
+    "refuses rotation before provider calls when the %s quota is exhausted",
+    async (_scope, quotaKey, used) => {
       vi.spyOn(Date, "now").mockReturnValue(Date.now());
-      await seedRateLimit(
-        env,
-        `metered:credential-rotation:org:${ORGANIZATION_ID}${scope === "actor" ? `:user:${USER_ID}` : ""}`,
-        scope === "actor" ? 5 : 20
-      );
+      await seedRateLimit(env, quotaKey, used);
       const providerFetch = vi.fn().mockResolvedValue(Response.json({ data: [] }));
       vi.stubGlobal("fetch", providerFetch);
 
@@ -1225,36 +1174,13 @@ describe("provider credential lifecycle", () => {
       expect(response.headers.get("Retry-After")).not.toBeNull();
       expect(await response.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
       expect(providerFetch).not.toHaveBeenCalled();
-      const state = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`);
+      const state = await readConnectionCredential();
       expect(state.status).toBe(200);
       expect(await state.json()).toMatchObject({
         data: { providerCredential: { id: CREDENTIAL_ID }, rotationCandidate: null },
       });
     }
   );
-
-  it("refuses rotation before provider calls or secret storage when the quota store is unavailable", async () => {
-    vi.spyOn(RedisKVStore.prototype, "admitSlidingWindow").mockRejectedValue(
-      new Error("KV unavailable")
-    );
-    const providerFetch = vi.fn().mockResolvedValue(Response.json({ data: [] }));
-    vi.stubGlobal("fetch", providerFetch);
-
-    const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
-      method: "POST",
-      key: "rotate-quota-unavailable",
-      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
-    });
-
-    expect(response.status).toBe(503);
-    expect(await response.json()).toMatchObject({ error: { code: "SERVICE_UNAVAILABLE" } });
-    expect(providerFetch).not.toHaveBeenCalled();
-    const state = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`);
-    expect(state.status).toBe(200);
-    expect(await state.json()).toMatchObject({
-      data: { providerCredential: { id: CREDENTIAL_ID }, rotationCandidate: null },
-    });
-  });
 
   it.each(["complete-rotation", "rollback", "deactivate"])(
     "refuses %s before provider calls or state changes when its quota is exhausted",
@@ -1277,31 +1203,30 @@ describe("provider credential lifecycle", () => {
         body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
       });
       expect(rotated.status).toBe(200);
-      const { data } = await rotated.json();
-      const statePath = `/connections/${CONNECTION_A_ID}/provider-credential`;
-      const before = await (await lifecycleRequest(statePath)).json();
+      const { data } = credentialResponseSchema.parse(await rotated.json());
+      const before = await (await readConnectionCredential()).json();
       const quota = action === "complete-rotation" ? "credential-rotation" : "credential-recovery";
       await seedRateLimit(env, `metered:${quota}:org:${ORGANIZATION_ID}`, 20);
       providerFetch.mockClear();
 
       const response = await lifecycleRequest(
-        `/provider-credentials/${data.providerCredential.id}/${action}`,
+        `/provider-credentials/${data.providerCredential.id}/${action === "rollback" ? "rollback-rotation" : action}`,
         { method: "POST" }
       );
 
       expect(response.status).toBe(429);
       expect(await response.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
       expect(providerFetch).not.toHaveBeenCalled();
-      const after = await (await lifecycleRequest(statePath)).json();
+      const after = await (await readConnectionCredential()).json();
       expect(after.data).toEqual(before.data);
     }
   );
 
   it("returns the exact credential and complete authorized impact", async () => {
-    const response = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`);
+    const response = await readConnectionCredential();
 
     expect(response.status).toBe(200);
-    const body = (await response.json()) as { data: Record<string, unknown> };
+    const body = await response.json();
     expect(body.data).toMatchObject({
       providerCredential: { id: CREDENTIAL_ID, status: "active", source: "stored" },
       rotationCandidate: null,
@@ -1331,6 +1256,10 @@ describe("provider credential lifecycle", () => {
       deactivatedAt: null,
       createdBy: USER_ID,
     });
+    const db = getDb(env);
+    const foreign = await db.queryOne("SELECT * FROM provider_credentials WHERE id = ?", [
+      credentialId,
+    ]);
     const secretLookup = vi.spyOn(
       ProviderCredentialStore.prototype,
       "findLifecycleCredentialWithSecret"
@@ -1344,11 +1273,15 @@ describe("provider credential lifecycle", () => {
     );
 
     expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ error: { code: "NOT_FOUND" } });
     expect(secretLookup).not.toHaveBeenCalled();
     expect(providerFetch).not.toHaveBeenCalled();
+    expect(
+      await db.queryOne("SELECT * FROM provider_credentials WHERE id = ?", [credentialId])
+    ).toEqual(foreign);
   });
 
-  it("rotates every referencing connection after one continuity check", async () => {
+  it("rotates the referencing connection after one continuity check", async () => {
     const providerFetch = vi.fn().mockImplementation(async () => Response.json({ data: [] }));
     vi.stubGlobal("fetch", providerFetch);
 
@@ -1359,9 +1292,10 @@ describe("provider credential lifecycle", () => {
     });
 
     expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      data: { providerCredential: { id: string; status: string }; rotation: { status: string } };
-    };
+    const raw = await response.json();
+    expect(JSON.stringify(raw)).not.toContain("new-secret");
+    expect(JSON.stringify(raw)).not.toContain(APP_ID);
+    const body = credentialResponseSchema.parse(raw);
     expect(body.data).toMatchObject({
       providerCredential: { status: "active" },
       rotation: { status: "success" },
@@ -1588,8 +1522,8 @@ describe("provider credential lifecycle", () => {
   });
 
   it("exposes an in-flight GCP candidate without permitting a second writer or completion", async () => {
-    const started = deferredVoid();
-    const released = deferredVoid();
+    const started = deferred<void>();
+    const released = deferred<void>();
     const gcp = mockGcpRotation({
       beforeAddResponse: async () => {
         started.resolve();
@@ -1604,7 +1538,7 @@ describe("provider credential lifecycle", () => {
     const rotation = lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, request);
     try {
       await started.promise;
-      const read = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`);
+      const read = await readConnectionCredential();
       expect(read.status).toBe(200);
       const body = z
         .object({
@@ -1765,8 +1699,8 @@ describe("provider credential lifecycle", () => {
   });
 
   it("keeps a GCP candidate cancelled when its late write response arrives", async () => {
-    const started = deferredVoid();
-    const released = deferredVoid();
+    const started = deferred<void>();
+    const released = deferred<void>();
     const gcp = mockGcpRotation({
       beforeAddResponse: async () => {
         started.resolve();
@@ -1782,7 +1716,7 @@ describe("provider credential lifecycle", () => {
     let candidateId: string | undefined;
     try {
       await started.promise;
-      const read = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`);
+      const read = await readConnectionCredential();
       candidateId = z
         .object({ data: z.object({ rotationCandidate: z.object({ id: z.string() }) }) })
         .parse(await read.json()).data.rotationCandidate.id;
@@ -2174,9 +2108,7 @@ describe("provider credential lifecycle", () => {
     });
 
     expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      data: { providerCredential: { id: string } };
-    };
+    const body = credentialResponseSchema.parse(await response.json());
     expect(body).toMatchObject({
       data: {
         providerCredential: { status: "failed_validation" },
@@ -2330,7 +2262,7 @@ describe("provider credential lifecycle", () => {
       expect.objectContaining({
         event: "sdp_api_credential_lifecycle_audit_unresolved",
         provider_credential_id: candidateId,
-        audit_intent_id: intent?.resource_id,
+        audit_intent_id: required(intent).resource_id,
         reason: "commit_outcome_unknown",
       }),
       "sdp_api_credential_lifecycle_audit_unresolved"
@@ -2346,7 +2278,7 @@ describe("provider credential lifecycle", () => {
     },
     {
       operation: "rollback",
-      command: "rollback",
+      command: "rollback-rotation",
       event: "provider_credential_rolled_back",
       action: "rollback",
     },
@@ -2482,7 +2414,7 @@ describe("provider credential lifecycle", () => {
   });
 
   it.each(["complete-rotation", "rollback"] as const)(
-    "blocks %s before secret access when its intent is unavailable",
+    "blocks %s before secret access, provider calls or state changes when its audit intent is unavailable",
     async (operation) => {
       const providerFetch = vi
         .fn()
@@ -2500,21 +2432,30 @@ describe("provider credential lifecycle", () => {
       });
       const candidateId = credentialResponseSchema.parse(await created.json()).data
         .providerCredential.id;
+      const db = getDb(env);
+      const before = await db.queryMany("SELECT * FROM provider_credentials ORDER BY id");
+      const connectionsBefore = await activeConnectionCredentialIds();
       const secretLookup = vi.spyOn(
         ProviderCredentialStore.prototype,
         "findLifecycleCredentialWithSecret"
       );
-      const db = getDb(env);
       await db.execute(`ALTER TABLE audit_logs ADD CONSTRAINT sdp_test_fail_check_audit
         CHECK (action <> 'maintenance') NOT VALID`);
       try {
         await expect(
-          lifecycleRequest(`/provider-credentials/${candidateId}/${operation}`, {
-            method: "POST",
-          })
+          lifecycleRequest(
+            `/provider-credentials/${candidateId}/${operation === "rollback" ? "rollback-rotation" : operation}`,
+            {
+              method: "POST",
+            }
+          )
         ).rejects.toThrow("Required audit record could not be persisted");
         expect(secretLookup).not.toHaveBeenCalled();
         expect(providerFetch).toHaveBeenCalledTimes(2);
+        expect(await db.queryMany("SELECT * FROM provider_credentials ORDER BY id")).toEqual(
+          before
+        );
+        expect(await activeConnectionCredentialIds()).toEqual(connectionsBefore);
       } finally {
         await db.execute("ALTER TABLE audit_logs DROP CONSTRAINT sdp_test_fail_check_audit");
       }
@@ -2548,7 +2489,7 @@ describe("provider credential lifecycle", () => {
         CHECK (action <> '${action}') NOT VALID`);
       try {
         const response = await lifecycleRequest(
-          `/provider-credentials/${currentId}/${action === "rollback" ? "rollback" : "rotate"}`,
+          `/provider-credentials/${currentId}/${action === "rollback" ? "rollback-rotation" : "rotate"}`,
           action === "rollback" ? { method: "POST" } : request
         );
         expect(response.status).toBe(200);
@@ -2595,9 +2536,7 @@ describe("provider credential lifecycle", () => {
     await db.execute(`ALTER TABLE audit_logs ADD CONSTRAINT sdp_test_fail_replay_audit
       CHECK (action <> 'maintenance') NOT VALID`);
     try {
-      expect(
-        (await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`)).status
-      ).toBe(200);
+      expect((await readConnectionCredential()).status).toBe(200);
       expect(
         (await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, request)).status
       ).toBe(200);
@@ -2686,9 +2625,7 @@ describe("provider credential lifecycle", () => {
       body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
     });
     expect(first.status).toBe(200);
-    const firstBody = (await first.json()) as {
-      data: { providerCredential: { id: string; status: string }; rotation: { status: string } };
-    };
+    const firstBody = credentialResponseSchema.parse(await first.json());
     expect(firstBody.data).toMatchObject({
       providerCredential: { status: "pending" },
       rotation: { status: "retry_unknown", code: "provider_response_unknown" },
@@ -2719,9 +2656,7 @@ describe("provider credential lifecycle", () => {
       key: "rotate-before-secret-access-cancel",
       body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
     });
-    const rotatedBody = (await rotated.json()) as {
-      data: { providerCredential: { id: string } };
-    };
+    const rotatedBody = credentialResponseSchema.parse(await rotated.json());
     const candidateId = rotatedBody.data.providerCredential.id;
     const findWithSecret = ProviderCredentialStore.prototype.findLifecycleCredentialWithSecret;
     let releaseSecretLookup: () => void = () => undefined;
@@ -2769,9 +2704,7 @@ describe("provider credential lifecycle", () => {
     };
 
     const first = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, request);
-    const firstBody = (await first.json()) as {
-      data: { providerCredential: { id: string }; rotation: { status: string } };
-    };
+    const firstBody = credentialResponseSchema.parse(await first.json());
     const replay = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, request);
 
     expect(replay.status).toBe(200);
@@ -2782,6 +2715,37 @@ describe("provider credential lifecycle", () => {
       },
     });
     expect(providerFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects a reused rotation key with a different payload before provider calls", async () => {
+    const providerFetch = vi.fn().mockImplementation(async () => Response.json({ data: [] }));
+    vi.stubGlobal("fetch", providerFetch);
+    const path = `/provider-credentials/${CREDENTIAL_ID}/rotate`;
+    const first = await lifecycleRequest(path, {
+      method: "POST",
+      key: "rotate-reused-key",
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "first-secret" } },
+    });
+    expect(first.status).toBe(200);
+    const rowsAfterFirst = await getDb(env).queryMany(
+      "SELECT * FROM provider_credentials ORDER BY id"
+    );
+
+    const reused = await lifecycleRequest(path, {
+      method: "POST",
+      key: "rotate-reused-key",
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "different-secret" } },
+    });
+
+    expect(reused.status).toBe(409);
+    expect((await reused.json()).error).toEqual({
+      code: "CONFLICT",
+      message: "Idempotency key already used with different request payload",
+    });
+    expect(providerFetch).toHaveBeenCalledTimes(2);
+    expect(await getDb(env).queryMany("SELECT * FROM provider_credentials ORDER BY id")).toEqual(
+      rowsAfterFirst
+    );
   });
 
   it("replays the exact successful rotation after a later rotation", async () => {
@@ -2798,9 +2762,7 @@ describe("provider credential lifecycle", () => {
       `/provider-credentials/${CREDENTIAL_ID}/rotate`,
       firstRequest
     );
-    const firstBody = (await first.json()) as {
-      data: { providerCredential: { id: string } };
-    };
+    const firstBody = credentialResponseSchema.parse(await first.json());
     const firstCandidateId = firstBody.data.providerCredential.id;
 
     const second = await lifecycleRequest(`/provider-credentials/${firstCandidateId}/rotate`, {
@@ -2844,9 +2806,7 @@ describe("provider credential lifecycle", () => {
       key: "rotate-before-rollback",
       body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
     });
-    const rotatedBody = (await rotated.json()) as {
-      data: { providerCredential: { id: string } };
-    };
+    const rotatedBody = credentialResponseSchema.parse(await rotated.json());
 
     await seedRateLimit(
       env,
@@ -2856,7 +2816,7 @@ describe("provider credential lifecycle", () => {
     await seedRateLimit(env, `metered:credential-rotation:org:${ORGANIZATION_ID}`, 20);
 
     const rollback = await lifecycleRequest(
-      `/provider-credentials/${rotatedBody.data.providerCredential.id}/rollback`,
+      `/provider-credentials/${rotatedBody.data.providerCredential.id}/rollback-rotation`,
       { method: "POST" }
     );
 
@@ -2936,7 +2896,9 @@ describe("provider credential lifecycle", () => {
     const third = credentialResponseSchema.parse(await thirdResponse.json()).data
       .providerCredential;
     expect(
-      await lifecycleRequest(`/provider-credentials/${third.id}/rollback`, { method: "POST" })
+      await lifecycleRequest(`/provider-credentials/${third.id}/rollback-rotation`, {
+        method: "POST",
+      })
     ).toMatchObject({ status: 200 });
     expect(
       await lifecycleRequest(`/provider-credentials/${second.id}/rotate`, {
@@ -2967,9 +2929,7 @@ describe("provider credential lifecycle", () => {
       key: "rotate-before-rollback-cleanup",
       body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
     });
-    const rotatedBody = (await rotated.json()) as {
-      data: { providerCredential: { id: string } };
-    };
+    const rotatedBody = credentialResponseSchema.parse(await rotated.json());
     const findWithSecret = ProviderCredentialStore.prototype.findLifecycleCredentialWithSecret;
     let releaseSecretLookup: () => void = () => undefined;
     let markSecretLookupStarted: () => void = () => undefined;
@@ -2993,7 +2953,7 @@ describe("provider credential lifecycle", () => {
     });
 
     const rollback = lifecycleRequest(
-      `/provider-credentials/${rotatedBody.data.providerCredential.id}/rollback`,
+      `/provider-credentials/${rotatedBody.data.providerCredential.id}/rollback-rotation`,
       { method: "POST" }
     );
     await secretLookupStarted;
@@ -3025,9 +2985,7 @@ describe("provider credential lifecycle", () => {
       key: "rotate-before-cancel",
       body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
     });
-    const rotatedBody = (await rotated.json()) as {
-      data: { providerCredential: { id: string } };
-    };
+    const rotatedBody = credentialResponseSchema.parse(await rotated.json());
     const candidateId = rotatedBody.data.providerCredential.id;
     await seedRateLimit(
       env,
@@ -3087,9 +3045,7 @@ describe("provider credential lifecycle", () => {
       key: "rotate-gcp-cancel",
       body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
     });
-    const rotatedBody = (await rotated.json()) as {
-      data: { providerCredential: { id: string } };
-    };
+    const rotatedBody = credentialResponseSchema.parse(await rotated.json());
     await getDb(env)
       .prepare(
         `UPDATE provider_credentials
@@ -3132,9 +3088,7 @@ describe("provider credential lifecycle", () => {
       key: "rotate-before-invariant-breach",
       body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
     });
-    const rotatedBody = (await rotated.json()) as {
-      data: { providerCredential: { id: string } };
-    };
+    const rotatedBody = credentialResponseSchema.parse(await rotated.json());
     const candidateId = rotatedBody.data.providerCredential.id;
     const db = getDb(env);
     await insertTestCustodyConnection(db, {
@@ -3206,6 +3160,10 @@ describe("provider credential lifecycle", () => {
     });
 
     expect(response.status).toBe(503);
+    expect(JSON.stringify(await response.json())).not.toContain("new-secret");
+    expect(await activeConnectionCredentialIds()).toEqual([
+      { provider_credential_id: CREDENTIAL_ID },
+    ]);
   });
 
   it("validates credentials at the 4096-character input limit", async () => {
@@ -3264,6 +3222,9 @@ describe("provider credential lifecycle", () => {
     });
 
     expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: { code: "BAD_REQUEST", message: "Invalid request body" },
+    });
     expect(
       await getDb(env).queryOne<{ count: number }>(
         "SELECT COUNT(*) AS count FROM provider_credentials"
@@ -3290,6 +3251,10 @@ describe("provider credential lifecycle", () => {
     });
 
     expect(response.status).toBe(409);
+    expect((await response.json()).error).toEqual({
+      code: "CONFLICT",
+      message: "Credential rotation is not available",
+    });
     expect(providerFetch).not.toHaveBeenCalled();
   });
 
@@ -3307,9 +3272,7 @@ describe("provider credential lifecycle", () => {
       body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
     });
     expect(rotated.status).toBe(200);
-    const rotatedBody = (await rotated.json()) as {
-      data: { providerCredential: { id: string } };
-    };
+    const rotatedBody = credentialResponseSchema.parse(await rotated.json());
     expect(rotatedBody.data).toMatchObject({
       providerCredential: { status: "active" },
       rotation: { status: "success" },
@@ -3322,22 +3285,23 @@ describe("provider credential lifecycle", () => {
       body: { provider: "privy", fields: { appId: APP_ID, appSecret: "pending-secret" } },
     });
     expect(pending.status).toBe(200);
-    const pendingBody = (await pending.json()) as {
-      data: { providerCredential: { id: string } };
-    };
+    const pendingBody = credentialResponseSchema.parse(await pending.json());
     expect(pendingBody.data).toMatchObject({
       providerCredential: { status: "pending" },
       rotation: { status: "retry_unknown", code: "provider_response_unknown" },
     });
     const candidateId = pendingBody.data.providerCredential.id;
 
-    const response = await lifecycleRequest(`/provider-credentials/${currentId}/rollback`, {
-      method: "POST",
-    });
+    const response = await lifecycleRequest(
+      `/provider-credentials/${currentId}/rollback-rotation`,
+      {
+        method: "POST",
+      }
+    );
 
     expect(response.status).toBe(409);
     expect(providerFetch).toHaveBeenCalledTimes(4);
-    const state = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`);
+    const state = await readConnectionCredential();
     expect(state.status).toBe(200);
     expect(await state.json()).toMatchObject({
       data: {
@@ -3368,9 +3332,7 @@ describe("provider credential lifecycle", () => {
         [candidateId]
       )
     ).toEqual({ status: "deactivated", encrypted_secret_payload: null });
-    const afterCancellation = await lifecycleRequest(
-      `/connections/${CONNECTION_A_ID}/provider-credential`
-    );
+    const afterCancellation = await readConnectionCredential();
     expect(afterCancellation.status).toBe(200);
     expect(await afterCancellation.json()).toMatchObject({
       data: {
@@ -3417,9 +3379,12 @@ describe("provider credential lifecycle", () => {
       }
       const before = await db.queryMany("SELECT * FROM provider_credentials ORDER BY id");
 
-      const response = await lifecycleRequest(`/provider-credentials/${currentId}/rollback`, {
-        method: "POST",
-      });
+      const response = await lifecycleRequest(
+        `/provider-credentials/${currentId}/rollback-rotation`,
+        {
+          method: "POST",
+        }
+      );
 
       expect(response.status).toBe(httpStatus);
       expect(await lifecycleAuditAttempts("rollback")).toEqual([

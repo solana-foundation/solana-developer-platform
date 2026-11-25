@@ -8,22 +8,17 @@ import type {
 } from "@sdp/types/earn";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
-import { type DatabaseClient as AppDb, asTransactionalClient } from "@/db/client";
+import type { DatabaseClient as AppDb } from "@/db/client";
 import type {
   DeprecateUnlistedEarnStrategiesInput,
-  EarnProviderWalletRow,
   EarnRepository,
   EarnStrategyRow,
-  InsertEarnProviderWalletInput,
-  ListEarnProviderWalletsInput,
-  ListEarnProviderWalletsResult,
   ListEarnStrategiesInput,
   ListEarnStrategiesResult,
   UpdateEarnStrategyMetricsInput,
   UpsertEarnStrategyInput,
 } from "./earn.repository";
-import { generateEarnProviderWalletId, generateEarnStrategyId } from "./earn.repository";
-import { mintEarnPositionForProviderWallet } from "./earn-movements.repository";
+import { generateEarnStrategyId } from "./earn.repository";
 
 /**
  * `host_cluster` is NULLABLE in the schema on purpose (migration 0057 is the
@@ -51,6 +46,7 @@ function mapStrategyRow(row: Record<string, unknown>): EarnStrategyRow {
     share_mint: row.share_mint as string | null,
     apy_type: row.apy_type as EarnApyType,
     current_apy: row.current_apy as string | null,
+    rate_observed_at: (row.rate_observed_at as string | null | undefined) ?? null,
     liquidity_term: row.liquidity_term as EarnLiquidityTerm,
     redemption_delay_days: row.redemption_delay_days as number | null,
     risk_metadata: row.risk_metadata as EarnStrategyRiskMetadata,
@@ -64,55 +60,22 @@ function mapStrategyRow(row: Record<string, unknown>): EarnStrategyRow {
   };
 }
 
-function mapProviderWalletRow(row: Record<string, unknown>): EarnProviderWalletRow {
-  return {
-    id: row.id as string,
-    organization_id: row.organization_id as string,
-    project_id: row.project_id as string | null,
-    environment: row.environment as SdpEnvironment,
-    provider: row.provider as string,
-    provider_wallet_ref: row.provider_wallet_ref as string,
-    label: row.label as string | null,
-    created_by: row.created_by as string,
-    created_at: row.created_at as string,
-    updated_at: row.updated_at as string,
-  };
-}
-
-/**
- * Shared count+page read for the earn list methods (same shape as the
- * payments-family where-builder idiom).
- *
- * `ordering` is a literal ORDER BY body (never caller input) and every value
- * passed must be TOTAL: end it with an `id` tiebreaker, because bulk catalogue
- * syncs write many rows in the same sdp_iso_now() instant and any prefix of the
- * sort can tie — a non-total order makes OFFSET pages repeat and skip rows.
- *
- * REQUIRED rather than defaulted, so a new list states its own order instead of
- * inheriting one silently: the two existing callers want genuinely different
- * orders (strategies rank by TVL, programs oldest-first so the head of that
- * list cannot move when a program is created — migration 0056's header explains
- * what breaks if it does), which is exactly the situation where an invisible
- * default is the wrong answer. `NEWEST_FIRST` stays as the shared tail every
- * total ordering can end with.
- */
 const NEWEST_FIRST = "created_at DESC, id DESC";
 
-async function selectPage<Row>(
+/** Count and page strategies using an internal order with an id tiebreaker. */
+async function selectStrategyPage(
   db: AppDb,
-  table: "earn_strategies" | "earn_provider_wallets",
   conditions: string[],
   bindings: unknown[],
   window: { limit: number; offset: number },
-  mapRow: (row: Record<string, unknown>) => Row,
   ordering: string
-): Promise<{ rows: Row[]; total: number }> {
+): Promise<{ rows: EarnStrategyRow[]; total: number }> {
   const where = conditions.join(" AND ");
 
   const [page, countRow] = await Promise.all([
     db
       .prepare(
-        `SELECT * FROM ${table}
+        `SELECT * FROM earn_strategies
            WHERE ${where}
            ORDER BY ${ordering}
            LIMIT ? OFFSET ?`
@@ -120,13 +83,13 @@ async function selectPage<Row>(
       .bind(...bindings, window.limit, window.offset)
       .all<Record<string, unknown>>(),
     db
-      .prepare(`SELECT COUNT(*)::int AS total FROM ${table} WHERE ${where}`)
+      .prepare(`SELECT COUNT(*)::int AS total FROM earn_strategies WHERE ${where}`)
       .bind(...bindings)
       .first<{ total: number }>(),
   ]);
 
   return {
-    rows: (page.results ?? []).map(mapRow),
+    rows: (page.results ?? []).map(mapStrategyRow),
     total: countRow?.total ?? 0,
   };
 }
@@ -140,6 +103,12 @@ const STRATEGY_UPSERT_CONFLICT_SQL = `ON CONFLICT (provider, provider_reference,
     share_mint = EXCLUDED.share_mint,
     apy_type = EXCLUDED.apy_type,
     current_apy = EXCLUDED.current_apy,
+    rate_observed_at = CASE
+      WHEN EXCLUDED.current_apy IS NULL THEN NULL
+      WHEN EXCLUDED.rate_observed_at IS NOT NULL THEN EXCLUDED.rate_observed_at
+      WHEN EXCLUDED.current_apy IS DISTINCT FROM earn_strategies.current_apy THEN NULL
+      ELSE earn_strategies.rate_observed_at
+    END,
     liquidity_term = EXCLUDED.liquidity_term,
     redemption_delay_days = EXCLUDED.redemption_delay_days,
     risk_metadata = EXCLUDED.risk_metadata,
@@ -171,6 +140,7 @@ function strategyBatchRecord(input: UpsertEarnStrategyInput) {
     share_mint: input.shareMint,
     apy_type: input.apyType,
     current_apy: input.currentApy,
+    rate_observed_at: input.currentApy === null ? null : (input.rateObservedAt ?? null),
     liquidity_term: input.liquidityTerm,
     redemption_delay_days: input.redemptionDelayDays,
     risk_metadata: input.riskMetadata ?? {},
@@ -186,8 +156,39 @@ function metricsBatchRecord(input: UpdateEarnStrategyMetricsInput) {
     provider_reference: input.providerReference,
     environment: input.environment,
     current_apy: input.currentApy,
+    rate_observed_at: input.currentApy === null ? null : (input.rateObservedAt ?? null),
     risk_metadata: input.riskMetadata ?? {},
   };
+}
+
+function discoveryFilters(input: ListEarnStrategiesInput) {
+  const conditions: string[] = [];
+  const bindings: unknown[] = [];
+  if (input.id !== undefined) {
+    conditions.push("id = ?");
+    bindings.push(input.id);
+  }
+  if (input.provider !== undefined) {
+    conditions.push("provider = ?");
+    bindings.push(input.provider);
+  }
+  if (input.depositMint !== undefined) {
+    conditions.push("deposit_mints @> ?::jsonb");
+    bindings.push(JSON.stringify([input.depositMint]));
+  }
+  for (const [bound, comparison] of [
+    [input.minApy, ">="],
+    [input.maxApy, "<="],
+  ] as const) {
+    if (bound === undefined) continue;
+    // CASE guards the cast even when the planner reorders predicates.
+    conditions.push(
+      `CASE WHEN current_apy ~ '^[0-9]+([.][0-9]+)?$' THEN current_apy::numeric END ${comparison} ?::numeric`
+    );
+    bindings.push(bound);
+  }
+
+  return { conditions, bindings };
 }
 
 export function createPostgresEarnRepository(db: AppDb): EarnRepository {
@@ -200,9 +201,9 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
           `INSERT INTO earn_strategies (
              id, provider, provider_reference, name,
              source_kind, underlying_source, deposit_mints, share_mint,
-             apy_type, current_apy, liquidity_term, redemption_delay_days,
+             apy_type, current_apy, rate_observed_at, liquidity_term, redemption_delay_days,
              risk_metadata, status, host_cluster, environment
-           ) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
+           ) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
            ${STRATEGY_UPSERT_CONFLICT_SQL}
            RETURNING *`
         )
@@ -217,6 +218,7 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
           input.shareMint,
           input.apyType,
           input.currentApy,
+          input.currentApy === null ? null : (input.rateObservedAt ?? null),
           input.liquidityTerm,
           input.redemptionDelayDays,
           JSON.stringify(input.riskMetadata ?? {}),
@@ -246,6 +248,7 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
                  share_mint TEXT,
                  apy_type TEXT,
                  current_apy TEXT,
+                 rate_observed_at TEXT,
                  liquidity_term TEXT,
                  redemption_delay_days INTEGER,
                  risk_metadata JSONB,
@@ -257,13 +260,13 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
              INSERT INTO earn_strategies (
                id, provider, provider_reference, name,
                source_kind, underlying_source, deposit_mints, share_mint,
-               apy_type, current_apy, liquidity_term, redemption_delay_days,
+               apy_type, current_apy, rate_observed_at, liquidity_term, redemption_delay_days,
                risk_metadata, status, host_cluster, environment
              )
              SELECT
                id, provider, provider_reference, name,
                source_kind, underlying_source, deposit_mints, share_mint,
-               apy_type, current_apy, liquidity_term, redemption_delay_days,
+               apy_type, current_apy, rate_observed_at, liquidity_term, redemption_delay_days,
                risk_metadata, status, host_cluster, environment
              FROM incoming
              ${STRATEGY_UPSERT_CONFLICT_SQL}
@@ -289,13 +292,23 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
       const row = await db
         .prepare(
           `UPDATE earn_strategies
-              SET current_apy = ?,
+              SET rate_observed_at = CASE
+                    WHEN ?::text IS NULL THEN NULL
+                    WHEN ?::text IS NOT NULL THEN ?::text
+                    WHEN current_apy IS DISTINCT FROM ?::text THEN NULL
+                    ELSE rate_observed_at
+                  END,
+                  current_apy = ?,
                   risk_metadata = risk_metadata || ?::jsonb,
                   updated_at = sdp_iso_now()
             WHERE provider = ? AND provider_reference = ? AND environment = ?
             RETURNING id`
         )
         .bind(
+          input.currentApy,
+          input.rateObservedAt ?? null,
+          input.rateObservedAt ?? null,
+          input.currentApy,
           input.currentApy,
           JSON.stringify(input.riskMetadata ?? {}),
           input.provider,
@@ -317,11 +330,18 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
                  provider_reference TEXT,
                  environment TEXT,
                  current_apy TEXT,
+                 rate_observed_at TEXT,
                  risk_metadata JSONB
                )
            ), updated AS (
              UPDATE earn_strategies strategy
-                SET current_apy = incoming.current_apy,
+                SET rate_observed_at = CASE
+                      WHEN incoming.current_apy IS NULL THEN NULL
+                      WHEN incoming.rate_observed_at IS NOT NULL THEN incoming.rate_observed_at
+                      WHEN incoming.current_apy IS DISTINCT FROM strategy.current_apy THEN NULL
+                      ELSE strategy.rate_observed_at
+                    END,
+                    current_apy = incoming.current_apy,
                     risk_metadata = strategy.risk_metadata || incoming.risk_metadata,
                     updated_at = sdp_iso_now()
                FROM incoming
@@ -427,6 +447,10 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
       const conditions = ["environment = ?"];
       const bindings: unknown[] = [input.environment];
 
+      const filters = discoveryFilters(input);
+      conditions.push(...filters.conditions);
+      bindings.push(...filters.bindings);
+
       if (!input.includeInactive) {
         conditions.push("status = 'active'");
       }
@@ -509,13 +533,11 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
       // malformed row — a string `"12M"`, a bool — into a 500 on EVERY
       // `GET /strategies` for that environment, an outage far from the write
       // that caused it. Guarded, such a row reads as unsized and sorts last.
-      return selectPage(
+      return selectStrategyPage(
         db,
-        "earn_strategies",
         conditions,
         bindings,
         input,
-        mapStrategyRow,
         `CASE WHEN jsonb_typeof(risk_metadata->'tvlUsd') = 'number'
               THEN (risk_metadata->>'tvlUsd')::numeric END DESC NULLS LAST, ${NEWEST_FIRST}`
       );
@@ -548,87 +570,6 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
           current_apy: row.current_apy as string | null,
           tvl_usd: tvl !== null && Number.isFinite(tvl) ? tvl : null,
         };
-      });
-    },
-
-    async getProviderWalletById(params) {
-      const row = await db
-        .prepare(
-          `SELECT * FROM earn_provider_wallets
-             WHERE organization_id = ? AND environment = ? AND id = ?`
-        )
-        .bind(params.organizationId, params.environment, params.walletId)
-        .first<Record<string, unknown>>();
-      return row ? mapProviderWalletRow(row) : null;
-    },
-
-    async listProviderWallets(
-      input: ListEarnProviderWalletsInput
-    ): Promise<ListEarnProviderWalletsResult> {
-      const conditions = ["organization_id = ?", "project_id = ?", "environment = ?"];
-      const bindings: unknown[] = [input.organizationId, input.projectId, input.environment];
-
-      if (input.provider) {
-        conditions.push("provider = ?");
-        bindings.push(input.provider);
-      }
-
-      // Oldest first, so the head of the list is stable for a program's
-      // whole life (migration 0056).
-      return selectPage(
-        db,
-        "earn_provider_wallets",
-        conditions,
-        bindings,
-        input,
-        mapProviderWalletRow,
-        "created_at ASC, id ASC"
-      );
-    },
-
-    async getProviderWalletByRef(params) {
-      const row = await db
-        .prepare(
-          `SELECT * FROM earn_provider_wallets
-             WHERE provider = ? AND provider_wallet_ref = ?`
-        )
-        .bind(params.provider, params.providerWalletRef)
-        .first<Record<string, unknown>>();
-      return row ? mapProviderWalletRow(row) : null;
-    },
-
-    async insertProviderWallet(input: InsertEarnProviderWalletInput) {
-      const id = generateEarnProviderWalletId();
-
-      // Linking a program also opens its custodial HOLDING in the unified
-      // ledger, atomically. Without it the program's first withdrawal would have
-      // no position to belong to, and the ledger requires every movement to have
-      // one (PRO-1705). 0064 does the same for programs that already exist.
-      return db.transaction(async (executor) => {
-        const transaction = asTransactionalClient(executor);
-        const row = await transaction
-          .prepare(
-            `INSERT INTO earn_provider_wallets (
-             id, organization_id, project_id, environment,
-             provider, provider_wallet_ref, label, created_by
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-           RETURNING *`
-          )
-          .bind(
-            id,
-            input.organizationId,
-            input.projectId,
-            input.environment,
-            input.provider,
-            input.providerWalletRef,
-            input.label,
-            input.createdBy
-          )
-          .first<Record<string, unknown>>();
-        if (!row) return null;
-
-        await mintEarnPositionForProviderWallet(transaction, id);
-        return mapProviderWalletRow(row);
       });
     },
   };

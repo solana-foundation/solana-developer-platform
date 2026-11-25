@@ -62,27 +62,6 @@ export const plumeRedeemStatusSchema = z
     destinationSignature: v.steps.solanaClaim?.signature ?? null,
     recoveryRequired: !!v.error?.code,
   }));
-export const plumeCancellationStatusSchema = z
-  .object({
-    solanaBurnSignature: z.string(),
-    solanaWallet: z.string(),
-    eventType: z.literal("UpdateRedeemRequest"),
-    redeemType: z.literal("async"),
-    steps: z.object({
-      plumeProcessing: z.object({
-        sharesUpdatedTotal: z.string(),
-        vaultComposerAddress: z.string(),
-      }),
-      solanaReturnShares: delivery,
-    }),
-  })
-  .transform((v) => ({
-    sourceSignature: v.solanaBurnSignature,
-    owner: v.solanaWallet,
-    destinationSignature: v.steps.solanaReturnShares?.signature ?? null,
-    remainingShares: v.steps.plumeProcessing.sharesUpdatedTotal,
-    composer: v.steps.plumeProcessing.vaultComposerAddress,
-  }));
 
 /** Every upstream body is parsed here. A malformed 200 must never shrink the shelf. */
 export async function plumeRequest<T>(

@@ -205,7 +205,7 @@ export async function findTransferBatchRecordReplay(
 }
 
 /**
- * POST /transfer-batches — creates the batch aggregate with its recipients,
+ * POST /transfer-batches/execute — creates the batch aggregate with its recipients,
  * then submits its chunks (runBatchChunks) without waiting for on-chain
  * confirmation.
  * Replays idempotently by Idempotency-Key + payload fingerprint. Every batch

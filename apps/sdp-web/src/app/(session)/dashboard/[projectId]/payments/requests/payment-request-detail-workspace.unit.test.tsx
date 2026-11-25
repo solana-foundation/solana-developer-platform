@@ -2,7 +2,6 @@
 
 import type { PaymentRequest } from "@sdp/types/payments";
 import type { OrganizationRole } from "@sdp/types/roles";
-import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
@@ -15,6 +14,7 @@ import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { stubMatchMedia } from "@/test/media-queries";
+import { testPaymentRequest } from "@/test/payment-requests";
 import { forgetCreatedRequestLink, noteCreatedRequestLink } from "./created-request-link";
 import { PaymentRequestDetailWorkspace } from "./payment-request-detail-workspace";
 import * as requestsData from "./payment-requests-page.data";
@@ -31,27 +31,7 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
   }),
 }));
 
-const paymentRequest: PaymentRequest = {
-  id: "preq_1",
-  organizationId: "org_1",
-  projectId: "prj_1",
-  walletId: "wallet_1",
-  destinationAddress: "11111111111111111111111111111111",
-  token: SOL_MINT,
-  amount: "5",
-  reference: "ref_1",
-  status: "awaiting_payment",
-  expiresAt: null,
-  fulfilledByTransferId: null,
-  paidLate: false,
-  canceledByApiKeyId: null,
-  canceledByUserId: null,
-  canceledAt: null,
-  lifecycle: [{ status: "awaiting_payment", at: "2026-09-14T00:00:00.000Z" }],
-  createdBy: null,
-  createdAt: "2026-09-14T00:00:00.000Z",
-  updatedAt: "2026-09-14T00:00:00.000Z",
-};
+const paymentRequest = testPaymentRequest({});
 
 function renderDetail(
   publicToken: string | null,

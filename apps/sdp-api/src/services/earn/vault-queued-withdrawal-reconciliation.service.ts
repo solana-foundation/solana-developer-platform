@@ -9,15 +9,16 @@ import type {
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import {
+  type ChainHeight,
   getChainHeight,
   getSignatureStatuses,
-  reReadExpiredStatuses,
+  proveExpiredAbsence,
   type SignatureStatusInfo,
   type SolanaRpc,
 } from "@sdp/rpc/solana";
 import { MAX_SUPPORTED_TRANSACTION_VERSION } from "@sdp/rpc/transaction-version";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
-import { address, type Signature, type Slot } from "@solana/kit";
+import { address, type Signature } from "@solana/kit";
 import { getDb } from "@/db/client";
 import {
   createPostgresEarnVaultWithdrawalRequestsRepository,
@@ -139,11 +140,6 @@ function emptyStats(actions: number, requests: number): QueueReconciliationStats
   };
 }
 
-interface ChainHeight {
-  blockHeight: bigint;
-  absoluteSlot: Slot;
-}
-
 /** Whether an action still waits on the chain: its batch status is null and it is not confirmed. */
 function awaitsChain(
   row: EarnVaultWithdrawalRequestActionRow,
@@ -165,32 +161,34 @@ function awaitsChain(
  * @returns The statuses with every expired action's re-read applied, and the indexes of expired
  * actions whose re-read failed, which stay unjudged this tick.
  */
-async function proveExpiredActions(
+function proveExpiredActions(
   rpc: SolanaRpc,
   environment: SdpEnvironment,
   rows: readonly EarnVaultWithdrawalRequestActionRow[],
   statuses: ReadonlyArray<SignatureStatusInfo | null>,
   height: ChainHeight
 ): Promise<{ statuses: Array<SignatureStatusInfo | null>; unproven: Set<number> }> {
-  const expired = rows.flatMap((row, index) =>
-    awaitsChain(row, statuses[index]) && height.blockHeight > BigInt(row.last_valid_block_height)
-      ? // SAFETY: an action row stores the base58 signature of the owner-signed transaction SDP
-        // verified at submit, the same value the batch status read sent.
-        [{ index, signature: row.signature as Signature }]
-      : []
+  return proveExpiredAbsence(
+    rpc,
+    rows,
+    statuses,
+    height,
+    (row, index) =>
+      awaitsChain(row, statuses[index])
+        ? {
+            // SAFETY: an action row stores the base58 signature of the owner-signed transaction
+            // SDP verified at submit, the same value the batch status read sent.
+            signature: row.signature as Signature,
+            lastValidBlockHeight: BigInt(row.last_valid_block_height),
+          }
+        : null,
+    (error, expired) => {
+      getLogger().error(
+        { environment, actions: expired, error },
+        "earn queued withdrawal reconciliation: expired signatures unreadable at the height's slot"
+      );
+    }
   );
-  try {
-    return {
-      statuses: await reReadExpiredStatuses(rpc, statuses, expired, height.absoluteSlot),
-      unproven: new Set(),
-    };
-  } catch (error) {
-    getLogger().error(
-      { environment, actions: expired.length, error },
-      "earn queued withdrawal reconciliation: expired signatures unreadable at the height's slot"
-    );
-    return { statuses: [...statuses], unproven: new Set(expired.map(({ index }) => index)) };
-  }
 }
 
 /**
@@ -244,14 +242,14 @@ async function readActionExpiry(
  *
  * @param ledger - The two queue repository reads and writes the cleanup uses.
  */
-export async function cleanupAbandonedExternalBuilds(
-  ledger: Pick<QueueLedger, "hasUnconsumedExternalBuilds" | "cleanupExpiredExternalBuilds">
+export async function cleanupAbandonedWalletBuilds(
+  ledger: Pick<QueueLedger, "hasUnconsumedWalletBuilds" | "cleanupExpiredWalletBuilds">
 ): Promise<void> {
   const { environment } = currentClusterScope();
   try {
-    if (!(await ledger.hasUnconsumedExternalBuilds({ environment }))) return;
+    if (!(await ledger.hasUnconsumedWalletBuilds({ environment }))) return;
     const height = await createClusterRpc().getBlockHeight({ commitment: "finalized" }).send();
-    await ledger.cleanupExpiredExternalBuilds({
+    await ledger.cleanupExpiredWalletBuilds({
       environment,
       currentBlockHeight: height.toString(),
     });
@@ -282,7 +280,7 @@ export async function reconcileEarnVaultQueuedWithdrawals(env: Env): Promise<voi
   const ledger = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
   const { environment } = currentClusterScope();
   await ledger.cleanupExpiredReservations({ environment });
-  await cleanupAbandonedExternalBuilds(ledger);
+  await cleanupAbandonedWalletBuilds(ledger);
   const actions = await ledger.claimUnsettledActions({ environment, limit: ACTION_BATCH_SIZE });
   const stats = emptyStats(actions.length, 0);
   await reconcileActions(env, ledger, actions, stats);
@@ -419,6 +417,16 @@ export async function reconcileAction(
   status: SignatureStatusInfo | null,
   chain: { rpc: RawHistoryRpc; currentHeight: bigint | null }
 ): Promise<"advanced" | "failed" | "rebroadcast" | "unchanged"> {
+  // A current release may affect a replacement at the same owner PDA. Keep
+  // older financial history isolated while that accepted action can execute.
+  if (
+    await ledger.isRequestFencedByCurrentRedemptionRelease({
+      organizationId: actionRow.organization_id,
+      environment: actionRow.environment,
+      withdrawalRequestId: actionRow.withdrawal_request_id,
+    })
+  )
+    return "unchanged";
   if (status?.err) {
     // A rejection on an unrooted fork cannot release the durable PDA claim.
     if (status.confirmationStatus !== "finalized") return "unchanged";
@@ -1172,6 +1180,14 @@ export async function reconcileParRequest(
   ledger: QueueLedger,
   request: EarnVaultWithdrawalRequestRow
 ): Promise<"advanced" | "closedUnknown" | "unchanged"> {
+  if (
+    await ledger.isRequestFencedByCurrentRedemptionRelease({
+      organizationId: request.organization_id,
+      environment: request.environment,
+      withdrawalRequestId: request.id,
+    })
+  )
+    return "unchanged";
   const client = resolveVaultParRedemptionClient(env, request.provider, createVaultDeadline());
   if (!client) throw new Error(`Par-redemption provider ${request.provider} is unavailable`);
   const lookup = await client.readParRedemptionRequest(

@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { generateKeyPairSigner } from "@solana/kit";
+import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import { KeychainParaAdapter } from "./keychain-para.adapter";
 
-const WALLET_ADDRESS = "11111111111111111111111111111111";
+const { address: WALLET_ADDRESS } = await generateKeyPairSigner();
 const WALLET_ID = "0b6f4a8e-2c1d-4e5f-9a7b-3c8d2e1f4a6b";
 
 describe("para adapter", () => {
@@ -24,7 +25,9 @@ describe("para adapter", () => {
     await expect(adapter.getPublicKey(`para_${WALLET_ID}`)).resolves.toBe(WALLET_ADDRESS);
 
     expect(fetchSpy).toHaveBeenCalledTimes(2);
-    expect(String(fetchSpy.mock.calls[1]?.[0])).toContain(`/v1/wallets/${WALLET_ID}`);
+    const retry = fetchSpy.mock.calls[1];
+    assert.isDefined(retry);
+    expect(String(retry[0])).toContain(`/v1/wallets/${WALLET_ID}`);
   });
 
   it("reuses one signer construction across successful calls", async () => {

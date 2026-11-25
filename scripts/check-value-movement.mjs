@@ -80,6 +80,18 @@ const KEYCHAIN_SDKS = [
 /** @type {Capability[]} */
 export const CAPABILITIES = [
   {
+    id: "earn-transaction-proposal",
+    why: "Creates one sign-only Earn transaction proposal; the implemented admission waist owns account and authority checks.",
+    symbols: [
+      {
+        file: "packages/sdp-custody/src/provisioning/fireblocks-transfers.ts",
+        name: "createFireblocksProgramCall",
+      },
+    ],
+    owners: [CUSTODY_PACKAGE],
+    allow: [`${API}/services/domain/signing/admitted-transaction-proposer.ts`],
+  },
+  {
     id: "fireblocks-native-transfer",
     why: "Creates a provider-signed payment; only the custody waist's proposer may (PRO-2435 D2).",
     symbols: [
@@ -105,7 +117,10 @@ export const CAPABILITIES = [
       },
     ],
     owners: [CUSTODY_PACKAGE],
-    allow: [`${API}/services/domain/signing/admitted-proposer.ts`],
+    allow: [
+      `${API}/services/domain/signing/admitted-proposer.ts`,
+      `${API}/services/domain/signing/admitted-transaction-proposer.ts`,
+    ],
   },
   {
     id: "custody-proposal-recovery",
@@ -217,6 +232,8 @@ export const CAPABILITIES = [
       `${API}/services/jobs/collect-recurring-payments.ts`,
       // A `/pay` link, as the payment request its token names.
       `${API}/routes/pay/context.ts`,
+      // Exact leased operation action, restored only by its guarded recovery worker.
+      `${API}/services/operations-principal.ts`,
     ],
   },
   {
@@ -238,6 +255,15 @@ export const CAPABILITIES = [
     symbols: [{ file: `${API}/lib/money-principal.ts`, name: "runAsRecordedMoneyPrincipal" }],
     owners: [`${API}/lib/money-principal.ts`],
     allow: [`${API}/services/jobs/reconcile-pending-proposals.ts`],
+  },
+  {
+    id: "recorded-operation-principal",
+    why: "Restores one persisted action identity after checking the recovery worker and its exact live lease.",
+    symbols: [
+      { file: `${API}/services/operations-principal.ts`, name: "runAsRecordedOperationPrincipal" },
+    ],
+    owners: [`${API}/services/operations-principal.ts`],
+    allow: [`${API}/services/jobs/reconcile-operations.ts`],
   },
   {
     id: "keypair-signer",

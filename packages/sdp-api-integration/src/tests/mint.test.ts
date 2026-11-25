@@ -53,7 +53,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mint Operations",
     const created = (await createRes.json()) as TokenApiResponse;
     deployedTokenId = created.data.token.id;
 
-    await request(`/v1/issuance/tokens/${deployedTokenId}/deploy`, {
+    await request(`/v1/issuance/tokens/${deployedTokenId}/deploy/execute`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),
@@ -61,7 +61,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mint Operations",
   }, 60000);
 
   it("mints tokens to destination (execute mode)", { timeout: 60000 }, async () => {
-    const mintRes = await request(`/v1/issuance/tokens/${deployedTokenId}/mint`, {
+    const mintRes = await request(`/v1/issuance/tokens/${deployedTokenId}/mint/execute`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -91,20 +91,23 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mint Operations",
   });
 
   it("prepares mint transaction (prepare mode)", { timeout: 30000 }, async () => {
-    const prepareRes = await request(`/v1/issuance/tokens/${deployedTokenId}/mint/prepare`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        signingCustodyWalletId: custodyWalletId,
-        mint: {
-          destination: custodyAddress,
-          amount: "1",
+    const prepareRes = await request(
+      `/v1/issuance/tokens/${deployedTokenId}/mint/build-unsigned-transaction`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
-        options: { simulate: true },
-      }),
-    });
+        body: JSON.stringify({
+          signingCustodyWalletId: custodyWalletId,
+          mint: {
+            destination: custodyAddress,
+            amount: "1",
+          },
+          options: { simulate: true },
+        }),
+      }
+    );
 
     expect(prepareRes.status).toBe(200);
     const prepared = (await prepareRes.json()) as MintPrepareApiResponse;

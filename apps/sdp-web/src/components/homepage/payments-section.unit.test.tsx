@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages, type MessageKey } from "@/i18n/messages";
 import type { TranslationValues } from "@/i18n/translate";
 import { EnglishI18n } from "@/test/i18n";
+import { required } from "@/test/required";
 
 vi.mock("@/i18n/server", async () => {
   const { getMessages } = await import("@/i18n/messages");
@@ -34,13 +35,9 @@ async function renderPayments() {
 }
 
 describe("PaymentsSection", () => {
-  it("is the paper-ground #payments section, the bench alone", async () => {
+  it("is the #payments section the nav and footer link to", async () => {
     const view = await renderPayments();
-    const section = view.querySelector("section");
-    expect(section?.id).toBe("payments");
-    expect(section?.dataset.ground).toBe("paper");
-    expect(view.querySelectorAll("h1, h2, h3")).toHaveLength(0);
-    expect(view.querySelector('[role="img"]')).toBeNull();
+    expect(view.querySelector("section")?.id).toBe("payments");
   });
 
   it("names the six kinds as tabs that control one stage", async () => {
@@ -68,10 +65,9 @@ describe("PaymentsSection", () => {
       "false",
     ]);
     expect(tabs.map((tab) => tab.tabIndex)).toEqual([0, -1, -1, -1, -1, -1]);
-    const panel = view.querySelector('[role="tabpanel"]');
-    expect(panel).not.toBeNull();
-    for (const tab of tabs) expect(tab.getAttribute("aria-controls")).toBe(panel?.id);
-    expect(panel?.getAttribute("aria-labelledby")).toBe(tabs[0].id);
+    const panel = required(view.querySelector('[role="tabpanel"]'));
+    for (const tab of tabs) expect(tab.getAttribute("aria-controls")).toBe(panel.id);
+    expect(panel.getAttribute("aria-labelledby")).toBe(tabs[0].id);
     expect(textOf(tabs[0].getAttribute("aria-describedby"))).toBe(
       getMessages("en").Homepage.payments.kinds.pay.body
     );

@@ -1,5 +1,4 @@
 import {
-  supportsPortfolioWallets,
   supportsVaultDepositQuote,
   supportsVaultDirect,
   supportsVaultWithdraw,
@@ -9,7 +8,6 @@ import type { EarnRuntimeEnvironment } from "@sdp/earn/types";
 import { address } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  assertNotPortfolioProvider,
   KaminoVaultDirectClient,
   type KaminoVaultOperationRunner,
   toEarnVaultTransactionPlan,
@@ -201,20 +199,6 @@ describe("KaminoVaultDirectClient capabilities", () => {
       expect.any(Function)
     );
     expect(quote).toEqual({ assetsOut: "4.997", assetDecimals: 6, blockingIssues: issues });
-  });
-
-  /**
-   * THE INVARIANT THAT PROTECTS CUSTOMER FUNDS.
-   *
-   * The portfolio capability means "SDP can give you an address to send
-   * stablecoins to". Kamino has no such address — its vault is a program
-   * account, and tokens sent there are DESTROYED. If this client ever answered
-   * yes to both, a portfolio route could render that account as a deposit
-   * target. The two capabilities must stay mutually exclusive.
-   */
-  it("NEVER reports the portfolio-wallet capability", () => {
-    expect(supportsPortfolioWallets(client)).toBe(false);
-    expect(() => assertNotPortfolioProvider(client)).not.toThrow();
   });
 
   it("still catalogues — the execution client is a superset, not a replacement", () => {

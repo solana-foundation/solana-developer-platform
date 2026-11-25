@@ -299,14 +299,10 @@ function WalletRow({
 function AccessStep({
   draft,
   wallets,
-  walletSelectionTouched,
-  onWalletSelectionTouched,
   update,
 }: {
   draft: ApiKeyAuthoringDraft;
   wallets: PaymentsDashboardWallet[];
-  walletSelectionTouched: boolean;
-  onWalletSelectionTouched: () => void;
   update: (patch: Partial<ApiKeyAuthoringDraft>) => void;
 }) {
   const t = useTranslations();
@@ -320,7 +316,6 @@ function AccessStep({
       .includes(query);
   });
   const toggleWallet = (walletId: string) => {
-    onWalletSelectionTouched();
     const selectedWalletIds = draft.selectedWalletIds.includes(walletId)
       ? draft.selectedWalletIds.filter((item) => item !== walletId)
       : [...draft.selectedWalletIds, walletId];
@@ -361,7 +356,6 @@ function AccessStep({
                 name="wallet-scope"
                 checked={draft.walletScope === "selected"}
                 onChange={() => {
-                  onWalletSelectionTouched();
                   update({ walletScope: "selected" });
                 }}
                 className="mt-1"
@@ -411,11 +405,6 @@ function AccessStep({
                   </p>
                 )}
               </div>
-              {walletSelectionTouched && selectedWallets.length === 0 ? (
-                <p className="mt-2 text-xs text-destructive">
-                  {t("DashboardCustody.apiKeyWalletRequired")}
-                </p>
-              ) : null}
             </div>
           ) : null}
         </WorkSection>
@@ -478,7 +467,7 @@ function ReviewStep({
           {draft.walletScope === "selected" ? (
             <ReviewLine
               label={t("DashboardCustody.selectedWallets")}
-              value={selectedWallets.map(walletLabel).join(", ")}
+              value={selectedWallets.map(walletLabel).join(", ") || t("DashboardCustody.none")}
             />
           ) : null}
         </WorkSection>
@@ -586,7 +575,6 @@ export function ApiKeyAuthoringWorkspace({
   const { sdpEnvironment, selectedProjectId } = useDashboardWorkspace();
   const [currentStep, setCurrentStep] = useState<ApiKeyAuthoringStep>("details");
   const [draft, setDraft] = useState(() => draftFromInitialKey(initialKey));
-  const [walletSelectionTouched, setWalletSelectionTouched] = useState(false);
   // A new key's wallet scope follows its grants until the person picks one:
   // an execute grant starts it on Selected wallets (HOO-2099).
   const [walletScopeChosen, setWalletScopeChosen] = useState(mode === "edit");
@@ -675,13 +663,7 @@ export function ApiKeyAuthoringWorkspace({
               />
             ) : null}
             {currentStep === "wallets" ? (
-              <AccessStep
-                draft={draft}
-                wallets={wallets}
-                walletSelectionTouched={walletSelectionTouched}
-                onWalletSelectionTouched={() => setWalletSelectionTouched(true)}
-                update={update}
-              />
+              <AccessStep draft={draft} wallets={wallets} update={update} />
             ) : null}
             {currentStep === "review" ? <ReviewStep draft={draft} wallets={wallets} /> : null}
           </div>

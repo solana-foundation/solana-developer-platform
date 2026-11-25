@@ -1,5 +1,6 @@
 /** Environment variables consumed by the Node API runtime. */
 
+import type { OperationRecord } from "@/db/repositories/operations.repository";
 import type { WalletAccess } from "@/lib/auth";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import type { GatewayIdentity } from "@/lib/gateway-identity";
@@ -332,10 +333,12 @@ declare module "hono" {
     requestGate?: RequestGateContext;
     // Set by authorize(): what the route's access check loaded (middleware/authorize.ts)
     authorized?: { loaded: unknown };
+    // Exact operation already checked for this request's project and wallet access.
+    operationRecord?: OperationRecord;
     // Set by idempotent() when this request holds its key: the request's fingerprint
     idempotencyFingerprint?: string;
-    // Set by idempotent(): the fingerprint under the route's previous canonical form
-    idempotencyPreviousFingerprint?: string;
+    // Set by idempotent(): the fingerprints under the route's previous forms
+    idempotencyPreviousFingerprints?: string[];
     // Set by idempotent() with the fingerprint: the key this request claimed
     idempotencyClaimedKey?: string;
     // Set by markIdempotencyCommitted() once the handler wrote its domain row

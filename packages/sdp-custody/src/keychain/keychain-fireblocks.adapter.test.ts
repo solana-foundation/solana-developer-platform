@@ -1,7 +1,6 @@
 import { generateKeyPairSync } from "node:crypto";
 import { type SignerError, SignerErrorCode } from "@solana/keychain-core";
 import {
-  address,
   assertIsTransactionWithinSizeLimit,
   blockhash,
   compileTransaction,
@@ -13,7 +12,7 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import type { MockInstance } from "vitest";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import { SigningError } from "#/signing";
 import { KeychainFireblocksAdapter } from "./keychain-fireblocks.adapter";
 
@@ -25,7 +24,16 @@ const CONFIG = {
   apiSecretPem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
   vaultAccountId: "default-vault",
 };
-const WALLET_ADDRESS = "11111111111111111111111111111111";
+const { address: WALLET_ADDRESS } = await generateKeyPairSigner();
+
+/** The URL and init of the fetch call at `index`, which must exist. */
+function fetchCall(fetch: MockInstance<typeof globalThis.fetch>, index: number) {
+  const call = fetch.mock.calls[index];
+  assert.isDefined(call);
+  const [url, init] = call;
+  assert.isDefined(init);
+  return { url: String(url), init };
+}
 const CONSOLE_METHODS = ["debug", "log", "info", "warn", "error"] as const;
 /** Fireblocks' documented answer for a transaction a policy rule blocked. */
 const POLICY_BLOCK = { status: "BLOCKED", subStatus: "BLOCKED_BY_POLICY" };
@@ -45,7 +53,7 @@ function signTestTransaction(
   const transaction = compileTransaction(
     pipe(
       createTransactionMessage({ version: 0 }),
-      (message) => setTransactionMessageFeePayer(address(WALLET_ADDRESS), message),
+      (message) => setTransactionMessageFeePayer(WALLET_ADDRESS, message),
       (message) =>
         setTransactionMessageLifetimeUsingBlockhash(
           {
@@ -286,14 +294,12 @@ describe.each([
           cancelRequested: success,
         },
       });
-      expect(JSON.parse(String(fetch.mock.calls[1]?.[1]?.body))).toMatchObject({
+      expect(JSON.parse(String(fetchCall(fetch, 1).init.body))).toMatchObject({
         operation,
         externalTxId: "sdp-test-request-1",
       });
-      expect(fetch.mock.calls[3]?.[0]).toBe(
-        "https://api.fireblocks.io/v1/transactions/tx-1/cancel"
-      );
-      expect(fetch.mock.calls[3]?.[1]?.method).toBe("POST");
+      expect(fetchCall(fetch, 3).url).toBe("https://api.fireblocks.io/v1/transactions/tx-1/cancel");
+      expect(fetchCall(fetch, 3).init.method).toBe("POST");
       expect(fetch).toHaveBeenCalledTimes(4);
       expect(cleanup).toHaveBeenCalledExactlyOnceWith({
         externalTxId: "sdp-test-request-1",
@@ -315,17 +321,18 @@ describe.each([
       })
       .mockResolvedValueOnce(Response.json({ id: "tx-1" }))
       .mockImplementationOnce(async (_url, init) => {
-        expect(init?.signal?.aborted).toBe(false);
+        assert.isDefined(init);
+        expect(init.signal?.aborted).toBe(false);
         return Response.json({ success: true });
       });
     const signer = await adapter(cleanup).getTransactionSigner();
     await expect(sign(signer, { abortSignal: controller.signal })).rejects.toThrow(
       "did not finish before its deadline"
     );
-    expect(fetch.mock.calls[2]?.[0]).toBe(
+    expect(fetchCall(fetch, 2).url).toBe(
       "https://api.fireblocks.io/v1/transactions/external_tx_id/sdp-test-request-1"
     );
-    expect(fetch.mock.calls[3]?.[0]).toBe("https://api.fireblocks.io/v1/transactions/tx-1/cancel");
+    expect(fetchCall(fetch, 3).url).toBe("https://api.fireblocks.io/v1/transactions/tx-1/cancel");
     expect(fetch).toHaveBeenCalledTimes(4);
     expect(cleanup).toHaveBeenCalledExactlyOnceWith({
       externalTxId: "sdp-test-request-1",
@@ -359,7 +366,9 @@ describe.each([
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(Response.json({ addresses: [{ address: WALLET_ADDRESS }] }));
     const signer = await adapter().getTransactionSigner();
-    await expect(sign(signer, { abortSignal: AbortSignal.abort() })).rejects.toThrow();
+    await expect(sign(signer, { abortSignal: AbortSignal.abort() })).rejects.toMatchObject({
+      name: "AbortError",
+    });
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 });
@@ -405,7 +414,7 @@ it("reports a create the provider never recorded through the failure hook", asyn
   }).getTransactionSigner();
   await expect(signTestMessage(signer)).rejects.toThrow("Fireblocks API error: 400");
   // One lookup by external ID confirms the provider never recorded the create.
-  expect(fetch.mock.calls[2]?.[0]).toBe(
+  expect(fetchCall(fetch, 2).url).toBe(
     "https://api.fireblocks.io/v1/transactions/external_tx_id/sdp-test-request-1"
   );
   expect(failure).toHaveBeenCalledExactlyOnceWith({

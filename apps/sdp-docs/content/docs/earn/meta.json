@@ -3,6 +3,7 @@
   "pages": [
     "quickstart",
     "concepts",
+    "api-overview",
     "strategies",
     "deposits",
     "balances",

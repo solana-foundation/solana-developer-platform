@@ -2,6 +2,7 @@
 
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { EarnStrategy } from "@sdp/types/earn";
+import { SOLANA_CLUSTER_LABELS } from "@sdp/types/well-known-tokens";
 import { Button } from "@sdp/ui/button";
 import { Callout } from "@sdp/ui/callout";
 import { ListEmptyState } from "@sdp/ui/list-empty-state";
@@ -20,19 +21,14 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { useCopy } from "@/lib/use-copy";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import {
-  type EarnDepositAvailabilityLabels,
-  earnDepositAvailabilityLabel,
-  earnProviderLabel,
-  earnStrategyLiquidityLabel,
-} from "./earn-format";
+import { useEarnStrategies } from "./earn-data";
+import { earnProviderLabel, earnStrategyLiquidityLabel } from "./earn-format";
 import {
   buildEarnIntegrationSections,
   buildEarnServerIntegration,
   type EarnIntegrationSections,
 } from "./earn-integration-snippets";
 import { formatProviderApy } from "./earn-market-presentation";
-import { useEarnStrategies } from "./earn-program-data";
 import {
   type EarnProviderAccess,
   type EarnVaultDepositAvailability,
@@ -50,33 +46,33 @@ type EarnIntegrationGuideProps = {
 const GUIDE_SECTIONS = [
   {
     id: "client",
-    navigationKey: "DashboardMarkets.earnProgram.guideClientNavigation",
-    titleKey: "DashboardMarkets.earnProgram.guideClientTitle",
-    descriptionKey: "DashboardMarkets.earnProgram.guideClientDescription",
+    navigationKey: "DashboardMarkets.embeddedYield.guideClientNavigation",
+    titleKey: "DashboardMarkets.embeddedYield.guideClientTitle",
+    descriptionKey: "DashboardMarkets.embeddedYield.guideClientDescription",
   },
   {
     id: "deposit",
-    navigationKey: "DashboardMarkets.earnProgram.guideDepositNavigation",
-    titleKey: "DashboardMarkets.earnProgram.guideDepositTitle",
-    descriptionKey: "DashboardMarkets.earnProgram.guideDepositDescription",
+    navigationKey: "DashboardMarkets.embeddedYield.guideDepositNavigation",
+    titleKey: "DashboardMarkets.embeddedYield.guideDepositTitle",
+    descriptionKey: "DashboardMarkets.embeddedYield.guideDepositDescription",
   },
   {
     id: "portfolio",
-    navigationKey: "DashboardMarkets.earnProgram.guidePortfolioNavigation",
-    titleKey: "DashboardMarkets.earnProgram.guidePortfolioTitle",
-    descriptionKey: "DashboardMarkets.earnProgram.guidePortfolioDescription",
+    navigationKey: "DashboardMarkets.embeddedYield.guidePortfolioNavigation",
+    titleKey: "DashboardMarkets.embeddedYield.guidePortfolioTitle",
+    descriptionKey: "DashboardMarkets.embeddedYield.guidePortfolioDescription",
   },
   {
     id: "withdraw",
-    navigationKey: "DashboardMarkets.earnProgram.guideWithdrawNavigation",
-    titleKey: "DashboardMarkets.earnProgram.guideWithdrawTitle",
-    descriptionKey: "DashboardMarkets.earnProgram.guideWithdrawDescription",
+    navigationKey: "DashboardMarkets.embeddedYield.guideWithdrawNavigation",
+    titleKey: "DashboardMarkets.embeddedYield.guideWithdrawTitle",
+    descriptionKey: "DashboardMarkets.embeddedYield.guideWithdrawDescription",
   },
   {
     id: "asyncWithdraw",
-    navigationKey: "DashboardMarkets.earnProgram.guideAsyncWithdrawNavigation",
-    titleKey: "DashboardMarkets.earnProgram.guideAsyncWithdrawTitle",
-    descriptionKey: "DashboardMarkets.earnProgram.guideAsyncWithdrawDescription",
+    navigationKey: "DashboardMarkets.embeddedYield.guideAsyncWithdrawNavigation",
+    titleKey: "DashboardMarkets.embeddedYield.guideAsyncWithdrawTitle",
+    descriptionKey: "DashboardMarkets.embeddedYield.guideAsyncWithdrawDescription",
   },
 ] as const satisfies ReadonlyArray<{
   id: keyof EarnIntegrationSections;
@@ -85,34 +81,25 @@ const GUIDE_SECTIONS = [
   descriptionKey: MessageKey;
 }>;
 
-const PROGRAM_AVAILABILITY_LABELS = {
-  available: "DashboardMarkets.earnProgram.sandboxReady",
-  cluster_unavailable: "DashboardMarkets.earnProgram.clusterUnavailable",
-  strategy_unavailable: "DashboardMarkets.earnProgram.unavailable",
-  environment_unavailable: "DashboardMarkets.earnProgram.productionUnavailable",
-  access_unavailable: "DashboardMarkets.earnProgram.accessUnavailable",
-  provider_unavailable: "DashboardMarkets.earnProgram.providerUnavailable",
-  production_only: "DashboardMarkets.earnProgram.sandboxUnavailable",
-} as const satisfies EarnDepositAvailabilityLabels;
+/** Why this project cannot fund a strategy, said under the picker while its code stays shown. */
+const UNAVAILABLE_DESCRIPTIONS = {
+  cluster_unavailable: "DashboardMarkets.embeddedYield.unavailableClusterDescription",
+  strategy_unavailable: "DashboardMarkets.embeddedYield.unavailableStrategyDescription",
+  environment_unavailable: "DashboardMarkets.embeddedYield.unavailableEnvironmentDescription",
+  access_unavailable: "DashboardMarkets.embeddedYield.unavailableAccessDescription",
+  provider_not_entitled: "DashboardMarkets.embeddedYield.unavailableNotOnPlanDescription",
+  provider_not_configured: "DashboardMarkets.embeddedYield.unavailableNotConfiguredDescription",
+  provider_disabled: "DashboardMarkets.embeddedYield.unavailableStrategyDescription",
+} as const satisfies Record<Exclude<EarnVaultDepositAvailability, "available">, MessageKey>;
 
 function unavailableDescriptionKey(
-  availability: EarnVaultDepositAvailability,
+  availability: Exclude<EarnVaultDepositAvailability, "available">,
   provider: string
 ): MessageKey {
-  switch (availability) {
-    case "cluster_unavailable":
-      return "DashboardMarkets.earnProgram.unavailableClusterDescription";
-    case "environment_unavailable":
-      return earnVaultDepositOnlyEnvironment(provider) === "production"
-        ? "DashboardMarkets.earnProgram.unavailableEnvironmentProductionDescription"
-        : "DashboardMarkets.earnProgram.unavailableEnvironmentDescription";
-    case "access_unavailable":
-      return "DashboardMarkets.earnProgram.unavailableAccessDescription";
-    case "provider_unavailable":
-      return "DashboardMarkets.earnProgram.unavailableProviderDescription";
-    default:
-      return "DashboardMarkets.earnProgram.unavailableStrategyDescription";
-  }
+  return availability === "environment_unavailable" &&
+    earnVaultDepositOnlyEnvironment(provider) === "production"
+    ? "DashboardMarkets.embeddedYield.unavailableEnvironmentProductionDescription"
+    : UNAVAILABLE_DESCRIPTIONS[availability];
 }
 
 /**
@@ -158,18 +145,17 @@ export function EarnIntegrationGuide({
   );
   if (isLoading) return <EarnIntegrationGuideSkeleton />;
 
-  const options = (strategies ?? []).map((strategy) => {
-    const availability = earnVaultDepositAvailability(strategy, sdpEnvironment, providerAccess);
-    return { availability, selectable: availability === "available", strategy };
-  });
+  const options = (strategies ?? []).map((strategy) => ({
+    availability: earnVaultDepositAvailability(strategy, sdpEnvironment, providerAccess),
+    strategy,
+  }));
   const requestedStrategy = options.find(({ strategy }) => strategy.id === selectedStrategyId);
+  // With no choice made, open on the first strategy this project can fund, else the first listed.
   const selectedOption =
     requestedStrategy ??
-    (selectedStrategyId === null ? options.find(({ selectable }) => selectable) : undefined);
-  const selectionIssue =
-    selectedOption && !selectedOption.selectable
-      ? unavailableDescriptionKey(selectedOption.availability, selectedOption.strategy.provider)
-      : undefined;
+    (selectedStrategyId === null
+      ? (options.find(({ availability }) => availability === "available") ?? options.at(0))
+      : undefined);
   const initialStrategyMissing = Boolean(initialStrategyId && !requestedStrategy);
 
   // The way back and the title are the shell's; the page opens with what the integration does.
@@ -177,7 +163,7 @@ export function EarnIntegrationGuide({
     <DashboardWorkspaceOverviewPanel>
       <div className="flex min-w-0 flex-col gap-8">
         <p className="text-body text-pretty text-secondary">
-          {t("DashboardMarkets.earnProgram.guideIntro")}
+          {t("DashboardMarkets.embeddedYield.guideIntro")}
         </p>
 
         <CatalogueContent
@@ -190,7 +176,6 @@ export function EarnIntegrationGuide({
           onStrategyChange={setSelectedStrategyId}
           options={options}
           selectedOption={selectedOption}
-          selectionIssue={selectionIssue}
         />
       </div>
     </DashboardWorkspaceOverviewPanel>
@@ -199,7 +184,6 @@ export function EarnIntegrationGuide({
 
 type StrategyOption = {
   availability: EarnVaultDepositAvailability;
-  selectable: boolean;
   strategy: EarnStrategy;
 };
 
@@ -213,7 +197,6 @@ function CatalogueContent({
   onStrategyChange,
   options,
   selectedOption,
-  selectionIssue,
 }: {
   activeSectionId: keyof EarnIntegrationSections;
   apiBaseUrl?: string | null;
@@ -224,53 +207,63 @@ function CatalogueContent({
   onStrategyChange: (strategyId: string | null) => void;
   options: StrategyOption[];
   selectedOption: StrategyOption | undefined;
-  selectionIssue: MessageKey | undefined;
 }) {
   const t = useTranslations();
   if (catalogueError) {
     return (
       <ListEmptyState
-        description={t("DashboardMarkets.earnProgram.catalogueErrorDescription")}
-        message={t("DashboardMarkets.earnProgram.catalogueErrorTitle")}
+        description={t("DashboardMarkets.embeddedYield.catalogueErrorDescription")}
+        message={t("DashboardMarkets.embeddedYield.catalogueErrorTitle")}
       />
     );
   }
   if (options.length === 0) {
     return (
       <ListEmptyState
-        description={t("DashboardMarkets.earnProgram.catalogueEmptyDescription")}
-        message={t("DashboardMarkets.earnProgram.catalogueEmptyTitle")}
+        description={t("DashboardMarkets.embeddedYield.catalogueEmptyDescription")}
+        message={t("DashboardMarkets.embeddedYield.catalogueEmptyTitle")}
       />
     );
   }
 
-  const selectedStrategy = selectedOption?.strategy;
-
   return (
     <RecordStack>
-      <RecordBlock title={t("DashboardMarkets.earnProgram.stepChooseStrategy")}>
+      <RecordBlock title={t("DashboardMarkets.embeddedYield.stepChooseStrategy")}>
         <StrategyPicker
           locale={locale}
           onStrategyChange={onStrategyChange}
           options={options}
           selectedOption={selectedOption}
         />
-        {selectedStrategy && selectedOption?.selectable ? (
-          <StrategyDetails locale={locale} strategy={selectedStrategy} />
+        {selectedOption ? (
+          <>
+            {selectedOption.availability === "available" ? null : (
+              <Callout variant="neutral">
+                {t(
+                  unavailableDescriptionKey(
+                    selectedOption.availability,
+                    selectedOption.strategy.provider
+                  ),
+                  {
+                    cluster: SOLANA_CLUSTER_LABELS[selectedOption.strategy.hostCluster],
+                    provider: earnProviderLabel(selectedOption.strategy.provider),
+                  }
+                )}
+              </Callout>
+            )}
+            <StrategyDetails locale={locale} strategy={selectedOption.strategy} />
+          </>
         ) : (
-          <StrategySelectionEmptyState
-            initialStrategyMissing={initialStrategyMissing}
-            selectionIssue={selectionIssue}
-          />
+          <StrategySelectionEmptyState initialStrategyMissing={initialStrategyMissing} />
         )}
       </RecordBlock>
 
-      {selectedStrategy && selectedOption?.selectable ? (
+      {selectedOption ? (
         <IntegrationReference
           activeSectionId={activeSectionId}
           apiBaseUrl={apiBaseUrl}
           onSectionChange={onSectionChange}
-          strategy={selectedStrategy}
+          strategy={selectedOption.strategy}
         />
       ) : null}
     </RecordStack>
@@ -278,8 +271,8 @@ function CatalogueContent({
 }
 
 /**
- * Every strategy the catalogue lists, the ones this project cannot fund disabled with the reason
- * beside their APY.
+ * Every strategy the catalogue lists, each selectable so its integration can be read. Whether
+ * this project can fund it is said under the picker, never inside the list.
  */
 function StrategyPicker({
   locale,
@@ -295,62 +288,52 @@ function StrategyPicker({
   const t = useTranslations();
   return (
     <Select
-      ariaLabel={t("DashboardMarkets.earnProgram.selectTitle")}
+      ariaLabel={t("DashboardMarkets.embeddedYield.selectTitle")}
       onValueChange={onStrategyChange}
-      placeholder={t("DashboardMarkets.earnProgram.selectTitle")}
+      placeholder={t("DashboardMarkets.embeddedYield.selectTitle")}
       value={selectedOption?.strategy.id ?? null}
     >
-      {options.map(({ availability, selectable, strategy }) => (
-        <SelectItem disabled={!selectable} key={strategy.id} value={strategy.id}>
-          <span className="flex min-w-0 flex-1 items-center justify-between gap-4">
-            <span className="truncate">{strategy.name}</span>
-            <span className="shrink-0 text-tertiary tabular-nums">
-              {formatProviderApy(strategy.currentApy, locale)}
-              {!selectable ? (
-                <>
-                  {" · "}
-                  {earnDepositAvailabilityLabel(
-                    availability,
-                    PROGRAM_AVAILABILITY_LABELS,
-                    strategy,
-                    t
-                  )}
-                </>
-              ) : null}
+      {options.map(({ strategy }) => {
+        const apy = formatProviderApy(strategy.currentApy, locale);
+        return (
+          <SelectItem key={strategy.id} value={strategy.id}>
+            <span className="flex min-w-0 flex-1 items-center justify-between gap-4">
+              <span className="truncate">{strategy.name}</span>
+              {apy === "—" ? null : (
+                <span className="shrink-0 text-tertiary tabular-nums">{apy}</span>
+              )}
             </span>
-          </span>
-        </SelectItem>
-      ))}
+          </SelectItem>
+        );
+      })}
     </Select>
   );
 }
 
 function StrategySelectionEmptyState({
   initialStrategyMissing,
-  selectionIssue,
 }: {
   initialStrategyMissing: boolean;
-  selectionIssue: MessageKey | undefined;
 }) {
   const t = useTranslations();
-  let descriptionKey: MessageKey = "DashboardMarkets.earnProgram.missingStrategyDescription";
-  let messageKey: MessageKey = "DashboardMarkets.earnProgram.missingStrategyTitle";
-  if (initialStrategyMissing) {
-    descriptionKey = "DashboardMarkets.earnProgram.unknownStrategyDescription";
-    messageKey = "DashboardMarkets.earnProgram.unknownStrategyTitle";
-  }
-  if (selectionIssue) {
-    descriptionKey = selectionIssue;
-    messageKey = "DashboardMarkets.earnProgram.unavailableStrategyTitle";
-  }
-  return <ListEmptyState description={t(descriptionKey)} message={t(messageKey)} />;
+  return initialStrategyMissing ? (
+    <ListEmptyState
+      description={t("DashboardMarkets.embeddedYield.unknownStrategyDescription")}
+      message={t("DashboardMarkets.embeddedYield.unknownStrategyTitle")}
+    />
+  ) : (
+    <ListEmptyState
+      description={t("DashboardMarkets.embeddedYield.missingStrategyDescription")}
+      message={t("DashboardMarkets.embeddedYield.missingStrategyTitle")}
+    />
+  );
 }
 
 /**
  * One plain line under the dropdown ("Kamino · Instant liquidity · 6.2% APY"), then the
  * strategy ID as a copyable code surface. Reference, not a dashboard: no field labels, no big
- * numbers, and no APY when it is unknown. Only a strategy this project can fund gets here, so
- * no availability is restated.
+ * numbers, and no APY when it is unknown. Whether the project can fund the strategy is the
+ * note above it, so no availability is restated here.
  */
 function StrategyDetails({ locale, strategy }: { locale: string; strategy: EarnStrategy }) {
   const t = useTranslations();
@@ -358,14 +341,14 @@ function StrategyDetails({ locale, strategy }: { locale: string; strategy: EarnS
   const apy = formatProviderApy(strategy.currentApy, locale);
   const facts = [
     earnProviderLabel(strategy.provider),
-    liquidity ? t("DashboardMarkets.earnProgram.liquidityFact", { liquidity }) : undefined,
-    apy === "—" ? undefined : t("DashboardMarkets.earnProgram.apyFact", { apy }),
+    liquidity ? t("DashboardMarkets.embeddedYield.liquidityFact", { liquidity }) : undefined,
+    apy === "—" ? undefined : t("DashboardMarkets.embeddedYield.apyFact", { apy }),
   ].filter((fact): fact is string => Boolean(fact));
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <p className="text-meta text-secondary tabular-nums">{facts.join(" · ")}</p>
-      <CodeBlock code={strategy.id} title={t("DashboardMarkets.earnProgram.strategyId")} />
+      <CodeBlock code={strategy.id} title={t("DashboardMarkets.embeddedYield.strategyId")} />
     </div>
   );
 }
@@ -400,31 +383,31 @@ function IntegrationReference({
           variant="outline"
         >
           {t(
-            copied ? "Shared.SharedComponents.copied" : "DashboardMarkets.earnProgram.copyAllCode"
+            copied ? "Shared.SharedComponents.copied" : "DashboardMarkets.embeddedYield.copyAllCode"
           )}
         </Button>
       }
-      title={t("DashboardMarkets.earnProgram.stepServerCode")}
+      title={t("DashboardMarkets.embeddedYield.stepServerCode")}
     >
       {/* The one thing the copied module needs that this page cannot generate: a key.
           Informational rather than a warning, and it links to where the key is made, because a
           warning with no way to act on it only says "no". The sentence is split around the link
           since the catalog has no rich-text helper. */}
       <Callout variant="info">
-        {t("DashboardMarkets.earnProgram.apiKeyCalloutBefore")}{" "}
+        {t("DashboardMarkets.embeddedYield.apiKeyCalloutBefore")}{" "}
         <Link
           className="font-medium underline underline-offset-2"
           href={href(DASHBOARD_SIDE_NAV_HREFS.apiKeys)}
         >
-          {t("DashboardMarkets.earnProgram.apiKeyCalloutLink")}
+          {t("DashboardMarkets.embeddedYield.apiKeyCalloutLink")}
         </Link>{" "}
-        {t("DashboardMarkets.earnProgram.apiKeyCalloutAfter")}
+        {t("DashboardMarkets.embeddedYield.apiKeyCalloutAfter")}
       </Callout>
 
       {/* Five reference sections, not wizard steps: on a phone the segments tighten so all five
           stay on one row. */}
       <SegmentedControl
-        ariaLabel={t("DashboardMarkets.earnProgram.guideNavigationTitle")}
+        ariaLabel={t("DashboardMarkets.embeddedYield.guideNavigationTitle")}
         className="w-full @2xl:w-fit"
         onChange={(value) => {
           const section = GUIDE_SECTIONS.find(({ id }) => id === value);
@@ -450,7 +433,7 @@ function IntegrationReference({
         <CodeBlock
           code={sections[activeSection.id]}
           language="typescript"
-          title={t("DashboardMarkets.earnProgram.serverExample")}
+          title={t("DashboardMarkets.embeddedYield.serverExample")}
           viewportClassName="max-h-[36rem]"
         />
       </div>

@@ -154,7 +154,7 @@ export const listMembers = async (c: AppContext) => {
   const { page, pageSize } = resolveMembersPaging(c);
 
   // Pending invitations are shown only to callers who can act on them. Raising
-  // one (`POST /invite`) and withdrawing one (`DELETE /invitations/:id`) both
+  // one (`POST /invitations`) and withdrawing one (`DELETE /invitations/:id`) both
   // require `members.manage`, but this list is `members.read`, which the
   // `member` role holds too. That gap put every invitee's address — and
   // Clerk's accept link, a forwardable credential we cannot expire, since

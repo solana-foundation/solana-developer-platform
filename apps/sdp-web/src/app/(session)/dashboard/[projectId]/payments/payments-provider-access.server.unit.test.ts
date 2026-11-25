@@ -18,7 +18,7 @@ const RAMP_ACCESS = { moonpay: { entitled: true, configured: true, enabled: true
 
 const fetchMock = vi.spyOn(globalThis, "fetch");
 
-/** Answers the onboarding read and the provider-access read through the real client. */
+/** Answers the onboarding read and the provider-availability read through the real client. */
 function answer(onboarding: OnboardingStatusAnswer) {
   fetchMock.mockImplementation(async (input) => {
     const url = input instanceof Request ? input.url : String(input);
@@ -32,7 +32,7 @@ function answer(onboarding: OnboardingStatusAnswer) {
 function providerAccessUrls(): string[] {
   return fetchMock.mock.calls
     .map(([input]) => (input instanceof Request ? input.url : String(input)))
-    .filter((url) => url.endsWith("/provider-access"));
+    .filter((url) => url.endsWith("/provider-availability"));
 }
 
 beforeEach(() => {
@@ -52,7 +52,21 @@ describe("loadOrganizationProviderAccess", () => {
       rampProviderAccess: RAMP_ACCESS,
     });
     expect(providerAccessUrls()).toEqual([
-      "https://api.sdp.test/v1/organizations/org_sdp/provider-access",
+      "https://api.sdp.test/v1/organizations/org_sdp/provider-availability",
+    ]);
+  });
+
+  it("has no provider access when the access read is refused", async () => {
+    fetchMock.mockImplementation(async (input) => {
+      const url = input instanceof Request ? input.url : String(input);
+      return url.endsWith("/v1/onboarding/status")
+        ? Response.json({ data: { linked: true, organization: { id: "org_sdp" } } })
+        : Response.json({ error: { message: "unavailable" } }, { status: 503 });
+    });
+
+    expect(await loadOrganizationProviderAccess()).toBeNull();
+    expect(providerAccessUrls()).toEqual([
+      "https://api.sdp.test/v1/organizations/org_sdp/provider-availability",
     ]);
   });
 

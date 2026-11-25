@@ -14,3 +14,6 @@ export function earnVaultHoldingValue(position: {
   if (!position.parIntermediate) return position.tokenValue;
   return sumDecimalStrings([position.tokenValue, position.parIntermediate.tokenValue]);
 }
+
+/** Quantity held when an intermediate redemption route is selected. */
+export type EarnVaultParRedemptionSource = "shares" | "intermediate";

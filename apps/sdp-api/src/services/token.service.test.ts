@@ -1144,7 +1144,7 @@ describe("TokenService", () => {
       expect(row?.total_supply_cached).toBe("1500000000");
     });
 
-    // A mint transaction row. `prepared` is what `POST /mint/prepare` leaves
+    // A mint transaction row. `prepared` is what `POST /mint/build-unsigned-transaction` leaves
     // behind: a serialized transaction handed to a client who may submit it at any
     // point until its blockhash expires. `amount` is the decimal amount the real
     // handlers always store in the row's params — it is what tells the refresh how
