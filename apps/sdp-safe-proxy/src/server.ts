@@ -74,15 +74,17 @@ function local() {
   return { caller: localCaller(listensOn), listensOn };
 }
 
+const credentials = {
+  fireblocks: inReleaseChannel("fireblocks") ? await fireblocksCredentials() : null,
+  privy: inReleaseChannel("privy") ? privyCredentials() : null,
+};
+
 const runtime = process.env.K_SERVICE === undefined ? local() : await cloudRun();
 
 const app = createApp({
   caller: runtime.caller,
   releaseChannel: env.SDP_RELEASE_CHANNEL,
-  credentials: {
-    fireblocks: inReleaseChannel("fireblocks") ? await fireblocksCredentials() : null,
-    privy: inReleaseChannel("privy") ? privyCredentials() : null,
-  },
+  credentials,
   providerTimeoutMs: env.SAFE_PROXY_PROVIDER_TIMEOUT_MS,
 });
 
