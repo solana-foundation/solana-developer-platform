@@ -282,8 +282,8 @@ the runner never receives or exports a Fireblocks private key. These commands do
 
 Before testing:
 
-1. Use a production SDP project, a mainnet RPC, and a Fireblocks endpoint matching the customer's
-   workspace region. Complete CSR registration and connect the existing SOL vault in the
+1. Use a production SDP project, a mainnet RPC, and a Fireblocks Mainnet workspace (production
+   projects always call `https://api.fireblocks.io`). Complete CSR registration and connect the existing SOL vault in the
    dashboard. Enable the connection for runtime execution. Allow TRANSFER initiation and the intended one-time destination in the workspace policy.
    Keep SOL in the source vault for network fees. Program Call permission is needed for the optional signer check.
 2. Fund the source vault with the payment asset and enough SOL for fees and any token-account
