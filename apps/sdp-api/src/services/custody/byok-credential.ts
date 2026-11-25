@@ -133,6 +133,7 @@ export async function checkByokCredential(
       : { status };
   }
   const result = await checkFireblocksCredential({
+    cluster: currentClusterScope().cluster,
     apiKey: credential.apiKey,
     privateKeyPem: credential.apiSecretPem,
     vaultAccountId: credential.vaultAccountId,

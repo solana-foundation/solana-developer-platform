@@ -87,11 +87,14 @@ export class KeychainFireblocksAdapter extends BaseKeychainAdapter {
   }
 
   private async createInitializedSigner(vaultAccountId: string): Promise<FireblocksSigner> {
+    const { origin, nativeAsset } = CUSTODY_CLUSTER_CONFIG[this.config.cluster].fireblocks;
     return createFireblocksSigner({
       apiKey: this.config.apiKey,
       privateKeyPem: this.config.apiSecretPem,
       vaultAccountId,
-      assetId: CUSTODY_CLUSTER_CONFIG[this.config.cluster].fireblocks.nativeAsset,
+      // The signer has its own default host; it must use the cluster's.
+      apiBaseUrl: origin,
+      assetId: nativeAsset,
       pollIntervalMs: this.config.pollIntervalMs,
       maxPollAttempts: this.config.maxPollAttempts,
       requestDelayMs: this.config.requestDelayMs,

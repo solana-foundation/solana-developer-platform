@@ -22,7 +22,8 @@ export type CustodyClusterConfig = {
 
 export const CUSTODY_CLUSTER_CONFIG = {
   devnet: {
-    fireblocks: { origin: "https://api.fireblocks.io", nativeAsset: "SOL_TEST" },
+    // Devnet credentials come from a Fireblocks Developer Sandbox workspace, which has its own host.
+    fireblocks: { origin: "https://sandbox-api.fireblocks.io", nativeAsset: "SOL_TEST" },
     privy: { origin: "https://api.privy.io/v1" },
     coinbase_cdp: { origin: "https://api.cdp.coinbase.com/platform", network: "solana-devnet" },
     para: { origin: "https://api.beta.getpara.com" },
