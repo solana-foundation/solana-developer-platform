@@ -1,8 +1,4 @@
 import { createHash, randomUUID } from "node:crypto";
-import {
-  isCustodyProviderInReleaseChannel,
-  type SdpReleaseChannel,
-} from "@sdp/types/release-channels";
 import { Hono, type MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { requestId } from "hono/request-id";
@@ -12,7 +8,7 @@ import { FROM_PROVIDER_HEADER } from "./endpoints/protocol";
 import { SAFE_PROXY_PROVIDERS, type SafeProxyProvider } from "./endpoints/providers";
 import { badGateway, forbidden, internal, notFound } from "./errors";
 import { type AppEnv, bodyWithinLimit, requestLog } from "./middleware";
-import { providerTarget } from "./utils";
+import { inReleaseChannel, providerTarget } from "./utils";
 
 export interface ProviderCredentials {
   fireblocks: { apiKey: string; privateKey: CryptoKey } | null;
@@ -21,7 +17,6 @@ export interface ProviderCredentials {
 
 export interface AppDependencies {
   caller: MiddlewareHandler<AppEnv>;
-  releaseChannel: SdpReleaseChannel;
   credentials: ProviderCredentials;
   providerTimeoutMs: number;
 }
@@ -51,11 +46,7 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
     line.provider = match.provider;
     line.endpoint = `${endpoint.method} ${endpoint.path}`;
 
-    if (
-      !isCustodyProviderInReleaseChannel(dependencies.releaseChannel, match.provider, "managed")
-    ) {
-      throw forbidden("provider_not_in_release_channel");
-    }
+    if (!inReleaseChannel(match.provider)) throw forbidden("provider_not_in_release_channel");
     if (!endpoint.callers.includes(caller)) throw forbidden("caller_not_allowed");
 
     const headers = new Headers();

@@ -1,4 +1,9 @@
+import {
+  isCustodyProviderInReleaseChannel,
+  resolveSdpReleaseChannel,
+} from "@sdp/types/release-channels";
 import { z } from "zod";
+import type { SafeProxyProvider } from "./endpoints/providers";
 
 export const positiveInteger = z.coerce.number().int().positive();
 
@@ -15,4 +20,12 @@ export function providerTarget(url: string, provider: string): string | null {
   const { pathname, search } = new URL(url);
   if (!pathname.startsWith(`/${provider}/`)) return null;
   return pathname.slice(provider.length + 1) + search;
+}
+
+export function inReleaseChannel(provider: SafeProxyProvider): boolean {
+  return isCustodyProviderInReleaseChannel(
+    resolveSdpReleaseChannel(process.env.SDP_RELEASE_CHANNEL),
+    provider,
+    "managed"
+  );
 }

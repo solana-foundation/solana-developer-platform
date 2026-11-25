@@ -1,16 +1,12 @@
 import { serve } from "@hono/node-server";
 import { IDENTITY_TOKEN_REFETCH_AFTER_SECONDS } from "@sdp/metadata-server/caller";
 import { createGoogleIdentityKeys } from "@sdp/metadata-server/receiver";
-import {
-  isCustodyProviderInReleaseChannel,
-  SDP_RELEASE_CHANNEL_NAMES,
-} from "@sdp/types/release-channels";
+import { SDP_RELEASE_CHANNEL_NAMES } from "@sdp/types/release-channels";
 import { importPKCS8 } from "jose";
 import { z } from "zod";
 import { createApp } from "./app";
-import type { SafeProxyProvider } from "./endpoints/providers";
 import { googleCaller, localCaller } from "./middleware";
-import { positiveInteger, readEnv } from "./utils";
+import { inReleaseChannel, positiveInteger, readEnv } from "./utils";
 
 const IDENTITY_TOKEN_LIFETIME_SECONDS = 3600;
 
@@ -18,10 +14,6 @@ const env = readEnv({
   SDP_RELEASE_CHANNEL: z.enum(SDP_RELEASE_CHANNEL_NAMES),
   SAFE_PROXY_PROVIDER_TIMEOUT_MS: positiveInteger,
 });
-
-function inReleaseChannel(provider: SafeProxyProvider): boolean {
-  return isCustodyProviderInReleaseChannel(env.SDP_RELEASE_CHANNEL, provider, "managed");
-}
 
 async function fireblocksCredentials() {
   const fireblocks = readEnv({
@@ -78,7 +70,6 @@ const runtime = process.env.K_SERVICE === undefined ? local() : await cloudRun()
 
 const app = createApp({
   caller: runtime.caller,
-  releaseChannel: env.SDP_RELEASE_CHANNEL,
   credentials: {
     fireblocks: inReleaseChannel("fireblocks") ? await fireblocksCredentials() : null,
     privy: inReleaseChannel("privy") ? privyCredentials() : null,
