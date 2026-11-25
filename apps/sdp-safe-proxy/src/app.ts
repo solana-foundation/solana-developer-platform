@@ -2,15 +2,12 @@ import { createHash, randomUUID } from "node:crypto";
 import { type CallerIdentity, CallerIdentityError } from "@sdp/metadata-server/receiver";
 import { SAFE_PROXY_CALLERS, type SafeProxyCaller } from "@sdp/safe-proxy-endpoints/callers";
 import { matchEndpoint } from "@sdp/safe-proxy-endpoints/match";
-import {
-  FROM_PROVIDER_HEADER,
-  LOCAL_CALLER_HEADER,
-  REQUEST_ID_HEADER,
-} from "@sdp/safe-proxy-endpoints/protocol";
+import { FROM_PROVIDER_HEADER, LOCAL_CALLER_HEADER } from "@sdp/safe-proxy-endpoints/protocol";
 import { SAFE_PROXY_PROVIDERS, type SafeProxyProvider } from "@sdp/safe-proxy-endpoints/providers";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
+import { type RequestIdVariables, requestId } from "hono/request-id";
 import { SignJWT } from "jose";
 import { badGateway, forbidden, notFound, serviceUnavailable, unauthorized } from "./errors";
 
@@ -31,7 +28,7 @@ export interface AppDependencies {
 }
 
 export interface RequestLogLine {
-  request_id: string | null;
+  request_id: string;
   caller: SafeProxyCaller | null;
   provider: string | null;
   // The declared method and path pattern, never the path that was requested.
@@ -43,10 +40,9 @@ export interface RequestLogLine {
   revision: string;
 }
 
-type AppEnv = { Variables: { line: RequestLogLine } };
+type AppEnv = { Variables: RequestIdVariables & { line: RequestLogLine } };
 
 const MAX_BODY_BYTES = 1024 * 1024;
-const REQUEST_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
 export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -56,13 +52,14 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
     c.json({ service: "sdp-safe-proxy", revision: dependencies.revision })
   );
 
+  // The caller's `X-Request-Id`, or a new one when it sent none.
+  app.use(requestId());
+
   // One log line per request, written once the answer is known.
   app.use(async (c, next) => {
     const startedAt = Date.now();
-    const requestId = c.req.header(REQUEST_ID_HEADER);
     const line: RequestLogLine = {
-      // Logged only in the shape callers send it; anything else is left out.
-      request_id: requestId !== undefined && REQUEST_ID.test(requestId) ? requestId : null,
+      request_id: c.get("requestId"),
       caller: null,
       provider: null,
       endpoint: null,
@@ -73,6 +70,8 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
     };
     c.set("line", line);
     await next();
+    // Sent back on every answer, the provider's included, so both sides log the same id.
+    c.header("X-Request-Id", line.request_id);
     line.status = c.res.status;
     line.duration_ms = Date.now() - startedAt;
     dependencies.writeLog(line);
@@ -129,8 +128,7 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
       throw badGateway();
     }
 
-    // The provider's answer goes back as it came: its status, its body, its content type. The
-    // marker is the only header the proxy adds.
+    // The provider's answer goes back as it came: its status, its body, its content type.
     const answerHeaders = new Headers({ [FROM_PROVIDER_HEADER]: "1" });
     const contentType = answer.headers.get("content-type");
     if (contentType !== null) answerHeaders.set("content-type", contentType);
