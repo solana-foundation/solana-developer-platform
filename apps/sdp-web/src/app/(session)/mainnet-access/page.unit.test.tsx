@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-import * as clerkSdk from "@clerk/nextjs";
 import type { MainnetAccess } from "@sdp/types/mainnet-access";
 import type { OrganizationRole } from "@sdp/types/roles";
 import { cleanup, render, screen } from "@testing-library/react";
@@ -8,6 +7,7 @@ import * as mainnetLoad from "@/app/(session)/dashboard/[projectId]/settings/mai
 import * as sdpApi from "@/lib/sdp-api";
 import { nextNavigationMock, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { EnglishI18n } from "@/test/i18n";
+import * as accountActions from "./mainnet-access-account-actions";
 import MainnetAccessPage from "./page";
 
 const state = vi.hoisted(() => {
@@ -30,24 +30,11 @@ vi.mock("@/flags", () => ({
   betaLabel: async () => state.betaLabel,
 }));
 
-/** The page's organization picker is SDP's own over Clerk's hooks, never Clerk's switcher. */
-function spyOnClerkOrganizations() {
-  const acme = { id: "org_test_acme", name: "Acme" };
-  const globex = { id: "org_test_globex", name: "Globex" };
-  vi.mocked(vi.spyOn(clerkSdk, "useClerk"), { partial: true }).mockReturnValue({
-    signOut: vi.fn(),
-  });
-  // SAFETY: the picker reads only the active organization's id and name, and the memberships'
-  // organization ids and names; Clerk's loaded-state unions demand whole resources.
-  vi.spyOn(clerkSdk, "useOrganization").mockReturnValue({
-    organization: acme,
-  } as unknown as ReturnType<typeof clerkSdk.useOrganization>);
-  // SAFETY: as above, for the membership list.
-  vi.spyOn(clerkSdk, "useOrganizationList").mockReturnValue({
-    isLoaded: true,
-    setActive: vi.fn(),
-    userMemberships: { data: [{ organization: acme }, { organization: globex }] },
-  } as unknown as ReturnType<typeof clerkSdk.useOrganizationList>);
+/** The page's account actions read Clerk; their own test drives them from plain values. */
+function stubAccountActions() {
+  vi.spyOn(accountActions, "MainnetAccessAccountActions").mockReturnValue(
+    <button type="button">Sign out</button>
+  );
 }
 
 const LOCKED: MainnetAccess = {
@@ -75,7 +62,7 @@ async function renderPage() {
 }
 
 beforeEach(() => {
-  spyOnClerkOrganizations();
+  stubAccountActions();
   resetDashboardNavigation();
   state.orgId = "org_clerk_test";
   state.sandboxOnBeta = false;
@@ -119,7 +106,6 @@ describe("mainnet request page", () => {
     ).toBeTruthy();
     expect(screen.getByRole("button", { name: "Request mainnet access" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Sign out" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Acme" })).toBeTruthy();
     const sandbox = screen.getByRole("link", { name: "Try the sandbox" });
     expect(sandbox.getAttribute("href")).toBe("https://platform-devnet.solana.com");
     expect(sandbox.getAttribute("target")).toBe("_blank");

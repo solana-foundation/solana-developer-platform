@@ -14,6 +14,12 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { useTranslations } from "@/i18n/provider";
 
+/** An organization the picker offers: all it shows and switches by. */
+export interface PickableOrganization {
+  id: string;
+  name: string;
+}
+
 /**
  * The mainnet request page's way out: another organization of the user's, or signing out. The
  * picker is SDP's own, never Clerk's OrganizationSwitcher: its Manage modal is Clerk's membership
@@ -28,9 +34,6 @@ export function MainnetAccessAccountActions() {
     userMemberships: { infinite: true },
   });
   const [isSwitching, setSwitching] = useState(false);
-  const otherOrganizations = (userMemberships.data ?? [])
-    .map(({ organization }) => organization)
-    .filter((organization) => organization.id !== activeOrganization?.id);
 
   const switchTo = async (organizationId: string) => {
     if (!setActive) return;
@@ -45,8 +48,38 @@ export function MainnetAccessAccountActions() {
   };
 
   return (
+    <AccountActions
+      activeOrganization={activeOrganization ?? null}
+      organizations={isLoaded ? (userMemberships.data ?? []).map((m) => m.organization) : []}
+      isSwitching={isSwitching}
+      onSwitch={(organizationId) => void switchTo(organizationId)}
+      onSignOut={() => void signOut({ redirectUrl: "/" })}
+    />
+  );
+}
+
+/**
+ * The picker and Sign out, from plain values: the other organizations to switch to, under the
+ * active one's name, and both held while a switch runs.
+ */
+export function AccountActions({
+  activeOrganization,
+  organizations,
+  isSwitching,
+  onSwitch,
+  onSignOut,
+}: {
+  activeOrganization: PickableOrganization | null;
+  organizations: readonly PickableOrganization[];
+  isSwitching: boolean;
+  onSwitch: (organizationId: string) => void;
+  onSignOut: () => void;
+}) {
+  const t = useTranslations();
+  const others = organizations.filter((organization) => organization.id !== activeOrganization?.id);
+  return (
     <div className="flex items-center gap-2">
-      {isLoaded && otherOrganizations.length > 0 ? (
+      {others.length > 0 ? (
         <DropdownMenu modal={false}>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="sm" disabled={isSwitching} aria-busy={isSwitching}>
@@ -55,11 +88,11 @@ export function MainnetAccessAccountActions() {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            {otherOrganizations.map((organization) => (
+            {others.map((organization) => (
               <DropdownMenuItem
                 key={organization.id}
                 disabled={isSwitching}
-                onSelect={() => void switchTo(organization.id)}
+                onSelect={() => onSwitch(organization.id)}
               >
                 {organization.name}
               </DropdownMenuItem>
@@ -67,12 +100,7 @@ export function MainnetAccessAccountActions() {
           </DropdownMenuContent>
         </DropdownMenu>
       ) : null}
-      <Button
-        variant="ghost"
-        size="sm"
-        disabled={isSwitching}
-        onClick={() => void signOut({ redirectUrl: "/" })}
-      >
+      <Button variant="ghost" size="sm" disabled={isSwitching} onClick={onSignOut}>
         {t("Shared.dashboardShell.signOut")}
       </Button>
     </div>
