@@ -279,6 +279,10 @@ export function useEarnOperation(
     return release;
   }, [observer, foreground, operationId]);
   const { data: progress } = useSWR<ProgressObservation>(earnQueryKeys.operationProgress(), null);
+  const { data: feed } = useSWR<EarnOperationsFeed>(
+    foreground ? earnQueryKeys.operations() : null,
+    null
+  );
   const { data, error, mutate } = useSWR(
     operationId ? earnQueryKeys.operation(operationId) : null,
     () => earnCoreClient.operation(operationId ?? ""),
@@ -290,7 +294,12 @@ export function useEarnOperation(
       refreshInterval: 0,
     }
   );
-  const operation = currentObservation(operationId, initial, data);
+  const fromFeed = feed?.operations.find(({ id }) => id === operationId);
+  const operation = currentObservation(
+    operationId,
+    initial,
+    currentObservation(operationId, fromFeed, data)
+  );
   useEffect(() => {
     if (operation) observer.recordObservation(operation, foreground === true);
   }, [observer, operation, foreground]);

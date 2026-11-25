@@ -328,6 +328,49 @@ it("does not give activity rows or provider waits their own poll timers", async 
   expect(transport).not.toHaveBeenCalled();
 });
 
+it("updates an open settlement dialog from the shared feed without another poller", async () => {
+  vi.useFakeTimers();
+  const settling: Operation = { ...queued, status: "settling" };
+  let remote = settling;
+  transport.mockImplementation(async (path: string) => {
+    const query = new URL(path, "https://dashboard.test").searchParams;
+    if (query.get("status") === "active") {
+      return page(remote.status === "settling" ? [remote] : []);
+    }
+    return page([remote]);
+  });
+  const onUpdated = vi.fn();
+  const cache = new Map();
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <SWRConfig value={{ ...DASHBOARD_SWR_CONFIG, provider: () => cache }}>{children}</SWRConfig>
+  );
+  const { result } = renderHook(
+    () => ({
+      feed: useEarnOperations(),
+      dialog: useEarnOperation(settling.id, settling, onUpdated, true),
+    }),
+    { wrapper }
+  );
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  expect(result.current.dialog.operation?.status).toBe("settling");
+  expect(transport).toHaveBeenCalledTimes(2);
+  expect(onUpdated).not.toHaveBeenCalled();
+
+  remote = { ...settling, status: "completed", nextAction: null };
+  await act(() => vi.advanceTimersByTimeAsync(15_000));
+  expect(result.current.feed.operations?.find(({ id }) => id === remote.id)?.status).toBe(
+    "completed"
+  );
+  expect(result.current.dialog.operation?.status).toBe("completed");
+  expect(onUpdated).toHaveBeenCalledExactlyOnceWith(remote);
+  expect(transport).toHaveBeenCalledTimes(4);
+  expect(
+    transport.mock.calls.every(
+      ([path]) => new URL(path, "https://dashboard.test").pathname === "/api/dashboard/operations"
+    )
+  ).toBe(true);
+});
+
 it("refreshes an expanded history snapshot without blanking the rows being read", async () => {
   const refreshed = deferred<Response>();
   let historyReads = 0;

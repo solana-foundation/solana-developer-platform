@@ -1,6 +1,6 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { CronRunStatus } from "@sdp/types/cron-runs";
-import { describeError, logEvent } from "@/runtime/money-path-events";
+import { describeError, logEvent, type MoneyPathEvent } from "@/runtime/money-path-events";
 
 export const CRON_RUN_EVENT = "sdp_cron_run";
 
@@ -36,19 +36,19 @@ const CRON_RUN_LOG_LEVELS = {
  * @param record - The slot's outcome.
  */
 export function logCronRun(registration: CronRegistration, record: CronRunRecord): void {
-  const base = {
+  const base: MoneyPathEvent = {
     event: CRON_RUN_EVENT,
     cron: registration.cron,
     environment: registration.environment,
     status: record.status,
-    ...(registration.worker === undefined ? {} : { worker: registration.worker }),
-    ...(registration.wakeupOnly === true ? { wakeup_only: true } : {}),
     // Transitional: the pre-ADR-0011 field, kept for one release so the live sdp-infra alerts
     // (keyed on `jsonPayload_monitor`) and the renamed ones (keyed on `cron`) both match whatever
     // order the API and alert deploys land in, and across a rollback. Drop it once the renamed
     // alerts are live (HOO-2165).
     monitor: `sdp-api-${registration.cron}`,
   };
+  if (registration.worker !== undefined) base.worker = registration.worker;
+  if (registration.wakeupOnly === true) base.wakeup_only = true;
   switch (record.status) {
     case "ok":
       logEvent(CRON_RUN_LOG_LEVELS.ok, { ...base, duration_ms: record.durationMs });

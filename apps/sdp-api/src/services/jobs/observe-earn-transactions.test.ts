@@ -1,7 +1,9 @@
+import type { EarnVaultQueuedWithdrawProvider } from "@sdp/earn/types";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import * as solanaRpc from "@sdp/rpc/solana";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
+import { SOL_MINT, wellKnownMint } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
@@ -11,6 +13,8 @@ import {
 } from "@/db/repositories/earn-observation-claims";
 import { createPostgresEarnVaultWithdrawalRequestsRepository } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import { logEvent } from "@/runtime/money-path-events";
+import * as executionRegistry from "@/services/earn/execution-registry";
+import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { reconcileEarnVaultMovementBatch } from "@/services/earn/vault-movement-reconciliation.service";
 import {
   observeEarnWithdrawalActionStatus,
@@ -25,18 +29,14 @@ import { deferred } from "@/test/helpers/deferred";
 import { env } from "@/test/helpers/env";
 import { syntheticSignature } from "@/test/helpers/parsed-transactions";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { observeEarnTransactions } from "./observe-earn-transactions";
 
-const decodeEvents = vi.hoisted(() => vi.fn());
-const readQueuedRequest = vi.hoisted(() => vi.fn());
-vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/earn/execution-registry")>()),
-  resolveVaultQueuedWithdrawClient: () => ({
-    decodeQueuedWithdrawalLifecycleEvents: decodeEvents,
-    readQueuedWithdrawalRequest: readQueuedRequest,
-  }),
-}));
+const decodeEvents =
+  vi.fn<EarnVaultQueuedWithdrawProvider["decodeQueuedWithdrawalLifecycleEvents"]>();
+const readQueuedRequest = vi.fn<EarnVaultQueuedWithdrawProvider["readQueuedWithdrawalRequest"]>();
+const USDC_MINT = required(wellKnownMint("USDC", "mainnet-beta"));
 
 const ORG = "org_recent_vault";
 const USER = "user_recent_vault";
@@ -62,8 +62,8 @@ async function seedMovement(provider = "veda") {
     provider,
     custodyWalletId: WALLET,
     vaultAddress: `vault_${sequence}`,
-    shareMint: "So11111111111111111111111111111111111111112",
-    tokenMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    shareMint: SOL_MINT,
+    tokenMint: USDC_MINT,
     label: "Observed vault",
     requestedAmount: "1",
     sourceAddress: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
@@ -90,10 +90,9 @@ async function seedWithdrawal() {
     environment: "sandbox",
     provider: "veda",
     positionId: deposit.position.id,
-    // SAFETY: seedMovement creates a direct vault holding with the supplied vault address.
-    vaultAddress: deposit.position.vault_address as string,
+    vaultAddress: required(deposit.position.vault_address),
     custodyWalletId: WALLET,
-    shareMint: "So11111111111111111111111111111111111111112",
+    shareMint: SOL_MINT,
     requestedShares: "1",
     walletAddress: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
     signature: syntheticSignature(sequence),
@@ -113,6 +112,14 @@ beforeEach(async () => {
   sequence = 0;
   decodeEvents.mockReset();
   readQueuedRequest.mockReset();
+  const client = required(
+    runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+      executionRegistry.resolveVaultQueuedWithdrawClient(env, "veda", createVaultDeadline())
+    )
+  );
+  vi.spyOn(client, "decodeQueuedWithdrawalLifecycleEvents").mockImplementation(decodeEvents);
+  vi.spyOn(client, "readQueuedWithdrawalRequest").mockImplementation(readQueuedRequest);
+  vi.spyOn(executionRegistry, "resolveVaultQueuedWithdrawClient").mockReturnValue(client);
   const db = getDb(env);
   await db
     .prepare(
@@ -171,10 +178,9 @@ async function seedQueuedAction() {
     positionId: deposited.position.id,
     custodyWalletId: WALLET,
     ownerAddress: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
-    // Each concurrent fixture binds the position it actually created.
-    vaultAddress: deposited.position.vault_address as string,
-    tokenMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-    shareMint: "So11111111111111111111111111111111111111112",
+    vaultAddress: required(deposited.position.vault_address),
+    tokenMint: USDC_MINT,
+    shareMint: SOL_MINT,
     requestAddress: `queue_address_${sequence}`,
     mechanism: "solver_queue" as const,
     shares: "1",
@@ -208,7 +214,9 @@ function finalized() {
   }));
 }
 
-function queuedEvents(request: Awaited<ReturnType<typeof seedQueuedAction>>["request"]) {
+function queuedEvents(
+  request: Awaited<ReturnType<typeof seedQueuedAction>>["request"]
+): Awaited<ReturnType<EarnVaultQueuedWithdrawProvider["decodeQueuedWithdrawalLifecycleEvents"]>> {
   return [
     {
       kind: "withdrawalRequested",
@@ -621,7 +629,9 @@ function queueRecovery() {
   );
 }
 
-function liveQueuedRequest(request: Awaited<ReturnType<typeof seedQueuedAction>>["request"]) {
+function liveQueuedRequest(
+  request: Awaited<ReturnType<typeof seedQueuedAction>>["request"]
+): Awaited<ReturnType<EarnVaultQueuedWithdrawProvider["readQueuedWithdrawalRequest"]>> {
   return {
     status: "pending",
     requestAddress: request.request_address,
@@ -635,8 +645,8 @@ function liveQueuedRequest(request: Awaited<ReturnType<typeof seedQueuedAction>>
       nonce: "7",
       assets: request.quoted_assets,
       creationTimestamp: "1700000000",
-      maturityTimestamp: request.maturity_timestamp,
-      deadlineTimestamp: request.deadline_timestamp,
+      maturityTimestamp: required(request.maturity_timestamp),
+      deadlineTimestamp: required(request.deadline_timestamp),
     },
   };
 }
@@ -674,13 +684,11 @@ describe("queued recovery shared evidence", () => {
   it("shares one height and one corroborating status read across expired action chunks", async () => {
     const seeded = await Promise.all(Array.from({ length: 12 }, () => seedQueuedAction()));
     const requests = new Map(seeded.map(({ request }) => [request.request_address, request]));
-    readQueuedRequest.mockImplementation(
-      async (_scope: unknown, input: { requestAddress: string }) => {
-        const request = requests.get(input.requestAddress);
-        if (!request) throw new Error("Unknown queued fixture");
-        return liveQueuedRequest(request);
-      }
-    );
+    readQueuedRequest.mockImplementation(async (_scope, input) => {
+      const request = requests.get(input.requestAddress);
+      if (!request) throw new Error("Unknown queued fixture");
+      return liveQueuedRequest(request);
+    });
     rpc.respondSignatureStatusesAt(5_000, () => null);
     rpc.answer("getEpochInfo", epochInfoResult({ absoluteSlot: 5_000, blockHeight: 101 }));
     await queueRecovery();
@@ -735,14 +743,12 @@ describe("queued recovery shared evidence", () => {
     const seeded = await Promise.all(Array.from({ length: 16 }, () => seedQueuedAction()));
     const requests = new Map(seeded.map(({ request }) => [request.request_address, request]));
     const providerRead = deferred<void>();
-    readQueuedRequest.mockImplementation(
-      async (_scope: unknown, input: { requestAddress: string }) => {
-        await providerRead.promise;
-        const request = requests.get(input.requestAddress);
-        if (!request) throw new Error("Unknown queued fixture");
-        return liveQueuedRequest(request);
-      }
-    );
+    readQueuedRequest.mockImplementation(async (_scope, input) => {
+      await providerRead.promise;
+      const request = requests.get(input.requestAddress);
+      if (!request) throw new Error("Unknown queued fixture");
+      return liveQueuedRequest(request);
+    });
     rpc.respondSignatureStatusesAt(5_000, () => null);
     rpc.answer("getEpochInfo", epochInfoResult({ absoluteSlot: 5_000, blockHeight: 101 }));
     const recovery = queueRecovery();

@@ -244,8 +244,8 @@ export function startCron(deps: CronDeps): CronHandle | null {
       const registration: CronRegistration = {
         cron: definition.name,
         environment,
-        ...(definition === operationsCron ? { wakeupOnly: true as const } : {}),
       };
+      if (definition === operationsCron) registration.wakeupOnly = true;
       // The in-flight run's own token, so a run abandoned at the deadline that settles later
       // cannot free the registration from under its successor.
       let inFlight: symbol | null = null;

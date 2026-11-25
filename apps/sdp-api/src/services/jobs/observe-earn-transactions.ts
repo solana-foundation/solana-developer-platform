@@ -127,11 +127,25 @@ export async function observeEarnTransactions(
   {
     const groups = new Map<string, { targets: Target[]; delayMs: number }>();
     for (const target of targets) {
-      const delayMs = statusReadFailed
-        ? 5_000
-        : attempted.has(target.row.id)
-          ? earnObservationDelay(target.row.created_at, failed.has(target.row.id))
-          : 0;
+      let release: "unattempted" | "attempted" | "status_read_failed" = "unattempted";
+      if (attempted.has(target.row.id)) release = "attempted";
+      if (statusReadFailed) release = "status_read_failed";
+      let delayMs: number;
+      switch (release) {
+        case "unattempted":
+          delayMs = 0;
+          break;
+        case "attempted":
+          delayMs = earnObservationDelay(target.row.created_at, failed.has(target.row.id));
+          break;
+        case "status_read_failed":
+          delayMs = 5_000;
+          break;
+        default: {
+          const unreachable: never = release;
+          throw new Error(`Unhandled observation release: ${unreachable}`);
+        }
+      }
       const key = `${target.kind}:${target.token}:${delayMs}`;
       const group = groups.get(key);
       if (group === undefined) groups.set(key, { targets: [target], delayMs });

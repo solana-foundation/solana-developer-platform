@@ -841,6 +841,12 @@ export const EARN_LANDED_VAULT_WITHDRAWAL_ACTION_STATUSES = [
   "finalized",
 ] as const satisfies readonly EarnVaultWithdrawalActionStatus[];
 
+/** Actions with a confirmed or irreversible chain observation, beyond submission alone. */
+export const EARN_CONFIRMED_VAULT_WITHDRAWAL_ACTION_STATUSES = [
+  "confirmed",
+  "finalized",
+] as const satisfies readonly EarnVaultWithdrawalActionStatus[];
+
 /** Legal action transitions, the vault-direct movement matrix with its insert state. */
 export const EARN_VAULT_WITHDRAWAL_ACTION_TRANSITIONS = {
   requested: [],

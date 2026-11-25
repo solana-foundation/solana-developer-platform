@@ -1,5 +1,8 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
-import { EARN_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES } from "@sdp/types/earn";
+import {
+  EARN_CONFIRMED_VAULT_WITHDRAWAL_ACTION_STATUSES,
+  EARN_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES,
+} from "@sdp/types/earn";
 import { TERMINAL_OPERATION_STATUSES } from "@sdp/types/operations";
 import type { DatabaseClient } from "@/db/client";
 import { sqlLiteralList } from "@/db/postgres-utils";
@@ -67,7 +70,7 @@ export async function readEarnRecoveryHealth(
         AND NOT ${FINALIZED_CURRENT_REDEMPTION_RELEASE_COVERS_REQUEST_SQL}
         AND EXISTS (SELECT 1 FROM earn_vault_withdrawal_request_actions action
           WHERE action.withdrawal_request_id = request.id AND action.action = 'request'
-            AND action.status IN ('confirmed', 'finalized'))
+            AND action.status IN (${sqlLiteralList(EARN_CONFIRMED_VAULT_WITHDRAWAL_ACTION_STATUSES)}))
       UNION ALL
       SELECT 'queued_delivery', MIN(CASE
         WHEN request.deadline_timestamp IS NOT NULL THEN to_timestamp(request.deadline_timestamp::double precision)
