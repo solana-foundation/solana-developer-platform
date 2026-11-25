@@ -253,9 +253,20 @@ describe("readWalletBalances", () => {
     expect(accountReads).toHaveLength(1);
 
     vi.advanceTimersByTime(10_000);
-    void readWalletBalances(rpc, SCOPE, [wallet(1)], "req_expired");
+    const expired = readWalletBalances(rpc, SCOPE, [wallet(1)], "req_expired");
     await flush();
     expect(accountReads).toHaveLength(2);
+    // The expired read asks both token programs again with the wallet, so the
+    // assertion covers the wallet's whole flow, not just the SOL account read.
+    expect(tokenReads.slice(2).map((read) => read.owner)).toEqual([
+      ownerAddress(1),
+      ownerAddress(1),
+    ]);
+    required(accountReads[1]).resolve({ value: [{ lamports: 3 }] });
+    answerTokenReadsEmpty(tokenReads.slice(2));
+    expect((await expired).get("cwlt_1")).toEqual([
+      { token: "SOL", mint: SOL_MINT, amount: "3", uiAmount: "0.000000003", decimals: 9 },
+    ]);
   });
 
   it("does not cache a read that finished after the cache was cleared", async () => {
@@ -268,8 +279,13 @@ describe("readWalletBalances", () => {
     answerTokenReadsEmpty(tokenReads);
     await stale;
 
-    void readWalletBalances(rpc, SCOPE, [wallet(1)], "req_after_clear");
+    const afterClear = readWalletBalances(rpc, SCOPE, [wallet(1)], "req_after_clear");
     await flush();
     expect(accountReads).toHaveLength(2);
+    required(accountReads[1]).resolve({ value: [{ lamports: 3 }] });
+    answerTokenReadsEmpty(tokenReads.slice(2));
+    expect((await afterClear).get("cwlt_1")).toEqual([
+      { token: "SOL", mint: SOL_MINT, amount: "3", uiAmount: "0.000000003", decimals: 9 },
+    ]);
   });
 });
