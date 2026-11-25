@@ -1,20 +1,30 @@
-import type { SafeProxyCaller } from "@sdp/safe-proxy-endpoints/callers";
+import { createHash, randomUUID } from "node:crypto";
+import { SAFE_PROXY_CALLERS, type SafeProxyCaller } from "@sdp/safe-proxy-endpoints/callers";
 import { matchEndpoint } from "@sdp/safe-proxy-endpoints/match";
 import {
+  LOCAL_CALLER_HEADER,
   REQUEST_ID_HEADER,
   RESULT_HEADER,
   SAFE_PROXY_CODES,
   type SafeProxyCode,
 } from "@sdp/safe-proxy-endpoints/protocol";
-import { SAFE_PROXY_PROVIDERS } from "@sdp/safe-proxy-endpoints/providers";
+import { SAFE_PROXY_PROVIDERS, type SafeProxyProvider } from "@sdp/safe-proxy-endpoints/providers";
+import { type CallerIdentity, CallerIdentityError } from "@sdp/service-call/caller-identity";
 import type { SafeProxyForwardResult } from "@sdp/types/safe-proxy";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { authHeaders, type ProviderCredentials } from "./provider-auth";
+import { SignJWT } from "jose";
+
+type IdentifyCaller = (headers: Headers) => Promise<SafeProxyCaller>;
+
+export interface ProviderCredentials {
+  fireblocks: { apiKey: string; privateKey: CryptoKey };
+  privy: { appId: string; appSecret: string };
+}
 
 export interface AppDependencies {
-  identifyCaller: (headers: Headers) => Promise<SafeProxyCaller>;
+  identifyCaller: IdentifyCaller;
   credentials: ProviderCredentials;
   fetch: typeof fetch;
   providerTimeoutMs: number;
@@ -141,7 +151,7 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
         if (value !== undefined) headers.set(name, value);
       }
       if (body !== "") headers.set("content-type", "application/json");
-      const auth = await authHeaders(provider, dependencies.credentials, { path: target, body });
+      const auth = await authHeaders(provider, dependencies.credentials, target, body);
       for (const [name, value] of Object.entries(auth)) headers.set(name, value);
 
       // From here the request may have reached the provider: a failure is no answer, never a
@@ -179,4 +189,77 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
   });
 
   return app;
+}
+
+// On Cloud Run: the caller is the service account its Google identity token names.
+export function createTokenCallerCheck(options: {
+  verify: (authorizationHeader: string | undefined) => Promise<CallerIdentity>;
+  callerEmails: Record<SafeProxyCaller, string>;
+}): IdentifyCaller {
+  return async (headers) => {
+    let identity: CallerIdentity;
+    try {
+      identity = await options.verify(headers.get("authorization") ?? undefined);
+    } catch (error) {
+      if (!(error instanceof CallerIdentityError)) throw error;
+      throw new Refusal(
+        error.code === "keys_unavailable" ? "caller_check_unavailable" : "unauthenticated"
+      );
+    }
+    const caller = SAFE_PROXY_CALLERS.find((name) => options.callerEmails[name] === identity.email);
+    if (caller === undefined) throw new Refusal("caller_not_allowed");
+    return caller;
+  };
+}
+
+// Locally: the caller addresses the loopback address and port the proxy listens on, and names
+// itself.
+export function createLocalCallerCheck(listensOn: {
+  hostname: string;
+  port: number;
+}): IdentifyCaller {
+  const host = `${listensOn.hostname}:${listensOn.port}`;
+  return async (headers) => {
+    const named = headers.get(LOCAL_CALLER_HEADER);
+    const caller = SAFE_PROXY_CALLERS.find((name) => name === named);
+    if (headers.get("host") !== host || caller === undefined) throw new Refusal("unauthenticated");
+    return caller;
+  };
+}
+
+type FireblocksAuthHeaders = { Authorization: string; "X-API-Key": string };
+type PrivyAuthHeaders = { Authorization: string; "privy-app-id": string };
+
+const FIREBLOCKS_TOKEN_LIFETIME_SECONDS = 30;
+
+// `target` and `body` are the request exactly as it is sent: the Fireblocks token covers both.
+async function authHeaders(
+  provider: SafeProxyProvider,
+  credentials: ProviderCredentials,
+  target: string,
+  body: string
+): Promise<FireblocksAuthHeaders | PrivyAuthHeaders> {
+  switch (provider) {
+    case "fireblocks": {
+      const { apiKey, privateKey } = credentials.fireblocks;
+      const bodyHash = createHash("sha256").update(body, "utf8").digest("hex");
+      const now = Math.floor(Date.now() / 1000);
+      const token = await new SignJWT({ bodyHash, nonce: randomUUID(), uri: target })
+        .setProtectedHeader({ alg: "RS256" })
+        .setSubject(apiKey)
+        .setIssuedAt(now)
+        .setExpirationTime(now + FIREBLOCKS_TOKEN_LIFETIME_SECONDS)
+        .sign(privateKey);
+      return { Authorization: `Bearer ${token}`, "X-API-Key": apiKey };
+    }
+    case "privy": {
+      const { appId, appSecret } = credentials.privy;
+      const basic = Buffer.from(`${appId}:${appSecret}`, "utf8").toString("base64");
+      return { Authorization: `Basic ${basic}`, "privy-app-id": appId };
+    }
+    default: {
+      const unreachable: never = provider;
+      return unreachable;
+    }
+  }
 }
