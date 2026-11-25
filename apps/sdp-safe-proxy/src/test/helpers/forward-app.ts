@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
 import type { TestContext } from "node:test";
 import { createLocalJWKSet, importPKCS8, type JWTVerifyGetKey, SignJWT } from "jose";
+import { z } from "zod";
 import { type AppDependencies, createApp, type ProviderCredentials } from "@/app";
-import type { SafeProxyCaller } from "@/endpoints/callers";
-import { googleCaller } from "@/middleware";
+import { SAFE_PROXY_CALLERS, type SafeProxyCaller } from "@/endpoints/callers";
+import { googleCaller, type RequestLogLine } from "@/middleware";
 
 const AUDIENCE = "https://safe-proxy.mock.invalid";
 const CALLER_EMAILS = {
@@ -40,6 +41,18 @@ export interface ProviderCall {
   body: string | null;
   redirect: RequestInit["redirect"];
 }
+
+// Strict, so a key the written line gains fails the parse; typed against the line, so a field the
+// type gains fails the typecheck.
+const LogLine = z.strictObject({
+  request_id: z.string(),
+  caller: z.enum(SAFE_PROXY_CALLERS).nullable(),
+  provider: z.string().nullable(),
+  endpoint: z.string().nullable(),
+  error: z.string().nullable(),
+  status: z.number(),
+  duration_ms: z.number(),
+}) satisfies z.ZodType<RequestLogLine>;
 
 type IdentityToken = SafeProxyCaller | "stranger" | "forged";
 
@@ -81,7 +94,7 @@ async function identityToken(token: IdentityToken): Promise<string> {
 // Takes over the platform's `fetch` and `console.log` until the test ends, so build one app per test.
 export function createForwardApp(t: TestContext, options: ForwardAppOptions = {}) {
   const calls: ProviderCall[] = [];
-  const logged: object[] = [];
+  const logged: Omit<RequestLogLine, "duration_ms">[] = [];
 
   const provider: typeof fetch = async (input, init) => {
     assert.ok(init, "the provider call carries its options");
@@ -96,13 +109,9 @@ export function createForwardApp(t: TestContext, options: ForwardAppOptions = {}
     return (options.answer ?? (() => new Response('{"id":"wallet-1"}')))(call);
   };
   t.mock.method(globalThis, "fetch", provider);
-  t.mock.method(console, "log", (text: unknown) => {
-    assert.ok(typeof text === "string", "a log line is written as text");
-    const line: unknown = JSON.parse(text);
-    assert.ok(typeof line === "object" && line !== null && "duration_ms" in line, "a log line");
-    // The duration is the one field a test cannot fix in advance.
-    const { duration_ms, ...rest } = line;
-    assert.equal(typeof duration_ms, "number");
+  t.mock.method(console, "log", (text: string) => {
+    // The duration is the one field a test cannot fix in advance: the schema holds it to a number.
+    const { duration_ms, ...rest } = LogLine.parse(JSON.parse(text));
     logged.push(rest);
   });
 
