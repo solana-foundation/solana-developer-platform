@@ -2,7 +2,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { type CallerIdentity, CallerIdentityError } from "@sdp/metadata-server/receiver";
 import { SAFE_PROXY_CALLERS, type SafeProxyCaller } from "@sdp/safe-proxy-endpoints/callers";
 import { matchEndpoint } from "@sdp/safe-proxy-endpoints/match";
-import { LOCAL_CALLER_HEADER, REQUEST_ID_HEADER } from "@sdp/safe-proxy-endpoints/protocol";
+import {
+  FROM_PROVIDER_HEADER,
+  LOCAL_CALLER_HEADER,
+  REQUEST_ID_HEADER,
+} from "@sdp/safe-proxy-endpoints/protocol";
 import { SAFE_PROXY_PROVIDERS, type SafeProxyProvider } from "@sdp/safe-proxy-endpoints/providers";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -125,12 +129,12 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
       throw badGateway();
     }
 
-    // The provider's answer goes back as it came: its status, its body, its content type.
+    // The provider's answer goes back as it came: its status, its body, its content type. The
+    // marker is the only header the proxy adds.
+    const answerHeaders = new Headers({ [FROM_PROVIDER_HEADER]: "1" });
     const contentType = answer.headers.get("content-type");
-    return new Response(answer.body, {
-      status: answer.status,
-      headers: contentType === null ? undefined : { "content-type": contentType },
-    });
+    if (contentType !== null) answerHeaders.set("content-type", contentType);
+    return new Response(answer.body, { status: answer.status, headers: answerHeaders });
   });
 
   app.notFound(() => {
