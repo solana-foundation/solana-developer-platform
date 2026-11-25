@@ -19,7 +19,15 @@ export type MatchResult =
       code: "provider_not_allowed" | "endpoint_not_allowed" | "body_not_allowed";
     };
 
-const QUERY_PAIR = /^([A-Za-z]+)=((?:[A-Za-z0-9._~*+-]|%[0-9A-Fa-f]{2})+)$/;
+// A query is `name=value` pairs joined by `&`, each name at most once.
+const querySchema = z
+  .array(
+    z.strictObject({
+      name: z.string().regex(/^[A-Za-z]+$/),
+      value: z.string().regex(/^(?:[A-Za-z0-9._~*+-]|%[0-9A-Fa-f]{2})+$/),
+    })
+  )
+  .refine((pairs) => new Set(pairs.map((pair) => pair.name)).size === pairs.length);
 
 const providerSchema = z.enum(
   // SAFETY: Object.keys of a const object returns exactly its declared keys.
@@ -27,13 +35,13 @@ const providerSchema = z.enum(
 );
 
 function queryNames(query: string): string[] | null {
-  const names: string[] = [];
-  for (const pair of query.split("&")) {
-    const name = QUERY_PAIR.exec(pair)?.[1];
-    if (name === undefined || names.includes(name)) return null;
-    names.push(name);
-  }
-  return names;
+  const pairs = querySchema.safeParse(
+    query.split("&").map((pair) => {
+      const [name, ...value] = pair.split("=");
+      return { name, value: value.join("=") };
+    })
+  );
+  return pairs.success ? pairs.data.map((pair) => pair.name) : null;
 }
 
 function pathMatches(endpoint: AllowedEndpoint, segments: string[], query: string[]): boolean {

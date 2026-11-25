@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { AllowedEndpoint, PathParameter } from "./endpoint";
 
 export type PatternSegment =
@@ -5,7 +6,7 @@ export type PatternSegment =
   | { is: "parameter"; parameter: PathParameter };
 
 // Every path segment Safe Proxy forwards is made of these characters only.
-const SEGMENT = /^[A-Za-z0-9_-]+$/;
+const segmentsSchema = z.array(z.string().regex(/^[A-Za-z0-9_-]+$/));
 
 export const FORMAT_PATTERNS = {
   digits: /^[0-9]{1,100}$/,
@@ -14,8 +15,8 @@ export const FORMAT_PATTERNS = {
 
 export function pathSegments(path: string): string[] | null {
   if (!path.startsWith("/")) return null;
-  const segments = path.slice(1).split("/");
-  return segments.every((segment) => SEGMENT.test(segment)) ? segments : null;
+  const segments = segmentsSchema.safeParse(path.slice(1).split("/"));
+  return segments.success ? segments.data : null;
 }
 
 export function patternSegments(endpoint: AllowedEndpoint): PatternSegment[] {
