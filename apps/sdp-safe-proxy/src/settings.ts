@@ -2,10 +2,7 @@ import { z } from "zod";
 import type { ProviderCredentials } from "./provider-auth";
 
 const port = z.coerce.number().int().min(1).max(65535);
-const positiveInteger = z
-  .string()
-  .regex(/^[1-9][0-9]{0,8}$/)
-  .transform(Number);
+const positiveInteger = z.coerce.number().int().positive();
 
 // The key may arrive on one line with its line breaks written as `\n`.
 const pkcs8PrivateKey = z
@@ -18,7 +15,7 @@ const PLATFORM_REQUEST_TIMEOUT_MS = 300_000;
 const IDENTITY_TOKEN_LIFETIME_SECONDS = 3600;
 
 const sharedSettings = {
-  SAFE_PROXY_PROVIDER_TIMEOUT_MS: positiveInteger.pipe(z.number().lt(PLATFORM_REQUEST_TIMEOUT_MS)),
+  SAFE_PROXY_PROVIDER_TIMEOUT_MS: positiveInteger.lt(PLATFORM_REQUEST_TIMEOUT_MS),
   PRIVY_APP_ID: z.string().min(1),
   PRIVY_APP_SECRET: z.string().min(1),
   FIREBLOCKS_API_KEY: z.string().min(1),
@@ -33,9 +30,7 @@ const serverSettingsSchema = z
     SAFE_PROXY_AUDIENCE: z.url({ protocol: /^https$/ }),
     SAFE_PROXY_API_CALLER: z.email(),
     SAFE_PROXY_CRON_CALLER: z.email(),
-    SAFE_PROXY_MAX_TOKEN_AGE_SECONDS: positiveInteger.pipe(
-      z.number().max(IDENTITY_TOKEN_LIFETIME_SECONDS)
-    ),
+    SAFE_PROXY_MAX_TOKEN_AGE_SECONDS: positiveInteger.max(IDENTITY_TOKEN_LIFETIME_SECONDS),
   })
   .refine((settings) => settings.SAFE_PROXY_API_CALLER !== settings.SAFE_PROXY_CRON_CALLER, {
     path: ["SAFE_PROXY_CRON_CALLER"],
