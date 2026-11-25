@@ -364,9 +364,10 @@ Positive signatures receive fenced ten-second processing leases; scan tokens
 only fence scheduling writes. At most two passes and four reducers per pass run
 per environment and replica. Direct and queued work share the processing budget
 fairly. Recent pending transactions retry after 250 ms and older work after 30
-seconds. Failed reads retry after five seconds for rows created within two
-minutes. An older failure clears its fast hint and leaves the obligation with
-minute recovery. Signature misses release their scan tokens before receipt or
+seconds. A failed shared status read keeps every row scheduled after five
+seconds. Individual projection failures retry after five seconds within two
+minutes; older projection failures clear their fast hints and stay with minute
+recovery. Signature misses release their scan tokens before receipt or
 provider work, leaving rebroadcast and expiry recovery available while positive
 observations settle. Obsolete queued hints retire in bounded indexed pages
 without changing financial history. Fast observation never signs, broadcasts or
@@ -440,6 +441,8 @@ then backs off as work ages. Completion refreshes the affected position and
 wallet together with the movement's read floor. Three successful batch reads
 that omit an operation stop its automatic watch and report unavailability only
 for that ID. Stale feed rows cannot restart it; reopening its dialog can retry.
+Retired foreground watches hand off to the active feed after two minutes. A
+subsequent feed read that loses the operation can start a missing-row watch.
 Transport failures keep their existing backoff and never imply a missing row.
 Detail reads retain a bounded observation-only chain read-through. Neither UI
 polling nor a lost notification is required for recovery, and stopping new Earn

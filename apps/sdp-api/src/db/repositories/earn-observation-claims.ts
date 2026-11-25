@@ -14,9 +14,11 @@ import { FINALIZED_CURRENT_REDEMPTION_RELEASE_COVERS_REQUEST_SQL } from "./earn-
 export type EarnObservationKind = "movement" | "withdrawal_action";
 
 /** Recovery can perform slower provider reads; fast projections have a four-second pass budget. */
-const EARN_RECOVERY_LEASE_SECONDS = 60;
+export const EARN_RECOVERY_LEASE_SECONDS = 60;
 /** Four-second fast pass plus bounded projection and release headroom. */
 export const EARN_FAST_OBSERVATION_LEASE_SECONDS = 10;
+/** Shared transport failures retry without retiring otherwise healthy rows. */
+export const EARN_OBSERVATION_RETRY_MS = 5_000;
 
 const tables = {
   movement: "earn_movements",
@@ -117,7 +119,7 @@ export async function claimSelectedEarnObservations(
   db: DatabaseClient,
   kind: EarnObservationKind,
   rows: readonly { id: string; organization_id: string; environment: SdpEnvironment }[],
-  leaseSeconds = EARN_RECOVERY_LEASE_SECONDS
+  leaseSeconds: number
 ): Promise<{ rows: Record<string, unknown>[]; ids: Set<string>; token: string }> {
   const token = randomUUID();
   const claimed = await db.queryMany<{ id: string } & Record<string, unknown>>(
@@ -205,6 +207,6 @@ export async function releaseEarnObservations(
 export function earnObservationDelay(createdAt: string, failed: boolean): number | null {
   const recent = Date.now() - Date.parse(createdAt) < 120_000;
   // Old failing work leaves the hot lane; minute recovery remains responsible.
-  if (failed) return recent ? 5_000 : null;
+  if (failed) return recent ? EARN_OBSERVATION_RETRY_MS : null;
   return recent ? 250 : 30_000;
 }

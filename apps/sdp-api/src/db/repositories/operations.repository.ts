@@ -36,6 +36,18 @@ import { conflict, internalError, notFound } from "@/lib/errors";
 import { type MoneyPrincipal, moneyPrincipalSchema } from "@/lib/money-principal";
 import { OPERATION_WORKER_LEASE_MS } from "@/services/earn/operation-worker-budget";
 
+const RECENT_OPERATION_EXECUTION_SQL = `error IS NULL
+  AND (next_action ->> 'type') IS DISTINCT FROM 'sign_in_provider'
+  AND status IN (${sqlLiteralList(SDP_PROGRESS_OPERATION_STATUSES)})
+  AND EXISTS (SELECT 1 FROM operation_attempts attempt
+    WHERE attempt.operation_id = operations.id
+      AND attempt.organization_id = operations.organization_id
+      AND attempt.project_id = operations.project_id
+      AND attempt.environment = operations.environment
+      AND attempt.action_id = operations.action_id
+      AND attempt.action_version = operations.action_version
+      AND attempt.execution_requested_at::timestamptz > now() - interval '2 minutes')`;
+
 /** Every operation access carries exact tenant, project and cluster scope. */
 export interface OperationScope {
   organizationId: string;
@@ -106,7 +118,7 @@ export interface OperationClaim {
   recoveryRequired: boolean;
   purpose: "execute" | "cancel";
   /** True only for the durable first recovery claim of this accepted attempt. */
-  firstExecutionClaim?: boolean;
+  firstExecutionClaim: boolean;
 }
 
 /** A validated, side-effect-free action ready for display. */
@@ -641,6 +653,7 @@ export function createOperationsRepository(db: DatabaseClient) {
           token,
           fence: record.fence,
           purpose: record.actionPurpose,
+          firstExecutionClaim: false,
           recoveryRequired:
             attempt.dispatchStartedAt !== null ||
             attempt.resourceRef !== null ||
@@ -1045,28 +1058,12 @@ export function createOperationsRepository(db: DatabaseClient) {
         (await db.execute(
           `UPDATE operations SET claim_token = NULL, claim_until = NULL,
            next_check_at = now() + make_interval(secs => CASE
-             WHEN error IS NULL AND (next_action ->> 'type') IS DISTINCT FROM 'sign_in_provider' AND status IN (${sqlLiteralList(SDP_PROGRESS_OPERATION_STATUSES)})
-               AND EXISTS (SELECT 1 FROM operation_attempts attempt
-                 WHERE attempt.operation_id = operations.id
-                   AND attempt.organization_id = operations.organization_id
-                   AND attempt.project_id = operations.project_id
-                   AND attempt.environment = operations.environment
-                   AND attempt.action_id = operations.action_id
-                   AND attempt.action_version = operations.action_version
-                   AND attempt.execution_requested_at::timestamptz > now() - interval '2 minutes') THEN 2
+             WHEN ${RECENT_OPERATION_EXECUTION_SQL} THEN 2
              WHEN status <> ? THEN 15 ELSE
              LEAST(CASE WHEN next_action ->> 'type' = 'sign_in_provider' THEN 60 ELSE 300 END,
                15 * power(2, LEAST(recovery_check_count, 5))) END),
            recovery_check_count = CASE WHEN status <> ? THEN 0
-             WHEN error IS NULL AND (next_action ->> 'type') IS DISTINCT FROM 'sign_in_provider' AND status IN (${sqlLiteralList(SDP_PROGRESS_OPERATION_STATUSES)})
-               AND EXISTS (SELECT 1 FROM operation_attempts attempt
-                 WHERE attempt.operation_id = operations.id
-                   AND attempt.organization_id = operations.organization_id
-                   AND attempt.project_id = operations.project_id
-                   AND attempt.environment = operations.environment
-                   AND attempt.action_id = operations.action_id
-                   AND attempt.action_version = operations.action_version
-                   AND attempt.execution_requested_at::timestamptz > now() - interval '2 minutes') THEN recovery_check_count
+             WHEN ${RECENT_OPERATION_EXECUTION_SQL} THEN recovery_check_count
              ELSE LEAST(recovery_check_count + 1, 5) END
          WHERE id = ? AND ${scopeSql} AND claim_token = ? AND fence = ? AND claim_until > now()`,
           [

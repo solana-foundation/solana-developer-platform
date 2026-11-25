@@ -389,6 +389,28 @@ it("stops starting position groups and proof batches after either reader fails",
   expect(result.current.positions?.[0]?.tokenValue).toBe("10");
 });
 
+it("exposes a failed cold completion refresh through the portfolio error state", async () => {
+  const { requests } = stubPositionReads();
+  const { result } = renderHook(() => useEarnVaultPositions(), { wrapper });
+  await waitFor(() => expect(requests).toHaveLength(1));
+  let failure: Promise<unknown> = Promise.resolve();
+  act(() => {
+    failure = result.current
+      .refresh(["deposit"], new Map([["deposit", "new-position"]]))
+      .catch((cause) => cause);
+  });
+  await waitFor(() => expect(requests).toHaveLength(2));
+  await act(async () => requests[1]?.answer(503));
+  await waitFor(() => expect(requests).toHaveLength(3));
+  await act(async () => {
+    requests[2]?.answer(503);
+    expect(await failure).toBeInstanceOf(Error);
+  });
+  await waitFor(() => expect(result.current.error).toBeInstanceOf(Error));
+  expect(result.current.positions).toBeUndefined();
+  await act(async () => requests[0]?.answer(503));
+});
+
 it("refreshes the full portfolio if completion arrives before the initial collection", async () => {
   const { requests } = stubPositionReads();
   const detail = vi.spyOn(earnCoreClient, "position");

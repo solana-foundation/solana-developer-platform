@@ -35,8 +35,10 @@ rotate candidate cursors. Recovery reads unleased candidates in bulk, then
 leases four fresh rows immediately before reduction; never reserve the full
 RPC batch. Fast scan tokens fence scheduling writes without a processing lease. Only a
 positive signature status can acquire the fast lane's ten-second processing
-lease. Failed reads retry after five seconds for rows created within two minutes;
-older failures clear the fast hint and remain with minute recovery. Scheduling writes must not change public `updated_at`.
+lease. A shared status-read failure keeps every row scheduled after five seconds.
+Individual projection failures retry after five seconds within two minutes;
+older projection failures clear the fast hint and remain with minute recovery.
+Scheduling writes must not change public `updated_at`.
 Fast scans exclude NULL due hints: retire obsolete hints in bounded
 pages without changing financial status, and leave legacy or parked NULL hints
 to minute recovery.

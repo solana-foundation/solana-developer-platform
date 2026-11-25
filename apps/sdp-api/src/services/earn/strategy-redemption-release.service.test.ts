@@ -216,6 +216,7 @@ beforeEach(async () => {
     token: "lease",
     fence: 1,
     recoveryRequired: false,
+    firstExecutionClaim: false,
     purpose: "execute",
   };
   vi.spyOn(repository, "getWalletTransaction").mockImplementation(async () => build);

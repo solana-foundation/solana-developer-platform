@@ -346,13 +346,13 @@ describe("Earn core read contracts", () => {
   });
 
   it.each([
-    { closedCount: 0, expectedReads: 1 },
-    { closedCount: 1, expectedReads: 2 },
-    { closedCount: 2, expectedReads: 2 },
-    { closedCount: 5, expectedReads: 3 },
+    { closedCount: 0, expectedReads: 1, expectedScanned: 2 },
+    { closedCount: 1, expectedReads: 2, expectedScanned: 4 },
+    { closedCount: 2, expectedReads: 2, expectedScanned: 4 },
+    { closedCount: 5, expectedReads: 3, expectedScanned: 5 },
   ])(
     "fills a mixed-source page after $closedCount leading holdings close during hydration",
-    async ({ closedCount, expectedReads }) => {
+    async ({ closedCount, expectedReads, expectedScanned }) => {
       const walletId = await seedWallet();
       const positions = [];
       const ledger = createPostgresEarnMovementsRepository(getDb(env));
@@ -397,7 +397,7 @@ describe("Earn core read contracts", () => {
       expect(body.data.nextCursor === null).toBe(!body.data.hasMore);
       const scanned = readVaultPositions.mock.calls.flatMap((call) => call[1].providerReferences);
       expect(scanned).toEqual(
-        Array.from({ length: Math.min(5, closedCount + 2) }, (_, index) => `paging-${index}`)
+        Array.from({ length: expectedScanned }, (_, index) => `paging-${index}`)
       );
       expect(readVaultPositions).toHaveBeenCalledTimes(expectedReads);
       const remaining: string[] = [];

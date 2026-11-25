@@ -1,12 +1,11 @@
-import { currentClusterScope } from "@sdp/rpc/scope";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { Operation } from "@sdp/types/operations";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { currentDatabaseIdentity } from "@/db/identity";
 import * as notifications from "@/db/operation-notifications";
 import type { OperationClaim, OperationScope } from "@/db/repositories/operations.repository";
 import type { BackgroundRunner } from "@/runtime/background";
-import { getLogContext, getLogger } from "@/runtime/logger";
+import { getLogger } from "@/runtime/logger";
 import * as moneyPathEvents from "@/runtime/money-path-events";
 import * as operations from "@/services/operations.service";
 import { deferred } from "@/test/helpers/deferred";
@@ -125,8 +124,12 @@ afterEach(async () => {
 });
 
 function start(environments: readonly SdpEnvironment[] = ["sandbox"]): OperationWorker {
-  worker = startOperationWorker(env, mocks.bg, environments);
+  worker = startOperationWorker(env, mocks.bg, environments, { run: runTestConsumer });
   return worker;
+}
+
+function runTestConsumer(environment: SdpEnvironment, consume: () => Promise<void>) {
+  return runInClusterScope({ projectId: null, environment }, consume);
 }
 
 function gate() {
@@ -181,7 +184,10 @@ describe("database-notified operation consumers", () => {
 
   it("fans commit, reconnect and scheduled wakes to the observer only for admitted environments", async () => {
     const wakeObserver = vi.fn();
-    worker = startOperationWorker(env, mocks.bg, ["sandbox"], { wakeObserver });
+    worker = startOperationWorker(env, mocks.bg, ["sandbox"], {
+      wakeObserver,
+      run: runTestConsumer,
+    });
     mocks.options().connected();
     mocks.options().wake("sandbox");
     worker.wake("sandbox");
@@ -220,16 +226,10 @@ describe("database-notified operation consumers", () => {
     );
   });
 
-  it("scans after LISTEN and reconnect, restoring only the worker entry identity", async () => {
+  it("scans after LISTEN and reconnect with the claim's recorded principal", async () => {
     const next = claimed("accepted");
     mocks.claim.mockResolvedValueOnce(next);
     mocks.execute.mockImplementation(async (_env, scope, claim) => {
-      expect(currentDatabaseIdentity()).toEqual({
-        kind: "system",
-        component: "cron:reconcile-operations",
-      });
-      expect(currentClusterScope()).toMatchObject({ projectId: null, environment: "sandbox" });
-      expect(getLogContext().cron).toBe("reconcile-operations");
       expect(scope).toEqual(next.scope);
       expect(claim.attempt.principal).toEqual(next.claim.attempt.principal);
       return true;

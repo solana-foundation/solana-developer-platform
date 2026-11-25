@@ -419,7 +419,7 @@ export interface EarnVaultWithdrawalRequestsRepository extends CurrentRedemption
   /** Reserve recovery candidates and return their current state after taking ownership. */
   claimRecoveryObservations(
     rows: readonly EarnVaultWithdrawalRequestActionRow[],
-    leaseSeconds?: number
+    leaseSeconds: number
   ): Promise<{
     rows: EarnVaultWithdrawalRequestActionRow[];
     token: string;

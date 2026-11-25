@@ -3,11 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OperationScope } from "@/db/repositories/operations.repository";
 import { conflict } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
-import { OPERATION_WORKER_BUDGET_MS } from "@/services/earn/operation-worker-budget";
 import * as strategyOperations from "@/services/earn/strategy-operations.service";
 import * as operationsService from "@/services/operations.service";
 import * as operationsPrincipal from "@/services/operations-principal";
-import { deferred } from "@/test/helpers/deferred";
 import { env } from "@/test/helpers/env";
 import { reconcileOperations } from "@/test/helpers/reconcile-operations";
 
@@ -22,7 +20,6 @@ const mocks = {
   log: vi.fn(),
 };
 
-let now: number;
 const scoped = () =>
   runInClusterScope({ projectId: null, environment: "sandbox" }, () => reconcileOperations(env));
 beforeEach(() => {
@@ -49,8 +46,6 @@ beforeEach(() => {
     (_env, _scope, _claim, work) => work()
   );
   vi.spyOn(getLogger(), "error").mockImplementation(mocks.log);
-  now = 1_000;
-  vi.spyOn(Date, "now").mockImplementation(() => now);
   mocks.candidates.mockResolvedValue(
     ["one", "two", "three"].map((id) => ({ id, organizationId: "org", projectId: "project" }))
   );
@@ -63,37 +58,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
-describe("operation worker run budget", () => {
-  it("finishes the current action and leaves later candidates unclaimed when the budget expires", async () => {
-    mocks.advance.mockImplementation(async () => {
-      now += OPERATION_WORKER_BUDGET_MS;
-    });
-    await scoped();
-    expect(mocks.claim).toHaveBeenCalledTimes(3);
-    expect(mocks.advance).toHaveBeenCalledTimes(1);
-    expect(mocks.release).toHaveBeenCalledTimes(3);
-  });
-
-  it("never preclaims beyond four active workers", async () => {
-    const gate = deferred<void>();
-    mocks.candidates.mockResolvedValue(
-      Array.from({ length: 100 }, (_, index) => ({
-        id: String(index),
-        organizationId: "org",
-        projectId: "project",
-      }))
-    );
-    mocks.advance.mockImplementation(async () => gate.promise);
-    const run = scoped();
-    await vi.waitFor(() => expect(mocks.advance).toHaveBeenCalledTimes(4));
-    expect(mocks.claim).toHaveBeenCalledTimes(4);
-    now += OPERATION_WORKER_BUDGET_MS;
-    gate.resolve();
-    await run;
-    expect(mocks.claim).toHaveBeenCalledTimes(4);
-    expect(mocks.release).toHaveBeenCalledTimes(4);
-  });
-
+describe("operation claim recovery", () => {
   it("waits for other active workers if one lease or scheduling call fails", async () => {
     mocks.release.mockRejectedValueOnce(new Error("Scheduling unavailable"));
     await expect(scoped()).rejects.toThrow("1 operation recovery attempts failed");

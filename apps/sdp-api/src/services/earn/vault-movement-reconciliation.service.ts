@@ -28,6 +28,7 @@ import {
   type EarnPositionRow,
 } from "@/db/repositories/earn-movements.repository";
 import {
+  EARN_RECOVERY_LEASE_SECONDS,
   earnObservationDelay,
   releaseEarnObservation,
   releaseEarnObservations,
@@ -314,9 +315,9 @@ export async function reconcileEarnVaultMovementBatch(
     ])
   );
   for (let offset = 0; offset < rows.length; offset += RECOVERY_CONCURRENCY) {
-    const claim = await ledger.claimRecoveryObservations(
-      rows.slice(offset, offset + RECOVERY_CONCURRENCY)
-    );
+    const selected = rows.slice(offset, offset + RECOVERY_CONCURRENCY);
+    const claim = await ledger.claimRecoveryObservations(selected, EARN_RECOVERY_LEASE_SECONDS);
+    stats.skippedLeased += selected.length - claim.rows.length;
     stats.claimed += claim.rows.length;
     try {
       const results = await mapSettledWithConcurrency(

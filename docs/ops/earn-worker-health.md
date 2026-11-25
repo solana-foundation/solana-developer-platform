@@ -7,6 +7,10 @@ prove completed scans; a wake never proves asynchronous work completed.
 Idle observers need no passes; only active stalls and overdue durable work
 are actionable.
 
+Merge [sdp-infra #433](https://github.com/solana-foundation/sdp-infra/pull/433)
+before [SDP #2973](https://github.com/solana-foundation/solana-developer-platform/pull/2973).
+Its worker-health alerts replace the success events omitted by wake-only jobs.
+
 The minute movement job reads one independent database snapshot of execution,
 observation, provider polling/delivery, queued polling/delivery and valuation
 obligations. It neither claims rows nor changes financial state. Existing due

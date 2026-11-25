@@ -21,6 +21,7 @@ import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { address, type Signature } from "@solana/kit";
 import { getDb } from "@/db/client";
 import {
+  EARN_RECOVERY_LEASE_SECONDS,
   earnObservationDelay,
   releaseEarnObservation,
   releaseEarnObservations,
@@ -92,6 +93,7 @@ interface ClosingParEventObservation {
 
 interface QueueReconciliationStats {
   actionsClaimed: number;
+  skippedLeased: number;
   actionsAdvanced: number;
   actionsFailed: number;
   actionsRebroadcast: number;
@@ -129,6 +131,7 @@ function epochSecondsIso(value: string): string {
 function emptyStats(actions: number, requests: number): QueueReconciliationStats {
   return {
     actionsClaimed: actions,
+    skippedLeased: 0,
     actionsAdvanced: 0,
     actionsFailed: 0,
     actionsRebroadcast: 0,
@@ -311,6 +314,7 @@ export async function reconcileEarnVaultQueuedWithdrawals(env: Env): Promise<voi
     event: "sdp_api_earn_vault_queued_withdrawal_reconciliation_tick",
     environment,
     actions_claimed: stats.actionsClaimed,
+    skipped_leased: stats.skippedLeased,
     actions_advanced: stats.actionsAdvanced,
     actions_failed: stats.actionsFailed,
     actions_rebroadcast: stats.actionsRebroadcast,
@@ -333,7 +337,8 @@ async function reconcileActions(
   actions: readonly EarnVaultWithdrawalRequestActionRow[],
   stats: QueueReconciliationStats
 ): Promise<void> {
-  const { rows: candidates } = await ledger.readRecoveryObservations(actions);
+  const { rows: candidates, skippedLeased } = await ledger.readRecoveryObservations(actions);
+  stats.skippedLeased += skippedLeased;
   if (candidates.length === 0) return;
   const { environment } = currentClusterScope();
   let rpc: SolanaRpc;
@@ -367,9 +372,9 @@ async function reconcileActions(
   // The shared read reserves nothing. Slow providers only hold four actions;
   // the fast observer can keep advancing the rest of this snapshot.
   for (let offset = 0; offset < candidates.length; offset += ACTION_RECOVERY_CONCURRENCY) {
-    const claim = await ledger.claimRecoveryObservations(
-      candidates.slice(offset, offset + ACTION_RECOVERY_CONCURRENCY)
-    );
+    const selected = candidates.slice(offset, offset + ACTION_RECOVERY_CONCURRENCY);
+    const claim = await ledger.claimRecoveryObservations(selected, EARN_RECOVERY_LEASE_SECONDS);
+    stats.skippedLeased += selected.length - claim.rows.length;
     stats.actionsClaimed += claim.rows.length;
     try {
       await reconcileClaimedActions(env, ledger, claim.rows, stats, claim.token, rpc, observations);

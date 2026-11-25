@@ -1,3 +1,4 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import {
   type OperationIntent,
   type OperationStatus,
@@ -577,7 +578,10 @@ describe("durable operations repository", () => {
         },
         draining: false,
       },
-      ["sandbox"]
+      ["sandbox"],
+      {
+        run: (environment, consume) => runInClusterScope({ projectId: null, environment }, consume),
+      }
     );
     try {
       await Promise.all(

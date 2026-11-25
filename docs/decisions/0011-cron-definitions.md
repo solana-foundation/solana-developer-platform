@@ -45,9 +45,12 @@ names and a no-op `Observability` layer.
   compare-and-set, and a definition with set- or snapshot-based writes holds
   its own lock until its work settles (the Earn catalogue sync). Real
   cancellation is a follow-up (HOO-2163).
-- **Run events go to Loki/Grafana only.** Every run logs `sdp_cron_run` with
+- **Run events go to Loki/Grafana only.** Scheduled work logs `sdp_cron_run` with
   `cron`, `environment` (cluster scope), `status`, and `duration_ms`. The
   leftover Sentry abstraction is removed from sdp-api.
+  Wake-only definitions omit success events; their asynchronous consumers
+  report progress through minute worker-health summaries. Errors, disabled
+  slots and overlap events still emit run events.
 
 ### Earn wakeups (2026-11-24)
 

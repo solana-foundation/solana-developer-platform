@@ -45,6 +45,10 @@ export function listenForOperationNotifications(
     current = null;
     options.disconnected?.();
     close(client);
+    retry(cause);
+  }
+
+  function retry(cause: unknown): void {
     if (stopped) return;
     options.failed(cause);
     if (reconnectTimer !== null) return;
@@ -57,30 +61,32 @@ export function listenForOperationNotifications(
   }
 
   async function connect(): Promise<void> {
-    const client = new Client({
-      connectionString:
-        bindings.DATABASE_LISTENER_URL?.trim() ||
-        process.env.DATABASE_LISTENER_URL?.trim() ||
-        getConnectionString(bindings),
-      keepAlive: true,
-      keepAliveInitialDelayMillis: 10_000,
-      connectionTimeoutMillis: 5_000,
-      query_timeout: 5_000,
-      application_name: "sdp-operations-notifications",
-    });
-    current = client;
-    client.on("error", (cause) => disconnected(client, cause));
-    client.on("end", () => disconnected(client, new Error("Operation notification session ended")));
-    client.on("notification", (notification) => {
-      if (stopped || current !== client || notification.channel !== OPERATION_WAKE_CHANNEL) return;
-      const environment = z.enum(SDP_ENVIRONMENTS).safeParse(notification.payload);
-      if (!environment.success) {
-        options.failed(new Error("Invalid operation notification environment"));
-        return;
-      }
-      options.wake(environment.data);
-    });
+    let connecting: Client | null = null;
     try {
+      const client = new Client({
+        connectionString: bindings.DATABASE_LISTENER_URL?.trim() || getConnectionString(bindings),
+        keepAlive: true,
+        keepAliveInitialDelayMillis: 10_000,
+        connectionTimeoutMillis: 5_000,
+        query_timeout: 5_000,
+        application_name: "sdp-operations-notifications",
+      });
+      connecting = client;
+      current = client;
+      client.on("error", (cause) => disconnected(client, cause));
+      client.on("end", () =>
+        disconnected(client, new Error("Operation notification session ended"))
+      );
+      client.on("notification", (notification) => {
+        if (stopped || current !== client || notification.channel !== OPERATION_WAKE_CHANNEL)
+          return;
+        const environment = z.enum(SDP_ENVIRONMENTS).safeParse(notification.payload);
+        if (!environment.success) {
+          options.failed(new Error("Invalid operation notification environment"));
+          return;
+        }
+        options.wake(environment.data);
+      });
       await client.connect();
       if (stopped || current !== client) return;
       await client.query(`LISTEN ${OPERATION_WAKE_CHANNEL}`);
@@ -88,7 +94,8 @@ export function listenForOperationNotifications(
       reconnectDelay = 1_000;
       options.connected();
     } catch (cause) {
-      disconnected(client, cause);
+      if (connecting === null) retry(cause);
+      else disconnected(connecting, cause);
     }
   }
 

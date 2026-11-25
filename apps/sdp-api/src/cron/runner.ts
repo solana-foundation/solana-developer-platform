@@ -243,6 +243,12 @@ export function startCron(deps: CronDeps): CronHandle | null {
   );
   const operationWorker = startOperationWorker(deps.env, deps.bg, operationEnvironments, {
     wakeObserver: (environment) => transactionObserver.wake(environment),
+    run: (environment, consume) =>
+      runWithLogContext({ cron: "reconcile-operations" }, () =>
+        runWithSystemDatabaseIdentity("cron:reconcile-operations", () =>
+          runInEnvironmentClusterScope(environment, consume)
+        )
+      ),
   });
 
   for (const definition of CRON_DEFINITIONS) {

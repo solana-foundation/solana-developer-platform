@@ -362,14 +362,11 @@ async function loadEarnPositions(
     return observed !== undefined && !isEarnVaultHoldingEmpty(observed);
   });
   // A closure can empty a selected page. Advance past scanned rows and read
-  // only enough unseen holdings to preserve the full-page cursor contract.
+  // a full batch of unseen holdings to avoid one-at-a-time closure reads.
   while (page.hasMore && observedRows.length < query.limit) {
     const lastScanned = page.rows.at(-1);
     if (!lastScanned) throw internalError("Earn position page has no continuation row");
-    page = await readPage(
-      { createdAt: lastScanned.created_at, id: lastScanned.id },
-      query.limit - observedRows.length
-    );
+    page = await readPage({ createdAt: lastScanned.created_at, id: lastScanned.id }, query.limit);
     const next = await hydrate(page.rows);
     holdings.push(...next.holdings);
     for (const [id, value] of next.live) live.set(id, value);

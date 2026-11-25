@@ -1,11 +1,9 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { logCronRun } from "@/cron/run-event";
-import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import { listenForOperationNotifications } from "@/db/operation-notifications";
 import type { OperationClaim, OperationScope } from "@/db/repositories/operations.repository";
 import type { BackgroundRunner } from "@/runtime/background";
-import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
-import { getLogger, runWithLogContext } from "@/runtime/logger";
+import { getLogger } from "@/runtime/logger";
 import { createOperationObservationRpc } from "@/services/earn/operation-observation-rpc";
 import { createOperationsService } from "@/services/operations.service";
 import type { Env } from "@/types/env";
@@ -48,7 +46,10 @@ export function startOperationWorker(
   env: Env,
   bg: BackgroundRunner,
   environments: readonly SdpEnvironment[],
-  options: { wakeObserver?: (environment: SdpEnvironment) => void } = {}
+  options: {
+    wakeObserver?: (environment: SdpEnvironment) => void;
+    run: (environment: SdpEnvironment, consume: () => Promise<void>) => Promise<void>;
+  }
 ): OperationWorker {
   let stopping = false;
   const consumers = new Map<SdpEnvironment, EnvironmentConsumer>(
@@ -108,29 +109,25 @@ export function startOperationWorker(
     consumer: EnvironmentConsumer,
     observation: { generation: number }
   ): Promise<void> {
-    await runWithLogContext({ cron: "reconcile-operations" }, () =>
-      runWithSystemDatabaseIdentity("cron:reconcile-operations", () =>
-        runInEnvironmentClusterScope(environment, async () => {
-          const service = createOperationsService(env);
-          while (!stopping) {
-            const generation = consumer.generation;
-            observation.generation = generation;
-            const next = await service.repository.claimNextRecovery(environment);
-            telemetry.completed(environment);
-            if (next === null) {
-              // A commit hint arriving during the empty claim must get another scan.
-              if (generation !== consumer.generation) continue;
-              return;
-            }
-            if (stopping) {
-              await service.repository.release(next.scope, next.claim);
-              return;
-            }
-            await executeClaim(environment, consumer, next.scope, next.claim);
-          }
-        })
-      )
-    );
+    await options.run(environment, async () => {
+      const service = createOperationsService(env);
+      while (!stopping) {
+        const generation = consumer.generation;
+        observation.generation = generation;
+        const next = await service.repository.claimNextRecovery(environment);
+        telemetry.completed(environment);
+        if (next === null) {
+          // A commit hint arriving during the empty claim must get another scan.
+          if (generation !== consumer.generation) continue;
+          return;
+        }
+        if (stopping) {
+          await service.repository.release(next.scope, next.claim);
+          return;
+        }
+        await executeClaim(environment, consumer, next.scope, next.claim);
+      }
+    });
   }
 
   function startFreeConsumers(environment: SdpEnvironment, consumer: EnvironmentConsumer): void {

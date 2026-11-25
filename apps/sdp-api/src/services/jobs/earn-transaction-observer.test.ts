@@ -1,9 +1,6 @@
-import { currentClusterScope, runInClusterScope } from "@sdp/rpc/scope";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as cronEvents from "@/cron/run-event";
-import { currentDatabaseIdentity, runWithSystemDatabaseIdentity } from "@/db/identity";
 import type { BackgroundRunner } from "@/runtime/background";
-import { getLogContext, runWithLogContext } from "@/runtime/logger";
 import { deferred } from "@/test/helpers/deferred";
 import { env } from "@/test/helpers/env";
 import { startEarnTransactionObserver } from "./earn-transaction-observer";
@@ -34,14 +31,8 @@ afterEach(async () => {
 });
 
 function start() {
-  observer = startEarnTransactionObserver(bg, ["sandbox"], (environment) =>
-    runWithLogContext({ cron: "earn-transaction-observer" }, () =>
-      runWithSystemDatabaseIdentity("cron:earn-transaction-observer", () =>
-        runInClusterScope({ projectId: null, environment }, () =>
-          observation.observeEarnTransactions(env)
-        )
-      )
-    )
+  observer = startEarnTransactionObserver(bg, ["sandbox"], () =>
+    observation.observeEarnTransactions(env)
   );
   return observer;
 }
@@ -53,37 +44,13 @@ async function flush() {
 }
 
 describe("Earn observation wakeups", () => {
-  it.each([undefined, "reconcile-operations"])(
-    "attributes asynchronous reads and retries to the observer when woken under %s",
-    async (parentCron) => {
-      vi.useFakeTimers();
-      const callers: Array<string | undefined> = [];
-      vi.spyOn(observation, "observeEarnTransactions").mockImplementation(async () => {
-        await Promise.resolve();
-        callers.push(getLogContext().cron);
-        return { claimed: callers.length === 1 ? 1 : 0, saturated: false };
-      });
-      const worker = start();
-      runWithLogContext(parentCron === undefined ? {} : { cron: parentCron }, () => {
-        worker.wake("sandbox");
-        expect(getLogContext().cron).toBe(parentCron);
-      });
-      await flush();
-      await vi.advanceTimersByTimeAsync(250);
-      expect(callers).toEqual(["earn-transaction-observer", "earn-transaction-observer"]);
-      expect(getLogContext().cron).toBeUndefined();
-    }
-  );
-
-  it("starts immediately in system/environment scope and does not wait for a cron boundary", async () => {
+  it("starts immediately and does not wait for a cron boundary", async () => {
     vi.useFakeTimers();
     const observedAt: number[] = [];
     const startAt = Date.now();
     const read = vi.spyOn(observation, "observeEarnTransactions").mockImplementation(async () => {
       observedAt.push(Date.now() - startAt);
-      expect(currentClusterScope().environment).toBe("sandbox");
-      expect(currentDatabaseIdentity()).toMatchObject({ kind: "system" });
-      return { claimed: 0, saturated: false };
+      return { scanned: 0, saturated: false };
     });
     const worker = start();
     worker.wake("production");
@@ -96,12 +63,12 @@ describe("Earn observation wakeups", () => {
   });
 
   it("accepts a new wake while a provider holds another batch, with at most two batches", async () => {
-    const slow = deferred<{ claimed: number; saturated: boolean }>();
-    gates.push(() => slow.resolve({ claimed: 0, saturated: false }));
+    const slow = deferred<{ scanned: number; saturated: boolean }>();
+    gates.push(() => slow.resolve({ scanned: 0, saturated: false }));
     const read = vi
       .spyOn(observation, "observeEarnTransactions")
       .mockImplementationOnce(() => slow.promise)
-      .mockResolvedValue({ claimed: 0, saturated: false });
+      .mockResolvedValue({ scanned: 0, saturated: false });
     const worker = start();
     worker.wake("sandbox");
     expect(read).toHaveBeenCalledTimes(1);
@@ -113,19 +80,19 @@ describe("Earn observation wakeups", () => {
 
   it("retains a wake arriving when both batches are busy", async () => {
     vi.useFakeTimers();
-    const slow = deferred<{ claimed: number; saturated: boolean }>();
-    gates.push(() => slow.resolve({ claimed: 0, saturated: false }));
+    const slow = deferred<{ scanned: number; saturated: boolean }>();
+    gates.push(() => slow.resolve({ scanned: 0, saturated: false }));
     const read = vi
       .spyOn(observation, "observeEarnTransactions")
       .mockImplementationOnce(() => slow.promise)
       .mockImplementationOnce(() => slow.promise)
-      .mockResolvedValue({ claimed: 0, saturated: false });
+      .mockResolvedValue({ scanned: 0, saturated: false });
     const worker = start();
     worker.wake("sandbox");
     worker.wake("sandbox");
     worker.wake("sandbox");
     expect(read).toHaveBeenCalledTimes(2);
-    slow.resolve({ claimed: 0, saturated: false });
+    slow.resolve({ scanned: 0, saturated: false });
     await flush();
     await vi.advanceTimersByTimeAsync(0);
     expect(read).toHaveBeenCalledTimes(3);
@@ -135,9 +102,9 @@ describe("Earn observation wakeups", () => {
     vi.useFakeTimers();
     const read = vi
       .spyOn(observation, "observeEarnTransactions")
-      .mockResolvedValueOnce({ claimed: 64, saturated: true })
-      .mockResolvedValueOnce({ claimed: 1, saturated: false })
-      .mockResolvedValue({ claimed: 0, saturated: false });
+      .mockResolvedValueOnce({ scanned: 64, saturated: true })
+      .mockResolvedValueOnce({ scanned: 1, saturated: false })
+      .mockResolvedValue({ scanned: 0, saturated: false });
     start().wake("sandbox");
     await flush();
     await vi.advanceTimersByTimeAsync(0);
@@ -154,9 +121,9 @@ describe("Earn observation wakeups", () => {
     vi.useFakeTimers();
     const read = vi
       .spyOn(observation, "observeEarnTransactions")
-      .mockResolvedValueOnce({ claimed: 0, saturated: true })
-      .mockResolvedValueOnce({ claimed: 1, saturated: false })
-      .mockResolvedValue({ claimed: 0, saturated: false });
+      .mockResolvedValueOnce({ scanned: 0, saturated: true })
+      .mockResolvedValueOnce({ scanned: 1, saturated: false })
+      .mockResolvedValue({ scanned: 0, saturated: false });
     start().wake("sandbox");
     await flush();
     await vi.advanceTimersByTimeAsync(0);
@@ -169,10 +136,10 @@ describe("Earn observation wakeups", () => {
     vi.useFakeTimers();
     const read = vi
       .spyOn(observation, "observeEarnTransactions")
-      .mockResolvedValueOnce({ claimed: 64, saturated: true })
-      .mockResolvedValueOnce({ claimed: 0, saturated: false })
-      .mockResolvedValueOnce({ claimed: 64, saturated: true })
-      .mockResolvedValue({ claimed: 0, saturated: false });
+      .mockResolvedValueOnce({ scanned: 64, saturated: true })
+      .mockResolvedValueOnce({ scanned: 0, saturated: false })
+      .mockResolvedValueOnce({ scanned: 64, saturated: true })
+      .mockResolvedValue({ scanned: 0, saturated: false });
     start().wake("sandbox");
     await flush();
     await vi.advanceTimersByTimeAsync(0);
@@ -194,7 +161,7 @@ describe("Earn observation wakeups", () => {
     const read = vi
       .spyOn(observation, "observeEarnTransactions")
       .mockRejectedValueOnce(error)
-      .mockResolvedValue({ claimed: 0, saturated: false });
+      .mockResolvedValue({ scanned: 0, saturated: false });
     start().wake("sandbox");
     await flush();
     expect(log).toHaveBeenCalledWith(
@@ -209,7 +176,7 @@ describe("Earn observation wakeups", () => {
     vi.useFakeTimers();
     const read = vi
       .spyOn(observation, "observeEarnTransactions")
-      .mockResolvedValue({ claimed: 1, saturated: false });
+      .mockResolvedValue({ scanned: 1, saturated: false });
     const worker = start();
     worker.wake("sandbox");
     await flush();

@@ -46,7 +46,7 @@ export function startEarnTransactionObserver(
       try {
         const result = await observe(environment);
         telemetry.completed(environment);
-        if (result.claimed > 0 || result.saturated) {
+        if (result.scanned > 0 || result.saturated) {
           lane.saturatedRetry = result.saturated;
           delay = result.saturated ? 0 : 250;
         } else if (lane.saturatedRetry) {

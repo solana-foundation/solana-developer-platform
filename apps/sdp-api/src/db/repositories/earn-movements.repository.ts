@@ -393,7 +393,7 @@ export interface EarnMovementsRepository {
   /** Reserve recovery candidates and return their current state after taking ownership. */
   claimRecoveryObservations(
     rows: readonly EarnMovementRow[],
-    leaseSeconds?: number
+    leaseSeconds: number
   ): Promise<{
     rows: EarnMovementRow[];
     token: string;

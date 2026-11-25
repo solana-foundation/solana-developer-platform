@@ -51,6 +51,7 @@ afterEach(async () => {
   listener = undefined;
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 async function start() {
@@ -86,6 +87,28 @@ describe("operation commit notification session", () => {
     await Promise.all(mocks.tasks);
     expect(required(mocks.clients[0]).port).toBe(5433);
     expect(mocks.connected).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads the listener override from bindings instead of the ambient process", async () => {
+    vi.stubEnv("DATABASE_LISTENER_URL", "postgresql://[");
+    await start();
+    expect(required(mocks.clients[0]).port).toBe(5432);
+    expect(mocks.connected).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports constructor errors and retries them without rejecting tracked work", async () => {
+    listener = listenForOperationNotifications(
+      { ...bindings, DATABASE_LISTENER_URL: "postgresql://[" },
+      mocks.options
+    );
+    await expect(Promise.all(mocks.tasks)).resolves.toBeDefined();
+    expect(mocks.failed).toHaveBeenCalledTimes(1);
+    expect(mocks.connect).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(mocks.failed).toHaveBeenCalledTimes(2);
+    await listener.stop();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(mocks.failed).toHaveBeenCalledTimes(2);
   });
 
   it("reconnects and rescans after session failure without trusting missed notifications", async () => {

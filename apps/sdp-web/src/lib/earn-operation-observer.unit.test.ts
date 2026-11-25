@@ -248,6 +248,25 @@ it("hands a long foreground watch to the feed after two minutes until explicitly
   release();
 });
 
+it("recovers a retired watch when its operation leaves the feed", async () => {
+  vi.useFakeTimers();
+  const read = vi.fn(async (ids: readonly string[]) => ids.map((id) => operation(id)));
+  const { observer } = createObserver(read);
+  const release = observer.retain();
+  observer.recordObservation(operation("long"), true);
+  await vi.advanceTimersByTimeAsync(120_000);
+  const count = read.mock.calls.length;
+  observer.recordObservation(operation("long"), true);
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(read).toHaveBeenCalledTimes(count);
+  read.mockResolvedValueOnce([operation("long", "completed")]);
+  observer.recover(["long"]);
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(read).toHaveBeenCalledTimes(count + 1);
+  expect(observer.isWatching("long")).toBe(false);
+  release();
+});
+
 it("does not restart a missing settlement backlog from stale feed rows", async () => {
   vi.useFakeTimers();
   const ids = Array.from({ length: 1_000 }, (_, index) => `settling-${index}`);

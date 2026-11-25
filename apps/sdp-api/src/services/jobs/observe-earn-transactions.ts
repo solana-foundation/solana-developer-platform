@@ -9,6 +9,7 @@ import {
 } from "@/db/repositories/earn-movements.repository";
 import {
   EARN_FAST_OBSERVATION_LEASE_SECONDS,
+  EARN_OBSERVATION_RETRY_MS,
   earnObservationDelay,
   releaseEarnObservations,
 } from "@/db/repositories/earn-observation-claims";
@@ -33,7 +34,7 @@ type Target =
 /** One bounded, horizontally partitioned pass over direct and queued transaction signatures. */
 export async function observeEarnTransactions(
   env: Env
-): Promise<{ claimed: number; saturated: boolean }> {
+): Promise<{ scanned: number; saturated: boolean }> {
   const startedAt = Date.now();
   const { environment } = currentClusterScope();
   const db = getDb(env);
@@ -58,7 +59,7 @@ export async function observeEarnTransactions(
           delayMs = earnObservationDelay(target.row.created_at, failed.has(target.row.id));
           break;
         case "status_read_failed":
-          delayMs = earnObservationDelay(target.row.created_at, true);
+          delayMs = EARN_OBSERVATION_RETRY_MS;
           break;
         default: {
           const unreachable: never = release;
@@ -146,7 +147,7 @@ export async function observeEarnTransactions(
         targets.push({ kind: "withdrawal_action", row: action, token: actions.token });
     }
     const saturated = movements.scanned === BATCH_PER_KIND || actions.scanned === BATCH_PER_KIND;
-    if (targets.length === 0) return { claimed: 0, saturated };
+    if (targets.length === 0) return { scanned: 0, saturated };
 
     const signatures = [
       ...new Set(
@@ -205,7 +206,7 @@ export async function observeEarnTransactions(
     logEvent(failed.size > 0 ? "error" : "info", {
       event: "sdp_api_earn_transaction_observation_tick",
       environment,
-      claimed: scannedCount,
+      scanned: scannedCount,
       signatures: signatures.length,
       advanced,
       errors: failed.size,
@@ -213,7 +214,7 @@ export async function observeEarnTransactions(
     });
     if (failed.size > 0) throw new Error(`${failed.size} Earn transactions could not be observed`);
     return {
-      claimed: scannedCount,
+      scanned: scannedCount,
       saturated,
     };
   };

@@ -9,9 +9,11 @@ import { getDb } from "@/db/client";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import {
   claimSelectedEarnObservations,
+  EARN_RECOVERY_LEASE_SECONDS,
   releaseEarnObservation,
 } from "@/db/repositories/earn-observation-claims";
 import { createPostgresEarnVaultWithdrawalRequestsRepository } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
+import * as moneyPathEvents from "@/runtime/money-path-events";
 import { logEvent } from "@/runtime/money-path-events";
 import * as executionRegistry from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
@@ -260,7 +262,7 @@ describe("shared Earn transaction observation", () => {
       confirmationStatus: "confirmed",
       err: null,
     }));
-    expect(await observe()).toEqual({ claimed: 2, saturated: false });
+    expect(await observe()).toEqual({ scanned: 2, saturated: false });
     const reads = rpc.requests.filter(({ method }) => method === "getSignatureStatuses");
     expect(reads).toHaveLength(1);
     expect(signatureStatusesRead(reads[0]).signatures).toHaveLength(2);
@@ -281,8 +283,8 @@ describe("shared Earn transaction observation", () => {
     finalized();
     const startedAt = performance.now();
     const first = await Promise.all([observe(), observe()]);
-    expect(first.map((result) => result.claimed)).toEqual([64, 64]);
-    expect(await observe()).toEqual({ claimed: 1, saturated: false });
+    expect(first.map((result) => result.scanned)).toEqual([64, 64]);
+    expect(await observe()).toEqual({ scanned: 1, saturated: false });
     const reads = rpc.requests.filter(({ method }) => method === "getSignatureStatuses");
     expect(reads).toHaveLength(3);
     expect(
@@ -314,9 +316,23 @@ describe("shared Earn transaction observation", () => {
     expect((await repository().scheduleDueObservations("sandbox", 4)).rows).toHaveLength(0);
     const row = one.rows[0];
     if (row === undefined) throw new Error("Missing claimed fixture");
-    const lease = await claimSelectedEarnObservations(getDb(env), "movement", [row]);
+    const lease = await claimSelectedEarnObservations(
+      getDb(env),
+      "movement",
+      [row],
+      EARN_RECOVERY_LEASE_SECONDS
+    );
     expect(lease.ids.size).toBe(1);
-    expect((await claimSelectedEarnObservations(getDb(env), "movement", [row])).ids.size).toBe(0);
+    expect(
+      (
+        await claimSelectedEarnObservations(
+          getDb(env),
+          "movement",
+          [row],
+          EARN_RECOVERY_LEASE_SECONDS
+        )
+      ).ids.size
+    ).toBe(0);
     await getDb(env).execute(
       "UPDATE earn_movements SET observation_claim_until = now() - interval '1 second', observation_due_at = now() - interval '1 second' WHERE id = ?",
       [row.id]
@@ -329,11 +345,40 @@ describe("shared Earn transaction observation", () => {
     expect((await repository().scheduleDueObservations("sandbox", 1)).rows).toHaveLength(1);
   });
 
+  it("counts queued leases held before the snapshot and taken during the shared read", async () => {
+    const held = await seedQueuedAction();
+    const raced = await seedQueuedAction();
+    await postponeQueuedProviderReads();
+    const queue = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
+    await queue.claimRecoveryObservations([held.action], EARN_RECOVERY_LEASE_SECONDS);
+    const statuses = vi
+      .spyOn(solanaRpc, "getSignatureStatuses")
+      .mockImplementationOnce(async () => {
+        await queue.claimRecoveryObservations([raced.action], EARN_RECOVERY_LEASE_SECONDS);
+        return [{ slot: 50n, confirmations: 1n, confirmationStatus: "confirmed", err: null }];
+      });
+    const events = vi.spyOn(moneyPathEvents, "logEvent").mockImplementation(() => {});
+    await queueRecovery();
+    expect(statuses).toHaveBeenCalledTimes(1);
+    expect(events).toHaveBeenCalledWith(
+      "info",
+      expect.objectContaining({
+        event: "sdp_api_earn_vault_queued_withdrawal_reconciliation_tick",
+        actions_claimed: 0,
+        skipped_leased: 2,
+        errors: 0,
+      })
+    );
+  });
+
   it("prevents the recovery sweep from spending RPC on a fast-observer claim", async () => {
     const seeded = await seedMovement();
     finalized();
     const scheduled = await repository().scheduleDueObservations("sandbox", 1);
-    const claim = await repository().claimRecoveryObservations(scheduled.rows);
+    const claim = await repository().claimRecoveryObservations(
+      scheduled.rows,
+      EARN_RECOVERY_LEASE_SECONDS
+    );
     const result = await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
       reconcileEarnVaultMovementBatch(env, [seeded.movement])
     );
@@ -528,14 +573,16 @@ describe("shared Earn transaction observation", () => {
       scanned: 0,
     });
     expect(
-      (await queue.claimRecoveryObservations([queued.action])).rows.map(({ id }) => id)
+      (
+        await queue.claimRecoveryObservations([queued.action], EARN_RECOVERY_LEASE_SECONDS)
+      ).rows.map(({ id }) => id)
     ).toEqual([queued.action.id]);
   });
 
   it("observes pending work without a notification and excludes the other environment", async () => {
     const seeded = await seedMovement();
     finalized();
-    expect(await observe("production")).toEqual({ claimed: 0, saturated: false });
+    expect(await observe("production")).toEqual({ scanned: 0, saturated: false });
     expect(rpc.calls).toHaveLength(0);
     await observe();
     expect((await readMovement(seeded.movement.id))?.status).toBe("finalized");
@@ -647,7 +694,14 @@ describe("shared Earn transaction observation", () => {
       signed_transaction: seeded.movement.signed_transaction,
     });
     expect(
-      (await claimSelectedEarnObservations(getDb(env), "movement", [seeded.movement])).ids.size
+      (
+        await claimSelectedEarnObservations(
+          getDb(env),
+          "movement",
+          [seeded.movement],
+          EARN_RECOVERY_LEASE_SECONDS
+        )
+      ).ids.size
     ).toBe(1);
     expect(
       rpc.calls.some(({ method }) => method === "sendTransaction" || method === "getEpochInfo")
@@ -692,11 +746,11 @@ describe("shared Earn transaction observation", () => {
       getDb(env)
     ).readRecoveryObservations([older.action]);
     expect(recoverable.rows.map(({ id }) => id)).toEqual([older.action.id]);
-    expect(await observe()).toEqual({ claimed: 0, saturated: false });
+    expect(await observe()).toEqual({ scanned: 0, saturated: false });
     expect(rpc.requests.filter(({ method }) => method === "getSignatureStatuses")).toHaveLength(1);
   });
 
-  it("hands old rows to recovery after a shared status-read failure", async () => {
+  it("keeps old rows scheduled after a shared status-read failure", async () => {
     const older = await seedMovement();
     await getDb(env).execute("UPDATE earn_movements SET created_at = ? WHERE id = ?", [
       new Date(Date.now() - 180_000).toISOString(),
@@ -710,7 +764,8 @@ describe("shared Earn transaction observation", () => {
         [older.movement.id]
       )
     );
-    expect(delay.seconds).toBeNull();
+    expect(delay.seconds).toBeGreaterThan(3);
+    expect(delay.seconds).toBeLessThanOrEqual(5);
     expect((await repository().readRecoveryObservations([older.movement])).rows).toHaveLength(1);
   });
 

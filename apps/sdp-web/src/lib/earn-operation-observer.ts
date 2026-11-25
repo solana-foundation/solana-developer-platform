@@ -67,7 +67,12 @@ export class EarnOperationObserver {
       this.watches.delete(operation.id);
       return;
     }
-    if (foreground && isSdpProgressOperationStatus(operation.status)) this.recover([operation.id]);
+    if (
+      foreground &&
+      isSdpProgressOperationStatus(operation.status) &&
+      !this.retired.has(operation.id)
+    )
+      this.recover([operation.id]);
   }
 
   /** A successful feed read can restore availability; retained cache rows cannot. */
@@ -92,7 +97,8 @@ export class EarnOperationObserver {
   /** Resolve disappeared active rows in bounded batches, including old completed withdrawals. */
   recover(ids: readonly string[]): void {
     for (const id of ids) {
-      if (!this.watches.has(id) && !this.unavailable.has(id) && !this.retired.has(id)) {
+      if (!this.watches.has(id) && !this.unavailable.has(id)) {
+        this.retired.delete(id);
         const now = Date.now();
         this.watches.set(id, { nextAt: now, startedAt: now, failures: 0, misses: 0 });
       }
@@ -168,7 +174,6 @@ export class EarnOperationObserver {
         if (this.watches.get(id) !== watch) continue;
         const operation = observed.get(id);
         if (operation === undefined) continue;
-        this.unavailable.delete(id);
         if (!isSdpProgressOperationStatus(operation.status)) {
           this.watches.delete(id);
         } else {
