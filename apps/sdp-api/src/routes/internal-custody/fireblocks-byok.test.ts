@@ -626,15 +626,17 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
       .mockResolvedValueOnce(Response.json({}))
       .mockResolvedValueOnce(Response.json({ addresses: [{ address: OTHER_ADDRESS }] }));
     const resolver = new CustodyRuntimeTargets(getDb(env), testEnv, new Map());
-    const wallet = await resolver.createConnectionWallet({
-      auditContext,
-      creationReason: "wallet_api",
-      organizationId: ORGANIZATION_ID,
-      projectId: PROJECT_ID,
-      connectionId: connected.connectionId,
-      label: "Operations",
-      purpose: "transfer",
-    });
+    const wallet = await inSandboxScope(() =>
+      resolver.createConnectionWallet({
+        auditContext,
+        creationReason: "wallet_api",
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        connectionId: connected.connectionId,
+        label: "Operations",
+        purpose: "transfer",
+      })
+    );
     expect(wallet).toMatchObject({
       walletId: "fb_42",
       publicKey: OTHER_ADDRESS,

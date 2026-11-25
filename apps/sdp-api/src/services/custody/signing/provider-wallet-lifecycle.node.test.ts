@@ -1,10 +1,8 @@
 import * as dfnsClient from "@sdp/custody/providers/dfns/client";
-import { runInClusterScope } from "@sdp/rpc/scope";
 import { generateKeyPairSigner } from "@solana/kit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { createProviderWallet } from "@/services/custody/signing/provider-wallet-lifecycle";
-import { inSandboxScope } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { required } from "@/test/helpers/required";
 
@@ -28,24 +26,22 @@ function stubWalletClient(create: "createDfnsApiClient" | "createIbmHavenApiClie
 afterEach(() => vi.restoreAllMocks());
 
 describe("createProviderWallet", () => {
-  it("creates additional DFNS wallets on the scope's cluster without reusing the configured signing key", async () => {
+  it("creates additional DFNS wallets without reusing the configured signing key", async () => {
     const createWallet = stubWalletClient("createDfnsApiClient");
 
-    const wallet = await runInClusterScope({ projectId: null, environment: "production" }, () =>
-      createProviderWallet({
-        env,
-        orgId: "org_dfns",
-        projectId: "project_dfns",
-        params: { label: "DFNS treasury" },
-        parsed: {
-          provider: "dfns",
-          walletId: "wa-12345-abcde-rootwallet",
-          signingKeyId: "key-12345-abcde-rootwallet",
-        },
-      })
-    );
+    const wallet = await createProviderWallet({
+      env,
+      orgId: "org_dfns",
+      projectId: "project_dfns",
+      params: { label: "DFNS treasury" },
+      parsed: {
+        provider: "dfns",
+        walletId: "wa-12345-abcde-rootwallet",
+        signingKeyId: "key-12345-abcde-rootwallet",
+      },
+    });
 
-    expect(dfnsClient.createDfnsApiClient).toHaveBeenCalledExactlyOnceWith(env, "mainnet-beta");
+    expect(dfnsClient.createDfnsApiClient).toHaveBeenCalledExactlyOnceWith(env);
     expect(createWallet).toHaveBeenCalledExactlyOnceWith({ body: { name: "DFNS treasury" } });
     expect(wallet).toEqual({
       walletId: "dfns_wa-12345-abcde-newdfnswallet",
@@ -56,21 +52,19 @@ describe("createProviderWallet", () => {
   it("creates additional IBM Digital Asset Haven wallets with the ibmhaven_ prefix", async () => {
     const createWallet = stubWalletClient("createIbmHavenApiClient");
 
-    const wallet = await inSandboxScope(() =>
-      createProviderWallet({
-        env,
-        orgId: "org_ibm_haven",
-        projectId: "project_ibm_haven",
-        params: { label: "Haven treasury" },
-        parsed: {
-          provider: "ibm_haven",
-          walletId: "wa-12345-abcde-rootwallet",
-          signingKeyId: "key-12345-abcde-rootwallet",
-        },
-      })
-    );
+    const wallet = await createProviderWallet({
+      env,
+      orgId: "org_ibm_haven",
+      projectId: "project_ibm_haven",
+      params: { label: "Haven treasury" },
+      parsed: {
+        provider: "ibm_haven",
+        walletId: "wa-12345-abcde-rootwallet",
+        signingKeyId: "key-12345-abcde-rootwallet",
+      },
+    });
 
-    expect(dfnsClient.createIbmHavenApiClient).toHaveBeenCalledExactlyOnceWith(env, "devnet");
+    expect(dfnsClient.createIbmHavenApiClient).toHaveBeenCalledExactlyOnceWith(env);
     expect(createWallet).toHaveBeenCalledExactlyOnceWith({ body: { name: "Haven treasury" } });
     expect(wallet).toEqual({
       walletId: "ibmhaven_wa-12345-abcde-newdfnswallet",
