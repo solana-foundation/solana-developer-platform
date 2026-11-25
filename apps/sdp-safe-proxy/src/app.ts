@@ -189,8 +189,6 @@ export function createLocalCallerCheck(listensOn: {
 type FireblocksAuthHeaders = { Authorization: string; "X-API-Key": string };
 type PrivyAuthHeaders = { Authorization: string; "privy-app-id": string };
 
-const FIREBLOCKS_TOKEN_LIFETIME_SECONDS = 30;
-
 // `target` and `body` are the request exactly as it is sent: the Fireblocks token covers both.
 async function authHeaders(
   provider: SafeProxyProvider,
@@ -201,13 +199,14 @@ async function authHeaders(
   switch (provider) {
     case "fireblocks": {
       const { apiKey, privateKey } = credentials.fireblocks;
+      const tokenLifetimeSeconds = 30;
       const bodyHash = createHash("sha256").update(body, "utf8").digest("hex");
       const now = Math.floor(Date.now() / 1000);
       const token = await new SignJWT({ bodyHash, nonce: randomUUID(), uri: target })
         .setProtectedHeader({ alg: "RS256" })
         .setSubject(apiKey)
         .setIssuedAt(now)
-        .setExpirationTime(now + FIREBLOCKS_TOKEN_LIFETIME_SECONDS)
+        .setExpirationTime(now + tokenLifetimeSeconds)
         .sign(privateKey);
       return { Authorization: `Bearer ${token}`, "X-API-Key": apiKey };
     }
