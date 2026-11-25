@@ -410,9 +410,6 @@ importers:
       '@sdp/metadata-server':
         specifier: workspace:*
         version: link:../../packages/sdp-metadata-server
-      '@sdp/safe-proxy-endpoints':
-        specifier: workspace:*
-        version: link:../../packages/sdp-safe-proxy-endpoints
       hono:
         specifier: 4.13.16
         version: 4.13.16
@@ -1182,22 +1179,6 @@ importers:
       tsx:
         specifier: 4.23.15
         version: 4.23.15
-
-  packages/sdp-safe-proxy-endpoints:
-    dependencies:
-      zod:
-        specifier: 4.6.7
-        version: 4.6.7
-    devDependencies:
-      '@types/node':
-        specifier: 26.6.5
-        version: 26.6.5
-      tsx:
-        specifier: 4.23.15
-        version: 4.23.15
-      typescript:
-        specifier: 6.0.3
-        version: 6.0.3
 
   packages/sdp-solana:
     dependencies:

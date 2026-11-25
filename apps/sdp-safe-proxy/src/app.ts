@@ -1,11 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
-import { matchEndpoint } from "@sdp/safe-proxy-endpoints/match";
-import { FROM_PROVIDER_HEADER } from "@sdp/safe-proxy-endpoints/protocol";
-import { SAFE_PROXY_PROVIDERS, type SafeProxyProvider } from "@sdp/safe-proxy-endpoints/providers";
 import { Hono, type MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { requestId } from "hono/request-id";
 import { SignJWT } from "jose";
+import { matchEndpoint } from "./endpoints/match";
+import { FROM_PROVIDER_HEADER } from "./endpoints/protocol";
+import { SAFE_PROXY_PROVIDERS, type SafeProxyProvider } from "./endpoints/providers";
 import { badGateway, forbidden, notFound } from "./errors";
 import { type AppEnv, bodyWithinLimit, requestLog } from "./middleware";
 

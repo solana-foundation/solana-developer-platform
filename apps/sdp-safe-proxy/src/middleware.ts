@@ -1,10 +1,10 @@
 import { CallerIdentityError, createCallerIdentityVerifier } from "@sdp/metadata-server/receiver";
-import { SAFE_PROXY_CALLERS, type SafeProxyCaller } from "@sdp/safe-proxy-endpoints/callers";
-import { LOCAL_CALLER_HEADER } from "@sdp/safe-proxy-endpoints/protocol";
 import type { MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { RequestIdVariables } from "hono/request-id";
 import type { JWTVerifyGetKey } from "jose";
+import { SAFE_PROXY_CALLERS, type SafeProxyCaller } from "./endpoints/callers";
+import { LOCAL_CALLER_HEADER } from "./endpoints/protocol";
 import { forbidden, payloadTooLarge, serviceUnavailable, unauthorized } from "./errors";
 
 export interface RequestLogLine {
