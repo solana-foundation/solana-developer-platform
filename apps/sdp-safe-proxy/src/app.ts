@@ -46,6 +46,7 @@ export interface RequestLogLine {
 type AppEnv = { Variables: { line: RequestLogLine } };
 
 const MAX_BODY_BYTES = 1024 * 1024;
+const REQUEST_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
 const OWN_ANSWER_STATUS = {
   unknown_route: 404,
@@ -76,8 +77,10 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
   // One log line per request, written once the answer is known.
   app.use(async (c, next) => {
     const startedAt = Date.now();
+    const requestId = c.req.header(REQUEST_ID_HEADER);
     const line: RequestLogLine = {
-      request_id: c.req.header(REQUEST_ID_HEADER) ?? null,
+      // Logged only in the shape callers send it; anything else is left out.
+      request_id: requestId !== undefined && REQUEST_ID.test(requestId) ? requestId : null,
       caller: null,
       provider: null,
       endpoint: null,
@@ -112,6 +115,7 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
 
       const { pathname, search } = new URL(c.req.url);
       const providerEnd = pathname.indexOf("/", 1);
+      if (providerEnd === -1) throw new Refusal("unknown_route");
       const target = pathname.slice(providerEnd) + search;
       const body = await c.req.text();
 
