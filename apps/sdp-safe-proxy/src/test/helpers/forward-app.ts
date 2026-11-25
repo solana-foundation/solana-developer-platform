@@ -1,17 +1,16 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
-import { createCallerIdentityVerifier } from "@sdp/metadata-server/receiver";
 import type { SafeProxyCaller } from "@sdp/safe-proxy-endpoints/callers";
 import { createLocalJWKSet, importPKCS8, type JWTVerifyGetKey, SignJWT } from "jose";
 import {
+  type AppDependencies,
   createApp,
-  createTokenCallerCheck,
+  googleCaller,
   type ProviderCredentials,
   type RequestLogLine,
 } from "@/app";
 
 const AUDIENCE = "https://safe-proxy.mock.invalid";
-const NOW_MS = 1_800_000_000_000;
 const CALLER_EMAILS = {
   api: "api@callers.mock.invalid",
   cron: "cron@callers.mock.invalid",
@@ -46,28 +45,35 @@ export interface ProviderCall {
   redirect: RequestInit["redirect"];
 }
 
+type IdentityToken = SafeProxyCaller | "stranger" | "forged";
+
+// The email each identity token names: a forged token names a real caller.
+const TOKEN_EMAILS = {
+  ...CALLER_EMAILS,
+  stranger: "stranger@callers.mock.invalid",
+  forged: CALLER_EMAILS.api,
+} as const satisfies Record<IdentityToken, string>;
+
 export interface ForwardRequest {
   method?: string;
   // The identity token sent: one a caller's service account holds, one for a service account no
   // caller has, one signed by a key Google never published, or none.
-  token?: SafeProxyCaller | "stranger" | "forged" | null;
+  token?: IdentityToken | null;
   headers?: Record<string, string>;
   body?: string;
 }
 
 export interface ForwardAppOptions {
   answer?: (call: ProviderCall) => Response | Promise<Response>;
+  caller?: AppDependencies["caller"];
   keys?: JWTVerifyGetKey;
   credentials?: ProviderCredentials;
 }
 
-async function identityToken(token: SafeProxyCaller | "stranger" | "forged"): Promise<string> {
-  const email =
-    token === "stranger"
-      ? "stranger@callers.mock.invalid"
-      : CALLER_EMAILS[token === "forged" ? "api" : token];
-  const issuedAt = NOW_MS / 1000 - 42;
-  return new SignJWT({ email, email_verified: true })
+// Issued against the clock the proxy reads, real or mocked.
+async function identityToken(token: IdentityToken): Promise<string> {
+  const issuedAt = Math.floor(Date.now() / 1000) - 42;
+  return new SignJWT({ email: TOKEN_EMAILS[token], email_verified: true })
     .setProtectedHeader({ alg: "RS256" })
     .setIssuer("https://accounts.google.com")
     .setAudience(AUDIENCE)
@@ -81,15 +87,14 @@ export function createForwardApp(options: ForwardAppOptions = {}) {
   const logged: RequestLogLine[] = [];
 
   const app = createApp({
-    identifyCaller: createTokenCallerCheck({
-      verify: createCallerIdentityVerifier({
+    caller:
+      options.caller ??
+      googleCaller({
         audience: AUDIENCE,
         keys: options.keys ?? trustedKeys,
         maxTokenAgeSeconds: 300,
-        now: () => NOW_MS,
+        callerEmails: CALLER_EMAILS,
       }),
-      callerEmails: CALLER_EMAILS,
-    }),
     credentials: options.credentials ?? PLATFORM_CREDENTIALS,
     fetch: async (input, init) => {
       assert.ok(init, "the provider call carries its options");

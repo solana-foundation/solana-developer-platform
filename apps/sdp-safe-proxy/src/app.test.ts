@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { FROM_PROVIDER_HEADER, LOCAL_CALLER_HEADER } from "@sdp/safe-proxy-endpoints/protocol";
 import { importSPKI, jwtVerify } from "jose";
-import { createLocalCallerCheck, type ProviderCredentials } from "@/app";
+import { localCaller, type ProviderCredentials } from "@/app";
 import {
   createForwardApp,
   FIREBLOCKS_PUBLIC_KEY_PEM,
@@ -61,7 +61,7 @@ const ownAnswers: [string, number, string, string, ForwardRequest?, ForwardAppOp
   [
     "a body over the size limit",
     413,
-    "Payload Too Large",
+    own("payload_too_large"),
     WALLETS,
     { method: "POST", body: "a".repeat(1024 * 1024 + 1) },
   ],
@@ -78,14 +78,26 @@ for (const [name, status, body, path, request, app] of ownAnswers) {
   });
 }
 
-it("the local caller check takes a caller only on its loopback address, naming itself", async () => {
-  const identify = createLocalCallerCheck({ hostname: "127.0.0.1", port: 8791 });
-  const headers = (host: string, caller: string) =>
-    new Headers({ host, [LOCAL_CALLER_HEADER]: caller });
+it("a local proxy takes a caller only on its loopback address, by the name it gives", async () => {
+  const local = createForwardApp({ caller: localCaller({ hostname: "127.0.0.1", port: 8791 }) });
+  const answers = [];
+  for (const [host, caller] of [
+    ["127.0.0.1:8791", "api"],
+    ["127.0.0.1:8791", "cron"],
+    ["localhost:8791", "api"],
+    ["127.0.0.1:8791", "admin"],
+  ]) {
+    const headers = { host, [LOCAL_CALLER_HEADER]: caller };
+    answers.push(await answerOf(await local.send(WALLETS, { token: null, headers })));
+  }
 
-  assert.equal(await identify(headers("127.0.0.1:8791", "cron")), "cron");
-  await assert.rejects(identify(headers("localhost:8791", "api")), { status: 401 });
-  await assert.rejects(identify(headers("127.0.0.1:8791", "admin")), { status: 401 });
+  assert.deepEqual(answers, [
+    { status: 200, fromProvider: "1", body: '{"id":"wallet-1"}' },
+    { status: 403, fromProvider: null, body: own("caller_not_allowed") },
+    { status: 401, fromProvider: null, body: own("unauthorized") },
+    { status: 401, fromProvider: null, body: own("unauthorized") },
+  ]);
+  assert.equal(local.calls.length, 1);
 });
 
 it("sends the provider only its declared headers and the platform's Privy auth", async () => {
