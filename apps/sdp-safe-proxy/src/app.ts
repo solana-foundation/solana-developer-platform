@@ -28,8 +28,6 @@ export interface AppDependencies {
   caller: MiddlewareHandler<AppEnv>;
   credentials: ProviderCredentials;
   providerTimeoutMs: number;
-  writeLog: (line: RequestLogLine) => void;
-  revision: string;
 }
 
 export interface RequestLogLine {
@@ -42,7 +40,6 @@ export interface RequestLogLine {
   error: string | null;
   status: number;
   duration_ms: number;
-  revision: string;
 }
 
 type AppEnv = {
@@ -55,9 +52,6 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
   app.get("/health", (c) => c.json({ status: "ok" }));
-  app.get("/health/ready", (c) =>
-    c.json({ service: "sdp-safe-proxy", revision: dependencies.revision })
-  );
 
   // The caller's `X-Request-Id`, or a new one when it sent none.
   app.use(requestId());
@@ -73,7 +67,6 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
       error: null,
       status: 0,
       duration_ms: 0,
-      revision: dependencies.revision,
     };
     c.set("line", line);
     await next();
@@ -81,7 +74,8 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
     c.header("X-Request-Id", line.request_id);
     line.status = c.res.status;
     line.duration_ms = Date.now() - startedAt;
-    dependencies.writeLog(line);
+    // One JSON object per line is what Cloud Logging reads as a structured entry.
+    console.log(JSON.stringify(line));
   });
 
   // METHOD /<provider>/<the provider's own path and query>

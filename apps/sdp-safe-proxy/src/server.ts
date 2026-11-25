@@ -32,7 +32,6 @@ async function cloudRun() {
       },
     }),
     listensOn: { port: positiveInteger("PORT") },
-    revision: setting("K_REVISION"),
   };
 }
 
@@ -40,7 +39,7 @@ async function cloudRun() {
 // themselves.
 function local() {
   const listensOn = { hostname: "127.0.0.1", port: positiveInteger("SDP_SAFE_PROXY_PORT") };
-  return { caller: localCaller(listensOn), listensOn, revision: "local" };
+  return { caller: localCaller(listensOn), listensOn };
 }
 
 // The one place the runtime is chosen: Cloud Run sets K_SERVICE on every container.
@@ -60,8 +59,6 @@ const app = createApp({
     privy: { appId: setting("PRIVY_APP_ID"), appSecret: setting("PRIVY_APP_SECRET") },
   },
   providerTimeoutMs: positiveInteger("SAFE_PROXY_PROVIDER_TIMEOUT_MS"),
-  writeLog: (line) => process.stdout.write(`${JSON.stringify(line)}\n`),
-  revision: runtime.revision,
 });
 
 const server = serve({ fetch: app.fetch, ...runtime.listensOn });
