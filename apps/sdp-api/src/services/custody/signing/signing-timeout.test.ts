@@ -25,28 +25,7 @@ import {
 const { address: SIGNER_ADDRESS } = await generateKeyPairSigner();
 
 describe("boundSigningTime", () => {
-  it("fails a signing call that outlives the bound, as a retryable network error", async () => {
-    vi.useFakeTimers();
-    try {
-      const signer: TransactionPartialSigner = {
-        address: SIGNER_ADDRESS,
-        signTransactions: vi.fn(() => new Promise<never>(() => undefined)),
-      };
-      const bounded = boundSigningTime(signer, 1_000);
-      if (!isTransactionPartialSigner(bounded)) {
-        throw new Error("the bounded signer lost signTransactions");
-      }
-      const signing = bounded.signTransactions([]);
-      const settled = expect(signing).rejects.toMatchObject({ code: "NETWORK_ERROR" });
-      await vi.advanceTimersByTimeAsync(1_000);
-      await settled;
-      await expect(signing).rejects.toBeInstanceOf(SigningError);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("aborts the provider when the local signing deadline expires", async () => {
+  it("fails a signing call that outlives the bound as a retryable network error, and aborts the provider", async () => {
     vi.useFakeTimers();
     try {
       let signal: AbortSignal | undefined;
@@ -59,11 +38,11 @@ describe("boundSigningTime", () => {
       };
       const bounded = boundSigningTime(signer, 100);
       if (!isTransactionPartialSigner(bounded)) throw new Error("Expected partial signer");
-      const rejected = expect(bounded.signTransactions([])).rejects.toMatchObject({
-        code: "NETWORK_ERROR",
-      });
+      const signing = bounded.signTransactions([]);
+      const rejected = expect(signing).rejects.toMatchObject({ code: "NETWORK_ERROR" });
       await vi.advanceTimersByTimeAsync(100);
       await rejected;
+      await expect(signing).rejects.toBeInstanceOf(SigningError);
       expect(required(signal).aborted).toBe(true);
     } finally {
       vi.useRealTimers();

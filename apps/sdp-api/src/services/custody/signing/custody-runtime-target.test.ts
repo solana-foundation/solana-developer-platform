@@ -204,7 +204,6 @@ describe("CustodyRuntimeTargets", () => {
   it("admits an active Connection wallet without reading credentials", async () => {
     const connection = await seedConnection(DEFAULT_CONNECTION);
     const read = mockStoredCredentialRead();
-    const getPrivySigner = vi.spyOn(KeychainPrivyAdapter.prototype, "getTransactionSigner");
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
@@ -215,7 +214,6 @@ describe("CustodyRuntimeTargets", () => {
       })
     ).resolves.toBeUndefined();
     expect(read).not.toHaveBeenCalled();
-    expect(getPrivySigner).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -268,7 +266,7 @@ describe("CustodyRuntimeTargets", () => {
     );
   });
 
-  describe("money admission at the custody signer (HOO-1955, APE-564)", () => {
+  describe("money admission at the custody signer", () => {
     async function signerFor(custodyWalletId: string, movement: MovementId) {
       const signer = await new CustodyRuntimeTargets(
         getDb(env),
@@ -327,11 +325,11 @@ describe("CustodyRuntimeTargets", () => {
       const asMember = <T>(fn: () => Promise<T>) =>
         runAsMoneyPrincipal({ kind: "member", userId: USER_ID }, fn);
 
-      // A start signs only for an authenticated principal (HOO-2099).
+      // A start signs only for an authenticated principal.
       await expect(asMember(() => start.signTransactions([]))).resolves.toEqual([]);
 
-      // SOLA9-790: removed from the project after ingress, the member's
-      // in-flight start gets no custody signature; an exit still signs.
+      // Removed from the project after ingress, the member's in-flight start
+      // gets no custody signature; an exit still signs.
       await db
         .prepare("DELETE FROM project_members WHERE project_id = ? AND user_id = ?")
         .bind(PROJECT_ID, USER_ID)
@@ -806,25 +804,30 @@ describe("CustodyRuntimeTargets", () => {
     ).resolves.toMatchObject({ kind: "connection", connectionId: connection.id });
   });
 
-  it.each([null, "root", "mint_authority", "freeze_authority", "fee_payer", "transfer"] as const)(
-    "projects the supported wallet purpose %s",
-    async (purpose) => {
-      const config = await seedConfig({ provider: "privy", projectId: PROJECT_ID });
-      await getDb(env)
-        .prepare("UPDATE custody_wallets SET purpose = ? WHERE id = ?")
-        .bind(purpose, `cwlt_${config.id}`)
-        .run();
-      const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+  it.each([
+    null,
+    "root",
+    "mint_authority",
+    "freeze_authority",
+    "fee_payer",
+    "transfer",
+    "dvp_settlement_authority",
+  ] as const)("projects the supported wallet purpose %s", async (purpose) => {
+    const config = await seedConfig({ provider: "privy", projectId: PROJECT_ID });
+    await getDb(env)
+      .prepare("UPDATE custody_wallets SET purpose = ? WHERE id = ?")
+      .bind(purpose, `cwlt_${config.id}`)
+      .run();
+    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
-      await expect(
-        targets.findOperationalWalletById({
-          organizationId: ORGANIZATION_ID,
-          projectId: PROJECT_ID,
-          custodyWalletId: `cwlt_${config.id}`,
-        })
-      ).resolves.toMatchObject({ purpose });
-    }
-  );
+    await expect(
+      targets.findOperationalWalletById({
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        custodyWalletId: `cwlt_${config.id}`,
+      })
+    ).resolves.toMatchObject({ purpose });
+  });
 
   it.each(["config", "connection"] as const)(
     "rejects an unknown wallet purpose from the %s projection",

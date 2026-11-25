@@ -152,7 +152,7 @@ async function signerRejectingWith(
   };
 }
 
-describe("admittedSigner custody policy refusals (HOO-2333)", () => {
+describe("admittedSigner custody policy refusals", () => {
   it.each([
     ["signTransactions", signTransactions],
     ["modifyAndSignTransactions", modifyAndSignTransactions],

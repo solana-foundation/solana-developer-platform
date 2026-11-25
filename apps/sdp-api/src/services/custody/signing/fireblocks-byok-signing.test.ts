@@ -322,7 +322,7 @@ describe("Fireblocks BYOK transaction proposals", () => {
   });
 });
 
-describe("Fireblocks BYOK policy refusals (HOO-2478)", () => {
+describe("Fireblocks BYOK policy refusals", () => {
   /** Signs through the shared custody signer while Fireblocks answers the proposal with `poll`. */
   async function signAgainstPoll(poll: { status: string; subStatus?: string; note?: string }) {
     vi.spyOn(globalThis, "fetch")

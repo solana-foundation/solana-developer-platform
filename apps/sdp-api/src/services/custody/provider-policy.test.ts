@@ -9,6 +9,7 @@ import {
   writeTestPrivyCredentialSecret,
 } from "@/test/helpers/custody-connections";
 import { env as baseEnv } from "@/test/helpers/env";
+import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { checkDueProviderPolicies } from "./provider-policy";
@@ -51,7 +52,7 @@ async function seedConnection(
         {
           id: walletId,
           walletId: `privy_${name}`,
-          publicKey: "So11111111111111111111111111111111111111112",
+          publicKey: syntheticAddress(1),
           label: name,
           purpose: null,
           status: "active",
@@ -59,7 +60,7 @@ async function seedConnection(
         ...Array.from({ length: options.extraWallets ?? 0 }, (_, index) => ({
           id: `${walletId}_${index + 2}`,
           walletId: `privy_${name}_${index + 2}`,
-          publicKey: "So11111111111111111111111111111111111111112",
+          publicKey: syntheticAddress(1),
           label: `${name}_${index + 2}`,
           purpose: null,
           status: "active" as const,
