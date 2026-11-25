@@ -105,11 +105,19 @@ async function identityToken(token: IdentityToken): Promise<string> {
     .sign(token === "forged" ? forgedKeys.privateKey : callerKeys.privateKey);
 }
 
-// Takes over the platform's `fetch` and the proxy's logger until the test ends, so build one app
-// per test.
+// Takes over the platform's `fetch`, the proxy's logger and the deployment's release channel until
+// the test ends, so build one app per test. `t.mock.property` refuses `process.env`, which takes
+// no accessors, so the channel is set and put back by hand.
 export function createForwardApp(t: TestContext, options: ForwardAppOptions = {}) {
   const calls: ProviderCall[] = [];
   const logged: LoggedLine[] = [];
+
+  const deployedChannel = process.env.SDP_RELEASE_CHANNEL;
+  process.env.SDP_RELEASE_CHANNEL = options.releaseChannel ?? EVERY_PROVIDER_CHANNEL;
+  t.after(() => {
+    if (deployedChannel === undefined) delete process.env.SDP_RELEASE_CHANNEL;
+    else process.env.SDP_RELEASE_CHANNEL = deployedChannel;
+  });
 
   const provider: typeof fetch = async (input, init) => {
     assert.ok(init, "the provider call carries its options");
@@ -141,7 +149,6 @@ export function createForwardApp(t: TestContext, options: ForwardAppOptions = {}
         maxTokenAgeSeconds: 300,
         callerEmails: CALLER_EMAILS,
       }),
-    releaseChannel: options.releaseChannel ?? EVERY_PROVIDER_CHANNEL,
     credentials: options.credentials ?? PLATFORM_CREDENTIALS,
     providerTimeoutMs: 10_000,
   });
