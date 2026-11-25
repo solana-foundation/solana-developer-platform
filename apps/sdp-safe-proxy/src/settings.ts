@@ -1,3 +1,4 @@
+import { IDENTITY_TOKEN_REFETCH_AFTER_SECONDS } from "@sdp/metadata-server/caller";
 import { z } from "zod";
 import type { ProviderCredentials } from "./provider-auth";
 
@@ -30,7 +31,10 @@ const serverSettingsSchema = z
     SAFE_PROXY_AUDIENCE: z.url({ protocol: /^https$/ }),
     SAFE_PROXY_API_CALLER: z.email(),
     SAFE_PROXY_CRON_CALLER: z.email(),
-    SAFE_PROXY_MAX_TOKEN_AGE_SECONDS: positiveInteger.max(IDENTITY_TOKEN_LIFETIME_SECONDS),
+    // Above the age at which callers fetch a new token, so a token still being sent is never refused.
+    SAFE_PROXY_MAX_TOKEN_AGE_SECONDS: positiveInteger
+      .gt(IDENTITY_TOKEN_REFETCH_AFTER_SECONDS)
+      .max(IDENTITY_TOKEN_LIFETIME_SECONDS),
   })
   .refine((settings) => settings.SAFE_PROXY_API_CALLER !== settings.SAFE_PROXY_CRON_CALLER, {
     path: ["SAFE_PROXY_CRON_CALLER"],

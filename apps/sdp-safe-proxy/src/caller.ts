@@ -1,6 +1,6 @@
+import { type CallerIdentity, CallerIdentityError } from "@sdp/metadata-server/receiver";
 import { SAFE_PROXY_CALLERS, type SafeProxyCaller } from "@sdp/safe-proxy-endpoints/callers";
 import { LOCAL_CALLER_HEADER } from "@sdp/safe-proxy-endpoints/protocol";
-import { type CallerIdentity, CallerIdentityError } from "@sdp/service-call/caller-identity";
 import { z } from "zod";
 import { Refusal } from "./app";
 

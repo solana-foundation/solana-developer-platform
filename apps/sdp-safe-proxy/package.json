@@ -13,7 +13,7 @@
   "dependencies": {
     "@hono/node-server": "2.1.6",
     "@sdp/safe-proxy-endpoints": "workspace:*",
-    "@sdp/service-call": "workspace:*",
+    "@sdp/metadata-server": "workspace:*",
     "@sdp/types": "workspace:*",
     "hono": "4.13.16",
     "jose": "6.2.13",

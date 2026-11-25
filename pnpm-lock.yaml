@@ -407,12 +407,12 @@ importers:
       '@hono/node-server':
         specifier: 2.1.6
         version: 2.1.6(hono@4.13.16)
+      '@sdp/metadata-server':
+        specifier: workspace:*
+        version: link:../../packages/sdp-metadata-server
       '@sdp/safe-proxy-endpoints':
         specifier: workspace:*
         version: link:../../packages/sdp-safe-proxy-endpoints
-      '@sdp/service-call':
-        specifier: workspace:*
-        version: link:../../packages/sdp-service-call
       '@sdp/types':
         specifier: workspace:*
         version: link:../../packages/sdp-types

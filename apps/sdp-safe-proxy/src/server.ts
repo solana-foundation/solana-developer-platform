@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import {
   createCallerIdentityVerifier,
   createGoogleIdentityKeys,
-} from "@sdp/service-call/caller-identity";
+} from "@sdp/metadata-server/receiver";
 import { createApp } from "./app";
 import { createTokenCallerCheck } from "./caller";
 import { parseServerSettings, platformCredentials } from "./settings";
