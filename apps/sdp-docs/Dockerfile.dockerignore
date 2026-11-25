@@ -56,7 +56,7 @@ packages/*
 !packages/sdp-solana
 !packages/sdp-payments
 !packages/sdp-fee-payment
-!packages/sdp-service-call
+!packages/sdp-metadata-server
 !packages/sdp-issuance
 docs
 infra

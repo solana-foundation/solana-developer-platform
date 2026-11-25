@@ -779,12 +779,12 @@ importers:
 
   packages/sdp-fee-payment:
     dependencies:
+      '@sdp/metadata-server':
+        specifier: workspace:*
+        version: link:../sdp-metadata-server
       '@sdp/rpc':
         specifier: workspace:*
         version: link:../sdp-rpc
-      '@sdp/service-call':
-        specifier: workspace:*
-        version: link:../sdp-service-call
       '@sdp/types':
         specifier: workspace:*
         version: link:../sdp-types
@@ -1009,6 +1009,25 @@ importers:
         specifier: 4.1.12
         version: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/coverage-istanbul@4.1.12)(@vitest/coverage-v8@4.1.12)(jsdom@30.1.3(@noble/hashes@2.4.0))(vite@7.3.7(@types/node@26.6.5)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
 
+  packages/sdp-metadata-server:
+    dependencies:
+      jose:
+        specifier: 6.2.13
+        version: 6.2.13
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@types/node':
+        specifier: 26.6.5
+        version: 26.6.5
+      tsx:
+        specifier: 4.23.15
+        version: 4.23.15
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+
   packages/sdp-ondo:
     dependencies:
       '@sdp/earn':
@@ -1166,25 +1185,6 @@ importers:
       '@sdp/types':
         specifier: workspace:*
         version: link:../sdp-types
-      zod:
-        specifier: 4.6.7
-        version: 4.6.7
-    devDependencies:
-      '@types/node':
-        specifier: 26.6.5
-        version: 26.6.5
-      tsx:
-        specifier: 4.23.15
-        version: 4.23.15
-      typescript:
-        specifier: 6.0.3
-        version: 6.0.3
-
-  packages/sdp-service-call:
-    dependencies:
-      jose:
-        specifier: 6.2.13
-        version: 6.2.13
       zod:
         specifier: 4.6.7
         version: 4.6.7

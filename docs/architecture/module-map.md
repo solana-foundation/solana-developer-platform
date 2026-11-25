@@ -23,7 +23,7 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/dvp` | Generated @solana/kit client for the DvP atomic swap program. | None | None |
 | `@sdp/earn` | Earn domain services, yield strategies, and vault-infra providers. | `@sdp/payments`, `@sdp/redaction`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` | None |
 | `@sdp/env-config` | Runtime environment configuration and validation. | None | None |
-| `@sdp/fee-payment` | Fee-payment port, the Kora adapter, Kora endpoint selection, and the Fee Payer's chain reads. | `@sdp/rpc`, `@sdp/service-call`, `@sdp/types` | None |
+| `@sdp/fee-payment` | Fee-payment port, the Kora adapter, Kora endpoint selection, and the Fee Payer's chain reads. | `@sdp/rpc`, `@sdp/metadata-server`, `@sdp/types` | None |
 | `@sdp/hastra` | Hastra PRIME mint/stake, Jupiter DEX exit, par-redemption lifecycle, and position plans. | `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` | `@sdp/custody` |
 | `@sdp/helius-rings` | Helius Rings shielded-wallet domain types, state machine, and gateway port (devnet). | `@sdp/types` | None |
 | `@sdp/helius-rings-sdk` | Helius Rings gateway adapter running the Zolana SDK in process: health, identity provisioning, and shielded balance reads. | `@sdp/helius-rings` | None |
@@ -31,6 +31,7 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/issuance` | Token issuance domain services and Mosaic integration. | `@sdp/rpc`, `@sdp/solana`, `@sdp/types` | None |
 | `@sdp/jupiter-lend` | Jupiter Lend Earn USDT deposit/withdraw plans over the official SDK. | `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` | `@sdp/custody` |
 | `@sdp/kamino` | Kit-native Kamino K-Vault deposit/withdraw instruction plans over klend-sdk. | `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` | `@sdp/custody` |
+| `@sdp/metadata-server` | Identity tokens between SDP's private Cloud Run services: the calling side fetches one from the metadata server for a checked destination, the receiving side verifies a caller's. | None | None |
 | `@sdp/ondo` | Ondo USDY secondary-market swap plans and position reads over an injected Jupiter port. | `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` | `@sdp/custody` |
 | `@sdp/payments` | Payment domain services and ramp providers. | `@sdp/redaction`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` | None |
 | `@sdp/plume` | Plume RWA transaction admission, cross-chain settlement, and live positions. | `@sdp/earn`, `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` | `@sdp/custody` |
@@ -39,7 +40,6 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/rpc` | Solana RPC clients, errors, and transport helpers. | `@sdp/types` | None |
 | `@sdp/safe-proxy` | Safe Proxy service: holds provider credentials and makes provider calls for the API. | `@sdp/safe-proxy-endpoints` | None |
 | `@sdp/safe-proxy-endpoints` | The provider endpoints Safe Proxy forwards to, the matcher that admits a request, and the forward protocol. | `@sdp/types` | None |
-| `@sdp/service-call` | Identity tokens for calls between SDP's private services: fetching one, checking the destination, and verifying a caller's. | None | None |
 | `@sdp/solana` | Solana transaction and token-program services. | `@sdp/rpc`, `@sdp/types` | None |
 | `@sdp/spc-escrow` | Generated @solana/kit client for the Private Channels escrow program. | None | None |
 | `@sdp/spc-withdraw` | Generated @solana/kit client for the Private Channels withdraw program. | None | None |
@@ -61,7 +61,7 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/dvp` -> None
 - `@sdp/earn` -> `@sdp/redaction`, `@sdp/types`
 - `@sdp/env-config` -> None
-- `@sdp/fee-payment` -> `@sdp/rpc`, `@sdp/service-call`, `@sdp/types`
+- `@sdp/fee-payment` -> `@sdp/metadata-server`, `@sdp/rpc`, `@sdp/types`
 - `@sdp/hastra` -> `@sdp/custody`, `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/helius-rings` -> `@sdp/types`
 - `@sdp/helius-rings-sdk` -> `@sdp/helius-rings`
@@ -69,6 +69,7 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/issuance` -> `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/jupiter-lend` -> `@sdp/custody`, `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/kamino` -> `@sdp/custody`, `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
+- `@sdp/metadata-server` -> None
 - `@sdp/ondo` -> `@sdp/custody`, `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/payments` -> `@sdp/redaction`, `@sdp/solana`, `@sdp/types`
 - `@sdp/plume` -> `@sdp/custody`, `@sdp/earn`, `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
@@ -77,7 +78,6 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/rpc` -> `@sdp/types`
 - `@sdp/safe-proxy` -> `@sdp/safe-proxy-endpoints`
 - `@sdp/safe-proxy-endpoints` -> `@sdp/types`
-- `@sdp/service-call` -> None
 - `@sdp/solana` -> `@sdp/rpc`
 - `@sdp/spc-escrow` -> None
 - `@sdp/spc-withdraw` -> None
