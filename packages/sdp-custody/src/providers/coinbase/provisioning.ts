@@ -77,7 +77,7 @@ export async function provisionCoinbaseCdpAccount(
   );
   const network = config.network ?? DEFAULT_COINBASE_CDP_NETWORK;
 
-  const name = await deriveCoinbaseCdpAccountName(runtime, {
+  const name = await deriveCoinbaseCdpAccountName({
     accountScope: config.accountScope,
     organizationId: options.orgId,
     projectId: options.projectId,
@@ -93,7 +93,7 @@ export async function provisionCoinbaseCdpAccount(
       apiKeyId,
       apiKeySecret,
       walletSecret,
-      idempotencyKey: options.idempotencyKey ?? runtime.randomUUID(),
+      idempotencyKey: options.idempotencyKey ?? crypto.randomUUID(),
       body: {
         name,
         ...(options.accountPolicy ? { accountPolicy: options.accountPolicy } : {}),

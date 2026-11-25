@@ -44,7 +44,7 @@ export async function provisionParaWallet(
 
   const apiBaseUrl = assertHttpsBaseUrl(config.apiBaseUrl ?? DEFAULT_PARA_API_BASE_URL, "Para");
 
-  const userIdentifier = buildParaUserIdentifier(runtime, {
+  const userIdentifier = buildParaUserIdentifier({
     orgId: options.orgId,
     projectId: options.projectId,
   });

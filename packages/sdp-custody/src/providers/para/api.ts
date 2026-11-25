@@ -146,12 +146,9 @@ export function validateParaWallet(
   };
 }
 
-export function buildParaUserIdentifier(
-  runtime: CustodyProvisioningRuntime,
-  params: { orgId: string; projectId?: string }
-): string {
+export function buildParaUserIdentifier(params: { orgId: string; projectId?: string }): string {
   const scope = params.projectId
     ? `org:${params.orgId}:project:${params.projectId}`
     : `org:${params.orgId}`;
-  return `sdp:${scope}:wallet:${runtime.randomUUID()}`;
+  return `sdp:${scope}:wallet:${crypto.randomUUID()}`;
 }

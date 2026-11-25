@@ -700,9 +700,6 @@ describe("utila wallet provisioning", () => {
         fetch: fetchMock,
         sleep: async () => undefined,
         now: () => now,
-        randomUUID: () => "test-uuid",
-        getRandomValues: (values) => values,
-        sha256: (data) => crypto.subtle.digest("SHA-256", new Uint8Array(data)),
       },
       {
         serviceAccountEmail: "service-account@example.com",

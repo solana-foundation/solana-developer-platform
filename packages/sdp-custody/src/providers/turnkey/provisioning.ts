@@ -80,7 +80,7 @@ export async function provisionTurnkeyPrivateKey(
       parameters: {
         privateKeys: [
           {
-            privateKeyName: buildTurnkeyPrivateKeyName(runtime, options.orgSlug || options.orgId),
+            privateKeyName: buildTurnkeyPrivateKeyName(options.orgSlug || options.orgId),
             curve: "CURVE_ED25519",
             privateKeyTags: [],
             addressFormats: ["ADDRESS_FORMAT_SOLANA"],
@@ -155,8 +155,8 @@ async function turnkeyRequest<T>(
   }
 }
 
-function buildTurnkeyPrivateKeyName(runtime: CustodyProvisioningRuntime, value: string): string {
-  const suffix = randomHex(runtime, 2);
+function buildTurnkeyPrivateKeyName(value: string): string {
+  const suffix = randomHex(2);
   let normalized = normalizeProviderNameFragment(value);
 
   if (!normalized) {
@@ -167,7 +167,7 @@ function buildTurnkeyPrivateKeyName(runtime: CustodyProvisioningRuntime, value: 
   name = trimTrailingHyphens(name);
 
   if (!name) {
-    name = `sdp-${randomHex(runtime, 3)}`;
+    name = `sdp-${randomHex(3)}`;
   }
 
   return name;

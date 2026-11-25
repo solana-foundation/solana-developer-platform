@@ -127,7 +127,7 @@ async function createCoinbaseCdpBearerJwt(
   params: CoinbaseCdpBearerJwtParams
 ): Promise<string> {
   const now = Math.floor(runtime.now() / 1000);
-  const nonce = randomHex(runtime, 16);
+  const nonce = randomHex(16);
   const uri = `${params.requestMethod} ${params.requestHost}${params.requestPath}`;
 
   const payload = new SignJWT({ uris: [uri] })
@@ -177,7 +177,7 @@ async function createCoinbaseCdpWalletJwt(
     Object.values(params.requestData).some((value) => value !== undefined);
 
   if (shouldIncludeReqHash) {
-    payload.reqHash = await sha256Hex(runtime, JSON.stringify(sortJsonKeys(params.requestData)));
+    payload.reqHash = await sha256Hex(JSON.stringify(sortJsonKeys(params.requestData)));
   }
 
   const pkcs8DerBytes = decodeBase64ToBytes(params.walletSecret);
@@ -194,7 +194,7 @@ async function createCoinbaseCdpWalletJwt(
     .setIssuedAt(now)
     .setNotBefore(now)
     .setExpirationTime(now + COINBASE_CDP_WALLET_JWT_TTL_SECONDS)
-    .setJti(randomHex(runtime, 16))
+    .setJti(randomHex(16))
     .sign(key);
 }
 
@@ -227,7 +227,6 @@ export interface CoinbaseCdpAccountIdentity {
  * ever decides which account a tenant receives.
  */
 export async function deriveCoinbaseCdpAccountName(
-  runtime: CustodyProvisioningRuntime,
   identity: CoinbaseCdpAccountIdentity
 ): Promise<string> {
   if (!identity.organizationId) {
@@ -247,7 +246,7 @@ export async function deriveCoinbaseCdpAccountName(
     identity.walletSeed ?? "__root__",
   ].join("|");
 
-  const digest = await sha256Hex(runtime, canonical);
+  const digest = await sha256Hex(canonical);
   return `sdp-${digest.slice(0, 32)}`;
 }
 

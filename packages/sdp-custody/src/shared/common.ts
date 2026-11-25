@@ -1,6 +1,5 @@
 import { redactCredentialString } from "@sdp/redaction/credentials";
 import { SigningError } from "#/signing";
-import type { CustodyProvisioningRuntime } from "./runtime";
 
 function hasEmptyResponseBody(response: Response): boolean {
   return response.status === 204 || response.headers.get("content-length") === "0";
@@ -21,19 +20,16 @@ export async function parseJsonResponse<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function sha256Hex(
-  runtime: CustodyProvisioningRuntime,
-  data: string
-): Promise<string> {
+export async function sha256Hex(data: string): Promise<string> {
   const encoder = new TextEncoder();
   const dataBuffer = encoder.encode(data);
-  const hashBuffer = await runtime.sha256(dataBuffer);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", dataBuffer);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-export function randomHex(runtime: CustodyProvisioningRuntime, byteLength: number): string {
-  const bytes = runtime.getRandomValues(new Uint8Array(byteLength));
+export function randomHex(byteLength: number): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(byteLength));
   return Array.from(bytes)
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");

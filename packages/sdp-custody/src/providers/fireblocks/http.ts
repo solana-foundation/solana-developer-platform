@@ -36,7 +36,7 @@ export async function fireblocksRequest<T>(
   // Preserve previously valid keys, including existing payment externalTxIds.
   const idempotencyKey =
     params.idempotencyKey && params.idempotencyKey.length > 40
-      ? (await sha256Hex(runtime, params.idempotencyKey)).slice(0, 40)
+      ? (await sha256Hex(params.idempotencyKey)).slice(0, 40)
       : params.idempotencyKey;
   const bodyStr = params.body ? JSON.stringify(params.body) : "";
   const token = await createFireblocksJwt(
@@ -90,8 +90,8 @@ async function createFireblocksJwt(
   body: string
 ): Promise<string> {
   const privateKey = await importPKCS8(privateKeyPem, "RS256");
-  const bodyHash = await sha256Hex(runtime, body);
-  const nonce = runtime.randomUUID();
+  const bodyHash = await sha256Hex(body);
+  const nonce = crypto.randomUUID();
   const now = Math.floor(runtime.now() / 1000);
 
   return new SignJWT({ bodyHash, nonce, uri })
