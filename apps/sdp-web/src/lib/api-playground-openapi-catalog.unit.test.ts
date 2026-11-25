@@ -43,6 +43,11 @@ describe("API playground module coverage", () => {
       const publicEndpoints = getOpenApiPlaygroundEndpoints(module as keyof typeof configsByModule);
       const publicKeys = publicEndpoints.map(operationKey);
 
+      // A generated catalog that lost this module would make every check below
+      // vacuous (`[].every(...)` is true), so floor the generated side first.
+      expect(publicKeys.length).toBeGreaterThan(0);
+      expect(new Set(publicKeys).size).toBe(publicKeys.length);
+
       expect(configuredKeys.size).toBe(configs.length);
       expect(publicKeys.every((key) => configuredKeys.has(key))).toBe(true);
       for (const publicEndpoint of publicEndpoints) {
@@ -312,6 +317,12 @@ describe("API playground key contract", () => {
         getOpenApiPlaygroundEndpoints(module).map((endpoint) => [operationKey(endpoint), endpoint])
       )
     );
+    // The off-ramp start is the one hand-authored form with no published
+    // operation to take a contract from; any other form outside the generated
+    // catalog is drift, not a form to silently skip.
+    expect(
+      built.filter((endpoint) => !generated.has(operationKey(endpoint))).map(operationKey)
+    ).toEqual(["POST /v1/payments/ramps/offramp/start"]);
     for (const endpoint of built) {
       const reference = generated.get(operationKey(endpoint));
       if (reference === undefined) continue;
