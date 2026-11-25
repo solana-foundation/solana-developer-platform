@@ -378,28 +378,26 @@ test("recorded principals are a separate capability restricted to the recovery w
   ]);
 });
 
-const custodySigningFolder = "apps/sdp-api/src/services/custody/signing/";
-
-for (const { id, names, allowedCount } of [
+for (const { id, names, allowed } of [
   {
     id: "fireblocks-transfer-cancellation",
     names: ["cancelFireblocksTransfer", "cancelFireblocksTransaction"],
-    allowedCount: 2,
+    allowed: [
+      "apps/sdp-api/src/services/custody/signing/admitted-proposer.ts",
+      "apps/sdp-api/src/services/custody/signing/admitted-transaction-proposer.ts",
+    ],
   },
   {
     id: "custody-proposal-recovery-construction",
     names: ["proposalRecovery", "proposalCanceller"],
-    allowedCount: 1,
+    allowed: ["apps/sdp-api/src/services/custody/signing/custody-runtime-target.ts"],
   },
 ]) {
   test(`${id} pins both worker and manual cancellation entry points`, () => {
     const capability = CAPABILITIES.find((candidate) => candidate.id === id);
     assert.ok(capability);
     assert.deepEqual(capability.symbols.map((symbol) => symbol.name).sort(), [...names].sort());
-    assert.equal(capability.allow.length, allowedCount);
-    for (const allowedFile of capability.allow) {
-      assert.ok(allowedFile.startsWith(custodySigningFolder), allowedFile);
-    }
+    assert.deepEqual(capability.allow, allowed);
     const found = violations(
       {
         "src/lib/cap.ts": names.map((name) => `export function ${name}(): void {}`).join("\n"),
