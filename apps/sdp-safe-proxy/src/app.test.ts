@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import {
-  FROM_PROVIDER_HEADER,
-  LOCAL_CALLER_HEADER,
-  REQUEST_ID_HEADER,
-} from "@sdp/safe-proxy-endpoints/protocol";
+import { FROM_PROVIDER_HEADER, LOCAL_CALLER_HEADER } from "@sdp/safe-proxy-endpoints/protocol";
 import { importSPKI, jwtVerify } from "jose";
 import { createLocalCallerCheck, type ProviderCredentials } from "@/app";
 import {
@@ -193,7 +189,11 @@ it("passes back the provider's status, body and content type, marked as the prov
     },
     {
       status: 403,
-      headers: { "content-type": "application/problem+json", [FROM_PROVIDER_HEADER]: "1" },
+      headers: {
+        "content-type": "application/problem+json",
+        [FROM_PROVIDER_HEADER]: "1",
+        "x-request-id": "req-7d1",
+      },
       body: own("caller_not_allowed"),
     }
   );
@@ -211,7 +211,7 @@ it("answers 502 when the provider call fails after it was sent", async () => {
   assert.equal(forwardApp.calls.length, 1);
 });
 
-it("logs the endpoint's pattern and the outcome, never a path, body, secret or token", async () => {
+it("logs the request id, the endpoint's pattern and the outcome, never a path, body, secret or token", async () => {
   const forwardApp = createForwardApp({
     answer: () => new Response('{"signed":"resp-body-c63"}'),
   });
@@ -221,7 +221,11 @@ it("logs the endpoint's pattern and the outcome, never a path, body, secret or t
   });
   await forwardApp.send(WALLETS, { token: "cron" });
   const failing = createForwardApp({ credentials: FAILING_CREDENTIALS });
-  await failing.send(VAULTS, { headers: { [REQUEST_ID_HEADER]: "req 7d1 tx-body-b52" } });
+  const badlyShaped = "req 7d1 tx-body-b52";
+  const replaced = await failing.send(VAULTS, { headers: { "x-request-id": badlyShaped } });
+  const replacedId = replaced.headers.get("x-request-id");
+  assert.ok(replacedId, "the proxy's own error carries a request id");
+  assert.notEqual(replacedId, badlyShaped);
 
   const lines = [...forwardApp.logged, ...failing.logged].map(({ duration_ms, ...line }) => line);
   const revision = "sdp-safe-proxy-00042-abc";
@@ -245,7 +249,7 @@ it("logs the endpoint's pattern and the outcome, never a path, body, secret or t
       revision,
     },
     {
-      request_id: null,
+      request_id: replacedId,
       caller: "api",
       provider: "fireblocks",
       endpoint: "GET /v1/vault/accounts_paged",

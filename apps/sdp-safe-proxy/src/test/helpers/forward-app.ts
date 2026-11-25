@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
 import { createCallerIdentityVerifier } from "@sdp/metadata-server/receiver";
 import type { SafeProxyCaller } from "@sdp/safe-proxy-endpoints/callers";
-import { REQUEST_ID_HEADER } from "@sdp/safe-proxy-endpoints/protocol";
 import { createLocalJWKSet, importPKCS8, type JWTVerifyGetKey, SignJWT } from "jose";
 import {
   createApp,
@@ -110,7 +109,7 @@ export function createForwardApp(options: ForwardAppOptions = {}) {
   });
 
   async function send(path: string, request: ForwardRequest = {}): Promise<Response> {
-    const headers = new Headers({ [REQUEST_ID_HEADER]: "req-7d1", ...request.headers });
+    const headers = new Headers({ "x-request-id": "req-7d1", ...request.headers });
     const token = request.token === undefined ? "api" : request.token;
     if (token !== null) headers.set("authorization", `Bearer ${await identityToken(token)}`);
     return app.request(path, { method: request.method ?? "GET", headers, body: request.body });
