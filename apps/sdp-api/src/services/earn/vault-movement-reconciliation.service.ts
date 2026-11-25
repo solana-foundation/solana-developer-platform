@@ -719,6 +719,8 @@ async function settleMovement(
     ...(movement.direction === "withdrawal" ? { tokenAmountSettled } : {}),
     ...(depositReceipt ? { depositReceipt } : {}),
   });
+  // Bounded observation leaves empty-position closure to the next hydrated
+  // position read, which verifies live shares without another fast-lane RPC.
   if (
     settled &&
     position &&

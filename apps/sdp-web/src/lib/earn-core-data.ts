@@ -6,7 +6,7 @@ import useSWR, { useSWRConfig } from "swr";
 import { earnQueryKeys } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-query-key";
 import { dashboardRequest } from "./dashboard-fetch";
 import { createEarnClient } from "./earn-client";
-import { EarnOperationObserver } from "./earn-operation-observer";
+import { type EarnObservationProgress, EarnOperationObserver } from "./earn-operation-observer";
 
 /** Both Earn products use the same project-scoped transport and typed contract. */
 export const earnCoreClient = createEarnClient((path, init) => {
@@ -88,10 +88,6 @@ async function fetchActiveOperations(): Promise<Operation[]> {
   throw new Error("Earn operation pagination exceeded its safety limit");
 }
 
-interface ProgressObservation {
-  error?: Error;
-}
-
 const operationObservers = new WeakMap<
   ReturnType<typeof useSWRConfig>["cache"],
   EarnOperationObserver
@@ -132,14 +128,10 @@ function operationObserver({ cache, mutate }: ReturnType<typeof useSWRConfig>) {
         { revalidate: false }
       );
     },
-    reportError: async (error) => {
-      await mutate<ProgressObservation>(
-        earnQueryKeys.operationProgress(),
-        { error },
-        {
-          revalidate: false,
-        }
-      );
+    reportProgress: async (progress) => {
+      await mutate<EarnObservationProgress>(earnQueryKeys.operationProgress(), progress, {
+        revalidate: false,
+      });
     },
   });
   operationObservers.set(cache, observer);
@@ -152,7 +144,10 @@ export function useEarnOperations() {
   const { cache } = config;
   const observer = operationObserver(config);
   useEffect(() => observer.retain(), [observer]);
-  const { data: progress } = useSWR<ProgressObservation>(earnQueryKeys.operationProgress(), null);
+  const { data: progress } = useSWR<EarnObservationProgress>(
+    earnQueryKeys.operationProgress(),
+    null
+  );
   const key = earnQueryKeys.operations();
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState<Error>();
@@ -165,9 +160,9 @@ export function useEarnOperations() {
       expanded ? undefined : earnCoreClient.operations({ limit: OPERATIONS_HISTORY_PAGE_SIZE }),
     ]);
     const previous = currentFeed();
-    await config.mutate<ProgressObservation>(
+    await config.mutate<EarnObservationProgress>(
       earnQueryKeys.operationProgress(),
-      { error: undefined },
+      (current) => ({ error: undefined, unavailableIds: current?.unavailableIds ?? [] }),
       { revalidate: false }
     );
     for (const operation of mergeOperations(
@@ -278,7 +273,10 @@ export function useEarnOperation(
     if (operationId) observer.focus(operationId);
     return release;
   }, [observer, foreground, operationId]);
-  const { data: progress } = useSWR<ProgressObservation>(earnQueryKeys.operationProgress(), null);
+  const { data: progress } = useSWR<EarnObservationProgress>(
+    earnQueryKeys.operationProgress(),
+    null
+  );
   const { data: feed } = useSWR<EarnOperationsFeed>(
     foreground ? earnQueryKeys.operations() : null,
     null
@@ -321,7 +319,13 @@ export function useEarnOperation(
   }, [initial, operation, operationId]);
   return {
     operation,
-    error: error ?? progress?.error,
+    error:
+      error ??
+      (operationId &&
+      progress?.unavailableIds.includes(operationId) &&
+      (!operation || !isEarnOperationTerminal(operation))
+        ? new Error("An operation observation is unavailable")
+        : progress?.error),
     refresh: () => mutate(),
     update: (operation: Operation) => {
       observer.recordObservation(operation, true);

@@ -1,7 +1,7 @@
 import type { Operation } from "@sdp/types/operations";
 import { afterEach, expect, it, vi } from "vitest";
 import { EarnApiError } from "./earn-client";
-import { EarnOperationObserver } from "./earn-operation-observer";
+import { type EarnObservationProgress, EarnOperationObserver } from "./earn-operation-observer";
 
 function operation(id: string, status: Operation["status"] = "queued"): Operation {
   return {
@@ -32,10 +32,10 @@ function operation(id: string, status: Operation["status"] = "queued"): Operatio
 
 function createObserver(read: (ids: readonly string[]) => Promise<readonly Operation[]>) {
   const publish = vi.fn(async (_operations: readonly Operation[]) => {});
-  const reportError = vi.fn(async (_error: Error | undefined) => {});
+  const reportProgress = vi.fn(async (_progress: EarnObservationProgress) => {});
   const visible = vi.fn(() => true);
-  const observer = new EarnOperationObserver({ read, publish, reportError, visible });
-  return { observer, publish, reportError, visible };
+  const observer = new EarnOperationObserver({ read, publish, reportProgress, visible });
+  return { observer, publish, reportProgress, visible };
 }
 
 afterEach(() => vi.useRealTimers());
@@ -83,17 +83,17 @@ it("backs off failures, honors Retry-After, and keeps the previous observation",
     .fn<(ids: readonly string[]) => Promise<readonly Operation[]>>()
     .mockRejectedValueOnce(new EarnApiError(429, undefined, "Busy", 10))
     .mockResolvedValue([operation("recent", "completed")]);
-  const { observer, publish, reportError } = createObserver(read);
+  const { observer, publish, reportProgress } = createObserver(read);
   const release = observer.retain();
   observer.recordObservation(operation("recent"), true);
   await vi.advanceTimersByTimeAsync(10_999);
   expect(read).toHaveBeenCalledTimes(1);
   expect(publish).not.toHaveBeenCalled();
-  expect(reportError.mock.calls[0]?.[0]).toBeInstanceOf(EarnApiError);
+  expect(reportProgress.mock.calls[0]?.[0].error).toBeInstanceOf(EarnApiError);
   await vi.advanceTimersByTimeAsync(1);
   expect(read).toHaveBeenCalledTimes(2);
   expect(publish).toHaveBeenCalledTimes(1);
-  expect(reportError).toHaveBeenLastCalledWith(undefined);
+  expect(reportProgress).toHaveBeenLastCalledWith({ unavailableIds: [] });
   release();
 });
 
@@ -148,12 +148,12 @@ it("publishes healthy operations when another requested row becomes unreadable",
   const read = vi.fn(async (ids: readonly string[]) =>
     ids.filter((id) => id !== "revoked").map((id) => operation(id, "completed"))
   );
-  const { observer, publish, reportError } = createObserver(read);
+  const { observer, publish, reportProgress } = createObserver(read);
   const release = observer.retain();
   observer.recover(["revoked", "healthy"]);
   await vi.advanceTimersByTimeAsync(1_000);
   expect(publish).toHaveBeenCalledExactlyOnceWith([operation("healthy", "completed")]);
-  expect(reportError.mock.calls[0]?.[0]).toBeInstanceOf(Error);
+  expect(reportProgress.mock.calls[0]?.[0].error).toBeUndefined();
   await vi.advanceTimersByTimeAsync(2_000);
   expect(read).toHaveBeenLastCalledWith(["revoked"]);
   expect(read).toHaveBeenCalledTimes(2);
@@ -174,4 +174,58 @@ it("restores fast observation when the same long-running operation is reopened",
   await vi.advanceTimersByTimeAsync(1_000);
   expect(read).toHaveBeenCalledTimes(32);
   close();
+});
+
+it("retires repeatedly omitted IDs until an explicit reopen", async () => {
+  vi.useFakeTimers();
+  const read = vi.fn(async () => []);
+  const { observer } = createObserver(read);
+  const release = observer.retain();
+  observer.recover(["revoked"]);
+  await vi.advanceTimersByTimeAsync(7_000);
+  expect(read).toHaveBeenCalledTimes(3);
+  observer.recover(["revoked"]);
+  observer.recordObservation(operation("revoked"), true);
+  await vi.advanceTimersByTimeAsync(120_000);
+  expect(read).toHaveBeenCalledTimes(3);
+  observer.focus("revoked");
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(read).toHaveBeenCalledTimes(4);
+  release();
+});
+
+it("does not retire operation IDs on transport failures", async () => {
+  vi.useFakeTimers();
+  const read = vi
+    .fn<(ids: readonly string[]) => Promise<readonly Operation[]>>()
+    .mockRejectedValue(new Error("Offline"));
+  const { observer, publish } = createObserver(read);
+  const release = observer.retain();
+  observer.recover(["pending"]);
+  await vi.advanceTimersByTimeAsync(120_000);
+  expect(read.mock.calls.length).toBeGreaterThan(3);
+  read.mockResolvedValue([operation("pending", "completed")]);
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect(publish).toHaveBeenCalledExactlyOnceWith([operation("pending", "completed")]);
+  release();
+});
+
+it("resets missing-row retries after a successful observation", async () => {
+  vi.useFakeTimers();
+  const read = vi
+    .fn<(ids: readonly string[]) => Promise<readonly Operation[]>>()
+    .mockResolvedValue([]);
+  const { observer } = createObserver(read);
+  const release = observer.retain();
+  observer.recover(["temporary"]);
+  await vi.advanceTimersByTimeAsync(3_000);
+  expect(read).toHaveBeenCalledTimes(2);
+  read.mockResolvedValueOnce([operation("temporary")]);
+  await vi.advanceTimersByTimeAsync(4_000);
+  await vi.advanceTimersByTimeAsync(3_000);
+  expect(read).toHaveBeenCalledTimes(5);
+  read.mockResolvedValueOnce([operation("temporary", "completed")]);
+  await vi.advanceTimersByTimeAsync(4_000);
+  expect(read).toHaveBeenCalledTimes(6);
+  release();
 });

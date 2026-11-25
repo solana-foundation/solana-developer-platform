@@ -8,17 +8,25 @@ const FAST_WINDOW_MS = 30_000;
 const WATCH_WINDOW_MS = 120_000;
 const BACKGROUND_MS = 5_000;
 const MAX_RETRY_MS = 30_000;
+const MAX_MISSING_READS = 3;
 
 interface Watch {
   nextAt: number;
   startedAt: number;
   failures: number;
+  misses: number;
+}
+
+/** Transport failures apply to the batch; missing rows apply only to their own IDs. */
+export interface EarnObservationProgress {
+  error?: Error;
+  unavailableIds: readonly string[];
 }
 
 interface ObserverPorts {
   read: (ids: readonly string[]) => Promise<readonly Operation[]>;
   publish: (operations: readonly Operation[]) => Promise<void>;
-  reportError: (error: Error | undefined) => Promise<void>;
+  reportProgress: (progress: EarnObservationProgress) => Promise<void>;
   visible: () => boolean;
 }
 
@@ -28,6 +36,7 @@ interface ObserverPorts {
  */
 export class EarnOperationObserver {
   private readonly watches = new Map<string, Watch>();
+  private readonly unavailable = new Set<string>();
   private consumers = 0;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private running = false;
@@ -51,6 +60,7 @@ export class EarnOperationObserver {
   recordObservation(operation: Operation, foreground = false): void {
     if (!isSdpProgressOperationStatus(operation.status)) {
       this.watches.delete(operation.id);
+      this.unavailable.delete(operation.id);
       return;
     }
     if (foreground) this.recover([operation.id]);
@@ -58,6 +68,7 @@ export class EarnOperationObserver {
 
   /** Reopening active work restores its short watch without bypassing server retry limits. */
   focus(id: string): void {
+    if (this.unavailable.delete(id)) this.recover([id]);
     const watch = this.watches.get(id);
     if (!watch) return;
     watch.startedAt = Date.now();
@@ -68,9 +79,9 @@ export class EarnOperationObserver {
   /** Resolve disappeared active rows in bounded batches, including old completed withdrawals. */
   recover(ids: readonly string[]): void {
     for (const id of ids) {
-      if (!this.watches.has(id)) {
+      if (!this.watches.has(id) && !this.unavailable.has(id)) {
         const now = Date.now();
-        this.watches.set(id, { nextAt: now, startedAt: now, failures: 0 });
+        this.watches.set(id, { nextAt: now, startedAt: now, failures: 0, misses: 0 });
       }
     }
     this.schedule();
@@ -119,9 +130,16 @@ export class EarnOperationObserver {
       const operations = await this.ports.read(due.map(([id]) => id));
       const observed = new Map(operations.map((operation) => [operation.id, operation]));
       const missing = due.filter(([id]) => !observed.has(id));
-      const missingError =
-        missing.length > 0 ? new Error("An operation observation is unavailable") : undefined;
-      if (missingError) this.delayFailedBatch(missing, missingError);
+      this.delayFailedBatch(missing, undefined);
+      for (const [id, watch] of missing) {
+        if (this.watches.get(id) !== watch) continue;
+        watch.misses += 1;
+        if (watch.misses >= MAX_MISSING_READS) {
+          this.watches.delete(id);
+          // A stale feed must not restart an exhausted watch. Reopening can retry.
+          this.unavailable.add(id);
+        }
+      }
       for (const [id, watch] of due) {
         if (this.watches.get(id) !== watch) continue;
         const operation = observed.get(id);
@@ -130,19 +148,21 @@ export class EarnOperationObserver {
           this.watches.delete(id);
         } else {
           watch.failures = 0;
+          watch.misses = 0;
           watch.nextAt = Date.now() + observationCadence(Date.now() - watch.startedAt);
         }
       }
       if (this.consumers > 0) {
         await this.ports.publish(operations);
-        await this.ports.reportError(missingError);
+        await this.ports.reportProgress({ unavailableIds: [...this.unavailable] });
       }
     } catch (cause) {
       this.delayFailedBatch(due, cause);
       if (this.consumers > 0)
-        await this.ports.reportError(
-          cause instanceof Error ? cause : new Error("Operation observation failed")
-        );
+        await this.ports.reportProgress({
+          error: cause instanceof Error ? cause : new Error("Operation observation failed"),
+          unavailableIds: [...this.unavailable],
+        });
     } finally {
       this.running = false;
       this.schedule();

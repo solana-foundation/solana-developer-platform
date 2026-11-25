@@ -33,7 +33,10 @@ with scoped, token-fenced leases. Financial writes stay in the domain
 repositories. `claimUnsettledVaultMovements` and `claimUnsettledActions` only
 rotate candidate cursors. Recovery reads unleased candidates in bulk, then
 leases four fresh rows immediately before reduction; never reserve the full
-RPC batch. Scheduling writes must not change public `updated_at`.
+RPC batch. The fast observer releases signature misses before slow positive
+projections so it cannot hide resend candidates from recovery. Failed reads
+retry after five seconds for rows created within two minutes, then once a
+minute. Scheduling writes must not change public `updated_at`.
 The queued fast index excludes NULL due hints: retire obsolete hints in bounded
 pages without changing financial status, and leave legacy NULL actions to
 minute recovery.

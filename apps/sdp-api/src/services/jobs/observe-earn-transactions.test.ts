@@ -343,6 +343,71 @@ describe("shared Earn transaction observation", () => {
     expect((await readMovement(seeded.movement.id))?.status).toBe("finalized");
   });
 
+  it("releases unknown signatures before slow projections so recovery can rebroadcast", async () => {
+    const direct = await seedMovement();
+    const queued = await seedQueuedAction();
+    const backlog = await Promise.all(Array.from({ length: 12 }, () => seedQueuedAction()));
+    await postponeQueuedProviderReads();
+    const unknown = new Set([direct.movement.signature, queued.action.signature]);
+    rpc.respondSignatureStatuses((sent) =>
+      unknown.has(sent)
+        ? null
+        : { slot: 50, confirmations: null, confirmationStatus: "finalized", err: null }
+    );
+    answerQueuedTransaction();
+    rpc.answer("getEpochInfo", epochInfoResult({ absoluteSlot: 50, blockHeight: 50 }));
+    rpc.answer("sendTransaction", syntheticSignature(999));
+    const requests = new Map(backlog.map(({ request }) => [request.request_address, request]));
+    const started = deferred<void>();
+    const release = deferred<void>();
+    decodeEvents.mockImplementation(async (_scope, input) => {
+      if (decodeEvents.mock.calls.length === 4) started.resolve();
+      await release.promise;
+      const request = requests.get(input.requestAddress);
+      if (!request) throw new Error("Unknown queued projection fixture");
+      return queuedEvents(request);
+    });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const observing = observe();
+    try {
+      await started.promise;
+      expect(
+        await getDb(env).queryOne(
+          "SELECT observation_claim_token FROM earn_movements WHERE id = ?",
+          [direct.movement.id]
+        )
+      ).toEqual({ observation_claim_token: null });
+      expect(
+        await getDb(env).queryOne(
+          "SELECT observation_claim_token FROM earn_vault_withdrawal_request_actions WHERE id = ?",
+          [queued.action.id]
+        )
+      ).toEqual({ observation_claim_token: null });
+      const recovered = await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+        reconcileEarnVaultMovementBatch(env, [direct.movement])
+      );
+      expect(recovered).toMatchObject({ claimed: 1, resubmitted: 1, failed: 0 });
+      await queueRecovery();
+      expect(
+        await getDb(env).queryOne(
+          "SELECT status FROM earn_vault_withdrawal_request_actions WHERE id = ?",
+          [queued.action.id]
+        )
+      ).toEqual({ status: "submitted" });
+      const sends = rpc.requests.filter(({ method }) => method === "sendTransaction");
+      expect(sends.map(({ params }) => params[0]).sort()).toEqual(
+        [direct.movement.signed_transaction, queued.action.signed_transaction].sort()
+      );
+      expect(rpc.requests.filter(({ method }) => method === "getSignatureStatuses")).toHaveLength(
+        3
+      );
+      expect(decodeEvents).toHaveBeenCalledTimes(4);
+    } finally {
+      release.resolve();
+      await observing;
+    }
+  });
+
   it("uses the fresh claimed state when a fast observer confirms a minute-sweep candidate", async () => {
     const stale = await seedMovement();
     await repository().advanceVaultMovement({
@@ -560,6 +625,53 @@ describe("shared Earn transaction observation", () => {
         [seeded.movement.id]
       )
     ).toEqual({ observation_claim_token: null, backed_off: true });
+  });
+
+  it("backs off old projection failures without slowing fresh transactions", async () => {
+    const recent = await seedQueuedAction();
+    const older = await seedQueuedAction();
+    await getDb(env).execute(
+      "UPDATE earn_vault_withdrawal_request_actions SET created_at = ? WHERE id = ?",
+      [new Date(Date.now() - 180_000).toISOString(), older.action.id]
+    );
+    finalized();
+    answerQueuedTransaction();
+    decodeEvents.mockResolvedValue([
+      { ...queuedEvents(recent.request)[0], owner: "foreign-owner" },
+    ]);
+    await expect(observe()).rejects.toThrow("could not be observed");
+    const delays = await getDb(env).queryMany<{ id: string; seconds: number }>(
+      "SELECT id, EXTRACT(EPOCH FROM (observation_due_at - now()))::float AS seconds FROM earn_vault_withdrawal_request_actions WHERE id = ANY(?::text[])",
+      [[recent.action.id, older.action.id]]
+    );
+    expect(required(delays.find(({ id }) => id === recent.action.id)).seconds).toBeGreaterThan(3);
+    expect(required(delays.find(({ id }) => id === recent.action.id)).seconds).toBeLessThanOrEqual(
+      5
+    );
+    expect(required(delays.find(({ id }) => id === older.action.id)).seconds).toBeGreaterThan(50);
+    expect(required(delays.find(({ id }) => id === older.action.id)).seconds).toBeLessThanOrEqual(
+      60
+    );
+    expect(await observe()).toEqual({ claimed: 0, saturated: false });
+    expect(rpc.requests.filter(({ method }) => method === "getSignatureStatuses")).toHaveLength(1);
+  });
+
+  it("backs off old rows after a shared status-read failure", async () => {
+    const older = await seedMovement();
+    await getDb(env).execute("UPDATE earn_movements SET created_at = ? WHERE id = ?", [
+      new Date(Date.now() - 180_000).toISOString(),
+      older.movement.id,
+    ]);
+    rpc.answer("getSignatureStatuses", { context: { slot: 50 }, value: [] });
+    await expect(observe()).rejects.toThrow();
+    const delay = required(
+      await getDb(env).queryOne<{ seconds: number }>(
+        "SELECT EXTRACT(EPOCH FROM (observation_due_at - now()))::float AS seconds FROM earn_movements WHERE id = ?",
+        [older.movement.id]
+      )
+    );
+    expect(delay.seconds).toBeGreaterThan(50);
+    expect(delay.seconds).toBeLessThanOrEqual(60);
   });
 
   it("reserves queued action capacity when slow direct receipts exhaust a pass", async () => {

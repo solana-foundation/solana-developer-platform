@@ -59,10 +59,12 @@ and fenced claims remain the authority to execute.
 
 An observation-only lane shares this wakeup and the minute movement sweep's
 per-row claims. It batches transaction status reads without signing,
-rebroadcasting or inferring expiry. The cron service's environment and shutdown
-gates apply to both lanes. Consumer failures emit error run events independently
-of the scheduled wake event. Financial reducers and expiry recovery are shared
-with the existing sweep.
+rebroadcasting or inferring expiry. Signature misses release their claims before
+slow receipt/provider projections, leaving recovery free to retry original
+bytes. The cron service's environment and shutdown gates apply to both lanes.
+Consumer failures emit error run events independently of the scheduled wake
+event. Financial reducers and expiry recovery are shared with the existing
+sweep.
 
 Recovery batches chain reads before taking four-row claims for ready reducers.
 The read reserves nothing, so a slow provider cannot lease the remaining backlog

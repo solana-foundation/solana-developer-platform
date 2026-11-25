@@ -362,11 +362,14 @@ action signatures. Each pass claims up to 64 rows of each kind with expiring,
 fenced PostgreSQL claims, then makes one batched status request. At most two
 passes and four reducers per pass run per environment and replica. Direct and
 queued work share the processing budget fairly. Recent pending transactions
-retry after 250 ms, older work after 30 seconds and failed reads after five
-seconds. Obsolete queued hints retire in bounded indexed pages without changing
-financial history. Fast observation never signs, broadcasts or treats missing
-evidence as failure. Both paths use the same financial reducers; queued escrow
-is not payout and missing amounts stay unknown.
+retry after 250 ms and older work after 30 seconds. Failed reads retry after
+five seconds for rows created within two minutes, then once a minute. Signature
+misses release their claims before receipt or provider work, leaving rebroadcast
+and expiry recovery available while positive observations settle. Obsolete
+queued hints retire in bounded indexed pages without changing financial history.
+Fast observation never signs, broadcasts or treats missing evidence as failure.
+Both paths use the same financial reducers; queued escrow is not payout and
+missing amounts stay unknown.
 
 The minute recovery sweep reads one available snapshot, up to 256 movements or
 128 queued actions, without reserving it. Each batch needs one status request,
@@ -432,10 +435,13 @@ existing reservations; they are not additional Earn execution queues.
 
 The dashboard shares one active-operation request per second, capped at 100 IDs,
 then backs off as work ages. Completion refreshes the affected position and
-wallet together with the movement's read floor. Detail reads retain a bounded
-observation-only chain read-through. Neither UI polling nor a lost notification
-is required for recovery, and stopping new Earn admission does not stop existing
-money obligations from completing.
+wallet together with the movement's read floor. Three successful batch reads
+that omit an operation stop its automatic watch and report unavailability only
+for that ID. Stale feed rows cannot restart it; reopening its dialog can retry.
+Transport failures keep their existing backoff and never imply a missing row.
+Detail reads retain a bounded observation-only chain read-through. Neither UI
+polling nor a lost notification is required for recovery, and stopping new Earn
+admission does not stop existing money obligations from completing.
 
 ## Local latency evidence (PRO-2578)
 
@@ -469,8 +475,11 @@ chain and provider responses are simulated.
 - Backlog isolation: no rows are leased while the shared RPC waits. With four
   provider reads blocked, the fast observer still advances later work and a
   newly submitted movement or queued action. Competing workers take disjoint
-  four-row claims. Changed absence markers or signed bytes cannot reuse earlier
-  recovery evidence.
+  four-row claims. With four fast-observer projections blocked, null-status
+  direct and queued transactions release their leases and both recovery paths
+  rebroadcast their original bytes. This uses the existing three status reads
+  (observer, movement recovery and queued recovery). Changed absence markers or
+  signed bytes cannot reuse earlier recovery evidence.
 
 The competing-observer burst processes 129 finalized movements with three
 status reads. It took 70 ms locally and 201 ms during a concurrent test run;

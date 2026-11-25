@@ -531,3 +531,44 @@ it("shows completion within one second with 500 pending activity observers", asy
   await act(() => vi.advanceTimersByTimeAsync(10_000));
   expect(transport).toHaveBeenCalledTimes(1);
 });
+
+it("isolates unavailable operation errors and stops retrying missing IDs across feed refreshes", async () => {
+  vi.useFakeTimers();
+  const revoked = historyOperation("revoked", "queued");
+  const healthy = historyOperation("healthy", "queued");
+  transport.mockImplementation(async (path: string) => {
+    const query = new URL(path, "https://dashboard.test").searchParams;
+    return query.has("operationIds") ? page([healthy]) : page([revoked, healthy]);
+  });
+  const cache = new Map();
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <SWRConfig value={{ ...DASHBOARD_SWR_CONFIG, provider: () => cache }}>{children}</SWRConfig>
+  );
+  const { result, rerender } = renderHook(
+    ({ open }) => ({
+      feed: useEarnOperations(),
+      revoked: useEarnOperation(revoked.id, revoked, undefined, open),
+      healthy: useEarnOperation(healthy.id, healthy, undefined, true),
+    }),
+    { wrapper, initialProps: { open: true } }
+  );
+  await act(() => vi.advanceTimersByTimeAsync(7_000));
+  expect(result.current.revoked.error?.message).toBe("An operation observation is unavailable");
+  expect(result.current.revoked.operation?.status).toBe("queued");
+  expect(result.current.healthy.error).toBeUndefined();
+  expect(result.current.feed.error).toBeUndefined();
+  const revokedReads = () =>
+    transport.mock.calls.filter(([path]) =>
+      new URL(path, "https://dashboard.test").searchParams
+        .get("operationIds")
+        ?.split(",")
+        .includes(revoked.id)
+    ).length;
+  expect(revokedReads()).toBe(3);
+  await act(() => vi.advanceTimersByTimeAsync(60_000));
+  expect(revokedReads()).toBe(3);
+  rerender({ open: false });
+  rerender({ open: true });
+  await act(() => vi.advanceTimersByTimeAsync(1_000));
+  expect(revokedReads()).toBe(4);
+});

@@ -35,6 +35,10 @@ for 30 seconds, then backs off to five seconds until two minutes and 15 seconds
 afterward. The active feed stays at 15 seconds. Never add per-row poll timers.
 Open dialogs subscribe to that same feed cache for provider-settlement updates;
 they must not freeze after their fast watch stops or add another provider poller.
+Stop an ID's automatic watch after three successful batch reads omit it. Keep
+its last financial status and scope the unavailable error to that operation.
+Stale feed data cannot restart the watch; explicitly reopening the dialog can.
+Network failures retain backoff and never count as missing rows.
 
 The default activity view polls active work and the newest 50 history entries.
 Older pages load on demand and keep their snapshot while expanded; Refresh

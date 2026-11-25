@@ -199,6 +199,7 @@ export async function releaseEarnObservations(
 
 /** Recent signatures stay responsive; old or unreadable work does not monopolize RPC. */
 export function earnObservationDelay(createdAt: string, failed: boolean): number {
-  if (failed) return 5_000;
-  return Date.now() - Date.parse(createdAt) < 120_000 ? 250 : 30_000;
+  const recent = Date.now() - Date.parse(createdAt) < 120_000;
+  if (failed) return recent ? 5_000 : 60_000;
+  return recent ? 250 : 30_000;
 }

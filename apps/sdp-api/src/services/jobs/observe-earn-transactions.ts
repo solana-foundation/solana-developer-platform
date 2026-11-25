@@ -41,6 +41,53 @@ export async function observeEarnTransactions(
   const attempted = new Set<string>();
   let statusReadFailed = false;
   let advanced = 0;
+  const released = new Set<Target>();
+  async function releaseTargets(selected: readonly Target[]): Promise<void> {
+    const groups = new Map<string, { targets: Target[]; delayMs: number }>();
+    for (const target of selected) {
+      let release: "unattempted" | "attempted" | "status_read_failed" = "unattempted";
+      if (attempted.has(target.row.id)) release = "attempted";
+      if (statusReadFailed) release = "status_read_failed";
+      let delayMs: number;
+      switch (release) {
+        case "unattempted":
+          delayMs = 0;
+          break;
+        case "attempted":
+          delayMs = earnObservationDelay(target.row.created_at, failed.has(target.row.id));
+          break;
+        case "status_read_failed":
+          delayMs = earnObservationDelay(target.row.created_at, true);
+          break;
+        default: {
+          const unreachable: never = release;
+          throw new Error(`Unhandled observation release: ${unreachable}`);
+        }
+      }
+      const key = `${target.kind}:${target.token}:${delayMs}`;
+      const group = groups.get(key);
+      if (group === undefined) groups.set(key, { targets: [target], delayMs });
+      else group.targets.push(target);
+    }
+    const releases = await mapSettledWithConcurrency([...groups.values()], 4, async (group) => {
+      const first = group.targets[0];
+      if (first === undefined) throw new Error("Empty observation release group");
+      await releaseEarnObservations(
+        db,
+        first.kind,
+        group.targets.map((target) => target.row),
+        first.token,
+        group.delayMs
+      );
+      for (const target of group.targets) released.add(target);
+    });
+    const errors = releases.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : []
+    );
+    if (errors.length > 0) {
+      throw new AggregateError(errors, "Earn observation or claim release failed");
+    }
+  }
   const run = async () => {
     const movements = await createPostgresEarnMovementsRepository(db).claimDueObservations(
       environment,
@@ -81,25 +128,38 @@ export async function observeEarnTransactions(
     });
     statusReadFailed = false;
     const bySignature = new Map(signatures.map((sent, index) => [sent, statuses[index] ?? null]));
-    const expiresAt = Date.now() + PASS_BUDGET_MS;
-    const results = await mapSettledWithConcurrency(targets, 4, async (target) => {
-      if (Date.now() >= expiresAt) return;
-      attempted.add(target.row.id);
+    const unobserved = targets.filter((target) => {
       const observed =
         target.row.signature === null ? null : bySignature.get(signature(target.row.signature));
-      // Absence carries no finality, resend or expiry authority in this lane.
-      if (observed === null || observed === undefined) return;
-      try {
-        const outcome =
-          target.kind === "movement"
-            ? await observeEarnVaultMovementStatus(env, target.row, observed, rpc)
-            : await observeEarnWithdrawalActionStatus(env, target.row, observed, rpc);
-        if (outcome !== "unchanged") advanced += 1;
-      } catch (error) {
-        failed.add(target.row.id);
-        throw error;
-      }
+      return observed === null || observed === undefined;
     });
+    // A signature miss needs no reducer. Release it before slow receipt/provider
+    // work so minute recovery can rebroadcast or prove expiry during this pass.
+    for (const target of unobserved) attempted.add(target.row.id);
+    await releaseTargets(unobserved);
+    const expiresAt = Date.now() + PASS_BUDGET_MS;
+    const results = await mapSettledWithConcurrency(
+      targets.filter((target) => !released.has(target)),
+      4,
+      async (target) => {
+        if (Date.now() >= expiresAt) return;
+        attempted.add(target.row.id);
+        const observed =
+          target.row.signature === null ? null : bySignature.get(signature(target.row.signature));
+        // Absence carries no finality, resend or expiry authority in this lane.
+        if (observed === null || observed === undefined) return;
+        try {
+          const outcome =
+            target.kind === "movement"
+              ? await observeEarnVaultMovementStatus(env, target.row, observed, rpc)
+              : await observeEarnWithdrawalActionStatus(env, target.row, observed, rpc);
+          if (outcome !== "unchanged") advanced += 1;
+        } catch (error) {
+          failed.add(target.row.id);
+          throw error;
+        }
+      }
+    );
     for (const result of results) {
       if (result.status === "rejected") {
         getLogger().error(
@@ -124,51 +184,12 @@ export async function observeEarnTransactions(
     };
   };
   const [result] = await Promise.allSettled([run()]);
-  {
-    const groups = new Map<string, { targets: Target[]; delayMs: number }>();
-    for (const target of targets) {
-      let release: "unattempted" | "attempted" | "status_read_failed" = "unattempted";
-      if (attempted.has(target.row.id)) release = "attempted";
-      if (statusReadFailed) release = "status_read_failed";
-      let delayMs: number;
-      switch (release) {
-        case "unattempted":
-          delayMs = 0;
-          break;
-        case "attempted":
-          delayMs = earnObservationDelay(target.row.created_at, failed.has(target.row.id));
-          break;
-        case "status_read_failed":
-          delayMs = 5_000;
-          break;
-        default: {
-          const unreachable: never = release;
-          throw new Error(`Unhandled observation release: ${unreachable}`);
-        }
-      }
-      const key = `${target.kind}:${target.token}:${delayMs}`;
-      const group = groups.get(key);
-      if (group === undefined) groups.set(key, { targets: [target], delayMs });
-      else group.targets.push(target);
-    }
-    const releases = await mapSettledWithConcurrency([...groups.values()], 4, async (group) => {
-      const first = group.targets[0];
-      if (first === undefined) throw new Error("Empty observation release group");
-      await releaseEarnObservations(
-        db,
-        first.kind,
-        group.targets.map((target) => target.row),
-        first.token,
-        group.delayMs
-      );
-    });
-    const errors = releases.flatMap((result) =>
-      result.status === "rejected" ? [result.reason] : []
-    );
-    if (errors.length > 0) {
-      if (result.status === "rejected") errors.unshift(result.reason);
-      throw new AggregateError(errors, "Earn observation or claim release failed");
-    }
+  try {
+    await releaseTargets(targets.filter((target) => !released.has(target)));
+  } catch (cause) {
+    const errors = [cause];
+    if (result.status === "rejected") errors.unshift(result.reason);
+    throw new AggregateError(errors, "Earn observation or claim release failed");
   }
   if (result.status === "rejected") throw result.reason;
   return result.value;
