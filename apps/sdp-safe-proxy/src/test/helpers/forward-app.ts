@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
 import type { TestContext } from "node:test";
-import type { SafeProxyCaller } from "@sdp/safe-proxy-endpoints/callers";
 import { createLocalJWKSet, importPKCS8, type JWTVerifyGetKey, SignJWT } from "jose";
 import { type AppDependencies, createApp, type ProviderCredentials } from "@/app";
+import type { SafeProxyCaller } from "@/endpoints/callers";
 import { googleCaller } from "@/middleware";
 
 const AUDIENCE = "https://safe-proxy.mock.invalid";

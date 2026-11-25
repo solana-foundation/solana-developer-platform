@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { FROM_PROVIDER_HEADER, LOCAL_CALLER_HEADER } from "@sdp/safe-proxy-endpoints/protocol";
 import { importSPKI, jwtVerify } from "jose";
 import type { ProviderCredentials } from "@/app";
+import { FROM_PROVIDER_HEADER, LOCAL_CALLER_HEADER } from "@/endpoints/protocol";
 import { localCaller } from "@/middleware";
 import {
   createForwardApp,
