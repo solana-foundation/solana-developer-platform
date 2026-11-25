@@ -24,6 +24,19 @@ bind each attempt to its reviewed transaction. Recovery uses a fenced lease;
 signed bytes, proposal bindings and dispatch identity cannot be replaced after
 an uncertain effect. Cancellation intent is sticky, and an observation-only
 attempt can never regain broadcast authority.
+`claimNextRecovery` skips locked rows and leases only due work ready to start.
+Commit notifications carry only the environment; submission wakes recovery
+after releasing its lease in the same transaction.
+
+`earn-observation-claims.ts` coordinates fast observation and minute recovery
+with scoped, token-fenced leases. Financial writes stay in the domain
+repositories. `claimUnsettledVaultMovements` and `claimUnsettledActions` only
+rotate candidate cursors. Recovery reads unleased candidates in bulk, then
+leases four fresh rows immediately before reduction; never reserve the full
+RPC batch. Scheduling writes must not change public `updated_at`.
+The queued fast index excludes NULL due hints: retire obsolete hints in bounded
+pages without changing financial status, and leave legacy NULL actions to
+minute recovery.
 
 Submit queues only the exact reviewed transaction. Refresh checks the current
 action ID/version before preparing terms. Withdrawal selection narrows the

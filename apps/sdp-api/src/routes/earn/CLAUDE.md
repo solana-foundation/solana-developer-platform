@@ -195,14 +195,13 @@ Error-free execution work rechecks every two seconds for the first two minutes
 after acceptance. Older pending work backs off from 15 to 300 seconds, capped
 at 60 seconds for `sign_in_provider`; status progress resets it to 15 seconds.
 Observe existing movement/request ledgers before resolving transaction builds.
-Within a short observation window, share a lazy RPC client and observations only for the
-exact organization, project, environment and recorded principal. Four concurrent
-same-authority status requests become one batch; two custody-proposal height
-reads become one. Batch at most 256 signatures, evict finished status batches
+Within a 25 ms observation window, share a lazy RPC client and observations
+only for the exact organization, project, environment and recorded principal.
+Four concurrent same-authority status requests become one batch; two
+custody-proposal height reads become one. Batch at most 256 signatures, evict finished status batches
 and failed heights, and never treat absence or a cached failure as nonexecution.
-An unsent-bytes proof adds one finalized height read per run and scope, and only
-past expiry one floored status read per pool endpoint, once; before this the
-operation polled forever.
+An unsent-bytes proof shares one finalized height read per window and scope.
+Past expiry, each proof reads floored status once per pool endpoint.
 
 Direct movement and queued-action signatures share bounded status batches in
 the fast observer. The minute recovery sweep reads one unleased snapshot and

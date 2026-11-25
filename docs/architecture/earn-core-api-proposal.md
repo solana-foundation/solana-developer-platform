@@ -413,17 +413,17 @@ Accepted work is durable before workers wake. The operation worker executes it;
 the fast observer records chain progress; the dashboard reads that durable
 progress. Scheduled recovery handles missed wakeups and unresolved obligations.
 
-| Component | Cadence | Responsibility |
-| --- | --- | --- |
-| Operation workers | Commit hint, startup/reconnect, two-second fallback | Advance accepted work through authorization, signing and broadcast. Four consumers per environment claim only work ready to start. |
-| Fast transaction observer | Same wakeups; recent work due again after 250 ms | Batch direct and queued-action signatures and record observed progress. Never sign, send or infer expiry. |
-| Movement recovery | Every minute | Observe unresolved signed transactions, retry identical bytes and apply proven expiry. Claims four rows at a time after shared chain reads. |
-| Queued withdrawal recovery | Alongside movement recovery | Track request/cancel transactions and provider fulfillment. Pending requests back off toward known maturity; escrow is never reported as payout. |
-| Provider-order settlement | Alongside movement recovery | Verify provider delivery and finalized destination evidence independently of the source transaction. |
-| Payout and receipt repair | After the movement pass | Fill missing withdrawal amounts or deposit receipts from finalized evidence. Never invent a value. |
-| Abandoned-build cleanup | Within queued recovery | Release expired unsigned-build reservations after finalized-height proof; retain recovery metadata. |
-| Catalogue sync | Startup, then roughly hourly | Discover and validate strategy identity and availability. |
-| Metrics refresh | Every five minutes | Refresh rates, TVL and risk figures for admitted strategies. |
+| Component                  | Cadence                                             | Responsibility                                                                                                                                   |
+| -------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Operation workers          | Commit hint, startup/reconnect, two-second fallback | Advance accepted work through authorization, signing and broadcast. Four consumers per environment claim only work ready to start.               |
+| Fast transaction observer  | Same wakeups; recent work due again after 250 ms    | Batch direct and queued-action signatures and record observed progress. Never sign, send or infer expiry.                                        |
+| Movement recovery          | Every minute                                        | Observe unresolved signed transactions, retry identical bytes and apply proven expiry. Claims four rows at a time after shared chain reads.      |
+| Queued withdrawal recovery | Alongside movement recovery                         | Track request/cancel transactions and provider fulfillment. Pending requests back off toward known maturity; escrow is never reported as payout. |
+| Provider-order settlement  | Alongside movement recovery                         | Verify provider delivery and finalized destination evidence independently of the source transaction.                                             |
+| Payout and receipt repair  | After the movement pass                             | Fill missing withdrawal amounts or deposit receipts from finalized evidence. Never invent a value.                                               |
+| Abandoned-build cleanup    | Within queued recovery                              | Release expired unsigned-build reservations after finalized-height proof; retain recovery metadata.                                              |
+| Catalogue sync             | Startup, then roughly hourly                        | Discover and validate strategy identity and availability.                                                                                        |
+| Metrics refresh            | Every five minutes                                  | Refresh rates, TVL and risk figures for admitted strategies.                                                                                     |
 
 Shared custody support remains separate: Fireblocks proposal observation runs
 every 30 seconds, custody-policy checks every minute, and sponsorship-budget

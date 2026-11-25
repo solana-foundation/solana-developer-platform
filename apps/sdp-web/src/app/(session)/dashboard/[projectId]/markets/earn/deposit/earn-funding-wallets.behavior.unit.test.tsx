@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import type { ReactNode } from "react";
+import { createRef, type ReactNode, type Ref, useImperativeHandle } from "react";
 import { SWRConfig, useSWRConfig } from "swr";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { earnQueryKeys } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-query-key";
@@ -412,18 +412,26 @@ it("discovers a newly added wallet before refreshing that wallet alone", async (
   ).toBe("30");
 });
 
-function FundingWalletConsumer({
-  observe,
-}: {
-  observe: (funding: ReturnType<typeof useEarnFundingWallets>) => void;
-}) {
-  observe(useEarnFundingWallets());
+function FundingWalletConsumer({ ref }: { ref: Ref<ReturnType<typeof useEarnFundingWallets>> }) {
+  const funding = useEarnFundingWallets();
+  useImperativeHandle(ref, () => funding, [funding]);
   return null;
 }
 
+it("does not start a wallet refresh after every consumer unmounts", async () => {
+  const reads = stubWalletReads();
+  const { result, unmount } = renderHook(() => useEarnFundingWallets(), { wrapper });
+  await waitFor(() => expect(result.current.wallets).toHaveLength(2));
+  const refreshBalances = result.current.refreshBalances;
+  reads.fetchMock.mockClear();
+  unmount();
+  await expect(refreshBalances(101, ["wallet-a"])).resolves.toBeUndefined();
+  expect(reads.fetchMock).not.toHaveBeenCalled();
+});
+
 it("publishes a shared observation after its initiating dialog closes", async () => {
   const reads = stubWalletReads();
-  let dialog: ReturnType<typeof useEarnFundingWallets> | undefined;
+  const dialog = createRef<ReturnType<typeof useEarnFundingWallets>>();
   let showDialog = true;
   function sharedWrapper({ children }: { children: ReactNode }) {
     return (
@@ -431,13 +439,7 @@ it("publishes a shared observation after its initiating dialog closes", async ()
         value={{ provider: () => new Map(), dedupingInterval: 0, shouldRetryOnError: false }}
       >
         {children}
-        {showDialog ? (
-          <FundingWalletConsumer
-            observe={(funding) => {
-              dialog = funding;
-            }}
-          />
-        ) : null}
+        {showDialog ? <FundingWalletConsumer ref={dialog} /> : null}
       </SWRConfig>
     );
   }
@@ -445,8 +447,8 @@ it("publishes a shared observation after its initiating dialog closes", async ()
     wrapper: sharedWrapper,
   });
   await waitFor(() => expect(result.current.wallets).toHaveLength(2));
-  const initiatingDialog = dialog;
-  if (initiatingDialog === undefined) throw new Error("Dialog did not mount");
+  const initiatingDialog = dialog.current;
+  if (initiatingDialog === null) throw new Error("Dialog did not mount");
   const pending = deferredRead();
   reads.fetchMock.mockImplementationOnce(async () => pending.response);
   let read: Promise<unknown> = Promise.resolve();

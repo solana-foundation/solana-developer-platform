@@ -66,7 +66,7 @@ it("never overlaps a slow batch and publishes after the initiating dialog closes
   const { observer, publish } = createObserver(read);
   const closeFeed = observer.retain();
   const closeDialog = observer.retain();
-  observer.observe(operation("recent"), true);
+  observer.recordObservation(operation("recent"), true);
   await vi.advanceTimersByTimeAsync(1_000);
   closeDialog();
   await vi.advanceTimersByTimeAsync(30_000);
@@ -85,7 +85,7 @@ it("backs off failures, honors Retry-After, and keeps the previous observation",
     .mockResolvedValue([operation("recent", "completed")]);
   const { observer, publish, reportError } = createObserver(read);
   const release = observer.retain();
-  observer.observe(operation("recent"), true);
+  observer.recordObservation(operation("recent"), true);
   await vi.advanceTimersByTimeAsync(10_999);
   expect(read).toHaveBeenCalledTimes(1);
   expect(publish).not.toHaveBeenCalled();
@@ -104,17 +104,17 @@ it("slows long custody waits and stops provider waits without forgetting newly o
   );
   const { observer } = createObserver(read);
   const close = observer.retain();
-  observer.observe(operation("recent"), true);
+  observer.recordObservation(operation("recent"), true);
   await vi.advanceTimersByTimeAsync(30_000);
   expect(read).toHaveBeenCalledTimes(30);
   await vi.advanceTimersByTimeAsync(10_000);
   expect(read).toHaveBeenCalledTimes(32);
-  observer.observe(operation("recent", "settling"));
+  observer.recordObservation(operation("recent", "settling"));
   await vi.advanceTimersByTimeAsync(30_000);
   expect(read).toHaveBeenCalledTimes(32);
   close();
   const reopen = observer.retain();
-  observer.observe(operation("new"), true);
+  observer.recordObservation(operation("new"), true);
   await vi.advanceTimersByTimeAsync(1_000);
   expect(read).toHaveBeenLastCalledWith(["new"]);
   reopen();
@@ -131,7 +131,7 @@ it("does no hidden-page work and never publishes into an abandoned project cache
   );
   const { observer, publish, visible } = createObserver(read);
   const leave = observer.retain();
-  observer.observe(operation("recent"), true);
+  observer.recordObservation(operation("recent"), true);
   visible.mockReturnValue(false);
   await vi.advanceTimersByTimeAsync(10_000);
   expect(read).not.toHaveBeenCalled();
@@ -165,7 +165,7 @@ it("restores fast observation when the same long-running operation is reopened",
   const read = vi.fn(async (ids: readonly string[]) => ids.map((id) => operation(id)));
   const { observer } = createObserver(read);
   const close = observer.retain();
-  observer.observe(operation("recent"), true);
+  observer.recordObservation(operation("recent"), true);
   await vi.advanceTimersByTimeAsync(32_000);
   expect(read).toHaveBeenCalledTimes(30);
   observer.focus("recent");

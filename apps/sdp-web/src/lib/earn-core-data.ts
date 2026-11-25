@@ -175,7 +175,7 @@ export function useEarnOperations() {
       recent?.operations ?? [],
       active
     ))
-      observer.observe(operation);
+      observer.recordObservation(operation);
     const observedIds = new Set([...active, ...(recent?.operations ?? [])].map(({ id }) => id));
     observer.recover(
       previous?.operations
@@ -292,7 +292,7 @@ export function useEarnOperation(
   );
   const operation = currentObservation(operationId, initial, data);
   useEffect(() => {
-    if (operation) observer.observe(operation, foreground === true);
+    if (operation) observer.recordObservation(operation, foreground === true);
   }, [observer, operation, foreground]);
   const notifyUpdated = useEffectEvent((observed: Operation) => onUpdated?.(observed));
   useEffect(() => {
@@ -315,7 +315,7 @@ export function useEarnOperation(
     error: error ?? progress?.error,
     refresh: () => mutate(),
     update: (operation: Operation) => {
-      observer.observe(operation, true);
+      observer.recordObservation(operation, true);
       return mutate(operation, { revalidate: false });
     },
   };

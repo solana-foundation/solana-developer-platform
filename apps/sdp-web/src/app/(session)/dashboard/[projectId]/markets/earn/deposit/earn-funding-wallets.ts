@@ -367,6 +367,7 @@ export function useEarnFundingWallets() {
   );
   const refreshBalances = useCallback(
     async (slot?: number, custodyWalletIds?: readonly string[]) => {
+      if (coordinator.consumers === 0) return undefined;
       // Later inventory reads must not replace live observations with cached cash.
       coordinator.requireLiveBalances = true;
       if (slot !== undefined) {
@@ -384,6 +385,8 @@ export function useEarnFundingWallets() {
           );
         }
       }
+      // Consumers can unmount during this shared read, so recheck after it settles.
+      // react-doctor-disable-next-line async-defer-await
       const read = await sweep(true, data?.wallets, custodyWalletIds);
       // A replaced project/organization provider has no cache left to update.
       if (coordinator.consumers === 0) return undefined;

@@ -3,6 +3,7 @@ import { logCronRun } from "@/cron/run-event";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import type { BackgroundRunner } from "@/runtime/background";
 import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
+import { runWithLogContext } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { observeEarnTransactions } from "./observe-earn-transactions";
 
@@ -43,8 +44,10 @@ export function startEarnTransactionObserver(
     const startedAt = Date.now();
     const run = async () => {
       try {
-        const result = await runWithSystemDatabaseIdentity("cron:earn-transaction-observer", () =>
-          runInEnvironmentClusterScope(environment, () => observeEarnTransactions(env))
+        const result = await runWithLogContext({ cron: "earn-transaction-observer" }, () =>
+          runWithSystemDatabaseIdentity("cron:earn-transaction-observer", () =>
+            runInEnvironmentClusterScope(environment, () => observeEarnTransactions(env))
+          )
         );
         if (result.claimed > 0 || result.saturated) {
           lane.saturatedRetry = result.saturated;

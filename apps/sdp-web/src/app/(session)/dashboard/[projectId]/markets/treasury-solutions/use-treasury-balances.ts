@@ -265,6 +265,8 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
       const started = Promise.resolve().then(async () => {
         while (operationTargets.current.size > 0) {
           const requestedIds = [...operationTargets.current.keys()];
+          // The next batch depends on refresh consuming this shared queue.
+          // react-doctor-disable-next-line async-await-in-loop
           await refresh();
           if (requestedIds.some((id) => operationTargets.current.has(id))) return;
         }

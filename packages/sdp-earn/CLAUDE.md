@@ -563,11 +563,11 @@ the five-minute pass would re-pay the whole catalogue cost for the rate alone.
 
 ## RPC budget (hard rule)
 
-Every Treasury refresh re-reads every position live, so each call a provider
-makes is paid per holding per refresh, against provider rate limits and the
-Cloud NAT's 64 ports per instance per destination. Every provider path (reads,
-quotes, builds, reconciliation) stays as lean as it can without losing
-accuracy:
+Full portfolio refreshes read every included position live. After a movement,
+Treasury refreshes only affected positions and funding wallets together at the
+acknowledged minimum slot. Each provider call still consumes its rate budget
+and Cloud NAT capacity. Every provider path (reads, quotes, builds,
+reconciliation) stays as lean as it can without losing accuracy:
 
 - **Live stays live.** Balances, shares, exchange rates, reserves, vesting and
   clock inputs, prices and quotes are read on every call. Never cache one.

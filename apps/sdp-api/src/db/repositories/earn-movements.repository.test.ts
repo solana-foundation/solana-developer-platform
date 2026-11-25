@@ -514,6 +514,17 @@ describe("Unified earn movement ledger (postgres)", () => {
         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_earn_movements_kamino_receipt_repair"
       );
       await getDb(env).transaction(async (tx) => {
+        const migratedLedger = createPostgresEarnMovementsRepository(asTransactionalClient(tx));
+        // Cache the public row shape on this exact connection without claiming work.
+        for (let attempt = 0; attempt < 2; attempt++) {
+          expect(
+            await migratedLedger.claimUnvaluedKaminoDeposits({
+              environment: "sandbox",
+              limit: 0,
+              retryBefore: observedAt,
+            })
+          ).toHaveLength(0);
+        }
         // Connection-local copies let the actual migration run against old data
         // without changing other tests' tables or dropping live constraints.
         await tx.execute(
@@ -522,13 +533,21 @@ describe("Unified earn movement ledger (postgres)", () => {
         );
         // Re-add later columns after 0121 so SELECT * keeps the public table's
         // column order when this connection reuses a named repository query.
-        await tx.execute("ALTER TABLE earn_movements DROP COLUMN strategy_reference");
+        await tx.execute(`ALTER TABLE earn_movements
+          DROP COLUMN strategy_reference,
+          DROP COLUMN observation_due_at,
+          DROP COLUMN observation_claim_token,
+          DROP COLUMN observation_claim_until`);
         await tx.execute("ALTER TABLE earn_movements DROP COLUMN deposit_receipt_observed_at");
         await tx.execute(
           "UPDATE earn_movements SET amount_settled = amount_requested, token_amount_settled = amount_requested, shares_out = '99'"
         );
         await tx.execute(migration);
-        await tx.execute("ALTER TABLE earn_movements ADD COLUMN strategy_reference TEXT");
+        await tx.execute(`ALTER TABLE earn_movements
+          ADD COLUMN strategy_reference TEXT,
+          ADD COLUMN observation_due_at TIMESTAMPTZ,
+          ADD COLUMN observation_claim_token TEXT,
+          ADD COLUMN observation_claim_until TIMESTAMPTZ`);
         expect(
           await tx.queryOne(
             "SELECT amount_requested, amount_settled, token_amount_settled, shares_out, status, signature FROM earn_movements"
@@ -541,7 +560,6 @@ describe("Unified earn movement ledger (postgres)", () => {
           status: "finalized",
           signature: created.movement.signature,
         });
-        const migratedLedger = createPostgresEarnMovementsRepository(asTransactionalClient(tx));
         const scope = { organizationId: ORG, movementId: created.movement.id };
         expect(await migratedLedger.getMovementById(scope)).toMatchObject({
           amount_settled: null,

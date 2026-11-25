@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as cronEvents from "@/cron/run-event";
 import { currentDatabaseIdentity } from "@/db/identity";
 import type { BackgroundRunner } from "@/runtime/background";
+import { getLogContext, runWithLogContext } from "@/runtime/logger";
 import { deferred } from "@/test/helpers/deferred";
 import { env } from "@/test/helpers/env";
 import { startEarnTransactionObserver } from "./earn-transaction-observer";
@@ -44,6 +45,28 @@ async function flush() {
 }
 
 describe("Earn observation wakeups", () => {
+  it.each([undefined, "reconcile-operations"])(
+    "attributes asynchronous reads and retries to the observer when woken under %s",
+    async (parentCron) => {
+      vi.useFakeTimers();
+      const callers: Array<string | undefined> = [];
+      vi.spyOn(observation, "observeEarnTransactions").mockImplementation(async () => {
+        await Promise.resolve();
+        callers.push(getLogContext().cron);
+        return { claimed: callers.length === 1 ? 1 : 0, saturated: false };
+      });
+      const worker = start();
+      runWithLogContext(parentCron === undefined ? {} : { cron: parentCron }, () => {
+        worker.wake("sandbox");
+        expect(getLogContext().cron).toBe(parentCron);
+      });
+      await flush();
+      await vi.advanceTimersByTimeAsync(250);
+      expect(callers).toEqual(["earn-transaction-observer", "earn-transaction-observer"]);
+      expect(getLogContext().cron).toBeUndefined();
+    }
+  );
+
   it("starts immediately in system/environment scope and does not wait for a cron boundary", async () => {
     vi.useFakeTimers();
     const observedAt: number[] = [];

@@ -47,8 +47,8 @@ export class EarnOperationObserver {
     };
   }
 
-  /** Follow a submitted user action quickly; terminal and provider-wait observations stop it. */
-  observe(operation: Operation, foreground = false): void {
+  /** Record operation state in shared tracking; retain() owns the timer lifetime. */
+  recordObservation(operation: Operation, foreground = false): void {
     if (!isSdpProgressOperationStatus(operation.status)) {
       this.watches.delete(operation.id);
       return;
