@@ -3,51 +3,20 @@ import {
   CallerIdentityError,
   createCallerIdentityVerifier,
 } from "@sdp/metadata-server/receiver";
-import { scrubTelemetry } from "@sdp/redaction/scrub";
 import type { MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { RequestIdVariables } from "hono/request-id";
 import type { JWTVerifyGetKey } from "jose";
-import pino from "pino";
 import { SAFE_PROXY_CALLERS, type SafeProxyCaller } from "./endpoints/callers";
 import { LOCAL_CALLER_HEADER } from "./endpoints/protocol";
 import { forbidden, payloadTooLarge, serviceUnavailable, unauthorized } from "./errors";
-
-export interface RequestLogLine {
-  request_id: string;
-  caller: SafeProxyCaller | null;
-  provider: string | null;
-  endpoint: string | null;
-  error: string | null;
-  status: number;
-  duration_ms: number;
-}
+import { logRequest, type RequestLogLine } from "./logger";
 
 export type AppEnv = {
   Variables: RequestIdVariables & { line: RequestLogLine; caller: SafeProxyCaller };
 };
 
 const MAX_BODY_BYTES = 1024 * 1024;
-
-const REQUEST_EVENT = "sdp_safe_proxy_request";
-
-const SEVERITY = { info: "INFO", warn: "WARNING", error: "ERROR" } as const;
-
-export const logger = pino({
-  base: undefined,
-  messageKey: "message",
-  hooks: {
-    logMethod(args, method) {
-      // SAFETY: the scrubber returns each argument with its type unchanged.
-      method.apply(this, args.map((argument) => scrubTelemetry(argument)) as typeof args);
-    },
-  },
-});
-
-function levelFor(status: number): keyof typeof SEVERITY {
-  if (status >= 500) return "error";
-  return status >= 400 ? "warn" : "info";
-}
 
 export const requestLog: MiddlewareHandler<AppEnv> = async (c, next) => {
   const startedAt = Date.now();
@@ -65,8 +34,7 @@ export const requestLog: MiddlewareHandler<AppEnv> = async (c, next) => {
   c.header("X-Request-Id", line.request_id);
   line.status = c.res.status;
   line.duration_ms = Date.now() - startedAt;
-  const level = levelFor(line.status);
-  logger[level]({ event: REQUEST_EVENT, severity: SEVERITY[level], ...line }, REQUEST_EVENT);
+  logRequest(line);
 };
 
 export const bodyWithinLimit = bodyLimit({
