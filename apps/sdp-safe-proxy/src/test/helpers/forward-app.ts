@@ -121,7 +121,7 @@ export function createForwardApp(t: TestContext, options: ForwardAppOptions = {}
   };
   t.mock.method(globalThis, "fetch", provider);
   for (const level of LOG_LEVELS) {
-    t.mock.method(logger, level, (fields: object, message: string) => {
+    t.mock.method(logger, level, (fields: z.infer<typeof LogLine>, message: string) => {
       // The duration is the one field a test cannot fix in advance: the schema holds it to a number.
       const { duration_ms, ...line } = LogLine.parse(fields);
       logged.push({ level, message, ...line });
