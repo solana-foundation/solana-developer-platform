@@ -50,7 +50,6 @@ const testEnv: Env = {
   ...env,
   SDP_RELEASE_CHANNEL: "experimental",
   CUSTODY_ENCRYPTION_KEY: Buffer.alloc(32, 11).toString("base64"),
-  FIREBLOCKS_API_BASE_URL: "https://fireblocks.recovery.test",
 };
 
 aroundEach((runTest) =>
@@ -395,7 +394,7 @@ describe("retained proposal recovery waist", () => {
       status: "PENDING_SIGNATURE",
     });
     await expect(controller.cancel("xfr_original")).resolves.toBe(true);
-    const base = "https://fireblocks.recovery.test";
+    const base = "https://api.fireblocks.io";
     expect(fetch.mock.calls.map(([url, init]) => [String(url), required(init).method])).toEqual([
       [`${base}/v1/transactions/external_tx_id/xfr_original`, "GET"],
       [`${base}/v1/transactions/external_tx_id/xfr_original`, "GET"],

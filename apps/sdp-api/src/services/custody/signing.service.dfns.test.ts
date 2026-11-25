@@ -47,7 +47,7 @@ describe("Managed custody config adapters", () => {
   it("treats anchorage as lifecycle-only (non-signing) configuration", async () => {
     const record: SigningConfigRecord = {
       ...createRecord({
-        config: await encryptConfig(JSON.stringify({ apiBaseUrl: "https://example.com" })),
+        config: await encryptConfig(JSON.stringify({})),
       }),
       provider: "anchorage",
     };

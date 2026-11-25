@@ -87,7 +87,6 @@ describe("privy adapter", () => {
     const adapter = new KeychainPrivyAdapter({
       appId: "app-id",
       appSecret: "app-secret",
-      apiBaseUrl: "https://privy.test/v1",
       requestDelayMs: 250,
     });
 
@@ -97,7 +96,6 @@ describe("privy adapter", () => {
       appId: "app-id",
       appSecret: "app-secret",
       walletId: "wallet-1",
-      apiBaseUrl: "https://privy.test/v1",
       requestDelayMs: 250,
     });
   });

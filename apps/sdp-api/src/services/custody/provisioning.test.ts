@@ -39,7 +39,10 @@ describe("coinbase account provisioning", () => {
       .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
         const url = toUrlString(input);
 
-        if (url.endsWith("/platform/v2/solana/accounts") && init?.method === "POST") {
+        if (
+          url === "https://api.cdp.coinbase.com/platform/v2/solana/accounts" &&
+          init?.method === "POST"
+        ) {
           names.push(requestNameSchema.parse(JSON.parse(String(init.body))).name);
 
           return jsonResponse({ address: CREATED_ADDRESS }, 200);
@@ -360,7 +363,7 @@ describe("privy wallet provisioning", () => {
 
     expect(fetchMock).toHaveBeenCalledOnce();
     const [createUrl, createRequest] = required(fetchMock.mock.calls[0]);
-    expect(toUrlString(createUrl)).toBe("https://privy.test/v1/wallets");
+    expect(toUrlString(createUrl)).toBe("https://api.privy.io/v1/wallets");
     expect(required(createRequest).method).toBe("POST");
     expect(JSON.parse(String(required(createRequest).body))).toEqual({
       chain_type: "solana",
@@ -599,7 +602,7 @@ describe("utila wallet provisioning", () => {
       .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
         const url = toUrlString(input);
 
-        if (url.endsWith("/v2/vaults/vault_123/wallets") && init?.method === "POST") {
+        if (url === "https://api.utila.io/v2/vaults/vault_123/wallets" && init?.method === "POST") {
           expect(JSON.parse(String(init.body))).toEqual({
             displayName: "Root Wallet",
             networks: ["networks/solana-devnet"],
@@ -705,7 +708,6 @@ describe("utila wallet provisioning", () => {
         serviceAccountEmail: "service-account@example.com",
         serviceAccountPrivateKeyPem: utilaPrivateKeyPem,
         vaultId: "vaults/vault_123",
-        apiBaseUrl: "https://api.utila.io",
       },
       {}
     );
@@ -726,13 +728,13 @@ describe("para wallet provisioning", () => {
     vi.restoreAllMocks();
   });
 
-  it("uses only the server-configured Para endpoint", async () => {
+  it("sends Para requests to the Para API origin", async () => {
     const walletId = "wal_para_env";
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
         const url = toUrlString(input);
-        expect(url.startsWith("https://trusted.para.test/")).toBe(true);
+        expect(url.startsWith("https://api.beta.getpara.com/")).toBe(true);
 
         if (url.endsWith("/v1/wallets") && init?.method === "POST") {
           return jsonResponse({ data: { id: walletId, status: "creating" } }, 200);
@@ -756,15 +758,7 @@ describe("para wallet provisioning", () => {
         throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
       });
 
-    await provisionParaWallet(
-      createParaEnv({
-        PARA_API_BASE_URL: "https://trusted.para.test",
-      }),
-      {
-        orgId: "org_abc",
-        orgSlug: "Acme Labs",
-      }
-    );
+    await provisionParaWallet(createParaEnv(), { orgId: "org_abc", orgSlug: "Acme Labs" });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -895,7 +889,7 @@ const PRIVY_WALLET = {
 };
 
 function createPrivyEnv(overrides: Partial<Env> = {}): Env {
-  return { ...env, PRIVY_API_BASE_URL: "https://privy.test/v1", ...overrides };
+  return { ...env, ...overrides };
 }
 
 function provisionTestPrivyWallet(options: Parameters<typeof provisionPrivyWallet>[1]) {
@@ -918,23 +912,16 @@ function privyWalletNotFound(): Response {
   return jsonResponse({ error: "not found" }, 404);
 }
 
-function createParaEnv(overrides: Partial<Env> = {}): Env {
-  return {
-    ...env,
-    PARA_API_KEY: "test-para-api-key",
-    PARA_API_BASE_URL: "https://api.getpara.com",
-    ...overrides,
-  };
+function createParaEnv(): Env {
+  return { ...env, PARA_API_KEY: "test-para-api-key" };
 }
 
-function createUtilaEnv(overrides: Partial<Env> = {}): Env {
+function createUtilaEnv(): Env {
   return {
     ...env,
     UTILA_SERVICE_ACCOUNT_EMAIL: "service-account@example.com",
     UTILA_SERVICE_ACCOUNT_PRIVATE_KEY: utilaPrivateKeyPem,
     UTILA_VAULT_ID: "vaults/vault_123",
-    UTILA_API_BASE_URL: "https://api.utila.io",
-    ...overrides,
   };
 }
 

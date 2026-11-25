@@ -50,7 +50,7 @@ const PRIVY_WALLET_ID = "wallet-provider-credential-installation";
 const PRIVY_WALLET_ADDRESS = "wallet-address-provider-credential-installation";
 const PRIVY_EXTERNAL_ID = `sdp_${CONNECTION_ID}`;
 const PRIVY_IDEMPOTENCY_KEY = `sdp_install_${CONNECTION_ID}`;
-const PRIVY_EXTERNAL_WALLET_URL = `https://privy.example.test/v1/wallets/ext_wal_${PRIVY_EXTERNAL_ID}`;
+const PRIVY_EXTERNAL_WALLET_URL = `https://api.privy.io/v1/wallets/ext_wal_${PRIVY_EXTERNAL_ID}`;
 const PROVIDER_ACCOUNT_FINGERPRINT =
   "sha256:227b73d3e3e9e6717d2c6f6500f88386b11130922ae7320de715a6ca237f3296";
 
@@ -333,7 +333,6 @@ describe("exact Custody Connection installation routes", () => {
     encryptionKey: env.CUSTODY_ENCRYPTION_KEY,
     appId: env.PRIVY_APP_ID,
     appSecret: env.PRIVY_APP_SECRET,
-    apiBaseUrl: env.PRIVY_API_BASE_URL,
   };
 
   beforeEach(async () => {
@@ -345,7 +344,6 @@ describe("exact Custody Connection installation routes", () => {
     env.CUSTODY_ENCRYPTION_KEY = testEncryptionKey();
     env.PRIVY_APP_ID = undefined;
     env.PRIVY_APP_SECRET = undefined;
-    env.PRIVY_API_BASE_URL = "https://privy.example.test/v1";
     clerkToken = await seedCustodyAdmin(env, {
       organizationId: ORGANIZATION_ID,
       userId: USER_ID,
@@ -370,7 +368,6 @@ describe("exact Custody Connection installation routes", () => {
     env.CUSTODY_ENCRYPTION_KEY = original.encryptionKey;
     env.PRIVY_APP_ID = original.appId;
     env.PRIVY_APP_SECRET = original.appSecret;
-    env.PRIVY_API_BASE_URL = original.apiBaseUrl;
     await clearKVStores(env);
   });
 
@@ -409,9 +406,9 @@ describe("exact Custody Connection installation routes", () => {
     });
     // The account check, then the create: no external-ID lookup before the POST.
     expect(providerFetch).toHaveBeenCalledTimes(2);
-    expect(required(providerFetch.mock.calls[0])[0]).toBe("https://privy.example.test/v1/wallets");
+    expect(required(providerFetch.mock.calls[0])[0]).toBe("https://api.privy.io/v1/wallets");
     expect(providerFetch.mock.calls[1]).toEqual([
-      "https://privy.example.test/v1/wallets",
+      "https://api.privy.io/v1/wallets",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({ "privy-idempotency-key": PRIVY_IDEMPOTENCY_KEY }),

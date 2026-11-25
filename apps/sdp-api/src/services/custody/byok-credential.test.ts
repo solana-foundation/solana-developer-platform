@@ -1,6 +1,6 @@
 import { generateKeyPairSync } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { env as testEnv } from "@/test/helpers/env";
+import { env } from "@/test/helpers/env";
 import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import { checkByokCredential, credentialPayload, parseByokCredential } from "./byok-credential";
 
@@ -10,7 +10,6 @@ const fields = {
   apiSecretPem: privateKey.export({ type: "pkcs1", format: "pem" }).toString(),
   vaultAccountId: "0",
 };
-const env = { ...testEnv, FIREBLOCKS_API_BASE_URL: "https://fireblocks.example.test" };
 const address = syntheticAddress(1);
 
 afterEach(() => vi.restoreAllMocks());
@@ -74,7 +73,7 @@ describe("Fireblocks BYOK credentials", () => {
     });
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenCalledWith(
-      `${env.FIREBLOCKS_API_BASE_URL}/v1/vault/accounts/0/SOL_TEST/addresses_paginated`,
+      "https://api.fireblocks.io/v1/vault/accounts/0/SOL_TEST/addresses_paginated",
       expect.objectContaining({
         method: "GET",
         headers: expect.objectContaining({

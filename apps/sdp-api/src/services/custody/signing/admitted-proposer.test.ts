@@ -14,6 +14,7 @@ import {
   proposalRuntime,
 } from "./admitted-proposer";
 
+const FIREBLOCKS_API = "https://api.fireblocks.io";
 const { address: SOURCE } = await generateKeyPairSigner();
 const { address: DESTINATION } = await generateKeyPairSigner();
 const access: ProposalAccess = {
@@ -22,7 +23,6 @@ const access: ProposalAccess = {
   apiSecretPem: generateKeyPairSync("rsa", { modulusLength: 2048 })
     .privateKey.export({ type: "pkcs8", format: "pem" })
     .toString(),
-  apiBaseUrl: "https://fireblocks.example.test",
   vaultAccountId: "0",
   publicKey: SOURCE,
   connectionId: "cconn_1",
@@ -127,7 +127,7 @@ describe("admittedTransferProposer", () => {
     const posts = fetch.mock.calls.filter(([, init]) => required(init).method === "POST");
     expect(posts).toHaveLength(1);
     const [url, init] = required(posts[0]);
-    expect(String(url)).toBe(`${access.apiBaseUrl}/v1/transactions`);
+    expect(String(url)).toBe(`${FIREBLOCKS_API}/v1/transactions`);
     expect(new Headers(required(init).headers).get("X-API-Key")).toBe("tenant-key");
     expect(JSON.parse(String(required(init).body))).toEqual({
       operation: "TRANSFER",
@@ -185,7 +185,7 @@ describe("admittedTransferProposer", () => {
       externalTxId: "xfr_1",
     });
     expect(fetch.mock.calls.map(([url, init]) => [String(url), required(init).method])).toEqual([
-      [`${access.apiBaseUrl}/v1/transactions/external_tx_id/xfr_1`, "GET"],
+      [`${FIREBLOCKS_API}/v1/transactions/external_tx_id/xfr_1`, "GET"],
     ]);
   });
 });
@@ -234,8 +234,8 @@ describe("proposalRecovery", () => {
     await expect(recovery.cancel(request.externalId)).resolves.toBe(true);
     expect(admit).toHaveBeenCalledTimes(1);
     expect(fetch.mock.calls.map(([url, init]) => [String(url), required(init).method])).toEqual([
-      [`${access.apiBaseUrl}/v1/transactions/external_tx_id/${request.externalId}`, "GET"],
-      [`${access.apiBaseUrl}/v1/transactions/${detail.id}/cancel`, "POST"],
+      [`${FIREBLOCKS_API}/v1/transactions/external_tx_id/${request.externalId}`, "GET"],
+      [`${FIREBLOCKS_API}/v1/transactions/${detail.id}/cancel`, "POST"],
     ]);
     for (const [, init] of fetch.mock.calls)
       expect(new Headers(required(init).headers).get("X-API-Key")).toBe(access.apiKey);

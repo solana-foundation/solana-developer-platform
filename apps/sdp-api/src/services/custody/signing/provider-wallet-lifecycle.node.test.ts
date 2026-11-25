@@ -16,35 +16,32 @@ function stubWalletClient(create: "createDfnsApiClient" | "createIbmHavenApiClie
   const createWallet = vi
     .fn<dfnsClient.DfnsApiClient["wallets"]["createWallet"]>()
     .mockResolvedValue({ id: "wa-12345-abcde-newdfnswallet", address: CREATED_WALLET_ADDRESS });
-  const createClient = vi.spyOn(dfnsClient, create).mockResolvedValue({
+  vi.spyOn(dfnsClient, create).mockResolvedValue({
     wallets: { getWallet: notCalledWhenCreating, listWallets: notCalledWhenCreating, createWallet },
     keySignatures: { createSignature: notCalledWhenCreating, getSignature: notCalledWhenCreating },
   });
-  return { createClient, createWallet };
+  return createWallet;
 }
 
 afterEach(() => vi.restoreAllMocks());
 
 describe("createProviderWallet", () => {
-  it("creates additional DFNS wallets on the deployment's API, without reusing the configured signing key", async () => {
-    const { createClient, createWallet } = stubWalletClient("createDfnsApiClient");
-    const dfnsEnv = { ...env, DFNS_API_BASE_URL: "https://trusted.dfns.test" };
+  it("creates additional DFNS wallets without reusing the configured signing key", async () => {
+    const createWallet = stubWalletClient("createDfnsApiClient");
 
     const wallet = await createProviderWallet({
-      env: dfnsEnv,
+      env,
       orgId: "org_dfns",
       projectId: "project_dfns",
       params: { label: "DFNS treasury" },
       parsed: {
         provider: "dfns",
-        apiBaseUrl: "https://untrusted.example",
         network: "SolanaDevnet",
         walletId: "wa-12345-abcde-rootwallet",
         signingKeyId: "key-12345-abcde-rootwallet",
       },
     });
 
-    expect(createClient).toHaveBeenCalledExactlyOnceWith(dfnsEnv);
     expect(createWallet).toHaveBeenCalledExactlyOnceWith({
       body: { network: "SolanaDevnet", name: "DFNS treasury" },
     });
@@ -55,24 +52,21 @@ describe("createProviderWallet", () => {
   });
 
   it("creates additional IBM Digital Asset Haven wallets with the ibmhaven_ prefix", async () => {
-    const { createClient, createWallet } = stubWalletClient("createIbmHavenApiClient");
-    const havenEnv = { ...env, IBM_HAVEN_API_BASE_URL: "https://trusted.haven.test" };
+    const createWallet = stubWalletClient("createIbmHavenApiClient");
 
     const wallet = await createProviderWallet({
-      env: havenEnv,
+      env,
       orgId: "org_ibm_haven",
       projectId: "project_ibm_haven",
       params: { label: "Haven treasury" },
       parsed: {
         provider: "ibm_haven",
-        apiBaseUrl: "https://untrusted.example",
         network: "SolanaDevnet",
         walletId: "wa-12345-abcde-rootwallet",
         signingKeyId: "key-12345-abcde-rootwallet",
       },
     });
 
-    expect(createClient).toHaveBeenCalledExactlyOnceWith(havenEnv);
     expect(createWallet).toHaveBeenCalledExactlyOnceWith({
       body: { network: "SolanaDevnet", name: "Haven treasury" },
     });

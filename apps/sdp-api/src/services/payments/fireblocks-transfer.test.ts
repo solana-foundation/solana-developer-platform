@@ -49,7 +49,6 @@ const USER_ID = "usr_fireblocks_byok";
 const PROJECT_ID = "prj_fireblocks_byok";
 const ADDRESS = TEST_SOLANA_ADDRESSES.wallet1;
 const OTHER_ADDRESS = TEST_SOLANA_ADDRESSES.wallet2;
-const FIREBLOCKS_API_BASE_URL = "https://fireblocks.example.test";
 const fields = {
   apiKey: "tenant-fireblocks-key",
   signingKeyId: "",
@@ -67,7 +66,6 @@ const testEnv: Env = {
   SDP_DEPLOYMENT_MODE: "self_hosted",
   CREDENTIAL_SECRET_STORE_BACKEND: "encrypted_db",
   CUSTODY_ENCRYPTION_KEY: Buffer.alloc(32, 11).toString("base64"),
-  FIREBLOCKS_API_BASE_URL,
   FIREBLOCKS_API_KEY: "deployment-key-must-not-be-used",
   FIREBLOCKS_API_SECRET: "deployment-secret-must-not-be-used",
 };
@@ -216,7 +214,7 @@ async function ready(projectId = PROJECT_ID) {
   beforeCancellation = null;
   beforeCreateResponse = null;
   mock.mockImplementation(async (url, init) => {
-    const path = String(url).replace(FIREBLOCKS_API_BASE_URL, "");
+    const path = new URL(String(url)).pathname;
     expect(new Headers(init?.headers).get("X-API-Key")).toBe(fields.apiKey);
     if (path === "/v1/supported_assets")
       return Response.json([

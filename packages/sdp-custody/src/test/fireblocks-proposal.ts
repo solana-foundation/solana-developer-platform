@@ -129,7 +129,6 @@ export async function assertFireblocksTransaction(
       apiSecretPem: rsa.privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
       vaultAccountId: "42",
       assetId,
-      apiBaseUrl: "https://fireblocks.example.test",
       useProgramCall: true,
     });
     const signer = await adapter.getTransactionSigner("fb_42");
@@ -143,9 +142,9 @@ export async function assertFireblocksTransaction(
     assert.deepEqual(
       requests.map(({ url, init }) => `${init?.method} ${url}`),
       [
-        `GET https://fireblocks.example.test/v1/vault/accounts/42/${assetId}/addresses_paginated`,
-        "POST https://fireblocks.example.test/v1/transactions",
-        "GET https://fireblocks.example.test/v1/transactions/proposal",
+        `GET https://api.fireblocks.io/v1/vault/accounts/42/${assetId}/addresses_paginated`,
+        "POST https://api.fireblocks.io/v1/transactions",
+        "GET https://api.fireblocks.io/v1/transactions/proposal",
       ]
     );
     for (const { init } of requests)

@@ -6,7 +6,6 @@ import { FireblocksApiError, fireblocksRequest } from "./http";
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const params = {
-  apiBaseUrl: "https://fireblocks.example.test",
   apiKey: "test-api-user",
   apiSecretPem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
   method: "POST" as const,
@@ -15,6 +14,16 @@ const params = {
 };
 
 describe("Fireblocks HTTP contract", () => {
+  it("sends requests to the Fireblocks API origin", async () => {
+    const urls: string[] = [];
+    const rt = testRuntime(async (url) => {
+      urls.push(String(url));
+      return Response.json({ id: "transaction" });
+    });
+    await fireblocksRequest(rt, params);
+    assert.deepEqual(urls, ["https://api.fireblocks.io/v1/transactions"]);
+  });
+
   it("keeps retries stable and separate requests distinct within the 40-character limit", async () => {
     const keys: string[] = [];
     const rt = testRuntime(async (_url, init) => {

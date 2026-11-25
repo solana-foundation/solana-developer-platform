@@ -11,22 +11,17 @@ describe("anchorage wallet provisioning", () => {
     vi.restoreAllMocks();
   });
 
-  it("uses only the server-configured Anchorage endpoint", async () => {
+  it("sends wallet creation to the Anchorage API origin", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(
         jsonResponse({ walletId: "wa_anch_env", address: syntheticAddress(1) }, 200)
       );
 
-    await provisionAnchorageWallet(
-      createAnchorageEnv({
-        ANCHORAGE_API_BASE_URL: "https://trusted.anchorage.test",
-      }),
-      {}
-    );
+    await provisionAnchorageWallet(createAnchorageEnv(), {});
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://trusted.anchorage.test/v1/wallets",
+      "https://api.anchorage.com/v1/wallets",
       expect.objectContaining({ method: "POST" })
     );
   });
@@ -72,8 +67,8 @@ describe("anchorage wallet provisioning", () => {
   });
 });
 
-function createAnchorageEnv(overrides: Partial<Env> = {}): Env {
-  return { ...env, ANCHORAGE_API_KEY: "anchorage-test-key", ...overrides };
+function createAnchorageEnv(): Env {
+  return { ...env, ANCHORAGE_API_KEY: "anchorage-test-key" };
 }
 
 function jsonResponse(body: unknown, status = 200): Response {

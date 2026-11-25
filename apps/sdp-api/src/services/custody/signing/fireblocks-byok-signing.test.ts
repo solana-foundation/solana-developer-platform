@@ -41,7 +41,6 @@ const apiSecretPem = rsa.privateKey.export({ type: "pkcs8", format: "pem" }).toS
 const env = {
   ...testEnv,
   SDP_RELEASE_CHANNEL: "experimental",
-  FIREBLOCKS_API_BASE_URL: "https://fireblocks.example.test",
   FIREBLOCKS_API_KEY: "deployment-key",
   FIREBLOCKS_API_SECRET: "deployment-secret",
 };
@@ -109,7 +108,7 @@ describe("Fireblocks BYOK transaction proposals", () => {
     expect(Buffer.from(required(required(signatures)[publicKey]))).toEqual(signature);
     expect(fetch).toHaveBeenCalledTimes(4);
     const [proposalUrl, proposalInit] = required(fetch.mock.calls[1]);
-    expect(proposalUrl).toBe("https://fireblocks.example.test/v1/transactions");
+    expect(proposalUrl).toBe("https://api.fireblocks.io/v1/transactions");
     expect(JSON.parse(String(required(proposalInit).body))).toEqual({
       externalTxId: expect.stringMatching(/^sdp-sign-/),
       operation: "PROGRAM_CALL",
@@ -121,10 +120,8 @@ describe("Fireblocks BYOK transaction proposals", () => {
         useDurableNonce: false,
       },
     });
-    for (const [url, init] of fetch.mock.calls) {
-      expect(String(url).startsWith("https://fireblocks.example.test/")).toBe(true);
+    for (const [, init] of fetch.mock.calls)
       expect(new Headers(required(init).headers).get("X-API-Key")).toBe("tenant-key");
-    }
     expect(await adapter.getTransactionSigner("fb_42", publicKey)).toBe(signer);
     expect(fetch).toHaveBeenCalledTimes(4);
   });
@@ -257,10 +254,10 @@ describe("Fireblocks BYOK transaction proposals", () => {
       context: { providerTransactionId: "proposal-1", cancelRequested: true },
     });
     expect(fetch.mock.calls.map(([url, init]) => [String(url), required(init).method])).toEqual([
-      ["https://fireblocks.example.test/v1/vault/accounts/42/SOL_TEST/addresses_paginated", "GET"],
-      ["https://fireblocks.example.test/v1/transactions", "POST"],
-      ["https://fireblocks.example.test/v1/transactions/proposal-1", "GET"],
-      ["https://fireblocks.example.test/v1/transactions/proposal-1/cancel", "POST"],
+      ["https://api.fireblocks.io/v1/vault/accounts/42/SOL_TEST/addresses_paginated", "GET"],
+      ["https://api.fireblocks.io/v1/transactions", "POST"],
+      ["https://api.fireblocks.io/v1/transactions/proposal-1", "GET"],
+      ["https://api.fireblocks.io/v1/transactions/proposal-1/cancel", "POST"],
     ]);
   });
 
