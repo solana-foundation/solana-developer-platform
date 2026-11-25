@@ -5,11 +5,7 @@
  * The platform sponsors all transaction fees via Kora's fee payer.
  */
 
-import {
-  assertCloudRunIdentityDestination,
-  createCloudRunIdentityTokenProvider,
-} from "@sdp/service-call/identity-token";
-import { createProcessCache } from "@sdp/service-call/process-cache";
+import { createIdentityTokenProvider } from "@sdp/metadata-server/caller";
 import { type Address, assertIsAddress } from "@solana/kit";
 import {
   type Config,
@@ -60,9 +56,6 @@ export type KoraAdapterConfig = KoraClientOptions & {
   client?: KoraClientTransport;
 };
 
-const KORA_URL_SETTING = "KORA_<CLUSTER>_URL";
-const KORA_AUDIENCE_SETTING = "KORA_<CLUSTER>_CLOUD_RUN_AUDIENCE";
-
 /** How long a Kora's fee-payer address is trusted before it is read again. */
 const FEE_PAYER_ADDRESS_TTL_MS = 5 * 60_000;
 
@@ -91,21 +84,17 @@ export class KoraAdapter implements FeePaymentPort {
     if (config.identityTokenProvider && !identityTokenAudience) {
       throw new Error("identityTokenAudience is required with an identityTokenProvider");
     }
-    if (identityTokenAudience) {
-      assertCloudRunIdentityDestination({
-        url: rpcUrl,
-        audience: identityTokenAudience,
-        urlSetting: KORA_URL_SETTING,
-        audienceSetting: KORA_AUDIENCE_SETTING,
-      });
-    }
-    const identityTokenProvider =
-      config.identityTokenProvider ??
-      (identityTokenAudience
-        ? createCloudRunIdentityTokenProvider(identityTokenAudience, {
-            audienceSetting: KORA_AUDIENCE_SETTING,
-          })
-        : undefined);
+    // The destination check runs even when a provider is injected: it is what keeps a token for
+    // one audience from being sent to another origin.
+    const metadataTokenProvider = identityTokenAudience
+      ? createIdentityTokenProvider({
+          url: rpcUrl,
+          audience: identityTokenAudience,
+          urlSetting: "KORA_<CLUSTER>_URL",
+          audienceSetting: "KORA_<CLUSTER>_CLOUD_RUN_AUDIENCE",
+        })
+      : undefined;
+    const identityTokenProvider = config.identityTokenProvider ?? metadataTokenProvider;
     this.client =
       config.client ??
       (identityTokenProvider
@@ -311,6 +300,43 @@ export class KoraAdapter implements FeePaymentPort {
 // ═══════════════════════════════════════════════════════════════════════════
 // Utilities
 // ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * A process-wide cache: a miss shares one in-flight load per key, and a failed load is never
+ * stored, so the next call loads again.
+ *
+ * @param expiresAt - When a freshly loaded value stops being served.
+ * @returns The cache.
+ */
+function createProcessCache<TValue>(expiresAt: (value: TValue) => number) {
+  const entries = new Map<string, { value: TValue; expiresAt: number }>();
+  const loads = new Map<string, Promise<TValue>>();
+  return {
+    source(key: string): "cache" | "shared" | "network" {
+      const entry = entries.get(key);
+      if (entry && Date.now() < entry.expiresAt) return "cache";
+      return loads.has(key) ? "shared" : "network";
+    },
+    get(key: string, load: () => Promise<TValue>): Promise<TValue> {
+      const entry = entries.get(key);
+      if (entry && Date.now() < entry.expiresAt) return Promise.resolve(entry.value);
+      const loadInFlight = loads.get(key);
+      if (loadInFlight) return loadInFlight;
+      const pendingLoad = load()
+        .then((value) => {
+          entries.set(key, { value, expiresAt: expiresAt(value) });
+          return value;
+        })
+        .finally(() => loads.delete(key));
+      loads.set(key, pendingLoad);
+      return pendingLoad;
+    },
+    /** Drop `key` only while it still holds `value` (compare-and-delete). */
+    forget(key: string, value: TValue): void {
+      if (entries.get(key)?.value === value) entries.delete(key);
+    },
+  };
+}
 
 function encodeBase64(bytes: Uint8Array): string {
   let binary = "";

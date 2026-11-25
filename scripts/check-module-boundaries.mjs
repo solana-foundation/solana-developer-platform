@@ -155,7 +155,7 @@ const MODULE_METADATA = [
     directory: "packages/sdp-fee-payment",
     purpose:
       "Fee-payment port, the Kora adapter, Kora endpoint selection, and the Fee Payer's chain reads.",
-    allowedDependencies: ["@sdp/rpc", "@sdp/service-call", "@sdp/types"],
+    allowedDependencies: ["@sdp/rpc", "@sdp/metadata-server", "@sdp/types"],
   },
   {
     name: "@sdp/hastra",
@@ -281,10 +281,10 @@ const MODULE_METADATA = [
     allowedDependencies: ["@sdp/types"],
   },
   {
-    name: "@sdp/service-call",
-    directory: "packages/sdp-service-call",
+    name: "@sdp/metadata-server",
+    directory: "packages/sdp-metadata-server",
     purpose:
-      "Identity tokens for calls between SDP's private services: fetching one, checking the destination, and verifying a caller's.",
+      "Identity tokens between SDP's private Cloud Run services: the calling side fetches one from the metadata server for a checked destination, the receiving side verifies a caller's.",
     allowedDependencies: [],
   },
   {

@@ -13,7 +13,7 @@ import {
   CallerIdentityError,
   type CallerIdentityErrorCode,
   createCallerIdentityVerifier,
-} from "./caller-identity";
+} from "./receiver";
 
 const AUDIENCE = "https://callee.mock.invalid";
 const ISSUER = "https://accounts.google.com";
