@@ -128,7 +128,7 @@ describe("Earn transaction proposal admission boundary", () => {
     expect(provider.propose).not.toHaveBeenCalled();
   });
 
-  it("changed credential account and wrong transaction owner refuse before provider I/O", async () => {
+  it("changed credential account, changed source address and wrong transaction owner refuse before provider I/O", async () => {
     const provider = port();
     await expect(
       inScope(() =>
@@ -137,6 +137,14 @@ describe("Earn transaction proposal admission boundary", () => {
           async () => admitted,
           async () => ({ ...access, accountFingerprint: "changed" })
         ).propose({ binding, unsignedTransaction: unsigned })
+      )
+    ).rejects.toBeInstanceOf(ProposalNotSentError);
+    await expect(
+      inScope(() =>
+        create(provider).propose({
+          binding: { ...binding, sourceAddress: "11111111111111111111111111111111" },
+          unsignedTransaction: unsigned,
+        })
       )
     ).rejects.toBeInstanceOf(ProposalNotSentError);
     await expect(

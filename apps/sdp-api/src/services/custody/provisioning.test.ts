@@ -516,16 +516,19 @@ describe("privy wallet provisioning", () => {
     expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["POST", "GET"]);
   });
 
-  it("creates a Managed wallet without an external ID", async () => {
+  it.each([
+    ["looks up an existing wallet by ID", { walletId: "wallet-existing" }, "GET"],
+    ["creates a wallet without an external ID", {}, "POST"],
+  ] as const)("reads or creates a Managed wallet (%s)", async (_case, options, method) => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(jsonResponse({ id: "wallet-existing", address: EXISTING_ADDRESS }, 200));
 
-    await expect(provisionTestPrivyWallet({})).resolves.toEqual({
+    await expect(provisionTestPrivyWallet(options)).resolves.toEqual({
       walletId: "wallet-existing",
       address: EXISTING_ADDRESS,
     });
-    expect(required(required(fetchMock.mock.calls[0])[1]).method).toBe("POST");
+    expect(required(required(fetchMock.mock.calls[0])[1]).method).toBe(method);
   });
 
   it.each([
