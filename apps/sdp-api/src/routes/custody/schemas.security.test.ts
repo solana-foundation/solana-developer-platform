@@ -40,14 +40,16 @@ describe("custody initialize endpoint selection", () => {
     }
   );
 
-  it("preserves ordinary platform-managed provisioning requests", () => {
-    const parsed = initializeSigningSchema.safeParse({
-      provider: "coinbase_cdp",
-      network: "solana-devnet",
-      walletLabel: "Treasury",
-    });
+  it.each([
+    { provider: "coinbase_cdp", network: "solana" },
+    { provider: "anchorage", network: "solana" },
+    { provider: "dfns", network: "Solana" },
+    { provider: "ibm_haven", network: "Solana" },
+  ] as const)("refuses a $provider request that chooses its network", ({ provider, network }) => {
+    const request = { provider, walletLabel: "Treasury" };
 
-    expect(parsed.success).toBe(true);
+    expect(initializeSigningSchema.safeParse(request).success).toBe(true);
+    expect(initializeSigningSchema.safeParse({ ...request, network }).success).toBe(false);
   });
 
   it.each(["__proto__", "constructor"])("rejects the unknown provider %s", (provider) => {

@@ -15,15 +15,17 @@ import type { MockInstance } from "vitest";
 import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import { SigningError } from "#/signing";
 import { KeychainFireblocksAdapter } from "./keychain.adapter";
+import type { KeychainFireblocksConfig } from "./keychain-config";
 
 type SolanaSigner = Awaited<ReturnType<KeychainFireblocksAdapter["getTransactionSigner"]>>;
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const CONFIG = {
+  cluster: "devnet",
   apiKey: "api-key",
   apiSecretPem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
   vaultAccountId: "default-vault",
-};
+} satisfies KeychainFireblocksConfig;
 const { address: WALLET_ADDRESS } = await generateKeyPairSigner();
 
 /** The URL and init of the fetch call at `index`, which must exist. */
@@ -116,9 +118,29 @@ describe("fireblocks adapter", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(2);
     for (const [url] of fetchSpy.mock.calls) {
       expect(String(url)).toBe(
-        "https://api.fireblocks.io/v1/vault/accounts/vault-1/SOL/addresses_paginated"
+        "https://api.fireblocks.io/v1/vault/accounts/vault-1/SOL_TEST/addresses_paginated"
       );
     }
+  });
+
+  it.each([
+    ["devnet", "SOL_TEST"],
+    ["mainnet-beta", "SOL"],
+  ] as const)("reads the address and proposes with the %s native asset", async (cluster, asset) => {
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ addresses: [{ address: WALLET_ADDRESS }] }))
+      .mockResolvedValueOnce(Response.json({ id: "tx-1", status: "SUBMITTED" }))
+      .mockResolvedValueOnce(Response.json({ id: "tx-1", status: "FAILED" }));
+    const adapter = new KeychainFireblocksAdapter({ ...CONFIG, cluster });
+
+    await expect(signTestMessage(await adapter.getTransactionSigner("fb_vault-1"))).rejects.toThrow(
+      "Transaction failed with status: FAILED"
+    );
+    expect(fetchCall(fetch, 0).url).toBe(
+      `https://api.fireblocks.io/v1/vault/accounts/vault-1/${asset}/addresses_paginated`
+    );
+    expect(JSON.parse(String(fetchCall(fetch, 1).init.body))).toMatchObject({ assetId: asset });
   });
 
   it("keeps real Fireblocks request and response bodies off every console sink", async () => {

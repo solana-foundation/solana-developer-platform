@@ -29,6 +29,7 @@ const owner = getBase58Decoder().decode(
   new Uint8Array(key.publicKey.export({ format: "der", type: "spki" }).subarray(-32))
 );
 const access: ProposalAccess = {
+  cluster: "devnet",
   apiKey: "key",
   apiSecretPem: "not-read-by-test-port",
   vaultAccountId: "42",

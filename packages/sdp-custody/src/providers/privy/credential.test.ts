@@ -3,7 +3,7 @@ import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { testRuntime } from "#/test/runtime";
 import { checkPrivyCredential } from "./credential";
 
-const CREDENTIAL = { appId: "app-123", appSecret: "secret" };
+const CREDENTIAL = { cluster: "devnet" as const, appId: "app-123", appSecret: "secret" };
 
 function checkAgainst(answer: () => Promise<Response>) {
   return checkPrivyCredential(testRuntime(answer), CREDENTIAL);

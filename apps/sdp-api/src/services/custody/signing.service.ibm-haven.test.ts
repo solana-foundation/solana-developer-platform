@@ -3,11 +3,7 @@ import {
   denormalizeIbmHavenWalletId,
   normalizeIbmHavenWalletId,
 } from "@sdp/custody/provider-wallet-ids";
-import {
-  type DfnsApiClient,
-  IBM_HAVEN_PROVIDER_LABEL,
-  resolveDfnsNetwork,
-} from "@sdp/custody/providers/dfns/client";
+import type { DfnsApiClient } from "@sdp/custody/providers/dfns/client";
 import { KeychainIbmHavenAdapter } from "@sdp/custody/providers/ibm-haven/keychain.adapter";
 import { aroundEach, describe, expect, it } from "vitest";
 import type { SigningConfigRecord } from "@/services/adapters/signing";
@@ -74,14 +70,6 @@ describe("ibm_haven wallet id prefixing", () => {
 
     expect(requested).toContain("wa-42");
     expect(requested.some((id) => id.startsWith("ibmhaven_"))).toBe(false);
-  });
-});
-
-describe("ibm_haven provider labeling", () => {
-  it("labels provider errors with the IBM Digital Asset Haven name", () => {
-    expect(() => resolveDfnsNetwork("Ethereum", IBM_HAVEN_PROVIDER_LABEL)).toThrow(
-      "IBM Digital Asset Haven network must be one of: Solana, SolanaDevnet"
-    );
   });
 });
 

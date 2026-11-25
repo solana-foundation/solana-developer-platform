@@ -3,6 +3,7 @@ import {
   createDfnsApiClient,
   createIbmHavenApiClient,
   type DfnsEnv,
+  type IbmHavenEnv,
 } from "@sdp/custody/providers/dfns/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { required } from "@/test/helpers/required";
@@ -20,6 +21,38 @@ beforeAll(() => {
   privateKeyPem = generateKeyPairSync("ed25519")
     .privateKey.export({ type: "pkcs8", format: "pem" })
     .toString();
+});
+
+describe("dfns wallet creation", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    ["DFNS", "devnet", "SolanaDevnet", DFNS_API_ORIGIN],
+    ["DFNS", "mainnet-beta", "Solana", DFNS_API_ORIGIN],
+    ["IBM Haven", "devnet", "SolanaDevnet", IBM_HAVEN_API_ORIGIN],
+    ["IBM Haven", "mainnet-beta", "Solana", IBM_HAVEN_API_ORIGIN],
+  ] as const)(
+    "creates a %s %s wallet on the %s network",
+    async (provider, cluster, network, origin) => {
+      const bodies: unknown[] = [];
+      mockDfnsFetch((url, init) => {
+        if (url !== `${origin}/wallets` || init?.method !== "POST") return null;
+        bodies.push(JSON.parse(String(init.body)));
+        return jsonResponse({ id: WALLET_ID }, 200);
+      });
+
+      const client = await (provider === "DFNS"
+        ? createDfnsApiClient(createDfnsEnv(), cluster)
+        : createIbmHavenApiClient(createIbmHavenEnv(), cluster));
+      await expect(client.wallets.createWallet({ body: { name: "Treasury" } })).resolves.toEqual({
+        id: WALLET_ID,
+      });
+
+      expect(bodies).toEqual([{ network, name: "Treasury" }]);
+    }
+  );
 });
 
 describe("dfns client redirects", () => {
@@ -40,8 +73,8 @@ describe("dfns client redirects", () => {
       return null;
     });
 
-    const client = await createDfnsApiClient(createDfnsEnv());
-    const wallet = await client.wallets.createWallet({ body: { network: "SolanaDevnet" } });
+    const client = await createDfnsApiClient(createDfnsEnv(), "devnet");
+    const wallet = await client.wallets.createWallet({ body: {} });
 
     expect(wallet.id).toBe(WALLET_ID);
 
@@ -63,11 +96,11 @@ describe("dfns client redirects", () => {
       return null;
     });
 
-    const client = await createDfnsApiClient(createDfnsEnv());
+    const client = await createDfnsApiClient(createDfnsEnv(), "devnet");
 
-    await expect(
-      client.wallets.createWallet({ body: { network: "SolanaDevnet" } })
-    ).rejects.toThrow(/cross-origin redirect/);
+    await expect(client.wallets.createWallet({ body: {} })).rejects.toThrow(
+      /cross-origin redirect/
+    );
 
     const foreignCalls = fetchMock.mock.calls.filter(([input]) => hasOrigin(input, FOREIGN_ORIGIN));
     expect(foreignCalls).toHaveLength(0);
@@ -82,11 +115,11 @@ describe("dfns client redirects", () => {
       return null;
     });
 
-    const client = await createDfnsApiClient(createDfnsEnv());
+    const client = await createDfnsApiClient(createDfnsEnv(), "devnet");
 
-    await expect(
-      client.wallets.createWallet({ body: { network: "SolanaDevnet" } })
-    ).rejects.toThrow(/cross-origin redirect/);
+    await expect(client.wallets.createWallet({ body: {} })).rejects.toThrow(
+      /cross-origin redirect/
+    );
   });
 
   it("refuses an unparsable redirect target", async () => {
@@ -98,11 +131,11 @@ describe("dfns client redirects", () => {
       return null;
     });
 
-    const client = await createDfnsApiClient(createDfnsEnv());
+    const client = await createDfnsApiClient(createDfnsEnv(), "devnet");
 
-    await expect(
-      client.wallets.createWallet({ body: { network: "SolanaDevnet" } })
-    ).rejects.toThrow(/redirectOrigin=invalid/);
+    await expect(client.wallets.createWallet({ body: {} })).rejects.toThrow(
+      /redirectOrigin=invalid/
+    );
   });
 
   it("applies the same-origin rule to the IBM Haven white-label client", async () => {
@@ -114,15 +147,11 @@ describe("dfns client redirects", () => {
       return null;
     });
 
-    const client = await createIbmHavenApiClient({
-      IBM_HAVEN_AUTH_TOKEN: AUTH_TOKEN,
-      IBM_HAVEN_CREDENTIAL_ID: CREDENTIAL_ID,
-      IBM_HAVEN_PRIVATE_KEY: privateKeyPem,
-    });
+    const client = await createIbmHavenApiClient(createIbmHavenEnv(), "devnet");
 
-    await expect(
-      client.wallets.createWallet({ body: { network: "SolanaDevnet" } })
-    ).rejects.toThrow(/IBM Digital Asset Haven API returned a cross-origin redirect/);
+    await expect(client.wallets.createWallet({ body: {} })).rejects.toThrow(
+      /IBM Digital Asset Haven API returned a cross-origin redirect/
+    );
 
     const foreignCalls = fetchMock.mock.calls.filter(([input]) => hasOrigin(input, FOREIGN_ORIGIN));
     expect(foreignCalls).toHaveLength(0);
@@ -137,7 +166,7 @@ describe("dfns client redirects", () => {
       return null;
     });
 
-    const client = await createDfnsApiClient(createDfnsEnv());
+    const client = await createDfnsApiClient(createDfnsEnv(), "devnet");
 
     await expect(client.wallets.getWallet({ walletId: "wa_1" })).rejects.toThrow(
       /unsupported redirect/
@@ -167,7 +196,7 @@ describe("dfns client error redaction", () => {
       return null;
     });
 
-    const client = await createDfnsApiClient(createDfnsEnv());
+    const client = await createDfnsApiClient(createDfnsEnv(), "devnet");
     const error = await captureError(() => client.wallets.getWallet({ walletId: "wa_1" }));
 
     expect(error.message).toContain("status=403");
@@ -186,7 +215,7 @@ describe("dfns client error redaction", () => {
       return null;
     });
 
-    const client = await createDfnsApiClient(createDfnsEnv());
+    const client = await createDfnsApiClient(createDfnsEnv(), "devnet");
     const error = await captureError(() => client.wallets.getWallet({ walletId: "wa_1" }));
 
     expect(error.message).toContain("code=unavailable");
@@ -205,7 +234,7 @@ describe("dfns client error redaction", () => {
       return null;
     });
 
-    const client = await createDfnsApiClient(createDfnsEnv());
+    const client = await createDfnsApiClient(createDfnsEnv(), "devnet");
     const error = await captureError(() => client.wallets.listWallets());
 
     expect(error.message).toContain("non-JSON response");
@@ -228,10 +257,8 @@ describe("dfns client error redaction", () => {
       { allowedCredentialIds: [otherCredentialId] }
     );
 
-    const client = await createDfnsApiClient(createDfnsEnv());
-    const error = await captureError(() =>
-      client.wallets.createWallet({ body: { network: "SolanaDevnet" } })
-    );
+    const client = await createDfnsApiClient(createDfnsEnv(), "devnet");
+    const error = await captureError(() => client.wallets.createWallet({ body: {} }));
 
     expect(error.message).toContain("1 credential(s) allowed");
     expect(error.message).not.toContain(CREDENTIAL_ID);
@@ -244,6 +271,14 @@ function createDfnsEnv(): DfnsEnv {
     DFNS_AUTH_TOKEN: AUTH_TOKEN,
     DFNS_CREDENTIAL_ID: CREDENTIAL_ID,
     DFNS_PRIVATE_KEY: privateKeyPem,
+  };
+}
+
+function createIbmHavenEnv(): IbmHavenEnv {
+  return {
+    IBM_HAVEN_AUTH_TOKEN: AUTH_TOKEN,
+    IBM_HAVEN_CREDENTIAL_ID: CREDENTIAL_ID,
+    IBM_HAVEN_PRIVATE_KEY: privateKeyPem,
   };
 }
 

@@ -125,10 +125,10 @@ export async function assertFireblocksTransaction(
       });
     };
     const adapter = new KeychainFireblocksAdapter({
+      cluster,
       apiKey: "tenant-key",
       apiSecretPem: rsa.privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
       vaultAccountId: "42",
-      assetId,
       useProgramCall: true,
     });
     const signer = await adapter.getTransactionSigner("fb_42");

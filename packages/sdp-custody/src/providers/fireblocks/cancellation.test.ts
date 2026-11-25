@@ -2,10 +2,11 @@ import { generateKeyPairSync } from "node:crypto";
 import { assert, describe, expect, it, vi } from "vitest";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { testRuntime } from "#/test/runtime";
-import { cancelFireblocksTransfer } from "./transfers";
+import { cancelFireblocksTransfer, type FireblocksTransferAccess } from "./transfers";
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
-const access = {
+const access: FireblocksTransferAccess = {
+  cluster: "devnet",
   apiKey: "tenant-api-key",
   apiSecretPem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
 };

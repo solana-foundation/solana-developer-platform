@@ -17,7 +17,7 @@ describe("para adapter", () => {
       .mockResolvedValueOnce(
         Response.json({ id: WALLET_ID, type: "SOLANA", address: WALLET_ADDRESS })
       );
-    const adapter = new KeychainParaAdapter({ apiKey: "sk_test-key" });
+    const adapter = new KeychainParaAdapter({ apiKey: "sk_test-key", cluster: "devnet" });
 
     await expect(adapter.getPublicKey(`para_${WALLET_ID}`)).rejects.toThrow(
       "Para network request failed"
@@ -34,7 +34,7 @@ describe("para adapter", () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(Response.json({ id: WALLET_ID, type: "SOLANA", address: WALLET_ADDRESS }));
-    const adapter = new KeychainParaAdapter({ apiKey: "sk_test-key" });
+    const adapter = new KeychainParaAdapter({ apiKey: "sk_test-key", cluster: "devnet" });
 
     const first = await adapter.getTransactionSigner(`para_${WALLET_ID}`);
     const second = await adapter.getTransactionSigner(`para_${WALLET_ID}`);

@@ -97,7 +97,6 @@ test("valid utila signing config has no Utila field errors", () => {
     UTILA_SERVICE_ACCOUNT_PRIVATE_KEY:
       "-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----",
     UTILA_VAULT_ID: "vault_123",
-    UTILA_NETWORK: "networks/solana-devnet",
     UTILA_POLL_INTERVAL_MS: "1000",
     UTILA_MAX_POLL_ATTEMPTS: "60",
     UTILA_DESIGNATED_SIGNERS: "users/service@vault.example.utilaserviceaccount.io",
@@ -107,7 +106,6 @@ test("valid utila signing config has no Utila field errors", () => {
     "UTILA_SERVICE_ACCOUNT_EMAIL",
     "UTILA_SERVICE_ACCOUNT_PRIVATE_KEY",
     "UTILA_VAULT_ID",
-    "UTILA_NETWORK",
     "UTILA_POLL_INTERVAL_MS",
     "UTILA_MAX_POLL_ATTEMPTS",
     "UTILA_DESIGNATED_SIGNERS",

@@ -3,7 +3,7 @@ import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { testRuntime } from "#/test/runtime";
 import { readPrivyWalletPolicy } from "./policy";
 
-const CREDENTIAL = { appId: "app", appSecret: "secret" };
+const CREDENTIAL = { cluster: "devnet" as const, appId: "app", appSecret: "secret" };
 
 function readAgainst(answer: () => Promise<Response>) {
   return readPrivyWalletPolicy(testRuntime(answer), CREDENTIAL, "privy_wallet-1");

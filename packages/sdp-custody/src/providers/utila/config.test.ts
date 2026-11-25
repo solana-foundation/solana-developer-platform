@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildKeychainUtilaConfig } from "./config";
 
 describe("buildKeychainUtilaConfig", () => {
-  it("takes the network from the cluster when neither the config nor env names one", () => {
+  it("carries the caller's cluster to the signer config", () => {
     const config = buildKeychainUtilaConfig(
       {
         UTILA_SERVICE_ACCOUNT_EMAIL: "signer@utila.example.test",
@@ -12,6 +12,6 @@ describe("buildKeychainUtilaConfig", () => {
       { cluster: "mainnet-beta" }
     );
 
-    expect(config.network).toBe("networks/solana-mainnet");
+    expect(config.cluster).toBe("mainnet-beta");
   });
 });

@@ -1,6 +1,5 @@
 import { generateKeyPairSync } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { env } from "@/test/helpers/env";
 import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import { checkByokCredential, credentialPayload, parseByokCredential } from "./byok-credential";
 
@@ -65,7 +64,7 @@ describe("Fireblocks BYOK credentials", () => {
       "fireblocks",
       credentialPayload("fireblocks", fields, "sandbox")
     );
-    const result = await checkByokCredential(env, credential);
+    const result = await checkByokCredential(credential);
     expect(result).toEqual({
       status: "success",
       fingerprint: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
@@ -93,15 +92,15 @@ describe("Fireblocks BYOK credentials", () => {
         ...credentialPayload("fireblocks", fields, "sandbox"),
         ...overrides,
       });
-    const first = await checkByokCredential(env, auth());
+    const first = await checkByokCredential(auth());
     expect(first.status).toBe("success");
-    expect(await checkByokCredential(env, auth({ apiKey: "new-api-user" }))).toEqual(first);
-    expect(await checkByokCredential(env, auth({ vaultAccountId: "1" }))).not.toEqual(first);
-    expect(await checkByokCredential(env, auth({ assetId: "SOL" }))).not.toEqual(first);
+    expect(await checkByokCredential(auth({ apiKey: "new-api-user" }))).toEqual(first);
+    expect(await checkByokCredential(auth({ vaultAccountId: "1" }))).not.toEqual(first);
+    expect(await checkByokCredential(auth({ assetId: "SOL" }))).not.toEqual(first);
     vi.mocked(globalThis.fetch).mockResolvedValue(
       Response.json({ addresses: [{ address: syntheticAddress(2) }] })
     );
-    expect(await checkByokCredential(env, auth())).not.toEqual(first);
+    expect(await checkByokCredential(auth())).not.toEqual(first);
   });
 
   it.each([
@@ -117,7 +116,6 @@ describe("Fireblocks BYOK credentials", () => {
         new Response("sensitive upstream body", { status })
       );
       const result = await checkByokCredential(
-        env,
         parseByokCredential("fireblocks", credentialPayload("fireblocks", fields, "sandbox"))
       );
       expect(result).toEqual({ status: expected });
@@ -128,7 +126,6 @@ describe("Fireblocks BYOK credentials", () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("network unavailable"));
     expect(
       await checkByokCredential(
-        env,
         parseByokCredential("fireblocks", credentialPayload("fireblocks", fields, "sandbox"))
       )
     ).toEqual({ status: "retry_unknown" });

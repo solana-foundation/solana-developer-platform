@@ -18,6 +18,7 @@ const FIREBLOCKS_API = "https://api.fireblocks.io";
 const { address: SOURCE } = await generateKeyPairSigner();
 const { address: DESTINATION } = await generateKeyPairSigner();
 const access: ProposalAccess = {
+  cluster: "devnet",
   apiKey: "tenant-key",
   // A real RSA key: the Fireblocks client signs a JWT before it sends anything.
   apiSecretPem: generateKeyPairSync("rsa", { modulusLength: 2048 })

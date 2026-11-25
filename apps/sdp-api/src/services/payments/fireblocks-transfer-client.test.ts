@@ -1,6 +1,7 @@
 import { createHash, generateKeyPairSync } from "node:crypto";
 import {
   createFireblocksTransfer,
+  type FireblocksTransferAccess,
   type FireblocksTransferRequest,
   readFireblocksTransfer,
   resolveFireblocksTransferAsset,
@@ -15,7 +16,8 @@ const USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address;
 const USDT_MINT = WELL_KNOWN_TOKENS.USDT.mints["mainnet-beta"].address;
 
 const rsa = generateKeyPairSync("rsa", { modulusLength: 2048 });
-const access = () => ({
+const access = (): FireblocksTransferAccess => ({
+  cluster: "devnet",
   apiKey: crypto.randomUUID(),
   apiSecretPem: rsa.privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
 });

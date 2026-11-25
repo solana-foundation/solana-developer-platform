@@ -17,6 +17,7 @@ const readPolicyAnswering = (body: unknown) =>
   readFireblocksPolicy(
     testRuntime(async () => Response.json(body)),
     {
+      cluster: "devnet",
       apiKey: "api-key",
       apiSecretPem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
     }
