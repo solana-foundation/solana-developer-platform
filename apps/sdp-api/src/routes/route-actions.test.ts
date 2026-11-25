@@ -284,8 +284,10 @@ describe("each route enforces its own action", () => {
 
   beforeAll(seedTestKey);
 
-  it("covers every route a key may call", () => {
-    expect(actionRoutes.length).toBeGreaterThan(200);
+  it("covers every action a key may hold", () => {
+    expect([...new Set(actionRoutes.map(declaredAction))].sort()).toEqual(
+      [...ALL_API_KEY_GRANTS].sort()
+    );
   });
 
   it.each(

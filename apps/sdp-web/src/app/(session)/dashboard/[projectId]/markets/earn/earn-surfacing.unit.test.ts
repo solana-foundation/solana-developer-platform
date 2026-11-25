@@ -1,6 +1,10 @@
 import type { EarnStrategy } from "@sdp/types/earn";
 import { describe, expect, it } from "vitest";
-import { earnVaultDepositAvailability } from "./earn-surfacing";
+import {
+  earnDepositsNotOnPlan,
+  earnVaultDepositAvailability,
+  SURFACED_VAULT_DIRECT_EARN_PROVIDERS,
+} from "./earn-surfacing";
 
 const strategy: EarnStrategy = {
   id: "earn_strategy_live",
@@ -48,7 +52,7 @@ describe("earnVaultDepositAvailability", () => {
       earnVaultDepositAvailability(strategy, "sandbox", {
         kamino: { entitled: false, configured: true, enabled: false },
       })
-    ).toBe("provider_unavailable");
+    ).toBe("provider_not_entitled");
     expect(
       earnVaultDepositAvailability({ ...strategy, fundable: false }, "sandbox", {
         kamino: { entitled: true, configured: true, enabled: true },
@@ -113,6 +117,47 @@ describe("earnVaultDepositAvailability", () => {
       earnVaultDepositAvailability(ondo, "production", {
         ondo: { entitled: false, configured: true, enabled: false },
       })
-    ).toBe("provider_unavailable");
+    ).toBe("provider_not_entitled");
+  });
+
+  it.each([
+    [{ entitled: false, configured: false, enabled: false }, "provider_not_entitled"],
+    [{ entitled: true, configured: false, enabled: false }, "provider_not_configured"],
+    [{ entitled: true, configured: true, enabled: false }, "provider_disabled"],
+    [{ entitled: true, configured: true, enabled: true }, "available"],
+  ] as const)("names the first provider check %o fails as %s", (entry, availability) => {
+    expect(earnVaultDepositAvailability(strategy, "sandbox", { kamino: entry })).toBe(availability);
+  });
+
+  it("treats a provider the access read omits as unverified, not as off the plan", () => {
+    expect(earnVaultDepositAvailability(strategy, "sandbox", {})).toBe("access_unavailable");
+  });
+});
+
+describe("earnDepositsNotOnPlan", () => {
+  const notEntitled = { entitled: false, configured: true, enabled: false };
+  const entitled = { entitled: true, configured: true, enabled: true };
+  const noneEntitled = Object.fromEntries(
+    SURFACED_VAULT_DIRECT_EARN_PROVIDERS.map((provider) => [provider, notEntitled])
+  );
+
+  it("is true only when every offered vault provider is read as not entitled", () => {
+    expect(earnDepositsNotOnPlan(noneEntitled)).toBe(true);
+    for (const provider of SURFACED_VAULT_DIRECT_EARN_PROVIDERS) {
+      expect(earnDepositsNotOnPlan({ ...noneEntitled, [provider]: entitled })).toBe(false);
+    }
+  });
+
+  it("stays quiet when access is unread or a provider's entry is missing", () => {
+    expect(earnDepositsNotOnPlan(null)).toBe(false);
+    const [omitted, ...rest] = SURFACED_VAULT_DIRECT_EARN_PROVIDERS;
+    expect(omitted).toBeDefined();
+    expect(
+      earnDepositsNotOnPlan(Object.fromEntries(rest.map((provider) => [provider, notEntitled])))
+    ).toBe(false);
+  });
+
+  it("ignores an entitlement to a provider Earn does not offer deposits with", () => {
+    expect(earnDepositsNotOnPlan({ ...noneEntitled, hastra: entitled })).toBe(true);
   });
 });

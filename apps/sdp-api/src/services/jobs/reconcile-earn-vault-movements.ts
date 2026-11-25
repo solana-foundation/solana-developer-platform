@@ -2,7 +2,6 @@ import { currentClusterScope } from "@sdp/rpc/scope";
 import { getDb } from "@/db/client";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { logEvent } from "@/runtime/money-path-events";
-import { reconcileEarnProviderActions } from "@/services/earn/provider-actions-reconciliation.service";
 import { reconcileEarnProviderOrders } from "@/services/earn/provider-settlement.service";
 import {
   reconcileEarnVaultMovementBatch,
@@ -60,7 +59,6 @@ export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
   const queuedRun = Promise.allSettled([
     reconcileEarnVaultQueuedWithdrawals(env),
     reconcileEarnProviderOrders(env),
-    reconcileEarnProviderActions(env),
   ]).then((results) => {
     const failures = results.flatMap((result) =>
       result.status === "rejected" ? [result.reason] : []

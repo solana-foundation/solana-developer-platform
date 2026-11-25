@@ -17,7 +17,7 @@ import { address } from "@solana/kit";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WisdomTreeChainReader } from "./chain";
-import { assertWisdomTreeNotPortfolioProvider, WisdomTreeVaultDirectClient } from "./client";
+import { WisdomTreeVaultDirectClient } from "./client";
 import {
   extraAccountMetaListAccount,
   fakeReader,
@@ -80,7 +80,6 @@ describe("capability shape", () => {
     expect(supportsVaultWithdraw(client)).toBe(true);
     expect(supportsVaultProviderOrderWithdraw(client)).toBe(true);
     expect(supportsDepositEligibility(client)).toBe(true);
-    expect(() => assertWisdomTreeNotPortfolioProvider(client)).not.toThrow();
   });
 
   it("declares the same programs the output guard enforces", () => {

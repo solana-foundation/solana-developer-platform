@@ -1,4 +1,3 @@
-import { supportsPortfolioWallets } from "@sdp/earn/capabilities";
 import { badRequest } from "@sdp/earn/errors";
 import { WisdomTreeEarnClient } from "@sdp/earn/providers/wisdomtree/client";
 import { getWisdomTreeOnReceiptWallet } from "@sdp/earn/providers/wisdomtree/connect";
@@ -12,6 +11,7 @@ import type {
   EarnVaultTransactionPlan,
   EarnVaultWithdrawInput,
 } from "@sdp/earn/types";
+import { EARN_PROVIDER_DESCRIPTORS } from "@sdp/types/provider-access";
 import {
   CLUSTER_BY_SDP_ENVIRONMENT,
   type SolanaCluster,
@@ -79,7 +79,7 @@ export class WisdomTreeVaultDirectClient
   implements EarnVaultProviderOrderWithdrawProvider
 {
   /** The redemption transaction transfers shares; WisdomTree pays USDC later. */
-  readonly vaultWithdrawalSettlement = "provider_order" as const;
+  readonly vaultWithdrawalSettlement = EARN_PROVIDER_DESCRIPTORS.wisdomtree.withdrawalSettlement;
 
   constructor(
     private readonly resolveProvenRpcUrl: (
@@ -333,21 +333,5 @@ export class WisdomTreeVaultDirectClient
   /** Addresses stand in as noop signers so kit places the account correctly; no key ever reaches this package. */
   private participant(value: string) {
     return createNoopSigner(address(value));
-  }
-}
-
-/**
- * Same construction-time assertion as `@sdp/kamino`'s: the two capabilities
- * describe opposite money models, and a client answering yes to both would let
- * a portfolio route hand out WisdomTree's on-receipt wallet as a fundable
- * address — which strands money sent from any unregistered wallet.
- */
-export function assertWisdomTreeNotPortfolioProvider(client: WisdomTreeVaultDirectClient): void {
-  if (supportsPortfolioWallets(client)) {
-    throw new SdpWisdomTreeError(
-      "MINT_MISMATCH",
-      "WisdomTree must never report the portfolio-wallet capability: SDP holds no fundable " +
-        "address for it, and its on-receipt wallet only settles deposits from KYC-registered wallets."
-    );
   }
 }

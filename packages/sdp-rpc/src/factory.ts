@@ -784,8 +784,12 @@ export type EndpointHistoryFailure =
 export type EveryEndpointSignatureStatus =
   /** At least one endpoint has a status for it; other endpoints' failures do not matter. */
   | { kind: "found"; status: SignatureStatusInfo }
-  /** Every endpoint answered at the floor, and none has a status for it. */
-  | { kind: "absent" }
+  /** Every distinct endpoint URL answered at the floor, and none has a status for it. */
+  | {
+      kind: "absent";
+      /** Number of distinct endpoint URLs whose floored history answered without the signature. */
+      answeringEndpointCount: number;
+    }
   /** No endpoint has a status for it and at least one could not answer at the floor. */
   | { kind: "unresolved"; failures: EndpointHistoryFailure[] };
 
@@ -794,8 +798,9 @@ export type EveryEndpointSignatureStatus =
  * read floored at `minContextSlot` against the `commitment` bank. The pool takes the first
  * endpoint's answer, and one endpoint's history can miss a landed transaction (a snapshot-booted
  * node, a history-backend error Agave serves as null), so only a null from every endpoint is
- * `absent`. Each endpoint is its own one-endpoint pool, sharing the managed pool's genesis proofs
- * and key-refusal memo but never its failover order.
+ * `absent`. Duplicate URLs in different configured slots count and read only once. Each endpoint
+ * is its own one-endpoint pool, sharing the managed pool's genesis proofs and key-refusal memo
+ * but never its failover order.
  *
  * @param signatures - The signatures to look up, at most `getSignatureStatuses`' batch limit.
  * @param floor - The slot every endpoint must have reached, and the bank it is checked against.
@@ -808,8 +813,14 @@ export async function getSignatureStatusesFromEveryEndpoint(
   floor: Readonly<{ minContextSlot: Slot; commitment: Commitment }>
 ): Promise<EveryEndpointSignatureStatus[]> {
   const { cluster } = currentClusterScope();
+  const endpoints = new Map<string, PoolEndpoint>();
+  for (const endpoint of managedPoolEndpoints(cluster)) {
+    const target = new URL(endpoint.endpointUrl);
+    target.hash = "";
+    if (!endpoints.has(target.href)) endpoints.set(target.href, endpoint);
+  }
   const endpointReads = await Promise.allSettled(
-    managedPoolEndpoints(cluster).map((endpoint) =>
+    [...endpoints.values()].map((endpoint) =>
       getSignatureStatuses(pooledClusterRpc(cluster, [endpoint], managedPools), signatures, {
         searchTransactionHistory: true,
         minContextSlot: floor.minContextSlot,
@@ -826,7 +837,9 @@ export async function getSignatureStatusesFromEveryEndpoint(
   return signatures.map((_signature, index): EveryEndpointSignatureStatus => {
     const found = mostConfirmedStatus(answers.map((statuses) => statuses[index]));
     if (found !== null) return { kind: "found", status: found };
-    return failures.length === 0 ? { kind: "absent" } : { kind: "unresolved", failures };
+    return failures.length === 0
+      ? { kind: "absent", answeringEndpointCount: endpointReads.length }
+      : { kind: "unresolved", failures };
   });
 }
 

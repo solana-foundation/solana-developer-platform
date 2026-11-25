@@ -2,9 +2,12 @@ import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
 import {
   earnProviderLabel,
+  formatCompactUsd,
   formatDurationSeconds,
   formatEpochSeconds,
+  formatIntentAmount,
   formatProviderAmount,
+  formatShareAmount,
   formatTokenQuantity,
   formatTokenValue,
   formatUsd,
@@ -12,6 +15,39 @@ import {
 
 const USDC_MINT = wellKnownMint("USDC", "mainnet-beta") ?? "";
 const SOL_MINT = wellKnownMint("SOL", "mainnet-beta") ?? "";
+const t = (key: string) => key.split(".").at(-1) ?? key;
+
+describe("Earn operation amounts", () => {
+  it("names shares in the singular only for exactly one", () => {
+    expect(formatShareAmount("1", "en-US", t)).toBe("1 shareUnitOne");
+    expect(formatShareAmount("1.000", "en-US", t)).toBe("1 shareUnitOne");
+    expect(formatShareAmount("199.9998", "en-US", t)).toBe("199.9998 shareUnit");
+    expect(formatShareAmount("0.5", "en-US", t)).toBe("0.5 shareUnit");
+  });
+
+  it("names each requested amount by what the intent moves", () => {
+    const deposit = {
+      kind: "earn.deposit",
+      strategyId: "strategy",
+      source: { walletId: "wallet" },
+      amount: { mint: USDC_MINT, value: "200" },
+    } as const;
+    expect(formatIntentAmount(deposit, "en-US", t)).toBe("$200.00");
+    const withdraw = (
+      amount: Parameters<typeof formatIntentAmount>[0] extends infer I
+        ? I extends { kind: "earn.withdraw"; amount: infer A }
+          ? A
+          : never
+        : never
+    ) => formatIntentAmount({ kind: "earn.withdraw", positionId: "p", amount }, "en-US", t);
+    expect(withdraw({ kind: "all" })).toBe("allHoldings");
+    expect(withdraw({ kind: "shares", value: "50" })).toBe("50 shareUnit");
+    expect(withdraw({ kind: "token", mint: USDC_MINT, value: "50" })).toBe("$50.00");
+    expect(withdraw({ kind: "intermediate", mint: "wYLDSintermediate", value: "5" })).toBe(
+      "5 wYLD…iate"
+    );
+  });
+});
 
 describe("Earn display formatting", () => {
   it("renders provider decimals exactly, past the safe-integer boundary", () => {
@@ -83,5 +119,23 @@ describe("Earn display formatting", () => {
     expect(formatDurationSeconds(7_200, "en-US")).toBe("2 hours");
     expect(formatDurationSeconds(172_800, "en-US")).toBe("2 days");
     expect(formatDurationSeconds(Number.NaN, "en-US")).toBeUndefined();
+  });
+});
+
+describe("formatCompactUsd", () => {
+  it.each([
+    ["32000000", "$32M"],
+    ["12345678.9", "$12.3M"],
+    ["2500000000", "$2.5B"],
+    ["98799", "$98.7K"],
+    ["999.99", "$999"],
+    ["0", "$0"],
+  ])("prints %s as %s, truncated to three significant digits", (value, expected) => {
+    expect(formatCompactUsd(value, "en-US")).toBe(expected);
+  });
+
+  it("shows an unknown or unreadable total as a dash, never zero", () => {
+    expect(formatCompactUsd(undefined, "en-US")).toBe("—");
+    expect(formatCompactUsd("1e+21", "en-US")).toBe("—");
   });
 });

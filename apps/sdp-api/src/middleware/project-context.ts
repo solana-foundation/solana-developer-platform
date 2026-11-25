@@ -14,6 +14,13 @@ import type { Env } from "@/types/env";
 
 const PROJECT_HEADER = "x-project-id";
 
+/** The authenticated project scope, resolved before entitlement exemptions. */
+export interface ResolvedProjectScope {
+  organizationId: string;
+  projectId: string;
+  environment: SdpEnvironment;
+}
+
 export interface ProjectContextOptions {
   /**
    * Requests that may act on a production project after the organization lost
@@ -27,7 +34,10 @@ export interface ProjectContextOptions {
    * decision, not something the product does; this keeps funds already in a
    * production project withdrawable if that ever happens.
    */
-  allowUnentitledProduction?: (c: Context<{ Bindings: Env }>) => boolean | Promise<boolean>;
+  allowUnentitledProduction?: (
+    c: Context<{ Bindings: Env }>,
+    scope: Readonly<ResolvedProjectScope>
+  ) => boolean | Promise<boolean>;
   /**
    * Take the project from this path parameter instead of the `x-project-id`
    * header, for routes that address a project in their URL (`/v1/projects/:projectId`).
@@ -59,7 +69,7 @@ export function projectContextMiddleware(options: ProjectContextOptions = {}) {
     if (scope.environment === "production") {
       if (!productionProjectsAllowed(c.env)) throw productionNotEnabled();
       if (!isProductionEntitled(c)) {
-        if (!(await options.allowUnentitledProduction?.(c))) throw productionNotEnabled();
+        if (!(await options.allowUnentitledProduction?.(c, scope))) throw productionNotEnabled();
         // The same exit stays open past the organization lock of a mainnet-only deployment.
         c.set("organizationAdmissionExempt", true);
       }

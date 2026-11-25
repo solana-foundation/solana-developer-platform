@@ -17,8 +17,12 @@ import { parseDecimalAmount } from "@sdp/solana/amount";
 import { isFireblocksPaymentMint, isFireblocksTransactionCancellable } from "@sdp/types/fireblocks";
 import type { MovementId } from "@sdp/types/movements";
 import { z } from "zod";
-import { type AppError, badRequest, conflict, serviceUnavailable } from "@/lib/errors";
-import { assertMovementAdmitted, type MoneyAdmissionDecision } from "@/lib/money-admission";
+import { AppError, badRequest, conflict, serviceUnavailable } from "@/lib/errors";
+import {
+  assertMovementAdmitted,
+  type MoneyAdmissionDecision,
+  MoneyMovementRefusedError,
+} from "@/lib/money-admission";
 
 /**
  * What a provider-built transfer is bound to when SDP records it: the exact Connection, provider
@@ -135,6 +139,19 @@ export class ProposalAdmissionRefusedError extends Error {
     super(cause.toResponse().error.message, { cause });
     this.name = "ProposalAdmissionRefusedError";
   }
+}
+
+/** Both proposal lifecycles distinguish revoked authority from transient admission outages. */
+export function rethrowProposalAdmissionError(error: unknown): never {
+  if (error instanceof MoneyMovementRefusedError)
+    throw new ProposalAdmissionRefusedError(error.reason, error);
+  if (
+    error instanceof AppError &&
+    error.code === "FORBIDDEN" &&
+    error.details?.reason === "provider_not_entitled"
+  )
+    throw new ProposalAdmissionRefusedError("provider_not_entitled", error);
+  throw error;
 }
 
 /**

@@ -43,8 +43,8 @@ describe("llms.txt generation", () => {
         ...document,
         paths: {
           ...document.paths,
-          "/v1/earn/strategies": { get: { tags: ["Earn"] } },
-          "/v1/earn/external-wallet/deposits": { post: { tags: ["Earn"] } },
+          "/v1/earn/discovery": { get: { tags: ["Earn"] } },
+          "/v1/earn/deposit": { post: { tags: ["Earn"] } },
         },
         tags: [...document.tags, { name: "Earn" }],
       },

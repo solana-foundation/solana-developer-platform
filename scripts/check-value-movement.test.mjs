@@ -352,6 +352,7 @@ test("recorded principals are a separate capability restricted to the recovery w
     "apps/sdp-api/src/middleware/clerk-auth.ts",
     "apps/sdp-api/src/services/jobs/collect-recurring-payments.ts",
     "apps/sdp-api/src/routes/pay/context.ts",
+    "apps/sdp-api/src/services/operations-principal.ts",
   ]);
 
   const found = violations(
@@ -381,19 +382,22 @@ for (const { id, names, allowed } of [
   {
     id: "fireblocks-transfer-cancellation",
     names: ["cancelFireblocksTransfer", "cancelFireblocksTransaction"],
-    allowed: "apps/sdp-api/src/services/domain/signing/admitted-proposer.ts",
+    allowed: [
+      "apps/sdp-api/src/services/domain/signing/admitted-proposer.ts",
+      "apps/sdp-api/src/services/domain/signing/admitted-transaction-proposer.ts",
+    ],
   },
   {
     id: "custody-proposal-recovery-construction",
     names: ["proposalRecovery", "proposalCanceller"],
-    allowed: "apps/sdp-api/src/services/domain/signing/custody-runtime-target.ts",
+    allowed: ["apps/sdp-api/src/services/domain/signing/custody-runtime-target.ts"],
   },
 ]) {
   test(`${id} pins both worker and manual cancellation entry points`, () => {
     const capability = CAPABILITIES.find((candidate) => candidate.id === id);
     assert.ok(capability);
     assert.deepEqual(capability.symbols.map((symbol) => symbol.name).sort(), [...names].sort());
-    assert.deepEqual(capability.allow, [allowed]);
+    assert.deepEqual(capability.allow, allowed);
     const found = violations(
       {
         "src/lib/cap.ts": names.map((name) => `export function ${name}(): void {}`).join("\n"),
@@ -432,7 +436,7 @@ for (const id of [
   test(`${id} cannot escape through a tenant handler`, () => {
     const capability = CAPABILITIES.find((candidate) => candidate.id === id);
     assert.ok(capability);
-    assert.equal(capability.allow.length, 1);
+    assert.equal(capability.allow.length, id === "fireblocks-transfer-cancellation" ? 2 : 1);
     const found = violations(
       {
         "src/lib/cap.ts": "export function cancel(): void {}\n",
@@ -459,4 +463,38 @@ test("the proposal worker is callable only by its dedicated cron definition", ()
   const capability = CAPABILITIES.find((candidate) => candidate.id === "custody-proposal-worker");
   assert.ok(capability);
   assert.deepEqual(capability.allow, ["apps/sdp-api/src/cron/reconcile-custody-proposals.ts"]);
+});
+
+test("recorded operation principals are callable only by the leased operation worker", () => {
+  const capability = CAPABILITIES.find(
+    (candidate) => candidate.id === "recorded-operation-principal"
+  );
+  assert.ok(capability);
+  assert.deepEqual(capability.symbols, [
+    {
+      file: "apps/sdp-api/src/services/operations-principal.ts",
+      name: "runAsRecordedOperationPrincipal",
+    },
+  ]);
+  assert.deepEqual(capability.owners, ["apps/sdp-api/src/services/operations-principal.ts"]);
+  assert.deepEqual(capability.allow, ["apps/sdp-api/src/services/jobs/reconcile-operations.ts"]);
+  const found = violations(
+    {
+      "src/lib/cap.ts": "export function restore(): void {}\n",
+      "src/allowed.ts": 'import { restore } from "./lib/cap";\nrestore();\n',
+      "src/routes/viewer.ts": 'import { restore } from "../lib/cap";\nrestore();\n',
+    },
+    [
+      {
+        ...capability,
+        symbols: [{ file: "src/lib/cap.ts", name: "restore" }],
+        owners: ["src/lib/cap.ts"],
+        allow: ["src/allowed.ts"],
+      },
+    ]
+  );
+  assert.deepEqual(
+    [...new Set(found.map((violation) => violation.split(":")[0]))],
+    ["src/routes/viewer.ts"]
+  );
 });

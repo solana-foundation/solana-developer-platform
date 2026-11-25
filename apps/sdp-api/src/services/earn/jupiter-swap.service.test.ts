@@ -18,7 +18,7 @@ import {
   requireEarnSwapMintMetadata,
   withComputeUnitLimit,
 } from "./jupiter-swap.service";
-import { createOndoSwapPort } from "./ondo-swap-port";
+import { createJupiterSwapPort } from "./jupiter-swap-port";
 import { createVaultDeadline } from "./vault-deadline";
 
 /**
@@ -840,7 +840,7 @@ describe("Ondo through the production swap port", () => {
     const client = new OndoVaultDirectClient(
       async () => "https://rpc.mock.invalid",
       (_label, operation) => operation(() => {}),
-      () => createOndoSwapPort(swapEnv())
+      () => createJupiterSwapPort(swapEnv(), "Jupiter swaps")
     );
     const ctx = { env: {}, environment: "production" as const };
     const common = { owner: OWNER, providerReference: usdy };

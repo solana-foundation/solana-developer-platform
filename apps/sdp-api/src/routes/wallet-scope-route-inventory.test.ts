@@ -33,8 +33,6 @@ type Classification =
   | { gap: string };
 
 const SIGNS_NOTHING = "signs nothing";
-const SPONSOR_ONLY =
-  "the caller's own wallet signs; SDP signs at most as fee sponsor, which is outside wallet scope";
 const CUSTODY_404 =
   "signs nothing; a wallet outside a selected key's scope answers 404 in its authorize step";
 
@@ -164,50 +162,36 @@ const WALLET_SCOPE_ROUTES = {
   "POST /v1/dvp/trades/:tradeId/cancel": { refusedEarly: { file: DVP, test: DVP_ACTIONS } },
 
   // Earn
-  "POST /v1/earn/deposits/execute": {
+  "POST /v1/earn/deposit": {
     refusedEarly: {
       file: "routes/earn.vault.test.ts",
-      test: "refuses a wallet outside the key's scope before opening an audit intent or deposit",
+      test: "rejects a wallet outside the authenticated key's scope",
     },
   },
-  "POST /v1/earn/withdrawals/execute": {
+  "POST /v1/earn/withdraw": {
     refusedEarly: {
       file: EARN_EXITS,
-      test: "refuses a withdrawal with wallet_out_of_scope before recording a movement",
+      test: "checks current wallet scope before creating a prepared withdrawal",
     },
   },
-  "POST /v1/earn/withdrawal-requests/execute": {
+  "POST /v1/operations/:operationId/submit": {
     refusedEarly: {
       file: EARN_EXITS,
-      test: "refuses a withdrawal request with wallet_out_of_scope before recording it",
+      test: "refuses $action with wallet_out_of_scope before changing an operation",
     },
   },
-  "POST /v1/earn/withdrawal-requests/:withdrawalRequestId/cancel/execute": {
+  "POST /v1/operations/:operationId/refresh": {
     refusedEarly: {
       file: EARN_EXITS,
-      test: "refuses a withdrawal request cancellation with wallet_out_of_scope, leaving the request unchanged",
+      test: "refuses $action with wallet_out_of_scope before changing an operation",
     },
   },
-  "POST /v1/earn/portfolio-accounts/:programId/withdrawals/execute": {
+  "POST /v1/operations/:operationId/cancel": {
     refusedEarly: {
-      file: "routes/earn-program.test.ts",
-      test: "refuses a wallet-scoped key on the payout, before the provider is driven",
+      file: EARN_EXITS,
+      test: "refuses $action with wallet_out_of_scope before changing an operation",
     },
   },
-  "POST /v1/earn/portfolio-accounts": { exempt: "links a provider account; signs nothing" },
-  "PUT /v1/earn/portfolio-accounts/:programId/allocation": {
-    exempt: "edits a provider account link; signs nothing",
-  },
-  "POST /v1/earn/deposits/build-unsigned-transaction": { exempt: SPONSOR_ONLY },
-  "POST /v1/earn/deposits/submit-signed-transaction": { exempt: SPONSOR_ONLY },
-  "POST /v1/earn/withdrawals/build-unsigned-transaction": { exempt: SPONSOR_ONLY },
-  "POST /v1/earn/withdrawals/submit-signed-transaction": { exempt: SPONSOR_ONLY },
-  "POST /v1/earn/withdrawal-requests/build-unsigned-transaction": { exempt: SPONSOR_ONLY },
-  "POST /v1/earn/withdrawal-requests/submit-signed-transaction": { exempt: SPONSOR_ONLY },
-  "POST /v1/earn/withdrawal-requests/cancel/build-unsigned-transaction": {
-    exempt: SPONSOR_ONLY,
-  },
-  "POST /v1/earn/withdrawal-requests/cancel/submit-signed-transaction": { exempt: SPONSOR_ONLY },
   "POST /v1/earn/onboarding/wisdomtree/:counterpartyId": {
     exempt: "saves a KYC/KYB application with the provider; signs nothing",
   },
@@ -220,28 +204,6 @@ const WALLET_SCOPE_ROUTES = {
   "POST /v1/earn/onboarding/wisdomtree/:counterpartyId/wallets": {
     exempt: "registers a wallet with the provider; signs nothing",
   },
-  "POST /v1/earn/provider-actions/preparations": {
-    refusedEarly: {
-      file: "routes/earn.provider-actions-wallet-scope.test.ts",
-      test: "refuses a preparation for a custody wallet outside the key's scope before creating the action",
-    },
-  },
-  "POST /v1/earn/provider-actions/cancellations": {
-    refusedEarly: {
-      file: "routes/earn.provider-actions-wallet-scope.test.ts",
-      test: "refuses a cancellation whose custody wallet is outside the key's scope before creating the action",
-    },
-  },
-  // The external provider-action routes build for and submit the caller's own
-  // signed transaction; the custody wallet stays out of the signing path.
-  "POST /v1/earn/provider-actions/external/preparation-transactions": {
-    exempt: SPONSOR_ONLY,
-  },
-  "POST /v1/earn/provider-actions/external/cancellation-transactions": {
-    exempt: SPONSOR_ONLY,
-  },
-  "POST /v1/earn/provider-actions/external/preparations": { exempt: SPONSOR_ONLY },
-  "POST /v1/earn/provider-actions/external/cancellations": { exempt: SPONSOR_ONLY },
 
   // Issuance
   "POST /v1/issuance/tokens/:tokenId/burn/execute": { refusedEarly: ISSUANCE_BURN },

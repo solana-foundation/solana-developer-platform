@@ -3,7 +3,6 @@
 import type { MoneyMovementStatus } from "@sdp/types/payments";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { floorToReplay } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-vault-slippage";
 import { movementStatusOf } from "./idempotency";
 import {
   createActionMemo,
@@ -205,31 +204,20 @@ describe("FloorMemo partial-write divergence", () => {
     // State a previous page load left behind: readable, and about to be stale.
     seedReadableStorage(FLOOR_KEY, JSON.stringify({}), originalSetItem);
 
-    // Whether a key is kept decides whether a remembered floor replays.
-    const firstResolution = { reused: keyStore.has(FINGERPRINT) };
+    expect(keyStore.has(FINGERPRINT)).toBe(false);
     const first = keyStore.claim(FINGERPRINT);
-    const fresh = floorToReplay(
-      firstResolution,
-      (fp) => floorMemo.recall(fp),
-      FINGERPRINT,
-      "0.99899"
-    );
-    if (fresh.kind !== "fresh") throw new Error("expected a fresh floor resolution");
-    expect(fresh).toEqual({ kind: "fresh", floor: "0.99899" });
-    floorMemo.remember(FINGERPRINT, fresh.floor);
+    floorMemo.remember(FINGERPRINT, "0.99899");
 
     // The first value-moving POST may have been accepted before its response
     // was lost; its key is intentionally kept for an ambiguous retry. The
     // floor-only storage failure must not disturb the key store.
-    const retryResolution = { reused: keyStore.has(FINGERPRINT) };
-    expect(retryResolution.reused).toBe(true);
+    expect(keyStore.has(FINGERPRINT)).toBe(true);
     expect(keyStore.claim(FINGERPRINT).key).toBe(first.key);
 
     // The retry must resubmit the floor the key was MINTED with, verbatim —
     // the API's idempotency fingerprint includes it, and a freshly derived
     // floor paired with the reused key retires it and opens a second deposit.
-    const retry = floorToReplay(retryResolution, (fp) => floorMemo.recall(fp), FINGERPRINT, "0.5");
-    expect(retry).toEqual({ kind: "replay", floor: "0.99899" });
+    expect(floorMemo.recall(FINGERPRINT)).toBe("0.99899");
   });
 
   it("keeps a forgotten floor forgotten across divergent writes", () => {

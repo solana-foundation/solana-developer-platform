@@ -149,8 +149,8 @@ function getMarketsActions(
     ...(earnEnabled
       ? [
           {
-            label: t("Shared.dashboardShell.earnProgram"),
-            href: DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram,
+            label: t("Shared.dashboardShell.embeddedYield"),
+            href: DASHBOARD_MARKETS_SUBNAV_HREFS.embeddedYield,
           },
         ]
       : []),

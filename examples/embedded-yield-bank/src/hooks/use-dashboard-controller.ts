@@ -3,206 +3,48 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { TransferDirection } from "@/components/transfer-dialog";
+import { ApiError, getDashboard } from "@/lib/api";
 import {
-  ApiError,
-  cancelQueuedWithdrawal,
-  createDeposit,
-  createWithdrawal,
-  getDashboard,
-  resumePendingIntent,
-} from "@/lib/api";
-import {
-  ACTIVE_MOVEMENT_REFRESH_MS,
-  applySubmittedTransfers,
-  type InFlightTransfer,
-  isPendingMovement,
-  type MovementPolling,
-  reconcileInFlight,
-  reconcileMovementPolling,
-  reconcileSubmittedTransfers,
-  SETTLEMENT_POLL_TIMEOUT_MS,
-  type SubmittedTransfer,
-  startMovementPolling,
-} from "@/lib/movements";
+  prepareDepositOperation,
+  prepareWithdrawalOperation,
+  resumePendingOperation,
+} from "@/lib/core-api";
+import { isOperationActive } from "@/lib/core-operation";
 import type { DashboardData, WithdrawalIntent } from "@/types";
 
 const BACKGROUND_REFRESH_MS = 30_000;
-const QUEUED_WITHDRAWAL_REFRESH_MS = 10_000;
-const RATE_LIMIT_PAUSE_MS = 10_000;
+const ACTIVE_OPERATION_REFRESH_MS = 2_000;
 
-const TRANSFER_COPY: Record<
-  TransferDirection,
-  { pending: string; done: string; failed: string }
-> = {
-  "to-savings": {
-    pending: "Moving money to savings",
-    done: "Moved to savings",
-    failed: "Could not move money to savings",
-  },
-  "to-checking": {
-    pending: "Moving money to checking",
-    done: "Moved to checking",
-    failed: "Could not move money to checking",
-  },
-};
-
-function confirmationDescription(
-  cluster: DashboardData["wallet"]["cluster"] | undefined,
-  state: "Confirmed" | "Confirming"
-): string {
-  const network =
-    cluster === "mainnet-beta"
-      ? "Solana mainnet"
-      : cluster === "devnet"
-        ? "Solana devnet"
-        : "Solana";
-  return `${state} on ${network}`;
-}
-
-function showSettledTransferToasts(
-  settled: readonly InFlightTransfer[],
-  completedMovementIds: Set<string>,
-  movementToastIds: Map<string, ReturnType<typeof toast.loading>>,
-  cluster: DashboardData["wallet"]["cluster"] | undefined
-) {
-  for (const transfer of settled) {
-    if (completedMovementIds.has(transfer.movementId)) continue;
-    completedMovementIds.add(transfer.movementId);
-    const toastId = movementToastIds.get(transfer.movementId);
-    toast.success(
-      TRANSFER_COPY[
-        transfer.direction === "deposit" ? "to-savings" : "to-checking"
-      ].done,
-      {
-        id: toastId,
-        description: confirmationDescription(cluster, "Confirmed"),
-      }
-    );
-    movementToastIds.delete(transfer.movementId);
-  }
-}
-
+/** Durable operations recover without optimistic money values. */
 export function useDashboardController() {
   const [data, setData] = useState<DashboardData>();
   const [error, setError] = useState<string>();
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [movementPolling, setMovementPolling] = useState<MovementPolling>();
-  const movementPollingRef = useRef<MovementPolling | undefined>(undefined);
-  const requestId = useRef(0);
-  const refreshInProgress = useRef(false);
-  const [inFlight, setInFlight] = useState<InFlightTransfer[]>([]);
-  const [submittedTransfers, setSubmittedTransfers] = useState<
-    SubmittedTransfer[]
-  >([]);
-  const inFlightRef = useRef<InFlightTransfer[]>([]);
-  const movementToastIds = useRef(
-    new Map<string, ReturnType<typeof toast.loading>>()
-  );
-  const completedMovementIds = useRef(new Set<string>());
-  const latestData = useRef<DashboardData>(undefined);
+  const latest = useRef<DashboardData | undefined>(undefined);
+  const reading = useRef(false);
   const pausedUntil = useRef(0);
-  const wasSettling = useRef(false);
-
-  const updateInFlight = useCallback((next: InFlightTransfer[]) => {
-    inFlightRef.current = next;
-    setInFlight(next);
-  }, []);
-
-  const updateMovementPolling = useCallback((next?: MovementPolling) => {
-    movementPollingRef.current = next;
-    setMovementPolling(next);
-  }, []);
 
   const refresh = useCallback(async () => {
-    if (refreshInProgress.current) return;
-    refreshInProgress.current = true;
-    const id = ++requestId.current;
+    if (reading.current) return;
+    reading.current = true;
     try {
-      const next = await getDashboard(
-        movementPollingRef.current?.movementIds ?? []
-      );
-      if (id !== requestId.current) return;
-      latestData.current = next;
+      const next = await getDashboard();
+      latest.current = next;
       setData(next);
-      setSubmittedTransfers((current) =>
-        reconcileSubmittedTransfers(current, next.movements)
-      );
-      const reconciliation = reconcileMovementPolling(
-        movementPollingRef.current,
-        next.movements
-      );
-      updateMovementPolling(reconciliation.polling);
-      const current = inFlightRef.current;
-      if (current.length) {
-        const { failed, remaining, settled } = reconcileInFlight(
-          current,
-          next.movements
-        );
-        const timedOutMovementIds = new Set(reconciliation.timedOutMovementIds);
-        const timedOut = remaining.filter((transfer) =>
-          timedOutMovementIds.has(transfer.movementId)
-        );
-        const activeRemaining = remaining.filter(
-          (transfer) => !timedOutMovementIds.has(transfer.movementId)
-        );
-        const keep = activeRemaining;
-        showSettledTransferToasts(
-          settled,
-          completedMovementIds.current,
-          movementToastIds.current,
-          latestData.current?.wallet.cluster
-        );
-        for (const transfer of failed) {
-          const copy =
-            TRANSFER_COPY[
-              transfer.direction === "deposit" ? "to-savings" : "to-checking"
-            ];
-          const toastId = movementToastIds.current.get(transfer.movementId);
-          toast.error(copy.failed, {
-            id: toastId,
-            description: "No money was moved.",
-          });
-          movementToastIds.current.delete(transfer.movementId);
-        }
-        for (const transfer of timedOut) {
-          const toastId = movementToastIds.current.get(transfer.movementId);
-          if (toastId !== undefined) toast.dismiss(toastId);
-          movementToastIds.current.delete(transfer.movementId);
-        }
-        updateInFlight(keep);
-      }
-      if (reconciliation.timedOutMovementIds.length) {
-        toast.warning("Settlement is taking longer than expected", {
-          id: "settlement-timeout",
-          description:
-            "Automatic refresh paused for timed-out transfers. Refresh to check again.",
-        });
-      }
       setError(undefined);
     } catch (caught) {
-      if (id !== requestId.current) return;
       if (caught instanceof ApiError && caught.status === 429) {
-        pausedUntil.current =
-          Date.now() + (caught.retryAfterMs ?? RATE_LIMIT_PAUSE_MS);
-        if (latestData.current) return;
+        pausedUntil.current = Date.now() + (caught.retryAfterMs ?? 10_000);
+        if (latest.current) return;
       }
       setError(
         caught instanceof Error ? caught.message : "Unable to load the demo"
       );
     } finally {
-      refreshInProgress.current = false;
+      reading.current = false;
     }
-  }, [updateMovementPolling, updateInFlight]);
-
-  const refreshWithProgress = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      await refresh();
-    } finally {
-      setRefreshing(false);
-    }
-  }, [refresh]);
+  }, []);
 
   useEffect(() => {
     void refresh();
@@ -212,152 +54,65 @@ export function useDashboardController() {
     let active = true;
     async function recover() {
       try {
-        const result = await resumePendingIntent();
-        if (active && result) await refresh();
-      } catch {
-        // Keep saved intent through every ambiguous error. A new transfer is
-        // blocked until the same signed intent has a durable, parsed answer.
+        if (await resumePendingOperation()) {
+          if (active) await refresh();
+        }
+      } catch (caught) {
+        if (active)
+          toast.error(
+            caught instanceof Error
+              ? caught.message
+              : "Pending transfer needs recovery"
+          );
       }
     }
     void recover();
-    const timer = window.setInterval(() => {
-      void recover();
-    }, BACKGROUND_REFRESH_MS);
+    const timer = window.setInterval(
+      () => void recover(),
+      BACKGROUND_REFRESH_MS
+    );
     return () => {
       active = false;
       window.clearInterval(timer);
     };
   }, [refresh]);
 
+  const settling = data?.operations.some(isOperationActive);
   useEffect(() => {
-    const interval =
-      movementPolling || inFlight.length
-        ? ACTIVE_MOVEMENT_REFRESH_MS
-        : data?.withdrawalRequests.length
-          ? QUEUED_WITHDRAWAL_REFRESH_MS
-          : BACKGROUND_REFRESH_MS;
+    const interval = settling
+      ? ACTIVE_OPERATION_REFRESH_MS
+      : BACKGROUND_REFRESH_MS;
     const timer = window.setInterval(() => {
-      if (
-        document.visibilityState === "visible" &&
-        Date.now() >= pausedUntil.current
-      ) {
-        void refresh();
-      }
+      if (!document.hidden && Date.now() >= pausedUntil.current) void refresh();
     }, interval);
     return () => window.clearInterval(timer);
-  }, [
-    data?.withdrawalRequests.length,
-    inFlight.length,
-    movementPolling,
-    refresh,
-  ]);
-
-  useEffect(() => {
-    const settling = movementPolling !== undefined || inFlight.length > 0;
-    if (wasSettling.current && !settling) {
-      const timer = window.setTimeout(() => void refresh(), 3_000);
-      wasSettling.current = settling;
-      return () => window.clearTimeout(timer);
-    }
-    wasSettling.current = settling;
-  }, [inFlight.length, movementPolling, refresh]);
+  }, [settling, refresh]);
 
   const transfer = useCallback(
     async (direction: TransferDirection, input: string | WithdrawalIntent) => {
-      const amount = typeof input === "string" ? input : input.amount;
-      const copy = TRANSFER_COPY[direction];
       setBusy(true);
-      const toastId = toast.loading(copy.pending);
       try {
-        const result =
-          direction === "to-savings"
-            ? { kind: "movement" as const, ...(await createDeposit(amount)) }
-            : await createWithdrawal(input as WithdrawalIntent);
-        if (result.kind === "queued") {
-          toast.success("Withdrawal requested", {
-            id: toastId,
-            description:
-              "Shares are escrowed. Northstar will keep checking for payment or recovery.",
-          });
-          void refresh();
-          return;
-        }
-        const { movement } = result;
-        if (movement.status === "failed") {
-          throw new Error(movement.failureReason ?? copy.failed);
-        }
-        setSubmittedTransfers((current) => [
-          { movement, requestedTokenAmount: amount },
-          ...current.filter(
-            (submitted) => submitted.movement.movementId !== movement.movementId
-          ),
-        ]);
-        if (isPendingMovement(movement)) {
-          const polling = startMovementPolling(
-            movementPollingRef.current,
-            movement.movementId
+        if (direction === "to-savings") {
+          await prepareDepositOperation(
+            typeof input === "string" ? input : input.amount
           );
-          const expiresAt =
-            polling.expiresAtByMovement[movement.movementId] ??
-            Date.now() + SETTLEMENT_POLL_TIMEOUT_MS;
-          updateMovementPolling(polling);
-          updateInFlight([
-            ...inFlightRef.current,
-            {
-              movementId: movement.movementId,
-              direction: direction === "to-savings" ? "deposit" : "withdrawal",
-              amount,
-              expiresAt,
-            },
-          ]);
-          movementToastIds.current.set(movement.movementId, toastId);
-          toast.info(copy.pending, {
-            id: toastId,
-            description: confirmationDescription(
-              latestData.current?.wallet.cluster,
-              "Confirming"
-            ),
-          });
         } else {
-          toast.success(copy.done, {
-            id: toastId,
-            description: confirmationDescription(
-              latestData.current?.wallet.cluster,
-              "Confirmed"
-            ),
-          });
+          if (typeof input === "string")
+            throw new Error("Withdrawal terms are required");
+          await prepareWithdrawalOperation(input);
         }
-        void refresh();
-      } catch (caught) {
-        toast.error(caught instanceof Error ? caught.message : copy.failed, {
-          id: toastId,
+        toast.info("Ready for review", {
+          description:
+            "Review the terms in Earn activity, then approve execution.",
         });
-        throw caught;
-      } finally {
-        setBusy(false);
-      }
-    },
-    [refresh, updateInFlight, updateMovementPolling]
-  );
-
-  const cancelWithdrawalRequest = useCallback(
-    async (withdrawalRequestId: string) => {
-      setBusy(true);
-      const toastId = toast.loading("Returning shares");
-      try {
-        await cancelQueuedWithdrawal(withdrawalRequestId);
-        toast.success("Share recovery submitted", {
-          id: toastId,
-          description: "Northstar will keep checking the final queue outcome.",
-        });
-        void refresh();
+        await refresh();
       } catch (caught) {
         toast.error(
           caught instanceof Error
             ? caught.message
-            : "Could not return the queued shares",
-          { id: toastId }
+            : "Could not prepare this transfer"
         );
+        throw caught;
       } finally {
         setBusy(false);
       }
@@ -365,35 +120,20 @@ export function useDashboardController() {
     [refresh]
   );
 
-  const activity = data
-    ? applySubmittedTransfers(data, submittedTransfers)
-    : data;
-  const view = activity;
-
-  const retry = useCallback(() => void refresh(), [refresh]);
-  const refreshDashboard = useCallback(
-    () => void refreshWithProgress(),
-    [refreshWithProgress]
-  );
-  const deposit = useCallback(
-    (amount: string) => transfer("to-savings", amount),
-    [transfer]
-  );
-  const withdraw = useCallback(
-    (input: WithdrawalIntent) => transfer("to-checking", input),
-    [transfer]
-  );
+  const refreshDashboard = useCallback(() => {
+    setRefreshing(true);
+    void refresh().finally(() => setRefreshing(false));
+  }, [refresh]);
 
   return {
     busy,
     error: data ? undefined : error,
     loading: !data && !error,
     refreshing,
-    view,
-    retry,
+    view: data,
+    retry: () => void refresh(),
     refresh: refreshDashboard,
-    deposit,
-    withdraw,
-    cancelQueuedWithdrawal: cancelWithdrawalRequest,
+    deposit: (amount: string) => transfer("to-savings", amount),
+    withdraw: (input: WithdrawalIntent) => transfer("to-checking", input),
   };
 }

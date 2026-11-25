@@ -62,10 +62,10 @@ of them is a regression:
 ## End-user owner addresses
 
 `ownerAddress` / `owner_address` is PII, and the only `*Address` key that is (threat model
-EARN-025 and EARN-028, PRO-1868). It names an end user on the embedded Earn surface rather
-than a customer treasury: per-owner position reads take `?ownerAddress=`, any `earn:read`
-key can enumerate every owner in its project, and a log line pairing an owner with a partner
-is PII linkage. The key is matched exactly (`ownerAddress`, `owner_address`), the
+EARN-025 and EARN-028, PRO-1868). It identifies an address-scoped Earn source:
+per-owner position reads take `?ownerAddress=`, an `earn.read` key can read owners
+within its project, and a log line pairing an owner with a partner is PII linkage.
+The key is matched exactly (`ownerAddress`, `owner_address`), the
 `ownerAddress=` assignment and quoted-JSON forms are matched inside strings so a logged URL
 or an echoed request body is covered too, and the rule deliberately does not widen: a base58
 value is not identifying by shape, and `walletAddress`, `destinationAddress`, `mintAddress`,
@@ -73,9 +73,6 @@ value is not identifying by shape, and `walletAddress`, `destinationAddress`, `m
 
 Consequences to know about:
 
-- The split-swap detector's `sdp_api_earn_split_swap_orphaned` and `_ambiguous` events reach
-  Loki with `owner_address` as `[REDACTED]`. Triage runs on `advisory_id`, which resolves to
-  the owner in `earn_split_swap_advisories`.
 - Earn audit rows store the owner as `[REDACTED]` in `metadata`; the row's `resourceId` is
   the movement id and `earn_movements.owner_address` holds the value behind tenant scoping,
   the same arrangement the allowlist audit rows have.

@@ -199,6 +199,28 @@ afterEach(() => {
 });
 
 describe("startCron", () => {
+  it("registers operation recovery in each environment with its own system identity", async () => {
+    const worker = await startWorker();
+    const registrations = worker.discovered.filter((item) => item.cron === "reconcile-operations");
+    expect(registrations).toHaveLength(SDP_ENVIRONMENTS.length);
+    expect(
+      registrations.map(({ environment, schedule, ran }) => ({ environment, schedule, ran }))
+    ).toEqual(
+      SDP_ENVIRONMENTS.map((environment) => ({
+        environment,
+        schedule: "*/15 * * * * *",
+        ran: [
+          {
+            cron: "reconcile-operations",
+            environment,
+            identity: { kind: "system", component: "cron:reconcile-operations" },
+          },
+        ],
+      }))
+    );
+    await worker.handle.stop();
+  });
+
   it("keeps Fireblocks polling independent of a failing or overlapping Solana settlement slot", async () => {
     const worker = await startWorker();
     vi.mocked(pendingTransfersCron.run).mockRejectedValueOnce(

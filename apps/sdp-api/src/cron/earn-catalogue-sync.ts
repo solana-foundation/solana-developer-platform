@@ -58,6 +58,7 @@ import {
   type StoredStrategyFigures,
 } from "@/services/earn/catalogue-anomaly";
 import { earnProviderEndpointUrls } from "@/services/earn/cluster-rpc";
+import { EARN_CREDENTIAL_ENV_KEYS } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
 import { defineCron } from "./define-cron";
 
@@ -117,6 +118,22 @@ function catalogueRuntime(env: Env, environment: SdpEnvironment): EarnRuntimeCon
   };
 }
 
+/**
+ * The env a deployment that admits no production project reads production's
+ * shelf with: every Earn provider credential removed, so its mirror read is a
+ * public one and never calls a provider's production API as a client.
+ *
+ * @param env - The process env.
+ * @returns The env without any key in `EARN_CREDENTIAL_ENV_KEYS`.
+ */
+function withoutEarnCredentials(env: Env): Env {
+  const stripped: Env = { ...env };
+  for (const key of EARN_CREDENTIAL_ENV_KEYS) {
+    Reflect.deleteProperty(stripped, key);
+  }
+  return stripped;
+}
+
 async function syncEarnCatalogue(env: Env): Promise<void> {
   const repo = createEarnRepository(env);
   // Providers read their own credentials from the raw env keyed by
@@ -140,13 +157,18 @@ async function syncProviderCatalogue(
   client: EarnVaultProvider,
   env: Env
 ): Promise<void> {
-  // A deployment that admits no production project reads no production shelf:
-  // the same steady state as production credentials being absent, so the
-  // mirror lane converges to empty.
-  const production: CatalogueFetch = productionProjectsAllowed(env)
-    ? await fetchAcceptedSnapshots(client, catalogueRuntime(env, "production"))
-    : { ok: false, steadyState: true };
-  if (production.ok) {
+  // Read on every deployment, because the sandbox mirror needs it too: a
+  // devnet-only deployment lists the same browse-only Mainnet rows as any
+  // other sandbox, and writes no production lane of its own. It reads with no
+  // provider credential, and a provider whose mainnet read needs an RPC skips
+  // as PROVIDER_NOT_CONFIGURED where no mainnet pool is configured, so those
+  // shelves' mirror rows converge to empty there.
+  const writesProduction = productionProjectsAllowed(env);
+  const production = await fetchAcceptedSnapshots(
+    client,
+    catalogueRuntime(writesProduction ? env : withoutEarnCredentials(env), "production")
+  );
+  if (production.ok && writesProduction) {
     // The provider's own fetch is the total truth for production, so its
     // delist stays environment-wide and stray wrong-cluster rows converge away
     // (a devnet row reaching production is otherwise caught only at read time,
@@ -372,6 +394,7 @@ async function fetchAcceptedSnapshots(
     return { ok: false, steadyState: false };
   }
 
+  const observedAt = new Date().toISOString();
   const accepted: ProviderStrategySnapshot[] = [];
   for (const snapshot of snapshots) {
     // A snapshot outside the provider's declared support envelope is provider
@@ -389,7 +412,11 @@ async function fetchAcceptedSnapshots(
       );
       continue;
     }
-    accepted.push(snapshot);
+    accepted.push({
+      ...snapshot,
+      rateObservedAt:
+        snapshot.currentApy === undefined ? undefined : (snapshot.rateObservedAt ?? observedAt),
+    });
   }
   return { ok: true, snapshots: accepted };
 }
@@ -472,6 +499,7 @@ async function writeCatalogueLane(
       shareMint: snapshot.shareMint ?? null,
       apyType: snapshot.apyType,
       currentApy: snapshot.currentApy ?? null,
+      rateObservedAt: snapshot.rateObservedAt ?? null,
       liquidityTerm: snapshot.liquidityTerm,
       redemptionDelayDays: snapshot.redemptionDelayDays ?? null,
       riskMetadata: snapshot.riskMetadata ?? {},

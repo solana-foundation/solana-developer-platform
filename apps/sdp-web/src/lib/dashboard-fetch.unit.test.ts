@@ -569,18 +569,21 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  // An earn program payout moves money without being a payments route, so it
-  // is registered for the same refusal: a reload must never mint a fresh key
-  // for a payout that may have landed.
-  it("refuses to send an earn program withdrawal when storage refuses its key", async () => {
+  it.each([
+    "/api/dashboard/markets/earn/deposit",
+    "/api/dashboard/markets/earn/withdraw",
+    "/api/dashboard/operations/operation/submit",
+    "/api/dashboard/operations/operation/refresh",
+    "/api/dashboard/operations/operation/cancel",
+  ])("refuses %s when storage refuses its key", async (path) => {
     openTab(`/dashboard/${SANDBOX_PROJECT.id}/markets/earn`);
     installSessionStorage(true);
     const fetchMock = statusFetchMock(201);
     vi.stubGlobal("fetch", fetchMock);
     const createWithdrawal = () =>
-      dashboardRequest("/api/dashboard/markets/earn/programs/prog_1/withdrawals", {
+      dashboardRequest(path, {
         method: "POST",
-        body: '{"amountUsd":"1","token":"usdc","destinationAddress":"addr"}',
+        body: "{}",
       });
 
     const response = await createWithdrawal();

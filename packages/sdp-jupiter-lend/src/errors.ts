@@ -1,8 +1,7 @@
-export type SdpJupiterLendErrorCode =
-  | "INVALID_AMOUNT"
-  | "VAULT_UNREADABLE"
-  | "CLUSTER_UNSUPPORTED"
-  | "PROGRAM_MISMATCH";
+import type { VaultProviderErrorCodeOf } from "@sdp/earn/types";
+export type SdpJupiterLendErrorCode = VaultProviderErrorCodeOf<
+  "INVALID_AMOUNT" | "VAULT_UNREADABLE" | "CLUSTER_UNSUPPORTED" | "PROGRAM_MISMATCH"
+>;
 
 export class SdpJupiterLendError extends Error {
   constructor(

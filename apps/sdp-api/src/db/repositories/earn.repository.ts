@@ -13,10 +13,6 @@ export function generateEarnStrategyId(): string {
   return `earn_strategy_${crypto.randomUUID()}`;
 }
 
-export function generateEarnProviderWalletId(): string {
-  return `earn_provider_wallet_${crypto.randomUUID()}`;
-}
-
 export interface EarnStrategyRow {
   id: string;
   /**
@@ -34,6 +30,8 @@ export interface EarnStrategyRow {
   share_mint: string | null;
   apy_type: EarnApyType;
   current_apy: string | null;
+  /** Provider rate observation, independent of metadata updates. */
+  rate_observed_at?: string | null;
   liquidity_term: EarnLiquidityTerm;
   redemption_delay_days: number | null;
   risk_metadata: EarnStrategyRiskMetadata;
@@ -58,34 +56,6 @@ export interface EarnStrategyRow {
   updated_at: string;
 }
 
-/**
- * Link to ONE provider-managed wallet — an Earn "program". An organization may
- * hold N of them per (environment, provider) since PRO-1670; each pins a single
- * vault and nothing rebalances across them. The uniqueness that used to cap this
- * at one row per (organization, environment, provider) is gone (migration 0056),
- * replaced by a GLOBAL UNIQUE (provider, provider_wallet_ref): a provider-side
- * wallet holds real funds, so exactly one link row may claim it platform-wide.
- *
- * project_id records the provisioning project only — it is not part of the
- * program's scope, and every project in an environment reaches every program.
- * It becomes null if that provisioning project is hard-deleted; the funded,
- * organization-scoped provider account survives.
- */
-export interface EarnProviderWalletRow {
-  id: string;
-  organization_id: string;
-  project_id: string | null;
-  environment: SdpEnvironment;
-  /** Open TEXT, same drift rule as EarnStrategyRow.provider. */
-  provider: string;
-  /** Provider-side wallet identifier. */
-  provider_wallet_ref: string;
-  label: string | null;
-  created_by: string;
-  created_at: string;
-  updated_at: string;
-}
-
 /** Catalogue sync upsert, keyed on (provider, provider_reference, environment). */
 export interface UpsertEarnStrategyInput {
   provider: EarnProviderId;
@@ -97,6 +67,8 @@ export interface UpsertEarnStrategyInput {
   shareMint: string | null;
   apyType: EarnApyType;
   currentApy: string | null;
+  /** When this rate was fetched; omit for metadata-only writes. */
+  rateObservedAt?: string | null;
   liquidityTerm: EarnLiquidityTerm;
   redemptionDelayDays: number | null;
   riskMetadata: EarnStrategyRiskMetadata;
@@ -118,6 +90,8 @@ export interface UpdateEarnStrategyMetricsInput {
   environment: SdpEnvironment;
   /** Null clears a rate the provider no longer reports. */
   currentApy: string | null;
+  /** When this rate was fetched, not when its database write completes. */
+  rateObservedAt?: string | null;
   /** Merged over the stored metadata, so curator and friends survive. */
   riskMetadata: EarnStrategyRiskMetadata;
 }
@@ -163,6 +137,13 @@ export interface DeprecateUnlistedEarnStrategiesInput {
 
 export interface ListEarnStrategiesInput {
   environment: SdpEnvironment;
+  id?: string;
+  /** Caller filter, intersected with the server-owned provider allowlist. */
+  provider?: string;
+  depositMint?: string;
+  /** Decimal APY fraction bounds; unavailable/malformed rates never match. */
+  minApy?: string;
+  maxApy?: string;
   /**
    * Restrict to one cluster's sub-shelf. Server-resolved, never a raw caller
    * value: the strategies route defaults it to the environment's own cluster so
@@ -170,7 +151,7 @@ export interface ListEarnStrategiesInput {
    * caller's explicit `?cluster=` opt-in through to browse the mirrored mainnet
    * shelf (PRO-1742). A NULL `host_cluster` row counts as the environment's own
    * cluster — mapStrategyRow's rule. Callers that want every cluster (the
-   * program-create keep set, which filters fundability itself) simply omit it.
+   * internal catalogue reads) simply omit it.
    */
   hostCluster?: SolanaCluster;
   sourceKind?: EarnStrategySourceKind;
@@ -234,32 +215,6 @@ interface EarnStrategyFigureRow {
 
 export interface ListEarnStrategiesResult {
   rows: EarnStrategyRow[];
-  total: number;
-}
-
-export interface InsertEarnProviderWalletInput {
-  organizationId: string;
-  projectId: string;
-  environment: SdpEnvironment;
-  provider: EarnProviderId;
-  providerWalletRef: string;
-  label: string | null;
-  createdBy: string;
-}
-
-export interface ListEarnProviderWalletsInput {
-  organizationId: string;
-  /** The owning project; the list is a project boundary like every per-program route. */
-  projectId: string;
-  environment: SdpEnvironment;
-  /** Optional filter; omitted lists every provider's programs. */
-  provider?: EarnProviderId;
-  limit: number;
-  offset: number;
-}
-
-export interface ListEarnProviderWalletsResult {
-  rows: EarnProviderWalletRow[];
   total: number;
 }
 
@@ -335,36 +290,4 @@ export interface EarnRepository {
    * provider relist reactivate the same id safely.
    */
   deprecateUnlistedStrategies(input: DeprecateUnlistedEarnStrategiesInput): Promise<string[]>;
-
-  /**
-   * One program by its own id, scoped to (organization, environment). The
-   * program id is caller-supplied on every `/programs/:programId` route, so both
-   * scopes are load-bearing: without organization_id a guessed id reads another
-   * tenant's program, and without environment a sandbox id resolves for a
-   * production session (the pre-PRO-1670 (org, environment, provider) lookup made
-   * both structurally impossible; an addressable id does not).
-   */
-  getProviderWalletById(params: {
-    organizationId: string;
-    environment: SdpEnvironment;
-    walletId: string;
-  }): Promise<EarnProviderWalletRow | null>;
-  /**
-   * Every program for an (organization, environment), oldest first. The order is
-   * a stability requirement, not a preference — see migration 0056's header.
-   */
-  listProviderWallets(input: ListEarnProviderWalletsInput): Promise<ListEarnProviderWalletsResult>;
-  /**
-   * Lookup by the provider-side wallet ref, keyed on 0056's global unique. The
-   * create path needs this without an organization scope to resolve a provider
-   * replay: the provider answers a retried create with the ORIGINAL ref, so the
-   * insert lands on that unique and the row it collided with IS the caller's
-   * program. The caller asserts ownership after the fetch, exactly as
-   * getProgramWithdrawalByProviderReference does.
-   */
-  getProviderWalletByRef(params: {
-    provider: EarnProviderId;
-    providerWalletRef: string;
-  }): Promise<EarnProviderWalletRow | null>;
-  insertProviderWallet(input: InsertEarnProviderWalletInput): Promise<EarnProviderWalletRow | null>;
 }

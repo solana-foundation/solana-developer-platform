@@ -58,7 +58,7 @@ The scope narrows what a key may sign with, not what it may read. A `selected` k
 
 For recurring payments the scope also bounds writes that sign nothing. A `selected` key may create, change, cancel, activate, collect, or resume only a recurring payment whose source wallet it lists, and may move one only to another listed wallet, because whoever activates a pending payment signs the terms it was last given. Anything else is refused with `wallet_out_of_scope` before it is recorded. Reading and listing recurring payments still cover the whole project.
 
-The dashboard starts a key that holds any `execute` action on **Selected wallets**, so it can sign with nothing you didn't give it. Choose **All wallets** to widen it.
+The dashboard starts a key that holds any `execute` action on **Selected wallets**. Leave the selection empty when your app supplies owner-signed transactions: the key can request no SDP wallet signatures. Add specific wallets for provider signing, or choose **All wallets** to widen it.
 
 ## Recurring payments outlive the key
 
@@ -83,7 +83,7 @@ be edited, so cancel the schedule and create a new one with an active recipient.
 2. Click **Create new API key**. Once the project has keys, the button reads **New API key**. Fill in each step, then click **Continue**:
    - **Details**: a **Name** (for example, "CI deploy key"), an optional **Expiration**, and optional **Allowed IP addresses**, one IPv4 or IPv6 address or CIDR range per line. An empty list allows any address. The **Environment** is the project's.
    - **Permissions**: a checkbox per verb for each module (Read, Manage, Execute); ticking Manage or Execute includes Read. **Everything** ticks every offered action, and **Clear all** clears them. Grant at least one.
-   - **Access**: **All wallets**, or **Selected wallets** with at least one wallet picked.
+   - **Access**: **All wallets**, or **Selected wallets** (an empty selection permits no SDP wallet signing).
 
    ![Key details step of the new API key page](/images/getting-started/api-key-create.png)
 
