@@ -38,4 +38,4 @@ jobs:
             exit 0
           fi
           gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$marker
-          Route change detected: this pull request changes the served path list (\`apps/sdp-api/src/routes/served-paths.generated.json\`). Please make sure the matching sdp-infra change is released first. @$PR_AUTHOR"
+          Route change detected: this pull request changes the served path list (\`apps/sdp-api/src/routes/served-paths.generated.json\`). Please make sure the sdp-infra change goes in the right order: before this merges for an added path, after it is released for a removed one (\`docs/contributing/code-standards.md\`, Served paths). @$PR_AUTHOR"
