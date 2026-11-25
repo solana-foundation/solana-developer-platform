@@ -15,14 +15,12 @@ export interface UtilaEnv {
   UTILA_VAULT_ID?: string;
   UTILA_WALLET_ID?: string;
   UTILA_NETWORK?: UtilaNetwork;
-  UTILA_API_BASE_URL?: string;
   UTILA_POLL_INTERVAL_MS?: string;
   UTILA_MAX_POLL_ATTEMPTS?: string;
   UTILA_DESIGNATED_SIGNERS?: string;
 }
 
 interface BuildUtilaConfigOptions {
-  apiBaseUrl?: string;
   /** The cluster the work runs on; picks the Utila network when neither the config nor env names one. */
   cluster: SolanaCluster;
   defaultWalletId?: string | null;
@@ -56,7 +54,6 @@ export function buildKeychainUtilaConfig(
     serviceAccountPrivateKeyPem,
     vaultId,
     network: resolveUtilaNetwork(env, options.cluster, options.network),
-    apiBaseUrl: options.apiBaseUrl ?? env.UTILA_API_BASE_URL,
     pollIntervalMs: parseOptionalPositiveInteger(
       env.UTILA_POLL_INTERVAL_MS,
       "UTILA_POLL_INTERVAL_MS"

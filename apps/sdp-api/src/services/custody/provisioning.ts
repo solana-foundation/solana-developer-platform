@@ -83,7 +83,6 @@ export async function provisionFireblocksVaultAccount(
     {
       apiKey: options.apiKey ?? env.FIREBLOCKS_API_KEY,
       apiSecretPem: options.apiSecretPem ?? env.FIREBLOCKS_API_SECRET,
-      apiBaseUrl: env.FIREBLOCKS_API_BASE_URL,
       assetId: options.assetId ?? env.FIREBLOCKS_ASSET_ID,
     },
     options
@@ -100,7 +99,6 @@ export async function provisionPrivyWallet(
     {
       appId: authentication?.appId ?? env.PRIVY_APP_ID,
       appSecret: authentication?.appSecret ?? env.PRIVY_APP_SECRET,
-      apiBaseUrl: env.PRIVY_API_BASE_URL,
     },
     options
   );
@@ -116,7 +114,6 @@ export async function findPrivyWalletByExternalId(
     {
       appId: authentication?.appId ?? env.PRIVY_APP_ID,
       appSecret: authentication?.appSecret ?? env.PRIVY_APP_SECRET,
-      apiBaseUrl: env.PRIVY_API_BASE_URL,
     },
     externalId
   );
@@ -132,7 +129,6 @@ export async function provisionCoinbaseCdpAccount(
       apiKeyId: env.COINBASE_CDP_API_KEY_ID,
       apiKeySecret: env.COINBASE_CDP_API_KEY_SECRET,
       walletSecret: env.COINBASE_CDP_WALLET_SECRET,
-      apiBaseUrl: env.COINBASE_CDP_API_BASE_URL,
       network: options.network ?? env.COINBASE_CDP_NETWORK,
       accountScope: env.COINBASE_CDP_ACCOUNT_NAMESPACE?.trim() || env.ENVIRONMENT,
     },
@@ -144,14 +140,7 @@ export async function provisionParaWallet(
   env: Env,
   options: ProvisionParaOptions
 ): Promise<ProvisionParaResult> {
-  return provisionParaWalletInCustody(
-    createRuntime(),
-    {
-      apiKey: env.PARA_API_KEY,
-      apiBaseUrl: env.PARA_API_BASE_URL,
-    },
-    options
-  );
+  return provisionParaWalletInCustody(createRuntime(), { apiKey: env.PARA_API_KEY }, options);
 }
 
 export async function provisionTurnkeyPrivateKey(
@@ -164,7 +153,6 @@ export async function provisionTurnkeyPrivateKey(
       apiPublicKey: env.TURNKEY_API_PUBLIC_KEY,
       apiPrivateKey: env.TURNKEY_API_PRIVATE_KEY,
       organizationId: env.TURNKEY_ORGANIZATION_ID,
-      apiBaseUrl: env.TURNKEY_API_BASE_URL,
     },
     options
   );
@@ -187,7 +175,6 @@ export async function provisionUtilaWallet(
         (currentClusterScope().cluster === "mainnet-beta"
           ? "networks/solana-mainnet"
           : "networks/solana-devnet"),
-      apiBaseUrl: env.UTILA_API_BASE_URL,
     },
     options
   );
@@ -199,10 +186,7 @@ export async function provisionAnchorageWallet(
 ): Promise<ProvisionAnchorageResult> {
   return provisionAnchorageWalletInCustody(
     createRuntime(),
-    {
-      apiKey: env.ANCHORAGE_API_KEY,
-      apiBaseUrl: env.ANCHORAGE_API_BASE_URL,
-    },
+    { apiKey: env.ANCHORAGE_API_KEY },
     options
   );
 }
@@ -211,17 +195,10 @@ export async function deleteAnchorageWallet(
   env: Env,
   options: DeleteAnchorageOptions
 ): Promise<void> {
-  await deleteAnchorageWalletInCustody(
-    createRuntime(),
-    {
-      apiKey: env.ANCHORAGE_API_KEY,
-      apiBaseUrl: env.ANCHORAGE_API_BASE_URL,
-    },
-    options
-  );
+  await deleteAnchorageWalletInCustody(createRuntime(), { apiKey: env.ANCHORAGE_API_KEY }, options);
 }
 
-function createRuntime(): CustodyProvisioningRuntime {
+export function createRuntime(): CustodyProvisioningRuntime {
   return {
     fetch: (input, init) => globalThis.fetch(input, init),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -230,24 +207,14 @@ function createRuntime(): CustodyProvisioningRuntime {
 }
 
 export function listFireblocksVaults(
-  env: Env,
   credential: { apiKey: string; apiSecretPem: string; assetId: "SOL" | "SOL_TEST" },
   options: { after?: string; namePrefix?: string }
 ) {
-  return listFireblocksVaultsInCustody(
-    createRuntime(),
-    { ...credential, apiBaseUrl: env.FIREBLOCKS_API_BASE_URL },
-    options
-  );
+  return listFireblocksVaultsInCustody(createRuntime(), credential, options);
 }
 export function getFireblocksVault(
-  env: Env,
   credential: { apiKey: string; apiSecretPem: string; assetId: "SOL" | "SOL_TEST" },
   id: string
 ) {
-  return getFireblocksVaultInCustody(
-    createRuntime(),
-    { ...credential, apiBaseUrl: env.FIREBLOCKS_API_BASE_URL },
-    id
-  );
+  return getFireblocksVaultInCustody(createRuntime(), credential, id);
 }

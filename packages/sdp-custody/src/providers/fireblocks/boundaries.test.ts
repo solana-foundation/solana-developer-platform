@@ -13,7 +13,6 @@ function access() {
   return {
     apiKey: crypto.randomUUID(),
     apiSecretPem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
-    apiBaseUrl: "https://fireblocks.example.test",
   };
 }
 describe("Fireblocks provider boundaries", () => {

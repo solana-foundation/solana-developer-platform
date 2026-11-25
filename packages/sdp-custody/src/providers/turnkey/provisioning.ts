@@ -1,6 +1,5 @@
 import { ApiKeyStamper } from "@solana/keychain-turnkey";
 import {
-  assertHttpsBaseUrl,
   normalizeProviderNameFragment,
   parseJsonResponse,
   randomHex,
@@ -10,7 +9,7 @@ import {
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
 
-const DEFAULT_TURNKEY_API_BASE_URL = "https://api.turnkey.com";
+const TURNKEY_API_ORIGIN = "https://api.turnkey.com";
 
 interface TurnkeyActivityResponse {
   activity?: {
@@ -38,7 +37,6 @@ export interface TurnkeyProvisioningConfig {
   apiPublicKey?: string;
   apiPrivateKey?: string;
   organizationId?: string;
-  apiBaseUrl?: string;
 }
 
 export interface ProvisionTurnkeyResult {
@@ -62,13 +60,7 @@ export async function provisionTurnkeyPrivateKey(
     );
   }
 
-  const apiBaseUrl = assertHttpsBaseUrl(
-    config.apiBaseUrl ?? DEFAULT_TURNKEY_API_BASE_URL,
-    "Turnkey"
-  );
-
   const created = await turnkeyRequest<TurnkeyActivityResponse>(runtime, {
-    apiBaseUrl,
     apiPublicKey,
     apiPrivateKey,
     method: "POST",
@@ -104,7 +96,6 @@ export async function provisionTurnkeyPrivateKey(
 interface TurnkeyRequestParams {
   method: "POST";
   path: string;
-  apiBaseUrl: string;
   apiPublicKey: string;
   apiPrivateKey: string;
   body: Record<string, unknown>;
@@ -124,7 +115,7 @@ async function turnkeyRequest<T>(
   const stamp = await Promise.resolve(stamper.stamp(body));
 
   try {
-    const response = await runtime.fetch(`${params.apiBaseUrl}${params.path}`, {
+    const response = await runtime.fetch(`${TURNKEY_API_ORIGIN}${params.path}`, {
       method: params.method,
       headers: {
         "Content-Type": "application/json",

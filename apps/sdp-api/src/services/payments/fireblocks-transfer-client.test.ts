@@ -18,7 +18,6 @@ const rsa = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const access = () => ({
   apiKey: crypto.randomUUID(),
   apiSecretPem: rsa.privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
-  apiBaseUrl: "https://fireblocks.example.test",
 });
 function runtime(fetch: CustodyProvisioningRuntime["fetch"]): CustodyProvisioningRuntime {
   return {
@@ -59,7 +58,7 @@ describe("native Fireblocks HTTP protocol", () => {
       note: "SDP payment",
     };
     const fetch = vi.fn(async (url, init) => {
-      expect(url).toBe("https://fireblocks.example.test/v1/transactions");
+      expect(url).toBe("https://api.fireblocks.io/v1/transactions");
       expect(init.method).toBe("POST");
       expect(init.redirect).toBe("error");
       expect(init.body).toBe(JSON.stringify(body));
@@ -172,7 +171,7 @@ describe("native Fireblocks HTTP protocol", () => {
     expect(await readFireblocksTransfer(rt, credentials, "xfr_1")).toBeNull();
     expect(fetch).toHaveBeenCalledTimes(2);
     for (const [url, init] of fetch.mock.calls) {
-      expect(url).toBe("https://fireblocks.example.test/v1/transactions/external_tx_id/xfr_1");
+      expect(url).toBe("https://api.fireblocks.io/v1/transactions/external_tx_id/xfr_1");
       expect(init.method).toBe("GET");
     }
   });

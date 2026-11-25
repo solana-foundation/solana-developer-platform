@@ -3,6 +3,8 @@ import { parseJsonResponse, sha256Hex } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
 
+const FIREBLOCKS_API_ORIGIN = "https://api.fireblocks.io";
+
 export class FireblocksApiError extends SigningError {
   constructor(
     readonly status: number,
@@ -17,7 +19,6 @@ export class FireblocksApiError extends SigningError {
 }
 
 interface FireblocksRequestParams {
-  apiBaseUrl: string;
   apiKey: string;
   apiSecretPem: string;
   method: "GET" | "POST";
@@ -53,7 +54,7 @@ export async function fireblocksRequest<T>(
   };
   if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
   if (params.body) headers["Content-Type"] = "application/json";
-  const response = await runtime.fetch(`${params.apiBaseUrl}${params.uri}`, {
+  const response = await runtime.fetch(`${FIREBLOCKS_API_ORIGIN}${params.uri}`, {
     method: params.method,
     redirect: "error",
     signal: AbortSignal.timeout(10_000),

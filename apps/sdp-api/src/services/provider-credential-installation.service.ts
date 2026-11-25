@@ -1,4 +1,5 @@
 import { normalizePrivyWalletId } from "@sdp/custody/provider-wallet-ids";
+import { checkPrivyCredential } from "@sdp/custody/providers/privy/credential";
 import type { ProvisionPrivyResult } from "@sdp/custody/providers/privy/provisioning";
 import { SigningError } from "@sdp/custody/signing";
 import { currentClusterScope } from "@sdp/rpc/scope";
@@ -32,11 +33,11 @@ import {
   parseByokCredential,
 } from "@/services/custody/byok-credential";
 import {
-  checkPrivyCredential,
   getPrivyProviderAccountFingerprint,
   type PrivyCredentialAuthentication,
 } from "@/services/custody/privy-credential";
 import {
+  createRuntime,
   findPrivyWalletByExternalId,
   getFireblocksVault,
   provisionPrivyWallet,
@@ -737,7 +738,7 @@ async function verifySelectedFireblocksVaults(
     // Only selected vaults are read; each address is verified once by solana-keychain.
     for (const id of selectedIds) {
       try {
-        const vault = await getFireblocksVault(context.c.env, credential, id);
+        const vault = await getFireblocksVault(credential, id);
         if (!vault.hasSolanaWallet) return { kind: "failed", code: "invalid_credentials" };
         const verified =
           id === credential.vaultAccountId
@@ -839,7 +840,7 @@ async function executeCompletionMode(
     return lookupProviderWallet(context.c.env, externalId, credential);
   }
 
-  const validation = await checkPrivyCredential(context.c.env, credential);
+  const validation = await checkPrivyCredential(createRuntime(), credential);
   if (validation !== "success") {
     return validation === "failed"
       ? { kind: "failed", code: "invalid_credentials" }

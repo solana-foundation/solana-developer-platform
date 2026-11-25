@@ -88,7 +88,6 @@ export class KeychainTurnkeyAdapter extends BaseKeychainAdapter {
         organizationId: this.config.organizationId,
         privateKeyId: denormalizeTurnkeyWalletId(normalizedWalletId),
         publicKey: resolvedPublicKey,
-        apiBaseUrl: this.config.apiBaseUrl,
         requestDelayMs: this.config.requestDelayMs,
       })
     );

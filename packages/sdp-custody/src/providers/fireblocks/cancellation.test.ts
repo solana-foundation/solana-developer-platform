@@ -6,7 +6,6 @@ import { cancelFireblocksTransfer } from "./transfers";
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const access = {
-  apiBaseUrl: "https://fireblocks.example.test",
   apiKey: "tenant-api-key",
   apiSecretPem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
 };
@@ -19,10 +18,10 @@ describe("Fireblocks cancellation adapter", () => {
     const rt = testRuntime(fetch);
     for (const transactionId of ["provider/id?part", "provider/id?part", "another-id"])
       await expect(cancelFireblocksTransfer(rt, access, transactionId)).resolves.toBe(true);
-    expect(fetch.mock.calls.map(([url]) => String(url))).toEqual([
-      `${access.apiBaseUrl}/v1/transactions/provider%2Fid%3Fpart/cancel`,
-      `${access.apiBaseUrl}/v1/transactions/provider%2Fid%3Fpart/cancel`,
-      `${access.apiBaseUrl}/v1/transactions/another-id/cancel`,
+    expect(fetch.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+      "/v1/transactions/provider%2Fid%3Fpart/cancel",
+      "/v1/transactions/provider%2Fid%3Fpart/cancel",
+      "/v1/transactions/another-id/cancel",
     ]);
     for (const [, init] of fetch.mock.calls) {
       assert.isDefined(init);

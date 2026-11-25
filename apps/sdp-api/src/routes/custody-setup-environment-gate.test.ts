@@ -44,7 +44,6 @@ const API_KEYS = {
   },
 } as const satisfies Record<SdpEnvironment, TestApiKeyMaterial>;
 const APP_ID = "privy-app-setup-gate";
-const PRIVY_API_BASE_URL = "https://privy.custody-setup-gate.test/v1";
 const PRIVY_WALLET_ID = "wallet-custody-setup-gate";
 const PRIVY_WALLET_ADDRESS = TEST_SOLANA_ADDRESSES.wallet1;
 const SUBMISSION_BODY = {
@@ -288,7 +287,6 @@ describe("Custody setup by project environment", () => {
   const original = {
     privyAppId: env.PRIVY_APP_ID,
     privyAppSecret: env.PRIVY_APP_SECRET,
-    privyApiBaseUrl: env.PRIVY_API_BASE_URL,
     backend: env.CREDENTIAL_SECRET_STORE_BACKEND,
     encryptionKey: env.CUSTODY_ENCRYPTION_KEY,
     fingerprintPepper: env.CREDENTIAL_FINGERPRINT_PEPPER,
@@ -300,7 +298,6 @@ describe("Custody setup by project environment", () => {
     vi.clearAllMocks();
     env.PRIVY_APP_ID = "managed-privy-app-id";
     env.PRIVY_APP_SECRET = "managed-privy-app-secret";
-    env.PRIVY_API_BASE_URL = PRIVY_API_BASE_URL;
     env.CREDENTIAL_SECRET_STORE_BACKEND = "encrypted_db";
     env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 13).toString("base64");
     env.CREDENTIAL_FINGERPRINT_PEPPER = "custody-setup-gate-fingerprint-pepper";
@@ -314,7 +311,6 @@ describe("Custody setup by project environment", () => {
     vi.unstubAllGlobals();
     env.PRIVY_APP_ID = original.privyAppId;
     env.PRIVY_APP_SECRET = original.privyAppSecret;
-    env.PRIVY_API_BASE_URL = original.privyApiBaseUrl;
     env.CREDENTIAL_SECRET_STORE_BACKEND = original.backend;
     env.CUSTODY_ENCRYPTION_KEY = original.encryptionKey;
     env.CREDENTIAL_FINGERPRINT_PEPPER = original.fingerprintPepper;

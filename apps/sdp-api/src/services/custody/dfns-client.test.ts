@@ -7,7 +7,8 @@ import {
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { required } from "@/test/helpers/required";
 
-const API_BASE_URL = "https://api.dfns.test";
+const DFNS_API_ORIGIN = "https://api.dfns.io";
+const IBM_HAVEN_API_ORIGIN = "https://api.digitalassets.ibm.com";
 const FOREIGN_ORIGIN = "https://foreign.example.test";
 const AUTH_TOKEN = "dfns-auth-token-value";
 const CREDENTIAL_ID = "cred_configured_123";
@@ -28,11 +29,11 @@ describe("dfns client redirects", () => {
 
   it("follows a same-origin redirect and returns the redirected resource", async () => {
     const fetchMock = mockDfnsFetch((url, init) => {
-      if (url === `${API_BASE_URL}/wallets` && init?.method === "POST") {
+      if (url === `${DFNS_API_ORIGIN}/wallets` && init?.method === "POST") {
         return redirectResponse(302, "/wallets/wa_created_1");
       }
 
-      if (url === `${API_BASE_URL}/wallets/wa_created_1` && init?.method === "GET") {
+      if (url === `${DFNS_API_ORIGIN}/wallets/wa_created_1` && init?.method === "GET") {
         return jsonResponse({ id: WALLET_ID, network: "SolanaDevnet" }, 200);
       }
 
@@ -46,7 +47,7 @@ describe("dfns client redirects", () => {
 
     const followCall = fetchMock.mock.calls.find(
       ([input, init]) =>
-        toUrlString(input) === `${API_BASE_URL}/wallets/wa_created_1` && init?.method === "GET"
+        toUrlString(input) === `${DFNS_API_ORIGIN}/wallets/wa_created_1` && init?.method === "GET"
     );
     expect(new Headers(required(required(followCall)[1]).headers).get("authorization")).toBe(
       `Bearer ${AUTH_TOKEN}`
@@ -55,7 +56,7 @@ describe("dfns client redirects", () => {
 
   it("refuses a cross-origin redirect instead of forwarding the bearer token", async () => {
     const fetchMock = mockDfnsFetch((url, init) => {
-      if (url === `${API_BASE_URL}/wallets` && init?.method === "POST") {
+      if (url === `${DFNS_API_ORIGIN}/wallets` && init?.method === "POST") {
         return redirectResponse(302, `${FOREIGN_ORIGIN}/wallets`);
       }
 
@@ -74,7 +75,7 @@ describe("dfns client redirects", () => {
 
   it("refuses a protocol-relative redirect that swaps the host", async () => {
     mockDfnsFetch((url, init) => {
-      if (url === `${API_BASE_URL}/wallets` && init?.method === "POST") {
+      if (url === `${DFNS_API_ORIGIN}/wallets` && init?.method === "POST") {
         return redirectResponse(307, "//foreign.example.test/wallets");
       }
 
@@ -90,7 +91,7 @@ describe("dfns client redirects", () => {
 
   it("refuses an unparsable redirect target", async () => {
     mockDfnsFetch((url, init) => {
-      if (url === `${API_BASE_URL}/wallets` && init?.method === "POST") {
+      if (url === `${DFNS_API_ORIGIN}/wallets` && init?.method === "POST") {
         return redirectResponse(302, "http://[");
       }
 
@@ -106,7 +107,7 @@ describe("dfns client redirects", () => {
 
   it("applies the same-origin rule to the IBM Haven white-label client", async () => {
     const fetchMock = mockDfnsFetch((url, init) => {
-      if (url === `${API_BASE_URL}/wallets` && init?.method === "POST") {
+      if (url === `${IBM_HAVEN_API_ORIGIN}/wallets` && init?.method === "POST") {
         return redirectResponse(302, `${FOREIGN_ORIGIN}/wallets`);
       }
 
@@ -117,7 +118,6 @@ describe("dfns client redirects", () => {
       IBM_HAVEN_AUTH_TOKEN: AUTH_TOKEN,
       IBM_HAVEN_CREDENTIAL_ID: CREDENTIAL_ID,
       IBM_HAVEN_PRIVATE_KEY: privateKeyPem,
-      IBM_HAVEN_API_BASE_URL: API_BASE_URL,
     });
 
     await expect(
@@ -130,7 +130,7 @@ describe("dfns client redirects", () => {
 
   it("does not follow redirects for read requests", async () => {
     mockDfnsFetch((url, init) => {
-      if (url === `${API_BASE_URL}/wallets/wa_1` && init?.method === "GET") {
+      if (url === `${DFNS_API_ORIGIN}/wallets/wa_1` && init?.method === "GET") {
         return redirectResponse(302, "/wallets/wa_2");
       }
 
@@ -152,7 +152,7 @@ describe("dfns client error redaction", () => {
 
   it("reports only the upstream error code for failed requests", async () => {
     mockDfnsFetch((url, init) => {
-      if (url === `${API_BASE_URL}/wallets/wa_1` && init?.method === "GET") {
+      if (url === `${DFNS_API_ORIGIN}/wallets/wa_1` && init?.method === "GET") {
         return jsonResponse(
           {
             error: {
@@ -179,7 +179,7 @@ describe("dfns client error redaction", () => {
 
   it("falls back to an unavailable code when the error body has no known code field", async () => {
     mockDfnsFetch((url, init) => {
-      if (url === `${API_BASE_URL}/wallets/wa_1` && init?.method === "GET") {
+      if (url === `${DFNS_API_ORIGIN}/wallets/wa_1` && init?.method === "GET") {
         return jsonResponse({ message: `leaked ${AUTH_TOKEN}` }, 500);
       }
 
@@ -195,7 +195,7 @@ describe("dfns client error redaction", () => {
 
   it("never echoes non-JSON upstream bodies", async () => {
     mockDfnsFetch((url, init) => {
-      if (url.startsWith(`${API_BASE_URL}/wallets`) && init?.method === "GET") {
+      if (url.startsWith(`${DFNS_API_ORIGIN}/wallets`) && init?.method === "GET") {
         return new Response(`<html>authorization: Bearer ${AUTH_TOKEN}</html>`, {
           status: 200,
           headers: { "Content-Type": "text/html" },
@@ -219,7 +219,7 @@ describe("dfns client error redaction", () => {
 
     mockDfnsFetch(
       (url, init) => {
-        if (url === `${API_BASE_URL}/wallets` && init?.method === "POST") {
+        if (url === `${DFNS_API_ORIGIN}/wallets` && init?.method === "POST") {
           return jsonResponse({ id: WALLET_ID }, 200);
         }
 
@@ -239,13 +239,11 @@ describe("dfns client error redaction", () => {
   });
 });
 
-function createDfnsEnv(overrides: Partial<DfnsEnv> = {}): DfnsEnv {
+function createDfnsEnv(): DfnsEnv {
   return {
     DFNS_AUTH_TOKEN: AUTH_TOKEN,
     DFNS_CREDENTIAL_ID: CREDENTIAL_ID,
     DFNS_PRIVATE_KEY: privateKeyPem,
-    DFNS_API_BASE_URL: API_BASE_URL,
-    ...overrides,
   };
 }
 
@@ -263,8 +261,9 @@ function mockDfnsFetch(
     .spyOn(globalThis, "fetch")
     .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
       const url = toUrlString(input);
+      const { pathname } = new URL(url);
 
-      if (url === `${API_BASE_URL}/auth/action/init`) {
+      if (pathname === "/auth/action/init") {
         return jsonResponse(
           {
             challenge: "challenge-value",
@@ -275,7 +274,7 @@ function mockDfnsFetch(
         );
       }
 
-      if (url === `${API_BASE_URL}/auth/action`) {
+      if (pathname === "/auth/action") {
         return jsonResponse({ userAction: "user-action-token" }, 200);
       }
 

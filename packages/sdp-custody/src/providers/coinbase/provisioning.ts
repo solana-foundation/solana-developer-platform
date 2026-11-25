@@ -1,4 +1,3 @@
-import { assertHttpsBaseUrl } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
 import {
@@ -8,7 +7,6 @@ import {
   isCoinbaseCdpAlreadyExistsError,
 } from "./api";
 
-const DEFAULT_COINBASE_CDP_API_BASE_URL = "https://api.cdp.coinbase.com/platform";
 const DEFAULT_COINBASE_CDP_NETWORK = "solana-devnet";
 
 interface CoinbaseCdpSolanaAccountResponse {
@@ -45,7 +43,6 @@ export interface CoinbaseCdpProvisioningConfig {
   apiKeyId?: string;
   apiKeySecret?: string;
   walletSecret?: string;
-  apiBaseUrl?: string;
   network?: "solana" | "solana-devnet";
   accountScope?: string;
 }
@@ -71,10 +68,6 @@ export async function provisionCoinbaseCdpAccount(
     );
   }
 
-  const apiBaseUrl = assertHttpsBaseUrl(
-    config.apiBaseUrl ?? DEFAULT_COINBASE_CDP_API_BASE_URL,
-    "Coinbase CDP"
-  );
   const network = config.network ?? DEFAULT_COINBASE_CDP_NETWORK;
 
   const name = await deriveCoinbaseCdpAccountName({
@@ -89,7 +82,6 @@ export async function provisionCoinbaseCdpAccount(
     const created = await coinbaseCdpRequest<CoinbaseCdpSolanaAccountResponse>(runtime, {
       method: "POST",
       path: "/v2/solana/accounts",
-      apiBaseUrl,
       apiKeyId,
       apiKeySecret,
       walletSecret,
@@ -123,7 +115,6 @@ export async function provisionCoinbaseCdpAccount(
       const existingByName = await coinbaseCdpRequest<CoinbaseCdpSolanaAccountResponse>(runtime, {
         method: "GET",
         path: `/v2/solana/accounts/by-name/${encodeURIComponent(name)}`,
-        apiBaseUrl,
         apiKeyId,
         apiKeySecret,
         walletSecret,

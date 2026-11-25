@@ -19,7 +19,6 @@ const readPolicyAnswering = (body: unknown) =>
     {
       apiKey: "api-key",
       apiSecretPem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
-      apiBaseUrl: "https://fireblocks.example.test",
     }
   );
 

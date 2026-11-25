@@ -1,6 +1,5 @@
 import type { ProviderPolicyCheck } from "@sdp/types/custody";
 import { z } from "zod";
-import { assertHttpsBaseUrl } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { FireblocksApiError, fireblocksRequest } from "./http";
 
@@ -222,16 +221,11 @@ export async function readFireblocksPolicy(
   config: {
     apiKey: string;
     apiSecretPem: string;
-    apiBaseUrl?: string;
   }
 ): Promise<{ value: FireblocksPolicyEnvelope } | { error: PolicyResult }> {
   try {
     const parsed = parseFireblocksPolicy(
       await fireblocksRequest<unknown>(runtime, {
-        apiBaseUrl: assertHttpsBaseUrl(
-          config.apiBaseUrl ?? "https://api.fireblocks.io",
-          "Fireblocks"
-        ),
         apiKey: config.apiKey,
         apiSecretPem: config.apiSecretPem,
         method: "GET",

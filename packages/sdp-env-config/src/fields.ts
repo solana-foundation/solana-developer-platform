@@ -393,15 +393,6 @@ export const FIELDS: EnvField[] = [
     ],
   },
   {
-    key: "UTILA_API_BASE_URL",
-    section: "signing",
-    kind: "url",
-    label: "Utila API base URL",
-    defaultValue: "https://api.utila.io",
-    visibleWhen: listIncludes("SIGNING_PROVIDERS", "utila"),
-    pattern: /^https:\/\//,
-  },
-  {
     key: "UTILA_POLL_INTERVAL_MS",
     section: "signing",
     kind: "text",

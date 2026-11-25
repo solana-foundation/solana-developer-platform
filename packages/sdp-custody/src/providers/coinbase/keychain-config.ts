@@ -12,9 +12,6 @@ export interface KeychainCoinbaseConfig {
   /** Coinbase CDP wallet secret (base64 PKCS#8 DER) for X-Wallet-Auth */
   walletSecret: string;
 
-  /** API base URL (default: "https://api.cdp.coinbase.com/platform") */
-  apiBaseUrl?: string;
-
   /** Optional delay in ms between concurrent signing requests (default: 0) */
   requestDelayMs?: number;
 

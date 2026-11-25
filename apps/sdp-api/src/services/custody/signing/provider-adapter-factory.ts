@@ -99,7 +99,6 @@ const providerAdapterFactories = {
       apiSecretPem,
       vaultAccountId: parsed.vaultAccountId,
       assetId: parsed.assetId,
-      apiBaseUrl: env.FIREBLOCKS_API_BASE_URL,
     });
   },
   privy: async ({ env, parsed }) => {
@@ -118,7 +117,6 @@ const providerAdapterFactories = {
     return new KeychainPrivyAdapter({
       appId,
       appSecret,
-      apiBaseUrl: env.PRIVY_API_BASE_URL,
       requestDelayMs,
     });
   },
@@ -138,7 +136,6 @@ const providerAdapterFactories = {
       apiKeyId,
       apiKeySecret,
       walletSecret,
-      apiBaseUrl: env.COINBASE_CDP_API_BASE_URL,
       requestDelayMs: parsed.requestDelayMs,
     });
   },
@@ -152,7 +149,6 @@ const providerAdapterFactories = {
 
     return new KeychainParaAdapter({
       apiKey,
-      apiBaseUrl: env.PARA_API_BASE_URL,
       requestDelayMs,
     });
   },
@@ -173,7 +169,6 @@ const providerAdapterFactories = {
       apiPublicKey,
       apiPrivateKey,
       organizationId,
-      apiBaseUrl: env.TURNKEY_API_BASE_URL,
       requestDelayMs,
     });
   },
@@ -377,7 +372,6 @@ export function createPrivyAdapterFromCredential(
       appId: input.appId,
       appSecret: input.appSecret,
       defaultWalletId: input.walletId,
-      apiBaseUrl: env.PRIVY_API_BASE_URL,
       requestDelayMs: input.requestDelayMs,
     })
   );
@@ -438,7 +432,6 @@ export function createFireblocksAdapterFromCredential(
           );
         }
       },
-      apiBaseUrl: env.FIREBLOCKS_API_BASE_URL,
       requestDelayMs: input.requestDelayMs,
     })
   );

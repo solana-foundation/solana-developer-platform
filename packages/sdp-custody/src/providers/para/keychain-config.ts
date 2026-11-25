@@ -6,9 +6,6 @@ export interface KeychainParaConfig {
   /** Para API key (X-API-Key) */
   apiKey: string;
 
-  /** API base URL (default: "https://api.getpara.com") */
-  apiBaseUrl?: string;
-
   /** Optional delay in ms between concurrent signing requests (default: 0) */
   requestDelayMs?: number;
 

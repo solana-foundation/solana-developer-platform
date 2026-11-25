@@ -96,7 +96,6 @@ describe("CustodyRuntimeTargets", () => {
   const original = {
     appId: env.PRIVY_APP_ID,
     appSecret: env.PRIVY_APP_SECRET,
-    apiBaseUrl: env.PRIVY_API_BASE_URL,
   };
 
   it("leaves managed Fireblocks wallets on the existing signing path", async () => {
@@ -121,7 +120,6 @@ describe("CustodyRuntimeTargets", () => {
     custodyReleaseChannel.outOfChannelMode = null;
     env.PRIVY_APP_ID = undefined;
     env.PRIVY_APP_SECRET = undefined;
-    env.PRIVY_API_BASE_URL = "https://privy.runtime-targets.test/v1";
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation(
@@ -140,7 +138,6 @@ describe("CustodyRuntimeTargets", () => {
     vi.unstubAllGlobals();
     env.PRIVY_APP_ID = original.appId;
     env.PRIVY_APP_SECRET = original.appSecret;
-    env.PRIVY_API_BASE_URL = original.apiBaseUrl;
   });
 
   it("logs an unavailable exact Config admission without Provider access", async () => {

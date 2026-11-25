@@ -15,9 +15,6 @@ export interface KeychainUtilaConfig {
   /** Utila Solana network resource (for example, "networks/solana-devnet") */
   network: string;
 
-  /** API base URL (default: "https://api.utila.io") */
-  apiBaseUrl?: string;
-
   /** Polling interval in milliseconds (default: 1000) */
   pollIntervalMs?: number;
 

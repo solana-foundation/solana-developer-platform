@@ -9,9 +9,6 @@ export interface KeychainPrivyConfig {
   /** Privy application secret */
   appSecret: string;
 
-  /** API base URL (default: "https://api.privy.io/v1") */
-  apiBaseUrl?: string;
-
   /** Optional delay in ms between concurrent signing requests (default: 0) */
   requestDelayMs?: number;
 

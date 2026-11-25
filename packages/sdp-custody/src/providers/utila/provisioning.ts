@@ -1,6 +1,6 @@
 import { summarizeUpstreamErrorBody } from "@sdp/redaction/upstream-error";
 import { importPKCS8, SignJWT } from "jose";
-import { assertHttpsBaseUrl, normalizePem } from "#/shared/common";
+import { normalizePem } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
 
@@ -16,7 +16,6 @@ export interface UtilaProvisioningConfig {
   serviceAccountPrivateKeyPem?: string;
   vaultId?: string;
   network?: "networks/solana-mainnet" | "networks/solana-devnet";
-  apiBaseUrl?: string;
 }
 
 export interface ProvisionUtilaResult {
@@ -53,7 +52,6 @@ export async function provisionUtilaWallet(
 
   // Create a new Solana sub-wallet inside the configured vault. Passing `networks`
   // makes Utila derive the Solana address as part of wallet creation.
-  const apiBaseUrl = normalizeUtilaApiBaseUrl(config.apiBaseUrl);
   const token = await mintUtilaAccessToken(
     runtime,
     serviceAccountEmail,
@@ -61,7 +59,7 @@ export async function provisionUtilaWallet(
   );
 
   const response = await runtime.fetch(
-    `${apiBaseUrl}/v2/vaults/${encodeURIComponent(vaultId)}/wallets`,
+    `${UTILA_API_ORIGIN}/v2/vaults/${encodeURIComponent(vaultId)}/wallets`,
     {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
@@ -102,7 +100,7 @@ interface UtilaCreateWalletResponse {
 }
 
 const UTILA_API_AUDIENCE = "https://api.utila.io/";
-const DEFAULT_UTILA_API_BASE_URL = "https://api.utila.io";
+const UTILA_API_ORIGIN = "https://api.utila.io";
 
 /** Mint a short-lived Utila service-account JWT for the REST API. */
 async function mintUtilaAccessToken(
@@ -119,17 +117,6 @@ async function mintUtilaAccessToken(
     .setIssuedAt(now)
     .setExpirationTime(now + 5 * 60)
     .sign(privateKey);
-}
-
-function normalizeUtilaApiBaseUrl(value?: string): string {
-  const url = assertHttpsBaseUrl(value ?? DEFAULT_UTILA_API_BASE_URL, "Utila");
-  let end = url.length;
-
-  while (end > 0 && url.charCodeAt(end - 1) === 47) {
-    end -= 1;
-  }
-
-  return url.slice(0, end);
 }
 
 function normalizeUtilaVaultId(value: string): string {

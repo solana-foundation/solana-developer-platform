@@ -531,7 +531,6 @@ export class SigningService {
       apiSecretPem: options.apiSecretPem,
       vaultAccountId: options.vaultAccountId,
       assetId: options.assetId ?? "SOL",
-      apiBaseUrl: this.env.FIREBLOCKS_API_BASE_URL,
     });
 
     const publicKey = await adapter.getPublicKey();

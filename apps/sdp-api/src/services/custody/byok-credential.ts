@@ -1,14 +1,13 @@
 import { createPrivateKey } from "node:crypto";
 import { checkFireblocksCredential } from "@sdp/custody/providers/fireblocks/credential";
+import { checkPrivyCredential } from "@sdp/custody/providers/privy/credential";
 import { hashString } from "@sdp/payments/hash";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { ByokCustodyProvider } from "@sdp/types/custody";
 import { z } from "zod";
 import { badRequest, internalError } from "@/lib/errors";
-import {
-  checkPrivyCredential,
-  getPrivyProviderAccountFingerprint,
-} from "@/services/custody/privy-credential";
+import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";
+import { createRuntime } from "@/services/custody/provisioning";
 import type { Env } from "@/types/env";
 
 export const privyAuthenticationSchema = z
@@ -123,7 +122,7 @@ export async function checkByokCredential(
   credential: ByokCredentialAuthentication
 ): Promise<ByokCredentialCheck> {
   if (credential.provider === "privy") {
-    const status = await checkPrivyCredential(env, credential);
+    const status = await checkPrivyCredential(createRuntime(), credential);
     return status === "success"
       ? { status, fingerprint: await getPrivyProviderAccountFingerprint(credential.appId) }
       : { status };
@@ -133,7 +132,6 @@ export async function checkByokCredential(
     privateKeyPem: credential.apiSecretPem,
     vaultAccountId: credential.vaultAccountId,
     assetId: credential.assetId,
-    apiBaseUrl: env.FIREBLOCKS_API_BASE_URL,
   });
   if (result.status !== "success") return result;
   // Vault numbers repeat across workspaces; bind rotation to the actual address.

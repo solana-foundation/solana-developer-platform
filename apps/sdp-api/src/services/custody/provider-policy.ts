@@ -7,6 +7,7 @@ import {
   readFireblocksPolicy,
 } from "@sdp/custody/providers/fireblocks/policy";
 import { resolveFireblocksTransferAsset } from "@sdp/custody/providers/fireblocks/transfers";
+import { readPrivyWalletPolicy } from "@sdp/custody/providers/privy/policy";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import type { ProviderPolicyCheck } from "@sdp/types/custody";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
@@ -23,7 +24,6 @@ import {
 } from "@/services/stores/custody-policy.store";
 import type { Env } from "@/types/env";
 import { parseByokCredential } from "./byok-credential";
-import { readPrivyWalletPolicy } from "./privy-policy";
 
 /** A batch claims up to 25 wallets; at most this many provider reads run at once. */
 const PROVIDER_READ_CONCURRENCY = 5;
@@ -56,14 +56,11 @@ async function inspectBatch(
       }
       const credential = await credentialRead;
       if (credential.provider === "privy") {
-        return await readPrivyWalletPolicy(env, credential, target.wallet_id);
+        return await readPrivyWalletPolicy(proposalRuntime, credential, target.wallet_id);
       }
       let policyRead = policies.get(target.provider_credential_id);
       if (!policyRead) {
-        policyRead = readFireblocksPolicy(proposalRuntime, {
-          ...credential,
-          apiBaseUrl: env.FIREBLOCKS_API_BASE_URL,
-        });
+        policyRead = readFireblocksPolicy(proposalRuntime, credential);
         policies.set(target.provider_credential_id, policyRead);
       }
       const policy = await policyRead;
@@ -93,7 +90,7 @@ async function inspectBatch(
       if (!mint) throw new Error("No canonical USDC mint for this cluster");
       const usdc = await resolveFireblocksTransferAsset(
         proposalRuntime,
-        { ...credential, apiBaseUrl: env.FIREBLOCKS_API_BASE_URL },
+        credential,
         credential.assetId,
         mint
       );

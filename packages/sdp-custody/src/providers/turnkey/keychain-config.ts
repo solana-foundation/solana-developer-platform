@@ -12,9 +12,6 @@ export interface KeychainTurnkeyConfig {
   /** Turnkey organization ID */
   organizationId: string;
 
-  /** API base URL (default: "https://api.turnkey.com") */
-  apiBaseUrl?: string;
-
   /** Optional delay in ms between concurrent signing requests (default: 0) */
   requestDelayMs?: number;
 

@@ -92,9 +92,10 @@ erases expired staging copies in bounded batches. Responses expose only public C
 for stored credentials, the API user ID suffix. Rotations generate a new key and CSR.
 
 The project environment selects the asset: `SOL_TEST` for sandbox and `SOL` for production.
-The encrypted credential pins that choice. The API endpoint comes only from the deployment's
-`FIREBLOCKS_API_BASE_URL`; credential submissions cannot override either the endpoint or asset.
-The endpoint must serve the workspace owning the API user.
+The encrypted credential pins that choice. The Fireblocks API endpoint is fixed in code
+(`https://api.fireblocks.io`); neither deployment settings nor credential submissions can
+override the endpoint, and credential submissions cannot override the asset. The API user
+must belong to a workspace that endpoint serves.
 
 Verification reads each vault address using `FireblocksSigner` from
 `@solana/keychain-fireblocks` and attaches those existing wallets. It does not create a vault,

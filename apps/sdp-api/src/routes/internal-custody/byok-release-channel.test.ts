@@ -36,7 +36,6 @@ const CUSTODY_WALLET_ID = "cwlt_byok_release_channel_installed";
 const SEEDED_AT = "2026-01-01T00:00:00.000Z";
 const APP_ID = "privy-app-1234";
 const APP_SECRET = "exact secret";
-const PRIVY_API_BASE_URL = "https://privy.byok-release-channel.test/v1";
 const CHANNEL_REFUSAL = {
   code: "FORBIDDEN",
   message: "The privy custody provider is not available in this release channel for byok custody.",
@@ -250,7 +249,6 @@ describe("BYOK Privy outside the release channel", () => {
     backend: env.CREDENTIAL_SECRET_STORE_BACKEND,
     encryptionKey: env.CUSTODY_ENCRYPTION_KEY,
     fingerprintPepper: env.CREDENTIAL_FINGERPRINT_PEPPER,
-    privyApiBaseUrl: env.PRIVY_API_BASE_URL,
   };
   const providerFetch = vi.fn<typeof fetch>();
 
@@ -261,7 +259,6 @@ describe("BYOK Privy outside the release channel", () => {
     env.CREDENTIAL_SECRET_STORE_BACKEND = "encrypted_db";
     env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 9).toString("base64");
     env.CREDENTIAL_FINGERPRINT_PEPPER = "byok-release-channel-fingerprint-pepper";
-    env.PRIVY_API_BASE_URL = PRIVY_API_BASE_URL;
     clerkToken = await seedCustodyAdmin(env, {
       organizationId: ORGANIZATION_ID,
       userId: USER_ID,
@@ -278,7 +275,6 @@ describe("BYOK Privy outside the release channel", () => {
     env.CREDENTIAL_SECRET_STORE_BACKEND = original.backend;
     env.CUSTODY_ENCRYPTION_KEY = original.encryptionKey;
     env.CREDENTIAL_FINGERPRINT_PEPPER = original.fingerprintPepper;
-    env.PRIVY_API_BASE_URL = original.privyApiBaseUrl;
     await clearKVStores(env);
   });
 
@@ -373,7 +369,7 @@ describe("BYOK Privy outside the release channel", () => {
     });
     expect(providerFetch).toHaveBeenCalledOnce();
     const [providerUrl, providerInit] = required(providerFetch.mock.calls[0]);
-    expect(providerUrl).toBe(`${PRIVY_API_BASE_URL}/wallets/ext_wal_sdp_${CONNECTION_ID}`);
+    expect(providerUrl).toBe(`https://api.privy.io/v1/wallets/ext_wal_sdp_${CONNECTION_ID}`);
     expect(providerInit).toMatchObject({ method: "GET" });
   });
 

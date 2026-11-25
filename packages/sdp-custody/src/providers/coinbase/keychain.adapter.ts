@@ -50,7 +50,6 @@ export class KeychainCoinbaseAdapter extends BaseKeychainAdapter {
       cdpApiKeySecret: this.config.apiKeySecret,
       cdpWalletSecret: this.config.walletSecret,
       address: denormalizeCoinbaseWalletId(normalizedWalletId),
-      baseUrl: this.config.apiBaseUrl,
       requestDelayMs: this.config.requestDelayMs,
     }).catch((error: unknown) => {
       if (this.signerByWalletId.get(cacheKey) === created) {

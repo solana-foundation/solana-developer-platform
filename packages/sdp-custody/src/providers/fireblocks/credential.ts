@@ -10,7 +10,7 @@ const credentialErrorSchema = z.object({
 
 /** One authenticated address read. Never exposes a signer or proposes a transaction. */
 export async function checkFireblocksCredential(
-  input: Parameters<typeof createFireblocksSigner>[0]
+  input: Omit<Parameters<typeof createFireblocksSigner>[0], "apiBaseUrl">
 ): Promise<{ status: "success"; address: string } | { status: "failed" | "retry_unknown" }> {
   try {
     const signer = await createFireblocksSigner(input);
