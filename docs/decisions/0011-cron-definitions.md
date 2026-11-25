@@ -49,6 +49,27 @@ names and a no-op `Observability` layer.
   `cron`, `environment` (cluster scope), `status`, and `duration_ms`. The
   leftover Sentry abstraction is removed from sdp-api.
 
+### Earn wakeups (2026-11-24)
+
+The cron service also owns Earn's PostgreSQL notification listener and bounded
+consumers. `reconcile-operations` wakes the same consumers every two seconds as
+a recovery fallback; it does not wait for a whole batch to finish. Notifications
+carry only an environment hint. Durable rows, current principal authorization
+and fenced claims remain the authority to execute.
+
+An observation-only lane shares this wakeup and the minute movement sweep's
+per-row claims. It batches transaction status reads without signing,
+rebroadcasting or inferring expiry. The cron service's environment and shutdown
+gates apply to both lanes. Consumer failures emit error run events independently
+of the scheduled wake event. Financial reducers and expiry recovery are shared
+with the existing sweep.
+
+Recovery batches chain reads before taking four-row claims for ready reducers.
+The read reserves nothing, so a slow provider cannot lease the remaining backlog
+away from the fast observer. Evidence is local to that sweep and checked against
+the fresh claimed transaction; changed state invalidates earlier absence proof.
+No extra queue or persistent evidence cache is introduced.
+
 ## Considered options
 
 - **Keep `job.ts` as break-glass.** Rejected: paused since the cron service shipped,

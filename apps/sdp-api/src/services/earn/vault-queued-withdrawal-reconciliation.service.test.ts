@@ -117,6 +117,7 @@ function action(
     updated_at: "2026-09-18T00:00:00.000Z",
     last_checked_at: null,
     unknown_signature_observed_at: "2026-09-18T00:00:00.000Z",
+    absent_creation_observed_at: null,
     ...overrides,
   };
 }

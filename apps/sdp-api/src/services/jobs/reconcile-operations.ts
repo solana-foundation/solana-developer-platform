@@ -36,6 +36,35 @@ async function recordRecoveryFailure(
   });
 }
 
+/** Execute one fenced claim through the canonical recorded-principal and recovery path. */
+export async function recoverOperationClaim(
+  env: Env,
+  scope: OperationScope,
+  claim: OperationClaim,
+  observations: ReturnType<typeof createOperationObservationRpc>
+): Promise<boolean> {
+  const service = createOperationsService(env);
+  try {
+    await runAsRecordedOperationPrincipal(env, scope, claim, () =>
+      advanceEarnOperation(env, scope, claim, observations)
+    );
+    return true;
+  } catch (error) {
+    getLogger().error({ error, operationId: claim.operation.id }, "Operation recovery failed");
+    try {
+      await recordRecoveryFailure(service, scope, claim, error);
+    } catch (projectionError) {
+      getLogger().error(
+        { error: projectionError, operationId: claim.operation.id },
+        "Operation failure projection failed"
+      );
+    }
+    return false;
+  } finally {
+    await service.repository.releaseRecovery(scope, claim);
+  }
+}
+
 /** Resume durable attempts; a worker never executes an unsubmitted preparation. */
 export async function reconcileOperations(env: Env): Promise<void> {
   const runExpiresAt = Date.now() + OPERATION_WORKER_BUDGET_MS;
@@ -57,25 +86,11 @@ export async function reconcileOperations(env: Env): Promise<void> {
       // Lease only work that can start now, never the whole candidate page.
       const claim = await service.repository.claimRecovery(scope, candidate.id);
       if (claim === null) continue;
-      try {
-        if (Date.now() >= runExpiresAt) return;
-        await runAsRecordedOperationPrincipal(env, scope, claim, () =>
-          advanceEarnOperation(env, scope, claim, observations)
-        );
-      } catch (error) {
-        failures += 1;
-        getLogger().error({ error, operationId: candidate.id }, "Operation recovery failed");
-        try {
-          await recordRecoveryFailure(service, scope, claim, error);
-        } catch (projectionError) {
-          getLogger().error(
-            { error: projectionError, operationId: candidate.id },
-            "Operation failure projection failed"
-          );
-        }
-      } finally {
+      if (Date.now() >= runExpiresAt) {
         await service.repository.releaseRecovery(scope, claim);
+        return;
       }
+      if (!(await recoverOperationClaim(env, scope, claim, observations))) failures += 1;
     }
   }
   const workers = await Promise.allSettled(Array.from({ length: 4 }, recoverNext));

@@ -45,6 +45,7 @@ export const earnCorePositionSchema = earnWalletPositionSchema.omit({ ownerAddre
   createdAt: nullableDate,
   discovered: z.boolean().optional(),
   costBasisKnown: z.boolean(),
+  balanceReadContext: earnBalanceReadContextSchema.optional(),
 });
 const summarySchema = earnWalletPositionSummaryResponse.shape.data.shape.summary;
 const strategyTotalSchema = summarySchema.shape.totalsByStrategy.element;

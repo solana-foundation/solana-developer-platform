@@ -40,6 +40,8 @@ import { assertProjectEnvironmentsConfig, environmentAllowed } from "@/lib/produ
 import type { BackgroundRunner } from "@/runtime/background";
 import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
 import { runWithLogContext } from "@/runtime/logger";
+import { startEarnTransactionObserver } from "@/services/jobs/earn-transaction-observer";
+import { startOperationWorker } from "@/services/jobs/operation-worker";
 import type { Env } from "@/types/env";
 import type { CronDefinition } from "./define-cron";
 import { type CronRegistration, logCronRun } from "./run-event";
@@ -224,6 +226,17 @@ export function startCron(deps: CronDeps): CronHandle | null {
   // work gets registered after the awaitAll() snapshot is taken.
   let stopping = false;
   const tasks: ScheduledTask[] = [];
+  const operationEnvironments = registrationEnvironments(operationsCron, deps.env).filter(
+    (environment): environment is SdpEnvironment => environment !== null
+  );
+  const transactionObserver = startEarnTransactionObserver(
+    deps.env,
+    deps.bg,
+    operationEnvironments
+  );
+  const operationWorker = startOperationWorker(deps.env, deps.bg, operationEnvironments, {
+    wakeObserver: (environment) => transactionObserver.wake(environment),
+  });
 
   for (const definition of CRON_DEFINITIONS) {
     const enabled = definition.enabled(deps.env);
@@ -258,8 +271,13 @@ export function startCron(deps: CronDeps): CronHandle | null {
           });
         }, CRON_SLOT_DEADLINE_MS);
         deadline.unref();
+        // Notifications and periodic recovery wake the same bounded consumers.
+        const scheduledDefinition =
+          definition === operationsCron && environment !== null
+            ? { ...definition, run: async () => operationWorker.wake(environment) }
+            : definition;
         deps.bg.run(
-          runSlot(definition, registration, deps.env).finally(() => {
+          runSlot(scheduledDefinition, registration, deps.env).finally(() => {
             clearTimeout(deadline);
             if (inFlight === slot) {
               inFlight = null;
@@ -275,11 +293,12 @@ export function startCron(deps: CronDeps): CronHandle | null {
   }
 
   return {
-    stop() {
+    async stop() {
       stopping = true;
       for (const task of tasks) {
         task.stop();
       }
+      await Promise.all([operationWorker.stop(), transactionObserver.stop()]);
     },
   };
 }

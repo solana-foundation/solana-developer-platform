@@ -125,7 +125,10 @@ describe("Treasury balance coordinator", () => {
     await act(async () => {
       await result.current.refreshOperation("operation-movement", "closed-position", "wallet");
     });
-    expect(mocks.refreshPositions).toHaveBeenCalledWith(["operation-movement"]);
+    expect(mocks.refreshPositions).toHaveBeenCalledWith(
+      ["operation-movement"],
+      new Map([["operation-movement", "closed-position"]])
+    );
     expect(mocks.refreshWallets).toHaveBeenCalledWith(101, ["wallet"]);
     expect(result.current.walletsError).toBeUndefined();
     expect(result.current.balancesRefreshing).toBe(false);
@@ -305,7 +308,10 @@ it("keeps retries within the API limit after more than 100 confirmations in one 
     await vi.advanceTimersByTimeAsync(5_000);
   });
   const expected = activities.map(({ movement }) => movement.movementId);
-  expect(mocks.refreshPositions).toHaveBeenLastCalledWith(expected);
+  expect(mocks.refreshPositions).toHaveBeenLastCalledWith(
+    expected,
+    new Map(expected.map((id) => [id, "position"]))
+  );
   expect(mocks.refreshPositions.mock.calls.every(([ids]) => ids.length <= 100)).toBe(true);
   expect(result.current.walletsError).toBeUndefined();
   expect(result.current.balanceOf(position)).toEqual({ value: "10", syncing: false });
@@ -504,4 +510,18 @@ describe("failed refresh retries", () => {
       Reflect.deleteProperty(document, "hidden");
     }
   });
+});
+
+it("coalesces one batch of completions into a single position and wallet refresh", async () => {
+  const { result } = renderHook(() => useTreasuryBalances([]));
+  await act(async () => {
+    await Promise.all(
+      Array.from({ length: 100 }, (_, i) =>
+        result.current.refreshOperation(`batch-${i}`, "position", "wallet")
+      )
+    );
+  });
+  expect(mocks.refreshPositions).toHaveBeenCalledTimes(1);
+  expect(mocks.refreshPositions.mock.calls[0]?.[0]).toHaveLength(100);
+  expect(mocks.refreshWallets).toHaveBeenCalledExactlyOnceWith(101, ["wallet"]);
 });

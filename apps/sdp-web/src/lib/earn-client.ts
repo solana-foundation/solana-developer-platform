@@ -56,6 +56,7 @@ export type EarnPositionQuery = Pick<EarnPositionsQuery, "afterMovementIds">;
 
 /** Recovery filters are independent of the initiating dashboard surface. */
 export interface EarnOperationsQuery {
+  operationIds?: string;
   kind?: Operation["kind"];
   status?: OperationStatusFilter;
   ownerAddress?: string;

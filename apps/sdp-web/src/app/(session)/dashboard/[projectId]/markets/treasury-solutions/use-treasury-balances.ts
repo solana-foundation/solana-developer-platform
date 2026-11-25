@@ -44,6 +44,7 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
   const failures = useRef(0);
   const requested = useRef(new Set<string>());
   const latestRead = vaults.reads.at(-1);
+  const operationRefresh = useRef<Promise<void> | undefined>(undefined);
 
   const beginSubmission = useCallback((target: SubmissionTarget) => {
     // Each disposer owns only this attempt, including close/reopen while a POST is pending.
@@ -104,7 +105,7 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
       try {
         const ids = [...request.movementIds];
         const positionRead = Promise.resolve(
-          ids.length > 100
+          ids.length > 0
             ? vaults.refresh(
                 ids,
                 new Map(
@@ -254,6 +255,30 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
     ]
   );
 
+  const refreshOperation = useCallback(
+    (movementId: string, positionId: string, custodyWalletId: string) => {
+      operationTargets.current.set(movementId, { positionId, custodyWalletId });
+      movementWalletIds.current.set(movementId, custodyWalletId);
+      if (operationRefresh.current) return operationRefresh.current;
+      // One observer batch can complete many movements in the same render. Refresh
+      // their combined position/wallet set once, then drain arrivals during that read.
+      const started = Promise.resolve().then(async () => {
+        while (operationTargets.current.size > 0) {
+          const requestedIds = [...operationTargets.current.keys()];
+          await refresh();
+          if (requestedIds.some((id) => operationTargets.current.has(id))) return;
+        }
+      });
+      operationRefresh.current = started;
+      const settle = () => {
+        operationRefresh.current = undefined;
+      };
+      started.then(settle, settle);
+      return started;
+    },
+    [refresh]
+  );
+
   return {
     positions: vaults.positions,
     positionsError: vaults.error,
@@ -276,10 +301,6 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
     balanceOf,
     beginSubmission,
     refresh,
-    refreshOperation: (movementId: string, positionId: string, custodyWalletId: string) => {
-      operationTargets.current.set(movementId, { positionId, custodyWalletId });
-      movementWalletIds.current.set(movementId, custodyWalletId);
-      return refresh([movementId]);
-    },
+    refreshOperation,
   };
 }

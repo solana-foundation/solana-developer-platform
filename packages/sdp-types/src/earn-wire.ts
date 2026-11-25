@@ -12,6 +12,12 @@ import { SOLANA_CLUSTERS } from "./well-known-tokens";
 export const earnBalanceReadContextSchema = z.object({
   afterMovementIds: z.array(z.string()).max(100),
   minimumSlot: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  minimumSlotMovementId: z
+    .string()
+    .optional()
+    .describe(
+      "On a position detail read, the accepted movement establishing minimumSlot. Retain this ID as that position's freshness floor instead of accumulating completed movements."
+    ),
 });
 
 export const earnVaultDepositSchema: z.ZodType<EarnVaultDeposit> = z.object({

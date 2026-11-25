@@ -309,12 +309,20 @@ selector whose holding cannot yet be verified.
 By default the activity feed polls active work and the newest 50 history
 entries. Older pages load only on request. Expanded history keeps its snapshot
 and cursor while active work stays live; Refresh returns to the newest page. A pending row that leaves the active query stays
-mounted until its existing detail poll observes completion, including when it
-is older than the current history page. With 1,000 terminal movement-backed
-operations and no active work, steady-state polling drops from ten HTTP calls
-and about 2,000 projection DB reads to two HTTP calls and about 100 projection
-DB reads. These counts exclude unchanged authorization and list queries and
-add no Solana RPC calls. The active filter uses a partial project-scoped index.
+mounted until shared observation sees completion, including when it is older
+than the current history page. Recent and foreground work shares one bounded
+100-ID request each second per dashboard cache. Provider waits retain the
+15-second feed cadence. Direct movement or queued request projections use two
+bulk DB reads per page (three for a mixed page), instead of two per row.
+Specialized release/recovery projections retain their proof checks under bounded
+concurrency. These counts exclude authorization and list queries and add no
+Solana RPC calls. The active filter uses a partial project-scoped index.
+
+Completion refreshes the affected position and funding wallet together at the
+acknowledged slot. A failed or unavailable read preserves the previous pair.
+Each position retains its strongest authorized movement proof instead of every
+completed movement in the session. A full exit returns its persisted closure on
+that first refresh, including when the transaction observer skipped closure.
 
 Withdrawal planning quotes each route once and reuses its protection floor.
 Token-sized exits add one cold share-mint precision read, zero warm reads;
@@ -338,16 +346,50 @@ one live request read when present. It targets the current owner request, not a
 historical cycle. No provider account is fetched twice in one choice read.
 
 Operation recovery uses the partial index on environment, `next_check_at` and
-ID to read at most 100 due candidates. Four workers claim only work ready to
-start. Unchanged pending states back off from 15 seconds to five minutes;
-`sign_in_provider` waits cap at one minute. Status progress resets the delay to
-15 seconds. Terminal operations are excluded from due scans.
+ID. Four competing consumers per environment claim only work ready to start;
+one slow signer cannot block free consumers. A dedicated PostgreSQL listener
+wakes consumers after commit, on startup and after reconnection. Hints contain
+only the environment, never execution authority. A two-second recovery wake
+covers missed notifications. Error-free operations in SDP's execution pipeline
+recheck every two seconds for the first two minutes after acceptance. Older
+pending states back off from 15 seconds to five minutes; `sign_in_provider`
+waits cap at one minute.
+Status progress resets the delay to 15 seconds. Terminal operations are
+excluded from due scans.
 
-Within one worker run and exact organization/project/environment/principal,
+The same listener wakes an observation-only lane for direct movement and queued
+action signatures. Each pass claims up to 64 rows of each kind with expiring,
+fenced PostgreSQL claims, then makes one batched status request. At most two
+passes and four reducers per pass run per environment and replica. Direct and
+queued work share the processing budget fairly. Recent pending transactions
+retry after 250 ms, older work after 30 seconds and failed reads after five
+seconds. Obsolete queued hints retire in bounded indexed pages without changing
+financial history. Fast observation never signs, broadcasts or treats missing
+evidence as failure. Both paths use the same financial reducers; queued escrow
+is not payout and missing amounts stay unknown.
+
+The minute recovery sweep reads one available snapshot, up to 256 movements or
+128 queued actions, without reserving it. Each batch needs one status request,
+one finalized-height read only when needed, and one shared absence-proof read
+per endpoint only for expired signatures. It then takes fresh claims for four
+rows at a time, leaving later rows available to the fast observer while provider
+reads wait. Both lanes share the same fenced claims.
+
+Evidence lives only in that invocation and is matched to the claimed row's exact
+signature, signed bytes, expiry and tenant. Changed state or absence markers
+disable the earlier negative evidence. Provider and finalized receipt proofs
+still run live. Recovery can rebroadcast only recorded bytes and retains the
+existing conservative expiry rules. Recovery preserves main's single status
+batch while processing four rows concurrently instead of serially. It adds no
+persistent cache or extra queue. Concurrent observers may overlap a read before
+either claims a row; financial transitions still use the canonical guarded
+writers.
+
+Within a short observation window and exact organization/project/environment/principal,
 concurrent signature observations share a lazy RPC client and batch at most
 256 signatures. Four simultaneous same-authority status requests become one;
 two confirmed-height reads during custody proposal handling become one. There
-is no cross-principal sharing or cache across runs. Failed height reads and
+is no cross-principal sharing or long-lived height cache. Failed height reads and
 completed signature batches are evicted; missing signatures never become
 durable evidence of nonexecution. Domain-settlement projections read their
 ledger before constructing a transaction or making execution RPC calls.
@@ -357,6 +399,87 @@ maximum-compute probe and one final simulation. Size overflow allows one compact
 retry. Removing the split path removes one baseline token-balance read and two
 standalone-swap simulations from an oversized preparation. No follow-up
 swap-status polling or second deposit preparation is needed.
+
+## Reconciliation responsibilities
+
+Previously, submission saved accepted work for the next 15-second operation
+tick. Background movement observation ran every minute; a detail read could
+observe sooner. These scheduling delays made Earn feel slow even after the
+chain had progressed. The new workers wake after commit, and the fast observer
+writes that progress to the financial ledger between minute ticks. This changes
+when SDP looks for evidence, not the evidence required for completion.
+
+Accepted work is durable before workers wake. The operation worker executes it;
+the fast observer records chain progress; the dashboard reads that durable
+progress. Scheduled recovery handles missed wakeups and unresolved obligations.
+
+| Component | Cadence | Responsibility |
+| --- | --- | --- |
+| Operation workers | Commit hint, startup/reconnect, two-second fallback | Advance accepted work through authorization, signing and broadcast. Four consumers per environment claim only work ready to start. |
+| Fast transaction observer | Same wakeups; recent work due again after 250 ms | Batch direct and queued-action signatures and record observed progress. Never sign, send or infer expiry. |
+| Movement recovery | Every minute | Observe unresolved signed transactions, retry identical bytes and apply proven expiry. Claims four rows at a time after shared chain reads. |
+| Queued withdrawal recovery | Alongside movement recovery | Track request/cancel transactions and provider fulfillment. Pending requests back off toward known maturity; escrow is never reported as payout. |
+| Provider-order settlement | Alongside movement recovery | Verify provider delivery and finalized destination evidence independently of the source transaction. |
+| Payout and receipt repair | After the movement pass | Fill missing withdrawal amounts or deposit receipts from finalized evidence. Never invent a value. |
+| Abandoned-build cleanup | Within queued recovery | Release expired unsigned-build reservations after finalized-height proof; retain recovery metadata. |
+| Catalogue sync | Startup, then roughly hourly | Discover and validate strategy identity and availability. |
+| Metrics refresh | Every five minutes | Refresh rates, TVL and risk figures for admitted strategies. |
+
+Shared custody support remains separate: Fireblocks proposal observation runs
+every 30 seconds, custody-policy checks every minute, and sponsorship-budget
+reconciliation every minute. These observe provider outcomes and reconcile
+existing reservations; they are not additional Earn execution queues.
+
+The dashboard shares one active-operation request per second, capped at 100 IDs,
+then backs off as work ages. Completion refreshes the affected position and
+wallet together with the movement's read floor. Detail reads retain a bounded
+observation-only chain read-through. Neither UI polling nor a lost notification
+is required for recovery, and stopping new Earn admission does not stop existing
+money obligations from completing.
+
+## Local latency evidence (PRO-2578)
+
+These checks cover scheduling, request budgets and balance freshness on top of
+main `c65066528`. They do not measure live signing, provider settlement or a
+signed-in browser. The local PostgreSQL and Redis instances are disposable;
+chain and provider responses are simulated.
+
+- Operation pickup: 16 accepted operations reached their fenced worker claim
+  in 28.40 ms median and 34.49 ms p95/max. The controlled-clock comparison
+  places acceptance just after a tick: 14,999 ms previously, zero timer delay
+  with notifications, and 1,999 ms with a lost notification.
+- UI budget: with 500 pending activity rows mounted, the foreground completion
+  reaches the cache within one second using one status request. Passive rows add
+  no individual timers. A 350-row disappearing backlog drains in four requests
+  capped at 100 IDs each.
+- Projection budget: 50 direct operations or 50 queued requests need two DB
+  reads instead of 100, with equivalent results. A mixed page needs three.
+  Validating 100 balance proofs also drops from 100 serial DB reads to one;
+  signature observation remains one shared RPC read.
+- Refresh budget: affected positions and wallets refresh together; 120
+  successive actions keep at most two movement proofs in each detail request
+  and one retained proof in the next portfolio read.
+  In the two-wallet fixture, refreshing one affected wallet drops from three
+  HTTP requests (inventory and both balances) to one balance request.
+- Recovery backlog: 256 movements or 128 queued actions use one status request
+  per batch. Twelve expired rows spanning three processing groups share one
+  finalized height and one corroborating status read per endpoint per sweep.
+  Repeating the movement sweep reads again; evidence does not survive between
+  invocations.
+- Backlog isolation: no rows are leased while the shared RPC waits. With four
+  provider reads blocked, the fast observer still advances later work and a
+  newly submitted movement or queued action. Competing workers take disjoint
+  four-row claims. Changed absence markers or signed bytes cannot reuse earlier
+  recovery evidence.
+
+The competing-observer burst processes 129 finalized movements with three
+status reads. It took 70 ms locally and 201 ms during a concurrent test run;
+these mocked-chain results establish bounded draining, not a production SLA.
+
+Provider approval and asynchronous redemption waits remain explicit operation
+states. Live Treasury/Embedded Yield timings, preparation/initial-loading
+profiles and deployment-scale load measurements remain PRO-2578 acceptance
+work; these local results do not close that ticket.
 
 ## Rollout and remaining gates
 

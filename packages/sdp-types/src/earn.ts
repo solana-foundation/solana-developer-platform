@@ -285,7 +285,12 @@ export interface EarnVaultPositionsPage {
   hasMore: boolean;
   nextCursor: string | null;
   /** Present when afterMovementIds constrained reads of their affected positions. */
-  balanceReadContext?: { afterMovementIds: string[]; minimumSlot: number };
+  balanceReadContext?: {
+    afterMovementIds: string[];
+    minimumSlot: number;
+    /** Single-position reads identify the movement proving the strongest floor. */
+    minimumSlotMovementId?: string;
+  };
 }
 
 /** One live position held by a partner end user's wallet. */
@@ -822,6 +827,12 @@ export const EARN_IN_FLIGHT_VAULT_WITHDRAWAL_ACTION_STATUSES = [
   "submitted",
   "confirmed",
 ] as const satisfies readonly EarnVaultWithdrawalActionStatus[];
+
+/** Request states still waiting for their signed action's authenticated projection. */
+export const EARN_UNPROJECTED_VAULT_WITHDRAWAL_REQUEST_STATUSES = [
+  "creating",
+  "cancelling",
+] as const satisfies readonly EarnVaultWithdrawalRequestStatus[];
 
 /** Actions whose transaction reached the chain. */
 export const EARN_LANDED_VAULT_WITHDRAWAL_ACTION_STATUSES = [

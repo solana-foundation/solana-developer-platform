@@ -2014,6 +2014,14 @@ describe("Earn core operation HTTP flow", () => {
     expect(await active.json()).toMatchObject({
       data: { operations: [{ id: operation.id, status: "prepared" }], nextCursor: null },
     });
+    const batch = await request(
+      `operations?ownerAddress=${owner}&operationIds=${operation.id},missing`
+    );
+    expect(await batch.json()).toMatchObject({ data: { operations: [{ id: operation.id }] } });
+    const hidden = await request(`operations?operationIds=${operation.id}`);
+    expect(await hidden.json()).toMatchObject({ data: { operations: [] } });
+    const omitted = await request(`operations?ownerAddress=${owner}&operationIds=missing`);
+    expect(await omitted.json()).toMatchObject({ data: { operations: [] } });
     const other = await seedEarnAuthzTenant(env, "core_operation_other", {
       environment: "sandbox",
     });
@@ -2022,6 +2030,14 @@ describe("Earn core operation HTTP flow", () => {
       grants: ["earn.read", "earn.execute"],
       environment: "sandbox",
     });
+    const foreignBatch = await request(
+      `operations?ownerAddress=${owner}&operationIds=${operation.id}`,
+      "GET",
+      undefined,
+      undefined,
+      otherKey
+    );
+    expect(await foreignBatch.json()).toMatchObject({ data: { operations: [] } });
     expect(
       (await request(`operations/${operation.id}`, "GET", undefined, undefined, otherKey)).status
     ).toBe(404);
@@ -2037,5 +2053,15 @@ describe("Earn core operation HTTP flow", () => {
       ).status
     ).toBe(404);
     expect(mocks.broadcast).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "",
+    "a,",
+    ",a",
+    Array.from({ length: 101 }, (_, i) => `op${i}`).join(","),
+    "a".repeat(257),
+  ])("rejects invalid operation batch IDs: %s", async (ids) => {
+    expect((await request(`operations?operationIds=${encodeURIComponent(ids)}`)).status).toBe(400);
   });
 });

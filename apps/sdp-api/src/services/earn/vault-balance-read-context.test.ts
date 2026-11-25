@@ -10,13 +10,13 @@ import {
   resolveVaultBalanceReadContext,
 } from "./vault-balance-read-context";
 
-const mocks = vi.hoisted(() => ({ movement: vi.fn(), statuses: vi.fn() }));
+const mocks = vi.hoisted(() => ({ movements: vi.fn(), statuses: vi.fn() }));
 vi.mock("@/db/client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/db/client")>()),
   getDb: vi.fn(),
 }));
 vi.mock("@/db/repositories/earn-movements.repository", () => ({
-  createPostgresEarnMovementsRepository: () => ({ getMovementById: mocks.movement }),
+  createPostgresEarnMovementsRepository: () => ({ getMovementsByIds: mocks.movements }),
 }));
 vi.mock("@sdp/rpc/solana", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@sdp/rpc/solana")>()),
@@ -54,7 +54,9 @@ installClusterRpcStub();
 beforeEach(() => {
   vi.clearAllMocks();
   resetFinalizedSignatureStatuses();
-  mocks.movement.mockResolvedValue(movement);
+  mocks.movements.mockImplementation(async ({ movementIds }: { movementIds: readonly string[] }) =>
+    movementIds.map((id) => ({ ...movement, id }))
+  );
   mocks.statuses.mockResolvedValue([status(100n), status(103n), status(102n)]);
 });
 
@@ -63,9 +65,15 @@ describe("vault balance confirmation context", () => {
     await expect(resolveInScope(input, "sandbox")).resolves.toEqual({
       afterMovementIds: input.movementIds,
       minimumSlot: 103,
+      minimumSlotMovementId: "two",
       minimumSlotByPositionId: new Map([["position", 103]]),
     });
-    expect(mocks.movement).toHaveBeenCalledWith({ movementId: "one", organizationId: "org" });
+    expect(mocks.movements).toHaveBeenCalledExactlyOnceWith({
+      movementIds: input.movementIds,
+      organizationId: "org",
+      projectId: "project",
+      environment: "sandbox",
+    });
     // The bounded devnet client: the pool memoizes one per cluster and timeout.
     expect(mocks.statuses.mock.calls[0]?.[0]).toBe(
       runInClusterScope({ projectId: "project", environment: "sandbox" }, () =>
@@ -74,11 +82,54 @@ describe("vault balance confirmation context", () => {
     );
   });
 
+  it("reads 100 movement proofs once and restores requested order before the shared RPC", async () => {
+    const ids = Array.from({ length: 100 }, (_, index) => `movement-${index}`);
+    const requested = ["movement-99", ...ids];
+    const unique = [...new Set(requested)];
+    mocks.movements.mockResolvedValue(
+      [...ids].reverse().map((id) => ({ ...movement, id, signature: `sig-${id}` }))
+    );
+    mocks.statuses.mockImplementation(async (_rpc: unknown, signatures: string[]) =>
+      signatures.map((signature) => status(BigInt(signature.replace("sig-movement-", "")) + 100n))
+    );
+
+    await expect(resolveInScope({ ...input, movementIds: requested }, "sandbox")).resolves.toEqual({
+      afterMovementIds: unique,
+      minimumSlot: 199,
+      minimumSlotMovementId: "movement-99",
+      minimumSlotByPositionId: new Map([["position", 199]]),
+    });
+    expect(mocks.movements).toHaveBeenCalledExactlyOnceWith({
+      movementIds: unique,
+      organizationId: "org",
+      projectId: "project",
+      environment: "sandbox",
+    });
+    expect(mocks.statuses).toHaveBeenCalledTimes(1);
+    expect(mocks.statuses.mock.calls[0]?.[1]).toEqual(unique.map((id) => `sig-${id}`));
+  });
+
+  it("rejects a partially visible movement batch before any chain request", async () => {
+    mocks.movements.mockResolvedValue(
+      input.movementIds.slice(0, 2).map((id) => ({ ...movement, id }))
+    );
+    await expect(resolveInScope(input, "sandbox")).rejects.toMatchObject({ statusCode: 404 });
+    expect(mocks.movements).toHaveBeenCalledTimes(1);
+    expect(mocks.statuses).not.toHaveBeenCalled();
+  });
+
   it("keeps each position's bound separate while retaining the overall wallet bound", async () => {
-    mocks.movement.mockResolvedValueOnce({ ...movement, position_id: "other" });
+    mocks.movements.mockResolvedValueOnce(
+      input.movementIds.map((id) => ({
+        ...movement,
+        id,
+        position_id: id === "one" ? "other" : movement.position_id,
+      }))
+    );
     await expect(resolveInScope(input, "sandbox")).resolves.toEqual({
       afterMovementIds: input.movementIds,
       minimumSlot: 103,
+      minimumSlotMovementId: "two",
       minimumSlotByPositionId: new Map([
         ["other", 100],
         ["position", 103],
@@ -87,7 +138,9 @@ describe("vault balance confirmation context", () => {
   });
 
   it("uses a discovered selector's ID only for its exact source and instrument", async () => {
-    mocks.movement.mockResolvedValue({ ...movement, provider: "veda", vault_address: "vault" });
+    mocks.movements.mockResolvedValue(
+      input.movementIds.map((id) => ({ ...movement, id, provider: "veda", vault_address: "vault" }))
+    );
     await expect(
       resolveInScope(
         {
@@ -98,11 +151,15 @@ describe("vault balance confirmation context", () => {
       )
     ).resolves.toMatchObject({
       minimumSlotByPositionId: new Map([["discovered-selector", 103]]),
+      minimumSlotMovementId: "two",
+      afterMovementIds: ["one", "two", "three"],
     });
   });
 
   it("rejects an unrelated detail instrument before reading signature statuses", async () => {
-    mocks.movement.mockResolvedValue({ ...movement, provider: "veda", vault_address: "other" });
+    mocks.movements.mockResolvedValue(
+      input.movementIds.map((id) => ({ ...movement, id, provider: "veda", vault_address: "other" }))
+    );
     await expect(
       resolveInScope(
         {
@@ -122,7 +179,7 @@ describe("vault balance confirmation context", () => {
     { ...movement, custody_wallet_id: "unbound" },
     { ...movement, execution_model: "custodial" },
   ])("refuses a foreign or unreadable movement before any RPC call", async (row) => {
-    mocks.movement.mockResolvedValueOnce(row);
+    mocks.movements.mockResolvedValueOnce(row === null ? [] : [{ ...row, id: "one" }]);
     await expect(resolveInScope(input, "sandbox")).rejects.toMatchObject({
       statusCode: 404,
     });
@@ -143,7 +200,7 @@ describe("vault balance confirmation context", () => {
 
   it("preserves ordinary position reads without a confirmation constraint", async () => {
     await expect(resolveInScope({ ...input, movementIds: [] }, "sandbox")).resolves.toBeUndefined();
-    expect(mocks.movement).not.toHaveBeenCalled();
+    expect(mocks.movements).not.toHaveBeenCalled();
     expect(mocks.statuses).not.toHaveBeenCalled();
   });
 });
@@ -160,6 +217,7 @@ describe("finalized signature statuses are read once", () => {
   const expected = {
     afterMovementIds: ["one", "two", "three"],
     minimumSlot: 103,
+    minimumSlotMovementId: "two",
     minimumSlotByPositionId: new Map([
       ["position-one", 100],
       ["position-two", 103],
@@ -169,11 +227,15 @@ describe("finalized signature statuses are read once", () => {
 
   beforeEach(() => {
     chain.clear();
-    mocks.movement.mockImplementation(async ({ movementId }: { movementId: string }) => ({
-      ...movement,
-      signature: `sig-${movementId}`,
-      position_id: `position-${movementId}`,
-    }));
+    mocks.movements.mockImplementation(
+      async ({ movementIds }: { movementIds: readonly string[] }) =>
+        movementIds.map((id) => ({
+          ...movement,
+          id,
+          signature: `sig-${id}`,
+          position_id: `position-${id}`,
+        }))
+    );
     mocks.statuses.mockImplementation(async (_rpc: unknown, signatures: string[]) =>
       signatures.map((signature) => chain.get(signature) ?? null)
     );
@@ -242,11 +304,14 @@ describe("finalized signature statuses are read once", () => {
       clock.mockRestore();
     }
 
-    mocks.movement.mockResolvedValueOnce({
-      ...movement,
-      environment: "production",
-      signature: "sig-one",
-    });
+    mocks.movements.mockResolvedValueOnce([
+      {
+        ...movement,
+        id: "one",
+        environment: "production",
+        signature: "sig-one",
+      },
+    ]);
     await resolveInScope(single, "production");
     expect(mocks.statuses).toHaveBeenCalledTimes(3);
   });

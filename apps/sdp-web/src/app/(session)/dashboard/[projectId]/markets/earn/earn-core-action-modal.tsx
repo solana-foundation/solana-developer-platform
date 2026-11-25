@@ -575,7 +575,7 @@ export function EarnOperationReview({
   onDone?: () => void;
   /** The strategy's share mint, so amounts in it read as shares; unknown leaves mints as they are. */
   shareMint?: string;
-  /** Set by the dialog the viewer has open: its operation is read every 2 s while SDP moves it. */
+  /** Set by the dialog the viewer has open: its recent operation joins the shared one-second observation batch. */
   foreground?: boolean;
 }) {
   const t = useTranslations();

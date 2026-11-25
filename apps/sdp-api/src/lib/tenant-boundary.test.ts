@@ -81,6 +81,9 @@ describe("tenant data-access boundary", () => {
       "db/identity.ts",
       "db/operator-access.ts",
       "cron/runner.ts",
+      // Notification and fallback wakes share the guarded operation executor.
+      "services/jobs/operation-worker.ts",
+      "services/jobs/earn-transaction-observer.ts",
       "middleware/auth.ts",
       "middleware/clerk-auth.ts",
       // Pre-link Clerk surface: resolves the Clerk-org mapping before any

@@ -1,3 +1,4 @@
+import { createClusterRpc } from "@sdp/rpc/factory";
 import { readFloor, readStamp } from "@sdp/rpc/read-context";
 import { currentClusterScope, runInClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
@@ -15,6 +16,7 @@ import {
   installClusterRpcResponder,
   type StubSignatureStatus,
 } from "@/test/helpers/cluster-rpc";
+import { deferred } from "@/test/helpers/deferred";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -52,7 +54,9 @@ vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
 
 const { reconcileEarnVaultMovements } = await import("./reconcile-earn-vault-movements");
 const {
+  reconcileEarnVaultMovementBatch,
   reconcileEarnVaultMovementReadThrough,
+  observeEarnVaultMovementStatus,
   repairUnvaluedWithdrawalPayouts,
   repairUnvaluedKaminoDeposits,
 } = await import("@/services/earn/vault-movement-reconciliation.service");
@@ -461,7 +465,11 @@ describe("settlement observations (0103): withdrawal payout and empty-holding cl
       amount_settled: "1",
       token_amount_settled: "1.0045",
     });
-    expect(getTransaction).toHaveBeenCalledWith(expect.anything(), seeded.movement.signature);
+    expect(getTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      seeded.movement.signature,
+      "finalized"
+    );
     expect(readVaultPositions).toHaveBeenCalledWith(
       { env, environment: "sandbox" },
       { owner: OWNER_ADDRESS, providerReferences: [seeded.position.vault_address] }
@@ -1020,6 +1028,246 @@ describe("reconcileEarnVaultMovementReadThrough", () => {
 });
 
 describe("reconcileEarnVaultMovements", () => {
+  it("does not lease recovery candidates while the shared RPC is pending", async () => {
+    const seeded = await Promise.all(Array.from({ length: 5 }, () => seedMovement()));
+    const statuses =
+      deferred<
+        Array<{ slot: bigint; confirmations: bigint; err: null; confirmationStatus: "confirmed" }>
+      >();
+    getSignatureStatuses.mockReturnValue(statuses.promise);
+    const recovery = inSandbox(() =>
+      reconcileEarnVaultMovementBatch(
+        env,
+        seeded.map(({ movement }) => movement)
+      )
+    );
+    await vi.waitFor(() => expect(getSignatureStatuses).toHaveBeenCalledTimes(1));
+    expect(
+      await getDb(env).queryOne(
+        "SELECT COUNT(*)::integer AS claimed FROM earn_movements WHERE organization_id = ? AND observation_claim_token IS NOT NULL",
+        [ORG]
+      )
+    ).toEqual({ claimed: 0 });
+    const fast = await createPostgresEarnMovementsRepository(getDb(env)).claimDueObservations(
+      "sandbox",
+      64
+    );
+    expect(new Set(fast.rows.map(({ id }) => id))).toEqual(
+      new Set(seeded.map(({ movement }) => movement.id))
+    );
+    statuses.resolve(
+      seeded.map(() => ({
+        slot: 1n,
+        confirmations: 1n,
+        err: null,
+        confirmationStatus: "confirmed",
+      }))
+    );
+    expect(await recovery).toMatchObject({ claimed: 0, confirmed: 0 });
+    expect(getSignatureStatuses).toHaveBeenCalledTimes(1);
+  });
+
+  it("shares one status request across a full 256-row recovery backlog", async () => {
+    const seeded = await Promise.all(Array.from({ length: 256 }, () => seedMovement()));
+    getSignatureStatuses.mockImplementation(async (_rpc: unknown, signatures: string[]) =>
+      signatures.map(() => ({
+        slot: 1n,
+        confirmations: 1n,
+        err: null,
+        confirmationStatus: "confirmed",
+      }))
+    );
+    const stats = await inSandbox(() =>
+      reconcileEarnVaultMovementBatch(
+        env,
+        seeded.map(({ movement }) => movement)
+      )
+    );
+    expect(stats).toMatchObject({ claimed: 256, confirmed: 256, movementErrors: 0 });
+    expect(getSignatureStatuses).toHaveBeenCalledTimes(1);
+    expect(new Set(getSignatureStatuses.mock.calls[0]?.[1])).toEqual(
+      new Set(seeded.map(({ movement }) => movement.signature))
+    );
+    expect(heightReads()).toHaveLength(0);
+    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+  });
+
+  it("shares height and corroborating absence evidence across recovery chunks only for one sweep", async () => {
+    const seeded = await Promise.all(Array.from({ length: 12 }, () => seedMovement()));
+    getSignatureStatuses.mockImplementation(async (_rpc: unknown, signatures: string[]) =>
+      signatures.map(() => null)
+    );
+    finalizedHeightIs(101);
+    historyAtFinalizedSlotIs(null);
+    for (let pass = 1; pass <= 2; pass += 1) {
+      const stats = await inSandbox(() =>
+        reconcileEarnVaultMovementBatch(
+          env,
+          seeded.map(({ movement }) => movement)
+        )
+      );
+      expect(stats).toMatchObject({
+        claimed: 12,
+        statusReadFailures: 0,
+        blockHeightReadFailures: 0,
+      });
+      expect(getSignatureStatuses).toHaveBeenCalledTimes(pass);
+      expect(heightReads()).toHaveLength(pass);
+      const proofs = clusterRpc.requests.filter(({ method }) => method === "getSignatureStatuses");
+      expect(proofs).toHaveLength(pass);
+      expect(proofs.at(-1)?.params).toEqual([
+        expect.arrayContaining(seeded.map(({ movement }) => movement.signature)),
+        { searchTransactionHistory: true, minContextSlot: FINALIZED_SLOT },
+      ]);
+      expect(proofs.at(-1)?.params[0]).toHaveLength(12);
+      expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+      const rows = await Promise.all(seeded.map(({ movement }) => ledgerRow(movement.id)));
+      expect(rows.map((row) => row?.status)).toEqual(
+        Array(12).fill(pass === 1 ? "submitted" : "failed")
+      );
+    }
+  });
+
+  it.each(["confirmed", "unknown_observation", "updated_at"] as const)(
+    "does not apply cached absence after the claimed row's %s changes",
+    async (changed) => {
+      const seeded = await seedMovement();
+      const ledger = createPostgresEarnMovementsRepository(getDb(env));
+      await ledger.advanceVaultMovement({
+        movementId: seeded.movement.id,
+        organizationId: ORG,
+        toStatus: "submitted",
+      });
+      const statuses = deferred<null[]>();
+      getSignatureStatuses.mockReturnValue(statuses.promise);
+      finalizedHeightIs(101);
+      historyAtFinalizedSlotIs(null);
+      const recovery = inSandbox(() => reconcileEarnVaultMovementBatch(env, [seeded.movement]));
+      await vi.waitFor(() => expect(getSignatureStatuses).toHaveBeenCalledTimes(1));
+      if (changed === "confirmed") {
+        await ledger.advanceVaultMovement({
+          movementId: seeded.movement.id,
+          organizationId: ORG,
+          toStatus: "confirmed",
+          confirmedAt: new Date().toISOString(),
+        });
+      } else if (changed === "unknown_observation") {
+        await ledger.recordUnknownSignatureObservation({
+          movementId: seeded.movement.id,
+          organizationId: ORG,
+        });
+      } else {
+        await getDb(env).execute(
+          "UPDATE earn_movements SET updated_at = '2040-01-01T00:00:00.000Z' WHERE id = ?",
+          [seeded.movement.id]
+        );
+      }
+      statuses.resolve([null]);
+      expect(await recovery).toMatchObject({ claimed: 1, unchanged: 1, failed: 0, resubmitted: 0 });
+      expect(getTransaction).not.toHaveBeenCalled();
+      expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+      expect((await ledgerRow(seeded.movement.id))?.status).toBe(
+        changed === "confirmed" ? "confirmed" : "submitted"
+      );
+    }
+  );
+
+  it("leaves a large backlog and a new movement available while four provider reads wait", async () => {
+    const seeded = await Promise.all(Array.from({ length: 32 }, () => seedMovement()));
+    const receipt = deferred<{ amount: string; sharesOut: string }>();
+    readKaminoDepositReceipt.mockReturnValue(receipt.promise);
+    getSignatureStatuses.mockImplementation(async (_rpc: unknown, signatures: string[]) =>
+      signatures.map(() => ({
+        slot: 1n,
+        confirmations: null,
+        err: null,
+        confirmationStatus: "finalized",
+      }))
+    );
+    const recovery = inSandbox(() =>
+      reconcileEarnVaultMovementBatch(
+        env,
+        seeded.map(({ movement }) => movement)
+      )
+    );
+    try {
+      await vi.waitFor(() => expect(readKaminoDepositReceipt).toHaveBeenCalledTimes(4));
+      const newcomer = await seedMovement("100", "veda");
+      const fast = await createPostgresEarnMovementsRepository(getDb(env)).claimDueObservations(
+        "sandbox",
+        64
+      );
+      expect(fast.rows).toHaveLength(29);
+      const fresh = fast.rows.find(({ id }) => id === newcomer.movement.id);
+      if (fresh === undefined) throw new Error("New movement was blocked behind recovery");
+      await inSandbox(() =>
+        observeEarnVaultMovementStatus(
+          env,
+          fresh,
+          {
+            slot: 1n,
+            confirmations: null,
+            err: null,
+            confirmationStatus: "finalized",
+          },
+          createClusterRpc()
+        )
+      );
+      expect((await ledgerRow(newcomer.movement.id))?.status).toBe("finalized");
+      expect(readKaminoDepositReceipt).toHaveBeenCalledTimes(4);
+    } finally {
+      receipt.resolve({ amount: "1", sharesOut: "1" });
+      await recovery;
+    }
+    expect(getSignatureStatuses).toHaveBeenCalledTimes(1);
+  });
+
+  it("partitions late recovery claims between workers sharing a candidate snapshot", async () => {
+    const seeded = await Promise.all(Array.from({ length: 8 }, () => seedMovement()));
+    const statuses =
+      deferred<
+        Array<{ slot: bigint; confirmations: null; err: null; confirmationStatus: "finalized" }>
+      >();
+    const receipt = deferred<{ amount: string; sharesOut: string }>();
+    getSignatureStatuses.mockReturnValue(statuses.promise);
+    readKaminoDepositReceipt.mockReturnValue(receipt.promise);
+    const runs = Array.from({ length: 2 }, () =>
+      inSandbox(() =>
+        reconcileEarnVaultMovementBatch(
+          env,
+          seeded.map(({ movement }) => movement)
+        )
+      )
+    );
+    try {
+      await vi.waitFor(() => expect(getSignatureStatuses).toHaveBeenCalledTimes(2));
+      statuses.resolve(
+        seeded.map(() => ({
+          slot: 1n,
+          confirmations: null,
+          err: null,
+          confirmationStatus: "finalized",
+        }))
+      );
+      await vi.waitFor(() => expect(readKaminoDepositReceipt).toHaveBeenCalledTimes(8));
+      const ownership = await getDb(env).queryMany<{ count: number }>(
+        "SELECT COUNT(*)::integer AS count FROM earn_movements WHERE organization_id = ? AND observation_claim_token IS NOT NULL GROUP BY observation_claim_token",
+        [ORG]
+      );
+      expect(ownership.map(({ count }) => count)).toEqual([4, 4]);
+    } finally {
+      receipt.resolve({ amount: "1", sharesOut: "1" });
+    }
+    const completed = await Promise.all(runs);
+    expect(completed.reduce((sum, stats) => sum + stats.claimed, 0)).toBe(8);
+    expect(completed.reduce((sum, stats) => sum + stats.settled, 0)).toBe(8);
+    expect(
+      (await Promise.all(seeded.map(({ movement }) => ledgerRow(movement.id)))).every(
+        (row) => row?.status === "finalized"
+      )
+    ).toBe(true);
+  });
+
   it.each(["deposit", "withdrawal"] as const)(
     "keeps a %s reconcilable through nonfinal errors in scheduled reconciliation",
     async (direction) => {
@@ -1602,7 +1850,7 @@ describe("reconcileEarnVaultMovements: sweep telemetry", () => {
 
     expect(tickLevel()).toBe("error");
     expect(tickPayload()).toMatchObject({
-      claimed: 1,
+      claimed: 0,
       settled: 0,
       status_read_failures: 1,
       unchanged: 1,

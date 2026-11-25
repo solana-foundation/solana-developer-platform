@@ -187,12 +187,15 @@ without caching failures, and do not fetch an account twice. Fresh reads after
 movement confirmation cannot join work begun before their freshness boundary.
 State before/after request counts when changing read or quote behavior.
 
-Operation recovery scans the `(environment, next_check_at, id)` partial index
-for at most 100 due candidates. Run at most four workers and lease only work
-ready to start. Stable pending work backs off from 15 to 300 seconds, capped
+Operation recovery claims from the `(environment, next_check_at, id)` partial
+index with four competing consumers per environment. PostgreSQL commit hints,
+startup/reconnect scans and a two-second fallback wake the same consumers;
+notifications contain no authority. Lease only work ready to start.
+Error-free execution work rechecks every two seconds for the first two minutes
+after acceptance. Older pending work backs off from 15 to 300 seconds, capped
 at 60 seconds for `sign_in_provider`; status progress resets it to 15 seconds.
 Observe existing movement/request ledgers before resolving transaction builds.
-Within one worker run, share a lazy RPC client and observations only for the
+Within a short observation window, share a lazy RPC client and observations only for the
 exact organization, project, environment and recorded principal. Four concurrent
 same-authority status requests become one batch; two custody-proposal height
 reads become one. Batch at most 256 signatures, evict finished status batches
@@ -200,6 +203,18 @@ and failed heights, and never treat absence or a cached failure as nonexecution.
 An unsent-bytes proof adds one finalized height read per run and scope, and only
 past expiry one floored status read per pool endpoint, once; before this the
 operation polled forever.
+
+Direct movement and queued-action signatures share bounded status batches in
+the fast observer. The minute recovery sweep reads one unleased snapshot and
+shares its status, conditional finalized height and expired-absence proof reads
+across the batch. It then acquires the same fenced claims four rows at a time.
+Evidence stays within that invocation and must match the fresh row's exact
+signed transaction; changed state or absence markers invalidate negative
+evidence. Never add signing, rebroadcast or expiry inference to the fast lane:
+it only feeds observations through the existing financial reducers. Keep queued
+escrow distinct from payout and unknown amounts unknown.
+The observer may skip optional holding closure; a detail read that closes an
+empty holding must return its persisted closure in that same response.
 
 Expired solver recovery adds zero provider reads without an eligible recorded
 request and one live proof read on the usual path. Skip stale closed or no-longer

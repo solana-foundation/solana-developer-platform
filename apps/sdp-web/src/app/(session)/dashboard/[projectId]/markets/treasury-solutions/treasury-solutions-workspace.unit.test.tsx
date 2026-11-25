@@ -730,22 +730,28 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(2);
   });
 
-  it("publishes an old exit's detail completion into the real feed and refreshes its exact wallet", async () => {
+  it("resolves an old exit missing from the feed in a shared batch and refreshes its exact wallet", async () => {
+    vi.useFakeTimers();
     const pending = { ...coreOperation("settling"), createdAt: "2026-11-17T00:00:00Z" };
     const recent = Array.from({ length: 50 }, (_, index) => ({
       ...coreOperation("completed"),
       id: `recent-${index}`,
     }));
     let activeReads = 0;
-    const list = vi.spyOn(earnCoreClient, "operations").mockImplementation(async (query) => ({
-      operations: query?.status === "active" ? (++activeReads === 1 ? [pending] : []) : recent,
-      nextCursor: null,
-    }));
     let finish: ((value: Operation) => void) | undefined;
     const response = new Promise<Operation>((resolve) => {
       finish = resolve;
     });
-    const detail = vi.spyOn(earnCoreClient, "operation").mockReturnValue(response);
+    const list = vi.spyOn(earnCoreClient, "operations").mockImplementation(async (query) => ({
+      operations: query?.operationIds
+        ? [await response]
+        : query?.status === "active"
+          ? ++activeReads === 1
+            ? [pending]
+            : []
+          : recent,
+      nextCursor: null,
+    }));
     let poll: () => Promise<unknown> = async () => undefined;
     const cache = new Map();
     try {
@@ -760,23 +766,21 @@ describe("TreasurySolutionsWorkspace", () => {
           />
         </SWRConfig>
       );
-      await waitFor(() => expect(detail).toHaveBeenCalledTimes(1));
+      await act(() => vi.advanceTimersByTimeAsync(0));
       await act(() => poll());
+      await act(() => vi.advanceTimersByTimeAsync(1_000));
       expect(screen.getByTestId("observed-exit").textContent).toBe("settling");
       await act(async () => {
         finish?.(coreOperation("completed"));
         await response;
       });
-      await waitFor(() =>
-        expect(screen.getByTestId("observed-exit").textContent).toBe("completed")
-      );
+      expect(screen.getByTestId("observed-exit").textContent).toBe("completed");
       expect(mocks.refreshPositions).toHaveBeenCalledExactlyOnceWith(["core-movement"]);
       expect(mocks.refreshWalletBalances).toHaveBeenCalledExactlyOnceWith(101, ["cwlt_live"]);
       await act(() => poll());
       expect(screen.getByTestId("observed-exit").textContent).toBe("absent");
     } finally {
       list.mockRestore();
-      detail.mockRestore();
     }
   });
 

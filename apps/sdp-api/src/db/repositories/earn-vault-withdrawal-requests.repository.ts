@@ -33,6 +33,11 @@ import {
   isRequestFencedByCurrentRedemptionReleaseWithin,
 } from "@/db/repositories/earn-redemption-release.repository";
 import { AppError, conflict } from "@/lib/errors";
+import {
+  claimEarnObservations,
+  claimSelectedEarnObservations,
+  readEarnRecoveryObservations,
+} from "./earn-observation-claims";
 
 /** A signed external build can recover this conflict with finalized evidence. */
 export class QueuedWithdrawalLeaseConflictError extends AppError {
@@ -116,6 +121,7 @@ export interface EarnVaultWithdrawalRequestActionRow {
   updated_at: string;
   last_checked_at: string | null;
   unknown_signature_observed_at: string | null;
+  absent_creation_observed_at: string | null;
 }
 
 export interface EarnWalletWithdrawalRequestTransactionRow {
@@ -315,6 +321,13 @@ export interface EarnVaultWithdrawalRequestsRepository extends CurrentRedemption
     environment: SdpEnvironment;
     withdrawalRequestId: string;
   }): Promise<EarnVaultWithdrawalRequestRow | null>;
+  /** Canonical request evidence for a scoped operation page. */
+  getByIds(params: {
+    organizationId: string;
+    projectId: string;
+    environment: SdpEnvironment;
+    withdrawalRequestIds: readonly string[];
+  }): Promise<EarnVaultWithdrawalRequestRow[]>;
   getByAddress(params: {
     environment: SdpEnvironment;
     provider: string;
@@ -399,6 +412,24 @@ export interface EarnVaultWithdrawalRequestsRepository extends CurrentRedemption
     /** Earliest time this failed request may be claimed again. */
     retryAt: string;
   }): Promise<void>;
+  /** Read fresh unleased candidates for one shared recovery observation. */
+  readRecoveryObservations(
+    rows: readonly EarnVaultWithdrawalRequestActionRow[]
+  ): Promise<EarnVaultWithdrawalRequestActionRow[]>;
+  /** Reserve recovery candidates and return their current state after taking ownership. */
+  claimRecoveryObservations(rows: readonly EarnVaultWithdrawalRequestActionRow[]): Promise<{
+    rows: EarnVaultWithdrawalRequestActionRow[];
+    token: string;
+  }>;
+  /** Claim signed creation/cancellation actions, including unfinished finality projection. */
+  claimDueObservations(
+    environment: SdpEnvironment,
+    limit: number
+  ): Promise<{
+    rows: EarnVaultWithdrawalRequestActionRow[];
+    scanned: number;
+    token: string;
+  }>;
   /** One environment's open signed actions, least recently checked first. */
   claimUnsettledActions(params: {
     environment: SdpEnvironment;
@@ -1031,6 +1062,24 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
         .bind(params.environment, params.provider, params.requestAddress)
         .first<Record<string, unknown>>();
       return row ? mapRequest(row) : null;
+    },
+
+    async getByIds(params) {
+      if (params.withdrawalRequestIds.length === 0) return [];
+      const rows = await db
+        .prepare(
+          `SELECT * FROM earn_vault_withdrawal_requests
+         WHERE organization_id = ? AND project_id = ? AND environment = ?
+           AND id = ANY(?::text[])`
+        )
+        .bind(
+          params.organizationId,
+          params.projectId,
+          params.environment,
+          params.withdrawalRequestIds
+        )
+        .all<Record<string, unknown>>();
+      return (rows.results ?? []).map(mapRequest);
     },
 
     async findOldestExpiredEscrow(params) {
@@ -1736,6 +1785,20 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
         )
         .bind(input.error.slice(0, 500), input.retryAt, input.retryAt, input.withdrawalRequestId)
         .run();
+    },
+
+    async readRecoveryObservations(rows) {
+      return (await readEarnRecoveryObservations(db, "withdrawal_action", rows)).map(mapAction);
+    },
+
+    async claimRecoveryObservations(rows) {
+      const claimed = await claimSelectedEarnObservations(db, "withdrawal_action", rows);
+      return { rows: claimed.rows.map(mapAction), token: claimed.token };
+    },
+
+    async claimDueObservations(environment, limit) {
+      const claimed = await claimEarnObservations(db, "withdrawal_action", environment, limit);
+      return { rows: claimed.rows.map(mapAction), scanned: claimed.scanned, token: claimed.token };
     },
 
     async claimUnsettledActions({ environment, limit }) {

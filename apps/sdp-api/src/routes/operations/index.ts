@@ -26,6 +26,7 @@ import { listReadableEarnWallets } from "@/routes/earn/wallet-scope";
 import {
   isTerminalOperation,
   projectEarnOperation,
+  projectEarnOperations,
   submitEarnOperation,
 } from "@/services/earn/strategy-operations.service";
 import {
@@ -123,18 +124,18 @@ operations.get(
   async (c) => {
     const actor = earnOperationActor(c);
     const query = querySchema.parse(c.req.query());
+    const { operationIds, ...filters } = query;
     const wallets = await listReadableEarnWallets(c, actor.auth, actor.projectId);
     if (query.walletId !== undefined && !wallets.some((wallet) => wallet.id === query.walletId))
       throw notFound("Wallet");
     const page = await createOperationsService(c.env).list(actor, {
-      ...query,
+      ...filters,
+      operationIds: operationIds?.split(","),
       allowedWalletIds: wallets.map((wallet) => wallet.id),
     });
     return success(c, {
       ...page,
-      operations: await Promise.all(
-        page.operations.map((operation) => projectEarnOperation(c.env, actor, operation))
-      ),
+      operations: await projectEarnOperations(c.env, actor, page.operations),
     });
   }
 );

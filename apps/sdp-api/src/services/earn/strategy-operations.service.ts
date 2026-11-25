@@ -12,9 +12,13 @@ import { getDb } from "@/db/client";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import {
   createPostgresEarnMovementsRepository,
+  type EarnMovementRow,
   type EarnPositionRow,
 } from "@/db/repositories/earn-movements.repository";
-import { createPostgresEarnVaultWithdrawalRequestsRepository } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
+import {
+  createPostgresEarnVaultWithdrawalRequestsRepository,
+  type EarnVaultWithdrawalRequestRow,
+} from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import type {
   OperationAttempt,
   OperationClaim,
@@ -22,6 +26,7 @@ import type {
   OperationSignedAttempt,
   OperationUpdate,
 } from "@/db/repositories/operations.repository";
+import { mapWithConcurrency } from "@/lib/concurrency";
 import { AppError, badRequest, conflict, internalError, notFound } from "@/lib/errors";
 import { assertMoneyStartAdmitted, MoneyMovementRefusedError } from "@/lib/money-admission";
 import { markIdempotencyCommitted } from "@/middleware/idempotency";
@@ -155,21 +160,27 @@ async function projectQueuedOperation(
   env: Env,
   scope: OperationScope,
   operation: Operation,
-  requestId: string
+  requestId: string,
+  snapshot?: { request: EarnVaultWithdrawalRequestRow; position: EarnPositionRow | null }
 ): Promise<Operation> {
   const requests = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
-  const request = await requests.getById({
-    organizationId: scope.organizationId,
-    environment: scope.environment,
-    withdrawalRequestId: requestId,
-  });
+  const request =
+    snapshot?.request ??
+    (await requests.getById({
+      organizationId: scope.organizationId,
+      environment: scope.environment,
+      withdrawalRequestId: requestId,
+    }));
   if (request === null || request.project_id !== scope.projectId)
     throw notFound("Operation withdrawal request");
-  const position = await createPostgresEarnMovementsRepository(getDb(env)).getPositionById({
-    organizationId: scope.organizationId,
-    environment: scope.environment,
-    positionId: request.position_id,
-  });
+  const position =
+    snapshot === undefined
+      ? await createPostgresEarnMovementsRepository(getDb(env)).getPositionById({
+          organizationId: scope.organizationId,
+          environment: scope.environment,
+          positionId: request.position_id,
+        })
+      : snapshot.position;
   const strategyId = position?.strategy_id;
   const supersedingRelease =
     request.mechanism === "operator_redemption"
@@ -257,6 +268,14 @@ export async function projectEarnOperation(
     positionId: movement.position_id,
   });
   if (position === null) throw internalError("Operation position is missing");
+  return projectMovementOperation(operation, movement, position);
+}
+
+function projectMovementOperation(
+  operation: Operation,
+  movement: EarnMovementRow,
+  position: EarnPositionRow
+): Operation {
   const strategyId =
     position.strategy_id ??
     (operation.intent.kind === "earn.deposit" ? operation.intent.strategyId : undefined);
@@ -264,6 +283,10 @@ export async function projectEarnOperation(
   const { status } = progress;
   return {
     ...operation,
+    updatedAt:
+      Date.parse(movement.updated_at) > Date.parse(operation.updatedAt)
+        ? movement.updated_at
+        : operation.updatedAt,
     status: projectedOperationStatus(operation.status, status),
     nextAction: waitFor(progress),
     error: projectedError(
@@ -287,6 +310,52 @@ export async function projectEarnOperation(
       settlementOutcome: status === "completed" ? "delivered" : null,
     },
   };
+}
+
+/** Batch canonical movement/request evidence and positions, preserving input order. */
+export async function projectEarnOperations(
+  env: Env,
+  scope: OperationScope,
+  operations: readonly Operation[]
+): Promise<Operation[]> {
+  const ledger = createPostgresEarnMovementsRepository(getDb(env));
+  const movementIds = operations.flatMap((operation) =>
+    operation.resourceRef?.kind === "earn.movement" ? [operation.resourceRef.id] : []
+  );
+  const requestIds = operations.flatMap((operation) =>
+    operation.resourceRef?.kind === "earn.withdrawal_request" ? [operation.resourceRef.id] : []
+  );
+  const [movements, requests] = await Promise.all([
+    ledger.getMovementsByIds({ ...scope, movementIds }),
+    createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env)).getByIds({
+      ...scope,
+      withdrawalRequestIds: requestIds,
+    }),
+  ]);
+  const positions = await ledger.getPositionsByIds({
+    ...scope,
+    positionIds: [...new Set([...movements, ...requests].map((resource) => resource.position_id))],
+  });
+  const movementById = new Map(movements.map((movement) => [movement.id, movement]));
+  const requestById = new Map(requests.map((request) => [request.id, request]));
+  const positionById = new Map(positions.map((position) => [position.id, position]));
+  return mapWithConcurrency([...operations], 4, async (operation) => {
+    if (operation.resourceRef?.kind === "earn.withdrawal_request") {
+      const request = requestById.get(operation.resourceRef.id);
+      if (request === undefined) throw notFound("Operation withdrawal request");
+      return projectQueuedOperation(env, scope, operation, request.id, {
+        request,
+        position: positionById.get(request.position_id) ?? null,
+      });
+    }
+    if (operation.resourceRef?.kind !== "earn.movement")
+      return projectEarnOperation(env, scope, operation);
+    const movement = movementById.get(operation.resourceRef.id);
+    if (movement === undefined) throw notFound("Operation movement");
+    const position = positionById.get(movement.position_id);
+    if (position === undefined) throw internalError("Operation position is missing");
+    return projectMovementOperation(operation, movement, position);
+  });
 }
 
 async function admitDeposit(env: Env, scope: OperationScope, operation: Operation) {
@@ -530,12 +599,6 @@ export async function advanceEarnOperation(
   if (claim.operation.resourceRef?.kind === "earn.redemption_release")
     return advanceCurrentRedemptionRelease(env, scope, claim, observations);
   const service = createOperationsService(env);
-  const {
-    target: built,
-    transactionScope,
-    submit,
-    currentRelease,
-  } = await resolveEarnOperationBuild(env, scope, claim);
   const update = (change: OperationUpdate) => service.transition(scope, claim, change);
   if (
     claim.operation.resourceRef?.kind === "earn.movement" ||
@@ -550,6 +613,12 @@ export async function advanceEarnOperation(
       error: projected.error,
     });
   }
+  const {
+    target: built,
+    transactionScope,
+    submit,
+    currentRelease,
+  } = await resolveEarnOperationBuild(env, scope, claim);
   let attempt = claim.attempt;
   let signedTransaction = attempt.signedTransaction;
   const stopping = claim.operation.cancelRequestedAt !== null;

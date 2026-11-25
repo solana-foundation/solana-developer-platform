@@ -17,6 +17,8 @@ import { z } from "zod";
 import { currentDatabaseIdentity, type DatabaseIdentity } from "@/db/identity";
 import type { BackgroundRunner } from "@/runtime/background";
 import * as moneyPathEvents from "@/runtime/money-path-events";
+import * as transactionObserver from "@/services/jobs/earn-transaction-observer";
+import * as operationWorker from "@/services/jobs/operation-worker";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { deferred } from "@/test/helpers/deferred";
 import { env } from "@/test/helpers/env";
@@ -25,6 +27,7 @@ import { required } from "@/test/helpers/required";
 import type { Env } from "@/types/env";
 import { earnCatalogueSyncCron } from "./earn-catalogue-sync";
 import { fireblocksProposalsCron } from "./fireblocks-proposals";
+import { operationsCron } from "./operations";
 import { pendingTransfersCron } from "./pending-transfers";
 import { CRON_RUN_EVENT, type CronRegistration } from "./run-event";
 import { assertCronConfig, CRON_DEFINITIONS, type CronHandle, startCron } from "./runner";
@@ -178,6 +181,14 @@ function deadlineEvent(cron: string, environment: SdpEnvironment | null) {
 }
 
 beforeEach(() => {
+  vi.spyOn(transactionObserver, "startEarnTransactionObserver").mockReturnValue({
+    wake: () => {},
+    stop: async () => {},
+  });
+  vi.spyOn(operationWorker, "startOperationWorker").mockImplementation((workerEnv) => ({
+    wake: () => operationsCron.run(workerEnv),
+    stop: async () => {},
+  }));
   scheduler.tasks.length = 0;
   observations.length = 0;
   logEventSpy = vi.spyOn(moneyPathEvents, "logEvent").mockImplementation(() => {});
@@ -208,7 +219,7 @@ describe("startCron", () => {
     ).toEqual(
       SDP_ENVIRONMENTS.map((environment) => ({
         environment,
-        schedule: "*/15 * * * * *",
+        schedule: "*/2 * * * * *",
         ran: [
           {
             cron: "reconcile-operations",

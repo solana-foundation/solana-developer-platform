@@ -1,16 +1,12 @@
 "use client";
 
-import {
-  isSdpProgressOperationStatus,
-  isTerminalOperationStatus,
-  type Operation,
-} from "@sdp/types/operations";
+import { isTerminalOperationStatus, type Operation } from "@sdp/types/operations";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { earnQueryKeys } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-query-key";
 import { dashboardRequest } from "./dashboard-fetch";
 import { createEarnClient } from "./earn-client";
-import { useCadencedSWR } from "./use-cadenced-swr";
+import { EarnOperationObserver } from "./earn-operation-observer";
 
 /** Both Earn products use the same project-scoped transport and typed contract. */
 export const earnCoreClient = createEarnClient((path, init) => {
@@ -92,9 +88,71 @@ async function fetchActiveOperations(): Promise<Operation[]> {
   throw new Error("Earn operation pagination exceeded its safety limit");
 }
 
+interface ProgressObservation {
+  error?: Error;
+}
+
+const operationObservers = new WeakMap<
+  ReturnType<typeof useSWRConfig>["cache"],
+  EarnOperationObserver
+>();
+
+function operationObserver({ cache, mutate }: ReturnType<typeof useSWRConfig>) {
+  const existing = operationObservers.get(cache);
+  if (existing) return existing;
+  const observer = new EarnOperationObserver({
+    visible: () => !document.hidden,
+    read: async (ids) => {
+      const page = await earnCoreClient.operations(
+        { operationIds: ids.join(","), limit: 100 },
+        AbortSignal.timeout(10_000)
+      );
+      if (page.nextCursor !== null) throw new Error("Incomplete operation observation");
+      return page.operations;
+    },
+    publish: async (operations) => {
+      await Promise.all(
+        operations.map((operation) =>
+          mutate<Operation>(
+            earnQueryKeys.operation(operation.id),
+            (current) => preferredObservation(current, operation),
+            { revalidate: false }
+          )
+        )
+      );
+      await mutate<EarnOperationsFeed>(
+        earnQueryKeys.operations(),
+        (current) =>
+          current
+            ? {
+                ...current,
+                operations: mergeOperations(current.operations, operations),
+              }
+            : current,
+        { revalidate: false }
+      );
+    },
+    reportError: async (error) => {
+      await mutate<ProgressObservation>(
+        earnQueryKeys.operationProgress(),
+        { error },
+        {
+          revalidate: false,
+        }
+      );
+    },
+  });
+  operationObservers.set(cache, observer);
+  return observer;
+}
+
 /** Recover every active operation while keeping automatic history reads bounded. */
 export function useEarnOperations() {
-  const { cache } = useSWRConfig();
+  const config = useSWRConfig();
+  const { cache } = config;
+  const observer = operationObserver(config);
+  useEffect(() => observer.retain(), [observer]);
+  const { data: progress } = useSWR<ProgressObservation>(earnQueryKeys.operationProgress(), null);
   const key = earnQueryKeys.operations();
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState<Error>();
@@ -107,9 +165,28 @@ export function useEarnOperations() {
       expanded ? undefined : earnCoreClient.operations({ limit: OPERATIONS_HISTORY_PAGE_SIZE }),
     ]);
     const previous = currentFeed();
+    await config.mutate<ProgressObservation>(
+      earnQueryKeys.operationProgress(),
+      { error: undefined },
+      { revalidate: false }
+    );
+    for (const operation of mergeOperations(
+      previous?.operations ?? [],
+      recent?.operations ?? [],
+      active
+    ))
+      observer.observe(operation);
+    const observedIds = new Set([...active, ...(recent?.operations ?? [])].map(({ id }) => id));
+    observer.recover(
+      previous?.operations
+        .filter(
+          (operation) => !isEarnOperationTerminal(operation) && !observedIds.has(operation.id)
+        )
+        .map(({ id }) => id) ?? []
+    );
     return {
       operations: mergeOperations(
-        // Keep a disappearing row mounted until its existing detail poll reports the outcome.
+        // Retain disappearing rows until the shared observer resolves their outcome.
         expanded
           ? (previous?.operations ?? [])
           : (previous?.operations.filter((operation) => !isEarnOperationTerminal(operation)) ?? []),
@@ -163,7 +240,7 @@ export function useEarnOperations() {
   return {
     operations: data?.operations,
     activeIds: data?.activeIds,
-    error: error ?? loadMoreError,
+    error: error ?? loadMoreError ?? progress?.error,
     isLoading,
     isRefreshing: isValidating,
     hasMore: data?.nextCursor !== null && data?.nextCursor !== undefined,
@@ -179,48 +256,9 @@ export function useEarnOperations() {
   };
 }
 
-/** How often the operation open in the viewer's dialog is read while SDP is moving it. */
-const OPERATION_WATCH_POLL_MS = 2_000;
-
 /**
- * How often every other pending operation is read: activity rows, and provider settlements that
- * can take days. The shared feed already refreshes active rows every 15 s, so this is the safety
- * net for a row that leaves it, and it keeps many pending rows under the dashboard's shared
- * request limit.
- */
-const OPERATION_BACKGROUND_POLL_MS = 30_000;
-
-/**
- * SWR's poll revalidates with dedupe, so under the dashboard's 10 s default a 2 s poll lands
- * every 10 s. The window must also stay under the cadence: SWR clears it only after a read
- * lands, so a window equal to the cadence still swallows every other tick. Half still joins the
- * dialog and its activity row when both watch one operation.
- */
-const OPERATION_POLL_DEDUPE_MS = OPERATION_WATCH_POLL_MS / 2;
-
-/**
- * The detail read cadence for one operation.
- *
- * @param operation - The latest observation, if any.
- * @param foreground - Whether the viewer has this operation open in a dialog.
- * @returns The poll interval in milliseconds, 0 once the operation is terminal.
- */
-function operationPollInterval(operation: Operation | undefined, foreground: boolean): number {
-  if (operation && isEarnOperationTerminal(operation)) return 0;
-  return foreground && operation && isSdpProgressOperationStatus(operation.status)
-    ? OPERATION_WATCH_POLL_MS
-    : OPERATION_BACKGROUND_POLL_MS;
-}
-
-/**
- * Detail polling is scoped to the operation; closing a modal never owns progress.
- *
- * @param operationId - The operation to read.
- * @param initial - The observation the caller already holds.
- * @param onUpdated - Told about each new observation after commit.
- * @param foreground - True for the operation open in the viewer's dialog, read every 2 s while
- *   SDP is moving it. Activity rows leave it out and are read every 30 s beside the feed.
- * @returns The current observation, its read error, and refresh and update handles.
+ * Activity rows observe the feed and shared cache without starting individual timers.
+ * An open dialog registers recent accepted work with the one bounded observer.
  */
 export function useEarnOperation(
   operationId: string | undefined,
@@ -232,17 +270,30 @@ export function useEarnOperation(
     id: operationId,
     observation: initial ? JSON.stringify(initial) : null,
   });
-  const { data, error, mutate } = useCadencedSWR(
+  const config = useSWRConfig();
+  const observer = operationObserver(config);
+  useEffect(() => {
+    if (!foreground) return;
+    const release = observer.retain();
+    if (operationId) observer.focus(operationId);
+    return release;
+  }, [observer, foreground, operationId]);
+  const { data: progress } = useSWR<ProgressObservation>(earnQueryKeys.operationProgress(), null);
+  const { data, error, mutate } = useSWR(
     operationId ? earnQueryKeys.operation(operationId) : null,
     () => earnCoreClient.operation(operationId ?? ""),
-    (latest) =>
-      operationPollInterval(currentObservation(operationId, initial, latest), foreground === true),
     {
       fallbackData: initial,
-      dedupingInterval: OPERATION_POLL_DEDUPE_MS,
+      revalidateOnMount: initial === undefined,
+      revalidateOnFocus: false,
+      revalidateOnReconnect: false,
+      refreshInterval: 0,
     }
   );
   const operation = currentObservation(operationId, initial, data);
+  useEffect(() => {
+    if (operation) observer.observe(operation, foreground === true);
+  }, [observer, operation, foreground]);
   const notifyUpdated = useEffectEvent((observed: Operation) => onUpdated?.(observed));
   useEffect(() => {
     if (reported.current.id !== operationId) {
@@ -252,7 +303,6 @@ export function useEarnOperation(
     const observation = JSON.stringify(operation);
     if (reported.current.observation === observation) return;
     reported.current.observation = observation;
-    if (operation === initial) return;
     // A shared request can finish after its initiating dialog unmounts. Notify
     // the remaining external activity/balance caches after commit; this does
     // not copy child render state into its parent (covered by the unmount test).
@@ -262,8 +312,11 @@ export function useEarnOperation(
   }, [initial, operation, operationId]);
   return {
     operation,
-    error,
+    error: error ?? progress?.error,
     refresh: () => mutate(),
-    update: (operation: Operation) => mutate(operation, { revalidate: false }),
+    update: (operation: Operation) => {
+      observer.observe(operation, true);
+      return mutate(operation, { revalidate: false });
+    },
   };
 }

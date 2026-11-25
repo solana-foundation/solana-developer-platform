@@ -28,6 +28,7 @@ export async function hydrateEarnPositionRows(
 ): Promise<{
   holdings: EarnPositionHolding[];
   live: Map<string, HydratedVaultPositionValue>;
+  closedPositionIds: ReadonlySet<string>;
 }> {
   const rowsReadAt = markVaultPositionRowsRead();
   const { discoveredIds, ...hydrationOptions } = options;
@@ -65,17 +66,21 @@ export async function hydrateEarnPositionRows(
     { ...hydrationOptions, rowsReadAt }
   );
   const repository = createPostgresEarnMovementsRepository(getDb(c.env));
+  const closedPositionIds = new Set<string>();
   await closeEmptyHydratedPositions(
-    (positionId, observedUpdatedAt) =>
-      repository.closeVaultPositionIfEmpty({
+    async (positionId, observedUpdatedAt) => {
+      const closed = await repository.closeVaultPositionIfEmpty({
         positionId,
         organizationId: getAuth(c).organizationId,
         observedUpdatedAt,
-      }),
+      });
+      if (closed) closedPositionIds.add(positionId);
+      return closed;
+    },
     holdings.filter((holding) => !discoveredIds?.has(holding.id)),
     live
   );
-  return { holdings, live };
+  return { holdings, live, closedPositionIds };
 }
 
 function instrumentKey(input: {

@@ -7,6 +7,7 @@ import { getDb } from "@/db/client";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
 import {
   createPostgresEarnMovementsRepository,
+  type EarnMovementsRepository,
   type EarnPositionRow,
 } from "@/db/repositories/earn-movements.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
@@ -46,6 +47,22 @@ function positionSelector(positionId: string): DiscoveredEarnPositionLocator | n
 function requireDiscoveredHolding(value: HydratedVaultPositionValue | undefined): void {
   if (value === undefined) throw providerUnavailable("Earn position value is unavailable");
   if (isEarnVaultHoldingEmpty(value)) throw notFound("Earn position");
+}
+
+async function readPersistedClosure(
+  repository: EarnMovementsRepository,
+  row: EarnPositionRow,
+  justClosed: boolean
+): Promise<EarnPositionRow> {
+  if (!justClosed) return row;
+  // Return the persisted close time on the first refresh, while respecting a
+  // deposit that has already reopened the holding.
+  const current = await repository.getPositionById({
+    organizationId: row.organization_id,
+    environment: row.environment,
+    positionId: row.id,
+  });
+  return { ...row, closed_at: current?.closed_at ?? null };
 }
 
 /** Read one authorized holding without scanning its owner's other positions. */
@@ -103,6 +120,7 @@ export async function readEarnPosition(
       environment,
       positionId,
       custodyWalletIds: wallets.map((wallet) => wallet.id),
+      includeClosed: query.afterMovementIds !== undefined,
     });
   }
   if (row === null) throw notFound("Earn position");
@@ -127,7 +145,7 @@ export async function readEarnPosition(
     ownerAddress: row.owner_address ?? undefined,
     position: { id: row.id, provider: row.provider, providerReference: row.vault_address },
   });
-  const { holdings, live } = await hydrateEarnPositionRows(c, [row], addresses, {
+  const { holdings, live, closedPositionIds } = await hydrateEarnPositionRows(c, [row], addresses, {
     sourceType: row.custody_wallet_id ? "wallet" : "address",
     discoveredIds: discovered ? new Set([row.id]) : undefined,
     minimumSlotByPositionId: balanceContext?.minimumSlotByPositionId,
@@ -136,11 +154,20 @@ export async function readEarnPosition(
   if (!holding) throw internalError("Earn position is missing its instrument identity");
   const value = live.get(row.id);
   if (discovered) requireDiscoveredHolding(value);
-  return projectEarnCorePosition(row, holding, value, {
+  row = await readPersistedClosure(repository, row, closedPositionIds.has(row.id));
+  const position = projectEarnCorePosition(row, holding, value, {
     discovered,
     feeSponsored: isEarnVaultSponsorshipEnabled(c.env, cluster),
     strategyIds: earnStrategyIdsByInstrument(strategies),
   });
+  if (balanceContext) {
+    position.balanceReadContext = {
+      afterMovementIds: balanceContext.afterMovementIds,
+      minimumSlot: balanceContext.minimumSlot,
+      minimumSlotMovementId: balanceContext.minimumSlotMovementId,
+    };
+  }
+  return position;
 }
 
 /** GET /v1/earn/positions/{positionId}. */

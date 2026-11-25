@@ -29,14 +29,15 @@ Preparation never signs or broadcasts. `submit` returns 202 after durable
 acceptance; workers request signatures, broadcast and track settlement. Keep
 polling queued and active operations, including custody providers that require
 a signature in another application. Read requests never trigger submission.
-Only the operation open in the dialog is read every 2 s, and only while SDP is
-moving it; activity rows and provider waits are read every 30 s beside the
-15 s feed, so many pending rows stay under the dashboard's shared request limit.
+Recent and foreground work shares one `operationIds` batch per second, capped
+at 100 IDs per request and scoped to the dashboard cache. Recent work stays hot
+for 30 seconds, then backs off to five seconds until two minutes and 15 seconds
+afterward. The active feed stays at 15 seconds. Never add per-row poll timers.
 
 The default activity view polls active work and the newest 50 history entries.
 Older pages load on demand and keep their snapshot while expanded; Refresh
-returns to the newest page. Retain a pending row until its existing detail poll
-observes a terminal outcome, even if it leaves the active feed. Completion from
+returns to the newest page. Retain a pending row until shared observation
+resolves its outcome, even if it leaves the active feed. Completion from
 either feed or detail must refresh holdings. A recovery refreshes holdings and
 cash observations without becoming withdrawal proceeds. Hastra releases report
 no settled amount; current available wYLDS comes from the live position read.
@@ -76,8 +77,11 @@ earnings, never zero principal or profit equal to the imported balance.
 
 Use paired position and funding-wallet refreshes after an operation obtains a
 movement reference. Pass `afterMovementIds` into positions and retain the
-returned minimum-slot read context until both snapshots succeed. Keep polling
-single-flight and quiet. Missing shares or token value remain unavailable.
+returned minimum-slot read context until both snapshots succeed. Coalesce
+completions and refresh only affected positions and wallets. Retain one
+`minimumSlotMovementId` proof per position plus still-pending movements, never
+all completed movements. Keep polling single-flight and quiet. Missing shares
+or token value remain unavailable and cannot acknowledge a paired refresh.
 Use decimal strings and exact decimal helpers, never `Number` for money.
 
 ## Catalogue and availability

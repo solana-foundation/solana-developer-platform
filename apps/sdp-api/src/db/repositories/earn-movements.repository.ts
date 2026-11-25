@@ -24,6 +24,11 @@ import {
 } from "@/db/client";
 import { sqlLiteralList } from "@/db/postgres-utils";
 import { conflict } from "@/lib/errors";
+import {
+  claimEarnObservations,
+  claimSelectedEarnObservations,
+  readEarnRecoveryObservations,
+} from "./earn-observation-claims";
 
 /**
  * The unified Earn movement ledger (PRO-1705, migrations 0062-0065).
@@ -228,6 +233,19 @@ export interface EarnMovementsRepository {
     movementId: string;
     organizationId: string;
   }): Promise<EarnMovementRow | null>;
+  /** Direct operation resources, batched within their exact project and environment. */
+  getMovementsByIds(params: {
+    organizationId: string;
+    projectId: string;
+    environment: SdpEnvironment;
+    movementIds: readonly string[];
+  }): Promise<EarnMovementRow[]>;
+  /** Shared position reads for already authorized movement resources. */
+  getPositionsByIds(params: {
+    organizationId: string;
+    environment: SdpEnvironment;
+    positionIds: readonly string[];
+  }): Promise<EarnPositionRow[]>;
   getPositionById(params: {
     organizationId: string;
     environment: SdpEnvironment;
@@ -240,6 +258,8 @@ export interface EarnMovementsRepository {
     environment: SdpEnvironment;
     positionId: string;
     custodyWalletIds: readonly string[];
+    /** Detail reads may include a closed holding before verifying its movement floor. */
+    includeClosed?: boolean;
   }): Promise<EarnPositionRow | null>;
   /** A discovered selector can resolve to a visible holding already tracked in this scope. */
   getReadablePositionByInstrument(params: {
@@ -366,6 +386,22 @@ export interface EarnMovementsRepository {
     provider: string;
     vaultAddress: string;
   }): Promise<string>;
+  /** Read fresh unleased candidates for one shared recovery observation. */
+  readRecoveryObservations(rows: readonly EarnMovementRow[]): Promise<EarnMovementRow[]>;
+  /** Reserve recovery candidates and return their current state after taking ownership. */
+  claimRecoveryObservations(rows: readonly EarnMovementRow[]): Promise<{
+    rows: EarnMovementRow[];
+    token: string;
+  }>;
+  /** Claim due signed rows for the shared fast observation worker. */
+  claimDueObservations(
+    environment: SdpEnvironment,
+    limit: number
+  ): Promise<{
+    rows: EarnMovementRow[];
+    scanned: number;
+    token: string;
+  }>;
   /**
    * Atomically select a fair, bounded batch of one environment's movements and
    * rotate its attempt cursor; not a work lease. One environment per claim, so
@@ -997,6 +1033,32 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         .first<EarnPositionRow>();
     },
 
+    async getMovementsByIds(params) {
+      if (params.movementIds.length === 0) return [];
+      const rows = await db
+        .prepare(
+          `SELECT * FROM earn_movements
+         WHERE organization_id = ? AND project_id = ? AND environment = ?
+           AND id = ANY(?::text[])`
+        )
+        .bind(params.organizationId, params.projectId, params.environment, params.movementIds)
+        .all<Record<string, unknown>>();
+      return (rows.results ?? []).map(mapMovementRow);
+    },
+
+    async getPositionsByIds(params) {
+      if (params.positionIds.length === 0) return [];
+      const rows = await db
+        .prepare(
+          `SELECT *, COALESCE(strategy_reference, vault_address) AS strategy_reference
+         FROM earn_positions WHERE organization_id = ? AND environment = ?
+           AND id = ANY(?::text[])`
+        )
+        .bind(params.organizationId, params.environment, params.positionIds)
+        .all<EarnPositionRow>();
+      return rows.results ?? [];
+    },
+
     async getReadablePositionById(params) {
       return db
         .prepare(
@@ -1005,14 +1067,16 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
             WHERE id = ? AND organization_id = ? AND environment = ?
               AND (custody_wallet_id = ANY (?::text[])
                 OR (owner_address IS NOT NULL AND project_id = ?))
-              AND ${VISIBLE_VAULT_POSITION_SQL}`
+              AND (${VISIBLE_VAULT_POSITION_SQL}
+                OR (? AND kind = 'vault_direct' AND activated_at IS NOT NULL AND closed_at IS NOT NULL))`
         )
         .bind(
           params.positionId,
           params.organizationId,
           params.environment,
           params.custodyWalletIds,
-          params.projectId
+          params.projectId,
+          params.includeClosed === true
         )
         .first<EarnPositionRow>();
     },
@@ -1376,6 +1440,24 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         .bind(params.environment, params.provider, params.vaultAddress)
         .first<{ exposure: string }>();
       return row?.exposure ?? "0";
+    },
+
+    async readRecoveryObservations(rows) {
+      return (await readEarnRecoveryObservations(db, "movement", rows)).map(mapMovementRow);
+    },
+
+    async claimRecoveryObservations(rows) {
+      const claimed = await claimSelectedEarnObservations(db, "movement", rows);
+      return { rows: claimed.rows.map(mapMovementRow), token: claimed.token };
+    },
+
+    async claimDueObservations(environment, limit) {
+      const claimed = await claimEarnObservations(db, "movement", environment, limit);
+      return {
+        rows: claimed.rows.map(mapMovementRow),
+        scanned: claimed.scanned,
+        token: claimed.token,
+      };
     },
 
     async claimUnsettledVaultMovements({ environment, limit }) {

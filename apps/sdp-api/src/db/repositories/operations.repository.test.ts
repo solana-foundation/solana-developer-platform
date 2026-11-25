@@ -3,12 +3,19 @@ import {
   type OperationStatus,
   TERMINAL_OPERATION_STATUSES,
 } from "@sdp/types/operations";
-import { beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db/client";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { asTransactionalClient, getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";
+import {
+  listenForOperationNotifications,
+  OPERATION_WAKE_CHANNEL,
+} from "@/db/operation-notifications";
 import { currentMoneyPrincipal, runAsMoneyPrincipal } from "@/lib/money-principal";
+import { startOperationWorker } from "@/services/jobs/operation-worker";
+import * as operationRecovery from "@/services/jobs/reconcile-operations";
 import { OperationsService } from "@/services/operations.service";
 import { runAsRecordedOperationPrincipal } from "@/services/operations-principal";
+import { deferred } from "@/test/helpers/deferred";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -59,8 +66,8 @@ function input(overrides: Partial<CreateOperationInput> = {}): CreateOperationIn
       (result.intent.kind === "earn.deposit" ? result.intent.source : { ownerAddress: "owner" }),
   };
 }
-async function createClaim(): Promise<OperationClaim> {
-  const { record } = await repository().createOrReplay(input());
+async function createClaim(overrides: Partial<CreateOperationInput> = {}): Promise<OperationClaim> {
+  const { record } = await repository().createOrReplay(input(overrides));
   return repository().claimAction(scope, record.operation.id, record.operation);
 }
 async function expireLease(claim: OperationClaim): Promise<void> {
@@ -383,8 +390,13 @@ describe("durable operations repository", () => {
     expect(await repository().releaseRecovery(scope, progressed)).toBe(false);
   });
 
-  it("caps provider signature polling at one minute and refuses stale scheduling fences", async () => {
+  it("caps older provider signature polling at one minute and refuses stale scheduling fences", async () => {
     const claim = await createClaim();
+    // Seed its first acceptance in the past; accepted execution identity is immutable.
+    await getDb(env).execute(
+      "UPDATE operation_attempts SET execution_requested_at = (now() - interval '3 minutes')::text WHERE operation_id = ?",
+      [claim.operation.id]
+    );
     await repository().requestExecution(scope, claim);
     await repository().transition(scope, claim, {
       status: "queued",
@@ -422,6 +434,231 @@ describe("durable operations repository", () => {
     );
     expect(delay?.seconds).toBeGreaterThan(58);
     expect(delay?.seconds).toBeLessThanOrEqual(60);
+  });
+
+  it("publishes only committed submission releases, after the execution lease is free", async () => {
+    const claim = await createClaim();
+    await repository().requestExecution(scope, claim);
+    const connected = deferred<void>();
+    const notifications: string[] = [];
+    const failures: unknown[] = [];
+    const listener = listenForOperationNotifications(env, {
+      wake: (environment) => {
+        notifications.push(environment);
+      },
+      connected: () => connected.resolve(),
+      failed: (error) => {
+        failures.push(error);
+      },
+      track: (work) => {
+        void work;
+      },
+    });
+    await connected.promise;
+    const released = deferred<void>();
+    const commit = deferred<void>();
+    const releasing = getDb(env).transaction(async (tx) => {
+      expect(
+        await createOperationsRepository(asTransactionalClient(tx)).release(scope, claim)
+      ).toBe(true);
+      released.resolve();
+      await commit.promise;
+    });
+    try {
+      await released.promise;
+      expect(notifications).toEqual([]);
+      commit.resolve();
+      await releasing;
+      await vi.waitFor(() => expect(notifications).toEqual(["sandbox"]));
+      const available = await repository().claimNextRecovery("sandbox");
+      expect(available?.claim.operation.id).toBe(claim.operation.id);
+      const fresh = await repository().createOrReplay(
+        input({ requestKey: "rollback-notification" })
+      );
+      const rollbackClaim = await repository().claimAction(
+        scope,
+        fresh.record.operation.id,
+        fresh.record.operation
+      );
+      await repository().requestExecution(scope, rollbackClaim);
+      await expect(
+        getDb(env).transaction(async (tx) => {
+          await createOperationsRepository(asTransactionalClient(tx)).release(scope, rollbackClaim);
+          throw new Error("Roll back release");
+        })
+      ).rejects.toThrow("Roll back release");
+      await getDb(env).execute("SELECT pg_notify(?, ?)", [OPERATION_WAKE_CHANNEL, "production"]);
+      await vi.waitFor(() => expect(notifications).toEqual(["sandbox", "production"]));
+      expect(await repository().claimNextRecovery("sandbox")).toBeNull();
+      expect(failures).toEqual([]);
+    } finally {
+      commit.resolve();
+      await releasing;
+      await listener.stop();
+    }
+  });
+
+  it("measures a local PostgreSQL commit-to-claim burst without chain or signer latency", async () => {
+    const claims: OperationClaim[] = [];
+    for (let index = 0; index < 16; index += 1) {
+      const claim = await createClaim({ requestKey: `latency-${index}` });
+      await repository().requestExecution(scope, claim);
+      claims.push(claim);
+    }
+    const releasedAt = new Map<string, number>();
+    const latencies: number[] = [];
+    const startedIds = new Set<string>();
+    const background = new Set<Promise<unknown>>();
+    const execute = vi
+      .spyOn(operationRecovery, "recoverOperationClaim")
+      .mockImplementation(async (_env, _scope, claim) => {
+        const started = releasedAt.get(claim.operation.id);
+        if (started === undefined) throw new Error("Operation started before submission release");
+        startedIds.add(claim.operation.id);
+        latencies.push(performance.now() - started);
+        return true;
+      });
+    const worker = startOperationWorker(
+      env,
+      {
+        run: (task) => {
+          background.add(task);
+          void task.finally(() => background.delete(task));
+        },
+        awaitAll: async () => {
+          await Promise.allSettled([...background]);
+        },
+        draining: false,
+      },
+      ["sandbox"]
+    );
+    try {
+      await Promise.all(
+        claims.map(async (claim) => {
+          releasedAt.set(claim.operation.id, performance.now());
+          await repository().release(scope, claim);
+        })
+      );
+      await vi.waitFor(() => expect(startedIds.size).toBe(claims.length));
+      const sorted = [...latencies].sort((left, right) => left - right);
+      const percentile = (fraction: number) => sorted[Math.ceil(sorted.length * fraction) - 1];
+      process.stdout.write(
+        `${JSON.stringify({
+          probe: "local-postgres-submission-release-to-worker-claim",
+          count: sorted.length,
+          p50Ms: percentile(0.5),
+          p95Ms: percentile(0.95),
+          maxMs: sorted.at(-1),
+          excludes: "provider signing, broadcasting and chain confirmation",
+        })}\n`
+      );
+      expect(execute).toHaveBeenCalledTimes(claims.length);
+    } finally {
+      await worker.stop();
+      execute.mockRestore();
+    }
+  });
+
+  it("competing consumers claim distinct due accepted work and skip an in-flight row lock", async () => {
+    const ids: string[] = [];
+    for (const key of ["first", "second", "third"]) {
+      const prepared = await repository().createOrReplay(input({ requestKey: key }));
+      const claim = await repository().claimAction(
+        scope,
+        prepared.record.operation.id,
+        prepared.record.operation
+      );
+      await repository().requestExecution(scope, claim);
+      await repository().release(scope, claim);
+      ids.push(claim.operation.id);
+    }
+    await repository().createOrReplay(input({ requestKey: "never-accepted" }));
+    const locked = deferred<void>();
+    const unlock = deferred<void>();
+    const holding = getDb(env).transaction(async (tx) => {
+      await tx.queryOne("SELECT id FROM operations WHERE id = ? FOR UPDATE", [ids[0]]);
+      locked.resolve();
+      await unlock.promise;
+    });
+    await locked.promise;
+    try {
+      const claims = await Promise.all(
+        Array.from({ length: 4 }, () => repository().claimNextRecovery("sandbox"))
+      );
+      const obtained = claims.filter((value) => value !== null);
+      expect(obtained.map(({ claim }) => claim.operation.id).sort()).toEqual(ids.slice(1).sort());
+      expect(obtained.every((value) => value.scope.organizationId === scope.organizationId)).toBe(
+        true
+      );
+      expect(await repository().claimNextRecovery("production")).toBeNull();
+    } finally {
+      unlock.resolve();
+      await holding;
+    }
+    const remaining = await repository().claimNextRecovery("sandbox");
+    expect(remaining?.claim.operation.id).toBe(ids[0]);
+    expect(await repository().claimNextRecovery("sandbox")).toBeNull();
+  });
+
+  it("checks recent accepted progress every two seconds and backs off once old or unhealthy", async () => {
+    const claim = await createClaim();
+    await repository().requestExecution(scope, claim);
+    await repository().transition(scope, claim, {
+      status: "queued",
+      nextAction: { type: "wait", reason: "Queued" },
+      resourceRef: null,
+      error: null,
+    });
+    await repository().release(scope, claim);
+    const worker = await repository().claimNextRecovery("sandbox");
+    if (worker === null) throw new Error("Expected recent accepted work");
+    await repository().releaseRecovery(scope, worker.claim);
+    const recent = await getDb(env).queryOne<{ seconds: number }>(
+      "SELECT EXTRACT(EPOCH FROM next_check_at - now())::float8 AS seconds FROM operations WHERE id = ?",
+      [claim.operation.id]
+    );
+    expect(recent?.seconds).toBeGreaterThan(0);
+    expect(recent?.seconds).toBeLessThanOrEqual(2);
+    const oldClaim = await createClaim({ requestKey: "old-accepted" });
+    await getDb(env).execute(
+      "UPDATE operation_attempts SET execution_requested_at = (now() - interval '3 minutes')::text WHERE operation_id = ?",
+      [oldClaim.operation.id]
+    );
+    await repository().requestExecution(scope, oldClaim);
+    await repository().transition(scope, oldClaim, {
+      status: "queued",
+      nextAction: { type: "wait", reason: "Queued" },
+      resourceRef: null,
+      error: null,
+    });
+    await repository().release(scope, oldClaim);
+    await getDb(env).execute("UPDATE operations SET recovery_check_count = 5 WHERE id = ?", [
+      oldClaim.operation.id,
+    ]);
+    const older = await repository().claimRecovery(scope, oldClaim.operation.id);
+    if (older === null) throw new Error("Expected older accepted work");
+    await repository().releaseRecovery(scope, older);
+    const backoff = await getDb(env).queryOne<{ seconds: number }>(
+      "SELECT EXTRACT(EPOCH FROM next_check_at - now())::float8 AS seconds FROM operations WHERE id = ?",
+      [oldClaim.operation.id]
+    );
+    expect(backoff?.seconds).toBeGreaterThan(298);
+    expect(backoff?.seconds).toBeLessThanOrEqual(300);
+    await getDb(env).execute(
+      "UPDATE operations SET next_check_at = now(), recovery_check_count = 5, error = ?::jsonb WHERE id = ?",
+      [
+        JSON.stringify({ code: "SERVICE_UNAVAILABLE", message: "Provider unavailable" }),
+        claim.operation.id,
+      ]
+    );
+    const unhealthy = await repository().claimNextRecovery("sandbox");
+    if (unhealthy === null) throw new Error("Expected retryable failed check");
+    await repository().releaseRecovery(scope, unhealthy.claim);
+    const retry = await getDb(env).queryOne<{ seconds: number }>(
+      "SELECT EXTRACT(EPOCH FROM next_check_at - now())::float8 AS seconds FROM operations WHERE id = ?",
+      [claim.operation.id]
+    );
+    expect(retry?.seconds).toBeGreaterThan(298);
   });
 
   it("does not let an expired worker postpone its successor's recovery", async () => {

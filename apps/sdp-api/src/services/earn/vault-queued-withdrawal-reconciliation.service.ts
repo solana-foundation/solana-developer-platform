@@ -21,11 +21,18 @@ import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { address, type Signature } from "@solana/kit";
 import { getDb } from "@/db/client";
 import {
+  earnObservationDelay,
+  releaseEarnObservation,
+  releaseEarnObservations,
+  renewEarnObservation,
+} from "@/db/repositories/earn-observation-claims";
+import {
   createPostgresEarnVaultWithdrawalRequestsRepository,
   type EarnVaultWithdrawalRequestActionRow,
   type EarnVaultWithdrawalRequestRow,
   type EarnVaultWithdrawalRequestsRepository,
 } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
+import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import {
@@ -34,9 +41,14 @@ import {
 } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { broadcastVaultTransaction } from "@/services/earn/vault-execution.service";
+import {
+  matchesEarnRecoveryTransaction,
+  unchangedEarnRecoveryState,
+} from "@/services/earn/vault-recovery-observation";
 import type { Env } from "@/types/env";
 
 const ACTION_BATCH_SIZE = 128;
+const ACTION_RECOVERY_CONCURRENCY = 4;
 const REQUEST_BATCH_SIZE = 128;
 const OPEN_REQUEST_POLL_MS = 60_000;
 const PENDING_REQUEST_MAX_POLL_MS = 15 * 60_000;
@@ -155,7 +167,7 @@ function awaitsChain(
  *
  * @param rpc - The cluster's pool client.
  * @param environment - The environment the actions belong to, for the failure log.
- * @param rows - The claimed actions.
+ * @param rows - The selected snapshot actions.
  * @param statuses - The batch statuses, by index.
  * @param height - The finalized height read and the slot it was read at.
  * @returns The statuses with every expired action's re-read applied, and the indexes of expired
@@ -197,7 +209,7 @@ function proveExpiredActions(
  *
  * @param rpc - The cluster's pool client.
  * @param environment - The environment the actions belong to, for the failure logs.
- * @param rows - The claimed actions.
+ * @param rows - The selected snapshot actions.
  * @param statuses - The batch statuses, by index.
  * @param stats - The tick's stats; an unreadable height or re-read counts as an error.
  * @returns The statuses with every expired action's re-read applied, and the height each action is
@@ -282,7 +294,7 @@ export async function reconcileEarnVaultQueuedWithdrawals(env: Env): Promise<voi
   await ledger.cleanupExpiredReservations({ environment });
   await cleanupAbandonedWalletBuilds(ledger);
   const actions = await ledger.claimUnsettledActions({ environment, limit: ACTION_BATCH_SIZE });
-  const stats = emptyStats(actions.length, 0);
+  const stats = emptyStats(0, 0);
   await reconcileActions(env, ledger, actions, stats);
 
   stats.requestsClaimed = await visitOpenRequestsJustInTime(
@@ -326,8 +338,7 @@ export async function reconcileEarnVaultQueuedWithdrawals(env: Env): Promise<voi
 }
 
 /**
- * Settle a claimed batch of signed request/cancel actions against the scope's
- * cluster, counting outcomes and failures into `stats`.
+ * Read a bounded snapshot once, then claim only actions ready to be processed.
  */
 async function reconcileActions(
   env: Env,
@@ -335,7 +346,8 @@ async function reconcileActions(
   actions: readonly EarnVaultWithdrawalRequestActionRow[],
   stats: QueueReconciliationStats
 ): Promise<void> {
-  if (actions.length === 0) return;
+  const candidates = await ledger.readRecoveryObservations(actions);
+  if (candidates.length === 0) return;
   const { environment } = currentClusterScope();
   let rpc: SolanaRpc;
   let statuses: Array<SignatureStatusInfo | null>;
@@ -345,41 +357,102 @@ async function reconcileActions(
       rpc,
       // SAFETY: an action row stores the base58 signature of the owner-signed transaction SDP
       // verified at submit.
-      actions.map((row) => row.signature as Signature),
+      candidates.map((row) => row.signature as Signature),
       { searchTransactionHistory: true }
     );
   } catch (error) {
-    stats.errors += actions.length;
+    stats.errors += candidates.length;
     getLogger().error(
-      { environment, actions: actions.length, error },
+      { environment, actions: candidates.length, error },
       "earn queued withdrawal reconciliation: signature batch unreadable"
     );
     return;
   }
 
-  const expiry = await readActionExpiry(rpc, environment, actions, statuses, stats);
-
-  for (const [index, actionRow] of actions.entries()) {
+  const expiry = await readActionExpiry(rpc, environment, candidates, statuses, stats);
+  const observations = new Map<string, ActionRecoveryObservation>(
+    candidates.map((row, index) => [
+      row.id,
+      { row, status: expiry.statuses[index] ?? null, height: expiry.heightFor(index) },
+    ])
+  );
+  const db = getDb(env);
+  // The shared read reserves nothing. Slow providers only hold four actions;
+  // the fast observer can keep advancing the rest of this snapshot.
+  for (let offset = 0; offset < candidates.length; offset += ACTION_RECOVERY_CONCURRENCY) {
+    const claim = await ledger.claimRecoveryObservations(
+      candidates.slice(offset, offset + ACTION_RECOVERY_CONCURRENCY)
+    );
+    stats.actionsClaimed += claim.rows.length;
     try {
-      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- bounded reconciliation pacing protects the RPC and pool.
-      const outcome = await reconcileAction(
-        env,
-        ledger,
-        actionRow,
-        expiry.statuses[index] ?? null,
-        {
+      await reconcileClaimedActions(env, ledger, claim.rows, stats, claim.token, rpc, observations);
+    } finally {
+      await releaseEarnObservations(db, "withdrawal_action", claim.rows, claim.token, 5_000);
+    }
+  }
+}
+
+interface ActionRecoveryObservation {
+  row: EarnVaultWithdrawalRequestActionRow;
+  status: SignatureStatusInfo | null;
+  height: bigint | null;
+}
+
+async function reconcileClaimedActions(
+  env: Env,
+  ledger: QueueLedger,
+  actions: readonly EarnVaultWithdrawalRequestActionRow[],
+  stats: QueueReconciliationStats,
+  token: string,
+  rpc: SolanaRpc,
+  observations: ReadonlyMap<string, ActionRecoveryObservation>
+): Promise<void> {
+  const results = await mapSettledWithConcurrency(
+    [...actions],
+    ACTION_RECOVERY_CONCURRENCY,
+    async (actionRow) => {
+      let failed = false;
+      try {
+        if (!(await renewEarnObservation(getDb(env), "withdrawal_action", actionRow, token)))
+          return;
+        const observed = observations.get(actionRow.id);
+        if (!observed || !matchesEarnRecoveryTransaction(observed.row, actionRow))
+          throw new Error("Queued action changed after its recovery observation");
+        const outcome = await reconcileAction(env, ledger, actionRow, observed.status, {
           rpc: rpc as unknown as RawHistoryRpc,
-          currentHeight: expiry.heightFor(index),
-        }
-      );
-      if (outcome === "advanced") stats.actionsAdvanced += 1;
-      else if (outcome === "failed") stats.actionsFailed += 1;
-      else if (outcome === "rebroadcast") stats.actionsRebroadcast += 1;
-    } catch (error) {
+          // A saved miss cannot count as a later observation after another
+          // worker records the first absence or changes this action's state.
+          currentHeight: unchangedEarnRecoveryState(observed.row, actionRow)
+            ? observed.height
+            : null,
+        });
+        if (outcome === "advanced") stats.actionsAdvanced += 1;
+        else if (outcome === "failed") stats.actionsFailed += 1;
+        else if (outcome === "rebroadcast") stats.actionsRebroadcast += 1;
+      } catch (error) {
+        failed = true;
+        stats.errors += 1;
+        getLogger().error(
+          { actionId: actionRow.id, requestId: actionRow.withdrawal_request_id, error },
+          "earn queued withdrawal reconciliation: action remains unsettled"
+        );
+      } finally {
+        await releaseEarnObservation(
+          getDb(env),
+          "withdrawal_action",
+          actionRow,
+          token,
+          earnObservationDelay(actionRow.created_at, failed)
+        );
+      }
+    }
+  );
+  for (const result of results) {
+    if (result.status === "rejected") {
       stats.errors += 1;
       getLogger().error(
-        { actionId: actionRow.id, requestId: actionRow.withdrawal_request_id, error },
-        "earn queued withdrawal reconciliation: action remains unsettled"
+        { error: result.reason },
+        "earn queued withdrawal reconciliation: observation lease release failed"
       );
     }
   }
@@ -410,12 +483,36 @@ export async function visitOpenRequestsJustInTime(
   return claimed;
 }
 
+/** Share the queued-action reducer without granting send or expiry authority. */
+export function observeEarnWithdrawalActionStatus(
+  env: Env,
+  action: EarnVaultWithdrawalRequestActionRow,
+  status: SignatureStatusInfo | null,
+  rpc: SolanaRpc
+): Promise<"advanced" | "failed" | "rebroadcast" | "unchanged"> {
+  if (action.environment !== currentClusterScope().environment) {
+    throw new Error("Earn withdrawal action belongs to another observation environment");
+  }
+  return reconcileAction(
+    env,
+    createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env)),
+    action,
+    status,
+    {
+      // SAFETY: the pool client implements the raw finalized history methods used here.
+      rpc: rpc as unknown as RawHistoryRpc,
+      currentHeight: null,
+      observationTimeoutMs: 2_000,
+    }
+  );
+}
+
 export async function reconcileAction(
   env: Env,
   ledger: QueueLedger,
   actionRow: EarnVaultWithdrawalRequestActionRow,
   status: SignatureStatusInfo | null,
-  chain: { rpc: RawHistoryRpc; currentHeight: bigint | null }
+  chain: { rpc: RawHistoryRpc; currentHeight: bigint | null; observationTimeoutMs?: number }
 ): Promise<"advanced" | "failed" | "rebroadcast" | "unchanged"> {
   // A current release may affect a replacement at the same owner PDA. Keep
   // older financial history isolated while that accepted action can execute.
@@ -439,7 +536,14 @@ export async function reconcileAction(
       organizationId: actionRow.organization_id,
       toStatus: "finalized",
     });
-    await projectFinalizedAction(env, ledger, actionRow, chain.rpc);
+    await projectFinalizedAction(
+      env,
+      ledger,
+      actionRow,
+      chain.rpc,
+      undefined,
+      chain.observationTimeoutMs
+    );
     return "advanced";
   }
   if (status?.confirmationStatus === "confirmed") {
@@ -850,7 +954,8 @@ async function projectFinalizedAction(
   ledger: QueueLedger,
   actionRow: EarnVaultWithdrawalRequestActionRow,
   rpc: RawHistoryRpc,
-  observed?: RawTransactionResponse
+  observed?: RawTransactionResponse,
+  timeoutMs?: number
 ): Promise<void> {
   const request = await ledger.getById({
     organizationId: actionRow.organization_id,
@@ -859,13 +964,18 @@ async function projectFinalizedAction(
   });
   if (!request) throw new Error(`Missing queued withdrawal ${actionRow.withdrawal_request_id}`);
   if (request.mechanism === "operator_redemption") {
-    await projectFinalizedParAction(env, ledger, actionRow, request, rpc, observed);
+    await projectFinalizedParAction(env, ledger, actionRow, request, rpc, observed, timeoutMs);
     return;
   }
-  const client = resolveVaultQueuedWithdrawClient(env, request.provider, createVaultDeadline());
+  const deadline = createVaultDeadline(timeoutMs);
+  const client = resolveVaultQueuedWithdrawClient(env, request.provider, deadline);
   if (!client) throw new Error(`Queued withdrawal provider ${request.provider} is unavailable`);
-  const logs = await transactionLogs(rpc, actionRow.signature, observed);
-  const events = await lifecycleEvents(env, client, request, logs);
+  const logs = await deadline.run("Queued transaction observation", () =>
+    transactionLogs(rpc, actionRow.signature, observed)
+  );
+  const events = await deadline.run("Queued transaction events", () =>
+    lifecycleEvents(env, client, request, logs)
+  );
   if (actionRow.action === "request") {
     const event = events.find(
       (candidate) =>
@@ -916,12 +1026,18 @@ async function projectFinalizedParAction(
   actionRow: EarnVaultWithdrawalRequestActionRow,
   request: EarnVaultWithdrawalRequestRow,
   rpc: RawHistoryRpc,
-  observed?: RawTransactionResponse
+  observed?: RawTransactionResponse,
+  timeoutMs?: number
 ): Promise<void> {
-  const client = resolveVaultParRedemptionClient(env, request.provider, createVaultDeadline());
+  const deadline = createVaultDeadline(timeoutMs);
+  const client = resolveVaultParRedemptionClient(env, request.provider, deadline);
   if (!client) throw new Error(`Par-redemption provider ${request.provider} is unavailable`);
-  const observation = await transactionObservation(rpc, actionRow.signature, observed);
-  const events = await parLifecycleEvents(env, client, request, observation);
+  const observation = await deadline.run("Redemption transaction observation", () =>
+    transactionObservation(rpc, actionRow.signature, observed)
+  );
+  const events = await deadline.run("Redemption transaction events", () =>
+    parLifecycleEvents(env, client, request, observation)
+  );
   if (actionRow.action === "request") {
     const event = events.find(
       (candidate) =>

@@ -19,7 +19,7 @@ every parameter, field and error.
 | [`GET /v1/earn/positions/{positionId}`](/docs/reference/api/earn/get-earn-position) | A position `id` | One [position](#position) |
 | [`POST /v1/earn/deposit`](/docs/reference/api/earn/prepare-earn-deposit) | `strategyId`, `source.ownerAddress`, `amount` | An [operation](#operation) to sign |
 | [`POST /v1/earn/withdraw`](/docs/reference/api/earn/prepare-earn-withdrawal) | `positionId`, `amount` | An [operation](#operation) to sign, or a route to choose |
-| [`GET /v1/operations`](/docs/reference/api/earn/list-operations) | `ownerAddress`; optional `status`, `kind` | A page of [operations](#operation) |
+| [`GET /v1/operations`](/docs/reference/api/earn/list-operations) | `ownerAddress`; optional `status`, `kind`, `operationIds` | A page of [operations](#operation) |
 | [`GET /v1/operations/{operationId}`](/docs/reference/api/earn/get-operation) | Nothing | One [operation](#operation) |
 | [`POST /v1/operations/{operationId}/submit`](/docs/reference/api/earn/submit-operation) | `actionId`, `version`, `signedTransaction` | The [operation](#operation), now `queued` |
 | [`POST /v1/operations/{operationId}/refresh`](/docs/reference/api/earn/refresh-operation) | `actionId`, `version`, `optionId` | The [operation](#operation), with the chosen route to sign |

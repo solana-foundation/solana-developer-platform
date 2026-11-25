@@ -63,6 +63,7 @@ export async function resolveVaultBalanceReadContext(
   | {
       afterMovementIds: string[];
       minimumSlot: number;
+      minimumSlotMovementId?: string;
       minimumSlotByPositionId: ReadonlyMap<string, number>;
     }
   | undefined
@@ -71,14 +72,18 @@ export async function resolveVaultBalanceReadContext(
   const { environment, cluster } = currentClusterScope();
   const repo = createPostgresEarnMovementsRepository(getDb(env));
   const afterMovementIds = [...new Set(input.movementIds)];
+  const scopedMovements = await repo.getMovementsByIds({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    environment,
+    movementIds: afterMovementIds,
+  });
+  const byId = new Map(scopedMovements.map((movement) => [movement.id, movement]));
   const movements = [];
   // Scope every movement before any chain request. A foreign id never becomes
   // a timing oracle for another project's or selected wallet's transaction.
   for (const movementId of afterMovementIds) {
-    const movement = await repo.getMovementById({
-      movementId,
-      organizationId: input.organizationId,
-    });
+    const movement = byId.get(movementId);
     if (
       movement?.execution_model !== "vault_direct" ||
       movement.environment !== environment ||
@@ -143,5 +148,11 @@ export async function resolveVaultBalanceReadContext(
       );
     }
   }
-  return { afterMovementIds, minimumSlot, minimumSlotByPositionId };
+  return {
+    afterMovementIds,
+    minimumSlot,
+    minimumSlotByPositionId,
+    minimumSlotMovementId:
+      afterMovementIds[statuses.findIndex((status) => Number(status?.slot) === minimumSlot)],
+  };
 }
