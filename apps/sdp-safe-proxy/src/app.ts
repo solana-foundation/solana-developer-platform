@@ -137,8 +137,11 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
     return new Response(answer.body, { status: answer.status, headers: answerHeaders });
   });
 
-  app.notFound(() => {
-    throw notFound();
+  // Returned, not thrown: an error thrown here would skip the request log.
+  app.notFound((c) => {
+    const error = notFound();
+    c.get("line").error = error.message;
+    return error.getResponse();
   });
 
   app.onError((error, c) => {
