@@ -4,7 +4,7 @@ import { parseServerSettings } from "./settings";
 
 it("names a missing or invalid setting and never its value", () => {
   const env = {
-    SAFE_PROXY_MAX_BUDGET_MS: "60000",
+    SAFE_PROXY_PROVIDER_TIMEOUT_MS: "30000",
     PRIVY_APP_ID: "privy-app-1",
     FIREBLOCKS_API_KEY: "fireblocks-key-1",
     FIREBLOCKS_API_SECRET: "fireblocks-secret-9e2a",

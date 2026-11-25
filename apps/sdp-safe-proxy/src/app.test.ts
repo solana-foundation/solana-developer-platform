@@ -1,267 +1,211 @@
 import assert from "node:assert/strict";
-import { before, describe, it } from "node:test";
+import { describe, it } from "node:test";
 import {
-  FORWARD_HEADERS,
   LOCAL_CALLER_HEADER,
+  REQUEST_ID_HEADER,
+  RESULT_HEADER,
   type SafeProxyCode,
 } from "@sdp/safe-proxy-endpoints/protocol";
-import type { SafeProxyForwardResult } from "@sdp/types/safe-proxy";
-import { decodeJwt } from "jose";
+import { importSPKI, jwtVerify } from "jose";
 import {
   createForwardApp,
+  FIREBLOCKS_PUBLIC_KEY_PEM,
+  type ForwardAppOptions,
   type ForwardRequest,
   PLATFORM_CREDENTIALS,
 } from "./test/helpers/forward-app";
 
-const LIST_WALLETS = "/v1/forward/privy/v1/wallets";
+const WALLETS = "/privy/v1/wallets";
 
-async function assertOwnAnswer(
-  response: Response,
-  result: Exclude<SafeProxyForwardResult, "forwarded">,
-  code: SafeProxyCode
-): Promise<void> {
-  assert.deepEqual(
-    { result: response.headers.get(FORWARD_HEADERS.result), body: await response.json() },
-    { result, body: { code } }
-  );
+async function ownAnswer(response: Response) {
+  const result = response.headers.get(RESULT_HEADER);
+  return { status: response.status, result, body: await response.text() };
 }
 
-describe("forward route refusals reach no provider", () => {
-  const rows: (ForwardRequest & { name: string; code: SafeProxyCode })[] = [
-    { name: "a token from another signer", untrustedToken: true, code: "unauthenticated" },
-    {
-      name: "no token, even naming a local caller",
-      caller: null,
-      headers: { [LOCAL_CALLER_HEADER]: "api" },
-      code: "unauthenticated",
-    },
-    { name: "a caller not on the endpoint's list", caller: "cron", code: "caller_not_allowed" },
-    {
-      name: "a body over the size limit",
-      method: "POST",
-      body: "a".repeat(1024 * 1024 + 1),
-      code: "invalid_request",
-    },
-    {
-      name: "a body that is not valid UTF-8",
-      method: "POST",
-      body: new Uint8Array([0x7b, 0xff, 0x7d]),
-      code: "invalid_request",
-    },
-    {
-      name: "a GET that declares a body",
-      headers: { "content-length": "2" },
-      code: "body_not_allowed",
-    },
-    {
-      name: "a malformed request id",
-      headers: { [FORWARD_HEADERS.requestId]: "req 7d1" },
-      code: "invalid_request",
-    },
-    {
-      name: "a reference to a customer secret",
-      headers: {
-        [FORWARD_HEADERS.credential]:
-          "secret_manager_version:projects/sdp-test/secrets/privy-g96/versions/3",
-      },
-      code: "credential_store_unavailable",
-    },
-    {
-      name: "a malformed credential reference",
-      headers: { [FORWARD_HEADERS.credential]: "secret_manager_version:privy-g96" },
-      code: "invalid_request",
-    },
+describe("a refused request reaches no provider", () => {
+  const rows: [
+    name: string,
+    status: number,
+    code: SafeProxyCode,
+    path: string,
+    request?: ForwardRequest,
+    app?: ForwardAppOptions,
+  ][] = [
+    ["a forged identity token", 401, "unauthenticated", WALLETS, { token: "forged" }],
+    [
+      "no token, even naming a local caller",
+      401,
+      "unauthenticated",
+      WALLETS,
+      { token: null, headers: { [LOCAL_CALLER_HEADER]: "api" } },
+    ],
+    ["an unknown service account", 403, "caller_not_allowed", WALLETS, { token: "stranger" }],
+    [
+      "a token while the identity keys cannot be read",
+      503,
+      "caller_check_unavailable",
+      WALLETS,
+      {},
+      { keys: () => Promise.reject(new Error("keys unreachable")) },
+    ],
+    ["a caller not on the endpoint", 403, "caller_not_allowed", WALLETS, { token: "cron" }],
+    ["an undeclared provider", 403, "provider_not_allowed", "/acme/v1/wallets"],
+    ["an undeclared endpoint", 403, "endpoint_not_allowed", "/privy/v1/users"],
+    [
+      "a body outside the body rule",
+      403,
+      "body_not_allowed",
+      "/privy/v1/wallets/wallet-d41/rpc",
+      { method: "POST", body: '{"method":"exportWallet"}' },
+    ],
+    [
+      "a body over the size limit",
+      400,
+      "invalid_request",
+      WALLETS,
+      { method: "POST", body: "a".repeat(1024 * 1024 + 1) },
+    ],
+    ["a provider with no provider path", 404, "unknown_route", "/privy"],
+    ["a path naming no provider", 404, "unknown_route", "/"],
   ];
-  for (const { name, code, ...request } of rows) {
+  for (const [name, status, code, path, request, app] of rows) {
     it(`refuses ${name}`, async () => {
-      const forwardApp = createForwardApp();
-      const response = await forwardApp.send(LIST_WALLETS, request);
-      await assertOwnAnswer(response, "refused", code);
+      const forwardApp = createForwardApp(app);
+      assert.deepEqual(await ownAnswer(await forwardApp.send(path, request)), {
+        status,
+        result: "refused",
+        body: JSON.stringify({ code }),
+      });
       assert.equal(forwardApp.calls.length, 0);
     });
   }
 });
 
-describe("the provider call", () => {
+it("sends the provider only its declared headers and the platform's Privy auth", async () => {
   const forwardApp = createForwardApp();
-  const body = '{"chain_type": "solana", "note": "é"}';
-  before(() =>
-    forwardApp.send(LIST_WALLETS, {
-      method: "POST",
-      body,
-      headers: {
-        "privy-idempotency-key": "idem-5e2",
-        "privy-app-id": "caller-app",
-        "x-api-key": "caller-key",
-        cookie: "session=abc",
-        "content-type": "text/plain",
-      },
-    })
-  );
-
-  it("carries only the declared request headers and the platform credential", () => {
-    const { appId, appSecret } = PLATFORM_CREDENTIALS.privy;
-    assert.deepEqual(forwardApp.calls[0]?.headers, {
-      authorization: `Basic ${Buffer.from(`${appId}:${appSecret}`).toString("base64")}`,
-      "privy-app-id": appId,
-      "privy-idempotency-key": "idem-5e2",
-      "content-type": "application/json",
-    });
-  });
-
-  it("sends the body it matched", () => {
-    assert.equal(forwardApp.calls[0]?.body, body);
-  });
-
-  it("does not follow a redirect", () => {
-    assert.equal(forwardApp.calls[0]?.redirect, "manual");
-  });
-});
-
-describe("the provider answer", () => {
-  let response: Response;
-  before(async () => {
-    const forwardApp = createForwardApp({
-      answer: () =>
-        new Response('{"code":"caller_not_allowed"}', {
-          status: 403,
-          headers: {
-            "content-type": "application/json",
-            "set-cookie": "session=provider-7a2",
-            "sdp-safe-proxy-result": "refused",
-          },
-        }),
-    });
-    response = await forwardApp.send(LIST_WALLETS);
-  });
-
-  it("comes back with only its content type", () => {
-    assert.deepEqual([...response.headers.keys()], ["content-type", "sdp-safe-proxy-result"]);
-    assert.equal(response.headers.get("content-type"), "application/json");
-  });
-
-  it("is marked forwarded even when it reads like a Safe Proxy refusal", async () => {
-    assert.equal(response.status, 403);
-    assert.equal(response.headers.get("sdp-safe-proxy-result"), "forwarded");
-    assert.equal(await response.text(), '{"code":"caller_not_allowed"}');
-  });
-
-  it("is refused past the size limit", async () => {
-    const forwardApp = createForwardApp({
-      answer: () => new Response(new Uint8Array(8 * 1024 * 1024 + 1)),
-    });
-    const tooLarge = await forwardApp.send(LIST_WALLETS);
-    await assertOwnAnswer(tooLarge, "no_answer", "provider_answer_too_large");
-  });
-
-  it("is no answer when the call fails after the request left", async () => {
-    const forwardApp = createForwardApp({
-      answer: () => Promise.reject(new TypeError("fetch failed")),
-    });
-    const failed = await forwardApp.send(LIST_WALLETS);
-    await assertOwnAnswer(failed, "no_answer", "provider_no_answer");
-    assert.equal(forwardApp.calls.length, 1);
-  });
-});
-
-it("refuses a request whose deadline passes before it is sent", { timeout: 5_000 }, async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
-  let reading!: () => void;
-  const bodyRead = new Promise<void>((resolve) => {
-    reading = resolve;
-  });
-  const forwardApp = createForwardApp();
-  const stalledBody = new ReadableStream<Uint8Array>(
-    {
-      pull: () => {
-        reading();
-        return new Promise(() => {});
-      },
-    },
-    { highWaterMark: 0 }
-  );
-
-  const pending = forwardApp.send(LIST_WALLETS, { method: "POST", body: stalledBody });
-  await bodyRead;
-  t.mock.timers.tick(10_000);
-
-  await assertOwnAnswer(await pending, "refused", "deadline_exceeded");
-  assert.equal(forwardApp.calls.length, 0);
-});
-
-it("bounds the provider call by the budget the caller check left", {
-  timeout: 5_000,
-}, async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
-  let reached!: () => void;
-  const providerReached = new Promise<void>((resolve) => {
-    reached = resolve;
-  });
-  const forwardApp = createForwardApp({
-    keys: (trusted) => (header, token) => {
-      t.mock.timers.tick(4_000);
-      return trusted(header, token);
-    },
-    answer: ({ signal }) => {
-      reached();
-      return new Promise((_resolve, reject) => {
-        signal?.addEventListener("abort", () => reject(signal.reason));
-      });
-    },
-  });
-
-  const pending = forwardApp.send(LIST_WALLETS);
-  await providerReached;
-  t.mock.timers.tick(5_999);
-  assert.equal(forwardApp.calls[0]?.signal?.aborted, false);
-  t.mock.timers.tick(1);
-
-  await assertOwnAnswer(await pending, "no_answer", "provider_no_answer");
-});
-
-it("signs the Fireblocks target and body exactly as forwarded", async () => {
-  const forwardApp = createForwardApp();
-  await forwardApp.send(
-    "/v1/forward/fireblocks/v1/vault/accounts_paged?namePrefix=vault-e74&limit=5"
-  );
-  await forwardApp.send("/v1/forward/fireblocks/v1/transactions", {
+  await forwardApp.send(WALLETS, {
     method: "POST",
-    body: '{"operation":"TRANSFER"}',
+    body: '{"chain_type": "solana", "note": "é"}',
+    headers: {
+      "privy-idempotency-key": "idem-5e2",
+      "privy-app-id": "caller-app",
+      "x-api-key": "caller-key",
+      cookie: "session=abc",
+      "content-type": "text/plain",
+    },
   });
 
-  const signed = forwardApp.calls.map(({ url, body, headers }) => {
-    const { uri, bodyHash } = decodeJwt(headers.authorization?.replace(/^Bearer /, "") ?? "");
-    return { url, body, uri, bodyHash };
-  });
-  assert.deepEqual(signed, [
+  assert.deepEqual(forwardApp.calls, [
     {
-      url: "https://api.fireblocks.io/v1/vault/accounts_paged?namePrefix=vault-e74&limit=5",
-      body: null,
-      uri: "/v1/vault/accounts_paged?namePrefix=vault-e74&limit=5",
-      bodyHash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    },
-    {
-      url: "https://api.fireblocks.io/v1/transactions",
-      body: '{"operation":"TRANSFER"}',
-      uri: "/v1/transactions",
-      bodyHash: "38ad69eb823eff0c4d8f416ceda77b9a1f5bcf32fce1892d8d6cc2a7386c4706",
+      url: "https://api.privy.io/v1/wallets",
+      method: "POST",
+      headers: {
+        authorization: "Basic YXBwXzdrMjpzw6ljcmV0",
+        "content-type": "application/json",
+        "privy-app-id": "app_7k2",
+        "privy-idempotency-key": "idem-5e2",
+      },
+      body: '{"chain_type": "solana", "note": "é"}',
+      redirect: "manual",
     },
   ]);
 });
 
-it("logs no body, concrete path, credential, reference or error message", async () => {
+it("signs the Fireblocks target and body exactly as sent", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: 1_800_000_000_750 });
+  const forwardApp = createForwardApp();
+  await forwardApp.send("/fireblocks/v1/vault/accounts_paged?namePrefix=vault-e74&limit=5");
+  await forwardApp.send("/fireblocks/v1/transactions", {
+    method: "POST",
+    body: '{"operation":"TRANSFER"}',
+  });
+
+  const publicKey = await importSPKI(FIREBLOCKS_PUBLIC_KEY_PEM, "RS256");
+  const sent = await Promise.all(
+    forwardApp.calls.map(async ({ url, body, headers: { authorization, ...headers } }) => {
+      const bearer = /^Bearer (\S+)$/.exec(authorization);
+      assert.ok(bearer, "the call carries a bearer token");
+      const { nonce, ...claims } = (await jwtVerify(bearer[1], publicKey)).payload;
+      return { url, body, headers, claims, nonce: String(nonce) };
+    })
+  );
+
+  assert.notEqual(sent[0].nonce, sent[1].nonce);
+  const claims = { sub: "fireblocks-key-k4w", iat: 1_800_000_000, exp: 1_800_000_030 };
+  assert.deepEqual(
+    sent.map(({ nonce, ...call }) => call),
+    [
+      {
+        url: "https://api.fireblocks.io/v1/vault/accounts_paged?namePrefix=vault-e74&limit=5",
+        body: null,
+        headers: { "x-api-key": "fireblocks-key-k4w" },
+        claims: {
+          ...claims,
+          uri: "/v1/vault/accounts_paged?namePrefix=vault-e74&limit=5",
+          bodyHash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        },
+      },
+      {
+        url: "https://api.fireblocks.io/v1/transactions",
+        body: '{"operation":"TRANSFER"}',
+        headers: { "content-type": "application/json", "x-api-key": "fireblocks-key-k4w" },
+        claims: {
+          ...claims,
+          uri: "/v1/transactions",
+          bodyHash: "38ad69eb823eff0c4d8f416ceda77b9a1f5bcf32fce1892d8d6cc2a7386c4706",
+        },
+      },
+    ]
+  );
+});
+
+it("passes the provider's status, body and content type back as forwarded", async () => {
+  const forwardApp = createForwardApp({
+    answer: () =>
+      new Response('{"code":"caller_not_allowed"}', {
+        status: 403,
+        headers: {
+          "content-type": "application/json",
+          "set-cookie": "session=provider-7a2",
+          [RESULT_HEADER]: "refused",
+        },
+      }),
+  });
+  const response = await forwardApp.send(WALLETS);
+
+  assert.deepEqual(
+    {
+      status: response.status,
+      headers: Object.fromEntries(response.headers),
+      body: await response.text(),
+    },
+    {
+      status: 403,
+      headers: { "content-type": "application/json", [RESULT_HEADER]: "forwarded" },
+      body: '{"code":"caller_not_allowed"}',
+    }
+  );
+});
+
+it("answers no answer when the provider call fails after it was sent", async () => {
+  const forwardApp = createForwardApp({
+    answer: () => Promise.reject(new TypeError("fetch failed")),
+  });
+  assert.deepEqual(await ownAnswer(await forwardApp.send(WALLETS)), {
+    status: 502,
+    result: "no_answer",
+    body: '{"code":"provider_no_answer"}',
+  });
+  assert.equal(forwardApp.calls.length, 1);
+});
+
+it("logs the endpoint's pattern and the outcome, never a path, body, secret or token", async () => {
   const forwardApp = createForwardApp({
     answer: () => new Response('{"signed":"resp-body-c63"}'),
   });
-  await forwardApp.send("/v1/forward/privy/v1/wallets/wallet-d41/rpc", {
+  await forwardApp.send("/privy/v1/wallets/wallet-d41/rpc", {
     method: "POST",
     body: '{"method":"signTransaction","params":{"transaction":"tx-body-b52"}}',
-  });
-  await forwardApp.send(LIST_WALLETS, {
-    headers: {
-      "sdp-safe-proxy-credential":
-        "secret_manager_version:projects/sdp-test/secrets/privy-g96/versions/3",
-    },
   });
   const failing = createForwardApp({
     credentials: {
@@ -271,24 +215,34 @@ it("logs no body, concrete path, credential, reference or error message", async 
       },
     },
   });
-  await failing.send("/v1/forward/fireblocks/v1/vault/accounts_paged?namePrefix=vault-e74");
+  await failing.send("/fireblocks/v1/vault/accounts_paged?namePrefix=vault-e74", {
+    headers: { [REQUEST_ID_HEADER]: "req 7d1 tx-body-b52" },
+  });
 
-  const lines = [...forwardApp.logged, ...failing.logged];
-  assert.deepEqual(
-    lines.map((line) => JSON.parse(line).code),
-    [null, "credential_store_unavailable", "internal"]
-  );
-  for (const kept of [
-    "tx-body-b52",
-    "resp-body-c63",
-    "privy-g96",
-    PLATFORM_CREDENTIALS.privy.appSecret,
-    "wallet-d41",
-    "vault-e74",
-    "peer-f85",
-    ...forwardApp.tokens,
-    ...failing.tokens,
-  ]) {
-    for (const line of lines) assert.ok(!line.includes(kept), `log line carries ${kept}`);
-  }
+  const lines = [...forwardApp.logged, ...failing.logged].map(({ duration_ms, ...line }) => line);
+  const revision = "sdp-safe-proxy-00042-abc";
+  assert.deepEqual(lines, [
+    {
+      request_id: "req-7d1",
+      caller: "api",
+      provider: "privy",
+      endpoint: "POST /v1/wallets/{wallet}/rpc",
+      result: "forwarded",
+      code: null,
+      error_name: null,
+      status: 200,
+      revision,
+    },
+    {
+      request_id: null,
+      caller: "api",
+      provider: "fireblocks",
+      endpoint: "GET /v1/vault/accounts_paged",
+      result: "refused",
+      code: "internal",
+      error_name: "Error",
+      status: 500,
+      revision,
+    },
+  ]);
 });
