@@ -4,6 +4,17 @@ import { matchEndpoint } from "./match";
 
 const TRANSACTIONS = ["fireblocks", "POST", "/v1/transactions"] as const;
 
+const REFUSED_PROGRAM_CALLS = [
+  ["signOnly false", '{"operation":"PROGRAM_CALL","extraParameters":{"signOnly":false}}'],
+  ["signOnly omitted", '{"operation":"PROGRAM_CALL","extraParameters":{}}'],
+  ["signOnly not a boolean", '{"operation":"PROGRAM_CALL","extraParameters":{"signOnly":"true"}}'],
+  ["no extraParameters", '{"operation":"PROGRAM_CALL"}'],
+  [
+    "a second nested key that differs from signOnly only in case",
+    '{"operation":"PROGRAM_CALL","extraParameters":{"signOnly":true,"SignOnly":false}}',
+  ],
+] as const;
+
 const cases = [
   ["refuses an undeclared provider", "acme", "GET", "/v1/wallets", "", "provider_not_allowed"],
   ["refuses a non-canonical path", "privy", "GET", "/v1/./wallets", "", "endpoint_not_allowed"],
@@ -50,7 +61,11 @@ const cases = [
     "",
     "/v1/vault/accounts/{vault}/{asset}/addresses_paginated for api cron",
   ],
-  // Two endpoints share this method and path; the body's operation picks the one whose callers apply.
+  ...REFUSED_PROGRAM_CALLS.map(
+    ([what, body]) =>
+      [`refuses PROGRAM_CALL with ${what}`, ...TRANSACTIONS, body, "body_not_allowed"] as const
+  ),
+  // Three endpoints share this method and path; the body picks the one whose callers apply.
   [
     "matches RAW to its own endpoint",
     ...TRANSACTIONS,
@@ -58,9 +73,9 @@ const cases = [
     "/v1/transactions for api cron",
   ],
   [
-    "matches PROGRAM_CALL to its own endpoint",
+    "matches a sign-only PROGRAM_CALL to its own endpoint",
     ...TRANSACTIONS,
-    '{"operation":"PROGRAM_CALL"}',
+    '{"operation":"PROGRAM_CALL","extraParameters":{"signOnly":true}}',
     "/v1/transactions for api cron",
   ],
   [
