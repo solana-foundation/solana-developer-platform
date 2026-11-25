@@ -68,10 +68,12 @@ describe("anchorage wallet provisioning", () => {
       );
 
     await expect(
-      provisionAnchorageWalletInCustody(
-        createRuntime(fetchMock),
-        { cluster: "devnet", apiKey: "anchorage-explicit-key" },
-        {}
+      inSandboxScope(() =>
+        provisionAnchorageWalletInCustody(
+          createRuntime(fetchMock),
+          { apiKey: "anchorage-explicit-key" },
+          {}
+        )
       )
     ).resolves.toEqual({ walletId: "wa_anch_4", address: syntheticAddress(4) });
   });

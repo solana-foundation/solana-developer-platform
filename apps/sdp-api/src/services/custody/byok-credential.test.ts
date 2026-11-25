@@ -1,5 +1,6 @@
 import { generateKeyPairSync } from "node:crypto";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, aroundEach, describe, expect, it, vi } from "vitest";
+import { inSandboxScope } from "@/test/helpers/cluster-rpc";
 import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import { checkByokCredential, credentialPayload, parseByokCredential } from "./byok-credential";
 
@@ -12,6 +13,7 @@ const fields = {
 const address = syntheticAddress(1);
 
 afterEach(() => vi.restoreAllMocks());
+aroundEach((runTest) => inSandboxScope(runTest));
 
 describe("Fireblocks BYOK credentials", () => {
   it("parses only the stored provider's credential variant", () => {
@@ -72,7 +74,7 @@ describe("Fireblocks BYOK credentials", () => {
     });
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenCalledWith(
-      "https://api.fireblocks.io/v1/vault/accounts/0/SOL_TEST/addresses_paginated",
+      "https://sandbox-api.fireblocks.io/v1/vault/accounts/0/SOL_TEST/addresses_paginated",
       expect.objectContaining({
         method: "GET",
         headers: expect.objectContaining({

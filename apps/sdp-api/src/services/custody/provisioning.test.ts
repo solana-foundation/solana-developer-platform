@@ -715,19 +715,20 @@ describe("utila wallet provisioning", () => {
     );
     const now = 1_725_000_000_000;
 
-    await provisionUtilaWalletInCustody(
-      {
-        fetch: fetchMock,
-        sleep: async () => undefined,
-        now: () => now,
-      },
-      {
-        cluster: "devnet",
-        serviceAccountEmail: "service-account@example.com",
-        serviceAccountPrivateKeyPem: utilaPrivateKeyPem,
-        vaultId: "vaults/vault_123",
-      },
-      {}
+    await inSandboxScope(() =>
+      provisionUtilaWalletInCustody(
+        {
+          fetch: fetchMock,
+          sleep: async () => undefined,
+          now: () => now,
+        },
+        {
+          serviceAccountEmail: "service-account@example.com",
+          serviceAccountPrivateKeyPem: utilaPrivateKeyPem,
+          vaultId: "vaults/vault_123",
+        },
+        {}
+      )
     );
 
     const authorization = required(

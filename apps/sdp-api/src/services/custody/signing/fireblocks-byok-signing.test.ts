@@ -108,7 +108,7 @@ describe("Fireblocks BYOK transaction proposals", () => {
     expect(Buffer.from(required(required(signatures)[publicKey]))).toEqual(signature);
     expect(fetch).toHaveBeenCalledTimes(4);
     const [proposalUrl, proposalInit] = required(fetch.mock.calls[1]);
-    expect(proposalUrl).toBe("https://api.fireblocks.io/v1/transactions");
+    expect(proposalUrl).toBe("https://sandbox-api.fireblocks.io/v1/transactions");
     expect(JSON.parse(String(required(proposalInit).body))).toEqual({
       externalTxId: expect.stringMatching(/^sdp-sign-/),
       operation: "PROGRAM_CALL",
@@ -254,10 +254,13 @@ describe("Fireblocks BYOK transaction proposals", () => {
       context: { providerTransactionId: "proposal-1", cancelRequested: true },
     });
     expect(fetch.mock.calls.map(([url, init]) => [String(url), required(init).method])).toEqual([
-      ["https://api.fireblocks.io/v1/vault/accounts/42/SOL_TEST/addresses_paginated", "GET"],
-      ["https://api.fireblocks.io/v1/transactions", "POST"],
-      ["https://api.fireblocks.io/v1/transactions/proposal-1", "GET"],
-      ["https://api.fireblocks.io/v1/transactions/proposal-1/cancel", "POST"],
+      [
+        "https://sandbox-api.fireblocks.io/v1/vault/accounts/42/SOL_TEST/addresses_paginated",
+        "GET",
+      ],
+      ["https://sandbox-api.fireblocks.io/v1/transactions", "POST"],
+      ["https://sandbox-api.fireblocks.io/v1/transactions/proposal-1", "GET"],
+      ["https://sandbox-api.fireblocks.io/v1/transactions/proposal-1/cancel", "POST"],
     ]);
   });
 
@@ -290,7 +293,7 @@ describe("Fireblocks BYOK transaction proposals", () => {
       });
       expect(fetch).toHaveBeenCalledTimes(4);
       expect(String(required(fetch.mock.calls[3])[0])).toMatch(
-        /^https:\/\/api\.fireblocks\.io\/v1\/transactions\/external_tx_id\/sdp-sign-/
+        /^https:\/\/sandbox-api\.fireblocks\.io\/v1\/transactions\/external_tx_id\/sdp-sign-/
       );
     }
   );

@@ -1,15 +1,26 @@
-import { describe, expect, it, vi } from "vitest";
+import { aroundEach, describe, expect, it, vi } from "vitest";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
+import { inClusterScope } from "#/test/cluster-scope";
 import { testRuntime } from "#/test/runtime";
 import { checkPrivyCredential } from "./credential";
 
-const CREDENTIAL = { cluster: "devnet" as const, appId: "app-123", appSecret: "secret" };
+const CREDENTIAL = { appId: "app-123", appSecret: "secret" };
 
 function checkAgainst(answer: () => Promise<Response>) {
   return checkPrivyCredential(testRuntime(answer), CREDENTIAL);
 }
 
+describe("checkPrivyCredential outside a cluster scope", () => {
+  it("rejects instead of reporting a retryable result", async () => {
+    await expect(checkAgainst(async () => Response.json({ data: [] }))).rejects.toMatchObject({
+      code: "CLUSTER_SCOPE_MISSING",
+    });
+  });
+});
+
 describe("checkPrivyCredential", () => {
+  aroundEach((runTest) => inClusterScope("devnet", runTest));
+
   it("accepts an empty app without triggering the Privy limit=1 failure", async () => {
     const fetch = vi.fn<CustodyProvisioningRuntime["fetch"]>(async (input) =>
       new URL(String(input)).searchParams.get("limit") === "1"

@@ -5,7 +5,9 @@ import {
   type DfnsEnv,
   type IbmHavenEnv,
 } from "@sdp/custody/providers/dfns/client";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { runInClusterScope } from "@sdp/rpc/scope";
+import { afterEach, aroundEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { inSandboxScope } from "@/test/helpers/cluster-rpc";
 import { required } from "@/test/helpers/required";
 
 const DFNS_API_ORIGIN = "https://api.dfns.io";
@@ -29,13 +31,13 @@ describe("dfns wallet creation", () => {
   });
 
   it.each([
-    ["DFNS", "devnet", "SolanaDevnet", DFNS_API_ORIGIN],
-    ["DFNS", "mainnet-beta", "Solana", DFNS_API_ORIGIN],
-    ["IBM Haven", "devnet", "SolanaDevnet", IBM_HAVEN_API_ORIGIN],
-    ["IBM Haven", "mainnet-beta", "Solana", IBM_HAVEN_API_ORIGIN],
+    ["DFNS", "sandbox", "SolanaDevnet", DFNS_API_ORIGIN],
+    ["DFNS", "production", "Solana", DFNS_API_ORIGIN],
+    ["IBM Haven", "sandbox", "SolanaDevnet", IBM_HAVEN_API_ORIGIN],
+    ["IBM Haven", "production", "Solana", IBM_HAVEN_API_ORIGIN],
   ] as const)(
     "creates a %s %s wallet on the %s network",
-    async (provider, cluster, network, origin) => {
+    async (provider, environment, network, origin) => {
       const bodies: unknown[] = [];
       mockDfnsFetch((url, init) => {
         if (url !== `${origin}/wallets` || init?.method !== "POST") return null;
@@ -43,9 +45,11 @@ describe("dfns wallet creation", () => {
         return jsonResponse({ id: WALLET_ID }, 200);
       });
 
-      const client = await (provider === "DFNS"
-        ? createDfnsApiClient(createDfnsEnv(), cluster)
-        : createIbmHavenApiClient(createIbmHavenEnv(), cluster));
+      const client = await runInClusterScope({ projectId: null, environment }, () =>
+        provider === "DFNS"
+          ? createDfnsApiClient(createDfnsEnv())
+          : createIbmHavenApiClient(createIbmHavenEnv())
+      );
       await expect(client.wallets.createWallet({ body: { name: "Treasury" } })).resolves.toEqual({
         id: WALLET_ID,
       });
@@ -56,6 +60,7 @@ describe("dfns wallet creation", () => {
 });
 
 describe("dfns client redirects", () => {
+  aroundEach((runTest) => inSandboxScope(runTest));
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -73,7 +78,7 @@ describe("dfns client redirects", () => {
       return null;
     });
 
-    const client = await createDfnsApiClient(createDfnsEnv(), "devnet");
+    const client = await createDfnsApiClient(createDfnsEnv());
     const wallet = await client.wallets.createWallet({ body: {} });
 
     expect(wallet.id).toBe(WALLET_ID);
@@ -96,7 +101,7 @@ describe("dfns client redirects", () => {
       return null;
     });
 
-    const client = await createDfnsApiClient(createDfnsEnv(), "devnet");
+    const client = await createDfnsApiClient(createDfnsEnv());
 
     await expect(client.wallets.createWallet({ body: {} })).rejects.toThrow(
       /cross-origin redirect/
@@ -115,7 +120,7 @@ describe("dfns client redirects", () => {
       return null;
     });
 
-    const client = await createDfnsApiClient(createDfnsEnv(), "devnet");
+    const client = await createDfnsApiClient(createDfnsEnv());
 
     await expect(client.wallets.createWallet({ body: {} })).rejects.toThrow(
       /cross-origin redirect/
@@ -131,7 +136,7 @@ describe("dfns client redirects", () => {
       return null;
     });
 
-    const client = await createDfnsApiClient(createDfnsEnv(), "devnet");
+    const client = await createDfnsApiClient(createDfnsEnv());
 
     await expect(client.wallets.createWallet({ body: {} })).rejects.toThrow(
       /redirectOrigin=invalid/
@@ -147,7 +152,7 @@ describe("dfns client redirects", () => {
       return null;
     });
 
-    const client = await createIbmHavenApiClient(createIbmHavenEnv(), "devnet");
+    const client = await createIbmHavenApiClient(createIbmHavenEnv());
 
     await expect(client.wallets.createWallet({ body: {} })).rejects.toThrow(
       /IBM Digital Asset Haven API returned a cross-origin redirect/
@@ -166,7 +171,7 @@ describe("dfns client redirects", () => {
       return null;
     });
 
-    const client = await createDfnsApiClient(createDfnsEnv(), "devnet");
+    const client = await createDfnsApiClient(createDfnsEnv());
 
     await expect(client.wallets.getWallet({ walletId: "wa_1" })).rejects.toThrow(
       /unsupported redirect/
@@ -175,6 +180,7 @@ describe("dfns client redirects", () => {
 });
 
 describe("dfns client error redaction", () => {
+  aroundEach((runTest) => inSandboxScope(runTest));
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -196,7 +202,7 @@ describe("dfns client error redaction", () => {
       return null;
     });
 
-    const client = await createDfnsApiClient(createDfnsEnv(), "devnet");
+    const client = await createDfnsApiClient(createDfnsEnv());
     const error = await captureError(() => client.wallets.getWallet({ walletId: "wa_1" }));
 
     expect(error.message).toContain("status=403");
@@ -215,7 +221,7 @@ describe("dfns client error redaction", () => {
       return null;
     });
 
-    const client = await createDfnsApiClient(createDfnsEnv(), "devnet");
+    const client = await createDfnsApiClient(createDfnsEnv());
     const error = await captureError(() => client.wallets.getWallet({ walletId: "wa_1" }));
 
     expect(error.message).toContain("code=unavailable");
@@ -234,7 +240,7 @@ describe("dfns client error redaction", () => {
       return null;
     });
 
-    const client = await createDfnsApiClient(createDfnsEnv(), "devnet");
+    const client = await createDfnsApiClient(createDfnsEnv());
     const error = await captureError(() => client.wallets.listWallets());
 
     expect(error.message).toContain("non-JSON response");
@@ -257,7 +263,7 @@ describe("dfns client error redaction", () => {
       { allowedCredentialIds: [otherCredentialId] }
     );
 
-    const client = await createDfnsApiClient(createDfnsEnv(), "devnet");
+    const client = await createDfnsApiClient(createDfnsEnv());
     const error = await captureError(() => client.wallets.createWallet({ body: {} }));
 
     expect(error.message).toContain("1 credential(s) allowed");

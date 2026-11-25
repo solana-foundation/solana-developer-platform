@@ -23,6 +23,7 @@ import {
 } from "@solana/kit";
 import { z } from "zod";
 import { KeychainFireblocksAdapter } from "#/providers/fireblocks/keychain.adapter";
+import { inClusterScope } from "#/test/cluster-scope";
 
 const rsa = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const proposalSchema = z
@@ -41,6 +42,11 @@ const proposalSchema = z
     externalTxId: z.string(),
   })
   .strict();
+/** The host and native asset a Fireblocks proposal on each cluster must use. */
+const FIREBLOCKS_BY_CLUSTER = {
+  devnet: { host: "https://sandbox-api.fireblocks.io", assetId: "SOL_TEST" },
+  "mainnet-beta": { host: "https://api.fireblocks.io", assetId: "SOL" },
+} as const satisfies Record<SolanaCluster, { host: string; assetId: string }>;
 
 /** Both the native Kit plans and the provider-neutral Earn wire plans. */
 interface ProposalPlan {
@@ -105,7 +111,7 @@ export async function assertFireblocksTransaction(
   cluster: SolanaCluster
 ): Promise<void> {
   const publicKey = wallet.address;
-  const assetId = cluster === "mainnet-beta" ? "SOL" : "SOL_TEST";
+  const { host, assetId } = FIREBLOCKS_BY_CLUSTER[cluster];
   const [expected] = await wallet.signTransactions([transaction]);
   const expectedSignature = Buffer.from(expected[publicKey]);
   const previousFetch = globalThis.fetch;
@@ -125,14 +131,15 @@ export async function assertFireblocksTransaction(
       });
     };
     const adapter = new KeychainFireblocksAdapter({
-      cluster,
       apiKey: "tenant-key",
       apiSecretPem: rsa.privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
       vaultAccountId: "42",
       useProgramCall: true,
     });
-    const signer = await adapter.getTransactionSigner("fb_42");
-    const [signatures] = await signer.signTransactions([transaction]);
+    const signer = await inClusterScope(cluster, () => adapter.getTransactionSigner("fb_42"));
+    const [signatures] = await inClusterScope(cluster, () =>
+      signer.signTransactions([transaction])
+    );
     assert.deepEqual(Buffer.from(signatures[publicKey]), expectedSignature);
     assert.equal(
       requests.length,
@@ -142,9 +149,9 @@ export async function assertFireblocksTransaction(
     assert.deepEqual(
       requests.map(({ url, init }) => `${init?.method} ${url}`),
       [
-        `GET https://api.fireblocks.io/v1/vault/accounts/42/${assetId}/addresses_paginated`,
-        "POST https://api.fireblocks.io/v1/transactions",
-        "GET https://api.fireblocks.io/v1/transactions/proposal",
+        `GET ${host}/v1/vault/accounts/42/${assetId}/addresses_paginated`,
+        `POST ${host}/v1/transactions`,
+        `GET ${host}/v1/transactions/proposal`,
       ]
     );
     for (const { init } of requests)

@@ -236,11 +236,7 @@ async function bookRequest(overrides = {}, projectId = PROJECT_ID) {
   );
 }
 function expireBook() {
-  invalidateFireblocksAddressBook({
-    cluster: "devnet",
-    apiKey: fields.apiKey,
-    apiSecretPem: "unused",
-  });
+  invalidateFireblocksAddressBook({ apiKey: fields.apiKey, apiSecretPem: "unused" });
 }
 describe("Fireblocks read-only address book", () => {
   it("shares two reads, recognizes internal whitelist entries and matches the exact network", async () => {

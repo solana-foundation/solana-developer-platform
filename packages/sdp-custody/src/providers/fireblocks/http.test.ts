@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
-import { describe, it } from "vitest";
+import { aroundEach, describe, it } from "vitest";
+import { inClusterScope } from "#/test/cluster-scope";
 import { testRuntime } from "#/test/runtime";
 import { FireblocksApiError, fireblocksRequest } from "./http";
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const params = {
-  cluster: "devnet" as const,
   apiKey: "test-api-user",
   apiSecretPem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
   method: "POST" as const,
@@ -14,16 +14,23 @@ const params = {
   body: { operation: "TRANSFER", assetId: "SOL" },
 };
 
-describe("Fireblocks HTTP contract", () => {
-  it("sends requests to the Fireblocks API origin", async () => {
+describe("Fireblocks host", () => {
+  it.each([
+    ["devnet", "https://sandbox-api.fireblocks.io/v1/transactions"],
+    ["mainnet-beta", "https://api.fireblocks.io/v1/transactions"],
+  ] as const)("sends %s requests to %s", async (cluster, url) => {
     const urls: string[] = [];
-    const rt = testRuntime(async (url) => {
-      urls.push(String(url));
+    const rt = testRuntime(async (requested) => {
+      urls.push(String(requested));
       return Response.json({ id: "transaction" });
     });
-    await fireblocksRequest(rt, params);
-    assert.deepEqual(urls, ["https://api.fireblocks.io/v1/transactions"]);
+    await inClusterScope(cluster, () => fireblocksRequest(rt, params));
+    assert.deepEqual(urls, [url]);
   });
+});
+
+describe("Fireblocks HTTP contract", () => {
+  aroundEach((runTest) => inClusterScope("devnet", runTest));
 
   it("keeps retries stable and separate requests distinct within the 40-character limit", async () => {
     const keys: string[] = [];

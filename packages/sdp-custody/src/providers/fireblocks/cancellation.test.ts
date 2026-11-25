@@ -1,17 +1,19 @@
 import { generateKeyPairSync } from "node:crypto";
-import { assert, describe, expect, it, vi } from "vitest";
+import { aroundEach, assert, describe, expect, it, vi } from "vitest";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
+import { inClusterScope } from "#/test/cluster-scope";
 import { testRuntime } from "#/test/runtime";
 import { cancelFireblocksTransfer, type FireblocksTransferAccess } from "./transfers";
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const access: FireblocksTransferAccess = {
-  cluster: "devnet",
   apiKey: "tenant-api-key",
   apiSecretPem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
 };
 
 describe("Fireblocks cancellation adapter", () => {
+  aroundEach((runTest) => inClusterScope("devnet", runTest));
+
   it("POSTs only the encoded cancellation endpoint without an idempotency cache", async () => {
     const fetch = vi.fn<CustodyProvisioningRuntime["fetch"]>(async () =>
       Response.json({ success: true })

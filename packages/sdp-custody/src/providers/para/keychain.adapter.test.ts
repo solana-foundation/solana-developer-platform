@@ -1,11 +1,13 @@
 import { generateKeyPairSigner } from "@solana/kit";
-import { afterEach, assert, describe, expect, it, vi } from "vitest";
+import { afterEach, aroundEach, assert, describe, expect, it, vi } from "vitest";
+import { inClusterScope } from "#/test/cluster-scope";
 import { KeychainParaAdapter } from "./keychain.adapter";
 
 const { address: WALLET_ADDRESS } = await generateKeyPairSigner();
 const WALLET_ID = "0b6f4a8e-2c1d-4e5f-9a7b-3c8d2e1f4a6b";
 
 describe("para adapter", () => {
+  aroundEach((runTest) => inClusterScope("devnet", runTest));
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -17,7 +19,7 @@ describe("para adapter", () => {
       .mockResolvedValueOnce(
         Response.json({ id: WALLET_ID, type: "SOLANA", address: WALLET_ADDRESS })
       );
-    const adapter = new KeychainParaAdapter({ apiKey: "sk_test-key", cluster: "devnet" });
+    const adapter = new KeychainParaAdapter({ apiKey: "sk_test-key" });
 
     await expect(adapter.getPublicKey(`para_${WALLET_ID}`)).rejects.toThrow(
       "Para network request failed"
@@ -34,7 +36,7 @@ describe("para adapter", () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(Response.json({ id: WALLET_ID, type: "SOLANA", address: WALLET_ADDRESS }));
-    const adapter = new KeychainParaAdapter({ apiKey: "sk_test-key", cluster: "devnet" });
+    const adapter = new KeychainParaAdapter({ apiKey: "sk_test-key" });
 
     const first = await adapter.getTransactionSigner(`para_${WALLET_ID}`);
     const second = await adapter.getTransactionSigner(`para_${WALLET_ID}`);

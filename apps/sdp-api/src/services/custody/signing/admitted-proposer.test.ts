@@ -2,7 +2,7 @@ import { generateKeyPairSync } from "node:crypto";
 import type { CustodyProvisioningRuntime } from "@sdp/custody/shared/runtime";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import { generateKeyPairSigner } from "@solana/kit";
-import { describe, expect, it, vi } from "vitest";
+import { aroundEach, describe, expect, it, vi } from "vitest";
 import type { MoneyAdmissionDecision } from "@/lib/money-admission";
 import { required } from "@/test/helpers/required";
 import {
@@ -14,11 +14,10 @@ import {
   proposalRuntime,
 } from "./admitted-proposer";
 
-const FIREBLOCKS_API = "https://api.fireblocks.io";
+const FIREBLOCKS_API = "https://sandbox-api.fireblocks.io";
 const { address: SOURCE } = await generateKeyPairSigner();
 const { address: DESTINATION } = await generateKeyPairSigner();
 const access: ProposalAccess = {
-  cluster: "devnet",
   apiKey: "tenant-key",
   // A real RSA key: the Fireblocks client signs a JWT before it sends anything.
   apiSecretPem: generateKeyPairSync("rsa", { modulusLength: 2048 })
@@ -72,8 +71,7 @@ function runtime() {
   };
 }
 
-const devnet = <T>(fn: () => Promise<T>) =>
-  runInClusterScope({ projectId: "prj_1", environment: "sandbox" }, fn);
+aroundEach((runTest) => runInClusterScope({ projectId: "prj_1", environment: "sandbox" }, runTest));
 
 describe("admittedTransferProposer", () => {
   it("refuses before any provider request when the waist's live decision refuses", async () => {
@@ -85,7 +83,7 @@ describe("admittedTransferProposer", () => {
       context,
       rt
     );
-    const error = await devnet(() => proposer.propose(request)).catch((e: unknown) => e);
+    const error = await proposer.propose(request).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ProposalNotSentError);
     expect(fetch).not.toHaveBeenCalled();
   });
@@ -101,7 +99,7 @@ describe("admittedTransferProposer", () => {
       context,
       rt
     );
-    const error = await devnet(() => proposer.propose(request)).catch((e: unknown) => e);
+    const error = await proposer.propose(request).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ProposalNotSentError);
     expect(fetch).not.toHaveBeenCalled();
   });
@@ -117,7 +115,7 @@ describe("admittedTransferProposer", () => {
       context,
       rt
     );
-    await expect(devnet(() => proposer.propose(request))).resolves.toMatchObject({
+    await expect(proposer.propose(request)).resolves.toMatchObject({
       id: "fb-1",
       status: "SUBMITTED",
     });
@@ -151,9 +149,7 @@ describe("admittedTransferProposer", () => {
       context,
       rt
     );
-    const prepared = await devnet(() =>
-      proposer.prepare({ token: "SOL", amount: "0.01", native: true })
-    );
+    const prepared = await proposer.prepare({ token: "SOL", amount: "0.01", native: true });
     expect(decide).not.toHaveBeenCalled();
     // Native SOL needs no asset catalogue, so preparing makes no provider request at all.
     expect(fetch).not.toHaveBeenCalled();
@@ -170,7 +166,7 @@ describe("admittedTransferProposer", () => {
       rt
     );
     await expect(
-      devnet(() => proposer.prepare({ token: "SOL", amount: "0.01", native: true }))
+      proposer.prepare({ token: "SOL", amount: "0.01", native: true })
     ).rejects.toMatchObject({ code: "CONFLICT", message: "Fireblocks source wallet changed" });
     expect(fetch).not.toHaveBeenCalled();
   });
