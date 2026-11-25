@@ -171,9 +171,12 @@ function PortfolioNotices({
       </div>
       {unavailablePositionCount > 0 ? (
         <Callout variant="warning">
-          {t("DashboardMarkets.embeddedYield.incompletePortfolio", {
-            count: unavailablePositionCount,
-          })}
+          {t(
+            unavailablePositionCount === 1
+              ? "DashboardMarkets.embeddedYield.incompletePortfolioOne"
+              : "DashboardMarkets.embeddedYield.incompletePortfolio",
+            { count: unavailablePositionCount }
+          )}
         </Callout>
       ) : null}
     </>

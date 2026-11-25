@@ -8,6 +8,7 @@ import {
   type ProviderAvailabilityEntry,
   SURFACED_EARN_PROVIDERS,
 } from "@sdp/types/provider-access";
+import { type ProviderAccessRefusal, providerAccessRefusal } from "@/lib/provider-availability";
 
 export type EarnProviderAccess = Readonly<
   Partial<Record<EarnProviderId, ProviderAvailabilityEntry>>
@@ -19,7 +20,15 @@ export type EarnVaultDepositAvailability =
   | "strategy_unavailable"
   | "environment_unavailable"
   | "access_unavailable"
-  | "provider_unavailable";
+  | "provider_not_entitled"
+  | "provider_not_configured"
+  | "provider_disabled";
+
+const PROVIDER_REFUSAL_AVAILABILITY = {
+  not_entitled: "provider_not_entitled",
+  not_configured: "provider_not_configured",
+  disabled: "provider_disabled",
+} as const satisfies Record<ProviderAccessRefusal, EarnVaultDepositAvailability>;
 
 /**
  * Which providers this module drives, and whether a deposit is offered.
@@ -74,11 +83,31 @@ export function earnVaultDepositAvailability(
     return "access_unavailable";
   }
 
-  // `strategy.provider` is an open read-model string. Surfacing above proves it
-  // is a registered provider before this cast; an unknown value already failed
-  // closed as `strategy_unavailable`.
-  const provider = strategy.provider as EarnProviderId;
-  return providerAccess[provider]?.enabled === true ? "available" : "provider_unavailable";
+  // SAFETY: `strategy.provider` is an open read-model string. Surfacing above
+  // proves it is a registered provider before this cast; an unknown value
+  // already failed closed as `strategy_unavailable`.
+  const entry = providerAccess[strategy.provider as EarnProviderId];
+  if (entry === undefined) {
+    return "access_unavailable";
+  }
+  const refusal = providerAccessRefusal(entry);
+  return refusal === null ? "available" : PROVIDER_REFUSAL_AVAILABILITY[refusal];
+}
+
+/**
+ * Whether the organization holds no entitlement to any provider Earn takes deposits with, so a
+ * page can say it once instead of leaving every row to explain it.
+ *
+ * @param providerAccess - The organization's Earn provider entries, or null when unread.
+ * @returns True when the entries were read and every offered vault provider is not entitled.
+ */
+export function earnDepositsNotOnPlan(providerAccess: EarnProviderAccess | null): boolean {
+  return (
+    providerAccess !== null &&
+    SURFACED_VAULT_DIRECT_EARN_PROVIDERS.every(
+      (provider) => providerAccess[provider]?.entitled === false
+    )
+  );
 }
 
 /**

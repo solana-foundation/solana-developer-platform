@@ -9,6 +9,10 @@ import { SWRConfig, useSWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EarnWithdrawalRecovery } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-core-operations";
 import { earnQueryKeys } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-query-key";
+import {
+  type EarnProviderAccess,
+  SURFACED_VAULT_DIRECT_EARN_PROVIDERS,
+} from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-surfacing";
 import { EnglishTestI18n } from "@/app/(session)/dashboard/[projectId]/markets/test-i18n";
 import {
   earnCoreClient,
@@ -796,7 +800,7 @@ describe("TreasurySolutionsWorkspace", () => {
     mocks.positionsEmpty = true;
     renderWorkspace();
 
-    expect(screen.getByText("No active custody wallets")).toBeTruthy();
+    expect(screen.getByText("No custody wallets yet")).toBeTruthy();
     const action = screen.getByRole("link", { name: "Create wallet" });
     expect(action.getAttribute("href")).toBe("/dashboard/prj_test_sandbox/wallets/setup");
     expect(screen.queryByRole("link", { name: "View all" })).toBeNull();
@@ -809,7 +813,7 @@ describe("TreasurySolutionsWorkspace", () => {
     mocks.positionsEmpty = true;
     renderWorkspace();
 
-    expect(screen.getByText("No active custody wallets")).toBeTruthy();
+    expect(screen.getByText("No custody wallets yet")).toBeTruthy();
     expect(screen.queryByRole("link", { name: "Create wallet" })).toBeNull();
   });
 
@@ -940,7 +944,7 @@ describe("TreasurySolutionsWorkspace", () => {
         .getAllByRole("columnheader")
         .map((header) => header.textContent)
     ).toEqual(["Strategy", "APY", "TVL", "Your position", "Actions"]);
-    expect(within(instantRow).getByText("$12,345,678.90")).toBeTruthy();
+    expect(within(instantRow).getByText("$12.3M")).toBeTruthy();
 
     const delayedRow = screen.getByText("Veda Treasury Fund").closest("tr");
     if (!delayedRow) throw new Error("Expected the delayed strategy row");
@@ -1290,7 +1294,7 @@ describe("TreasurySolutionsWorkspace", () => {
   });
 
   it("never claims an empty positions list over a holding it has no record of", () => {
-    // "No active vault positions" is a claim of absence like any other.
+    // "No positions yet" is a claim of absence like any other.
     mocks.positionsEmpty = true;
     mocks.walletBalances = [
       { token: "USDC", mint: USDC_MINT, amount: "2500000000", uiAmount: "2500", decimals: 6 },
@@ -1308,7 +1312,7 @@ describe("TreasurySolutionsWorkspace", () => {
       screen.getByLabelText("A wallet holds vault shares with no matching position")
     ).toBeTruthy();
     expect(screen.getByText("Positions may be incomplete")).toBeTruthy();
-    expect(screen.queryByText("No active vault positions")).toBeNull();
+    expect(screen.queryByText("No positions yet")).toBeNull();
   });
 
   it("keeps a strategy row from printing a total another wallet contradicts", () => {
@@ -1597,7 +1601,7 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(
       (within(row).getByRole("button", { name: "Deposit" }) as HTMLButtonElement).disabled
     ).toBe(false);
-    expect(screen.getByLabelText(/Rates are provider-reported and variable/)).toBeTruthy();
+    expect(screen.getByLabelText(/Rates are provider-reported and can change/)).toBeTruthy();
   });
 });
 
@@ -1619,7 +1623,7 @@ describe("TreasurySolutionsWorkspace — combined strategy catalogue (PRO-1742)"
     expect(mainnetRow).not.toBeNull();
     expect(devnetRow).toBeDefined();
     const mainnetCells = within(mainnetRow as HTMLTableRowElement);
-    expect(mainnetCells.getByText("$32,000,000.00")).toBeTruthy();
+    expect(mainnetCells.getByText("$32M")).toBeTruthy();
     expect(mainnetCells.queryByText(/Devnet/)).toBeNull();
     expect(within(devnetRow as HTMLTableRowElement).getByText("Kamino · Devnet")).toBeTruthy();
     expect(mainnetCells.queryByRole("button", { name: "Deposit" })).toBeNull();
@@ -1678,9 +1682,7 @@ describe("TreasurySolutionsWorkspace — combined strategy catalogue (PRO-1742)"
     const catalogue = within(section);
     expect(catalogue.getByText("Kamino JLP Vault")).toBeTruthy();
     expect(devnetStrategyRow("Steakhouse USDC")).toBeUndefined();
-    expect(
-      catalogue.getByText("Loading Devnet strategies. Mainnet strategies remain available.")
-    ).toBeTruthy();
+    expect(catalogue.getByText("Loading Devnet strategies.")).toBeTruthy();
   });
 
   it("keeps mainnet strategies visible when the Devnet catalogue fails", () => {
@@ -1694,12 +1696,8 @@ describe("TreasurySolutionsWorkspace — combined strategy catalogue (PRO-1742)"
     const catalogue = within(section);
     expect(catalogue.getByText("Kamino JLP Vault")).toBeTruthy();
     expect(devnetStrategyRow("Steakhouse USDC")).toBeUndefined();
-    expect(
-      catalogue.getByText(
-        "Devnet strategies could not be loaded. Mainnet strategies remain available."
-      )
-    ).toBeTruthy();
-    expect(catalogue.queryByText("Markets data unavailable")).toBeNull();
+    expect(catalogue.getByText("Devnet strategies could not be loaded.")).toBeTruthy();
+    expect(catalogue.queryByText("Strategies could not be loaded")).toBeNull();
   });
 
   it("keeps devnet strategies depositable when the mainnet catalogue fails (PRO-1961)", () => {
@@ -1717,12 +1715,8 @@ describe("TreasurySolutionsWorkspace — combined strategy catalogue (PRO-1742)"
       within(devnetRow).getByRole("button", { name: "Deposit" }).hasAttribute("disabled")
     ).toBe(false);
     expect(catalogue.queryByText("Kamino JLP Vault")).toBeNull();
-    expect(
-      catalogue.getByText(
-        "Mainnet strategies could not be loaded. Devnet strategies remain available."
-      )
-    ).toBeTruthy();
-    expect(catalogue.queryByText("Markets data unavailable")).toBeNull();
+    expect(catalogue.getByText("Mainnet strategies could not be loaded.")).toBeTruthy();
+    expect(catalogue.queryByText("Strategies could not be loaded")).toBeNull();
   });
 
   it("keeps devnet strategies visible while the mainnet catalogue loads (PRO-1961)", () => {
@@ -1736,9 +1730,7 @@ describe("TreasurySolutionsWorkspace — combined strategy catalogue (PRO-1742)"
     const catalogue = within(section);
     expect(catalogue.getByText("Steakhouse USDC")).toBeTruthy();
     expect(catalogue.queryByText("Kamino JLP Vault")).toBeNull();
-    expect(
-      catalogue.getByText("Loading Mainnet strategies. Devnet strategies remain available.")
-    ).toBeTruthy();
+    expect(catalogue.getByText("Loading Mainnet strategies.")).toBeTruthy();
   });
 
   it("reserves the full catalogue error for both shelves failing (PRO-1961)", () => {
@@ -1751,10 +1743,14 @@ describe("TreasurySolutionsWorkspace — combined strategy catalogue (PRO-1742)"
       .closest("section");
     if (!section) throw new Error("Expected the strategy catalogue");
     const catalogue = within(section);
-    expect(catalogue.getByText("Markets data unavailable")).toBeTruthy();
+    expect(catalogue.getByText("Strategies could not be loaded")).toBeTruthy();
     expect(catalogue.queryByText("Steakhouse USDC")).toBeNull();
     expect(catalogue.queryByText("Kamino JLP Vault")).toBeNull();
-    expect(catalogue.queryByText(/strategies remain available\./)).toBeNull();
+    expect(
+      catalogue.queryByText(
+        /strategies could not be loaded\.|Loading (Devnet|Mainnet) strategies\./
+      )
+    ).toBeNull();
   });
 
   it("refreshes the environment and mainnet shelves once each", async () => {
@@ -1763,5 +1759,60 @@ describe("TreasurySolutionsWorkspace — combined strategy catalogue (PRO-1742)"
 
     await user.click(screen.getByRole("button", { name: "Refresh" }));
     expect(mocks.refreshStrategies).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("TreasurySolutionsWorkspace — provider plan", () => {
+  const notEntitled = { entitled: false, configured: true, enabled: false };
+  const entitled = { entitled: true, configured: true, enabled: true };
+  const noneEntitled: EarnProviderAccess = Object.fromEntries(
+    SURFACED_VAULT_DIRECT_EARN_PROVIDERS.map((provider) => [provider, notEntitled])
+  );
+  const planNotice = "New deposits aren't on your plan. Contact us to enable them.";
+
+  function renderWithAccess(providerAccess: EarnProviderAccess | null) {
+    return render(
+      <EnglishTestI18n>
+        <TreasurySolutionsWorkspace providerAccess={providerAccess} />
+      </EnglishTestI18n>
+    );
+  }
+
+  function strategyRow(name: string): HTMLTableRowElement {
+    const row = screen.getByText(name).closest("tr");
+    if (!row) throw new Error(`Expected a strategy row for ${name}`);
+    return row;
+  }
+
+  it("says once that new deposits are off the plan and names it on each affected row", () => {
+    renderWithAccess(noneEntitled);
+
+    const section = screen
+      .getByRole("heading", { name: "Available strategies" })
+      .closest("section");
+    if (!section) throw new Error("Expected the strategies section");
+    expect(within(section).getByText(planNotice)).toBeTruthy();
+    const row = devnetStrategyRow("Steakhouse USDC");
+    if (!row) throw new Error("Expected the devnet Steakhouse row");
+    expect(within(row).getByText("Not on your plan")).toBeTruthy();
+    expect(within(row).queryByRole("button", { name: "Deposit" })).toBeNull();
+    expect(screen.queryByText("Setup required")).toBeNull();
+  });
+
+  it("keeps the notice off while any offered provider is on the plan", () => {
+    renderWithAccess({ ...noneEntitled, kamino: entitled });
+
+    expect(screen.queryByText(planNotice)).toBeNull();
+    expect(within(strategyRow("Veda Treasury Fund")).getByText("Not on your plan")).toBeTruthy();
+  });
+
+  it("says access could not be checked, never that it is off the plan, when the read failed", () => {
+    renderWithAccess(null);
+
+    expect(screen.queryByText(planNotice)).toBeNull();
+    const row = devnetStrategyRow("Steakhouse USDC");
+    if (!row) throw new Error("Expected the devnet Steakhouse row");
+    expect(within(row).getByText("Couldn't check access")).toBeTruthy();
+    expect(screen.queryByText("Not on your plan")).toBeNull();
   });
 });
