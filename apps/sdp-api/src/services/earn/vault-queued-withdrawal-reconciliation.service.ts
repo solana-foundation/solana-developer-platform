@@ -111,20 +111,7 @@ interface RawSignatureInfo {
   err: unknown | null;
 }
 
-interface RawHistoryRpc {
-  getTransaction(
-    signature: Signature,
-    config: {
-      commitment: "finalized";
-      encoding: "json";
-      maxSupportedTransactionVersion: typeof MAX_SUPPORTED_TRANSACTION_VERSION;
-    }
-  ): { send(): Promise<RawTransactionResponse | null> };
-  getSignaturesForAddress(
-    requestAddress: ReturnType<typeof address>,
-    config: { commitment: "finalized"; limit: number; before?: Signature; until?: Signature }
-  ): { send(): Promise<readonly RawSignatureInfo[]> };
-}
+type HistoryRpc = Pick<SolanaRpc, "getTransaction" | "getSignaturesForAddress">;
 
 function describeError(error: unknown): string {
   return (error instanceof Error ? error.message : String(error)).slice(0, 500);
@@ -419,7 +406,7 @@ async function reconcileClaimedActions(
         if (!observed || !matchesEarnRecoveryTransaction(observed.row, actionRow))
           throw new Error("Queued action changed after its recovery observation");
         const outcome = await reconcileAction(env, ledger, actionRow, observed.status, {
-          rpc: rpc as unknown as RawHistoryRpc,
+          rpc,
           // A saved miss cannot count as a later observation after another
           // worker records the first absence or changes this action's state.
           currentHeight: unchangedEarnRecoveryState(observed.row, actionRow)
@@ -499,8 +486,7 @@ export function observeEarnWithdrawalActionStatus(
     action,
     status,
     {
-      // SAFETY: the pool client implements the raw finalized history methods used here.
-      rpc: rpc as unknown as RawHistoryRpc,
+      rpc,
       currentHeight: null,
       observationTimeoutMs: 2_000,
     }
@@ -512,7 +498,7 @@ export async function reconcileAction(
   ledger: QueueLedger,
   actionRow: EarnVaultWithdrawalRequestActionRow,
   status: SignatureStatusInfo | null,
-  chain: { rpc: RawHistoryRpc; currentHeight: bigint | null; observationTimeoutMs?: number }
+  chain: { rpc: HistoryRpc; currentHeight: bigint | null; observationTimeoutMs?: number }
 ): Promise<"advanced" | "failed" | "rebroadcast" | "unchanged"> {
   // A current release may affect a replacement at the same owner PDA. Keep
   // older financial history isolated while that accepted action can execute.
@@ -605,7 +591,7 @@ async function recoverExpiredUnknownAction(
   env: Env,
   ledger: QueueLedger,
   actionRow: EarnVaultWithdrawalRequestActionRow,
-  rpc: RawHistoryRpc
+  rpc: HistoryRpc
 ): Promise<"advanced" | "failed" | "unchanged"> {
   const request = await ledger.getById({
     organizationId: actionRow.organization_id,
@@ -720,7 +706,7 @@ async function recoverExpiredUnknownParAction(
   ledger: QueueLedger,
   actionRow: EarnVaultWithdrawalRequestActionRow,
   request: EarnVaultWithdrawalRequestRow,
-  rpc: RawHistoryRpc
+  rpc: HistoryRpc
 ): Promise<"advanced" | "failed" | "unchanged"> {
   const client = resolveVaultParRedemptionClient(env, request.provider, createVaultDeadline());
   if (!client) throw new Error(`Par-redemption provider ${request.provider} is unavailable`);
@@ -812,7 +798,7 @@ async function recoverAbsentCreation(
   ledger: QueueLedger,
   actionRow: EarnVaultWithdrawalRequestActionRow,
   request: EarnVaultWithdrawalRequestRow,
-  rpc: RawHistoryRpc
+  rpc: HistoryRpc
 ): Promise<"advanced" | "failed" | "unchanged"> {
   const transaction = await rpc
     // SAFETY: the durable signature came from the verified signed intent.
@@ -875,7 +861,7 @@ async function failAction(
 }
 
 async function transactionObservation(
-  rpc: RawHistoryRpc,
+  rpc: HistoryRpc,
   signature: string,
   observed?: RawTransactionResponse
 ): Promise<{ logs: readonly string[] | null; blockTime: string | null } | null> {
@@ -905,7 +891,7 @@ async function transactionObservation(
 }
 
 async function transactionLogs(
-  rpc: RawHistoryRpc,
+  rpc: HistoryRpc,
   signature: string,
   observed?: RawTransactionResponse
 ): Promise<readonly string[] | null> {
@@ -953,7 +939,7 @@ async function projectFinalizedAction(
   env: Env,
   ledger: QueueLedger,
   actionRow: EarnVaultWithdrawalRequestActionRow,
-  rpc: RawHistoryRpc,
+  rpc: HistoryRpc,
   observed?: RawTransactionResponse,
   timeoutMs?: number
 ): Promise<void> {
@@ -1025,7 +1011,7 @@ async function projectFinalizedParAction(
   ledger: QueueLedger,
   actionRow: EarnVaultWithdrawalRequestActionRow,
   request: EarnVaultWithdrawalRequestRow,
-  rpc: RawHistoryRpc,
+  rpc: HistoryRpc,
   observed?: RawTransactionResponse,
   timeoutMs?: number
 ): Promise<void> {
@@ -1254,7 +1240,7 @@ async function reconcileRequest(
       : "advanced";
   }
 
-  const rpc = createClusterRpc() as unknown as RawHistoryRpc;
+  const rpc = createClusterRpc();
   const closing = await findClosingEvent(env, rpc, request, client);
   if (closing === null) {
     await ledger.advanceRequest({
@@ -1323,7 +1309,7 @@ export async function reconcileParRequest(
     return request.status === toStatus ? "unchanged" : "advanced";
   }
 
-  const rpc = createClusterRpc() as unknown as RawHistoryRpc;
+  const rpc = createClusterRpc();
   const closing = await findClosingParEvent(env, rpc, request, client);
   if (closing === null) {
     await ledger.advanceRequest({
@@ -1408,7 +1394,7 @@ const STATUS_EQUIVALENT: Record<string, string> = {
 
 async function findClosingEvent(
   env: Env,
-  rpc: RawHistoryRpc,
+  rpc: HistoryRpc,
   request: EarnVaultWithdrawalRequestRow,
   client: EarnVaultQueuedWithdrawProvider
 ): Promise<ClosingEventObservation | null> {
@@ -1461,7 +1447,7 @@ async function observeHistoryNewestFirst<T>(
 
 export async function findClosingEventInHistoryPage(
   env: Env,
-  rpc: RawHistoryRpc,
+  rpc: HistoryRpc,
   request: EarnVaultWithdrawalRequestRow,
   client: EarnVaultQueuedWithdrawProvider,
   history: readonly RawSignatureInfo[]
@@ -1485,7 +1471,7 @@ export async function findClosingEventInHistoryPage(
 
 export async function findClosingParEventInHistoryPage(
   env: Env,
-  rpc: RawHistoryRpc,
+  rpc: HistoryRpc,
   request: ParLifecycleContext,
   client: EarnVaultParRedemptionProvider,
   history: readonly RawSignatureInfo[]
@@ -1509,7 +1495,7 @@ export async function findClosingParEventInHistoryPage(
 
 async function findClosingParEvent(
   env: Env,
-  rpc: RawHistoryRpc,
+  rpc: HistoryRpc,
   request: ParLifecycleContext,
   client: EarnVaultParRedemptionProvider
 ): Promise<ClosingParEventObservation | null> {

@@ -10,7 +10,6 @@ import type {
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { getTransaction, type ParsedTransaction } from "@sdp/rpc/solana";
-import { MAX_SUPPORTED_TRANSACTION_VERSION } from "@sdp/rpc/transaction-version";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { address, type Signature } from "@solana/kit";
@@ -1056,15 +1055,7 @@ async function assertParCreationNotClosed(
     .send();
   const closing = await findClosingParEventInHistoryPage(
     env,
-    {
-      getTransaction: (signature, config) =>
-        rpc.getTransaction(signature, {
-          ...config,
-          maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
-        }),
-      getSignaturesForAddress: (requestAddress, config) =>
-        rpc.getSignaturesForAddress(requestAddress, config),
-    },
+    rpc,
     {
       id: input.requestId,
       environment: input.environment,
