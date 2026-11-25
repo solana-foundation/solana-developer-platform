@@ -410,12 +410,18 @@ importers:
       '@sdp/metadata-server':
         specifier: workspace:*
         version: link:../../packages/sdp-metadata-server
+      '@sdp/redaction':
+        specifier: workspace:*
+        version: link:../../packages/sdp-redaction
       hono:
         specifier: 4.13.16
         version: 4.13.16
       jose:
         specifier: 6.2.13
         version: 6.2.13
+      pino:
+        specifier: 10.4.0
+        version: 10.4.0
       zod:
         specifier: 4.6.7
         version: 4.6.7
