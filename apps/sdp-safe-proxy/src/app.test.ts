@@ -1,13 +1,12 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { it } from "node:test";
 import {
+  FROM_PROVIDER_HEADER,
   LOCAL_CALLER_HEADER,
   REQUEST_ID_HEADER,
-  RESULT_HEADER,
-  type SafeProxyCode,
 } from "@sdp/safe-proxy-endpoints/protocol";
 import { importSPKI, jwtVerify } from "jose";
-import { createLocalCallerCheck } from "@/app";
+import { createLocalCallerCheck, type ProviderCredentials } from "@/app";
 import {
   createForwardApp,
   FIREBLOCKS_PUBLIC_KEY_PEM,
@@ -17,70 +16,71 @@ import {
 } from "./test/helpers/forward-app";
 
 const WALLETS = "/privy/v1/wallets";
+const VAULTS = "/fireblocks/v1/vault/accounts_paged?namePrefix=vault-e74";
 
-async function ownAnswer(response: Response) {
-  const result = response.headers.get(RESULT_HEADER);
-  return { status: response.status, result, body: await response.text() };
-}
+const FAILING_CREDENTIALS = {
+  privy: PLATFORM_CREDENTIALS.privy,
+  get fireblocks(): never {
+    throw new Error("credential read failed peer-f85");
+  },
+} satisfies ProviderCredentials;
 
-describe("a refused request reaches no provider", () => {
-  const rows: [
-    name: string,
-    status: number,
-    code: SafeProxyCode,
-    path: string,
-    request?: ForwardRequest,
-    app?: ForwardAppOptions,
-  ][] = [
-    ["a forged identity token", 401, "unauthenticated", WALLETS, { token: "forged" }],
-    [
-      "no token, even naming a local caller",
-      401,
-      "unauthenticated",
-      WALLETS,
-      { token: null, headers: { [LOCAL_CALLER_HEADER]: "api" } },
-    ],
-    ["an unknown service account", 403, "caller_not_allowed", WALLETS, { token: "stranger" }],
-    [
-      "a token while the identity keys cannot be read",
-      503,
-      "caller_check_unavailable",
-      WALLETS,
-      {},
-      { keys: () => Promise.reject(new Error("keys unreachable")) },
-    ],
-    ["a caller not on the endpoint", 403, "caller_not_allowed", WALLETS, { token: "cron" }],
-    ["an undeclared provider", 403, "provider_not_allowed", "/acme/v1/wallets"],
-    ["an undeclared endpoint", 403, "endpoint_not_allowed", "/privy/v1/users"],
-    [
-      "a body outside the body rule",
-      403,
-      "body_not_allowed",
-      "/privy/v1/wallets/wallet-d41/rpc",
-      { method: "POST", body: '{"method":"exportWallet"}' },
-    ],
-    [
-      "a body over the size limit",
-      400,
-      "invalid_request",
-      WALLETS,
-      { method: "POST", body: "a".repeat(1024 * 1024 + 1) },
-    ],
-    ["a provider with no provider path", 404, "unknown_route", "/privy"],
-    ["a path naming no provider", 404, "unknown_route", "/"],
-  ];
-  for (const [name, status, code, path, request, app] of rows) {
-    it(`refuses ${name}`, async () => {
-      const forwardApp = createForwardApp(app);
-      assert.deepEqual(await ownAnswer(await forwardApp.send(path, request)), {
-        status,
-        result: "refused",
-        body: JSON.stringify({ code }),
-      });
-      assert.equal(forwardApp.calls.length, 0);
-    });
-  }
+// The body of an error the proxy answers itself.
+const own = (error: string) => JSON.stringify({ error });
+
+const answerOf = async (response: Response) => ({
+  status: response.status,
+  fromProvider: response.headers.get(FROM_PROVIDER_HEADER),
+  body: await response.text(),
 });
+
+const ownAnswers: [string, number, string, string, ForwardRequest?, ForwardAppOptions?][] = [
+  ["a forged identity token", 401, own("unauthorized"), WALLETS, { token: "forged" }],
+  [
+    "no token, even naming a local caller",
+    401,
+    own("unauthorized"),
+    WALLETS,
+    { token: null, headers: { [LOCAL_CALLER_HEADER]: "api" } },
+  ],
+  ["an unknown service account", 403, own("caller_not_allowed"), WALLETS, { token: "stranger" }],
+  [
+    "a token while the identity keys cannot be read",
+    503,
+    own("caller_check_unavailable"),
+    WALLETS,
+    {},
+    { keys: () => Promise.reject(new Error("keys unreachable")) },
+  ],
+  ["a caller not on the endpoint", 403, own("caller_not_allowed"), WALLETS, { token: "cron" }],
+  ["an undeclared provider", 403, own("provider_not_allowed"), "/acme/v1/wallets"],
+  ["an undeclared endpoint", 403, own("endpoint_not_allowed"), "/privy/v1/users"],
+  [
+    "a body outside the body rule",
+    403,
+    own("body_not_allowed"),
+    "/privy/v1/wallets/wallet-d41/rpc",
+    { method: "POST", body: '{"method":"exportWallet"}' },
+  ],
+  [
+    "a body over the size limit",
+    413,
+    "Payload Too Large",
+    WALLETS,
+    { method: "POST", body: "a".repeat(1024 * 1024 + 1) },
+  ],
+  ["a provider with no provider path", 404, own("not_found"), "/privy"],
+  ["a path naming no provider", 404, own("not_found"), "/"],
+  ["its own failure", 500, own("internal"), VAULTS, {}, { credentials: FAILING_CREDENTIALS }],
+];
+for (const [name, status, body, path, request, app] of ownAnswers) {
+  it(`answers ${status} to ${name} and reaches no provider`, async () => {
+    const forwardApp = createForwardApp(app);
+    const answer = await answerOf(await forwardApp.send(path, request));
+    assert.deepEqual(answer, { status, fromProvider: null, body });
+    assert.equal(forwardApp.calls.length, 0);
+  });
+}
 
 it("the local caller check takes a caller only on its loopback address, naming itself", async () => {
   const identify = createLocalCallerCheck({ hostname: "127.0.0.1", port: 8791 });
@@ -88,8 +88,8 @@ it("the local caller check takes a caller only on its loopback address, naming i
     new Headers({ host, [LOCAL_CALLER_HEADER]: caller });
 
   assert.equal(await identify(headers("127.0.0.1:8791", "cron")), "cron");
-  await assert.rejects(identify(headers("localhost:8791", "api")), { code: "unauthenticated" });
-  await assert.rejects(identify(headers("127.0.0.1:8791", "admin")), { code: "unauthenticated" });
+  await assert.rejects(identify(headers("localhost:8791", "api")), { status: 401 });
+  await assert.rejects(identify(headers("127.0.0.1:8791", "admin")), { status: 401 });
 });
 
 it("sends the provider only its declared headers and the platform's Privy auth", async () => {
@@ -170,15 +170,16 @@ it("signs the Fireblocks target and body exactly as sent", async (t) => {
   );
 });
 
-it("passes the provider's status, body and content type back as forwarded", async () => {
+it("passes back the provider's status, body and content type, marked as the provider's", async () => {
   const forwardApp = createForwardApp({
     answer: () =>
-      new Response('{"code":"caller_not_allowed"}', {
+      new Response(own("caller_not_allowed"), {
         status: 403,
         headers: {
-          "content-type": "application/json",
+          "content-type": "application/problem+json",
           "set-cookie": "session=provider-7a2",
-          [RESULT_HEADER]: "refused",
+          "x-request-id": "provider-req-9f1",
+          [FROM_PROVIDER_HEADER]: "0",
         },
       }),
   });
@@ -192,20 +193,20 @@ it("passes the provider's status, body and content type back as forwarded", asyn
     },
     {
       status: 403,
-      headers: { "content-type": "application/json", [RESULT_HEADER]: "forwarded" },
-      body: '{"code":"caller_not_allowed"}',
+      headers: { "content-type": "application/problem+json", [FROM_PROVIDER_HEADER]: "1" },
+      body: own("caller_not_allowed"),
     }
   );
 });
 
-it("answers no answer when the provider call fails after it was sent", async () => {
+it("answers 502 when the provider call fails after it was sent", async () => {
   const forwardApp = createForwardApp({
     answer: () => Promise.reject(new TypeError("fetch failed")),
   });
-  assert.deepEqual(await ownAnswer(await forwardApp.send(WALLETS)), {
+  assert.deepEqual(await answerOf(await forwardApp.send(WALLETS)), {
     status: 502,
-    result: "no_answer",
-    body: '{"code":"provider_no_answer"}',
+    fromProvider: null,
+    body: own("provider_unreachable"),
   });
   assert.equal(forwardApp.calls.length, 1);
 });
@@ -218,17 +219,9 @@ it("logs the endpoint's pattern and the outcome, never a path, body, secret or t
     method: "POST",
     body: '{"method":"signTransaction","params":{"transaction":"tx-body-b52"}}',
   });
-  const failing = createForwardApp({
-    credentials: {
-      privy: PLATFORM_CREDENTIALS.privy,
-      get fireblocks(): never {
-        throw new Error("credential read failed peer-f85");
-      },
-    },
-  });
-  await failing.send("/fireblocks/v1/vault/accounts_paged?namePrefix=vault-e74", {
-    headers: { [REQUEST_ID_HEADER]: "req 7d1 tx-body-b52" },
-  });
+  await forwardApp.send(WALLETS, { token: "cron" });
+  const failing = createForwardApp({ credentials: FAILING_CREDENTIALS });
+  await failing.send(VAULTS, { headers: { [REQUEST_ID_HEADER]: "req 7d1 tx-body-b52" } });
 
   const lines = [...forwardApp.logged, ...failing.logged].map(({ duration_ms, ...line }) => line);
   const revision = "sdp-safe-proxy-00042-abc";
@@ -238,10 +231,17 @@ it("logs the endpoint's pattern and the outcome, never a path, body, secret or t
       caller: "api",
       provider: "privy",
       endpoint: "POST /v1/wallets/{wallet}/rpc",
-      result: "forwarded",
-      code: null,
-      error_name: null,
+      error: null,
       status: 200,
+      revision,
+    },
+    {
+      request_id: "req-7d1",
+      caller: "cron",
+      provider: "privy",
+      endpoint: "GET /v1/wallets",
+      error: "caller_not_allowed",
+      status: 403,
       revision,
     },
     {
@@ -249,9 +249,7 @@ it("logs the endpoint's pattern and the outcome, never a path, body, secret or t
       caller: "api",
       provider: "fireblocks",
       endpoint: "GET /v1/vault/accounts_paged",
-      result: "refused",
-      code: "internal",
-      error_name: "Error",
+      error: "Error",
       status: 500,
       revision,
     },
