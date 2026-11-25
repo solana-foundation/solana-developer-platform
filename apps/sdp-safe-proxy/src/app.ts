@@ -37,21 +37,18 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
     const caller = c.get("caller");
     line.caller = caller;
 
+    // The target is cut from the path as it was sent, not from Hono's decoded parameters: it is
+    // what gets matched, signed and forwarded.
+    const provider = c.req.param("provider");
     const { pathname, search } = new URL(c.req.url);
-    const providerEnd = pathname.indexOf("/", 1);
-    if (providerEnd === -1) throw notFound();
-    const target = pathname.slice(providerEnd) + search;
+    if (!pathname.startsWith(`/${provider}/`)) throw notFound();
+    const target = pathname.slice(provider.length + 1) + search;
     const body = await c.req.text();
 
-    const match = matchEndpoint({
-      provider: pathname.slice(1, providerEnd),
-      method: c.req.method,
-      path: target,
-      body,
-    });
+    const match = matchEndpoint({ provider, method: c.req.method, path: target, body });
     if (!match.allowed) throw forbidden(match.code);
-    const { provider, endpoint } = match;
-    line.provider = provider;
+    const { endpoint } = match;
+    line.provider = match.provider;
     line.endpoint = `${endpoint.method} ${endpoint.path}`;
 
     if (!endpoint.callers.includes(caller)) throw forbidden("caller_not_allowed");
@@ -63,12 +60,12 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
       if (value !== undefined) headers.set(name, value);
     }
     if (body !== "") headers.set("content-type", "application/json");
-    const auth = await authHeaders(provider, dependencies.credentials, target, body);
+    const auth = await authHeaders(match.provider, dependencies.credentials, target, body);
     for (const [name, value] of Object.entries(auth)) headers.set(name, value);
 
     let answer: Response;
     try {
-      answer = await fetch(`https://${SAFE_PROXY_PROVIDERS[provider].hosts[0]}${target}`, {
+      answer = await fetch(`https://${SAFE_PROXY_PROVIDERS[match.provider].hosts[0]}${target}`, {
         method: endpoint.method,
         headers,
         body: body === "" ? null : body,
