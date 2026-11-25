@@ -8,6 +8,14 @@ const cases = [
   ["refuses an undeclared provider", "acme", "GET", "/v1/wallets", "", "provider_not_allowed"],
   ["refuses a non-canonical path", "privy", "GET", "/v1/./wallets", "", "endpoint_not_allowed"],
   [
+    "refuses a path parameter outside its format",
+    "fireblocks",
+    "GET",
+    "/v1/vault/accounts/vault-1",
+    "",
+    "endpoint_not_allowed",
+  ],
+  [
     "refuses an undeclared query name",
     "fireblocks",
     "GET",
@@ -34,19 +42,41 @@ const cases = [
     '{"operation":"BURN","operation":"TRANSFER"}',
     "body_not_allowed",
   ],
-  ["allows a Privy read", "privy", "GET", "/v1/wallets/wal_1", "", "read /v1/wallets/{wallet}"],
   [
-    "allows a Fireblocks transfer",
+    "allows a read with path parameters and a declared query name",
+    "fireblocks",
+    "GET",
+    "/v1/vault/accounts/12/SOL_TEST/addresses_paginated?limit=5",
+    "",
+    "/v1/vault/accounts/{vault}/{asset}/addresses_paginated for api cron",
+  ],
+  // Two endpoints share this method and path; the body's operation picks the one whose callers apply.
+  [
+    "matches RAW to its own endpoint",
+    ...TRANSACTIONS,
+    '{"operation":"RAW"}',
+    "/v1/transactions for api cron",
+  ],
+  [
+    "matches PROGRAM_CALL to its own endpoint",
+    ...TRANSACTIONS,
+    '{"operation":"PROGRAM_CALL"}',
+    "/v1/transactions for api cron",
+  ],
+  [
+    "matches TRANSFER to its own endpoint",
     ...TRANSACTIONS,
     '{"operation":"TRANSFER"}',
-    "change /v1/transactions",
+    "/v1/transactions for api",
   ],
 ] as const;
 
 for (const [name, provider, method, path, body, expected] of cases) {
   it(`matchEndpoint ${name}`, () => {
     const result = matchEndpoint({ provider, method, path, body });
-    const got = result.allowed ? `${result.endpoint.kind} ${result.endpoint.path}` : result.code;
+    const got = result.allowed
+      ? `${result.endpoint.path} for ${result.endpoint.callers.join(" ")}`
+      : result.code;
     assert.equal(got, expected);
   });
 }
