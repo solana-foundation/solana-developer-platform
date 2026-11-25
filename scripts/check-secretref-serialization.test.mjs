@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
-import { findSecretRefViolations } from "./check-secretref-serialization.mjs";
+import {
+  checkSecretRefSerialization,
+  findSecretRefViolations,
+} from "./check-secretref-serialization.mjs";
 
 test("flags a revealed secret passed to JSON.stringify", () => {
   const violations = findSecretRefViolations(
@@ -169,4 +175,61 @@ test("does not confuse an unrelated reveal() method", () => {
   // the leak is worth the occasional rename. Documented so the behaviour is a
   // decision rather than a surprise.
   assert.equal(violations.length, 1);
+});
+
+/** A throwaway repo-shaped directory; the caller removes it in a finally. */
+function fixtureRepo(files) {
+  const root = mkdtempSync(path.join(tmpdir(), "secretref-check-"));
+  for (const [file, content] of Object.entries(files)) {
+    const target = path.join(root, file);
+    mkdirSync(path.dirname(target), { recursive: true });
+    writeFileSync(target, content);
+  }
+  return root;
+}
+
+test("the repo walk flags a violating file end to end", () => {
+  // The unit rules above are driven with synthetic strings; this drives the
+  // real walker over a real fixture so the scan roots, the file collection and
+  // the test-file exemption are exercised too. An empty scan cannot tell
+  // "clean" from "scanned nothing".
+  const leakSource =
+    `export const leak = (ref: { reveal(): string }) =>\n` +
+    `  JSON.stringify({ key: ref.reveal("adapter") });\n`;
+  const root = fixtureRepo({
+    "apps/sdp-api/src/leak.ts": leakSource,
+    // The same leak in a test file is the sanctioned path and must not be
+    // reported.
+    "apps/sdp-api/src/leak.test.ts": leakSource,
+    "packages/sdp-helius-rings/src/clean.ts": `export const clean = (ref: { reveal(): string }) => ref.reveal("signer");\n`,
+  });
+
+  try {
+    const violations = checkSecretRefSerialization(root);
+    assert.equal(violations.length, 1);
+    assert.match(violations[0], /^apps\/sdp-api\/src\/leak\.ts:2: /);
+    assert.match(violations[0], /JSON\.stringify\(\) receives a revealed SecretRef/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a missing scan root fails the walk instead of passing vacuously", () => {
+  // With `packages/` gone, a lenient walker would scan `apps/` alone and
+  // report "passed" — a check that cannot see half the repo cannot vouch for
+  // any of it. `readdirSync` throws ENOENT naming the missing root.
+  const root = mkdtempSync(path.join(tmpdir(), "secretref-check-"));
+  try {
+    mkdirSync(path.join(root, "apps"));
+    assert.throws(
+      () => checkSecretRefSerialization(root),
+      (error) => {
+        assert.equal(error.code, "ENOENT");
+        assert.equal(error.path, path.join(root, "packages"));
+        return true;
+      }
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

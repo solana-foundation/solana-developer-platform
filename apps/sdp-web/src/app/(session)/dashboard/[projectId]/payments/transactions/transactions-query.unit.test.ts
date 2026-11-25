@@ -1,8 +1,8 @@
 import { UNIFIED_TRANSACTION_MODULES } from "@sdp/types/unified-transactions";
 import { describe, expect, it } from "vitest";
+import { transactionsApiQuery } from "./transactions-page.data";
 import {
   parseTransactionFilters,
-  parseTransactionModule,
   serializeTransactionFilters,
   toTransactionsApiQuery,
 } from "./transactions-query";
@@ -14,7 +14,7 @@ describe("transaction filter query", () => {
     expect(
       parseTransactionFilters(
         {
-          tab: "payments",
+          module: "payments",
           status: "succeeded",
           counterpartyId: "  cpty_42  ",
           search: ["  xfr_42  ", "ignored"],
@@ -36,23 +36,10 @@ describe("transaction filter query", () => {
   });
 
   it("treats every malformed URL field as absent without dropping valid fields", () => {
-    expect(() =>
-      parseTransactionFilters(
-        {
-          tab: "unknown",
-          status: "complete",
-          search: "xy",
-          from: "not-a-date",
-          to: "2026-07-18",
-          cursor: "",
-        },
-        ALL
-      )
-    ).not.toThrow();
     expect(
       parseTransactionFilters(
         {
-          tab: "unknown",
+          module: "unknown",
           status: "complete",
           search: "xy",
           from: "not-a-date",
@@ -64,21 +51,8 @@ describe("transaction filter query", () => {
     ).toEqual({ to: "2026-07-18", cursors: [] });
   });
 
-  it("maps the module param: a module id selects it, all and unknown mean the default", () => {
-    expect(parseTransactionModule("earn", ALL)).toBe("earn");
-    expect(parseTransactionModule("all", ALL)).toBeUndefined();
-    expect(parseTransactionModule(null, ALL)).toBeUndefined();
-    expect(parseTransactionModule("unknown", ALL)).toBeUndefined();
-    expect(parseTransactionFilters({ tab: "all" }, ALL).module).toBeUndefined();
-  });
-
-  it("reads the module from ?module=, falling back to the legacy ?tab=", () => {
-    expect(parseTransactionFilters({ module: "dvp", tab: "earn" }, ALL).module).toBe("dvp");
-    expect(parseTransactionFilters({ tab: "earn" }, ALL).module).toBe("earn");
-  });
-
   it("keeps a supported page size and drops the default or an unsupported one", () => {
-    expect(parseTransactionFilters({ pageSize: "50" }, ALL).pageSize).toBe(50);
+    expect(transactionsApiQuery(parseTransactionFilters({ pageSize: "50" }, ALL))).toBe("limit=50");
     expect(parseTransactionFilters({ pageSize: "25" }, ALL)).not.toHaveProperty("pageSize");
     expect(parseTransactionFilters({ pageSize: "7" }, ALL)).not.toHaveProperty("pageSize");
     expect(
@@ -114,7 +88,6 @@ describe("transaction filter query", () => {
         ["payments"]
       )
     ).toEqual({ status: "succeeded", cursors: [] });
-    expect(parseTransactionModule("issuance", ["payments"])).toBeUndefined();
   });
 
   it("drops a kind that arrives without its module", () => {

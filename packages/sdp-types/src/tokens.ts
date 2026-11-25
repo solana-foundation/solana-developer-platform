@@ -466,7 +466,7 @@ export interface UpdateTokenRequest {
 
 /**
  * Add to allowlist request
- * POST /v1/issuance/tokens/:id/allowlist
+ * POST /v1/issuance/tokens/:id/control-list
  */
 export interface AddAllowlistEntryRequest {
   address: string;
@@ -475,7 +475,7 @@ export interface AddAllowlistEntryRequest {
 
 /**
  * Freeze account request
- * POST /v1/issuance/tokens/:id/freeze
+ * POST /v1/issuance/tokens/:id/freeze-account
  */
 export interface FreezeAccountRequest {
   /** Token account address or owner wallet address */
@@ -485,7 +485,7 @@ export interface FreezeAccountRequest {
 
 /**
  * Unfreeze account request
- * POST /v1/issuance/tokens/:id/unfreeze
+ * POST /v1/issuance/tokens/:id/unfreeze-account
  */
 export interface UnfreezeAccountRequest {
   accountAddress: string;

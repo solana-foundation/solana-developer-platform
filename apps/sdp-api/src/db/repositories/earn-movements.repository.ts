@@ -5,7 +5,10 @@ import type {
   EarnMovementDirection,
   EarnMovementStatus,
 } from "@sdp/types/earn";
-import { EARN_MOVEMENT_TRANSITIONS } from "@sdp/types/earn";
+import {
+  EARN_MOVEMENT_TRANSITIONS,
+  EARN_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES,
+} from "@sdp/types/earn";
 import {
   type EarnProviderSettlement,
   earnProviderSettlementSchema,
@@ -19,6 +22,7 @@ import {
   asTransactionalClient,
   type DatabaseExecutor,
 } from "@/db/client";
+import { sqlLiteralList } from "@/db/postgres-utils";
 import { conflict } from "@/lib/errors";
 
 /**
@@ -32,10 +36,6 @@ import { conflict } from "@/lib/errors";
  * replaced (`earn_program_withdrawals`, `earn_vault_movements`,
  * `earn_vault_positions`) are gone, dropped by migration 0068 along with the
  * projection views that carried their history across.
- *
- * `earn_provider_wallets` is deliberately NOT among them: it models an ACCOUNT at
- * a provider — the custodial twin of `custody_wallets` — and an account is not a
- * holding. A custodial position is the link row between the two.
  */
 
 /**
@@ -93,6 +93,12 @@ export function assertMovementIsOwnReplay(
 
 export interface EarnPositionRow {
   id: string;
+  /** Canonical strategy link; older holdings can resolve it by instrument. */
+  strategy_id?: string | null;
+  /** Canonical instrument identity; vault_address is the rolling-compat alias. */
+  strategy_reference?: string | null;
+  /** False for imported holdings whose acquisition history is unknown. */
+  cost_basis_known?: boolean;
   organization_id: string;
   project_id: string | null;
   environment: SdpEnvironment;
@@ -101,8 +107,8 @@ export interface EarnPositionRow {
   /** vault_direct only, SDP-signed shape: the custody wallet holds the shares. */
   custody_wallet_id: string | null;
   /**
-   * vault_direct only, EXTERNAL-WALLET shape (PRO-1722): the non-custodial wallet
-   * that signs and holds the shares. Exactly one of this and
+   * vault_direct only, owner-address claim (PRO-1722): the wallet whose owner
+   * signs directly and holds the shares. Exactly one of this and
    * `custody_wallet_id` is set on a vault row; SDP holds no key for it.
    */
   owner_address: string | null;
@@ -110,8 +116,6 @@ export interface EarnPositionRow {
   vault_address: string | null;
   share_mint: string | null;
   token_mint: string | null;
-  /** custodial only — the program wallet this holding is reached through. */
-  provider_wallet_id: string | null;
   label: string;
   created_by: string | null;
   created_at: string;
@@ -132,6 +136,8 @@ export interface EarnMovementRow {
   project_id: string | null;
   environment: SdpEnvironment;
   provider: string;
+  /** Instrument reference, distinct from provider_reference (order identity). */
+  strategy_reference?: string | null;
   execution_model: EarnExecutionModel;
   direction: EarnMovementDirection;
   position_id: string;
@@ -160,7 +166,7 @@ export interface EarnMovementRow {
   /** Legacy custodial payout stablecoin symbol; NOT the asset identity. */
   payout_token: string | null;
   custody_wallet_id: string | null;
-  /** The external (non-custodial) wallet that signed this movement; exactly one of this and
+  /** The wallet address whose owner signed this movement; exactly one of this and
    * `custody_wallet_id` is set on a vault row (PRO-1722). */
   owner_address: string | null;
   vault_address: string | null;
@@ -193,76 +199,6 @@ export interface EarnMovementRow {
 }
 
 /**
- * Columns a re-projection must not clobber.
- *
- * `finalized` is the one status the unified ledger can hold that no legacy table
- * can express, so a legacy row can never be the authority on a row that already
- * reached it. Without this guard a later legacy write would not merely regress
- * the status — it would re-project `settled_at` as NULL and violate 0062's
- * settlement biconditional, failing the legacy write itself.
- */
-
-/**
- * Create the custodial holding for a newly linked program wallet.
- *
- * The only projection that mints an id instead of preserving one: a program
- * wallet never had a holding row to carry an id from. Insert-only and guarded on
- * the wallet, so linking is idempotent and an existing holding — including one
- * 0064 already minted — is left exactly as it is.
- */
-export async function mintEarnPositionForProviderWallet(
-  db: AppDb,
-  providerWalletId: string
-): Promise<void> {
-  await db
-    .prepare(
-      `INSERT INTO earn_positions (
-         id, organization_id, project_id, environment, provider, kind,
-         provider_wallet_id, label, created_by, created_at, updated_at, activated_at
-       )
-       SELECT
-         ?, wallet.organization_id, wallet.project_id, wallet.environment,
-         wallet.provider, 'custodial', wallet.id,
-         -- earn_provider_wallets.label is nullable and earn_positions.label is
-         -- not. The provider wallet ref is the honest fallback: it is what the
-         -- provider console shows for an unlabelled program.
-         COALESCE(wallet.label, wallet.provider_wallet_ref),
-         wallet.created_by, wallet.created_at, wallet.updated_at,
-         -- A custodial holding is live from the moment its program exists, unlike a
-         -- vault claim, which is only activated by a durably recorded signed
-         -- transaction.
-         wallet.created_at
-       FROM earn_provider_wallets wallet
-       WHERE wallet.id = ?
-         AND NOT EXISTS (
-           SELECT 1 FROM earn_positions existing
-            WHERE existing.provider_wallet_id = wallet.id
-              AND existing.kind = 'custodial'
-         )
-       ON CONFLICT DO NOTHING`
-    )
-    .bind(generateEarnPositionId(), providerWalletId)
-    .run();
-
-  // The invariant is the POST-condition, not the insert: after this call the
-  // program has a custodial holding, whether this call minted it or found one.
-  // Asserting it here is what stops a program from existing that the ledger
-  // cannot record a withdrawal against — a zero-row insert is silent otherwise.
-  const held = await db
-    .prepare(
-      `SELECT 1 AS held FROM earn_positions
-       WHERE provider_wallet_id = ? AND kind = 'custodial'`
-    )
-    .bind(providerWalletId)
-    .first<{ held: number }>();
-  if (!held) {
-    throw new Error(
-      `Earn ledger could not open a custodial holding for program wallet ${providerWalletId}`
-    );
-  }
-}
-
-/**
  * ── Reads ──────────────────────────────────────────────────────────────────
  *
  * Every Earn read serves from the unified tables. The wire contracts are
@@ -292,50 +228,29 @@ export interface EarnMovementsRepository {
     movementId: string;
     organizationId: string;
   }): Promise<EarnMovementRow | null>;
-  /** Vault replay lookup — ORG-scoped, matching 0059's anchor. */
-  findVaultMovementByRequestId(params: {
-    organizationId: string;
-    requestId: string;
-  }): Promise<EarnMovementRow | null>;
-  /** Custodial replay lookup — HOLDING-scoped, matching 0055's wallet anchor. */
-  findCustodialMovementByRequestId(params: {
-    organizationId: string;
-    providerWalletId: string;
-    requestId: string;
-  }): Promise<EarnMovementRow | null>;
-  /** Observation lookup — global index; callers assert the org after the fetch. */
-  findMovementByProviderReference(params: {
-    provider: string;
-    providerReference: string;
-  }): Promise<EarnMovementRow | null>;
-  /**
-   * One workspace's recorded vault movements of ONE direction, newest first, as
-   * a keyset page. The direction is a required parameter rather than two copies
-   * of this query: deposits and withdrawals share every scoping rule
-   * (organization, environment, exact project, wallet binding), and a shared
-   * builder is what keeps them from drifting apart.
-   */
-  listVaultMovements(params: {
-    organizationId: string;
-    environment: SdpEnvironment;
-    projectId: string;
-    custodyWalletIds: readonly string[];
-    direction: EarnMovementDirection;
-    limit: number;
-    before: EarnMovementCursor | null;
-    settled?: boolean;
-  }): Promise<{ rows: EarnMovementRow[]; hasMore: boolean }>;
-  /** One program's withdrawal history, offset-paged with a total. */
-  listCustodialMovements(params: {
-    organizationId: string;
-    providerWalletId: string;
-    limit: number;
-    offset: number;
-  }): Promise<{ rows: EarnMovementRow[]; total: number }>;
   getPositionById(params: {
     organizationId: string;
     environment: SdpEnvironment;
     positionId: string;
+  }): Promise<EarnPositionRow | null>;
+  /** One visible holding, under the same source boundaries as the positions list. */
+  getReadablePositionById(params: {
+    organizationId: string;
+    projectId: string;
+    environment: SdpEnvironment;
+    positionId: string;
+    custodyWalletIds: readonly string[];
+  }): Promise<EarnPositionRow | null>;
+  /** A discovered selector can resolve to a visible holding already tracked in this scope. */
+  getReadablePositionByInstrument(params: {
+    organizationId: string;
+    projectId: string;
+    environment: SdpEnvironment;
+    provider: string;
+    providerReference: string;
+    tokenMint: string;
+    shareMint: string;
+    source: { walletId: string } | { ownerAddress: string };
   }): Promise<EarnPositionRow | null>;
   /** Vault holdings with live movement evidence, newest first, as a keyset page. */
   listVaultPositions(params: {
@@ -345,39 +260,8 @@ export interface EarnMovementsRepository {
     limit: number;
     before: EarnMovementCursor | null;
   }): Promise<{ rows: EarnPositionRow[]; hasMore: boolean }>;
-  /**
-   * The COMPLETE set of claims `listVaultPositions` would serve (same
-   * visibility predicate, unpaged — a reconciliation over a page would clear
-   * discrepancies it never looked at), each with whether any of its movements
-   * is still unsettled, the ids of its open queued withdrawal requests, and,
-   * per intermediate mint, how much its operator redemptions left in the
-   * wallet (`retained`: cancelled), delegated there (`in_flight`: landed and
-   * still open) or may hold there (`unresolved`: not yet landed, or closed
-   * unidentified), in decimal token units. Read-only input to share
-   * reconciliation (PRO-1741);
-   * empty wallet scope answers empty rather than throwing, because "this key
-   * sees no wallets" is a legitimate reconciliation answer.
-   */
-  listVaultClaimsForReconciliation(params: {
-    organizationId: string;
-    environment: SdpEnvironment;
-    custodyWalletIds: readonly string[];
-  }): Promise<
-    Array<
-      EarnPositionRow & {
-        has_unsettled_movements: boolean;
-        open_withdrawal_request_ids: string[];
-        redemption_intermediates: Array<{
-          mint: string;
-          retained: string;
-          in_flight: string;
-          unresolved: string;
-        }>;
-      }
-    >
-  >;
-  /** External-wallet vault claims, exact-project scoped, newest first. */
-  listExternalWalletPositions(params: {
+  /** Wallet vault claims, exact-project scoped, newest first. */
+  listWalletPositions(params: {
     organizationId: string;
     projectId: string;
     environment: SdpEnvironment;
@@ -385,15 +269,6 @@ export interface EarnMovementsRepository {
     limit: number;
     before: EarnMovementCursor | null;
   }): Promise<{ rows: EarnPositionRow[]; hasMore: boolean }>;
-  /**
-   * Deposit-token mint per position id, organization scoped. The movement
-   * wire shape names the token a withdrawal pays out in, and a withdrawal row
-   * only carries its SHARE mint, so the position supplies it.
-   */
-  listPositionTokenMints(params: {
-    organizationId: string;
-    positionIds: readonly string[];
-  }): Promise<Map<string, string>>;
   /**
    * Stamp `closed_at` on a vault position the caller has just observed EMPTY
    * on chain (live shares "0" after a finalized withdrawal). Takes the same
@@ -451,47 +326,6 @@ export interface EarnMovementsRepository {
     sharesOut: string;
   }): Promise<boolean>;
   /**
-   * One external wallet's recorded movements, exact-project scoped, newest
-   * first (PRO-1772). The per-owner read the cross-provider feed structurally
-   * cannot serve: its vault arm requires a custody-wallet match, and an
-   * owner-signed row has none. Scope is the 0070 claim key — org, PROJECT,
-   * environment, owner — so a sibling project sees nothing.
-   */
-  listExternalWalletMovements(params: {
-    organizationId: string;
-    projectId: string;
-    environment: SdpEnvironment;
-    ownerAddress: string;
-    direction?: EarnMovementDirection;
-    status?: string;
-    limit: number;
-    before: EarnMovementCursor | null;
-  }): Promise<{ rows: EarnMovementRow[]; hasMore: boolean }>;
-  /**
-   * Every external-wallet DEPOSIT movement for one owner and deposit token
-   * created strictly after a moment, oldest first (PRO-1864). The orphaned
-   * split-swap detector reads these with their STATUS: a `failed` deposit must
-   * not discharge an advisory, and a still-`requested` one is in flight, not
-   * observed. Matches on the deposit token rather than the vault on purpose: a
-   * partner may legitimately deposit the swapped tokens into a sibling
-   * strategy of the same token, and the funds reached a vault either way.
-   */
-  listExternalWalletDepositsSince(params: {
-    organizationId: string;
-    projectId: string | null;
-    environment: SdpEnvironment;
-    ownerAddress: string;
-    depositTokenMint: string;
-    createdAfter: string;
-  }): Promise<EarnMovementRow[]>;
-  /** One external-wallet movement under the same four scoping rules, or null. */
-  getExternalWalletMovement(params: {
-    organizationId: string;
-    projectId: string;
-    environment: SdpEnvironment;
-    movementId: string;
-  }): Promise<EarnMovementRow | null>;
-  /**
    * Ledger inputs to the per-owner earnings figure, grouped by position
    * (PRO-1772): finalized deposit total and finalized withdrawal payout total
    * (both in deposit-token units, from `token_amount_settled`, so the SUMs
@@ -500,12 +334,12 @@ export interface EarnMovementsRepository {
    * queued withdrawal requests are still open. Failed movements are ignored:
    * that money never moved.
    */
-  aggregateExternalWalletMovements(params: {
+  aggregateWalletMovements(params: {
     organizationId: string;
     projectId: string;
     environment: SdpEnvironment;
     ownerAddress: string;
-  }): Promise<Map<string, ExternalWalletMovementTotals>>;
+  }): Promise<Map<string, WalletMovementTotals>>;
   /**
    * SDP-wide money INTO one vault, summed across every organization on the
    * environment (ADR 0004 layer 1, PRO-1934): non-failed vault deposits
@@ -532,31 +366,6 @@ export interface EarnMovementsRepository {
     provider: string;
     vaultAddress: string;
   }): Promise<string>;
-  /**
-   * The cross-provider movement feed: one chronological history spanning both
-   * execution models, which is what neither legacy table could serve alone.
-   *
-   * Visibility is the UNION of what the two per-family reads already grant, and
-   * not a wider grant dressed up as a new endpoint — vault rows stay
-   * project-and-wallet scoped, custodial rows stay program scoped (every project
-   * in an environment reaches every program). A caller sees exactly the rows the
-   * existing endpoints would have shown it, in one list.
-   */
-  listMovements(params: {
-    organizationId: string;
-    environment: SdpEnvironment;
-    projectId: string;
-    /** Wallet-binding scope for vault rows; empty means no vault row is visible. */
-    custodyWalletIds: readonly string[];
-    limit: number;
-    before: EarnMovementCursor | null;
-    direction?: EarnMovementDirection;
-    status?: string;
-    provider?: string;
-    positionId?: string;
-    sourceAddress?: string;
-    destinationAddress?: string;
-  }): Promise<{ rows: EarnMovementRow[]; hasMore: boolean }>;
   /**
    * Atomically select a fair, bounded batch of one environment's movements and
    * rotate its attempt cursor; not a work lease. One environment per claim, so
@@ -622,8 +431,8 @@ export interface EarnMovementsRepository {
     replayed: boolean;
   }>;
   /**
-   * Atomically consume one BUILT external-wallet transaction into a signed deposit
-   * movement: claim/refresh the external-wallet holding, insert the movement, mark
+   * Atomically consume one BUILT wallet transaction into a signed deposit
+   * movement: claim/refresh the wallet holding, insert the movement, mark
    * the built transaction consumed, and activate the holding (PRO-1722).
    *
    * The built-transaction row is locked FIRST: one built transaction can land
@@ -632,21 +441,17 @@ export interface EarnMovementsRepository {
    * into the ledger's unique signature index. A same-key retry resolves the
    * recorded movement as a replay before that conflict is reachable.
    */
-  createSignedExternalWalletDepositIntent(
-    input: CreateSignedExternalWalletDepositIntentInput
-  ): Promise<{
+  createSignedWalletDepositIntent(input: CreateSignedWalletDepositIntentInput): Promise<{
     position: EarnPositionRow;
     movement: EarnMovementRow;
     replayed: boolean;
   }>;
   /**
-   * The withdrawal mirror of the above, against an EXISTING external-wallet holding.
+   * The withdrawal mirror of the above, against an EXISTING wallet holding.
    * Never creates or activates a holding; the movement's composite FK onto
    * (vault, owner) is what refuses a claim that does not match the position.
    */
-  createSignedExternalWalletWithdrawalIntent(
-    input: CreateSignedExternalWalletWithdrawalIntentInput
-  ): Promise<{
+  createSignedWalletWithdrawalIntent(input: CreateSignedWalletWithdrawalIntentInput): Promise<{
     position: EarnPositionRow;
     movement: EarnMovementRow;
     replayed: boolean;
@@ -685,16 +490,6 @@ export interface EarnMovementsRepository {
     movementId: string;
     organizationId: string;
   }): Promise<EarnMovementRow | null>;
-  /**
-   * Insert-at-intent for a custodial movement: the row exists before the provider
-   * accepts. Always returns the row — a missing holding heals then retries, and a
-   * missing program wallet throws rather than letting money move unrecorded.
-   */
-  createCustodialMovement(input: CreateCustodialMovementInput): Promise<EarnMovementRow>;
-  /** Guarded CAS on a custodial movement, by row id or by provider reference. */
-  updateCustodialMovementGuarded(
-    input: UpdateCustodialMovementGuardedInput
-  ): Promise<EarnMovementRow | null>;
 }
 
 export interface CreateSignedVaultDepositIntentInput
@@ -785,8 +580,8 @@ interface ShareAccountRentAttribution {
   shareAtaRentFunder?: string | null;
 }
 
-/** Per-position ledger totals behind the external-wallet earnings read. */
-export interface ExternalWalletMovementTotals {
+/** Per-position ledger totals behind the wallet earnings read. */
+export interface WalletMovementTotals {
   /** Σ finalized deposits, deposit-token units. */
   finalizedDeposits: string;
   /** Finalized deposits whose actual amount has not been observed. */
@@ -851,14 +646,14 @@ interface CreateSignedVaultWithdrawalIntentInput extends ShareAccountRentAttribu
   initiatedByKeyId?: string | null;
 }
 
-export interface CreateSignedExternalWalletDepositIntentInput extends LedgerAdmissionHook {
+export interface CreateSignedWalletDepositIntentInput extends LedgerAdmissionHook {
   organizationId: string;
   projectId: string;
   environment: SdpEnvironment;
   provider: string;
   /** The vault's on-chain address. */
   vaultAddress: string;
-  /** The external wallet that signed; SDP holds no key for it. */
+  /** The wallet that signed; SDP holds no key for it. */
   ownerAddress: string;
   shareMint: string;
   tokenMint: string;
@@ -872,8 +667,8 @@ export interface CreateSignedExternalWalletDepositIntentInput extends LedgerAdmi
   /** The caller's Idempotency-Key: the movement's org-scoped anchor. */
   requestId: string;
   idempotencyFingerprint: string;
-  /** The built transaction being consumed (`earn_external_wallet_transactions.id`). */
-  externalWalletTransactionId: string;
+  /** The built transaction being consumed (`earn_wallet_transactions.id`). */
+  walletTransactionId: string;
   /** The builder's observation that this deposit creates the share account. */
   createsShareAccount?: boolean;
   /**
@@ -888,12 +683,12 @@ export interface CreateSignedExternalWalletDepositIntentInput extends LedgerAdmi
   initiatedByKeyId?: string | null;
 }
 
-interface CreateSignedExternalWalletWithdrawalIntentInput {
+interface CreateSignedWalletWithdrawalIntentInput {
   organizationId: string;
   projectId: string;
   environment: SdpEnvironment;
   provider: string;
-  /** The EXISTING external-wallet holding being exited; never created here. */
+  /** The EXISTING wallet holding being exited; never created here. */
   positionId: string;
   /** Claim facts, FK-verified against the position row on insert. */
   vaultAddress: string;
@@ -907,48 +702,13 @@ interface CreateSignedExternalWalletWithdrawalIntentInput {
   lastValidBlockHeight: string;
   requestId: string;
   idempotencyFingerprint: string;
-  /** The built transaction being consumed (`earn_external_wallet_transactions.id`). */
-  externalWalletTransactionId: string;
+  /** The built transaction being consumed (`earn_wallet_transactions.id`). */
+  walletTransactionId: string;
   createsShareAccount?: boolean;
   /** Same build-time rent attribution as the deposit intent's field. */
   shareAtaRentFunder?: string | null;
   createdBy?: string | null;
   initiatedByKeyId?: string | null;
-}
-
-export interface CreateCustodialMovementInput {
-  organizationId: string;
-  projectId: string;
-  environment: SdpEnvironment;
-  provider: string;
-  /** The program wallet this movement is reached through; resolves the holding. */
-  providerWalletId: string;
-  /** USD decimal string (the portfolio vocabulary). */
-  amountRequestedUsd: string;
-  /** Payout stablecoin symbol; NOT the unit, which is always `usd` here. */
-  payoutToken: string;
-  destinationAddress: string;
-  requestId: string;
-  idempotencyFingerprint: string;
-  providerData: Record<string, unknown>;
-  createdBy: string | null;
-  initiatedByKeyId: string | null;
-}
-
-type UpdateCustodialMovementSelector =
-  | { movementId: string }
-  | { provider: string; providerReference: string };
-
-interface UpdateCustodialMovementGuardedInput {
-  selector: UpdateCustodialMovementSelector;
-  organizationId: string;
-  toStatus: string;
-  providerReference?: string;
-  amountSettled?: string | null;
-  feeAmount?: string | null;
-  failureReason?: string | null;
-  settledAt?: string | null;
-  providerData?: Record<string, unknown>;
 }
 
 /**
@@ -992,7 +752,7 @@ const ATOMIC_SETTLED_STATUSES_BY_DIRECTION = {
  * finalized; a future authenticated provider reconciler must introduce its
  * own durable completion fact before this predicate can close those rows.
  */
-function vaultSettlementFilter(
+function _vaultSettlementFilter(
   direction: EarnMovementDirection,
   settled: boolean | undefined
 ): { clause: string; values: readonly unknown[] } {
@@ -1042,7 +802,8 @@ function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
     payout_token: row.payout_token as string | null,
     custody_wallet_id: row.custody_wallet_id as string | null,
     owner_address: row.owner_address as string | null,
-    vault_address: row.vault_address as string | null,
+    strategy_reference: (row.strategy_reference ?? row.vault_address) as string | null,
+    vault_address: (row.strategy_reference ?? row.vault_address) as string | null,
     source_address: row.source_address as string | null,
     destination_address: row.destination_address as string | null,
     provider_reference: row.provider_reference as string | null,
@@ -1166,25 +927,6 @@ function mapFulfilledQueueMovement(row: Record<string, unknown>): EarnMovementRo
   };
 }
 
-function mergeMovementPage(
-  ledgerRows: readonly EarnMovementRow[],
-  queuedRows: readonly EarnMovementRow[],
-  limit: number
-): { rows: EarnMovementRow[]; hasMore: boolean } {
-  // A fulfilled request whose payout was persisted into earn_movements is
-  // also matched by the queued-projection fallback; the ledger row is
-  // authoritative and the projection only fills rows that were not persisted.
-  const persistedIds = new Set(ledgerRows.map((row) => row.id));
-  const combined = [...ledgerRows, ...queuedRows.filter((row) => !persistedIds.has(row.id))].sort(
-    (left, right) => {
-      if (left.created_at !== right.created_at)
-        return right.created_at.localeCompare(left.created_at);
-      return right.id.localeCompare(left.id);
-    }
-  );
-  return { rows: combined.slice(0, limit), hasMore: combined.length > limit };
-}
-
 async function getFulfilledQueueMovement(
   db: DatabaseExecutor,
   params: { organizationId: string; movementId: string }
@@ -1203,37 +945,36 @@ async function getFulfilledQueueMovement(
 }
 
 /**
- * What makes a custody vault claim VISIBLE to the org: the exact predicate
- * behind `GET /vault-positions` (activated, open or re-entered, live movement
- * evidence, wallet-scoped). `listVaultClaimsForReconciliation` shares it by
- * construction, because the reconciliation report's meaning is "relative to
- * what the positions read serves": a claim matched by a broader predicate
- * would mark a holding recorded while `/vault-positions` still hides it, and
- * the Treasury would understate with reconciliation reporting all clear.
- *
- * Binds, in order: organization_id, environment, custody wallet id array.
+ * Holding visibility is shared by list, detail and reconciliation reads. An
+ * imported holding (unknown cost basis, claimed from a verified live balance)
+ * needs no movement: its balance, not SDP history, made it a holding.
  */
-const CUSTODY_VAULT_CLAIM_VISIBILITY_SQL = `organization_id = ?
-               AND environment = ?
-               AND kind = 'vault_direct'
+const VISIBLE_VAULT_POSITION_SQL = `kind = 'vault_direct'
                AND activated_at IS NOT NULL
                AND (
                  closed_at IS NULL
                  OR EXISTS (
-                   SELECT 1
-                   FROM earn_movements reentry
+                   SELECT 1 FROM earn_movements reentry
                    WHERE reentry.position_id = earn_positions.id
                      AND reentry.direction = 'deposit'
                      AND reentry.status IN ('requested', 'submitted')
                  )
                )
-               AND custody_wallet_id = ANY (?::text[])
-               AND EXISTS (
-                 SELECT 1
-                 FROM earn_movements movement
+               AND (NOT earn_positions.cost_basis_known OR EXISTS (
+                 SELECT 1 FROM earn_movements movement
                  WHERE movement.position_id = earn_positions.id
                    AND movement.status IN ('requested', 'submitted', 'confirmed', 'finalized')
-               )`;
+               ) OR EXISTS (
+                 SELECT 1 FROM earn_vault_withdrawal_requests request
+                 WHERE request.position_id = earn_positions.id
+                   AND request.creation_signature IS NOT NULL
+               ))`;
+
+/** Binds organization, environment and the project's readable custody wallet IDs. */
+const CUSTODY_VAULT_CLAIM_VISIBILITY_SQL = `organization_id = ?
+               AND environment = ?
+               AND custody_wallet_id = ANY (?::text[])
+               AND ${VISIBLE_VAULT_POSITION_SQL}`;
 
 export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsRepository {
   return {
@@ -1246,167 +987,64 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       return getFulfilledQueueMovement(db, params);
     },
 
-    async findVaultMovementByRequestId(params) {
-      const row = await db
-        .prepare(
-          `SELECT * FROM earn_movements
-             WHERE organization_id = ?
-               AND request_id = ?
-               AND execution_model = 'vault_direct'`
-        )
-        .bind(params.organizationId, params.requestId)
-        .first<Record<string, unknown>>();
-      return row ? mapMovementRow(row) : null;
-    },
-
-    async findCustodialMovementByRequestId(params) {
-      // Anchored on the HOLDING, which is 1:1 with the program wallet, so sibling
-      // projects sharing that program resolve the same replay row — 0055's rule.
-      const row = await db
-        .prepare(
-          `SELECT movement.* FROM earn_movements movement
-             INNER JOIN earn_positions position
-               ON position.id = movement.position_id
-              AND position.kind = 'custodial'
-             WHERE movement.organization_id = ?
-               AND position.provider_wallet_id = ?
-               AND movement.request_id = ?
-               AND movement.execution_model = 'custodial'`
-        )
-        .bind(params.organizationId, params.providerWalletId, params.requestId)
-        .first<Record<string, unknown>>();
-      return row ? mapMovementRow(row) : null;
-    },
-
-    async findMovementByProviderReference(params) {
-      const row = await db
-        .prepare(`SELECT * FROM earn_movements WHERE provider = ? AND provider_reference = ?`)
-        .bind(params.provider, params.providerReference)
-        .first<Record<string, unknown>>();
-      return row ? mapMovementRow(row) : null;
-    },
-
-    async listVaultMovements(params) {
-      if (params.custodyWalletIds.length === 0) {
-        throw new Error(
-          "listVaultMovements requires at least one project-scoped custody wallet id"
-        );
-      }
-      const beforeClause = params.before ? "AND (created_at, id) < (?, ?)" : "";
-      const beforeValues = params.before ? [params.before.createdAt, params.before.id] : [];
-      const settledFilter = vaultSettlementFilter(params.direction, params.settled);
-      const result = await db
-        .prepare(
-          // An EXACT project match. `project_id` is nullable only through
-          // ON DELETE SET NULL, so a null means the project was deleted, and a
-          // deleted project's movements are not addressable through a
-          // project-scoped read.
-          `SELECT * FROM earn_movements
-             WHERE organization_id = ?
-               AND environment = ?
-               AND execution_model = 'vault_direct'
-               AND direction = ?
-               AND custody_wallet_id = ANY (?::text[])
-               AND project_id = ?
-               ${settledFilter.clause}
-               ${beforeClause}
-             ORDER BY created_at DESC, id DESC
-             LIMIT ?`
-        )
-        .bind(
-          params.organizationId,
-          params.environment,
-          params.direction,
-          params.custodyWalletIds,
-          params.projectId,
-          ...settledFilter.values,
-          ...beforeValues,
-          params.limit + 1
-        )
-        .all<Record<string, unknown>>();
-      const ledgerRows = (result.results ?? []).map(mapMovementRow);
-      if (params.direction !== "withdrawal" || params.settled === false) {
-        return {
-          rows: ledgerRows.slice(0, params.limit),
-          hasMore: ledgerRows.length > params.limit,
-        };
-      }
-      const queueBeforeClause = params.before
-        ? `AND (COALESCE(fulfilled_at, updated_at),
-                    '${QUEUED_FULFILLMENT_MOVEMENT_PREFIX}' || id) < (?, ?)`
-        : "";
-      const queue = await db
-        .prepare(
-          `SELECT * FROM earn_vault_withdrawal_requests
-            WHERE organization_id = ? AND environment = ? AND project_id = ?
-              AND custody_wallet_id = ANY (?::text[])
-              AND status = 'fulfilled' AND closing_signature IS NOT NULL
-              ${queueBeforeClause}
-            ORDER BY COALESCE(fulfilled_at, updated_at) DESC, id DESC
-            LIMIT ?`
-        )
-        .bind(
-          params.organizationId,
-          params.environment,
-          params.projectId,
-          params.custodyWalletIds,
-          ...(params.before ? [params.before.createdAt, params.before.id] : []),
-          params.limit + 1
-        )
-        .all<Record<string, unknown>>();
-      return mergeMovementPage(
-        ledgerRows,
-        (queue.results ?? []).map(mapFulfilledQueueMovement),
-        params.limit
-      );
-    },
-
-    async listCustodialMovements(params) {
-      // Program-scoped, not (org, project): every project in the environment
-      // reaches the same programs, and since PRO-1670 an organization may hold
-      // several — so the program is what joins sibling projects' history while
-      // keeping a sibling PROGRAM's payouts out. One program = one history.
-      const conditions = [
-        "movement.organization_id = ?",
-        "position.provider_wallet_id = ?",
-        "movement.execution_model = 'custodial'",
-      ];
-      const bindings: unknown[] = [params.organizationId, params.providerWalletId];
-      const where = conditions.join(" AND ");
-      const from = `FROM earn_movements movement
-             INNER JOIN earn_positions position
-               ON position.id = movement.position_id
-              AND position.kind = 'custodial'`;
-
-      const [page, countRow] = await Promise.all([
-        db
-          .prepare(
-            `SELECT movement.* ${from}
-               WHERE ${where}
-               ORDER BY movement.created_at DESC, movement.id DESC
-               LIMIT ? OFFSET ?`
-          )
-          .bind(...bindings, params.limit, params.offset)
-          .all<Record<string, unknown>>(),
-        db
-          .prepare(`SELECT COUNT(*)::int AS total ${from} WHERE ${where}`)
-          .bind(...bindings)
-          .first<{ total: number }>(),
-      ]);
-
-      return {
-        rows: (page.results ?? []).map(mapMovementRow),
-        total: countRow?.total ?? 0,
-      };
-    },
-
     async getPositionById(params) {
       return db
         .prepare(
-          `SELECT * FROM earn_positions
+          `SELECT *, COALESCE(strategy_reference, vault_address) AS strategy_reference FROM earn_positions
              WHERE id = ? AND organization_id = ? AND environment = ?`
         )
         .bind(params.positionId, params.organizationId, params.environment)
+        .first<EarnPositionRow>();
+    },
+
+    async getReadablePositionById(params) {
+      return db
+        .prepare(
+          `SELECT *, COALESCE(strategy_reference, vault_address) AS strategy_reference
+             FROM earn_positions
+            WHERE id = ? AND organization_id = ? AND environment = ?
+              AND (custody_wallet_id = ANY (?::text[])
+                OR (owner_address IS NOT NULL AND project_id = ?))
+              AND ${VISIBLE_VAULT_POSITION_SQL}`
+        )
+        .bind(
+          params.positionId,
+          params.organizationId,
+          params.environment,
+          params.custodyWalletIds,
+          params.projectId
+        )
+        .first<EarnPositionRow>();
+    },
+
+    async getReadablePositionByInstrument(params) {
+      // Custody sources are resolved from the project's readable wallet IDs;
+      // address claims additionally name their exact project in the query.
+      const sourceClause =
+        "walletId" in params.source
+          ? "custody_wallet_id = ?"
+          : "owner_address = ? AND project_id = ?";
+      const sourceValues =
+        "walletId" in params.source
+          ? [params.source.walletId]
+          : [params.source.ownerAddress, params.projectId];
+      return db
+        .prepare(
+          `SELECT *, COALESCE(strategy_reference, vault_address) AS strategy_reference
+           FROM earn_positions
+          WHERE organization_id = ? AND environment = ?
+            AND provider = ? AND vault_address = ? AND token_mint = ? AND share_mint = ?
+            AND ${sourceClause} AND ${VISIBLE_VAULT_POSITION_SQL}`
+        )
+        .bind(
+          params.organizationId,
+          params.environment,
+          params.provider,
+          params.providerReference,
+          params.tokenMint,
+          params.shareMint,
+          ...sourceValues
+        )
         .first<EarnPositionRow>();
     },
 
@@ -1420,7 +1058,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       const beforeValues = params.before ? [params.before.createdAt, params.before.id] : [];
       const result = await db
         .prepare(
-          `SELECT * FROM earn_positions
+          `SELECT *, COALESCE(strategy_reference, vault_address) AS strategy_reference FROM earn_positions
              WHERE ${CUSTODY_VAULT_CLAIM_VISIBILITY_SQL}
                ${beforeClause}
              ORDER BY created_at DESC, id DESC
@@ -1438,190 +1076,19 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       return { rows: rows.slice(0, params.limit), hasMore: rows.length > params.limit };
     },
 
-    async listVaultClaimsForReconciliation(params) {
-      if (params.custodyWalletIds.length === 0) {
-        return [];
-      }
-      // `has_unsettled_movements` uses the vault ledger's NON-TERMINAL set
-      // (finalized|failed are the only terminal statuses). A claim with an
-      // in-flight movement is excluded from zero-share reporting by the
-      // service: the ledger already explains why chain and record disagree,
-      // and the every-minute sweep will settle it either way. Open queued
-      // requests (the same predicate closeVaultPositionIfEmpty uses) come back
-      // by id so the service can name them beside a claim they may explain.
-      // A cancelled operator redemption never recreates the shares it burned:
-      // the owner keeps the intermediate it delegated (Hastra wYLDS), and an
-      // open one's delegated intermediate still sits in the wallet. The
-      // retained balance excludes fulfilled and open held-intermediate requests;
-      // A held-intermediate cancellation proves at least its released amount
-      // remains; repeated cancellations do not accumulate the same tokens.
-      // Clamp debits at zero in lifecycle order so an older redemption cannot
-      // spend backing created by a later cancellation.
-      // Amounts come back per status class so the service can tell which
-      // balance is provably whose. Requests are aggregated once per tenant
-      // (the tenant/created index) and joined by position, because the
-      // request table has no position index and the claim set is unpaged.
-      const result = await db
-        .prepare(
-          `WITH open_requests AS (
-             SELECT queued.position_id,
-                    array_agg(queued.id ORDER BY queued.created_at, queued.id) AS ids
-               FROM earn_vault_withdrawal_requests queued
-              WHERE queued.organization_id = ?
-                AND queued.environment = ?
-                AND queued.status IN (
-                  'creating', 'pending', 'fulfillable',
-                  'expired_cancelable', 'cancelling', 'closed_or_unknown'
-                )
-              GROUP BY queued.position_id
-           ),
-           redemption_history AS (
-             SELECT redemption.position_id,
-                    redemption.intermediate_mint,
-                    redemption.intermediate_amount,
-                    redemption.status,
-                    redemption.id,
-                    redemption.created_at,
-                    COALESCE(redemption.fulfilled_at, redemption.cancelled_at,
-                      redemption.created_at)::timestamptz AS observed_at,
-                    CASE
-                      WHEN redemption.status = 'cancelled' AND redemption.shares::numeric > 0
-                        THEN redemption.intermediate_amount::numeric
-                      WHEN redemption.status <> 'cancelled' AND redemption.shares::numeric = 0
-                        THEN -redemption.intermediate_amount::numeric
-                      ELSE 0
-                    END AS retained_delta,
-                    CASE
-                      WHEN redemption.status = 'cancelled' AND redemption.shares::numeric = 0
-                        THEN redemption.intermediate_amount::numeric
-                      ELSE 0
-                    END AS retained_floor
-               FROM earn_vault_withdrawal_requests redemption
-              WHERE redemption.organization_id = ?
-                AND redemption.environment = ?
-                AND redemption.mechanism = 'operator_redemption'
-                AND redemption.intermediate_mint IS NOT NULL
-                AND redemption.status IN (
-                  'cancelled', 'fulfilled', 'creating', 'pending', 'fulfillable',
-                  'expired_cancelable', 'cancelling', 'closed_or_unknown'
-                )
-           ),
-           redemption_balances AS (
-             SELECT redemption_history.*,
-                    SUM(retained_delta) OVER (
-                      PARTITION BY position_id, intermediate_mint
-                      ORDER BY observed_at, created_at, id
-                      ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                    ) AS running_retained
-               FROM redemption_history
-           ),
-           redemption_amounts AS (
-             SELECT redemption.position_id,
-                    redemption.intermediate_mint,
-                    -- Track the largest shortfall from the balance floor at each event:
-                    -- zero after a debit, or the amount released by a held-token cancel.
-                    -- This preserves later credits and never sums repeated releases.
-                    (SUM(redemption.retained_delta)
-                      + GREATEST(MAX(redemption.retained_floor
-                        - redemption.running_retained), 0))::text AS retained,
-                    COALESCE(SUM(redemption.intermediate_amount::numeric)
-                      FILTER (WHERE redemption.status IN (
-                        'pending', 'fulfillable', 'expired_cancelable', 'cancelling'
-                      )), 0)::text
-                      AS in_flight,
-                    -- May or may not hold its intermediate: a 'creating'
-                    -- request can land before the request row advances, and a
-                    -- 'closed_or_unknown' one was either burned or cancelled.
-                    COALESCE(SUM(redemption.intermediate_amount::numeric)
-                      FILTER (WHERE redemption.status IN (
-                        'creating', 'closed_or_unknown'
-                      )), 0)::text
-                      AS unresolved
-               FROM redemption_balances redemption
-              GROUP BY redemption.position_id, redemption.intermediate_mint
-           ),
-           intermediates_by_position AS (
-             SELECT position_id,
-                    json_agg(json_build_object(
-                      'mint', intermediate_mint,
-                      'retained', retained,
-                      'in_flight', in_flight,
-                      'unresolved', unresolved
-                    ) ORDER BY intermediate_mint) AS intermediates
-               FROM redemption_amounts
-              GROUP BY position_id
-           )
-           SELECT earn_positions.*,
-                  EXISTS (
-                    SELECT 1
-                    FROM earn_movements unsettled
-                    WHERE unsettled.position_id = earn_positions.id
-                      AND unsettled.status IN ('requested', 'submitted', 'confirmed')
-                  ) AS has_unsettled_movements,
-                  COALESCE(open_requests.ids, ARRAY[]::text[]) AS open_withdrawal_request_ids,
-                  COALESCE(intermediates_by_position.intermediates, '[]'::json)
-                    AS redemption_intermediates
-             FROM earn_positions
-             LEFT JOIN open_requests ON open_requests.position_id = earn_positions.id
-             LEFT JOIN intermediates_by_position
-               ON intermediates_by_position.position_id = earn_positions.id
-             WHERE ${CUSTODY_VAULT_CLAIM_VISIBILITY_SQL}
-             ORDER BY earn_positions.created_at DESC, earn_positions.id DESC`
-        )
-        .bind(
-          params.organizationId,
-          params.environment,
-          params.organizationId,
-          params.environment,
-          params.organizationId,
-          params.environment,
-          params.custodyWalletIds
-        )
-        .all<
-          EarnPositionRow & {
-            has_unsettled_movements: boolean;
-            open_withdrawal_request_ids: string[];
-            redemption_intermediates: Array<{
-              mint: string;
-              retained: string;
-              in_flight: string;
-              unresolved: string;
-            }>;
-          }
-        >();
-      return result.results ?? [];
-    },
-
-    async listExternalWalletPositions(params) {
+    async listWalletPositions(params) {
       const beforeClause = params.before ? "AND (created_at, id) < (?, ?)" : "";
       const ownerClause = params.ownerAddress ? "AND owner_address = ?" : "";
       const beforeValues = params.before ? [params.before.createdAt, params.before.id] : [];
       const ownerValues = params.ownerAddress ? [params.ownerAddress] : [];
       const result = await db
         .prepare(
-          `SELECT * FROM earn_positions
+          `SELECT *, COALESCE(strategy_reference, vault_address) AS strategy_reference FROM earn_positions
              WHERE organization_id = ?
                AND project_id = ?
                AND environment = ?
-               AND kind = 'vault_direct'
                AND owner_address IS NOT NULL
-               AND activated_at IS NOT NULL
-               AND (
-                 closed_at IS NULL
-                 OR EXISTS (
-                   SELECT 1
-                   FROM earn_movements reentry
-                   WHERE reentry.position_id = earn_positions.id
-                     AND reentry.direction = 'deposit'
-                     AND reentry.status IN ('requested', 'submitted')
-                 )
-               )
-               AND EXISTS (
-                 SELECT 1
-                 FROM earn_movements movement
-                 WHERE movement.position_id = earn_positions.id
-                   AND movement.status IN ('requested', 'submitted', 'confirmed', 'finalized')
-               )
+               AND ${VISIBLE_VAULT_POSITION_SQL}
                ${ownerClause}
                ${beforeClause}
              ORDER BY created_at DESC, id DESC
@@ -1638,25 +1105,6 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         .all<EarnPositionRow>();
       const rows = result.results ?? [];
       return { rows: rows.slice(0, params.limit), hasMore: rows.length > params.limit };
-    },
-
-    async listPositionTokenMints(params) {
-      const mints = new Map<string, string>();
-      const ids = [...new Set(params.positionIds)];
-      if (ids.length === 0) return mints;
-      const result = await db
-        .prepare(
-          `SELECT id, token_mint
-             FROM earn_positions
-            WHERE organization_id = ?
-              AND id = ANY (?::text[])`
-        )
-        .bind(params.organizationId, ids)
-        .all<{ id: string; token_mint: string | null }>();
-      for (const row of result.results ?? []) {
-        if (row.token_mint) mints.set(row.id, row.token_mint);
-      }
-      return mints;
     },
 
     async closeVaultPositionIfEmpty(params) {
@@ -1696,10 +1144,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                 AND NOT EXISTS (
                   SELECT 1 FROM earn_vault_withdrawal_requests queued
                    WHERE queued.position_id = earn_positions.id
-                     AND queued.status IN (
-                       'creating', 'pending', 'fulfillable',
-                       'expired_cancelable', 'cancelling', 'closed_or_unknown'
-                     )
+                     AND queued.status IN (${sqlLiteralList(EARN_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES)})
                 )
               RETURNING id`
           )
@@ -1805,137 +1250,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       return Boolean(row);
     },
 
-    async listExternalWalletDepositsSince(params) {
-      // idx_earn_movements_external_wallet_owner drives the range scan; the
-      // direction/denomination predicates filter on the heap.
-      const result = await db
-        .prepare(
-          `SELECT * FROM earn_movements
-            WHERE organization_id = ?
-              AND project_id IS NOT DISTINCT FROM ?
-              AND environment = ?
-              AND owner_address = ?
-              AND direction = 'deposit'
-              AND denomination = ?
-              AND created_at > ?
-            ORDER BY created_at ASC, id ASC`
-        )
-        .bind(
-          params.organizationId,
-          params.projectId,
-          params.environment,
-          params.ownerAddress,
-          params.depositTokenMint,
-          params.createdAfter
-        )
-        .all<Record<string, unknown>>();
-      return (result.results ?? []).map(mapMovementRow);
-    },
-
-    async listExternalWalletMovements(params) {
-      const conditions = [
-        "organization_id = ?",
-        "project_id = ?",
-        "environment = ?",
-        "owner_address = ?",
-      ];
-      const bindings: unknown[] = [
-        params.organizationId,
-        params.projectId,
-        params.environment,
-        params.ownerAddress,
-      ];
-      for (const [column, value] of [
-        ["direction", params.direction],
-        ["status", params.status],
-      ] as const) {
-        if (value !== undefined) {
-          conditions.push(`${column} = ?`);
-          bindings.push(value);
-        }
-      }
-      if (params.before) {
-        conditions.push("(created_at, id) < (?, ?)");
-        bindings.push(params.before.createdAt, params.before.id);
-      }
-      const result = await db
-        .prepare(
-          `SELECT * FROM earn_movements
-             WHERE ${conditions.join(" AND ")}
-             ORDER BY created_at DESC, id DESC
-             LIMIT ?`
-        )
-        .bind(...bindings, params.limit + 1)
-        .all<Record<string, unknown>>();
-      const ledgerRows = (result.results ?? []).map(mapMovementRow);
-      if (
-        (params.direction !== undefined && params.direction !== "withdrawal") ||
-        (params.status !== undefined && params.status !== "finalized")
-      ) {
-        return {
-          rows: ledgerRows.slice(0, params.limit),
-          hasMore: ledgerRows.length > params.limit,
-        };
-      }
-      const queueBeforeClause = params.before
-        ? `AND (COALESCE(fulfilled_at, updated_at),
-                    '${QUEUED_FULFILLMENT_MOVEMENT_PREFIX}' || id) < (?, ?)`
-        : "";
-      const queue = await db
-        .prepare(
-          `SELECT * FROM earn_vault_withdrawal_requests
-            WHERE organization_id = ? AND project_id = ? AND environment = ?
-              AND owner_address = ? AND custody_wallet_id IS NULL
-              AND status = 'fulfilled' AND closing_signature IS NOT NULL
-              ${queueBeforeClause}
-            ORDER BY COALESCE(fulfilled_at, updated_at) DESC, id DESC
-            LIMIT ?`
-        )
-        .bind(
-          params.organizationId,
-          params.projectId,
-          params.environment,
-          params.ownerAddress,
-          ...(params.before ? [params.before.createdAt, params.before.id] : []),
-          params.limit + 1
-        )
-        .all<Record<string, unknown>>();
-      return mergeMovementPage(
-        ledgerRows,
-        (queue.results ?? []).map(mapFulfilledQueueMovement),
-        params.limit
-      );
-    },
-
-    async getExternalWalletMovement(params) {
-      // owner_address IS NOT NULL is the shape half of the scope: a custody
-      // movement guessed by id answers exactly like a missing row.
-      const row = await db
-        .prepare(
-          `SELECT * FROM earn_movements
-             WHERE id = ?
-               AND organization_id = ?
-               AND project_id = ?
-               AND environment = ?
-               AND owner_address IS NOT NULL`
-        )
-        .bind(params.movementId, params.organizationId, params.projectId, params.environment)
-        .first<Record<string, unknown>>();
-      if (row) return mapMovementRow(row);
-      const projected = await getFulfilledQueueMovement(db, {
-        organizationId: params.organizationId,
-        movementId: params.movementId,
-      });
-      return projected &&
-        projected.project_id === params.projectId &&
-        projected.environment === params.environment &&
-        projected.owner_address !== null &&
-        projected.custody_wallet_id === null
-        ? projected
-        : null;
-    },
-
-    async aggregateExternalWalletMovements(params) {
+    async aggregateWalletMovements(params) {
       // Postgres numeric is exact, and every summed row shares its position's
       // deposit-token denomination. Unknown receipts contribute no invented
       // amount and withhold earnings through the unvalued counts.
@@ -1982,10 +1297,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                      CASE WHEN request.status = 'fulfilled' AND request.assets_paid IS NULL
                           THEN 1 ELSE 0 END,
                      0,
-                     CASE WHEN request.status IN (
-                            'creating', 'pending', 'fulfillable',
-                            'expired_cancelable', 'cancelling', 'closed_or_unknown'
-                          ) THEN 1 ELSE 0 END
+                     CASE WHEN request.status IN (${sqlLiteralList(EARN_OPEN_VAULT_WITHDRAWAL_REQUEST_STATUSES)}) THEN 1 ELSE 0 END
                 FROM earn_vault_withdrawal_requests request
                WHERE request.organization_id = ?
                  AND request.project_id = ?
@@ -2035,7 +1347,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           unsettled_movement_count: number;
           open_withdrawal_request_count: number;
         }>();
-      const totals = new Map<string, ExternalWalletMovementTotals>();
+      const totals = new Map<string, WalletMovementTotals>();
       for (const row of result.results ?? []) {
         totals.set(row.position_id, {
           finalizedDeposits: row.finalized_deposits,
@@ -2064,118 +1376,6 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         .bind(params.environment, params.provider, params.vaultAddress)
         .first<{ exposure: string }>();
       return row?.exposure ?? "0";
-    },
-
-    async listMovements(params) {
-      const conditions = ["organization_id = ?", "environment = ?"];
-      const bindings: unknown[] = [params.organizationId, params.environment];
-
-      // The visibility union, spelled in SQL so no caller can skip half of it.
-      // A vault row needs BOTH the exact project and an in-scope signing wallet;
-      // a custodial row is reachable by every project in the environment, which
-      // is how `/programs/:id/withdrawals` has always behaved.
-      if (params.custodyWalletIds.length > 0) {
-        conditions.push(
-          `(
-             execution_model = 'custodial'
-             OR (
-               project_id = ?
-               AND custody_wallet_id = ANY (?::text[])
-             )
-           )`
-        );
-        bindings.push(params.projectId, params.custodyWalletIds);
-      } else {
-        conditions.push("execution_model = 'custodial'");
-      }
-
-      for (const [column, value] of [
-        ["direction", params.direction],
-        ["status", params.status],
-        ["provider", params.provider],
-        ["position_id", params.positionId],
-        ["source_address", params.sourceAddress],
-        ["destination_address", params.destinationAddress],
-      ] as const) {
-        if (value !== undefined) {
-          conditions.push(`${column} = ?`);
-          bindings.push(value);
-        }
-      }
-
-      if (params.before) {
-        conditions.push("(created_at, id) < (?, ?)");
-        bindings.push(params.before.createdAt, params.before.id);
-      }
-
-      const result = await db
-        .prepare(
-          `SELECT * FROM earn_movements
-             WHERE ${conditions.join(" AND ")}
-             ORDER BY created_at DESC, id DESC
-             LIMIT ?`
-        )
-        .bind(...bindings, params.limit + 1)
-        .all<Record<string, unknown>>();
-      const ledgerRows = (result.results ?? []).map(mapMovementRow);
-      if (
-        params.custodyWalletIds.length === 0 ||
-        (params.direction !== undefined && params.direction !== "withdrawal") ||
-        (params.status !== undefined && params.status !== "finalized") ||
-        // The solver source is not persisted, so a source-address filter can
-        // never truthfully match a queued fulfillment projection.
-        params.sourceAddress !== undefined
-      ) {
-        return {
-          rows: ledgerRows.slice(0, params.limit),
-          hasMore: ledgerRows.length > params.limit,
-        };
-      }
-      const queueConditions = [
-        "organization_id = ?",
-        "environment = ?",
-        "project_id = ?",
-        "custody_wallet_id = ANY (?::text[])",
-        "status = 'fulfilled'",
-        "closing_signature IS NOT NULL",
-      ];
-      const queueBindings: unknown[] = [
-        params.organizationId,
-        params.environment,
-        params.projectId,
-        params.custodyWalletIds,
-      ];
-      for (const [column, value] of [
-        ["provider", params.provider],
-        ["position_id", params.positionId],
-        ["owner_address", params.destinationAddress],
-      ] as const) {
-        if (value !== undefined) {
-          queueConditions.push(`${column} = ?`);
-          queueBindings.push(value);
-        }
-      }
-      if (params.before) {
-        queueConditions.push(
-          `(COALESCE(fulfilled_at, updated_at),
-            '${QUEUED_FULFILLMENT_MOVEMENT_PREFIX}' || id) < (?, ?)`
-        );
-        queueBindings.push(params.before.createdAt, params.before.id);
-      }
-      const queue = await db
-        .prepare(
-          `SELECT * FROM earn_vault_withdrawal_requests
-            WHERE ${queueConditions.join(" AND ")}
-            ORDER BY COALESCE(fulfilled_at, updated_at) DESC, id DESC
-            LIMIT ?`
-        )
-        .bind(...queueBindings, params.limit + 1)
-        .all<Record<string, unknown>>();
-      return mergeMovementPage(
-        ledgerRows,
-        (queue.results ?? []).map(mapFulfilledQueueMovement),
-        params.limit
-      );
     },
 
     async claimUnsettledVaultMovements({ environment, limit }) {
@@ -2436,15 +1636,11 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       });
     },
 
-    async createSignedExternalWalletDepositIntent(input) {
+    async createSignedWalletDepositIntent(input) {
       return db.transaction(async (executor) => {
         const transaction = asTransactionalClient(executor);
 
-        const resolved = await resolveExternalWalletTransactionConsumption(
-          transaction,
-          input,
-          "deposit"
-        );
+        const resolved = await resolveWalletTransactionConsumption(transaction, input, "deposit");
         if (resolved) {
           return {
             position: await requireMovementPosition(transaction, resolved.movement),
@@ -2478,8 +1674,8 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
 
         await input.admit?.(executor);
 
-        const claimed = await claimExternalWalletVaultPosition(transaction, input);
-        const inserted = await insertExternalWalletDepositMovement(transaction, input, claimed.id);
+        const claimed = await claimWalletVaultPosition(transaction, input);
+        const inserted = await insertWalletDepositMovement(transaction, input, claimed.id);
         if (!inserted) {
           // The built-transaction lock serializes same-build racers, so a loser
           // here reused its KEY against a different build and lost to it; the
@@ -2489,8 +1685,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
             input.organizationId,
             input.requestId
           );
-          if (!winner)
-            throw new Error("Failed to resolve concurrent earn external-wallet movement");
+          if (!winner) throw new Error("Failed to resolve concurrent earn wallet movement");
           assertMovementIsOwnReplay(winner, input);
           return {
             position: await requireMovementPosition(transaction, winner),
@@ -2499,11 +1694,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           };
         }
 
-        await consumeExternalWalletTransaction(
-          transaction,
-          input.externalWalletTransactionId,
-          inserted.id
-        );
+        await consumeWalletTransaction(transaction, input.walletTransactionId, inserted.id);
         // AFTER the insert, because the projection reads the row the insert
         // just wrote (same ordering rule as the custody deposit above).
         await projectShareAccountRentFunder(transaction, claimed.id, input.organizationId);
@@ -2512,11 +1703,11 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       });
     },
 
-    async createSignedExternalWalletWithdrawalIntent(input) {
+    async createSignedWalletWithdrawalIntent(input) {
       return db.transaction(async (executor) => {
         const transaction = asTransactionalClient(executor);
 
-        const resolved = await resolveExternalWalletTransactionConsumption(
+        const resolved = await resolveWalletTransactionConsumption(
           transaction,
           input,
           "withdrawal"
@@ -2529,7 +1720,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           };
         }
 
-        const movement = await insertExternalWalletWithdrawalMovement(transaction, input);
+        const movement = await insertWalletWithdrawalMovement(transaction, input);
         if (!movement) {
           const winner = await findVaultMovementByRequest(
             transaction,
@@ -2537,7 +1728,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
             input.requestId
           );
           if (!winner) {
-            throw new Error("Failed to resolve concurrent earn external-wallet withdrawal");
+            throw new Error("Failed to resolve concurrent earn wallet withdrawal");
           }
           assertMovementIsOwnReplay(winner, input);
           return {
@@ -2547,11 +1738,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           };
         }
 
-        await consumeExternalWalletTransaction(
-          transaction,
-          input.externalWalletTransactionId,
-          movement.id
-        );
+        await consumeWalletTransaction(transaction, input.walletTransactionId, movement.id);
         // An exit that creates the share account claims its rent attribution
         // too, exactly like the custody exit.
         await projectShareAccountRentFunder(
@@ -2673,13 +1860,16 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
 
         if (input.toStatus === "failed") {
           // De-activate only when nothing live remains: a failed attempt beside a
-          // good one must not close a holding the organization still has.
+          // good one must not close a holding the organization still has. An
+          // imported holding never depended on a movement, so a failed exit
+          // leaves its funds visible.
           await transaction
             .prepare(
               `UPDATE earn_positions position
                   SET activated_at = NULL, updated_at = sdp_iso_now()
                 WHERE position.id = ?
                   AND position.activated_at IS NOT NULL
+                  AND position.cost_basis_known
                   AND NOT EXISTS (
                     SELECT 1 FROM earn_movements movement
                      WHERE movement.position_id = position.id
@@ -2765,127 +1955,6 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
             RETURNING *`
         )
         .bind(input.movementId, input.organizationId)
-        .first<Record<string, unknown>>();
-      return row ? mapMovementRow(row) : null;
-    },
-
-    async createCustodialMovement(input) {
-      // Status, denomination and direction are fixed for this shape: an intent row
-      // exists before the provider call is accepted and never in another state, and
-      // a portfolio withdrawal is USD-denominated by definition. The holding is
-      // resolved by JOIN rather than passed in, so a movement can never name one
-      // that does not belong to its program.
-      const insert = () =>
-        db
-          .prepare(
-            `INSERT INTO earn_movements (
-             id, organization_id, project_id, environment, provider,
-             execution_model, direction, position_id, status,
-             denomination, amount_requested, payout_token, destination_address,
-             request_id, idempotency_fingerprint, provider_data,
-             created_by, initiated_by_key_id
-           )
-           SELECT ?, ?, ?, ?, ?, 'custodial', 'withdrawal', position.id, 'requested',
-                  'usd', ?, ?, ?, ?, ?, ?::jsonb, ?, ?
-             FROM earn_positions position
-            WHERE position.provider_wallet_id = ?
-              AND position.kind = 'custodial'
-           RETURNING *`
-          )
-          .bind(
-            generateEarnMovementId(),
-            input.organizationId,
-            input.projectId,
-            input.environment,
-            input.provider,
-            input.amountRequestedUsd,
-            input.payoutToken,
-            input.destinationAddress,
-            input.requestId,
-            input.idempotencyFingerprint,
-            JSON.stringify(input.providerData ?? {}),
-            input.createdBy,
-            input.initiatedByKeyId,
-            input.providerWalletId
-          )
-          .first<Record<string, unknown>>();
-
-      const row = await insert();
-      if (row) return mapMovementRow(row);
-
-      // Zero rows means the JOIN found no holding for this program. Open one and
-      // retry rather than failing: a program linked by a revision that predates
-      // the ledger, or during a rollout or rollback window, has no holding
-      // through no fault of the caller, and refusing here takes that program's
-      // whole withdrawal endpoint down permanently until an operator intervenes.
-      // The mint is insert-only and guarded on the wallet, so this is safe to
-      // race.
-      await mintEarnPositionForProviderWallet(db, input.providerWalletId);
-      const healed = await insert();
-      if (!healed) {
-        // Still nothing: the program wallet itself does not exist, which is a
-        // caller bug rather than a gap in the ledger. Loud, because the
-        // alternative is money moving unrecorded.
-        throw new Error(
-          `Earn program wallet ${input.providerWalletId} has no custodial holding to record a movement against`
-        );
-      }
-      return mapMovementRow(healed);
-    },
-
-    async updateCustodialMovementGuarded(input) {
-      // Dynamic SET list, payments idiom: `undefined` means "don't touch", `null`
-      // is a real write; provider_data is a shallow JSONB merge. updated_at is
-      // DB-stamped (earn convention), never caller-supplied.
-      const assignments = ["status = ?", "updated_at = sdp_iso_now()"];
-      const assignmentValues: unknown[] = [input.toStatus];
-      for (const [column, value] of [
-        ["provider_reference", input.providerReference],
-        ["amount_settled", input.amountSettled],
-        ["fee_amount", input.feeAmount],
-        ["failure_reason", input.failureReason],
-        ["settled_at", input.settledAt],
-      ] as const) {
-        if (value !== undefined) {
-          assignments.push(`${column} = ?`);
-          assignmentValues.push(value);
-        }
-      }
-      if (input.providerData !== undefined) {
-        assignments.push("provider_data = provider_data || ?::jsonb");
-        assignmentValues.push(JSON.stringify(input.providerData));
-      }
-
-      // The CAS guard and the org scope live in the same WHERE as the selector, so
-      // the whole transition is one atomic statement: the loser of a concurrent
-      // race simply matches zero rows.
-      const conditions = [
-        "organization_id = ?",
-        "execution_model = 'custodial'",
-        "status = ANY(?)",
-      ];
-      const conditionValues: unknown[] = [
-        input.organizationId,
-        // From the shared matrix, never the caller: terminal statuses appear in no
-        // source list, so regression is unrepresentable rather than merely refused.
-        [...allowedSourceStatuses("custodial", input.toStatus)],
-      ];
-      if ("movementId" in input.selector) {
-        conditions.push("id = ?");
-        conditionValues.push(input.selector.movementId);
-      } else {
-        conditions.push("provider = ?", "provider_reference = ?");
-        conditionValues.push(input.selector.provider, input.selector.providerReference);
-      }
-
-      const row = await db
-        .prepare(
-          `UPDATE earn_movements
-              SET ${assignments.join(", ")}
-            WHERE ${conditions.join(" AND ")}
-            RETURNING *`
-        )
-        .bind(...assignmentValues, ...conditionValues)
         .first<Record<string, unknown>>();
       return row ? mapMovementRow(row) : null;
     },
@@ -3042,7 +2111,7 @@ async function requireMovementPosition(
 ): Promise<EarnPositionRow> {
   const position = await db
     .prepare(
-      `SELECT * FROM earn_positions WHERE id = ? AND organization_id = ? AND environment = ?`
+      `SELECT *, COALESCE(strategy_reference, vault_address) AS strategy_reference FROM earn_positions WHERE id = ? AND organization_id = ? AND environment = ?`
     )
     .bind(movement.position_id, movement.organization_id, movement.environment)
     .first<EarnPositionRow>();
@@ -3103,7 +2172,7 @@ async function projectShareAccountRentFunder(
 }
 
 /**
- * Lock the built external-wallet transaction named by a submit, and resolve the
+ * Lock the built wallet transaction named by a submit, and resolve the
  * submit's idempotency outcome UNDER that lock (PRO-1722).
  *
  * The lock ordering is the safety argument: one built transaction can land on
@@ -3115,30 +2184,30 @@ async function projectShareAccountRentFunder(
  *
  * Returns the movement to replay, or null when the caller should insert.
  */
-async function resolveExternalWalletTransactionConsumption(
+async function resolveWalletTransactionConsumption(
   db: AppDb,
   input: {
     organizationId: string;
     projectId: string;
     requestId: string;
     idempotencyFingerprint: string;
-    externalWalletTransactionId: string;
+    walletTransactionId: string;
   },
   direction: EarnMovementDirection
 ): Promise<{ movement: EarnMovementRow } | null> {
   const built = await db
     .prepare(
-      `SELECT id, movement_id FROM earn_external_wallet_transactions
+      `SELECT id, movement_id FROM earn_wallet_transactions
         WHERE id = ? AND organization_id = ?
         FOR UPDATE`
     )
-    .bind(input.externalWalletTransactionId, input.organizationId)
+    .bind(input.walletTransactionId, input.organizationId)
     .first<{ id: string; movement_id: string | null }>();
   if (!built) {
     // The service resolves the built row before it calls in, so a miss here is
     // a broken invariant, not caller error.
     throw new Error(
-      `Earn external-wallet submit references missing built transaction ${input.externalWalletTransactionId}`
+      `Earn wallet submit references missing built transaction ${input.walletTransactionId}`
     );
   }
 
@@ -3161,39 +2230,126 @@ async function resolveExternalWalletTransactionConsumption(
 }
 
 /** Mark the built transaction consumed by the movement the caller just inserted. */
-async function consumeExternalWalletTransaction(
+async function consumeWalletTransaction(
   db: AppDb,
-  externalWalletTransactionId: string,
+  walletTransactionId: string,
   movementId: string
 ): Promise<void> {
   const consumed = await db
     .prepare(
-      `UPDATE earn_external_wallet_transactions
+      `UPDATE earn_wallet_transactions
           SET movement_id = ?, consumed_at = sdp_iso_now(), updated_at = sdp_iso_now()
         WHERE id = ? AND movement_id IS NULL
         RETURNING id`
     )
-    .bind(movementId, externalWalletTransactionId)
+    .bind(movementId, walletTransactionId)
     .first<{ id: string }>();
   if (!consumed) {
     // Unreachable while the FOR UPDATE lock above serializes consumers; failing
     // loudly rolls the movement back rather than double-ledgering the build.
     throw new Error(
-      `Earn external-wallet built transaction ${externalWalletTransactionId} was consumed concurrently`
+      `Earn wallet built transaction ${walletTransactionId} was consumed concurrently`
     );
   }
 }
 
 /**
- * Claim or refresh the EXTERNAL-WALLET vault holding: one per (org, project,
+ * Claim or refresh the owner-address holding: one per (org, project,
  * environment, provider, vault, owner). Tenancy comes FROM the project row
  * rather than from the input, like the custody claim below; there is no wallet
  * scope to validate because SDP holds nothing here — the owner address IS the
  * holder. A mint-identity mismatch returns nothing and answers 409.
  */
-async function claimExternalWalletVaultPosition(
+type VaultPositionClaimInput = Pick<
+  CreateSignedVaultDepositIntentInput,
+  | "organizationId"
+  | "projectId"
+  | "environment"
+  | "provider"
+  | "vaultAddress"
+  | "shareMint"
+  | "tokenMint"
+  | "label"
+  | "createdBy"
+  | "custodyWalletId"
+>;
+type WalletPositionClaimInput = Omit<VaultPositionClaimInput, "custodyWalletId"> & {
+  ownerAddress: string;
+};
+
+/** Metadata already authorized and verified by the signed withdrawal submit. */
+export interface ClaimDiscoveredStrategyPositionInput {
+  organizationId: string;
+  projectId: string;
+  environment: SdpEnvironment;
+  provider: string;
+  strategyId: string;
+  strategyReference: string;
+  tokenMint: string;
+  shareMint: string;
+  label: string;
+  source: { walletId: string } | { ownerAddress: string };
+  createdBy?: string | null;
+}
+
+/**
+ * Claim a live holding only after verifying its signed withdrawal. The caller
+ * must use the transaction that persists that withdrawal's signed movement.
+ * This writes no deposit, amount, cost basis, or synthetic movement history.
+ * A selector can name a holding SDP already tracks: that claim resolves as
+ * position detail does, keeping its known cost basis and acquisition history.
+ */
+export async function claimDiscoveredStrategyPosition(
+  input: ClaimDiscoveredStrategyPositionInput,
+  executor: DatabaseExecutor
+): Promise<EarnPositionRow> {
+  const db = asTransactionalClient(executor);
+  const metadata = { ...input, vaultAddress: input.strategyReference };
+  const tracked = await createPostgresEarnMovementsRepository(db).getReadablePositionByInstrument({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    environment: input.environment,
+    provider: input.provider,
+    providerReference: input.strategyReference,
+    tokenMint: input.tokenMint,
+    shareMint: input.shareMint,
+    source: input.source,
+  });
+  const position =
+    tracked ??
+    ("walletId" in input.source
+      ? await claimVaultPosition(db, { ...metadata, custodyWalletId: input.source.walletId })
+      : await claimWalletVaultPosition(db, {
+          ...metadata,
+          ownerAddress: input.source.ownerAddress,
+        }));
+  // Only a holding SDP did not already track starts with an unknown cost basis.
+  const imported = tracked === null;
+  const row = await db
+    .prepare(`UPDATE earn_positions
+    SET strategy_id = ?,
+        cost_basis_known = cost_basis_known AND NOT ?::boolean,
+        closed_at = CASE WHEN ?::boolean THEN NULL ELSE closed_at END,
+        updated_at = sdp_iso_now()
+    WHERE id = ? AND (strategy_id IS NULL OR strategy_id = ?)
+      AND EXISTS (
+        SELECT 1 FROM earn_strategies strategy
+        WHERE strategy.id = ? AND strategy.environment = earn_positions.environment
+          AND strategy.provider = earn_positions.provider
+          AND strategy.provider_reference = earn_positions.vault_address
+          AND strategy.share_mint = earn_positions.share_mint
+          AND strategy.deposit_mints @> jsonb_build_array(earn_positions.token_mint)
+      )
+    RETURNING *`)
+    .bind(input.strategyId, imported, imported, position.id, input.strategyId, input.strategyId)
+    .first<EarnPositionRow>();
+  if (!row) throw conflict("Position strategy identity does not match the signed withdrawal");
+  return row;
+}
+
+async function claimWalletVaultPosition(
   db: AppDb,
-  input: CreateSignedExternalWalletDepositIntentInput
+  input: WalletPositionClaimInput
 ): Promise<EarnPositionRow> {
   const row = await db
     .prepare(
@@ -3239,9 +2395,9 @@ async function claimExternalWalletVaultPosition(
   return row;
 }
 
-async function insertExternalWalletDepositMovement(
+async function insertWalletDepositMovement(
   db: AppDb,
-  input: CreateSignedExternalWalletDepositIntentInput,
+  input: CreateSignedWalletDepositIntentInput,
   positionId: string
 ): Promise<EarnMovementRow | null> {
   const row = await db
@@ -3273,7 +2429,7 @@ async function insertExternalWalletDepositMovement(
       input.acceptedMinSharesOut ?? null,
       input.ownerAddress,
       input.vaultAddress,
-      // The external wallet funds the deposit; the instrument receives it.
+      // The wallet funds the deposit; the instrument receives it.
       input.ownerAddress,
       input.vaultAddress,
       input.signature,
@@ -3296,9 +2452,9 @@ async function insertExternalWalletDepositMovement(
   return row ? mapMovementRow(row) : null;
 }
 
-async function insertExternalWalletWithdrawalMovement(
+async function insertWalletWithdrawalMovement(
   db: AppDb,
-  input: CreateSignedExternalWalletWithdrawalIntentInput
+  input: CreateSignedWalletWithdrawalIntentInput
 ): Promise<EarnMovementRow | null> {
   const row = await db
     .prepare(
@@ -3327,7 +2483,7 @@ async function insertExternalWalletWithdrawalMovement(
       input.requestedShares,
       input.ownerAddress,
       input.vaultAddress,
-      // Money leaves the INSTRUMENT and returns to the external wallet.
+      // Money leaves the INSTRUMENT and returns to the wallet.
       input.vaultAddress,
       input.ownerAddress,
       input.signature,
@@ -3350,7 +2506,7 @@ async function insertExternalWalletWithdrawalMovement(
 
 async function claimVaultPosition(
   db: AppDb,
-  input: CreateSignedVaultDepositIntentInput
+  input: VaultPositionClaimInput
 ): Promise<EarnPositionRow> {
   const row = await db
     .prepare(

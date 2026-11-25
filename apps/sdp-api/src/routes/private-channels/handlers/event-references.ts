@@ -14,7 +14,7 @@ function resolveWalletScope(c: AppContext): PrivateChannelReferenceWalletScope {
 }
 
 /**
- * GET /events/references — flat id→name dictionary for event enrichment.
+ * GET /events/reference-labels — flat id→name dictionary for event enrichment.
  * Channels and members follow the same viewer rules as the events feed.
  * Issued-token symbols are project-wide (public on-chain data), and wallet
  * labels follow the wallets.read action.

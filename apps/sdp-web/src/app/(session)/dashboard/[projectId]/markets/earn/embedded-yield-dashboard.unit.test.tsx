@@ -1,10 +1,6 @@
 // @vitest-environment jsdom
 
-import type {
-  EarnExternalWalletPosition,
-  EarnExternalWalletPositionSummary,
-  EarnStrategy,
-} from "@sdp/types/earn";
+import type { EarnStrategy, EarnWalletPosition, EarnWalletPositionSummary } from "@sdp/types/earn";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -14,11 +10,11 @@ import { EmbeddedYieldDashboard } from "./embedded-yield-dashboard";
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const mocks = vi.hoisted(() => ({
   cluster: "devnet" as "devnet" | "mainnet-beta",
-  summary: undefined as EarnExternalWalletPositionSummary | undefined,
+  summary: undefined as EarnWalletPositionSummary | undefined,
   error: undefined as Error | undefined,
   isInitialLoading: false,
   strategies: [] as EarnStrategy[],
-  fetchPositions: vi.fn<() => Promise<EarnExternalWalletPosition[]>>(),
+  fetchPositions: vi.fn<() => Promise<EarnWalletPosition[]>>(),
   summaryOptions: vi.fn<(options?: { detailsVisible?: boolean }) => void>(),
 }));
 
@@ -36,9 +32,9 @@ vi.mock("@/lib/use-solana-cluster", () => ({
   useSolanaCluster: () => mocks.cluster,
 }));
 
-vi.mock("./earn-program-data", () => ({
-  fetchEarnExternalWalletPositions: mocks.fetchPositions,
-  useEarnExternalWalletPositionSummary: (options?: { detailsVisible?: boolean }) => {
+vi.mock("./earn-data", () => ({
+  fetchEarnWalletPositions: mocks.fetchPositions,
+  useEarnWalletPositionSummary: (options?: { detailsVisible?: boolean }) => {
     mocks.summaryOptions(options);
     return {
       summary: mocks.summary,
@@ -72,9 +68,7 @@ function strategyFixture(overrides: Partial<EarnStrategy> = {}): EarnStrategy {
   };
 }
 
-function positionFixture(
-  overrides: Partial<EarnExternalWalletPosition> = {}
-): EarnExternalWalletPosition {
+function positionFixture(overrides: Partial<EarnWalletPosition> = {}): EarnWalletPosition {
   return {
     id: "position_1",
     ownerAddress: "11111111111111111111111111111111",
@@ -366,13 +360,13 @@ describe("EmbeddedYieldDashboard", () => {
 
     renderDashboard();
 
-    expect(screen.getByText(/Live values are unavailable for 1 position/)).toBeTruthy();
+    expect(screen.getByText(/1 position has no live value yet/)).toBeTruthy();
     expect(screen.getByText("Unavailable")).toBeTruthy();
     // The hero withholds the sum too, and says why behind its (i).
     expect(liveValueFigure()).toBe("—");
     expect(
       screen.getByRole("button", {
-        name: "Withheld until every position's live value is read, so it never shows as partial.",
+        name: "Shows once every position's live value is read.",
       })
     ).toBeTruthy();
     expect(document.body.textContent).not.toContain("$0.00");
@@ -510,14 +504,14 @@ describe("EmbeddedYieldDashboard", () => {
 
     renderDashboard();
 
-    expect(screen.getByText("Your customer portfolio will show here")).toBeTruthy();
+    expect(screen.getByText("No customer deposits yet")).toBeTruthy();
     expect(screen.getByText(/Showing the last complete portfolio/)).toBeTruthy();
     expect(screen.getByRole("status").textContent).toContain("Showing the last complete portfolio");
-    expect(screen.queryByText("Customer portfolio unavailable")).toBeNull();
+    expect(screen.queryByText("Portfolio could not be loaded")).toBeNull();
   });
 
   it("renders more wallets than the chain-read quota from one summary request", () => {
-    const positions: EarnExternalWalletPosition[] = Array.from({ length: 31 }, (_, index) => ({
+    const positions: EarnWalletPosition[] = Array.from({ length: 31 }, (_, index) => ({
       id: `position_${index + 1}`,
       ownerAddress: `customer_wallet_${String(index + 1).padStart(2, "0")}`,
       provider: "kamino",

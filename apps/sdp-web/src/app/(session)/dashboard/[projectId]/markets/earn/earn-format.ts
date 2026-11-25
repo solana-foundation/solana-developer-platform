@@ -1,10 +1,13 @@
 import { isDecimalString } from "@sdp/solana/amount";
 import type { EarnStrategy } from "@sdp/types/earn";
+import type { OperationIntent, OperationStatus } from "@sdp/types/operations";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import { SOLANA_CLUSTER_LABELS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
+import type { StatusTone } from "@sdp/ui/status-text";
 import { truncateMiddle } from "@/app/(session)/dashboard/[projectId]/markets/truncate-middle";
 import type { MessageKey } from "@/i18n/messages";
 import type { TranslationValues } from "@/i18n/translate";
+import { compareUnsignedDecimals } from "./earn-decimal";
 import {
   type EarnVaultDepositAvailability,
   earnVaultDepositOnlyEnvironment,
@@ -79,6 +82,25 @@ export function formatUsd(value: string | undefined, locale: string): string {
   return amount === undefined ? "—" : `$${amount}`;
 }
 
+/**
+ * A provider-reported dollar total in compact notation ("$32M", "$1.23B"), where cents and whole
+ * dollars are noise. It truncates like every Earn figure, so it never overstates.
+ *
+ * @param value - The total as a decimal string, or undefined when the provider reports none.
+ * @param locale - The viewer's locale.
+ * @returns The compact figure, or "—" when the total is unknown.
+ */
+export function formatCompactUsd(value: string | undefined, locale: string): string {
+  if (value === undefined || !isIntlDecimalLiteral(value)) return "—";
+  return new Intl.NumberFormat(locale, {
+    style: "currency",
+    currency: "USD",
+    notation: "compact",
+    maximumSignificantDigits: 3,
+    roundingMode: "trunc",
+  }).format(value);
+}
+
 /** Above zero but under one cent: exactly what a two-decimal truncation prints as zero. */
 function isBelowOneCent(value: string): boolean {
   const [whole = "", fraction = ""] = value.split(".");
@@ -87,6 +109,21 @@ function isBelowOneCent(value: string): boolean {
 }
 
 /** The parts of a table row's detail line, joined by the design's middle dot. */
+/**
+ * How each operation status reads, in the design system's status tones. A prepared operation
+ * still waits on the user's decision, so it reads as plain text.
+ */
+export const EARN_OPERATION_STATUS_TONE: Record<OperationStatus, StatusTone | null> = {
+  prepared: null,
+  queued: "progress",
+  awaiting_signature: "progress",
+  submitted: "progress",
+  settling: "progress",
+  completed: "positive",
+  failed: "critical",
+  cancelled: "neutral",
+};
+
 export function earnDetailLine(parts: readonly string[]): string {
   return parts.join(" · ");
 }
@@ -141,9 +178,57 @@ export function formatTokenValue(
     : formatTokenQuantity(value, locale, tokenSymbol(tokenMint));
 }
 
-/** Basis points as a bare percent figure, without the % sign: 25 → "0.25". */
-export function formatBpsPercent(bps: number): string {
-  return (bps / 100).toFixed(2).replace(/\.?0+$/, "");
+/**
+ * A share count with its unit, singular for exactly one. A strategy's share token carries no
+ * symbol of its own, so shares read as shares rather than a shortened mint.
+ *
+ * @param value - The decimal share count.
+ * @param locale - The viewer's locale.
+ * @param t - The translator.
+ * @returns The count with its unit.
+ */
+export function formatShareAmount(
+  value: string,
+  locale: string,
+  t: (key: MessageKey, values?: TranslationValues) => string
+): string {
+  const unit =
+    compareUnsignedDecimals(value, "1") === 0
+      ? "DashboardEarn.core.shareUnitOne"
+      : "DashboardEarn.core.shareUnit";
+  return formatTokenQuantity(value, locale, t(unit));
+}
+
+/**
+ * The amount an operation's intent asks to move: the deposit, or the withdrawal as requested.
+ *
+ * @param intent - The operation's intent.
+ * @param locale - The viewer's locale.
+ * @param t - The translator.
+ * @returns The requested amount as Earn surfaces name it.
+ */
+export function formatIntentAmount(
+  intent: OperationIntent,
+  locale: string,
+  t: (key: MessageKey, values?: TranslationValues) => string
+): string {
+  if (intent.kind === "earn.deposit") {
+    return formatTokenValue(intent.amount.value, intent.amount.mint, locale);
+  }
+  const { amount } = intent;
+  switch (amount.kind) {
+    case "all":
+      return t("DashboardEarn.core.allHoldings");
+    case "shares":
+      return formatShareAmount(amount.value, locale, t);
+    case "token":
+    case "intermediate":
+      return formatTokenValue(amount.value, amount.mint, locale);
+    default: {
+      const unknownAmount: never = amount;
+      throw new Error(`Unknown withdrawal amount: ${JSON.stringify(unknownAmount)}`);
+    }
+  }
 }
 
 /** Turn a provider duration into one short, human unit for product copy. */

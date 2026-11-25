@@ -103,6 +103,8 @@ describe("gateway identity (X-SF-Identity)", () => {
   }
 
   beforeEach(async () => {
+    // A worker can inherit rate-limit buckets from the preceding test file.
+    await clearKVStores(env);
     invalidGatewayIdentityLimiter.resetForTesting();
     await seedTestDatabase(env);
     await getDb(env)
@@ -302,7 +304,7 @@ describe("gateway identity (X-SF-Identity)", () => {
   it("reaches a keyed Earn route with only the gateway identity, as with the key itself", async () => {
     await seedSfKey();
     const earnEnv = gatewayEnv();
-    const path = "/v1/earn/positions/caller-signed";
+    const path = "/v1/earn/positions";
 
     const viaGateway = await app.request(
       path,

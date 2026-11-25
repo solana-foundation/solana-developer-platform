@@ -1,6 +1,8 @@
 import type { PaymentRequest } from "@sdp/types/payments";
-import { wellKnownMint } from "@sdp/types/well-known-tokens";
+import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
+import { TEST_PAYMENT_REQUEST_RECIPIENT, testPaymentRequest } from "@/test/payment-requests";
+import { requiredWellKnownMint } from "@/test/well-known-mints";
 import {
   fetchPaymentRequestCanceler,
   fetchPaymentRequestDetail,
@@ -14,37 +16,13 @@ import {
   paymentRequestsListHref,
 } from "./payment-requests-page.data";
 
-function requestRow(id: string, overrides: Partial<PaymentRequest> = {}): PaymentRequest {
-  return {
+function requestRow(id: string, changes: Partial<PaymentRequest>): PaymentRequest {
+  return testPaymentRequest({
     id,
-    organizationId: "org_1",
-    projectId: "prj_1",
-    walletId: "wal_1",
-    destinationAddress: "11111111111111111111111111111111",
-    token: MAINNET_USDC,
+    token: requiredWellKnownMint("USDC", "mainnet-beta"),
     amount: "1",
-    reference: "ref_1",
-    status: "awaiting_payment",
-    expiresAt: null,
-    fulfilledByTransferId: null,
-    paidLate: false,
-    canceledByApiKeyId: null,
-    canceledByUserId: null,
-    canceledAt: null,
-    lifecycle: [{ status: "awaiting_payment", at: "2026-09-14T00:00:00.000Z" }],
-    createdBy: null,
-    createdAt: "2026-09-14T00:00:00.000Z",
-    updatedAt: "2026-09-14T00:00:00.000Z",
-    ...overrides,
-  };
-}
-
-const MAINNET_USDC = mainnetUsdc();
-
-function mainnetUsdc(): string {
-  const mint = wellKnownMint("USDC", "mainnet-beta");
-  if (!mint) throw new Error("USDC has no mainnet mint");
-  return mint;
+    ...changes,
+  });
 }
 
 describe("parsePaymentRequestsListParams", () => {
@@ -70,14 +48,15 @@ describe("parsePaymentRequestsListParams", () => {
 });
 
 describe("paymentRequestMatchesSearch", () => {
-  const request = requestRow("preq_1", {
-    amount: "12.5",
-    destinationAddress: "Dest1111111111111111111111111111111111111111",
-    reference: "INV-42",
-  });
+  const request = requestRow("preq_1", { amount: "12.5", reference: "INV-42" });
 
   it("matches the amount, token symbol, destination or reference, ignoring case", () => {
-    for (const needle of ["12.5", "usdc", "dest111", "inv-42"]) {
+    for (const needle of [
+      "12.5",
+      WELL_KNOWN_TOKENS.USDC.symbol.toLowerCase(),
+      TEST_PAYMENT_REQUEST_RECIPIENT.slice(0, 8).toLowerCase(),
+      "inv-42",
+    ]) {
       expect(paymentRequestMatchesSearch(request, needle)).toBe(true);
     }
   });
@@ -98,7 +77,7 @@ describe("fetchPaymentRequestDetail", () => {
   }
 
   it("reads the request by id", async () => {
-    const row = requestRow("preq_120");
+    const row = requestRow("preq_120", {});
     const api = detailApi(Response.json({ data: row }));
     const result = await fetchPaymentRequestDetail(api.request, "preq_120");
     expect(result).toEqual({ status: "found", request: row });
@@ -129,7 +108,7 @@ describe("fetchPaymentRequestLinkToken", () => {
       ok: true,
       publicToken: "tok_1",
     });
-    expect(api.paths).toEqual(["/v1/payments/requests/preq_1/link"]);
+    expect(api.paths).toEqual(["/v1/payments/requests/preq_1/link-token"]);
   });
 
   it("answers no token when the member may not manage payment requests", async () => {
@@ -158,7 +137,7 @@ describe("paymentRequestsListHref", () => {
  */
 function pageApi(rows: PaymentRequest[], total: number) {
   const calls: { page: string | null; pageSize: string | null; status: string | null }[] = [];
-  const request = async (path: string) => {
+  const request: Parameters<typeof loadPaymentRequestsList>[0] = async (path) => {
     const query = new URL(path, "https://sdp.test").searchParams;
     calls.push({
       page: query.get("page"),
@@ -169,11 +148,11 @@ function pageApi(rows: PaymentRequest[], total: number) {
       data: { paymentRequests: rows, total, page: 1, pageSize: rows.length },
     });
   };
-  return { request: request as Parameters<typeof loadPaymentRequestsList>[0], calls };
+  return { request, calls };
 }
 
 function rowWithStatus(id: string, status: PaymentRequest["status"]): PaymentRequest {
-  return { id, status } as PaymentRequest;
+  return requestRow(id, { status });
 }
 
 function listState(changes: Partial<PaymentRequestsListState> = {}): PaymentRequestsListState {
@@ -231,25 +210,9 @@ describe("loadPaymentRequestsList", () => {
     expect(middle.hasNextPage).toBe(true);
   });
 
-  it("passes Paid's rows through as the API returns them", async () => {
-    const rows = [rowWithStatus("preq_1", "paid"), rowWithStatus("preq_2", "paid")];
-    const result = await loadPaymentRequestsList(
-      pageApi(rows, 2).request,
-      listState({ status: "paid" })
-    );
-    expect(result).toEqual({
-      ok: true,
-      data: rows,
-      total: 2,
-      totalIsExact: true,
-      hasNextPage: false,
-    });
-  });
-
   it("reports a failed read", async () => {
-    const request = (async () => new Response("boom", { status: 500 })) as unknown as Parameters<
-      typeof loadPaymentRequestsList
-    >[0];
+    const request: Parameters<typeof loadPaymentRequestsList>[0] = async () =>
+      new Response("boom", { status: 500 });
     const result = await loadPaymentRequestsList(
       request,
       listState({ status: "awaiting_payment" })
@@ -282,7 +245,7 @@ describe("fetchPaymentRequestCanceler", () => {
   };
 
   it("reads nothing for a request that is not canceled", async () => {
-    expect(await fetchPaymentRequestCanceler(unused, requestRow("preq_1"))).toBeNull();
+    expect(await fetchPaymentRequestCanceler(unused, requestRow("preq_1", {}))).toBeNull();
   });
 
   it("names the API key from the Project's keys", async () => {

@@ -52,13 +52,13 @@ describe("i18n messages", () => {
   it("uses Embedded Yield as the product name in every locale", async () => {
     for (const locale of supportedLocales) {
       const messages = await loadMessages(locale);
-      expect(translate(messages, "Shared.dashboardShell.earnProgram")).toBe("Embedded Yield");
+      expect(translate(messages, "Shared.dashboardShell.embeddedYield")).toBe("Embedded Yield");
       expect(translate(messages, "DashboardEarn.playground.productName")).toBe("Embedded Yield");
     }
   });
 
   it("defines the product name in the raw English source catalog", () => {
-    expect(englishSourceMessages.Shared.dashboardShell.earnProgram).toBe("Embedded Yield");
+    expect(englishSourceMessages.Shared.dashboardShell.embeddedYield).toBe("Embedded Yield");
     expect(englishSourceMessages.DashboardEarn.playground.productName).toBe("Embedded Yield");
   });
 

@@ -1,12 +1,28 @@
 import assert from "node:assert/strict";
-import test from "node:test";
 import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+import {
+  checkModuleBoundaries,
   findWorkspaceDependencyCycles,
   forbiddenPackageSourceImport,
+  listFiles,
   validateModuleBoundaries,
   workspaceImportName,
   workspaceImportPath,
 } from "./check-module-boundaries.mjs";
+
+const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const api = {
   name: "@sdp/api",
@@ -38,16 +54,38 @@ test("assigns relative imports to their owning workspace package", () => {
     modules: [
       {
         name: "@sdp/custody",
-        sourceDirectory: "/repo/packages/sdp-custody/src",
+        manifestPath: "/repo/packages/sdp-custody/package.json",
       },
       {
         name: "@sdp/payments",
-        sourceDirectory: "/repo/packages/sdp-payments/src",
+        manifestPath: "/repo/packages/sdp-payments/package.json",
       },
     ],
   });
 
   assert.equal(workspacePackage, "@sdp/payments");
+});
+
+test("assigns a relative import into a source-less package by its package root", () => {
+  // bigint-buffer has no `src/` to anchor the lookup, so the owning package is
+  // resolved from its manifest's directory; dropping that lookup would let an
+  // undeclared relative import into the package pass silently.
+  const workspacePackage = workspaceImportPath({
+    filePath: "/repo/packages/sdp-custody/src/index.ts",
+    specifier: "../../bigint-buffer/node.js",
+    modules: [
+      {
+        name: "@sdp/custody",
+        manifestPath: "/repo/packages/sdp-custody/package.json",
+      },
+      {
+        name: "bigint-buffer",
+        manifestPath: "/repo/packages/bigint-buffer/package.json",
+      },
+    ],
+  });
+
+  assert.equal(workspacePackage, "bigint-buffer");
 });
 
 test("permits the explicit API test-support facade", () => {
@@ -109,14 +147,14 @@ test("requires relative imports to declare their owning workspace package", () =
   const custody = {
     name: "@sdp/custody",
     directory: "packages/sdp-custody",
-    sourceDirectory: "/repo/packages/sdp-custody/src",
+    manifestPath: "/repo/packages/sdp-custody/package.json",
     allowedDependencies: ["@sdp/types"],
     declaredDependencies: ["@sdp/types"],
   };
   const payments = {
     name: "@sdp/payments",
     directory: "packages/sdp-payments",
-    sourceDirectory: "/repo/packages/sdp-payments/src",
+    manifestPath: "/repo/packages/sdp-payments/package.json",
     allowedDependencies: [],
     declaredDependencies: [],
   };
@@ -204,3 +242,56 @@ for (const [fileName, runtimeDependencies, accepted] of [
     assert.equal(errors.length === 0, accepted);
   });
 }
+
+test("fails closed when a module's source directory is missing", () => {
+  // A declared module whose `src/` was renamed away must fail the walk rather
+  // than quietly contribute zero imports — the boundary rules for it would
+  // otherwise silently stop running. `readdirSync` throws ENOENT naming the
+  // missing directory; `listFiles` must not swallow it.
+  assert.throws(
+    () => listFiles(path.join(repositoryRoot, "packages/sdp-types/renamed-away")),
+    /ENOENT/
+  );
+});
+
+test("drives the real walk end to end over a repo-shaped fixture", () => {
+  // The tests above hand validateModuleBoundaries pre-extracted imports; this
+  // drives checkModuleBoundaries over a repo-shaped fixture so the walk, the
+  // import extraction and the violation reporting run for real. An extractor
+  // that returned nothing would otherwise pass every test and the CI check
+  // without ever checking a source import.
+  const root = mkdtempSync(path.join(tmpdir(), "module-boundaries-check-"));
+  try {
+    // Every workspace module needs its manifest; an empty `src/index.mjs`
+    // keeps each walked module non-empty without contributing imports.
+    for (const parent of ["apps", "packages"]) {
+      for (const entry of readdirSync(path.join(repositoryRoot, parent), { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const manifestPath = path.join(repositoryRoot, parent, entry.name, "package.json");
+        if (!existsSync(manifestPath)) continue;
+        const { name } = JSON.parse(readFileSync(manifestPath, "utf8"));
+        const fixtureDirectory = path.join(root, parent, entry.name);
+        mkdirSync(path.join(fixtureDirectory, "src"), { recursive: true });
+        writeFileSync(path.join(fixtureDirectory, "package.json"), JSON.stringify({ name }));
+        writeFileSync(path.join(fixtureDirectory, "src", "index.mjs"), "");
+      }
+    }
+
+    // One undeclared relative import from @sdp/types into @sdp/rpc: only a
+    // walk that really finds it makes the check report it.
+    writeFileSync(
+      path.join(root, "packages/sdp-types/src/index.mjs"),
+      `import "../../sdp-rpc/src/index.mjs";\n`
+    );
+
+    const errors = checkModuleBoundaries(root, { write: true });
+
+    assert.equal(errors.length, 1);
+    assert.match(
+      errors[0],
+      /packages\/sdp-types\/src\/index\.mjs imports \.\.\/\.\.\/sdp-rpc\/src\/index\.mjs without declaring @sdp\/rpc\./
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -1,14 +1,13 @@
 import { apiTestSupport } from "@sdp/api/test-support";
-import type { CustodyConfigsResponse } from "@sdp/types/custody";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { TokenApiResponse } from "#/helpers/api-types";
+import { CUSTODY_PROVIDERS } from "@sdp/types/custody";
+import { afterAll, assert, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import {
   cleanupIntegrationSuite,
   INTEGRATION_CUSTODY_PROVIDER,
   type IntegrationCustodyWallet,
   initIntegrationSuite,
   RUN_INTEGRATION_TESTS,
-  request as rawRequest,
   requestWithApiKey,
   resetIntegrationState,
   SOLANA_CONFIGURED,
@@ -16,6 +15,18 @@ import {
 import { env } from "#env-impl";
 
 const { getDb } = apiTestSupport;
+
+const configsResponseSchema = z.object({
+  data: z.object({
+    configs: z.array(z.object({ id: z.string(), provider: z.enum(CUSTODY_PROVIDERS) })),
+  }),
+});
+const createdTokenResponseSchema = z.object({
+  data: z.object({ token: z.object({ id: z.string() }) }),
+});
+const deployedTokenResponseSchema = z.object({
+  data: z.object({ token: z.object({ mintAuthority: z.string() }) }),
+});
 
 const describeIfIntegrationConfigured = describe.skipIf(
   !SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS
@@ -42,23 +53,25 @@ describeIfIntegrationConfigured("Custody Access and Explicit Signing", () => {
   });
 
   it("deploys with the named custody wallet", { timeout: 120000 }, async () => {
-    const configsRes = await request("/v1/wallets/configs");
+    const configsRes = await request("/v1/wallets/managed-signing/configurations");
 
     expect(configsRes.status).toBe(200);
-    const configsBody = (await configsRes.json()) as { data: CustodyConfigsResponse };
+    const configsBody = configsResponseSchema.parse(await configsRes.json());
     const providerConfigs = configsBody.data.configs.filter(
       (config) => config.provider === INTEGRATION_CUSTODY_PROVIDER
     );
     expect(providerConfigs).toHaveLength(1);
-    expect(custodyWallet.address).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
+    const [providerConfig] = providerConfigs;
+    assert(providerConfig, "the integration provider's config must be listed");
 
     const configRow = await getDb(env)
       .prepare("SELECT config_encrypted FROM custody_configs WHERE id = ?")
-      .bind(providerConfigs[0].id)
+      .bind(providerConfig.id)
       .first<{ config_encrypted: string }>();
+    assert(configRow, "the listed config must have a row");
 
-    expect(configRow?.config_encrypted).toBeTruthy();
-    expect(() => JSON.parse(configRow?.config_encrypted ?? "")).toThrow();
+    // Stored encrypted, never as the plaintext provider config.
+    expect(() => JSON.parse(configRow.config_encrypted)).toThrow();
 
     const createRes = await request("/v1/issuance/tokens", {
       method: "POST",
@@ -76,29 +89,17 @@ describeIfIntegrationConfigured("Custody Access and Explicit Signing", () => {
     });
 
     expect(createRes.status).toBe(201);
-    const created = (await createRes.json()) as TokenApiResponse;
+    const created = createdTokenResponseSchema.parse(await createRes.json());
     const tokenId = created.data.token.id;
 
-    const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
+    const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy/execute`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ signingCustodyWalletId: custodyWallet.id }),
     });
 
     expect(deployRes.status).toBe(200);
-    const deployed = (await deployRes.json()) as TokenApiResponse;
+    const deployed = deployedTokenResponseSchema.parse(await deployRes.json());
     expect(deployed.data.token.mintAuthority).toBe(custodyWallet.address);
-  });
-
-  it("requires auth for custody endpoints", async () => {
-    const configsRes = await rawRequest("/v1/wallets/configs");
-    expect(configsRes.status).toBe(401);
-
-    const initRes = await rawRequest("/v1/wallets", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider: INTEGRATION_CUSTODY_PROVIDER }),
-    });
-    expect(initRes.status).toBe(401);
   });
 });

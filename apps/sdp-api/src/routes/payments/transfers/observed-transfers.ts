@@ -251,6 +251,8 @@ function readTokenAmountInfo(
     };
   }
 
+  // SAFETY: a non-array object; every RpcTokenBalanceAmount field is optional and each read
+  // below checks its value's type before using it.
   const tokenAmountRecord = rawTokenAmount as RpcTokenBalanceAmount;
 
   const amountValue =
@@ -356,17 +358,6 @@ interface ParsedTransactionCacheEntry {
 
 const parsedTransactionCache = new Map<string, ParsedTransactionCacheEntry>();
 const inFlightParsedTransactions = new Map<string, Promise<ParsedTransactionResponse["result"]>>();
-
-/**
- * Drops every cached parsed transaction and in-flight lookup. Cache entries
- * are keyed by cluster and signature and shared across tenants (a parsed body is
- * tenant-independent), so callers that stub the RPC must clear the cache to
- * stay isolated.
- */
-export function clearObservedTransferCaches() {
-  parsedTransactionCache.clear();
-  inFlightParsedTransactions.clear();
-}
 
 function readCachedParsedTransaction(cacheKey: string): ParsedTransaction | null {
   const entry = parsedTransactionCache.get(cacheKey);

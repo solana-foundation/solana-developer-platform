@@ -97,7 +97,7 @@ describe("mergePaymentsPlaygroundSections", () => {
       "cancel-payment-request",
       "create-payment-request",
       "get-payment-request",
-      "get-payment-request-link",
+      "get-payment-request-link-token",
       "list-payment-requests",
     ]);
     expect(new Set(requestEndpoints.map(({ group }) => group))).toEqual(new Set(["Requests"]));

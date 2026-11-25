@@ -9,6 +9,7 @@ import { SignerError, SignerErrorCode, type SolanaSigner } from "@solana/keychai
 import { PrivySigner } from "@solana/keychain-privy";
 import type { Address } from "@solana/kit";
 import { z } from "zod";
+import { denormalizePrivyWalletId } from "#/provider-wallet-ids";
 import { SigningError } from "#/signing";
 import { BaseKeychainAdapter } from "./base-keychain.adapter";
 import type { KeychainPrivyConfig } from "./types";
@@ -81,10 +82,6 @@ export class KeychainPrivyAdapter extends BaseKeychainAdapter {
     this.signerByWalletId.set(cacheKey, created);
     return created;
   }
-}
-
-function denormalizePrivyWalletId(walletId: string): string {
-  return walletId.startsWith("privy_") ? walletId.slice("privy_".length) : walletId;
 }
 
 /**

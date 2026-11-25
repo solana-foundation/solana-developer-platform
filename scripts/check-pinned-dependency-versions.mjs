@@ -128,14 +128,28 @@ function trackedPackageManifests(repositoryRoot) {
 export function checkPinnedDependencyVersions(repositoryRoot) {
   const violations = [];
 
-  for (const relativePath of trackedPackageManifests(repositoryRoot)) {
+  const manifests = trackedPackageManifests(repositoryRoot);
+  // An empty listing would let the whole manifest sweep pass without reading
+  // anything — a clean result cannot tell a compliant repo from an unscanned
+  // one. Fail closed if discovery stops matching.
+  if (manifests.length === 0) {
+    throw new Error("found no package.json manifests; the git pathspec may have stopped matching.");
+  }
+
+  for (const relativePath of manifests) {
     const manifestPath = path.join(repositoryRoot, relativePath);
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
     violations.push(...validateManifest(manifest, relativePath));
   }
 
   const workspacePath = path.join(repositoryRoot, "pnpm-workspace.yaml");
-  if (existsSync(workspacePath)) {
+  if (!existsSync(workspacePath)) {
+    // The catalog file carries the exact-pin rule for Solana Earn packages; a
+    // rename must not turn that enforcement off silently.
+    violations.push(
+      "pnpm-workspace.yaml is missing: the catalog exact-pin policy cannot be enforced."
+    );
+  } else {
     violations.push(
       ...validatePnpmCatalog(readFileSync(workspacePath, "utf8"), "pnpm-workspace.yaml")
     );

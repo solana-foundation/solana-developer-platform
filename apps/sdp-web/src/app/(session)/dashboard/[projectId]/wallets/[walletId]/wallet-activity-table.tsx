@@ -185,7 +185,6 @@ export function WalletActivityTable({
             return (
               <Fragment key={row.id}>
                 <TableRow
-                  data-wallet-activity-row={row.id}
                   data-state={open ? "selected" : undefined}
                   className={cn("cursor-pointer", open && "border-b-0")}
                   onClick={toggle}

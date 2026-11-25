@@ -5,9 +5,13 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
-import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
+import {
+  dashboardRouter,
+  resetDashboardNavigation,
+  setDashboardUrl,
+} from "@/test/dashboard-navigation";
+import { EnglishI18n } from "@/test/i18n";
+import { syntheticWalletAddress } from "@/test/wallets";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
@@ -42,7 +46,7 @@ function makeWallet(id: string): CustodyWalletSummary {
     provider: "privy",
     isRuntimeExecutionAllowed: true,
     walletId: `${id}_provider`,
-    publicKey: "ByokPublicKey11111111111111111111111111111",
+    publicKey: syntheticWalletAddress(1),
     label: "Treasury",
     purpose: "transfer",
     status: "active",
@@ -68,7 +72,7 @@ function renderList({
     pagination: { limit: 20, offset: 0, total },
   };
   return render(
-    <I18nProvider locale="en" messages={getMessages("en")}>
+    <EnglishI18n>
       <ConnectionsList
         result={result}
         filters={{ page: 1 }}
@@ -78,7 +82,7 @@ function renderList({
         projectName="Acme Payments"
         emptyStateAction={emptyStateAction}
       />
-    </I18nProvider>
+    </EnglishI18n>
   );
 }
 
@@ -128,7 +132,6 @@ describe("connections list", () => {
     expect(connectionCell(container, "conn_test_a91c")).toBe(
       "Ops Privy app····a91c1 wallet · Signing is disabled"
     );
-    expect(container.querySelector('[data-signing-state="paused"]')).not.toBeNull();
   });
 
   it("leads a failed connection with its state and the reason it failed", () => {
@@ -221,7 +224,9 @@ describe("connections list", () => {
     expect(container.querySelector("[data-connection-id]")).toBeNull();
   });
 
-  it("paginates only past one page", () => {
+  it("paginates only past one page, and keeps the page in the address", async () => {
+    const user = userEvent.setup();
+    setDashboardUrl("/dashboard/prj_test_sandbox/integrations/privy", { provider: "privy" });
     const connections = [makeConnection({ id: "conn_test_a91c" })];
     const single = renderList({
       connections,
@@ -241,5 +246,11 @@ describe("connections list", () => {
       emptyStateAction: null,
     });
     expect(screen.getByText("Page 1 of 3")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+    expect(dashboardRouter.replace).toHaveBeenCalledExactlyOnceWith(
+      "/dashboard/prj_test_sandbox/integrations/privy?page=2",
+      { scroll: false }
+    );
   });
 });

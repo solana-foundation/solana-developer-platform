@@ -2,7 +2,7 @@ import { runInClusterScope } from "@sdp/rpc/scope";
 import type { SignatureInfo } from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import {
   parsedSystemTransfer,
@@ -12,11 +12,7 @@ import {
   signatureHistoryEntry,
   syntheticAddress,
 } from "@/test/helpers/parsed-transactions";
-import {
-  buildObservedTransfersForSignatures,
-  clearObservedTransferCaches,
-  SIGNATURE_HISTORY_LOOKUP_CONCURRENCY,
-} from "./observed-transfers";
+import { buildObservedTransfersForSignatures } from "./observed-transfers";
 
 const PAYER = syntheticAddress(1);
 const WALLET_ADDRESS = syntheticAddress(2);
@@ -45,18 +41,15 @@ function buildOnSandbox(signatures: SignatureInfo[]) {
   );
 }
 
+// Parsed bodies are cached per module, so each test reads its own signatures.
 describe("buildObservedTransfersForSignatures", () => {
   const rpc = installClusterRpcStub();
-
-  beforeEach(() => {
-    clearObservedTransferCaches();
-  });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("bounds concurrent getTransaction lookups instead of fanning out per signature", async () => {
+  it("reads at most five transactions at once, however long the signature history", async () => {
     rpc.answer("getTransaction", null);
     const stubbedFetch = globalThis.fetch;
     let inFlight = 0;
@@ -78,12 +71,11 @@ describe("buildObservedTransfersForSignatures", () => {
 
     expect(rows).toEqual([]);
     expect(rpc.calls.filter((call) => call.method === "getTransaction")).toHaveLength(25);
-    expect(peak).toBeGreaterThan(0);
-    expect(peak).toBeLessThanOrEqual(SIGNATURE_HISTORY_LOOKUP_CONCURRENCY);
+    expect(peak).toBe(5);
   });
 
   it("reads the integer lamports and transferChecked decimals kit parses to bigint", async () => {
-    const observed = signatureHistoryEntry(0, "confirmed");
+    const observed = signatureHistoryEntry(100, "confirmed");
     rpc.answer(
       "getTransaction",
       parsedTransactionResult({
@@ -124,7 +116,7 @@ describe("buildObservedTransfersForSignatures", () => {
     ).toEqual([
       {
         token: SOL_MINT,
-        amount: formatDecimalAmount(1_500_000n, 9),
+        amount: "0.0015",
         direction: "inbound",
         source: PAYER,
         destination: WALLET_ADDRESS,
@@ -146,7 +138,7 @@ describe("buildObservedTransfersForSignatures", () => {
     // transfer, so the wallet's row says it paid nothing (HOO-2614).
     const sponsor = syntheticAddress(9);
     const recipient = syntheticAddress(8);
-    const observed = signatureHistoryEntry(0, "confirmed");
+    const observed = signatureHistoryEntry(101, "confirmed");
     rpc.answer(
       "getTransaction",
       parsedTransactionResult({
@@ -175,7 +167,7 @@ describe("buildObservedTransfersForSignatures", () => {
   });
 
   it("includes an inbound v1 transfer in the observed list", async () => {
-    const observed = signatureHistoryEntry(0, "finalized");
+    const observed = signatureHistoryEntry(102, "finalized");
     rpc.answer(
       "getTransaction",
       parsedTransactionResult({
@@ -201,7 +193,7 @@ describe("buildObservedTransfersForSignatures", () => {
   });
 
   it("keeps two equal SOL transfers in one transaction as one row each", async () => {
-    const observed = signatureHistoryEntry(0, "confirmed");
+    const observed = signatureHistoryEntry(103, "confirmed");
     const deposit = parsedSystemTransfer({
       source: PAYER,
       destination: WALLET_ADDRESS,
@@ -226,17 +218,17 @@ describe("buildObservedTransfersForSignatures", () => {
     expect(rows.map((row) => ({ id: row.id, amount: row.amount }))).toEqual([
       {
         id: `xfr_observed_wal_fanout_test_${observed.signature}_0_inbound`,
-        amount: formatDecimalAmount(1_000_000n, 9),
+        amount: "0.001",
       },
       {
         id: `xfr_observed_wal_fanout_test_${observed.signature}_1_inbound`,
-        amount: formatDecimalAmount(1_000_000n, 9),
+        amount: "0.001",
       },
     ]);
   });
 
   it("keeps an inner token transfer apart from an equal outer one", async () => {
-    const observed = signatureHistoryEntry(0, "confirmed");
+    const observed = signatureHistoryEntry(104, "confirmed");
     const cpiProgram = syntheticAddress(5);
     const deposit = parsedTransferChecked({
       source: SOURCE_TOKEN_ACCOUNT,

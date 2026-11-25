@@ -32,19 +32,17 @@ Consequences that differ from Kamino:
 
 - **`minSharesOut` is refused, never ignored.** Settlement happens at a NAV
   struck after the transfer lands; no instruction can encode a share floor.
-- **A confirmed movement is not a settled order.** Even after Solana reports
-  the payment/share leg finalized, that finality is all the ledger records:
-  the sweep stamps the durable chain fact (`finalized`/`settled_at`) and then
-  stops scheduling the row, but fund tokens (or redemption USDC) arrive later
-  through WisdomTree's transfer agent. The stamp never leaves the ledger: the
-  public wire (`movementStatusOnWire`) translates a provider-order row at
-  `finalized` down to `confirmed` with no `settledAt`, because the contract
-  defines `finalized` as terminal settlement, and the settled surface never
-  closes a provider-order row on a chain fact. Connect's order completion —
-  the authenticated, correlated provider signal — is what a future reconciler
-  must bring before the settled view can close these rows. Position reads
-  still surface assets from live chain state. Order-status polling against
-  `GET /api/orders/*` is deliberately NOT wired yet — see "Not done" below.
+- **A confirmed movement is not a settled order.** When Solana finalizes the
+  payment or share leg, the sweep keeps the movement `confirmed` and records
+  chain finality as its own fact (`chain_finalized_at`), which takes the row
+  off the chain queue; the operation reads `settling`. Fund tokens (or
+  redemption USDC) arrive later through WisdomTree's transfer agent, so that
+  chain fact never closes the position, schedules payout repair or recognizes
+  earnings. Only Connect's order completion, the authenticated and correlated
+  provider signal, may move the row to `finalized`: a future reconciler that
+  implements `readProviderSettlement`, as Plume's does. Position reads still
+  surface assets from live chain state. Order-status polling against
+  `GET /api/orders/*` is deliberately NOT wired yet; see "Not done" below.
 
 ## The compliance model is the integration's spine
 
@@ -167,7 +165,7 @@ or completed an actual transfer-agent order.
 
 ## Not done, deliberately — the go-live checklist
 
-- **Surfacing stays `false`** (`EARN_PROVIDER_SURFACING.wisdomtree`). The
+- **Surfacing stays `false`** (`EARN_PROVIDER_DESCRIPTORS.wisdomtree.surfaced`). The
   playbook's rule is flip LAST, in its own PR, after an end-to-end deposit —
   which needs real Connect credentials AND production vault-direct deposits
   (PRO-1703): WisdomTree is mainnet-only and their sandbox is Ethereum

@@ -1,4 +1,5 @@
 import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
@@ -7,11 +8,13 @@ import { seedProjectCryptoWalletCounterparty } from "@/test/helpers/counterparti
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
+import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import {
   expectProjectScoped,
   type SeededDefaultProjects,
   seedDefaultProjects,
 } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { PaymentTransferBatchesRepository } from "./payment-transfer-batches.repository";
 import { createPostgresPaymentTransferBatchesRepository } from "./payment-transfer-batches.repository.postgres";
@@ -19,6 +22,11 @@ import { createPostgresPaymentTransferBatchesRepository } from "./payment-transf
 const TEST_PROJECT_ID = "prj_transfer_batches_repo_test";
 const TEST_WALLET_ID = "wallet_transfer_batches_repo_test";
 const TEST_CUSTODY_WALLET_ID = "cwlt_transfer_batches_repo_test";
+const OTHER_CUSTODY_WALLET_ID = "cwlt_transfer_batches_repo_other";
+const SOURCE_ADDRESS = syntheticAddress(1);
+const DESTINATION_ADDRESS = syntheticAddress(2);
+const ROTATED_ADDRESS = syntheticAddress(3);
+const OTHER_SOURCE_ADDRESS = syntheticAddress(4);
 
 describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
   let repo: PaymentTransferBatchesRepository;
@@ -71,7 +79,16 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
           id: TEST_CUSTODY_WALLET_ID,
           owner: { kind: "config", custodyConfigId: "cfg_transfer_batches_exact" },
           walletId: TEST_WALLET_ID,
-          publicKey: "Source111",
+          publicKey: SOURCE_ADDRESS,
+          label: null,
+          purpose: null,
+          status: "active",
+        },
+        {
+          id: OTHER_CUSTODY_WALLET_ID,
+          owner: { kind: "config", custodyConfigId: "cfg_transfer_batches_exact" },
+          walletId: "wallet_transfer_batches_repo_other",
+          publicKey: OTHER_SOURCE_ADDRESS,
           label: null,
           purpose: null,
           status: "active",
@@ -86,8 +103,8 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
     organizationId: TEST_ORG.id,
     sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
     sourceWalletId: TEST_WALLET_ID,
-    sourceAddress: "Source111",
-    token: "SOL",
+    sourceAddress: SOURCE_ADDRESS,
+    token: SOL_MINT,
     status: "processing" as const,
     totalAmount: "1",
     recipientCount: 1,
@@ -170,10 +187,22 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
         },
         recipients: [],
       })
-    ).resolves.toBeDefined();
+    ).resolves.toMatchObject({
+      batch: { project_id: projects.production.id, idempotency_key: "shared-batch-key" },
+    });
   });
 
   it("rolls back the batch row when a recipient insert fails", async () => {
+    await seedProjectCryptoWalletCounterparty(getDb(env), {
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      createdBy: TEST_USER.id,
+      counterpartyId: "cpty_batch_rollback",
+      counterpartyAccountId: "cpa_batch_rollback",
+      walletAddress: DESTINATION_ADDRESS,
+    });
+
+    // The account passes admission; the recipient row names a counterparty that does not own it.
     await expect(
       repo.createTransferBatchWithRecipients({
         batch: { ...baseInput, projectId: TEST_PROJECT_ID, idempotencyKey: "rollback-batch-key" },
@@ -183,15 +212,15 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
             projectId: TEST_PROJECT_ID,
             externalId: null,
             counterpartyId: "cpty_does_not_exist",
-            counterpartyAccountId: "cpacct_does_not_exist",
-            destinationAddress: "Dest111",
+            counterpartyAccountId: "cpa_batch_rollback",
+            destinationAddress: DESTINATION_ADDRESS,
             amount: "1",
             status: "pending",
             error: null,
           },
         ],
       })
-    ).rejects.toThrow();
+    ).rejects.toMatchObject({ code: "23503" });
 
     expect(
       await repo.findTransferBatchByIdempotency({
@@ -203,23 +232,20 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
   });
 
   it("filters batches by exact source wallet", async () => {
+    const { batch: selectedBatch } = await repo.createTransferBatchWithRecipients({
+      batch: { ...baseInput, projectId: TEST_PROJECT_ID },
+      recipients: [],
+    });
     await repo.createTransferBatchWithRecipients({
       batch: {
         ...baseInput,
         projectId: TEST_PROJECT_ID,
-        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        sourceCustodyWalletId: OTHER_CUSTODY_WALLET_ID,
+        sourceWalletId: "wallet_transfer_batches_repo_other",
+        sourceAddress: OTHER_SOURCE_ADDRESS,
       },
       recipients: [],
     });
-    // A legacy batch with no source wallet must not match the filter.
-    const { batch: legacy } = await repo.createTransferBatchWithRecipients({
-      batch: { ...baseInput, projectId: TEST_PROJECT_ID },
-      recipients: [],
-    });
-    await getDb(env)
-      .prepare("UPDATE payment_transfer_batches SET source_custody_wallet_id = NULL WHERE id = ?")
-      .bind(legacy.id)
-      .run();
 
     const selected = await repo.listTransferBatches({
       organizationId: TEST_ORG.id,
@@ -229,8 +255,8 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
       offset: 0,
     });
 
-    expect(selected.rows).toHaveLength(1);
-    expect(selected.rows[0]?.source_custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
+    expect(selected.total).toBe(1);
+    expect(selected.rows.map((row) => row.id)).toEqual([selectedBatch.id]);
   });
 
   it("links only recipients still unsent, and claims failed ones all or nothing", async () => {
@@ -240,7 +266,7 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
       createdBy: TEST_USER.id,
       counterpartyId: "cpty_batch_claim",
       counterpartyAccountId: "cpa_batch_claim",
-      walletAddress: "Dest111",
+      walletAddress: DESTINATION_ADDRESS,
     });
     const recipient = {
       organizationId: TEST_ORG.id,
@@ -248,7 +274,7 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
       externalId: null,
       counterpartyId: "cpty_batch_claim",
       counterpartyAccountId: "cpa_batch_claim",
-      destinationAddress: "Dest111",
+      destinationAddress: DESTINATION_ADDRESS,
       amount: "1",
       status: "pending" as const,
       error: null,
@@ -308,9 +334,9 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
       });
     // The second recipient is processing, so a claim naming it takes neither.
     expect(await claim([first, second])).toBeNull();
-    const claimed = await claim([first]);
-    expect(claimed?.recipients).toMatchObject([{ id: first, status: "pending", error: null }]);
-    expect(claimed?.batch.transaction_count).toBe(2);
+    const claimed = required(await claim([first]));
+    expect(claimed.recipients).toMatchObject([{ id: first, status: "pending", error: null }]);
+    expect(claimed.batch.transaction_count).toBe(2);
     expect(await claim([first])).toBeNull();
     // Only the claim that took its recipients recorded a retry.
     expect(
@@ -353,7 +379,7 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
       externalId: null,
       counterpartyId: "cpty_batch_recheck",
       counterpartyAccountId: "cpa_batch_recheck",
-      destinationAddress: "Dest111",
+      destinationAddress: DESTINATION_ADDRESS,
       amount: "1",
       status: "pending" as const,
       error: null,
@@ -379,10 +405,10 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
       getDb(env)
         .prepare(
           `UPDATE counterparty_accounts
-              SET details = jsonb_set(details, '{address}', '"Rotated111"')
+              SET details = jsonb_set(details, '{address}', to_jsonb(?::text))
             WHERE id = ?`
         )
-        .bind(recipient.counterpartyAccountId)
+        .bind(ROTATED_ADDRESS, recipient.counterpartyAccountId)
         .run();
     const create = (idempotencyKey: string) =>
       repo.createTransferBatchWithRecipients({
@@ -390,11 +416,11 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
         recipients: [recipient],
       });
     const batchCount = async () =>
-      (
+      required(
         await getDb(env)
           .prepare("SELECT count(*)::int AS n FROM payment_transfer_batches")
           .first<{ n: number }>()
-      )?.n;
+      ).n;
 
     it("refuses a create whose account was archived after authorize, writing nothing", async () => {
       await archiveAccount();
@@ -424,9 +450,9 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
       const update = getDb(env).transaction(async (tx) => {
         await tx.execute(
           `UPDATE counterparty_accounts
-              SET details = jsonb_set(details, '{address}', '"Rotated111"')
+              SET details = jsonb_set(details, '{address}', to_jsonb(?::text))
             WHERE id = ?`,
-          [recipient.counterpartyAccountId]
+          [ROTATED_ADDRESS, recipient.counterpartyAccountId]
         );
         updateLocked();
         await updateHeld;
@@ -553,7 +579,7 @@ describe("PaymentTransferBatchesRepository.listStrandedTransferBatches (postgres
           id: SOURCE_WALLETS.sandbox.custodyWalletId,
           owner: { kind: "config", custodyConfigId: "cfg_transfer_batches_stranded" },
           walletId: SOURCE_WALLETS.sandbox.walletId,
-          publicKey: "Source111",
+          publicKey: SOURCE_ADDRESS,
           label: null,
           purpose: null,
           status: "active",
@@ -566,7 +592,7 @@ describe("PaymentTransferBatchesRepository.listStrandedTransferBatches (postgres
       createdBy: TEST_USER.id,
       custodyWalletId: SOURCE_WALLETS.production.custodyWalletId,
       walletId: SOURCE_WALLETS.production.walletId,
-      publicKey: "Production111",
+      publicKey: OTHER_SOURCE_ADDRESS,
     });
     repo = createPostgresPaymentTransferBatchesRepository(db);
     strandedBatchIds.clear();
@@ -577,7 +603,7 @@ describe("PaymentTransferBatchesRepository.listStrandedTransferBatches (postgres
         createdBy: TEST_USER.id,
         counterpartyId: `cpty_stranded_${environment}`,
         counterpartyAccountId: `cpacct_stranded_${environment}`,
-        walletAddress: "Dest111",
+        walletAddress: DESTINATION_ADDRESS,
       });
       const { batch } = await repo.createTransferBatchWithRecipients({
         batch: {
@@ -585,8 +611,8 @@ describe("PaymentTransferBatchesRepository.listStrandedTransferBatches (postgres
           projectId: PROJECT_IDS[environment],
           sourceCustodyWalletId: SOURCE_WALLETS[environment].custodyWalletId,
           sourceWalletId: SOURCE_WALLETS[environment].walletId,
-          sourceAddress: "Source111",
-          token: "SOL",
+          sourceAddress: SOURCE_ADDRESS,
+          token: SOL_MINT,
           status: "processing",
           totalAmount: "1",
           recipientCount: 1,
@@ -602,7 +628,7 @@ describe("PaymentTransferBatchesRepository.listStrandedTransferBatches (postgres
             externalId: null,
             counterpartyId: `cpty_stranded_${environment}`,
             counterpartyAccountId: `cpacct_stranded_${environment}`,
-            destinationAddress: "Dest111",
+            destinationAddress: DESTINATION_ADDRESS,
             amount: "1",
             status: "pending",
             error: null,

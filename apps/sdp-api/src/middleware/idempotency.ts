@@ -59,12 +59,17 @@ export interface IdempotencyOptions {
    *   Only for a route whose handler writes its own row under a unique key
    *   before it moves anything, and replays that row on a retry, because that
    *   row is what recovers the earlier attempt.
-   *
    * A `rerun` route also lets a retry take over a claim whose lease lapsed
    * without an outcome (a crash, a failed write of the outcome); see
    * {@link IdempotencyOptions.recovery} for a `store` route.
    */
   serverErrors: "store" | "rerun";
+  /**
+   * Store a 5xx after `markIdempotencyCommitted`, overriding `serverErrors`.
+   * Earn operations opt in so accepted requests replay their exact answer.
+   * Otherwise server errors keep the route's normal domain-row recovery.
+   */
+  committedServerErrors?: "store";
   /**
    * `record`: the route mounts `replayFromRecord` after this step, so a retry
    * that takes over a claim whose lease lapsed without an outcome is answered
@@ -80,11 +85,17 @@ export interface IdempotencyOptions {
    */
   canonicalize?: (body: JsonValue) => JsonValue;
   /**
-   * The canonical form the route fingerprinted with before its current
-   * `canonicalize`. A key record or domain row saved under it still matches,
-   * so a retry across the change replays instead of answering 422. Must be pure.
+   * Earlier forms of a domain row's fingerprint: the `canonicalize` used
+   * (defaulting to the current one) and the `operation` it was mounted at
+   * (defaulting to the current path), each as of that era. A domain row saved
+   * under any of them can answer a retry across a rename or canonical-form
+   * change instead of returning 422. Canonicalizers must be pure.
    */
-  previousCanonicalize?: (body: JsonValue) => JsonValue;
+  previousForms?: {
+    canonicalize?: (body: JsonValue) => JsonValue;
+    /** The full `METHOD /path` string, exactly as {@link idempotencyOperation} built it. */
+    operation?: string;
+  }[];
 }
 
 const DEFAULT_IDEMPOTENCY_LEASE_SECONDS = 60;
@@ -353,19 +364,25 @@ export async function runIdempotency(
   const maxRenewalSeconds = options.maxLeaseRenewalSeconds ?? MAX_IDEMPOTENCY_LEASE_RENEWAL_SECONDS;
   const validatedParams = validatedInput(c).params;
   const body = await readFingerprintBody(c);
-  const fingerprintOf = (canonicalize: IdempotencyOptions["canonicalize"]) =>
+  const fingerprintOf = (canonicalize: IdempotencyOptions["canonicalize"], scope: string) =>
     requestFingerprint({
-      operation,
+      operation: scope,
       // As the route's param validator left them, like the body.
       params: toJsonValue(validatedParams),
       // Names are ordered by the canonical form; repeated values keep their order.
       query: c.req.queries(),
       body: canonicalize ? canonicalize(body) : body,
     });
-  let fingerprint = fingerprintOf(options.canonicalize);
-  const previousFingerprint = options.previousCanonicalize
-    ? fingerprintOf(options.previousCanonicalize)
-    : fingerprint;
+  const fingerprint = fingerprintOf(options.canonicalize, operation);
+  // The domain row can have been written under any earlier operation or body
+  // form. Key records stay scoped to the current operation and fingerprint.
+  const previousFingerprints = [
+    ...new Set(
+      (options.previousForms ?? []).map((form) =>
+        fingerprintOf(form.canonicalize ?? options.canonicalize, form.operation ?? operation)
+      )
+    ),
+  ].filter((candidate) => candidate !== fingerprint);
   const id = `idk_${crypto.randomUUID()}`;
   const claimToken = crypto.randomUUID();
   const repository = createPostgresIdempotencyKeyRepository(getDb(c.env));
@@ -385,17 +402,8 @@ export async function runIdempotency(
     leaseSeconds,
     retentionSeconds: IDEMPOTENCY_KEY_RETENTION_SECONDS,
   };
-  let claim = await repository.claim(claimInput);
-  if (claim.kind === "mismatch" && previousFingerprint !== fingerprint) {
-    // A key saved before the route's canonical form changed (a mismatch
-    // writes nothing, so claiming again under the old form is safe).
-    const previous = await repository.claim({ ...claimInput, fingerprint: previousFingerprint });
-    if (previous.kind !== "mismatch") {
-      claim = previous;
-      fingerprint = previousFingerprint;
-    }
-  }
-  c.set("idempotencyPreviousFingerprint", previousFingerprint);
+  const claim = await repository.claim(claimInput);
+  c.set("idempotencyPreviousFingerprints", previousFingerprints);
 
   switch (claim.kind) {
     case "completed":
@@ -473,18 +481,17 @@ export async function runIdempotency(
       await release(() => repository.unlock(id, claimToken));
       return;
     }
-    // Once the handler has written its domain row (markIdempotencyCommitted),
-    // any status is stored: the request changed something, so its retry gets
-    // the same answer. A record mismatch is never stored: binding the key to
-    // this other request would refuse the original request's own retry.
-    const refusedUnchanged =
-      isIdempotencyUnstoredStatus(response.status) && c.get("idempotencyCommitted") !== true;
+    // Committed refusals are stored; server errors follow the route's recovery
+    // policy. A mismatch never binds another request's answer to this key.
+    const committed = c.get("idempotencyCommitted") === true;
+    const refusedUnchanged = isIdempotencyUnstoredStatus(response.status) && !committed;
     if (refusedUnchanged || c.get("idempotencyRecordMismatch") === true) {
       await release(() =>
         freshClaim ? repository.discard(id, claimToken) : repository.unlock(id, claimToken)
       );
     } else if (
       response.status >= 500 &&
+      !(committed && options.committedServerErrors === "store") &&
       (options.serverErrors === "rerun" || c.get("idempotencyRerunnable") === true)
     ) {
       await release(() => repository.unlock(id, claimToken));
@@ -608,11 +615,10 @@ export function deriveIdempotencyRecordKey(
 }
 
 /**
- * Marks that the handler has written its domain row under this request's key,
- * so its response is stored whatever its status: a 400 or 409 raised after the
- * row exists is the request's answer, and a same-key retry replays it instead
- * of being answered from the row with a different status. Call it right after
- * the row is committed; refusals before it stay unstored and run again.
+ * Marks that the handler committed its domain row under this request's key.
+ * A later refusal is stored rather than replaced by a different row response.
+ * Server errors follow `serverErrors`, unless `committedServerErrors` overrides
+ * it. Call immediately after commitment; earlier refusals stay unstored.
  */
 export function markIdempotencyCommitted(c: Context<{ Bindings: Env }>): void {
   c.set("idempotencyCommitted", true);
@@ -658,14 +664,15 @@ export function getIdempotencyFingerprint(c: Context<{ Bindings: Env }>): string
 
 /**
  * Whether a fingerprint stored on a domain row is this request's: its current
- * fingerprint, or the one under the route's `previousCanonicalize`, so a row
- * saved before the canonical form changed still answers its retry.
+ * fingerprint, or one under the route's `previousForms`, so a row saved before
+ * the canonical form or the route path changed still answers its retry.
  */
 export function idempotencyFingerprintMatches(
   c: Context<{ Bindings: Env }>,
   stored: string
 ): boolean {
   return (
-    stored === c.get("idempotencyFingerprint") || stored === c.get("idempotencyPreviousFingerprint")
+    stored === c.get("idempotencyFingerprint") ||
+    (c.get("idempotencyPreviousFingerprints")?.includes(stored) ?? false)
   );
 }

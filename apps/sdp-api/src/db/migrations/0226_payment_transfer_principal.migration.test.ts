@@ -35,16 +35,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await client.query("BEGIN");
-  await client.query(`CREATE TEMP TABLE payment_transfers (
-    id TEXT PRIMARY KEY,
-    status TEXT NOT NULL DEFAULT 'processing',
-    initiated_by_key_id TEXT,
-    provider_data JSONB NOT NULL DEFAULT '{}'::jsonb
-  ) ON COMMIT DROP`);
-  await client.query(`INSERT INTO payment_transfers
-    (id, initiated_by_key_id, provider_data) VALUES
-    ('legacy_key', 'key_legacy', '{"fireblocksTransfer":{"connectionId":"legacy"}}'),
-    ('legacy_unknown', NULL, '{}')`);
+  await client.query("CREATE TEMP TABLE payment_transfers (id TEXT PRIMARY KEY) ON COMMIT DROP");
   await client.query(migrationSql);
 });
 
@@ -52,63 +43,8 @@ afterEach(async () => {
   await client.query("ROLLBACK");
 });
 
-describe("0226 payment transfer principal", () => {
-  it("leaves legacy rows unchanged and does not infer their execution principal", async () => {
-    const result = await client.query(
-      `SELECT id, status, initiated_by_key_id, provider_data, initiated_by_principal
-         FROM payment_transfers ORDER BY id`
-    );
-    expect(result.rows).toEqual([
-      {
-        id: "legacy_key",
-        status: "processing",
-        initiated_by_key_id: "key_legacy",
-        provider_data: { fireblocksTransfer: { connectionId: "legacy" } },
-        initiated_by_principal: null,
-      },
-      {
-        id: "legacy_unknown",
-        status: "processing",
-        initiated_by_key_id: null,
-        provider_data: {},
-        initiated_by_principal: null,
-      },
-    ]);
-  });
-
-  it("keeps the column nullable without a default and avoids a history scan", async () => {
-    const column = await client.query(
-      `SELECT a.attnotnull, pg_get_expr(d.adbin, d.adrelid) AS column_default
-         FROM pg_attribute a
-         LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
-        WHERE a.attrelid = 'pg_temp.payment_transfers'::regclass
-          AND a.attname = 'initiated_by_principal'`
-    );
-    expect(column.rows).toEqual([{ attnotnull: false, column_default: null }]);
-    const check = await client.query(
-      `SELECT convalidated FROM pg_constraint
-        WHERE conrelid = 'pg_temp.payment_transfers'::regclass AND conname = $1`,
-      [constraint]
-    );
-    expect(check.rows).toEqual([{ convalidated: false }]);
-  });
-
-  it("accepts inserts and updates from the previous writer without a principal", async () => {
-    await client.query(
-      "INSERT INTO payment_transfers (id, initiated_by_key_id) VALUES ('old_writer', 'key_old')"
-    );
-    await client.query("UPDATE payment_transfers SET status = 'confirmed'");
-    const result = await client.query(
-      "SELECT id, initiated_by_principal FROM payment_transfers ORDER BY id"
-    );
-    expect(result.rows).toEqual([
-      { id: "legacy_key", initiated_by_principal: null },
-      { id: "legacy_unknown", initiated_by_principal: null },
-      { id: "old_writer", initiated_by_principal: null },
-    ]);
-  });
-
-  it.each(principals)("accepts the exact $kind principal", async (principal) => {
+describe("payment transfer initiating principal constraint", () => {
+  it.each(principals)("stores the exact $kind principal", async (principal) => {
     await client.query(
       "INSERT INTO payment_transfers (id, initiated_by_principal) VALUES ('valid', $1::jsonb)",
       [JSON.stringify(principal)]

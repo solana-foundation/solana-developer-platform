@@ -78,7 +78,7 @@ describe("rejectCrossSiteWrite", () => {
 
   it("refuses a cross-origin write to a BFF money route", async () => {
     const response = rejectCrossSiteWrite(
-      write("/api/dashboard/markets/earn/vault-withdrawals", {
+      write("/api/dashboard/markets/earn/withdraw", {
         origin: "https://attacker.example",
       })
     );
@@ -99,7 +99,7 @@ describe("rejectCrossSiteWrite", () => {
   it("allows a same-origin write", () => {
     expect(
       rejectCrossSiteWrite(
-        write("/api/dashboard/markets/earn/vault-withdrawals", {
+        write("/api/dashboard/markets/earn/withdraw", {
           origin: "https://dashboard.example.com",
         })
       )
@@ -123,11 +123,7 @@ describe("rejectCrossSiteWrite", () => {
   it("leaves reads to the same-origin policy", () => {
     expect(
       rejectCrossSiteWrite(
-        write(
-          "/api/dashboard/markets/earn/movements",
-          { origin: "https://attacker.example" },
-          "GET"
-        )
+        write("/api/dashboard/operations", { origin: "https://attacker.example" }, "GET")
       )
     ).toBeNull();
   });
@@ -135,7 +131,9 @@ describe("rejectCrossSiteWrite", () => {
   it("gates playground writes but not routes outside the BFF", () => {
     expect(
       rejectCrossSiteWrite(
-        write("/api/playground/v1/payments/transfers", { origin: "https://attacker.example" })
+        write("/api/playground/v1/payments/transfers/execute", {
+          origin: "https://attacker.example",
+        })
       )?.status
     ).toBe(403);
     expect(

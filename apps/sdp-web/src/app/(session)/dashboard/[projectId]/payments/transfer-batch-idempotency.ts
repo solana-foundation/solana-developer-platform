@@ -29,7 +29,7 @@ import {
 /**
  * Browser-side durability for the transfer-batch IDEMPOTENCY KEY.
  *
- * `POST /v1/payments/transfer-batches` replays by Idempotency-Key + payload
+ * `POST /v1/payments/transfer-batches/execute` replays by Idempotency-Key + payload
  * fingerprint, but only when the caller carries a key at all: an unkeyed retry
  * is a brand-new batch that moves the whole amount again. Storage and
  * the retire rule are the shared key store's (`lib/idempotency-key-store.ts`),
@@ -83,7 +83,7 @@ export function canonicalTransferBatchRequest(
  * order, which is also the order they are SENT in, so this key and the API's
  * own order-sensitive fingerprint agree on what one intent is.
  */
-export function transferBatchRequestFingerprint(request: DashboardTransferBatchRequest): string {
+function transferBatchRequestFingerprint(request: DashboardTransferBatchRequest): string {
   const canonical = canonicalTransferBatchRequest(request);
   return JSON.stringify([
     canonical.projectId,
@@ -133,7 +133,7 @@ function referenceStoreName(unnamed: DashboardTransferBatchRequest): string {
  * @param request - The batch without a reference.
  * @param day - The UTC calendar day, `YYYY-MM-DD`, shared by every operator.
  */
-export function defaultTransferBatchReference(
+function defaultTransferBatchReference(
   request: DashboardTransferBatchRequest,
   day: string
 ): string {
@@ -147,10 +147,8 @@ export function defaultTransferBatchReference(
  * again after midnight, in another tab or after a reload still names the same
  * run. A storage that refuses falls back to the day's name.
  */
-export function claimDefaultTransferBatchReference(
-  unnamed: DashboardTransferBatchRequest,
-  now: Date = new Date()
-): string {
+function claimDefaultTransferBatchReference(unnamed: DashboardTransferBatchRequest): string {
+  const now = new Date();
   const storage = referenceStorage();
   const name = referenceStoreName(unnamed);
   try {
@@ -250,22 +248,6 @@ export function isTransferBatchSendOutcomeUnknown(error: unknown): boolean {
   if (error.code === "IDEMPOTENCY_KEY_IN_FLIGHT") return true;
   const answer = { status: error.status, replayed: error.replayed, code: error.code };
   return uncertainMoneyAnswerMessage(answer) !== null;
-}
-
-/**
- * The idempotency key for this batch, minting and persisting one the first time.
- * The same batch rebuilt after a retry or a reload gets the SAME key.
- */
-export function claimTransferBatchIdempotencyKey(fingerprint: string): string {
-  return store.claim(fingerprint).key;
-}
-
-/**
- * Retire a key once the API has answered for it: a recorded batch, or a
- * definitive refusal ({@link sendTransferBatchUnderKey}).
- */
-export function releaseTransferBatchIdempotencyKey(fingerprint: string, key: string): void {
-  store.release(fingerprint, key);
 }
 
 /**

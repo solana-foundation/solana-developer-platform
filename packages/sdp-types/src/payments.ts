@@ -1383,6 +1383,24 @@ export function isPaymentRequestPayableAt(
   );
 }
 
+/** The statuses that close a payment request: every status that no longer admits a payment. */
+export type ClosedPaymentRequestStatus = {
+  [Status in PaymentRequestStatus]: (typeof PAYMENT_REQUEST_STATUS_PAYABLE)[Status] extends true
+    ? never
+    : Status;
+}[PaymentRequestStatus];
+
+/** Reports whether a payment request is closed: paid, or closed without a payment. */
+export function isClosedPaymentRequestStatus(
+  status: PaymentRequestStatus
+): status is ClosedPaymentRequestStatus {
+  return !isPayablePaymentRequestStatus(status);
+}
+
+export const PAYMENT_REQUEST_CLOSED_STATUSES = PAYMENT_REQUEST_STATUSES.filter(
+  isClosedPaymentRequestStatus
+);
+
 /**
  * Whether each status closes a payment request without a payment: a payer who signed before it
  * closed can still land the transfer, and the reconciler records that money as a late payment.
@@ -1449,7 +1467,7 @@ export interface CreatedPaymentRequest extends PaymentRequest {
 }
 
 /**
- * `GET /v1/payments/requests/{id}/link` (`payment_requests.manage`): the
+ * `GET /v1/payments/requests/{id}/link-token` (`payment_requests.manage`): the
  * request's link token.
  */
 export interface PaymentRequestLink {

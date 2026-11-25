@@ -20,7 +20,7 @@ import { createTransferSchema, walletTransferSchema } from "./schemas";
 export const transfers = new Hono<{ Bindings: Env }>();
 
 transfers.post(
-  "/",
+  "/execute",
   requireAction("transfers.execute"),
   validateBody((c) =>
     isModuleInChannel(c, "ramps") ? createTransferSchema : walletTransferSchema
@@ -33,6 +33,9 @@ transfers.post(
     serverErrors: "rerun",
     recovery: "record",
     canonicalize: canonicalizePaymentBody,
+    // The execute step was split out of POST /v1/payments/transfers; a
+    // row saved under that operation still answers its retry.
+    previousForms: [{ operation: "POST /v1/payments/transfers" }],
   }),
   replayFromRecord(findTransferRecordReplay),
   admit(admitTransferExecution),

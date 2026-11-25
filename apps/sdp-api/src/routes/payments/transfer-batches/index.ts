@@ -40,7 +40,7 @@ transferBatches.post(
   estimateTransferBatch
 );
 transferBatches.post(
-  "/",
+  "/execute",
   requireAction("transfer_batches.execute"),
   validateBody(createTransferBatchSchema),
   authorize(authorizeTransferBatch),
@@ -52,7 +52,17 @@ transferBatches.post(
     recovery: "record",
     leaseSeconds: 300,
     canonicalize: canonicalizeTransferBatchBody,
-    previousCanonicalize: previousCanonicalTransferBatchBody,
+    // The execute step was split out of POST /v1/payments/transfer-batches; a
+    // batch row saved under that operation still answers its retry,
+    // under either body form that operation fingerprinted with: the token as
+    // sent before APE SOLA9-695, as the mint since.
+    previousForms: [
+      { operation: "POST /v1/payments/transfer-batches" },
+      {
+        canonicalize: previousCanonicalTransferBatchBody,
+        operation: "POST /v1/payments/transfer-batches",
+      },
+    ],
   }),
   replayFromRecord(findTransferBatchRecordReplay),
   // Meters only new sends: a replay, an in-flight poll or a record answer has

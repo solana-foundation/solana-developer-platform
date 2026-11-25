@@ -32,7 +32,7 @@ const apiKeyEnvironmentSchema = z
 
 const apiKeyWalletScopeSchema = z.enum(API_KEY_WALLET_SCOPES).openapi({
   description:
-    "Which custody wallets the key may sign with: `all` wallets in its project, or only the `selected` ones in `walletIds`. A `selected` key with no wallets signs with no custody wallet (the fee sponsor is outside wallet scope). The scope applies when SDP signs; it also narrows the key's wallet list and wallet detail reads, while every other read covers the whole project.",
+    "Which custody wallets the key may sign with: `all` wallets in its project, or only the `selected` ones in `walletIds`. A `selected` key with no wallets signs with no custody wallet (the fee sponsor is outside wallet scope). The scope applies when SDP requests a provider signature; it also narrows the key's wallet list and wallet detail reads, while every other read covers the whole project.",
   example: "selected",
 });
 

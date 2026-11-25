@@ -2,7 +2,7 @@ import { normalizePrivyWalletId } from "@sdp/custody/provider-wallet-ids";
 import type { ProvisionPrivyResult } from "@sdp/custody/provisioning";
 import { SigningError } from "@sdp/custody/signing";
 import { currentClusterScope } from "@sdp/rpc/scope";
-import type { ByokCustodyProvider } from "@sdp/types/custody";
+import type { ByokCustodyProvider, ProviderPolicyCheck } from "@sdp/types/custody";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import type { Context } from "hono";
 import { type DatabaseClient, getDb } from "@/db/client";
@@ -54,6 +54,7 @@ import {
 } from "@/services/provider-credential-installation";
 import type { SafeProviderCredential } from "@/services/provider-credential-submission.service";
 import { destroySecretVersion, queueOrphanedSecretVersion } from "@/services/secret-retirement";
+import { CustodyPolicyStore } from "@/services/stores/custody-policy.store";
 import {
   getPendingFireblocksVaultIds,
   getPendingWalletLabel,
@@ -83,6 +84,7 @@ export interface SafeInstallationConnection {
   label: string;
   status: InstallationConnectionState["status"];
   completion: SafeCompletion | null;
+  providerPolicy?: ProviderPolicyCheck;
   walletLabel?: string;
   canComplete: boolean;
   canReplaceCredentials: boolean;
@@ -130,7 +132,16 @@ export async function getProviderCredentialInstallation(
 ): Promise<{ connection: SafeInstallationConnection }> {
   const context = createInstallationContext(c);
   const loaded = await loadInstallation(context, connectionId);
-  return { connection: projectConnection(loaded) };
+  return {
+    connection: {
+      ...projectConnection(loaded),
+      providerPolicy: await new CustodyPolicyStore(context.db).read(
+        context.organizationId,
+        context.projectId,
+        { connectionId }
+      ),
+    },
+  };
 }
 
 export async function deactivateCustodyConnection(

@@ -1698,8 +1698,30 @@ describe("getSignatureStatusesFromEveryEndpoint", () => {
       [firstSignature]
     );
 
-    assert.deepEqual(reads, [{ kind: "absent" }]);
+    assert.deepEqual(reads, [{ kind: "absent", answeringEndpointCount: 2 }]);
   });
+
+  for (const alias of ["", "/", "/#other-slot"]) {
+    it(`counts and reads equivalent endpoint URLs only once (alias=${alias})`, async () => {
+      const endpointUrl = "https://devnet-every-duplicate.example.test";
+      configurePool({
+        SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: endpointUrl,
+        SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL: `${endpointUrl}${alias}`,
+      });
+      const calls = stubSignatureStatusEndpoints({
+        [endpointUrl]: { contextSlot: floorSlot, statuses: [null] },
+      });
+      const reads = await runInClusterScope(SANDBOX, () =>
+        getSignatureStatusesFromEveryEndpoint([firstSignature], {
+          minContextSlot: BigInt(floorSlot),
+          commitment: "finalized",
+        })
+      );
+
+      assert.deepEqual(reads, [{ kind: "absent", answeringEndpointCount: 1 }]);
+      assert.equal(calls.length, 1);
+    });
+  }
 
   it("is unresolved as node_behind_floor when one endpoint has none and another answers below the floor", async () => {
     const { reads } = await readFromTwoEndpoints(

@@ -29,7 +29,7 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/helius-rings-sdk` | Helius Rings gateway adapter running the Zolana SDK in process: health, identity provisioning, and shielded balance reads. | `@sdp/helius-rings` | None |
 | `@sdp/ip` | IPv4 and IPv6 address and CIDR range parsing and canonical form. | None | None |
 | `@sdp/issuance` | Token issuance domain services and Mosaic integration. | `@sdp/rpc`, `@sdp/solana`, `@sdp/types` | None |
-| `@sdp/jupiter-lend` | Jupiter Lend Earn USDT deposit/withdraw plans over the official SDK. | `@sdp/earn`, `@sdp/rpc`, `@sdp/types` | `@sdp/custody` |
+| `@sdp/jupiter-lend` | Jupiter Lend Earn USDT deposit/withdraw plans over the official SDK. | `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` | `@sdp/custody` |
 | `@sdp/kamino` | Kit-native Kamino K-Vault deposit/withdraw instruction plans over klend-sdk. | `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` | `@sdp/custody` |
 | `@sdp/ondo` | Ondo USDY secondary-market swap plans and position reads over an injected Jupiter port. | `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` | `@sdp/custody` |
 | `@sdp/payments` | Payment domain services and ramp providers. | `@sdp/redaction`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` | None |
@@ -44,7 +44,7 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/types` | Shared runtime types, constants, and product contracts. | None | None |
 | `@sdp/ui` | Dashboard UI primitives built on @solana/design-system and @sdp/design-tokens. | `@sdp/design-tokens`, `@sdp/solana` | None |
 | `@sdp/veda` | Kit-native Veda SVM vault deposit, instant and queued withdrawal plans, plus position and lifecycle reads over @vedatech/svm-sdk. | `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` | `@sdp/custody` |
-| `@sdp/wisdomtree` | Kit-native WisdomTree Connect transfer plans (on-receipt subscription/redemption legs) and Token-2022 fund position reads. | `@sdp/earn`, `@sdp/rpc`, `@sdp/types` | `@sdp/custody` |
+| `@sdp/wisdomtree` | Kit-native WisdomTree Connect transfer plans (on-receipt subscription/redemption legs) and Token-2022 fund position reads. | `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` | `@sdp/custody` |
 | `bigint-buffer` | Private pure-JavaScript compatibility package replacing bigint-buffer's vulnerable native binding. | None | None |
 | `sdp-docs` | Public documentation site and generated API reference. | `@sdp/api-catalog`, `@sdp/design-tokens`, `@sdp/env-config`, `@sdp/types` | None |
 | `sdp-web` | Dashboard application. | `@sdp/api-catalog`, `@sdp/design-tokens`, `@sdp/ip`, `@sdp/issuance`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/solana`, `@sdp/types`, `@sdp/ui` | None |
@@ -65,7 +65,7 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/helius-rings-sdk` -> `@sdp/helius-rings`
 - `@sdp/ip` -> None
 - `@sdp/issuance` -> `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
-- `@sdp/jupiter-lend` -> `@sdp/custody`, `@sdp/earn`, `@sdp/rpc`, `@sdp/types`
+- `@sdp/jupiter-lend` -> `@sdp/custody`, `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/kamino` -> `@sdp/custody`, `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/ondo` -> `@sdp/custody`, `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/payments` -> `@sdp/redaction`, `@sdp/solana`, `@sdp/types`
@@ -80,7 +80,7 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/types` -> None
 - `@sdp/ui` -> `@sdp/design-tokens`, `@sdp/solana`
 - `@sdp/veda` -> `@sdp/custody`, `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
-- `@sdp/wisdomtree` -> `@sdp/custody`, `@sdp/earn`, `@sdp/rpc`, `@sdp/types`
+- `@sdp/wisdomtree` -> `@sdp/custody`, `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `bigint-buffer` -> None
 - `sdp-docs` -> `@sdp/api-catalog`, `@sdp/design-tokens`, `@sdp/env-config`, `@sdp/types`
 - `sdp-web` -> `@sdp/api-catalog`, `@sdp/design-tokens`, `@sdp/ip`, `@sdp/issuance`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/solana`, `@sdp/types`, `@sdp/ui`

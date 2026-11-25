@@ -16,6 +16,50 @@ The mechanism-split predecessors
 (`earn_program_withdrawals`, `earn_vault_movements`, `earn_vault_positions`) no
 longer have writers, and their code is retired.
 
+`operations.repository.ts` coordinates asynchronous Earn execution through
+`operations` and `operation_attempts` (0236); it does not replace the movement
+ledger or provider withdrawal obligations. Every access includes organization,
+project and environment. Immutable intent/source/principal and versioned actions
+bind each attempt to its reviewed transaction. Recovery uses a fenced lease;
+signed bytes, proposal bindings and dispatch identity cannot be replaced after
+an uncertain effect. Cancellation intent is sticky, and an observation-only
+attempt can never regain broadcast authority.
+
+Submit queues only the exact reviewed transaction. Refresh checks the current
+action ID/version before preparing terms. Withdrawal selection narrows the
+advertised options to the chosen route; later refreshes preserve that route or
+fail if it is unavailable. No separate selection column or preparation-only
+submission is needed.
+
+Refresh and public cancellation are preparation-only. Both serialize against
+submit acceptance and permanently refuse after any accepted submit in the
+operation's history. A definitive signing refusal or proven nonexecution makes
+the operation terminal `failed`; retrying needs a new request/key. An uncertain
+outcome cannot authorize a replacement or another operation.
+
+`canCancel` derives from durable operation state and every prior attempt.
+Public cancellation cannot follow any accepted submit. An exposed owner
+transaction with an unknown outcome also keeps it false. Route permissions
+remain separate.
+Provider cleanup for permission loss or expiry does not reopen this capability.
+
+Deposit acceptance commits verified owner-signed bytes, `audit_intent_id`
+and `execution_requested_at` together (0236). No audit admission means no queued
+deposit. Exits retain their durable execution request if auditing is unavailable.
+Neither acceptance nor an operation status proves settlement.
+
+New shared references use `strategy_id` and `strategy_reference`.
+Migration 0238 synchronizes `strategy_reference` with `vault_address` on
+positions, movements and direct builds while previous revisions serve traffic;
+keep the alias until deployment drain. A discovered holding receives unknown
+cost basis (0238), never a synthetic deposit or earnings; a selector that names
+a holding SDP already tracks keeps that holding's cost basis. `cost_basis_known
+= false` marks an imported holding: visibility needs no movement for it, and a
+failed movement never deactivates it. Current operations
+use the same movement ledger and provider obligations; do not create a second
+financial ledger or adopt old prelaunch actions. The schema-only companion
+removes unused legacy storage after the rewrite is serving.
+
 Things that will bite:
 - **Legal source states come from `EARN_MOVEMENT_TRANSITIONS` (`@sdp/types`),
   never from the caller.** Terminal regression is unrepresentable rather than
@@ -46,8 +90,8 @@ Things that will bite:
   share ATAs retain rent for an explicit owner-authorized close, including
   newly created accounts that could have been pre-funded.
 - **Every movement needs a holding, and a missing one must never fail a money
-  write.** Resolve or open the holding before writing the movement. The custodial
-  holding for a program is minted when its provider wallet is linked.
+  write.** Resolve or open the holding before writing the movement, in the same
+  transaction that records the verified signed intent.
 - **Amounts carry a `denomination`** (`usd`, the token mint, or the SHARE mint
   on a vault withdrawal, whose exact intent-time quantity is shares). A par
   fulfillment whose request burned no shares (it redeemed held intermediate)
@@ -71,8 +115,9 @@ Things that will bite:
   advancement to an eligible state excludes active cancel actions. Only atomic
   action-failure recovery may reopen it. A failed create cannot discard a
   request once its nonce, creation timestamp or durable provider observation
-  establishes existence.
-- **Expired external builds remain recovery records.** Cleanup releases their
+  establishes existence. These are internal provider lifecycle constraints,
+  not a public post-submit cancellation flow.
+- **Expired owner-signed builds remain recovery records.** Cleanup releases their
   reservations, retaining the unsigned message, tenant, owner and terms. A
   late submit verifies the signed message before consuming the build, and only
   finalized execution can reclaim a released transient lease. Occupied leases
@@ -86,6 +131,20 @@ Things that will bite:
   Null legacy history remains protected unless its row is still creating.
   Migration 0212's status trigger captures the previous image's observations
   too; do not replace it with a flag only the new service writes.
+- **A Hastra release proves absence the same way.** 0240's
+  `release_absence_observed_at` records the first finalized miss after the
+  release's blockhash expires, once. A miss at least 30 seconds later fails the
+  release `TRANSACTION_EXPIRED` only when every RPC endpoint, read at a
+  finalized slot past the expiry, also misses it (`unsentVerdict`), with at least
+  two distinct endpoints answering. One endpoint leaves it pending; a pooled
+  null can come from a lagging or pruned backend. After acceptance, the release
+  immutability trigger lets only that write-once marker and finality change.
+- **Finalized releases supersede tracking, not financial history.** The exact
+  finalized release fence makes the earlier operation terminal with
+  `REDEMPTION_SUPERSEDED` and no payout claim. Covered requests and actions leave
+  sweep queues, and cannot regain address occupancy after another release
+  fails. Their original financial rows retain the previous status and evidence
+  so a rolling previous revision can still read them.
 - **Retained par intermediate excludes redeemed or reserved amounts.**
   Reconciliation adds intermediate from cancelled share-sourced requests and
   subtracts fulfilled or open zero-share requests for the same position and mint,
@@ -108,7 +167,7 @@ Things that will bite:
   and you must change both. Both take the sweep's `environment` (HOO-2148), so
   pass the same one to both.
 - **Earn's sweep queries select one environment** (HOO-2148). The vault
-  movement, queued withdrawal and split-swap crons run once per environment,
+  movement, queued withdrawal and operation crons run once per environment,
   so every claim, repair, backlog count and cleanup they call takes
   `environment` and filters Earn's own `environment` column (joining
   `projects` waits on `project_id NOT NULL`, HOO-2177). A row in the other
@@ -117,22 +176,12 @@ Things that will bite:
   takes `environment` too.
 - **A vault row's signer is a column pair, not a new model** (PRO-1722,
   migration 0070): exactly one of `custody_wallet_id` (SDP signs) and
-  `owner_address` (an external wallet SDP holds no key for signs) is set, on
-  positions and movements alike. Keyed external-wallet submits consume a row
-  of `earn_external_wallet_transactions`, locked FIRST and consumable at most
+  `owner_address` (a wallet SDP holds no key for signs) is set, on
+  positions and movements alike. Keyed wallet submits consume a row
+  of `earn_wallet_transactions`, locked FIRST and consumable at most
   once, inside the same transaction that inserts the movement. One durable
   build can therefore never ledger twice; that consume is written HERE, with
   the single ledger writer, not in the built-transactions repository.
-- **`earn_split_swap_advisories` is advisory state, never a movement**
-  (PRO-1864, migration 0091). A row records that a split-swap build handed a
-  partner a standalone swap. The detector writes nothing but back to this
-  table and never touches `earn_movements`. Its amount columns carry ONE
-  declared unit each: the floor and both balance samples are deposit-mint ATOMS
-  with the decimals recorded beside them, and the two `*_amount` columns are
-  display-only decimal strings. Compare atoms to atoms.
-  `listExternalWalletDepositsSince` on the movements repository is its
-  status-aware follow-up read: a `failed` deposit must not discharge an
-  advisory.
 
 The full rule set is in [`../../routes/earn/CLAUDE.md`](../../routes/earn/CLAUDE.md).
 Architecture and the migration inventory are in

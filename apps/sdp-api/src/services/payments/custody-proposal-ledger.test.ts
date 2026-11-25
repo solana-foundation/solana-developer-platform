@@ -7,11 +7,16 @@ import { beforeEach, describe, expect, it, onTestFinished } from "vitest";
 import { getDb } from "@/db/client";
 import type { CustodyProposalRow } from "@/db/repositories/custody-proposals.repository";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
-import { createSystemAuditService, criticalOutcomeEntry } from "@/services/audit.service";
+import {
+  AuditPersistenceError,
+  createSystemAuditService,
+  criticalOutcomeEntry,
+} from "@/services/audit.service";
 import { systemProposalLedger } from "@/services/jobs/proposal-recovery-ledger";
 import { env } from "@/test/helpers/env";
 import { organizationMember, seedOrganizationMembers } from "@/test/helpers/organization-members";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { ProposalLedger } from "./custody-proposal-ledger";
 import { applyProposalEvent } from "./custody-proposal-ledger";
@@ -217,6 +222,7 @@ describe("custody proposal event ledger", () => {
     const stored = await proposal();
     expect(stored.version).toBe(beforeProposal.version + 1);
     expect(stored.state.authorizationState).toBe("refused");
+    const refusal = required(stored.state.refusal);
     const payment = await transfer();
     expect(payment).toMatchObject({ status: "processing", audit_intent_id: auditIntentId });
     expect(payment.provider_data.retainedEvidence).toBe(true);
@@ -231,9 +237,9 @@ describe("custody proposal event ledger", () => {
           projectId,
           proposalId: stored.id,
           provider: "fireblocks",
-          at: stored.state.refusal?.at,
-          reason: stored.state.refusal?.reason,
-          refusedAt: stored.state.refusal?.at,
+          at: refusal.at,
+          reason: refusal.reason,
+          refusedAt: refusal.at,
           providerTransactionId: "provider-transaction",
         }),
       }),
@@ -320,7 +326,7 @@ describe("custody proposal event ledger", () => {
     expect(otherProposal.version).toBe((await proposal()).version);
     await expect(
       applyProposalEvent(ledger, await transfer(), otherProposal, REFUSAL)
-    ).rejects.toThrow();
+    ).rejects.toThrow("The proposal does not belong to this payment");
     expect((await proposal()).state.authorizationState).toBe("authorized");
     expect(
       (await ledger.proposals.getForTransfer({ ...identity(), transferId: otherTransferId }))?.state
@@ -329,9 +335,12 @@ describe("custody proposal event ledger", () => {
     expect(await auditEvents()).toEqual([]);
   });
 
-  it.each(["provider reference", "settlement signature"] as const)(
-    "rejects an old revision's changed %s without relying on proposal versioning",
-    async (field) => {
+  it.each([
+    { field: "provider reference", error: "The provider transaction identity changed" },
+    { field: "settlement signature", error: "The payment settlement signature changed" },
+  ] as const)(
+    "rejects an old revision's changed $field without relying on proposal versioning",
+    async ({ field, error }) => {
       const beforePayment = await transfer();
       const snapshot = await proposal();
       const db = getDb(env);
@@ -352,7 +361,7 @@ describe("custody proposal event ledger", () => {
         applyProposalEvent(ledger, beforePayment, snapshot, COMPLETED, {
           signature: "different-observed-settlement-signature",
         })
-      ).rejects.toThrow();
+      ).rejects.toThrow(error);
       expect(await proposal()).toEqual(snapshot);
       expect(await transfer()).toEqual(olderWriterPayment);
       expect(await auditEvents()).toEqual([]);
@@ -455,7 +464,7 @@ describe("custody proposal event ledger", () => {
           type: "cancel_requested",
           at: LAST,
         })
-      ).rejects.toThrow();
+      ).rejects.toThrow("The payment already has a recorded outcome");
       expect(await proposal()).toEqual(snapshot);
       const recovered = await reconcileRecordedProposalOutcome(
         ledger,
@@ -463,7 +472,6 @@ describe("custody proposal event ledger", () => {
         snapshot,
         Date.parse(LAST)
       );
-      expect(recovered).not.toBeNull();
       expect(recovered?.written).toBe(true);
       expect(recovered?.transfer.status).toBe(status);
       expect(recovered?.proposal.state).toMatchObject({
@@ -483,9 +491,15 @@ describe("custody proposal event ledger", () => {
     }
   );
 
-  it.each(["binding", "signature"] as const)(
-    "rejects an older terminal payment with invalid %s without changing proposal state",
-    async (field) => {
+  it.each([
+    {
+      field: "binding",
+      error: "The recorded payment does not match the custody proposal binding",
+    },
+    { field: "signature", error: "base58-encoded signature string" },
+  ] as const)(
+    "rejects an older terminal payment with invalid $field without changing proposal state",
+    async ({ field, error }) => {
       await apply(REFUSAL);
       const snapshot = await proposal();
       await recordOlderRevisionCompletion("confirmed");
@@ -508,7 +522,7 @@ describe("custody proposal event ledger", () => {
       const recordedPayment = await transfer();
       await expect(
         reconcileRecordedProposalOutcome(ledger, recordedPayment, snapshot, Date.parse(LAST))
-      ).rejects.toThrow();
+      ).rejects.toThrow(error);
       expect(await proposal()).toEqual(snapshot);
       expect(await transfer()).toEqual(recordedPayment);
       expect(await ledger.proposals.listUnalerted({ environment: "sandbox", limit: 10 })).toEqual(
@@ -522,7 +536,9 @@ describe("custody proposal event ledger", () => {
     const snapshot = await proposal();
     const pendingPayment = await transfer();
     await recordOlderRevisionCompletion("confirmed");
-    await expect(applyProposalEvent(ledger, pendingPayment, snapshot, REFUSAL)).rejects.toThrow();
+    await expect(applyProposalEvent(ledger, pendingPayment, snapshot, REFUSAL)).rejects.toThrow(
+      "The payment already has a recorded outcome"
+    );
     expect(await proposal()).toEqual(snapshot);
     const recovered = await reconcileRecordedProposalOutcome(
       ledger,
@@ -602,7 +618,7 @@ describe("custody proposal event ledger", () => {
           signature: step === "settlement" ? "verified-provider-signature" : undefined,
         });
       const restore = await refuseAudit();
-      await expect(write()).rejects.toThrow();
+      await expect(write()).rejects.toThrow(AuditPersistenceError);
       expect(await transfer()).toEqual(beforePayment);
       expect(await proposal()).toEqual(beforeProposal);
       expect(await auditEvents()).toEqual(beforeEvents);
@@ -619,6 +635,15 @@ describe("custody proposal event ledger", () => {
           },
         ]);
       } else {
+        expect((await auditEvents()).at(-1)?.metadata.eventType).toBe(
+          {
+            refusal: "proposal_refused",
+            "cancel request": "proposal_cancellation_requested",
+            "cancel decline": "proposal_cancellation_declined",
+            "cancel acknowledgment": "proposal_cancellation_accepted",
+            alert: "proposal_refusal_alerted",
+          }[step]
+        );
         expect(await auditEvents()).toHaveLength(beforeEvents.length + 1);
       }
     }

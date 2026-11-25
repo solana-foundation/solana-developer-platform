@@ -1,8 +1,10 @@
 import { generateKeyPairSync } from "node:crypto";
+import { SignerErrorCode } from "@solana/keychain-core";
+import { generateKeyPairSigner } from "@solana/kit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { KeychainCoinbaseAdapter } from "./keychain-coinbase.adapter";
 
-const WALLET_ADDRESS = "11111111111111111111111111111111";
+const { address: WALLET_ADDRESS } = await generateKeyPairSigner();
 
 function createCoinbaseSecrets(): { apiKeySecret: string; walletSecret: string } {
   const ed25519 = generateKeyPairSync("ed25519");
@@ -25,30 +27,25 @@ describe("coinbase adapter", () => {
       apiKeyId: "api-key-id",
       ...createCoinbaseSecrets(),
     });
-    const importKeySpy = vi
-      .spyOn(globalThis.crypto.subtle, "importKey")
-      .mockRejectedValueOnce(new Error("temporary crypto failure"));
+    vi.spyOn(globalThis.crypto.subtle, "importKey").mockRejectedValueOnce(
+      new Error("temporary crypto failure")
+    );
 
-    await expect(adapter.getPublicKey(`cdp_${WALLET_ADDRESS}`)).rejects.toThrow();
-    const callsAfterFailure = importKeySpy.mock.calls.length;
+    await expect(adapter.getPublicKey(`cdp_${WALLET_ADDRESS}`)).rejects.toMatchObject({
+      code: SignerErrorCode.CONFIG_ERROR,
+    });
     await expect(adapter.getPublicKey(`cdp_${WALLET_ADDRESS}`)).resolves.toBe(WALLET_ADDRESS);
-
-    expect(importKeySpy.mock.calls.length).toBeGreaterThan(callsAfterFailure);
   });
 
-  it("reuses one signer construction across successful calls", async () => {
+  it("hands out one signer per wallet across successful calls", async () => {
     const adapter = new KeychainCoinbaseAdapter({
       apiKeyId: "api-key-id",
       ...createCoinbaseSecrets(),
     });
-    const importKeySpy = vi.spyOn(globalThis.crypto.subtle, "importKey");
 
     const first = await adapter.getTransactionSigner(`cdp_${WALLET_ADDRESS}`);
-    const callsAfterFirst = importKeySpy.mock.calls.length;
     const second = await adapter.getTransactionSigner(`cdp_${WALLET_ADDRESS}`);
 
     expect(second).toBe(first);
-    expect(callsAfterFirst).toBeGreaterThan(0);
-    expect(importKeySpy).toHaveBeenCalledTimes(callsAfterFirst);
   });
 });

@@ -92,9 +92,6 @@ describe("tenant data-access boundary", () => {
       "services/audit.service.ts",
       "routes/issuance/index.ts",
       "routes/members/index.ts",
-      // BOLA guard: must see every organization's ledger rows to 404 a
-      // foreign withdrawal ref before any provider call.
-      "routes/earn/handlers/program.ts",
       // Rebuilds the network-wide sponsorship budget window: its `global`
       // counter must count every organization's spend.
       "db/repositories/sponsorship-budget.repository.ts",

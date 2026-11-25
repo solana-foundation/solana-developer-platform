@@ -6,6 +6,14 @@ export function buildInClause(length: number): string {
   return Array.from({ length }, () => "?").join(", ");
 }
 
+/**
+ * Comma-separated SQL string literals for an `IN (...)` clause over fixed
+ * vocabulary, such as a status tuple from `@sdp/types`; never caller input.
+ */
+export function sqlLiteralList(values: readonly string[]): string {
+  return values.map((value) => `'${value.replaceAll("'", "''")}'`).join(", ");
+}
+
 export function escapeLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, "\\$&");
 }

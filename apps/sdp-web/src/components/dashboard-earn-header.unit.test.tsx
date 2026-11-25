@@ -35,11 +35,11 @@ describe("Markets dashboard headers", () => {
     const config = getDashboardPageConfig("/dashboard/markets/embedded-yield", t, []);
 
     expect(config).toMatchObject({
-      title: "Shared.dashboardShell.earnProgram",
+      title: "Shared.dashboardShell.embeddedYield",
       titlePosition: "left",
       contentWidthClass: "max-w-page",
       headerAction: {
-        label: "DashboardMarkets.earnProgram.configureShort",
+        label: "DashboardMarkets.embeddedYield.configureShort",
         href: "/dashboard/markets/embedded-yield/configure",
         variant: "primary",
       },
@@ -52,11 +52,11 @@ describe("Markets dashboard headers", () => {
     const config = getDashboardPageConfig("/dashboard/markets/embedded-yield/configure", t, []);
 
     expect(config).toMatchObject({
-      title: "DashboardMarkets.earnProgram.configureShort",
+      title: "DashboardMarkets.embeddedYield.configureShort",
       contentWidthClass: "max-w-page",
       backAction: {
         href: "/dashboard/markets/embedded-yield",
-        label: "Shared.dashboardShell.earnProgram",
+        label: "Shared.dashboardShell.embeddedYield",
       },
     });
     expect(config.headerTabs).toBeUndefined();

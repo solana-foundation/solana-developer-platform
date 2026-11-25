@@ -1,4 +1,3 @@
-import { supportsPortfolioWallets } from "@sdp/earn/capabilities";
 import { KaminoEarnClient } from "@sdp/earn/providers/kamino/client";
 import type {
   EarnRuntimeContext,
@@ -380,21 +379,5 @@ export class KaminoVaultDirectClient
         ];
       });
     });
-  }
-}
-
-/**
- * Guard asserted at construction rather than trusted: the two capabilities
- * describe opposite money models, and a client answering yes to both would let a
- * portfolio route hand a customer the vault's own account as a deposit address —
- * where funds are destroyed. Exported so the API can assert it at registry wiring.
- */
-export function assertNotPortfolioProvider(client: KaminoVaultDirectClient): void {
-  if (supportsPortfolioWallets(client)) {
-    throw new SdpKaminoError(
-      "VAULT_UNREADABLE",
-      "Kamino must never report the portfolio-wallet capability: it custodies nothing, " +
-        "and its vault account is not a fundable address."
-    );
   }
 }

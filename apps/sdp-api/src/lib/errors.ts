@@ -457,15 +457,3 @@ export function unsupportedRampCorridor(
     { ...details, provider, direction }
   );
 }
-
-export function counterpartyNotProvisioned(
-  provider: RampProviderId,
-  direction: RampDirection,
-  details?: Record<string, unknown>
-): AppError {
-  return new AppError(
-    "CONFLICT",
-    `Counterparty is not provisioned for ${provider} ${direction}. Complete the counterparty requirements (POST /counterparties/:counterpartyId/requirements) before requesting a quote.`,
-    { ...details, provider, direction }
-  );
-}

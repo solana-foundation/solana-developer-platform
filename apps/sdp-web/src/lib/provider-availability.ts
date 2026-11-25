@@ -31,6 +31,27 @@ export function hasEnabledRampProvider(access: RampProviderAccess | null): boole
 }
 
 /**
+ * Why an organization cannot use a provider, in the order the API checks: the organization's
+ * entitlement, the deployment's credentials, then whether the deployment runs the provider.
+ */
+export type ProviderAccessRefusal = "not_entitled" | "not_configured" | "disabled";
+
+/**
+ * The first check an organization's provider availability entry fails.
+ *
+ * @param entry - The organization's availability entry for one provider.
+ * @returns The refusal, or null when the organization can use the provider.
+ */
+export function providerAccessRefusal(
+  entry: ProviderAvailabilityEntry
+): ProviderAccessRefusal | null {
+  if (!entry.entitled) return "not_entitled";
+  if (!entry.configured) return "not_configured";
+  if (!entry.enabled) return "disabled";
+  return null;
+}
+
+/**
  * Restricts a ramp provider access record to the feature-flag-enabled providers.
  *
  * @param access - The provider access record reported for the organization.
@@ -50,7 +71,7 @@ export async function fetchProviderAvailability(
   organizationId: string
 ): Promise<DashboardProviderAvailability> {
   const response = await request(
-    `/v1/organizations/${encodeURIComponent(organizationId)}/provider-access`
+    `/v1/organizations/${encodeURIComponent(organizationId)}/provider-availability`
   );
   if (!response.ok) {
     const body = await response.text();

@@ -44,7 +44,7 @@ const GOLDEN_ENDPOINTS: GoldenEndpoint[] = [
     query: FIRST_PAGE,
   },
   { domain: "payments-recurring", path: "/v1/payments/recurring-payments", scope: "project" },
-  { domain: "earn-strategies", path: "/v1/earn/strategies", scope: "project", module: "earn" },
+  { domain: "earn-discovery", path: "/v1/earn/discovery", scope: "project", module: "earn" },
 ];
 
 test.describe("GCP dev API golden endpoints", () => {

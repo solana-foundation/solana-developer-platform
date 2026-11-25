@@ -11,22 +11,11 @@ import { isEarnExitOrRead } from "./exits";
  * among the exits in `index.ts`, is a deliberate choice this test forces.
  */
 const EARN_ENTRY_ROUTES = [
+  "POST /v1/earn/deposit",
   "POST /v1/earn/onboarding/wisdomtree/:counterpartyId/wallets",
   "POST /v1/earn/onboarding/wisdomtree/:counterpartyId",
   "POST /v1/earn/onboarding/wisdomtree/:counterpartyId/documents",
   "POST /v1/earn/onboarding/wisdomtree/:counterpartyId/corrections/:reasonId",
-  "POST /v1/earn/provider-actions/preparations",
-  "POST /v1/earn/provider-actions/cancellations",
-  "POST /v1/earn/provider-actions/external/preparation-transactions",
-  "POST /v1/earn/provider-actions/external/cancellation-transactions",
-  "POST /v1/earn/provider-actions/external/preparations",
-  "POST /v1/earn/provider-actions/external/cancellations",
-  "POST /v1/earn/deposits/preview",
-  "POST /v1/earn/deposits/build-unsigned-transaction",
-  "POST /v1/earn/deposits/execute",
-  "POST /v1/earn/deposits/submit-signed-transaction",
-  "POST /v1/earn/portfolio-accounts",
-  "PUT /v1/earn/portfolio-accounts/:programId/allocation",
 ];
 
 function earnRoutes(): Array<{ method: string; path: string }> {
@@ -82,17 +71,13 @@ describe("Earn exits without the production entitlement (APE-351, ADR 0002)", ()
     }
   });
 
-  it.each([
-    "/v1/earn/withdrawal-requests/cancel/build-unsigned-transaction",
-    "/v1/earn/withdrawal-requests/cancel/submit-signed-transaction",
-    "/v1/earn/withdrawal-requests/request-id/cancel/execute",
-  ])("keeps cancellation available as an exit: %s", (path) => {
-    expect(isEarnExitOrRead("POST", path)).toBe(true);
+  it("keeps the shared withdrawal preparation available as an exit", () => {
+    expect(isEarnExitOrRead("POST", "/v1/earn/withdraw")).toBe(true);
   });
 
   it("refuses unknown methods and paths outside Earn", () => {
-    expect(isEarnExitOrRead("DELETE", "/v1/earn/withdrawals/provider-signed")).toBe(false);
-    expect(isEarnExitOrRead("POST", "/v1/payments/transfers/execute")).toBe(false);
-    expect(isEarnExitOrRead("POST", "/v1/earn/withdrawals/provider-signed/extra")).toBe(false);
+    expect(isEarnExitOrRead("DELETE", "/v1/earn/withdraw")).toBe(false);
+    expect(isEarnExitOrRead("POST", "/v1/payments/transfers")).toBe(false);
+    expect(isEarnExitOrRead("POST", "/v1/earn/withdraw/extra")).toBe(false);
   });
 });

@@ -2,13 +2,16 @@ import { readFileSync } from "node:fs";
 import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
-import { runWithTenantDatabaseIdentity } from "@/db/identity";
+import { runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";
+import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
+import { createPostgresEarnWalletTransactionsRepository } from "@/db/repositories/earn-wallet-transactions.repository";
 import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
-import { recordSignedExternalQueuedRequest } from "@/services/earn/vault-queued-withdraw.service";
+import { recordSignedWalletQueuedRequest } from "@/services/earn/vault-queued-withdraw.service";
 import { reconcileEarnVaultQueuedWithdrawals } from "@/services/earn/vault-queued-withdrawal-reconciliation.service";
 import { ENVIRONMENT_CLUSTER_CASES, installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/helpers/custody";
+import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -31,13 +34,369 @@ const TOKEN_MINT = "9VfVedaQueueToken111111111111111111111111111";
 const SHARE_MINT = "AVfVedaQueueShare111111111111111111111111111";
 const INTERMEDIATE_MINT = "BVfHastraWylds1111111111111111111111111111";
 const POSITION = "earn_position_queued_withdrawal_repo";
-const EXTERNAL_POSITION = "earn_position_queued_withdrawal_repo_external";
-const OTHER_EXTERNAL_POSITION = "earn_position_queued_withdrawal_repo_other_external";
-const EXTERNAL_OWNER = "CVfExternalQueueOwner11111111111111111111111";
+const OWNER_POSITION = "earn_position_queued_withdrawal_repo_external";
+const OTHER_OWNER_POSITION = "earn_position_queued_withdrawal_repo_other_external";
+const OWNER_ADDRESS = "CVfExternalQueueOwner11111111111111111111111";
 
 describe("Earn queued withdrawal repository", () => {
   let repository: EarnVaultWithdrawalRequestsRepository;
   let sequence = 0;
+
+  describe("canonical wallet build storage", () => {
+    async function directBuild() {
+      return createPostgresEarnWalletTransactionsRepository(getDb(env)).create({
+        id: "earn_wallet_transaction_storage_test",
+        organizationId: ORG,
+        projectId: PROJECT,
+        environment: "sandbox",
+        provider: "veda",
+        direction: "deposit",
+        ownerAddress: OWNER_ADDRESS,
+        vaultAddress: VAULT,
+        tokenMint: TOKEN_MINT,
+        shareMint: SHARE_MINT,
+        label: "Storage test",
+        denomination: TOKEN_MINT,
+        amountRequested: "1",
+        createsShareAccount: false,
+        unsignedTransaction: "AQ==",
+        lastValidBlockHeight: "20000",
+      });
+    }
+
+    async function queuedBuild(
+      input: { positionId?: string; custodyWalletId?: string; ownerAddress?: string } = {}
+    ) {
+      return repository.createWalletTransaction({
+        id: "earn_wallet_withdrawal_request_transaction_storage_test",
+        organizationId: ORG,
+        projectId: PROJECT,
+        environment: "sandbox",
+        provider: "veda",
+        positionId: input.positionId ?? OWNER_POSITION,
+        custodyWalletId: input.custodyWalletId,
+        action: "request",
+        ownerAddress: input.ownerAddress ?? OWNER_ADDRESS,
+        vaultAddress: VAULT,
+        tokenMint: TOKEN_MINT,
+        shareMint: SHARE_MINT,
+        requestAddress: "StorageQueueRequestAddress111111111111111111",
+        shares: "1",
+        quotedAssets: "0.99",
+        shareDecimals: 6,
+        assetDecimals: 6,
+        discountBps: 25,
+        maturityTimestamp: "1700000060",
+        deadlineTimestamp: "1700000120",
+        unsignedTransaction: "AQ==",
+        lastValidBlockHeight: "20000",
+        currentBlockHeight: "10000",
+      });
+    }
+
+    it("uses physical tables with forced tenant RLS", async () => {
+      const result = await getDb(env).queryMany<{
+        relname: string;
+        relkind: string;
+        relrowsecurity: boolean;
+        relforcerowsecurity: boolean;
+      }>(
+        `SELECT relname, relkind, relrowsecurity, relforcerowsecurity FROM pg_class
+          WHERE relname IN ('earn_wallet_transactions',
+                            'earn_wallet_withdrawal_request_transactions')
+            ORDER BY relname`
+      );
+      expect(result).toHaveLength(2);
+      expect(
+        result.every((row) => row.relkind === "r" && row.relrowsecurity && row.relforcerowsecurity)
+      ).toBe(true);
+    });
+
+    it("rejects nonpositive deposits and incomplete consumption claims", async () => {
+      const direct = await directBuild();
+      const queued = await queuedBuild();
+      const db = getDb(env);
+      await expect(
+        db.execute("UPDATE earn_wallet_transactions SET amount_requested = '0' WHERE id = ?", [
+          direct.id,
+        ])
+      ).rejects.toThrow(/check constraint/i);
+      for (const [table, id, consumed] of [
+        ["earn_wallet_transactions", direct.id, "movement_id"],
+        ["earn_wallet_withdrawal_request_transactions", queued.id, "consumed_action_id"],
+      ]) {
+        await expect(
+          db.execute(`UPDATE ${table} SET ${consumed} = 'missing' WHERE id = ?`, [id])
+        ).rejects.toThrow(/check constraint/i);
+      }
+    });
+
+    it("retains the owner position claim in both directions", async () => {
+      const built = await queuedBuild();
+      await expect(
+        getDb(env).execute(
+          "UPDATE earn_wallet_withdrawal_request_transactions SET owner_address = ? WHERE id = ?",
+          [OWNER, built.id]
+        )
+      ).rejects.toThrow(/foreign key/i);
+      await expect(
+        getDb(env).execute("UPDATE earn_positions SET owner_address = ? WHERE id = ?", [
+          OWNER,
+          OWNER_POSITION,
+        ])
+      ).rejects.toThrow(/foreign key/i);
+    });
+
+    it("binds custody builds to their exact wallet, position, project and instrument", async () => {
+      const built = await queuedBuild({
+        positionId: POSITION,
+        custodyWalletId: WALLET,
+        ownerAddress: OWNER,
+      });
+      expect(
+        await getDb(env).queryOne(
+          "SELECT custody_wallet_id, owner_address, position_owner_address FROM earn_wallet_withdrawal_request_transactions WHERE id = ?",
+          [built.id]
+        )
+      ).toEqual({ custody_wallet_id: WALLET, owner_address: OWNER, position_owner_address: null });
+      for (const [column, value] of [
+        ["position_id", OWNER_POSITION],
+        ["project_id", OTHER_PROJECT],
+        ["owner_address", OWNER_ADDRESS],
+        ["token_mint", SHARE_MINT],
+        ["share_mint", TOKEN_MINT],
+        ["provider", "hastra"],
+        ["environment", "production"],
+        ["vault_address", SHARE_MINT],
+      ])
+        await expect(
+          getDb(env).execute(
+            `UPDATE earn_wallet_withdrawal_request_transactions SET ${column} = ? WHERE id = ?`,
+            [value, built.id]
+          )
+        ).rejects.toThrow(/custody source|foreign key/i);
+      await expect(
+        getDb(env).execute("UPDATE earn_positions SET vault_address = ? WHERE id = ?", [
+          TOKEN_MINT,
+          POSITION,
+        ])
+      ).rejects.toThrow(/foreign key/i);
+    });
+
+    it("scopes discovery builds to a config or connection even for system writers", async () => {
+      const db = getDb(env);
+      const strategy = await createPostgresEarnRepository(db).upsertStrategy({
+        provider: "veda",
+        providerReference: VAULT,
+        name: "Custody discovery",
+        sourceKind: "defi",
+        underlyingSource: null,
+        depositMints: [TOKEN_MINT],
+        shareMint: SHARE_MINT,
+        apyType: "variable",
+        currentApy: "0.04",
+        liquidityTerm: "instant",
+        redemptionDelayDays: null,
+        riskMetadata: {},
+        status: "active",
+        hostCluster: "devnet",
+        environment: "sandbox",
+      });
+      if (strategy === null) throw new Error("Missing strategy fixture");
+      const built = await queuedBuild({
+        positionId: POSITION,
+        custodyWalletId: WALLET,
+        ownerAddress: OWNER,
+      });
+      await db.execute(
+        "UPDATE earn_wallet_withdrawal_request_transactions SET position_id = NULL, strategy_id = ? WHERE id = ?",
+        [strategy.id, built.id]
+      );
+      await expect(
+        runWithSystemDatabaseIdentity("test:queued-source-binding", () =>
+          db.execute(
+            "UPDATE earn_wallet_withdrawal_request_transactions SET project_id = ? WHERE id = ?",
+            [`${PROJECT}_production`, built.id]
+          )
+        )
+      ).rejects.toThrow(/custody source/i);
+      for (const [suffix, organizationId, projectId] of [
+        ["foreign", OTHER_ORG, OTHER_PROJECT],
+        ["other_project", ORG, `${PROJECT}_production`],
+      ]) {
+        const configId = `cfg_discovery_${suffix}`;
+        const walletId = `cwlt_discovery_${suffix}`;
+        if (suffix === "foreign") {
+          await insertTestCustodyConfigRow(db, {
+            id: configId,
+            organizationId,
+            projectId,
+            provider: "local",
+            configEncrypted: "encrypted",
+            status: "active",
+          });
+          await insertTestCustodyWalletRow(db, {
+            id: walletId,
+            owner: { kind: "config", custodyConfigId: configId },
+            walletId,
+            publicKey: OWNER,
+            label: null,
+            purpose: null,
+            status: "active",
+          });
+          await expect(
+            runWithSystemDatabaseIdentity("test:queued-source-binding", () =>
+              db.execute(
+                "UPDATE earn_wallet_withdrawal_request_transactions SET custody_wallet_id = ? WHERE id = ?",
+                [walletId, built.id]
+              )
+            )
+          ).rejects.toThrow(/custody source/i);
+        }
+        await seedUnreadPrivyWallet(db, {
+          organizationId,
+          projectId,
+          createdBy: USER,
+          custodyWalletId: `${walletId}_connection`,
+          walletId: `${walletId}_connection`,
+          publicKey: OWNER,
+        });
+        await expect(
+          runWithSystemDatabaseIdentity("test:queued-source-binding", () =>
+            db.execute(
+              "UPDATE earn_wallet_withdrawal_request_transactions SET custody_wallet_id = ? WHERE id = ?",
+              [`${walletId}_connection`, built.id]
+            )
+          )
+        ).rejects.toThrow(/custody source/i);
+      }
+      await seedUnreadPrivyWallet(db, {
+        organizationId: ORG,
+        projectId: PROJECT,
+        createdBy: USER,
+        custodyWalletId: "cwlt_queue_connection",
+        walletId: "queue_connection",
+        publicKey: OWNER,
+      });
+      expect(
+        await runWithSystemDatabaseIdentity("test:queued-source-binding", () =>
+          db.execute(
+            "UPDATE earn_wallet_withdrawal_request_transactions SET custody_wallet_id = 'cwlt_queue_connection' WHERE id = ?",
+            [built.id]
+          )
+        )
+      ).toBe(1);
+    });
+
+    it("retains row locks, update counts and irreversible execution guards", async () => {
+      const built = await directBuild();
+      await getDb(env).transaction(async (tx) => {
+        const locked = await tx
+          .prepare(
+            "SELECT unsigned_transaction FROM earn_wallet_transactions WHERE id = ? FOR UPDATE"
+          )
+          .bind(built.id)
+          .first<{ unsigned_transaction: string }>();
+        expect(locked?.unsigned_transaction).toBe("AQ==");
+        expect(
+          await tx
+            .prepare("UPDATE earn_wallet_transactions SET operation_only = TRUE WHERE id = ?")
+            .bind(built.id)
+            .run()
+        ).toBe(1);
+        expect(
+          await tx
+            .prepare("SELECT operation_only FROM earn_wallet_transactions WHERE id = ?")
+            .bind(built.id)
+            .first<{ operation_only: boolean }>()
+        ).toEqual({ operation_only: true });
+        expect(
+          await tx
+            .prepare("UPDATE earn_wallet_transactions SET label = 'Updated' WHERE id = ?")
+            .bind(built.id)
+            .run()
+        ).toBe(1);
+      });
+      expect(
+        (
+          await createPostgresEarnWalletTransactionsRepository(getDb(env)).getById({
+            organizationId: ORG,
+            transactionId: built.id,
+          })
+        )?.label
+      ).toBe("Updated");
+      await expect(
+        getDb(env)
+          .prepare("UPDATE earn_wallet_transactions SET operation_only = FALSE WHERE id = ?")
+          .bind(built.id)
+          .run()
+      ).rejects.toThrow(/irreversible/i);
+    });
+
+    it("supports queued ON CONFLICT and projects the same signed consumption", async () => {
+      const built = await queuedBuild();
+      const insertable = await getDb(env).queryMany<{ name: string }>(
+        `SELECT quote_ident(attname) AS name FROM pg_attribute
+          WHERE attrelid = 'earn_wallet_withdrawal_request_transactions'::regclass
+            AND attnum > 0 AND NOT attisdropped AND attgenerated = '' ORDER BY attnum`
+      );
+      const columns = insertable.map((column) => column.name).join(", ");
+      const duplicate = await getDb(env)
+        .prepare(`INSERT INTO earn_wallet_withdrawal_request_transactions (${columns})
+          SELECT ${columns} FROM earn_wallet_withdrawal_request_transactions WHERE id = ?
+          ON CONFLICT DO NOTHING RETURNING *`)
+        .bind(built.id)
+        .first();
+      expect(duplicate).toBeNull();
+      const recorded = await repository.createSignedRequest(
+        requestInput({
+          requestAddress: built.request_address,
+          positionId: OWNER_POSITION,
+          custodyWalletId: null,
+          ownerAddress: OWNER_ADDRESS,
+          pdaLeaseToken: built.id,
+          walletTransactionId: built.id,
+        })
+      );
+      const consumed = await getDb(env)
+        .prepare(
+          "SELECT consumed_action_id FROM earn_wallet_withdrawal_request_transactions WHERE id = ?"
+        )
+        .bind(built.id)
+        .first<{ consumed_action_id: string }>();
+      expect(consumed?.consumed_action_id).toBe(recorded.action.id);
+      expect(
+        (
+          await repository.getWalletTransaction({
+            organizationId: ORG,
+            transactionId: built.id,
+          })
+        )?.consumed_action_id
+      ).toBe(recorded.action.id);
+    });
+
+    it("cannot read or update another tenant through either canonical name", async () => {
+      const direct = await directBuild();
+      const queued = await queuedBuild();
+      await runWithTenantDatabaseIdentity({ organizationId: OTHER_ORG }, async () => {
+        for (const [table, id] of [
+          ["earn_wallet_transactions", direct.id],
+          ["earn_wallet_withdrawal_request_transactions", queued.id],
+        ]) {
+          const db = getDb(env);
+          expect(
+            await db.prepare(`SELECT id FROM ${table} WHERE id = ?`).bind(id).first()
+          ).toBeNull();
+          expect(
+            await db
+              .prepare(`UPDATE ${table} SET operation_only = TRUE WHERE id = ?`)
+              .bind(id)
+              .run()
+          ).toBe(0);
+        }
+      });
+    });
+  });
 
   beforeAll(async () => {
     await seedTestDatabase(env);
@@ -50,7 +409,7 @@ describe("Earn queued withdrawal repository", () => {
   beforeEach(async () => {
     const db = getDb(env);
     for (const table of [
-      "earn_external_wallet_withdrawal_request_transactions",
+      "earn_wallet_withdrawal_request_transactions",
       "earn_vault_withdrawal_request_actions",
       "earn_vault_withdrawal_request_reservations",
       "earn_vault_withdrawal_request_pda_leases",
@@ -58,6 +417,8 @@ describe("Earn queued withdrawal repository", () => {
       "earn_vault_withdrawal_requests",
       "earn_positions",
       "custody_wallets",
+      "custody_connections",
+      "provider_credentials",
       "custody_configs",
       "projects",
       "organizations",
@@ -129,7 +490,7 @@ describe("Earn queued withdrawal repository", () => {
          ) VALUES (?, ?, ?, 'sandbox', 'veda', 'vault_direct', ?, ?, ?, ?,
                    'External Veda queued vault', sdp_iso_now())`
       )
-      .bind(EXTERNAL_POSITION, ORG, PROJECT, EXTERNAL_OWNER, VAULT, SHARE_MINT, TOKEN_MINT)
+      .bind(OWNER_POSITION, ORG, PROJECT, OWNER_ADDRESS, VAULT, SHARE_MINT, TOKEN_MINT)
       .run();
     await db
       .prepare(
@@ -141,10 +502,10 @@ describe("Earn queued withdrawal repository", () => {
                    'Other external Veda queued vault', sdp_iso_now())`
       )
       .bind(
-        OTHER_EXTERNAL_POSITION,
+        OTHER_OWNER_POSITION,
         OTHER_ORG,
         OTHER_PROJECT,
-        EXTERNAL_OWNER,
+        OWNER_ADDRESS,
         VAULT,
         SHARE_MINT,
         TOKEN_MINT
@@ -603,8 +964,8 @@ describe("Earn queued withdrawal repository", () => {
 
     await expect(
       runWithTenantDatabaseIdentity({ organizationId: OTHER_ORG }, () =>
-        repository.createExternalWalletTransaction({
-          id: "earn_external_wallet_withdrawal_request_transaction_collision",
+        repository.createWalletTransaction({
+          id: "earn_wallet_withdrawal_request_transaction_collision",
           organizationId: OTHER_ORG,
           projectId: OTHER_PROJECT,
           environment: "sandbox",
@@ -633,15 +994,15 @@ describe("Earn queued withdrawal repository", () => {
 
   it("closes the consume-versus-build race by atomically promoting the shared lease", async () => {
     const requestAddress = "ConcurrentQueueRequestAddress111111111111";
-    const build = await repository.createExternalWalletTransaction({
-      id: "earn_external_wallet_withdrawal_request_transaction_winner",
+    const build = await repository.createWalletTransaction({
+      id: "earn_wallet_withdrawal_request_transaction_winner",
       organizationId: ORG,
       projectId: PROJECT,
       environment: "sandbox",
       provider: "veda",
-      positionId: EXTERNAL_POSITION,
+      positionId: OWNER_POSITION,
       action: "request",
-      ownerAddress: EXTERNAL_OWNER,
+      ownerAddress: OWNER_ADDRESS,
       vaultAddress: VAULT,
       tokenMint: TOKEN_MINT,
       shareMint: SHARE_MINT,
@@ -659,11 +1020,11 @@ describe("Earn queued withdrawal repository", () => {
     });
     const signed = requestInput({
       requestAddress,
-      positionId: EXTERNAL_POSITION,
+      positionId: OWNER_POSITION,
       custodyWalletId: null,
-      ownerAddress: EXTERNAL_OWNER,
+      ownerAddress: OWNER_ADDRESS,
       pdaLeaseToken: build.id,
-      externalWalletTransactionId: build.id,
+      walletTransactionId: build.id,
     });
     const [winner, contender] = await Promise.allSettled([
       repository.createSignedRequest(signed),
@@ -674,7 +1035,7 @@ describe("Earn queued withdrawal repository", () => {
         environment: "sandbox",
         provider: "veda",
         vaultAddress: VAULT,
-        ownerAddress: EXTERNAL_OWNER,
+        ownerAddress: OWNER_ADDRESS,
         requestAddress,
         clientRequestId: "contender-key",
         idempotencyFingerprint: "contender-fingerprint",
@@ -701,18 +1062,18 @@ describe("Earn queued withdrawal repository", () => {
   });
 
   it("reports unconsumed builds per environment until the cleanup expires them", async () => {
-    await expect(repository.hasUnconsumedExternalBuilds({ environment: "sandbox" })).resolves.toBe(
+    await expect(repository.hasUnconsumedWalletBuilds({ environment: "sandbox" })).resolves.toBe(
       false
     );
-    await repository.createExternalWalletTransaction({
-      id: "earn_external_wallet_withdrawal_request_transaction_cleanup_gate",
+    await repository.createWalletTransaction({
+      id: "earn_wallet_withdrawal_request_transaction_cleanup_gate",
       organizationId: ORG,
       projectId: PROJECT,
       environment: "sandbox",
       provider: "veda",
-      positionId: EXTERNAL_POSITION,
+      positionId: OWNER_POSITION,
       action: "request",
-      ownerAddress: EXTERNAL_OWNER,
+      ownerAddress: OWNER_ADDRESS,
       vaultAddress: VAULT,
       tokenMint: TOKEN_MINT,
       shareMint: SHARE_MINT,
@@ -730,45 +1091,45 @@ describe("Earn queued withdrawal repository", () => {
     });
 
     // Only outstanding reservations need cleanup; the build remains recoverable.
-    await expect(repository.hasUnconsumedExternalBuilds({ environment: "sandbox" })).resolves.toBe(
+    await expect(repository.hasUnconsumedWalletBuilds({ environment: "sandbox" })).resolves.toBe(
       true
     );
-    await expect(
-      repository.hasUnconsumedExternalBuilds({ environment: "production" })
-    ).resolves.toBe(false);
-    await expect(
-      repository.cleanupExpiredExternalBuilds({ environment: "sandbox", currentBlockHeight: "101" })
-    ).resolves.toBe(1);
-    await expect(repository.hasUnconsumedExternalBuilds({ environment: "sandbox" })).resolves.toBe(
+    await expect(repository.hasUnconsumedWalletBuilds({ environment: "production" })).resolves.toBe(
       false
     );
     await expect(
-      repository.getExternalWalletTransaction({
+      repository.cleanupExpiredWalletBuilds({ environment: "sandbox", currentBlockHeight: "101" })
+    ).resolves.toBe(1);
+    await expect(repository.hasUnconsumedWalletBuilds({ environment: "sandbox" })).resolves.toBe(
+      false
+    );
+    await expect(
+      repository.getWalletTransaction({
         organizationId: ORG,
-        transactionId: "earn_external_wallet_withdrawal_request_transaction_cleanup_gate",
+        transactionId: "earn_wallet_withdrawal_request_transaction_cleanup_gate",
       })
     ).resolves.toMatchObject({ unsigned_transaction: "AQ==", consumed_action_id: null });
     await expect(
-      repository.cleanupExpiredExternalBuilds({
+      repository.cleanupExpiredWalletBuilds({
         environment: "sandbox",
         currentBlockHeight: "102",
       })
     ).resolves.toBe(0);
   });
 
-  describe("late external-wallet submission", () => {
+  describe("late wallet submission", () => {
     const clusterRpc = installClusterRpcResponder();
 
     async function expiredBuild() {
-      return repository.createExternalWalletTransaction({
-        id: "earn_external_wallet_withdrawal_request_transaction_late",
+      return repository.createWalletTransaction({
+        id: "earn_wallet_withdrawal_request_transaction_late",
         organizationId: ORG,
         projectId: PROJECT,
         environment: "sandbox",
         provider: "veda",
-        positionId: EXTERNAL_POSITION,
+        positionId: OWNER_POSITION,
         action: "request",
-        ownerAddress: EXTERNAL_OWNER,
+        ownerAddress: OWNER_ADDRESS,
         vaultAddress: VAULT,
         tokenMint: TOKEN_MINT,
         shareMint: SHARE_MINT,
@@ -804,21 +1165,21 @@ describe("Earn queued withdrawal repository", () => {
 
     it("recovers a finalized signed build after cleanup and replays it without RPC", async () => {
       const build = await expiredBuild();
-      await repository.cleanupExpiredExternalBuilds({
+      await repository.cleanupExpiredWalletBuilds({
         environment: "sandbox",
         currentBlockHeight: "101",
       });
       clusterRpc.answer("getTransaction", historicalTransaction());
       const input = requestInput({
-        positionId: EXTERNAL_POSITION,
+        positionId: OWNER_POSITION,
         custodyWalletId: null,
-        ownerAddress: EXTERNAL_OWNER,
+        ownerAddress: OWNER_ADDRESS,
         requestAddress: build.request_address,
         pdaLeaseToken: build.id,
-        externalWalletTransactionId: build.id,
+        walletTransactionId: build.id,
       });
       const recovered = await runInEnvironmentClusterScope("sandbox", () =>
-        recordSignedExternalQueuedRequest(env, repository, input)
+        recordSignedWalletQueuedRequest(env, repository, input)
       );
       expect(recovered).toMatchObject({
         alreadyFinalized: true,
@@ -827,13 +1188,13 @@ describe("Earn queued withdrawal repository", () => {
       });
       expect(clusterRpc.calls.filter((call) => call.method === "getTransaction")).toHaveLength(1);
       await expect(
-        repository.getExternalWalletTransaction({ organizationId: ORG, transactionId: build.id })
+        repository.getWalletTransaction({ organizationId: ORG, transactionId: build.id })
       ).resolves.toMatchObject({
         consumed_action_id: recovered.action.id,
       });
       const before = clusterRpc.calls.length;
       const replay = await runInEnvironmentClusterScope("sandbox", () =>
-        recordSignedExternalQueuedRequest(env, repository, input)
+        recordSignedWalletQueuedRequest(env, repository, input)
       );
       expect(replay.replayed).toBe(true);
       expect(replay.request.id).toBe(recovered.request.id);
@@ -842,7 +1203,7 @@ describe("Earn queued withdrawal repository", () => {
 
     it("cannot replace another durable occupancy even with finalized execution", async () => {
       const build = await expiredBuild();
-      await repository.cleanupExpiredExternalBuilds({
+      await repository.cleanupExpiredWalletBuilds({
         environment: "sandbox",
         currentBlockHeight: "101",
       });
@@ -854,16 +1215,16 @@ describe("Earn queued withdrawal repository", () => {
         .run();
       clusterRpc.answer("getTransaction", historicalTransaction());
       const input = requestInput({
-        positionId: EXTERNAL_POSITION,
+        positionId: OWNER_POSITION,
         custodyWalletId: null,
-        ownerAddress: EXTERNAL_OWNER,
+        ownerAddress: OWNER_ADDRESS,
         requestAddress: build.request_address,
         pdaLeaseToken: build.id,
-        externalWalletTransactionId: build.id,
+        walletTransactionId: build.id,
       });
       await expect(
         runInEnvironmentClusterScope("sandbox", () =>
-          recordSignedExternalQueuedRequest(env, repository, input)
+          recordSignedWalletQueuedRequest(env, repository, input)
         )
       ).rejects.toThrow(/no longer owns/);
       expect(
@@ -875,7 +1236,7 @@ describe("Earn queued withdrawal repository", () => {
           .first()
       ).toEqual({ lease_token: "other-durable-request", occupied: true });
       await expect(
-        repository.getExternalWalletTransaction({ organizationId: ORG, transactionId: build.id })
+        repository.getWalletTransaction({ organizationId: ORG, transactionId: build.id })
       ).resolves.toMatchObject({ consumed_action_id: null });
       await expect(
         repository.getById({
@@ -904,26 +1265,26 @@ describe("Earn queued withdrawal repository", () => {
       },
     ])("preserves an expired build when $name", async ({ transaction, expectedError }) => {
       const build = await expiredBuild();
-      await repository.cleanupExpiredExternalBuilds({
+      await repository.cleanupExpiredWalletBuilds({
         environment: "sandbox",
         currentBlockHeight: "101",
       });
       clusterRpc.respond("getTransaction", () => ({ result: transaction }));
       const input = requestInput({
-        positionId: EXTERNAL_POSITION,
+        positionId: OWNER_POSITION,
         custodyWalletId: null,
-        ownerAddress: EXTERNAL_OWNER,
+        ownerAddress: OWNER_ADDRESS,
         requestAddress: build.request_address,
         pdaLeaseToken: build.id,
-        externalWalletTransactionId: build.id,
+        walletTransactionId: build.id,
       });
       await expect(
         runInEnvironmentClusterScope("sandbox", () =>
-          recordSignedExternalQueuedRequest(env, repository, input)
+          recordSignedWalletQueuedRequest(env, repository, input)
         )
       ).rejects.toMatchObject(expectedError);
       await expect(
-        repository.getExternalWalletTransaction({ organizationId: ORG, transactionId: build.id })
+        repository.getWalletTransaction({ organizationId: ORG, transactionId: build.id })
       ).resolves.toMatchObject({ consumed_action_id: null });
       await expect(
         repository.getById({
@@ -937,15 +1298,15 @@ describe("Earn queued withdrawal repository", () => {
 
   it("lets another tenant take over an expired build through the shared PDA lease", async () => {
     const requestAddress = "ExpiredCrossTenantQueueRequest111111111111";
-    await repository.createExternalWalletTransaction({
-      id: "earn_external_wallet_withdrawal_request_transaction_expired",
+    await repository.createWalletTransaction({
+      id: "earn_wallet_withdrawal_request_transaction_expired",
       organizationId: ORG,
       projectId: PROJECT,
       environment: "sandbox",
       provider: "veda",
-      positionId: EXTERNAL_POSITION,
+      positionId: OWNER_POSITION,
       action: "request",
-      ownerAddress: EXTERNAL_OWNER,
+      ownerAddress: OWNER_ADDRESS,
       vaultAddress: VAULT,
       tokenMint: TOKEN_MINT,
       shareMint: SHARE_MINT,
@@ -963,15 +1324,15 @@ describe("Earn queued withdrawal repository", () => {
     });
 
     const successor = await runWithTenantDatabaseIdentity({ organizationId: OTHER_ORG }, () =>
-      repository.createExternalWalletTransaction({
-        id: "earn_external_wallet_withdrawal_request_transaction_successor",
+      repository.createWalletTransaction({
+        id: "earn_wallet_withdrawal_request_transaction_successor",
         organizationId: OTHER_ORG,
         projectId: OTHER_PROJECT,
         environment: "sandbox",
         provider: "veda",
-        positionId: OTHER_EXTERNAL_POSITION,
+        positionId: OTHER_OWNER_POSITION,
         action: "request",
-        ownerAddress: EXTERNAL_OWNER,
+        ownerAddress: OWNER_ADDRESS,
         vaultAddress: VAULT,
         tokenMint: TOKEN_MINT,
         shareMint: SHARE_MINT,
@@ -990,13 +1351,13 @@ describe("Earn queued withdrawal repository", () => {
     );
 
     expect(successor).toMatchObject({
-      id: "earn_external_wallet_withdrawal_request_transaction_successor",
+      id: "earn_wallet_withdrawal_request_transaction_successor",
       organization_id: OTHER_ORG,
     });
     const rows = await getDb(env)
       .prepare(
         `SELECT organization_id
-           FROM earn_external_wallet_withdrawal_request_transactions
+           FROM earn_wallet_withdrawal_request_transactions
           WHERE environment = 'sandbox' AND request_address = ?
           ORDER BY organization_id`
       )
@@ -1012,17 +1373,17 @@ describe("Earn queued withdrawal repository", () => {
       .bind(requestAddress)
       .first<{ lease_token: string; occupied: boolean }>();
     expect(lease).toEqual({
-      lease_token: "earn_external_wallet_withdrawal_request_transaction_successor",
+      lease_token: "earn_wallet_withdrawal_request_transaction_successor",
       occupied: false,
     });
 
     const stale = requestInput({
       requestAddress,
-      positionId: EXTERNAL_POSITION,
+      positionId: OWNER_POSITION,
       custodyWalletId: null,
-      ownerAddress: EXTERNAL_OWNER,
-      pdaLeaseToken: "earn_external_wallet_withdrawal_request_transaction_expired",
-      externalWalletTransactionId: "earn_external_wallet_withdrawal_request_transaction_expired",
+      ownerAddress: OWNER_ADDRESS,
+      pdaLeaseToken: "earn_wallet_withdrawal_request_transaction_expired",
+      walletTransactionId: "earn_wallet_withdrawal_request_transaction_expired",
     });
     await expect(
       runWithTenantDatabaseIdentity({ organizationId: ORG }, () =>
@@ -1032,8 +1393,8 @@ describe("Earn queued withdrawal repository", () => {
     const staleState = await getDb(env)
       .prepare(
         `SELECT consumed_action_id
-           FROM earn_external_wallet_withdrawal_request_transactions
-          WHERE id = 'earn_external_wallet_withdrawal_request_transaction_expired'`
+           FROM earn_wallet_withdrawal_request_transactions
+          WHERE id = 'earn_wallet_withdrawal_request_transaction_expired'`
       )
       .first<{ consumed_action_id: string | null }>();
     expect(staleState?.consumed_action_id).toBeNull();
@@ -1048,7 +1409,7 @@ describe("Earn queued withdrawal repository", () => {
     // Finalized execution may reclaim a transient successor, including one
     // hidden by RLS, but not a durable occupied request.
     const recovered = await runWithTenantDatabaseIdentity({ organizationId: ORG }, () =>
-      repository.createSignedRequest({ ...stale, recoverFinalizedExternalBuild: true })
+      repository.createSignedRequest({ ...stale, recoverFinalizedWalletBuild: true })
     );
     expect(recovered.request.id).toBe(stale.requestId);
     const occupied = await getDb(env)
@@ -1209,6 +1570,319 @@ describe("Earn queued withdrawal repository", () => {
       .first<{ closed_at: string | null; updated_at: string }>();
     expect(position?.closed_at).toBeNull();
     expect(position?.updated_at).not.toBe("2026-09-18T00:00:00.000Z");
+  });
+
+  describe("exact finalized escrow recovery", () => {
+    it("filters foreign positions before offering one of more than 32 expired requests", async () => {
+      let addressIndex = 0;
+      const nextAddress = () => `RecoveryQueue${String(addressIndex++).padStart(20, "0")}`;
+      await Promise.all(
+        Array.from({ length: 33 }, async () => {
+          const created = await createRequest({
+            positionId: OWNER_POSITION,
+            custodyWalletId: null,
+            ownerAddress: OWNER_ADDRESS,
+            requestAddress: nextAddress(),
+          });
+          await repository.advanceRequest({
+            organizationId: ORG,
+            withdrawalRequestId: created.request.id,
+            toStatus: "expired_cancelable",
+            nonce: "7",
+            creationTimestamp: "1700000000",
+          });
+        })
+      );
+      const first = await createRequest({ requestAddress: nextAddress() });
+      await repository.advanceRequest({
+        organizationId: ORG,
+        withdrawalRequestId: first.request.id,
+        toStatus: "expired_cancelable",
+        nonce: "7",
+        creationTimestamp: "1700000000",
+      });
+      await Promise.all(
+        Array.from({ length: 33 }, async () => {
+          const created = await createRequest({ requestAddress: nextAddress() });
+          await repository.advanceRequest({
+            organizationId: ORG,
+            withdrawalRequestId: created.request.id,
+            toStatus: "expired_cancelable",
+            nonce: "7",
+            creationTimestamp: "1700000000",
+          });
+        })
+      );
+      expect(
+        await repository.findOldestExpiredEscrow({
+          organizationId: ORG,
+          projectId: PROJECT,
+          environment: "sandbox",
+          positionId: POSITION,
+          ownerAddress: OWNER,
+          custodyWalletId: WALLET,
+          beforeUnixSeconds: "1800000000",
+        })
+      ).toMatchObject({ id: first.request.id });
+    });
+
+    it("advances past stale candidates in creation order without repeating a timestamp", async () => {
+      const candidates = [];
+      for (const suffix of ["b", "a", "c"]) {
+        const created = await createRequest({ requestId: `expired_candidate_${suffix}` });
+        await repository.advanceRequest({
+          organizationId: ORG,
+          withdrawalRequestId: created.request.id,
+          toStatus: "expired_cancelable",
+          nonce: "7",
+          creationTimestamp: "1700000000",
+        });
+        await getDb(env)
+          .prepare("UPDATE earn_vault_withdrawal_requests SET created_at = ? WHERE id = ?")
+          .bind("2026-11-01T00:00:00.000Z", created.request.id)
+          .run();
+        candidates.push(created.request.id);
+      }
+      const scope = {
+        organizationId: ORG,
+        projectId: PROJECT,
+        environment: "sandbox" as const,
+        positionId: POSITION,
+        ownerAddress: OWNER,
+        custodyWalletId: WALLET,
+        beforeUnixSeconds: "1800000000",
+      };
+      const found = [];
+      let after: { createdAt: string; id: string } | undefined;
+      for (let index = 0; index < candidates.length; index += 1) {
+        const candidate = await repository.findOldestExpiredEscrow({ ...scope, after });
+        expect(candidate).not.toBeNull();
+        if (candidate === null) throw new Error("Expected the next scoped recovery candidate");
+        found.push(candidate.id);
+        after = { createdAt: candidate.created_at, id: candidate.id };
+      }
+      expect(found).toEqual([...candidates].sort());
+      await expect(repository.findOldestExpiredEscrow({ ...scope, after })).resolves.toBeNull();
+      await expect(
+        repository.findOldestExpiredEscrow({ ...scope, projectId: OTHER_PROJECT })
+      ).resolves.toBeNull();
+      await expect(
+        repository.findOldestExpiredEscrow({ ...scope, environment: "production" })
+      ).resolves.toBeNull();
+    });
+
+    async function recoveryBuild() {
+      const created = await createRequest();
+      await repository.advanceRequest({
+        organizationId: ORG,
+        withdrawalRequestId: created.request.id,
+        toStatus: "expired_cancelable",
+        nonce: "7",
+        creationTimestamp: "1700000000",
+      });
+      const build = await repository.createWalletTransaction({
+        id: "wallet_exact_escrow_recovery",
+        organizationId: ORG,
+        projectId: PROJECT,
+        environment: "sandbox",
+        provider: "veda",
+        custodyWalletId: WALLET,
+        positionId: POSITION,
+        withdrawalRequestId: created.request.id,
+        action: "cancel",
+        mechanism: "solver_queue",
+        operationOnly: true,
+        ownerAddress: OWNER,
+        vaultAddress: VAULT,
+        tokenMint: TOKEN_MINT,
+        shareMint: SHARE_MINT,
+        requestAddress: created.request.request_address,
+        unsignedTransaction: "AQ==",
+        lastValidBlockHeight: "20000",
+      });
+      return {
+        request: created.request,
+        input: {
+          actionId: "action_exact_escrow_recovery",
+          organizationId: ORG,
+          projectId: PROJECT,
+          environment: "sandbox" as const,
+          withdrawalRequestId: created.request.id,
+          signature: "signature_exact_escrow_recovery",
+          signedTransaction: "AQ==",
+          lastValidBlockHeight: "20000",
+          clientRequestId: "attempt_exact_escrow_recovery",
+          idempotencyFingerprint: "fingerprint_exact_escrow_recovery",
+          walletTransactionId: build.id,
+          recoverFinalizedWalletBuild: true,
+        },
+      };
+    }
+
+    it("records the exact already-finalized body without reopening the request", async () => {
+      const { request, input } = await recoveryBuild();
+      await repository.advanceRequest({
+        organizationId: ORG,
+        withdrawalRequestId: request.id,
+        toStatus: "cancelled",
+        nonce: "7",
+        closingSignature: input.signature,
+      });
+      const recovered = await repository.createSignedCancel(input);
+      expect(recovered.action).toMatchObject({
+        id: input.actionId,
+        action: "cancel",
+        status: "finalized",
+        signature: input.signature,
+      });
+      expect(recovered.request).toMatchObject({
+        status: "cancelled",
+        closing_signature: input.signature,
+        cancel_signature: input.signature,
+        assets_paid: null,
+      });
+      expect(recovered.action.settled_at).not.toBeNull();
+      expect(
+        await repository.getWalletTransaction({
+          organizationId: ORG,
+          transactionId: input.walletTransactionId,
+        })
+      ).toMatchObject({ consumed_action_id: input.actionId });
+      expect((await repository.createSignedCancel(input)).replayed).toBe(true);
+    });
+
+    it.each([
+      { projectId: OTHER_PROJECT },
+      { lastValidBlockHeight: "20001" },
+      { walletTransactionId: undefined },
+    ])("refuses finalized recovery without its exact canonical source: %j", async (changed) => {
+      const { request, input } = await recoveryBuild();
+      await repository.advanceRequest({
+        organizationId: ORG,
+        withdrawalRequestId: request.id,
+        toStatus: "cancelled",
+        nonce: "7",
+        closingSignature: input.signature,
+      });
+      await expect(repository.createSignedCancel({ ...input, ...changed })).rejects.toThrow(
+        "canonical build"
+      );
+      expect(
+        await repository.getActionByClientRequestId({
+          organizationId: ORG,
+          clientRequestId: input.clientRequestId,
+        })
+      ).toBeNull();
+    });
+
+    it("marks a different verified closing transaction unavailable", async () => {
+      const { request, input } = await recoveryBuild();
+      await repository.advanceRequest({
+        organizationId: ORG,
+        withdrawalRequestId: request.id,
+        toStatus: "cancelled",
+        nonce: "7",
+        closingSignature: "another_finalized_cancellation",
+      });
+      await expect(repository.createSignedCancel(input)).rejects.toMatchObject({
+        details: { reason: "withdrawal_recovery_unavailable" },
+      });
+    });
+
+    it("does not treat unknown closure as definitive nonexecution", async () => {
+      const { request, input } = await recoveryBuild();
+      await repository.advanceRequest({
+        organizationId: ORG,
+        withdrawalRequestId: request.id,
+        toStatus: "closed_or_unknown",
+      });
+      await expect(repository.createSignedCancel(input)).rejects.toMatchObject({
+        details: undefined,
+      });
+      expect(
+        await repository.getActionByClientRequestId({
+          organizationId: ORG,
+          clientRequestId: input.clientRequestId,
+        })
+      ).toBeNull();
+    });
+
+    it("refuses a second action if the build was already consumed", async () => {
+      const { request, input } = await recoveryBuild();
+      await repository.advanceRequest({
+        organizationId: ORG,
+        withdrawalRequestId: request.id,
+        toStatus: "cancelled",
+        nonce: "7",
+        closingSignature: input.signature,
+      });
+      await repository.createSignedCancel(input);
+      await expect(
+        repository.createSignedCancel({
+          ...input,
+          actionId: "second_recovery_action",
+          clientRequestId: "second_recovery_attempt",
+        })
+      ).rejects.toThrow("different idempotency key");
+      expect(
+        await repository.getActionByClientRequestId({
+          organizationId: ORG,
+          clientRequestId: "second_recovery_attempt",
+        })
+      ).toBeNull();
+      expect(
+        await repository.getById({
+          organizationId: ORG,
+          environment: "sandbox",
+          withdrawalRequestId: request.id,
+        })
+      ).toMatchObject({ status: "cancelled", assets_paid: null });
+    });
+
+    it("rolls back finalized action metadata if canonical build consumption fails", async () => {
+      const { request, input } = await recoveryBuild();
+      await repository.advanceRequest({
+        organizationId: ORG,
+        withdrawalRequestId: request.id,
+        toStatus: "cancelled",
+        nonce: "7",
+        closingSignature: input.signature,
+      });
+      const db = getDb(env);
+      await db
+        .prepare(`ALTER TABLE earn_wallet_withdrawal_request_transactions
+        ADD CONSTRAINT test_exact_recovery_consumption CHECK (consumed_action_id IS NULL) NOT VALID`)
+        .run();
+      try {
+        await expect(repository.createSignedCancel(input)).rejects.toThrow(
+          "test_exact_recovery_consumption"
+        );
+      } finally {
+        await db
+          .prepare(`ALTER TABLE earn_wallet_withdrawal_request_transactions
+          DROP CONSTRAINT test_exact_recovery_consumption`)
+          .run();
+      }
+      expect(
+        await repository.getActionByClientRequestId({
+          organizationId: ORG,
+          clientRequestId: input.clientRequestId,
+        })
+      ).toBeNull();
+      expect(
+        await repository.getById({
+          organizationId: ORG,
+          environment: "sandbox",
+          withdrawalRequestId: request.id,
+        })
+      ).toMatchObject({ status: "cancelled", cancel_signature: null, assets_paid: null });
+      expect(
+        await repository.getWalletTransaction({
+          organizationId: ORG,
+          transactionId: input.walletTransactionId,
+        })
+      ).toMatchObject({ consumed_action_id: null });
+    });
   });
 
   it("retries operator cancellation, reopens the holding, and embargoes terminal PDA reuse", async () => {
@@ -1441,7 +2115,7 @@ describe("Earn queued withdrawal repository", () => {
     }
   );
 
-  it("persists the fulfilled payout movement for custody and external wallets", async () => {
+  it("persists the fulfilled payout movement for custody and wallets", async () => {
     const custody = await createRequest();
     await repository.advanceRequest({
       withdrawalRequestId: custody.request.id,
@@ -1454,9 +2128,9 @@ describe("Earn queued withdrawal repository", () => {
     });
 
     const external = await createRequest({
-      positionId: EXTERNAL_POSITION,
+      positionId: OWNER_POSITION,
       custodyWalletId: null,
-      ownerAddress: EXTERNAL_OWNER,
+      ownerAddress: OWNER_ADDRESS,
     });
     await repository.advanceRequest({
       withdrawalRequestId: external.request.id,
@@ -1469,7 +2143,7 @@ describe("Earn queued withdrawal repository", () => {
     });
 
     // A custody fulfillment claims the custody wallet and keeps owner_address
-    // NULL: binding both would activate the external-wallet claim foreign key
+    // NULL: binding both would activate the wallet claim foreign key
     // against a custody position that has no owner address.
     const custodyMovement = await getDb(env)
       .prepare(
@@ -1488,7 +2162,7 @@ describe("Earn queued withdrawal repository", () => {
       status: "finalized",
     });
 
-    const externalMovement = await getDb(env)
+    const walletMovement = await getDb(env)
       .prepare(
         `SELECT custody_wallet_id, owner_address, vault_address, destination_address,
                 signature, status
@@ -1496,26 +2170,26 @@ describe("Earn queued withdrawal repository", () => {
       )
       .bind(`earn_queue_fulfillment_${external.request.id}`)
       .first<Record<string, unknown>>();
-    expect(externalMovement).toMatchObject({
+    expect(walletMovement).toMatchObject({
       custody_wallet_id: null,
-      owner_address: EXTERNAL_OWNER,
+      owner_address: OWNER_ADDRESS,
       vault_address: VAULT,
-      destination_address: EXTERNAL_OWNER,
+      destination_address: OWNER_ADDRESS,
       signature: "queued-fulfilled-external-signature",
       status: "finalized",
     });
 
     // The fulfilled request now exists BOTH as a persisted movement and as a
     // queue row; the owner's earned totals must count the payout once.
-    const totals = await createPostgresEarnMovementsRepository(
-      getDb(env)
-    ).aggregateExternalWalletMovements({
-      organizationId: ORG,
-      projectId: PROJECT,
-      environment: "sandbox",
-      ownerAddress: EXTERNAL_OWNER,
-    });
-    expect(totals.get(EXTERNAL_POSITION)).toMatchObject({
+    const totals = await createPostgresEarnMovementsRepository(getDb(env)).aggregateWalletMovements(
+      {
+        organizationId: ORG,
+        projectId: PROJECT,
+        environment: "sandbox",
+        ownerAddress: OWNER_ADDRESS,
+      }
+    );
+    expect(totals.get(OWNER_POSITION)).toMatchObject({
       finalizedDeposits: "0",
       finalizedWithdrawals: "9.8",
       finalizedWithdrawalCount: 1,
@@ -1525,14 +2199,14 @@ describe("Earn queued withdrawal repository", () => {
 
   it("records every payout in a batched solver transaction exactly once", async () => {
     const first = await createRequest({
-      positionId: EXTERNAL_POSITION,
+      positionId: OWNER_POSITION,
       custodyWalletId: null,
-      ownerAddress: EXTERNAL_OWNER,
+      ownerAddress: OWNER_ADDRESS,
     });
     const second = await createRequest({
-      positionId: EXTERNAL_POSITION,
+      positionId: OWNER_POSITION,
       custodyWalletId: null,
-      ownerAddress: EXTERNAL_OWNER,
+      ownerAddress: OWNER_ADDRESS,
     });
     const fulfill = (withdrawalRequestId: string, assetsPaid: string) =>
       repository.advanceRequest({
@@ -1547,15 +2221,15 @@ describe("Earn queued withdrawal repository", () => {
     await fulfill(second.request.id, "9.8");
     expect(await fulfill(first.request.id, "9.9")).toBeNull();
     expect(await fulfill(second.request.id, "9.8")).toBeNull();
-    const totals = await createPostgresEarnMovementsRepository(
-      getDb(env)
-    ).aggregateExternalWalletMovements({
-      organizationId: ORG,
-      projectId: PROJECT,
-      environment: "sandbox",
-      ownerAddress: EXTERNAL_OWNER,
-    });
-    expect(totals.get(EXTERNAL_POSITION)).toMatchObject({
+    const totals = await createPostgresEarnMovementsRepository(getDb(env)).aggregateWalletMovements(
+      {
+        organizationId: ORG,
+        projectId: PROJECT,
+        environment: "sandbox",
+        ownerAddress: OWNER_ADDRESS,
+      }
+    );
+    expect(totals.get(OWNER_POSITION)).toMatchObject({
       finalizedWithdrawals: "19.7",
       finalizedWithdrawalCount: 2,
     });
@@ -2119,10 +2793,10 @@ describe("Earn queued withdrawal repository", () => {
     // both environments, works one, and proves the other's rows were neither
     // returned nor touched. Owner-signed requests keep the fixture free of
     // custody: managed custody is Sandbox-only (ADR 0006).
-    const PRODUCTION_EXTERNAL_POSITION = "earn_position_queued_withdrawal_repo_production_external";
+    const PRODUCTION_OWNER_POSITION = "earn_position_queued_withdrawal_repo_production_external";
     const SCOPE = {
-      sandbox: { projectId: PROJECT, positionId: EXTERNAL_POSITION },
-      production: { projectId: `${PROJECT}_production`, positionId: PRODUCTION_EXTERNAL_POSITION },
+      sandbox: { projectId: PROJECT, positionId: OWNER_POSITION },
+      production: { projectId: `${PROJECT}_production`, positionId: PRODUCTION_OWNER_POSITION },
     } as const satisfies Record<SdpEnvironment, { projectId: string; positionId: string }>;
 
     beforeEach(async () => {
@@ -2136,10 +2810,10 @@ describe("Earn queued withdrawal repository", () => {
                      'Production external Veda queued vault', sdp_iso_now())`
         )
         .bind(
-          PRODUCTION_EXTERNAL_POSITION,
+          PRODUCTION_OWNER_POSITION,
           ORG,
           SCOPE.production.projectId,
-          EXTERNAL_OWNER,
+          OWNER_ADDRESS,
           VAULT,
           SHARE_MINT,
           TOKEN_MINT
@@ -2178,7 +2852,7 @@ describe("Earn queued withdrawal repository", () => {
         environment,
         provider: "veda",
         vaultAddress: VAULT,
-        ownerAddress: EXTERNAL_OWNER,
+        ownerAddress: OWNER_ADDRESS,
         requestAddress: `ScopeReservationAddress${String(sequence).padStart(16, "1")}`,
         clientRequestId: `scope-reservation-key-${sequence}`,
         idempotencyFingerprint: `scope-reservation-fingerprint-${sequence}`,
@@ -2189,15 +2863,15 @@ describe("Earn queued withdrawal repository", () => {
     /** An unconsumed owner-signed request build in `environment`. */
     async function buildIn(environment: SdpEnvironment, lastValidBlockHeight = "20000") {
       sequence += 1;
-      return repository.createExternalWalletTransaction({
-        id: `earn_external_wallet_withdrawal_request_transaction_scope_${sequence}`,
+      return repository.createWalletTransaction({
+        id: `earn_wallet_withdrawal_request_transaction_scope_${sequence}`,
         organizationId: ORG,
         projectId: SCOPE[environment].projectId,
         environment,
         provider: "veda",
         positionId: SCOPE[environment].positionId,
         action: "request",
-        ownerAddress: EXTERNAL_OWNER,
+        ownerAddress: OWNER_ADDRESS,
         vaultAddress: VAULT,
         tokenMint: TOKEN_MINT,
         shareMint: SHARE_MINT,
@@ -2224,10 +2898,10 @@ describe("Earn queued withdrawal repository", () => {
           environment,
           positionId: SCOPE[environment].positionId,
           custodyWalletId: null,
-          ownerAddress: EXTERNAL_OWNER,
+          ownerAddress: OWNER_ADDRESS,
           requestAddress: build.request_address,
           pdaLeaseToken: build.id,
-          externalWalletTransactionId: build.id,
+          walletTransactionId: build.id,
         })
       );
       await repository.advanceAction({
@@ -2279,19 +2953,19 @@ describe("Earn queued withdrawal repository", () => {
     it.each(SDP_ENVIRONMENTS)(
       "gates and expires only %s unconsumed builds",
       async (environment) => {
-        await expect(repository.hasUnconsumedExternalBuilds({ environment })).resolves.toBe(false);
+        await expect(repository.hasUnconsumedWalletBuilds({ environment })).resolves.toBe(false);
         await buildIn(otherThan(environment), "100");
-        await expect(repository.hasUnconsumedExternalBuilds({ environment })).resolves.toBe(false);
+        await expect(repository.hasUnconsumedWalletBuilds({ environment })).resolves.toBe(false);
         await buildIn(environment, "100");
-        await expect(repository.hasUnconsumedExternalBuilds({ environment })).resolves.toBe(true);
+        await expect(repository.hasUnconsumedWalletBuilds({ environment })).resolves.toBe(true);
 
         await expect(
-          repository.cleanupExpiredExternalBuilds({ environment, currentBlockHeight: "101" })
+          repository.cleanupExpiredWalletBuilds({ environment, currentBlockHeight: "101" })
         ).resolves.toBe(1);
 
-        await expect(repository.hasUnconsumedExternalBuilds({ environment })).resolves.toBe(false);
+        await expect(repository.hasUnconsumedWalletBuilds({ environment })).resolves.toBe(false);
         await expect(
-          repository.hasUnconsumedExternalBuilds({ environment: otherThan(environment) })
+          repository.hasUnconsumedWalletBuilds({ environment: otherThan(environment) })
         ).resolves.toBe(true);
       }
     );
@@ -2321,9 +2995,9 @@ describe("Earn queued withdrawal repository", () => {
             reservations
           );
           expect(await countIn("earn_vault_withdrawal_request_pda_leases", other)).toBe(leases);
-          await expect(
-            repository.hasUnconsumedExternalBuilds({ environment: other })
-          ).resolves.toBe(true);
+          await expect(repository.hasUnconsumedWalletBuilds({ environment: other })).resolves.toBe(
+            true
+          );
           expect(clusterRpc.calls).toEqual([]);
         }
       );

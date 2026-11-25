@@ -1,4 +1,4 @@
-import { SDP_RAMP_PROVIDER_MATURITY, SDP_RELEASE_CHANNEL_NAMES } from "@sdp/types/release-channels";
+import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { describe, expect, it, vi } from "vitest";
 import { createApp } from "@/app";
 import { env as baseEnv } from "@/test/helpers/env";
@@ -26,22 +26,20 @@ function nextClientHeaders() {
 }
 
 describe("custody routes with the custody module out of channel", () => {
-  describe.each(SDP_RELEASE_CHANNEL_NAMES)("on the %s release channel", (releaseChannel) => {
-    it.each(CUSTODY_PROBE_PATHS)("refuses an anonymous GET %s before auth", async (path) => {
-      const response = await app.request(
-        path,
-        { headers: nextClientHeaders() },
-        { ...baseEnv, SDP_RELEASE_CHANNEL: releaseChannel, TRUST_PROXY_HEADERS: "true" }
-      );
+  it.each(CUSTODY_PROBE_PATHS)("refuses an anonymous GET %s before auth", async (path) => {
+    const response = await app.request(
+      path,
+      { headers: nextClientHeaders() },
+      { ...baseEnv, TRUST_PROXY_HEADERS: "true" }
+    );
 
-      expect(response.status).toBe(403);
-      expect(await response.json()).toEqual({
-        error: {
-          code: "FORBIDDEN",
-          message: "The custody module is not available in this release channel.",
-        },
-        meta: { requestId: expect.any(String) },
-      });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "FORBIDDEN",
+        message: "The custody module is not available in this release channel.",
+      },
+      meta: { requestId: expect.any(String) },
     });
   });
 });

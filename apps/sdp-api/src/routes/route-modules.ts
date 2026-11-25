@@ -12,9 +12,11 @@ export type RouteOwner = SdpModule | "core";
 export const ROUTE_OWNERS: readonly (readonly [RegExp, RouteOwner])[] = [
   [/^\/v1\/payments\/ramps(\/|$)/, "ramps"],
   [/^\/webhooks\/payments\/ramps\//, "ramps"],
-  [/^\/v1\/counterparties\/:counterpartyId\/(requirements|provider-accounts)(\/|$)/, "ramps"],
+  [/^\/v1\/counterparties\/:counterpartyId\/(ramp-requirements|provider-accounts)(\/|$)/, "ramps"],
   [/^\/v1\/issuance(\/|$)/, "issuance"],
   [/^\/v1\/earn(\/|$)/, "earn"],
+  // The lifecycle is generic, but its first admitted operation kinds are Earn only.
+  [/^\/v1\/operations(\/|$)/, "earn"],
   [/^\/v1\/dvp(\/|$)/, "dvp"],
   [/^\/v1\/private-channels(\/|$)/, "private_channels"],
   [/^\/(v1|internal\/dashboard)\/helius-rings(\/|$)/, "helius_rings"],

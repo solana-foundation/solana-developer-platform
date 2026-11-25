@@ -6,6 +6,25 @@ instructions, positions, and both exit paths. The API exposes the
 operator-completed par redemption by default; the Jupiter DEX builder remains
 available only when the deployment opts in.
 
+## Layout
+
+`client.ts` holds `HastraVaultDirectClient` alone. The layers under it are
+their own modules: `constants.ts` (program ids and limits), `addresses.ts`
+(cluster config and PDAs), `codec.ts` (Anchor discriminators and little-endian
+reads), `amounts.ts` (token and share arithmetic), `rpc.ts` (the JSON-RPC wire
+and read caches), `state.ts` (account decoders and `readHastraState`),
+`instructions.ts` (raw instruction builders), `issues.ts` (blocking-issue
+checks) and `redemption.ts` (par request admission, request decoding and
+lifecycle events). Import a symbol from the module that defines it: ADR 0010
+bans re-exports, and the package's public surface is its `exports` map.
+
+Addresses and instructions are `@solana/kit`; the package has no
+`@solana/web3.js`. Kit derives PDAs asynchronously, so a derivation inside a
+read yields before that read is sent. Where send order matters, derive first:
+the par cancel passes `deriveHastraAddresses` output to `loadHastraState` so the
+identity read still leaves before the request read (`addresses.test.ts` pins
+the derived values to the web3.js-era ones).
+
 ## Pinned deployment
 
 Use only `@sdp/types/hastra-programs`. Its program IDs and token mints are tied
@@ -65,11 +84,14 @@ transaction fee; the separate 50 bps DEX tolerance is only a slippage bound.
 
 ## Important constraints
 
-- Jupiter instructions enter only through `HastraSwapPort`, implemented by the
+- Jupiter instructions enter only through `EarnSwapPort`, implemented by the
   API's reviewed Jupiter admission boundary. Never add a Jupiter HTTP client
   here. This package deliberately retains the builder regardless of rollout
   state; the API owns the default-off capability gate so deposits, position
   reads, and par-redemption operations remain available without a Jupiter key.
+  The port's own failures (no route, outage) pass through unchanged, so the API
+  answers them as its swap boundary does. `SWAP_UNAVAILABLE` names only a
+  Jupiter answer this package cannot use, and the API answers it with a 503.
 - Disabling the optional DEX lane stops new quotes and builds. It must not stop
   submission or reconciliation of an already admitted transaction: those
   durable movements remain atomic, and recovery must continue from their

@@ -11,34 +11,19 @@ import type {
   EarnVaultQueuedWithdrawProvider,
   EarnVaultWithdrawProvider,
 } from "@sdp/earn/types";
-import {
-  assertNotPortfolioProvider as assertHastraNotPortfolioProvider,
-  HastraVaultDirectClient,
-} from "@sdp/hastra/client";
-import {
-  assertJupiterLendNotPortfolioProvider,
-  JupiterLendVaultDirectClient,
-} from "@sdp/jupiter-lend/client";
-import { assertNotPortfolioProvider, KaminoVaultDirectClient } from "@sdp/kamino/client";
-import {
-  assertNotPortfolioProvider as assertOndoNotPortfolioProvider,
-  OndoVaultDirectClient,
-} from "@sdp/ondo/client";
+import { HastraVaultDirectClient } from "@sdp/hastra/client";
+import { JupiterLendVaultDirectClient } from "@sdp/jupiter-lend/client";
+import { KaminoVaultDirectClient } from "@sdp/kamino/client";
+import { OndoVaultDirectClient } from "@sdp/ondo/client";
 import { PlumeVaultDirectClient } from "@sdp/plume/client";
-import {
-  assertNotPortfolioProvider as assertVedaNotPortfolioProvider,
-  VedaVaultDirectClient,
-} from "@sdp/veda/client";
-import {
-  assertWisdomTreeNotPortfolioProvider,
-  WisdomTreeVaultDirectClient,
-} from "@sdp/wisdomtree/client";
+import { VedaVaultDirectClient } from "@sdp/veda/client";
+import { WisdomTreeVaultDirectClient } from "@sdp/wisdomtree/client";
 import { isEarnHastraDexExitConfigured } from "@/lib/feature-flags";
 import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 import { assertClusterEndpoint } from "./cluster-rpc";
 import { createHastraSwapPort } from "./hastra-swap-port";
-import { createOndoSwapPort } from "./ondo-swap-port";
+import { createJupiterSwapPort } from "./jupiter-swap-port";
 import type { VaultDeadline } from "./vault-deadline";
 import { createVaultRpcFailover } from "./vault-rpc-failover";
 
@@ -81,36 +66,30 @@ export function resolveEarnExecutionClient(
     return instrumentVendorPort("plume", new PlumeVaultDirectClient(runOperation));
   if (provider === "kamino") {
     const client = new KaminoVaultDirectClient(provenRpcUrl, runOperation);
-    assertNotPortfolioProvider(client);
     return instrumentVendorPort("kamino", client);
   }
   if (provider === "jupiter_lend") {
     const client = new JupiterLendVaultDirectClient(provenRpcUrl, runOperation);
-    assertJupiterLendNotPortfolioProvider(client);
     return instrumentVendorPort("jupiter_lend", client);
   }
   if (provider === "veda") {
     const client = new VedaVaultDirectClient(provenRpcUrl, runOperation);
-    assertVedaNotPortfolioProvider(client);
     return instrumentVendorPort("veda", client);
   }
   if (provider === "ondo") {
     const client = new OndoVaultDirectClient(provenRpcUrl, runOperation, () =>
-      createOndoSwapPort(env)
+      createJupiterSwapPort(env, "Jupiter swaps")
     );
-    assertOndoNotPortfolioProvider(client);
     return instrumentVendorPort("ondo", client);
   }
   if (provider === "hastra") {
     const client = new HastraVaultDirectClient(provenRpcUrl, runOperation, () =>
       createHastraSwapPort(env)
     );
-    assertHastraNotPortfolioProvider(client);
     return instrumentVendorPort("hastra", client);
   }
   if (provider === "wisdomtree") {
     const client = new WisdomTreeVaultDirectClient(provenRpcUrl, runOperation);
-    assertWisdomTreeNotPortfolioProvider(client);
     return instrumentVendorPort("wisdomtree", client);
   }
   return null;
@@ -143,12 +122,17 @@ export function resolveVaultWithdrawClient(
 ): EarnVaultWithdrawProvider | null {
   // Hastra always retains its separate operator-redemption capability below.
   // This opt-in controls only admission to NEW Jupiter quote/build work; it is
-  // deliberately checked here so every custody and external-wallet entry
+  // deliberately checked here so every custody and wallet entry
   // point, plus withdrawal-options discovery, agrees on the default par-only
   // posture.
-  if (provider === "hastra" && !isEarnHastraDexExitConfigured(env)) return null;
+  if (!isEarnDirectWithdrawalConfigured(env, provider)) return null;
 
   return resolveRecordedVaultWithdrawClient(env, provider, deadline);
+}
+
+/** Apply direct-exit rollout policy without constructing a second client. */
+export function isEarnDirectWithdrawalConfigured(env: Env, provider: string): boolean {
+  return provider !== "hastra" || isEarnHastraDexExitConfigured(env);
 }
 
 /**

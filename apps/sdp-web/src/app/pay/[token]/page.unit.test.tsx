@@ -1,7 +1,12 @@
+import {
+  type ClosedPaymentRequestStatus,
+  PAYMENT_REQUEST_CLOSED_STATUSES,
+} from "@sdp/types/payments";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ZodError } from "zod";
 import { nextNavigationMock, resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { TEST_PAYMENT_REQUEST_RECIPIENT } from "@/test/payment-requests";
 import PayPage from "./page";
 import { payTokenSchema } from "./pay-token";
 
@@ -42,7 +47,9 @@ describe("PayPage unknown links", () => {
 
     await expect(renderPage("AbCdEfGh12345-xy")).rejects.toThrow("NEXT_NOT_FOUND");
     expect(fetchMock).toHaveBeenCalledOnce();
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://sdp-api.test/pay/AbCdEfGh12345-xy");
+    expect(fetchMock).toHaveBeenCalledWith("http://sdp-api.test/pay/AbCdEfGh12345-xy", {
+      cache: "no-store",
+    });
   });
 
   it("does not call a refused or failed read a missing link", async () => {
@@ -63,7 +70,7 @@ describe("PayPage open requests", () => {
   const openRequest = {
     amount: "1.5",
     tokenSymbol: "USDC",
-    recipient: "7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV",
+    recipient: TEST_PAYMENT_REQUEST_RECIPIENT,
     status: "awaiting_payment",
     expiresAt: null,
     network: "devnet",
@@ -86,8 +93,40 @@ describe("PayPage open requests", () => {
     const html = renderToStaticMarkup(await renderPage("AbCdEfGh12345-xy"));
 
     expect(html).toContain("Scan with a Solana wallet to pay");
+    expect(html).toContain('href="solana:https://sdp-api.test/pay/x/tx"');
     expect(html).not.toContain("Payment unavailable");
   });
+
+  it("draws no link for a Solana Pay URL outside the https and solana schemes", async () => {
+    fetchMock.mockResolvedValue(
+      Response.json({ ...openRequest, solanaPayUrl: "javascript:alert(1)" })
+    );
+
+    const html = renderToStaticMarkup(await renderPage("AbCdEfGh12345-xy"));
+
+    expect(html).toContain("Payment unavailable");
+    expect(html).not.toContain("javascript:");
+  });
+
+  const closedTitle = {
+    paid: "Payment received",
+    expired: "Link expired",
+    canceled: "Request canceled",
+  } as const satisfies Record<ClosedPaymentRequestStatus, string>;
+
+  it.each(PAYMENT_REQUEST_CLOSED_STATUSES)(
+    "tells the payer a %s request is closed, with no way to pay it",
+    async (status) => {
+      const title = closedTitle[status];
+      fetchMock.mockResolvedValue(Response.json({ ...openRequest, status, solanaPayUrl: null }));
+
+      const html = renderToStaticMarkup(await renderPage("AbCdEfGh12345-xy"));
+
+      expect(html).toContain(title);
+      expect(html).not.toContain("Scan with a Solana wallet to pay");
+      expect(html).not.toContain("Payment unavailable");
+    }
+  );
 });
 
 describe("payTokenSchema", () => {
