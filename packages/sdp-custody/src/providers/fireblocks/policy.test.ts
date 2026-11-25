@@ -102,6 +102,16 @@ describe("Fireblocks policy presence", () => {
       status: "missing",
       reason: "no_policy",
     });
+    // Empty approver fields must still read as an ALLOW rule.
+    expect(inspect([rule([["42", "VAULT"]], "SOL", { action: "ALLOW", authorizers: [] })])).toEqual(
+      {
+        status: "missing",
+        reason: "no_policy",
+      }
+    );
+    expect(
+      inspect([rule([["42", "VAULT"]], "SOL", { action: "ALLOW", authorizationGroups: {} })])
+    ).toEqual({ status: "missing", reason: "no_policy" });
     // Fireblocks defines ALLOW as requiring no additional approvals; populated
     // approver fields must not read as a policy and hide the warning.
     expect(
