@@ -169,9 +169,6 @@ export const proposalRuntime: CustodyProvisioningRuntime = {
   fetch: (input, init) => globalThis.fetch(input, init),
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   now: () => Date.now(),
-  randomUUID: () => crypto.randomUUID(),
-  getRandomValues: (data) => crypto.getRandomValues(new Uint8Array(data)),
-  sha256: (data) => crypto.subtle.digest("SHA-256", new Uint8Array(data)),
 };
 
 function expectedNetworkAsset(): "SOL" | "SOL_TEST" {
