@@ -3,7 +3,8 @@ import { generateKeyPairSync } from "node:crypto";
 import type { TestContext } from "node:test";
 import type { SafeProxyCaller } from "@sdp/safe-proxy-endpoints/callers";
 import { createLocalJWKSet, importPKCS8, type JWTVerifyGetKey, SignJWT } from "jose";
-import { type AppDependencies, createApp, googleCaller, type ProviderCredentials } from "@/app";
+import { type AppDependencies, createApp, type ProviderCredentials } from "@/app";
+import { googleCaller } from "@/middleware";
 
 const AUDIENCE = "https://safe-proxy.mock.invalid";
 const CALLER_EMAILS = {
