@@ -133,7 +133,6 @@ export async function checkByokCredential(
     privateKeyPem: credential.apiSecretPem,
     vaultAccountId: credential.vaultAccountId,
     assetId: credential.assetId,
-    apiBaseUrl: env.FIREBLOCKS_API_BASE_URL,
   });
   if (result.status !== "success") return result;
   // Vault numbers repeat across workspaces; bind rotation to the actual address.

@@ -1,6 +1,5 @@
 import { FIREBLOCKS_ADDRESS_STATUSES, type FireblocksAddressStatus } from "@sdp/types/fireblocks";
 import { z } from "zod";
-import { assertHttpsBaseUrl } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
 import { fireblocksRequest } from "./http";
@@ -35,17 +34,8 @@ const books = new Map<
   string,
   { expires: number; pending: boolean; entries: Promise<FireblocksAddressEntry[]> }
 >();
-function config(access: FireblocksTransferAccess) {
-  return {
-    ...access,
-    apiBaseUrl: assertHttpsBaseUrl(access.apiBaseUrl ?? "https://api.fireblocks.io", "Fireblocks"),
-  };
-}
-function cacheKey(access: FireblocksTransferAccess) {
-  return `${access.apiBaseUrl}:${access.apiKey}`;
-}
 export function invalidateFireblocksAddressBook(access: FireblocksTransferAccess) {
-  books.delete(cacheKey(config(access)));
+  books.delete(access.apiKey);
 }
 function invalid(): never {
   throw new SigningError("Invalid Fireblocks address book response", "NETWORK_ERROR");
@@ -74,8 +64,7 @@ export async function readFireblocksAddressBook(
   access: FireblocksTransferAccess,
   fresh = false
 ): Promise<FireblocksAddressEntry[]> {
-  const credentials = config(access);
-  const key = cacheKey(credentials);
+  const key = access.apiKey;
   let cached = books.get(key);
   if (!cached || (!cached.pending && (fresh || cached.expires <= runtime.now()))) {
     if (books.size >= 100) {
@@ -84,12 +73,12 @@ export async function readFireblocksAddressBook(
     }
     const entries = Promise.all([
       fireblocksRequest(runtime, {
-        ...credentials,
+        ...access,
         method: "GET",
         uri: "/v1/external_wallets",
       }).then((value) => parseBook(value, "EXTERNAL_WALLET")),
       fireblocksRequest(runtime, {
-        ...credentials,
+        ...access,
         method: "GET",
         uri: "/v1/internal_wallets",
       }).then((value) => parseBook(value, "INTERNAL_WALLET")),

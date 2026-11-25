@@ -91,7 +91,6 @@ export class KeychainFireblocksAdapter extends BaseKeychainAdapter {
       privateKeyPem: this.config.apiSecretPem,
       vaultAccountId,
       assetId: this.config.assetId ?? "SOL",
-      apiBaseUrl: this.config.apiBaseUrl,
       pollIntervalMs: this.config.pollIntervalMs,
       maxPollAttempts: this.config.maxPollAttempts,
       requestDelayMs: this.config.requestDelayMs,

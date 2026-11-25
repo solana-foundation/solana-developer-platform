@@ -1,7 +1,6 @@
 import { Buffer } from "node:buffer";
 import * as crypto from "node:crypto";
 import { summarizeUpstreamErrorBody } from "@sdp/redaction/upstream-error";
-import { assertHttpsBaseUrl } from "#/shared/common";
 import { SigningError } from "#/signing";
 
 /**
@@ -12,7 +11,6 @@ export interface DfnsEnv {
   DFNS_AUTH_TOKEN?: string;
   DFNS_CREDENTIAL_ID?: string;
   DFNS_PRIVATE_KEY?: string;
-  DFNS_API_BASE_URL?: string;
 }
 
 /**
@@ -22,12 +20,11 @@ export interface IbmHavenEnv {
   IBM_HAVEN_AUTH_TOKEN?: string;
   IBM_HAVEN_CREDENTIAL_ID?: string;
   IBM_HAVEN_PRIVATE_KEY?: string;
-  IBM_HAVEN_API_BASE_URL?: string;
 }
 
-export const DEFAULT_DFNS_API_BASE_URL = "https://api.dfns.io";
+const DFNS_API_ORIGIN = "https://api.dfns.io";
 // IBM Digital Asset Haven is a white-label Dfns deployment fronted by IBM's host.
-export const DEFAULT_IBM_HAVEN_API_BASE_URL = "https://api.digitalassets.ibm.com";
+const IBM_HAVEN_API_ORIGIN = "https://api.digitalassets.ibm.com";
 // Provider display labels interpolated into error messages so each white-label
 // deployment self-identifies (a Haven credential failure must not read "DFNS").
 export const DFNS_PROVIDER_LABEL = "DFNS";
@@ -298,7 +295,7 @@ function toBase64Url(data: Uint8Array): string {
     .replace(/=+$/g, "");
 }
 
-function resolveDfnsContext(env: DfnsEnv, options?: { apiBaseUrl?: string }): DfnsClientContext {
+function resolveDfnsContext(env: DfnsEnv): DfnsClientContext {
   const authToken = env.DFNS_AUTH_TOKEN;
   const credentialId = env.DFNS_CREDENTIAL_ID;
   const privateKey = env.DFNS_PRIVATE_KEY ? normalizePrivateKey(env.DFNS_PRIVATE_KEY) : undefined;
@@ -314,10 +311,7 @@ function resolveDfnsContext(env: DfnsEnv, options?: { apiBaseUrl?: string }): Df
     authToken,
     credentialId,
     privateKey,
-    baseUrl: assertHttpsBaseUrl(
-      options?.apiBaseUrl ?? env.DFNS_API_BASE_URL ?? DEFAULT_DFNS_API_BASE_URL,
-      "DFNS"
-    ),
+    baseUrl: DFNS_API_ORIGIN,
     providerLabel: DFNS_PROVIDER_LABEL,
     userAgent: DFNS_USER_AGENT,
   };
@@ -602,19 +596,13 @@ function buildDfnsApiClient(ctx: DfnsClientContext): DfnsApiClient {
   };
 }
 
-export async function createDfnsApiClient(
-  env: DfnsEnv,
-  options?: { apiBaseUrl?: string }
-): Promise<DfnsApiClient> {
-  return buildDfnsApiClient(resolveDfnsContext(env, options));
+export async function createDfnsApiClient(env: DfnsEnv): Promise<DfnsApiClient> {
+  return buildDfnsApiClient(resolveDfnsContext(env));
 }
 
 // IBM Digital Asset Haven reuses the Dfns request/UAS/signing machinery with
 // IBM-hosted credentials (IBM_HAVEN_*) and base URL — same wire protocol.
-function resolveIbmHavenContext(
-  env: IbmHavenEnv,
-  options?: { apiBaseUrl?: string }
-): DfnsClientContext {
+function resolveIbmHavenContext(env: IbmHavenEnv): DfnsClientContext {
   const authToken = env.IBM_HAVEN_AUTH_TOKEN;
   const credentialId = env.IBM_HAVEN_CREDENTIAL_ID;
   const privateKey = env.IBM_HAVEN_PRIVATE_KEY
@@ -632,18 +620,12 @@ function resolveIbmHavenContext(
     authToken,
     credentialId,
     privateKey,
-    baseUrl: assertHttpsBaseUrl(
-      options?.apiBaseUrl ?? env.IBM_HAVEN_API_BASE_URL ?? DEFAULT_IBM_HAVEN_API_BASE_URL,
-      "IBM Digital Asset Haven"
-    ),
+    baseUrl: IBM_HAVEN_API_ORIGIN,
     providerLabel: IBM_HAVEN_PROVIDER_LABEL,
     userAgent: IBM_HAVEN_USER_AGENT,
   };
 }
 
-export async function createIbmHavenApiClient(
-  env: IbmHavenEnv,
-  options?: { apiBaseUrl?: string }
-): Promise<DfnsApiClient> {
-  return buildDfnsApiClient(resolveIbmHavenContext(env, options));
+export async function createIbmHavenApiClient(env: IbmHavenEnv): Promise<DfnsApiClient> {
+  return buildDfnsApiClient(resolveIbmHavenContext(env));
 }

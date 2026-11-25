@@ -103,7 +103,6 @@ const providerWalletLifecycleRegistry = {
         apiSecretPem,
         vaultAccountId: provisioned.vaultAccountId,
         assetId: provisioned.assetId,
-        apiBaseUrl: provisioned.apiBaseUrl,
       });
 
       return {

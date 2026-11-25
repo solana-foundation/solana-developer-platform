@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { assertHttpsBaseUrl } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
 import { fireblocksRequest } from "./http";
@@ -16,7 +15,6 @@ export interface FireblocksVaultPage {
 interface VaultAccess {
   apiKey: string;
   apiSecretPem: string;
-  apiBaseUrl?: string;
   assetId: "SOL" | "SOL_TEST";
 }
 
@@ -42,7 +40,6 @@ function vault(value: unknown, assetId: string): FireblocksVault {
 }
 function requestConfig(config: VaultAccess) {
   return {
-    apiBaseUrl: assertHttpsBaseUrl(config.apiBaseUrl ?? "https://api.fireblocks.io", "Fireblocks"),
     apiKey: config.apiKey,
     apiSecretPem: config.apiSecretPem,
     method: "GET" as const,

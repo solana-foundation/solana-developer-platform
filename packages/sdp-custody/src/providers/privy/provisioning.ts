@@ -1,13 +1,8 @@
-import {
-  assertHttpsBaseUrl,
-  encodeBasicAuth,
-  parseJsonResponse,
-  readErrorResponseText,
-} from "#/shared/common";
+import { encodeBasicAuth, parseJsonResponse, readErrorResponseText } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
 
-const DEFAULT_PRIVY_API_BASE_URL = "https://api.privy.io/v1";
+const PRIVY_API_ORIGIN = "https://api.privy.io/v1";
 const PRIVY_REQUEST_TIMEOUT_MS = 10_000;
 
 interface PrivyWalletResponse {
@@ -28,7 +23,6 @@ export interface ProvisionPrivyOptions {
 export interface PrivyProvisioningConfig {
   appId?: string;
   appSecret?: string;
-  apiBaseUrl?: string;
 }
 
 export interface ProvisionPrivyResult {
@@ -52,13 +46,11 @@ export async function provisionPrivyWallet(
     );
   }
 
-  const apiBaseUrl = assertHttpsBaseUrl(config.apiBaseUrl ?? DEFAULT_PRIVY_API_BASE_URL, "Privy");
   const authHeader = `Basic ${encodeBasicAuth(`${appId}:${appSecret}`)}`;
   validatePrivyProvisionOptions(options);
 
   if (options.walletId) {
     const existing = await privyRequest<PrivyWalletResponse>(runtime, {
-      apiBaseUrl,
       authHeader,
       appId,
       method: "GET",
@@ -73,7 +65,7 @@ export async function provisionPrivyWallet(
   }
 
   const externalWalletLookup = options.externalId
-    ? { apiBaseUrl, authHeader, appId, externalId: options.externalId }
+    ? { authHeader, appId, externalId: options.externalId }
     : undefined;
   const credentialRequest =
     options.credentialRequest === true || externalWalletLookup !== undefined;
@@ -83,7 +75,6 @@ export async function provisionPrivyWallet(
   // answer with it (a duplicate external_id, a conflict, or no answer).
   try {
     const created = await privyRequest<PrivyWalletResponse>(runtime, {
-      apiBaseUrl,
       authHeader,
       appId,
       storedCredentialRequest: credentialRequest,
@@ -161,7 +152,6 @@ function validatePrivyProvisionOptions(options: ProvisionPrivyOptions): void {
 }
 
 interface PrivyRequestParams {
-  apiBaseUrl: string;
   authHeader: string;
   appId: string;
   allowNotFound?: boolean;
@@ -177,7 +167,7 @@ async function privyRequest<T>(
   params: PrivyRequestParams
 ): Promise<T> {
   try {
-    const response = await runtime.fetch(`${params.apiBaseUrl}${params.path}`, {
+    const response = await runtime.fetch(`${PRIVY_API_ORIGIN}${params.path}`, {
       method: params.method,
       headers: {
         Authorization: params.authHeader,
@@ -238,7 +228,6 @@ export async function findPrivyWalletByExternalId(
   let wallet: PrivyWalletResponse;
   try {
     wallet = await privyRequest<PrivyWalletResponse>(runtime, {
-      apiBaseUrl: assertHttpsBaseUrl(config.apiBaseUrl ?? DEFAULT_PRIVY_API_BASE_URL, "Privy"),
       allowNotFound: true,
       authHeader: `Basic ${encodeBasicAuth(`${appId}:${appSecret}`)}`,
       appId,

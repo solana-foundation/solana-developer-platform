@@ -60,10 +60,7 @@ async function inspectBatch(
       }
       let policyRead = policies.get(target.provider_credential_id);
       if (!policyRead) {
-        policyRead = readFireblocksPolicy(proposalRuntime, {
-          ...credential,
-          apiBaseUrl: env.FIREBLOCKS_API_BASE_URL,
-        });
+        policyRead = readFireblocksPolicy(proposalRuntime, credential);
         policies.set(target.provider_credential_id, policyRead);
       }
       const policy = await policyRead;
@@ -93,7 +90,7 @@ async function inspectBatch(
       if (!mint) throw new Error("No canonical USDC mint for this cluster");
       const usdc = await resolveFireblocksTransferAsset(
         proposalRuntime,
-        { ...credential, apiBaseUrl: env.FIREBLOCKS_API_BASE_URL },
+        credential,
         credential.assetId,
         mint
       );

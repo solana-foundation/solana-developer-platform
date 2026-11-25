@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { assertHttpsBaseUrl } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
 import { FireblocksApiError, fireblocksRequest } from "./http";
@@ -7,7 +6,6 @@ import { FireblocksApiError, fireblocksRequest } from "./http";
 export interface FireblocksTransferAccess {
   apiKey: string;
   apiSecretPem: string;
-  apiBaseUrl?: string;
 }
 
 export interface FireblocksTransferRequest {
@@ -85,12 +83,6 @@ const assetSchema = z.object({
 type Asset = z.infer<typeof assetSchema>;
 const catalogues = new Map<string, { expires: number; value: Promise<Asset[]> }>();
 
-function config(access: FireblocksTransferAccess) {
-  return {
-    ...access,
-    apiBaseUrl: assertHttpsBaseUrl(access.apiBaseUrl ?? "https://api.fireblocks.io", "Fireblocks"),
-  };
-}
 function invalid(): never {
   throw new SigningError("Invalid Fireblocks transfer response", "NETWORK_ERROR");
 }
@@ -107,8 +99,7 @@ export async function resolveFireblocksTransferAsset(
   mint: string | null
 ): Promise<{ id: string; decimals: number }> {
   if (mint === null) return { id: nativeAsset, decimals: 9 };
-  const credentials = config(access);
-  const cacheKey = `${credentials.apiBaseUrl}:${credentials.apiKey}`;
+  const cacheKey = access.apiKey;
   let entry = catalogues.get(cacheKey);
   if (!entry || entry.expires <= runtime.now()) {
     if (catalogues.size >= 100) {
@@ -116,7 +107,7 @@ export async function resolveFireblocksTransferAsset(
       catalogues.delete(catalogues.keys().next().value as string);
     }
     const value = fireblocksRequest<unknown>(runtime, {
-      ...credentials,
+      ...access,
       method: "GET",
       uri: "/v1/supported_assets",
     }).then((assets) => {
@@ -160,7 +151,7 @@ export async function createFireblocksTransfer(
 ): Promise<FireblocksTransferResult> {
   return result(
     await fireblocksRequest(runtime, {
-      ...config(access),
+      ...access,
       method: "POST",
       uri: "/v1/transactions",
       body,
@@ -176,7 +167,7 @@ export async function createFireblocksProgramCall(
 ): Promise<FireblocksTransferResult> {
   return result(
     await fireblocksRequest(runtime, {
-      ...config(access),
+      ...access,
       method: "POST",
       uri: "/v1/transactions",
       body,
@@ -194,7 +185,7 @@ export async function readFireblocksTransfer(
   try {
     return result(
       await fireblocksRequest(runtime, {
-        ...config(access),
+        ...access,
         method: "GET",
         uri: `/v1/transactions/external_tx_id/${encodeURIComponent(externalTxId)}`,
       })
@@ -215,7 +206,7 @@ export async function cancelFireblocksTransaction(
   transactionId: string
 ): Promise<boolean> {
   const response = await fireblocksRequest<unknown>(runtime, {
-    ...config(access),
+    ...access,
     method: "POST",
     uri: `/v1/transactions/${encodeURIComponent(transactionId)}/cancel`,
     // Cancellation cannot create another transfer. Do not cache a success:false reply for

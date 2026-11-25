@@ -49,7 +49,6 @@ export class KeychainUtilaAdapter extends BaseKeychainAdapter {
       vaultId: this.config.vaultId,
       walletId: denormalizeUtilaWalletId(normalizedWalletId),
       network: this.config.network,
-      apiBaseUrl: this.config.apiBaseUrl,
       pollIntervalMs: this.config.pollIntervalMs,
       maxPollAttempts: this.config.maxPollAttempts,
       designatedSigners: this.config.designatedSigners,

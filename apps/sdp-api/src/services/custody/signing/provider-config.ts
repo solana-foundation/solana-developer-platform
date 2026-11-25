@@ -14,14 +14,10 @@ export interface FireblocksProviderConfig {
   apiSecretEncrypted: string;
   vaultAccountId: string;
   assetId: string;
-  /** @deprecated Legacy persisted value; runtime endpoints come from server environment only. */
-  apiBaseUrl?: string;
 }
 
 export interface PrivyProviderConfig {
   provider: "privy";
-  /** @deprecated Legacy persisted value; runtime endpoints come from server environment only. */
-  apiBaseUrl?: string;
   requestDelayMs?: number;
   privyAppId?: string;
   walletId?: string;
@@ -29,8 +25,6 @@ export interface PrivyProviderConfig {
 
 export interface CoinbaseCdpProviderConfig {
   provider: "coinbase_cdp";
-  /** @deprecated Legacy persisted value; runtime endpoints come from server environment only. */
-  apiBaseUrl?: string;
   network?: "solana" | "solana-devnet";
   accountPolicy?: string;
   requestDelayMs?: number;
@@ -38,8 +32,6 @@ export interface CoinbaseCdpProviderConfig {
 
 export interface ParaProviderConfig {
   provider: "para";
-  /** @deprecated Legacy persisted value; runtime endpoints come from server environment only. */
-  apiBaseUrl?: string;
   requestDelayMs?: number;
   walletId?: string;
   userIdentifier?: string;
@@ -49,16 +41,12 @@ export interface ParaProviderConfig {
 export interface TurnkeyProviderConfig {
   provider: "turnkey";
   organizationId?: string;
-  /** @deprecated Legacy persisted value; runtime endpoints come from server environment only. */
-  apiBaseUrl?: string;
   requestDelayMs?: number;
   privateKeyId?: string;
 }
 
 export interface DfnsProviderConfig {
   provider: "dfns";
-  /** @deprecated Legacy persisted value; runtime endpoints come from server environment only. */
-  apiBaseUrl?: string;
   network?: "Solana" | "SolanaDevnet";
   walletId?: string;
   signingKeyId?: string;
@@ -66,8 +54,6 @@ export interface DfnsProviderConfig {
 
 export interface IbmHavenProviderConfig {
   provider: "ibm_haven";
-  /** @deprecated Legacy persisted value; runtime endpoints come from server environment only. */
-  apiBaseUrl?: string;
   network?: "Solana" | "SolanaDevnet";
   walletId?: string;
   signingKeyId?: string;
@@ -75,16 +61,12 @@ export interface IbmHavenProviderConfig {
 
 export interface AnchorageProviderConfig {
   provider: "anchorage";
-  /** @deprecated Legacy persisted value; runtime endpoints come from server environment only. */
-  apiBaseUrl?: string;
   walletId?: string;
   network?: "solana" | "solana-devnet";
 }
 
 export interface UtilaProviderConfig {
   provider: "utila";
-  /** @deprecated Legacy persisted value; runtime endpoints come from server environment only. */
-  apiBaseUrl?: string;
   vaultId?: string;
   network?: "networks/solana-mainnet" | "networks/solana-devnet";
 }

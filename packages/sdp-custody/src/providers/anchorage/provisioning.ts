@@ -1,14 +1,13 @@
-import { assertHttpsBaseUrl, parseJsonResponse, readErrorResponseText } from "#/shared/common";
+import { parseJsonResponse, readErrorResponseText } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
 
-const DEFAULT_ANCHORAGE_API_BASE_URL = "https://api.anchorage.com";
+const ANCHORAGE_API_ORIGIN = "https://api.anchorage.com";
 
 type AnchorageHttpMethod = "GET" | "POST" | "DELETE";
 
 interface AnchorageRequestParams {
   method: AnchorageHttpMethod;
-  apiBaseUrl: string;
   apiKey: string;
   path: string;
   body?: Record<string, unknown>;
@@ -32,7 +31,6 @@ export interface DeleteAnchorageOptions {
 
 export interface AnchorageProvisioningConfig {
   apiKey?: string;
-  apiBaseUrl?: string;
 }
 
 export async function provisionAnchorageWallet(
@@ -40,11 +38,10 @@ export async function provisionAnchorageWallet(
   config: AnchorageProvisioningConfig,
   options: ProvisionAnchorageOptions
 ): Promise<ProvisionAnchorageResult> {
-  const { apiBaseUrl, apiKey } = resolveAnchorageConfig(config);
+  const { apiKey } = resolveAnchorageConfig(config);
 
   const created = await anchorageRequest<unknown>(runtime, {
     method: "POST",
-    apiBaseUrl,
     apiKey,
     path: "/v1/wallets",
     body: {
@@ -61,20 +58,16 @@ export async function deleteAnchorageWallet(
   config: AnchorageProvisioningConfig,
   options: DeleteAnchorageOptions
 ): Promise<void> {
-  const { apiBaseUrl, apiKey } = resolveAnchorageConfig(config);
+  const { apiKey } = resolveAnchorageConfig(config);
 
   await anchorageRequest<void>(runtime, {
     method: "DELETE",
-    apiBaseUrl,
     apiKey,
     path: `/v1/wallets/${encodeURIComponent(options.walletId)}`,
   });
 }
 
-function resolveAnchorageConfig(config: AnchorageProvisioningConfig): {
-  apiBaseUrl: string;
-  apiKey: string;
-} {
+function resolveAnchorageConfig(config: AnchorageProvisioningConfig): { apiKey: string } {
   const apiKey = config.apiKey;
   if (!apiKey) {
     throw new SigningError(
@@ -83,13 +76,7 @@ function resolveAnchorageConfig(config: AnchorageProvisioningConfig): {
     );
   }
 
-  return {
-    apiBaseUrl: assertHttpsBaseUrl(
-      config.apiBaseUrl ?? DEFAULT_ANCHORAGE_API_BASE_URL,
-      "Anchorage"
-    ),
-    apiKey,
-  };
+  return { apiKey };
 }
 
 async function anchorageRequest<T>(
@@ -98,7 +85,7 @@ async function anchorageRequest<T>(
 ): Promise<T> {
   try {
     const requestWithAuth = (authStrategy: AnchorageAuthStrategy) =>
-      runtime.fetch(`${params.apiBaseUrl}${params.path}`, {
+      runtime.fetch(`${ANCHORAGE_API_ORIGIN}${params.path}`, {
         method: params.method,
         headers: buildAnchorageHeaders(params, authStrategy),
         body: params.body ? JSON.stringify(params.body) : undefined,

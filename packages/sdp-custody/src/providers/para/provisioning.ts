@@ -1,4 +1,3 @@
-import { assertHttpsBaseUrl } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
 import {
@@ -9,8 +8,6 @@ import {
   waitForParaWalletReady,
 } from "./api";
 
-const DEFAULT_PARA_API_BASE_URL = "https://api.getpara.com";
-
 export interface ProvisionParaOptions {
   orgId: string;
   orgSlug: string;
@@ -19,7 +16,6 @@ export interface ProvisionParaOptions {
 
 export interface ParaProvisioningConfig {
   apiKey?: string;
-  apiBaseUrl?: string;
 }
 
 export interface ProvisionParaResult {
@@ -42,14 +38,11 @@ export async function provisionParaWallet(
     );
   }
 
-  const apiBaseUrl = assertHttpsBaseUrl(config.apiBaseUrl ?? DEFAULT_PARA_API_BASE_URL, "Para");
-
   const userIdentifier = buildParaUserIdentifier({
     orgId: options.orgId,
     projectId: options.projectId,
   });
   const created = await paraRequest<ParaWalletResponse>(runtime, {
-    apiBaseUrl,
     apiKey,
     method: "POST",
     path: "/v1/wallets",
@@ -66,7 +59,6 @@ export async function provisionParaWallet(
   }
 
   const readyWallet = await waitForParaWalletReady(runtime, {
-    apiBaseUrl,
     apiKey,
     walletId: created.id,
   });

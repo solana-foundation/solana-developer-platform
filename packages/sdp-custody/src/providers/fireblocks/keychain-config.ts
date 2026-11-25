@@ -17,9 +17,6 @@ export interface KeychainFireblocksConfig extends FireblocksProposalTracking {
   /** Asset ID (default: "SOL", use "SOL_TEST" for devnet) */
   assetId?: string;
 
-  /** API base URL (default: "https://api.fireblocks.io") */
-  apiBaseUrl?: string;
-
   /** Polling interval in milliseconds (default: 1000) */
   pollIntervalMs?: number;
 

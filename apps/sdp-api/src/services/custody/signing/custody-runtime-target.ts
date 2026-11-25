@@ -1097,7 +1097,6 @@ export class CustodyRuntimeTargets {
       publicKey: target.wallet.publicKey,
       connectionId: target.connectionId,
       accountFingerprint: row.provider_account_fingerprint,
-      apiBaseUrl: this.env.FIREBLOCKS_API_BASE_URL,
     };
   }
 

@@ -1,11 +1,10 @@
 import { isAddress } from "@solana/addresses";
 import type { VaultAddressesResponse } from "@solana/keychain-fireblocks";
-import { assertHttpsBaseUrl, normalizePem } from "#/shared/common";
+import { normalizePem } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
 import { fireblocksRequest } from "./http";
 
-const DEFAULT_FIREBLOCKS_API_BASE_URL = "https://api.fireblocks.io";
 const DEFAULT_FIREBLOCKS_ASSET_ID = "SOL";
 
 interface FireblocksVaultAccountResponse {
@@ -23,7 +22,6 @@ export interface ProvisionFireblocksOptions {
 export interface FireblocksProvisioningConfig {
   apiKey?: string;
   apiSecretPem?: string;
-  apiBaseUrl?: string;
   assetId?: string;
 }
 
@@ -31,7 +29,6 @@ export interface ProvisionFireblocksResult {
   publicKey: string;
   vaultAccountId: string;
   assetId: string;
-  apiBaseUrl: string;
 }
 
 export async function provisionFireblocksVaultAccount(
@@ -49,10 +46,6 @@ export async function provisionFireblocksVaultAccount(
     );
   }
 
-  const apiBaseUrl = assertHttpsBaseUrl(
-    config.apiBaseUrl ?? DEFAULT_FIREBLOCKS_API_BASE_URL,
-    "Fireblocks"
-  );
   const assetId = config.assetId ?? DEFAULT_FIREBLOCKS_ASSET_ID;
 
   let vaultAccountId = options.vaultAccountId;
@@ -60,7 +53,6 @@ export async function provisionFireblocksVaultAccount(
   if (!vaultAccountId) {
     const name = `sdp-${options.orgSlug || options.orgId}`.slice(0, 64);
     const response = await fireblocksRequest<FireblocksVaultAccountResponse>(runtime, {
-      apiBaseUrl,
       apiKey,
       apiSecretPem,
       method: "POST",
@@ -81,7 +73,6 @@ export async function provisionFireblocksVaultAccount(
 
   // Ensure the asset wallet exists for this vault account.
   await fireblocksRequest<void>(runtime, {
-    apiBaseUrl,
     apiKey,
     apiSecretPem,
     method: "POST",
@@ -93,7 +84,6 @@ export async function provisionFireblocksVaultAccount(
 
   // Ensure the address exists (Fireblocks signer expects addresses_paginated to return at least one).
   const addresses = await fetchFireblocksAddressesWithRetry(runtime, {
-    apiBaseUrl,
     apiKey,
     apiSecretPem,
     vaultAccountId,
@@ -108,11 +98,10 @@ export async function provisionFireblocksVaultAccount(
     );
   }
 
-  return { vaultAccountId, assetId, apiBaseUrl, publicKey };
+  return { vaultAccountId, assetId, publicKey };
 }
 
 interface FireblocksAddressesParams {
-  apiBaseUrl: string;
   apiKey: string;
   apiSecretPem: string;
   vaultAccountId: string;
@@ -128,7 +117,6 @@ async function fetchFireblocksAddressesWithRetry(
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const response = await fireblocksRequest<VaultAddressesResponse>(runtime, {
-      apiBaseUrl: params.apiBaseUrl,
       apiKey: params.apiKey,
       apiSecretPem: params.apiSecretPem,
       method: "GET",

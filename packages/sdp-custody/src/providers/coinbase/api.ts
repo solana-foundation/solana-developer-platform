@@ -12,10 +12,11 @@ import {
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
 
+const COINBASE_CDP_API_ORIGIN = "https://api.cdp.coinbase.com/platform";
+
 export interface CoinbaseCdpRequestParams {
   method: "GET" | "POST" | "PUT" | "DELETE";
   path: string;
-  apiBaseUrl: string;
   apiKeyId: string;
   apiKeySecret: string;
   walletSecret: string;
@@ -50,7 +51,7 @@ export async function coinbaseCdpRequest<T>(
   runtime: CustodyProvisioningRuntime,
   params: CoinbaseCdpRequestParams
 ): Promise<T> {
-  const { requestPath, url } = resolveCoinbaseCdpRequestUrl(params.apiBaseUrl, params.path);
+  const { requestPath, url } = resolveCoinbaseCdpRequestUrl(params.path);
   const normalizedBody = params.body ? sortJsonKeys(params.body) : undefined;
   const bodyJson = normalizedBody ? JSON.stringify(normalizedBody) : undefined;
 
@@ -108,13 +109,9 @@ export async function coinbaseCdpRequest<T>(
   }
 }
 
-function resolveCoinbaseCdpRequestUrl(
-  apiBaseUrl: string,
-  path: string
-): { requestPath: string; url: URL } {
-  const normalizedBaseUrl = apiBaseUrl.endsWith("/") ? apiBaseUrl : `${apiBaseUrl}/`;
+function resolveCoinbaseCdpRequestUrl(path: string): { requestPath: string; url: URL } {
   const normalizedPath = path.startsWith("/") ? path.slice(1) : path;
-  const url = new URL(normalizedPath, normalizedBaseUrl);
+  const url = new URL(normalizedPath, `${COINBASE_CDP_API_ORIGIN}/`);
 
   return {
     requestPath: `${url.pathname}${url.search}`,

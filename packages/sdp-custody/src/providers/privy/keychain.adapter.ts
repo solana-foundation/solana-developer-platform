@@ -68,7 +68,6 @@ export class KeychainPrivyAdapter extends BaseKeychainAdapter {
       appId: this.config.appId,
       appSecret: this.config.appSecret,
       walletId: denormalizePrivyWalletId(normalizedWalletId),
-      apiBaseUrl: this.config.apiBaseUrl,
       requestDelayMs: this.config.requestDelayMs,
     })
       .then(refusingPolicyViolations)
