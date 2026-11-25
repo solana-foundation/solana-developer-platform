@@ -15,6 +15,7 @@ import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
+import { readEarnRecoveryHealth } from "./earn-recovery-health.repository";
 import {
   type CreateSignedQueuedWithdrawalRequestInput,
   createPostgresEarnVaultWithdrawalRequestsRepository,
@@ -576,6 +577,37 @@ describe("Earn queued withdrawal repository", () => {
     const input = await reserveInput(requestInput(overrides));
     return repository.createSignedRequest(input);
   }
+
+  it("health separates scheduled reads from fulfillment deadlines and ignores terminal requests", async () => {
+    const nowSeconds = Math.floor(Date.now() / 1_000);
+    const created = await createRequest({
+      maturityTimestamp: String(nowSeconds + 86_400),
+      deadlineTimestamp: String(nowSeconds + 172_800),
+    });
+    const health = async () =>
+      Object.fromEntries(
+        (await readEarnRecoveryHealth(getDb(env), "sandbox")).map((row) => [
+          row.queue,
+          row.overdue_seconds,
+        ])
+      );
+    await getDb(env).execute(
+      "UPDATE earn_vault_withdrawal_requests SET next_check_at = ?, status = 'pending' WHERE id = ?",
+      [new Date(Date.now() + 900_000).toISOString(), created.request.id]
+    );
+    expect((await health()).queued_delivery).toBe(0);
+    expect((await health()).queued_poll).toBe(0);
+    await getDb(env).execute(
+      "UPDATE earn_vault_withdrawal_requests SET maturity_timestamp = ?, deadline_timestamp = ? WHERE id = ?",
+      [String(nowSeconds - 86_400), String(nowSeconds - 3_600), created.request.id]
+    );
+    expect((await health()).queued_delivery).toBeGreaterThan(3_590);
+    await getDb(env).execute(
+      "UPDATE earn_vault_withdrawal_requests SET status = 'failed', failure_reason = 'test terminal' WHERE id = ?",
+      [created.request.id]
+    );
+    expect((await health()).queued_delivery).toBe(0);
+  });
 
   it("rejects null mechanism-required terms at the database boundary", async () => {
     const db = getDb(env);

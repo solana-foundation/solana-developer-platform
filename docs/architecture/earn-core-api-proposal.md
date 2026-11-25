@@ -506,3 +506,25 @@ See the [threat model](https://www.notion.so/422d36dad52d81e2bcf2cbd62c8e4622) a
 [integration guide](../../apps/sdp-docs/content/docs/earn/integration-details.mdx).
 Provider sandbox execution, signed-in browser verification and security review
 remain release gates. Local tests do not establish those external outcomes.
+
+### Worker health
+
+Worker health summaries report completed scans/passes, active consumers,
+interval error counts, maximum queued-action pickup delay and listener state
+once a minute per environment. Scheduled operation ticks carry
+`wakeup_only=true`: they do not prove an asynchronous consumer completed work.
+Idle observers need no passes; only active stalls and overdue durable work
+are actionable.
+
+The minute movement job reads one independent database snapshot of execution,
+observation, provider polling/delivery, queued polling/delivery and valuation
+obligations. It neither claims rows nor changes financial state. Existing due
+indexes and the partial missing-valuation index keep finalized history out of
+the read. Snapshot failures never fabricate zero backlog. RPC count for this
+telemetry is **0 before, 0 after**.
+
+Recorded queue maturity/deadline controls the useful polling time. Unknown
+provider delivery deadlines get a one-day investigation budget; missing
+finalized valuation gets one hour. Neither changes fulfillment guarantees.
+The companion sdp-infra rules warn on sustained delays, retain recovery and
+integrity pages, and require manual resolution for one-shot integrity loss.

@@ -241,7 +241,11 @@ export function startCron(deps: CronDeps): CronHandle | null {
   for (const definition of CRON_DEFINITIONS) {
     const enabled = definition.enabled(deps.env);
     for (const environment of registrationEnvironments(definition, deps.env)) {
-      const registration: CronRegistration = { cron: definition.name, environment };
+      const registration: CronRegistration = {
+        cron: definition.name,
+        environment,
+        ...(definition === operationsCron ? { wakeupOnly: true as const } : {}),
+      };
       // The in-flight run's own token, so a run abandoned at the deadline that settles later
       // cannot free the registration from under its successor.
       let inFlight: symbol | null = null;

@@ -6,6 +6,7 @@ import { SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
+import { readEarnRecoveryHealth } from "@/db/repositories/earn-recovery-health.repository";
 import { createPostgresEarnWalletTransactionsRepository } from "@/db/repositories/earn-wallet-transactions.repository";
 import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
 import {
@@ -1249,12 +1250,18 @@ describe("reconcileEarnVaultMovements", () => {
           confirmationStatus: "finalized",
         }))
       );
-      await vi.waitFor(() => expect(readKaminoDepositReceipt).toHaveBeenCalledTimes(8));
+      await vi.waitFor(() =>
+        expect(readKaminoDepositReceipt.mock.calls.length).toBeGreaterThanOrEqual(4)
+      );
       const ownership = await getDb(env).queryMany<{ count: number }>(
         "SELECT COUNT(*)::integer AS count FROM earn_movements WHERE organization_id = ? AND observation_claim_token IS NOT NULL GROUP BY observation_claim_token",
         [ORG]
       );
-      expect(ownership.map(({ count }) => count)).toEqual([4, 4]);
+      // SKIP LOCKED can split the first four rows between the two claimers.
+      expect(ownership.every(({ count }) => count > 0 && count <= 4)).toBe(true);
+      expect(ownership.reduce((sum, { count }) => sum + count, 0)).toBe(
+        readKaminoDepositReceipt.mock.calls.length
+      );
     } finally {
       receipt.resolve({ amount: "1", sharesOut: "1" });
     }
@@ -2047,5 +2054,121 @@ describe("reconcileEarnVaultMovements: sweep telemetry", () => {
 
     expect(stats.backlogWithdrawals).toBe(1);
     expect(stats.oldestWithdrawalCreatedAt).not.toBeNull();
+  });
+});
+
+describe("Earn durable recovery health", () => {
+  async function health(environment: SdpEnvironment = "sandbox") {
+    return Object.fromEntries(
+      (await readEarnRecoveryHealth(getDb(env), environment)).map((row) => [
+        row.queue,
+        row.overdue_seconds,
+      ])
+    );
+  }
+
+  it("reports empty queues with one database read and no RPC calls", async () => {
+    const query = vi.spyOn(getDb(env), "queryMany");
+    const before = clusterRpc.requests.length;
+    expect(Object.values(await health())).toEqual(Array(9).fill(0));
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(clusterRpc.requests).toHaveLength(before);
+    const statement = query.mock.calls[0];
+    if (statement === undefined) throw new Error("Missing health read");
+    query.mockRestore();
+    const plan = await getDb(env).transaction(async (tx) => {
+      await tx.execute("SET LOCAL enable_seqscan = off");
+      return tx.queryMany(`EXPLAIN (FORMAT JSON) ${statement[0]}`, statement[1]);
+    });
+    expect(JSON.stringify(plan)).toContain("idx_earn_valuation_health");
+    expect(JSON.stringify(plan)).toContain("operations_recovery_due");
+  });
+
+  it("detects overdue observations, excludes active leases and isolates environments", async () => {
+    const { movement } = await seedMovement();
+    const db = getDb(env);
+    await db.execute(
+      "UPDATE earn_movements SET observation_due_at = now() - interval '30 seconds' WHERE id = ?",
+      [movement.id]
+    );
+    const before = await ledgerRow(movement.id);
+    expect((await health()).movements).toBeGreaterThanOrEqual(30);
+    expect((await health("production")).movements).toBe(0);
+    expect(await ledgerRow(movement.id)).toEqual(before);
+    await db.execute(
+      "UPDATE earn_movements SET observation_claim_token = 'busy', observation_claim_until = now() + interval '1 minute' WHERE id = ?",
+      [movement.id]
+    );
+    expect((await health()).movements).toBe(0);
+  });
+
+  it("keeps chain-finalized provider obligations visible until delivery", async () => {
+    const { movement } = await seedMovement("100", "plume");
+    const db = getDb(env);
+    await db.execute(
+      "UPDATE earn_movements SET status = 'confirmed', confirmed_at = sdp_iso_now(), chain_finalized_at = (now() - interval '2 days')::text, reconciliation_attempted_at = sdp_iso_now() WHERE id = ?",
+      [movement.id]
+    );
+    const stats = await health();
+    expect(stats.movements).toBe(0);
+    expect(stats.provider_poll).toBe(0);
+    expect(stats.provider_delivery).toBeGreaterThan(86_300);
+    await db.execute(
+      "UPDATE earn_movements SET chain_finalized_at = sdp_iso_now(), reconciliation_attempted_at = (now() - interval '5 minutes')::text WHERE id = ?",
+      [movement.id]
+    );
+    expect((await health()).provider_delivery).toBe(0);
+    expect((await health()).provider_poll).toBeGreaterThan(230);
+  });
+
+  it("reports persistent missing valuations but quiets after receipt repair", async () => {
+    const { movement } = await seedMovement();
+    const db = getDb(env);
+    await db.execute(
+      "UPDATE earn_movements SET status = 'finalized', confirmed_at = sdp_iso_now(), settled_at = (now() - interval '2 hours')::text WHERE id = ?",
+      [movement.id]
+    );
+    expect((await health()).valuation).toBeGreaterThan(3_590);
+    await createPostgresEarnMovementsRepository(db).recordKaminoDepositReceipt({
+      movementId: movement.id,
+      organizationId: ORG,
+      amount: "1",
+      sharesOut: "1",
+    });
+    expect((await health()).valuation).toBe(0);
+  });
+
+  it("keeps recovery running and counts a failed health read once in its minute verdict", async () => {
+    const query = vi
+      .spyOn(getDb(env), "queryMany")
+      .mockRejectedValueOnce(new Error("health query failed"));
+    await expect(sweep("sandbox")).rejects.toThrow("1 health-snapshot failures");
+    expect(reconcileEarnVaultQueuedWithdrawals).toHaveBeenCalled();
+    expect(logEvent).toHaveBeenCalledWith(
+      "error",
+      expect.objectContaining({
+        event: "sdp_api_earn_recovery_health_failed",
+        environment: "sandbox",
+      })
+    );
+    expect(logEvent).toHaveBeenCalledWith(
+      "error",
+      expect.objectContaining({
+        event: "sdp_api_earn_vault_reconciliation_tick",
+        health_snapshot_errors: 1,
+      })
+    );
+    expect(
+      logEvent.mock.calls.some(([, payload]) => payload.event === "sdp_api_earn_recovery_health")
+    ).toBe(false);
+    query.mockRestore();
+  });
+
+  it("never fabricates a healthy snapshot when the query fails", async () => {
+    const query = vi
+      .spyOn(getDb(env), "queryMany")
+      .mockRejectedValueOnce(new Error("health query failed"));
+    await expect(health()).rejects.toThrow("health query failed");
+    query.mockRestore();
   });
 });

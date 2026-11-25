@@ -5,6 +5,7 @@ import type { BackgroundRunner } from "@/runtime/background";
 import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
 import { runWithLogContext } from "@/runtime/logger";
 import type { Env } from "@/types/env";
+import { startEarnWorkerTelemetry } from "./earn-worker-telemetry";
 import { observeEarnTransactions } from "./observe-earn-transactions";
 
 interface EnvironmentLane {
@@ -27,6 +28,9 @@ export function startEarnTransactionObserver(
     ])
   );
   let stopped = false;
+  const telemetry = startEarnWorkerTelemetry("observer", environments, (environment) => ({
+    active: lanes.get(environment)?.tasks.size ?? 0,
+  }));
 
   function wake(environment: SdpEnvironment): void {
     const lane = lanes.get(environment);
@@ -49,6 +53,7 @@ export function startEarnTransactionObserver(
             runInEnvironmentClusterScope(environment, () => observeEarnTransactions(env))
           )
         );
+        telemetry.completed(environment);
         if (result.claimed > 0 || result.saturated) {
           lane.saturatedRetry = result.saturated;
           delay = result.saturated ? 0 : 250;
@@ -58,8 +63,9 @@ export function startEarnTransactionObserver(
           delay = 250;
         }
       } catch (error) {
+        telemetry.failed(environment);
         logCronRun(
-          { cron: "reconcile-earn-vault-movements", environment },
+          { cron: "earn-transaction-observer", environment, worker: "observer" },
           {
             status: "error",
             durationMs: Date.now() - startedAt,
@@ -86,6 +92,7 @@ export function startEarnTransactionObserver(
     wake,
     async stop() {
       stopped = true;
+      telemetry.stop();
       for (const lane of lanes.values()) if (lane.timer !== null) clearTimeout(lane.timer);
       await Promise.all([...lanes.values()].flatMap((lane) => [...lane.tasks]));
     },

@@ -292,6 +292,7 @@ describe("database-notified operation consumers", () => {
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     expect(mocks.logEvent).toHaveBeenCalledExactlyOnceWith("error", {
       event: "sdp_cron_run",
+      worker: "operations",
       cron: "reconcile-operations",
       environment: "sandbox",
       status: "error",
@@ -310,6 +311,7 @@ describe("database-notified operation consumers", () => {
     expect(mocks.execute).toHaveBeenCalledTimes(2);
     expect(mocks.logEvent).toHaveBeenCalledExactlyOnceWith("error", {
       event: "sdp_cron_run",
+      worker: "operations",
       cron: "reconcile-operations",
       environment: "sandbox",
       status: "error",

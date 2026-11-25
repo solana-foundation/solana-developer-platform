@@ -2,12 +2,14 @@ import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { logCronRun } from "@/cron/run-event";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import { listenForOperationNotifications } from "@/db/operation-notifications";
+import type { OperationClaim } from "@/db/repositories/operations.repository";
 import type { BackgroundRunner } from "@/runtime/background";
 import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
 import { getLogger, runWithLogContext } from "@/runtime/logger";
 import { createOperationObservationRpc } from "@/services/earn/operation-observation-rpc";
 import { createOperationsService } from "@/services/operations.service";
 import type { Env } from "@/types/env";
+import { startEarnWorkerTelemetry } from "./earn-worker-telemetry";
 import { recoverOperationClaim } from "./reconcile-operations";
 
 const OPERATION_WORKER_CONCURRENCY = 4;
@@ -51,6 +53,16 @@ export function startOperationWorker(
   const consumers = new Map<SdpEnvironment, EnvironmentConsumer>(
     environments.map((environment) => [environment, { generation: 0, tasks: new Set() }])
   );
+  let listenerConnected = false;
+  const telemetry = startEarnWorkerTelemetry("operations", environments, (environment) => ({
+    active: consumers.get(environment)?.tasks.size ?? 0,
+    listener_connected: listenerConnected,
+  }));
+
+  function recordPickup(environment: SdpEnvironment, claim: OperationClaim): void {
+    if (claim.operation.status === "queued" && claim.attempt.executionRequestedAt !== null)
+      telemetry.pickedUp(environment, claim.attempt.executionRequestedAt);
+  }
 
   async function consume(
     environment: SdpEnvironment,
@@ -65,6 +77,7 @@ export function startOperationWorker(
             const generation = consumer.generation;
             observation.generation = generation;
             const next = await service.repository.claimNextRecovery(environment);
+            telemetry.completed(environment);
             if (next === null) {
               // A commit hint arriving during the empty claim must get another scan.
               if (generation !== consumer.generation) continue;
@@ -75,6 +88,7 @@ export function startOperationWorker(
               return;
             }
             const startedAt = Date.now();
+            recordPickup(environment, next.claim);
             const advanced = await recoverOperationClaim(
               env,
               next.scope,
@@ -82,8 +96,9 @@ export function startOperationWorker(
               observationBatch(consumer)
             );
             if (!advanced) {
+              telemetry.failed(environment);
               logCronRun(
-                { cron: "reconcile-operations", environment },
+                { cron: "reconcile-operations", environment, worker: "operations" },
                 {
                   status: "error",
                   durationMs: Date.now() - startedAt,
@@ -106,9 +121,10 @@ export function startOperationWorker(
       const startedAt = Date.now();
       const task = consume(environment, consumer, observation)
         .catch((error) => {
+          telemetry.failed(environment);
           observation.generation = consumer.generation;
           logCronRun(
-            { cron: "reconcile-operations", environment },
+            { cron: "reconcile-operations", environment, worker: "operations" },
             { status: "error", durationMs: Date.now() - startedAt, cause: error }
           );
         })
@@ -134,7 +150,11 @@ export function startOperationWorker(
   const listener = listenForOperationNotifications(env, {
     wake,
     connected: () => {
+      listenerConnected = true;
       for (const environment of environments) wake(environment);
+    },
+    disconnected: () => {
+      listenerConnected = false;
     },
     failed: (error) => {
       getLogger().error(
@@ -149,6 +169,7 @@ export function startOperationWorker(
     wake,
     async stop() {
       stopping = true;
+      telemetry.stop();
       await listener.stop();
       await Promise.allSettled([...consumers.values()].flatMap((consumer) => [...consumer.tasks]));
     },

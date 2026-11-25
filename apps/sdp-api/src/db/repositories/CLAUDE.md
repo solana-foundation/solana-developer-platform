@@ -266,6 +266,16 @@ status change, with its source statuses, target and ramp types (HOO-2033).
   cannot join an open transaction (a transactional client refuses its session
   lock), so it owns the transaction: MoonPay's observation runs inside it.
 
+## Earn recovery health
+
+`earn-recovery-health.repository.ts` reads one snapshot per minute over active
+queues and unresolved valuations. It never claims, writes, reads RPC or treats
+a provider wait as chain backlog. Match observation eligibility with
+`EARN_OBSERVATION_PREDICATES`; finalized current releases exclude their old
+queued obligations. Keep the missing-valuation predicate aligned with
+`idx_earn_valuation_health` so history growth cannot turn health into a full
+ledger scan. A failed query must not publish healthy zeros.
+
 ## Ramps: status pull queue
 
 The `sweep-ramp-transfer-statuses` cron recovers missed webhooks (HOO-2040).

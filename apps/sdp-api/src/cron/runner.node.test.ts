@@ -229,6 +229,11 @@ describe("startCron", () => {
         ],
       }))
     );
+    await Promise.all(fire(worker, "reconcile-operations", "sandbox"));
+    expect(runEvents("reconcile-operations", "sandbox")).toContainEqual([
+      "info",
+      expect.objectContaining({ status: "ok", wakeup_only: true }),
+    ]);
     await worker.handle.stop();
   });
 

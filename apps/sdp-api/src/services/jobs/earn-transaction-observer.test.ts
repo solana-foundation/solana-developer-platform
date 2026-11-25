@@ -190,7 +190,7 @@ describe("Earn observation wakeups", () => {
     start().wake("sandbox");
     await flush();
     expect(log).toHaveBeenCalledWith(
-      { cron: "reconcile-earn-vault-movements", environment: "sandbox" },
+      { cron: "earn-transaction-observer", environment: "sandbox", worker: "observer" },
       { status: "error", durationMs: 0, cause: error }
     );
     await vi.advanceTimersByTimeAsync(2_000);

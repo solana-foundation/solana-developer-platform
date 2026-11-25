@@ -19,6 +19,7 @@ import { deferred } from "@/test/helpers/deferred";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
+import { readEarnRecoveryHealth } from "./earn-recovery-health.repository";
 import {
   type CreateOperationInput,
   createOperationsRepository,
@@ -97,6 +98,55 @@ describe("durable operations repository", () => {
       );
     }
     await seedDefaultProjects(db, { organizationId: ORG, createdBy: USER, members: [USER] });
+  });
+
+  it("health watches accepted due actions, excluding unsigned, leased and future work", async () => {
+    const age = async () =>
+      (await readEarnRecoveryHealth(getDb(env), "sandbox")).find(
+        (row) => row.queue === "operations"
+      )?.overdue_seconds;
+    const claim = await createClaim();
+    await repository().release(scope, claim);
+    await getDb(env).execute(
+      "UPDATE operations SET next_check_at = now() - interval '30 seconds' WHERE id = ?",
+      [claim.operation.id]
+    );
+    expect(await age()).toBe(0);
+    const requested = await repository().claimAction(scope, claim.operation.id, claim.operation);
+    await getDb(env).execute(
+      "UPDATE operation_attempts SET execution_requested_at = (now() - interval '3 minutes')::text WHERE operation_id = ?",
+      [claim.operation.id]
+    );
+    await repository().requestExecution(scope, requested);
+    await repository().release(scope, requested);
+    expect(await age()).toBeGreaterThanOrEqual(30);
+    expect(
+      (await readEarnRecoveryHealth(getDb(env), "production")).find(
+        (row) => row.queue === "operations"
+      )?.overdue_seconds
+    ).toBe(0);
+    const held = await repository().claimNextRecovery("sandbox");
+    expect(held).not.toBeNull();
+    expect(await age()).toBe(0);
+    await getDb(env).execute(
+      "UPDATE operations SET claim_until = now() - interval '1 second', next_check_at = now() + interval '1 minute' WHERE id = ?",
+      [claim.operation.id]
+    );
+    expect(await age()).toBe(0);
+    await getDb(env).execute("UPDATE operations SET status = 'queued' WHERE id = ?", [
+      claim.operation.id,
+    ]);
+    expect(
+      (await readEarnRecoveryHealth(getDb(env), "sandbox")).find((row) => row.queue === "accepted")
+        ?.overdue_seconds
+    ).toBeGreaterThanOrEqual(180);
+    await getDb(env).execute("UPDATE operations SET status = 'awaiting_signature' WHERE id = ?", [
+      claim.operation.id,
+    ]);
+    expect(
+      (await readEarnRecoveryHealth(getDb(env), "sandbox")).find((row) => row.queue === "accepted")
+        ?.overdue_seconds
+    ).toBe(0);
   });
 
   it("concurrent same-key preparation records one immutable operation", async () => {

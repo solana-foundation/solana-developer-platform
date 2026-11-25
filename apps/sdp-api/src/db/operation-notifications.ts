@@ -9,6 +9,7 @@ export const OPERATION_WAKE_CHANNEL = "sdp_operations_due";
 interface OperationNotificationOptions {
   wake: (environment: SdpEnvironment) => void;
   connected: () => void;
+  disconnected?: () => void;
   failed: (cause: unknown) => void;
   track: (work: Promise<void>) => void;
 }
@@ -42,6 +43,7 @@ export function listenForOperationNotifications(
   function disconnected(client: Client, cause: unknown): void {
     if (current !== client) return;
     current = null;
+    options.disconnected?.();
     close(client);
     if (stopped) return;
     options.failed(cause);

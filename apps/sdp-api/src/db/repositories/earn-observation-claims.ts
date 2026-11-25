@@ -21,7 +21,8 @@ const tables = {
   withdrawal_action: "earn_vault_withdrawal_request_actions",
 } as const;
 
-const predicates = {
+/** Shared by claims and read-only health snapshots so obsolete hints cannot raise alerts. */
+export const EARN_OBSERVATION_PREDICATES = {
   movement: `item.execution_model = 'vault_direct'
     AND item.status IN (${sqlLiteralList(EARN_MOVEMENT_TRANSITIONS.vault_direct.finalized)})
     AND item.chain_finalized_at IS NULL`,
@@ -37,6 +38,8 @@ const predicates = {
         AND NOT ${FINALIZED_CURRENT_REDEMPTION_RELEASE_COVERS_REQUEST_SQL}
     )`,
 } as const;
+
+const predicates = EARN_OBSERVATION_PREDICATES;
 
 /** Claim disjoint due rows without holding a database transaction during RPC work. */
 export async function claimEarnObservations(

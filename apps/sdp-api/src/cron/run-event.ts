@@ -8,6 +8,9 @@ export const CRON_RUN_EVENT = "sdp_cron_run";
 export interface CronRegistration {
   cron: string;
   environment: SdpEnvironment | null;
+  /** A scheduler wake is not evidence that an asynchronous consumer completed work. */
+  wakeupOnly?: true;
+  worker?: "operations" | "observer";
 }
 
 /** A slot's outcome; the statuses and their meanings are `CRON_RUN_STATUSES`. */
@@ -38,6 +41,8 @@ export function logCronRun(registration: CronRegistration, record: CronRunRecord
     cron: registration.cron,
     environment: registration.environment,
     status: record.status,
+    ...(registration.worker === undefined ? {} : { worker: registration.worker }),
+    ...(registration.wakeupOnly === true ? { wakeup_only: true } : {}),
     // Transitional: the pre-ADR-0011 field, kept for one release so the live sdp-infra alerts
     // (keyed on `jsonPayload_monitor`) and the renamed ones (keyed on `cron`) both match whatever
     // order the API and alert deploys land in, and across a rollback. Drop it once the renamed

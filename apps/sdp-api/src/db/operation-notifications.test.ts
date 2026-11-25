@@ -26,16 +26,18 @@ function spies() {
   const wake = vi.fn();
   const connected = vi.fn();
   const failed = vi.fn();
+  const disconnected = vi.fn();
   const tasks: Promise<void>[] = [];
   const options = {
     wake,
     connected,
+    disconnected,
     failed,
     track: (work: Promise<void>) => {
       tasks.push(work);
     },
   };
-  return { clients, connect, query, end, wake, connected, failed, tasks, options };
+  return { clients, connect, query, end, wake, connected, disconnected, failed, tasks, options };
 }
 
 let mocks: ReturnType<typeof spies>;
@@ -73,6 +75,7 @@ describe("operation commit notification session", () => {
     emit("sandbox", "unrelated-channel");
     expect(mocks.wake).toHaveBeenCalledTimes(2);
     expect(mocks.failed).toHaveBeenCalledTimes(1);
+    expect(mocks.disconnected).not.toHaveBeenCalled();
   });
 
   it("reconnects and rescans after session failure without trusting missed notifications", async () => {
@@ -80,6 +83,7 @@ describe("operation commit notification session", () => {
     const first = required(mocks.clients[0]);
     first.emit("error", new Error("Connection lost"));
     first.emit("end");
+    expect(mocks.disconnected).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1_000);
     expect(mocks.connect).toHaveBeenCalledTimes(2);
     expect(mocks.query).toHaveBeenCalledTimes(2);
