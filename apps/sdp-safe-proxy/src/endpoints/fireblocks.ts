@@ -102,14 +102,27 @@ const cancelTransaction: AllowedEndpoint = {
   requestHeaders: [],
 };
 
-const createSigningProposal: AllowedEndpoint = {
+const signRawMessage: AllowedEndpoint = {
   method: "POST",
   path: "/v1/transactions",
   parameters: {},
   query: [],
   callers: ["api", "cron"],
   requestHeaders: [],
-  body: { field: "operation", values: ["RAW", "PROGRAM_CALL"] },
+  body: z.looseObject({ operation: z.literal("RAW") }),
+};
+
+const signProgramCall: AllowedEndpoint = {
+  method: "POST",
+  path: "/v1/transactions",
+  parameters: {},
+  query: [],
+  callers: ["api", "cron"],
+  requestHeaders: [],
+  body: z.looseObject({
+    operation: z.literal("PROGRAM_CALL"),
+    extraParameters: z.looseObject({ signOnly: z.literal(true) }),
+  }),
 };
 
 const createTransfer: AllowedEndpoint = {
@@ -119,7 +132,7 @@ const createTransfer: AllowedEndpoint = {
   query: [],
   callers: ["api"],
   requestHeaders: [],
-  body: { field: "operation", values: ["TRANSFER"] },
+  body: z.looseObject({ operation: z.literal("TRANSFER") }),
 };
 
 const endpoints: readonly AllowedEndpoint[] = [
@@ -134,7 +147,8 @@ const endpoints: readonly AllowedEndpoint[] = [
   createVault,
   activateVaultAsset,
   cancelTransaction,
-  createSigningProposal,
+  signRawMessage,
+  signProgramCall,
   createTransfer,
 ];
 

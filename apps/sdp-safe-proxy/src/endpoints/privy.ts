@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { type AllowedEndpoint, type ProviderDeclaration, token } from "./endpoint";
 
 const listWallets: AllowedEndpoint = {
@@ -34,7 +35,7 @@ const signTransaction: AllowedEndpoint = {
   query: [],
   callers: ["api", "cron"],
   requestHeaders: [],
-  body: { field: "method", values: ["signTransaction"] },
+  body: z.looseObject({ method: z.literal("signTransaction") }),
 };
 
 const signMessage: AllowedEndpoint = {
@@ -44,7 +45,7 @@ const signMessage: AllowedEndpoint = {
   query: [],
   callers: ["api", "cron"],
   requestHeaders: [],
-  body: { field: "method", values: ["signMessage"] },
+  body: z.looseObject({ method: z.literal("signMessage") }),
 };
 
 const endpoints: readonly AllowedEndpoint[] = [

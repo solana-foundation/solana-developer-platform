@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { AllowedEndpoint, BodyRule } from "./endpoint";
+import type { AllowedEndpoint } from "./endpoint";
 import { SAFE_PROXY_PROVIDERS, type SafeProxyProvider } from "./providers";
 
 export interface ProviderRequest {
@@ -79,18 +79,27 @@ function pathMatches(endpoint: AllowedEndpoint, segments: string[], query: strin
   );
 }
 
-function bodyAllowed(rule: BodyRule, body: string): boolean {
-  let parsed: unknown;
+const jsonSchema = z.json();
+
+function hasKeysEqualIgnoringCase(value: z.infer<typeof jsonSchema>): boolean {
+  if (Array.isArray(value)) return value.some(hasKeysEqualIgnoringCase);
+  if (value === null || typeof value !== "object") return false;
+  const keys = Object.keys(value).map((key) => key.toLowerCase());
+  return new Set(keys).size !== keys.length || Object.values(value).some(hasKeysEqualIgnoringCase);
+}
+
+function bodyAllowed(rule: z.ZodType, body: string): boolean {
+  let parsed: z.infer<typeof jsonSchema>;
   try {
-    parsed = JSON.parse(body);
+    parsed = jsonSchema.parse(JSON.parse(body));
   } catch {
     return false;
   }
-  if (JSON.stringify(parsed) !== body) return false;
-  const ruled = z.looseObject({ [rule.field]: z.enum(rule.values) }).safeParse(parsed);
-  if (!ruled.success) return false;
-  const field = rule.field.toLowerCase();
-  return Object.keys(ruled.data).every((key) => key === rule.field || key.toLowerCase() !== field);
+  return (
+    JSON.stringify(parsed) === body &&
+    !hasKeysEqualIgnoringCase(parsed) &&
+    rule.safeParse(parsed).success
+  );
 }
 
 export function matchEndpoint(request: ProviderRequest): MatchResult {
