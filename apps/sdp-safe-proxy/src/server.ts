@@ -59,7 +59,6 @@ const app = createApp({
     },
     privy: { appId: setting("PRIVY_APP_ID"), appSecret: setting("PRIVY_APP_SECRET") },
   },
-  fetch: globalThis.fetch,
   providerTimeoutMs: positiveInteger("SAFE_PROXY_PROVIDER_TIMEOUT_MS"),
   writeLog: (line) => process.stdout.write(`${JSON.stringify(line)}\n`),
   revision: runtime.revision,

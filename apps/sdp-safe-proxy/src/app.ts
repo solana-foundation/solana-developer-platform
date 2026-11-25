@@ -27,7 +27,6 @@ export interface AppDependencies {
   // `googleCaller` on Cloud Run, `localCaller` anywhere else.
   caller: MiddlewareHandler<AppEnv>;
   credentials: ProviderCredentials;
-  fetch: typeof fetch;
   providerTimeoutMs: number;
   writeLog: (line: RequestLogLine) => void;
   revision: string;
@@ -129,16 +128,13 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
 
     let answer: Response;
     try {
-      answer = await dependencies.fetch(
-        `https://${SAFE_PROXY_PROVIDERS[provider].hosts[0]}${target}`,
-        {
-          method: endpoint.method,
-          headers,
-          body: body === "" ? null : body,
-          redirect: "manual",
-          signal: AbortSignal.timeout(dependencies.providerTimeoutMs),
-        }
-      );
+      answer = await fetch(`https://${SAFE_PROXY_PROVIDERS[provider].hosts[0]}${target}`, {
+        method: endpoint.method,
+        headers,
+        body: body === "" ? null : body,
+        redirect: "manual",
+        signal: AbortSignal.timeout(dependencies.providerTimeoutMs),
+      });
     } catch {
       throw badGateway();
     }
