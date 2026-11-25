@@ -11,7 +11,7 @@ import {
 import { KeychainIbmHavenAdapter } from "@sdp/custody/providers/ibm-haven/keychain.adapter";
 import { aroundEach, describe, expect, it } from "vitest";
 import type { SigningConfigRecord } from "@/services/adapters/signing";
-import { createAdapterFromEncryptedConfig } from "@/services/domain/signing/provider-adapter-factory";
+import { createAdapterFromEncryptedConfig } from "@/services/custody/signing/provider-adapter-factory";
 import { createEncryptionService } from "@/services/encryption.service";
 import { inSandboxScope } from "@/test/helpers/cluster-rpc";
 import type { Env } from "@/types/env";

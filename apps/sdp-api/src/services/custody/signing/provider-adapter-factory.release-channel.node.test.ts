@@ -11,13 +11,13 @@ import {
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
 import * as events from "@/runtime/money-path-events";
 import type { SigningConfigRecord } from "@/services/adapters/signing";
-import type { CustodyCipher } from "@/services/custody-cipher/cipher-router";
 import {
   createAdapterFromEncryptedConfig,
   createFireblocksAdapterFromCredential,
   createPrivyAdapterFromCredential,
   type PrivyCredentialAdapterInput,
-} from "@/services/domain/signing/provider-adapter-factory";
+} from "@/services/custody/signing/provider-adapter-factory";
+import type { CustodyCipher } from "@/services/custody-cipher/cipher-router";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { inSandboxScope } from "@/test/helpers/cluster-rpc";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";

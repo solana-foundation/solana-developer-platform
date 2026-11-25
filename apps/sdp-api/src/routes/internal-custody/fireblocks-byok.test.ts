@@ -14,7 +14,7 @@ import { createCredentialSecretStore } from "@/services/credential-secret-store"
 import { trackFireblocksProposals } from "@/services/custody/fireblocks-proposal-tracking";
 import { eraseExpiredFireblocksCsrs } from "@/services/custody/fireblocks-registration.service";
 import { checkDueProviderPolicies } from "@/services/custody/provider-policy";
-import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
+import { CustodyRuntimeTargets } from "@/services/custody/signing/custody-runtime-target";
 import { reconcileFireblocksProposals } from "@/services/jobs/reconcile-fireblocks-proposals";
 import { ProviderCredentialSecretCleanupStore } from "@/services/stores/provider-credential-secret-cleanup.store";
 import { inSandboxScope } from "@/test/helpers/cluster-rpc";

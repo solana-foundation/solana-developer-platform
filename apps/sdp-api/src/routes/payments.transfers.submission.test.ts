@@ -16,7 +16,7 @@ import { createPostgresPaymentsRepository } from "@/db/repositories/payments.rep
 import { createTenantScope } from "@/lib/tenant-scope";
 import { rootLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
-import { admittedSigner } from "@/services/domain/signing/admitted-signer";
+import { admittedSigner } from "@/services/custody/signing/admitted-signer";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import * as signedSubmission from "@/services/payments/signed-submission";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";

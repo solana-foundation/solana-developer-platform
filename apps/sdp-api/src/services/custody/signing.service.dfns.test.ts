@@ -2,7 +2,7 @@ import { KeychainDfnsAdapter } from "@sdp/custody/providers/dfns/keychain.adapte
 import { isFullSigningPort } from "@sdp/custody/signing";
 import { aroundEach, describe, expect, it } from "vitest";
 import type { SigningConfigRecord } from "@/services/adapters/signing";
-import { createAdapterFromEncryptedConfig } from "@/services/domain/signing/provider-adapter-factory";
+import { createAdapterFromEncryptedConfig } from "@/services/custody/signing/provider-adapter-factory";
 import { createEncryptionService } from "@/services/encryption.service";
 import { inSandboxScope } from "@/test/helpers/cluster-rpc";
 import { TEST_LEGACY_CUSTODY_KEY } from "@/test/helpers/custody-cipher";

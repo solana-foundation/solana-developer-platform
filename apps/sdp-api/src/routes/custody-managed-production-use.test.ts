@@ -2,7 +2,7 @@ import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
-import { createSigningService } from "@/services/domain/signing.service";
+import { createSigningService } from "@/services/custody/signing.service";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";

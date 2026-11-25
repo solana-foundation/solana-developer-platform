@@ -5,7 +5,7 @@ import * as custodyProvisioning from "@/services/custody/provisioning";
 import {
   createProviderWallet,
   privyWalletExternalId,
-} from "@/services/domain/signing/provider-wallet-lifecycle";
+} from "@/services/custody/signing/provider-wallet-lifecycle";
 import { env } from "@/test/helpers/env";
 import { required } from "@/test/helpers/required";
 

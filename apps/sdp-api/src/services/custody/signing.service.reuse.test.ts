@@ -6,7 +6,7 @@ import {
   provisionPrivyWallet,
   provisionUtilaWallet,
 } from "@/services/custody/provisioning";
-import { SigningService } from "@/services/domain/signing.service";
+import { SigningService } from "@/services/custody/signing.service";
 import * as providerAvailability from "@/services/provider-availability.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import { env as testEnv } from "@/test/helpers/env";

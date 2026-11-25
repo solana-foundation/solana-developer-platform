@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_CUSTODY_SIGNING_TIMEOUT_MS } from "@/services/domain/signing/signing-timeout";
+import { MAX_CUSTODY_SIGNING_TIMEOUT_MS } from "@/services/custody/signing/signing-timeout";
 import {
   OPERATION_WORKER_BOUNDARY_MS,
   OPERATION_WORKER_BUDGET_MS,

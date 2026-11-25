@@ -42,7 +42,7 @@ import * as meteredQuota from "@/middleware/metered-quota";
 import * as admission from "@/routes/earn/handlers/admission";
 import * as catalogue from "@/routes/earn/strategy-catalogue";
 import { AuditService } from "@/services/audit.service";
-import { admittedSigner } from "@/services/domain/signing/admitted-signer";
+import { admittedSigner } from "@/services/custody/signing/admitted-signer";
 import * as executionRegistry from "@/services/earn/execution-registry";
 import * as observationRpc from "@/services/earn/operation-observation-rpc";
 import * as strategyMint from "@/services/earn/strategy-mint";

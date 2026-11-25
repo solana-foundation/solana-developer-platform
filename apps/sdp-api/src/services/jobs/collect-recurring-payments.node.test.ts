@@ -70,7 +70,7 @@ vi.mock("@/db/repositories/payment-recurring-payments.repository.postgres", () =
   }),
 }));
 
-vi.mock("@/services/domain/signing/custody-runtime-target", () => ({
+vi.mock("@/services/custody/signing/custody-runtime-target", () => ({
   CustodyRuntimeTargets: class {
     findOperationalWalletById = mocks.findOperationalWalletById;
   },

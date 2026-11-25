@@ -383,14 +383,14 @@ for (const { id, names, allowed } of [
     id: "fireblocks-transfer-cancellation",
     names: ["cancelFireblocksTransfer", "cancelFireblocksTransaction"],
     allowed: [
-      "apps/sdp-api/src/services/domain/signing/admitted-proposer.ts",
-      "apps/sdp-api/src/services/domain/signing/admitted-transaction-proposer.ts",
+      "apps/sdp-api/src/services/custody/signing/admitted-proposer.ts",
+      "apps/sdp-api/src/services/custody/signing/admitted-transaction-proposer.ts",
     ],
   },
   {
     id: "custody-proposal-recovery-construction",
     names: ["proposalRecovery", "proposalCanceller"],
-    allowed: ["apps/sdp-api/src/services/domain/signing/custody-runtime-target.ts"],
+    allowed: ["apps/sdp-api/src/services/custody/signing/custody-runtime-target.ts"],
   },
 ]) {
   test(`${id} pins both worker and manual cancellation entry points`, () => {

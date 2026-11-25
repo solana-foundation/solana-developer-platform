@@ -22,7 +22,7 @@ import type { AuditLogEntry } from "@/services/audit.service";
 import {
   type CustodyProposalRecovery,
   ProposalAdmissionRefusedError,
-} from "@/services/domain/signing/admitted-proposer";
+} from "@/services/custody/signing/admitted-proposer";
 import * as ledgerFactory from "@/services/jobs/proposal-recovery-ledger";
 import type { ProposalLedger } from "@/services/payments/custody-proposal-ledger";
 import * as signer from "@/services/solana/signer";
