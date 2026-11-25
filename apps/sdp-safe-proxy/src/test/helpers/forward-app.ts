@@ -3,10 +3,13 @@ import { generateKeyPairSync } from "node:crypto";
 import type { SafeProxyCaller } from "@sdp/safe-proxy-endpoints/callers";
 import { REQUEST_ID_HEADER } from "@sdp/safe-proxy-endpoints/protocol";
 import { createCallerIdentityVerifier } from "@sdp/service-call/caller-identity";
-import { createLocalJWKSet, type JWTVerifyGetKey, SignJWT } from "jose";
-import { createApp, type RequestLogLine } from "@/app";
-import { createTokenCallerCheck } from "@/caller";
-import type { ProviderCredentials } from "@/provider-auth";
+import { createLocalJWKSet, importPKCS8, type JWTVerifyGetKey, SignJWT } from "jose";
+import {
+  createApp,
+  createTokenCallerCheck,
+  type ProviderCredentials,
+  type RequestLogLine,
+} from "@/app";
 
 const AUDIENCE = "https://safe-proxy.mock.invalid";
 const NOW_MS = 1_800_000_000_000;
@@ -30,7 +33,10 @@ export const FIREBLOCKS_PUBLIC_KEY_PEM = fireblocksKeys.publicKey;
 
 export const PLATFORM_CREDENTIALS = {
   privy: { appId: "app_7k2", appSecret: "sécret" },
-  fireblocks: { apiKey: "fireblocks-key-k4w", apiSecretPem: fireblocksKeys.privateKey },
+  fireblocks: {
+    apiKey: "fireblocks-key-k4w",
+    privateKey: await importPKCS8(fireblocksKeys.privateKey, "RS256"),
+  },
 } as const satisfies ProviderCredentials;
 
 export interface ProviderCall {
