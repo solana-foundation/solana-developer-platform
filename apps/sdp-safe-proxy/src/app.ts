@@ -8,6 +8,7 @@ import { FROM_PROVIDER_HEADER } from "./endpoints/protocol";
 import { SAFE_PROXY_PROVIDERS, type SafeProxyProvider } from "./endpoints/providers";
 import { badGateway, forbidden, notFound } from "./errors";
 import { type AppEnv, bodyWithinLimit, requestLog } from "./middleware";
+import { providerTarget } from "./utils";
 
 export interface ProviderCredentials {
   fireblocks: { apiKey: string; privateKey: CryptoKey };
@@ -37,12 +38,9 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
     const caller = c.get("caller");
     line.caller = caller;
 
-    // The target is cut from the path as it was sent, not from Hono's decoded parameters: it is
-    // what gets matched, signed and forwarded.
     const provider = c.req.param("provider");
-    const { pathname, search } = new URL(c.req.url);
-    if (!pathname.startsWith(`/${provider}/`)) throw notFound();
-    const target = pathname.slice(provider.length + 1) + search;
+    const target = providerTarget(c.req.url, provider);
+    if (target === null) throw notFound();
     const body = await c.req.text();
 
     const match = matchEndpoint({ provider, method: c.req.method, path: target, body });
