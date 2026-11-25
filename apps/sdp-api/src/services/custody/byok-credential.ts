@@ -3,7 +3,6 @@ import { CUSTODY_CLUSTER_CONFIG } from "@sdp/custody/cluster-config";
 import { checkFireblocksCredential } from "@sdp/custody/providers/fireblocks/credential";
 import { checkPrivyCredential } from "@sdp/custody/providers/privy/credential";
 import { hashString } from "@sdp/payments/hash";
-import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { ByokCustodyProvider } from "@sdp/types/custody";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
@@ -124,7 +123,6 @@ export async function checkByokCredential(
 ): Promise<ByokCredentialCheck> {
   if (credential.provider === "privy") {
     const status = await checkPrivyCredential(createRuntime(), {
-      cluster: currentClusterScope().cluster,
       appId: credential.appId,
       appSecret: credential.appSecret,
     });
@@ -133,7 +131,6 @@ export async function checkByokCredential(
       : { status };
   }
   const result = await checkFireblocksCredential({
-    cluster: currentClusterScope().cluster,
     apiKey: credential.apiKey,
     privateKeyPem: credential.apiSecretPem,
     vaultAccountId: credential.vaultAccountId,

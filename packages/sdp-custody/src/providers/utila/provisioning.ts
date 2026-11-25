@@ -1,7 +1,6 @@
 import { summarizeUpstreamErrorBody } from "@sdp/redaction/upstream-error";
-import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { importPKCS8, SignJWT } from "jose";
-import { CUSTODY_CLUSTER_CONFIG } from "#/cluster-config";
+import { custodyClusterConfig } from "#/cluster-config";
 import { normalizePem } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
@@ -12,7 +11,6 @@ export interface ProvisionUtilaOptions {
 }
 
 export interface UtilaProvisioningConfig {
-  cluster: SolanaCluster;
   serviceAccountEmail?: string;
   serviceAccountPrivateKeyPem?: string;
   vaultId?: string;
@@ -32,7 +30,7 @@ export async function provisionUtilaWallet(
   const serviceAccountEmail = config.serviceAccountEmail;
   const serviceAccountPrivateKeyPem = config.serviceAccountPrivateKeyPem;
   const configuredVaultId = config.vaultId;
-  const { origin, network } = CUSTODY_CLUSTER_CONFIG[config.cluster].utila;
+  const { origin, network } = custodyClusterConfig().utila;
 
   if (!serviceAccountEmail || !serviceAccountPrivateKeyPem || !configuredVaultId) {
     throw new SigningError(

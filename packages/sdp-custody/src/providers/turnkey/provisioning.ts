@@ -1,6 +1,5 @@
-import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { ApiKeyStamper } from "@solana/keychain-turnkey";
-import { CUSTODY_CLUSTER_CONFIG } from "#/cluster-config";
+import { custodyClusterConfig } from "#/cluster-config";
 import {
   normalizeProviderNameFragment,
   parseJsonResponse,
@@ -34,7 +33,6 @@ export interface ProvisionTurnkeyOptions {
 }
 
 export interface TurnkeyProvisioningConfig {
-  cluster: SolanaCluster;
   apiPublicKey?: string;
   apiPrivateKey?: string;
   organizationId?: string;
@@ -62,7 +60,6 @@ export async function provisionTurnkeyPrivateKey(
   }
 
   const created = await turnkeyRequest<TurnkeyActivityResponse>(runtime, {
-    cluster: config.cluster,
     apiPublicKey,
     apiPrivateKey,
     method: "POST",
@@ -96,7 +93,6 @@ export async function provisionTurnkeyPrivateKey(
 }
 
 interface TurnkeyRequestParams {
-  cluster: SolanaCluster;
   method: "POST";
   path: string;
   apiPublicKey: string;
@@ -116,19 +112,17 @@ async function turnkeyRequest<T>(
   // ApiKeyStamper is currently synchronous, but normalize in case the SDK
   // ever changes stamp() to return a Promise.
   const stamp = await Promise.resolve(stamper.stamp(body));
+  const url = `${custodyClusterConfig().turnkey.origin}${params.path}`;
 
   try {
-    const response = await runtime.fetch(
-      `${CUSTODY_CLUSTER_CONFIG[params.cluster].turnkey.origin}${params.path}`,
-      {
-        method: params.method,
-        headers: {
-          "Content-Type": "application/json",
-          [stamp.stampHeaderName]: stamp.stampHeaderValue,
-        },
-        body,
-      }
-    );
+    const response = await runtime.fetch(url, {
+      method: params.method,
+      headers: {
+        "Content-Type": "application/json",
+        [stamp.stampHeaderName]: stamp.stampHeaderValue,
+      },
+      body,
+    });
 
     if (!response.ok) {
       const errorText = await readErrorResponseText(response);

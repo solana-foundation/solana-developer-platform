@@ -1,6 +1,5 @@
 import { checkPrivyCredential } from "@sdp/custody/providers/privy/credential";
 import { hashString } from "@sdp/payments/hash";
-import { currentClusterScope } from "@sdp/rpc/scope";
 import { badRequest } from "@/lib/errors";
 import { createRuntime } from "@/services/custody/provisioning";
 
@@ -21,10 +20,7 @@ export async function getPrivyProviderAccountFingerprint(appId: string): Promise
 export async function assertPrivyCredentialAccepted(
   credential: PrivyCredentialAuthentication
 ): Promise<void> {
-  const result = await checkPrivyCredential(createRuntime(), {
-    ...credential,
-    cluster: currentClusterScope().cluster,
-  });
+  const result = await checkPrivyCredential(createRuntime(), credential);
   if (result === "failed") {
     throw badRequest(PRIVY_CREDENTIALS_REJECTED_MESSAGE, { reason: "invalid_credentials" });
   }

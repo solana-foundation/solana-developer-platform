@@ -1,5 +1,4 @@
-import type { SolanaCluster } from "@sdp/types/well-known-tokens";
-import { CUSTODY_CLUSTER_CONFIG } from "#/cluster-config";
+import { custodyClusterConfig } from "#/cluster-config";
 import { parseJsonResponse, readErrorResponseText } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
@@ -7,7 +6,6 @@ import { SigningError } from "#/signing";
 type AnchorageHttpMethod = "GET" | "POST" | "DELETE";
 
 interface AnchorageRequestParams {
-  cluster: SolanaCluster;
   method: AnchorageHttpMethod;
   apiKey: string;
   path: string;
@@ -30,7 +28,6 @@ export interface DeleteAnchorageOptions {
 }
 
 export interface AnchorageProvisioningConfig {
-  cluster: SolanaCluster;
   apiKey?: string;
 }
 
@@ -42,12 +39,11 @@ export async function provisionAnchorageWallet(
   const { apiKey } = resolveAnchorageConfig(config);
 
   const created = await anchorageRequest<unknown>(runtime, {
-    cluster: config.cluster,
     method: "POST",
     apiKey,
     path: "/v1/wallets",
     body: {
-      network: CUSTODY_CLUSTER_CONFIG[config.cluster].anchorage.network,
+      network: custodyClusterConfig().anchorage.network,
       ...(options.walletLabel ? { label: options.walletLabel } : {}),
     },
   });
@@ -63,7 +59,6 @@ export async function deleteAnchorageWallet(
   const { apiKey } = resolveAnchorageConfig(config);
 
   await anchorageRequest<void>(runtime, {
-    cluster: config.cluster,
     method: "DELETE",
     apiKey,
     path: `/v1/wallets/${encodeURIComponent(options.walletId)}`,
@@ -86,9 +81,10 @@ async function anchorageRequest<T>(
   runtime: CustodyProvisioningRuntime,
   params: AnchorageRequestParams
 ): Promise<T> {
+  const url = `${custodyClusterConfig().anchorage.origin}${params.path}`;
   try {
     const requestWithAuth = (authStrategy: AnchorageAuthStrategy) =>
-      runtime.fetch(`${CUSTODY_CLUSTER_CONFIG[params.cluster].anchorage.origin}${params.path}`, {
+      runtime.fetch(url, {
         method: params.method,
         headers: buildAnchorageHeaders(params, authStrategy),
         body: params.body ? JSON.stringify(params.body) : undefined,

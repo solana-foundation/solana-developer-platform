@@ -95,7 +95,6 @@ const providerAdapterFactories = {
     const apiSecretPem = await cipher.decrypt(orgId, parsed.apiSecretEncrypted);
 
     return new KeychainFireblocksAdapter({
-      cluster: currentClusterScope().cluster,
       apiKey: parsed.apiKey,
       apiSecretPem,
       vaultAccountId: parsed.vaultAccountId,
@@ -149,7 +148,6 @@ const providerAdapterFactories = {
 
     return new KeychainParaAdapter({
       apiKey,
-      cluster: currentClusterScope().cluster,
       requestDelayMs,
     });
   },
@@ -175,19 +173,18 @@ const providerAdapterFactories = {
   },
   dfns: async ({ env }) => {
     return new KeychainDfnsAdapter({
-      client: await createDfnsApiClient(env, currentClusterScope().cluster),
+      client: await createDfnsApiClient(env),
     });
   },
   ibm_haven: async ({ env }) => {
     return new KeychainIbmHavenAdapter({
-      client: await createIbmHavenApiClient(env, currentClusterScope().cluster),
+      client: await createIbmHavenApiClient(env),
     });
   },
   anchorage: async () => new LifecycleOnlyAdapter("anchorage"),
   utila: async ({ env, parsed }) => {
     return new KeychainUtilaAdapter(
       buildKeychainUtilaConfig(env, {
-        cluster: currentClusterScope().cluster,
         vaultId: parsed.vaultId,
       })
     );
@@ -405,7 +402,6 @@ export function createFireblocksAdapterFromCredential(
     "fireblocks",
     "byok",
     new KeychainFireblocksAdapter({
-      cluster: currentClusterScope().cluster,
       apiKey: input.apiKey,
       apiSecretPem: input.apiSecretPem,
       vaultAccountId: input.walletId.startsWith("fb_") ? input.walletId.slice(3) : input.walletId,

@@ -1,5 +1,4 @@
 import type { ProviderPolicyCheck } from "@sdp/types/custody";
-import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { FireblocksApiError, fireblocksRequest } from "./http";
@@ -220,7 +219,6 @@ export function fireblocksUngatedRuleJudged(
 export async function readFireblocksPolicy(
   runtime: CustodyProvisioningRuntime,
   config: {
-    cluster: SolanaCluster;
     apiKey: string;
     apiSecretPem: string;
   }
@@ -228,7 +226,6 @@ export async function readFireblocksPolicy(
   try {
     const parsed = parseFireblocksPolicy(
       await fireblocksRequest<unknown>(runtime, {
-        cluster: config.cluster,
         apiKey: config.apiKey,
         apiSecretPem: config.apiSecretPem,
         method: "GET",

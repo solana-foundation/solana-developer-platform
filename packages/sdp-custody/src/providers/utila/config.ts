@@ -1,4 +1,3 @@
-import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { normalizeUtilaWalletId } from "#/provider-wallet-ids";
 import { SigningError } from "#/signing";
 import type { KeychainUtilaConfig } from "./keychain-config";
@@ -18,7 +17,6 @@ export interface UtilaEnv {
 }
 
 interface BuildUtilaConfigOptions {
-  cluster: SolanaCluster;
   defaultWalletId?: string | null;
   defaultWalletIdFromEnv?: boolean;
   missingMessage?: string;
@@ -48,7 +46,6 @@ export function buildKeychainUtilaConfig(
     serviceAccountEmail,
     serviceAccountPrivateKeyPem,
     vaultId,
-    cluster: options.cluster,
     pollIntervalMs: parseOptionalPositiveInteger(
       env.UTILA_POLL_INTERVAL_MS,
       "UTILA_POLL_INTERVAL_MS"

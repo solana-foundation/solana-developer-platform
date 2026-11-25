@@ -16,7 +16,6 @@ import {
 } from "@sdp/custody/providers/dfns/client";
 import { KeychainFireblocksAdapter } from "@sdp/custody/providers/fireblocks/keychain.adapter";
 import { SigningError } from "@sdp/custody/signing";
-import { currentClusterScope } from "@sdp/rpc/scope";
 import {
   deleteAnchorageWallet,
   provisionAnchorageWallet,
@@ -97,7 +96,6 @@ const providerWalletLifecycleRegistry = {
         })
       );
       const adapter = new KeychainFireblocksAdapter({
-        cluster: currentClusterScope().cluster,
         apiKey: parsed.apiKey,
         apiSecretPem,
         vaultAccountId: provisioned.vaultAccountId,
@@ -187,7 +185,7 @@ const providerWalletLifecycleRegistry = {
   dfns: {
     create: async ({ env, params }) => {
       const provisioned = await withProvisioningError("DFNS", async () => {
-        const client = await createDfnsApiClient(env, currentClusterScope().cluster);
+        const client = await createDfnsApiClient(env);
         return client.wallets.createWallet({
           body: params.label ? { name: params.label } : {},
         });
@@ -206,7 +204,7 @@ const providerWalletLifecycleRegistry = {
   ibm_haven: {
     create: async ({ env, params }) => {
       const provisioned = await withProvisioningError("IBM Digital Asset Haven", async () => {
-        const client = await createIbmHavenApiClient(env, currentClusterScope().cluster);
+        const client = await createIbmHavenApiClient(env);
         return client.wallets.createWallet({
           body: params.label ? { name: params.label } : {},
         });

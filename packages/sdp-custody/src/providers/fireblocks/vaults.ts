@@ -1,4 +1,3 @@
-import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
@@ -14,7 +13,6 @@ export interface FireblocksVaultPage {
   nextCursor: string | null;
 }
 interface VaultAccess {
-  cluster: SolanaCluster;
   apiKey: string;
   apiSecretPem: string;
   assetId: "SOL" | "SOL_TEST";
@@ -42,7 +40,6 @@ function vault(value: unknown, assetId: string): FireblocksVault {
 }
 function requestConfig(config: VaultAccess) {
   return {
-    cluster: config.cluster,
     apiKey: config.apiKey,
     apiSecretPem: config.apiSecretPem,
     method: "GET" as const,

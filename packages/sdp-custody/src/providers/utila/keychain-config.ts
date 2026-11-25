@@ -1,5 +1,3 @@
-import type { SolanaCluster } from "@sdp/types/well-known-tokens";
-
 // ═══════════════════════════════════════════════════════════════════════════
 // Utila Configuration
 // ═══════════════════════════════════════════════════════════════════════════
@@ -13,9 +11,6 @@ export interface KeychainUtilaConfig {
 
   /** Utila vault ID */
   vaultId: string;
-
-  /** The cluster whose Utila network resource the signer uses. */
-  cluster: SolanaCluster;
 
   /** Polling interval in milliseconds (default: 1000) */
   pollIntervalMs?: number;

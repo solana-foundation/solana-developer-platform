@@ -22,7 +22,6 @@ import {
 import { KeychainFireblocksAdapter } from "@sdp/custody/providers/fireblocks/keychain.adapter";
 import type { SigningPort } from "@sdp/custody/signing";
 import { SigningError } from "@sdp/custody/signing";
-import { currentClusterScope } from "@sdp/rpc/scope";
 import type { CustodyProvider } from "@sdp/types/custody";
 import type { MovementId, WaistMovement } from "@sdp/types/movements";
 import { getBase58Codec } from "@solana/codecs";
@@ -520,7 +519,6 @@ export class SigningService {
 
     // Create the adapter to get the public key
     const adapter = new KeychainFireblocksAdapter({
-      cluster: currentClusterScope().cluster,
       apiKey: options.apiKey,
       apiSecretPem: options.apiSecretPem,
       vaultAccountId: options.vaultAccountId,
@@ -812,7 +810,7 @@ export class SigningService {
       );
     }
 
-    const client = await createDfnsApiClient(this.env, currentClusterScope().cluster);
+    const client = await createDfnsApiClient(this.env);
 
     const wallet = await client.wallets.createWallet({
       body: options.walletLabel ? { name: options.walletLabel } : {},
@@ -863,7 +861,7 @@ export class SigningService {
       );
     }
 
-    const client = await createIbmHavenApiClient(this.env, currentClusterScope().cluster);
+    const client = await createIbmHavenApiClient(this.env);
 
     const wallet = await client.wallets.createWallet({
       body: options.walletLabel ? { name: options.walletLabel } : {},

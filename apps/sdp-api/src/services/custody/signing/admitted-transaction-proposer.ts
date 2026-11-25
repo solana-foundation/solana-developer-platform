@@ -5,7 +5,6 @@ import {
   type FireblocksTransferResult,
   readFireblocksTransfer,
 } from "@sdp/custody/providers/fireblocks/transfers";
-import { currentClusterScope } from "@sdp/rpc/scope";
 import {
   isFireblocksTransactionCancellable,
   isFireblocksTransactionCancelled,
@@ -105,14 +104,13 @@ export interface AdmittedTransactionContext {
 }
 
 function assertAccount(access: ProposalAccess, binding: OperationProposalBinding): void {
-  const { cluster } = currentClusterScope();
   if (
     access.connectionId !== binding.connectionId ||
     access.accountFingerprint !== binding.accountFingerprint ||
     access.vaultAccountId !== binding.vaultAccountId ||
     access.publicKey !== binding.sourceAddress ||
-    !isFireblocksNativeAsset(cluster, access.assetId) ||
-    !isFireblocksNativeAsset(cluster, binding.assetId)
+    !isFireblocksNativeAsset(access.assetId) ||
+    !isFireblocksNativeAsset(binding.assetId)
   )
     throw conflict("Custody transaction proposal account changed");
 }

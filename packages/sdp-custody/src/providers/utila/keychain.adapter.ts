@@ -8,7 +8,7 @@
 import type { SolanaSigner } from "@solana/keychain-core";
 import { createUtilaSigner } from "@solana/keychain-utila";
 import type { Address, TransactionSigner } from "@solana/kit";
-import { CUSTODY_CLUSTER_CONFIG } from "#/cluster-config";
+import { custodyClusterConfig } from "#/cluster-config";
 import { denormalizeUtilaWalletId } from "#/provider-wallet-ids";
 import { BaseKeychainAdapter } from "#/providers/base-keychain.adapter";
 import { SigningError } from "#/signing";
@@ -49,7 +49,7 @@ export class KeychainUtilaAdapter extends BaseKeychainAdapter {
       serviceAccountPrivateKeyPem: this.config.serviceAccountPrivateKeyPem,
       vaultId: this.config.vaultId,
       walletId: denormalizeUtilaWalletId(normalizedWalletId),
-      network: CUSTODY_CLUSTER_CONFIG[this.config.cluster].utila.network,
+      network: custodyClusterConfig().utila.network,
       pollIntervalMs: this.config.pollIntervalMs,
       maxPollAttempts: this.config.maxPollAttempts,
       designatedSigners: this.config.designatedSigners,

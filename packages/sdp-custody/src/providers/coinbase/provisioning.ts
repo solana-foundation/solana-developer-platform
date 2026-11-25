@@ -1,5 +1,4 @@
-import type { SolanaCluster } from "@sdp/types/well-known-tokens";
-import { CUSTODY_CLUSTER_CONFIG } from "#/cluster-config";
+import { custodyClusterConfig } from "#/cluster-config";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
 import {
@@ -40,7 +39,6 @@ export interface ProvisionCoinbaseCdpOptions {
 }
 
 export interface CoinbaseCdpProvisioningConfig {
-  cluster: SolanaCluster;
   apiKeyId?: string;
   apiKeySecret?: string;
   walletSecret?: string;
@@ -67,18 +65,16 @@ export async function provisionCoinbaseCdpAccount(
     );
   }
 
-  const { cluster } = config;
   const name = await deriveCoinbaseCdpAccountName({
     accountScope: config.accountScope,
     organizationId: options.orgId,
     projectId: options.projectId,
-    network: CUSTODY_CLUSTER_CONFIG[cluster].coinbase_cdp.network,
+    network: custodyClusterConfig().coinbase_cdp.network,
     walletSeed: options.walletSeed,
   });
 
   try {
     const created = await coinbaseCdpRequest<CoinbaseCdpSolanaAccountResponse>(runtime, {
-      cluster,
       method: "POST",
       path: "/v2/solana/accounts",
       apiKeyId,
@@ -112,7 +108,6 @@ export async function provisionCoinbaseCdpAccount(
 
     try {
       const existingByName = await coinbaseCdpRequest<CoinbaseCdpSolanaAccountResponse>(runtime, {
-        cluster,
         method: "GET",
         path: `/v2/solana/accounts/by-name/${encodeURIComponent(name)}`,
         apiKeyId,

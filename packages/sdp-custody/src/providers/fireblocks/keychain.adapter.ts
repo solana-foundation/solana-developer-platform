@@ -18,7 +18,7 @@ import { SignerErrorCode } from "@solana/keychain-core";
 import { createFireblocksSigner } from "@solana/keychain-fireblocks";
 import type { Address } from "@solana/kit";
 import { z } from "zod";
-import { CUSTODY_CLUSTER_CONFIG } from "#/cluster-config";
+import { custodyClusterConfig } from "#/cluster-config";
 import { BaseKeychainAdapter } from "#/providers/base-keychain.adapter";
 import { SigningError } from "#/signing";
 import type { KeychainFireblocksConfig } from "./keychain-config";
@@ -87,7 +87,7 @@ export class KeychainFireblocksAdapter extends BaseKeychainAdapter {
   }
 
   private async createInitializedSigner(vaultAccountId: string): Promise<FireblocksSigner> {
-    const { origin, nativeAsset } = CUSTODY_CLUSTER_CONFIG[this.config.cluster].fireblocks;
+    const { origin, nativeAsset } = custodyClusterConfig().fireblocks;
     return createFireblocksSigner({
       apiKey: this.config.apiKey,
       privateKeyPem: this.config.apiSecretPem,

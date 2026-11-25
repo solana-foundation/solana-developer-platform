@@ -41,7 +41,6 @@ import {
   provisionUtilaWallet as provisionUtilaWalletInCustody,
 } from "@sdp/custody/providers/utila/provisioning";
 import type { CustodyProvisioningRuntime } from "@sdp/custody/shared/runtime";
-import { currentClusterScope } from "@sdp/rpc/scope";
 import type { PrivyCredentialAuthentication } from "@/services/custody/privy-credential";
 import type { Env } from "@/types/env";
 
@@ -77,7 +76,6 @@ export async function provisionFireblocksVaultAccount(
   return provisionFireblocksVaultAccountInCustody(
     createRuntime(),
     {
-      cluster: currentClusterScope().cluster,
       apiKey: options.apiKey ?? env.FIREBLOCKS_API_KEY,
       apiSecretPem: options.apiSecretPem ?? env.FIREBLOCKS_API_SECRET,
     },
@@ -93,7 +91,6 @@ export async function provisionPrivyWallet(
   return provisionPrivyWalletInCustody(
     createRuntime(),
     {
-      cluster: currentClusterScope().cluster,
       appId: authentication?.appId ?? env.PRIVY_APP_ID,
       appSecret: authentication?.appSecret ?? env.PRIVY_APP_SECRET,
     },
@@ -109,7 +106,6 @@ export async function findPrivyWalletByExternalId(
   return findPrivyWalletByExternalIdInCustody(
     createRuntime(),
     {
-      cluster: currentClusterScope().cluster,
       appId: authentication?.appId ?? env.PRIVY_APP_ID,
       appSecret: authentication?.appSecret ?? env.PRIVY_APP_SECRET,
     },
@@ -124,7 +120,6 @@ export async function provisionCoinbaseCdpAccount(
   return provisionCoinbaseCdpAccountInCustody(
     createRuntime(),
     {
-      cluster: currentClusterScope().cluster,
       apiKeyId: env.COINBASE_CDP_API_KEY_ID,
       apiKeySecret: env.COINBASE_CDP_API_KEY_SECRET,
       walletSecret: env.COINBASE_CDP_WALLET_SECRET,
@@ -138,11 +133,7 @@ export async function provisionParaWallet(
   env: Env,
   options: ProvisionParaOptions
 ): Promise<ProvisionParaResult> {
-  return provisionParaWalletInCustody(
-    createRuntime(),
-    { cluster: currentClusterScope().cluster, apiKey: env.PARA_API_KEY },
-    options
-  );
+  return provisionParaWalletInCustody(createRuntime(), { apiKey: env.PARA_API_KEY }, options);
 }
 
 export async function provisionTurnkeyPrivateKey(
@@ -152,7 +143,6 @@ export async function provisionTurnkeyPrivateKey(
   return provisionTurnkeyPrivateKeyInCustody(
     createRuntime(),
     {
-      cluster: currentClusterScope().cluster,
       apiPublicKey: env.TURNKEY_API_PUBLIC_KEY,
       apiPrivateKey: env.TURNKEY_API_PRIVATE_KEY,
       organizationId: env.TURNKEY_ORGANIZATION_ID,
@@ -168,7 +158,6 @@ export async function provisionUtilaWallet(
   return provisionUtilaWalletInCustody(
     createRuntime(),
     {
-      cluster: currentClusterScope().cluster,
       serviceAccountEmail: options.serviceAccountEmail ?? env.UTILA_SERVICE_ACCOUNT_EMAIL,
       serviceAccountPrivateKeyPem:
         options.serviceAccountPrivateKeyPem ?? env.UTILA_SERVICE_ACCOUNT_PRIVATE_KEY,
@@ -184,7 +173,7 @@ export async function provisionAnchorageWallet(
 ): Promise<ProvisionAnchorageResult> {
   return provisionAnchorageWalletInCustody(
     createRuntime(),
-    { cluster: currentClusterScope().cluster, apiKey: env.ANCHORAGE_API_KEY },
+    { apiKey: env.ANCHORAGE_API_KEY },
     options
   );
 }
@@ -193,11 +182,7 @@ export async function deleteAnchorageWallet(
   env: Env,
   options: DeleteAnchorageOptions
 ): Promise<void> {
-  await deleteAnchorageWalletInCustody(
-    createRuntime(),
-    { cluster: currentClusterScope().cluster, apiKey: env.ANCHORAGE_API_KEY },
-    options
-  );
+  await deleteAnchorageWalletInCustody(createRuntime(), { apiKey: env.ANCHORAGE_API_KEY }, options);
 }
 
 export function createRuntime(): CustodyProvisioningRuntime {

@@ -1,8 +1,7 @@
 import { Buffer } from "node:buffer";
 import * as crypto from "node:crypto";
 import { summarizeUpstreamErrorBody } from "@sdp/redaction/upstream-error";
-import type { SolanaCluster } from "@sdp/types/well-known-tokens";
-import { CUSTODY_CLUSTER_CONFIG } from "#/cluster-config";
+import { custodyClusterConfig } from "#/cluster-config";
 import { SigningError } from "#/signing";
 
 /**
@@ -293,7 +292,7 @@ function toBase64Url(data: Uint8Array): string {
     .replace(/=+$/g, "");
 }
 
-function resolveDfnsContext(env: DfnsEnv, cluster: SolanaCluster): DfnsClientContext {
+function resolveDfnsContext(env: DfnsEnv): DfnsClientContext {
   const authToken = env.DFNS_AUTH_TOKEN;
   const credentialId = env.DFNS_CREDENTIAL_ID;
   const privateKey = env.DFNS_PRIVATE_KEY ? normalizePrivateKey(env.DFNS_PRIVATE_KEY) : undefined;
@@ -305,12 +304,13 @@ function resolveDfnsContext(env: DfnsEnv, cluster: SolanaCluster): DfnsClientCon
     );
   }
 
+  const { origin, network } = custodyClusterConfig().dfns;
   return {
     authToken,
     credentialId,
     privateKey,
-    baseUrl: CUSTODY_CLUSTER_CONFIG[cluster].dfns.origin,
-    network: CUSTODY_CLUSTER_CONFIG[cluster].dfns.network,
+    baseUrl: origin,
+    network,
     providerLabel: DFNS_PROVIDER_LABEL,
     userAgent: DFNS_USER_AGENT,
   };
@@ -580,16 +580,13 @@ function buildDfnsApiClient(ctx: DfnsClientContext): DfnsApiClient {
   };
 }
 
-export async function createDfnsApiClient(
-  env: DfnsEnv,
-  cluster: SolanaCluster
-): Promise<DfnsApiClient> {
-  return buildDfnsApiClient(resolveDfnsContext(env, cluster));
+export async function createDfnsApiClient(env: DfnsEnv): Promise<DfnsApiClient> {
+  return buildDfnsApiClient(resolveDfnsContext(env));
 }
 
 // IBM Digital Asset Haven reuses the Dfns request/UAS/signing machinery with
 // IBM-hosted credentials (IBM_HAVEN_*) and base URL — same wire protocol.
-function resolveIbmHavenContext(env: IbmHavenEnv, cluster: SolanaCluster): DfnsClientContext {
+function resolveIbmHavenContext(env: IbmHavenEnv): DfnsClientContext {
   const authToken = env.IBM_HAVEN_AUTH_TOKEN;
   const credentialId = env.IBM_HAVEN_CREDENTIAL_ID;
   const privateKey = env.IBM_HAVEN_PRIVATE_KEY
@@ -603,20 +600,18 @@ function resolveIbmHavenContext(env: IbmHavenEnv, cluster: SolanaCluster): DfnsC
     );
   }
 
+  const { origin, network } = custodyClusterConfig().ibm_haven;
   return {
     authToken,
     credentialId,
     privateKey,
-    baseUrl: CUSTODY_CLUSTER_CONFIG[cluster].ibm_haven.origin,
-    network: CUSTODY_CLUSTER_CONFIG[cluster].ibm_haven.network,
+    baseUrl: origin,
+    network,
     providerLabel: IBM_HAVEN_PROVIDER_LABEL,
     userAgent: IBM_HAVEN_USER_AGENT,
   };
 }
 
-export async function createIbmHavenApiClient(
-  env: IbmHavenEnv,
-  cluster: SolanaCluster
-): Promise<DfnsApiClient> {
-  return buildDfnsApiClient(resolveIbmHavenContext(env, cluster));
+export async function createIbmHavenApiClient(env: IbmHavenEnv): Promise<DfnsApiClient> {
+  return buildDfnsApiClient(resolveIbmHavenContext(env));
 }

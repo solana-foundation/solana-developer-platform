@@ -1,4 +1,4 @@
-import { CUSTODY_CLUSTER_CONFIG } from "@sdp/custody/cluster-config";
+import { custodyClusterConfig } from "@sdp/custody/cluster-config";
 import {
   type FireblocksAddressEntry,
   readFireblocksAddressBook,
@@ -179,7 +179,7 @@ function assertBoundTo(access: ProposalAccess, intent: TransferProposalIntent, s
     access.accountFingerprint !== intent.accountFingerprint ||
     access.vaultAccountId !== intent.vaultAccountId ||
     access.publicKey !== source ||
-    !isFireblocksNativeAsset(currentClusterScope().cluster, access.assetId)
+    !isFireblocksNativeAsset(access.assetId)
   )
     throw conflict("Fireblocks connection does not match the payment intent");
 }
@@ -195,14 +195,14 @@ async function resolvePaymentAsset(
   runtime: CustodyProvisioningRuntime
 ) {
   const network = currentClusterScope().cluster;
-  if (!isFireblocksNativeAsset(network, access.assetId))
+  if (!isFireblocksNativeAsset(access.assetId))
     throw badRequest("Fireblocks connection does not match the Solana network");
   if (!operation.native && !isFireblocksPaymentMint(operation.token, network))
     throw badRequest("Fireblocks payments currently support SOL and USDC only");
   return resolveFireblocksTransferAsset(
     runtime,
     access,
-    CUSTODY_CLUSTER_CONFIG[network].fireblocks.nativeAsset,
+    custodyClusterConfig().fireblocks.nativeAsset,
     operation.native ? null : operation.token
   );
 }

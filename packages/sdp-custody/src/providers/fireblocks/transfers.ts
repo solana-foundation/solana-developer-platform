@@ -1,11 +1,9 @@
-import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
 import { FireblocksApiError, fireblocksRequest } from "./http";
 
 export interface FireblocksTransferAccess {
-  cluster: SolanaCluster;
   apiKey: string;
   apiSecretPem: string;
 }

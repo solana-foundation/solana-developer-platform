@@ -1,24 +1,18 @@
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { ManagedCustodyProvider } from "@sdp/types/custody";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 
-type OriginRow = { origin: string };
-type NetworkRow = { origin: string; network: string };
-
-interface ClusterRowByProvider {
+export interface CustodyClusterConfig extends Record<ManagedCustodyProvider, { origin: string }> {
   fireblocks: { origin: string; nativeAsset: string };
-  privy: OriginRow;
-  coinbase_cdp: NetworkRow;
-  para: OriginRow;
-  turnkey: OriginRow;
-  dfns: NetworkRow;
-  ibm_haven: NetworkRow;
-  anchorage: NetworkRow;
-  utila: NetworkRow;
+  privy: { origin: string };
+  coinbase_cdp: { origin: string; network: string };
+  para: { origin: string };
+  turnkey: { origin: string };
+  dfns: { origin: string; network: string };
+  ibm_haven: { origin: string; network: string };
+  anchorage: { origin: string; network: string };
+  utila: { origin: string; network: string };
 }
-
-export type CustodyClusterConfig = {
-  [Provider in ManagedCustodyProvider]: ClusterRowByProvider[Provider];
-};
 
 export const CUSTODY_CLUSTER_CONFIG = {
   devnet: {
@@ -46,3 +40,7 @@ export const CUSTODY_CLUSTER_CONFIG = {
     utila: { origin: "https://api.utila.io", network: "networks/solana-mainnet" },
   },
 } as const satisfies Record<SolanaCluster, CustodyClusterConfig>;
+
+export function custodyClusterConfig() {
+  return CUSTODY_CLUSTER_CONFIG[currentClusterScope().cluster];
+}

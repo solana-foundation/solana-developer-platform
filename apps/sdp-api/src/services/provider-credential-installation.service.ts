@@ -738,10 +738,7 @@ async function verifySelectedFireblocksVaults(
     // Only selected vaults are read; each address is verified once by solana-keychain.
     for (const id of selectedIds) {
       try {
-        const vault = await getFireblocksVault(
-          { ...credential, cluster: currentClusterScope().cluster },
-          id
-        );
+        const vault = await getFireblocksVault(credential, id);
         if (!vault.hasSolanaWallet) return { kind: "failed", code: "invalid_credentials" };
         const verified =
           id === credential.vaultAccountId
@@ -843,10 +840,7 @@ async function executeCompletionMode(
     return lookupProviderWallet(context.c.env, externalId, credential);
   }
 
-  const validation = await checkPrivyCredential(createRuntime(), {
-    ...credential,
-    cluster: currentClusterScope().cluster,
-  });
+  const validation = await checkPrivyCredential(createRuntime(), credential);
   if (validation !== "success") {
     return validation === "failed"
       ? { kind: "failed", code: "invalid_credentials" }

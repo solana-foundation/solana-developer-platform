@@ -1,5 +1,4 @@
-import type { SolanaCluster } from "@sdp/types/well-known-tokens";
-import { CUSTODY_CLUSTER_CONFIG } from "#/cluster-config";
+import { custodyClusterConfig } from "#/cluster-config";
 import { parseJsonResponse, readErrorResponseText } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
@@ -8,7 +7,6 @@ const PARA_WALLET_READY_MAX_ATTEMPTS = 8;
 const PARA_WALLET_READY_DELAY_MS = 500;
 
 export interface ParaRequestParams {
-  cluster: SolanaCluster;
   method: "GET" | "POST";
   path: string;
   apiKey: string;
@@ -28,18 +26,16 @@ export async function paraRequest<T>(
   runtime: CustodyProvisioningRuntime,
   params: ParaRequestParams
 ): Promise<T> {
+  const url = `${custodyClusterConfig().para.origin}${params.path}`;
   try {
-    const response = await runtime.fetch(
-      `${CUSTODY_CLUSTER_CONFIG[params.cluster].para.origin}${params.path}`,
-      {
-        method: params.method,
-        headers: {
-          "X-API-Key": params.apiKey,
-          ...(params.body ? { "Content-Type": "application/json" } : {}),
-        },
-        body: params.body ? JSON.stringify(params.body) : undefined,
-      }
-    );
+    const response = await runtime.fetch(url, {
+      method: params.method,
+      headers: {
+        "X-API-Key": params.apiKey,
+        ...(params.body ? { "Content-Type": "application/json" } : {}),
+      },
+      body: params.body ? JSON.stringify(params.body) : undefined,
+    });
 
     if (!response.ok) {
       const errorText = await readErrorResponseText(response);
@@ -71,7 +67,6 @@ export async function paraRequest<T>(
 export async function waitForParaWalletReady(
   runtime: CustodyProvisioningRuntime,
   params: {
-    cluster: SolanaCluster;
     apiKey: string;
     walletId: string;
   }
@@ -83,7 +78,6 @@ export async function waitForParaWalletReady(
     let wallet: ParaWalletResponse;
     try {
       wallet = await paraRequest<ParaWalletResponse>(runtime, {
-        cluster: params.cluster,
         apiKey: params.apiKey,
         method: "GET",
         path: `/v1/wallets/${encodeURIComponent(params.walletId)}`,

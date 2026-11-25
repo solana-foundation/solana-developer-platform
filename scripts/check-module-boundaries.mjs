@@ -111,7 +111,7 @@ const MODULE_METADATA = [
     name: "@sdp/custody",
     directory: "packages/sdp-custody",
     purpose: "Custody provider abstractions and keychain adapters.",
-    allowedDependencies: ["@sdp/redaction", "@sdp/types"],
+    allowedDependencies: ["@sdp/redaction", "@sdp/rpc", "@sdp/types"],
   },
   {
     name: "@sdp/design-tokens",

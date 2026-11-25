@@ -1,10 +1,9 @@
-import { CUSTODY_CLUSTER_CONFIG } from "@sdp/custody/cluster-config";
+import { custodyClusterConfig } from "@sdp/custody/cluster-config";
 import { FireblocksApiError } from "@sdp/custody/providers/fireblocks/http";
 import {
   type ByokCustodyProvider,
   isProviderCredentialCreationInProgress,
 } from "@sdp/types/custody";
-import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import type { Context } from "hono";
 import { type DatabaseClient, getDb } from "@/db/client";
 import {
@@ -234,15 +233,10 @@ export async function discoverFireblocksVaults(
     throw internalError("Fireblocks registration key is unavailable");
   const environment = c.get("projectEnvironment");
   if (!environment) throw internalError("Project environment is required");
-  const cluster = CLUSTER_BY_SDP_ENVIRONMENT[environment];
+  const assetId = custodyClusterConfig().fireblocks.nativeAsset;
   try {
     return await listFireblocksVaults(
-      {
-        cluster,
-        apiKey: input.apiKey,
-        apiSecretPem: secret.privateKeyPem,
-        assetId: CUSTODY_CLUSTER_CONFIG[cluster].fireblocks.nativeAsset,
-      },
+      { apiKey: input.apiKey, apiSecretPem: secret.privateKeyPem, assetId },
       { after: input.after, namePrefix: input.namePrefix }
     );
   } catch (error) {

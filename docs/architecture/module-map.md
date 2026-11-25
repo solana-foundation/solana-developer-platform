@@ -18,7 +18,7 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/api` | Node.js API and application composition root. | `@sdp/api-catalog`, `@sdp/custody`, `@sdp/dvp`, `@sdp/earn`, `@sdp/env-config`, `@sdp/fee-payment`, `@sdp/helius-rings`, `@sdp/helius-rings-sdk`, `@sdp/hastra`, `@sdp/ip`, `@sdp/issuance`, `@sdp/kamino`, `@sdp/jupiter-lend`, `@sdp/ondo`, `@sdp/payments`, `@sdp/plume`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/rpc`, `@sdp/solana`, `@sdp/spc-escrow`, `@sdp/spc-withdraw`, `@sdp/types`, `@sdp/veda`, `@sdp/wisdomtree` | None |
 | `@sdp/api-catalog` | The public API's reference model and request snippets, shared by the API, the dashboard and the docs. | `@sdp/types` | None |
 | `@sdp/api-integration` | Maintainer integration harness for API endpoint and provider coverage. | `@sdp/api`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/spc-escrow`, `@sdp/types` | None |
-| `@sdp/custody` | Custody provider abstractions and keychain adapters. | `@sdp/redaction`, `@sdp/types` | None |
+| `@sdp/custody` | Custody provider abstractions and keychain adapters. | `@sdp/redaction`, `@sdp/rpc`, `@sdp/types` | None |
 | `@sdp/design-tokens` | Design tokens (CSS custom properties, Tailwind theme mapping, typed catalog) for SDP UI. | None | None |
 | `@sdp/dvp` | Generated @solana/kit client for the DvP atomic swap program. | None | None |
 | `@sdp/earn` | Earn domain services, yield strategies, and vault-infra providers. | `@sdp/payments`, `@sdp/redaction`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` | None |
@@ -53,7 +53,7 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/api` -> `@sdp/api-catalog`, `@sdp/custody`, `@sdp/dvp`, `@sdp/earn`, `@sdp/env-config`, `@sdp/fee-payment`, `@sdp/hastra`, `@sdp/helius-rings`, `@sdp/helius-rings-sdk`, `@sdp/ip`, `@sdp/issuance`, `@sdp/jupiter-lend`, `@sdp/kamino`, `@sdp/ondo`, `@sdp/payments`, `@sdp/plume`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/rpc`, `@sdp/solana`, `@sdp/spc-escrow`, `@sdp/spc-withdraw`, `@sdp/types`, `@sdp/veda`, `@sdp/wisdomtree`
 - `@sdp/api-catalog` -> `@sdp/types`
 - `@sdp/api-integration` -> `@sdp/api`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/spc-escrow`, `@sdp/types`
-- `@sdp/custody` -> `@sdp/redaction`, `@sdp/types`
+- `@sdp/custody` -> `@sdp/redaction`, `@sdp/rpc`, `@sdp/types`
 - `@sdp/design-tokens` -> None
 - `@sdp/dvp` -> None
 - `@sdp/earn` -> `@sdp/redaction`, `@sdp/types`
