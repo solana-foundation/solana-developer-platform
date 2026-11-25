@@ -3,7 +3,8 @@ import { IDENTITY_TOKEN_REFETCH_AFTER_SECONDS } from "@sdp/metadata-server/calle
 import { createGoogleIdentityKeys } from "@sdp/metadata-server/receiver";
 import { importPKCS8 } from "jose";
 import { z } from "zod";
-import { createApp, googleCaller, localCaller } from "./app";
+import { createApp } from "./app";
+import { googleCaller, localCaller } from "./middleware";
 import { positiveInteger, readEnv } from "./utils";
 
 const IDENTITY_TOKEN_LIFETIME_SECONDS = 3600;
