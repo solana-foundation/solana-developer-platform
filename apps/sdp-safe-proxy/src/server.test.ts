@@ -4,29 +4,29 @@ import { once } from "node:events";
 import { it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { IDENTITY_TOKEN_REFETCH_AFTER_SECONDS } from "@sdp/metadata-server/caller";
+import type { SafeProxyProvider } from "@/endpoints/providers";
+import { channelOfferingOne, EVERY_PROVIDER_CHANNEL } from "./test/helpers/release-channels";
 
-// Every text value carries k4w, so stderr must never carry k4w.
+// Every text value carries k4w, so stderr must never carry k4w. Cloud Run unless K_SERVICE is unset.
 const API_CALLER = "api-k4w@sdp-test.iam.gserviceaccount.com";
-const CLOUD_RUN = {
+const SETTINGS = {
   K_SERVICE: "sdp-safe-proxy",
   PORT: "48791",
   SAFE_PROXY_PROVIDER_TIMEOUT_MS: "30000",
-  FIREBLOCKS_API_KEY: "fireblocks-key-k4w",
-  FIREBLOCKS_API_SECRET: "fireblocks-secret-k4w",
-  PRIVY_APP_ID: "app_k4w",
-  PRIVY_APP_SECRET: "privy-secret-k4w",
+  SDP_RELEASE_CHANNEL: EVERY_PROVIDER_CHANNEL,
+  SDP_SAFE_PROXY_PORT: "48792",
   SAFE_PROXY_AUDIENCE: "https://safe-proxy-k4w.a.run.app",
   SAFE_PROXY_API_CALLER: API_CALLER,
   SAFE_PROXY_CRON_CALLER: "cron-k4w@sdp-test.iam.gserviceaccount.com",
 };
 
-// Starts the Cloud Run proxy with settings that fail, so it exits before fetching Google's keys.
+// Starts the proxy with settings that fail before it fetches Google's keys.
 async function startupFailure(
-  settings: { SAFE_PROXY_MAX_TOKEN_AGE_SECONDS: string } & Partial<typeof CLOUD_RUN>
+  settings: Partial<typeof SETTINGS & { SAFE_PROXY_MAX_TOKEN_AGE_SECONDS: string }>
 ) {
   const child = spawn(process.execPath, ["--import", "tsx", "src/server.ts"], {
     cwd: fileURLToPath(new URL("..", import.meta.url)),
-    env: { PATH: process.env.PATH, ...CLOUD_RUN, ...settings },
+    env: { PATH: process.env.PATH, ...SETTINGS, ...settings },
     stdio: ["ignore", "ignore", "pipe"],
     // A proxy that starts anyway is stopped here and fails the exit assertion.
     signal: AbortSignal.timeout(15_000),
@@ -63,4 +63,24 @@ it("on Cloud Run, does not start with one account for both callers, naming only 
       "invalid settings: SAFE_PROXY_CRON_CALLER"
     );
   }
+});
+
+it("does not start without a release channel, naming that setting", async () => {
+  assert.equal(
+    await startupFailure({ SDP_RELEASE_CHANNEL: undefined }),
+    "invalid settings: SDP_RELEASE_CHANNEL"
+  );
+});
+
+const CREDENTIAL_SETTINGS = {
+  fireblocks: "invalid settings: FIREBLOCKS_API_KEY, FIREBLOCKS_API_SECRET",
+  privy: "invalid settings: PRIVY_APP_ID, PRIVY_APP_SECRET",
+} as const satisfies Record<SafeProxyProvider, string>;
+
+it("requires the credential settings of the providers in its release channel, and only theirs", async () => {
+  const { releaseChannel, offered } = channelOfferingOne();
+  assert.equal(
+    await startupFailure({ K_SERVICE: undefined, SDP_RELEASE_CHANNEL: releaseChannel }),
+    CREDENTIAL_SETTINGS[offered]
+  );
 });

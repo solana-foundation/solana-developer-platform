@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
 import type { TestContext } from "node:test";
+import type { SdpReleaseChannel } from "@sdp/types/release-channels";
 import { createLocalJWKSet, importPKCS8, type JWTVerifyGetKey, SignJWT } from "jose";
 import { z } from "zod";
 import { type AppDependencies, createApp, type ProviderCredentials } from "@/app";
 import { SAFE_PROXY_CALLERS, type SafeProxyCaller } from "@/endpoints/callers";
 import { logger, type RequestLogLine } from "@/logger";
 import { googleCaller } from "@/middleware";
+import { EVERY_PROVIDER_CHANNEL } from "./release-channels";
 
 const AUDIENCE = "https://safe-proxy.mock.invalid";
 const CALLER_EMAILS = {
@@ -87,6 +89,7 @@ export interface ForwardAppOptions {
   answer?: (call: ProviderCall) => Response | Promise<Response>;
   caller?: AppDependencies["caller"];
   keys?: JWTVerifyGetKey;
+  releaseChannel?: SdpReleaseChannel;
   credentials?: ProviderCredentials;
 }
 
@@ -138,6 +141,7 @@ export function createForwardApp(t: TestContext, options: ForwardAppOptions = {}
         maxTokenAgeSeconds: 300,
         callerEmails: CALLER_EMAILS,
       }),
+    releaseChannel: options.releaseChannel ?? EVERY_PROVIDER_CHANNEL,
     credentials: options.credentials ?? PLATFORM_CREDENTIALS,
     providerTimeoutMs: 10_000,
   });

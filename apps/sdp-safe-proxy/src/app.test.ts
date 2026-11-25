@@ -3,6 +3,7 @@ import { it } from "node:test";
 import { importSPKI, jwtVerify } from "jose";
 import type { ProviderCredentials } from "@/app";
 import { FROM_PROVIDER_HEADER, LOCAL_CALLER_HEADER } from "@/endpoints/protocol";
+import type { SafeProxyProvider } from "@/endpoints/providers";
 import { localCaller } from "@/middleware";
 import {
   createForwardApp,
@@ -12,6 +13,7 @@ import {
   type LoggedLine,
   PLATFORM_CREDENTIALS,
 } from "./test/helpers/forward-app";
+import { channelOfferingOne } from "./test/helpers/release-channels";
 
 const WALLETS = "/privy/v1/wallets";
 const VAULTS = "/fireblocks/v1/vault/accounts_paged?namePrefix=vault-e74";
@@ -302,4 +304,31 @@ it("logs the request id, the endpoint's pattern and the outcome at its severity,
       status: 500,
     }),
   ]);
+});
+
+// One allowed endpoint per provider, with the pattern its log line names.
+const ENDPOINTS = {
+  fireblocks: { path: VAULTS, endpoint: "GET /v1/vault/accounts_paged" },
+  privy: { path: WALLETS, endpoint: "GET /v1/wallets" },
+} as const satisfies Record<SafeProxyProvider, { path: string; endpoint: string }>;
+
+it("refuses a provider outside the release channel and still forwards one inside it", async (t) => {
+  const { releaseChannel, offered, refused } = channelOfferingOne();
+  const forwardApp = createForwardApp(t, { releaseChannel });
+  const answers = [
+    await answerOf(await forwardApp.send(ENDPOINTS[refused].path)),
+    await answerOf(await forwardApp.send(ENDPOINTS[offered].path)),
+  ];
+
+  const error = "sdp_safe_proxy_provider_not_in_release_channel";
+  assert.deepEqual(answers, [
+    { status: 403, fromProvider: null, body: own(error) },
+    { status: 200, fromProvider: "1", body: '{"id":"wallet-1"}' },
+  ]);
+  assert.equal(forwardApp.calls.length, 1);
+  const [refusal] = forwardApp.logged;
+  assert.deepEqual(
+    { severity: refusal.severity, provider: refusal.provider, endpoint: refusal.endpoint },
+    { severity: "WARNING", provider: refused, endpoint: ENDPOINTS[refused].endpoint }
+  );
 });
