@@ -1,12 +1,10 @@
 import {
   CUSTODY_PROPOSAL_ABSENCE_HORIZON_MS,
   CUSTODY_PROPOSAL_AUTHORIZATION_STATES,
-  CUSTODY_PROPOSAL_AUTHORIZATION_TRANSITIONS,
   CUSTODY_PROPOSAL_MAX_CANCEL_ATTEMPT,
   CUSTODY_PROPOSAL_OBSERVED_PHASES,
   CUSTODY_PROPOSAL_PROVIDER_PHASE_PROPERTIES,
   CUSTODY_PROPOSAL_PROVIDER_PHASES,
-  CUSTODY_PROPOSAL_PROVIDER_TRANSITIONS,
   CUSTODY_PROPOSAL_VALID_AUTHORIZATION_STATES_BY_PHASE,
   type CustodyProposalAuthorizationState,
   type CustodyProposalEvent,
@@ -192,25 +190,31 @@ describe("custody proposal state transitions", () => {
     expect(
       transitionCustodyProposal(missing.next, { type: "submission_claimed", at: LATER })
     ).toHaveProperty("rejected");
-    const expired = apply(missing.next, {
-      type: "observed_absent",
-      at: new Date(Date.parse(START) + CUSTODY_PROPOSAL_ABSENCE_HORIZON_MS).toISOString(),
-    });
-    expect(expired.next.providerPhase).toBe("never_accepted");
-    expect(expired.effects).toEqual([
-      { type: "payment_status", status: "failed" },
-      { type: "close_audit_intent", outcome: "failure" },
-    ]);
-    expect(
-      transitionCustodyProposal(expired.next, { type: "submission_claimed", at: LAST })
-    ).toHaveProperty("rejected");
   });
 
-  it.each(CUSTODY_PROPOSAL_OBSERVED_PHASES)(
-    "records a validated %s receipt despite a missing local claim, without permitting resubmission",
-    (phase) => {
+  const processing = [{ type: "payment_status", status: "processing" }] as const;
+  const failed = [
+    { type: "payment_status", status: "failed" },
+    { type: "close_audit_intent", outcome: "failure" },
+  ] as const;
+  it.each([
+    { phase: "pending", effects: processing },
+    { phase: "executing", effects: processing },
+    {
+      phase: "completed",
+      effects: [
+        { type: "payment_status", status: "confirmed" },
+        { type: "close_audit_intent", outcome: "success" },
+      ],
+    },
+    { phase: "failed", effects: failed },
+    { phase: "cancelled", effects: failed },
+  ] as const)(
+    "records a validated $phase receipt despite a missing local claim, projects its payment, and never permits resubmission",
+    ({ phase, effects }) => {
       // The provider adapter validates binding and exact settlement before this boundary.
       const recorded = apply(createCustodyProposalState(), observation(phase, START));
+      expect(recorded.effects).toEqual(effects);
       expect(recorded.next.providerPhase).toBe(phase);
       expect(recorded.next.providerTransactionId).toBe("provider-transaction-1");
       expect(recorded.next.authorizationState).toBe("authorized");
@@ -261,9 +265,6 @@ describe("custody proposal state transitions", () => {
     const accepted = apply(absent, observation("pending", LAST)).next;
     expect(accepted.firstMissingAt).toBeNull();
     expect(accepted.providerTransactionId).toBe("provider-transaction-1");
-    expect(
-      transitionCustodyProposal(accepted, { type: "submission_refused", at: LAST, error: "x" })
-    ).toHaveProperty("rejected");
   });
 
   it("refuses provider identity replacement before applying any observation", () => {
@@ -298,8 +299,19 @@ describe("custody proposal state transitions", () => {
     }
   );
 
-  it("keeps the first authority refusal and its attribution across repeated checks", () => {
-    const first = refused();
+  it("audits the first authority refusal and keeps it and its attribution across repeated checks", () => {
+    const recorded = apply(pending(), {
+      type: "admission_refused",
+      at: LATER,
+      reason: "principal_revoked",
+      message: "The initiating key was revoked",
+    });
+    expect(recorded.effects).toEqual([{ type: "audit", event: "proposal_refused" }]);
+    expect(recorded.next).toMatchObject({
+      providerPhase: "pending",
+      authorizationState: "refused",
+    });
+    const first = recorded.next;
     const repeated = apply(first, {
       type: "admission_refused",
       at: LAST,
@@ -335,9 +347,6 @@ describe("custody proposal state transitions", () => {
           message: "Revoked by the time this read finished",
         })
       ).toHaveProperty("rejected");
-      expect(state.authorizationState).toBe("authorized");
-      expect(state.refusal).toBeNull();
-      expect(hasUnalertedCustodyProposalRefusal(state)).toBe(false);
     }
   });
 
@@ -380,24 +389,6 @@ describe("custody proposal state transitions", () => {
       { type: "close_audit_intent", outcome: "failure" },
     ]);
     expect(hasUnalertedCustodyProposalRefusal(cancelled.next)).toBe(false);
-  });
-
-  it("retains refusal after a declined cancellation and permits a later staged attempt", () => {
-    const declined = apply(requested(), { type: "cancel_declined", at: LAST });
-    expect(declined.next.providerPhase).toBe("pending");
-    expect(declined.next.authorizationState).toBe("cancel_declined");
-    expect(declined.next.refusal).toEqual(refused().refusal);
-    expect(declined.next.cancelDeclinedAt).toBe(LAST);
-    expect(declined.effects).toEqual([{ type: "audit", event: "proposal_cancellation_declined" }]);
-    expect(canRequestCustodyProposalCancellation(declined.next, LAST)).toBe(false);
-    expect(
-      transitionCustodyProposal(declined.next, { type: "cancel_requested", at: LAST })
-    ).toHaveProperty("rejected");
-    const retry = apply(declined.next, { type: "cancel_requested", at: RETRY });
-    expect(retry.next.cancelRequestedAt).toBe(RETRY);
-    expect(retry.next.authorizationState).toBe("cancel_retry_requested");
-    expect(retry.next.cancelAttempt).toBe(2);
-    expect(retry.effects).toEqual([]);
   });
 
   it("audits the first definitive decline after ambiguous attempts, then retains it through retries", () => {
@@ -487,12 +478,8 @@ describe("custody proposal state transitions", () => {
         .success
     ).toBe(false);
   });
-  it("identifies each staged attempt and rejects counter overflow", () => {
+  it("rejects a staged attempt past the attempt counter's bound", () => {
     const first = requested();
-    expect(first.cancelAttempt).toBe(1);
-    const retry = apply(first, { type: "cancel_requested", at: RETRY });
-    expect(retry.next.cancelAttempt).toBe(2);
-    expect(retry.effects).toEqual([]);
     const last = { ...first, cancelAttempt: CUSTODY_PROPOSAL_MAX_CANCEL_ATTEMPT - 1 };
     const maximum = apply(last, { type: "cancel_requested", at: RETRY }).next;
     expect(maximum.cancelAttempt).toBe(CUSTODY_PROPOSAL_MAX_CANCEL_ATTEMPT);
@@ -559,13 +546,7 @@ describe("custody proposal state transitions", () => {
     ).toHaveProperty("rejected");
   });
 
-  it("exhausts both state axes and rejects every illegal product in the persisted schema", () => {
-    expect(Object.keys(CUSTODY_PROPOSAL_AUTHORIZATION_TRANSITIONS).sort()).toEqual(
-      [...CUSTODY_PROPOSAL_AUTHORIZATION_STATES].sort()
-    );
-    expect(Object.keys(CUSTODY_PROPOSAL_PROVIDER_TRANSITIONS).sort()).toEqual(
-      [...CUSTODY_PROPOSAL_PROVIDER_PHASES].sort()
-    );
+  it("persists exactly the provider/authorization products the @sdp/types table lists", () => {
     for (const phase of CUSTODY_PROPOSAL_PROVIDER_PHASES) {
       const allowed: readonly CustodyProposalAuthorizationState[] =
         CUSTODY_PROPOSAL_VALID_AUTHORIZATION_STATES_BY_PHASE[phase];
@@ -576,6 +557,20 @@ describe("custody proposal state transitions", () => {
         ).toBe(allowed.includes(authorization));
       }
     }
+  });
+
+  it.each([
+    ["unsent", "cancel_requested", false],
+    ["submitting", "cancel_acknowledged", false],
+    ["pending", "cancel_requested", true],
+    ["cancelled", "cancel_acknowledged", true],
+    ["completed", "refused", false],
+    ["completed", "committed_after_refusal", true],
+    ["failed", "committed_after_refusal", false],
+  ] as const)("persists %s/%s: %s", (phase, authorization, persists) => {
+    expect(custodyProposalStateSchema.safeParse(productState(phase, authorization)).success).toBe(
+      persists
+    );
   });
   it("rejects absent progress without the first observation required for its horizon", () => {
     const absent = apply(submitting(), { type: "observed_absent", at: LATER }).next;

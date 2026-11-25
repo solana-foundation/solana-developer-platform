@@ -15,24 +15,8 @@ function transferFixture(overrides: Partial<PaymentTransferSummary>): PaymentTra
     ...overrides,
   };
 }
-describe("providerTransferDetailRows", () => {
-  it("builds a MoonPay sell receipt from the bound provider transaction id", () => {
-    const rows = providerTransferDetailRows(
-      transferFixture({
-        id: "xfr_123",
-        providerReference: "772f7a7f-142e-43cf-824f-8d861aefe8bd",
-      }),
-      { cluster: "devnet" },
-      (key) => key
-    );
 
-    expect(rows).toContainEqual({
-      key: "DashboardPayments.transferDetails.receipt",
-      label: "DashboardPayments.transferDetails.receipt",
-      value: "DashboardPayments.transferDetails.viewReceipt",
-      href: "https://buy.moonpay.com/v2/transaction-tracker?transactionId=772f7a7f-142e-43cf-824f-8d861aefe8bd",
-    });
-  });
+describe("providerTransferDetailRows", () => {
   it("builds MoonPay settlement economics and an explorer link", () => {
     const signature =
       "TestDepos1tS1gnature11111111111111111111111111111111111111111111111111111111111111111111";
@@ -115,11 +99,29 @@ describe("providerTransferDetailRows", () => {
     ]);
   });
 
+  it("shows a sale's quoted payout only when the provider paid out something else", () => {
+    const sale = (fiatPayout: { amount: string; currency: string }) =>
+      providerTransferDetailRows(
+        transferFixture({ fiatAmount: "20.69", fiatCurrency: "usd", fiatPayout }),
+        { cluster: "devnet" },
+        (key) => key
+      );
+
+    expect(sale({ amount: "20.82", currency: "USD" })).toEqual([
+      {
+        key: "DashboardPayments.transferDetails.quotedPayout",
+        label: "DashboardPayments.transferDetails.quotedPayout",
+        value: "20.69 USD",
+      },
+    ]);
+    expect(sale({ amount: "20.690", currency: "USD" })).toEqual([]);
+  });
+
   it.each([
     { type: "transfer", provider: "moonpay" },
     { type: "offramp", provider: undefined },
     { type: "offramp", provider: "stripe" },
-  ] as const)("omits unsupported transfer details", ({ type, provider }) => {
+  ] as const)("contributes nothing for a $type from $provider", ({ type, provider }) => {
     expect(
       providerTransferDetailRows(
         transferFixture({

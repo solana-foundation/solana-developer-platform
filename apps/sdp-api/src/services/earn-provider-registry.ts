@@ -1,30 +1,15 @@
 import { EARN_PROVIDER_CLIENTS as CATALOGUE_PROVIDER_CLIENTS, isEarnProviderId } from "@sdp/earn";
 import { providerNotConfigured } from "@sdp/earn/errors";
 import type { EarnRuntimeContext, EarnVaultProvider } from "@sdp/earn/types";
-import {
-  assertNotPortfolioProvider as assertHastraNotPortfolioProvider,
-  HastraVaultDirectClient,
-} from "@sdp/hastra/client";
-import {
-  assertJupiterLendNotPortfolioProvider,
-  JupiterLendVaultDirectClient,
-} from "@sdp/jupiter-lend/client";
-import { assertNotPortfolioProvider, KaminoVaultDirectClient } from "@sdp/kamino/client";
-import {
-  assertNotPortfolioProvider as assertOndoNotPortfolioProvider,
-  OndoVaultDirectClient,
-} from "@sdp/ondo/client";
+import { HastraVaultDirectClient } from "@sdp/hastra/client";
+import { JupiterLendVaultDirectClient } from "@sdp/jupiter-lend/client";
+import { KaminoVaultDirectClient } from "@sdp/kamino/client";
+import { OndoVaultDirectClient } from "@sdp/ondo/client";
 import { PlumeVaultDirectClient } from "@sdp/plume/client";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
-import {
-  assertNotPortfolioProvider as assertVedaNotPortfolioProvider,
-  VedaVaultDirectClient,
-} from "@sdp/veda/client";
-import {
-  assertWisdomTreeNotPortfolioProvider,
-  WisdomTreeVaultDirectClient,
-} from "@sdp/wisdomtree/client";
+import { VedaVaultDirectClient } from "@sdp/veda/client";
+import { WisdomTreeVaultDirectClient } from "@sdp/wisdomtree/client";
 import {
   assertClusterEndpoint,
   earnPoolNotConfigured,
@@ -32,7 +17,7 @@ import {
 } from "@/services/earn/cluster-rpc";
 import type { Env } from "@/types/env";
 import { createHastraSwapPort } from "./earn/hastra-swap-port";
-import { createOndoSwapPort } from "./earn/ondo-swap-port";
+import { createJupiterSwapPort } from "./earn/jupiter-swap-port";
 import { createVaultDeadline } from "./earn/vault-deadline";
 
 /**
@@ -60,27 +45,21 @@ function runVaultOperation<T>(
 }
 
 const kamino = new KaminoVaultDirectClient(resolveProvenRpcUrl, runVaultOperation);
-assertNotPortfolioProvider(kamino);
 const jupiterLend = new JupiterLendVaultDirectClient(resolveProvenRpcUrl, runVaultOperation);
-assertJupiterLendNotPortfolioProvider(jupiterLend);
 
 const veda = new VedaVaultDirectClient(resolveProvenRpcUrl, runVaultOperation);
-assertVedaNotPortfolioProvider(veda);
 const plume = new PlumeVaultDirectClient(runVaultOperation);
 const wisdomtree = new WisdomTreeVaultDirectClient(resolveProvenRpcUrl, runVaultOperation);
-assertWisdomTreeNotPortfolioProvider(wisdomtree);
 
 // The swap port is resolved per request from the runtime context (the API
 // constructs `ctx.env` from `Env`), because these are process singletons and
 // the Jupiter credential is request-environment state, same as the RPC URL.
 const ondo = new OndoVaultDirectClient(resolveProvenRpcUrl, runVaultOperation, (ctx) =>
-  createOndoSwapPort(ctx.env as unknown as Env)
+  createJupiterSwapPort(ctx.env as unknown as Env, "Jupiter swaps")
 );
-assertOndoNotPortfolioProvider(ondo);
 const hastra = new HastraVaultDirectClient(resolveProvenRpcUrl, runVaultOperation, (ctx) =>
   createHastraSwapPort(ctx.env as unknown as Env)
 );
-assertHastraNotPortfolioProvider(hastra);
 
 /**
  * API composition root for Earn providers.

@@ -15,6 +15,7 @@ import {
   hydratedHoldingTokenValue,
   hydrateVaultPositions as hydrateUnscoped,
   markVaultPositionRowsRead,
+  vaultPositionDiscoveryScope,
 } from "./vault-position-hydration";
 
 /** One hydration in the cluster scope its request opens for `environment`. */
@@ -251,6 +252,88 @@ describe("hydrateVaultPositions shares identical provider reads in flight", () =
     mocks.resolveClient.mockReturnValue({ readVaultPositions: mocks.readVaultPositions });
   });
 
+  it("discovers one provider-owner scope without zero-filling absent known holdings", async () => {
+    const transport: RpcTransport = async <T>() =>
+      ({ jsonrpc: "2.0", id: 1, result: { context: { slot: 201 }, value: null } }) as T;
+    const rpc = createRpcFromTransport(transport, { wrapTransport: withRpcReadContext });
+    mocks.readVaultPositions.mockImplementation(async () => {
+      await getAccountInfo(rpc, OWNER as Address);
+      return [
+        {
+          providerReference: "vault-a",
+          owner: OWNER,
+          cluster: "devnet",
+          tokenMint: TOKEN,
+          shareMint: SHARE,
+          ...VALUE,
+        },
+      ];
+    });
+    const observations = {
+      completedScopes: new Set<string>(),
+      rejectedPositionIds: new Set<string>(),
+    };
+    const live = await hydrateVaultPositions(
+      context(),
+      "sandbox",
+      [holding("p1", "vault-a"), holding("p2", "vault-b")],
+      {
+        sourceType: "wallet",
+        rowsReadAt: markVaultPositionRowsRead(),
+        discoverAll: true,
+        discoveryObservations: observations,
+        minimumSlotByPositionId: new Map([
+          ["p1", 100],
+          ["p2", 200],
+        ]),
+      }
+    );
+    expect(mocks.readVaultPositions).toHaveBeenCalledTimes(1);
+    expect(mocks.readVaultPositions).toHaveBeenCalledWith(expect.anything(), {
+      owner: OWNER,
+      providerReferences: [],
+    });
+    expect(live.get("p1")).toEqual(VALUE);
+    expect(live.has("p2")).toBe(false);
+    expect(observations.completedScopes.has(vaultPositionDiscoveryScope("kamino", OWNER))).toBe(
+      true
+    );
+    expect(observations.rejectedPositionIds.size).toBe(0);
+  });
+
+  it("keeps failed and mismatched discovery observations unavailable", async () => {
+    const observations = {
+      completedScopes: new Set<string>(),
+      rejectedPositionIds: new Set<string>(),
+    };
+    mocks.readVaultPositions.mockResolvedValue([
+      {
+        providerReference: "vault-a",
+        owner: OTHER_OWNER,
+        cluster: "devnet",
+        tokenMint: TOKEN,
+        shareMint: SHARE,
+        ...VALUE,
+      },
+    ]);
+    const options = {
+      sourceType: "wallet" as const,
+      rowsReadAt: markVaultPositionRowsRead(),
+      discoverAll: true,
+      discoveryObservations: observations,
+    };
+    expect(
+      (await hydrateVaultPositions(context(), "sandbox", [holding("p1", "vault-a")], options)).size
+    ).toBe(0);
+    expect(observations.rejectedPositionIds.has("p1")).toBe(true);
+    observations.completedScopes.clear();
+    mocks.readVaultPositions.mockRejectedValue(new Error("Provider unavailable"));
+    expect(
+      (await hydrateVaultPositions(context(), "sandbox", [holding("p1", "vault-a")], options)).size
+    ).toBe(0);
+    expect(observations.completedScopes.size).toBe(0);
+  });
+
   it("serves overlapping identical refreshes, in any reference order, from one provider read", async () => {
     const pending = heldReads();
     const positions = [holding("p1", "vault-a"), holding("p2", "vault-b")];
@@ -258,11 +341,11 @@ describe("hydrateVaultPositions shares identical provider reads in flight", () =
     const rowsReadAt = markVaultPositionRowsRead();
 
     const first = hydrateVaultPositions(context(), "sandbox", positions, {
-      ownerKind: "custody",
+      sourceType: "wallet",
       rowsReadAt,
     });
     const second = hydrateVaultPositions(context(), "sandbox", [...positions].reverse(), {
-      ownerKind: "external-wallet",
+      sourceType: "address",
       rowsReadAt,
     });
     expect(pending).toHaveLength(1);
@@ -280,7 +363,7 @@ describe("hydrateVaultPositions shares identical provider reads in flight", () =
 
   it("never shares across a different environment, RPC endpoint, owner, reference set or minimum slot", async () => {
     const pending = heldReads();
-    const options = { ownerKind: "custody" as const, rowsReadAt: markVaultPositionRowsRead() };
+    const options = { sourceType: "wallet" as const, rowsReadAt: markVaultPositionRowsRead() };
     const reads = [
       hydrateVaultPositions(context(), "sandbox", [holding("p1", "vault-a")], options),
       hydrateVaultPositions(
@@ -330,7 +413,7 @@ describe("hydrateVaultPositions shares identical provider reads in flight", () =
       context(),
       "sandbox",
       [holding("p1", "vault-a"), holding("p2", "vault-b", OTHER_OWNER)],
-      { ownerKind: "custody", rowsReadAt }
+      { sourceType: "wallet", rowsReadAt }
     );
 
     expect(floors).toEqual([rowsReadAt, rowsReadAt]);
@@ -339,13 +422,13 @@ describe("hydrateVaultPositions shares identical provider reads in flight", () =
   it("is not a cache: the next refresh reads again", async () => {
     const pending = heldReads();
     const first = hydrateVaultPositions(context(), "sandbox", [holding("p1", "vault-a")], {
-      ownerKind: "custody",
+      sourceType: "wallet",
       rowsReadAt: markVaultPositionRowsRead(),
     });
     pending[0]?.release();
     await first;
     const second = hydrateVaultPositions(context(), "sandbox", [holding("p1", "vault-a")], {
-      ownerKind: "custody",
+      sourceType: "wallet",
       rowsReadAt: markVaultPositionRowsRead(),
     });
     expect(pending).toHaveLength(2);
@@ -356,7 +439,7 @@ describe("hydrateVaultPositions shares identical provider reads in flight", () =
   it("shares a failure only with the callers already waiting on it", async () => {
     const pending = heldReads();
     const positions = [holding("p1", "vault-a")];
-    const options = { ownerKind: "custody" as const, rowsReadAt: markVaultPositionRowsRead() };
+    const options = { sourceType: "wallet" as const, rowsReadAt: markVaultPositionRowsRead() };
     const first = hydrateVaultPositions(context(), "sandbox", positions, options);
     const second = hydrateVaultPositions(context(), "sandbox", positions, options);
     pending[0]?.fail(new Error("socket hang up"));
@@ -364,7 +447,7 @@ describe("hydrateVaultPositions shares identical provider reads in flight", () =
     await expect(second).resolves.toEqual(new Map());
 
     const third = hydrateVaultPositions(context(), "sandbox", positions, {
-      ownerKind: "custody",
+      sourceType: "wallet",
       rowsReadAt: markVaultPositionRowsRead(),
     });
     expect(pending).toHaveLength(2);
@@ -378,7 +461,7 @@ describe("hydrateVaultPositions shares identical provider reads in flight", () =
       .mockReturnValueOnce(new VaultDeadline(20_000))
       .mockReturnValueOnce(new VaultDeadline(20));
     const positions = [holding("p1", "vault-a")];
-    const options = { ownerKind: "custody" as const, rowsReadAt: markVaultPositionRowsRead() };
+    const options = { sourceType: "wallet" as const, rowsReadAt: markVaultPositionRowsRead() };
     const first = hydrateVaultPositions(context(), "sandbox", positions, options);
     const second = hydrateVaultPositions(context(), "sandbox", positions, options);
 
@@ -407,7 +490,7 @@ describe("hydrateVaultPositions shares identical provider reads in flight", () =
     // Request A reads the row, then its provider read starts and is held.
     const rowA = { ...stored };
     const first = hydrateVaultPositions(context(), "sandbox", positions, {
-      ownerKind: "custody",
+      sourceType: "wallet",
       rowsReadAt: markVaultPositionRowsRead(),
     });
     expect(pending).toHaveLength(1);
@@ -418,7 +501,7 @@ describe("hydrateVaultPositions shares identical provider reads in flight", () =
     // Request B reads the refilled row while A's read is still in flight.
     const rowB = { ...stored };
     const second = hydrateVaultPositions(context(), "sandbox", positions, {
-      ownerKind: "custody",
+      sourceType: "wallet",
       rowsReadAt: markVaultPositionRowsRead(),
     });
     expect(pending).toHaveLength(2);
@@ -463,7 +546,7 @@ describe("hydrateVaultPositions shares identical provider reads in flight", () =
         }
       );
       const options = {
-        ownerKind: "custody" as const,
+        sourceType: "wallet" as const,
         minimumSlotByPositionId: new Map([["p1", 101]]),
         rowsReadAt: markVaultPositionRowsRead(),
       };

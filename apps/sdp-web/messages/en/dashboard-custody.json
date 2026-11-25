@@ -327,7 +327,7 @@
     "closeApiKeyCreationModal": "Close API key creation modal",
     "wallets": "Wallets",
     "playgroundListWallets": "List Wallets",
-    "playgroundListWalletConfigs": "List Wallet Configs",
+    "playgroundListWalletConfigs": "List managed signing configurations",
     "playgroundGetWallet": "Get Wallet",
     "playgroundGetWalletPublicKey": "Get Wallet Public Key",
     "playgroundAggregateBalances": "Aggregate Wallet Balances",
@@ -861,6 +861,15 @@
       "empty": "No proposals in this list.",
       "previous": "Previous",
       "next": "Next"
-    }
+    },
+    "providerPolicyPresent": "Provider policy detected",
+    "providerPolicyMissing": "No provider policy detected",
+    "providerPolicyUnknown": "Provider policy not verified",
+    "providerPolicyPresentBody": "Review the rules in {provider} to confirm they cover your intended transactions and approvals. This check does not assess how restrictive the policy is.",
+    "providerPolicyMissingBody": "At least one connected wallet has no matching provider policy. Configure transaction restrictions and approvals in {provider}. SDP still allows signing; policy checks repeat hourly.",
+    "providerPolicyMissingWalletBody": "This wallet has no matching provider policy. Configure transaction restrictions and approvals in {provider}. SDP still allows signing; policy checks repeat hourly.",
+    "providerPolicyDeniedBody": "This credential cannot read policies. Ask an authorized operator to review the policy in {provider}. SDP still allows signing and will check again hourly.",
+    "providerPolicyUnknownBody": "SDP cannot currently verify the provider policy. Review it in {provider} before sending funds. Checks repeat hourly; this warning does not block signing.",
+    "providerPolicyCheckedAt": "Last checked {at}"
   }
 }

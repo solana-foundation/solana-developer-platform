@@ -29,7 +29,7 @@ export const projectScopeWithIdempotencyHeaders = projectScopeHeaders.extend({
 
 /**
  * For routes where the header is the ONLY accepted idempotency source and the
- * runtime refuses a request without it (the vault and external-wallet money
+ * runtime refuses a request without it (the vault and wallet money
  * movers). Marking it optional here would let a generated client omit a header
  * the API 400s on.
  */
@@ -53,9 +53,11 @@ export interface IdempotencyDocumentation {
   recovery?: "record";
   /**
    * The handler marks its domain row written (`markIdempotencyCommitted`), so
-   * from then on any status is stored: transfers and transfer batches.
+   * from then on known statuses below 500 are stored: transfers and batches.
    */
   storesAnswerAfterRecord?: boolean;
+  /** Preserve the exact answer after an operation mutation commits. */
+  committedServerErrors?: "store";
   /**
    * The route's authorize step marks a 5xx rerunnable when the custody
    * provider dedupes on the request id (`markIdempotencyRerunnable`,
@@ -89,6 +91,9 @@ const UNRECORDED_OUTCOME = {
 const ANSWER_AFTER_RECORD =
   "Once the request has written its record, any answer below 500 is stored: a transfer that fails after that (such as 400 `TRANSACTION_FAILED` or a 409 signer mismatch) answers a same-key retry with the same error and `Idempotent-Replayed: true`, and after 24 hours the record answers with the same status and code. A 5xx is not stored: a same-key retry runs again and is answered from the record. To try again after a failure, send the request with a new key.";
 
+const COMMITTED_SERVER_ERROR_RETRY =
+  "Before commitment a same-key retry after a 5xx can recover from the original record. After commitment the exact 5xx is stored and replayed; read the operation with GET or recover it from the operations feed. Never send a new money request to recover an uncertain response.";
+
 const PROVIDER_DEDUPE_RETRY =
   "On a custody provider that returns the same wallet for the same request ID, a 5xx is not stored: a same-key retry runs again and gets back the wallet the first attempt made. The Idempotency guide lists those providers and how long each keeps the request ID. On any other provider, a 5xx is stored and replayed like any other answer; check `GET /v1/wallets` before retrying with a new key.";
 
@@ -98,6 +103,7 @@ function idempotencyKeyDescription({
   serverErrors,
   recovery,
   storesAnswerAfterRecord,
+  committedServerErrors,
   rerunsWhenProviderDedupes,
 }: IdempotencyDocumentation) {
   const lead =
@@ -106,10 +112,26 @@ function idempotencyKeyDescription({
       : "Optional, and honored when sent.";
   const afterRecord = storesAnswerAfterRecord ? ` ${ANSWER_AFTER_RECORD}` : "";
   const unrecorded = UNRECORDED_OUTCOME[recovery ?? "none"];
-  const serverErrorRetry = rerunsWhenProviderDedupes
-    ? PROVIDER_DEDUPE_RETRY
-    : SERVER_ERROR_RETRY[serverErrors];
+  const serverErrorRetry = describeServerErrorRetry({
+    serverErrors,
+    committedServerErrors,
+    rerunsWhenProviderDedupes,
+  });
   return `${lead} ${IDEMPOTENCY_CONTRACT} ${unrecorded}${afterRecord} ${serverErrorRetry}`;
+}
+
+/** What a same-key retry after a 5xx does on this route. */
+function describeServerErrorRetry({
+  serverErrors,
+  committedServerErrors,
+  rerunsWhenProviderDedupes,
+}: Pick<
+  IdempotencyDocumentation,
+  "serverErrors" | "committedServerErrors" | "rerunsWhenProviderDedupes"
+>): string {
+  if (committedServerErrors === "store") return COMMITTED_SERVER_ERROR_RETRY;
+  if (rerunsWhenProviderDedupes) return PROVIDER_DEDUPE_RETRY;
+  return SERVER_ERROR_RETRY[serverErrors];
 }
 
 /**

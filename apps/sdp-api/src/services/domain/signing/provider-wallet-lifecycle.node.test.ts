@@ -1,61 +1,43 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as dfnsClient from "@sdp/custody/dfns/client";
+import { generateKeyPairSigner } from "@solana/kit";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import {
   createProviderWallet,
   privyWalletExternalId,
 } from "@/services/domain/signing/provider-wallet-lifecycle";
-import type { Env } from "@/types/env";
+import { env } from "@/test/helpers/env";
+import { required } from "@/test/helpers/required";
 
-const createWalletMock = vi.hoisted(() => vi.fn());
-const createDfnsApiClientMock = vi.hoisted(() => vi.fn());
-const createIbmHavenApiClientMock = vi.hoisted(() => vi.fn());
-const provisionPrivyWalletMock = vi.spyOn(custodyProvisioning, "provisionPrivyWallet");
-const provisionCoinbaseCdpAccountMock = vi.spyOn(
-  custodyProvisioning,
-  "provisionCoinbaseCdpAccount"
-);
+const { address: CREATED_WALLET_ADDRESS } = await generateKeyPairSigner();
 
-vi.mock("@sdp/custody/dfns/client", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@sdp/custody/dfns/client")>();
+function notCalledWhenCreating(): Promise<never> {
+  return Promise.reject(new Error("Wallet creation calls only wallets.createWallet"));
+}
 
-  return {
-    ...actual,
-    createDfnsApiClient: createDfnsApiClientMock,
-    createIbmHavenApiClient: createIbmHavenApiClientMock,
-  };
-});
+function stubWalletClient(create: "createDfnsApiClient" | "createIbmHavenApiClient") {
+  const createWallet = vi
+    .fn<dfnsClient.DfnsApiClient["wallets"]["createWallet"]>()
+    .mockResolvedValue({ id: "wa-12345-abcde-newdfnswallet", address: CREATED_WALLET_ADDRESS });
+  const createClient = vi.spyOn(dfnsClient, create).mockResolvedValue({
+    wallets: { getWallet: notCalledWhenCreating, listWallets: notCalledWhenCreating, createWallet },
+    keySignatures: { createSignature: notCalledWhenCreating, getSignature: notCalledWhenCreating },
+  });
+  return { createClient, createWallet };
+}
+
+afterEach(() => vi.restoreAllMocks());
 
 describe("createProviderWallet", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    createWalletMock.mockResolvedValue({
-      id: "wa-12345-abcde-newdfnswallet",
-      address: "DfnsNewWalletPublicKey111111111111111111111",
-    });
-    createDfnsApiClientMock.mockResolvedValue({
-      wallets: {
-        createWallet: createWalletMock,
-      },
-    });
-    createIbmHavenApiClientMock.mockResolvedValue({
-      wallets: {
-        createWallet: createWalletMock,
-      },
-    });
-  });
-
-  it("creates additional DFNS wallets without reusing the configured signing key", async () => {
-    const env = {
-      DFNS_API_BASE_URL: "https://trusted.dfns.test",
-    } as Env;
+  it("creates additional DFNS wallets on the deployment's API, without reusing the configured signing key", async () => {
+    const { createClient, createWallet } = stubWalletClient("createDfnsApiClient");
+    const dfnsEnv = { ...env, DFNS_API_BASE_URL: "https://trusted.dfns.test" };
 
     const wallet = await createProviderWallet({
-      env,
+      env: dfnsEnv,
       orgId: "org_dfns",
       projectId: "project_dfns",
-      params: {
-        label: "DFNS treasury",
-      },
+      params: { label: "DFNS treasury" },
       parsed: {
         provider: "dfns",
         apiBaseUrl: "https://untrusted.example",
@@ -65,31 +47,25 @@ describe("createProviderWallet", () => {
       },
     });
 
-    expect(createDfnsApiClientMock).toHaveBeenCalledWith(env);
-    expect(createWalletMock).toHaveBeenCalledWith({
-      body: {
-        network: "SolanaDevnet",
-        name: "DFNS treasury",
-      },
+    expect(createClient).toHaveBeenCalledExactlyOnceWith(dfnsEnv);
+    expect(createWallet).toHaveBeenCalledExactlyOnceWith({
+      body: { network: "SolanaDevnet", name: "DFNS treasury" },
     });
     expect(wallet).toEqual({
       walletId: "dfns_wa-12345-abcde-newdfnswallet",
-      publicKey: "DfnsNewWalletPublicKey111111111111111111111",
+      publicKey: CREATED_WALLET_ADDRESS,
     });
   });
 
   it("creates additional IBM Digital Asset Haven wallets with the ibmhaven_ prefix", async () => {
-    const env = {
-      IBM_HAVEN_API_BASE_URL: "https://trusted.haven.test",
-    } as Env;
+    const { createClient, createWallet } = stubWalletClient("createIbmHavenApiClient");
+    const havenEnv = { ...env, IBM_HAVEN_API_BASE_URL: "https://trusted.haven.test" };
 
     const wallet = await createProviderWallet({
-      env,
+      env: havenEnv,
       orgId: "org_ibm_haven",
       projectId: "project_ibm_haven",
-      params: {
-        label: "Haven treasury",
-      },
+      params: { label: "Haven treasury" },
       parsed: {
         provider: "ibm_haven",
         apiBaseUrl: "https://untrusted.example",
@@ -99,16 +75,13 @@ describe("createProviderWallet", () => {
       },
     });
 
-    expect(createIbmHavenApiClientMock).toHaveBeenCalledWith(env);
-    expect(createWalletMock).toHaveBeenCalledWith({
-      body: {
-        network: "SolanaDevnet",
-        name: "Haven treasury",
-      },
+    expect(createClient).toHaveBeenCalledExactlyOnceWith(havenEnv);
+    expect(createWallet).toHaveBeenCalledExactlyOnceWith({
+      body: { network: "SolanaDevnet", name: "Haven treasury" },
     });
     expect(wallet).toEqual({
       walletId: "ibmhaven_wa-12345-abcde-newdfnswallet",
-      publicKey: "DfnsNewWalletPublicKey111111111111111111111",
+      publicKey: CREATED_WALLET_ADDRESS,
     });
   });
 
@@ -116,12 +89,12 @@ describe("createProviderWallet", () => {
     const REQUEST_ID = "6f1f4de5-930e-4c4c-a99f-30d46c3c5ceb";
 
     it("reaches Privy as its idempotency key and external id, the same on every attempt", async () => {
-      provisionPrivyWalletMock.mockResolvedValue({
+      const provision = vi.spyOn(custodyProvisioning, "provisionPrivyWallet").mockResolvedValue({
         walletId: "privy_wallet",
-        address: "So11111111111111111111111111111111111111112",
+        address: CREATED_WALLET_ADDRESS,
       });
       const context = {
-        env: {} as Env,
+        env,
         orgId: "org_privy",
         projectId: "project_privy",
         params: { requestId: REQUEST_ID },
@@ -135,18 +108,19 @@ describe("createProviderWallet", () => {
         externalId: privyWalletExternalId(REQUEST_ID),
         idempotencyKey: REQUEST_ID,
       };
-      expect(provisionPrivyWalletMock).toHaveBeenNthCalledWith(1, context.env, expected);
-      expect(provisionPrivyWalletMock).toHaveBeenNthCalledWith(2, context.env, expected);
+      expect(provision.mock.calls).toEqual([
+        [env, expected],
+        [env, expected],
+      ]);
       expect(expected.externalId).toMatch(/^[a-zA-Z0-9_-]{1,64}$/);
     });
 
     it("reaches Coinbase CDP as its idempotency key and account seed, reusing the account", async () => {
-      provisionCoinbaseCdpAccountMock.mockResolvedValue({
-        address: "So11111111111111111111111111111111111111112",
-        network: "solana-devnet",
-      });
+      const provision = vi
+        .spyOn(custodyProvisioning, "provisionCoinbaseCdpAccount")
+        .mockResolvedValue({ address: CREATED_WALLET_ADDRESS, network: "solana-devnet" });
       const context = {
-        env: {} as Env,
+        env,
         orgId: "org_cdp",
         projectId: "project_cdp",
         params: { requestId: REQUEST_ID },
@@ -161,40 +135,40 @@ describe("createProviderWallet", () => {
         idempotencyKey: REQUEST_ID,
         reuseExisting: true,
       });
-      expect(provisionCoinbaseCdpAccountMock).toHaveBeenNthCalledWith(1, context.env, expected);
-      expect(provisionCoinbaseCdpAccountMock).toHaveBeenNthCalledWith(2, context.env, expected);
+      expect(provision.mock.calls).toEqual([
+        [env, expected],
+        [env, expected],
+      ]);
     });
 
     it("is absent from an unkeyed create, which gets a fresh Coinbase CDP account", async () => {
-      provisionCoinbaseCdpAccountMock.mockResolvedValue({
-        address: "So11111111111111111111111111111111111111112",
-        network: "solana-devnet",
-      });
-      provisionPrivyWalletMock.mockResolvedValue({
-        walletId: "privy_wallet",
-        address: "So11111111111111111111111111111111111111112",
-      });
+      const provisionCdp = vi
+        .spyOn(custodyProvisioning, "provisionCoinbaseCdpAccount")
+        .mockResolvedValue({ address: CREATED_WALLET_ADDRESS, network: "solana-devnet" });
+      const provisionPrivy = vi
+        .spyOn(custodyProvisioning, "provisionPrivyWallet")
+        .mockResolvedValue({ walletId: "privy_wallet", address: CREATED_WALLET_ADDRESS });
 
       await createProviderWallet({
-        env: {} as Env,
+        env,
         orgId: "org_cdp",
         projectId: "project_cdp",
         params: {},
         parsed: { provider: "coinbase_cdp", network: "solana-devnet" },
       });
       await createProviderWallet({
-        env: {} as Env,
+        env,
         orgId: "org_privy",
         projectId: "project_privy",
         params: {},
         parsed: { provider: "privy" },
       });
 
-      const cdpOptions = provisionCoinbaseCdpAccountMock.mock.calls[0]?.[1];
       // No request id: CDP gets a fresh idempotency key, and a name collision fails.
-      expect(cdpOptions?.idempotencyKey).toBeUndefined();
-      expect(cdpOptions?.reuseExisting).toBe(false);
-      expect(provisionPrivyWalletMock).toHaveBeenCalledWith({}, {});
+      const [, cdpOptions] = required(provisionCdp.mock.calls[0]);
+      expect(required(cdpOptions).idempotencyKey).toBeUndefined();
+      expect(required(cdpOptions).reuseExisting).toBe(false);
+      expect(provisionPrivy).toHaveBeenCalledExactlyOnceWith(env, {});
     });
   });
 });

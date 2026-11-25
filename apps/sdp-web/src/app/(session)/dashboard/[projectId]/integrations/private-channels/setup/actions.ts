@@ -83,10 +83,13 @@ export async function testConnectionAction(input: {
 
   try {
     const client = await createSdpApiClient();
-    const probe = await client.fetch<PrivateChannelProbeResult>("/v1/private-channels/probe", {
-      method: "POST",
-      body: JSON.stringify(parsed.data),
-    });
+    const probe = await client.fetch<PrivateChannelProbeResult>(
+      "/v1/private-channels/instance-connection/probe",
+      {
+        method: "POST",
+        body: JSON.stringify(parsed.data),
+      }
+    );
     return { kind: "probe", probe };
   } catch (error) {
     // The API client's diagnostic includes status codes, request IDs, and the
@@ -126,7 +129,7 @@ export async function connectPrivateChannelAction(
   try {
     const client = await createSdpApiClient();
     const response = await client.fetch<{ instance: PrivateChannelInstance }>(
-      "/v1/private-channels/instance",
+      "/v1/private-channels/instance-connection/connect",
       {
         method: "POST",
         body: JSON.stringify({ ...connectInput, confirmReactivate }),
@@ -168,7 +171,7 @@ export async function updatePrivateChannelAction(
   try {
     const client = await createSdpApiClient();
     const response = await client.fetch<{ instance: PrivateChannelInstance }>(
-      "/v1/private-channels/instance",
+      "/v1/private-channels/instance-connection",
       {
         method: "PATCH",
         body: JSON.stringify({ ...updateInput, instanceId }),
@@ -190,7 +193,7 @@ export async function disconnectPrivateChannelAction(): Promise<DisconnectResult
   try {
     const client = await createSdpApiClient();
     const response = await client.fetch<{ instance: PrivateChannelInstance }>(
-      "/v1/private-channels/instance/disconnect",
+      "/v1/private-channels/instance-connection/disconnect",
       { method: "POST", body: "{}" }
     );
     revalidatePath(await requestProjectHref("/dashboard/integrations/private-channels"), "layout");
@@ -206,7 +209,9 @@ export type DeleteResult = { ok: true } | { ok: false; message: string };
 export async function deletePrivateChannelAction(): Promise<DeleteResult> {
   try {
     const client = await createSdpApiClient();
-    await client.fetch<{ deleted: true }>("/v1/private-channels/instance", { method: "DELETE" });
+    await client.fetch<{ deleted: true }>("/v1/private-channels/instance-connection", {
+      method: "DELETE",
+    });
     revalidatePath(await requestProjectHref("/dashboard/integrations/private-channels/setup"));
     revalidatePath(await requestProjectHref("/dashboard/integrations"));
     return { ok: true };

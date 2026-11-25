@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
-import { verifyClerkJwt } from "@/lib/clerk-token";
 import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
-import { signSeededClerkMember } from "@/test/helpers/clerk-member";
+import { seedCustodyAdmin } from "@/test/helpers/custody-admin";
 import {
   insertTestCustodyConnection,
   insertTestStoredProviderCredential,
@@ -14,7 +14,7 @@ import {
 } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
-import { seedDefaultProjects } from "@/test/helpers/projects";
+import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -53,31 +53,6 @@ const VALID_BODY = {
 } as const;
 
 let clerkToken: string;
-
-async function seedActor(): Promise<void> {
-  const db = getDb(env);
-  await db.execute(
-    `INSERT INTO organizations (id, name, slug, tier, status)
-     VALUES (?, 'BYOK Release Channel', 'byok-release-channel', 'individual', 'active')`,
-    [ORGANIZATION_ID]
-  );
-  await db.execute(
-    `INSERT INTO users (id, email, email_verified, status)
-     VALUES (?, 'byok-release-channel@example.com', 1, 'active')`,
-    [USER_ID]
-  );
-  await db.execute(
-    `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-     VALUES ('mem_byok_release_channel', ?, ?, 'admin', 'active')`,
-    [ORGANIZATION_ID, USER_ID]
-  );
-  await seedDefaultProjects(db, {
-    organizationId: ORGANIZATION_ID,
-    createdBy: USER_ID,
-    members: [USER_ID],
-    ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
-  });
-}
 
 async function storedCredential(
   status: TestStoredProviderCredential["status"]
@@ -143,7 +118,7 @@ async function seedActiveConnection(): Promise<void> {
         {
           id: CUSTODY_WALLET_ID,
           walletId: "privy_byok_release_channel_installed",
-          publicKey: "byok-release-channel-installed-address",
+          publicKey: syntheticAddress(1),
           label: null,
           purpose: null,
           status: "active",
@@ -287,9 +262,12 @@ describe("BYOK Privy outside the release channel", () => {
     env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 9).toString("base64");
     env.CREDENTIAL_FINGERPRINT_PEPPER = "byok-release-channel-fingerprint-pepper";
     env.PRIVY_API_BASE_URL = PRIVY_API_BASE_URL;
-    await seedActor();
-    clerkToken = await signSeededClerkMember(env, getDb(env), USER_ID, ORGANIZATION_ID);
-    await verifyClerkJwt(clerkToken, env);
+    clerkToken = await seedCustodyAdmin(env, {
+      organizationId: ORGANIZATION_ID,
+      userId: USER_ID,
+      projectId: PROJECT_ID,
+      tier: "individual",
+    });
     providerFetch.mockReset();
     vi.stubGlobal("fetch", providerFetch);
   });
@@ -321,7 +299,7 @@ describe("BYOK Privy outside the release channel", () => {
     providerFetch.mockResolvedValueOnce(Response.json({ data: [] }));
     const first = await submit("byok-out-replay");
     expect(first.status).toBe(201);
-    const firstBody = (await first.json()) as { data: Record<string, unknown> };
+    const firstData = z.object({ data: z.unknown() }).parse(await first.json()).data;
     custodyReleaseChannel.outOfChannelMode = "byok";
 
     const replay = await submit("byok-out-replay");
@@ -329,7 +307,7 @@ describe("BYOK Privy outside the release channel", () => {
 
     expect(replay.status).toBe(201);
     expect(await replay.json()).toEqual({
-      data: firstBody.data,
+      data: firstData,
       meta: { requestId: expect.any(String), timestamp: expect.any(String) },
     });
     expect(fresh.status).toBe(403);
@@ -346,7 +324,7 @@ describe("BYOK Privy outside the release channel", () => {
     const before = await connectionState();
 
     const response = await dashboardRequest(
-      `/internal/dashboard/custody/connections/${CONNECTION_ID}/complete`,
+      `/internal/dashboard/custody/connections/${CONNECTION_ID}/complete-installation`,
       { method: "POST", idempotencyKey: null, body: null }
     );
 
@@ -364,14 +342,14 @@ describe("BYOK Privy outside the release channel", () => {
     providerFetch.mockResolvedValueOnce(
       Response.json({
         id: "wallet-byok-release-channel",
-        address: "wallet-address-byok-release-channel",
+        address: syntheticAddress(2),
         chain_type: "solana",
         external_id: `sdp_${CONNECTION_ID}`,
       })
     );
 
     const response = await dashboardRequest(
-      `/internal/dashboard/custody/connections/${CONNECTION_ID}/complete`,
+      `/internal/dashboard/custody/connections/${CONNECTION_ID}/complete-installation`,
       { method: "POST", idempotencyKey: null, body: null }
     );
 
@@ -401,44 +379,10 @@ describe("BYOK Privy outside the release channel", () => {
 
   it.each([
     {
-      operation: "rotate",
-      path: `/internal/dashboard/custody/provider-credentials/${CREDENTIAL_ID}/rotate`,
-      idempotencyKey: "byok-out-rotate",
-      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "rotated secret" } },
-    },
-    {
-      operation: "complete-rotation",
-      path: `/internal/dashboard/custody/provider-credentials/${CREDENTIAL_ID}/complete-rotation`,
-      idempotencyKey: null,
-      body: null,
-    },
-    {
-      operation: "rollback",
-      path: `/internal/dashboard/custody/provider-credentials/${CREDENTIAL_ID}/rollback`,
-      idempotencyKey: null,
-      body: null,
-    },
-  ])("refuses $operation before any Provider call", async ({ path, idempotencyKey, body }) => {
-    await seedActiveConnection();
-    const before = await credentialState();
-
-    const response = await dashboardRequest(path, { method: "POST", idempotencyKey, body });
-
-    expect(response.status).toBe(403);
-    expect(await response.json()).toEqual({
-      error: CHANNEL_REFUSAL,
-      meta: { requestId: expect.any(String) },
-    });
-    expect(providerFetch).not.toHaveBeenCalled();
-    expect(await credentialState()).toEqual(before);
-  });
-
-  it.each([
-    {
       operation: "rollback",
       state: "a retired Credential",
       seed: () => seedSuccessor({ status: "retired", deactivatedAt: null }),
-      path: `/internal/dashboard/custody/provider-credentials/${SUCCESSOR_CREDENTIAL_ID}/rollback`,
+      path: `/internal/dashboard/custody/provider-credentials/${SUCCESSOR_CREDENTIAL_ID}/rollback-rotation`,
       idempotencyKey: null,
       body: null,
     },

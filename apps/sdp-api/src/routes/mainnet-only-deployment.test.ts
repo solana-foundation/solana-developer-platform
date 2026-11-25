@@ -215,7 +215,7 @@ describe("a mainnet-only deployment, for an organization without mainnet access"
 
   it("keeps the Earn reads and exits a production project holds after losing mainnet", async () => {
     const response = await app.request(
-      "/v1/earn/strategies",
+      "/v1/earn/discovery",
       { headers: actor.headers(PRODUCTION_PROJECT_ID) },
       env
     );

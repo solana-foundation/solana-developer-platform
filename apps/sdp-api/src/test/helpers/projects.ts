@@ -1,4 +1,5 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { MovementId } from "@sdp/types/movements";
 import { expect } from "vitest";
 import type { DatabaseClient } from "@/db/client";
 
@@ -129,6 +130,26 @@ export async function seedDefaultProjects(
  */
 export async function archiveProject(db: DatabaseClient, projectId: string): Promise<void> {
   await db.prepare("UPDATE projects SET status = 'archived' WHERE id = ?").bind(projectId).run();
+}
+
+/**
+ * Stop exactly these movements for a project, as the operator's movement control does; an
+ * empty list re-enables every movement.
+ *
+ * @param db - Test database client.
+ * @param projectId - Project whose movements change.
+ * @param movements - Movements to stop.
+ * @returns Resolves once the row is updated.
+ */
+export async function setDisabledMovements(
+  db: DatabaseClient,
+  projectId: string,
+  movements: readonly MovementId[]
+): Promise<void> {
+  await db
+    .prepare("UPDATE projects SET disabled_movements = ?::text[] WHERE id = ?")
+    .bind([...movements], projectId)
+    .run();
 }
 
 /**

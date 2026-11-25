@@ -25,14 +25,7 @@ import {
   isTransactionWithinSizeLimit,
   verifySignature,
 } from "@solana/kit";
-import {
-  cancelCompose,
-  cctpBurnDecoder,
-  evmWord,
-  mintHook,
-  oftSendDecoder,
-  redeemCompose,
-} from "./abi";
+import { cctpBurnDecoder, evmWord, mintHook, oftSendDecoder, redeemCompose } from "./abi";
 import { SdpPlumeError } from "./errors";
 import { assertPlumeOperationActive } from "./operation";
 
@@ -84,8 +77,7 @@ export interface PlumePlanInput {
   depositMint: string;
   atoms: bigint;
   canonicalAmount: string;
-  mode: "mint" | "standard" | "instant" | "cancel";
-  originalComposer?: string;
+  mode: "mint" | "standard" | "instant";
   transactionBase64: string;
 }
 
@@ -154,7 +146,7 @@ export async function admitPlumeTransaction(
         ? { amount: input.canonicalAmount }
         : {
             shares: input.canonicalAmount,
-            redemptionMode: input.mode === "cancel" ? undefined : input.mode,
+            redemptionMode: input.mode,
           },
   };
   if (additionalSigners.length > 0)
@@ -265,24 +257,12 @@ function admitRedemption(
   requireEqual(send.minimum, input.atoms);
   requireEqual(send.lzTokenFee, 0n);
   if (send.nativeFee > 100_000_000n) refuse("Plume native bridge fee exceeds policy");
-  const composer =
-    input.mode === "cancel" ? input.originalComposer : input.vault.redemptionComposer;
-  if (composer === undefined || !bytesEqual(send.to, evmWord(composer)) || !isSome(send.compose))
+  if (!bytesEqual(send.to, evmWord(input.vault.redemptionComposer)) || !isSome(send.compose))
     refuse("Unexpected Plume redemption route");
   const plumeAtoms =
     input.atoms /
     10n ** BigInt(Math.max(0, input.vault.shareDecimals - input.vault.plumeShareDecimals));
-  if (input.mode === "cancel") {
-    if (send.compose.value.length !== 416) refuse("Invalid cancellation message");
-    const returnValue = BigInt(
-      `0x${Buffer.from(send.compose.value).subarray(32, 64).toString("hex")}`
-    );
-    if (
-      !bytesEqual(send.compose.value, cancelCompose(usdcAta, returnValue)) &&
-      !bytesEqual(send.compose.value, cancelCompose(input.owner, returnValue))
-    )
-      refuse("Unexpected cancellation receiver or amount");
-  } else if (
+  if (
     !bytesEqual(
       send.compose.value,
       redeemCompose(usdcAta, plumeAtoms, input.mode === "instant" ? "instant" : "standard")

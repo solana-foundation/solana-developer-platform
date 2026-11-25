@@ -24,7 +24,7 @@ import type { DatabaseExecutor } from "@/db/client";
 /**
  * How long after a standalone subscription's last change its authority stays: one billing period
  * plus this margin. A canceled standalone subscription can still be resumed by its subscriber
- * (`prepare-resume`) until the end of its current period, which needs the authority. A recurring
+ * (`resume/build-unsigned-transaction`) until the end of its current period, which needs the authority. A recurring
  * payment's cancel is terminal (HOO-2339), so its subscriptions hold nothing once released.
  */
 const SUBSCRIPTION_AUTHORITY_IDLE_MARGIN_HOURS = 1;

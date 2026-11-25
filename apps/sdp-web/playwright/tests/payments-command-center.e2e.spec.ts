@@ -3,48 +3,41 @@ import { projectHref } from "@/lib/dashboard-project-path";
 import { test } from "@/playwright/support/test";
 import { gotoProjectPage, provisionLinkedOrgProjects } from "../support/local-dashboard-bootstrap";
 
-test.describe("payments command center and transaction ledger", () => {
+test.describe("payments overview and transaction ledger", () => {
   let projectId = "";
 
   test.beforeAll(async ({ browser }) => {
     projectId = (await provisionLinkedOrgProjects(browser)).sandbox;
   });
 
-  test("renders the fast action surface and independently settled summaries", async ({ page }) => {
+  test("renders the overview from the API and links each action to its flow", async ({ page }) => {
     await gotoProjectPage(page, projectId, "/dashboard/payments");
 
-    const commandCenter = page.locator("[data-payments-command-center]");
-    await expect(commandCenter).toBeVisible();
-    const destinations = [
+    // Each region streams in once its reads answer; its heading shows only then.
+    await expect(page.getByRole("heading", { name: "Available balance" })).toBeVisible({
+      timeout: 120_000,
+    });
+    await expect(page.getByRole("heading", { name: "Activity", exact: true })).toBeVisible({
+      timeout: 120_000,
+    });
+    await expect(page.getByText("Balance is temporarily unavailable.")).toHaveCount(0);
+    await expect(page.getByText("Activity is temporarily unavailable.")).toHaveCount(0);
+
+    const moveMoney = page.getByRole("region", { name: "Move money" });
+    for (const [name, path] of [
       ["Pay", "/dashboard/payments/pay"],
       ["Deposit", "/dashboard/payments/deposit"],
       ["Request", "/dashboard/payments/requests"],
       ["Schedule", "/dashboard/payments/recurring/create"],
-    ] as const;
-    for (const [name, href] of destinations) {
-      await expect(
-        commandCenter.getByRole("link", { name: new RegExp(`^${name}`) })
-      ).toHaveAttribute("href", projectHref(projectId, href));
+    ] as const) {
+      await expect(moveMoney.getByRole("link", { name: new RegExp(`^${name}`) })).toHaveAttribute(
+        "href",
+        projectHref(projectId, path)
+      );
     }
-
-    for (const section of ["balance", "summary", "actions", "activity"]) {
-      await expect(
-        commandCenter.locator(`[data-payments-overview-section="${section}"]`)
-      ).toBeVisible({
-        timeout: 120_000,
-      });
-    }
-    // With transfers the activity list ends on "View all transactions"; a project with none
-    // shows the empty state, whose one way on is "Open Transactions".
-    await expect(
-      commandCenter
-        .locator('[data-payments-overview-section="activity"]')
-        .getByRole("link", { name: /^(View all transactions|Open Transactions)$/ })
-        .first()
-    ).toHaveAttribute("href", projectHref(projectId, "/dashboard/payments/transactions"));
   });
 
-  test("keeps transaction filters responsive, shareable, and stable on mobile", async ({
+  test("sends a search to the API, keeps it in a shareable URL, and fits a phone", async ({
     page,
   }) => {
     await page.setViewportSize({ width: 390, height: 844 });
@@ -53,14 +46,31 @@ test.describe("payments command center and transaction ledger", () => {
 
     const search = page.getByRole("searchbox", { name: /search transactions/i });
     await expect(search).toBeVisible();
+    const searched = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        url.pathname === "/api/dashboard/payments/transactions" &&
+        url.searchParams.get("search") === "invoice-42"
+      );
+    });
     await search.fill("invoice-42");
     await search.press("Enter");
-    await expect(page).toHaveURL(/search=invoice-42/, { timeout: 5_000 });
+    expect((await searched).status()).toBe(200);
+    await expect(page).toHaveURL(/[?&]search=invoice-42(&|$)/, { timeout: 5_000 });
     await expect
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
       .toBe(true);
 
+    await page.reload();
+    await expect(page.getByRole("searchbox", { name: /search transactions/i })).toHaveValue(
+      "invoice-42"
+    );
+  });
+
+  test("keeps a collapsed sidebar section collapsed across a reload", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
+    await gotoProjectPage(page, projectId, "/dashboard/payments/transactions");
+
     const paymentsToggle = page.getByRole("button", { name: /payments menu/i });
     await expect(paymentsToggle).toHaveAttribute("aria-expanded", "true");
     await paymentsToggle.click();

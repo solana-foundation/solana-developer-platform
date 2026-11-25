@@ -1,12 +1,10 @@
 import "server-only";
 
-import type {
-  YieldMovement,
-  YieldPosition,
-  YieldStrategy,
-  YieldWithdrawalOptions,
-  YieldWithdrawalRequest,
-} from "../src/types";
+import {
+  coreOperationSchema,
+  type EarnOperation,
+} from "../src/lib/core-operation";
+import type { YieldPosition, YieldStrategy } from "../src/types";
 import type { DemoConfig } from "./env";
 
 interface SdpErrorEnvelope {
@@ -19,44 +17,6 @@ interface SdpErrorEnvelope {
 interface Page {
   hasMore: boolean;
   nextCursor: string | null;
-}
-
-export interface BuiltTransaction {
-  transactionId: string;
-  transaction: string;
-  lastValidBlockHeight: string;
-  ownerAddress: string;
-  feePayer?: string;
-  provider: string;
-}
-
-interface DepositBuildResult {
-  transaction?: BuiltTransaction & {
-    amount: string;
-    minSharesOut: string | null;
-    strategy: Pick<
-      YieldStrategy,
-      "id" | "name" | "provider" | "providerReference" | "hostCluster"
-    >;
-  };
-  requiresSeparateSwap?: true;
-}
-
-interface WithdrawalBuildResult {
-  transaction: BuiltTransaction & {
-    positionId: string;
-    shares: string;
-    minAmountOut: string | null;
-  };
-}
-
-interface QueuedWithdrawalBuildResult {
-  transaction: BuiltTransaction & {
-    positionId: string;
-    action: "request" | "cancel";
-    requestAddress: string;
-    withdrawalRequestId?: string;
-  };
 }
 
 export class SdpApiError extends Error {
@@ -105,7 +65,7 @@ export class EmbeddedYieldClient {
       const data = await this.request<{
         strategies: YieldStrategy[];
         total: number;
-      }>(`/v1/earn/strategies?${query}`);
+      }>(`/v1/earn/discovery?${query}`);
       let added = 0;
       for (const strategy of data.strategies) {
         if (seenStrategyIds.has(strategy.id)) continue;
@@ -125,271 +85,161 @@ export class EmbeddedYieldClient {
     );
   }
 
-  async previewDeposit(strategyId: string, amount: string) {
-    return this.request<{
-      strategyId: string;
-      sharesOut: string;
-      shareDecimals: number;
-      blockingIssues: Array<{ code: string; message: string }>;
-    }>("/v1/earn/deposits/preview", {
-      method: "POST",
-      body: { strategyId, amount },
-    });
-  }
-
-  async buildDeposit(input: {
-    strategyId: string;
-    ownerAddress: string;
-    feePayer?: string;
-    amount: string;
-    sourceTokenMint: string;
-    minSharesOut?: string;
-  }): Promise<BuiltTransaction> {
-    const data = await this.request<DepositBuildResult>(
-      "/v1/earn/deposits/build-unsigned-transaction",
-      { method: "POST", body: input }
-    );
-    if (data.requiresSeparateSwap || !data.transaction) {
-      throw new Error(
-        "The direct-deposit demo unexpectedly received a split-swap transaction"
-      );
-    }
-    return data.transaction;
-  }
-
-  async submitDeposit(
-    transactionId: string,
-    signedTransaction: string,
-    idempotencyKey: string
-  ): Promise<YieldMovement> {
-    const data = await this.request<{ deposit: YieldMovement }>(
-      "/v1/earn/deposits/submit-signed-transaction",
-      {
-        method: "POST",
-        body: { transactionId, signedTransaction },
-        idempotencyKey,
-      }
-    );
-    return data.deposit;
-  }
-
-  async previewWithdrawal(positionId: string, shares: string) {
-    return this.request<{
-      positionId: string;
-      assetsOut: string;
-      assetDecimals: number;
-      blockingIssues: Array<{ code: string; message: string }>;
-    }>("/v1/earn/withdrawals/caller-signed/preview", {
-      method: "POST",
-      body: { positionId, shares },
-    });
-  }
-
-  async getWithdrawalOptions(
-    positionId: string
-  ): Promise<YieldWithdrawalOptions> {
-    return this.request<YieldWithdrawalOptions>(
-      "/v1/earn/withdrawals/caller-signed/options",
-      { method: "POST", body: { positionId } }
-    );
-  }
-
-  async previewQueuedWithdrawal(input: {
-    positionId: string;
-    shares: string;
-    discountBps: number;
-    deadlineSeconds: number;
-  }) {
-    return this.request<{
-      positionId: string;
-      assetMint: string;
-      shares: string;
-      shareDecimals: number;
-      assets: string;
-      assetDecimals: number;
-      discountBps: number;
-      maturityTimestamp: string;
-      deadlineTimestamp: string;
-      blockingIssues: Array<{ code: string; message: string }>;
-    }>("/v1/earn/withdrawal-requests/caller-signed/preview", {
-      method: "POST",
-      body: input,
-    });
-  }
-
-  async buildWithdrawal(input: {
-    positionId: string;
-    shares: string;
-    minAmountOut?: string;
-    feePayer?: string;
-  }): Promise<BuiltTransaction> {
-    const data = await this.request<WithdrawalBuildResult>(
-      "/v1/earn/withdrawals/build-unsigned-transaction",
-      { method: "POST", body: input }
-    );
-    return data.transaction;
-  }
-
-  async submitWithdrawal(
-    transactionId: string,
-    signedTransaction: string,
-    idempotencyKey: string
-  ): Promise<YieldMovement> {
-    const data = await this.request<{ withdrawal: YieldMovement }>(
-      "/v1/earn/withdrawals/submit-signed-transaction",
-      {
-        method: "POST",
-        body: { transactionId, signedTransaction },
-        idempotencyKey,
-      }
-    );
-    return data.withdrawal;
-  }
-
-  async buildQueuedWithdrawalRequest(input: {
-    positionId: string;
-    shares: string;
-    discountBps: number;
-    deadlineSeconds: number;
-    feePayer?: string;
-  }): Promise<QueuedWithdrawalBuildResult["transaction"]> {
-    const data = await this.request<QueuedWithdrawalBuildResult>(
-      "/v1/earn/withdrawal-requests/build-unsigned-transaction",
-      { method: "POST", body: input }
-    );
-    return data.transaction;
-  }
-
-  async submitQueuedWithdrawalRequest(
-    transactionId: string,
-    signedTransaction: string,
-    idempotencyKey: string
-  ): Promise<YieldWithdrawalRequest> {
-    const data = await this.request<{
-      withdrawalRequest: YieldWithdrawalRequest;
-    }>("/v1/earn/withdrawal-requests/submit-signed-transaction", {
-      method: "POST",
-      body: { transactionId, signedTransaction },
-      idempotencyKey,
-    });
-    return data.withdrawalRequest;
-  }
-
-  async listPendingWithdrawalRequests(
-    ownerAddress: string
-  ): Promise<YieldWithdrawalRequest[]> {
-    return this.allowUnknownOwner(
-      () =>
-        this.collectPages<YieldWithdrawalRequest>(
-          "/v1/earn/withdrawal-requests/caller-signed",
-          "withdrawalRequests",
-          ownerAddress,
-          { settled: "false" }
-        ),
-      []
-    );
-  }
-
-  async buildQueuedWithdrawalCancellation(input: {
-    withdrawalRequestId: string;
-    feePayer?: string;
-  }): Promise<QueuedWithdrawalBuildResult["transaction"]> {
-    const data = await this.request<QueuedWithdrawalBuildResult>(
-      "/v1/earn/withdrawal-requests/cancel/build-unsigned-transaction",
-      { method: "POST", body: input }
-    );
-    return data.transaction;
-  }
-
-  async submitQueuedWithdrawalCancellation(
-    transactionId: string,
-    signedTransaction: string,
-    idempotencyKey: string
-  ): Promise<YieldWithdrawalRequest> {
-    const data = await this.request<{
-      withdrawalRequest: YieldWithdrawalRequest;
-    }>("/v1/earn/withdrawal-requests/cancel/submit-signed-transaction", {
-      method: "POST",
-      body: { transactionId, signedTransaction },
-      idempotencyKey,
-    });
-    return data.withdrawalRequest;
-  }
-
-  /** Every recorded movement for the wallet, newest first, across all pages. */
-  async listMovements(ownerAddress: string): Promise<YieldMovement[]> {
-    return this.allowUnknownOwner(
-      () =>
-        this.collectPages<YieldMovement>(
-          "/v1/earn/movements/caller-signed",
-          "movements",
-          ownerAddress
-        ),
-      []
-    );
-  }
-
-  /** Read one movement through SDP's chain-aware detail endpoint. */
-  async getMovement(movementId: string): Promise<YieldMovement> {
-    const data = await this.request<{ movement: YieldMovement }>(
-      `/v1/earn/movements/caller-signed/${encodeURIComponent(movementId)}`
-    );
-    return data.movement;
-  }
-
-  /** Open positions for the wallet. SDP omits a position once it is closed. */
+  /** Read positions belonging to the configured owner address. */
   async listPositions(ownerAddress: string): Promise<YieldPosition[]> {
-    return this.allowUnknownOwner(
-      () =>
-        this.collectPages<YieldPosition>(
-          "/v1/earn/positions/caller-signed",
-          "positions",
-          ownerAddress
-        ),
-      []
-    );
-  }
-
-  private async collectPages<T>(
-    path: string,
-    key: "movements" | "positions" | "withdrawalRequests",
-    ownerAddress: string,
-    filters: Record<string, string> = {}
-  ): Promise<T[]> {
-    const items: T[] = [];
-    const seenCursors = new Set<string>();
-    let cursor: string | undefined;
-
-    while (true) {
+    const positions: YieldPosition[] = [];
+    const seen = new Set<string>();
+    let before: string | undefined;
+    for (let page = 0; page < 100; page += 1) {
       const query = new URLSearchParams({
+        sourceType: "address",
         ownerAddress,
+        discover: "true",
         limit: "100",
-        ...filters,
       });
-      if (cursor) query.set("before", cursor);
-      const data = await this.request<Page & Record<typeof key, T[]>>(
-        `${path}?${query}`
-      );
-      items.push(...data[key]);
-      if (!data.hasMore) return items;
-      if (!data.nextCursor || seenCursors.has(data.nextCursor)) {
-        throw new Error(`SDP ${key} cursor did not advance`);
+      if (before) query.set("before", before);
+      const data = await this.request<
+        Page & {
+          positions: Array<
+            Omit<YieldPosition, "ownerAddress"> & {
+              source: { ownerAddress?: string };
+            }
+          >;
+        }
+      >(`/v1/earn/positions?${query}`);
+      for (const position of data.positions) {
+        if (position.source.ownerAddress !== ownerAddress)
+          throw new Error("Invalid position owner");
+        positions.push({ ...position, ownerAddress });
       }
-      seenCursors.add(data.nextCursor);
-      cursor = data.nextCursor;
+      if (!data.hasMore) return positions;
+      if (!data.nextCursor || seen.has(data.nextCursor))
+        throw new Error("SDP position cursor did not advance");
+      seen.add(data.nextCursor);
+      before = data.nextCursor;
     }
+    throw new Error("SDP position pagination exceeded its safety limit");
   }
 
-  private async allowUnknownOwner<T>(
-    load: () => Promise<T>,
-    empty: T
-  ): Promise<T> {
-    try {
-      return await load();
-    } catch (error) {
-      if (error instanceof SdpApiError && error.status === 404) return empty;
-      throw error;
+  /** Preparation builds terms and unsigned bytes without asking a custodian to sign. */
+  async prepareDeposit(
+    input: {
+      strategyId: string;
+      source: { ownerAddress: string };
+      amount: { mint: string; value: string };
+      slippageBps?: number;
+      feePayer?: string;
+    },
+    idempotencyKey: string
+  ): Promise<EarnOperation> {
+    const data = await this.request<{ operation: unknown }>(
+      "/v1/earn/deposit",
+      {
+        method: "POST",
+        body: input,
+        idempotencyKey,
+      }
+    );
+    return coreOperationSchema.parse(data.operation);
+  }
+
+  async prepareWithdrawal(
+    input: {
+      positionId: string;
+      amount: { kind: "token"; mint: string; value: string };
+      slippageBps?: number;
+      feePayer?: string;
+    },
+    idempotencyKey: string
+  ): Promise<EarnOperation> {
+    const data = await this.request<{ operation: unknown }>(
+      "/v1/earn/withdraw",
+      {
+        method: "POST",
+        body: input,
+        idempotencyKey,
+      }
+    );
+    return coreOperationSchema.parse(data.operation);
+  }
+
+  async getOperation(id: string): Promise<EarnOperation> {
+    const data = await this.request<{ operation: unknown }>(
+      `/v1/operations/${encodeURIComponent(id)}`
+    );
+    return coreOperationSchema.parse(data.operation);
+  }
+
+  async listOperations(ownerAddress: string): Promise<EarnOperation[]> {
+    const operations: EarnOperation[] = [];
+    const seen = new Set<string>();
+    let before: string | undefined;
+    for (let page = 0; page < 100; page += 1) {
+      const query = new URLSearchParams({ ownerAddress, limit: "100" });
+      if (before) query.set("cursor", before);
+      const data = await this.request<{
+        operations: unknown[];
+        nextCursor: string | null;
+      }>(`/v1/operations?${query}`);
+      operations.push(
+        ...data.operations.map((operation) =>
+          coreOperationSchema.parse(operation)
+        )
+      );
+      if (data.nextCursor === null) return operations;
+      if (seen.has(data.nextCursor))
+        throw new Error("SDP operation cursor did not advance");
+      seen.add(data.nextCursor);
+      before = data.nextCursor;
     }
+    throw new Error("SDP operation pagination exceeded its safety limit");
+  }
+
+  async submitOperation(
+    id: string,
+    action: {
+      actionId: string;
+      version: number;
+      signedTransaction?: string;
+    },
+    idempotencyKey: string
+  ): Promise<EarnOperation> {
+    const data = await this.request<{ operation: unknown }>(
+      `/v1/operations/${encodeURIComponent(id)}/submit`,
+      {
+        method: "POST",
+        body: action,
+        idempotencyKey,
+      }
+    );
+    return coreOperationSchema.parse(data.operation);
+  }
+
+  async refreshOperation(
+    id: string,
+    action: { actionId: string; version: number; optionId?: string },
+    idempotencyKey: string
+  ): Promise<EarnOperation> {
+    const data = await this.request<{ operation: unknown }>(
+      `/v1/operations/${encodeURIComponent(id)}/refresh`,
+      { method: "POST", body: action, idempotencyKey }
+    );
+    return coreOperationSchema.parse(data.operation);
+  }
+
+  async cancelOperation(
+    id: string,
+    idempotencyKey: string
+  ): Promise<EarnOperation> {
+    const data = await this.request<{ operation: unknown }>(
+      `/v1/operations/${encodeURIComponent(id)}/cancel`,
+      {
+        method: "POST",
+        body: {},
+        idempotencyKey,
+      }
+    );
+    return coreOperationSchema.parse(data.operation);
   }
 
   private async request<T>(

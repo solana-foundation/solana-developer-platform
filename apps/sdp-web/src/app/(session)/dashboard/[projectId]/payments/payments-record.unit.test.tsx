@@ -8,18 +8,13 @@ afterEach(() => {
 });
 
 describe("RecordFacts", () => {
-  it("skips empty and repeated facts and draws a hidden dot only between the ones left", () => {
+  it("shows each fact once, skipping empty ones, with one hidden separator between them", () => {
     const { container } = render(
       <RecordFacts facts={[null, "Singapore", "", "Singapore", undefined, "192.0.2.1"]} />
     );
 
-    const leaves = Array.from(container.querySelectorAll("span span")).filter(
-      (span) => span.children.length === 0
-    );
-
-    expect(
-      leaves.map((leaf) => (leaf.getAttribute("aria-hidden") === "true" ? "dot" : leaf.textContent))
-    ).toEqual(["Singapore", "dot", "192.0.2.1"]);
+    expect(container.textContent).toBe("Singapore192.0.2.1");
+    expect(container.querySelectorAll('[aria-hidden="true"]')).toHaveLength(1);
   });
 });
 

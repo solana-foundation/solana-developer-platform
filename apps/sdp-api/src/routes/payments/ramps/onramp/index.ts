@@ -14,7 +14,7 @@ import { createOnrampQuoteSchema, estimateOnrampSchema } from "./schemas";
 
 export const onramp = new Hono<{ Bindings: Env }>();
 
-onramp.get("/currency", requireAction("onramp.read"), listOnrampCurrencies);
+onramp.get("/supported-pairs", requireAction("onramp.read"), listOnrampCurrencies);
 onramp.post(
   "/estimate",
   requireAction("onramp.read"),
@@ -23,7 +23,7 @@ onramp.post(
   estimateOnramp
 );
 onramp.post(
-  "/quote",
+  "/start",
   requireAction("onramp.execute"),
   validateBody(createOnrampQuoteSchema),
   meteredQuota({ name: "ramp-quote", actorMax: 20, orgMax: 60 }),

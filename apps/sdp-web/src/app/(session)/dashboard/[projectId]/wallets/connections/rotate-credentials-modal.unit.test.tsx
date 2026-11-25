@@ -6,10 +6,9 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as csrActions from "@/app/(session)/dashboard/[projectId]/wallets/setup/fireblocks-csr-actions";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
 import { dashboardDataResponse } from "@/test/dashboard-fetch";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { EnglishI18n } from "@/test/i18n";
 import { setPageRequest } from "@/test/request-project";
 import { FreshSWRCache } from "@/test/swr";
 
@@ -69,7 +68,7 @@ function modal(
   const provider = currentLifecycle.providerCredential.provider;
   if (!isByokCustodyProvider(provider)) throw new Error("Expected BYOK fixture");
   return (
-    <I18nProvider locale="en" messages={getMessages("en")}>
+    <EnglishI18n>
       <FreshSWRCache>
         <RotateCredentialsModal
           isOpen
@@ -80,7 +79,7 @@ function modal(
           canRotate={canRotate}
         />
       </FreshSWRCache>
-    </I18nProvider>
+    </EnglishI18n>
   );
 }
 
@@ -121,9 +120,9 @@ function RotationHost({
 
 function section(currentLifecycle: CustodyCredentialLifecycle | "restricted" | null) {
   return (
-    <I18nProvider locale="en" messages={getMessages("en")}>
+    <EnglishI18n>
       <RotationHost lifecycle={currentLifecycle} />
-    </I18nProvider>
+    </EnglishI18n>
   );
 }
 
@@ -152,6 +151,21 @@ function mockApi() {
     })
   );
   return rotation;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+/** The rotate request the page sent `index`th, as sdp-api receives it. */
+function sentRotation(rotation: ReturnType<typeof mockApi>, index: number) {
+  const call = rotation.mock.calls[index];
+  if (call === undefined) throw new Error(`No rotate request #${index + 1}`);
+  const [url, init] = call;
+  if (init === undefined) throw new Error("A rotate request always sends a RequestInit");
+  return {
+    url,
+    idempotencyKey: new Headers(init.headers).get("Idempotency-Key"),
+    body: init.body,
+  };
 }
 
 async function submitCredentials(appSecret = "test-app-secret") {
@@ -203,22 +217,17 @@ describe("rotation recovery", () => {
       await userEvent.click(screen.getByRole("button", { name: "Retry" }));
       await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
       expect(rotation).toHaveBeenCalledTimes(2);
-      const first = rotation.mock.calls[0];
-      const retry = rotation.mock.calls[1];
-      expect(first?.[0]).toBe(
-        "https://api.example.test/internal/dashboard/custody/provider-credentials/pcred_original/rotate"
-      );
-      expect(retry?.[0]).toBe(first?.[0]);
-      expect(first?.[1]?.body).toBe(
-        JSON.stringify({
+      const first = sentRotation(rotation, 0);
+      expect(first).toEqual({
+        url: "https://api.example.test/internal/dashboard/custody/provider-credentials/pcred_original/rotate",
+        idempotencyKey: expect.stringMatching(UUID),
+        body: JSON.stringify({
           provider: "privy",
           fields: { appId: "test-app-id", appSecret: "test-app-secret" },
-        })
-      );
-      expect(retry?.[1]?.body).toBe(first?.[1]?.body);
-      const originalKey = new Headers(first?.[1]?.headers).get("Idempotency-Key");
-      expect(originalKey).toBeTruthy();
-      expect(new Headers(retry?.[1]?.headers).get("Idempotency-Key")).toBe(originalKey);
+        }),
+      });
+      // The retry is the same request under the same key, so the API replays the first answer.
+      expect(sentRotation(rotation, 1)).toEqual(first);
       expect(screen.getByLabelText("New Privy app secret")).toHaveProperty("value", "");
     }
   );
@@ -251,8 +260,7 @@ describe("rotation recovery", () => {
       await userEvent.click(screen.getByRole("button", { name: "Retry" }));
       await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
       expect(rotation).toHaveBeenCalledTimes(2);
-      expect(rotation.mock.calls[1]?.[0]).toBe(rotation.mock.calls[0]?.[0]);
-      expect(rotation.mock.calls[1]?.[1]?.body).toBe(rotation.mock.calls[0]?.[1]?.body);
+      expect(sentRotation(rotation, 1)).toEqual(sentRotation(rotation, 0));
     }
   );
 
@@ -288,26 +296,24 @@ describe("rotation recovery", () => {
       await userEvent.click(screen.getByRole("button", { name: "Rotate for 1 connections" }));
       await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
       expect(rotation).toHaveBeenCalledTimes(2);
-      const originalKey = new Headers(rotation.mock.calls[0]?.[1]?.headers).get("Idempotency-Key");
-      const corrected = rotation.mock.calls[1]?.[1];
-      expect(new Headers(corrected?.headers).get("Idempotency-Key")).not.toBe(originalKey);
-      expect(corrected?.body).toBe(
-        JSON.stringify({
+      const original = sentRotation(rotation, 0);
+      const corrected = sentRotation(rotation, 1);
+      expect(corrected).toEqual({
+        url: original.url,
+        idempotencyKey: expect.stringMatching(UUID),
+        body: JSON.stringify({
           provider: "privy",
           fields: { appId: "test-app-id", appSecret: "corrected-secret" },
-        })
-      );
+        }),
+      });
+      expect(corrected.idempotencyKey).not.toBe(original.idempotencyKey);
     }
   );
 
   it("blocks editing and closing while the first rotation is in flight", async () => {
     const rotation = mockApi();
-    let resolveRotation: ((response: Response) => void) | undefined;
-    rotation.mockReturnValueOnce(
-      new Promise((resolve) => {
-        resolveRotation = resolve;
-      })
-    );
+    const pendingRotation = Promise.withResolvers<Response>();
+    rotation.mockReturnValueOnce(pendingRotation.promise);
     const onClose = vi.fn();
     render(modal(onClose));
     await submitCredentials();
@@ -318,7 +324,7 @@ describe("rotation recovery", () => {
     await userEvent.keyboard("{Escape}");
     await userEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(onClose).not.toHaveBeenCalled();
-    resolveRotation?.(
+    pendingRotation.resolve(
       Response.json({
         data: { providerCredential: { id: "pcred_new" }, rotation: { status: "success" } },
       })
@@ -443,14 +449,10 @@ describe("rotation recovery", () => {
       await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
       expect(screen.queryByRole("button", { name: "Resume rotation" })).toBeNull();
       expect(rotation).toHaveBeenCalledTimes(3);
-      const first = rotation.mock.calls[0];
-      const originalKey = new Headers(first?.[1]?.headers).get("Idempotency-Key");
-      expect(originalKey).toBeTruthy();
-      for (const retry of rotation.mock.calls.slice(1)) {
-        expect(retry[0]).toBe(first?.[0]);
-        expect(retry[1]?.body).toBe(first?.[1]?.body);
-        expect(new Headers(retry[1]?.headers).get("Idempotency-Key")).toBe(originalKey);
-      }
+      const first = sentRotation(rotation, 0);
+      expect(first.idempotencyKey).toMatch(UUID);
+      expect(sentRotation(rotation, 1)).toEqual(first);
+      expect(sentRotation(rotation, 2)).toEqual(first);
     }
   );
 
@@ -487,14 +489,11 @@ describe("rotation recovery", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(screen.queryByRole("button", { name: "Resume rotation" })).toBeNull();
     expect(rotation).toHaveBeenCalledTimes(3);
-    const original = rotation.mock.calls[0]?.[1];
-    const replay = rotation.mock.calls[1]?.[1];
-    const corrected = rotation.mock.calls[2]?.[1];
-    const originalKey = new Headers(original?.headers).get("Idempotency-Key");
-    expect(new Headers(replay?.headers).get("Idempotency-Key")).toBe(originalKey);
-    expect(replay?.body).toBe(original?.body);
-    expect(new Headers(corrected?.headers).get("Idempotency-Key")).not.toBe(originalKey);
-    expect(corrected?.body).toBe(
+    const original = sentRotation(rotation, 0);
+    const corrected = sentRotation(rotation, 2);
+    expect(sentRotation(rotation, 1)).toEqual(original);
+    expect(corrected.idempotencyKey).not.toBe(original.idempotencyKey);
+    expect(corrected.body).toBe(
       JSON.stringify({
         provider: "privy",
         fields: { appId: "test-app-id", appSecret: "corrected-secret" },
@@ -539,7 +538,7 @@ it("rotates Fireblocks credentials using a generated key reference and the pinne
   await user.click(await screen.findByRole("radio", { name: /Treasury/ }));
   await user.click(screen.getByRole("button", { name: "Rotate for 1 connections" }));
   await waitFor(() => expect(onClose).toHaveBeenCalledWith(false));
-  expect(JSON.parse(String(rotation.mock.calls[0]?.[1]?.body))).toEqual({
+  expect(JSON.parse(String(sentRotation(rotation, 0).body))).toEqual({
     provider: "fireblocks",
     fields: {
       apiKey: "next-api-user",

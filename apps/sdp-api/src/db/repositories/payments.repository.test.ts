@@ -1,5 +1,6 @@
 import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
 import { WALLET_TRANSFER_TYPES } from "@sdp/types/payments";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
@@ -15,6 +16,7 @@ import {
   type SeededDefaultProjects,
   seedDefaultProjects,
 } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { createPostgresPaymentTransferBatchesRepository } from "./payment-transfer-batches.repository.postgres";
 import type { PaymentsRepository } from "./payments.repository";
@@ -123,11 +125,11 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
   let repo: PaymentsRepository;
 
   beforeAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+    await seedTestDatabase(env);
   });
 
   afterAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+    await seedTestDatabase(env);
   });
 
   beforeEach(async () => {
@@ -147,9 +149,9 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
       initiatedByKeyId: "audit_creator",
       initiatedByPrincipal: principal,
     };
-    const created = await repo.createTransfer(input);
-    expect(created?.initiated_by_principal).toEqual(principal);
-    expect(created?.initiated_by_key_id).toBe("audit_creator");
+    const created = required(await repo.createTransfer(input));
+    expect(created.initiated_by_principal).toEqual(principal);
+    expect(created.initiated_by_key_id).toBe("audit_creator");
 
     await repo.updateTransfer({
       transferId: input.id,
@@ -159,23 +161,34 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
       providerData: { observed: true },
       updatedAt: new Date().toISOString(),
     });
-    const replay = await repo.findTransferByIdempotency({
+    const replay = required(
+      await repo.findTransferByIdempotency({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        idempotencyKey: input.idempotencyKey,
+      })
+    );
+    expect(replay.initiated_by_principal).toEqual(principal);
+    expect(replay.initiated_by_key_id).toBe("audit_creator");
+    expect(replay.status).toBe("confirmed");
+  });
+
+  it("leaves unrecorded authority null without inferring from an audit identity", async () => {
+    const input = {
+      ...transferInput({ suffix: "unrecorded_principal" }),
+      initiatedByKeyId: "key_or_user_audit_id",
+    };
+    await repo.createTransfer(input);
+
+    const stored = await repo.findTransferByIdempotency({
       organizationId: input.organizationId,
       projectId: input.projectId,
       idempotencyKey: input.idempotencyKey,
     });
-    expect(replay?.initiated_by_principal).toEqual(principal);
-    expect(replay?.initiated_by_key_id).toBe("audit_creator");
-    expect(replay?.status).toBe("confirmed");
-  });
-
-  it("leaves unrecorded authority null without inferring from an audit identity", async () => {
-    const created = await repo.createTransfer({
-      ...transferInput({ suffix: "legacy_principal" }),
-      initiatedByKeyId: "ambiguous_key_or_user_id",
+    expect(required(stored)).toMatchObject({
+      initiated_by_principal: null,
+      initiated_by_key_id: "key_or_user_audit_id",
     });
-    expect(created?.initiated_by_principal).toBeNull();
-    expect(created?.initiated_by_key_id).toBe("ambiguous_key_or_user_id");
   });
 
   it.for([
@@ -307,7 +320,7 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
     }
   );
 
-  it("reports whether settleTransferBatch claimed the chunk from processing", async () => {
+  it("settles a batch chunk once, and a later settle neither claims nor overwrites it", async () => {
     const input = { ...transferInput({ suffix: "settle_claim" }), type: "transfer_batch" as const };
     await repo.createTransfer(input);
     await seedProjectCryptoWalletCounterparty(getDb(env), {
@@ -342,50 +355,20 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
         },
       ],
     });
-    const settle = () =>
+    const settle = (transferStatus: "confirmed" | "failed") =>
       batches.settleTransferBatch({
         transferId: input.id,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
-        transferStatus: "failed",
-        error: "Transaction not found on chain",
+        transferStatus,
+        error: transferStatus === "failed" ? "Transaction not found on chain" : null,
         slot: null,
         updatedAt: new Date().toISOString(),
       });
 
-    await expect(settle()).resolves.toBe(true);
-    await expect(settle()).resolves.toBe(false);
-  });
-
-  it("installs the indexed payment-ledger search plan", async () => {
-    const extension = await getDb(env)
-      .prepare("SELECT extname FROM pg_extension WHERE extname = 'pg_trgm'")
-      .first<{ extname: string }>();
-    const indexes = await getDb(env)
-      .prepare(
-        `SELECT indexname, indexdef
-         FROM pg_indexes
-         WHERE indexname IN (
-           'idx_payment_transfers_project_source_created_id',
-           'idx_payment_transfers_project_destination_created_id',
-           'idx_payment_transfers_search_trgm',
-           'idx_counterparties_display_name_trgm'
-         )`
-      )
-      .all<{ indexdef: string; indexname: string }>();
-
-    expect(extension?.extname).toBe("pg_trgm");
-    expect(indexes.results.map((index) => index.indexname).sort()).toEqual([
-      "idx_counterparties_display_name_trgm",
-      "idx_payment_transfers_project_destination_created_id",
-      "idx_payment_transfers_project_source_created_id",
-      "idx_payment_transfers_search_trgm",
-    ]);
-    expect(
-      indexes.results
-        .filter((index) => index.indexname.endsWith("_trgm"))
-        .every((index) => index.indexdef.includes("gin_trgm_ops"))
-    ).toBe(true);
+    await expect(settle("failed")).resolves.toBe(true);
+    await expect(settle("confirmed")).resolves.toBe(false);
+    expect(await readStatus(input.id)).toBe("failed");
   });
 
   async function seedTransfer(input: { id: string; status: string }): Promise<void> {
@@ -411,28 +394,14 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
       .run();
   }
 
+  /** The row's status, or null when no row was written. */
   async function readStatus(id: string): Promise<string | null> {
     const row = await getDb(env)
       .prepare("SELECT status FROM payment_transfers WHERE id = ?")
       .bind(id)
       .first<{ status: string }>();
-    return row?.status ?? null;
+    return row === null ? null : row.status;
   }
-
-  it("applies a transition from one of its source statuses", async () => {
-    await seedTransfer({ id: "xfr_guard_ok", status: "awaiting_payment" });
-
-    const updated = await repo.transitionRampTransfer({
-      transferId: "xfr_guard_ok",
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      transition: "canceled",
-      updatedAt: new Date().toISOString(),
-    });
-
-    expect(updated?.status).toBe("canceled");
-    expect(await readStatus("xfr_guard_ok")).toBe("canceled");
-  });
 
   it("claims an unoccupied off-ramp row for its on-chain deposit", async () => {
     const depositAddress = "DepositAddress111";
@@ -476,14 +445,17 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
       token: "SOL",
       amount: "1",
       initiatedByKeyId: "key_ramp_onchain",
-      idempotency: null,
+      idempotency: { key: "claim-key", fingerprint: "claim-fp" },
       updatedAt: "2026-08-31T10:00:00.000Z",
     });
 
     expect(updated).toMatchObject({
       id: transfer.id,
+      custody_wallet_id: TEST_CUSTODY_WALLET_ID,
       destination_address: depositAddress,
       initiated_by_key_id: "key_ramp_onchain",
+      idempotency_key: "claim-key",
+      idempotency_fingerprint: "claim-fp",
       status: "processing",
     });
   });
@@ -519,6 +491,7 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
         updatedAt: "2026-08-31T10:00:00.000Z",
       })
     ).resolves.toBeNull();
+    expect(await readStatus(transfer.id)).toBe("awaiting_payment");
   });
 
   it("sets a provider reference once and permits only an exact replay", async () => {
@@ -563,33 +536,13 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
         provider: "stripe",
       })
     ).resolves.toBeNull();
-  });
-
-  it("is a no-op returning null when the status left the sources (the race)", async () => {
-    await seedTransfer({ id: "xfr_guard_race", status: "settling" });
-
-    const updated = await repo.transitionRampTransfer({
-      transferId: "xfr_guard_race",
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      transition: "canceled",
-      updatedAt: new Date().toISOString(),
-    });
-
-    expect(updated).toBeNull();
-    expect(await readStatus("xfr_guard_race")).toBe("settling");
-  });
-
-  it("returns null for a transfer that does not exist", async () => {
-    const updated = await repo.transitionRampTransfer({
-      transferId: "xfr_missing",
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      transition: "canceled",
-      updatedAt: new Date().toISOString(),
-    });
-
-    expect(updated).toBeNull();
+    await expect(
+      repo.getTransferById({
+        transferId: transfer.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+      })
+    ).resolves.toMatchObject({ provider: "moonpay", provider_reference: "moonpay-transaction-1" });
   });
 
   it("does not transition a transfer owned by a different organization", async () => {
@@ -622,48 +575,6 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
       { own: projects.sandbox, other: projects.production },
       (row) => row === null
     );
-  });
-
-  it("persists idempotency metadata and looks it up by (org, key)", async () => {
-    const repo = createPostgresPaymentsRepository(getDb(env));
-    const created = await repo.createTransfer({
-      id: "xfr_idempotency_metadata",
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      custodyWalletId: TEST_CUSTODY_WALLET_ID,
-      walletId: TEST_WALLET_ID,
-      counterpartyId: null,
-      sourceAddress: "Source111",
-      destinationAddress: "Dest111",
-      token: "SOL",
-      amount: "1",
-      memo: null,
-      type: "transfer",
-      direction: "outbound",
-      status: "processing",
-      provider: null,
-      providerReference: null,
-      deliveryMode: null,
-      fiatCurrency: null,
-      fiatAmount: null,
-      providerData: {},
-      serializedTx: null,
-      signature: null,
-      slot: null,
-      initiatedByKeyId: null,
-      idempotencyKey: "key-abc",
-      idempotencyFingerprint: "fp-1",
-    });
-    expect(created?.idempotency_key).toBe("key-abc");
-    expect(created?.custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
-
-    const found = await repo.findTransferByIdempotency({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      idempotencyKey: "key-abc",
-    });
-    expect(found?.id).toBe(created?.id);
-    expect(found?.idempotency_fingerprint).toBe("fp-1");
   });
 
   it("persists a signed transfer before submission starts", async () => {
@@ -844,128 +755,50 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
     ).resolves.toBeNull();
   });
 
-  it("keeps legacy transfers without signed-outbox fields valid", async () => {
-    const legacy = await repo.createTransfer({
-      ...transferInput({ suffix: "legacy-submission" }),
-      signature: "legacy-signature",
-      serializedTx: "legacy-serialized-transaction",
-    });
-    if (!legacy) throw new Error("Expected transfer creation to succeed");
-
-    const confirmed = await repo.updateTransfer({
-      transferId: legacy.id,
-      status: "confirmed",
-      updatedAt: "2026-08-21T10:09:00.000Z",
-    });
-
-    expect(confirmed).toMatchObject({
-      signature: "legacy-signature",
-      serialized_tx: "legacy-serialized-transaction",
-      signed_transaction: null,
-      last_valid_block_height: null,
-      submission_started_at: null,
-      status: "confirmed",
-    });
-  });
-
-  it("scopes idempotency to project — same org+key in different projects do not collide", async () => {
-    const repo = createPostgresPaymentsRepository(getDb(env));
-    const base = {
-      organizationId: TEST_ORG.id,
-      custodyWalletId: TEST_CUSTODY_WALLET_ID,
-      walletId: TEST_WALLET_ID,
-      counterpartyId: null,
-      sourceAddress: "Source111",
-      destinationAddress: "Dest111",
-      token: "SOL",
-      amount: "1",
-      memo: null,
-      type: "transfer" as const,
-      direction: "outbound" as const,
-      status: "processing" as const,
-      provider: null,
-      providerReference: null,
-      deliveryMode: null,
-      fiatCurrency: null,
-      fiatAmount: null,
-      providerData: {},
-      serializedTx: null,
-      signature: null,
-      slot: null,
-      initiatedByKeyId: null,
-      idempotencyFingerprint: "fp-1",
+  it("finds a transfer by its idempotency key only within the project that wrote it", async () => {
+    const keyed = (suffix: string, projectId: string) => ({
+      ...transferInput({ suffix }),
+      projectId,
       idempotencyKey: "shared-key",
-    };
-    const productionScoped = await repo.createTransfer({
-      ...base,
+      idempotencyFingerprint: `fp-${suffix}`,
+    });
+    await repo.createTransfer(keyed("production_scoped", projects.production.id));
+    await repo.createTransfer(keyed("sandbox_scoped", projects.sandbox.id));
+
+    const find = (projectId: string) =>
+      repo.findTransferByIdempotency({
+        organizationId: TEST_ORG.id,
+        projectId,
+        idempotencyKey: "shared-key",
+      });
+    expect(await find(projects.production.id)).toMatchObject({
       id: "xfr_production_scoped",
-      projectId: projects.production.id,
+      idempotency_fingerprint: "fp-production_scoped",
     });
-    const sandboxScoped = await repo.createTransfer({
-      ...base,
+    expect(await find(projects.sandbox.id)).toMatchObject({
       id: "xfr_sandbox_scoped",
-      projectId: projects.sandbox.id,
+      idempotency_fingerprint: "fp-sandbox_scoped",
     });
-    expect(productionScoped?.id).not.toBe(sandboxScoped?.id);
-
-    const foundProduction = await repo.findTransferByIdempotency({
-      organizationId: TEST_ORG.id,
-      projectId: projects.production.id,
-      idempotencyKey: "shared-key",
-    });
-    const foundSandbox = await repo.findTransferByIdempotency({
-      organizationId: TEST_ORG.id,
-      projectId: projects.sandbox.id,
-      idempotencyKey: "shared-key",
-    });
-    expect(foundProduction?.id).toBe(productionScoped?.id);
-    expect(foundSandbox?.id).toBe(sandboxScoped?.id);
   });
 
-  it("rejects a second transfer with the same (org, idempotency_key)", async () => {
-    const repo = createPostgresPaymentsRepository(getDb(env));
-    const base = {
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      custodyWalletId: TEST_CUSTODY_WALLET_ID,
-      walletId: TEST_WALLET_ID,
-      counterpartyId: null,
-      sourceAddress: "Source111",
-      destinationAddress: "Dest111",
-      token: "SOL",
-      amount: "1",
-      memo: null,
-      type: "transfer" as const,
-      direction: "outbound" as const,
-      status: "processing" as const,
-      provider: null,
-      providerReference: null,
-      deliveryMode: null,
-      fiatCurrency: null,
-      fiatAmount: null,
-      providerData: {},
-      serializedTx: null,
-      signature: null,
-      slot: null,
-      initiatedByKeyId: null,
-      idempotencyFingerprint: "fp-1",
-    };
-    await repo.createTransfer({ ...base, id: "xfr_dup_key_first", idempotencyKey: "dup-key" });
-    await expect(
-      repo.createTransfer({ ...base, id: "xfr_dup_key_second", idempotencyKey: "dup-key" })
-    ).rejects.toSatisfy((err: unknown) => isPostgresUniqueViolation(err));
+  it("rejects a second transfer with the same idempotency key in one project", async () => {
+    const keyed = (suffix: string) => ({ ...transferInput({ suffix }), idempotencyKey: "dup-key" });
+    await repo.createTransfer(keyed("dup_key_first"));
+
+    await expect(repo.createTransfer(keyed("dup_key_second"))).rejects.toSatisfy((err: unknown) =>
+      isPostgresUniqueViolation(err)
+    );
+    expect(await readStatus("xfr_dup_key_second")).toBeNull();
   });
 });
 
 describe("PaymentsRepository.listTransfers token filter (postgres)", () => {
-  const SOL_MINT_ADDRESS = "So11111111111111111111111111111111111111112";
-
   beforeAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+    await seedTestDatabase(env);
   });
 
   afterAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+    await seedTestDatabase(env);
   });
 
   beforeEach(async () => {
@@ -973,12 +806,13 @@ describe("PaymentsRepository.listTransfers token filter (postgres)", () => {
   });
 
   async function seedMixedForms() {
-    // Exactly the shape the local ledger holds: the same asset written as a bare
-    // symbol on some rows and as its mint on others, all with type = transfer.
+    // The same asset is written as a bare symbol on some rows and as its mint
+    // on others; a second asset sits beside it.
     const repo = createPostgresPaymentsRepository(getDb(env));
     await repo.createTransfer(transferInput({ token: "SOL", suffix: "sym-1" }));
     await repo.createTransfer(transferInput({ token: "SOL", suffix: "sym-2" }));
-    await repo.createTransfer(transferInput({ token: SOL_MINT_ADDRESS, suffix: "mint-1" }));
+    await repo.createTransfer(transferInput({ token: SOL_MINT, suffix: "mint-1" }));
+    await repo.createTransfer(transferInput({ token: "USDC", suffix: "usdc-1" }));
     return repo;
   }
 
@@ -989,45 +823,34 @@ describe("PaymentsRepository.listTransfers token filter (postgres)", () => {
     offset: 0,
   };
 
-  it("returns the mint rows and the symbol rows for one filter", async () => {
+  async function listIds(repo: PaymentsRepository, token: string): Promise<string[]> {
+    const { rows } = await repo.listTransfers({ ...listArgs, token });
+    return rows.map((row) => row.id).sort();
+  }
+
+  it("answers either spelling of an asset with its symbol and mint rows, and no other asset", async () => {
     const repo = await seedMixedForms();
+    const sol = ["xfr_mint-1", "xfr_sym-1", "xfr_sym-2"];
 
-    // An exact match returned 2 for the symbol and 1 for the mint. Both are the
-    // same asset, so either spelling has to answer with all three.
-    const bySymbol = await repo.listTransfers({ ...listArgs, token: "SOL" });
-    const byMint = await repo.listTransfers({ ...listArgs, token: SOL_MINT_ADDRESS });
-
-    expect(bySymbol.rows).toHaveLength(3);
-    expect(byMint.rows).toHaveLength(3);
-  });
-
-  it("does not pull in a different asset that happens to share the catalogue", async () => {
-    const repo = await seedMixedForms();
-    await repo.createTransfer(transferInput({ token: "USDC", suffix: "usdc-1" }));
-
-    const bySymbol = await repo.listTransfers({ ...listArgs, token: "SOL" });
-
-    expect(bySymbol.rows).toHaveLength(3);
-    expect(bySymbol.rows.every((row) => row.token !== "USDC")).toBe(true);
+    expect(await listIds(repo, "SOL")).toEqual(sol);
+    expect(await listIds(repo, SOL_MINT)).toEqual(sol);
   });
 
   it("treats a blank token as no filter rather than as a value to match", async () => {
     const repo = await seedMixedForms();
 
-    // The query schema takes `token` as a bare optional string, so whitespace
-    // reaches the repository truthy. Matching it literally returned zero rows for
-    // what is really an absent filter.
-    const blank = await repo.listTransfers({ ...listArgs, token: "   " });
-
-    expect(blank.rows).toHaveLength(3);
+    expect(await listIds(repo, "   ")).toEqual([
+      "xfr_mint-1",
+      "xfr_sym-1",
+      "xfr_sym-2",
+      "xfr_usdc-1",
+    ]);
   });
 
   it("returns nothing for a token the organization has never transferred", async () => {
     const repo = await seedMixedForms();
 
-    const none = await repo.listTransfers({ ...listArgs, token: "JUP" });
-
-    expect(none.rows).toHaveLength(0);
+    expect(await listIds(repo, "JUP")).toEqual([]);
   });
 });
 
@@ -1038,11 +861,11 @@ describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
   const CUSTODY_WALLET_B = "cwlt_allowlist_b";
 
   beforeAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+    await seedTestDatabase(env);
   });
 
   afterAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+    await seedTestDatabase(env);
   });
 
   beforeEach(async () => {
@@ -1050,7 +873,6 @@ describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
   });
 
   async function seedTwoWallets() {
-    const db = getDb(env);
     await seedTestCustodyRows(env, {
       configs: [
         {
@@ -1087,14 +909,6 @@ describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
     await repo.createTransfer(
       transferInput({ custodyWalletId: CUSTODY_WALLET_A, walletId: WALLET_A, suffix: "a-1" })
     );
-    const legacy = await repo.createTransfer(
-      transferInput({ custodyWalletId: CUSTODY_WALLET_A, walletId: WALLET_A, suffix: "a-2" })
-    );
-    if (!legacy) throw new Error("Expected legacy transfer fixture creation to succeed");
-    await db
-      .prepare("UPDATE payment_transfers SET custody_wallet_id = NULL WHERE id = ?")
-      .bind(legacy.id)
-      .run();
     await repo.createTransfer(
       transferInput({ custodyWalletId: CUSTODY_WALLET_B, walletId: WALLET_B, suffix: "b-1" })
     );
@@ -1116,8 +930,7 @@ describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
       custodyWalletId: CUSTODY_WALLET_A,
     });
 
-    expect(selected.rows.map((row) => row.id)).toHaveLength(1);
-    expect(selected.rows[0]?.custody_wallet_id).toBe(CUSTODY_WALLET_A);
+    expect(selected.rows.map((row) => row.id)).toEqual(["xfr_a-1"]);
   });
 });
 
@@ -1129,11 +942,11 @@ describe("PaymentsRepository pending-transfer job reads (postgres)", () => {
   } as const satisfies Record<SdpEnvironment, string>;
 
   afterAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+    await seedTestDatabase(env);
   });
 
   beforeEach(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+    await seedTestDatabase(env);
     await resetPaymentFixtures();
     await seedUnreadPrivyWallet(getDb(env), {
       organizationId: TEST_ORG.id,

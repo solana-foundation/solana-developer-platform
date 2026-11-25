@@ -2,8 +2,8 @@
 
 Plume is a `vault_direct` RWA provider for Treasury Solutions and Embedded Yield.
 The catalogue lives in `@sdp/earn`; this package owns Solana transaction admission,
-position reads, account preparation, standard and instant redemption, cancellation,
-and provider delivery observation. Neither package needs a Plume API key.
+position reads, standard and instant redemption, and provider delivery
+observation. Neither package needs a Plume API key.
 
 ## Deployment and rollout
 
@@ -22,21 +22,18 @@ staging/canary workflow. Do not use a laptop to exercise production APIs.
 
 ## Flows
 
-- A sponsored first mint first finalizes a separate idempotent share ATA setup.
-  An existing live share account returns `not_required` without signing or fees.
-  Treasury does this automatically. Embedded apps use the provider action build,
-  sign, submit and read endpoints before building a deposit.
+- A sponsored first mint needs the owner's share token account to exist: the
+  mint builder refuses one without it (`DEPOSIT_REFUSED`). SDP builds no
+  separate share-account setup, so it never sponsors a first mint.
 - Mint uses the provider's VersionedTransaction unchanged. Its keeper and ephemeral
   CCTP signatures are verified and preserved. Neither its blockhash, payer nor
   instructions can be rewritten; fund USDC separately instead of composing a swap.
 - Standard redemption is an asynchronous request. Instant redemption uses the
   available instant liquidity path but still crosses chains. Neither is an atomic
   payout and neither requires a later user-signed claim transaction.
-- Standard cancellation sends an update to zero using the original recorded
-  composer. Plume updates the aggregate pending request for that wallet/vault,
-  so cancelling may affect multiple requests. Only an exact full share return can
-  close the selected SDP movement automatically; partial or aggregated returns
-  stay open for recovery. Already-delivered USDC is not recalled.
+- SDP neither builds nor tracks Plume cancellations. Plume's own cancellation,
+  an update to zero through the original composer, changes the aggregate
+  pending request for that wallet and vault, so it can affect several requests.
 - Source finality leaves the economic obligation open. Provider status supplies a
   candidate destination signature; SDP independently reads that finalized Solana
   transaction, verifies the bridge program/accounts and the exact owner/mint token

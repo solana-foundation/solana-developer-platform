@@ -1,3 +1,7 @@
+import {
+  type ClosedPaymentRequestStatus,
+  PAYMENT_REQUEST_CLOSED_STATUSES,
+} from "@sdp/types/payments";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
@@ -6,18 +10,19 @@ import {
   createSystemPaymentRequestsRepository,
 } from "@/db/repositories/repository-factory";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { TEST_CUSTODY_PUBLIC_KEY } from "@/test/fixtures/custody";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
-import { seedTestCustodyRows } from "@/test/helpers/custody";
+import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
+import {
+  type PaymentRequestTenant,
+  resetPaymentRequestTenant,
+} from "@/test/helpers/payment-request-tenant";
 import {
   seedPaymentRequestTransfer,
   setPaymentRequestColumns,
 } from "@/test/helpers/payment-requests";
-import {
-  expectProjectScoped,
-  type SeededDefaultProjects,
-  seedDefaultProjects,
-} from "@/test/helpers/projects";
+import { expectProjectScoped } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type {
@@ -43,90 +48,43 @@ function ago(ms: number): string {
 
 async function claimWindow(id: string, lastValidBlockHeight: string) {
   await setPaymentRequestColumns(env, id, {
-    sponsored_tx_account: "acct",
+    sponsored_tx_account: TEST_SOLANA_ADDRESSES.wallet1,
     sponsored_tx_unsigned: "tx",
     sponsored_tx_last_valid_block_height: lastValidBlockHeight,
   });
 }
 
+function scanAt(position: Partial<SignatureScanPosition>): SignatureScanPosition {
+  return {
+    cursor: null,
+    before: null,
+    progress: null,
+    cycleHadRetry: false,
+    stuckSignature: null,
+    stuckSince: null,
+    ...position,
+  };
+}
+
 describe("PaymentRequestsRepository (postgres)", () => {
   let repo: PaymentRequestsRepository;
-  let projects: SeededDefaultProjects;
+  let tenant: PaymentRequestTenant;
 
   beforeAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+    await seedTestDatabase(env);
   });
 
   afterAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+    await seedTestDatabase(env);
   });
 
   beforeEach(async () => {
-    const db = getDb(env);
-    await db.prepare("DELETE FROM payment_requests").run();
-    await db.prepare("DELETE FROM payment_transfers").run();
-    await db.prepare("DELETE FROM counterparties").run();
-    await db.prepare("DELETE FROM api_keys").run();
-    await db.prepare("DELETE FROM projects").run();
-
-    await db
-      .prepare(
-        "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
-      )
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
-      .run();
-
-    await db
-      .prepare(
-        "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')"
-      )
-      .bind(TEST_USER.id, TEST_USER.email)
-      .run();
-
-    projects = await seedDefaultProjects(db, {
-      organizationId: TEST_ORG.id,
-      createdBy: TEST_USER.id,
-      members: [],
-      ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
-    });
-    await seedTestCustodyRows(env, {
-      configs: [
-        {
-          id: "cfg_preq_repo_exact",
-          organizationId: TEST_ORG.id,
-          projectId: TEST_PROJECT_ID,
-          provider: "local",
-          configEncrypted: "encrypted",
-          status: "active",
-        },
-      ],
-      wallets: [
-        {
-          id: TEST_CUSTODY_WALLET_ID,
-          owner: { kind: "config", custodyConfigId: "cfg_preq_repo_exact" },
-          walletId: "wlt_receiving",
-          publicKey: "OurWallet",
-          label: null,
-          purpose: null,
-          status: "active",
-        },
-      ],
-    });
-
-    repo = createPostgresPaymentRequestsRepository(db);
+    tenant = await resetPaymentRequestTenant(env, "preq_repo_test");
+    repo = createPostgresPaymentRequestsRepository(getDb(env));
   });
 
-  async function seedTransfer(id: string) {
-    await getDb(env)
-      .prepare(
-        `INSERT INTO payment_transfers (
-           id, organization_id, project_id, wallet_id, source_address, destination_address,
-           token, amount, type, direction, status, created_at, updated_at
-         ) VALUES (?, ?, ?, 'wlt_x', 'PayerAddr', 'OurWallet', 'USDC', '10', 'transfer', 'inbound', 'processing',
-                   '2026-06-23T00:00:00.000Z', '2026-06-23T00:00:00.000Z')`
-      )
-      .bind(id, TEST_ORG.id, TEST_PROJECT_ID)
-      .run();
+  function key(request: PaymentRequestRow) {
+    return { requestId: request.id, organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
   }
 
   function cancelInput(
@@ -134,22 +92,14 @@ describe("PaymentRequestsRepository (postgres)", () => {
     liveClaimMinLastValidBlockHeight: bigint | null
   ): CancelPaymentRequestInput {
     return {
-      requestId: request.id,
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
+      ...key(request),
       canceledBy: { apiKeyId: null, userId: TEST_USER.id },
       liveClaimMinLastValidBlockHeight,
     };
   }
 
   async function stored(request: PaymentRequestRow): Promise<PaymentRequestRow> {
-    return required(
-      await repo.getPaymentRequestById({
-        requestId: request.id,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-      })
-    );
+    return required(await repo.getPaymentRequestById(key(request)));
   }
 
   function createInput(overrides: Partial<CreatePaymentRequestInput>): CreatePaymentRequestInput {
@@ -157,51 +107,70 @@ describe("PaymentRequestsRepository (postgres)", () => {
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
       custodyWalletId: TEST_CUSTODY_WALLET_ID,
-      walletId: "wlt_receiving",
-      destinationAddress: "OurWallet",
-      token: "USDC",
+      walletId: tenant.walletId,
+      destinationAddress: TEST_CUSTODY_PUBLIC_KEY,
+      token: SOL_MINT,
       amount: "25.00",
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      expiresAt: FUTURE,
       createdBy: TEST_USER.id,
       ...overrides,
     };
   }
 
+  function markExpired(request: PaymentRequestRow) {
+    return repo.markPaymentRequest({
+      ...key(request),
+      status: "expired",
+      fulfilledByTransferId: null,
+      paidLate: false,
+      chainRead: true,
+    });
+  }
+
+  function markPaid(request: PaymentRequestRow, transferId: string) {
+    return repo.markPaymentRequest({
+      ...key(request),
+      status: "paid",
+      fulfilledByTransferId: transferId,
+      paidLate: false,
+      chainRead: true,
+    });
+  }
+
   describe("createPaymentRequest", () => {
-    it("inserts and returns the row with a generated id and awaiting_payment status", async () => {
-      const row = await repo.createPaymentRequest(createInput({}));
-
-      expect(row).not.toBeNull();
-      expect(row?.id).toMatch(/^preq_/);
-      expect(row?.amount).toBe("25.00");
-      expect(row?.custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
-      expect(row?.status).toBe("awaiting_payment");
-      expect(row?.fulfilled_by_transfer_id).toBeNull();
-    });
-
-    it("persists an explicitly selected exact wallet", async () => {
-      const row = await repo.createPaymentRequest(
-        createInput({ custodyWalletId: TEST_CUSTODY_WALLET_ID })
-      );
-
-      expect(row.custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
-    });
-
-    it("seeds the lifecycle log with the creation event", async () => {
-      const row = await repo.createPaymentRequest(createInput({}));
-
-      expect(row?.lifecycle).toHaveLength(1);
-      expect(row?.lifecycle[0]).toMatchObject({ status: "awaiting_payment" });
-      expect(row?.lifecycle[0].at).toEqual(expect.any(String));
-    });
-
-    it("generates a public_token distinct from the id", async () => {
+    it("creates an open request with its own id, link token and reference", async () => {
       const first = await repo.createPaymentRequest(createInput({}));
       const second = await repo.createPaymentRequest(createInput({}));
 
-      expect(first?.public_token).toMatch(/^[A-Za-z0-9_-]{16}$/);
-      expect(first?.public_token).not.toBe(first?.id);
-      expect(first?.public_token).not.toBe(second?.public_token);
+      expect(first).toMatchObject({
+        organization_id: TEST_ORG.id,
+        project_id: TEST_PROJECT_ID,
+        custody_wallet_id: TEST_CUSTODY_WALLET_ID,
+        wallet_id: tenant.walletId,
+        destination_address: TEST_CUSTODY_PUBLIC_KEY,
+        token: SOL_MINT,
+        amount: "25.00",
+        expires_at: FUTURE,
+        created_by: TEST_USER.id,
+        status: "awaiting_payment",
+        lifecycle: [{ status: "awaiting_payment", at: expect.any(String) }],
+        fulfilled_by_transfer_id: null,
+        paid_late: false,
+        canceled_at: null,
+        canceled_by_api_key_id: null,
+        canceled_by_user_id: null,
+        signature_scan_cursor: null,
+        signature_scan_before: null,
+        signature_scan_progress: null,
+        signature_scan_cycle_had_retry: false,
+        signature_scan_stuck_signature: null,
+        signature_scan_stuck_since: null,
+      });
+      expect(first.id).toMatch(/^preq_/);
+      expect(first.public_token).toMatch(/^[A-Za-z0-9-]{16}$/);
+      expect(second.id).not.toBe(first.id);
+      expect(second.public_token).not.toBe(first.public_token);
+      expect(second.reference).not.toBe(first.reference);
     });
   });
 
@@ -209,8 +178,8 @@ describe("PaymentRequestsRepository (postgres)", () => {
     it("resolves a row by its public token, unscoped by org/project", async () => {
       const created = await repo.createPaymentRequest(createInput({}));
 
-      const row = await repo.getPaymentRequestByPublicToken(created?.public_token ?? "");
-      expect(row?.id).toBe(created?.id);
+      const row = await repo.getPaymentRequestByPublicToken(created.public_token);
+      expect(required(row).id).toBe(created.id);
     });
 
     it("returns null for an unknown token", async () => {
@@ -220,39 +189,21 @@ describe("PaymentRequestsRepository (postgres)", () => {
   });
 
   describe("getPaymentRequestById", () => {
-    it("returns the row when org and project match", async () => {
-      const created = await repo.createPaymentRequest(createInput({}));
-
-      const row = await repo.getPaymentRequestById({
-        requestId: created?.id ?? "",
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-      });
-      expect(row?.id).toBe(created?.id);
-    });
-
     it("returns null when org doesn't match (tenancy guard)", async () => {
       const created = await repo.createPaymentRequest(createInput({}));
 
       const row = await repo.getPaymentRequestById({
-        requestId: created?.id ?? "",
+        ...key(created),
         organizationId: "org_does_not_exist",
-        projectId: TEST_PROJECT_ID,
       });
       expect(row).toBeNull();
     });
 
     it("returns null when the project does not match", async () => {
       const created = await repo.createPaymentRequest(createInput({}));
-      if (!created) throw new Error("createPaymentRequest returned null");
       await expectProjectScoped(
-        (projectId) =>
-          repo.getPaymentRequestById({
-            requestId: created.id,
-            organizationId: TEST_ORG.id,
-            projectId,
-          }),
-        { own: projects.sandbox, other: projects.production },
+        (projectId) => repo.getPaymentRequestById({ ...key(created), projectId }),
+        { own: tenant.projects.sandbox, other: tenant.projects.production },
         (row) => row === null
       );
     });
@@ -262,16 +213,8 @@ describe("PaymentRequestsRepository (postgres)", () => {
     it("returns rows newest first with a total", async () => {
       const first = await repo.createPaymentRequest(createInput({}));
       const second = await repo.createPaymentRequest(createInput({}));
-
-      const db = getDb(env);
-      await db
-        .prepare("UPDATE payment_requests SET created_at = ? WHERE id = ?")
-        .bind("2026-01-01T00:00:00.000Z", first?.id)
-        .run();
-      await db
-        .prepare("UPDATE payment_requests SET created_at = ? WHERE id = ?")
-        .bind("2026-01-01T00:00:01.000Z", second?.id)
-        .run();
+      await setPaymentRequestColumns(env, first.id, { created_at: "2026-01-01T00:00:00.000Z" });
+      await setPaymentRequestColumns(env, second.id, { created_at: "2026-01-01T00:00:01.000Z" });
 
       const { rows, total } = await repo.listPaymentRequests({
         organizationId: TEST_ORG.id,
@@ -281,7 +224,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
       });
 
       expect(total).toBe(2);
-      expect(rows.map((row) => row.id)).toEqual([second?.id, first?.id]);
+      expect(rows.map((row) => row.id)).toEqual([second.id, first.id]);
     });
 
     it("scopes lists by project", async () => {
@@ -294,67 +237,46 @@ describe("PaymentRequestsRepository (postgres)", () => {
             limit: 50,
             offset: 0,
           }),
-        { own: projects.sandbox, other: projects.production },
+        { own: tenant.projects.sandbox, other: tenant.projects.production },
         ({ rows }) => rows.length === 0
       );
     });
 
-    it("filters by status", async () => {
-      const toCancel = await repo.createPaymentRequest(createInput({}));
-      await repo.createPaymentRequest(createInput({}));
-      await repo.cancelPaymentRequest(cancelInput(toCancel, null));
+    it("filters by status, listing an open request past its expiry as expired", async () => {
+      const open = await repo.createPaymentRequest(createInput({}));
+      const lapsed = await repo.createPaymentRequest(createInput({ expiresAt: PAST }));
+      const canceled = await repo.createPaymentRequest(createInput({}));
+      await repo.cancelPaymentRequest(cancelInput(canceled, null));
+      const listed = async (status: "awaiting_payment" | "expired" | "canceled") => {
+        const { rows, total } = await repo.listPaymentRequests({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          status,
+          limit: 50,
+          offset: 0,
+        });
+        return { ids: rows.map((row) => row.id), total };
+      };
 
-      const { rows, total } = await repo.listPaymentRequests({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        status: "awaiting_payment",
-        limit: 50,
-        offset: 0,
-      });
-
-      expect(total).toBe(1);
-      expect(rows[0].status).toBe("awaiting_payment");
+      expect(await listed("awaiting_payment")).toEqual({ ids: [open.id], total: 1 });
+      expect(await listed("expired")).toEqual({ ids: [lapsed.id], total: 1 });
+      expect(await listed("canceled")).toEqual({ ids: [canceled.id], total: 1 });
     });
   });
 
-  describe("markPaymentRequest", () => {
-    it("does not transition another project's request", async () => {
+  describe("status transitions", () => {
+    it("marks an open request paid by its settling transfer", async () => {
       const created = await repo.createPaymentRequest(createInput({}));
-      if (!created) throw new Error("createPaymentRequest returned null");
-      const transition = (projectId: string) =>
-        repo.markPaymentRequest({
-          requestId: created.id,
-          organizationId: TEST_ORG.id,
-          projectId,
-          status: "expired",
-          fulfilledByTransferId: null,
-          paidLate: false,
-          chainRead: true,
-        });
-      await expectProjectScoped(
-        transition,
-        { own: projects.sandbox, other: projects.production },
-        (row) => row === null
-      );
-    });
+      const transferId = await seedPaymentRequestTransfer(env, created);
 
-    it("marks paid and links the settling transfer", async () => {
-      const created = await repo.createPaymentRequest(createInput({}));
-      await seedTransfer("xfr_settle");
+      const paid = required(await markPaid(created, transferId));
 
-      const paid = await repo.markPaymentRequest({
-        requestId: created?.id ?? "",
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
+      expect(paid).toMatchObject({
         status: "paid",
-        fulfilledByTransferId: "xfr_settle",
-        paidLate: false,
-        chainRead: true,
+        fulfilled_by_transfer_id: transferId,
+        paid_late: false,
       });
-
-      expect(paid?.status).toBe("paid");
-      expect(paid?.fulfilled_by_transfer_id).toBe("xfr_settle");
-      expect(paid?.lifecycle[1]).toMatchObject({ status: "paid" });
+      expect(paid.lifecycle.map((event) => event.status)).toEqual(["awaiting_payment", "paid"]);
     });
 
     it("rejects a paid transition with no settling transfer (paid_requires_transfer)", async () => {
@@ -362,77 +284,29 @@ describe("PaymentRequestsRepository (postgres)", () => {
 
       await expect(
         repo.markPaymentRequest({
-          requestId: created.id,
-          organizationId: TEST_ORG.id,
-          projectId: TEST_PROJECT_ID,
+          ...key(created),
           status: "paid",
           fulfilledByTransferId: null,
           paidLate: false,
           chainRead: true,
         })
-      ).rejects.toThrow();
+      ).rejects.toThrow(/payment_requests_paid_requires_transfer/);
     });
 
-    it("expires an awaiting request", async () => {
+    it("expires an open request", async () => {
       const created = await repo.createPaymentRequest(createInput({}));
 
-      const expired = await repo.markPaymentRequest({
-        requestId: created?.id ?? "",
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        status: "expired",
-        fulfilledByTransferId: null,
-        paidLate: false,
-        chainRead: true,
-      });
-      expect(expired?.status).toBe("expired");
+      const expired = required(await markExpired(created));
+
+      expect(expired).toMatchObject({ status: "expired", fulfilled_by_transfer_id: null });
+      expect(expired.lifecycle.map((event) => event.status)).toEqual([
+        "awaiting_payment",
+        "expired",
+      ]);
     });
 
-    it("returns null and is a no-op when the request is already terminal", async () => {
-      const created = await repo.createPaymentRequest(createInput({}));
-      await repo.markPaymentRequest({
-        requestId: created?.id ?? "",
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        status: "expired",
-        fulfilledByTransferId: null,
-        paidLate: false,
-        chainRead: true,
-      });
-
-      const second = await repo.markPaymentRequest({
-        requestId: created?.id ?? "",
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        status: "paid",
-        fulfilledByTransferId: null,
-        paidLate: false,
-        chainRead: true,
-      });
-      expect(second).toBeNull();
-
-      const current = await repo.getPaymentRequestById({
-        requestId: created?.id ?? "",
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-      });
-      expect(current?.status).toBe("expired");
-    });
-  });
-
-  describe("cancelPaymentRequest", () => {
-    it("cancels only an open request, recording who canceled it and when", async () => {
+    it("cancels an open request once, recording who canceled it and when", async () => {
       const open = await repo.createPaymentRequest(createInput({}));
-      const expired = await repo.createPaymentRequest(createInput({}));
-      await repo.markPaymentRequest({
-        requestId: expired.id,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        status: "expired",
-        fulfilledByTransferId: null,
-        paidLate: false,
-        chainRead: true,
-      });
 
       const canceled = required(await repo.cancelPaymentRequest(cancelInput(open, null)));
 
@@ -440,19 +314,17 @@ describe("PaymentRequestsRepository (postgres)", () => {
         status: "canceled",
         canceled_by_api_key_id: null,
         canceled_by_user_id: TEST_USER.id,
+        canceled_at: expect.any(String),
       });
-      expect(canceled.canceled_at).toEqual(expect.any(String));
       expect(canceled.lifecycle.map((event) => event.status)).toEqual([
         "awaiting_payment",
         "canceled",
       ]);
       expect(await repo.cancelPaymentRequest(cancelInput(open, null))).toBeNull();
-      expect((await stored(open)).canceled_at).toBe(canceled.canceled_at);
-      expect(await repo.cancelPaymentRequest(cancelInput(expired, null))).toBeNull();
-      expect((await stored(expired)).status).toBe("expired");
+      expect(await stored(open)).toEqual(canceled);
     });
 
-    it("refuses an awaiting request past its expires_at", async () => {
+    it("refuses to cancel an open request past its expires_at", async () => {
       const lapsed = await repo.createPaymentRequest(createInput({ expiresAt: PAST }));
 
       expect(await repo.cancelPaymentRequest(cancelInput(lapsed, null))).toBeNull();
@@ -479,25 +351,184 @@ describe("PaymentRequestsRepository (postgres)", () => {
       }
     );
 
-    it("does not cancel another project's request", async () => {
-      const request = await repo.createPaymentRequest(createInput({}));
+    it("settles an expired request a late payment reached, recording lateness as given", async () => {
+      const request = await repo.createPaymentRequest(createInput({ expiresAt: PAST }));
+      const transferId = await seedPaymentRequestTransfer(env, request);
+      await markExpired(request);
+      await setPaymentRequestColumns(env, request.id, {
+        last_verified_at: null,
+        signature_scan_stuck_signature: "unresolved_signature",
+        signature_scan_stuck_since: PAST,
+      });
+
+      const paid = required(
+        await createSystemPaymentRequestsRepository(env).markExpiredPaymentRequestPaid({
+          ...key(request),
+          fulfilledByTransferId: transferId,
+          paidLate: true,
+        })
+      );
+
+      expect(paid).toMatchObject({
+        status: "paid",
+        paid_late: true,
+        fulfilled_by_transfer_id: transferId,
+        last_verified_at: expect.any(String),
+        signature_scan_stuck_signature: null,
+        signature_scan_stuck_since: null,
+      });
+      expect(paid.lifecycle.map((event) => event.status)).toEqual([
+        "awaiting_payment",
+        "expired",
+        "paid",
+      ]);
+    });
+
+    it("leaves an open request past its expires_at unpaid by the expired-request write", async () => {
+      const lapsed = await repo.createPaymentRequest(createInput({ expiresAt: PAST }));
+      const transferId = await seedPaymentRequestTransfer(env, lapsed);
+      const before = await stored(lapsed);
 
       expect(
-        await repo.cancelPaymentRequest({
-          ...cancelInput(request, null),
-          projectId: projects.production.id,
+        await createSystemPaymentRequestsRepository(env).markExpiredPaymentRequestPaid({
+          ...key(lapsed),
+          fulfilledByTransferId: transferId,
+          paidLate: true,
         })
       ).toBeNull();
-      expect(await stored(request)).toMatchObject({
-        status: "awaiting_payment",
-        canceled_at: null,
+      expect(await stored(lapsed)).toEqual(before);
+    });
+
+    it("settles a canceled request a late payment reached, keeping who canceled it and when", async () => {
+      const request = await repo.createPaymentRequest(createInput({}));
+      const transferId = await seedPaymentRequestTransfer(env, request);
+      const canceled = required(await repo.cancelPaymentRequest(cancelInput(request, null)));
+
+      const paid = required(
+        await createSystemPaymentRequestsRepository(env).markCanceledPaymentRequestPaid({
+          ...key(request),
+          fulfilledByTransferId: transferId,
+          paidLate: false,
+        })
+      );
+
+      expect(paid).toMatchObject({
+        status: "paid",
+        paid_late: false,
+        fulfilled_by_transfer_id: transferId,
+        canceled_by_api_key_id: null,
+        canceled_by_user_id: TEST_USER.id,
+        canceled_at: canceled.canceled_at,
       });
+      expect(paid.lifecycle.map((event) => event.status)).toEqual([
+        "awaiting_payment",
+        "canceled",
+        "paid",
+      ]);
+    });
+
+    const closeTo = {
+      paid: (request: PaymentRequestRow, transferId: string) => markPaid(request, transferId),
+      expired: (request: PaymentRequestRow) => markExpired(request),
+      canceled: (request: PaymentRequestRow) =>
+        repo.cancelPaymentRequest(cancelInput(request, null)),
+    } satisfies Record<
+      ClosedPaymentRequestStatus,
+      (request: PaymentRequestRow, transferId: string) => Promise<PaymentRequestRow | null>
+    >;
+    const refusedWrites = {
+      paid: ["pay", "expire", "cancel", "payExpired", "payCanceled"],
+      expired: ["pay", "expire", "cancel", "payCanceled"],
+      canceled: ["pay", "expire", "cancel", "payExpired"],
+    } as const satisfies Record<ClosedPaymentRequestStatus, readonly string[]>;
+
+    it.each(PAYMENT_REQUEST_CLOSED_STATUSES)(
+      "leaves a %s request unchanged under every write that does not start from it",
+      async (status) => {
+        const request = await repo.createPaymentRequest(createInput({}));
+        const transferId = await seedPaymentRequestTransfer(env, request);
+        await closeTo[status](request, transferId);
+        const before = await stored(request);
+        const system = createSystemPaymentRequestsRepository(env);
+        const write = {
+          pay: () => markPaid(request, transferId),
+          expire: () => markExpired(request),
+          cancel: () => repo.cancelPaymentRequest(cancelInput(request, null)),
+          payExpired: () =>
+            system.markExpiredPaymentRequestPaid({
+              ...key(request),
+              fulfilledByTransferId: transferId,
+              paidLate: true,
+            }),
+          payCanceled: () =>
+            system.markCanceledPaymentRequestPaid({
+              ...key(request),
+              fulfilledByTransferId: transferId,
+              paidLate: true,
+            }),
+        };
+
+        for (const refused of refusedWrites[status]) {
+          expect(await write[refused]()).toBeNull();
+        }
+        expect(await stored(request)).toEqual(before);
+      }
+    );
+
+    it("leaves another project's request untouched by every write", async () => {
+      const open = await repo.createPaymentRequest(createInput({}));
+      const expired = await repo.createPaymentRequest(createInput({}));
+      const transferId = await seedPaymentRequestTransfer(env, open);
+      await markExpired(expired);
+      const before = [await stored(open), await stored(expired)];
+      const otherProject = { projectId: tenant.projects.production.id };
+
+      expect(
+        await repo.markPaymentRequest({
+          ...key(open),
+          ...otherProject,
+          status: "paid",
+          fulfilledByTransferId: transferId,
+          paidLate: false,
+          chainRead: true,
+        })
+      ).toBeNull();
+      expect(
+        await repo.markPaymentRequest({
+          ...key(open),
+          ...otherProject,
+          status: "expired",
+          fulfilledByTransferId: null,
+          paidLate: false,
+          chainRead: true,
+        })
+      ).toBeNull();
+      expect(
+        await repo.cancelPaymentRequest({ ...cancelInput(open, null), ...otherProject })
+      ).toBeNull();
+      expect(
+        await repo.markExpiredPaymentRequestPaid({
+          ...key(expired),
+          ...otherProject,
+          fulfilledByTransferId: transferId,
+          paidLate: false,
+        })
+      ).toBeNull();
+      expect(
+        await repo.advanceSignatureScan({
+          ...key(open),
+          ...otherProject,
+          from: scanAt({}),
+          to: scanAt({ cursor: "sigA" }),
+        })
+      ).toBe(false);
+      expect([await stored(open), await stored(expired)]).toEqual(before);
     });
   });
 
   describe("sponsored transaction window", () => {
-    const ACCOUNT_A = "9wVmMF2GpxZMsJLxCv2xXWjDWVv8HtqTmKqnZxNKkYTz";
-    const ACCOUNT_B = "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJfhRhPkV";
+    const ACCOUNT_A = TEST_SOLANA_ADDRESSES.wallet1;
+    const ACCOUNT_B = TEST_SOLANA_ADDRESSES.wallet2;
 
     it("admits exactly one of two concurrent claims", async () => {
       const request = await repo.createPaymentRequest(createInput({}));
@@ -519,11 +550,9 @@ describe("PaymentRequestsRepository (postgres)", () => {
       ]);
       expect(results.filter(Boolean)).toHaveLength(1);
 
-      const claim = await repo.getSponsoredTransactionClaim(request.id);
-      expect(claim).not.toBeNull();
-      expect([ACCOUNT_A, ACCOUNT_B]).toContain(claim?.account);
-      expect(claim?.signedTransaction).toBeNull();
-      expect(claim?.lastValidBlockHeight).toBe(1_000n);
+      const claim = required(await repo.getSponsoredTransactionClaim(request.id));
+      expect([ACCOUNT_A, ACCOUNT_B]).toContain(claim.account);
+      expect(claim).toMatchObject({ signedTransaction: null, lastValidBlockHeight: 1_000n });
     });
 
     it("refuses a claim on a request past its deadline that is still awaiting payment", async () => {
@@ -571,9 +600,10 @@ describe("PaymentRequestsRepository (postgres)", () => {
           currentBlockHeight: 1_001n,
         })
       ).toBe(true);
-      const claim = await repo.getSponsoredTransactionClaim(request.id);
-      expect(claim?.account).toBe(ACCOUNT_B);
-      expect(claim?.signedTransaction).toBeNull();
+      expect(await repo.getSponsoredTransactionClaim(request.id)).toMatchObject({
+        account: ACCOUNT_B,
+        signedTransaction: null,
+      });
     });
 
     it("stores the signature for the claiming account only", async () => {
@@ -591,7 +621,9 @@ describe("PaymentRequestsRepository (postgres)", () => {
         unsignedTransaction: "dHhB",
         signedTransaction: "c2lnQg==",
       });
-      expect((await repo.getSponsoredTransactionClaim(request.id))?.signedTransaction).toBeNull();
+      expect(
+        required(await repo.getSponsoredTransactionClaim(request.id)).signedTransaction
+      ).toBeNull();
 
       await repo.storeSponsoredTransactionSignature({
         requestId: request.id,
@@ -599,7 +631,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         unsignedTransaction: "dHhB",
         signedTransaction: "c2lnQQ==",
       });
-      expect((await repo.getSponsoredTransactionClaim(request.id))?.signedTransaction).toBe(
+      expect(required(await repo.getSponsoredTransactionClaim(request.id)).signedTransaction).toBe(
         "c2lnQQ=="
       );
     });
@@ -629,7 +661,9 @@ describe("PaymentRequestsRepository (postgres)", () => {
           signedTransaction: "c2lnT2xk",
         })
       ).toBe(false);
-      expect((await repo.getSponsoredTransactionClaim(request.id))?.signedTransaction).toBeNull();
+      expect(
+        required(await repo.getSponsoredTransactionClaim(request.id)).signedTransaction
+      ).toBeNull();
 
       expect(
         await repo.storeSponsoredTransactionSignature({
@@ -639,7 +673,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
           signedTransaction: "c2lnTmV3",
         })
       ).toBe(true);
-      expect((await repo.getSponsoredTransactionClaim(request.id))?.signedTransaction).toBe(
+      expect(required(await repo.getSponsoredTransactionClaim(request.id)).signedTransaction).toBe(
         "c2lnTmV3"
       );
     });
@@ -653,19 +687,10 @@ describe("PaymentRequestsRepository (postgres)", () => {
         lastValidBlockHeight: 1_000n,
         currentBlockHeight: 900n,
       });
-      expect((await repo.getSponsoredTransactionClaim(request.id))?.requestStatus).toBe(
+      expect(required(await repo.getSponsoredTransactionClaim(request.id)).requestStatus).toBe(
         "awaiting_payment"
       );
-      await seedTransfer("xfr_claim_paid");
-      await repo.markPaymentRequest({
-        requestId: request.id,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        status: "paid",
-        fulfilledByTransferId: "xfr_claim_paid",
-        paidLate: false,
-        chainRead: true,
-      });
+      await markPaid(request, await seedPaymentRequestTransfer(env, request));
 
       expect(
         await repo.storeSponsoredTransactionSignature({
@@ -709,31 +734,16 @@ describe("PaymentRequestsRepository (postgres)", () => {
   });
 
   describe("reconciler queries", () => {
-    it("lists hot requests whose sponsored transaction can still land, stalest first", async () => {
+    it("lists hot requests whose sponsored transaction can still land", async () => {
       const live = await repo.createPaymentRequest(
         createInput({ token: SOL_MINT, expiresAt: null })
       );
       const lapsedClaim = await repo.createPaymentRequest(
         createInput({ token: SOL_MINT, expiresAt: null })
       );
-      const noClaim = await repo.createPaymentRequest(
-        createInput({ token: SOL_MINT, expiresAt: null })
-      );
-      const db = getDb(env);
-      await db
-        .prepare(
-          `UPDATE payment_requests SET sponsored_tx_account = 'acct', sponsored_tx_unsigned = 'tx',
-             sponsored_tx_last_valid_block_height = ? WHERE id = ?`
-        )
-        .bind("1000", live.id)
-        .run();
-      await db
-        .prepare(
-          `UPDATE payment_requests SET sponsored_tx_account = 'acct', sponsored_tx_unsigned = 'tx',
-             sponsored_tx_last_valid_block_height = ? WHERE id = ?`
-        )
-        .bind("10", lapsedClaim.id)
-        .run();
+      await repo.createPaymentRequest(createInput({ token: SOL_MINT, expiresAt: null }));
+      await claimWindow(live.id, "1000");
+      await claimWindow(lapsedClaim.id, "10");
 
       const rows = await createSystemPaymentRequestsRepository(env).listHotPaymentRequests({
         environment: "sandbox",
@@ -742,7 +752,6 @@ describe("PaymentRequestsRepository (postgres)", () => {
       });
 
       expect(rows.map((row) => row.id)).toEqual([live.id]);
-      expect(rows.map((row) => row.id)).not.toContain(noClaim.id);
     });
 
     it("probes for an open sponsored window in one environment only", async () => {
@@ -759,22 +768,20 @@ describe("PaymentRequestsRepository (postgres)", () => {
       expect(await systemRepo.hasHotPaymentRequests({ environment: "production" })).toBe(false);
 
       // An expired request belongs to the expiry lane.
-      await setPaymentRequestColumns(env, request.id, { expires_at: "2020-01-01T00:00:00.000Z" });
+      await setPaymentRequestColumns(env, request.id, { expires_at: PAST });
       expect(await systemRepo.hasHotPaymentRequests({ environment: "sandbox" })).toBe(false);
     });
 
     it("probes for a lapsed request due for its expiry check in one environment only", async () => {
       const systemRepo = createSystemPaymentRequestsRepository(env);
       const checkedBefore = ago(45 * SECOND);
-      await repo.createPaymentRequest(
-        createInput({ token: SOL_MINT, expiresAt: "2099-01-01T00:00:00.000Z" })
-      );
+      await repo.createPaymentRequest(createInput({ token: SOL_MINT, expiresAt: FUTURE }));
       expect(
         await systemRepo.hasLapsedPaymentRequests({ environment: "sandbox", checkedBefore })
       ).toBe(false);
 
       const lapsed = await repo.createPaymentRequest(
-        createInput({ token: SOL_MINT, expiresAt: "2020-01-01T00:00:00.000Z" })
+        createInput({ token: SOL_MINT, expiresAt: PAST })
       );
       expect(
         await systemRepo.hasLapsedPaymentRequests({ environment: "sandbox", checkedBefore })
@@ -801,17 +808,10 @@ describe("PaymentRequestsRepository (postgres)", () => {
         createInput({ token: SOL_MINT, expiresAt: null })
       );
       const lapsed = await repo.createPaymentRequest(
-        createInput({ token: SOL_MINT, expiresAt: "2020-01-01T00:00:00.000Z" })
+        createInput({ token: SOL_MINT, expiresAt: PAST })
       );
-      const db = getDb(env);
-      await db
-        .prepare("UPDATE payment_requests SET last_checked_at = ? WHERE id = ?")
-        .bind("2026-01-01T00:00:00.000Z", old.id)
-        .run();
-      await db
-        .prepare("UPDATE payment_requests SET last_checked_at = ? WHERE id = ?")
-        .bind("2099-01-01T00:00:00.000Z", fresh.id)
-        .run();
+      await setPaymentRequestColumns(env, old.id, { last_checked_at: "2026-01-01T00:00:00.000Z" });
+      await setPaymentRequestColumns(env, fresh.id, { last_checked_at: FUTURE });
 
       const rows = await createSystemPaymentRequestsRepository(env).listPaymentRequestsDueForCheck({
         environment: "sandbox",
@@ -829,9 +829,9 @@ describe("PaymentRequestsRepository (postgres)", () => {
       await repo.createPaymentRequest(createInput({ token: SOL_MINT, expiresAt: null }));
       const rows = await createSystemPaymentRequestsRepository(env).listPaymentRequestsDueForCheck({
         environment: "production",
-        recentCheckedBefore: "2099-01-01T00:00:00.000Z",
-        agedCheckedBefore: "2099-01-01T00:00:00.000Z",
-        agedCreatedBefore: "2099-01-01T00:00:00.000Z",
+        recentCheckedBefore: FUTURE,
+        agedCheckedBefore: FUTURE,
+        agedCreatedBefore: FUTURE,
         limit: 10,
       });
       expect(rows).toEqual([]);
@@ -839,11 +839,9 @@ describe("PaymentRequestsRepository (postgres)", () => {
 
     it("lists awaiting requests past expires_at as lapsed", async () => {
       const lapsed = await repo.createPaymentRequest(
-        createInput({ token: SOL_MINT, expiresAt: "2020-01-01T00:00:00.000Z" })
+        createInput({ token: SOL_MINT, expiresAt: PAST })
       );
-      await repo.createPaymentRequest(
-        createInput({ token: SOL_MINT, expiresAt: "2099-01-01T00:00:00.000Z" })
-      );
+      await repo.createPaymentRequest(createInput({ token: SOL_MINT, expiresAt: FUTURE }));
       await repo.createPaymentRequest(createInput({ token: SOL_MINT, expiresAt: null }));
 
       const rows = await createSystemPaymentRequestsRepository(env).listLapsedPaymentRequests({
@@ -867,7 +865,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         createInput({ token: SOL_MINT, expiresAt: "2019-06-01T00:00:00.000Z" })
       );
       const neverCheckedOlder = await repo.createPaymentRequest(
-        createInput({ token: SOL_MINT, expiresAt: "2020-01-01T00:00:00.000Z" })
+        createInput({ token: SOL_MINT, expiresAt: PAST })
       );
       await setPaymentRequestColumns(env, recentlyChecked.id, { last_checked_at: ago(MINUTE) });
       await setPaymentRequestColumns(env, longUnchecked.id, { last_checked_at: ago(DAY) });
@@ -914,7 +912,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
 
     it("skips lapsed requests checked since the cutoff so failing rows rotate", async () => {
       const due = await repo.createPaymentRequest(
-        createInput({ token: SOL_MINT, expiresAt: "2020-01-01T00:00:00.000Z" })
+        createInput({ token: SOL_MINT, expiresAt: PAST })
       );
       const justChecked = await repo.createPaymentRequest(
         createInput({ token: SOL_MINT, expiresAt: "2021-01-01T00:00:00.000Z" })
@@ -934,16 +932,16 @@ describe("PaymentRequestsRepository (postgres)", () => {
 
     it("skips lapsed requests whose sponsored transaction can still land", async () => {
       const live = await repo.createPaymentRequest(
-        createInput({ token: SOL_MINT, expiresAt: "2020-01-01T00:00:00.000Z" })
+        createInput({ token: SOL_MINT, expiresAt: PAST })
       );
       const atBoundary = await repo.createPaymentRequest(
-        createInput({ token: SOL_MINT, expiresAt: "2020-01-01T00:00:00.000Z" })
+        createInput({ token: SOL_MINT, expiresAt: PAST })
       );
       const passed = await repo.createPaymentRequest(
-        createInput({ token: SOL_MINT, expiresAt: "2020-01-01T00:00:00.000Z" })
+        createInput({ token: SOL_MINT, expiresAt: PAST })
       );
       const unclaimed = await repo.createPaymentRequest(
-        createInput({ token: SOL_MINT, expiresAt: "2020-01-01T00:00:00.000Z" })
+        createInput({ token: SOL_MINT, expiresAt: PAST })
       );
       await claimWindow(live.id, "1000");
       await claimWindow(atBoundary.id, "500");
@@ -960,9 +958,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
     });
 
     it("does not list another environment's lapsed requests", async () => {
-      await repo.createPaymentRequest(
-        createInput({ token: SOL_MINT, expiresAt: "2020-01-01T00:00:00.000Z" })
-      );
+      await repo.createPaymentRequest(createInput({ token: SOL_MINT, expiresAt: PAST }));
 
       const rows = await createSystemPaymentRequestsRepository(env).listLapsedPaymentRequests({
         environment: "production",
@@ -1009,80 +1005,6 @@ describe("PaymentRequestsRepository (postgres)", () => {
       expect(rows.map((row) => row.id)).toEqual([agedDue.id, young.id]);
     });
 
-    it("moves only an expired request to paid, recording lateness as given", async () => {
-      const request = await repo.createPaymentRequest(
-        createInput({ token: SOL_MINT, expiresAt: "2020-01-01T00:00:00.000Z" })
-      );
-      const transferId = await seedPaymentRequestTransfer(env, request);
-      const systemRepo = createSystemPaymentRequestsRepository(env);
-      const scoped = {
-        requestId: request.id,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-      };
-
-      expect(
-        await systemRepo.markExpiredPaymentRequestPaid({
-          ...scoped,
-          fulfilledByTransferId: transferId,
-          paidLate: true,
-        })
-      ).toBeNull();
-
-      await repo.markPaymentRequest({
-        ...scoped,
-        status: "expired",
-        fulfilledByTransferId: null,
-        paidLate: false,
-        chainRead: true,
-      });
-      await setPaymentRequestColumns(env, request.id, { last_verified_at: null });
-      const paid = await systemRepo.markExpiredPaymentRequestPaid({
-        ...scoped,
-        fulfilledByTransferId: transferId,
-        paidLate: true,
-      });
-
-      expect(paid).toMatchObject({
-        status: "paid",
-        paid_late: true,
-        fulfilled_by_transfer_id: transferId,
-      });
-      expect(paid?.last_verified_at).not.toBeNull();
-      expect(paid?.lifecycle.map((event) => event.status)).toEqual([
-        "awaiting_payment",
-        "expired",
-        "paid",
-      ]);
-    });
-
-    it("moves an expired request to paid on time when lateness is false", async () => {
-      const request = await repo.createPaymentRequest(
-        createInput({ token: SOL_MINT, expiresAt: "2020-01-01T00:00:00.000Z" })
-      );
-      const transferId = await seedPaymentRequestTransfer(env, request);
-      const scoped = {
-        requestId: request.id,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-      };
-      await repo.markPaymentRequest({
-        ...scoped,
-        status: "expired",
-        fulfilledByTransferId: null,
-        paidLate: false,
-        chainRead: true,
-      });
-
-      const paid = await createSystemPaymentRequestsRepository(env).markExpiredPaymentRequestPaid({
-        ...scoped,
-        fulfilledByTransferId: transferId,
-        paidLate: false,
-      });
-
-      expect(paid).toMatchObject({ status: "paid", paid_late: false });
-    });
-
     it("stamps last_checked_at on every listed id and last_verified_at only on verified ones", async () => {
       const a = await repo.createPaymentRequest(createInput({ token: SOL_MINT, expiresAt: null }));
       const b = await repo.createPaymentRequest(createInput({ token: SOL_MINT, expiresAt: null }));
@@ -1093,28 +1015,19 @@ describe("PaymentRequestsRepository (postgres)", () => {
         { id: b.id, outcome: { kind: "skipped" } },
       ]);
 
-      const rows = await Promise.all(
-        [a, b].map((row) =>
-          repo.getPaymentRequestById({
-            requestId: row.id,
-            organizationId: TEST_ORG.id,
-            projectId: TEST_PROJECT_ID,
-          })
-        )
-      );
-      expect(rows.every((row) => row?.last_checked_at !== null)).toBe(true);
-      expect(rows.map((row) => row?.last_verified_at === null)).toEqual([false, true]);
+      const rows = [await stored(a), await stored(b)];
+      expect(rows.map((row) => row.last_checked_at === null)).toEqual([false, false]);
+      expect(rows.map((row) => row.last_verified_at === null)).toEqual([false, true]);
     });
 
     it("records a block, keeps it on a skip, and clears it on a read or a failure", async () => {
       const systemRepo = createSystemPaymentRequestsRepository(env);
-      const created = await Promise.all(
-        ["blocked", "skipped", "read", "failed"].map(() =>
-          repo.createPaymentRequest(createInput({ token: SOL_MINT, expiresAt: null }))
-        )
-      );
-      const [blocked, skipped, read, failed] = created.map((row) => row.id);
-      if (!blocked || !skipped || !read || !failed) throw new Error("fixture rows missing");
+      const create = async () =>
+        (await repo.createPaymentRequest(createInput({ token: SOL_MINT, expiresAt: null }))).id;
+      const blocked = await create();
+      const skipped = await create();
+      const read = await create();
+      const failed = await create();
       for (const id of [skipped, read, failed]) {
         await setPaymentRequestColumns(env, id, { settlement_blocked_reason: "invalid_amount" });
       }
@@ -1126,27 +1039,24 @@ describe("PaymentRequestsRepository (postgres)", () => {
         { id: failed, outcome: { kind: "failed" } },
       ]);
 
-      const stored = await Promise.all(
-        [blocked, skipped, read, failed].map((requestId) =>
-          repo.getPaymentRequestById({
-            requestId,
-            organizationId: TEST_ORG.id,
-            projectId: TEST_PROJECT_ID,
-          })
+      const rows = await Promise.all(
+        [blocked, skipped, read, failed].map(async (requestId) =>
+          required(
+            await repo.getPaymentRequestById({
+              requestId,
+              organizationId: TEST_ORG.id,
+              projectId: TEST_PROJECT_ID,
+            })
+          )
         )
       );
-      expect(stored.map((row) => row?.settlement_blocked_reason)).toEqual([
+      expect(rows.map((row) => row.settlement_blocked_reason)).toEqual([
         "mint_not_admitted",
         "invalid_amount",
         null,
         null,
       ]);
-      expect(stored.map((row) => row?.last_verified_at === null)).toEqual([
-        true,
-        true,
-        false,
-        true,
-      ]);
+      expect(rows.map((row) => row.last_verified_at === null)).toEqual([true, true, false, true]);
     });
 
     describe("listClosedPaymentRequestsForLateCheck", () => {
@@ -1242,7 +1152,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
 
       it("counts unexpired awaiting requests not checked since the cutoff", async () => {
         await staleRequest(null);
-        await staleRequest("2099-01-01T00:00:00.000Z");
+        await staleRequest(FUTURE);
         await staleRequest(null, { last_verified_at: ago(MINUTE) });
 
         expect(await countStale()).toBe(2);
@@ -1261,7 +1171,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
       });
 
       it("excludes lapsed requests, which the expiry lane owns", async () => {
-        await staleRequest("2020-01-01T00:00:00.000Z");
+        await staleRequest(PAST);
 
         expect(await countStale()).toBe(0);
       });
@@ -1368,7 +1278,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
 
       it("excludes unexpired requests, which the awaiting lanes own", async () => {
         await lapsedRequest(null, { created_at: PAST });
-        await lapsedRequest("2099-01-01T00:00:00.000Z", { created_at: PAST });
+        await lapsedRequest(FUTURE, { created_at: PAST });
 
         expect(await countStaleLapsed()).toBe(0);
       });
@@ -1389,39 +1299,11 @@ describe("PaymentRequestsRepository (postgres)", () => {
     });
 
     describe("advanceSignatureScan", () => {
-      function scanKey(request: PaymentRequestRow) {
-        return { requestId: request.id, organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
-      }
-
-      function scanAt(position: Partial<SignatureScanPosition>): SignatureScanPosition {
-        return {
-          cursor: null,
-          before: null,
-          progress: null,
-          cycleHadRetry: false,
-          stuckSignature: null,
-          stuckSince: null,
-          ...position,
-        };
-      }
-
-      it("starts with no scan position", async () => {
-        const created = await repo.createPaymentRequest(createInput({}));
-        expect(created).toMatchObject({
-          signature_scan_cursor: null,
-          signature_scan_before: null,
-          signature_scan_progress: null,
-          signature_scan_cycle_had_retry: false,
-          signature_scan_stuck_signature: null,
-          signature_scan_stuck_since: null,
-        });
-      });
-
       it("moves the scan position when the expected position matches", async () => {
         const created = await repo.createPaymentRequest(createInput({}));
 
         const advanced = await repo.advanceSignatureScan({
-          ...scanKey(created),
+          ...key(created),
           from: scanAt({}),
           to: scanAt({
             cursor: "sigA",
@@ -1434,7 +1316,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         });
 
         expect(advanced).toBe(true);
-        expect(await repo.getPaymentRequestById(scanKey(created))).toMatchObject({
+        expect(await repo.getPaymentRequestById(key(created))).toMatchObject({
           signature_scan_cursor: "sigA",
           signature_scan_before: "sigB",
           signature_scan_progress: "sigProgress",
@@ -1447,25 +1329,25 @@ describe("PaymentRequestsRepository (postgres)", () => {
       it("does not overwrite a newer position with a stale expected one", async () => {
         const created = await repo.createPaymentRequest(createInput({}));
         await repo.advanceSignatureScan({
-          ...scanKey(created),
+          ...key(created),
           from: scanAt({}),
           to: scanAt({ cursor: "sigNewer" }),
         });
 
         const stale = await repo.advanceSignatureScan({
-          ...scanKey(created),
+          ...key(created),
           from: scanAt({}),
           to: scanAt({ cursor: "sigOlder" }),
         });
         const staleBefore = await repo.advanceSignatureScan({
-          ...scanKey(created),
+          ...key(created),
           from: scanAt({ cursor: "sigNewer", before: "sigOther" }),
           to: scanAt({ cursor: "sigOlder" }),
         });
 
         expect(stale).toBe(false);
         expect(staleBefore).toBe(false);
-        expect(await repo.getPaymentRequestById(scanKey(created))).toMatchObject({
+        expect(await repo.getPaymentRequestById(key(created))).toMatchObject({
           signature_scan_cursor: "sigNewer",
           signature_scan_before: null,
         });
@@ -1474,44 +1356,28 @@ describe("PaymentRequestsRepository (postgres)", () => {
       it("does not overwrite a position whose stuck signature changed meanwhile", async () => {
         const created = await repo.createPaymentRequest(createInput({}));
         await repo.advanceSignatureScan({
-          ...scanKey(created),
+          ...key(created),
           from: scanAt({}),
           to: scanAt({ stuckSignature: "sigStuck", stuckSince: PAST }),
         });
 
         const staleStuck = await repo.advanceSignatureScan({
-          ...scanKey(created),
+          ...key(created),
           from: scanAt({ stuckSignature: "sigStuck", stuckSince: FUTURE }),
           to: scanAt({ cursor: "sigStuck" }),
         });
         const staleClear = await repo.advanceSignatureScan({
-          ...scanKey(created),
+          ...key(created),
           from: scanAt({}),
           to: scanAt({ stuckSignature: "sigOther", stuckSince: FUTURE }),
         });
 
         expect(staleStuck).toBe(false);
         expect(staleClear).toBe(false);
-        expect(await repo.getPaymentRequestById(scanKey(created))).toMatchObject({
+        expect(await repo.getPaymentRequestById(key(created))).toMatchObject({
           signature_scan_cursor: null,
           signature_scan_stuck_signature: "sigStuck",
           signature_scan_stuck_since: PAST,
-        });
-      });
-
-      it("does not move another project's scan position", async () => {
-        const created = await repo.createPaymentRequest(createInput({}));
-
-        const advanced = await repo.advanceSignatureScan({
-          ...scanKey(created),
-          projectId: `${TEST_PROJECT_ID}_production`,
-          from: scanAt({}),
-          to: scanAt({ cursor: "sigA" }),
-        });
-
-        expect(advanced).toBe(false);
-        expect(await repo.getPaymentRequestById(scanKey(created))).toMatchObject({
-          signature_scan_cursor: null,
         });
       });
 
@@ -1524,7 +1390,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
 
         expect(
           await tenant.advanceSignatureScan({
-            ...scanKey(created),
+            ...key(created),
             from: scanAt({}),
             to: scanAt({ cursor: "sigA" }),
           })

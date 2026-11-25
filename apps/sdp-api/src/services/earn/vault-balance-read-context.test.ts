@@ -86,6 +86,35 @@ describe("vault balance confirmation context", () => {
     });
   });
 
+  it("uses a discovered selector's ID only for its exact source and instrument", async () => {
+    mocks.movement.mockResolvedValue({ ...movement, provider: "veda", vault_address: "vault" });
+    await expect(
+      resolveInScope(
+        {
+          ...input,
+          position: { id: "discovered-selector", provider: "veda", providerReference: "vault" },
+        },
+        "sandbox"
+      )
+    ).resolves.toMatchObject({
+      minimumSlotByPositionId: new Map([["discovered-selector", 103]]),
+    });
+  });
+
+  it("rejects an unrelated detail instrument before reading signature statuses", async () => {
+    mocks.movement.mockResolvedValue({ ...movement, provider: "veda", vault_address: "other" });
+    await expect(
+      resolveInScope(
+        {
+          ...input,
+          position: { id: "detail", provider: "veda", providerReference: "vault" },
+        },
+        "sandbox"
+      )
+    ).rejects.toMatchObject({ statusCode: 404 });
+    expect(mocks.statuses).not.toHaveBeenCalled();
+  });
+
   it.each([
     null,
     { ...movement, project_id: "foreign" },

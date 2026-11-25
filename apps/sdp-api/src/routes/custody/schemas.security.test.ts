@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { initializeSigningSchema } from "./schemas";
 
 const hostedProviderRequests = [
@@ -12,7 +13,7 @@ const hostedProviderRequests = [
 ] as const;
 
 const existingProviderObjectRequests = [
-  { provider: "coinbase_cdp", walletAddress: "11111111111111111111111111111111" },
+  { provider: "coinbase_cdp", walletAddress: TEST_SOLANA_ADDRESSES.wallet1 },
   { provider: "para", walletId: "wallet_from_another_tenant" },
   { provider: "turnkey", privateKeyId: "key_from_another_tenant" },
   { provider: "dfns", walletId: "wallet_from_another_tenant" },

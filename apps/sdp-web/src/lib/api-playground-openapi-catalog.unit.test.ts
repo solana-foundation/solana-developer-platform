@@ -1,5 +1,5 @@
 import { ONCHAIN_TRANSFER_STATUSES } from "@sdp/types/payments";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildIssuancePlaygroundEndpointConfigs } from "@/app/(session)/dashboard/[projectId]/issuance/issuance-playground-config";
 import { buildCounterpartyPlaygroundEndpointConfigs } from "@/app/(session)/dashboard/[projectId]/payments/counterparty/counterparty-playground-config";
 import { buildPaymentsPlaygroundEndpointConfigs } from "@/app/(session)/dashboard/[projectId]/payments/payments-playground-config";
@@ -75,7 +75,7 @@ describe("API playground release channel", () => {
       { transfers: [], wallets: [], rampProviders: [] },
       t
     );
-    expect(paths(payments)).toContain("/v1/payments/ramps/onramp/quote");
+    expect(paths(payments)).toContain("/v1/payments/ramps/onramp/start");
 
     const stable = paths(filterPlaygroundEndpointsToReleaseChannel(payments, "stable"));
     expect(stable.filter((path) => path.startsWith("/v1/payments/ramps"))).toEqual([]);
@@ -113,7 +113,7 @@ describe("API playground release channel", () => {
       getOpenApiPlaygroundEndpoints("payments"),
       "stable"
     );
-    const batches = payments.find((endpoint) => endpoint.id === "create-payment-transfer-batch");
+    const batches = payments.find((endpoint) => endpoint.id === "execute-payment-transfer-batch");
     expect(JSON.stringify(batches?.expectedResponse)).toMatch(/"transfers":\[\{/);
     expect(JSON.stringify(batches?.expectedResponse)).not.toMatch(/moonpay|stripe/);
 
@@ -148,7 +148,7 @@ describe("API playground release channel", () => {
       getOpenApiPlaygroundEndpoints("payments"),
       "stable"
     );
-    const transfer = endpoints.find((endpoint) => endpoint.id === "create-payment-transfer");
+    const transfer = endpoints.find((endpoint) => endpoint.id === "execute-payment-transfer");
     expect(transfer).toBeDefined();
     expect(transfer?.bodyFields.find((field) => field.key === "$body")?.defaultValue).not.toContain(
       "transferId"
@@ -213,13 +213,33 @@ describe("API playground allowlist", () => {
     values?: Record<string, string | number>
   ) => translate(messages, key, values);
 
-  it("matches a concrete path to its catalog operation, a literal segment first", () => {
+  it("matches a concrete path to its catalog operation", () => {
     expect(
       findPublishedPlaygroundOperation("GET", "/v1/payments/transfers/trf_1", "stable")
     ).toMatchObject({ pathTemplate: "/v1/payments/transfers/{transferId}" });
-    expect(findPublishedPlaygroundOperation("GET", "/v1/wallets/configs", "stable")).toMatchObject({
-      pathTemplate: "/v1/wallets/configs",
-    });
+  });
+
+  it("keeps literal precedence when the catalog puts parameter routes first", async () => {
+    vi.resetModules();
+    const { default: generatedCatalog } = await import("@sdp/api-catalog/playground-catalog");
+    const operations = generatedCatalog.modules.issuance;
+    const original = [...operations];
+    // Catalog order is not a routing guarantee. Use the real published routes
+    // in the opposite order so this regression exercises the competing match.
+    operations.sort(
+      (left, right) => Number(right.path.includes("{")) - Number(left.path.includes("{"))
+    );
+    try {
+      const { findPublishedPlaygroundOperation: find } = await import(
+        "./api-playground-openapi-catalog"
+      );
+      expect(find("GET", "/v1/issuance/tokens/facets", "experimental")).toMatchObject({
+        pathTemplate: "/v1/issuance/tokens/facets",
+      });
+    } finally {
+      operations.splice(0, operations.length, ...original);
+      vi.resetModules();
+    }
   });
 
   // Greptile (#2433): a concrete path can fit a published template's parameter
@@ -258,10 +278,10 @@ describe("API playground allowlist", () => {
       { transfers: [], wallets: [], rampProviders: [] },
       t
     );
-    expect(paths(payments)).toContain("/v1/payments/ramps/offramp/quote");
+    expect(paths(payments)).toContain("/v1/payments/ramps/offramp/start");
     expect(
       paths(filterPlaygroundEndpointsToReleaseChannel(payments, "experimental"))
-    ).not.toContain("/v1/payments/ramps/offramp/quote");
+    ).not.toContain("/v1/payments/ramps/offramp/start");
   });
 });
 

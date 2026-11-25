@@ -1,823 +1,205 @@
 import type { EarnStrategy } from "@sdp/types/earn";
 import { DEFAULT_SDP_API_URL } from "@sdp/types/site";
 
-/**
- * The authenticated Embedded Yield loop, exactly as shipped (PRO-1722 +
- * PRO-1772): the partner's backend BUILDS an unsigned transaction for the
- * customer's own wallet, the wallet signs it, the backend SUBMITS the signed
- * bytes, and SDP verifies the signature, records the movement, then
- * broadcasts. The reads close the loop: poll the movement to a terminal
- * state, show balance and earned, list movements, and withdraw the same way
- * money came in.
- *
- * Copy-and-go by construction: the module needs one strategy id and one API
- * key. The API key comes from process.env and never reaches a browser; the
- * customer's key never leaves their wallet. The treasury route
- * (`/deposits/provider-signed` + `custodyWalletId`) must not appear here, because a
- * partner cannot name a custody wallet.
- *
- * The sections concatenate into one server module. `@solana/kit` is the only
- * Solana SDK referenced, and only by the optional sponsor signer.
- *
- * The docs guide (apps/sdp-docs/content/docs/guides/embedded-yield.mdx)
- * documents this same authenticated flow. Keep the shared contract aligned
- * in both.
- */
+/** The same server-side strategy and operation contract serves both Earn products. */
 export interface EarnIntegrationSections {
-  /** Shared client setup: base URL, auth headers, response envelope, signers. */
   client: string;
-  /** Money in: build, customer signs, submit, poll to terminal. */
   deposit: string;
-  /** Reads: balance and earned, movements, live positions. */
   portfolio: string;
-  /** Money out: preview, build the exit, customer signs, submit. */
   withdraw: string;
-  /** Asynchronous money out: request solver or operator settlement, then observe or cancel. */
   asyncWithdraw: string;
 }
 
+/** Strategy identity is the only integration-specific value embedded in the sample. */
 export type EarnIntegrationStrategy = Pick<
   EarnStrategy,
   "id" | "depositSlippage" | "withdrawalSlippage"
 >;
 
-/**
- * The catalogue's suggested tolerance is interpolated into code a partner
- * copies onto their server and runs with SDP_API_KEY in scope, so the emitted
- * text must be nothing but an integer literal. The strategies read does not
- * re-validate the row at runtime (the `number` here is a compile-time claim),
- * so this is the enforcement point: a finite integer inside the 1–1000 bps
- * range `floorForTolerance` itself accepts passes through, and any other
- * value — a string, an object, a payload smuggling statements — falls back to
- * the documented default instead of being spelled into the module.
- */
-function snippetToleranceBps(value: number | undefined): number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 && value <= 1_000
-    ? value
-    : 10;
-}
-
+/** Copyable code keeps credentials server-side and leaves signing with the owner. */
 export function buildEarnIntegrationSections(
   strategy: EarnIntegrationStrategy,
-  apiBaseUrl?: string
+  apiBaseUrl = DEFAULT_SDP_API_URL
 ): EarnIntegrationSections {
-  const requiresDepositFloor = strategy.depositSlippage?.quoteRequired === true;
-  const requiresWithdrawalFloor = strategy.withdrawalSlippage?.quoteRequired === true;
-  const depositSlippageInput = requiresDepositFloor
-    ? `  slippageBps = ${snippetToleranceBps(strategy.depositSlippage?.defaultToleranceBps)},\n`
-    : "";
-  const withdrawalSlippageInput = requiresWithdrawalFloor
-    ? `  slippageBps = ${snippetToleranceBps(strategy.withdrawalSlippage?.defaultToleranceBps)},\n`
-    : "";
-  const depositSlippageType = requiresDepositFloor
-    ? "  /** Customer-selected slippage tolerance in basis points. */\n  slippageBps?: number;\n"
-    : "";
-  const withdrawalSlippageType = requiresWithdrawalFloor
-    ? "  /** Customer-selected slippage tolerance in basis points. */\n  slippageBps?: number;\n"
-    : "";
-  const depositFloor = requiresDepositFloor
-    ? `  // This strategy requires a quote-derived floor: preview, then take the
-  // customer's tolerance off the live figure.
-  const quote = await previewEarnDeposit(amount);
-  if (quote.blockingIssues.length > 0) {
-    throw new Error(quote.blockingIssues.map((issue: { message: string }) => issue.message).join("; "));
-  }
-  const minSharesOut = floorForTolerance(quote.sharesOut, quote.shareDecimals, slippageBps);`
-    : "  // This strategy accepts no onchain deposit floor (depositSlippage is\n  // null). That can mean a live-rate deposit or a next-NAV provider order; a\n  // preview is informational and cannot bound later provider settlement.\n  const minSharesOut = undefined;";
-  const withdrawalFloor = requiresWithdrawalFloor
-    ? `  // This strategy requires a quote-derived floor: preview, then take the
-  // customer's tolerance off the live figure.
-  const quote = await previewEarnWithdrawal(positionId, shares);
-  if (quote.blockingIssues.length > 0) {
-    throw new Error(quote.blockingIssues.map((issue: { message: string }) => issue.message).join("; "));
-  }
-  const minAmountOut = floorForTolerance(quote.assetsOut, quote.assetDecimals, slippageBps);`
-    : "  // This strategy accepts no onchain withdrawal floor (withdrawalSlippage is\n  // null), so minAmountOut is not accepted. A preview may be informational;\n  // for a provider order it cannot promise the later NAV-struck payout.\n  const minAmountOut = undefined;";
-  const floorHelper =
-    requiresDepositFloor || requiresWithdrawalFloor
-      ? `
-
-/** Exact decimal floor without a JavaScript number round-trip. */
-function floorForTolerance(quote: string, decimals: number, toleranceBps: number) {
-  if (!Number.isInteger(toleranceBps) || toleranceBps < 1 || toleranceBps > 1_000) {
-    throw new Error("slippage tolerance must be 1-1000 basis points");
-  }
-  const [whole, fraction = ""] = quote.split(".");
-  // Providers do not canonicalize scale: a trailing-zero-PADDED fraction
-  // ("1.2000000" at scale 6) is not finer precision, so the padding is
-  // stripped before the scale check and the value still parses. A quote with
-  // more SIGNIFICANT fractional digits than the mint has atoms is malformed —
-  // padEnd would silently over-count its atoms ("1.234" at scale 2 reads as
-  // 1234) — so that stays a thrown error.
-  const significant = fraction.replace(/0+$/, "");
-  if (!/^\\d+$/.test(whole ?? "") || !/^\\d*$/.test(fraction) || significant.length > decimals) {
-    throw new Error("provider quote is not a valid decimal at the reported mint scale");
-  }
-  const atoms = BigInt((whole ?? "0") + significant.padEnd(decimals, "0"));
-  if (atoms === 0n) throw new Error("provider quote returned zero output");
-  const floored = (atoms * BigInt(10_000 - toleranceBps)) / 10_000n || 1n;
-  const digits = floored.toString().padStart(decimals + 1, "0");
-  if (decimals === 0) return digits;
-  const wholeResult = digits.slice(0, -decimals);
-  const fractionResult = digits.slice(-decimals).replace(/0+$/, "");
-  return fractionResult ? \`\${wholeResult}.\${fractionResult}\` : wholeResult;
-}`
-      : "";
-
-  const client = `const SDP_API_URL = ${JSON.stringify(apiBaseUrl ?? DEFAULT_SDP_API_URL)};
+  const client = `const SDP_API_URL = ${JSON.stringify(apiBaseUrl)};
 const STRATEGY_ID = ${JSON.stringify(strategy.id)};
 
-// Create an API key for this project in the dashboard with Earn Read, Execute
-// and Manage (Manage builds and submits cancellations) and keep it on your
-// server. The customer's wallet signs in your browser or mobile app; it never
-// sees this key.
-
-function sdpHeaders(extra: Record<string, string> = {}) {
+// Run this module on your server. The API key never reaches a customer browser.
+// Store each idempotency key before sending, and reuse it for uncertain retries.
+async function sdp(path: string, init: RequestInit = {}) {
   const apiKey = process.env.SDP_API_KEY;
   if (!apiKey) throw new Error("SDP_API_KEY is required");
-  return {
+  const headers: Record<string, string> = {
     Authorization: \`Bearer \${apiKey}\`,
-    "Content-Type": "application/json",
-    ...extra,
+    Accept: "application/json",
   };
+  if (init.body) headers["Content-Type"] = "application/json";
+  const response = await fetch(\`\${SDP_API_URL}\${path}\`, {
+    ...init,
+    headers: { ...headers, ...init.headers },
+  });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(body?.error?.message ?? \`SDP \${response.status}\`);
+  if (!body?.data) throw new Error("Invalid SDP response");
+  return body.data;
 }
 
-type SdpErrorBody = {
-  error?: { code?: string; message?: string; details?: unknown };
-} | null;
-
-/** An SDP error response. Branch on status, code and details, not the message. */
-export class EarnApiError extends Error {
-  readonly status: number;
-  readonly code: string | undefined;
-  readonly details: unknown;
-  /** The Retry-After header on a 429 or 503, in seconds, when SDP sent one. */
-  readonly retryAfter: string | null;
-
-  constructor(response: Response, body: SdpErrorBody) {
-    const code = body?.error?.code;
-    super(\`SDP \${response.status}\${code ? \` \${code}\` : ""}: \${body?.error?.message ?? "Request failed"}\`);
-    this.name = "EarnApiError";
-    this.status = response.status;
-    this.code = code;
-    this.details = body?.error?.details;
-    this.retryAfter = response.headers.get("Retry-After");
-  }
+function post(path: string, input: unknown, idempotencyKey: string) {
+  return sdp(path, {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(input),
+  });
 }
 
-async function sdpFetch(path: string, init?: RequestInit) {
-  const response = await fetch(\`\${SDP_API_URL}\${path}\`, init);
-  // An error body is not always JSON (a gateway 502, an empty 503), so parse
-  // defensively and keep the status in the error either way.
-  const result = await response.json().catch(() => null);
-  if (!response.ok) throw new EarnApiError(response, result);
-  return result.data;
-}
-
-/** The complete catalogue: every strategy id and its live APY. */
 export async function listEarnStrategies() {
   const strategies = [];
-  const seenStrategyIds = new Set();
-  const pageSize = 100;
-  const maximumPages = 100;
-  for (let page = 1; page <= maximumPages; page += 1) {
-    const data = await sdpFetch(
-      \`/v1/earn/strategies?\${new URLSearchParams({ page: String(page), pageSize: String(pageSize) })}\`,
-      { headers: sdpHeaders() }
-    );
-    let added = 0;
+  const seen = new Set<string>();
+  for (let page = 1; page <= 100; page += 1) {
+    const data = await sdp(\`/v1/earn/discovery?page=\${page}&pageSize=100\`);
     for (const strategy of data.strategies) {
-      if (seenStrategyIds.has(strategy.id)) continue;
-      seenStrategyIds.add(strategy.id);
-      strategies.push(strategy);
-      added += 1;
+      if (!seen.has(strategy.id)) { seen.add(strategy.id); strategies.push(strategy); }
     }
     if (strategies.length >= data.total) return strategies;
-    if (added === 0) {
-      throw new Error("SDP strategy pagination made no progress before the reported total");
-    }
+    if (data.strategies.length < 100) throw new Error("Incomplete strategy catalogue");
   }
-  throw new Error(
-    "SDP strategy pagination exceeded " +
-      maximumPages +
-      " pages before the reported total"
-  );
-}
-
-/** What a deposit would mint right now. Read-only; nothing is built. */
-export async function previewEarnDeposit(amount: string) {
-  // { sharesOut, shareDecimals, blockingIssues }
-  return sdpFetch("/v1/earn/deposits/preview", {
-    method: "POST",
-    headers: sdpHeaders(),
-    body: JSON.stringify({ strategyId: STRATEGY_ID, amount }),
-  });
-}
-
-/** What redeeming these shares would pay right now. Read-only; nothing is built. */
-export async function previewEarnWithdrawal(positionId: string, shares: string) {
-  // { assetsOut, assetDecimals, blockingIssues }
-  return sdpFetch("/v1/earn/withdrawals/caller-signed/preview", {
-    method: "POST",
-    headers: sdpHeaders(),
-    body: JSON.stringify({ positionId, shares }),
-  });
-}${floorHelper}
-
-export type EarnTransactionSigner = (transactionBase64: string) => Promise<string>;
-
-function transactionMessageBytes(transactionBase64: string): Uint8Array {
-  let bytes: Uint8Array;
-  try {
-    bytes = Uint8Array.from(atob(transactionBase64), (character) => character.charCodeAt(0));
-  } catch {
-    throw new Error("Signer returned invalid base64 transaction bytes");
-  }
-  // A Solana wire transaction begins with a compact-u16 signature count,
-  // followed by 64 bytes per signature. Everything after that is the message.
-  let signatureCount = 0;
-  let shift = 0;
-  let cursor = 0;
-  while (true) {
-    const byte = bytes[cursor];
-    if (byte === undefined || cursor >= 3) throw new Error("Signer returned invalid transaction bytes");
-    signatureCount |= (byte & 0x7f) << shift;
-    cursor += 1;
-    if ((byte & 0x80) === 0) break;
-    shift += 7;
-  }
-  const messageOffset = cursor + signatureCount * 64;
-  if (messageOffset >= bytes.length) throw new Error("Signer returned invalid transaction bytes");
-  return bytes.subarray(messageOffset);
-}
-
-function assertSameTransactionMessage(expectedBase64: string, candidateBase64: string) {
-  const expected = transactionMessageBytes(expectedBase64);
-  const candidate = transactionMessageBytes(candidateBase64);
-  if (
-    expected.length !== candidate.length ||
-    expected.some((byte, index) => byte !== candidate[index])
-  ) {
-    throw new Error("Signer changed the transaction message; refusing to sponsor it");
-  }
-}
-
-/** Collect every signature the built transaction requires. */
-export async function signEarnTransaction(
-  built: { transaction: string; feePayer?: string },
-  customerSigner: EarnTransactionSigner,
-  sponsorSigner?: EarnTransactionSigner
-) {
-  const customerSigned = await customerSigner(built.transaction);
-  assertSameTransactionMessage(built.transaction, customerSigned);
-  if (!built.feePayer) return customerSigned;
-  if (!sponsorSigner) throw new Error("Sponsor signature is required for this transaction");
-  const sponsorSigned = await sponsorSigner(customerSigned);
-  assertSameTransactionMessage(built.transaction, sponsorSigned);
-  return sponsorSigned;
-}
-
-/**
- * A server-side signer for a wallet you control, such as your fee sponsor.
- * Base64 in, base64 out, the same shape your customer wallet integration
- * returns. Requires @solana/kit. Never use it for a customer's key.
- */
-export async function createSponsorSigner(
-  secretKey: Uint8Array,
-  expectedFeePayer: string
-): Promise<EarnTransactionSigner> {
-  const kit = await import("@solana/kit");
-  const keyPair = await kit.createKeyPairFromBytes(secretKey);
-  const signerAddress = await kit.getAddressFromPublicKey(keyPair.publicKey);
-  if (signerAddress !== expectedFeePayer) {
-    throw new Error("Sponsor key does not match the configured fee payer");
-  }
-  return async (transactionBase64) => {
-    const transaction = kit
-      .getTransactionDecoder()
-      .decode(kit.getBase64Encoder().encode(transactionBase64));
-    const message = kit.getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
-    if (message.staticAccounts[0] !== expectedFeePayer) {
-      throw new Error("Transaction fee payer does not match the configured sponsor");
-    }
-    const signed = await kit.partiallySignTransaction([keyPair], transaction);
-    return kit.getBase64EncodedWireTransaction(signed);
-  };
+  throw new Error("Strategy pagination exceeded its safety limit");
 }`;
 
-  const deposit = `/**
- * Build an unsigned deposit for the customer's wallet. Omit feePayer and the
- * customer pays the network fee and any first-deposit account rent; pass your
- * sponsor address to pay both, then co-sign with createSponsorSigner.
- */
-export async function buildEarnDepositTransaction({
-  ownerAddress,
-  amount,
-  feePayer,
-${depositSlippageInput}}: {
+  const deposit = `/** Prepare only. Show returned terms before asking the customer to sign. */
+export async function prepareEarnDeposit(input: {
   ownerAddress: string;
-  /** Decimal string in the strategy's deposit token. */
-  amount: string;
-  feePayer?: string;
-${depositSlippageType}}) {
-${depositFloor}
-  const data = await sdpFetch("/v1/earn/deposits/build-unsigned-transaction", {
-    method: "POST",
-    headers: sdpHeaders(),
-    body: JSON.stringify({
-      strategyId: STRATEGY_ID,
-      ownerAddress,
-      amount,
-      ...(feePayer ? { feePayer } : {}),
-      ...(minSharesOut ? { minSharesOut } : {}),
-    }),
-  });
-  // { transactionId, transaction, lastValidBlockHeight, feePayer?, ... }
-  return data.transaction;
-}
-
-/**
- * Submit promptly once every required wallet has signed. SDP records the
- * authenticated signed intent before broadcast. An expired blockhash does
- * not prove failure: resolve the original attempt before replacing it, and
- * reuse the same idempotency key and signed body on an uncertain retry.
- */
-export async function submitEarnDeposit({
-  transactionId,
-  signedTransaction,
-  idempotencyKey,
-}: {
-  transactionId: string;
-  signedTransaction: string;
+  amount: { mint: string; value: string };
   idempotencyKey: string;
+  slippageBps?: number;
+  feePayer?: string;
 }) {
-  const data = await sdpFetch("/v1/earn/deposits/submit-signed-transaction", {
-    method: "POST",
-    headers: sdpHeaders({ "Idempotency-Key": idempotencyKey }),
-    body: JSON.stringify({ transactionId, signedTransaction }),
-  });
-  // { movementId, positionId, status, signature, replayed, ... }
-  return data.deposit;
+  const { ownerAddress, amount, idempotencyKey, slippageBps, feePayer } = input;
+  const body: {
+    strategyId: string;
+    source: { ownerAddress: string };
+    amount: { mint: string; value: string };
+    slippageBps?: number;
+    feePayer?: string;
+  } = { strategyId: STRATEGY_ID, source: { ownerAddress }, amount };
+  if (slippageBps !== undefined) body.slippageBps = slippageBps;
+  if (feePayer) body.feePayer = feePayer;
+  const { operation } = await post("/v1/earn/deposit", body, idempotencyKey);
+  return operation;
 }
 
-/**
- * One movement. Statuses: requested (recorded, not yet seen on the network),
- * submitted, confirmed, finalized, failed. Confirmed proves only a Solana
- * observation, not economic settlement. Wait for finalized or failed; a
- * provider order remains confirmed until authenticated provider completion is
- * correlated to the movement.
- */
-export async function getEarnMovement(movementId: string) {
-  const data = await sdpFetch(
-    \`/v1/earn/movements/caller-signed/\${encodeURIComponent(movementId)}\`,
-    { headers: sdpHeaders() }
-  );
-  // { movementId, direction, status, tokenAmount, tokenMint, signature, failureReason, ... }
-  return data.movement;
+/** Submit only the reviewed action/version, using the exact returned message. */
+export async function submitEarnOperation(input: {
+  operationId: string;
+  actionId: string;
+  version: number;
+  idempotencyKey: string;
+  signedTransaction?: string;
+}) {
+  const { operationId, idempotencyKey, ...action } = input;
+  return (await post(\`/v1/operations/\${encodeURIComponent(operationId)}/submit\`, action, idempotencyKey)).operation;
 }
 
-/**
- * Polls a movement to finalized or failed: every second for the first minute,
- * then every five seconds, so tracking stays well inside the rate limit.
- */
-export async function waitForEarnMovement(
-  movementId: string,
-  { signal, intervalMs = 1_000 }: { signal?: AbortSignal; intervalMs?: number } = {}
+// Customer flow: prepare -> review operation.terms -> sign nextAction.transaction
+// in the customer's wallet -> submitEarnOperation with that signed transaction.
+// Any compatible Solana wallet can sign; no SDP wallet registration is needed.
+// Send its base64-encoded signed transaction as signedTransaction.
+// A separate fee payer must co-sign. Never alter the message before submitting.
+// Optional: an existing connected wallet uses source: { walletId } instead.
+// Submit without signedTransaction; SDP requests signing from its provider.
+// Submission returns 202 once durable work is accepted; signing and broadcast run asynchronously.
+// A funding swap and deposit share one atomic transaction, or preparation refuses the route.
+// If nextAction.type is sign_in_provider, show its instructions and keep polling.`;
+
+  const portfolio = `export async function getEarnOperation(operationId: string) {
+  return (await sdp(\`/v1/operations/\${encodeURIComponent(operationId)}\`)).operation;
+}
+
+async function collectEarnPages(path: string, collection: "positions" | "operations") {
+  const rows = [];
+  const seen = new Set<string>();
+  let before: string | undefined;
+  for (let page = 0; page < 100; page += 1) {
+    const query = new URLSearchParams({ limit: "100" });
+    if (before) query.set(collection === "operations" ? "cursor" : "before", before);
+    const data = await sdp(\`\${path}\${path.includes("?") ? "&" : "?"}\${query}\`);
+    rows.push(...data[collection]);
+    if (!data.nextCursor) return rows;
+    if (seen.has(data.nextCursor)) throw new Error("Pagination did not advance");
+    seen.add(data.nextCursor);
+    before = data.nextCursor;
+  }
+  throw new Error("Pagination exceeded its safety limit");
+}
+
+export function listEarnPositions(ownerAddress: string) {
+  return collectEarnPages(\`/v1/earn/positions?sourceType=address&ownerAddress=\${encodeURIComponent(ownerAddress)}&discover=true\`, "positions");
+}
+
+export function listEarnActivity(ownerAddress: string) {
+  return collectEarnPages(\`/v1/operations?ownerAddress=\${encodeURIComponent(ownerAddress)}\`, "operations");
+}
+
+// discover=true includes verified holdings in integrated strategies for this explicit owner.
+// Check coverage and discovery.unavailableStrategyCount; this is not every protocol on Solana.
+// Discovered acquisition dates and unknown cost basis are never inferred.
+// Absent shares/value mean unavailable, never zero. Values retain token units.
+// Poll active operations through signing, chain confirmation and provider settlement.
+// Only completed means the expected shares or payout were actually delivered.`;
+
+  const withdraw = `/** The position binds its owner, strategy and underlying provider vault. */
+export async function prepareEarnWithdrawal(input: {
+  positionId: string;
+  amount: { kind: "all" } | { kind: "shares"; value: string }
+    | { kind: "token" | "intermediate"; mint: string; value: string };
+  idempotencyKey: string;
+  slippageBps?: number;
+  feePayer?: string;
+}) {
+  const { idempotencyKey, ...intent } = input;
+  return (await post("/v1/earn/withdraw", intent, idempotencyKey)).operation;
+}
+
+// The same endpoint prepares direct, queued and provider-operated withdrawals.
+// If nextAction.type is select_option, show terms.options and call
+// refreshEarnOperation with the selected optionId to prepare its transaction.
+// Review the returned terms, then sign/submit the current action as in the deposit flow.
+// A submitted queue request escrows shares; it is not a completed payout.`;
+
+  const asyncWithdraw = `/** Discard an unsubmitted preparation only when SDP advertises canCancel. */
+export async function cancelEarnOperation(
+  operation: { id: string; canCancel: boolean },
+  idempotencyKey: string
 ) {
-  const startedAt = Date.now();
-  while (true) {
-    signal?.throwIfAborted();
-    const movement = await getEarnMovement(movementId);
-    if (movement.status === "finalized" || movement.status === "failed") return movement;
-    const delayMs = Date.now() - startedAt < 60_000 ? intervalMs : Math.max(intervalMs, 5_000);
-    await new Promise<void>((resolve, reject) => {
-      const onAbort = () => {
-        clearTimeout(timer);
-        reject(signal?.reason ?? new Error("Polling aborted"));
-      };
-      const timer = setTimeout(() => {
-        signal?.removeEventListener("abort", onAbort);
-        resolve();
-      }, delayMs);
-      signal?.addEventListener("abort", onAbort, { once: true });
-      if (signal?.aborted) onAbort();
-    });
-  }
-}`;
-
-  const portfolio = `/**
- * Balance and earned per deposit token. A customer with no history answers
- * empty totals, not an error. \`earned\` is current value plus withdrawn minus
- * deposited, and is ABSENT with \`earnedUnavailableReason\` while a movement
- * or queued withdrawal is pending, or a payout could not be valued: render a
- * dash, never $0.
- */
-export async function getEarnEarnings(ownerAddress: string) {
-  const data = await sdpFetch(
-    \`/v1/earn/earnings/caller-signed?\${new URLSearchParams({ ownerAddress })}\`,
-    { headers: sdpHeaders() }
-  );
-  // { ownerAddress, totalsByToken: [{ tokenMint, currentValue?, totalDeposited, totalWithdrawn, earned?, ... }] }
-  return data.earnings;
+  if (!operation.canCancel) throw new Error("This operation cannot be cancelled");
+  return (await post(\`/v1/operations/\${encodeURIComponent(operation.id)}/cancel\`, {}, idempotencyKey)).operation;
 }
 
-/**
- * One page of the wallet's movements, newest first. Pass nextCursor back as
- * cursor while hasMore is true. Render \`tokenAmount\` in \`tokenMint\` units for
- * both directions; \`amount\`/\`denomination\` is the onchain quantity, which is
- * shares on a withdrawal. A withdrawal's tokenAmount is null until it finalizes.
- */
-export async function listEarnMovements(ownerAddress: string, cursor?: string) {
-  const query = new URLSearchParams({ ownerAddress });
-  if (cursor) query.set("before", cursor);
-  // { movements, hasMore, nextCursor }
-  return sdpFetch(\`/v1/earn/movements/caller-signed?\${query}\`, { headers: sdpHeaders() });
-}
-
-/**
- * Live positions, paged to completion: a silently short list hides
- * withdrawable money. A withdrawal names a POSITION and a share amount, so
- * read \`id\` and \`withdrawableShares\` here. A fully exited position closes and
- * drops out of this list. If the live read fails, \`shares\`,
- * \`withdrawableShares\` and \`tokenValue\` are absent, never zero: show an
- * unavailable state and disable withdrawal until a fresh read succeeds.
- */
-export async function listEarnPositions(ownerAddress: string) {
-  const positions = [];
-  let cursor;
-  do {
-    const query = new URLSearchParams({ ownerAddress });
-    if (cursor) query.set("before", cursor);
-    const data = await sdpFetch(
-      \`/v1/earn/positions/caller-signed?\${query}\`,
-      { headers: sdpHeaders() }
-    );
-    // { positions: [{ id, shares?, withdrawableShares?, tokenValue?, ... }], hasMore, nextCursor }
-    positions.push(...data.positions);
-    if (!data.hasMore) return positions;
-    if (!data.nextCursor || data.nextCursor === cursor) {
-      throw new Error("SDP positions cursor did not advance");
-    }
-    cursor = data.nextCursor;
-  } while (true);
-}`;
-
-  const withdraw = `/**
- * Build an unsigned exit. Same fee rules as the deposit: omit feePayer and the
- * customer pays, or pass your sponsor address and co-sign. Exits keep working
- * when deposits are paused.
- */
-export async function buildEarnWithdrawalTransaction({
-  positionId,
-  shares,
-  feePayer,
-${withdrawalSlippageInput}}: {
-  positionId: string;
-  shares: string;
-  feePayer?: string;
-${withdrawalSlippageType}}) {
-${withdrawalFloor}
-  const data = await sdpFetch("/v1/earn/withdrawals/build-unsigned-transaction", {
-    method: "POST",
-    headers: sdpHeaders(),
-    body: JSON.stringify({
-      positionId,
-      shares,
-      ...(feePayer ? { feePayer } : {}),
-      ...(minAmountOut ? { minAmountOut } : {}),
-    }),
-  });
-  return data.transaction;
-}
-
-/** Submit the signed exit; same idempotency and expiry contract as the deposit. */
-export async function submitEarnWithdrawal({
-  transactionId,
-  signedTransaction,
-  idempotencyKey,
-}: {
-  transactionId: string;
-  signedTransaction: string;
+/** Prepare a selected route or refreshed terms before any accepted submission. */
+export async function refreshEarnOperation(input: {
+  operationId: string;
+  actionId: string;
+  version: number;
+  optionId?: string;
   idempotencyKey: string;
 }) {
-  const data = await sdpFetch("/v1/earn/withdrawals/submit-signed-transaction", {
-    method: "POST",
-    headers: sdpHeaders({ "Idempotency-Key": idempotencyKey }),
-    body: JSON.stringify({ transactionId, signedTransaction }),
-  });
-  return data.withdrawal;
-}`;
-
-  const asyncWithdraw = `/**
- * Read atomic, provider-order, solver-queue, and operator-redemption routes
- * independently. Atomic exits pay in one transaction; the other routes settle
- * later. Check parRedemption separately from queued: a provider may expose one,
- * both, or neither.
- */
-export async function getEarnWithdrawalOptions(positionId: string) {
-  return sdpFetch("/v1/earn/withdrawals/caller-signed/options", {
-    method: "POST",
-    headers: sdpHeaders(),
-    body: JSON.stringify({ positionId }),
-  });
+  const { operationId, idempotencyKey, ...action } = input;
+  return (await post(\`/v1/operations/\${encodeURIComponent(operationId)}/refresh\`, action, idempotencyKey)).operation;
 }
 
-function compareDecimalStrings(left: string, right: string): number {
-  const parse = (value: string) => {
-    if (!/^\\d+(\\.\\d+)?$/.test(value)) throw new Error("Invalid decimal amount");
-    const [whole = "", fraction = ""] = value.split(".");
-    return { whole: whole.replace(/^0+(?=\\d)/, ""), fraction: fraction.replace(/0+$/, "") };
-  };
-  const a = parse(left);
-  const b = parse(right);
-  const scale = Math.max(a.fraction.length, b.fraction.length);
-  const aAtoms = BigInt(a.whole + a.fraction.padEnd(scale, "0"));
-  const bAtoms = BigInt(b.whole + b.fraction.padEnd(scale, "0"));
-  return aAtoms === bAtoms ? 0 : aAtoms < bAtoms ? -1 : 1;
-}
-
-function assertQueuedWithdrawalTerms(
-  options: any,
-  shares: string,
-  discountBps: number,
-  deadlineSeconds: number
-) {
-  const terms = options.queueAsset;
-  if (!options.queued || !terms?.allowWithdrawals) {
-    throw new Error("Queued withdrawals are not currently available for this position");
-  }
-  if (compareDecimalStrings(shares, terms.minimumShares) < 0) {
-    throw new Error(\`Queued withdrawals require at least \${terms.minimumShares} shares\`);
-  }
-  if (
-    !Number.isInteger(discountBps) ||
-    discountBps < terms.minimumDiscountBps ||
-    discountBps > terms.maximumDiscountBps
-  ) {
-    throw new Error(
-      \`discountBps must be between \${terms.minimumDiscountBps} and \${terms.maximumDiscountBps}\`
-    );
-  }
-  if (
-    !Number.isInteger(deadlineSeconds) ||
-    deadlineSeconds < terms.minimumSecondsToDeadline ||
-    deadlineSeconds > terms.maximumSecondsToDeadline
-  ) {
-    throw new Error(
-      \`deadlineSeconds must be between \${terms.minimumSecondsToDeadline} and \${terms.maximumSecondsToDeadline}\`
-    );
-  }
-}
-
-/** Preview exact queue terms from live chain state before building. */
-export async function previewEarnQueuedWithdrawal({
-  positionId,
-  shares,
-  discountBps,
-  deadlineSeconds,
-}: {
-  positionId: string;
-  shares: string;
-  discountBps: number;
-  deadlineSeconds: number;
-}) {
-  const options = await getEarnWithdrawalOptions(positionId);
-  assertQueuedWithdrawalTerms(options, shares, discountBps, deadlineSeconds);
-  return sdpFetch("/v1/earn/withdrawal-requests/caller-signed/preview", {
-    method: "POST",
-    headers: sdpHeaders(),
-    body: JSON.stringify({ positionId, shares, discountBps, deadlineSeconds }),
-  });
-}
-
-/** Preview the operator-completed redemption at par before building. */
-export async function previewEarnParRedemption({
-  positionId,
-  shares,
-}: {
-  positionId: string;
-  shares: string;
-}) {
-  return sdpFetch("/v1/earn/withdrawal-requests/caller-signed/preview", {
-    method: "POST",
-    headers: sdpHeaders(),
-    body: JSON.stringify({ positionId, shares, mechanism: "operatorRedemption" }),
-  });
-}
-
-/**
- * Build an unsigned queue request. Landing this transaction escrows shares; it
- * does NOT pay assets. The provider's solve authority may fulfill after maturity.
- */
-export async function buildEarnQueuedWithdrawalRequest({
-  positionId,
-  shares,
-  discountBps,
-  deadlineSeconds,
-  feePayer,
-}: {
-  positionId: string;
-  shares: string;
-  discountBps: number;
-  deadlineSeconds: number;
-  feePayer?: string;
-}) {
-  const preview = await previewEarnQueuedWithdrawal({
-    positionId,
-    shares,
-    discountBps,
-    deadlineSeconds,
-  });
-  if (preview.blockingIssues.length > 0) {
-    throw new Error(
-      preview.blockingIssues.map((issue: { message: string }) => issue.message).join("; ")
-    );
-  }
-  const data = await sdpFetch("/v1/earn/withdrawal-requests/build-unsigned-transaction", {
-    method: "POST",
-    headers: sdpHeaders(),
-    body: JSON.stringify({
-      positionId,
-      shares,
-      discountBps,
-      deadlineSeconds,
-      ...(feePayer ? { feePayer } : {}),
-    }),
-  });
-  // Includes requestAddress and the expected quote/timestamps.
-  return data.transaction;
-}
-
-/**
- * Build an unsigned par-redemption request. Landing it converts the position's
- * shares into the provider's intermediate asset and delegates later settlement
- * at par to the operator; it does NOT pay the deposit asset immediately.
- */
-export async function buildEarnParRedemptionRequest({
-  positionId,
-  shares,
-  feePayer,
-}: {
-  positionId: string;
-  shares: string;
-  feePayer?: string;
-}) {
-  const data = await sdpFetch("/v1/earn/withdrawal-requests/build-unsigned-transaction", {
-    method: "POST",
-    headers: sdpHeaders(),
-    body: JSON.stringify({
-      positionId,
-      shares,
-      mechanism: "operatorRedemption",
-      ...(feePayer ? { feePayer } : {}),
-    }),
-  });
-  // Includes requestAddress, intermediateMint, intermediateAmount, and expected assets.
-  return data.transaction;
-}
-
-/** Submit either signed solver-queue or operator-redemption request build. */
-export async function submitEarnWithdrawalRequest(input: {
-  transactionId: string;
-  signedTransaction: string;
-  idempotencyKey: string;
-}) {
-  const data = await sdpFetch("/v1/earn/withdrawal-requests/submit-signed-transaction", {
-    method: "POST",
-    headers: sdpHeaders({ "Idempotency-Key": input.idempotencyKey }),
-    body: JSON.stringify({
-      transactionId: input.transactionId,
-      signedTransaction: input.signedTransaction,
-    }),
-  });
-  return data.withdrawalRequest;
-}
-
-/**
- * Poll this durable object, not the request-creation transaction. Terminal
- * states are fulfilled, cancelled, and failed. closedOrUnknown is retryable:
- * SDP is still indexing the close event to distinguish payout from recovery.
- */
-export async function getEarnWithdrawalRequest(withdrawalRequestId: string) {
-  const data = await sdpFetch(
-    \`/v1/earn/withdrawal-requests/caller-signed/\${encodeURIComponent(withdrawalRequestId)}\`,
-    { headers: sdpHeaders() }
-  );
-  return data.withdrawalRequest;
-}
-
-/** Restore every non-terminal request after startup, reconnect, or browser refresh. */
-export async function listPendingEarnQueuedWithdrawals(ownerAddress: string) {
-  const withdrawalRequests = [];
-  const seenCursors = new Set();
-  let cursor;
-  do {
-    const query = new URLSearchParams({ ownerAddress, settled: "false" });
-    if (cursor) query.set("before", cursor);
-    const data = await sdpFetch(
-      \`/v1/earn/withdrawal-requests/caller-signed?\${query}\`,
-      { headers: sdpHeaders() }
-    );
-    withdrawalRequests.push(...data.withdrawalRequests);
-    if (!data.hasMore) return withdrawalRequests;
-    if (!data.nextCursor || seenCursors.has(data.nextCursor)) {
-      throw new Error("SDP queued-withdrawal cursor did not advance");
-    }
-    seenCursors.add(data.nextCursor);
-    cursor = data.nextCursor;
-  } while (true);
-}
-
-/**
- * Polls a withdrawal request to fulfilled, cancelled or failed, once a minute.
- * A request can take hours or days, so after a restart, restore open requests
- * with listPendingEarnQueuedWithdrawals instead of keeping this loop alive.
- */
-export async function waitForEarnQueuedWithdrawal(
-  withdrawalRequestId: string,
-  { signal, intervalMs = 60_000 }: { signal?: AbortSignal; intervalMs?: number } = {}
-) {
-  const terminal = new Set(["fulfilled", "cancelled", "failed"]);
-  while (true) {
-    signal?.throwIfAborted();
-    const request = await getEarnWithdrawalRequest(withdrawalRequestId);
-    if (terminal.has(request.status)) return request;
-    await new Promise<void>((resolve, reject) => {
-      const onAbort = () => {
-        clearTimeout(timer);
-        reject(signal?.reason ?? new Error("Polling aborted"));
-      };
-      const timer = setTimeout(() => {
-        signal?.removeEventListener("abort", onAbort);
-        resolve();
-      }, intervalMs);
-      signal?.addEventListener("abort", onAbort, { once: true });
-      if (signal?.aborted) onAbort();
-    });
-  }
-}
-
-/**
- * Build the holder's cancellation transaction. A solverQueue request must first
- * reach expiredCancelable; cancelling it before its deadline is rejected. An
- * operatorRedemption request is cancellable while pending, until the operator
- * completes and closes it. Refresh the request immediately before building.
- */
-export async function buildEarnWithdrawalRequestCancellation({
-  withdrawalRequestId,
-  feePayer,
-}: {
-  withdrawalRequestId: string;
-  feePayer?: string;
-}) {
-  const data = await sdpFetch(
-    "/v1/earn/withdrawal-requests/cancel/build-unsigned-transaction",
-    {
-      method: "POST",
-      headers: sdpHeaders(),
-      body: JSON.stringify({
-        withdrawalRequestId,
-        ...(feePayer ? { feePayer } : {}),
-      }),
-    }
-  );
-  return data.transaction;
-}
-
-/** Submit a signed cancellation build for either asynchronous mechanism. */
-export async function submitEarnWithdrawalRequestCancellation(input: {
-  transactionId: string;
-  signedTransaction: string;
-  idempotencyKey: string;
-}) {
-  const data = await sdpFetch(
-    "/v1/earn/withdrawal-requests/cancel/submit-signed-transaction",
-    {
-      method: "POST",
-      headers: sdpHeaders({ "Idempotency-Key": input.idempotencyKey }),
-      body: JSON.stringify({
-        transactionId: input.transactionId,
-        signedTransaction: input.signedTransaction,
-      }),
-    }
-  );
-  return data.withdrawalRequest;
-}`;
-
+// Resume the same operation after reload. Do not create a replacement because
+// signing timed out or RPC history is missing. Once /submit is accepted,
+// cancellation and refresh are unavailable; track the same operation.
+// Only a prepared nextAction.type === "refresh" offers replacement terms.
+// A previously exposed wallet message needs authoritative reconciliation; expiry alone is not proof.
+// Refresh changes the message: review new terms and obtain a new signature.`;
   return { client, deposit, portfolio, withdraw, asyncWithdraw };
 }
 
-/** The sections joined into the one server module they document. */
+/** One complete module, using the same source as each integration-guide section. */
 export function buildEarnServerIntegration(
   strategy: EarnIntegrationStrategy,
   apiBaseUrl?: string
 ): string {
-  const sections = buildEarnIntegrationSections(strategy, apiBaseUrl);
-  return [
-    sections.client,
-    sections.deposit,
-    sections.portfolio,
-    sections.withdraw,
-    sections.asyncWithdraw,
-  ].join("\n\n");
+  return Object.values(buildEarnIntegrationSections(strategy, apiBaseUrl)).join("\n\n");
 }

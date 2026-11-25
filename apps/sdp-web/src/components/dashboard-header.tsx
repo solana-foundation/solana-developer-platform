@@ -808,26 +808,26 @@ function getMarketsRoutePageConfig(
       contentWidthClass: PAGE_WIDTH,
     };
   }
-  if (pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram) {
+  if (pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.embeddedYield) {
     return {
-      title: t("Shared.dashboardShell.earnProgram"),
+      title: t("Shared.dashboardShell.embeddedYield"),
       titlePosition: "left",
       contentWidthClass: PAGE_WIDTH,
       headerAction: {
-        label: t("DashboardMarkets.earnProgram.configureShort"),
-        href: `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/configure`,
+        label: t("DashboardMarkets.embeddedYield.configureShort"),
+        href: `${DASHBOARD_MARKETS_SUBNAV_HREFS.embeddedYield}/configure`,
         variant: "primary",
       },
     };
   }
   // The integration guide: the way back to the portfolio over a left title.
-  if (pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/configure`) {
+  if (pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.embeddedYield}/configure`) {
     return {
-      title: t("DashboardMarkets.earnProgram.configureShort"),
+      title: t("DashboardMarkets.embeddedYield.configureShort"),
       contentWidthClass: PAGE_WIDTH,
       backAction: {
-        href: DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram,
-        label: t("Shared.dashboardShell.earnProgram"),
+        href: DASHBOARD_MARKETS_SUBNAV_HREFS.embeddedYield,
+        label: t("Shared.dashboardShell.embeddedYield"),
       },
     };
   }

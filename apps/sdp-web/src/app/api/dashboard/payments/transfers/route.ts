@@ -64,9 +64,7 @@ export async function GET(request: Request) {
     return nextResponse;
   } catch (error) {
     const response = dashboardJson(
-      {
-        error: error instanceof Error ? error.message : "Transfer list request failed",
-      },
+      { error: { message: "Transfer list request failed" } },
       {
         status: 500,
         trace,
@@ -83,6 +81,6 @@ export async function POST(request: Request) {
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.payments.transfers.post",
-    path: "/v1/payments/transfers",
+    path: "/v1/payments/transfers/execute",
   });
 }

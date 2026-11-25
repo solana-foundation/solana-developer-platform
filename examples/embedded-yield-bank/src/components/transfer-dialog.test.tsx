@@ -9,7 +9,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { YieldStrategy, YieldWithdrawalOptions } from "@/types";
+import type { YieldStrategy } from "@/types";
 import { TransferDialog } from "./transfer-dialog";
 
 const strategy: YieldStrategy = {
@@ -29,26 +29,6 @@ const strategy: YieldStrategy = {
   withdrawalSlippage: null,
 };
 
-const queuedWithdrawalOptions: YieldWithdrawalOptions = {
-  positionId: "position_1",
-  instant: false,
-  providerOrder: false,
-  queued: true,
-  withdrawAuthority: "withdraw_authority",
-  queueState: "queue_state",
-  queueAsset: {
-    assetMint: "usdc_mint",
-    allowWithdrawals: true,
-    secondsToMaturity: 60,
-    minimumSecondsToDeadline: 360,
-    maximumSecondsToDeadline: 7_776_000,
-    minimumDiscountBps: 25,
-    maximumDiscountBps: 75,
-    minimumShares: "1",
-    shareDecimals: 6,
-  },
-};
-
 afterEach(cleanup);
 
 describe("TransferDialog", () => {
@@ -60,7 +40,6 @@ describe("TransferDialog", () => {
         symbol="USDC"
         available="18.31"
         strategy={strategy}
-        feesPaidBy="northstar"
         busy={false}
         onSubmit={onSubmit}
       />
@@ -72,45 +51,32 @@ describe("TransferDialog", () => {
       target: { value: "1" },
     });
 
-    const submit = dialog.getByRole("button", { name: "Move to savings" });
+    const submit = dialog.getByRole("button", { name: "Review terms" });
     expect((submit as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(submit);
 
-    await waitFor(() =>
-      expect(onSubmit).toHaveBeenCalledWith({ amount: "1", route: "deposit" })
-    );
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ amount: "1" }));
   });
 
-  it("keeps invalid queued withdrawal terms blocked", () => {
+  it("requests current withdrawal terms before offering execution or route selection", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(
       <TransferDialog
         direction="to-checking"
         symbol="USDC"
         available="10"
         strategy={strategy}
-        withdrawalOptions={queuedWithdrawalOptions}
-        feesPaidBy="northstar"
         busy={false}
-        onSubmit={vi.fn()}
+        onSubmit={onSubmit}
       />
     );
-
     fireEvent.click(screen.getByRole("button", { name: "Move to checking" }));
     const dialog = within(screen.getByRole("dialog"));
+    expect(dialog.queryByRole("radio")).toBeNull();
     fireEvent.change(dialog.getByLabelText("Amount"), {
       target: { value: "1" },
     });
-    fireEvent.click(dialog.getByRole("button", { name: "Adjust terms" }));
-    fireEvent.change(dialog.getByLabelText("Max discount (%)"), {
-      target: { value: "0" },
-    });
-
-    expect(
-      (
-        dialog.getByRole("button", {
-          name: "Request withdrawal",
-        }) as HTMLButtonElement
-      ).disabled
-    ).toBe(true);
+    fireEvent.click(dialog.getByRole("button", { name: "Review terms" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ amount: "1" }));
   });
 });

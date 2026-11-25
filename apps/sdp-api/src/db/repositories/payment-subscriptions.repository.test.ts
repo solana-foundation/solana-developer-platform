@@ -3,9 +3,11 @@ import type {
   PaymentSubscriptionCollectionAttemptStatus,
   PaymentSubscriptionStatus,
 } from "@sdp/types/payments";
+import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { TEST_ORG } from "@/test/fixtures/organizations";
+import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import { required } from "@/test/helpers/required";
 import {
@@ -23,7 +25,6 @@ import type {
 import { createPostgresPaymentSubscriptionsRepository } from "./payment-subscriptions.repository.postgres";
 
 const PROJECT_ID = "prj_collection_history_test";
-const MINT = "Mint111111111111111111111111111111111111";
 const ALL_ATTEMPTS = ["psca_history_3", "psca_history_2", "psca_history_1"];
 
 describe("PaymentSubscriptionsRepository.listRecurringPaymentCollectionAttempts (postgres)", () => {
@@ -46,8 +47,8 @@ describe("PaymentSubscriptionsRepository.listRecurringPaymentCollectionAttempts 
     recurring: { status: PaymentRecurringPaymentStatus } | null
   ) {
     return seedAuthoritySubscription(tenant, {
-      authority: "Authority1111111111111111111111111111111",
-      tokenMint: MINT,
+      authority: TEST_SOLANA_ADDRESSES.wallet2,
+      tokenMint: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
       status,
       changedAt: "2026-01-01T00:00:00.000Z",
       recurring,
@@ -66,7 +67,7 @@ describe("PaymentSubscriptionsRepository.listRecurringPaymentCollectionAttempts 
         ...input,
         organizationId: TEST_ORG.id,
         transferId: null,
-        token: MINT,
+        token: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
         amount: "1",
         dueAt: input.createdAt,
         attemptedAt: input.createdAt,
@@ -101,7 +102,7 @@ describe("PaymentSubscriptionsRepository.listRecurringPaymentCollectionAttempts 
       projectId: PROJECT_ID,
       custodyWalletId: "cwlt_collection_history_test",
       providerWalletId: "wallet_collection_history_test",
-      walletAddress: "Sender111111111111111111111111111111111",
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet1,
     });
     repo = createPostgresPaymentSubscriptionsRepository(getDb(env));
     const replaced = await seedSchedule("canceled", { status: "paused" });

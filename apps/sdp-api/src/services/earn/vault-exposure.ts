@@ -459,10 +459,10 @@ export async function assertVaultExposureWithinCap(
 /**
  * The LATE half: the `admit` hook the ledger runs inside the transaction that
  * records a deposit's `requested` row (`LedgerAdmissionHook`,
- * earn-movements.repository.ts). Both ledgered deposit paths pass it: the
- * custody deposit from `depositIntoVault` and the authenticated
- * external-wallet deposit from `submitExternalWalletDeposit`. Anonymous
- * builds have no SDP submit or ledger transaction.
+ * earn-movements.repository.ts). The operation worker passes it before a new
+ * deposit broadcast. Recording signed bytes already observed on chain bypasses
+ * admission: a cap refusal or unreadable exposure cannot erase economic activity.
+ * Unsigned builds have no ledger transaction.
  *
  * Order, and why each step is where it is:
  *
@@ -484,7 +484,7 @@ export async function assertVaultExposureWithinCap(
  * 4. Emit with `stage: "ledger_write"`, and refuse or admit by the same rule as
  *    admission. A refusal throws out of the ledger transaction with nothing
  *    recorded and nothing broadcast: the custody path signed but did not send,
- *    the external-wallet path verified the customer's signature but did not
+ *    the wallet path verified the customer's signature but did not
  *    send. Failing closed there is the ADR's direction; the alternative is a
  *    deposit that lands over the cap.
  *

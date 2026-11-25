@@ -431,9 +431,8 @@ export interface WisdomTreeDepositEligibility {
 
 /**
  * Deliberately shared by every valid-but-ineligible admission outcome. The
- * external-wallet build route can be called without authentication, so naming
- * whether the wallet is absent, pending, or approved-but-unentitled would turn
- * it into a public KYC/tradability oracle.
+ * authenticated partner must not learn whether another wallet is absent,
+ * pending, or approved-but-unentitled from a build refusal.
  */
 export const WISDOMTREE_DEPOSIT_INELIGIBLE_REASON =
   "This WisdomTree deposit is unavailable for the selected wallet and fund.";
@@ -507,23 +506,6 @@ export async function checkWisdomTreeDepositEligibility(
     return wisdomTreeDepositIneligible();
   }
   return { eligible: true };
-}
-
-/**
- * Raw orders feed — tooling surface (underscore convention, like Ground's
- * `_iterateYieldSources`): consumed by inventory/settlement tooling and the
- * future order-settlement reconciler, not part of the provider contract.
- * Accepts both the bare-array and wrapped shapes because the spec never prints
- * this route's envelope. UNVERIFIED.
- */
-export async function _listWisdomTreeOrders(ctx: EarnRuntimeContext): Promise<unknown[]> {
-  const response = await connectGetJson<unknown>(ctx, "/api/orders/all");
-  if (Array.isArray(response)) return response;
-  if (response && typeof response === "object") {
-    const wrapped = (response as { orders?: unknown }).orders;
-    if (Array.isArray(wrapped)) return wrapped;
-  }
-  throw providerUnavailable("WisdomTree returned an orders response in an unrecognized shape");
 }
 
 /**

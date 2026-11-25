@@ -9,7 +9,7 @@ review, applicable CI and staging validation. It is not a zero-loss guarantee.
 - Branch `codex/kamino-audit`, isolated from fetched `origin/main` at
   `f31813d81d8b0a1cfcf40886cd2ba67e100d8fce`.
 - Reviewed catalogue/quotes, amount conversion, SDK plans, share consolidation,
-  provider binding, custody and external-wallet builds/submits, signature checks,
+  provider binding, custody and wallet builds/submits, signature checks,
   persistence, reconciliation, sponsorship/rent, position values and dashboard
   amount/slippage flows.
 - Registry-pinned `@kamino-finance/klend-sdk@10.0.0`; dependencies unchanged.

@@ -7,11 +7,6 @@ import { useCursorPagination } from "./use-cursor-pagination";
 
 const navigate = vi.fn<(next: TransactionFilters) => void>();
 
-function lastNavigation(): TransactionFilters {
-  const [next] = navigate.mock.lastCall as [TransactionFilters];
-  return next;
-}
-
 beforeEach(() => navigate.mockReset());
 
 describe("useCursorPagination", () => {
@@ -22,8 +17,11 @@ describe("useCursorPagination", () => {
     expect(result.current.page).toBe(1);
     expect(result.current.pageCount).toBe(2);
     result.current.goToPage(2);
-    expect(lastNavigation().cursor).toBe("cursor_2");
-    expect(lastNavigation().cursors).toEqual(["cursor_2"]);
+    expect(navigate).toHaveBeenCalledExactlyOnceWith({
+      module: "earn",
+      cursor: "cursor_2",
+      cursors: ["cursor_2"],
+    });
   });
 
   it("returns to the previous page by popping the cursor history", () => {
@@ -37,7 +35,26 @@ describe("useCursorPagination", () => {
     expect(result.current.page).toBe(3);
     expect(result.current.pageCount).toBe(3);
     result.current.goToPage(2);
-    expect(lastNavigation().cursor).toBe("cursor_2");
-    expect(lastNavigation().cursors).toEqual(["cursor_2"]);
+    expect(navigate).toHaveBeenCalledExactlyOnceWith({
+      module: "earn",
+      cursor: "cursor_2",
+      cursors: ["cursor_2"],
+    });
+  });
+
+  it("returns to the first page without a cursor", () => {
+    const filters: TransactionFilters = {
+      module: "earn",
+      cursor: "cursor_2",
+      cursors: ["cursor_2"],
+    };
+    const { result } = renderHook(() => useCursorPagination(filters, "cursor_3", navigate));
+
+    result.current.goToPage(1);
+    expect(navigate).toHaveBeenCalledExactlyOnceWith({
+      module: "earn",
+      cursor: undefined,
+      cursors: [],
+    });
   });
 });

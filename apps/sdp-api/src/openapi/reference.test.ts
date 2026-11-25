@@ -135,15 +135,16 @@ describe("buildApiReference", () => {
     });
   }
 
-  it("builds the Earn reference with every documented response, including shared 501 errors", () => {
-    const document = createPublicOpenApiDocument({
-      releaseChannel: "experimental",
-    });
+  it("renders the Earn action's responses through its module release channel", () => {
+    const document = createPublicOpenApiDocument({ releaseChannel: "experimental" });
+    expect(document.paths["/v1/earn/deposit"]).toBeDefined();
     const reference = apiReferenceSchema.parse(buildApiReference(document));
     const earn = reference.families.find((family) => family.name === "Earn");
     if (!earn) throw new Error("The Earn family is missing");
     const documented = new Map(
-      [...documentOperations(document)].filter(([operation]) => operation.includes("/v1/earn/"))
+      [...documentOperations(document)].filter(([operation]) =>
+        /\/v1\/(earn|operations)\b/.test(operation)
+      )
     );
     expect(
       earn.operations.map((operation) => `${operation.method} ${operation.path}`).sort()
@@ -176,7 +177,7 @@ describe("buildApiReference", () => {
       operations.find((operation) => operation.operationId === operationId)?.takesIdempotencyKey;
     // POST /v1/issuance/tokens ignores the header: a retry under one key creates a second token.
     expect(takesKey("createToken")).toBe(false);
-    expect(takesKey("createPaymentTransfer")).toBe(true);
+    expect(takesKey("executePaymentTransfer")).toBe(true);
   });
 
   it("names the route's action in its 403 example, as the API refuses it", () => {
@@ -240,7 +241,8 @@ describe("buildApiReference", () => {
     // body is still the one variant set titled by a pinned value, so the body is
     // grafted onto a test-only API-key operation that names no action.
     const publicDocument = createPublicOpenApiDocument({ releaseChannel: "stable" });
-    const internalInitialize = createOpenApiDocument().paths["/v1/wallets/initialize"]?.post;
+    const internalInitialize =
+      createOpenApiDocument().paths["/v1/wallets/managed-signing/initialize-with-wallet"]?.post;
     if (internalInitialize === undefined) throw new Error("no internal initialize operation");
     const initialize = buildApiReference({
       ...publicDocument,

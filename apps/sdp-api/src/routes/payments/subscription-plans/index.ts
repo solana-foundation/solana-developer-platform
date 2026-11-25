@@ -35,7 +35,7 @@ subscriptionPlans.post(
 );
 subscriptionPlans.get("/", requireAction("recurring.read"), listSubscriptionPlans);
 subscriptionPlans.post(
-  "/:planId/prepare-create",
+  "/:planId/create/build-unsigned-transaction",
   requireAction("recurring.manage"),
   validateBody(prepareSubscriptionPlanCreateSchema),
   prepareCreateSubscriptionPlan

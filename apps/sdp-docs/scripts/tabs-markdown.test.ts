@@ -47,7 +47,7 @@ describe("presentation Markdown", () => {
       '<Tab value="API">',
       '<Tabs items={["curl", "TypeScript"]}>',
       '<Tab value="curl">',
-      '```bash\ncurl "https://api.solana.com/v1/earn/strategies"\n```',
+      '```bash\ncurl "https://api.solana.com/v1/earn/discovery"\n```',
       "</Tab>",
       '<Tab value="TypeScript">',
       '```ts\nconst example = "<Tab value=\\"literal\\">";\n```',
