@@ -413,6 +413,9 @@ importers:
       '@sdp/redaction':
         specifier: workspace:*
         version: link:../../packages/sdp-redaction
+      '@sdp/types':
+        specifier: workspace:*
+        version: link:../../packages/sdp-types
       hono:
         specifier: 4.13.16
         version: 4.13.16

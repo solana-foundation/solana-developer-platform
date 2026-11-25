@@ -1,4 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
+import {
+  isCustodyProviderInReleaseChannel,
+  type SdpReleaseChannel,
+} from "@sdp/types/release-channels";
 import { Hono, type MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { requestId } from "hono/request-id";
@@ -11,12 +15,13 @@ import { type AppEnv, bodyWithinLimit, requestLog } from "./middleware";
 import { providerTarget } from "./utils";
 
 export interface ProviderCredentials {
-  fireblocks: { apiKey: string; privateKey: CryptoKey };
-  privy: { appId: string; appSecret: string };
+  fireblocks: { apiKey: string; privateKey: CryptoKey } | null;
+  privy: { appId: string; appSecret: string } | null;
 }
 
 export interface AppDependencies {
   caller: MiddlewareHandler<AppEnv>;
+  releaseChannel: SdpReleaseChannel;
   credentials: ProviderCredentials;
   providerTimeoutMs: number;
 }
@@ -46,6 +51,11 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
     line.provider = match.provider;
     line.endpoint = `${endpoint.method} ${endpoint.path}`;
 
+    if (
+      !isCustodyProviderInReleaseChannel(dependencies.releaseChannel, match.provider, "managed")
+    ) {
+      throw forbidden("provider_not_in_release_channel");
+    }
     if (!endpoint.callers.includes(caller)) throw forbidden("caller_not_allowed");
 
     const headers = new Headers();
@@ -101,6 +111,7 @@ async function authHeaders(
 ): Promise<FireblocksAuthHeaders | PrivyAuthHeaders> {
   switch (provider) {
     case "fireblocks": {
+      if (credentials.fireblocks === null) throw new Error("Fireblocks credentials are not loaded");
       const { apiKey, privateKey } = credentials.fireblocks;
       const tokenLifetimeSeconds = 30;
       const bodyHash = createHash("sha256").update(body, "utf8").digest("hex");
@@ -114,6 +125,7 @@ async function authHeaders(
       return { Authorization: `Bearer ${token}`, "X-API-Key": apiKey };
     }
     case "privy": {
+      if (credentials.privy === null) throw new Error("Privy credentials are not loaded");
       const { appId, appSecret } = credentials.privy;
       const basic = Buffer.from(`${appId}:${appSecret}`, "utf8").toString("base64");
       return { Authorization: `Basic ${basic}`, "privy-app-id": appId };

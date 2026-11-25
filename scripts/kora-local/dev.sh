@@ -39,6 +39,8 @@ export SDP_API_PORT=$((8787 + offset))
 export SDP_WORKER_PORT=$((8789 + offset))
 export SDP_SAFE_PROXY_PORT=$((8791 + offset))
 export SAFE_PROXY_PROVIDER_TIMEOUT_MS=60000
+# Safe Proxy reads the same release channel the API does; the API's dev env defaults to this one.
+export SDP_RELEASE_CHANNEL="${SDP_RELEASE_CHANNEL:-experimental}"
 export PORT=$((3000 + offset))
 export SDP_DOCS_PORT=$((3001 + offset))
 export SDP_API_BASE_URL="http://127.0.0.1:${SDP_API_PORT}"
