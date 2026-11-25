@@ -189,7 +189,7 @@ export async function rotateProviderCredential(
   }
 
   if ("appId" in fields) {
-    await assertPrivyCredentialAccepted(c.env, fields);
+    await assertPrivyCredentialAccepted(fields);
   }
   await resolveRegistrationPayload(c, target.credential.provider, fields, idempotencyKey);
   const result = await submitRotationCandidate(

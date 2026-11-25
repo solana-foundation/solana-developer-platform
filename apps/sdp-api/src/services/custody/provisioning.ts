@@ -198,7 +198,7 @@ export async function deleteAnchorageWallet(
   await deleteAnchorageWalletInCustody(createRuntime(), { apiKey: env.ANCHORAGE_API_KEY }, options);
 }
 
-function createRuntime(): CustodyProvisioningRuntime {
+export function createRuntime(): CustodyProvisioningRuntime {
   return {
     fetch: (input, init) => globalThis.fetch(input, init),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -207,14 +207,12 @@ function createRuntime(): CustodyProvisioningRuntime {
 }
 
 export function listFireblocksVaults(
-  env: Env,
   credential: { apiKey: string; apiSecretPem: string; assetId: "SOL" | "SOL_TEST" },
   options: { after?: string; namePrefix?: string }
 ) {
   return listFireblocksVaultsInCustody(createRuntime(), credential, options);
 }
 export function getFireblocksVault(
-  env: Env,
   credential: { apiKey: string; apiSecretPem: string; assetId: "SOL" | "SOL_TEST" },
   id: string
 ) {

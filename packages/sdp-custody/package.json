@@ -79,6 +79,16 @@
       "import": "./src/providers/privy/provisioning.ts",
       "default": "./src/providers/privy/provisioning.ts"
     },
+    "./providers/privy/credential": {
+      "types": "./src/providers/privy/credential.ts",
+      "import": "./src/providers/privy/credential.ts",
+      "default": "./src/providers/privy/credential.ts"
+    },
+    "./providers/privy/policy": {
+      "types": "./src/providers/privy/policy.ts",
+      "import": "./src/providers/privy/policy.ts",
+      "default": "./src/providers/privy/policy.ts"
+    },
     "./providers/coinbase/provisioning": {
       "types": "./src/providers/coinbase/provisioning.ts",
       "import": "./src/providers/coinbase/provisioning.ts",

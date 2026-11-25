@@ -234,7 +234,6 @@ export async function discoverFireblocksVaults(
   if (!environment) throw internalError("Project environment is required");
   try {
     return await listFireblocksVaults(
-      c.env,
       {
         apiKey: input.apiKey,
         apiSecretPem: secret.privateKeyPem,

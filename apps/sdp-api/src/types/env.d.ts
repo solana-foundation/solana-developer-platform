@@ -168,7 +168,6 @@ export interface Env extends ManagedRpcEnv {
   PRIVY_APP_ID?: string;
   PRIVY_APP_SECRET?: string;
   PRIVY_WALLET_ID?: string;
-  PRIVY_API_BASE_URL?: string;
 
   // Coinbase CDP Server Wallet configuration (Solana)
   COINBASE_CDP_API_KEY_ID?: string;

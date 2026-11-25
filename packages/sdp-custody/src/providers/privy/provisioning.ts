@@ -1,8 +1,8 @@
 import { encodeBasicAuth, parseJsonResponse, readErrorResponseText } from "#/shared/common";
 import type { CustodyProvisioningRuntime } from "#/shared/runtime";
 import { SigningError } from "#/signing";
+import { PRIVY_API_ORIGIN } from "./api";
 
-const PRIVY_API_ORIGIN = "https://api.privy.io/v1";
 const PRIVY_REQUEST_TIMEOUT_MS = 10_000;
 
 interface PrivyWalletResponse {

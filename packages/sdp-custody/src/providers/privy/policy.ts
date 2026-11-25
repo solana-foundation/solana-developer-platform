@@ -1,25 +1,21 @@
-import { denormalizePrivyWalletId } from "@sdp/custody/provider-wallet-ids";
 import type { ProviderPolicyCheck } from "@sdp/types/custody";
 import { z } from "zod";
-import type { Env } from "@/types/env";
-import {
-  PRIVY_INVALID_CREDENTIALS_CODE,
-  type PrivyCredentialAuthentication,
-  privyErrorBodySchema,
-} from "./privy-credential";
+import { denormalizePrivyWalletId } from "#/provider-wallet-ids";
+import type { CustodyProvisioningRuntime } from "#/shared/runtime";
+import { PRIVY_API_ORIGIN } from "./api";
+import { PRIVY_INVALID_CREDENTIALS_CODE, privyErrorBodySchema } from "./credential";
 
 const walletSchema = z.object({ id: z.string(), policy_ids: z.array(z.string().min(1)) });
 
 /** Inspect the connected wallet, never infer its coverage from unrelated policies in the app. */
 export async function readPrivyWalletPolicy(
-  env: Env,
-  credential: PrivyCredentialAuthentication,
+  runtime: CustodyProvisioningRuntime,
+  credential: { appId: string; appSecret: string },
   walletId: string
 ): Promise<Pick<ProviderPolicyCheck, "status" | "reason">> {
   const id = denormalizePrivyWalletId(walletId);
-  const baseUrl = (env.PRIVY_API_BASE_URL ?? "https://api.privy.io/v1").replace(/\/+$/, "");
   try {
-    const response = await fetch(`${baseUrl}/wallets/${encodeURIComponent(id)}`, {
+    const response = await runtime.fetch(`${PRIVY_API_ORIGIN}/wallets/${encodeURIComponent(id)}`, {
       headers: {
         Authorization: `Basic ${Buffer.from(`${credential.appId}:${credential.appSecret}`).toString("base64")}`,
         "privy-app-id": credential.appId,
