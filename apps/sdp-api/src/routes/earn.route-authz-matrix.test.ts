@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { type Action, actionsInModule, grantsCoverAction } from "@sdp/types/actions";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { earnRoutes } from "@/routes/earn";
 import { type EarnAuthzTenant, seedEarnApiKey, seedEarnAuthzTenant } from "@/test/helpers/earn";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 
@@ -109,6 +111,12 @@ function requestAnonymously(route: string) {
 
 const ROUTES = Object.keys(EARN_ROUTE_ACTIONS).sort();
 
+/**
+ * A project of another organization that no matrix user is a member of: the
+ * membership 403 every route must answer it with (EARN-027).
+ */
+const FOREIGN_PROJECT_ID = "prj_matrix_foreign_sandbox";
+
 const ACTION_BY_ROUTE: ReadonlyMap<string, Action> = new Map(Object.entries(EARN_ROUTE_ACTIONS));
 
 function actionFor(route: string): Action {
@@ -156,6 +164,20 @@ beforeEach(async () => {
     });
     rawKeyBySet.set(setId, key.raw);
   }
+  // The foreign organization and its sandbox project exist for the EARN-027
+  // membership refusals; nobody holds a project_members row for them.
+  await getDb(env)
+    .prepare(
+      "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'enterprise', 'active')"
+    )
+    .bind("org_test_matrix_foreign", "Earn Authz Foreign", "earn-authz-foreign")
+    .run();
+  await seedDefaultProjects(getDb(env), {
+    organizationId: "org_test_matrix_foreign",
+    createdBy: tenant.user.id,
+    members: [],
+    ids: { sandbox: FOREIGN_PROJECT_ID, production: "prj_matrix_foreign_production" },
+  });
 });
 
 describe("earn route inventory", () => {
@@ -214,10 +236,27 @@ describe("action conformance: each route needs exactly its declared action", () 
 });
 
 describe("Clerk callers are membership-checked, per route (EARN-027)", () => {
+  // The refusal is pinned positively on every route, so a router that stops
+  // running the membership check (dropped project-context middleware, a new
+  // route mounted without it) fails here instead of leaving the member test
+  // below nothing to discriminate.
+  it.each(ROUTES.map((route) => ({ route })))(
+    "$route refuses another organization's project with the membership 403",
+    async ({ route }) => {
+      const res = await requestAsClerk(route, tenant.token, FOREIGN_PROJECT_ID);
+      expect(res.status, `${route} admitted a project header the caller has no membership in`).toBe(
+        403
+      );
+      const body = errorBodySchema.parse(await res.json());
+      expect(body.error.code, route).toBe("FORBIDDEN");
+      expect(body.error.message, route).toBe("Requested project is not accessible");
+    }
+  );
+
   it("a member project header is honored (never the membership 403)", async () => {
     for (const route of ROUTES) {
       const res = await requestAsClerk(route, tenant.token, tenant.project.id);
-      if (res.status !== 403) continue;
+      if (res.status !== 403) continue; // past the membership gate; the handler's answer is its own test's concern
       const body = errorBodySchema.parse(await res.json());
       expect(
         body.error.message,
