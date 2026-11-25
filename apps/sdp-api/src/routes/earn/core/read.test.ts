@@ -13,6 +13,7 @@ import {
   generateEarnPositionId,
 } from "@/db/repositories/earn-movements.repository";
 import { app } from "@/index";
+import { earnPositionsResponseSchema } from "@/openapi/schemas/earn-core";
 import {
   projectEarnOperation,
   projectEarnOperations,
@@ -344,9 +345,14 @@ describe("Earn core read contracts", () => {
     expect(next.data.hasMore).toBe(false);
   });
 
-  it.each([0, 1, 2, 5])(
-    "fills a mixed-source page after %i leading holdings close during hydration",
-    async (closedCount) => {
+  it.each([
+    { closedCount: 0, expectedReads: 1 },
+    { closedCount: 1, expectedReads: 2 },
+    { closedCount: 2, expectedReads: 2 },
+    { closedCount: 5, expectedReads: 3 },
+  ])(
+    "fills a mixed-source page after $closedCount leading holdings close during hydration",
+    async ({ closedCount, expectedReads }) => {
       const walletId = await seedWallet();
       const positions = [];
       const ledger = createPostgresEarnMovementsRepository(getDb(env));
@@ -383,7 +389,7 @@ describe("Earn core read contracts", () => {
 
       const response = await get("positions?limit=2");
       expect(response.status).toBe(200);
-      const body = (await response.json()) as { data: EarnPositionsResponse };
+      const body = earnPositionsResponseSchema.parse(await response.json());
       expect(body.data.positions.map((position) => position.id)).toEqual(
         positions.slice(closedCount, closedCount + 2).map((position) => position.id)
       );
@@ -393,15 +399,13 @@ describe("Earn core read contracts", () => {
       expect(scanned).toEqual(
         Array.from({ length: Math.min(5, closedCount + 2) }, (_, index) => `paging-${index}`)
       );
-      expect(readVaultPositions).toHaveBeenCalledTimes(
-        closedCount === 0 ? 1 : closedCount === 5 ? 3 : 2
-      );
+      expect(readVaultPositions).toHaveBeenCalledTimes(expectedReads);
       const remaining: string[] = [];
       let cursor = body.data.nextCursor;
       while (cursor !== null) {
         const next = await get(`positions?limit=2&before=${encodeURIComponent(cursor)}`);
         expect(next.status).toBe(200);
-        const page = (await next.json()) as { data: EarnPositionsResponse };
+        const page = earnPositionsResponseSchema.parse(await next.json());
         if (page.data.hasMore) expect(page.data.positions).toHaveLength(2);
         expect(page.data.nextCursor === null).toBe(!page.data.hasMore);
         remaining.push(...page.data.positions.map((position) => position.id));
