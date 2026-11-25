@@ -49,16 +49,16 @@ import {
   provisionFireblocksVaultAccount,
   provisionPrivyWallet,
 } from "@/services/custody/provisioning";
-import { assertCustodyProviderCanCreateWallet } from "@/services/custody-provider-lifecycle.service";
 import {
   type AdmittedSignerContext,
   admittedSigner,
   type SignerCredentialBinding,
-} from "@/services/domain/signing/admitted-signer";
+} from "@/services/custody/signing/admitted-signer";
 import {
   createFireblocksAdapterFromCredential,
   createPrivyAdapterFromCredential,
-} from "@/services/domain/signing/provider-adapter-factory";
+} from "@/services/custody/signing/provider-adapter-factory";
+import { assertCustodyProviderCanCreateWallet } from "@/services/custody-provider-lifecycle.service";
 import {
   assertCustodyProviderEntitled,
   assertManagedCustodyUseAllowed,

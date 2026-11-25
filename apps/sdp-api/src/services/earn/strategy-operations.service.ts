@@ -31,11 +31,11 @@ import { isEarnStrategyInExecutionShelf } from "@/routes/earn/strategy-catalogue
 import {
   ProposalAdmissionRefusedError,
   ProposalNotSentError,
-} from "@/services/domain/signing/admitted-proposer";
+} from "@/services/custody/signing/admitted-proposer";
 import type {
   CustodyTransactionProposer,
   TransactionProposalObservation,
-} from "@/services/domain/signing/admitted-transaction-proposer";
+} from "@/services/custody/signing/admitted-transaction-proposer";
 import { acceptOperationExecution } from "@/services/operation-execution-audit.service";
 import { createOperationsService } from "@/services/operations.service";
 import { createOrgTransactionProposerForCustodyWallet } from "@/services/solana/signer";

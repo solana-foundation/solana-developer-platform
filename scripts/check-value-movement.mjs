@@ -89,7 +89,7 @@ export const CAPABILITIES = [
       },
     ],
     owners: [CUSTODY_PACKAGE],
-    allow: [`${API}/services/domain/signing/admitted-transaction-proposer.ts`],
+    allow: [`${API}/services/custody/signing/admitted-transaction-proposer.ts`],
   },
   {
     id: "fireblocks-native-transfer",
@@ -101,7 +101,7 @@ export const CAPABILITIES = [
       },
     ],
     owners: [CUSTODY_PACKAGE],
-    allow: [`${API}/services/domain/signing/admitted-proposer.ts`],
+    allow: [`${API}/services/custody/signing/admitted-proposer.ts`],
   },
   {
     id: "fireblocks-transfer-cancellation",
@@ -118,8 +118,8 @@ export const CAPABILITIES = [
     ],
     owners: [CUSTODY_PACKAGE],
     allow: [
-      `${API}/services/domain/signing/admitted-proposer.ts`,
-      `${API}/services/domain/signing/admitted-transaction-proposer.ts`,
+      `${API}/services/custody/signing/admitted-proposer.ts`,
+      `${API}/services/custody/signing/admitted-transaction-proposer.ts`,
     ],
   },
   {
@@ -135,40 +135,40 @@ export const CAPABILITIES = [
     id: "custody-proposal-recovery-construction",
     why: "Builds cancellation authority from retained access; only the custody runtime waist may.",
     symbols: [
-      { file: `${API}/services/domain/signing/admitted-proposer.ts`, name: "proposalRecovery" },
-      { file: `${API}/services/domain/signing/admitted-proposer.ts`, name: "proposalCanceller" },
+      { file: `${API}/services/custody/signing/admitted-proposer.ts`, name: "proposalRecovery" },
+      { file: `${API}/services/custody/signing/admitted-proposer.ts`, name: "proposalCanceller" },
     ],
-    owners: [`${API}/services/domain/signing/admitted-proposer.ts`],
-    allow: [`${API}/services/domain/signing/custody-runtime-target.ts`],
+    owners: [`${API}/services/custody/signing/admitted-proposer.ts`],
+    allow: [`${API}/services/custody/signing/custody-runtime-target.ts`],
   },
   {
     id: "config-signing-adapter",
     why: "Builds a signing adapter from an encrypted custody config; only the custody signer waist may.",
     symbols: [
       {
-        file: `${API}/services/domain/signing/provider-adapter-factory.ts`,
+        file: `${API}/services/custody/signing/provider-adapter-factory.ts`,
         // biome-ignore lint/security/noSecrets: a function name, not a secret.
         name: "createAdapterFromEncryptedConfig",
       },
     ],
-    owners: [`${API}/services/domain/signing/provider-adapter-factory.ts`],
-    allow: [`${API}/services/domain/signing.service.ts`],
+    owners: [`${API}/services/custody/signing/provider-adapter-factory.ts`],
+    allow: [`${API}/services/custody/signing.service.ts`],
   },
   {
     id: "credential-signing-adapter",
     why: "Builds a signing adapter from a BYOK provider credential; only the custody signer waist may.",
     symbols: [
       {
-        file: `${API}/services/domain/signing/provider-adapter-factory.ts`,
+        file: `${API}/services/custody/signing/provider-adapter-factory.ts`,
         name: "createPrivyAdapterFromCredential",
       },
       {
-        file: `${API}/services/domain/signing/provider-adapter-factory.ts`,
+        file: `${API}/services/custody/signing/provider-adapter-factory.ts`,
         name: "createFireblocksAdapterFromCredential",
       },
     ],
-    owners: [`${API}/services/domain/signing/provider-adapter-factory.ts`],
-    allow: [`${API}/services/domain/signing/custody-runtime-target.ts`],
+    owners: [`${API}/services/custody/signing/provider-adapter-factory.ts`],
+    allow: [`${API}/services/custody/signing/custody-runtime-target.ts`],
   },
   {
     id: "fee-payment-adapter",
@@ -189,9 +189,9 @@ export const CAPABILITIES = [
       .map((file) => ({ file: `${KEYCHAIN}/${file}`, name: "*" })),
     owners: [CUSTODY_PACKAGE],
     allow: [
-      `${API}/services/domain/signing.service.ts`,
-      `${API}/services/domain/signing/provider-adapter-factory.ts`,
-      `${API}/services/domain/signing/provider-wallet-lifecycle.ts`,
+      `${API}/services/custody/signing.service.ts`,
+      `${API}/services/custody/signing/provider-adapter-factory.ts`,
+      `${API}/services/custody/signing/provider-wallet-lifecycle.ts`,
     ],
   },
   {
@@ -209,9 +209,9 @@ export const CAPABILITIES = [
     ],
     owners: [CUSTODY_PACKAGE],
     allow: [
-      `${API}/services/domain/signing.service.ts`,
-      `${API}/services/domain/signing/provider-adapter-factory.ts`,
-      `${API}/services/domain/signing/provider-wallet-lifecycle.ts`,
+      `${API}/services/custody/signing.service.ts`,
+      `${API}/services/custody/signing/provider-adapter-factory.ts`,
+      `${API}/services/custody/signing/provider-wallet-lifecycle.ts`,
     ],
   },
   {
@@ -282,7 +282,7 @@ export const CAPABILITIES = [
     ],
     owners: [],
     allow: [
-      `${API}/services/domain/signing.service.ts`,
+      `${API}/services/custody/signing.service.ts`,
       // Each builds the keypair inside a constructor that is pinned itself.
       `${KEYCHAIN}/local/keychain.adapter.ts`,
     ],

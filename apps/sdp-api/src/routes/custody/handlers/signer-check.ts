@@ -27,8 +27,8 @@ import { success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import type { signerCheckSchema } from "@/routes/custody/schemas";
-import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
-import { createSigningService } from "@/services/domain/signing.service";
+import { CustodyRuntimeTargets } from "@/services/custody/signing/custody-runtime-target";
+import { createSigningService } from "@/services/custody/signing.service";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   resolveRequestSponsorshipScope,

@@ -36,21 +36,16 @@ import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
 import type { SigningConfigRecord } from "@/services/adapters/signing";
 import { assertLocalSigningAllowed } from "@/services/adapters/signing";
 import * as custodyProvisioning from "@/services/custody/provisioning";
-import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
-import {
-  assertCustodyProviderCanCreateWallet,
-  assertCustodyProviderCanDeleteWallet,
-} from "@/services/custody-provider-lifecycle.service";
 import type {
   CustodyProposalCanceller,
   CustodyProposalReader,
   CustodyProposalRecovery,
   CustodyTransferProposer,
   TransferProposalIntent,
-} from "@/services/domain/signing/admitted-proposer";
-import type { CustodyTransactionProposer } from "@/services/domain/signing/admitted-transaction-proposer";
-import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
-import { createAdapterFromEncryptedConfig } from "@/services/domain/signing/provider-adapter-factory";
+} from "@/services/custody/signing/admitted-proposer";
+import type { CustodyTransactionProposer } from "@/services/custody/signing/admitted-transaction-proposer";
+import { CustodyRuntimeTargets } from "@/services/custody/signing/custody-runtime-target";
+import { createAdapterFromEncryptedConfig } from "@/services/custody/signing/provider-adapter-factory";
 import {
   type AnchorageProviderConfig,
   type CoinbaseCdpProviderConfig,
@@ -63,11 +58,16 @@ import {
   parseConfigRecord,
   type TurnkeyProviderConfig,
   type UtilaProviderConfig,
-} from "@/services/domain/signing/provider-config";
+} from "@/services/custody/signing/provider-config";
 import {
   createProviderWallet,
   deleteProviderWallet,
-} from "@/services/domain/signing/provider-wallet-lifecycle";
+} from "@/services/custody/signing/provider-wallet-lifecycle";
+import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
+import {
+  assertCustodyProviderCanCreateWallet,
+  assertCustodyProviderCanDeleteWallet,
+} from "@/services/custody-provider-lifecycle.service";
 import {
   assertCustodyProviderAvailable,
   assertCustodyProviderEnabled,

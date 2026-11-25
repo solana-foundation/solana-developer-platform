@@ -1,8 +1,8 @@
 import type { CustodyWalletOwnerTarget, CustodyWalletPurpose } from "@sdp/types/custody";
 import type { Context } from "hono";
 import type { DatabaseClient } from "@/db/client";
-import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
-import { createSigningService } from "@/services/domain/signing.service";
+import { CustodyRuntimeTargets } from "@/services/custody/signing/custody-runtime-target";
+import { createSigningService } from "@/services/custody/signing.service";
 import type { Env } from "@/types/env";
 
 /**

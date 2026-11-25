@@ -154,7 +154,7 @@ does for a signed payment; acceptance alone is never audited as success.
 
 The payment goes through the same custody waist as every signed payment (ADR 0007). The
 waist resolves a Fireblocks BYOK wallet to a proposer rather than a signer
-(`services/domain/signing/admitted-proposer.ts`), with the same checks at resolution: runtime
+(`services/custody/signing/admitted-proposer.ts`), with the same checks at resolution: runtime
 availability, wallet purpose and provider entitlement. Immediately before the provider POST, the
 proposer re-reads the wallet row and Connection, checks connection, account, vault, source address
 and network against the stored intent, and makes the same live money-admission decision a signature

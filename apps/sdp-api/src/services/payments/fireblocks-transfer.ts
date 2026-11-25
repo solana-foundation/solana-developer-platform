@@ -26,7 +26,7 @@ import {
   type CustodyTransferProposer,
   transferProposalIntentSchema as intentSchema,
   ProposalNotSentError,
-} from "@/services/domain/signing/admitted-proposer";
+} from "@/services/custody/signing/admitted-proposer";
 import {
   createOrgTransferProposalCanceller,
   createOrgTransferProposalReader,

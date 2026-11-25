@@ -15,7 +15,7 @@ import { mapWithConcurrency } from "@/lib/concurrency";
 import { getLogger } from "@/runtime/logger";
 import { createSystemAuditService } from "@/services/audit.service";
 import { createCredentialSecretStore } from "@/services/credential-secret-store";
-import { proposalRuntime } from "@/services/domain/signing/admitted-proposer";
+import { proposalRuntime } from "@/services/custody/signing/admitted-proposer";
 import {
   CustodyPolicyStore,
   type PolicyCheckScope,

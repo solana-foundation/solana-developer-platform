@@ -3,7 +3,7 @@ import { requireProjectId } from "@/lib/auth";
 import { success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { type AppContext, resolveActor } from "@/routes/custody/context";
-import { createSigningService } from "@/services/domain/signing.service";
+import { createSigningService } from "@/services/custody/signing.service";
 
 export const getConfigs = async (c: AppContext) => {
   const actor = resolveActor(c);

@@ -9,7 +9,7 @@
 import type { Address } from "@solana/kit";
 import { type DatabaseClient, getDb } from "@/db/client";
 import { type WalletAccess, walletAccessAllows } from "@/lib/auth";
-import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
+import { CustodyRuntimeTargets } from "@/services/custody/signing/custody-runtime-target";
 import type { Env } from "@/types/env";
 
 /**

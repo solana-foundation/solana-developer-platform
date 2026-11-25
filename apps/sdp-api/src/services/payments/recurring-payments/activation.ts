@@ -44,7 +44,7 @@ import { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { resolveSourceTokenAccountOrAta } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
-import { createSigningService } from "@/services/domain/signing.service";
+import { createSigningService } from "@/services/custody/signing.service";
 import { parseU64String } from "@/services/payment-operation.service";
 import { resolveSolanaCounterpartyAccount } from "@/services/payments/counterparty-account-resolution";
 import { loadPaymentMint } from "@/services/payments/token-amount";

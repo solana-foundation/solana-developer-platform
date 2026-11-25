@@ -18,7 +18,7 @@ import {
   issuanceTransactionWalletFilterSchema,
   listTokenTransactionsQuerySchema,
 } from "@/routes/issuance/schemas";
-import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
+import { CustodyRuntimeTargets } from "@/services/custody/signing/custody-runtime-target";
 import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import { resolveIssuanceWallet } from "./authority-resolution";
