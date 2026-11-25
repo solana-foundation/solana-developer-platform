@@ -70,16 +70,16 @@ const ownAnswers: [string, number, string, string, ForwardRequest?, ForwardAppOp
   ["its own failure", 500, own("internal"), VAULTS, {}, { credentials: FAILING_CREDENTIALS }],
 ];
 for (const [name, status, body, path, request, app] of ownAnswers) {
-  it(`answers ${status} to ${name} and reaches no provider`, async () => {
-    const forwardApp = createForwardApp(app);
+  it(`answers ${status} to ${name} and reaches no provider`, async (t) => {
+    const forwardApp = createForwardApp(t, app);
     const answer = await answerOf(await forwardApp.send(path, request));
     assert.deepEqual(answer, { status, fromProvider: null, body });
     assert.equal(forwardApp.calls.length, 0);
   });
 }
 
-it("a local proxy takes a caller only on its loopback address, by the name it gives", async () => {
-  const local = createForwardApp({ caller: localCaller({ hostname: "127.0.0.1", port: 8791 }) });
+it("a local proxy takes a caller only on its loopback address, by the name it gives", async (t) => {
+  const local = createForwardApp(t, { caller: localCaller({ hostname: "127.0.0.1", port: 8791 }) });
   const answers = [];
   for (const [host, caller] of [
     ["127.0.0.1:8791", "api"],
@@ -100,8 +100,8 @@ it("a local proxy takes a caller only on its loopback address, by the name it gi
   assert.equal(local.calls.length, 1);
 });
 
-it("sends the provider only its declared headers and the platform's Privy auth", async () => {
-  const forwardApp = createForwardApp();
+it("sends the provider only its declared headers and the platform's Privy auth", async (t) => {
+  const forwardApp = createForwardApp(t);
   await forwardApp.send(WALLETS, {
     method: "POST",
     body: '{"chain_type": "solana", "note": "é"}',
@@ -132,7 +132,7 @@ it("sends the provider only its declared headers and the platform's Privy auth",
 
 it("signs the Fireblocks target and body exactly as sent", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: 1_800_000_000_750 });
-  const forwardApp = createForwardApp();
+  const forwardApp = createForwardApp(t);
   await forwardApp.send("/fireblocks/v1/vault/accounts_paged?namePrefix=vault-e74&limit=5");
   await forwardApp.send("/fireblocks/v1/transactions", {
     method: "POST",
@@ -178,8 +178,8 @@ it("signs the Fireblocks target and body exactly as sent", async (t) => {
   );
 });
 
-it("passes back the provider's status, body and content type, marked as the provider's", async () => {
-  const forwardApp = createForwardApp({
+it("passes back the provider's status, body and content type, marked as the provider's", async (t) => {
+  const forwardApp = createForwardApp(t, {
     answer: () =>
       new Response(own("caller_not_allowed"), {
         status: 403,
@@ -211,8 +211,8 @@ it("passes back the provider's status, body and content type, marked as the prov
   );
 });
 
-it("answers 502 when the provider call fails after it was sent", async () => {
-  const forwardApp = createForwardApp({
+it("answers 502 when the provider call fails after it was sent", async (t) => {
+  const forwardApp = createForwardApp(t, {
     answer: () => Promise.reject(new TypeError("fetch failed")),
   });
   assert.deepEqual(await answerOf(await forwardApp.send(WALLETS)), {
@@ -223,23 +223,23 @@ it("answers 502 when the provider call fails after it was sent", async () => {
   assert.equal(forwardApp.calls.length, 1);
 });
 
-it("logs the request id, the endpoint's pattern and the outcome, never a path, body, secret or token", async () => {
-  const forwardApp = createForwardApp({
+it("logs the request id, the endpoint's pattern and the outcome, never a path, body, secret or token", async (t) => {
+  const forwardApp = createForwardApp(t, {
     answer: () => new Response('{"signed":"resp-body-c63"}'),
+    credentials: FAILING_CREDENTIALS,
   });
   await forwardApp.send("/privy/v1/wallets/wallet-d41/rpc", {
     method: "POST",
     body: '{"method":"signTransaction","params":{"transaction":"tx-body-b52"}}',
   });
   await forwardApp.send(WALLETS, { token: "cron" });
-  const failing = createForwardApp({ credentials: FAILING_CREDENTIALS });
   const badlyShaped = "req 7d1 tx-body-b52";
-  const replaced = await failing.send(VAULTS, { headers: { "x-request-id": badlyShaped } });
+  const replaced = await forwardApp.send(VAULTS, { headers: { "x-request-id": badlyShaped } });
   const replacedId = replaced.headers.get("x-request-id");
   assert.ok(replacedId, "the proxy's own error carries a request id");
   assert.notEqual(replacedId, badlyShaped);
 
-  const lines = [...forwardApp.logged, ...failing.logged].map(({ duration_ms, ...line }) => line);
+  const lines = forwardApp.logged.map(({ duration_ms, ...line }) => line);
   const revision = "sdp-safe-proxy-00042-abc";
   assert.deepEqual(lines, [
     {

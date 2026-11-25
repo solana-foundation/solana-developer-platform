@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
+import type { TestContext } from "node:test";
 import type { SafeProxyCaller } from "@sdp/safe-proxy-endpoints/callers";
 import { createLocalJWKSet, importPKCS8, type JWTVerifyGetKey, SignJWT } from "jose";
 import {
@@ -82,9 +83,24 @@ async function identityToken(token: IdentityToken): Promise<string> {
     .sign(token === "forged" ? forgedKeys.privateKey : callerKeys.privateKey);
 }
 
-export function createForwardApp(options: ForwardAppOptions = {}) {
+// Takes over the platform's `fetch` until the test ends, so build one app per test.
+export function createForwardApp(t: TestContext, options: ForwardAppOptions = {}) {
   const calls: ProviderCall[] = [];
   const logged: RequestLogLine[] = [];
+
+  const provider: typeof fetch = async (input, init) => {
+    assert.ok(init, "the provider call carries its options");
+    const call: ProviderCall = {
+      url: String(input),
+      method: String(init.method),
+      headers: Object.fromEntries(new Headers(init.headers)),
+      body: init.body == null ? null : String(init.body),
+      redirect: init.redirect,
+    };
+    calls.push(call);
+    return (options.answer ?? (() => new Response('{"id":"wallet-1"}')))(call);
+  };
+  t.mock.method(globalThis, "fetch", provider);
 
   const app = createApp({
     caller:
@@ -96,18 +112,6 @@ export function createForwardApp(options: ForwardAppOptions = {}) {
         callerEmails: CALLER_EMAILS,
       }),
     credentials: options.credentials ?? PLATFORM_CREDENTIALS,
-    fetch: async (input, init) => {
-      assert.ok(init, "the provider call carries its options");
-      const call: ProviderCall = {
-        url: String(input),
-        method: String(init.method),
-        headers: Object.fromEntries(new Headers(init.headers)),
-        body: init.body == null ? null : String(init.body),
-        redirect: init.redirect,
-      };
-      calls.push(call);
-      return (options.answer ?? (() => new Response('{"id":"wallet-1"}')))(call);
-    },
     providerTimeoutMs: 10_000,
     writeLog: (line) => logged.push(line),
     revision: "sdp-safe-proxy-00042-abc",
