@@ -413,9 +413,6 @@ importers:
       '@sdp/safe-proxy-endpoints':
         specifier: workspace:*
         version: link:../../packages/sdp-safe-proxy-endpoints
-      '@sdp/types':
-        specifier: workspace:*
-        version: link:../../packages/sdp-types
       hono:
         specifier: 4.13.16
         version: 4.13.16
@@ -1188,9 +1185,6 @@ importers:
 
   packages/sdp-safe-proxy-endpoints:
     dependencies:
-      '@sdp/types':
-        specifier: workspace:*
-        version: link:../sdp-types
       zod:
         specifier: 4.6.7
         version: 4.6.7

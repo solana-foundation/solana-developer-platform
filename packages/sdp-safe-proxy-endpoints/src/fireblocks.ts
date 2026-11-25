@@ -1,183 +1,127 @@
-import {
-  type AllowedEndpoint,
-  endpoint,
-  type PathParameter,
-  type ProviderDeclaration,
-} from "./endpoint";
+import type { AllowedEndpoint, PathParameter, ProviderDeclaration } from "./endpoint";
 
 const VAULT = { format: "digits" } as const satisfies PathParameter;
 const ASSET = { format: "one_of", values: ["SOL", "SOL_TEST"] } as const satisfies PathParameter;
 const TRANSACTION = { format: "token" } as const satisfies PathParameter;
 
-const readVaultAddresses = endpoint({
+const readVaultAddresses: AllowedEndpoint = {
   method: "GET",
   path: "/v1/vault/accounts/{vault}/{asset}/addresses_paginated",
   parameters: { vault: VAULT, asset: ASSET },
   query: ["limit"],
-  kind: "read",
   callers: ["api", "cron"],
   requestHeaders: [],
-  status: "active",
-});
+};
 
-const listVaults = endpoint({
+const listVaults: AllowedEndpoint = {
   method: "GET",
   path: "/v1/vault/accounts_paged",
   parameters: {},
   query: ["limit", "assetId", "after", "namePrefix"],
-  kind: "read",
   callers: ["api"],
   requestHeaders: [],
-  status: "active",
-});
+};
 
-const readVault = endpoint({
+const readVault: AllowedEndpoint = {
   method: "GET",
   path: "/v1/vault/accounts/{vault}",
   parameters: { vault: VAULT },
   query: [],
-  kind: "read",
   callers: ["api"],
   requestHeaders: [],
-  status: "active",
-});
+};
 
-const listSupportedAssets = endpoint({
+const listSupportedAssets: AllowedEndpoint = {
   method: "GET",
   path: "/v1/supported_assets",
   parameters: {},
   query: [],
-  kind: "read",
   callers: ["api"],
   requestHeaders: [],
-  status: "active",
-});
+};
 
-const listExternalWallets = endpoint({
+const listExternalWallets: AllowedEndpoint = {
   method: "GET",
   path: "/v1/external_wallets",
   parameters: {},
   query: [],
-  kind: "read",
   callers: ["api"],
   requestHeaders: [],
-  status: "active",
-});
+};
 
-const listInternalWallets = endpoint({
+const listInternalWallets: AllowedEndpoint = {
   method: "GET",
   path: "/v1/internal_wallets",
   parameters: {},
   query: [],
-  kind: "read",
   callers: ["api"],
   requestHeaders: [],
-  status: "active",
-});
+};
 
-const readTransaction = endpoint({
+const readTransaction: AllowedEndpoint = {
   method: "GET",
   path: "/v1/transactions/{transaction}",
   parameters: { transaction: TRANSACTION },
   query: [],
-  kind: "read",
   callers: ["api", "cron"],
   requestHeaders: [],
-  status: "active",
-});
+};
 
-const readTransactionByExternalId = endpoint({
+const readTransactionByExternalId: AllowedEndpoint = {
   method: "GET",
   path: "/v1/transactions/external_tx_id/{externalTxId}",
   parameters: { externalTxId: { format: "token" } },
   query: [],
-  kind: "read",
   callers: ["api", "cron"],
   requestHeaders: [],
-  status: "active",
-});
+};
 
-const createVault = endpoint({
+const createVault: AllowedEndpoint = {
   method: "POST",
   path: "/v1/vault/accounts",
   parameters: {},
   query: [],
-  kind: "change",
   callers: ["api"],
   requestHeaders: ["idempotency-key"],
-  status: "active",
-  idempotency: {
-    key: { in: "header", name: "idempotency-key" },
-    dedupe: { lasts: "hours", hours: 24 },
-    read: listVaults,
-  },
-});
+};
 
-const activateVaultAsset = endpoint({
+const activateVaultAsset: AllowedEndpoint = {
   method: "POST",
   path: "/v1/vault/accounts/{vault}/{asset}",
   parameters: { vault: VAULT, asset: ASSET },
   query: [],
-  kind: "change",
   callers: ["api"],
   requestHeaders: ["idempotency-key"],
-  status: "active",
-  idempotency: {
-    key: { in: "header", name: "idempotency-key" },
-    dedupe: { lasts: "hours", hours: 24 },
-    read: readVaultAddresses,
-  },
-});
+};
 
-const cancelTransaction = endpoint({
+const cancelTransaction: AllowedEndpoint = {
   method: "POST",
   path: "/v1/transactions/{transaction}/cancel",
   parameters: { transaction: TRANSACTION },
   query: [],
-  kind: "change",
   callers: ["api", "cron"],
   requestHeaders: [],
-  status: "active",
-  idempotency: {
-    key: { in: "path" },
-    dedupe: { lasts: "permanent" },
-    read: readTransaction,
-  },
-});
+};
 
-const createSigningProposal = endpoint({
+const createSigningProposal: AllowedEndpoint = {
   method: "POST",
   path: "/v1/transactions",
   parameters: {},
   query: [],
-  kind: "sign",
   callers: ["api", "cron"],
   requestHeaders: [],
-  status: "active",
   body: { field: "operation", values: ["RAW", "PROGRAM_CALL"] },
-  idempotency: {
-    key: { in: "body", field: "externalTxId" },
-    dedupe: { lasts: "permanent" },
-    read: readTransactionByExternalId,
-  },
-});
+};
 
-const createTransfer = endpoint({
+const createTransfer: AllowedEndpoint = {
   method: "POST",
   path: "/v1/transactions",
   parameters: {},
   query: [],
-  kind: "change",
   callers: ["api"],
   requestHeaders: [],
-  status: "active",
   body: { field: "operation", values: ["TRANSFER"] },
-  idempotency: {
-    key: { in: "body", field: "externalTxId" },
-    dedupe: { lasts: "permanent" },
-    read: readTransactionByExternalId,
-  },
-});
+};
 
 const endpoints: readonly AllowedEndpoint[] = [
   readVaultAddresses,

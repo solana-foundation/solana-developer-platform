@@ -229,11 +229,6 @@
       "import": "./src/rpc.ts",
       "default": "./src/rpc.ts"
     },
-    "./safe-proxy": {
-      "types": "./src/safe-proxy.ts",
-      "import": "./src/safe-proxy.ts",
-      "default": "./src/safe-proxy.ts"
-    },
     "./site": {
       "types": "./src/site.ts",
       "import": "./src/site.ts",
