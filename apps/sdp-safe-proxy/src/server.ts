@@ -1,10 +1,7 @@
 import { serve } from "@hono/node-server";
-import {
-  createCallerIdentityVerifier,
-  createGoogleIdentityKeys,
-} from "@sdp/metadata-server/receiver";
+import { createGoogleIdentityKeys } from "@sdp/metadata-server/receiver";
 import { importPKCS8 } from "jose";
-import { createApp, createLocalCallerCheck, createTokenCallerCheck } from "./app";
+import { createApp, googleCaller, localCaller } from "./app";
 
 // A failure names the setting, never its value.
 function setting(name: string): string {
@@ -25,13 +22,10 @@ async function cloudRun() {
   // The port opens only once the identity keys have been fetched.
   await keys.reload();
   return {
-    identifyCaller: createTokenCallerCheck({
-      verify: createCallerIdentityVerifier({
-        audience: setting("SAFE_PROXY_AUDIENCE"),
-        keys,
-        maxTokenAgeSeconds: positiveInteger("SAFE_PROXY_MAX_TOKEN_AGE_SECONDS"),
-        now: Date.now,
-      }),
+    caller: googleCaller({
+      audience: setting("SAFE_PROXY_AUDIENCE"),
+      keys,
+      maxTokenAgeSeconds: positiveInteger("SAFE_PROXY_MAX_TOKEN_AGE_SECONDS"),
       callerEmails: {
         api: setting("SAFE_PROXY_API_CALLER"),
         cron: setting("SAFE_PROXY_CRON_CALLER"),
@@ -46,14 +40,14 @@ async function cloudRun() {
 // themselves.
 function local() {
   const listensOn = { hostname: "127.0.0.1", port: positiveInteger("SDP_SAFE_PROXY_PORT") };
-  return { identifyCaller: createLocalCallerCheck(listensOn), listensOn, revision: "local" };
+  return { caller: localCaller(listensOn), listensOn, revision: "local" };
 }
 
 // The one place the runtime is chosen: Cloud Run sets K_SERVICE on every container.
 const runtime = process.env.K_SERVICE === undefined ? local() : await cloudRun();
 
 const app = createApp({
-  identifyCaller: runtime.identifyCaller,
+  caller: runtime.caller,
   credentials: {
     fireblocks: {
       apiKey: setting("FIREBLOCKS_API_KEY"),

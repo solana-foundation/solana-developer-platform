@@ -1,17 +1,22 @@
 import { createHash, randomUUID } from "node:crypto";
-import { type CallerIdentity, CallerIdentityError } from "@sdp/metadata-server/receiver";
+import { CallerIdentityError, createCallerIdentityVerifier } from "@sdp/metadata-server/receiver";
 import { SAFE_PROXY_CALLERS, type SafeProxyCaller } from "@sdp/safe-proxy-endpoints/callers";
 import { matchEndpoint } from "@sdp/safe-proxy-endpoints/match";
 import { FROM_PROVIDER_HEADER, LOCAL_CALLER_HEADER } from "@sdp/safe-proxy-endpoints/protocol";
 import { SAFE_PROXY_PROVIDERS, type SafeProxyProvider } from "@sdp/safe-proxy-endpoints/providers";
-import { Hono } from "hono";
+import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
 import { type RequestIdVariables, requestId } from "hono/request-id";
-import { SignJWT } from "jose";
-import { badGateway, forbidden, notFound, serviceUnavailable, unauthorized } from "./errors";
-
-type IdentifyCaller = (headers: Headers) => Promise<SafeProxyCaller>;
+import { type JWTVerifyGetKey, SignJWT } from "jose";
+import {
+  badGateway,
+  forbidden,
+  notFound,
+  payloadTooLarge,
+  serviceUnavailable,
+  unauthorized,
+} from "./errors";
 
 export interface ProviderCredentials {
   fireblocks: { apiKey: string; privateKey: CryptoKey };
@@ -19,7 +24,8 @@ export interface ProviderCredentials {
 }
 
 export interface AppDependencies {
-  identifyCaller: IdentifyCaller;
+  // `googleCaller` on Cloud Run, `localCaller` anywhere else.
+  caller: MiddlewareHandler<AppEnv>;
   credentials: ProviderCredentials;
   fetch: typeof fetch;
   providerTimeoutMs: number;
@@ -40,7 +46,9 @@ export interface RequestLogLine {
   revision: string;
 }
 
-type AppEnv = { Variables: RequestIdVariables & { line: RequestLogLine } };
+type AppEnv = {
+  Variables: RequestIdVariables & { line: RequestLogLine; caller: SafeProxyCaller };
+};
 
 const MAX_BODY_BYTES = 1024 * 1024;
 
@@ -78,9 +86,16 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
   });
 
   // METHOD /<provider>/<the provider's own path and query>
-  app.all("/:provider/*", bodyLimit({ maxSize: MAX_BODY_BYTES }), async (c) => {
+  const bodyWithinLimit = bodyLimit({
+    maxSize: MAX_BODY_BYTES,
+    onError: () => {
+      throw payloadTooLarge();
+    },
+  });
+
+  app.all("/:provider/*", bodyWithinLimit, dependencies.caller, async (c) => {
     const line = c.get("line");
-    const caller = await dependencies.identifyCaller(c.req.raw.headers);
+    const caller = c.get("caller");
     line.caller = caller;
 
     const { pathname, search } = new URL(c.req.url);
@@ -152,37 +167,45 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
   return app;
 }
 
-// On Cloud Run: the caller is the service account its Google identity token names.
-export function createTokenCallerCheck(options: {
-  verify: (authorizationHeader: string | undefined) => Promise<CallerIdentity>;
+// On Cloud Run: the caller is the service account its Google identity token names. The token is
+// verified here as well as by Cloud Run.
+export function googleCaller(options: {
+  audience: string;
+  keys: JWTVerifyGetKey;
+  maxTokenAgeSeconds: number;
   callerEmails: Record<SafeProxyCaller, string>;
-}): IdentifyCaller {
-  return async (headers) => {
-    let identity: CallerIdentity;
-    try {
-      identity = await options.verify(headers.get("authorization") ?? undefined);
-    } catch (error) {
+}): MiddlewareHandler<AppEnv> {
+  const verify = createCallerIdentityVerifier({
+    audience: options.audience,
+    keys: options.keys,
+    maxTokenAgeSeconds: options.maxTokenAgeSeconds,
+    now: Date.now,
+  });
+  return async (c, next) => {
+    const identity = await verify(c.req.header("authorization")).catch((error: unknown) => {
       if (!(error instanceof CallerIdentityError)) throw error;
       throw error.code === "keys_unavailable" ? serviceUnavailable() : unauthorized();
-    }
+    });
     const caller = SAFE_PROXY_CALLERS.find((name) => options.callerEmails[name] === identity.email);
     if (caller === undefined) throw forbidden("caller_not_allowed");
-    return caller;
+    c.set("caller", caller);
+    await next();
   };
 }
 
 // Locally: the caller addresses the loopback address and port the proxy listens on, and names
 // itself.
-export function createLocalCallerCheck(listensOn: {
+export function localCaller(listensOn: {
   hostname: string;
   port: number;
-}): IdentifyCaller {
+}): MiddlewareHandler<AppEnv> {
   const host = `${listensOn.hostname}:${listensOn.port}`;
-  return async (headers) => {
-    const named = headers.get(LOCAL_CALLER_HEADER);
+  return async (c, next) => {
+    const named = c.req.header(LOCAL_CALLER_HEADER);
     const caller = SAFE_PROXY_CALLERS.find((name) => name === named);
-    if (headers.get("host") !== host || caller === undefined) throw unauthorized();
-    return caller;
+    if (c.req.header("host") !== host || caller === undefined) throw unauthorized();
+    c.set("caller", caller);
+    await next();
   };
 }
 
