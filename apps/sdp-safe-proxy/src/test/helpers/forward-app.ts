@@ -3,13 +3,7 @@ import { generateKeyPairSync } from "node:crypto";
 import type { TestContext } from "node:test";
 import type { SafeProxyCaller } from "@sdp/safe-proxy-endpoints/callers";
 import { createLocalJWKSet, importPKCS8, type JWTVerifyGetKey, SignJWT } from "jose";
-import {
-  type AppDependencies,
-  createApp,
-  googleCaller,
-  type ProviderCredentials,
-  type RequestLogLine,
-} from "@/app";
+import { type AppDependencies, createApp, googleCaller, type ProviderCredentials } from "@/app";
 
 const AUDIENCE = "https://safe-proxy.mock.invalid";
 const CALLER_EMAILS = {
@@ -83,10 +77,10 @@ async function identityToken(token: IdentityToken): Promise<string> {
     .sign(token === "forged" ? forgedKeys.privateKey : callerKeys.privateKey);
 }
 
-// Takes over the platform's `fetch` until the test ends, so build one app per test.
+// Takes over the platform's `fetch` and `console.log` until the test ends, so build one app per test.
 export function createForwardApp(t: TestContext, options: ForwardAppOptions = {}) {
   const calls: ProviderCall[] = [];
-  const logged: RequestLogLine[] = [];
+  const logged: object[] = [];
 
   const provider: typeof fetch = async (input, init) => {
     assert.ok(init, "the provider call carries its options");
@@ -101,6 +95,15 @@ export function createForwardApp(t: TestContext, options: ForwardAppOptions = {}
     return (options.answer ?? (() => new Response('{"id":"wallet-1"}')))(call);
   };
   t.mock.method(globalThis, "fetch", provider);
+  t.mock.method(console, "log", (text: unknown) => {
+    assert.ok(typeof text === "string", "a log line is written as text");
+    const line: unknown = JSON.parse(text);
+    assert.ok(typeof line === "object" && line !== null && "duration_ms" in line, "a log line");
+    // The duration is the one field a test cannot fix in advance.
+    const { duration_ms, ...rest } = line;
+    assert.equal(typeof duration_ms, "number");
+    logged.push(rest);
+  });
 
   const app = createApp({
     caller:
@@ -113,8 +116,6 @@ export function createForwardApp(t: TestContext, options: ForwardAppOptions = {}
       }),
     credentials: options.credentials ?? PLATFORM_CREDENTIALS,
     providerTimeoutMs: 10_000,
-    writeLog: (line) => logged.push(line),
-    revision: "sdp-safe-proxy-00042-abc",
   });
 
   async function send(path: string, request: ForwardRequest = {}): Promise<Response> {
@@ -124,6 +125,6 @@ export function createForwardApp(t: TestContext, options: ForwardAppOptions = {}
     return app.request(path, { method: request.method ?? "GET", headers, body: request.body });
   }
 
-  // `calls` holds every provider call as sent, `logged` every request log line as written.
+  // `calls` holds every provider call as sent, `logged` every request log line written to stdout.
   return { calls, logged, send };
 }

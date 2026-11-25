@@ -239,9 +239,7 @@ it("logs the request id, the endpoint's pattern and the outcome, never a path, b
   assert.ok(replacedId, "the proxy's own error carries a request id");
   assert.notEqual(replacedId, badlyShaped);
 
-  const lines = forwardApp.logged.map(({ duration_ms, ...line }) => line);
-  const revision = "sdp-safe-proxy-00042-abc";
-  assert.deepEqual(lines, [
+  assert.deepEqual(forwardApp.logged, [
     {
       request_id: "req-7d1",
       caller: "api",
@@ -249,7 +247,6 @@ it("logs the request id, the endpoint's pattern and the outcome, never a path, b
       endpoint: "POST /v1/wallets/{wallet}/rpc",
       error: null,
       status: 200,
-      revision,
     },
     {
       request_id: "req-7d1",
@@ -258,7 +255,6 @@ it("logs the request id, the endpoint's pattern and the outcome, never a path, b
       endpoint: "GET /v1/wallets",
       error: "caller_not_allowed",
       status: 403,
-      revision,
     },
     {
       request_id: replacedId,
@@ -267,7 +263,6 @@ it("logs the request id, the endpoint's pattern and the outcome, never a path, b
       endpoint: "GET /v1/vault/accounts_paged",
       error: "Error",
       status: 500,
-      revision,
     },
   ]);
 });
