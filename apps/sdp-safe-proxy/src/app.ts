@@ -131,7 +131,6 @@ export function createApp(dependencies: AppDependencies): Hono<AppEnv> {
       line.endpoint = `${endpoint.method} ${endpoint.path}`;
 
       if (!endpoint.callers.includes(caller)) throw new Refusal("caller_not_allowed");
-      if (endpoint.method === "GET" && body !== "") throw new Refusal("body_not_allowed");
 
       // Only the headers the endpoint declares are passed through; the auth is set last.
       const headers = new Headers();
