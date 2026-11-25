@@ -1,4 +1,5 @@
 import { scrubTelemetry } from "@sdp/redaction/scrub";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import pino from "pino";
 import type { SafeProxyCaller } from "./endpoints/callers";
 
@@ -6,7 +7,7 @@ export interface RequestLogLine {
   request_id: string;
   caller: SafeProxyCaller | null;
   provider: string | null;
-  cluster: string | null;
+  cluster: SolanaCluster | null;
   endpoint: string | null;
   error: string | null;
   status: number;
