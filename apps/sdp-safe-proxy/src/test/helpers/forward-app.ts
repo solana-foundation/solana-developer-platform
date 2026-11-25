@@ -5,7 +5,8 @@ import { createLocalJWKSet, importPKCS8, type JWTVerifyGetKey, SignJWT } from "j
 import { z } from "zod";
 import { type AppDependencies, createApp, type ProviderCredentials } from "@/app";
 import { SAFE_PROXY_CALLERS, type SafeProxyCaller } from "@/endpoints/callers";
-import { googleCaller, logger, type RequestLogLine } from "@/middleware";
+import { logger, type RequestLogLine } from "@/logger";
+import { googleCaller } from "@/middleware";
 
 const AUDIENCE = "https://safe-proxy.mock.invalid";
 const CALLER_EMAILS = {
