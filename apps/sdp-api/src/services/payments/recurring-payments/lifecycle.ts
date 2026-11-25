@@ -55,7 +55,7 @@ import { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
-import { createSigningService } from "@/services/domain/signing.service";
+import { createSigningService } from "@/services/custody/signing.service";
 import { resolveSolanaCounterpartyAccount } from "@/services/payments/counterparty-account-resolution";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import { isDefiniteSubmissionError } from "@/services/sponsorship-submission";

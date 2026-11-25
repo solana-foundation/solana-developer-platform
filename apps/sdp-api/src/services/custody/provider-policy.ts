@@ -5,8 +5,8 @@ import {
   inspectFireblocksPolicy,
   type PolicyResult,
   readFireblocksPolicy,
-} from "@sdp/custody/provisioning/fireblocks-policy";
-import { resolveFireblocksTransferAsset } from "@sdp/custody/provisioning/fireblocks-transfers";
+} from "@sdp/custody/providers/fireblocks/policy";
+import { resolveFireblocksTransferAsset } from "@sdp/custody/providers/fireblocks/transfers";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import type { ProviderPolicyCheck } from "@sdp/types/custody";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
@@ -15,7 +15,7 @@ import { mapWithConcurrency } from "@/lib/concurrency";
 import { getLogger } from "@/runtime/logger";
 import { createSystemAuditService } from "@/services/audit.service";
 import { createCredentialSecretStore } from "@/services/credential-secret-store";
-import { proposalRuntime } from "@/services/domain/signing/admitted-proposer";
+import { proposalRuntime } from "@/services/custody/signing/admitted-proposer";
 import {
   CustodyPolicyStore,
   type PolicyCheckScope,

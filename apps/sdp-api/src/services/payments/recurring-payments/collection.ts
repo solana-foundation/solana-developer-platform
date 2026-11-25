@@ -87,7 +87,7 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import { resolveSourceTokenAccountOrAta } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
-import { createSigningService } from "@/services/domain/signing.service";
+import { createSigningService } from "@/services/custody/signing.service";
 import { resolveSolanaCounterpartyAccount } from "@/services/payments/counterparty-account-resolution";
 import type { TransferSignedSubmissionStore } from "@/services/payments/signed-submission";
 import { loadPaymentMint, loadPaymentMintFacts } from "@/services/payments/token-amount";

@@ -21,7 +21,7 @@ import { describeError } from "@/runtime/money-path-events";
 import {
   ProposalAdmissionRefusedError,
   transferProposalIntentSchema,
-} from "@/services/domain/signing/admitted-proposer";
+} from "@/services/custody/signing/admitted-proposer";
 import { systemProposalLedger } from "@/services/jobs/proposal-recovery-ledger";
 import type {
   ProposalEventResult,

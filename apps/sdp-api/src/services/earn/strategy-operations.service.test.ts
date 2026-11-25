@@ -39,11 +39,11 @@ import * as catalogue from "@/routes/earn/strategy-catalogue";
 import {
   ProposalAdmissionRefusedError,
   ProposalNotSentError,
-} from "@/services/domain/signing/admitted-proposer";
+} from "@/services/custody/signing/admitted-proposer";
 import type {
   CustodyTransactionProposer,
   TransactionProposalObservation,
-} from "@/services/domain/signing/admitted-transaction-proposer";
+} from "@/services/custody/signing/admitted-transaction-proposer";
 import * as executionAudit from "@/services/operation-execution-audit.service";
 import * as operationServices from "@/services/operations.service";
 import * as signers from "@/services/solana/signer";

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { CustodyProposalRow } from "@/db/repositories/custody-proposals.repository";
 import type { PaymentsRepository } from "@/db/repositories/payments.repository";
-import { transferProposalIntentSchema } from "@/services/domain/signing/admitted-proposer";
+import { transferProposalIntentSchema } from "@/services/custody/signing/admitted-proposer";
 
 /** Versioned, nonsecret account binding; provider credentials are always read live. */
 export const fireblocksProposalBindingSchema = transferProposalIntentSchema

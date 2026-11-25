@@ -7,9 +7,9 @@ import type {
   CustodyProposalRecovery,
   CustodyTransferProposer,
   TransferProposalIntent,
-} from "@/services/domain/signing/admitted-proposer";
-import type { CustodyTransactionProposer } from "@/services/domain/signing/admitted-transaction-proposer";
-import { createSigningService } from "@/services/domain/signing.service";
+} from "@/services/custody/signing/admitted-proposer";
+import type { CustodyTransactionProposer } from "@/services/custody/signing/admitted-transaction-proposer";
+import { createSigningService } from "@/services/custody/signing.service";
 import type { Env } from "@/types/env";
 
 /**

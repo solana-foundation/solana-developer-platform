@@ -48,12 +48,12 @@ import { withIssuedTokenLabels } from "@/routes/payments/token-accounts";
 import { resolveIssuedTokenLabelsByMint } from "@/routes/payments/token-labels";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
-import { assertCustodyProviderCanDeleteWallet } from "@/services/custody-provider-lifecycle.service";
 import {
   CustodyRuntimeTargets,
   type CustodyRuntimeWalletProjection,
-} from "@/services/domain/signing/custody-runtime-target";
-import * as signingServiceModule from "@/services/domain/signing.service";
+} from "@/services/custody/signing/custody-runtime-target";
+import * as signingServiceModule from "@/services/custody/signing.service";
+import { assertCustodyProviderCanDeleteWallet } from "@/services/custody-provider-lifecycle.service";
 import {
   aggregateTrackedWalletBalances,
   attachDisplayValuesToBalanceMap,

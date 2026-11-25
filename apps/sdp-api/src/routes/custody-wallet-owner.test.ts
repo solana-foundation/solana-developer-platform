@@ -7,7 +7,7 @@ import { app } from "@/index";
 import { custodyWalletResponse } from "@/openapi/paths/responses";
 import { deriveCustodyWalletCreateRequestId } from "@/routes/custody/handlers/wallets";
 import * as custodyProvisioning from "@/services/custody/provisioning";
-import { privyWalletExternalId } from "@/services/domain/signing/provider-wallet-lifecycle";
+import { privyWalletExternalId } from "@/services/custody/signing/provider-wallet-lifecycle";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedTestCustodyRows } from "@/test/helpers/custody";

@@ -1,4 +1,4 @@
-import { FireblocksApiError } from "@sdp/custody/provisioning/fireblocks-http";
+import { FireblocksApiError } from "@sdp/custody/providers/fireblocks/http";
 import {
   type ByokCustodyProvider,
   isProviderCredentialCreationInProgress,

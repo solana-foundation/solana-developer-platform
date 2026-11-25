@@ -1,0 +1,68 @@
+/**
+ * DFNS Signing Adapter
+ *
+ * Wraps the internal DFNS signer to implement SigningPort.
+ */
+
+import type { Address } from "@solana/kit";
+import { BaseKeychainAdapter } from "#/providers/base-keychain.adapter";
+import { SigningError } from "#/signing";
+import { DFNS_PROVIDER_LABEL } from "./client";
+import type { KeychainDfnsConfig } from "./keychain-config";
+import { DfnsSigner } from "./signer";
+
+export class KeychainDfnsAdapter extends BaseKeychainAdapter {
+  // Widened from the "dfns" literal to `string` so the KeychainIbmHavenAdapter
+  // subclass can override providerId — tsc rejects the override otherwise, because
+  // the immediate parent narrows this readonly field to "dfns" (base is abstract `string`).
+  readonly providerId: string = "dfns";
+
+  /** Display label interpolated into signer error messages (overridden by white-label subclasses). */
+  protected readonly providerLabel: string = DFNS_PROVIDER_LABEL;
+
+  private readonly config: KeychainDfnsConfig;
+  private readonly signerByWalletId = new Map<string, Promise<DfnsSigner>>();
+
+  constructor(config: KeychainDfnsConfig) {
+    super();
+    this.config = config;
+  }
+
+  /**
+   * Get the underlying DFNS signer for direct use with @solana/kit.
+   */
+  async getTransactionSigner(walletId?: string, _walletPublicKey?: Address): Promise<DfnsSigner> {
+    return this.getDfnsSigner(walletId);
+  }
+
+  private async getDfnsSigner(walletId?: string): Promise<DfnsSigner> {
+    const normalizedWalletId = walletId ?? this.config.defaultWalletId;
+    if (!normalizedWalletId) {
+      throw new SigningError(
+        `${this.providerLabel} wallet ID is required`,
+        "PROVIDER_NOT_CONFIGURED"
+      );
+    }
+
+    const cacheKey = normalizedWalletId;
+    const existing = this.signerByWalletId.get(cacheKey);
+    if (existing) {
+      return existing;
+    }
+
+    const created = DfnsSigner.create({
+      client: this.config.client,
+      walletId: normalizedWalletId,
+      requestDelayMs: this.config.requestDelayMs,
+      providerLabel: this.providerLabel,
+    }).catch((error: unknown) => {
+      if (this.signerByWalletId.get(cacheKey) === created) {
+        this.signerByWalletId.delete(cacheKey);
+      }
+      throw error;
+    });
+
+    this.signerByWalletId.set(cacheKey, created);
+    return created;
+  }
+}

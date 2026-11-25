@@ -24,7 +24,7 @@ import { buildIdempotencyMetadata } from "@/routes/issuance/handlers/idempotency
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { rootLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
-import { SigningService } from "@/services/domain/signing.service";
+import { SigningService } from "@/services/custody/signing.service";
 import * as solanaSigner from "@/services/solana/signer";
 import { TokenService } from "@/services/token.service";
 import {

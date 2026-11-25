@@ -811,7 +811,7 @@ describe("value-moving authorization and replay conformance", () => {
 
   it("never loads or creates a stored local signing key in a managed deployment", async () => {
     const { createAdapterFromEncryptedConfig } = await import(
-      "@/services/domain/signing/provider-adapter-factory"
+      "@/services/custody/signing/provider-adapter-factory"
     );
     const localRecord = {
       id: "cfg_local",
@@ -847,7 +847,7 @@ describe("value-moving authorization and replay conformance", () => {
       createAdapterFromEncryptedConfig(selfHostedEnv, "org_1", localRecord, cipher)
     ).rejects.toThrow("decrypt reached");
 
-    const { SigningService } = await import("@/services/domain/signing.service");
+    const { SigningService } = await import("@/services/custody/signing.service");
     const configStore = { findActiveByProvider: vi.fn() };
     // SAFETY: initializeLocalSigning must refuse before its first store call;
     // the fake only records whether that call happened.

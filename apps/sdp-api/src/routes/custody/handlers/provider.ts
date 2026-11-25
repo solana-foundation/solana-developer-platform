@@ -1,4 +1,4 @@
-import { normalizePem } from "@sdp/custody/provisioning/common";
+import { normalizePem } from "@sdp/custody/shared/common";
 import { SigningError } from "@sdp/custody/signing";
 import { redactCredentialString } from "@sdp/redaction/credentials";
 import type { InitializeSigningResponse } from "@sdp/types/custody";
@@ -16,8 +16,8 @@ import { provisionFireblocksVaultAccount } from "@/services/custody/provisioning
 import {
   type FireblocksProviderConfig,
   parseConfigRecord,
-} from "@/services/domain/signing/provider-config";
-import { createSigningService } from "@/services/domain/signing.service";
+} from "@/services/custody/signing/provider-config";
+import { createSigningService } from "@/services/custody/signing.service";
 import { assertCustodySetupAdmitted } from "@/services/provider-availability.service";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 

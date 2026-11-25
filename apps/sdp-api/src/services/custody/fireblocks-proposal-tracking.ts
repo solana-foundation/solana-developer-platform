@@ -1,4 +1,4 @@
-import type { FireblocksProposalTracking } from "@sdp/custody/fireblocks-proposals";
+import type { FireblocksProposalTracking } from "@sdp/custody/providers/fireblocks/proposals";
 import { SigningError } from "@sdp/custody/signing";
 import { isFireblocksSignatureAccepted, isFireblocksSigningFinished } from "@sdp/types/fireblocks";
 import type { DatabaseExecutor } from "@/db/client";

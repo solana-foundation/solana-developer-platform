@@ -25,7 +25,7 @@ import * as moneyPathEvents from "@/runtime/money-path-events";
 import { ApiKeyService } from "@/services/api-key.service";
 import { AuditService } from "@/services/audit.service";
 import * as credentialSecretStore from "@/services/credential-secret-store";
-import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
+import { CustodyRuntimeTargets } from "@/services/custody/signing/custody-runtime-target";
 import { systemProposalLedger } from "@/services/jobs/proposal-recovery-ledger";
 import { reconcileFireblocksProposals } from "@/services/jobs/reconcile-fireblocks-proposals";
 import { reconcilePendingProposals } from "@/services/jobs/reconcile-pending-proposals";
@@ -185,7 +185,7 @@ const paymentApp = createApp({
   rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
 });
 let walletId: string;
-let createBody: import("@sdp/custody/provisioning/fireblocks-transfers").FireblocksTransferRequest;
+let createBody: import("@sdp/custody/providers/fireblocks/transfers").FireblocksTransferRequest;
 let providerStatus: string;
 let lostResponse = false;
 let readMissing = false;

@@ -8,7 +8,7 @@ import { getAuth, requireProjectId, walletAccessAllows } from "@/lib/auth";
 import { badRequest, conflict, notFound } from "@/lib/errors";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { AppContext } from "@/routes/payments/context";
-import type { DestinationState } from "@/services/domain/signing/admitted-proposer";
+import type { DestinationState } from "@/services/custody/signing/admitted-proposer";
 import { createOrgTransferProposerForCustodyWallet } from "@/services/solana/signer";
 
 /**

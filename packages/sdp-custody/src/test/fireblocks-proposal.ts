@@ -22,7 +22,7 @@ import {
   type TransactionPartialSigner,
 } from "@solana/kit";
 import { z } from "zod";
-import { KeychainFireblocksAdapter } from "#/keychain/keychain-fireblocks.adapter";
+import { KeychainFireblocksAdapter } from "#/providers/fireblocks/keychain.adapter";
 
 const rsa = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const proposalSchema = z

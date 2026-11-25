@@ -4,135 +4,160 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./dfns/client": {
-      "types": "./src/dfns/client.ts",
-      "import": "./src/dfns/client.ts",
-      "default": "./src/dfns/client.ts"
+    "./providers/dfns/client": {
+      "types": "./src/providers/dfns/client.ts",
+      "import": "./src/providers/dfns/client.ts",
+      "default": "./src/providers/dfns/client.ts"
     },
-    "./keychain/keychain-coinbase.adapter": {
-      "types": "./src/keychain/keychain-coinbase.adapter.ts",
-      "import": "./src/keychain/keychain-coinbase.adapter.ts",
-      "default": "./src/keychain/keychain-coinbase.adapter.ts"
+    "./providers/coinbase/keychain.adapter": {
+      "types": "./src/providers/coinbase/keychain.adapter.ts",
+      "import": "./src/providers/coinbase/keychain.adapter.ts",
+      "default": "./src/providers/coinbase/keychain.adapter.ts"
     },
-    "./keychain/keychain-dfns.adapter": {
-      "types": "./src/keychain/keychain-dfns.adapter.ts",
-      "import": "./src/keychain/keychain-dfns.adapter.ts",
-      "default": "./src/keychain/keychain-dfns.adapter.ts"
+    "./providers/dfns/keychain.adapter": {
+      "types": "./src/providers/dfns/keychain.adapter.ts",
+      "import": "./src/providers/dfns/keychain.adapter.ts",
+      "default": "./src/providers/dfns/keychain.adapter.ts"
     },
-    "./keychain/keychain-fireblocks.adapter": {
-      "types": "./src/keychain/keychain-fireblocks.adapter.ts",
-      "import": "./src/keychain/keychain-fireblocks.adapter.ts",
-      "default": "./src/keychain/keychain-fireblocks.adapter.ts"
+    "./providers/fireblocks/keychain.adapter": {
+      "types": "./src/providers/fireblocks/keychain.adapter.ts",
+      "import": "./src/providers/fireblocks/keychain.adapter.ts",
+      "default": "./src/providers/fireblocks/keychain.adapter.ts"
     },
-    "./keychain/keychain-ibm-haven.adapter": {
-      "types": "./src/keychain/keychain-ibm-haven.adapter.ts",
-      "import": "./src/keychain/keychain-ibm-haven.adapter.ts",
-      "default": "./src/keychain/keychain-ibm-haven.adapter.ts"
+    "./providers/ibm-haven/keychain.adapter": {
+      "types": "./src/providers/ibm-haven/keychain.adapter.ts",
+      "import": "./src/providers/ibm-haven/keychain.adapter.ts",
+      "default": "./src/providers/ibm-haven/keychain.adapter.ts"
     },
-    "./keychain/keychain-memory.adapter": {
-      "types": "./src/keychain/keychain-memory.adapter.ts",
-      "import": "./src/keychain/keychain-memory.adapter.ts",
-      "default": "./src/keychain/keychain-memory.adapter.ts"
+    "./providers/local/keychain.adapter": {
+      "types": "./src/providers/local/keychain.adapter.ts",
+      "import": "./src/providers/local/keychain.adapter.ts",
+      "default": "./src/providers/local/keychain.adapter.ts"
     },
-    "./keychain/keychain-para.adapter": {
-      "types": "./src/keychain/keychain-para.adapter.ts",
-      "import": "./src/keychain/keychain-para.adapter.ts",
-      "default": "./src/keychain/keychain-para.adapter.ts"
+    "./providers/para/keychain.adapter": {
+      "types": "./src/providers/para/keychain.adapter.ts",
+      "import": "./src/providers/para/keychain.adapter.ts",
+      "default": "./src/providers/para/keychain.adapter.ts"
     },
-    "./keychain/keychain-privy.adapter": {
-      "types": "./src/keychain/keychain-privy.adapter.ts",
-      "import": "./src/keychain/keychain-privy.adapter.ts",
-      "default": "./src/keychain/keychain-privy.adapter.ts"
+    "./providers/privy/keychain.adapter": {
+      "types": "./src/providers/privy/keychain.adapter.ts",
+      "import": "./src/providers/privy/keychain.adapter.ts",
+      "default": "./src/providers/privy/keychain.adapter.ts"
     },
-    "./keychain/keychain-turnkey.adapter": {
-      "types": "./src/keychain/keychain-turnkey.adapter.ts",
-      "import": "./src/keychain/keychain-turnkey.adapter.ts",
-      "default": "./src/keychain/keychain-turnkey.adapter.ts"
+    "./providers/turnkey/keychain.adapter": {
+      "types": "./src/providers/turnkey/keychain.adapter.ts",
+      "import": "./src/providers/turnkey/keychain.adapter.ts",
+      "default": "./src/providers/turnkey/keychain.adapter.ts"
     },
-    "./keychain/keychain-utila.adapter": {
-      "types": "./src/keychain/keychain-utila.adapter.ts",
-      "import": "./src/keychain/keychain-utila.adapter.ts",
-      "default": "./src/keychain/keychain-utila.adapter.ts"
+    "./providers/utila/keychain.adapter": {
+      "types": "./src/providers/utila/keychain.adapter.ts",
+      "import": "./src/providers/utila/keychain.adapter.ts",
+      "default": "./src/providers/utila/keychain.adapter.ts"
     },
-    "./keychain/utila-config": {
-      "types": "./src/keychain/utila-config.ts",
-      "import": "./src/keychain/utila-config.ts",
-      "default": "./src/keychain/utila-config.ts"
+    "./providers/utila/config": {
+      "types": "./src/providers/utila/config.ts",
+      "import": "./src/providers/utila/config.ts",
+      "default": "./src/providers/utila/config.ts"
     },
     "./provider-wallet-ids": {
       "types": "./src/provider-wallet-ids.ts",
       "import": "./src/provider-wallet-ids.ts",
       "default": "./src/provider-wallet-ids.ts"
     },
-    "./providers": {
-      "types": "./src/providers.ts",
-      "import": "./src/providers.ts",
-      "default": "./src/providers.ts"
+    "./capabilities": {
+      "types": "./src/capabilities.ts",
+      "import": "./src/capabilities.ts",
+      "default": "./src/capabilities.ts"
     },
-    "./provisioning": {
-      "types": "./src/provisioning/index.ts",
-      "import": "./src/provisioning/index.ts",
-      "default": "./src/provisioning/index.ts"
+    "./providers/fireblocks/provisioning": {
+      "types": "./src/providers/fireblocks/provisioning.ts",
+      "import": "./src/providers/fireblocks/provisioning.ts",
+      "default": "./src/providers/fireblocks/provisioning.ts"
     },
-    "./provisioning/anchorage": {
-      "types": "./src/provisioning/anchorage.ts",
-      "import": "./src/provisioning/anchorage.ts",
-      "default": "./src/provisioning/anchorage.ts"
+    "./providers/privy/provisioning": {
+      "types": "./src/providers/privy/provisioning.ts",
+      "import": "./src/providers/privy/provisioning.ts",
+      "default": "./src/providers/privy/provisioning.ts"
     },
-    "./provisioning/common": {
-      "types": "./src/provisioning/common.ts",
-      "import": "./src/provisioning/common.ts",
-      "default": "./src/provisioning/common.ts"
+    "./providers/coinbase/provisioning": {
+      "types": "./src/providers/coinbase/provisioning.ts",
+      "import": "./src/providers/coinbase/provisioning.ts",
+      "default": "./src/providers/coinbase/provisioning.ts"
     },
-    "./provisioning/runtime": {
-      "types": "./src/provisioning/runtime.ts",
-      "import": "./src/provisioning/runtime.ts",
-      "default": "./src/provisioning/runtime.ts"
+    "./providers/para/provisioning": {
+      "types": "./src/providers/para/provisioning.ts",
+      "import": "./src/providers/para/provisioning.ts",
+      "default": "./src/providers/para/provisioning.ts"
+    },
+    "./providers/turnkey/provisioning": {
+      "types": "./src/providers/turnkey/provisioning.ts",
+      "import": "./src/providers/turnkey/provisioning.ts",
+      "default": "./src/providers/turnkey/provisioning.ts"
+    },
+    "./providers/utila/provisioning": {
+      "types": "./src/providers/utila/provisioning.ts",
+      "import": "./src/providers/utila/provisioning.ts",
+      "default": "./src/providers/utila/provisioning.ts"
+    },
+    "./providers/anchorage/provisioning": {
+      "types": "./src/providers/anchorage/provisioning.ts",
+      "import": "./src/providers/anchorage/provisioning.ts",
+      "default": "./src/providers/anchorage/provisioning.ts"
+    },
+    "./shared/common": {
+      "types": "./src/shared/common.ts",
+      "import": "./src/shared/common.ts",
+      "default": "./src/shared/common.ts"
+    },
+    "./shared/runtime": {
+      "types": "./src/shared/runtime.ts",
+      "import": "./src/shared/runtime.ts",
+      "default": "./src/shared/runtime.ts"
     },
     "./signing": {
       "types": "./src/signing.ts",
       "import": "./src/signing.ts",
       "default": "./src/signing.ts"
     },
-    "./provisioning/fireblocks-address-book": {
-      "types": "./src/provisioning/fireblocks-address-book.ts",
-      "import": "./src/provisioning/fireblocks-address-book.ts",
-      "default": "./src/provisioning/fireblocks-address-book.ts"
+    "./providers/fireblocks/address-book": {
+      "types": "./src/providers/fireblocks/address-book.ts",
+      "import": "./src/providers/fireblocks/address-book.ts",
+      "default": "./src/providers/fireblocks/address-book.ts"
     },
-    "./provisioning/fireblocks-http": {
-      "types": "./src/provisioning/fireblocks-http.ts",
-      "import": "./src/provisioning/fireblocks-http.ts",
-      "default": "./src/provisioning/fireblocks-http.ts"
+    "./providers/fireblocks/http": {
+      "types": "./src/providers/fireblocks/http.ts",
+      "import": "./src/providers/fireblocks/http.ts",
+      "default": "./src/providers/fireblocks/http.ts"
     },
-    "./provisioning/fireblocks-transfers": {
-      "types": "./src/provisioning/fireblocks-transfers.ts",
-      "import": "./src/provisioning/fireblocks-transfers.ts",
-      "default": "./src/provisioning/fireblocks-transfers.ts"
+    "./providers/fireblocks/transfers": {
+      "types": "./src/providers/fireblocks/transfers.ts",
+      "import": "./src/providers/fireblocks/transfers.ts",
+      "default": "./src/providers/fireblocks/transfers.ts"
     },
-    "./provisioning/fireblocks-vaults": {
-      "types": "./src/provisioning/fireblocks-vaults.ts",
-      "import": "./src/provisioning/fireblocks-vaults.ts",
-      "default": "./src/provisioning/fireblocks-vaults.ts"
+    "./providers/fireblocks/vaults": {
+      "types": "./src/providers/fireblocks/vaults.ts",
+      "import": "./src/providers/fireblocks/vaults.ts",
+      "default": "./src/providers/fireblocks/vaults.ts"
     },
-    "./provisioning/fireblocks-credential": {
-      "types": "./src/provisioning/fireblocks-credential.ts",
-      "import": "./src/provisioning/fireblocks-credential.ts",
-      "default": "./src/provisioning/fireblocks-credential.ts"
+    "./providers/fireblocks/credential": {
+      "types": "./src/providers/fireblocks/credential.ts",
+      "import": "./src/providers/fireblocks/credential.ts",
+      "default": "./src/providers/fireblocks/credential.ts"
     },
-    "./fireblocks-proposals": {
-      "types": "./src/fireblocks-proposals.ts",
-      "import": "./src/fireblocks-proposals.ts",
-      "default": "./src/fireblocks-proposals.ts"
+    "./providers/fireblocks/proposals": {
+      "types": "./src/providers/fireblocks/proposals.ts",
+      "import": "./src/providers/fireblocks/proposals.ts",
+      "default": "./src/providers/fireblocks/proposals.ts"
     },
     "./testing/fireblocks-proposal": {
       "types": "./src/test/fireblocks-proposal.ts",
       "import": "./src/test/fireblocks-proposal.ts",
       "default": "./src/test/fireblocks-proposal.ts"
     },
-    "./provisioning/fireblocks-policy": {
-      "types": "./src/provisioning/fireblocks-policy.ts",
-      "import": "./src/provisioning/fireblocks-policy.ts",
-      "default": "./src/provisioning/fireblocks-policy.ts"
+    "./providers/fireblocks/policy": {
+      "types": "./src/providers/fireblocks/policy.ts",
+      "import": "./src/providers/fireblocks/policy.ts",
+      "default": "./src/providers/fireblocks/policy.ts"
     }
   },
   "imports": {

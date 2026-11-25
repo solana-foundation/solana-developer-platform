@@ -1,36 +1,46 @@
 import {
-  type ProvisionCoinbaseCdpOptions as CustodyProvisionCoinbaseCdpOptions,
-  type ProvisionFireblocksOptions as CustodyProvisionFireblocksOptions,
-  type ProvisionParaOptions as CustodyProvisionParaOptions,
-  type ProvisionPrivyOptions as CustodyProvisionPrivyOptions,
-  type ProvisionTurnkeyOptions as CustodyProvisionTurnkeyOptions,
-  type ProvisionUtilaOptions as CustodyProvisionUtilaOptions,
-  findPrivyWalletByExternalId as findPrivyWalletByExternalIdInCustody,
-  type ProvisionCoinbaseCdpResult,
-  type ProvisionFireblocksResult,
-  type ProvisionParaResult,
-  type ProvisionPrivyResult,
-  type ProvisionTurnkeyResult,
-  type ProvisionUtilaResult,
-  provisionCoinbaseCdpAccount as provisionCoinbaseCdpAccountInCustody,
-  provisionFireblocksVaultAccount as provisionFireblocksVaultAccountInCustody,
-  provisionParaWallet as provisionParaWalletInCustody,
-  provisionPrivyWallet as provisionPrivyWalletInCustody,
-  provisionTurnkeyPrivateKey as provisionTurnkeyPrivateKeyInCustody,
-  provisionUtilaWallet as provisionUtilaWalletInCustody,
-} from "@sdp/custody/provisioning";
-import {
   type DeleteAnchorageOptions as CustodyDeleteAnchorageOptions,
   type ProvisionAnchorageOptions as CustodyProvisionAnchorageOptions,
   deleteAnchorageWallet as deleteAnchorageWalletInCustody,
   type ProvisionAnchorageResult,
   provisionAnchorageWallet as provisionAnchorageWalletInCustody,
-} from "@sdp/custody/provisioning/anchorage";
+} from "@sdp/custody/providers/anchorage/provisioning";
+import {
+  type ProvisionCoinbaseCdpOptions as CustodyProvisionCoinbaseCdpOptions,
+  type ProvisionCoinbaseCdpResult,
+  provisionCoinbaseCdpAccount as provisionCoinbaseCdpAccountInCustody,
+} from "@sdp/custody/providers/coinbase/provisioning";
+import {
+  type ProvisionFireblocksOptions as CustodyProvisionFireblocksOptions,
+  type ProvisionFireblocksResult,
+  provisionFireblocksVaultAccount as provisionFireblocksVaultAccountInCustody,
+} from "@sdp/custody/providers/fireblocks/provisioning";
 import {
   getFireblocksVault as getFireblocksVaultInCustody,
   listFireblocksVaults as listFireblocksVaultsInCustody,
-} from "@sdp/custody/provisioning/fireblocks-vaults";
-import type { CustodyProvisioningRuntime } from "@sdp/custody/provisioning/runtime";
+} from "@sdp/custody/providers/fireblocks/vaults";
+import {
+  type ProvisionParaOptions as CustodyProvisionParaOptions,
+  type ProvisionParaResult,
+  provisionParaWallet as provisionParaWalletInCustody,
+} from "@sdp/custody/providers/para/provisioning";
+import {
+  type ProvisionPrivyOptions as CustodyProvisionPrivyOptions,
+  findPrivyWalletByExternalId as findPrivyWalletByExternalIdInCustody,
+  type ProvisionPrivyResult,
+  provisionPrivyWallet as provisionPrivyWalletInCustody,
+} from "@sdp/custody/providers/privy/provisioning";
+import {
+  type ProvisionTurnkeyOptions as CustodyProvisionTurnkeyOptions,
+  type ProvisionTurnkeyResult,
+  provisionTurnkeyPrivateKey as provisionTurnkeyPrivateKeyInCustody,
+} from "@sdp/custody/providers/turnkey/provisioning";
+import {
+  type ProvisionUtilaOptions as CustodyProvisionUtilaOptions,
+  type ProvisionUtilaResult,
+  provisionUtilaWallet as provisionUtilaWalletInCustody,
+} from "@sdp/custody/providers/utila/provisioning";
+import type { CustodyProvisioningRuntime } from "@sdp/custody/shared/runtime";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import type { PrivyCredentialAuthentication } from "@/services/custody/privy-credential";
 import type { Env } from "@/types/env";

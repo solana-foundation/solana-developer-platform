@@ -4,8 +4,8 @@ import {
   type FireblocksTransferRequest,
   readFireblocksTransfer,
   resolveFireblocksTransferAsset,
-} from "@sdp/custody/provisioning/fireblocks-transfers";
-import type { CustodyProvisioningRuntime } from "@sdp/custody/provisioning/runtime";
+} from "@sdp/custody/providers/fireblocks/transfers";
+import type { CustodyProvisioningRuntime } from "@sdp/custody/shared/runtime";
 import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { jwtVerify } from "jose";
 import { describe, expect, it, vi } from "vitest";

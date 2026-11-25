@@ -35,8 +35,8 @@ import { installOutboundDispatcher } from "@/runtime/outbound-dispatcher";
 import { installRpcTelemetrySink } from "@/runtime/rpc-telemetry";
 import { shutdown } from "@/runtime/shutdown-node";
 import { assertSigningProviderAllowed } from "@/services/adapters/signing";
+import { warnIfCustodySigningBudgetCapped } from "@/services/custody/signing/signing-timeout";
 import { assertCustodyEncryptionScheme } from "@/services/custody-cipher/cipher-router";
-import { warnIfCustodySigningBudgetCapped } from "@/services/domain/signing/signing-timeout";
 import type { Env } from "@/types/env";
 
 const DEFAULT_PORT = 8787;

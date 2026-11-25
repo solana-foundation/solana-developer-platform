@@ -3,7 +3,7 @@ import {
   createDfnsApiClient,
   createIbmHavenApiClient,
   type DfnsEnv,
-} from "@sdp/custody/dfns/client";
+} from "@sdp/custody/providers/dfns/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { required } from "@/test/helpers/required";
 
