@@ -344,6 +344,73 @@ describe("Earn core read contracts", () => {
     expect(next.data.hasMore).toBe(false);
   });
 
+  it.each([0, 1, 2, 5])(
+    "fills a mixed-source page after %i leading holdings close during hydration",
+    async (closedCount) => {
+      const walletId = await seedWallet();
+      const positions = [];
+      const ledger = createPostgresEarnMovementsRepository(getDb(env));
+      for (let index = 0; index < 5; index += 1) {
+        const position = await seedPosition({
+          reference: `paging-${index}`,
+          walletId: index % 2 === 0 ? walletId : undefined,
+          createdAt: `2026-11-18T0${5 - index}:00:00.000Z`,
+        });
+        await ledger.advanceVaultMovement({
+          movementId: position.movementId,
+          organizationId: tenant.org.id,
+          toStatus: "finalized",
+          confirmedAt: "2026-11-24T00:00:00.000Z",
+          settledAt: "2026-11-24T00:00:00.000Z",
+        });
+        positions.push(position);
+      }
+      readVaultPositions.mockImplementation(async (_runtime, input) =>
+        input.providerReferences.map((providerReference: string) => {
+          const closed = Number(providerReference.replace("paging-", "")) < closedCount;
+          return {
+            owner: input.owner,
+            providerReference,
+            cluster: "devnet",
+            tokenMint: TOKEN,
+            shareMint: SHARE,
+            shares: closed ? "0" : "2",
+            withdrawableShares: closed ? "0" : "2",
+            tokenValue: closed ? "0" : "10",
+          };
+        })
+      );
+
+      const response = await get("positions?limit=2");
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as { data: EarnPositionsResponse };
+      expect(body.data.positions.map((position) => position.id)).toEqual(
+        positions.slice(closedCount, closedCount + 2).map((position) => position.id)
+      );
+      expect(body.data.hasMore).toBe(closedCount + 2 < positions.length);
+      expect(body.data.nextCursor === null).toBe(!body.data.hasMore);
+      const scanned = readVaultPositions.mock.calls.flatMap((call) => call[1].providerReferences);
+      expect(scanned).toEqual(
+        Array.from({ length: Math.min(5, closedCount + 2) }, (_, index) => `paging-${index}`)
+      );
+      expect(readVaultPositions).toHaveBeenCalledTimes(
+        closedCount === 0 ? 1 : closedCount === 5 ? 3 : 2
+      );
+      const remaining: string[] = [];
+      let cursor = body.data.nextCursor;
+      while (cursor !== null) {
+        const next = await get(`positions?limit=2&before=${encodeURIComponent(cursor)}`);
+        expect(next.status).toBe(200);
+        const page = (await next.json()) as { data: EarnPositionsResponse };
+        if (page.data.hasMore) expect(page.data.positions).toHaveLength(2);
+        expect(page.data.nextCursor === null).toBe(!page.data.hasMore);
+        remaining.push(...page.data.positions.map((position) => position.id));
+        cursor = page.data.nextCursor;
+      }
+      expect(remaining).toEqual(positions.slice(closedCount + 2).map((position) => position.id));
+    }
+  );
+
   it("summarizes the complete scope with one hydration, preserving unknown totals", async () => {
     await seedPosition({ reference: "known" });
     await seedPosition({ reference: "unavailable" });

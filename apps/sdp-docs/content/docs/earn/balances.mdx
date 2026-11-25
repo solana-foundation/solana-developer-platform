@@ -29,7 +29,8 @@ with; the [position object](/docs/earn/api-overview#position) lists its fields. 
 in the project. See [position filters](/docs/reference/api/earn/list-earn-core-positions).
 
 Tracked holdings verified empty during a read are omitted from the list. Keep
-tracking outstanding withdrawals through their operations.
+tracking outstanding withdrawals through their operations. Pages fill any gaps:
+when `hasMore` is true, the page contains `limit` holdings and a `nextCursor`.
 
 ## Read one position
 

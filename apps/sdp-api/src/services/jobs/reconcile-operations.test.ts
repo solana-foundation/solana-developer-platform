@@ -2,13 +2,16 @@ import { runInClusterScope } from "@sdp/rpc/scope";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OperationScope } from "@/db/repositories/operations.repository";
 import { conflict } from "@/lib/errors";
+import { getLogger } from "@/runtime/logger";
 import { OPERATION_WORKER_BUDGET_MS } from "@/services/earn/operation-worker-budget";
+import * as strategyOperations from "@/services/earn/strategy-operations.service";
+import * as operationsService from "@/services/operations.service";
+import * as operationsPrincipal from "@/services/operations-principal";
 import { deferred } from "@/test/helpers/deferred";
 import { env } from "@/test/helpers/env";
 import { reconcileOperations } from "@/test/helpers/reconcile-operations";
-import type { Env } from "@/types/env";
 
-const mocks = vi.hoisted(() => ({
+const mocks = {
   candidates: vi.fn(),
   claim: vi.fn(),
   advance: vi.fn(),
@@ -17,48 +20,35 @@ const mocks = vi.hoisted(() => ({
   getAttempt: vi.fn(),
   transition: vi.fn(),
   log: vi.fn(),
-}));
-vi.mock("@/services/operations.service", () => ({
-  createOperationsService: () => ({
-    repository: {
-      claimRecovery: mocks.claim,
-      claimNextRecovery: async () => {
-        const candidate = (await mocks.candidates()).shift();
-        if (candidate === undefined) return null;
-        const scope: OperationScope = {
-          organizationId: candidate.organizationId,
-          projectId: candidate.projectId,
-          environment: "sandbox",
-        };
-        return { scope, claim: await mocks.claim(scope, candidate.id) };
-      },
-      releaseRecovery: mocks.release,
-      get: mocks.get,
-      getAttempt: mocks.getAttempt,
-    },
-    transition: mocks.transition,
-  }),
-}));
-vi.mock("@/services/earn/strategy-operations.service", () => ({
-  advanceEarnOperation: mocks.advance,
-  isTerminalOperation: (operation: { status: string }) =>
-    ["completed", "failed", "cancelled"].includes(operation.status),
-}));
-vi.mock("@/services/operations-principal", () => ({
-  runAsRecordedOperationPrincipal: (
-    _env: Env,
-    _scope: OperationScope,
-    _claim: unknown,
-    work: () => Promise<void>
-  ) => work(),
-}));
-vi.mock("@/runtime/logger", () => ({ getLogger: () => ({ error: mocks.log }) }));
+};
 
 let now: number;
 const scoped = () =>
   runInClusterScope({ projectId: null, environment: "sandbox" }, () => reconcileOperations(env));
 beforeEach(() => {
   vi.resetAllMocks();
+  const service = operationsService.createOperationsService(env);
+  vi.spyOn(service.repository, "claimRecovery").mockImplementation(mocks.claim);
+  vi.spyOn(service.repository, "claimNextRecovery").mockImplementation(async () => {
+    const candidate = (await mocks.candidates()).shift();
+    if (candidate === undefined) return null;
+    const scope: OperationScope = {
+      organizationId: candidate.organizationId,
+      projectId: candidate.projectId,
+      environment: "sandbox",
+    };
+    return { scope, claim: await mocks.claim(scope, candidate.id) };
+  });
+  vi.spyOn(service.repository, "releaseRecovery").mockImplementation(mocks.release);
+  vi.spyOn(service.repository, "get").mockImplementation(mocks.get);
+  vi.spyOn(service.repository, "getAttempt").mockImplementation(mocks.getAttempt);
+  vi.spyOn(service, "transition").mockImplementation(mocks.transition);
+  vi.spyOn(operationsService, "createOperationsService").mockReturnValue(service);
+  vi.spyOn(strategyOperations, "advanceEarnOperation").mockImplementation(mocks.advance);
+  vi.spyOn(operationsPrincipal, "runAsRecordedOperationPrincipal").mockImplementation(
+    (_env, _scope, _claim, work) => work()
+  );
+  vi.spyOn(getLogger(), "error").mockImplementation(mocks.log);
   now = 1_000;
   vi.spyOn(Date, "now").mockImplementation(() => now);
   mocks.candidates.mockResolvedValue(

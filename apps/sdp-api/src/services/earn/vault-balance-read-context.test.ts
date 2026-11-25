@@ -1,27 +1,19 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { runInClusterScope } from "@sdp/rpc/scope";
+import * as solanaRpc from "@sdp/rpc/solana";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getDb } from "@/db/client";
+import * as movementsRepository from "@/db/repositories/earn-movements.repository";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
-import type { Env } from "@/types/env";
+import { env } from "@/test/helpers/env";
 import {
   FINALIZED_SIGNATURE_STATUS_TTL_MS,
   resetFinalizedSignatureStatuses,
   resolveVaultBalanceReadContext,
 } from "./vault-balance-read-context";
 
-const mocks = vi.hoisted(() => ({ movements: vi.fn(), statuses: vi.fn() }));
-vi.mock("@/db/client", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/db/client")>()),
-  getDb: vi.fn(),
-}));
-vi.mock("@/db/repositories/earn-movements.repository", () => ({
-  createPostgresEarnMovementsRepository: () => ({ getMovementsByIds: mocks.movements }),
-}));
-vi.mock("@sdp/rpc/solana", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/rpc/solana")>()),
-  getSignatureStatuses: mocks.statuses,
-}));
+const mocks = { movements: vi.fn(), statuses: vi.fn() };
 const input = {
   movementIds: ["one", "two", "three"],
   organizationId: "org",
@@ -44,7 +36,7 @@ function resolveInScope(
   environment: SdpEnvironment
 ) {
   return runInClusterScope({ projectId: readInput.projectId, environment }, () =>
-    resolveVaultBalanceReadContext({} as Env, readInput)
+    resolveVaultBalanceReadContext(env, readInput)
   );
 }
 
@@ -54,11 +46,18 @@ installClusterRpcStub();
 beforeEach(() => {
   vi.clearAllMocks();
   resetFinalizedSignatureStatuses();
+  const repository = movementsRepository.createPostgresEarnMovementsRepository(getDb(env));
+  vi.spyOn(repository, "getMovementsByIds").mockImplementation(mocks.movements);
+  vi.spyOn(movementsRepository, "createPostgresEarnMovementsRepository").mockReturnValue(
+    repository
+  );
+  vi.spyOn(solanaRpc, "getSignatureStatuses").mockImplementation(mocks.statuses);
   mocks.movements.mockImplementation(async ({ movementIds }: { movementIds: readonly string[] }) =>
     movementIds.map((id) => ({ ...movement, id }))
   );
   mocks.statuses.mockResolvedValue([status(100n), status(103n), status(102n)]);
 });
+afterEach(() => vi.restoreAllMocks());
 
 describe("vault balance confirmation context", () => {
   it("uses the highest confirmed slot across repeated or offsetting movements", async () => {
