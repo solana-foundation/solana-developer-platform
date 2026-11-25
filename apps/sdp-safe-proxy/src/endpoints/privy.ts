@@ -1,4 +1,4 @@
-import type { AllowedEndpoint, ProviderDeclaration } from "./endpoint";
+import { type AllowedEndpoint, type ProviderDeclaration, token } from "./endpoint";
 
 const listWallets: AllowedEndpoint = {
   method: "GET",
@@ -12,7 +12,7 @@ const listWallets: AllowedEndpoint = {
 const readWallet: AllowedEndpoint = {
   method: "GET",
   path: "/v1/wallets/{wallet}",
-  parameters: { wallet: { format: "token" } },
+  parameters: { wallet: token },
   query: [],
   callers: ["api", "cron"],
   requestHeaders: [],
@@ -30,7 +30,7 @@ const createWallet: AllowedEndpoint = {
 const signTransaction: AllowedEndpoint = {
   method: "POST",
   path: "/v1/wallets/{wallet}/rpc",
-  parameters: { wallet: { format: "token" } },
+  parameters: { wallet: token },
   query: [],
   callers: ["api", "cron"],
   requestHeaders: [],
@@ -40,7 +40,7 @@ const signTransaction: AllowedEndpoint = {
 const signMessage: AllowedEndpoint = {
   method: "POST",
   path: "/v1/wallets/{wallet}/rpc",
-  parameters: { wallet: { format: "token" } },
+  parameters: { wallet: token },
   query: [],
   callers: ["api", "cron"],
   requestHeaders: [],

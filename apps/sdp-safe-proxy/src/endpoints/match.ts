@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { AllowedEndpoint, BodyRule, PathParameter } from "./endpoint";
+import type { AllowedEndpoint, BodyRule } from "./endpoint";
 import { SAFE_PROXY_PROVIDERS, type SafeProxyProvider } from "./providers";
 
 export interface ProviderRequest {
@@ -18,14 +18,9 @@ export type MatchResult =
 
 type PatternSegment =
   | { is: "literal"; value: string }
-  | { is: "parameter"; parameter: PathParameter };
+  | { is: "parameter"; parameter: z.ZodType<string> };
 
 const segmentsSchema = z.array(z.string().regex(/^[A-Za-z0-9_-]+$/));
-
-const FORMAT_PATTERNS = {
-  digits: /^[0-9]{1,100}$/,
-  token: /^[A-Za-z0-9_-]{1,255}$/,
-} as const satisfies Record<Exclude<PathParameter["format"], "one_of">, RegExp>;
 
 function pathSegments(path: string): string[] | null {
   if (!path.startsWith("/")) return null;
@@ -45,16 +40,10 @@ function patternSegments(endpoint: AllowedEndpoint): PatternSegment[] {
     });
 }
 
-function parameterAccepts(parameter: PathParameter, segment: string): boolean {
-  return parameter.format === "one_of"
-    ? parameter.values.includes(segment)
-    : FORMAT_PATTERNS[parameter.format].test(segment);
-}
-
 function segmentAccepts(pattern: PatternSegment, segment: string): boolean {
   return pattern.is === "literal"
     ? pattern.value === segment
-    : parameterAccepts(pattern.parameter, segment);
+    : pattern.parameter.safeParse(segment).success;
 }
 
 const querySchema = z

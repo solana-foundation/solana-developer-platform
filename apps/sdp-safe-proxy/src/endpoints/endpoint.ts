@@ -1,9 +1,8 @@
+import { z } from "zod";
 import type { SafeProxyCaller } from "./callers";
 
-export type PathParameter =
-  | { format: "digits" }
-  | { format: "token" }
-  | { format: "one_of"; values: readonly [string, ...string[]] };
+export const digits = z.string().regex(/^[0-9]{1,100}$/);
+export const token = z.string().regex(/^[A-Za-z0-9_-]{1,255}$/);
 
 export interface BodyRule {
   field: string;
@@ -13,7 +12,7 @@ export interface BodyRule {
 export interface AllowedEndpoint {
   method: "GET" | "POST";
   path: string;
-  parameters: Readonly<Record<string, PathParameter>>;
+  parameters: Readonly<Record<string, z.ZodType<string>>>;
   query: readonly string[];
   callers: readonly [SafeProxyCaller, ...SafeProxyCaller[]];
   requestHeaders: readonly string[];

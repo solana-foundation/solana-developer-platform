@@ -1,13 +1,12 @@
-import type { AllowedEndpoint, PathParameter, ProviderDeclaration } from "./endpoint";
+import { z } from "zod";
+import { type AllowedEndpoint, digits, type ProviderDeclaration, token } from "./endpoint";
 
-const VAULT = { format: "digits" } as const satisfies PathParameter;
-const ASSET = { format: "one_of", values: ["SOL", "SOL_TEST"] } as const satisfies PathParameter;
-const TRANSACTION = { format: "token" } as const satisfies PathParameter;
+const ASSET = z.enum(["SOL", "SOL_TEST"]);
 
 const readVaultAddresses: AllowedEndpoint = {
   method: "GET",
   path: "/v1/vault/accounts/{vault}/{asset}/addresses_paginated",
-  parameters: { vault: VAULT, asset: ASSET },
+  parameters: { vault: digits, asset: ASSET },
   query: ["limit"],
   callers: ["api", "cron"],
   requestHeaders: [],
@@ -25,7 +24,7 @@ const listVaults: AllowedEndpoint = {
 const readVault: AllowedEndpoint = {
   method: "GET",
   path: "/v1/vault/accounts/{vault}",
-  parameters: { vault: VAULT },
+  parameters: { vault: digits },
   query: [],
   callers: ["api"],
   requestHeaders: [],
@@ -61,7 +60,7 @@ const listInternalWallets: AllowedEndpoint = {
 const readTransaction: AllowedEndpoint = {
   method: "GET",
   path: "/v1/transactions/{transaction}",
-  parameters: { transaction: TRANSACTION },
+  parameters: { transaction: token },
   query: [],
   callers: ["api", "cron"],
   requestHeaders: [],
@@ -70,7 +69,7 @@ const readTransaction: AllowedEndpoint = {
 const readTransactionByExternalId: AllowedEndpoint = {
   method: "GET",
   path: "/v1/transactions/external_tx_id/{externalTxId}",
-  parameters: { externalTxId: { format: "token" } },
+  parameters: { externalTxId: token },
   query: [],
   callers: ["api", "cron"],
   requestHeaders: [],
@@ -88,7 +87,7 @@ const createVault: AllowedEndpoint = {
 const activateVaultAsset: AllowedEndpoint = {
   method: "POST",
   path: "/v1/vault/accounts/{vault}/{asset}",
-  parameters: { vault: VAULT, asset: ASSET },
+  parameters: { vault: digits, asset: ASSET },
   query: [],
   callers: ["api"],
   requestHeaders: ["idempotency-key"],
@@ -97,7 +96,7 @@ const activateVaultAsset: AllowedEndpoint = {
 const cancelTransaction: AllowedEndpoint = {
   method: "POST",
   path: "/v1/transactions/{transaction}/cancel",
-  parameters: { transaction: TRANSACTION },
+  parameters: { transaction: token },
   query: [],
   callers: ["api", "cron"],
   requestHeaders: [],
