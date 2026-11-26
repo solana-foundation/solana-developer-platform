@@ -2506,6 +2506,10 @@ describe("Issuance Routes", () => {
       );
       expect(match.status).toBe(200);
       const matchBody = await match.json();
+      // The filter must match the seeded token: an empty page would make the
+      // every() below vacuous and indistinguishable from the miss case.
+      expect(matchBody.meta.total).toBeGreaterThan(0);
+      expect(matchBody.data[0].name).toBe("Listed Token");
       expect(matchBody.data.length).toBe(matchBody.meta.total);
       expect(matchBody.data.every((token: { name: string }) => token.name === "Listed Token")).toBe(
         true
