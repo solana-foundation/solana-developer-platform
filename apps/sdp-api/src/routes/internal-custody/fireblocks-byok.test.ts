@@ -14,7 +14,7 @@ import { createCredentialSecretStore } from "@/services/credential-secret-store"
 import { trackFireblocksProposals } from "@/services/custody/fireblocks-proposal-tracking";
 import { eraseExpiredFireblocksCsrs } from "@/services/custody/fireblocks-registration.service";
 import { checkDueProviderPolicies } from "@/services/custody/provider-policy";
-import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
+import { CustodyRuntimeTargets } from "@/services/custody/signing/custody-runtime-target";
 import { reconcileFireblocksProposals } from "@/services/jobs/reconcile-fireblocks-proposals";
 import { ProviderCredentialSecretCleanupStore } from "@/services/stores/provider-credential-secret-cleanup.store";
 import { inSandboxScope } from "@/test/helpers/cluster-rpc";
@@ -51,7 +51,6 @@ const testEnv: Env = {
   SDP_DEPLOYMENT_MODE: "self_hosted",
   CREDENTIAL_SECRET_STORE_BACKEND: "encrypted_db",
   CUSTODY_ENCRYPTION_KEY: Buffer.alloc(32, 11).toString("base64"),
-  FIREBLOCKS_API_BASE_URL: "https://fireblocks.example.test",
   FIREBLOCKS_API_KEY: "deployment-key-must-not-be-used",
   FIREBLOCKS_API_SECRET: "deployment-secret-must-not-be-used",
 };
@@ -206,7 +205,7 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
     await inSandboxScope(() => checkDueProviderPolicies(testEnv));
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(fetch).toHaveBeenCalledWith(
-      `${testEnv.FIREBLOCKS_API_BASE_URL}/v1/vault/accounts/0/SOL_TEST/addresses_paginated`,
+      "https://sandbox-api.fireblocks.io/v1/vault/accounts/0/SOL_TEST/addresses_paginated",
       expect.objectContaining({
         method: "GET",
         headers: expect.objectContaining({ "X-API-Key": fields.apiKey }),
@@ -397,7 +396,7 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
     const fetch = providerResponse();
     await connect(`${PROJECT_ID}_production`);
     expect(String(required(fetch.mock.calls[0])[0])).toBe(
-      `${testEnv.FIREBLOCKS_API_BASE_URL}/v1/vault/accounts/0/SOL/addresses_paginated`
+      "https://api.fireblocks.io/v1/vault/accounts/0/SOL/addresses_paginated"
     );
     for (const extra of [
       { apiBaseUrl: "https://other.invalid" },
@@ -627,15 +626,17 @@ describe("Fireblocks BYOK lifecycle on experimental", () => {
       .mockResolvedValueOnce(Response.json({}))
       .mockResolvedValueOnce(Response.json({ addresses: [{ address: OTHER_ADDRESS }] }));
     const resolver = new CustodyRuntimeTargets(getDb(env), testEnv, new Map());
-    const wallet = await resolver.createConnectionWallet({
-      auditContext,
-      creationReason: "wallet_api",
-      organizationId: ORGANIZATION_ID,
-      projectId: PROJECT_ID,
-      connectionId: connected.connectionId,
-      label: "Operations",
-      purpose: "transfer",
-    });
+    const wallet = await inSandboxScope(() =>
+      resolver.createConnectionWallet({
+        auditContext,
+        creationReason: "wallet_api",
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        connectionId: connected.connectionId,
+        label: "Operations",
+        purpose: "transfer",
+      })
+    );
     expect(wallet).toMatchObject({
       walletId: "fb_42",
       publicKey: OTHER_ADDRESS,
@@ -837,7 +838,7 @@ describe("Fireblocks CSR security", () => {
 });
 
 describe("Fireblocks vault discovery and selection", () => {
-  it("lists named Solana vaults with a CSR-authenticated request and keeps pagination on the configured host", async () => {
+  it("lists named Solana vaults with a CSR-authenticated request and keeps pagination on the Fireblocks host", async () => {
     const csr = (await (await request("/fireblocks/csr")).json()).data.csr.csrPem;
     const publicKey = execFileSync("openssl", ["req", "-pubkey", "-noout"], {
       input: csr,
@@ -845,7 +846,7 @@ describe("Fireblocks vault discovery and selection", () => {
     });
     const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = new URL(String(input));
-      expect(url.origin).toBe(testEnv.FIREBLOCKS_API_BASE_URL);
+      expect(url.origin).toBe("https://sandbox-api.fireblocks.io");
       expect(url.pathname).toBe("/v1/vault/accounts_paged");
       expect(url.searchParams.get("assetId")).toBe("SOL_TEST");
       expect(url.searchParams.get("limit")).toBe("50");

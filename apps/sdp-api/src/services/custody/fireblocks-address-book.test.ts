@@ -1,4 +1,4 @@
-import { invalidateFireblocksAddressBook } from "@sdp/custody/provisioning/fireblocks-address-book";
+import { invalidateFireblocksAddressBook } from "@sdp/custody/providers/fireblocks/address-book";
 import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { Hono } from "hono";
@@ -42,7 +42,6 @@ const testEnv: Env = {
   SDP_DEPLOYMENT_MODE: "self_hosted",
   CREDENTIAL_SECRET_STORE_BACKEND: "encrypted_db",
   CUSTODY_ENCRYPTION_KEY: Buffer.alloc(32, 11).toString("base64"),
-  FIREBLOCKS_API_BASE_URL: "https://fireblocks.example.test",
   FIREBLOCKS_API_KEY: "deployment-key-must-not-be-used",
   FIREBLOCKS_API_SECRET: "deployment-secret-must-not-be-used",
 };
@@ -237,11 +236,7 @@ async function bookRequest(overrides = {}, projectId = PROJECT_ID) {
   );
 }
 function expireBook() {
-  invalidateFireblocksAddressBook({
-    apiKey: fields.apiKey,
-    apiSecretPem: "unused",
-    apiBaseUrl: testEnv.FIREBLOCKS_API_BASE_URL,
-  });
+  invalidateFireblocksAddressBook({ apiKey: fields.apiKey, apiSecretPem: "unused" });
 }
 describe("Fireblocks read-only address book", () => {
   it("shares two reads, recognizes internal whitelist entries and matches the exact network", async () => {

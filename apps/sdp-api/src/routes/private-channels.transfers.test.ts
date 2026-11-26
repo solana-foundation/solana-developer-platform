@@ -1,4 +1,4 @@
-import { KeychainPrivyAdapter } from "@sdp/custody/keychain/keychain-privy.adapter";
+import { KeychainPrivyAdapter } from "@sdp/custody/providers/privy/keychain.adapter";
 import { hashString } from "@sdp/payments/hash";
 import type { PrivateChannelTransfer } from "@sdp/types/private-channels";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";

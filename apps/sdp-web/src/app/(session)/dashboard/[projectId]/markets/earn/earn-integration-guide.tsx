@@ -2,6 +2,7 @@
 
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { EarnStrategy } from "@sdp/types/earn";
+import { SOLANA_CLUSTER_LABELS } from "@sdp/types/well-known-tokens";
 import { Button } from "@sdp/ui/button";
 import { Callout } from "@sdp/ui/callout";
 import { ListEmptyState } from "@sdp/ui/list-empty-state";
@@ -21,12 +22,7 @@ import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { useCopy } from "@/lib/use-copy";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useEarnStrategies } from "./earn-data";
-import {
-  type EarnDepositAvailabilityLabels,
-  earnDepositAvailabilityLabel,
-  earnProviderLabel,
-  earnStrategyLiquidityLabel,
-} from "./earn-format";
+import { earnProviderLabel, earnStrategyLiquidityLabel } from "./earn-format";
 import {
   buildEarnIntegrationSections,
   buildEarnServerIntegration,
@@ -85,34 +81,25 @@ const GUIDE_SECTIONS = [
   descriptionKey: MessageKey;
 }>;
 
-const PROGRAM_AVAILABILITY_LABELS = {
-  available: "DashboardMarkets.embeddedYield.sandboxReady",
-  cluster_unavailable: "DashboardMarkets.embeddedYield.clusterUnavailable",
-  strategy_unavailable: "DashboardMarkets.embeddedYield.unavailable",
-  environment_unavailable: "DashboardMarkets.embeddedYield.productionUnavailable",
-  access_unavailable: "DashboardMarkets.embeddedYield.accessUnavailable",
-  provider_unavailable: "DashboardMarkets.embeddedYield.providerUnavailable",
-  production_only: "DashboardMarkets.embeddedYield.sandboxUnavailable",
-} as const satisfies EarnDepositAvailabilityLabels;
+/** Why this project cannot fund a strategy, said under the picker while its code stays shown. */
+const UNAVAILABLE_DESCRIPTIONS = {
+  cluster_unavailable: "DashboardMarkets.embeddedYield.unavailableClusterDescription",
+  strategy_unavailable: "DashboardMarkets.embeddedYield.unavailableStrategyDescription",
+  environment_unavailable: "DashboardMarkets.embeddedYield.unavailableEnvironmentDescription",
+  access_unavailable: "DashboardMarkets.embeddedYield.unavailableAccessDescription",
+  provider_not_entitled: "DashboardMarkets.embeddedYield.unavailableNotOnPlanDescription",
+  provider_not_configured: "DashboardMarkets.embeddedYield.unavailableNotConfiguredDescription",
+  provider_disabled: "DashboardMarkets.embeddedYield.unavailableStrategyDescription",
+} as const satisfies Record<Exclude<EarnVaultDepositAvailability, "available">, MessageKey>;
 
 function unavailableDescriptionKey(
-  availability: EarnVaultDepositAvailability,
+  availability: Exclude<EarnVaultDepositAvailability, "available">,
   provider: string
 ): MessageKey {
-  switch (availability) {
-    case "cluster_unavailable":
-      return "DashboardMarkets.embeddedYield.unavailableClusterDescription";
-    case "environment_unavailable":
-      return earnVaultDepositOnlyEnvironment(provider) === "production"
-        ? "DashboardMarkets.embeddedYield.unavailableEnvironmentProductionDescription"
-        : "DashboardMarkets.embeddedYield.unavailableEnvironmentDescription";
-    case "access_unavailable":
-      return "DashboardMarkets.embeddedYield.unavailableAccessDescription";
-    case "provider_unavailable":
-      return "DashboardMarkets.embeddedYield.unavailableProviderDescription";
-    default:
-      return "DashboardMarkets.embeddedYield.unavailableStrategyDescription";
-  }
+  return availability === "environment_unavailable" &&
+    earnVaultDepositOnlyEnvironment(provider) === "production"
+    ? "DashboardMarkets.embeddedYield.unavailableEnvironmentProductionDescription"
+    : UNAVAILABLE_DESCRIPTIONS[availability];
 }
 
 /**
@@ -158,18 +145,17 @@ export function EarnIntegrationGuide({
   );
   if (isLoading) return <EarnIntegrationGuideSkeleton />;
 
-  const options = (strategies ?? []).map((strategy) => {
-    const availability = earnVaultDepositAvailability(strategy, sdpEnvironment, providerAccess);
-    return { availability, selectable: availability === "available", strategy };
-  });
+  const options = (strategies ?? []).map((strategy) => ({
+    availability: earnVaultDepositAvailability(strategy, sdpEnvironment, providerAccess),
+    strategy,
+  }));
   const requestedStrategy = options.find(({ strategy }) => strategy.id === selectedStrategyId);
+  // With no choice made, open on the first strategy this project can fund, else the first listed.
   const selectedOption =
     requestedStrategy ??
-    (selectedStrategyId === null ? options.find(({ selectable }) => selectable) : undefined);
-  const selectionIssue =
-    selectedOption && !selectedOption.selectable
-      ? unavailableDescriptionKey(selectedOption.availability, selectedOption.strategy.provider)
-      : undefined;
+    (selectedStrategyId === null
+      ? (options.find(({ availability }) => availability === "available") ?? options.at(0))
+      : undefined);
   const initialStrategyMissing = Boolean(initialStrategyId && !requestedStrategy);
 
   // The way back and the title are the shell's; the page opens with what the integration does.
@@ -190,7 +176,6 @@ export function EarnIntegrationGuide({
           onStrategyChange={setSelectedStrategyId}
           options={options}
           selectedOption={selectedOption}
-          selectionIssue={selectionIssue}
         />
       </div>
     </DashboardWorkspaceOverviewPanel>
@@ -199,7 +184,6 @@ export function EarnIntegrationGuide({
 
 type StrategyOption = {
   availability: EarnVaultDepositAvailability;
-  selectable: boolean;
   strategy: EarnStrategy;
 };
 
@@ -213,7 +197,6 @@ function CatalogueContent({
   onStrategyChange,
   options,
   selectedOption,
-  selectionIssue,
 }: {
   activeSectionId: keyof EarnIntegrationSections;
   apiBaseUrl?: string | null;
@@ -224,7 +207,6 @@ function CatalogueContent({
   onStrategyChange: (strategyId: string | null) => void;
   options: StrategyOption[];
   selectedOption: StrategyOption | undefined;
-  selectionIssue: MessageKey | undefined;
 }) {
   const t = useTranslations();
   if (catalogueError) {
@@ -244,8 +226,6 @@ function CatalogueContent({
     );
   }
 
-  const selectedStrategy = selectedOption?.strategy;
-
   return (
     <RecordStack>
       <RecordBlock title={t("DashboardMarkets.embeddedYield.stepChooseStrategy")}>
@@ -255,22 +235,35 @@ function CatalogueContent({
           options={options}
           selectedOption={selectedOption}
         />
-        {selectedStrategy && selectedOption?.selectable ? (
-          <StrategyDetails locale={locale} strategy={selectedStrategy} />
+        {selectedOption ? (
+          <>
+            {selectedOption.availability === "available" ? null : (
+              <Callout variant="neutral">
+                {t(
+                  unavailableDescriptionKey(
+                    selectedOption.availability,
+                    selectedOption.strategy.provider
+                  ),
+                  {
+                    cluster: SOLANA_CLUSTER_LABELS[selectedOption.strategy.hostCluster],
+                    provider: earnProviderLabel(selectedOption.strategy.provider),
+                  }
+                )}
+              </Callout>
+            )}
+            <StrategyDetails locale={locale} strategy={selectedOption.strategy} />
+          </>
         ) : (
-          <StrategySelectionEmptyState
-            initialStrategyMissing={initialStrategyMissing}
-            selectionIssue={selectionIssue}
-          />
+          <StrategySelectionEmptyState initialStrategyMissing={initialStrategyMissing} />
         )}
       </RecordBlock>
 
-      {selectedStrategy && selectedOption?.selectable ? (
+      {selectedOption ? (
         <IntegrationReference
           activeSectionId={activeSectionId}
           apiBaseUrl={apiBaseUrl}
           onSectionChange={onSectionChange}
-          strategy={selectedStrategy}
+          strategy={selectedOption.strategy}
         />
       ) : null}
     </RecordStack>
@@ -278,8 +271,8 @@ function CatalogueContent({
 }
 
 /**
- * Every strategy the catalogue lists, the ones this project cannot fund disabled with the reason
- * beside their APY.
+ * Every strategy the catalogue lists, each selectable so its integration can be read. Whether
+ * this project can fund it is said under the picker, never inside the list.
  */
 function StrategyPicker({
   locale,
@@ -300,57 +293,47 @@ function StrategyPicker({
       placeholder={t("DashboardMarkets.embeddedYield.selectTitle")}
       value={selectedOption?.strategy.id ?? null}
     >
-      {options.map(({ availability, selectable, strategy }) => (
-        <SelectItem disabled={!selectable} key={strategy.id} value={strategy.id}>
-          <span className="flex min-w-0 flex-1 items-center justify-between gap-4">
-            <span className="truncate">{strategy.name}</span>
-            <span className="shrink-0 text-tertiary tabular-nums">
-              {formatProviderApy(strategy.currentApy, locale)}
-              {!selectable ? (
-                <>
-                  {" · "}
-                  {earnDepositAvailabilityLabel(
-                    availability,
-                    PROGRAM_AVAILABILITY_LABELS,
-                    strategy,
-                    t
-                  )}
-                </>
-              ) : null}
+      {options.map(({ strategy }) => {
+        const apy = formatProviderApy(strategy.currentApy, locale);
+        return (
+          <SelectItem key={strategy.id} value={strategy.id}>
+            <span className="flex min-w-0 flex-1 items-center justify-between gap-4">
+              <span className="truncate">{strategy.name}</span>
+              {apy === "—" ? null : (
+                <span className="shrink-0 text-tertiary tabular-nums">{apy}</span>
+              )}
             </span>
-          </span>
-        </SelectItem>
-      ))}
+          </SelectItem>
+        );
+      })}
     </Select>
   );
 }
 
 function StrategySelectionEmptyState({
   initialStrategyMissing,
-  selectionIssue,
 }: {
   initialStrategyMissing: boolean;
-  selectionIssue: MessageKey | undefined;
 }) {
   const t = useTranslations();
-  let descriptionKey: MessageKey = "DashboardMarkets.embeddedYield.missingStrategyDescription";
-  let messageKey: MessageKey = "DashboardMarkets.embeddedYield.missingStrategyTitle";
-  if (initialStrategyMissing) {
-    descriptionKey = "DashboardMarkets.embeddedYield.unknownStrategyDescription";
-    messageKey = "DashboardMarkets.embeddedYield.unknownStrategyTitle";
-  }
-  if (selectionIssue) {
-    descriptionKey = selectionIssue;
-    messageKey = "DashboardMarkets.embeddedYield.unavailableStrategyTitle";
-  }
-  return <ListEmptyState description={t(descriptionKey)} message={t(messageKey)} />;
+  return initialStrategyMissing ? (
+    <ListEmptyState
+      description={t("DashboardMarkets.embeddedYield.unknownStrategyDescription")}
+      message={t("DashboardMarkets.embeddedYield.unknownStrategyTitle")}
+    />
+  ) : (
+    <ListEmptyState
+      description={t("DashboardMarkets.embeddedYield.missingStrategyDescription")}
+      message={t("DashboardMarkets.embeddedYield.missingStrategyTitle")}
+    />
+  );
 }
 
 /**
  * One plain line under the dropdown ("Kamino · Instant liquidity · 6.2% APY"), then the
  * strategy ID as a copyable code surface. Reference, not a dashboard: no field labels, no big
- * numbers, and no APY when it is unknown. Only a strategy this project can fund gets here, so
- * no availability is restated.
+ * numbers, and no APY when it is unknown. Whether the project can fund the strategy is the
+ * note above it, so no availability is restated here.
  */
 function StrategyDetails({ locale, strategy }: { locale: string; strategy: EarnStrategy }) {
   const t = useTranslations();

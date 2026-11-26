@@ -68,7 +68,7 @@ import { errorResponseSchema, successResponseSchema } from "@/openapi/schemas/ba
 import { paymentRecurringPaymentListResponseSchema } from "@/openapi/schemas/payments";
 import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { rootLogger } from "@/runtime/logger";
-import { SigningService } from "@/services/domain/signing.service";
+import { SigningService } from "@/services/custody/signing.service";
 import { INSUFFICIENT_FUNDS_MESSAGE } from "@/services/fee-payment-errors";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
 import * as counterpartyAccountResolution from "@/services/payments/counterparty-account-resolution";

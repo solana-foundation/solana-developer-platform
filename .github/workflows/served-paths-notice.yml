@@ -1,0 +1,41 @@
+name: Served Paths Notice
+
+# Runs from the base branch and never checks out or runs pull request code: it
+# only posts one comment, so the write token is safe on fork pull requests too.
+on:
+  pull_request_target:
+    types:
+      - opened
+      - synchronize
+      - reopened
+    paths:
+      - apps/sdp-api/src/routes/served-paths.generated.json
+
+permissions:
+  pull-requests: write
+
+concurrency:
+  group: served-paths-notice-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  notice:
+    if: ${{ github.event.pull_request.user.type != 'Bot' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remind the author once
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          marker='<!-- served-paths-notice -->'
+          already=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json comments \
+            --jq "[.comments[] | select(.body | contains(\"$marker\"))] | length")
+          if [ "$already" != "0" ]; then
+            echo "Notice already posted."
+            exit 0
+          fi
+          gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$marker
+          Route change detected: this pull request changes the served path list (\`apps/sdp-api/src/routes/served-paths.generated.json\`). Please make sure the sdp-infra change goes in the right order: before this merges for an added path, after it is released for a removed one (\`docs/contributing/code-standards.md\`, Served paths). @$PR_AUTHOR"

@@ -45827,8 +45827,9 @@ available for API user approval. If Fireblocks isn't available, ask the SDP team
 Choose an SDP **Sandbox project** for devnet (`SOL_TEST`) or **Production
 project** for mainnet (`SOL`, [mainnet access required](/docs/guides/go-to-mainnet)).
 Each selected vault must already contain a Solana wallet on that network.
-SDP project environments are separate from Fireblocks workspace types; check
-workspace compatibility with the SDP team.
+The Fireblocks workspace type must match the project: a Sandbox project connects
+to a **Developer Sandbox** workspace, and a Production project to a **Mainnet**
+workspace. A Testnet workspace can't be connected.
 
 1. **Generate a CSR in SDP.** Open **Integrations → Fireblocks → Add connection**,
    enter a **Connection name**, and click **Generate and download CSR**.

@@ -24,7 +24,7 @@ import {
 import { runAsMoneyPrincipal } from "@/lib/money-principal";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
-import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
+import { CustodyRuntimeTargets } from "@/services/custody/signing/custody-runtime-target";
 import { activateRecurringPayment } from "@/services/payments/recurring-payments/activation";
 import {
   collectRecurringPayment,

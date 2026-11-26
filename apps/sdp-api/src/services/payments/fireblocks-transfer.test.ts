@@ -25,7 +25,7 @@ import * as moneyPathEvents from "@/runtime/money-path-events";
 import { ApiKeyService } from "@/services/api-key.service";
 import { AuditService } from "@/services/audit.service";
 import * as credentialSecretStore from "@/services/credential-secret-store";
-import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
+import { CustodyRuntimeTargets } from "@/services/custody/signing/custody-runtime-target";
 import { systemProposalLedger } from "@/services/jobs/proposal-recovery-ledger";
 import { reconcileFireblocksProposals } from "@/services/jobs/reconcile-fireblocks-proposals";
 import { reconcilePendingProposals } from "@/services/jobs/reconcile-pending-proposals";
@@ -49,7 +49,6 @@ const USER_ID = "usr_fireblocks_byok";
 const PROJECT_ID = "prj_fireblocks_byok";
 const ADDRESS = TEST_SOLANA_ADDRESSES.wallet1;
 const OTHER_ADDRESS = TEST_SOLANA_ADDRESSES.wallet2;
-const FIREBLOCKS_API_BASE_URL = "https://fireblocks.example.test";
 const fields = {
   apiKey: "tenant-fireblocks-key",
   signingKeyId: "",
@@ -67,7 +66,6 @@ const testEnv: Env = {
   SDP_DEPLOYMENT_MODE: "self_hosted",
   CREDENTIAL_SECRET_STORE_BACKEND: "encrypted_db",
   CUSTODY_ENCRYPTION_KEY: Buffer.alloc(32, 11).toString("base64"),
-  FIREBLOCKS_API_BASE_URL,
   FIREBLOCKS_API_KEY: "deployment-key-must-not-be-used",
   FIREBLOCKS_API_SECRET: "deployment-secret-must-not-be-used",
 };
@@ -185,7 +183,7 @@ const paymentApp = createApp({
   rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
 });
 let walletId: string;
-let createBody: import("@sdp/custody/provisioning/fireblocks-transfers").FireblocksTransferRequest;
+let createBody: import("@sdp/custody/providers/fireblocks/transfers").FireblocksTransferRequest;
 let providerStatus: string;
 let lostResponse = false;
 let readMissing = false;
@@ -216,7 +214,7 @@ async function ready(projectId = PROJECT_ID) {
   beforeCancellation = null;
   beforeCreateResponse = null;
   mock.mockImplementation(async (url, init) => {
-    const path = String(url).replace(FIREBLOCKS_API_BASE_URL, "");
+    const path = new URL(String(url)).pathname;
     expect(new Headers(init?.headers).get("X-API-Key")).toBe(fields.apiKey);
     if (path === "/v1/supported_assets")
       return Response.json([

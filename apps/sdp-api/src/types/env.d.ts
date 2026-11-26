@@ -164,56 +164,44 @@ export interface Env extends ManagedRpcEnv {
   // Fireblocks configuration (@solana/keychain-fireblocks)
   FIREBLOCKS_API_KEY?: string;
   FIREBLOCKS_API_SECRET?: string;
-  FIREBLOCKS_ASSET_ID?: string;
-  FIREBLOCKS_API_BASE_URL?: string;
 
   // Privy configuration (@solana/keychain-privy)
   PRIVY_APP_ID?: string;
   PRIVY_APP_SECRET?: string;
   PRIVY_WALLET_ID?: string;
-  PRIVY_API_BASE_URL?: string;
 
   // Coinbase CDP Server Wallet configuration (Solana)
   COINBASE_CDP_API_KEY_ID?: string;
   COINBASE_CDP_API_KEY_SECRET?: string;
   COINBASE_CDP_WALLET_SECRET?: string;
-  COINBASE_CDP_API_BASE_URL?: string;
-  COINBASE_CDP_NETWORK?: "solana" | "solana-devnet";
   COINBASE_CDP_ACCOUNT_NAMESPACE?: string;
 
   // Para Server Wallet configuration (Solana)
   PARA_API_KEY?: string;
-  PARA_API_BASE_URL?: string;
 
   // Turnkey Server Wallet configuration (Solana)
   TURNKEY_API_PUBLIC_KEY?: string;
   TURNKEY_API_PRIVATE_KEY?: string;
   TURNKEY_ORGANIZATION_ID?: string;
-  TURNKEY_API_BASE_URL?: string;
 
   // DFNS Server Wallet configuration (Solana)
   DFNS_AUTH_TOKEN?: string;
   DFNS_CREDENTIAL_ID?: string;
   DFNS_PRIVATE_KEY?: string;
-  DFNS_API_BASE_URL?: string;
 
   // IBM Digital Asset Haven configuration (white-label Dfns; Solana)
   IBM_HAVEN_AUTH_TOKEN?: string;
   IBM_HAVEN_CREDENTIAL_ID?: string;
   IBM_HAVEN_PRIVATE_KEY?: string;
-  IBM_HAVEN_API_BASE_URL?: string;
 
   // Anchorage wallet lifecycle configuration
   ANCHORAGE_API_KEY?: string;
-  ANCHORAGE_API_BASE_URL?: string;
 
   // Utila Server Wallet configuration (Solana)
   UTILA_SERVICE_ACCOUNT_EMAIL?: string;
   UTILA_SERVICE_ACCOUNT_PRIVATE_KEY?: string;
   UTILA_VAULT_ID?: string;
   UTILA_WALLET_ID?: string;
-  UTILA_NETWORK?: "networks/solana-devnet" | "networks/solana-mainnet";
-  UTILA_API_BASE_URL?: string;
   UTILA_POLL_INTERVAL_MS?: string;
   UTILA_MAX_POLL_ATTEMPTS?: string;
   UTILA_DESIGNATED_SIGNERS?: string;

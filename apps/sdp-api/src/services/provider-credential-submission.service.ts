@@ -194,7 +194,7 @@ async function submitProviderCredentialIntent(
   if ("appId" in fields) {
     await enforceMeteredQuota(c, PRIVY_PREFLIGHT_QUOTA);
     try {
-      await assertPrivyCredentialAccepted(c.env, fields);
+      await assertPrivyCredentialAccepted(fields);
     } catch (error) {
       await auditFailure(c, context.audit, context.auditBase, {
         reason: "provider_preflight_refused",

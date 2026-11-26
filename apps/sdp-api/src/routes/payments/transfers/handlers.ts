@@ -117,7 +117,7 @@ import {
   type CriticalOutcome,
   criticalOutcomeEntry,
 } from "@/services/audit.service";
-import type { CustodyTransferProposer } from "@/services/domain/signing/admitted-proposer";
+import type { CustodyTransferProposer } from "@/services/custody/signing/admitted-proposer";
 import { callerInsufficientFundsError } from "@/services/fee-payment-errors";
 import {
   assertPaymentProjectScope,

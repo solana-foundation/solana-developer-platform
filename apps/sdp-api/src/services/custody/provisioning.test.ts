@@ -1,5 +1,5 @@
 import { generateKeyPairSync } from "node:crypto";
-import { provisionUtilaWallet as provisionUtilaWalletInCustody } from "@sdp/custody/provisioning";
+import { provisionUtilaWallet as provisionUtilaWalletInCustody } from "@sdp/custody/providers/utila/provisioning";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -10,6 +10,7 @@ import {
   provisionPrivyWallet,
   provisionUtilaWallet,
 } from "@/services/custody/provisioning";
+import { inSandboxScope } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import { required } from "@/test/helpers/required";
@@ -33,13 +34,20 @@ describe("coinbase account provisioning", () => {
     vi.restoreAllMocks();
   });
 
+  function provisionCoinbaseInSandbox(...args: Parameters<typeof provisionCoinbaseCdpAccount>) {
+    return inSandboxScope(() => provisionCoinbaseCdpAccount(...args));
+  }
+
   function mockCreateCapturingNames(names: string[]) {
     return vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
         const url = toUrlString(input);
 
-        if (url.endsWith("/platform/v2/solana/accounts") && init?.method === "POST") {
+        if (
+          url === "https://api.cdp.coinbase.com/platform/v2/solana/accounts" &&
+          init?.method === "POST"
+        ) {
           names.push(requestNameSchema.parse(JSON.parse(String(init.body))).name);
 
           return jsonResponse({ address: CREATED_ADDRESS }, 200);
@@ -53,7 +61,7 @@ describe("coinbase account provisioning", () => {
     const names: string[] = [];
     const fetchMock = mockCreateCapturingNames(names);
 
-    const result = await provisionCoinbaseCdpAccount(
+    const result = await provisionCoinbaseInSandbox(
       createCoinbaseEnv({
         ENVIRONMENT: "production",
       }),
@@ -64,27 +72,28 @@ describe("coinbase account provisioning", () => {
     );
 
     expect(result.address).toBe(CREATED_ADDRESS);
-    expect(result.network).toBe("solana-devnet");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(names[0]).toMatch(/^sdp-[0-9a-f]{32}$/);
   });
 
-  it("scopes the account identity by org, project, network, namespace, and wallet seed", async () => {
+  it("scopes the account identity by org, project, cluster, namespace, and wallet seed", async () => {
     const names: string[] = [];
     mockCreateCapturingNames(names);
 
     const base = { orgId: "org_abc", projectId: "proj_1" };
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), base);
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), base);
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), { ...base, orgId: "org_other" });
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), { ...base, projectId: "proj_2" });
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv({ COINBASE_CDP_NETWORK: "solana" }), base);
-    await provisionCoinbaseCdpAccount(
+    await provisionCoinbaseInSandbox(createCoinbaseEnv(), base);
+    await provisionCoinbaseInSandbox(createCoinbaseEnv(), base);
+    await provisionCoinbaseInSandbox(createCoinbaseEnv(), { ...base, orgId: "org_other" });
+    await provisionCoinbaseInSandbox(createCoinbaseEnv(), { ...base, projectId: "proj_2" });
+    await runInClusterScope({ projectId: null, environment: "production" }, () =>
+      provisionCoinbaseCdpAccount(createCoinbaseEnv(), base)
+    );
+    await provisionCoinbaseInSandbox(
       createCoinbaseEnv({ COINBASE_CDP_ACCOUNT_NAMESPACE: "staging" }),
       base
     );
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), { ...base, walletSeed: "seed-1" });
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), { ...base, walletSeed: "seed-2" });
+    await provisionCoinbaseInSandbox(createCoinbaseEnv(), { ...base, walletSeed: "seed-1" });
+    await provisionCoinbaseInSandbox(createCoinbaseEnv(), { ...base, walletSeed: "seed-2" });
 
     // Retries of the same identity are deterministic…
     expect(names[1]).toBe(names[0]);
@@ -106,9 +115,9 @@ describe("coinbase account provisioning", () => {
     );
 
     const base = { orgId: "org_abc", projectId: "proj_1", walletSeed: "seed-1" };
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), { ...base, idempotencyKey: "req-1" });
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), { ...base, idempotencyKey: "req-1" });
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), base);
+    await provisionCoinbaseInSandbox(createCoinbaseEnv(), { ...base, idempotencyKey: "req-1" });
+    await provisionCoinbaseInSandbox(createCoinbaseEnv(), { ...base, idempotencyKey: "req-1" });
+    await provisionCoinbaseInSandbox(createCoinbaseEnv(), base);
 
     expect(headers[0]).toBe("req-1");
     expect(headers[1]).toBe("req-1");
@@ -120,11 +129,11 @@ describe("coinbase account provisioning", () => {
     mockCreateCapturingNames(names);
 
     const longPrefix = `org_${"a".repeat(60)}`;
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
+    await provisionCoinbaseInSandbox(createCoinbaseEnv(), {
       orgId: `${longPrefix}x`,
       projectId: "proj_1",
     });
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
+    await provisionCoinbaseInSandbox(createCoinbaseEnv(), {
       orgId: `${longPrefix}y`,
       projectId: "proj_1",
     });
@@ -156,7 +165,7 @@ describe("coinbase account provisioning", () => {
         throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
       });
 
-    const result = await provisionCoinbaseCdpAccount(
+    const result = await provisionCoinbaseInSandbox(
       createCoinbaseEnv({
         COINBASE_CDP_ACCOUNT_NAMESPACE: "local",
       }),
@@ -185,7 +194,7 @@ describe("coinbase account provisioning", () => {
       });
 
     await expect(
-      provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
+      provisionCoinbaseInSandbox(createCoinbaseEnv(), {
         orgId: "org_abc",
         projectId: "proj_1",
         walletSeed: "seed-1",
@@ -208,7 +217,7 @@ describe("coinbase account provisioning", () => {
         throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
       });
 
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
+    await provisionCoinbaseInSandbox(createCoinbaseEnv(), {
       orgId: "org_abc",
       projectId: "proj_1",
     });
@@ -250,7 +259,7 @@ describe("coinbase account provisioning", () => {
         throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
       });
 
-    const result = await provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
+    const result = await provisionCoinbaseInSandbox(createCoinbaseEnv(), {
       orgId: "org_abc",
       reuseExisting: true,
     });
@@ -277,7 +286,7 @@ describe("coinbase account provisioning", () => {
       });
 
     await expect(
-      provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
+      provisionCoinbaseInSandbox(createCoinbaseEnv(), {
         orgId: "org_abc",
         reuseExisting: true,
       })
@@ -304,7 +313,7 @@ describe("coinbase account provisioning", () => {
       });
 
     await expect(
-      provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
+      provisionCoinbaseInSandbox(createCoinbaseEnv(), {
         orgId: "org_abc",
         reuseExisting: true,
       })
@@ -360,7 +369,7 @@ describe("privy wallet provisioning", () => {
 
     expect(fetchMock).toHaveBeenCalledOnce();
     const [createUrl, createRequest] = required(fetchMock.mock.calls[0]);
-    expect(toUrlString(createUrl)).toBe("https://privy.test/v1/wallets");
+    expect(toUrlString(createUrl)).toBe("https://api.privy.io/v1/wallets");
     expect(required(createRequest).method).toBe("POST");
     expect(JSON.parse(String(required(createRequest).body))).toEqual({
       chain_type: "solana",
@@ -517,9 +526,9 @@ describe("privy wallet provisioning", () => {
   });
 
   it.each([
-    ["wallet lookup", { walletId: "wallet-existing" }, "GET"],
-    ["legacy creation", {}, "POST"],
-  ] as const)("preserves %s", async (_case, options, method) => {
+    ["looks up an existing wallet by ID", { walletId: "wallet-existing" }, "GET"],
+    ["creates a wallet without an external ID", {}, "POST"],
+  ] as const)("reads or creates a Managed wallet (%s)", async (_case, options, method) => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(jsonResponse({ id: "wallet-existing", address: EXISTING_ADDRESS }, 200));
@@ -535,7 +544,7 @@ describe("privy wallet provisioning", () => {
     [401, "PROVIDER_NOT_CONFIGURED"],
     [400, "PROVIDER_NOT_CONFIGURED"],
     [503, "PROVIDER_NOT_CONFIGURED"],
-  ] as const)("preserves legacy HTTP %s create classification as %s", async (status, code) => {
+  ] as const)("classifies a Managed create's HTTP %s failure as %s", async (status, code) => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ error: "rejected" }, status));
 
     await expect(provisionTestPrivyWallet({})).rejects.toMatchObject({ code });
@@ -564,16 +573,18 @@ describe("privy wallet provisioning", () => {
     });
   });
 
-  it("preserves the legacy malformed create response", async () => {
+  it("reports a malformed Managed create response as a failed creation", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({}, 200));
 
     await expect(
-      provisionPrivyWallet(
-        createPrivyEnv({
-          PRIVY_APP_ID: PRIVY_AUTHENTICATION.appId,
-          PRIVY_APP_SECRET: PRIVY_AUTHENTICATION.appSecret,
-        }),
-        {}
+      inSandboxScope(() =>
+        provisionPrivyWallet(
+          createPrivyEnv({
+            PRIVY_APP_ID: PRIVY_AUTHENTICATION.appId,
+            PRIVY_APP_SECRET: PRIVY_AUTHENTICATION.appSecret,
+          }),
+          {}
+        )
       )
     ).rejects.toMatchObject({
       code: "PROVIDER_NOT_CONFIGURED",
@@ -588,46 +599,55 @@ describe("utila wallet provisioning", () => {
   });
 
   function provisionInSandbox(options: Parameters<typeof provisionUtilaWallet>[1]) {
-    return runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
-      provisionUtilaWallet(createUtilaEnv(), options)
-    );
+    return inSandboxScope(() => provisionUtilaWallet(createUtilaEnv(), options));
   }
 
-  it("normalizes resource-style vault IDs before creating wallets", async () => {
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
-        const url = toUrlString(input);
+  it.each([
+    ["sandbox", "networks/solana-devnet"],
+    ["production", "networks/solana-mainnet"],
+  ] as const)(
+    "creates the %s wallet on %s under the normalized vault ID",
+    async (environment, network) => {
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+          const url = toUrlString(input);
 
-        if (url.endsWith("/v2/vaults/vault_123/wallets") && init?.method === "POST") {
-          expect(JSON.parse(String(init.body))).toEqual({
-            displayName: "Root Wallet",
-            networks: ["networks/solana-devnet"],
-          });
+          if (
+            url === "https://api.utila.io/v2/vaults/vault_123/wallets" &&
+            init?.method === "POST"
+          ) {
+            expect(JSON.parse(String(init.body))).toEqual({
+              displayName: "Root Wallet",
+              networks: [network],
+            });
 
-          return jsonResponse(
-            {
-              wallet: {
-                name: "vaults/vault_123/wallets/wallet_abc",
-                solanaDetails: {
-                  address: CREATED_ADDRESS,
+            return jsonResponse(
+              {
+                wallet: {
+                  name: "vaults/vault_123/wallets/wallet_abc",
+                  solanaDetails: {
+                    address: CREATED_ADDRESS,
+                  },
                 },
               },
-            },
-            200
-          );
-        }
+              200
+            );
+          }
 
-        throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
-      });
+          throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
+        });
 
-    const result = await provisionInSandbox({ displayName: "Root Wallet" });
+      const result = await runInClusterScope({ projectId: null, environment }, () =>
+        provisionUtilaWallet(createUtilaEnv(), { displayName: "Root Wallet" })
+      );
 
-    expect(result.walletId).toBe("wallet_abc");
-    expect(result.address).toBe(CREATED_ADDRESS);
-    expect(result.vaultId).toBe("vault_123");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
+      expect(result.walletId).toBe("wallet_abc");
+      expect(result.address).toBe(CREATED_ADDRESS);
+      expect(result.vaultId).toBe("vault_123");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    }
+  );
 
   it("reports only the upstream error code when wallet creation fails", async () => {
     const leakedToken = "eyJhbGciOiJSUzI1NiJ9.leaked-service-account-token";
@@ -695,22 +715,20 @@ describe("utila wallet provisioning", () => {
     );
     const now = 1_725_000_000_000;
 
-    await provisionUtilaWalletInCustody(
-      {
-        fetch: fetchMock,
-        sleep: async () => undefined,
-        now: () => now,
-        randomUUID: () => "test-uuid",
-        getRandomValues: (values) => values,
-        sha256: (data) => crypto.subtle.digest("SHA-256", new Uint8Array(data)),
-      },
-      {
-        serviceAccountEmail: "service-account@example.com",
-        serviceAccountPrivateKeyPem: utilaPrivateKeyPem,
-        vaultId: "vaults/vault_123",
-        apiBaseUrl: "https://api.utila.io",
-      },
-      {}
+    await inSandboxScope(() =>
+      provisionUtilaWalletInCustody(
+        {
+          fetch: fetchMock,
+          sleep: async () => undefined,
+          now: () => now,
+        },
+        {
+          serviceAccountEmail: "service-account@example.com",
+          serviceAccountPrivateKeyPem: utilaPrivateKeyPem,
+          vaultId: "vaults/vault_123",
+        },
+        {}
+      )
     );
 
     const authorization = required(
@@ -729,13 +747,13 @@ describe("para wallet provisioning", () => {
     vi.restoreAllMocks();
   });
 
-  it("uses only the server-configured Para endpoint", async () => {
+  it("sends Para requests to the Para API origin", async () => {
     const walletId = "wal_para_env";
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
         const url = toUrlString(input);
-        expect(url.startsWith("https://trusted.para.test/")).toBe(true);
+        expect(url.startsWith("https://api.beta.getpara.com/")).toBe(true);
 
         if (url.endsWith("/v1/wallets") && init?.method === "POST") {
           return jsonResponse({ data: { id: walletId, status: "creating" } }, 200);
@@ -759,15 +777,7 @@ describe("para wallet provisioning", () => {
         throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
       });
 
-    await provisionParaWallet(
-      createParaEnv({
-        PARA_API_BASE_URL: "https://trusted.para.test",
-      }),
-      {
-        orgId: "org_abc",
-        orgSlug: "Acme Labs",
-      }
-    );
+    await provisionParaInSandbox(createParaEnv(), { orgId: "org_abc", orgSlug: "Acme Labs" });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -806,7 +816,7 @@ describe("para wallet provisioning", () => {
         throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
       });
 
-    const result = await provisionParaWallet(createParaEnv(), {
+    const result = await provisionParaInSandbox(createParaEnv(), {
       orgId: "org_abc",
       orgSlug: "Acme Labs",
     });
@@ -830,7 +840,7 @@ describe("para wallet provisioning", () => {
       });
 
     await expect(
-      provisionParaWallet(createParaEnv(), {
+      provisionParaInSandbox(createParaEnv(), {
         orgId: "org_abc",
         orgSlug: "Acme Labs",
       })
@@ -859,7 +869,7 @@ describe("para wallet provisioning", () => {
         throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
       });
 
-    const provisionPromise = provisionParaWallet(createParaEnv(), {
+    const provisionPromise = provisionParaInSandbox(createParaEnv(), {
       orgId: "org_abc",
       orgSlug: "Acme Labs",
     });
@@ -898,18 +908,22 @@ const PRIVY_WALLET = {
 };
 
 function createPrivyEnv(overrides: Partial<Env> = {}): Env {
-  return { ...env, PRIVY_API_BASE_URL: "https://privy.test/v1", ...overrides };
+  return { ...env, ...overrides };
 }
 
 function provisionTestPrivyWallet(options: Parameters<typeof provisionPrivyWallet>[1]) {
-  return provisionPrivyWallet(createPrivyEnv(), options, PRIVY_AUTHENTICATION);
+  return inSandboxScope(() =>
+    provisionPrivyWallet(createPrivyEnv(), options, PRIVY_AUTHENTICATION)
+  );
 }
 
 function findTestPrivyWallet() {
-  return findPrivyWalletByExternalId(
-    createPrivyEnv(),
-    PRIVY_CREATE_OPTIONS.externalId,
-    PRIVY_AUTHENTICATION
+  return inSandboxScope(() =>
+    findPrivyWalletByExternalId(
+      createPrivyEnv(),
+      PRIVY_CREATE_OPTIONS.externalId,
+      PRIVY_AUTHENTICATION
+    )
   );
 }
 
@@ -921,23 +935,20 @@ function privyWalletNotFound(): Response {
   return jsonResponse({ error: "not found" }, 404);
 }
 
-function createParaEnv(overrides: Partial<Env> = {}): Env {
-  return {
-    ...env,
-    PARA_API_KEY: "test-para-api-key",
-    PARA_API_BASE_URL: "https://api.getpara.com",
-    ...overrides,
-  };
+function provisionParaInSandbox(...args: Parameters<typeof provisionParaWallet>) {
+  return inSandboxScope(() => provisionParaWallet(...args));
 }
 
-function createUtilaEnv(overrides: Partial<Env> = {}): Env {
+function createParaEnv(): Env {
+  return { ...env, PARA_API_KEY: "test-para-api-key" };
+}
+
+function createUtilaEnv(): Env {
   return {
     ...env,
     UTILA_SERVICE_ACCOUNT_EMAIL: "service-account@example.com",
     UTILA_SERVICE_ACCOUNT_PRIVATE_KEY: utilaPrivateKeyPem,
     UTILA_VAULT_ID: "vaults/vault_123",
-    UTILA_API_BASE_URL: "https://api.utila.io",
-    ...overrides,
   };
 }
 

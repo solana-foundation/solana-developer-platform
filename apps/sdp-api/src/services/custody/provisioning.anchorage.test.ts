@@ -1,9 +1,12 @@
-import { provisionAnchorageWallet as provisionAnchorageWalletInCustody } from "@sdp/custody/provisioning/anchorage";
-import type { CustodyProvisioningRuntime } from "@sdp/custody/provisioning/runtime";
+import { provisionAnchorageWallet as provisionAnchorageWalletInCustody } from "@sdp/custody/providers/anchorage/provisioning";
+import type { CustodyProvisioningRuntime } from "@sdp/custody/shared/runtime";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { provisionAnchorageWallet } from "@/services/custody/provisioning";
+import { inSandboxScope } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { syntheticAddress } from "@/test/helpers/parsed-transactions";
+import { required } from "@/test/helpers/required";
 import type { Env } from "@/types/env";
 
 describe("anchorage wallet provisioning", () => {
@@ -11,24 +14,26 @@ describe("anchorage wallet provisioning", () => {
     vi.restoreAllMocks();
   });
 
-  it("uses only the server-configured Anchorage endpoint", async () => {
+  it.each([
+    ["sandbox", "solana-devnet"],
+    ["production", "solana"],
+  ] as const)("creates the %s wallet on the Anchorage %s network", async (environment, network) => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(
         jsonResponse({ walletId: "wa_anch_env", address: syntheticAddress(1) }, 200)
       );
 
-    await provisionAnchorageWallet(
-      createAnchorageEnv({
-        ANCHORAGE_API_BASE_URL: "https://trusted.anchorage.test",
-      }),
-      {}
+    await runInClusterScope({ projectId: null, environment }, () =>
+      provisionAnchorageWallet(createAnchorageEnv(), { walletLabel: "Treasury" })
     );
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://trusted.anchorage.test/v1/wallets",
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
+      "https://api.anchorage.com/v1/wallets",
       expect.objectContaining({ method: "POST" })
     );
+    const [, init] = required(fetchMock.mock.calls[0]);
+    expect(JSON.parse(String(required(init).body))).toEqual({ network, label: "Treasury" });
   });
 
   it("falls back to Bearer auth when Api-Key auth is rejected", async () => {
@@ -49,7 +54,7 @@ describe("anchorage wallet provisioning", () => {
         return jsonResponse({ walletId: "wa_anch_2", address: syntheticAddress(2) }, 200);
       });
 
-    const result = await provisionAnchorageWallet(createAnchorageEnv(), {});
+    const result = await inSandboxScope(() => provisionAnchorageWallet(createAnchorageEnv(), {}));
 
     expect(result).toEqual({ walletId: "wa_anch_2", address: syntheticAddress(2) });
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -63,17 +68,19 @@ describe("anchorage wallet provisioning", () => {
       );
 
     await expect(
-      provisionAnchorageWalletInCustody(
-        createRuntime(fetchMock),
-        { apiKey: "anchorage-explicit-key" },
-        {}
+      inSandboxScope(() =>
+        provisionAnchorageWalletInCustody(
+          createRuntime(fetchMock),
+          { apiKey: "anchorage-explicit-key" },
+          {}
+        )
       )
     ).resolves.toEqual({ walletId: "wa_anch_4", address: syntheticAddress(4) });
   });
 });
 
-function createAnchorageEnv(overrides: Partial<Env> = {}): Env {
-  return { ...env, ANCHORAGE_API_KEY: "anchorage-test-key", ...overrides };
+function createAnchorageEnv(): Env {
+  return { ...env, ANCHORAGE_API_KEY: "anchorage-test-key" };
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -88,8 +95,5 @@ function createRuntime(fetch: typeof globalThis.fetch): CustodyProvisioningRunti
     fetch,
     sleep: async () => undefined,
     now: () => 0,
-    randomUUID: () => "test-uuid",
-    getRandomValues: (values) => values,
-    sha256: (data) => crypto.subtle.digest("SHA-256", new Uint8Array(data)),
   };
 }

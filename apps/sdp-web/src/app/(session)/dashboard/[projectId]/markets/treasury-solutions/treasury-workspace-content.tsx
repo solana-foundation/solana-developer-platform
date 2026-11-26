@@ -33,6 +33,7 @@ import {
   earnDepositAvailabilityLabel,
   earnDetailLine,
   earnProviderLabel,
+  formatCompactUsd,
   formatProviderAmount,
   formatTokenValue,
   formatUsd,
@@ -52,6 +53,7 @@ import {
 } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-page-blocks";
 import {
   type EarnProviderAccess,
+  earnDepositsNotOnPlan,
   earnVaultDepositAvailability,
   SURFACED_VAULT_DIRECT_EARN_PROVIDERS,
 } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-surfacing";
@@ -132,7 +134,9 @@ const TREASURY_AVAILABILITY_LABELS = {
   strategy_unavailable: "DashboardMarkets.treasury.depositUnavailable",
   environment_unavailable: "DashboardMarkets.treasury.productionUnavailable",
   access_unavailable: "DashboardMarkets.treasury.accessUnavailable",
-  provider_unavailable: "DashboardMarkets.treasury.providerUnavailable",
+  provider_not_entitled: "DashboardMarkets.treasury.notOnPlan",
+  provider_not_configured: "DashboardMarkets.treasury.depositUnavailable",
+  provider_disabled: "DashboardMarkets.treasury.depositUnavailable",
   production_only: "DashboardMarkets.treasury.sandboxUnavailable",
 } as const satisfies EarnDepositAvailabilityLabels;
 
@@ -239,7 +243,7 @@ function treasuryStrategiesDisclosureKey(
 ) {
   if (providerAccess === null) return "DashboardMarkets.treasury.accessDisclosure" as const;
   if (depositsEnabled) return "DashboardMarkets.treasury.rateDisclosure" as const;
-  return "DashboardMarkets.treasury.productionDisclosure" as const;
+  return "DashboardMarkets.treasury.depositsClosedDisclosure" as const;
 }
 
 /** Where a position's balance read stands, for tests and tooling reading the row. */
@@ -1254,7 +1258,7 @@ function StrategyTable({
                     "text-primary tabular-nums"
                   )}
                 >
-                  {formatUsd(strategyTvlUsd(strategy), locale)}
+                  {formatCompactUsd(strategyTvlUsd(strategy), locale)}
                 </TableCell>
                 <TableCell
                   className={cn(
@@ -1450,6 +1454,11 @@ function TreasuryStrategies({
       hint={t(treasuryStrategiesDisclosureKey(depositsEnabled, providerAccess))}
       title={t("DashboardMarkets.treasury.strategiesTitle")}
     >
+      {/* Rendered from the server-read entitlement in every catalogue state, so it is on the
+          page before the rows load and never moves them. */}
+      {earnDepositsNotOnPlan(providerAccess) ? (
+        <Callout variant="neutral">{t("DashboardMarkets.treasury.notOnPlanNotice")}</Callout>
+      ) : null}
       {/* A failed or empty shelf sits in the middle of the four rows it replaces. */}
       <div className={cn(TREASURY_STRATEGIES_BODY, !isLoading && !hasRows && "justify-center")}>
         <StrategiesBody

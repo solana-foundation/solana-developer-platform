@@ -1,15 +1,15 @@
 import { createPrivateKey } from "node:crypto";
-import { checkFireblocksCredential } from "@sdp/custody/provisioning/fireblocks-credential";
+import { CUSTODY_CLUSTER_CONFIG } from "@sdp/custody/cluster-config";
+import { checkFireblocksCredential } from "@sdp/custody/providers/fireblocks/credential";
+import { checkPrivyCredential } from "@sdp/custody/providers/privy/credential";
 import { hashString } from "@sdp/payments/hash";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { ByokCustodyProvider } from "@sdp/types/custody";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
 import { badRequest, internalError } from "@/lib/errors";
-import {
-  checkPrivyCredential,
-  getPrivyProviderAccountFingerprint,
-} from "@/services/custody/privy-credential";
-import type { Env } from "@/types/env";
+import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";
+import { createRuntime } from "@/services/custody/provisioning";
 
 export const privyAuthenticationSchema = z
   .object({
@@ -74,7 +74,7 @@ export function credentialPayload(
   return {
     ...parsed.data,
     apiSecretPem,
-    assetId: environment === "production" ? "SOL" : "SOL_TEST",
+    assetId: CUSTODY_CLUSTER_CONFIG[CLUSTER_BY_SDP_ENVIRONMENT[environment]].fireblocks.nativeAsset,
   };
 }
 
@@ -119,11 +119,13 @@ export type ByokCredentialCheck = z.infer<typeof byokCredentialCheckSchema>;
 
 /** One authenticated provider read; checking a Fireblocks connection never proposes a signature. */
 export async function checkByokCredential(
-  env: Env,
   credential: ByokCredentialAuthentication
 ): Promise<ByokCredentialCheck> {
   if (credential.provider === "privy") {
-    const status = await checkPrivyCredential(env, credential);
+    const status = await checkPrivyCredential(createRuntime(), {
+      appId: credential.appId,
+      appSecret: credential.appSecret,
+    });
     return status === "success"
       ? { status, fingerprint: await getPrivyProviderAccountFingerprint(credential.appId) }
       : { status };
@@ -133,7 +135,6 @@ export async function checkByokCredential(
     privateKeyPem: credential.apiSecretPem,
     vaultAccountId: credential.vaultAccountId,
     assetId: credential.assetId,
-    apiBaseUrl: env.FIREBLOCKS_API_BASE_URL,
   });
   if (result.status !== "success") return result;
   // Vault numbers repeat across workspaces; bind rotation to the actual address.

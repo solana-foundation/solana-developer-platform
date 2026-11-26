@@ -16,8 +16,8 @@ import { projectContextMiddleware } from "@/middleware/project-context";
 import { requireAction } from "@/middleware/require-action";
 import { fireblocksCustody } from "@/routes/internal-custody/fireblocks";
 import { byokRegistrationSchema } from "@/services/custody/byok-credential";
+import { isCustodyConnectionRuntimeAvailable } from "@/services/custody/signing/custody-runtime-target";
 import { getCustodySetupStatus } from "@/services/custody-setup-status.service";
-import { isCustodyConnectionRuntimeAvailable } from "@/services/domain/signing/custody-runtime-target";
 import {
   getProviderAvailability,
   isCustodyProviderEntitled,

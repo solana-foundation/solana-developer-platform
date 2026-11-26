@@ -1,4 +1,4 @@
-import { KeychainPrivyAdapter } from "@sdp/custody/keychain/keychain-privy.adapter";
+import { KeychainPrivyAdapter } from "@sdp/custody/providers/privy/keychain.adapter";
 import { assert, type Mock } from "vitest";
 
 /**

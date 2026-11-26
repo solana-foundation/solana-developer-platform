@@ -93,8 +93,13 @@ Use decimal strings and exact decimal helpers, never `Number` for money.
 ## Catalogue and availability
 
 Strategy visibility, executability and wallet funding are separate decisions.
-Show returned catalogue rows even when deposits are unavailable, with their
-reason. The API owns provider surfacing and filtering. Display APY basis and
+Show returned catalogue rows even when deposits are unavailable. Treasury rows
+carry their reason; the Embedded Yield picker lists every strategy as a plain
+option and says why the selected one can't be funded under it, code still
+shown. Provider entitlement reads through `providerAccessRefusal`
+(`src/lib/provider-availability.ts`, shared with ramps): a Treasury row that
+is not entitled reads "Not on your plan", and Treasury says it once above the
+table when no offered provider is entitled. The API owns provider surfacing and filtering. Display APY basis and
 observation time; do not imply stale or unavailable APY is a current quote.
 Provider-unconfigured reads degrade to a quiet notice. Inspect error codes,
 not only HTTP status, when describing unavailable execution.

@@ -1,5 +1,5 @@
-import { FireblocksApiError } from "@sdp/custody/provisioning/fireblocks-http";
-import type { FireblocksTransferResult } from "@sdp/custody/provisioning/fireblocks-transfers";
+import { FireblocksApiError } from "@sdp/custody/providers/fireblocks/http";
+import type { FireblocksTransferResult } from "@sdp/custody/providers/fireblocks/transfers";
 import { compareDecimalAmounts, parseDecimalAmount } from "@sdp/solana/amount";
 import {
   type CustodyProposalEvent,
@@ -26,7 +26,7 @@ import {
   type CustodyTransferProposer,
   transferProposalIntentSchema as intentSchema,
   ProposalNotSentError,
-} from "@/services/domain/signing/admitted-proposer";
+} from "@/services/custody/signing/admitted-proposer";
 import {
   createOrgTransferProposalCanceller,
   createOrgTransferProposalReader,

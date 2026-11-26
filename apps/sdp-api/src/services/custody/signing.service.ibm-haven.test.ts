@@ -1,0 +1,128 @@
+import { Buffer } from "node:buffer";
+import {
+  denormalizeIbmHavenWalletId,
+  normalizeIbmHavenWalletId,
+} from "@sdp/custody/provider-wallet-ids";
+import type { DfnsApiClient } from "@sdp/custody/providers/dfns/client";
+import { KeychainIbmHavenAdapter } from "@sdp/custody/providers/ibm-haven/keychain.adapter";
+import { aroundEach, describe, expect, it } from "vitest";
+import type { SigningConfigRecord } from "@/services/adapters/signing";
+import { createAdapterFromEncryptedConfig } from "@/services/custody/signing/provider-adapter-factory";
+import { createEncryptionService } from "@/services/encryption.service";
+import { inSandboxScope } from "@/test/helpers/cluster-rpc";
+import { env as testEnv } from "@/test/helpers/env";
+import { syntheticAddress } from "@/test/helpers/parsed-transactions";
+import type { Env } from "@/types/env";
+
+const TEST_ORG_ID = "org_ibm_haven";
+const TEST_PROJECT_ID = "prj_ibm_haven";
+
+aroundEach((runTest) => inSandboxScope(runTest));
+
+describe("signing.service ibm_haven (IBM Digital Asset Haven)", () => {
+  it("resolves the IBM Haven adapter with a distinct provider id", async () => {
+    const env = createTestEnv();
+    const encryptedConfig = await encryptConfig(env, JSON.stringify({ walletId: "wa_haven_1" }));
+    const record = createRecord({ config: encryptedConfig });
+
+    const adapter = await createAdapterFromEncryptedConfig(env, TEST_ORG_ID, record);
+
+    // IBM Haven reuses the Dfns signing stack but must surface as its own provider.
+    expect(adapter).toBeInstanceOf(KeychainIbmHavenAdapter);
+    expect(adapter.providerId).toBe("ibm_haven");
+  });
+});
+
+describe("ibm_haven wallet id prefixing", () => {
+  it("round-trips the ibmhaven_ prefix and leaves raw / dfns ids untouched", () => {
+    expect(normalizeIbmHavenWalletId("wa-1")).toBe("ibmhaven_wa-1");
+    expect(normalizeIbmHavenWalletId("ibmhaven_wa-1")).toBe("ibmhaven_wa-1");
+    expect(denormalizeIbmHavenWalletId("ibmhaven_wa-1")).toBe("wa-1");
+    expect(denormalizeIbmHavenWalletId("wa-1")).toBe("wa-1");
+    // Must not strip a dfns_ prefix — that belongs to the Dfns provider.
+    expect(denormalizeIbmHavenWalletId("dfns_wa-1")).toBe("dfns_wa-1");
+  });
+
+  it("sends the raw (unprefixed) wallet id to the Dfns-shaped API when reading a public key", async () => {
+    const requested: string[] = [];
+    const adapter = new KeychainIbmHavenAdapter({
+      client: createMockDfnsClient(requested),
+      defaultWalletId: "wa-default",
+    });
+
+    await adapter.getPublicKey("ibmhaven_wa-42");
+
+    // The reused DfnsSigner only strips `dfns_`; the Haven adapter must strip
+    // `ibmhaven_` first so the raw id reaches the wire.
+    expect(requested).toContain("wa-42");
+    expect(requested.some((id) => id.startsWith("ibmhaven_"))).toBe(false);
+  });
+
+  it("denormalizes the wallet id on the getTransactionSigner path", async () => {
+    const requested: string[] = [];
+    const adapter = new KeychainIbmHavenAdapter({
+      client: createMockDfnsClient(requested),
+      defaultWalletId: "wa-default",
+    });
+
+    // This is the path every real signature takes (issuance, transfers).
+    await adapter.getTransactionSigner("ibmhaven_wa-42");
+
+    expect(requested).toContain("wa-42");
+    expect(requested.some((id) => id.startsWith("ibmhaven_"))).toBe(false);
+  });
+});
+
+function createMockDfnsClient(requested: string[]): DfnsApiClient {
+  const address = syntheticAddress(1);
+  return {
+    wallets: {
+      getWallet: async ({ walletId }: { walletId: string }) => {
+        requested.push(walletId);
+        return {
+          id: walletId,
+          address,
+          signingKey: { id: "key-haven-1" },
+          network: "SolanaDevnet",
+        };
+      },
+      listWallets: async () => ({ items: [] }),
+      createWallet: async () => ({ id: "wa-new", address }),
+    },
+    keySignatures: {
+      createSignature: async () => ({ id: "sig-1", status: "Signed" as const }),
+      getSignature: async () => ({ id: "sig-1", status: "Signed" as const }),
+    },
+  };
+}
+
+function createTestEnv(): Env {
+  return {
+    ...testEnv,
+    CUSTODY_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
+    IBM_HAVEN_AUTH_TOKEN: "ibm-haven-auth-token",
+    IBM_HAVEN_CREDENTIAL_ID: "ibm-haven-credential-id",
+    IBM_HAVEN_PRIVATE_KEY: "ibm-haven-test-private-key",
+    SDP_RELEASE_CHANNEL: "beta",
+  };
+}
+
+async function encryptConfig(env: Env, plaintext: string): Promise<string> {
+  const encryption = createEncryptionService(env.CUSTODY_ENCRYPTION_KEY);
+  const encrypted = await encryption.encrypt(TEST_ORG_ID, plaintext);
+  return encrypted.ciphertext;
+}
+
+function createRecord(params: { config: string }): SigningConfigRecord {
+  return {
+    id: "cust_ibm_haven_test",
+    organizationId: TEST_ORG_ID,
+    projectId: TEST_PROJECT_ID,
+    provider: "ibm_haven",
+    config: params.config,
+    encryptionVersion: "sdp-custody-encryption-v1",
+    status: "active",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+}

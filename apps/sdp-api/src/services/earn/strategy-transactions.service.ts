@@ -29,7 +29,7 @@ import {
   type EarnWalletTransactionRow,
 } from "@/db/repositories/earn-wallet-transactions.repository";
 import { conflict, internalError, notFound } from "@/lib/errors";
-import { MAX_CUSTODY_SIGNING_TIMEOUT_MS } from "@/services/domain/signing/signing-timeout";
+import { MAX_CUSTODY_SIGNING_TIMEOUT_MS } from "@/services/custody/signing/signing-timeout";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import type { Env } from "@/types/env";
 import {

@@ -1,4 +1,5 @@
-import { FireblocksApiError } from "@sdp/custody/provisioning/fireblocks-http";
+import { custodyClusterConfig } from "@sdp/custody/cluster-config";
+import { FireblocksApiError } from "@sdp/custody/providers/fireblocks/http";
 import {
   type ByokCustodyProvider,
   isProviderCredentialCreationInProgress,
@@ -232,14 +233,10 @@ export async function discoverFireblocksVaults(
     throw internalError("Fireblocks registration key is unavailable");
   const environment = c.get("projectEnvironment");
   if (!environment) throw internalError("Project environment is required");
+  const assetId = custodyClusterConfig().fireblocks.nativeAsset;
   try {
     return await listFireblocksVaults(
-      c.env,
-      {
-        apiKey: input.apiKey,
-        apiSecretPem: secret.privateKeyPem,
-        assetId: environment === "production" ? "SOL" : "SOL_TEST",
-      },
+      { apiKey: input.apiKey, apiSecretPem: secret.privateKeyPem, assetId },
       { after: input.after, namePrefix: input.namePrefix }
     );
   } catch (error) {

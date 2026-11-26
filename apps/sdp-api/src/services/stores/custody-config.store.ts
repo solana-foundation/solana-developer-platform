@@ -2,8 +2,8 @@ import { type CustodyConfigStatus, UNARCHIVED_CUSTODY_CONFIG_STATUSES } from "@s
 import type { PreparedStatement } from "@/db/client";
 import { buildInClause } from "@/db/postgres-utils";
 import type { SigningConfigRecord, SigningProviderType } from "@/services/adapters/signing";
+import type { SigningConfigStore } from "@/services/custody/signing.service";
 import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
-import type { SigningConfigStore } from "@/services/domain/signing.service";
 import type { Env } from "@/types/env";
 
 // ═══════════════════════════════════════════════════════════════════════════

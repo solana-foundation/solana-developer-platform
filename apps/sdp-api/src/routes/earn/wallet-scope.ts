@@ -5,7 +5,7 @@ import type { AppContext } from "@/routes/earn/context";
 import {
   CustodyRuntimeTargets,
   type CustodyRuntimeWalletProjection,
-} from "@/services/domain/signing/custody-runtime-target";
+} from "@/services/custody/signing/custody-runtime-target";
 
 /** Resolve only the exact persisted custody wallet identity. */
 export function resolveEarnCustodyWallet(

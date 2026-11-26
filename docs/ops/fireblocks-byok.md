@@ -92,9 +92,13 @@ erases expired staging copies in bounded batches. Responses expose only public C
 for stored credentials, the API user ID suffix. Rotations generate a new key and CSR.
 
 The project environment selects the asset: `SOL_TEST` for sandbox and `SOL` for production.
-The encrypted credential pins that choice. The API endpoint comes only from the deployment's
-`FIREBLOCKS_API_BASE_URL`; credential submissions cannot override either the endpoint or asset.
-The endpoint must serve the workspace owning the API user.
+The encrypted credential pins that choice. The Fireblocks API endpoint also follows the
+project environment and is fixed in code: sandbox projects use the Developer Sandbox host
+(`https://sandbox-api.fireblocks.io`) and production projects use `https://api.fireblocks.io`.
+Neither deployment settings nor credential submissions can override the endpoint, and
+credential submissions cannot override the asset. The API user must belong to a workspace
+that endpoint serves: a Developer Sandbox workspace for sandbox projects, a Mainnet workspace
+for production projects.
 
 Verification reads each vault address using `FireblocksSigner` from
 `@solana/keychain-fireblocks` and attaches those existing wallets. It does not create a vault,
@@ -154,7 +158,7 @@ does for a signed payment; acceptance alone is never audited as success.
 
 The payment goes through the same custody waist as every signed payment (ADR 0007). The
 waist resolves a Fireblocks BYOK wallet to a proposer rather than a signer
-(`services/domain/signing/admitted-proposer.ts`), with the same checks at resolution: runtime
+(`services/custody/signing/admitted-proposer.ts`), with the same checks at resolution: runtime
 availability, wallet purpose and provider entitlement. Immediately before the provider POST, the
 proposer re-reads the wallet row and Connection, checks connection, account, vault, source address
 and network against the stored intent, and makes the same live money-admission decision a signature
@@ -278,8 +282,8 @@ the runner never receives or exports a Fireblocks private key. These commands do
 
 Before testing:
 
-1. Use a production SDP project, a mainnet RPC, and a Fireblocks endpoint matching the customer's
-   workspace region. Complete CSR registration and connect the existing SOL vault in the
+1. Use a production SDP project, a mainnet RPC, and a Fireblocks Mainnet workspace (production
+   projects always call `https://api.fireblocks.io`). Complete CSR registration and connect the existing SOL vault in the
    dashboard. Enable the connection for runtime execution. Allow TRANSFER initiation and the intended one-time destination in the workspace policy.
    Keep SOL in the source vault for network fees. Program Call permission is needed for the optional signer check.
 2. Fund the source vault with the payment asset and enough SOL for fees and any token-account

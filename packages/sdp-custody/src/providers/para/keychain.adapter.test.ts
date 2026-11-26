@@ -1,0 +1,47 @@
+import { generateKeyPairSigner } from "@solana/kit";
+import { afterEach, aroundEach, assert, describe, expect, it, vi } from "vitest";
+import { inClusterScope } from "#/test/cluster-scope";
+import { KeychainParaAdapter } from "./keychain.adapter";
+
+const { address: WALLET_ADDRESS } = await generateKeyPairSigner();
+const WALLET_ID = "0b6f4a8e-2c1d-4e5f-9a7b-3c8d2e1f4a6b";
+
+describe("para adapter", () => {
+  aroundEach((runTest) => inClusterScope("devnet", runTest));
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("evicts failed signer creation so subsequent calls can retry", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new TypeError("temporary para outage"))
+      .mockResolvedValueOnce(
+        Response.json({ id: WALLET_ID, type: "SOLANA", address: WALLET_ADDRESS })
+      );
+    const adapter = new KeychainParaAdapter({ apiKey: "sk_test-key" });
+
+    await expect(adapter.getPublicKey(`para_${WALLET_ID}`)).rejects.toThrow(
+      "Para network request failed"
+    );
+    await expect(adapter.getPublicKey(`para_${WALLET_ID}`)).resolves.toBe(WALLET_ADDRESS);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const retry = fetchSpy.mock.calls[1];
+    assert.isDefined(retry);
+    expect(String(retry[0])).toContain(`/v1/wallets/${WALLET_ID}`);
+  });
+
+  it("hands out one signer per wallet and reads the wallet once", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(Response.json({ id: WALLET_ID, type: "SOLANA", address: WALLET_ADDRESS }));
+    const adapter = new KeychainParaAdapter({ apiKey: "sk_test-key" });
+
+    const first = await adapter.getTransactionSigner(`para_${WALLET_ID}`);
+    const second = await adapter.getTransactionSigner(`para_${WALLET_ID}`);
+
+    expect(second).toBe(first);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+});

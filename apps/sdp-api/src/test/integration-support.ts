@@ -32,7 +32,7 @@ import { app } from "@/index";
 import { runAsMoneyPrincipal } from "@/lib/money-principal";
 import { runInEachClusterScope, runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
 import { closeAllRedisClients, createKVStoreSet } from "@/runtime/kv-redis";
-import { createSigningService } from "@/services/domain/signing.service";
+import { createSigningService } from "@/services/custody/signing.service";
 import { resolveEarnExecutionClient } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import {

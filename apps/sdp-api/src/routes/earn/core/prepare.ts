@@ -30,7 +30,7 @@ import { resolveEarnCustodyWallet } from "@/routes/earn/wallet-scope";
 import {
   CustodyRuntimeTargets,
   type CustodyRuntimeWalletProjection,
-} from "@/services/domain/signing/custody-runtime-target";
+} from "@/services/custody/signing/custody-runtime-target";
 import { resolveEarnExecutionClient } from "@/services/earn/execution-registry";
 import { earnRuntime } from "@/services/earn/runtime";
 import { strategyShareDecimals } from "@/services/earn/strategy-mint";

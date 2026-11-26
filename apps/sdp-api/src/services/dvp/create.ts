@@ -54,7 +54,7 @@ import { getAuth } from "@/lib/auth";
 import { badRequest, conflict } from "@/lib/errors";
 import { assertCallerWalletInScope, MoneyMovementRefusedError } from "@/lib/money-admission";
 import { createTenantScope } from "@/lib/tenant-scope";
-import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
+import { CustodyRuntimeTargets } from "@/services/custody/signing/custody-runtime-target";
 import { readSolanaCryptoWalletAddress } from "@/services/payments/counterparty-account-resolution";
 import {
   createSponsorshipFeePayment,
