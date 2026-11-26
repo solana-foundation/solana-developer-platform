@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Validates a backoffice-mainnet-access.yml dispatch and composes the backoffice-ops args.
+# Everything written here reaches the run's public step summary, so the inputs are only an
+# organization id, a country code, a ticket and a short reason: never a person's details.
+set -euo pipefail
+
+[[ "${TARGET}" == "prod" || "${TARGET}" == "stage" ]] || { echo 'Invalid target.' >&2; exit 1; }
+[[ "${ACTION}" == "status" || "${ACTION}" == "reset" || "${ACTION}" == "set-country" ]] || { echo 'Invalid action.' >&2; exit 1; }
+[[ "${OPERATOR}" =~ ^[A-Za-z0-9-]{1,39}$ ]] || { echo 'Invalid operator.' >&2; exit 1; }
+[[ "${ORGANIZATION_ID}" =~ ^[A-Za-z0-9_-]{1,64}$ ]] || { echo 'Invalid organization id.' >&2; exit 1; }
+
+args=(mainnet-access "${ACTION}" --organization-id "${ORGANIZATION_ID}")
+if [[ "${ACTION}" == "set-country" ]]; then
+  [[ "${COUNTRY}" =~ ^[A-Za-z]{2}$ ]] || { echo 'set-country needs a two-letter country code.' >&2; exit 1; }
+  args+=(--country "${COUNTRY}")
+elif [[ -n "${COUNTRY}" ]]; then
+  echo 'Only set-country accepts a country.' >&2; exit 1
+fi
+if [[ "${ACTION}" != "status" ]]; then
+  # The Cloud Run args transport uses | delimiters. Exclude delimiters,
+  # shell substitution, quotes and control characters from operator text.
+  text_re='^[A-Za-z0-9][A-Za-z0-9 ._,:;/#()-]{3,199}$'
+  [[ "${REASON}" =~ ${text_re} ]] || { echo 'Reason must be 4-200 safe printable characters.' >&2; exit 1; }
+  [[ "${TICKET}" =~ ^[A-Z]{2,6}-[0-9]{1,6}$ ]] || { echo 'A Linear ticket is required.' >&2; exit 1; }
+  args+=(--operator "github:${OPERATOR}" --reason "${REASON}" --ticket "${TICKET}")
+fi
+joined="$(IFS='|'; echo "${args[*]}")"
+echo "args=${joined}" >> "${GITHUB_OUTPUT}"
+gated=false
+if [[ "${TARGET}" == "prod" && "${ACTION}" != "status" ]]; then gated=true; fi
+echo "gated=${gated}" >> "${GITHUB_OUTPUT}"
+printf 'Target: %s\n\n    backoffice-ops %s\n' "${TARGET}" "${args[*]}" >> "${GITHUB_STEP_SUMMARY}"
+if [[ "${gated}" == "true" ]]; then
+  echo 'A production change waits for release-production approval.' >> "${GITHUB_STEP_SUMMARY}"
+fi

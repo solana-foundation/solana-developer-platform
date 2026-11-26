@@ -1,36 +1,21 @@
 import { describe, expect, it } from "vitest";
-import {
-  addDecimals,
-  compareDecimals,
-  floorForTolerance,
-  formatAtoms,
-  multiplyDivideDecimals,
-} from "./decimal";
+import { addDecimals, formatAtoms, isPositiveDecimal } from "./decimal";
 
-describe("Embedded Yield decimal helpers", () => {
-  it("derives a quote floor without a number round-trip", () => {
-    expect(floorForTolerance("25.123456", 6, 50)).toBe("24.997838");
-  });
-
-  it("keeps a non-zero floor for the smallest quote", () => {
-    expect(floorForTolerance("0.000001", 6, 1_000)).toBe("0.000001");
-  });
-
+describe("exact decimal arithmetic", () => {
   it("formats token atoms and sums unequal decimal scales", () => {
     expect(formatAtoms(12_345_600n, 6)).toBe("12.3456");
     expect(addDecimals(["12.34", "0.006", "-2"])).toBe("10.346");
   });
-
-  it("compares and scales decimals without floating point", () => {
-    expect(compareDecimals("1.10", "1.1")).toBe(0);
-    expect(compareDecimals("0.000001", "0.0000009")).toBe(1);
-    expect(multiplyDivideDecimals("11", "100", "110", 6)).toBe("10");
-    expect(multiplyDivideDecimals("1", "3", "7", 6)).toBe("0.428571");
+  it("retains precision above the JavaScript integer limit", () => {
+    expect(
+      addDecimals(["9007199254740993.000001", "0.000001", "-9007199254740993"])
+    ).toBe("0.000002");
+    expect(addDecimals(["0.000001", "-0.000002"])).toBe("-0.000001");
   });
-
-  it("rejects a quote that exceeds the provider scale", () => {
-    expect(() => floorForTolerance("1.0000001", 6, 50)).toThrow(
-      "reported decimal scale"
-    );
+  it("requires a positive ordinary decimal for transfer intent", () => {
+    expect(isPositiveDecimal("0.000001")).toBe(true);
+    for (const amount of ["0", "-1", "NaN", "1e2", "1."])
+      expect(isPositiveDecimal(amount)).toBe(false);
+    expect(() => addDecimals(["1e2"])).toThrow("Invalid decimal");
   });
 });

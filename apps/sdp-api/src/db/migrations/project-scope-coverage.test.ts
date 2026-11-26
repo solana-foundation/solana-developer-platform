@@ -7,12 +7,10 @@ const EARN_FORENSIC_HISTORY =
 const NULLABLE_PROJECT_TABLES = {
   admin_alerts:
     "HOO-2299: organization-wide alerts (members, the entitlement, settings) are about no project",
-  earn_external_wallet_transactions: EARN_FORENSIC_HISTORY,
-  earn_external_wallet_withdrawal_request_transactions: EARN_FORENSIC_HISTORY,
+  earn_wallet_transactions: EARN_FORENSIC_HISTORY,
+  earn_wallet_withdrawal_request_transactions: EARN_FORENSIC_HISTORY,
   earn_movements: EARN_FORENSIC_HISTORY,
   earn_positions: EARN_FORENSIC_HISTORY,
-  earn_provider_wallets: EARN_FORENSIC_HISTORY,
-  earn_split_swap_advisories: EARN_FORENSIC_HISTORY,
   earn_vault_withdrawal_request_actions: EARN_FORENSIC_HISTORY,
   earn_vault_withdrawal_request_reservations: EARN_FORENSIC_HISTORY,
   earn_vault_withdrawal_requests: EARN_FORENSIC_HISTORY,

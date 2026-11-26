@@ -1,4 +1,3 @@
-import { SDP_RELEASE_CHANNEL_NAMES, type SdpReleaseChannel } from "@sdp/types/release-channels";
 import {
   UNIFIED_TRANSACTION_MODULES,
   type UnifiedTransactionModule,
@@ -15,12 +14,10 @@ vi.mock("@clerk/nextjs/server", () => ({
   auth: async () => ({ userId: "user_test", orgId: "org_test" }),
 }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
-
-const flagMocks = vi.hoisted(() => ({ issuance: vi.fn() }));
-// The issued-token read is gated on the `issuance` flag itself; it follows the channel here.
+// The issued-token read follows the deployment's own `issuance` flag, off on stable.
 vi.mock("@/flags", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/flags")>()),
-  issuance: flagMocks.issuance,
+  issuance: async () => false,
 }));
 
 /** What the page hands its workspace that the release channel decides. */
@@ -32,9 +29,8 @@ type WorkspaceProps = {
 /** The API paths the page read, so a test can see which module it asked for. */
 const requestedPaths: string[] = [];
 
-/** Each read the page makes, answered as the API answers an empty Project. */
+/** Each read the page makes besides the list, answered as the API answers an empty Project. */
 const EMPTY_PROJECT_ANSWERS: Record<string, unknown> = {
-  "/v1/issuance/tokens?page=1&pageSize=100": { data: { tokens: [] }, meta: { hasMore: false } },
   "/v1/wallets?view=summary": { data: { wallets: [] } },
   "/v1/counterparties?page=1&pageSize=100": { data: { counterparties: [], total: 0 } },
 };
@@ -68,13 +64,8 @@ function emptyApiClient(): sdpApi.SdpApiClient {
   };
 }
 
-async function renderPage(
-  releaseChannel: SdpReleaseChannel,
-  searchParams: Record<string, string>
-): Promise<WorkspaceProps> {
-  const flags = dashboardFlagsAt(releaseChannel);
-  vi.spyOn(dashboardFlags, "getDashboardFlags").mockResolvedValue(flags);
-  flagMocks.issuance.mockResolvedValue(flags.issuance);
+async function renderStablePage(searchParams: Record<string, string>): Promise<WorkspaceProps> {
+  vi.spyOn(dashboardFlags, "getDashboardFlags").mockResolvedValue(dashboardFlagsAt("stable"));
   // SAFETY: the page returns its workspace element, whose props include `WorkspaceProps`.
   const element = (await TransactionsPage({
     searchParams: Promise.resolve(searchParams),
@@ -93,35 +84,24 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("transactions page on each release channel", () => {
-  it.each(SDP_RELEASE_CHANNEL_NAMES)(
-    "hands the workspace only %s's modules",
-    async (releaseChannel) => {
-      const { modules } = await renderPage(releaseChannel, {});
-      expect(modules).toEqual(enabledTransactionModules(dashboardFlagsAt(releaseChannel)));
-    }
-  );
-
-  it.each(SDP_RELEASE_CHANNEL_NAMES)(
-    "reads issued tokens on %s only when that channel runs Issuance",
-    async (releaseChannel) => {
-      await renderPage(releaseChannel, {});
-      const readsIssuance = requestedPaths.some((path) => path.startsWith("/v1/issuance/"));
-      expect(readsIssuance).toBe(dashboardFlagsAt(releaseChannel).issuance);
-    }
-  );
-
-  it("opens All on stable for a deep link to a module stable hides", async () => {
+describe("transactions page on the stable channel", () => {
+  it("opens All from its first page for a deep link to a module stable hides", async () => {
     const shown = enabledTransactionModules(dashboardFlagsAt("stable"));
     const hidden = UNIFIED_TRANSACTION_MODULES.filter((module) => !shown.includes(module));
     expect(hidden).not.toEqual([]);
     for (const module of hidden) {
       requestedPaths.length = 0;
-      const { initialFilters } = await renderPage("stable", { module });
-      expect(initialFilters.module, module).toBeUndefined();
-      const transactionsRead = requestedPaths.filter((path) => path.startsWith("/v1/transactions"));
-      expect(transactionsRead, module).toHaveLength(1);
-      expect(transactionsRead[0], module).not.toContain(`module=${module}`);
+      const { modules, initialFilters } = await renderStablePage({
+        module,
+        cursor: "c2",
+        cursors: "c1",
+      });
+      expect(modules, module).not.toContain(module);
+      expect(initialFilters, module).toEqual({ cursors: [] });
+      const transactionsReads = requestedPaths.filter((path) =>
+        path.startsWith("/v1/transactions")
+      );
+      expect(transactionsReads, module).toEqual(["/v1/transactions?limit=25"]);
     }
   });
 });

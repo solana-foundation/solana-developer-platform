@@ -102,15 +102,15 @@ describe("scrubTelemetry", () => {
 
   it("redacts an end-user owner address by key while the treasury address survives", () => {
     const scrubbed = scrubTelemetry({
-      event: "sdp_api_earn_split_swap_orphaned",
-      advisory_id: "adv_01HZY",
+      event: "sdp_api_earn_operation_pending",
+      operation_id: "op_01HZY",
       owner_address: OWNER_ADDRESS,
       vault_address: SOLANA_ADDRESS,
     });
 
     assert.deepEqual(scrubbed, {
-      event: "sdp_api_earn_split_swap_orphaned",
-      advisory_id: "adv_01HZY",
+      event: "sdp_api_earn_operation_pending",
+      operation_id: "op_01HZY",
       owner_address: "[REDACTED]",
       vault_address: SOLANA_ADDRESS,
     });
@@ -121,9 +121,9 @@ describe("scrubTelemetry", () => {
     // an echoed request body carries the end user without any object key.
     assert.equal(
       scrubTelemetryString(
-        `GET /v1/earn/external-wallet/positions?ownerAddress=${OWNER_ADDRESS}&strategyId=str_1`
+        `GET /v1/earn/positions?sourceType=address&ownerAddress=${OWNER_ADDRESS}&strategyId=str_1`
       ),
-      "GET /v1/earn/external-wallet/positions?ownerAddress=[REDACTED]&strategyId=str_1"
+      "GET /v1/earn/positions?sourceType=address&ownerAddress=[REDACTED]&strategyId=str_1"
     );
     assert.equal(
       scrubTelemetryString(

@@ -5,8 +5,8 @@ import { getDb } from "@/db/client";
 import { getAuth, requireProjectId, walletAccessAllows } from "@/lib/auth";
 import { conflict, walletNotFound } from "@/lib/errors";
 import { assertMoneyStartAdmitted } from "@/lib/money-admission";
-import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
-import { createSigningService } from "@/services/domain/signing.service";
+import { CustodyRuntimeTargets } from "@/services/custody/signing/custody-runtime-target";
+import { createSigningService } from "@/services/custody/signing.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { AppContext } from "./context";
 

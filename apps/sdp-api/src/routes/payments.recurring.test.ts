@@ -68,7 +68,7 @@ import { errorResponseSchema, successResponseSchema } from "@/openapi/schemas/ba
 import { paymentRecurringPaymentListResponseSchema } from "@/openapi/schemas/payments";
 import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { rootLogger } from "@/runtime/logger";
-import { SigningService } from "@/services/domain/signing.service";
+import { SigningService } from "@/services/custody/signing.service";
 import { INSUFFICIENT_FUNDS_MESSAGE } from "@/services/fee-payment-errors";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
 import * as counterpartyAccountResolution from "@/services/payments/counterparty-account-resolution";
@@ -4122,8 +4122,8 @@ describe("Payments routes — recurring", () => {
   });
 
   it.each([
-    ["prepare-resume", {}],
-    ["prepare-collection", { receiverTokenAccount: TEST_SOLANA_ADDRESSES.wallet3 }],
+    ["resume/build-unsigned-transaction", {}],
+    ["collect/build-unsigned-transaction", { receiverTokenAccount: TEST_SOLANA_ADDRESSES.wallet3 }],
   ] as const)(
     "refuses the standalone %s route for a recurring payment's subscription",
     async (route, body) => {
@@ -5022,7 +5022,7 @@ describe("Payments routes — recurring", () => {
       });
 
     const preparePromise = app.request(
-      `/v1/payments/subscriptions/${subscriptionId}/prepare-authorization`,
+      `/v1/payments/subscriptions/${subscriptionId}/authorize/build-unsigned-transaction`,
       {
         method: "POST",
         headers: RECURRING_HEADERS,

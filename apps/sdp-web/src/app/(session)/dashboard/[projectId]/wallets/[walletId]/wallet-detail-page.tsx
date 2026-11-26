@@ -130,6 +130,7 @@ function toWalletPageView(
     connection:
       connection === null ? null : { label: connection.label, href: connection.href ?? null },
     canManageCustody,
+    providerPolicy: wallet.providerPolicy,
   };
 }
 

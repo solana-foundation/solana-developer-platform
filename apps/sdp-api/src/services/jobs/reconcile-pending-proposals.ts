@@ -1,0 +1,334 @@
+import { currentClusterScope } from "@sdp/rpc/scope";
+import {
+  type CustodyProposalEvent,
+  canRequestCustodyProposalCancellation,
+  hasUnalertedCustodyProposalRefusal,
+  isCancellableCustodyProposalPhase,
+  isCustodyProposalCancellationInFlight,
+  isTerminalCustodyProposalPhase,
+} from "@sdp/types/custody-proposals";
+import type {
+  ClaimCustodyProposalsInput,
+  CustodyProposalRecoveryScope,
+  CustodyProposalRow,
+} from "@/db/repositories/custody-proposals.repository";
+import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
+import { mapSettledWithConcurrency } from "@/lib/concurrency";
+import { internalError } from "@/lib/errors";
+import { runAsRecordedMoneyPrincipal } from "@/lib/money-principal";
+import { getLogger } from "@/runtime/logger";
+import { describeError } from "@/runtime/money-path-events";
+import {
+  ProposalAdmissionRefusedError,
+  transferProposalIntentSchema,
+} from "@/services/custody/signing/admitted-proposer";
+import { systemProposalLedger } from "@/services/jobs/proposal-recovery-ledger";
+import type {
+  ProposalEventResult,
+  ProposalLedger,
+} from "@/services/payments/custody-proposal-ledger";
+import { applyProposalEvent } from "@/services/payments/custody-proposal-ledger";
+import {
+  applyProposalObservation,
+  reconcileRecordedProposalOutcome,
+} from "@/services/payments/fireblocks-transfer";
+import { createOrgTransferProposalRecovery } from "@/services/solana/signer";
+import type { Env } from "@/types/env";
+
+const RECOVERY_PAGE_SIZE = 50;
+const RECOVERY_CONCURRENCY = 5;
+const RECOVERY_PASSES = 2;
+const CANCELLATION_RESULT_WRITE_ATTEMPTS = 5;
+
+class ProposalRefusalAlertDeliveryError extends Error {
+  constructor(cause: unknown) {
+    super("Custody proposal refusal alert delivery failed", { cause });
+    this.name = "ProposalRefusalAlertDeliveryError";
+  }
+}
+
+function identity(proposal: CustodyProposalRow) {
+  return {
+    transferId: proposal.payment_transfer_id,
+    organizationId: proposal.organization_id,
+    projectId: proposal.project_id,
+  };
+}
+
+async function recoverProposal(env: Env, ledger: ProposalLedger, snapshot: CustodyProposalRow) {
+  for (let attempt = 0; attempt < RECOVERY_PASSES; attempt += 1) {
+    if (await finishTerminalProposal(ledger, snapshot)) return;
+    if (await recoverProposalPass(env, ledger, snapshot)) return;
+    const fresh = await ledger.proposals.getForTransfer(identity(snapshot));
+    if (fresh === null) throw internalError("Custody proposal is missing");
+    snapshot = fresh;
+  }
+  if (await finishTerminalProposal(ledger, snapshot)) return;
+  // A status reader must not consume a revocation's priority without re-admission.
+  await ledger.proposals.requestRecheck({ ...identity(snapshot), now: new Date().toISOString() });
+  throw internalError("Custody proposal recovery changed concurrently");
+}
+
+async function finishTerminalProposal(ledger: ProposalLedger, proposal: CustodyProposalRow) {
+  if (!isTerminalCustodyProposalPhase(proposal.state.providerPhase)) return false;
+  if (hasUnalertedCustodyProposalRefusal(proposal.state))
+    await emitRefusalAlert(ledger, null, proposal);
+  return true;
+}
+
+async function recoverProposalPass(
+  env: Env,
+  ledger: ProposalLedger,
+  snapshot: CustodyProposalRow
+): Promise<boolean> {
+  const initial = await ledger.repo.getTransferById(identity(snapshot));
+  if (initial === null) throw internalError("Custody proposal payment is missing");
+  const recorded = await reconcileRecordedProposalOutcome(ledger, initial, snapshot, Date.now());
+  if (recorded !== null) {
+    if (!recorded.written) return false;
+    if (hasUnalertedCustodyProposalRefusal(recorded.proposal.state)) {
+      await emitRefusalAlert(ledger, recorded.transfer, recorded.proposal);
+    }
+    return true;
+  }
+  if (snapshot.custody_wallet_id === null)
+    throw internalError("Custody proposal wallet is missing");
+  const recovery = await createOrgTransferProposalRecovery<"payments">(
+    env,
+    snapshot.organization_id,
+    snapshot.project_id,
+    snapshot.custody_wallet_id,
+    {
+      ...transferProposalIntentSchema.parse(snapshot.binding),
+      sourceAddress: initial.source_address,
+    },
+    "payments.transfer"
+  );
+  // Each pass pins the version before a fresh GET; a lost CAS never reuses its observation.
+  const result = await recovery.read(initial.id);
+  let current = await applyProposalObservation(ledger, initial, result, Date.now(), snapshot);
+  if (!current.written) return false;
+  if (hasUnalertedCustodyProposalRefusal(current.proposal.state)) {
+    await emitRefusalAlert(ledger, current.transfer, current.proposal);
+  }
+  if (result === null || !isCancellableCustodyProposalPhase(current.proposal.state.providerPhase))
+    return true;
+  if (current.proposal.state.authorizationState === "authorized") {
+    let refusal: { reason: string; message: string };
+    if (current.transfer.initiated_by_principal === null) {
+      refusal = {
+        reason: "principal_missing",
+        message: "This payment has no recorded initiating principal and cannot remain authorized.",
+      };
+    } else {
+      try {
+        await runAsRecordedMoneyPrincipal(current.transfer, () => recovery.admit());
+        return true;
+      } catch (error) {
+        // Unavailable admission is not proof of revoked authority.
+        if (!(error instanceof ProposalAdmissionRefusedError)) throw error;
+        refusal = { reason: error.reason, message: error.message };
+      }
+    }
+    current = await applyProposalEvent(ledger, current.transfer, current.proposal, {
+      type: "admission_refused",
+      at: new Date().toISOString(),
+      ...refusal,
+    });
+    if (!current.written) return false;
+  }
+  const cancellationAt = new Date().toISOString();
+  if (!canRequestCustodyProposalCancellation(current.proposal.state, cancellationAt)) return true;
+  current = await applyProposalEvent(ledger, current.transfer, current.proposal, {
+    type: "cancel_requested",
+    at: cancellationAt,
+  });
+  if (!current.written) return false;
+  // Only the durable CAS winner calls cancel. A timeout retains retry work; acknowledgment
+  // does not settle the payment.
+  let accepted: boolean;
+  try {
+    accepted = await recovery.cancel(current.transfer.id);
+  } catch (error) {
+    try {
+      await recordCancellationResult(ledger, current, {
+        type: "cancel_ambiguous",
+        at: new Date().toISOString(),
+      });
+    } catch (persistenceError) {
+      throw new AggregateError(
+        [error, persistenceError],
+        "Custody proposal cancellation and result recording failed"
+      );
+    }
+    throw error;
+  }
+  await recordCancellationResult(ledger, current, {
+    type: accepted ? "cancel_accepted" : "cancel_declined",
+    at: new Date().toISOString(),
+  });
+  return true;
+}
+
+async function recordCancellationResult(
+  ledger: ProposalLedger,
+  current: ProposalEventResult,
+  event: Extract<
+    CustodyProposalEvent,
+    { type: "cancel_accepted" | "cancel_declined" | "cancel_ambiguous" }
+  >
+): Promise<void> {
+  const proposalId = current.proposal.id;
+  const cancellationAttempt = current.proposal.state.cancelAttempt;
+  // Observations may advance the version during cancel. Retry only this attempt's
+  // result, without repeating provider I/O or overwriting a newer decision.
+  for (let attempt = 0; attempt < CANCELLATION_RESULT_WRITE_ATTEMPTS; attempt += 1) {
+    current = await applyProposalEvent(ledger, current.transfer, current.proposal, event);
+    if (current.written) return;
+    if (
+      current.proposal.id !== proposalId ||
+      current.proposal.state.cancelAttempt !== cancellationAttempt ||
+      !isCustodyProposalCancellationInFlight(current.proposal.state) ||
+      isTerminalCustodyProposalPhase(current.proposal.state.providerPhase)
+    )
+      return;
+  }
+  throw internalError("Custody proposal cancellation result changed concurrently");
+}
+
+async function recoverDue(env: Env, ledger: ProposalLedger, scope: CustodyProposalRecoveryScope) {
+  const environment = currentClusterScope().environment;
+  const now = new Date().toISOString();
+  const adoption = await Promise.allSettled([
+    (async () => {
+      await ledger.proposals.adoptLegacyTransfers({ environment, now, limit: RECOVERY_PAGE_SIZE });
+    })(),
+  ]);
+  // A malformed legacy row cannot starve already-recorded proposals. Report the
+  // bridge failure after processing them, so the cron still signals failed work.
+  const recovery = await Promise.allSettled([
+    recoverClaimedProposals(env, ledger, { ...scope, environment, now, limit: RECOVERY_PAGE_SIZE }),
+  ]);
+  rethrowFailures([...adoption, ...recovery]);
+}
+
+async function recoverClaimedProposals(
+  env: Env,
+  ledger: ProposalLedger,
+  input: ClaimCustodyProposalsInput
+) {
+  const proposals = await ledger.proposals.claimDue(input);
+  // Row failures use age-based alerts regardless of the rest of the page.
+  const outcomes = await mapSettledWithConcurrency(
+    proposals,
+    RECOVERY_CONCURRENCY,
+    async (proposal) => {
+      try {
+        await recoverProposal(env, ledger, proposal);
+      } catch (error) {
+        if (error instanceof ProposalRefusalAlertDeliveryError) throw error;
+        getLogger().warn(
+          {
+            event: "proposal_recovery_unavailable",
+            environment: input.environment,
+            ...identity(proposal),
+            pending_age_seconds: Math.max(
+              0,
+              Math.floor((Date.now() - Date.parse(proposal.created_at)) / 1000)
+            ),
+            ...describeError(error),
+          },
+          "proposal_recovery_unavailable"
+        );
+        throw error;
+      }
+    }
+  );
+  rethrowFailures(
+    outcomes.filter(
+      (outcome) =>
+        outcome.status === "rejected" && outcome.reason instanceof ProposalRefusalAlertDeliveryError
+    )
+  );
+}
+
+async function emitRefusalAlert(
+  ledger: ProposalLedger,
+  transfer: PaymentTransferRow | null,
+  proposal: CustodyProposalRow
+) {
+  try {
+    transfer ??= await ledger.repo.getTransferById(identity(proposal));
+    if (transfer === null) throw internalError("Custody proposal payment is missing");
+    const refusal = proposal.state.refusal;
+    if (refusal === null) throw internalError("Custody proposal alert has no recorded refusal");
+    getLogger().fatal(
+      {
+        event: "fireblocks_transfer_committed_after_refusal",
+        ...identity(proposal),
+        refusalReason: refusal.reason,
+        refusedAt: refusal.at,
+        signature: transfer.signature,
+      },
+      "fireblocks_transfer_committed_after_refusal"
+    );
+    await applyProposalEvent(ledger, transfer, proposal, {
+      type: "alert_delivered",
+      at: new Date().toISOString(),
+    });
+  } catch (error) {
+    throw new ProposalRefusalAlertDeliveryError(error);
+  }
+}
+
+function rethrowFailures(outcomes: readonly PromiseSettledResult<void>[]) {
+  const failures = outcomes
+    .filter((outcome): outcome is PromiseRejectedResult => outcome.status === "rejected")
+    .map((outcome) => outcome.reason);
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) throw new AggregateError(failures, "Custody proposal recovery failed");
+}
+
+async function drainAlerts(ledger: ProposalLedger, scope: CustodyProposalRecoveryScope) {
+  const proposals = await ledger.proposals.listUnalerted({
+    ...scope,
+    environment: currentClusterScope().environment,
+    limit: RECOVERY_PAGE_SIZE,
+  });
+  const outcomes = await mapSettledWithConcurrency(
+    proposals,
+    RECOVERY_CONCURRENCY,
+    async (proposal) => {
+      try {
+        await emitRefusalAlert(ledger, null, proposal);
+      } catch (error) {
+        getLogger().warn(
+          {
+            event: "proposal_refusal_alert_unavailable",
+            ...identity(proposal),
+            ...describeError(error),
+          },
+          "proposal_refusal_alert_unavailable"
+        );
+        throw error;
+      }
+    }
+  );
+  rethrowFailures(outcomes);
+}
+
+/**
+ * Reconcile bounded proposal pages under the dedicated cron identity. Terminal alerts drain
+ * independently, including when legacy adoption or the active recovery queue is unavailable.
+ */
+export async function reconcilePendingProposals(
+  env: Env,
+  scope: CustodyProposalRecoveryScope = {}
+): Promise<void> {
+  const ledger = systemProposalLedger(env);
+  const outcomes = await Promise.allSettled([
+    recoverDue(env, ledger, scope),
+    drainAlerts(ledger, scope),
+  ]);
+  rethrowFailures(outcomes);
+}

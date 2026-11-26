@@ -49,6 +49,11 @@
       "import": "./src/custody.ts",
       "default": "./src/custody.ts"
     },
+    "./custody-proposals": {
+      "types": "./src/custody-proposals.ts",
+      "import": "./src/custody-proposals.ts",
+      "default": "./src/custody-proposals.ts"
+    },
     "./dvp": {
       "types": "./src/dvp.ts",
       "import": "./src/dvp.ts",
@@ -58,6 +63,11 @@
       "types": "./src/earn.ts",
       "import": "./src/earn.ts",
       "default": "./src/earn.ts"
+    },
+    "./earn-core": {
+      "types": "./src/earn-core.ts",
+      "import": "./src/earn-core.ts",
+      "default": "./src/earn-core.ts"
     },
     "./earn-wire": {
       "types": "./src/earn-wire.ts",
@@ -148,6 +158,11 @@
       "types": "./src/organizations.ts",
       "import": "./src/organizations.ts",
       "default": "./src/organizations.ts"
+    },
+    "./operations": {
+      "types": "./src/operations.ts",
+      "import": "./src/operations.ts",
+      "default": "./src/operations.ts"
     },
     "./pagination": {
       "types": "./src/pagination.ts",

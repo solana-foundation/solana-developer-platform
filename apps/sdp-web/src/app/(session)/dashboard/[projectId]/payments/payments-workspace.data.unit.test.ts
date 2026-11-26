@@ -1,144 +1,58 @@
 import type { Counterparty } from "@sdp/types/counterparties";
-import { address } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  dashboardDataResponse,
+  sentDashboardRequests,
+  stubDashboardFetch,
+} from "@/test/dashboard-fetch";
+import { requiredWellKnownMint } from "@/test/well-known-mints";
 import { setWindowPathname } from "@/test/window-location";
 import {
   counterpartyListComplete,
-  createTransfer,
   createTransferBatch,
   estimateTransferBatch,
   fetchRampEstimates,
-  TransferRequestError,
+  type Translate,
 } from "./payments-workspace.data";
 
-const t = ((key: string) => key) as Parameters<typeof createTransfer>[1];
+const t: Translate = (key) => key;
 
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
-describe("Payments write requests", () => {
+describe("createTransferBatch", () => {
   beforeEach(() => setWindowPathname("/dashboard/prj_test_sandbox/payments/pay"));
   afterEach(() => vi.unstubAllGlobals());
 
-  const transferInput = {
-    sourceCustodyWalletId: "cwlt_1",
-    destination: "destination",
-    token: address("So11111111111111111111111111111111111111112"),
-    amount: "1",
-  };
-
-  it("sends the exact custody wallet id, the tab's Project, and the caller's key or one per action", async () => {
-    const fetch = vi
-      .fn()
-      .mockImplementation(async () =>
-        jsonResponse({ data: { transfer: { id: "trf_1", status: "pending", signature: null } } })
-      );
-    vi.stubGlobal("fetch", fetch);
-
-    await createTransfer({ ...transferInput, transferId: "xfr_1" }, t, {
-      value: "idem_transfer_1",
-      persisted: true,
-    });
-    await createTransfer(transferInput, t, null);
-
-    const init = fetch.mock.calls[0]?.[1] as RequestInit;
-    expect(JSON.parse(String(init.body))).toEqual({ ...transferInput, transferId: "xfr_1" });
-
-    const [keyed, unkeyed] = fetch.mock.calls.map(([, init]) => (init as RequestInit).headers);
-    expect(keyed).toEqual(
-      new Headers({
-        "Content-Type": "application/json",
-        "Idempotency-Key": "idem_transfer_1",
-        "x-project-id": "prj_test_sandbox",
-      })
-    );
-    // A caller without its own key still gets one per user action (HOO-1918).
-    const unkeyedHeaders = new Headers(unkeyed);
-    expect(unkeyedHeaders.get("x-project-id")).toBe("prj_test_sandbox");
-    expect(unkeyedHeaders.get("Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/);
-  });
-
-  it("treats a 202 SIGNING_PENDING body like any other unexpected response", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        jsonResponse(
-          {
-            error: {
-              code: "SIGNING_PENDING",
-              message: "Approval required",
-              details: { approvalRequestId: "apr_1" },
-            },
-          },
-          202
-        )
-      )
-    );
-
-    await expect(
-      createTransfer(transferInput, t, { value: "idem_transfer_1", persisted: true })
-    ).rejects.toThrow("DashboardPayments.workspace.transferMissing");
-  });
-
-  it("carries the status of a refusal so the caller can decide the key's fate", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(jsonResponse({ error: { message: "Insufficient balance" } }, 422))
-    );
-
-    const refusal = await createTransfer(transferInput, t, {
-      value: "idem_transfer_1",
-      persisted: true,
-    }).catch((error: unknown) => error);
-    expect(refusal).toBeInstanceOf(TransferRequestError);
-    expect(refusal).toMatchObject({ status: 422, message: "Insufficient balance" });
-  });
-
-  it("uses the exact custody wallet id for batch estimate and create", async () => {
-    const fetch = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse({ data: { estimate: { transactionCount: 1 } } }))
-      .mockResolvedValueOnce(
-        jsonResponse({
-          data: { batch: { id: "batch_1" }, recipients: [], transfers: [] },
-        })
-      );
-    vi.stubGlobal("fetch", fetch);
-    const request = {
-      sourceCustodyWalletId: "cwlt_1",
-      token: "mint",
+  it("sends the exact custody wallet id in the batch estimate and create bodies", async () => {
+    const batch = {
+      sourceCustodyWalletId: "cwlt_batch_source",
+      token: requiredWellKnownMint("USDC", "devnet"),
       recipients: [{ counterpartyId: "cp_1", counterpartyAccountId: "acct_1", amount: "1" }],
     };
+    const fetchMock = stubDashboardFetch(({ path }) =>
+      path === "/api/dashboard/payments/transfers/batch/estimate"
+        ? dashboardDataResponse(200, { estimate: { transactionCount: 1 } })
+        : dashboardDataResponse(200, { batch: { id: "batch_1" }, recipients: [], transfers: [] })
+    );
 
-    await estimateTransferBatch(request, t);
-    await createTransferBatch(request, t, { value: "idem_batch_1", persisted: true });
+    await estimateTransferBatch(batch, t);
+    await createTransferBatch(batch, t, { value: "idem_batch_1", persisted: true });
 
-    for (const [, init] of fetch.mock.calls) {
-      expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
-        sourceCustodyWalletId: "cwlt_1",
-      });
-      expect(JSON.parse(String((init as RequestInit).body))).not.toHaveProperty("source");
-    }
+    expect(sentDashboardRequests(fetchMock).map(({ path, body }) => ({ path, body }))).toEqual([
+      { path: "/api/dashboard/payments/transfers/batch/estimate", body: batch },
+      { path: "/api/dashboard/payments/transfers/batch", body: batch },
+    ]);
   });
 
   it("surfaces a disabled batch movement with the API's actionable refusal", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        jsonResponse(
-          {
-            error: {
-              code: "FORBIDDEN",
-              message: "This movement is disabled for the project",
-              details: { reason: "movement_disabled" },
-            },
+    stubDashboardFetch(() =>
+      Response.json(
+        {
+          error: {
+            code: "FORBIDDEN",
+            message: "This movement is disabled for the project",
+            details: { reason: "movement_disabled" },
           },
-          403
-        )
+        },
+        { status: 403 }
       )
     );
 
@@ -156,6 +70,7 @@ describe("Payments write requests", () => {
       name: "TransferBatchRequestError",
       status: 403,
       code: "FORBIDDEN",
+      replayed: false,
       message: "This movement is disabled for the project",
     });
   });
@@ -184,18 +99,15 @@ describe("fetchRampEstimates", () => {
   } as const;
 
   it("turns an estimate without a usable rate into that provider's error", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        jsonResponse({
-          data: {
-            estimates: [
-              { provider: "moonpay", status: "ok", estimate: { ...estimate, exchangeRate: "0" } },
-              { provider: "stripe", status: "ok", estimate },
-            ],
-          },
-        })
-      )
+    const fetchMock = stubDashboardFetch(() =>
+      Response.json({
+        data: {
+          estimates: [
+            { provider: "moonpay", status: "ok", estimate: { ...estimate, exchangeRate: "0" } },
+            { provider: "stripe", status: "ok", estimate },
+          ],
+        },
+      })
     );
 
     expect(await fetchRampEstimates(request, t)).toEqual([
@@ -205,6 +117,16 @@ describe("fetchRampEstimates", () => {
         error: "DashboardPayments.workspace.rampEstimateInvalidRate",
       },
       { provider: "stripe", status: "ok", estimate },
+    ]);
+    // A buy is quoted from the fiat it spends.
+    expect(
+      sentDashboardRequests(fetchMock).map(({ path, method, body }) => ({ path, method, body }))
+    ).toEqual([
+      {
+        path: "/api/dashboard/payments/ramps/onramp/estimate",
+        method: "POST",
+        body: { assetRail: "sol.solana", fiatCurrency: "USD", fiatAmount: "25" },
+      },
     ]);
   });
 
@@ -216,13 +138,10 @@ describe("fetchRampEstimates", () => {
       reason: "amount_below_minimum",
       limit: { amount: "20.00879", currency: "USDC" },
     } as const;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        jsonResponse({
-          data: { estimates: [outOfRange, { provider: "stripe", status: "unsupported" }] },
-        })
-      )
+    stubDashboardFetch(() =>
+      Response.json({
+        data: { estimates: [outOfRange, { provider: "stripe", status: "unsupported" }] },
+      })
     );
 
     expect(await fetchRampEstimates(request, t)).toEqual([
@@ -232,11 +151,8 @@ describe("fetchRampEstimates", () => {
   });
 
   it("refuses a response that is not an estimate list", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        jsonResponse({ data: { estimates: [{ provider: "stripe", status: "ok" }] } })
-      )
+    stubDashboardFetch(() =>
+      Response.json({ data: { estimates: [{ provider: "stripe", status: "ok" }] } })
     );
 
     await expect(fetchRampEstimates(request, t)).rejects.toThrow(
@@ -247,17 +163,14 @@ describe("fetchRampEstimates", () => {
   it.each([{ totalFiatAmount: "26,02" }, { fees: { currency: "USD", total: "1.02 USD" } }])(
     "refuses an estimate whose figures aren't decimals: %o",
     async (figures) => {
-      vi.stubGlobal(
-        "fetch",
-        vi.fn(async () =>
-          jsonResponse({
-            data: {
-              estimates: [
-                { provider: "stripe", status: "ok", estimate: { ...estimate, ...figures } },
-              ],
-            },
-          })
-        )
+      stubDashboardFetch(() =>
+        Response.json({
+          data: {
+            estimates: [
+              { provider: "stripe", status: "ok", estimate: { ...estimate, ...figures } },
+            ],
+          },
+        })
       );
 
       await expect(fetchRampEstimates(request, t)).rejects.toThrow(

@@ -126,7 +126,7 @@ submission through confirmation and the paired refresh. Subsequent polling keeps
 the bound; execution and reconciliation keep their existing commitments. It does not project requested amounts into
 holdings or availability. The bank example also separates requested amounts
 from observed payouts and excludes queue quotes from current value and earnings.
-Provider-order confirmation stays pending; the external-wallet movement contract
+Provider-order confirmation stays pending; the wallet movement contract
 now explicitly identifies atomic versus provider-order settlement.
 
 

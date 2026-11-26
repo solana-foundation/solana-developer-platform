@@ -4,6 +4,7 @@ import { getDb } from "@/db/client";
 import { app } from "@/index";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
+import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { clerkAdminHeaders } from "@/test/helpers/clerk-member";
 import { seedTestCustodySetup } from "@/test/helpers/custody";
 import {
@@ -13,6 +14,7 @@ import {
 } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 
@@ -89,7 +91,7 @@ async function requestInitialize(): Promise<Response> {
     projectId: PROJECT_ID,
   });
   return app.request(
-    "/v1/wallets/initialize",
+    "/v1/wallets/managed-signing/initialize-with-wallet",
     {
       method: "POST",
       headers: {
@@ -125,7 +127,7 @@ async function seedManagedPrivyConfig(): Promise<void> {
       id: "cwlt_privy_byok_admission",
       custodyConfigId: CONFIG_ID,
       walletId: "privy_wallet_admission",
-      publicKey: "ManagedPublicKey",
+      publicKey: TEST_SOLANA_ADDRESSES.wallet1,
       label: "Managed wallet",
       purpose: null,
       status: "active",
@@ -205,7 +207,7 @@ describe("Managed Privy setup beside BYOK Privy", () => {
   it("initializes a Managed Privy wallet in a project that also holds a pending Privy Connection", async () => {
     provisionPrivyWalletMock.mockResolvedValueOnce({
       walletId: "wallet_side_by_side",
-      address: "ManagedSideBySidePublicKey",
+      address: TEST_SOLANA_ADDRESSES.wallet2,
     });
     await seedPendingPrivyConnection();
 
@@ -217,7 +219,7 @@ describe("Managed Privy setup beside BYOK Privy", () => {
       data: {
         configId: expect.any(String),
         walletId: "privy_wallet_side_by_side",
-        publicKey: "ManagedSideBySidePublicKey",
+        publicKey: TEST_SOLANA_ADDRESSES.wallet2,
       },
       meta: { requestId: expect.any(String), timestamp: expect.any(String) },
     });
@@ -245,13 +247,15 @@ describe("Managed Privy setup beside BYOK Privy", () => {
       meta: { requestId: expect.any(String) },
     });
     expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
-    const createAudits = await getDb(env)
-      .prepare(
-        `SELECT COUNT(*) AS count
-         FROM audit_logs
-         WHERE resource_type = 'custody_config' AND action = 'create'`
-      )
-      .first<{ count: number }>();
-    expect(createAudits?.count).toBe(0);
+    const createAudits = required(
+      await getDb(env)
+        .prepare(
+          `SELECT COUNT(*)::int AS count
+           FROM audit_logs
+           WHERE resource_type = 'custody_config' AND action = 'create'`
+        )
+        .first<{ count: number }>()
+    );
+    expect(createAudits.count).toBe(0);
   });
 });

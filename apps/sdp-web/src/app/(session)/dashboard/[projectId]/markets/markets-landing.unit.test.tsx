@@ -56,7 +56,7 @@ describe("MarketsLanding", () => {
 
   it("titles the cards with the shared subnav labels so they cannot drift", () => {
     expect(markup).toContain("Shared.dashboardShell.treasurySolutions");
-    expect(markup).toContain("Shared.dashboardShell.earnProgram");
+    expect(markup).toContain("Shared.dashboardShell.embeddedYield");
   });
 
   it("leaves out DvP where the release channel runs Earn without it", async () => {

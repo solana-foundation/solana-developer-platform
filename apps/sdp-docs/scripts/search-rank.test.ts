@@ -12,8 +12,8 @@ const descriptions = {
   "/docs/earn/concepts": "Understand strategies, shares, value, and withdrawals.",
   "/docs/earn/withdrawals": "Choose an exit and track funds back to the owner's wallet.",
   "/docs/reference/api/earn": "Earn API operations.",
-  "/docs/reference/api/earn/get-earn-external-wallet-earnings": "Read balance and earned yield.",
-  "/docs/reference/api/earn/create-earn-vault-withdrawal": "Submit a custody withdrawal.",
+  "/docs/reference/api/earn/get-earn-wallet-earnings": "Read balance and earned yield.",
+  "/docs/reference/api/earn/prepare-earn-withdrawal": "Submit a custody withdrawal.",
 } as const satisfies Record<string, string>;
 
 type FixtureUrl = keyof typeof descriptions;
@@ -70,7 +70,7 @@ describe("search ranking", () => {
 
   it("puts the Earn overview before an earnings prefix and the family reference", () => {
     const results = [
-      page("/docs/reference/api/earn/get-earn-external-wallet-earnings", "Get wallet earnings"),
+      page("/docs/reference/api/earn/get-earn-wallet-earnings", "Get wallet earnings"),
       page("/docs/reference/api/earn", "Earn"),
       page("/docs/earn", "Earn"),
     ];
@@ -79,10 +79,7 @@ describe("search ranking", () => {
 
   it("finds the withdrawal guide for withdrawal and withdrawal inflections", () => {
     const results = [
-      page(
-        "/docs/reference/api/earn/create-earn-vault-withdrawal",
-        "Withdraw from a custody position"
-      ),
+      page("/docs/reference/api/earn/prepare-earn-withdrawal", "Prepare a position withdrawal"),
       page("/docs/earn/withdrawals", "Withdraw funds"),
     ];
     for (const query of ["withdraw", "withdrawal", "withdrawals"]) {
@@ -107,22 +104,22 @@ describe("search ranking", () => {
   });
 
   it("puts an exact endpoint owner before guides that mention its path", () => {
-    const endpointUrl = "/docs/reference/api/earn/create-earn-vault-withdrawal";
+    const endpointUrl = "/docs/reference/api/earn/prepare-earn-withdrawal";
     const results = [
       page("/docs/earn/withdrawals", "Withdraw funds"),
-      passage("/docs/earn/withdrawals", "Submit through POST /v1/earn/vault-withdrawals."),
-      page(endpointUrl, "Withdraw from a custody position"),
-      passage(endpointUrl, "POST /v1/earn/vault-withdrawals"),
+      passage("/docs/earn/withdrawals", "Submit through POST /v1/earn/withdraw."),
+      page(endpointUrl, "Prepare a position withdrawal"),
+      passage(endpointUrl, "POST /v1/earn/withdraw"),
     ];
     for (const query of [
-      "/v1/earn/vault-withdrawals",
-      "POST /v1/earn/vault-withdrawals",
-      "create-earn-vault-withdrawal",
+      "/v1/earn/withdraw",
+      "POST /v1/earn/withdraw",
+      "prepare-earn-withdrawal",
       endpointUrl,
     ]) {
       const ranked = rankTitlesFirst(results, query, descriptionOf);
       assert.equal(ranked[0]?.url, endpointUrl);
-      assert.equal(ranked[1]?.content, "POST /v1/earn/vault-withdrawals");
+      assert.equal(ranked[1]?.content, "POST /v1/earn/withdraw");
     }
   });
 

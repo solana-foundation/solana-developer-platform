@@ -92,9 +92,13 @@ erases expired staging copies in bounded batches. Responses expose only public C
 for stored credentials, the API user ID suffix. Rotations generate a new key and CSR.
 
 The project environment selects the asset: `SOL_TEST` for sandbox and `SOL` for production.
-The encrypted credential pins that choice. The API endpoint comes only from the deployment's
-`FIREBLOCKS_API_BASE_URL`; credential submissions cannot override either the endpoint or asset.
-The endpoint must serve the workspace owning the API user.
+The encrypted credential pins that choice. The Fireblocks API endpoint also follows the
+project environment and is fixed in code: sandbox projects use the Developer Sandbox host
+(`https://sandbox-api.fireblocks.io`) and production projects use `https://api.fireblocks.io`.
+Neither deployment settings nor credential submissions can override the endpoint, and
+credential submissions cannot override the asset. The API user must belong to a workspace
+that endpoint serves: a Developer Sandbox workspace for sandbox projects, a Mainnet workspace
+for production projects.
 
 Verification reads each vault address using `FireblocksSigner` from
 `@solana/keychain-fireblocks` and attaches those existing wallets. It does not create a vault,
@@ -113,7 +117,7 @@ API user in Fireblocks.
 
 ## Transaction approval
 
-Direct SOL and USDC payments through `POST /v1/payments/transfers` use Fireblocks'
+Direct SOL and USDC payments through `POST /v1/payments/transfers/execute` use Fireblocks'
 [TRANSFER operation](https://developers.fireblocks.com/api-reference/transactions/create-a-new-transaction).
 SDP resolves the exact project wallet and its encrypted BYOK credential. Fireblocks builds the
 transaction, applies the workspace's approvals, signs and broadcasts. The source vault needs
@@ -143,9 +147,9 @@ money context before proposing. It uses the canonical `MoneyPrincipal` identity
 The field is internal and stays unchanged on retries, status reads and settlement;
 `initiated_by_key_id` remains separate audit evidence. Migration `0226` leaves
 historical rows null and accepts writes from the previous API revision. Never
-reconstruct their authority from the ambiguous audit ID. Worker restoration and
-D4 re-admission/cancellation follow this persistence slice of PRO-2435; neither
-is enabled by this change.
+reconstruct their authority from the ambiguous audit ID. D4 restores this
+principal for live re-admission and best-effort cancellation; see
+[submission recovery](#submission-recovery-and-access-revocation).
 
 The payment's critical audit intent stays open while the proposal awaits approval. The read or
 cron run that settles the payment (confirmed, failed, rejected or expired) closes it with
@@ -154,7 +158,7 @@ does for a signed payment; acceptance alone is never audited as success.
 
 The payment goes through the same custody waist as every signed payment (ADR 0007). The
 waist resolves a Fireblocks BYOK wallet to a proposer rather than a signer
-(`services/domain/signing/admitted-proposer.ts`), with the same checks at resolution: runtime
+(`services/custody/signing/admitted-proposer.ts`), with the same checks at resolution: runtime
 availability, wallet purpose and provider entitlement. Immediately before the provider POST, the
 proposer re-reads the wallet row and Connection, checks connection, account, vault, source address
 and network against the stored intent, and makes the same live money-admission decision a signature
@@ -162,18 +166,21 @@ makes. A local refusal marks the intent failed without a POST. Credentials never
 and previously decrypted credentials are never carried from preparation into submission. Only the
 proposer may call `createFireblocksTransfer` (`pnpm check:value-movement`). This adds no Fireblocks
 or Solana RPC requests.
-The request returns `processing` while approval is pending. Dashboard transfer reads and the
-pending-transfer job reconcile with GET by external ID; they never POST. Unknown outcomes,
-including a timeout, missing proposal, or unavailable credentials, stay processing. Do not
-create a replacement until the original has been reconciled. A crash before the create call
-may require manual reconciliation; automatic resubmission is deliberately not implemented.
+The request returns `processing` while approval is pending. Dashboard transfer
+reads reconcile with GET by external ID. The recovery worker can also POST a
+cancellation after recording a live-admission refusal. Unknown outcomes, including
+a timeout, missing proposal, or unavailable credentials, stay processing. Do not
+create a replacement until the original has been reconciled. A crash before the
+create call may require manual reconciliation; automatic resubmission is
+deliberately not implemented.
 
 Connection deactivation or a failed connection check blocks new payments but does not stop
 these status reads. Recovery verifies the stored connection, provider account, vault and source
 address before reading the retained active credential. It does not require an active wallet or
 a healthy connection, and it stops polling once the payment settles. Credential revocation or
-loss of provider access still requires operator intervention; disabling a connection does not
-cancel a transfer already accepted by Fireblocks.
+loss of provider access still requires operator intervention. A disabled connection
+refuses worker re-admission and triggers best-effort cancellation; it cannot
+guarantee that an accepted transfer stops.
 
 Fireblocks transaction ID, status and substatus are visible in SDP. COMPLETED with a valid
 Solana signature records confirmation only after the external ID, vault, asset, destination,
@@ -275,8 +282,8 @@ the runner never receives or exports a Fireblocks private key. These commands do
 
 Before testing:
 
-1. Use a production SDP project, a mainnet RPC, and a Fireblocks endpoint matching the customer's
-   workspace region. Complete CSR registration and connect the existing SOL vault in the
+1. Use a production SDP project, a mainnet RPC, and a Fireblocks Mainnet workspace (production
+   projects always call `https://api.fireblocks.io`). Complete CSR registration and connect the existing SOL vault in the
    dashboard. Enable the connection for runtime execution. Allow TRANSFER initiation and the intended one-time destination in the workspace policy.
    Keep SOL in the source vault for network fees. Program Call permission is needed for the optional signer check.
 2. Fund the source vault with the payment asset and enough SOL for fees and any token-account
@@ -342,6 +349,17 @@ implementation with mocked Fireblocks HTTP responses and a locally generated Ed2
 Dashboard tests cover submission, rotation, and the existing Privy lifecycle. These tests do not
 replace an approval-policy check against a real Fireblocks workspace.
 
+Provider build suites send deposit and withdrawal plans through the real Fireblocks
+adapter with mocked HTTP: Kamino and Veda use recorded chain data; Jupiter Lend uses
+its real SDK against an in-process chain; WisdomTree uses its real subscription and
+Token-2022 redemption builders; Ondo and Hastra stub their admitted Jupiter swap leg.
+Plume also covers immutable CCTP transactions with existing protocol signatures.
+The shared harness substitutes a local signing key for recorded owners and verifies
+the exact serialized proposal and signature. These are offline compatibility tests,
+not live execution evidence. Hastra, WisdomTree and Plume keep their pre-launch gates;
+Upshift and Perena remain unimplemented stubs. Hastra's absent legacy-ticket sentinel
+is now readonly, so both par and optional DEX redemption transactions can compile.
+
 ## Read-only checks on Pay
 
 The minimal integration retains server-generated RSA-4096 keys, CSR download, API user ID
@@ -405,10 +423,161 @@ checks still apply. It skips execution eligibility and funding checks; `prefligh
 `payment` retain them. Compared with the previous status command, this removes one SDP wallet-list
 GET and one Solana `getMultipleAccounts` request; mainnet and confirmed-signature checks remain.
 
-Native transfers can execute in Fireblocks after SDP access is revoked. Cancel pending transfers
-from SDP or cancel/reject them in Fireblocks as part of revocation/incident response; cancellation
-can race execution.
-See the **proposed, not yet approved** [ADR 0007 exception](../decisions/0007-money-admission.md#proposed-exception-fireblocks-native-transfers-pr-2455).
+Pending native transfers are re-admitted by the recovery worker as the stored
+initiating principal, using live status, actions, wallet scope, organization,
+project controls and custody eligibility. A refusal is persisted before any
+cancellation request and remains sticky if authority is restored. Connection
+health checks and deployment release-channel restrictions are availability
+failures: recovery retries them without recording refusal or cancelling.
+Explicit wallet, connection or credential revocation still refuses admission.
+Legacy rows without a principal refuse in every environment, including stage
+and writes from an older API revision during a rolling deploy; the audit actor
+is never a fallback authority.
+
+`custody_proposals` owns provider progress, sticky authorization decisions and
+recovery scheduling. The initiating principal and public status stay on the
+payment. One shared reducer selects transitions; versioned writes commit the
+proposal, payment projection, audit and pending cancellation or alert together.
+A stale observation loses its version check and cannot overwrite newer state.
+New proposal creation and its submission claim share one transaction, before any
+provider call. A crash before that transaction leaves only the payment intent;
+the worker adopts it after two minutes and observes by `externalTxId`. Viewer
+reads or revocation wakes can adopt it earlier, but neither polling claim can
+observe an unsent proposal until that same two-minute grace has passed. The
+creator can still claim submission immediately. Recovery never submits it
+automatically. Unclaimed proposals use the same authenticated absence
+horizon as ambiguous submissions.
+
+Key revocation and member removal try to enqueue affected proposals in a
+savepoint inside their database transaction. A failed wake rolls back only its
+adoption and flags; authority withdrawal still commits. The error event
+`proposal_recovery_wake_failed` records tenant scope and available SQLSTATE
+without raw provider data. The minute worker continues checking known proposals
+when legacy adoption fails; that failure still fails the cron. Ordinary recovery
+failures use the per-payment age signal described below. Malformed legacy records
+need repair before adoption.
+
+Set `organization_id` and `project_id` as psql variables. This read-only query
+lists suspicious legacy refusal rows oldest first, including already-adopted rows:
+
+```sql
+SELECT pt.id, pt.organization_id, pt.project_id, pt.created_at
+  FROM payment_transfers pt
+ WHERE pt.organization_id = :'organization_id'
+   AND pt.project_id = :'project_id'
+   AND jsonb_typeof(pt.provider_data->'fireblocksTransfer') = 'object'
+   AND pt.provider_data->'proposalRefusal' IS NOT NULL
+   AND (
+     jsonb_typeof(pt.provider_data->'proposalRefusal') IS DISTINCT FROM 'object'
+     OR NULLIF(btrim(pt.provider_data #>> '{proposalRefusal,at}'), '') IS NULL
+     OR NULLIF(btrim(pt.provider_data #>> '{proposalRefusal,reason}'), '') IS NULL
+     OR NULLIF(btrim(pt.provider_data #>> '{proposalRefusal,message}'), '') IS NULL
+   )
+ ORDER BY pt.created_at, pt.id
+ LIMIT 50;
+```
+
+Inspect each row's proposal before choosing a repair. Preserve refusal evidence;
+do not clear it to unblock adoption. Invalid nonblank timestamps and malformed
+bindings need separate inspection.
+
+The dedicated `reconcile-custody-proposals` cron runs every minute,
+claims at most 50 rows per environment and makes five concurrent provider calls.
+Flagged revocations take priority with capacity reserved for ordinary progress.
+Dashboard refresh has a separate 15-second throttle and cannot postpone worker
+admission. Backlog, upstream timeouts and credential availability extend recovery
+latency; a one-minute schedule is not a cancellation guarantee. HTTP handlers do
+not run recovery. Provider webhooks are deferred.
+
+**Remove the rollout bridge after old revisions drain.**
+
+[PRO-2520](https://linear.app/solana-fndn/issue/PRO-2520/remove-the-custody-proposal-rollout-bridge-after-old-revisions-drain)
+tracks the contract migration. Keep the bridge until old serving and rollback
+revisions have drained, every pending payment and unalerted refusal has a
+canonical proposal, and race/crash tests pass with compatibility disabled.
+Include payment rows written after the expansion migration in that inventory.
+
+Remove these together in that contract change:
+
+- Bounded legacy adoption and unsent advancement in
+  `proposal-recovery.repository.ts`, including the legacy queue indexes.
+- The old JSON decoder in `lib/fireblocks-proposal-compatibility.ts` and
+  transition projection in `services/payments/fireblocks-proposal-compatibility.ts`,
+  the legacy submission claim in
+  `custody-proposal-ledger.ts`, and legacy poll timestamps.
+- Payment-status decision guards in `custody-proposal-ledger.ts`,
+  `pollFireblocksTransfer` (including viewer refresh),
+  `reconcileRecordedProposalOutcome`, and
+  `requestPendingProposalRecovery`. Replace them with proposal-phase gates;
+  retain payment updates as the public projection.
+
+Until then, the viewer and adoption bridge share one legacy lifecycle decoder.
+Adoption checks the selected payment snapshot again while locking the parent
+before its proposal, so an overlapping old writer cannot import stale state.
+Legacy JSON remains a projection for old readers; its submission claim joins
+the new transaction to prevent a second create attempt. Keep refusal,
+cancellation and alert evidence during backfill and removal.
+
+Recovery reads the proposal, validates its recorded account and intent, and
+rechecks live admission while the provider reports a known cancellable state.
+Cancellation reloads the account-bound credential and makes another bound detail
+GET before one cancel POST. This catches credential, binding or provider-state
+changes during admission and the durable cancellation write. Normal worker
+observation adds one provider GET, zero Solana RPC; refusal adds at most one GET
+and one POST in that pass. A competing status write can trigger one fresh recovery
+pass, adding one observation GET. Continued contention preserves a priority wake
+for the next tick; a losing observation is never replayed. Provider acknowledgment
+remains `processing`; only a terminal provider outcome closes the payment. The
+first cancellation attempt is immediate; a timeout or rejected cancel keeps the
+durable refusal and retries no sooner than five minutes after the last attempt.
+Observations continue every minute during that cooldown, including
+completion-after-refusal alerts.
+An acknowledged cancel is polled to outcome. Cancellation stages are explicit:
+`cancel_requested` is in flight, `cancel_ambiguous` records an uncertain result,
+and `cancel_declined` records a definitive decline. Retries after that decline use
+`cancel_retry_requested` and `cancel_retry_ambiguous` to preserve the first-decline
+audit. A committed integer `cancelAttempt` identifies each attempt independently
+of its timestamp; timestamps record timing and enforce the cooldown.
+Signed, broadcasting, cancelling and unfamiliar states are observation-only.
+
+The first refusal, first cancellation request, first definitive decline,
+cancellation acknowledgment and critical event acknowledgment each commit with
+a system audit entry in the same database transaction. Ambiguous attempts do
+not consume the first-decline audit; later declines keep that original marker
+without appending another entry. Cancellation intent commits before provider
+I/O. Cancellation results retry version conflicts against the same recorded
+attempt without another provider call. Terminal outcomes and newer attempts win;
+five consecutive write conflicts fail that recovery check. A failed audit write
+rolls back its marker so recovery can retry. These intermediate events do not
+close the original payment audit intent; only terminal settlement does.
+
+A payment that completes after a recorded refusal emits the CRITICAL structured
+event `fireblocks_transfer_committed_after_refusal`. The row remains an alert
+outbox in `committed_after_refusal` until emission is acknowledged, including
+completions first observed by a viewer. Acknowledgment moves it to
+`refusal_alerted`; the query and partial index select by state, while `alertedAt`
+records delivery time. The event requires an already-recorded refusal. Transfers
+first observed outside the cancellable window remain observation-only; without a
+prior refusal,
+their completion raises no critical event even if the initiating principal was
+revoked. Delivery is at least once: deduplicate on transfer ID. Configure on-call
+routing for this event before rollout; this repository does not deploy that rule.
+Monitor `proposal_recovery_unavailable` for stalled mitigation. Every ordinary
+recovery failure emits this event, whether the rest of its page succeeds or fails.
+It includes the environment, `pending_age_seconds` from the durable payment
+creation time, and organization, project and transfer IDs. Ordinary row failures do not fail the cron;
+selection, legacy adoption and critical-alert delivery failures still do.
+
+Route this event by environment and pending age before rollout, independently of
+cron success. For example, select `pending_age_seconds >= 300` and deduplicate by
+organization, project and transfer ID. A newly failed old payment can alert too.
+Recovery cannot use a revoked provider credential; restore account-bound
+read/cancel access or act directly in Fireblocks.
+
+Native transfers can still execute after SDP access is revoked. Cancel pending
+transfers from SDP or cancel/reject them in Fireblocks during incident response.
+Cancellation races signing and broadcasting and cannot guarantee containment. See the
+**proposed, not yet approved** [ADR 0007 exception](../decisions/0007-money-admission.md#proposed-exception-fireblocks-native-transfers-pr-2455).
 
 Live-test receipts bind the payment to the SDP API key via a slow one-way fingerprint. Keep the
 same key and receipt when retrying; a changed key or legacy unbound receipt is refused. The
@@ -419,6 +588,8 @@ result receipt stores only a validated SDP transfer ID, never a provider respons
 Organization administrators can use **Wallets → Overview → Fireblocks approvals** for
 both native transfers and sign-only requests. The internal dashboard list and cancellation
 routes require `wallets.configure` and a human session; they are not public API-key routes.
+Native cancellation uses the same pending statuses in the worker and dashboard,
+including `PENDING_ENRICHMENT`.
 Each cancellation validates project and wallet access before the shared required
 `Idempotency-Key` step. Audit intent is written before provider cancellation.
 
@@ -436,11 +607,21 @@ provider outcomes remain pending; `success: true` from cancel is an acknowledgem
 `CANCELLED`. A native TRANSFER can still execute during cancellation; its existing settlement
 validation records the real result. No automatic replacement is submitted.
 
+The dashboard approval list reads worker cancellation attempts from the proposal
+row; manual attempts retain their existing timestamp. This adds one indexed DB
+read per displayed native transfer, bounded at 20, and zero provider or Solana
+calls.
+
 Request budget: each cancellation makes one status GET, at most one cancel POST and one
-follow-up GET; zero Solana RPC. The paginated list reads at most 20 pending proposals per
+follow-up GET; zero Solana RPC. A competing unchanged status write permits one
+extra status GET before cancellation. Further contention returns a conflict for
+an explicit retry. The paginated list reads at most 20 pending proposals per
 page, throttled to one status GET per proposal per 15 seconds across concurrent requests.
 Terminal rows need no provider read. SDK tracking writes on status transitions, not each
-identical poll. List pages show the last known status during provider outages. Historical
+identical poll. Malformed legacy rows record the failed poll time before returning
+an error, so they rotate behind other pending rows. Failed adoption adds one scoped
+DB write and no provider or Solana calls. List pages show the last known
+status during provider outages. Historical
 rows are paginated; a retention policy remains follow-up work.
 
 ## Scheduled reconciliation and metrics
@@ -505,10 +686,12 @@ currently uses two owner queries plus one credential query; encrypted DB credent
 need no external fetch, while Secret Manager-backed credentials retain their existing
 secret read. The signing queue has a concurrent partial pending index (0230).
 
-Principal persistence, re-admission during polling and automatic cancellation on
-key/member revocation remain intentionally unimplemented (PRO-2468/2469/2470).
-Manual cancellation remains available. No permission-refusal or revocation-latency
-metric is fabricated by this read-only job.
+Native transfers persist their initiating principal. A separate one-minute
+authority-recovery worker rechecks that principal and requests cancellation after
+a refusal, prioritizing recorded key/member access changes. The 30-second status
+job remains read-only; its request budget excludes that separate worker. Neither
+job fabricates a revocation-latency metric or guarantees cancellation before
+execution. Manual cancellation remains available.
 
 ## Sandbox evidence still required
 
@@ -529,9 +712,9 @@ and timestamps for RAW, PROGRAM_CALL and TRANSFER:
 ## Stable-train requirements coverage
 
 Scope reviewed against all 19 issues in **Fireblocks BYOK to stable** on 2026-11-12.
-This change implements beta sign-only proposals, cancellation safeguards and docs;
-it keeps BYOK maturity at beta — a stable promotion is a separate, later one-line
-maturity change — and does not declare the entire launch gate complete.
+Coverage includes beta sign-only proposals, native-transfer authority recovery,
+cancellation safeguards and docs. BYOK maturity stays beta; stable promotion and
+the remaining launch gates require separate approval and operational evidence.
 
 | Issue                                                     | Coverage in this change / remaining work                                                                                                                                                                                                                                                      |
 | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -541,15 +724,15 @@ maturity change — and does not declare the entire launch gate complete.
 | [PRO-2363](https://linear.app/solana-fndn/issue/PRO-2363) | Updated existing customer setup/rotation/teardown guide with program-call policies, approval deadlines, manual cancellation and cancellation limits; publishes with the beta channel. Annotated workspace screenshots remain outstanding.                                                     |
 | [HOO-2478](https://linear.app/solana-fndn/issue/HOO-2478) | Existing policy-refusal normalization retained across the SDK upgrade; tests include PROGRAM_CALL and RAW. Pending/unknown/non-policy failures remain distinct.                                                                                                                               |
 | [PRO-2356](https://linear.app/solana-fndn/issue/PRO-2356) | Design and operational boundaries documented above; manual enablement remains. The issue discussion records a STRIDE-session waiver; this change does not supply an independent security sign-off.                                                                                            |
-| [PRO-2435](https://linear.app/solana-fndn/issue/PRO-2435) | Bounded sign-only program calls and RAW cleanup included. Durable generic async approvals, the shared native-transfer waist and recurring workflows remain separate. PRs #2863/#2864 were open when reviewed; neither is included.                                                            |
+| [PRO-2435](https://linear.app/solana-fndn/issue/PRO-2435) | Bounded sign-only requests, the shared native-transfer waist, durable native proposal state and authority recovery included. Generic durable async signing and recurring workflows remain separate.                                                                                           |
 | [PRO-2474](https://linear.app/solana-fndn/issue/PRO-2474) | Mocked regressions and a manual sandbox matrix provided; live cancellation/lookup/blockhash evidence remains outstanding.                                                                                                                                                                     |
 | [PRO-2466](https://linear.app/solana-fndn/issue/PRO-2466) | Direct-transfer-only API restriction deliberately excluded: it conflicts with this branch's arbitrary stable proposal scope.                                                                                                                                                                  |
 | [PRO-2467](https://linear.app/solana-fndn/issue/PRO-2467) | Direct-transfer-only dashboard filtering excluded for the same reason.                                                                                                                                                                                                                        |
-| [PRO-2468](https://linear.app/solana-fndn/issue/PRO-2468) | Initiating money principal persistence on native transfers is outside this change (separate PR #2864).                                                                                                                                                                                        |
-| [PRO-2469](https://linear.app/solana-fndn/issue/PRO-2469) | Native-transfer re-admission and cancellation on each poll remain outstanding.                                                                                                                                                                                                                |
-| [PRO-2470](https://linear.app/solana-fndn/issue/PRO-2470) | Immediate cancellation sweep after principal revocation remains outstanding.                                                                                                                                                                                                                  |
-| [PRO-2471](https://linear.app/solana-fndn/issue/PRO-2471) | Independent 30-second, per-environment read-only lane for native transfers and signing proposals; shared batch limit 100, concurrency five, queue rotation and isolation/failure tests included.                                                                                              |
-| [PRO-2472](https://linear.app/solana-fndn/issue/PRO-2472) | 180-second polling-age target, per-run backlog/age/duration/outcome metrics and companion sdp-infra dashboard/alerts included. Live p99 settlement measurements and revocation-to-cancel metrics remain outstanding; revocation enforcement is deliberately deferred.                         |
+| [PRO-2468](https://linear.app/solana-fndn/issue/PRO-2468) | Native transfers persist the initiating money principal; recovery restores only that recorded principal.                                                                                                                                                                                      |
+| [PRO-2469](https://linear.app/solana-fndn/issue/PRO-2469) | The one-minute authority worker re-admits pending native transfers and requests cancellation after refusal. Status-only polls never restore execution authority.                                                                                                                              |
+| [PRO-2470](https://linear.app/solana-fndn/issue/PRO-2470) | Key/member authority withdrawal durably prioritizes proposal recovery. Queues and provider delays prevent an immediate-cancellation guarantee.                                                                                                                                                |
+| [PRO-2471](https://linear.app/solana-fndn/issue/PRO-2471) | Independent 30-second, per-environment status lane for both proposal kinds, with batch limit 100 and concurrency five. Native authority recovery has its own one-minute registration.                                                                                                         |
+| [PRO-2472](https://linear.app/solana-fndn/issue/PRO-2472) | 180-second polling-age target, backlog/age/duration/outcome metrics and companion dashboard/alerts included. Live p99 settlement measurements and revocation-to-cancel metrics remain outstanding.                                                                                            |
 | [PRO-2473](https://linear.app/solana-fndn/issue/PRO-2473) | Pending-approval expiry remains deliberately omitted, including the proposed seven-day limit.                                                                                                                                                                                                 |
 | [PRO-2364](https://linear.app/solana-fndn/issue/PRO-2364) | Policy-absence detection, audit and alert remain outstanding. Editor credentials cannot read active policies; a dismissible reminder is not detection.                                                                                                                                        |
 | [PRO-2365](https://linear.app/solana-fndn/issue/PRO-2365) | Dependency-register verification, sandbox/production workspace setup and contacts require operational follow-through.                                                                                                                                                                         |

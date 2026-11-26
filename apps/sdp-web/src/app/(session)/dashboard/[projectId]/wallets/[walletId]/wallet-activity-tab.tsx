@@ -192,7 +192,7 @@ export function WalletActivityTab({
   const { type, status, filtered, pageSize, currentPage, pageCount } = filters;
   const transactionsHref = projectHref(walletTransactionsHref(custodyWalletId));
   return (
-    <div className="flex min-w-0 flex-col gap-5" data-wallet-activity-tab>
+    <div className="flex min-w-0 flex-col gap-5">
       <ListToolbar
         filters={
           <FilterMenu

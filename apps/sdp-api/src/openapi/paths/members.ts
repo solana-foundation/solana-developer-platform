@@ -70,7 +70,7 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/members/invite",
+    path: "/v1/members/invitations",
     tags: ["Members"],
     summary: "Invite member",
     operationId: "inviteMember",

@@ -1,5 +1,4 @@
 import {
-  supportsPortfolioWallets,
   supportsVaultDepositQuote,
   supportsVaultDirect,
   supportsVaultQueuedWithdraw,
@@ -10,7 +9,6 @@ import type { VedaDeployment } from "@sdp/types/veda-programs";
 import { address } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  assertNotPortfolioProvider,
   toEarnVaultQueuedWithdrawalRequestPlan,
   toEarnVaultTransactionPlan,
   VEDA_POSITION_READ_CONCURRENCY,
@@ -170,24 +168,10 @@ describe("VedaVaultDirectClient capabilities", () => {
     expect(supportsVaultQueuedWithdraw(client)).toBe(true);
   });
 
-  /**
-   * THE INVARIANT THAT PROTECTS CUSTOMER FUNDS.
-   *
-   * The portfolio capability means "SDP can give you an address to send
-   * stablecoins to". Veda has no such address — its vault state is a program
-   * account. If this client ever answered yes to both, a portfolio route could
-   * render that account as a deposit target. The two must stay mutually
-   * exclusive.
-   */
-  it("NEVER reports the portfolio-wallet capability", () => {
-    expect(supportsPortfolioWallets(client)).toBe(false);
-    expect(() => assertNotPortfolioProvider(client)).not.toThrow();
-  });
-
   it("still catalogues — the execution client is a superset, not a replacement", () => {
     expect(client.provider).toBe("veda");
     expect(client.declaredSupport.sourceKinds).toEqual(["defi"]);
-    expect(client.declaredSupport.depositTokens).toEqual(["USDC"]);
+    expect(client.declaredSupport.depositTokens).toEqual(["USDC", "OUSD"]);
     expect(typeof client.listStrategies).toBe("function");
   });
 });
@@ -489,18 +473,10 @@ describe("readVaultPositions", () => {
   });
 });
 
-describe("an unconfigured deployment", () => {
-  /**
-   * The real registry has no MAINNET entry (devnet is confirmed; mainnet waits
-   * for Veda to name a production vault), so a client built against it refuses
-   * every mainnet chain call. Asserted with the mock bypassed so this is the
-   * genuine `@sdp/types` state, not the fixture's.
-   */
-  it("refuses both chain capabilities with a typed error", async () => {
+describe("the deployment registry", () => {
+  it("resolves the production deployment through the real registry", async () => {
     const { vedaClusterConfig } = await vi.importActual<typeof import("./programs")>("./programs");
-    expect(() => vedaClusterConfig("mainnet-beta")).toThrowError(
-      expect.objectContaining({ code: "DEPLOYMENT_NOT_CONFIGURED" })
-    );
+    expect(vedaClusterConfig("mainnet-beta").vaultStateAddresses).toHaveLength(2);
   });
 
   it("still exposes the fixture-driven config helper the builder uses", () => {

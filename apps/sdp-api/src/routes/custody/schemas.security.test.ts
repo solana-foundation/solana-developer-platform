@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { initializeSigningSchema } from "./schemas";
 
 const hostedProviderRequests = [
@@ -12,7 +13,7 @@ const hostedProviderRequests = [
 ] as const;
 
 const existingProviderObjectRequests = [
-  { provider: "coinbase_cdp", walletAddress: "11111111111111111111111111111111" },
+  { provider: "coinbase_cdp", walletAddress: TEST_SOLANA_ADDRESSES.wallet1 },
   { provider: "para", walletId: "wallet_from_another_tenant" },
   { provider: "turnkey", privateKeyId: "key_from_another_tenant" },
   { provider: "dfns", walletId: "wallet_from_another_tenant" },
@@ -39,14 +40,16 @@ describe("custody initialize endpoint selection", () => {
     }
   );
 
-  it("preserves ordinary platform-managed provisioning requests", () => {
-    const parsed = initializeSigningSchema.safeParse({
-      provider: "coinbase_cdp",
-      network: "solana-devnet",
-      walletLabel: "Treasury",
-    });
+  it.each([
+    { provider: "coinbase_cdp", network: "solana" },
+    { provider: "anchorage", network: "solana" },
+    { provider: "dfns", network: "Solana" },
+    { provider: "ibm_haven", network: "Solana" },
+  ] as const)("refuses a $provider request that chooses its network", ({ provider, network }) => {
+    const request = { provider, walletLabel: "Treasury" };
 
-    expect(parsed.success).toBe(true);
+    expect(initializeSigningSchema.safeParse(request).success).toBe(true);
+    expect(initializeSigningSchema.safeParse({ ...request, network }).success).toBe(false);
   });
 
   it.each(["__proto__", "constructor"])("rejects the unknown provider %s", (provider) => {

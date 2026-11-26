@@ -21,6 +21,6 @@ export async function POST(request: Request, context: RouteContext) {
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.payments.ramps.quote.post",
-    path: `/v1/payments/ramps/${direction}/quote`,
+    path: `/v1/payments/ramps/${direction}/start`,
   });
 }

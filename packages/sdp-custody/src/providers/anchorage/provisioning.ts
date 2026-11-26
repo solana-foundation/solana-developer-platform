@@ -1,0 +1,179 @@
+import { custodyClusterConfig } from "#/cluster-config";
+import { parseJsonResponse, readErrorResponseText } from "#/shared/common";
+import type { CustodyProvisioningRuntime } from "#/shared/runtime";
+import { SigningError } from "#/signing";
+
+type AnchorageHttpMethod = "GET" | "POST" | "DELETE";
+
+interface AnchorageRequestParams {
+  method: AnchorageHttpMethod;
+  apiKey: string;
+  path: string;
+  body?: Record<string, unknown>;
+}
+
+type AnchorageAuthStrategy = "api-key" | "bearer";
+
+export interface ProvisionAnchorageOptions {
+  walletLabel?: string;
+}
+
+export interface ProvisionAnchorageResult {
+  walletId: string;
+  address: string;
+}
+
+export interface DeleteAnchorageOptions {
+  walletId: string;
+}
+
+export interface AnchorageProvisioningConfig {
+  apiKey?: string;
+}
+
+export async function provisionAnchorageWallet(
+  runtime: CustodyProvisioningRuntime,
+  config: AnchorageProvisioningConfig,
+  options: ProvisionAnchorageOptions
+): Promise<ProvisionAnchorageResult> {
+  const { apiKey } = resolveAnchorageConfig(config);
+
+  const created = await anchorageRequest<unknown>(runtime, {
+    method: "POST",
+    apiKey,
+    path: "/v1/wallets",
+    body: {
+      network: custodyClusterConfig().anchorage.network,
+      ...(options.walletLabel ? { label: options.walletLabel } : {}),
+    },
+  });
+
+  return extractAnchorageWallet(created);
+}
+
+export async function deleteAnchorageWallet(
+  runtime: CustodyProvisioningRuntime,
+  config: AnchorageProvisioningConfig,
+  options: DeleteAnchorageOptions
+): Promise<void> {
+  const { apiKey } = resolveAnchorageConfig(config);
+
+  await anchorageRequest<void>(runtime, {
+    method: "DELETE",
+    apiKey,
+    path: `/v1/wallets/${encodeURIComponent(options.walletId)}`,
+  });
+}
+
+function resolveAnchorageConfig(config: AnchorageProvisioningConfig): { apiKey: string } {
+  const apiKey = config.apiKey;
+  if (!apiKey) {
+    throw new SigningError(
+      "Anchorage environment variables not configured: ANCHORAGE_API_KEY",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  return { apiKey };
+}
+
+async function anchorageRequest<T>(
+  runtime: CustodyProvisioningRuntime,
+  params: AnchorageRequestParams
+): Promise<T> {
+  const url = `${custodyClusterConfig().anchorage.origin}${params.path}`;
+  try {
+    const requestWithAuth = (authStrategy: AnchorageAuthStrategy) =>
+      runtime.fetch(url, {
+        method: params.method,
+        headers: buildAnchorageHeaders(params, authStrategy),
+        body: params.body ? JSON.stringify(params.body) : undefined,
+      });
+
+    let response = await requestWithAuth("api-key");
+    if (!response.ok && (response.status === 401 || response.status === 403)) {
+      // Compatibility fallback for deployments still expecting Bearer auth.
+      response = await requestWithAuth("bearer");
+    }
+
+    if (!response.ok) {
+      const errorText = await readErrorResponseText(response);
+      throw new SigningError(
+        `Anchorage API error: ${response.status} - ${errorText}`,
+        "NETWORK_ERROR"
+      );
+    }
+
+    return parseJsonResponse<T>(response);
+  } catch (error) {
+    if (error instanceof SigningError) {
+      throw error;
+    }
+
+    throw new SigningError(
+      `Failed to call Anchorage API: ${error instanceof Error ? error.message : "Unknown error"}`,
+      "NETWORK_ERROR",
+      error instanceof Error ? error : undefined
+    );
+  }
+}
+
+function buildAnchorageHeaders(
+  params: AnchorageRequestParams,
+  authStrategy: AnchorageAuthStrategy
+): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (authStrategy === "api-key") {
+    headers["Api-Key"] = params.apiKey;
+  } else {
+    headers.Authorization = `Bearer ${params.apiKey}`;
+  }
+
+  if (params.body) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  return headers;
+}
+
+function extractAnchorageWallet(payload: unknown): ProvisionAnchorageResult {
+  const record = unwrapPayload(payload);
+  const walletId = readString(record, ["walletId", "wallet_id", "id"]);
+  const address = readString(record, ["address", "publicKey", "public_key"]);
+
+  if (!walletId || !address) {
+    throw new SigningError(
+      "Anchorage wallet response missing wallet id or address",
+      "INVALID_REQUEST"
+    );
+  }
+
+  return { walletId, address };
+}
+
+function unwrapPayload(payload: unknown): Record<string, unknown> {
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    const direct = payload as Record<string, unknown>;
+    const nested = direct.data;
+    if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+      return nested as Record<string, unknown>;
+    }
+    return direct;
+  }
+
+  return {};
+}
+
+function readString(record: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed) {
+        return trimmed;
+      }
+    }
+  }
+
+  return undefined;
+}

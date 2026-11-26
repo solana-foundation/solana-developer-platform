@@ -112,6 +112,7 @@ export type ResourceType =
   | "provider_credential"
   | "custody_connection"
   | "earn_movement"
+  | "earn_operation"
   | "earn_vault_withdrawal_request"
   | "earn_provider_action"
   | "dvp_trade"

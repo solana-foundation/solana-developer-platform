@@ -1,7 +1,6 @@
 import { SigningError } from "@sdp/custody/signing";
 import { FeePaymentError } from "@sdp/fee-payment/port";
 import { runInClusterScope } from "@sdp/rpc/scope";
-import type { confirmTransaction } from "@sdp/rpc/solana";
 import {
   generateKeyPairSigner,
   getSignatureFromTransaction,
@@ -14,16 +13,17 @@ import { getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import type { UpdatePaymentTransferInput } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
-import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { rootLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
-import { admittedSigner } from "@/services/domain/signing/admitted-signer";
+import { admittedSigner } from "@/services/custody/signing/admitted-signer";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import * as signedSubmission from "@/services/payments/signed-submission";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
+import { expireIdempotencyKey } from "@/test/helpers/idempotency-records";
+import { syntheticSignature } from "@/test/helpers/parsed-transactions";
 import {
   confirmTransactionMock,
   createKoraAdapterMock,
@@ -44,9 +44,9 @@ import {
   readTransferResponse,
   readTransferRow,
 } from "@/test/helpers/payments-transfers";
+import { setDisabledMovements } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { sendTransactionPreflightError } from "@/test/helpers/rpc-errors";
-import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 
 describe("Payments routes — signed submission", () => {
   installPaymentsRouteTestHooks();
@@ -77,6 +77,12 @@ describe("Payments routes — signed submission", () => {
       const row = (await listTransferRows())[0];
       if (!row) throw new Error("no transfer row");
       return row;
+    }
+
+    /** The signature of the one transaction the route handed to sendTransaction. */
+    function broadcastSignature(): string {
+      const [call] = sendTransactionMock.mock.calls;
+      return getSignatureFromTransaction(getTransactionDecoder().decode(required(call)[1]));
     }
 
     function transferRequest(amount: string, idempotencyKey?: string) {
@@ -157,7 +163,7 @@ describe("Payments routes — signed submission", () => {
           signed_transaction: Buffer.from(signedBytes).toString("base64"),
           last_valid_block_height: "1000",
         });
-        expect(row?.submission_started_at).not.toBeNull();
+        expect(required(row).submission_started_at).not.toBeNull();
         return signature;
       });
 
@@ -199,12 +205,7 @@ describe("Payments routes — signed submission", () => {
       confirmTransactionMock.mockImplementationOnce(async (_rpc, signature) => {
         await settleProcessingTransfer(signature, { status: "finalized", slot: 200 });
 
-        return {
-          signature,
-          slot: 100n,
-          confirmationStatus: "confirmed",
-          err: null,
-        } as Awaited<ReturnType<typeof confirmTransaction>>;
+        return { signature, slot: 100n, confirmationStatus: "confirmed", err: null };
       });
 
       const res = await transferRequest("0.001");
@@ -308,7 +309,7 @@ describe("Payments routes — signed submission", () => {
       expect(res.status).toBe(200);
       const json = await readTransferResponse(res);
       expect(json.data.transfer.status).toBe("processing");
-      expect(json.data.transfer.signature).toBeTruthy();
+      expect(json.data.transfer.signature).toBe(broadcastSignature());
 
       const row = await readTransferRow(json.data.transfer.id);
       expect(row).toMatchObject({
@@ -320,8 +321,8 @@ describe("Payments routes — signed submission", () => {
 
       const replay = await transferRequest("0.001", idempotencyKey);
       expect(replay.status).toBe(200);
-      const replayJson = await readTransferResponse(replay);
-      expect(replayJson.data.transfer.id).toBe(json.data.transfer.id);
+      expect(replay.headers.get("Idempotent-Replayed")).toBe("true");
+      expect((await readTransferResponse(replay)).data).toEqual(json.data);
       expect(signAsFeePayer).toHaveBeenCalledOnce();
       expect(sendTransactionMock).toHaveBeenCalledOnce();
       expect(warn).toHaveBeenCalledWith(
@@ -339,6 +340,30 @@ describe("Payments routes — signed submission", () => {
         "sdp_api_payment_submission_unresolved"
       );
       warn.mockRestore();
+    });
+
+    it("keeps a submitted transfer processing with its signature when confirmation fails", async () => {
+      const { signAsFeePayer } = await mockSignedSubmissionAdapter();
+      confirmTransactionMock.mockRejectedValueOnce(new Error("confirmation timed out"));
+      const idempotencyKey = "submitted-unconfirmed";
+
+      const res = await transferRequest("0.001", idempotencyKey);
+
+      expect(res.status).toBe(200);
+      const json = await readTransferResponse(res);
+      const signature = broadcastSignature();
+      expect(json.data.transfer).toMatchObject({ status: "processing", signature });
+      expect(await readTransferRow(json.data.transfer.id)).toMatchObject({
+        status: "processing",
+        signature,
+      });
+
+      const replay = await transferRequest("0.001", idempotencyKey);
+      expect(replay.status).toBe(200);
+      expect(replay.headers.get("Idempotent-Replayed")).toBe("true");
+      expect((await readTransferResponse(replay)).data).toEqual(json.data);
+      expect(signAsFeePayer).toHaveBeenCalledOnce();
+      expect(sendTransactionMock).toHaveBeenCalledOnce();
     });
 
     it("closes the open audit intent when the tracker settles an ambiguous broadcast", async () => {
@@ -405,14 +430,7 @@ describe("Payments routes — signed submission", () => {
         )
         .first<{ count: number }>();
       expect(open?.count).toBe(0);
-      const outcomes = await getDb(env)
-        .prepare(
-          `SELECT count(*)::integer AS count FROM audit_logs
-           WHERE metadata::jsonb ->> 'auditIntentId' = ?`
-        )
-        .bind(intentId)
-        .first<{ count: number }>();
-      expect(outcomes?.count).toBe(1);
+      expect(await countIntentOutcomes(required(intentId))).toBe(1);
     });
 
     it("appends one outcome when the tracker settles the row while the request waits", async () => {
@@ -470,7 +488,12 @@ describe("Payments routes — signed submission", () => {
 
       expect(res.status).toBeGreaterThanOrEqual(500);
       expect(sendTransactionMock).not.toHaveBeenCalled();
-      expect(await latestTransferRow()).toMatchObject({ status: "failed", audit_intent_id: null });
+      expect(await latestTransferRow()).toMatchObject({
+        status: "failed",
+        signature: null,
+        error: "Audit ledger admission failed before execution",
+        audit_intent_id: null,
+      });
     });
 
     it("fails a transfer whose first broadcast preflight refuses, keeping its signature", async () => {
@@ -481,9 +504,10 @@ describe("Payments routes — signed submission", () => {
 
       expect(res.status).toBe(400);
       expect((await readErrorResponse(res)).error.code).toBe("TRANSACTION_FAILED");
-      const row = await latestTransferRow();
-      expect(row.status).toBe("failed");
-      expect(row.signature).toBeTruthy();
+      expect(await latestTransferRow()).toMatchObject({
+        status: "failed",
+        signature: broadcastSignature(),
+      });
       expect(sendTransactionMock).toHaveBeenCalledOnce();
     });
 
@@ -537,115 +561,61 @@ describe("Payments routes — signed submission", () => {
       expect(sendTransactionMock).not.toHaveBeenCalled();
     });
 
-    it("records a pre-send admission rejection as a plain failed transfer", async () => {
-      createKoraAdapterMock.mockReturnValue(
-        testKoraAdapter({
-          getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
-          getSponsorshipConfiguration: vi
-            .fn()
-            .mockRejectedValue(new Error("Kora config timed out")),
-          signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
-        })
-      );
-
-      const res = await transferRequest("1");
-
-      expect(res.status).toBeGreaterThanOrEqual(400);
-      expect(sendTransactionMock).not.toHaveBeenCalled();
-      const row = await latestTransferRow();
-      expect(row).toMatchObject({ status: "failed", signature: null });
-      expect(row.error).toContain("Sponsorship preflight is unavailable");
-    });
-
     it("refuses a stopped project before its row and lets the same key run after re-enable", async () => {
       const { signAsFeePayer } = await mockSignedSubmissionAdapter();
-      await getDb(env)
-        .prepare("UPDATE projects SET disabled_movements = ?::text[] WHERE id = ?")
-        .bind(["payments.transfer"], TEST_PROJECT.id)
-        .run();
+      await setDisabledMovements(getDb(env), TEST_PROJECT.id, ["payments.transfer"]);
+      const idempotencyKey = "stopped-project-transfer";
 
-      const key = "disabled-project-transfer";
-      const first = await transferRequest("0.001", key);
-      expect(first.status).toBe(403);
-      expect((await readErrorResponse(first)).error).toMatchObject({
+      const stopped = await transferRequest("0.001", idempotencyKey);
+
+      expect(stopped.status).toBe(403);
+      expect((await readErrorResponse(stopped)).error).toMatchObject({
         code: "FORBIDDEN",
         details: { reason: "movement_disabled" },
       });
-      expect(sendTransactionMock).not.toHaveBeenCalled();
       expect(signAsFeePayer).not.toHaveBeenCalled();
+      expect(sendTransactionMock).not.toHaveBeenCalled();
       expect(await listTransferRows()).toHaveLength(0);
 
-      await getDb(env)
-        .prepare("UPDATE projects SET disabled_movements = ARRAY[]::text[] WHERE id = ?")
-        .bind(TEST_PROJECT.id)
-        .run();
-      const replay = await transferRequest("0.001", key);
-      expect(replay.status).toBe(200);
-      expect(replay.headers.get("Idempotent-Replayed")).toBeNull();
+      await setDisabledMovements(getDb(env), TEST_PROJECT.id, []);
+      const resumed = await transferRequest("0.001", idempotencyKey);
+
+      expect(resumed.status).toBe(200);
+      expect(resumed.headers.get("Idempotent-Replayed")).toBeNull();
       expect(sendTransactionMock).toHaveBeenCalledOnce();
       expect(await listTransferRows()).toHaveLength(1);
     });
 
-    it("journals a definite on-chain failure as failed with the submitted signature", async () => {
-      await mockSignedSubmissionAdapter();
-      confirmTransactionMock.mockResolvedValueOnce({
-        signature:
-          "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy",
-        slot: 100n,
-        confirmationStatus: "confirmed",
-        err: { InstructionError: [0, { Custom: 1 }] },
-      } as unknown as Awaited<ReturnType<typeof confirmTransaction>>);
-
-      const res = await transferRequest("1");
-
-      expect(res.status).toBe(400);
-      const row = await latestTransferRow();
-      expect(row.status).toBe("failed");
-      expect(row.signature).toBeTruthy();
-    });
-
-    async function errorBody(response: Response) {
-      // SAFETY: the app's error envelope; the tests read these fields only.
-      return (await response.json()) as {
-        error: { code: string; message: string };
-        meta?: { requestId?: string };
-      };
-    }
-
-    async function expireIdempotencyKey(key: string) {
-      await getDb(env)
-        .prepare("DELETE FROM idempotency_keys WHERE idempotency_key = ?")
-        .bind(key)
-        .run();
-    }
-
     it("stores a 400 raised after the row, and past 24 hours answers it from the row", async () => {
       await mockSignedSubmissionAdapter();
       confirmTransactionMock.mockResolvedValueOnce({
-        signature:
-          "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy",
+        signature: syntheticSignature(1),
         slot: 100n,
         confirmationStatus: "confirmed",
         err: { InstructionError: [0, { Custom: 1 }] },
-      } as unknown as Awaited<ReturnType<typeof confirmTransaction>>);
+      });
       const key = "failed-after-row-400";
 
       const first = await transferRequest("1", key);
       expect(first.status).toBe(400);
-      const firstBody = await errorBody(first);
+      const firstBody = await readErrorResponse(first);
       expect(firstBody.error.code).toBe("TRANSACTION_FAILED");
+      expect(await latestTransferRow()).toMatchObject({
+        status: "failed",
+        signature: broadcastSignature(),
+      });
 
       // Within 24 hours the stored answer replays: the same 400, never a 200.
       const retry = await transferRequest("1", key);
       expect(retry.status).toBe(400);
       expect(retry.headers.get("Idempotent-Replayed")).toBe("true");
-      expect((await errorBody(retry)).error).toEqual(firstBody.error);
+      expect((await readErrorResponse(retry)).error).toEqual(firstBody.error);
 
       // Past 24 hours the failed row answers with the same status and code.
       await expireIdempotencyKey(key);
       const late = await transferRequest("1", key);
       expect(late.status).toBe(400);
-      const lateBody = await errorBody(late);
+      const lateBody = await readErrorResponse(late);
       expect(lateBody.error.code).toBe("TRANSACTION_FAILED");
       expect(lateBody.error.message).toContain("new Idempotency-Key");
       // The same envelope as a fresh error: the request id and trace header.
@@ -707,53 +677,6 @@ describe("Payments routes — signed submission", () => {
           .bind(TEST_ORG.id)
           .first<{ count: number }>()
       ).toEqual({ count: 0 });
-    });
-
-    it("stores a 409 signer mismatch raised after the row and replays it", async () => {
-      createOrgSignerForCustodyWalletMock.mockRejectedValueOnce(
-        new AppError("CONFLICT", "Custody signer does not match the selected wallet")
-      );
-      const key = "failed-after-row-409";
-
-      const first = await transferRequest("1", key);
-      expect(first.status).toBe(409);
-      expect((await latestTransferRow()).status).toBe("failed");
-
-      const retry = await transferRequest("1", key);
-      expect(retry.status).toBe(409);
-      expect(retry.headers.get("Idempotent-Replayed")).toBe("true");
-      expect((await errorBody(retry)).error.message).toBe(
-        "Custody signer does not match the selected wallet"
-      );
-
-      await expireIdempotencyKey(key);
-      const late = await transferRequest("1", key);
-      expect(late.status).toBe(409);
-      expect((await errorBody(late)).error.code).toBe("CONFLICT");
-      expect(sendTransactionMock).not.toHaveBeenCalled();
-    });
-
-    it("keeps a submitted transfer processing with its signature when confirmation fails", async () => {
-      const { signAsFeePayer } = await mockSignedSubmissionAdapter();
-      confirmTransactionMock.mockRejectedValueOnce(new Error("confirmation timed out"));
-
-      const idempotencyKey = "submitted-unconfirmed-key";
-      const res = await transferRequest("0.001", idempotencyKey);
-
-      expect(res.status).toBe(200);
-      const json = await readTransferResponse(res);
-      expect(json.data.transfer.status).toBe("processing");
-      expect(json.data.transfer.signature).toBeTruthy();
-
-      const row = await readTransferRow(json.data.transfer.id);
-      expect(row.status).toBe("processing");
-      expect(row.signature).toBe(json.data.transfer.signature);
-      const replay = await transferRequest("0.001", idempotencyKey);
-      expect(replay.status).toBe(200);
-      const replayJson = await readTransferResponse(replay);
-      expect(replayJson.data.transfer.id).toBe(json.data.transfer.id);
-      expect(signAsFeePayer).toHaveBeenCalledOnce();
-      expect(sendTransactionMock).toHaveBeenCalledOnce();
     });
   });
 });

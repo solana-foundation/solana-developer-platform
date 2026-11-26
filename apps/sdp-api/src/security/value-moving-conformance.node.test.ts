@@ -50,7 +50,7 @@ const contracts: ValueMovingContract[] = [
     // Access before the key, the row replay before admission (ADR 0009).
     authorization: {
       file: "apps/sdp-api/src/routes/payments/transfer-batches/index.ts",
-      section: 'transferBatches.post(\n  "/",',
+      section: 'transferBatches.post(\n  "/execute",',
       before:
         'requireAction("transfer_batches.execute"),\n  validateBody(createTransferBatchSchema),\n  authorize(authorizeTransferBatch)',
       through:
@@ -104,7 +104,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
-      section: '"/tokens/:tokenId/authority",',
+      section: '"/tokens/:tokenId/authority/update/execute",',
       before: 'requireAction("issuance.authority")',
       through: "requestGate(",
       after: "executeUpdateAuthority",
@@ -125,7 +125,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
-      section: '"/tokens/:tokenId/freeze",',
+      section: '"/tokens/:tokenId/freeze-account",',
       before: 'requireAction("issuance.enforce")',
       after: "freezeAccount",
     },
@@ -146,7 +146,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
-      section: '"/tokens/:tokenId/unfreeze",',
+      section: '"/tokens/:tokenId/unfreeze-account",',
       before: 'requireAction("issuance.enforce")',
       after: "unfreezeAccount",
     },
@@ -206,7 +206,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
-      section: '"/tokens/:tokenId/seize",',
+      section: '"/tokens/:tokenId/seize/execute",',
       before: 'requireAction("issuance.enforce")',
       after: "executeSeize",
     },
@@ -226,7 +226,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
-      section: '"/tokens/:tokenId/force-burn",',
+      section: '"/tokens/:tokenId/force-burn/execute",',
       before: 'requireAction("issuance.enforce")',
       after: "executeForceBurn",
     },
@@ -246,7 +246,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
-      section: '"/tokens/:tokenId/burn",',
+      section: '"/tokens/:tokenId/burn/execute",',
       before: 'requireAction("issuance.execute")',
       after: "executeBurn",
     },
@@ -313,7 +313,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
-      section: '"/tokens/:tokenId/deploy",',
+      section: '"/tokens/:tokenId/deploy/execute",',
       before: 'requireAction("issuance.execute")',
       after: "  deployToken",
     },
@@ -333,7 +333,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
-      section: '"/tokens/:tokenId/allowlist",',
+      section: '"/tokens/:tokenId/control-list",',
       before: 'requireAction("issuance.enforce")',
       after: "addAllowlistEntry",
     },
@@ -353,7 +353,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
-      section: '"/tokens/:tokenId/allowlist/:entryId",',
+      section: '"/tokens/:tokenId/control-list/:entryId",',
       before: 'requireAction("issuance.enforce")',
       after: "removeAllowlistEntry",
     },
@@ -373,7 +373,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/payments/ramps/onramp/index.ts",
-      section: '"/quote",',
+      section: '"/start",',
       before: 'requireAction("onramp.execute")',
       through: "requestGate(",
       after: "\n  createOnrampQuote\n",
@@ -474,63 +474,56 @@ const contracts: ValueMovingContract[] = [
     ],
   },
   {
-    /**
-     * Non-custodial Earn vault deposits. Registered late — the route shipped
-     * ungated, and the inventory below could not see it because
-     * `apps/sdp-api/src/services/earn` was not a scanned root, so this test
-     * passed while a value-moving path had no request gate at all.
-     */
     family: "earn",
     trustedContext: {
-      file: "apps/sdp-api/src/routes/earn/handlers/vault.ts",
-      evidence: "const wallets = await new CustodyRuntimeTargets",
+      file: "apps/sdp-api/src/routes/earn/core/prepare.ts",
+      evidence: "const auth = getAuth(c)",
     },
     authorization: {
       file: "apps/sdp-api/src/routes/earn/index.ts",
-      section: '"/vault-deposits",',
-      before: "requestGate(",
-      after: "createEarnVaultDeposit",
+      section: '"/deposit",',
+      before: 'requireAction("earn.execute")',
+      through: "authorize(authorizeEarnDeposit)",
+      after: "prepareEarnOperation",
     },
     replay: [
       {
-        mode: "idempotency_fingerprint",
-        file: "apps/sdp-api/src/services/earn/vault-deposit.service.test.ts",
-        evidence: "replays the original vault deposit for the same requestId and payload",
+        mode: "claimed_state_machine",
+        file: "apps/sdp-api/src/routes/earn/core/operation-flow.test.ts",
+        evidence:
+          "replays accepted queued bytes after HTTP key loss without another attempt or audit",
       },
       {
         mode: "idempotency_fingerprint",
-        file: "apps/sdp-api/src/services/earn/vault-deposit.service.test.ts",
-        evidence: "rejects the same requestId with a different payload",
+        file: "apps/sdp-api/src/routes/earn/core/operation-flow.test.ts",
+        evidence: "rejects a different signed message and stale action without queueing money work",
       },
     ],
   },
   {
-    /**
-     * The exit half (PRO-1702). Registered WITH the route rather than after
-     * it, so this money-moving surface is born gated — the deposit above is
-     * the cautionary tale.
-     */
     family: "earn",
     trustedContext: {
-      file: "apps/sdp-api/src/routes/earn/handlers/vault.ts",
-      evidence: "const wallet = resolveEarnVaultCustodyWallet(wallets, position.custodyWalletId)",
+      file: "apps/sdp-api/src/routes/earn/core/prepare.ts",
+      evidence: "const auth = getAuth(c)",
     },
     authorization: {
       file: "apps/sdp-api/src/routes/earn/index.ts",
-      section: '"/vault-withdrawals",',
-      before: "requestGate(",
-      after: "createEarnVaultWithdrawal",
+      section: '"/withdraw",',
+      before: 'requireAction("earn.execute")',
+      through: "authorize(authorizeEarnWithdrawal)",
+      after: "prepareEarnOperation",
     },
     replay: [
       {
-        mode: "idempotency_fingerprint",
-        file: "apps/sdp-api/src/services/earn/vault-withdraw.service.test.ts",
-        evidence: "replays the original vault withdrawal for the same requestId and payload",
+        mode: "claimed_state_machine",
+        file: "apps/sdp-api/src/routes/earn/core/operation-flow.test.ts",
+        evidence:
+          "prepares an existing legacy custody position withdrawal and queues it without any inline signer",
       },
       {
         mode: "idempotency_fingerprint",
-        file: "apps/sdp-api/src/services/earn/vault-withdraw.service.test.ts",
-        evidence: "rejects the same requestId with a different payload",
+        file: "apps/sdp-api/src/routes/earn/core/operation-flow.test.ts",
+        evidence: "rejects a different signed message and stale action without queueing money work",
       },
     ],
   },
@@ -540,17 +533,7 @@ const signingSinkInventory: Record<string, string[]> = {
   // The custody signer check is deliberately absent: it partially signs and
   // SIMULATES its memo transaction — verified locally, never broadcast — so it
   // has no signing sink and cannot spend sponsorship.
-  // The custody provider-action flow and the vault intent executor sign and
-  // persist through the owned sponsorship submission sink before broadcasting.
-  "apps/sdp-api/src/services/earn/provider-actions.service.ts": ["prepareOwnedSubmission"],
-  "apps/sdp-api/src/services/earn/vault-execution.service.ts": [
-    // Sponsored signing adds the fee-payer signature without broadcasting, so
-    // the final signature can still be recorded before bytes reach the network.
-    "signAsFeePayer",
-    // Wallet-paid signing likewise returns fully signed bytes without sending.
-    "signTransactionMessageWithSigners",
-  ],
-  "apps/sdp-api/src/services/earn/vault-intent-execution.service.ts": ["prepareOwnedSubmission"],
+  "apps/sdp-api/src/services/earn/strategy-transactions.service.ts": ["signAsFeePayer"],
   // DvP create, fund, settle/cancel and payments share the owned sponsorship
   // submission sink, which signs and persists before broadcasting; fund and
   // settle only partially sign as authorities and are not sinks of their own.
@@ -699,6 +682,49 @@ describe("value-moving authorization and replay conformance", () => {
     }
   });
 
+  it.each<OrderedBoundary>([
+    {
+      file: "apps/sdp-api/src/services/earn/strategy-transactions.service.ts",
+      section: "export async function signPreparedStrategyTransaction",
+      before: 'await createOrgSignerForCustodyWallet<"earn">(',
+      after: "await partiallySignTransactionWithSigners([signer], transaction)",
+    },
+    {
+      file: "apps/sdp-api/src/services/earn/strategy-operations.service.ts",
+      section: "async function readCustodyProposal(",
+      before: "await admitDeposit(env, scope, claim.operation)",
+      through: "await service.recordProposalBinding(scope, claim, binding)",
+      after: "await proposer.propose({",
+    },
+    {
+      file: "apps/sdp-api/src/services/earn/strategy-operations.service.ts",
+      section: "async function prepareCustodySignature()",
+      before: "await service.recordSignedAttempt(scope, claim, {",
+      through: "await admitRecordedCustodyBroadcast(",
+      after: "await submit(signedTransaction, broadcast)",
+    },
+  ])("retains Earn's admitted signing and broadcast boundary in $section", (boundary) => {
+    const source = sectionSource(boundary);
+    const markers = [boundary.before, boundary.through, boundary.after].filter(
+      (marker): marker is string => marker !== undefined
+    );
+    let cursor = 0;
+    for (const marker of markers) {
+      const index = source.indexOf(marker, cursor);
+      expect(index, `Earn must retain ${marker} in order`).toBeGreaterThanOrEqual(cursor);
+      cursor = index + marker.length;
+    }
+  });
+
+  it("acknowledges Earn execution without signing or broadcasting on the HTTP path", () => {
+    const source = readSource("apps/sdp-api/src/services/earn/strategy-operations.service.ts");
+    const execution = source.slice(source.indexOf("export async function submitEarnOperation("));
+    expect(execution).toContain("await acceptOperationExecution(c, scope, claim, verifiedSigned)");
+    expect(execution).toContain('status: "queued"');
+    expect(execution).not.toMatch(/\b(?:advanceEarnOperation|signPreparedStrategyTransaction)\(/);
+    expect(execution).not.toMatch(/\.propose\(|\.send\(/);
+  });
+
   it("runs extraction, replay and admission inside the request gate before the handler", () => {
     const gateSource = readSource("apps/sdp-api/src/middleware/request-gate.ts");
     const start = gateSource.indexOf("export function requestGate");
@@ -785,7 +811,7 @@ describe("value-moving authorization and replay conformance", () => {
 
   it("never loads or creates a stored local signing key in a managed deployment", async () => {
     const { createAdapterFromEncryptedConfig } = await import(
-      "@/services/domain/signing/provider-adapter-factory"
+      "@/services/custody/signing/provider-adapter-factory"
     );
     const localRecord = {
       id: "cfg_local",
@@ -821,7 +847,7 @@ describe("value-moving authorization and replay conformance", () => {
       createAdapterFromEncryptedConfig(selfHostedEnv, "org_1", localRecord, cipher)
     ).rejects.toThrow("decrypt reached");
 
-    const { SigningService } = await import("@/services/domain/signing.service");
+    const { SigningService } = await import("@/services/custody/signing.service");
     const configStore = { findActiveByProvider: vi.fn() };
     // SAFETY: initializeLocalSigning must refuse before its first store call;
     // the fake only records whether that call happened.

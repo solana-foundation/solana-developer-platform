@@ -51,6 +51,11 @@ function inSandbox<T>(work: () => Promise<T>): Promise<T> {
   return runInClusterScope({ projectId: null, environment: "sandbox" }, work);
 }
 
+/** Provider work in the cluster scope a Production request opens. */
+function inProduction<T>(work: () => Promise<T>): Promise<T> {
+  return runInClusterScope({ projectId: null, environment: "production" }, work);
+}
+
 /** A fetch spy that fails the test on any request: resolution must stay I/O-free. */
 function forbidFetch() {
   const fetchSpy = vi.fn(async () => {
@@ -115,27 +120,37 @@ describe("resolveVaultDirectClient", () => {
   });
 
   /**
-   * SDP has no confirmed PRODUCTION Veda deployment (devnet is deployed;
-   * mainnet waits on PRO-1777), so a production deposit fails on THAT rather
-   * than on an RPC — and it fails before any endpoint work, because an
-   * unconfigured deployment is a fact about SDP that should not depend on a
-   * node being reachable.
+   * The mainnet Veda deployment is configured (PRO-1777), so production work
+   * no longer dies on the deployment table. The first missing fact for this
+   * test process is the mainnet managed pool, and that refusal must still
+   * precede any RPC: a pool nobody configured is a fact about SDP that should
+   * not depend on a node being reachable.
    */
-  it("refuses Veda work on the missing mainnet deployment, before any RPC", async () => {
+  it("refuses Veda production work on the unconfigured mainnet pool, before any RPC", async () => {
     const fetchSpy = forbidFetch();
     const productionRuntime = { env: {}, environment: "production" } as const;
     const client = resolveVaultDirectClient(executionEnv, "veda", createVaultDeadline());
     if (!client) throw new Error("expected a Veda vault-direct client");
 
     await expect(
-      client.buildVaultDeposit(productionRuntime, { ...depositInput, minSharesOut: "1" })
-    ).rejects.toMatchObject({ code: "DEPLOYMENT_NOT_CONFIGURED" });
+      inProduction(() =>
+        client.buildVaultDeposit(productionRuntime, { ...depositInput, minSharesOut: "1" })
+      )
+    ).rejects.toMatchObject({
+      code: "PROVIDER_NOT_CONFIGURED",
+      message: expect.stringContaining("SOLANA_RPC_<PROVIDER>_MAINNET_API_KEY_URL"),
+    });
     await expect(
-      client.readVaultPositions(productionRuntime, {
-        owner: depositInput.owner,
-        providerReferences: [depositInput.providerReference],
-      })
-    ).rejects.toMatchObject({ code: "DEPLOYMENT_NOT_CONFIGURED" });
+      inProduction(() =>
+        client.readVaultPositions(productionRuntime, {
+          owner: depositInput.owner,
+          providerReferences: [depositInput.providerReference],
+        })
+      )
+    ).rejects.toMatchObject({
+      code: "PROVIDER_NOT_CONFIGURED",
+      message: expect.stringContaining("SOLANA_RPC_<PROVIDER>_MAINNET_API_KEY_URL"),
+    });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -233,26 +248,6 @@ describe("resolveVaultDirectClient", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("keeps the client capability and the withdrawal settlement table in agreement", async () => {
-    // The reconciler parks withdrawals by CLIENT capability while ?settled=
-    // and the dashboard decide by the settlement TABLE. If the two disagree,
-    // the API parks rows the list calls settled and detail reads never stop —
-    // so one loop over the registry pins the invariant for every provider.
-    const { supportsVaultProviderOrderWithdraw } = await import("@sdp/earn/capabilities");
-    const { EARN_PROVIDERS, EARN_PROVIDER_WITHDRAWAL_SETTLEMENT } = await import(
-      "@sdp/types/provider-access"
-    );
-
-    for (const provider of EARN_PROVIDERS) {
-      const client = resolveVaultDirectClient(executionEnv, provider, createVaultDeadline());
-      const reconcilesAsProviderOrder =
-        client !== null && supportsVaultProviderOrderWithdraw(client);
-      expect(reconcilesAsProviderOrder, provider).toBe(
-        EARN_PROVIDER_WITHDRAWAL_SETTLEMENT[provider] === "provider_order"
-      );
-    }
-  });
-
   it("keeps every provider's withdrawal capability and settlement table in agreement", async () => {
     const { supportsVaultProviderOrderWithdraw } = await import("@sdp/earn/capabilities");
     const { EARN_PROVIDERS, EARN_PROVIDER_WITHDRAWAL_SETTLEMENT } = await import(
@@ -270,8 +265,9 @@ describe("resolveVaultDirectClient", () => {
         EARN_PROVIDER_WITHDRAWAL_SETTLEMENT[provider] === "provider_order"
       );
     }
-    // The loop is not vacuous: exactly one provider-order provider exists today.
+    // The loop is not vacuous: WisdomTree and Plume settle exits as provider orders.
     expect(EARN_PROVIDER_WITHDRAWAL_SETTLEMENT.wisdomtree).toBe("provider_order");
+    expect(EARN_PROVIDER_WITHDRAWAL_SETTLEMENT.plume).toBe("provider_order");
   });
 
   it("does not start provider work after endpoint proof exhausts the shared deadline", async () => {

@@ -5,6 +5,7 @@ import {
   getOrCreateATAInstruction,
   getWithdrawContext,
 } from "@jup-ag/lend/earn";
+import { assertFireblocksProposal } from "@sdp/custody/testing/fireblocks-proposal";
 import { JUPITER_LEND_EARN_PROGRAM_IDS, JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
 import {
   type AccountInfo,
@@ -440,6 +441,8 @@ describe("@jup-ag/lend coupling", () => {
 
     const exit = await withdrawal(owner);
     expect(exit.instructions).toEqual((await sdkWithdrawal(owner)).instructions);
+    await assertFireblocksProposal(plan, owner.toBase58());
+    await assertFireblocksProposal(exit, owner.toBase58());
   });
 
   it("plans the SDK's ATA create when the ATA read fails, as the SDK alone does", async () => {

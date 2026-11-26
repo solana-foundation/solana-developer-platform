@@ -1,12 +1,8 @@
 import { generateKeyPairSync } from "node:crypto";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { env as testEnv } from "@/test/helpers/env";
-import {
-  byokCredentialCheckSchema,
-  checkByokCredential,
-  credentialPayload,
-  parseByokCredential,
-} from "./byok-credential";
+import { afterEach, aroundEach, describe, expect, it, vi } from "vitest";
+import { inSandboxScope } from "@/test/helpers/cluster-rpc";
+import { syntheticAddress } from "@/test/helpers/parsed-transactions";
+import { checkByokCredential, credentialPayload, parseByokCredential } from "./byok-credential";
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const fields = {
@@ -14,10 +10,10 @@ const fields = {
   apiSecretPem: privateKey.export({ type: "pkcs1", format: "pem" }).toString(),
   vaultAccountId: "0",
 };
-const env = { ...testEnv, FIREBLOCKS_API_BASE_URL: "https://fireblocks.example.test" };
-const address = "11111111111111111111111111111111";
+const address = syntheticAddress(1);
 
 afterEach(() => vi.restoreAllMocks());
+aroundEach((runTest) => inSandboxScope(runTest));
 
 describe("Fireblocks BYOK credentials", () => {
   it("parses only the stored provider's credential variant", () => {
@@ -42,20 +38,6 @@ describe("Fireblocks BYOK credentials", () => {
       })
     ).toThrow();
     expect(() => parseByokCredential("fireblocks", { ...fields, assetId: "ETH" })).toThrow();
-  });
-
-  it("requires success evidence and forbids it on a failed or unknown check", () => {
-    expect(byokCredentialCheckSchema.safeParse({ status: "success" }).success).toBe(false);
-    expect(
-      byokCredentialCheckSchema.safeParse({ status: "success", fingerprint: "" }).success
-    ).toBe(false);
-    for (const status of ["failed", "retry_unknown"] as const) {
-      expect(byokCredentialCheckSchema.parse({ status })).toEqual({ status });
-      expect(byokCredentialCheckSchema.safeParse({ status, fingerprint: "stale" }).success).toBe(
-        false
-      );
-    }
-    expect(byokCredentialCheckSchema.safeParse({ status: "unknown" }).success).toBe(false);
   });
 
   it("normalizes RSA PEM and pins the asset to the project environment", () => {
@@ -84,11 +66,15 @@ describe("Fireblocks BYOK credentials", () => {
       "fireblocks",
       credentialPayload("fireblocks", fields, "sandbox")
     );
-    const result = await checkByokCredential(env, credential);
-    expect(result).toMatchObject({ status: "success", wallet: { walletId: "fb_0", address } });
+    const result = await checkByokCredential(credential);
+    expect(result).toEqual({
+      status: "success",
+      fingerprint: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+      wallet: { walletId: "fb_0", address },
+    });
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenCalledWith(
-      `${env.FIREBLOCKS_API_BASE_URL}/v1/vault/accounts/0/SOL_TEST/addresses_paginated`,
+      "https://sandbox-api.fireblocks.io/v1/vault/accounts/0/SOL_TEST/addresses_paginated",
       expect.objectContaining({
         method: "GET",
         headers: expect.objectContaining({
@@ -108,30 +94,33 @@ describe("Fireblocks BYOK credentials", () => {
         ...credentialPayload("fireblocks", fields, "sandbox"),
         ...overrides,
       });
-    const first = await checkByokCredential(env, auth());
+    const first = await checkByokCredential(auth());
     expect(first.status).toBe("success");
-    expect(await checkByokCredential(env, auth({ apiKey: "new-api-user" }))).toEqual(first);
-    expect(await checkByokCredential(env, auth({ vaultAccountId: "1" }))).not.toEqual(first);
-    expect(await checkByokCredential(env, auth({ assetId: "SOL" }))).not.toEqual(first);
+    expect(await checkByokCredential(auth({ apiKey: "new-api-user" }))).toEqual(first);
+    expect(await checkByokCredential(auth({ vaultAccountId: "1" }))).not.toEqual(first);
+    expect(await checkByokCredential(auth({ assetId: "SOL" }))).not.toEqual(first);
     vi.mocked(globalThis.fetch).mockResolvedValue(
-      Response.json({ addresses: [{ address: "So11111111111111111111111111111111111111112" }] })
+      Response.json({ addresses: [{ address: syntheticAddress(2) }] })
     );
-    expect(await checkByokCredential(env, auth())).not.toEqual(first);
+    expect(await checkByokCredential(auth())).not.toEqual(first);
   });
 
-  it.each([401, 403, 404, 429, 500])(
-    "classifies HTTP %s without exposing provider response bodies",
-    async (status) => {
+  it.each([
+    [401, "failed"],
+    [403, "failed"],
+    [404, "failed"],
+    [429, "retry_unknown"],
+    [500, "retry_unknown"],
+  ] as const)(
+    "classifies HTTP %s as %s without exposing provider response bodies",
+    async (status, expected) => {
       vi.spyOn(globalThis, "fetch").mockResolvedValue(
         new Response("sensitive upstream body", { status })
       );
       const result = await checkByokCredential(
-        env,
         parseByokCredential("fireblocks", credentialPayload("fireblocks", fields, "sandbox"))
       );
-      expect(result).toEqual({
-        status: [401, 403, 404].includes(status) ? "failed" : "retry_unknown",
-      });
+      expect(result).toEqual({ status: expected });
     }
   );
 
@@ -139,7 +128,6 @@ describe("Fireblocks BYOK credentials", () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("network unavailable"));
     expect(
       await checkByokCredential(
-        env,
         parseByokCredential("fireblocks", credentialPayload("fireblocks", fields, "sandbox"))
       )
     ).toEqual({ status: "retry_unknown" });

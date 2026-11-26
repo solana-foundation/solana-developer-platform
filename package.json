@@ -1,6 +1,6 @@
 {
   "name": "solana-developer-platform",
-  "version": "0.89.0",
+  "version": "0.90.0",
   "private": true,
   "packageManager": "pnpm@10.16.0",
   "engines": {
@@ -31,9 +31,11 @@
       "esbuild": "0.28.1",
       "fast-copy": "4.1.2",
       "fast-uri": "3.1.9",
-      "follow-redirects": "1.16.1",
+      "follow-redirects": "1.16.2",
+      "glob@>=9.0.0 <14.0.2": "14.0.2",
       "jayson>uuid": "11.1.1",
       "js-yaml": "4.3.0",
+      "minimatch@>=7.0.0 <11.0.1": "11.0.1",
       "postcss": "^8.5.22",
       "postcss>nanoid": "3.3.18",
       "protobufjs": "7.6.5",
@@ -61,6 +63,11 @@
         "dependencies": {
           "@solana-program/compute-budget": "^0.8.0",
           "@solana-program/memo": "^0.7.0"
+        }
+      },
+      "@kamino-finance/kliquidity-sdk": {
+        "dependencies": {
+          "@solana/web3.js": "1.99.0"
         }
       }
     }

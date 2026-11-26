@@ -4,6 +4,16 @@ Date: 2026-07-20
 Status: Accepted — implemented on `main` (`earn-initial` merged as
 `bdb63491`, #831; subsequent amendments are recorded as addenda below)
 
+The [core API replacement](../architecture/earn-core-api-proposal.md) supersedes
+the historical product routes, allocation contracts and split funding flow
+described below. Current deposits combine swap and deposit instructions
+atomically or refuse preparation. Shared `/submit` only queues a reviewed
+transaction; `/refresh` prepares terms or selects an advertised withdrawal route
+before submission is accepted. Current unsigned builds use
+`earn_wallet_transactions` for every wallet source. References below to
+`earn_external_wallet_transactions` describe the historical schema. The
+schema-only companion removes it after the rewrite is serving.
+
 ## Context
 
 Solana Earn (SDP Markets V1) fronts yield strategies through external
@@ -78,7 +88,7 @@ Independent switches, all runtime-safe:
 - **Surfacing (2026-08-14 addendum):** `EARN_PROVIDER_SURFACING` declares which
   registered providers SDP currently OFFERS. An un-surfaced provider keeps its
   code, credentials, crons and catalogue rows, but its strategies vanish from
-  every public read and `POST /programs` refuses it. This is the _product_
+  every public read and `POST /portfolio-accounts` refuses it. This is the _product_
   switch — the four above are deployment and customer switches — and it is the
   only one that no per-organization override can lift.
 
@@ -376,10 +386,10 @@ promised had nowhere to live. It now lives between programs.
   the duplicate it exists to prevent. A ref held by a different organization or
   environment is the one genuine conflict — refuse it, never adopt it.
 - **Gate ordering is part of the decision, not an implementation detail.**
-  `POST /programs` resolves the idempotency key LAST: schema → capability (501)
+  `POST /portfolio-accounts` resolves the idempotency key LAST: schema → capability (501)
   → availability (403) → known yield sources (400) → project scope → key (400).
   An unentitled caller sending no key must still learn it is unentitled.
-- **Listing has a credential gate that fires on an EMPTY list.** `GET /programs`
+- **Listing has a credential gate that fires on an EMPTY list.** `GET /portfolio-accounts`
   with a `provider` asserts credentials before reading rows. A collection cannot
   404 for emptiness, so without it a missing provider key would be
   indistinguishable from "this organization has no programs" — onboarding shown
@@ -387,7 +397,7 @@ promised had nowhere to live. It now lives between programs.
   oldest-first (`created_at ASC, id ASC`) so the head stays stable for a
   program's whole life; a newest-first order would silently re-point any
   consumer that tracks one program across polls.
-- **Cross-program BOLA.** `GET /programs/:programId/withdrawals/:ref` now
+- **Cross-program BOLA.** `GET /portfolio-accounts/:programId/withdrawals/:ref` now
   compares the ledger row's `wallet_id` to the path program, not the caller's
   organization. An org-only check was complete while an org held one program;
   with several, asking program A for program B's ref would pass and then drive
@@ -399,8 +409,8 @@ promised had nowhere to live. It now lives between programs.
   still caps each token group at one allocation entry; this addendum is about
   how many programs an org may hold, not what one program may contain.
 - **Path rename.** Every `/v1/earn/program*` path named in the addenda above is
-  now `/v1/earn/programs` (list, create) or
-  `/v1/earn/programs/:programId/...` (get, re-target, deposits, withdrawal
+  now `/v1/earn/portfolio-accounts` (list, create) or
+  `/v1/earn/portfolio-accounts/:programId/...` (get, re-target, deposits, withdrawal
   preview/create/list/detail). The implicit create-or-update `PUT /program` is
   gone: it was keyed on the triple that stops being addressable the moment a
   second program exists.
@@ -479,7 +489,7 @@ is "what this deployment can talk to", the former is "what we offer today".
 
 - **One declaration, three consumers, no provider ids anywhere else.**
   `GET /strategies` (list and detail) hides an un-surfaced provider's rows;
-  `POST /programs` refuses to open a new position with it
+  `POST /portfolio-accounts` refuses to open a new position with it
   (`assertProviderAvailable`, `provider_not_offered`); the dashboard derives
   `EARN_PROGRAM_CREATION_ENABLED` and drops every create affordance. Hiding at
   the API rather than in the browser is deliberate — the API is the surface the
@@ -494,7 +504,7 @@ is "what this deployment can talk to", the former is "what we offer today".
   surfacing entirely. This is the money-out-beats-money-off invariant applied to
   a new switch: an organization holding a position taken while a provider was
   offered keeps every route that reads or exits it, and un-surfacing can never
-  trap funds. `POST /programs` is the only route that opens a _new_ commitment,
+  trap funds. `POST /portfolio-accounts` is the only route that opens a _new_ commitment,
   so it is the only one that refuses.
 - **Its 403 is not the entitlement 403.** `assertProviderAvailable` answers an
   organization-scoped question and tells the caller to request manual
@@ -630,7 +640,7 @@ the provider. Customer-initiated custodial deposits remain unledgered because SD
 has no intent moment for them; when an observed-deposit feed is built, it writes
 rows into this ledger rather than a third table.
 
-Exit safety is unchanged and extended to the new read: `GET /v1/earn/movements`
+Exit safety is unchanged and extended to the new read: `GET /v1/earn/treasury/movements`
 takes **no provider gate**, like the reads it generalises. It reports on money
 that has already moved, so un-offering a provider, removing its credentials, or
 un-entitling an organization closes the door IN and must never remove the record
@@ -713,7 +723,7 @@ expecting zero differences.
 
 ## Addendum — 2026-08-20 The vault exit route (PRO-1702)
 
-The vault-direct model's money-out half ships: `POST /v1/earn/vault-withdrawals`
+The vault-direct model's money-out half ships: `POST /v1/earn/withdrawals/execute`
 plus the treasury exit action, with Kamino the first `EarnVaultWithdrawProvider`
 implementor. The builder preserves Kamino's complete instruction sequence and
 the vault lookup table. The API appends the idempotency memo, compiles and signs
@@ -991,14 +1001,14 @@ production row does not propagate to the sandbox mirror row. Both are
 review-surface fidelity gaps, not deposit paths: `fundable: false` holds
 throughout.
 
-## Addendum — 2026-08-26 External wallets: caller-signed vault movements (PRO-1722)
+## Addendum — 2026-08-26 Wallets: caller-signed vault movements (PRO-1722)
 
-The B2B2C money path ships. An _external wallet_ is a **non-custodial wallet**
+The B2B2C money path ships. An _wallet_ is a **non-custodial wallet**
 the partner's platform connects — SDP holds no key for it, and its owner is
 not an SDP tenant. Every prior vault money path resolved an exact custody
 wallet and signed from it. The contract decided here: **SDP builds and returns
 an unsigned
-transaction for the external wallet to sign, and records the movement when the
+transaction for the wallet to sign, and records the movement when the
 signed transaction is submitted back, before SDP broadcasts it.**
 
 ### The load-bearing question: who broadcasts
@@ -1006,7 +1016,7 @@ signed transaction is submitted back, before SDP broadcasts it.**
 The vault runtime is built around record-before-broadcast, and a caller-signed
 flow moves the point at which the signature becomes knowable. The answer that
 preserves the invariant is that **SDP stays the broadcaster**: the partner
-returns the signed bytes to `POST /v1/earn/external-wallet/deposits` (or
+returns the signed bytes to `POST /v1/earn/deposits/submit-signed-transaction` (or
 `/withdrawals`), SDP verifies them, records the `earn_movements` row durably —
 signature, wire bytes, blockhash window — and only then sends. Every recovery
 property carries over unchanged: an ambiguous send leaves a reconcilable
@@ -1019,13 +1029,13 @@ converges on one correct ledger row.
 
 ### Not a third execution model
 
-An external-wallet movement is a `vault_direct` movement: one signed
+A wallet movement is a `vault_direct` movement: one signed
 transaction, recorded before broadcast, chain lifecycle, same reconciler, same
 transition matrix, same org-scoped idempotency anchor. The execution model names
 HOW money moves on chain, not whose key signed. The signer distinction is a
 column pair — exactly one of `custody_wallet_id` and `owner_address` per vault
 row (migration 0070) — and every treasury read scopes by custody wallet, so
-external-wallet rows are structurally invisible to those surfaces rather than
+wallet rows are structurally invisible to those surfaces rather than
 filtered by convention.
 
 ### The authenticated two-call shape, and why the build persists
@@ -1067,9 +1077,9 @@ transaction is a different request and conflicts rather than silently replaying.
   signature, which IS the authorization. There is no signing sink for the
   value-moving conformance inventory to find.
 
-### Scoping: the external wallet belongs to the partner org AND project
+### Scoping: the wallet belongs to the partner org AND project
 
-The claim key for an external-wallet position is (org, **project**, environment,
+The claim key for a wallet position is (org, **project**, environment,
 provider, vault, owner) — stricter than the custody claim, where the project is
 attribution only. A partner's sibling project is a different integration
 surface: it must not learn the position exists, let alone exit it. Movements
@@ -1083,7 +1093,7 @@ carry the exact-claim FK onto (vault, owner) the way custody movements do onto
   co-signing a stranger's transaction is its own decision). The share-ATA rent
   funder is recorded as NULL (the signing wallet paid and keeps it), so the
   exit's rent refund defaults back to the owner with no attribution to carry.
-- **Live hydration of an external-wallet position reads the OWNER's balance in
+- **Live hydration of a wallet position reads the OWNER's balance in
   that vault**, which includes shares acquired outside SDP. That is the honest
   non-custodial answer — the chain cannot attribute fungible shares to SDP
   movements — and the per-wallet read surface (PRO-1724) inherits it as a
@@ -1096,7 +1106,7 @@ carry the exact-claim FK onto (vault, owner) the way custody movements do onto
   accumulate until a cleanup sweep exists. Nothing reads them but their own
   submit.
 
-## Addendum — 2026-08-31 External wallets: per-owner reads and the earned figure (PRO-1772)
+## Addendum — 2026-08-31 Wallets: per-owner reads and the earned figure (PRO-1772)
 
 PRO-1722 shipped the B2B2C surface write-only; this addendum adds the reads
 that close the loop: a per-owner activity list and movement detail, and a
@@ -1104,7 +1114,7 @@ balance-plus-earned read. All three take `earn:read` only (no `wallets:read` —
 an end-user wallet carries no custody binding) and no provider gate (they
 report on money that already moved). Scope is the 0070 claim key — org, EXACT
 project, environment, owner — collapsed to one 404 for anything outside it.
-`GET /v1/earn/movements` deliberately stays custody-scoped: its vault arm
+`GET /v1/earn/treasury/movements` deliberately stays custody-scoped: its vault arm
 requires a custody-wallet match an owner-signed row can never satisfy, so the
 per-owner reads are a separate surface rather than a widened union. Index:
 `idx_earn_movements_external_wallet_owner` (migration 0073).
@@ -1161,7 +1171,7 @@ integration measured against the live API:
   A balance screen must render for a new customer, and every query is already
   org/project/environment scoped, so a foreign claim produces the same empty
   bytes as no claim: nothing leaks that the content itself would not. The
-  `hasExternalWalletPositionOwner` gate is gone. Only the retired
+  `hasWalletPositionOwner` gate is gone. Only the retired
   path-addressed shapes and the movement-by-id detail still 404.
 - **`withdrawals_not_valued` is now the exception, not the rule.** The
   "deliberately follow-up work" above is done: when a withdrawal reaches
@@ -1178,7 +1188,7 @@ integration measured against the live API:
 - **A fully exited holding closes.** The same settlement hook reads the
   holding live for that one vault and owner and stamps `closed_at` when
   shares are "0" (fail-soft; a later deposit transition re-opens it), for
-  external-wallet and custody rows alike. Before this nothing ever wrote
+  wallet and custody rows alike. Before this nothing ever wrote
   `closed_at` at runtime, so an exited position stayed "held" forever.
 
 ### Addendum to the addendum: 2026-09-29 open queued withdrawals are `withdrawals_pending`
@@ -1201,10 +1211,10 @@ it delegated rather than recreating PRIME, so that wYLDS still backs the
 claim there when the report can attribute it, and the claim carries
 `ambiguousBacking` when it cannot.
 
-## Addendum — 2026-09-02 The partner pays: caller-provided fee payers on the external-wallet builds
+## Addendum — 2026-09-02 The partner pays: caller-provided fee payers on the wallet builds
 
 Supersedes the "Owner pays everything" accepted cost in the 2026-08-26
-addendum. Both external-wallet BUILD routes now take an optional `feePayer`: a
+addendum. Both wallet BUILD routes now take an optional `feePayer`: a
 wallet the API caller (the partner) controls, which becomes the transaction's
 fee payer and, through the provider's `rentPayer`, funds the share-ATA rent an
 account creation needs. The compiled transaction then requires the partner's
@@ -1244,22 +1254,21 @@ Decisions that hold it together:
   durable movement that can only die at broadcast. The recorded ledger
   `signature` is slot zero — the partner's when present — which is the
   on-chain txid, so reconciliation is unchanged.
-- **The split-swap contract carries `feePayer`** through `followUp`, and the
-  standalone swap compiles with the same payer, so every transaction the flow
-  hands out is partner-payable.
+- **Historical split funding carried `feePayer`** through both transactions.
+  That flow is removed by the core replacement. Funding swaps and deposits now
+  compose into one partner-payable transaction or preparation fails.
 
-Accepted costs: the partner wallet needs a SOL float and its balance is now
-partner-operational surface (a broke sponsor 400s at build, naming the fee
-payer); the fee payer adds 96 bytes to the compiled transaction, so near-limit
-swap-funded builds fall to the split flow slightly more often; and the
-blockhash window now has to fit the partner's co-signature too, which is why
-the docs tell partners to co-sign programmatically.
+Accepted costs at the time: the partner wallet needed a SOL float; a separate
+fee payer added 96 bytes, making the split funding flow more likely; and the
+blockhash window had to fit both signatures. The core replacement keeps the
+fee-payer and co-signature costs but refuses oversized atomic compositions
+instead of splitting them.
 
 ## Addendum: 2026-09-22 Queued withdrawals enter the Embedded Yield contract
 
 PR #1987 completed the PRO-1872 / EARN-027 security gate at exact head
 `b2d313803`, with named approval from `cutbow7`, and published the
-external-wallet queued-withdrawal lifecycle. The public Earn document now pins
+wallet queued-withdrawal lifecycle. The public Earn document now pins
 21 operations, every one requiring an API key; the project behind the key
 decides the environment.
 

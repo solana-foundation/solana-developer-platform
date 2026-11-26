@@ -1,5 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { z } from "zod";
+import { currentDatabaseIdentity } from "@/db/identity";
+import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { AppError } from "@/lib/errors";
 
 /**
@@ -8,11 +10,14 @@ import { AppError } from "@/lib/errors";
  * and refuse a principal that is no longer live, does not hold the movement's
  * action, or may not sign with that custody wallet.
  *
- * It is ambient only. Handlers never pass a principal, so none can name a
- * more privileged one. Only the entry points that authenticated it set it:
+ * Handlers never pass a principal, so none can name a more privileged one.
+ * Only the entry points that authenticated it establish the ambient identity:
  * the API-key and Clerk auth middleware, the recurring-payment job (as the
  * mandate it collects), and `/pay` (as the payment request its link names).
  * `pnpm check:value-movement` pins {@link runAsMoneyPrincipal} to those files.
+ * The pending-proposal worker alone may restore a durable transfer's recorded
+ * identity through {@link runAsRecordedMoneyPrincipal}, then read its authority
+ * live.
  *
  * - `api_key`: live when active, unexpired and within any rotation deadline;
  *   holds its grants; signs with its wallet scope.
@@ -92,6 +97,34 @@ export function runAsMoneyPrincipal<T>(principal: MoneyPrincipal, fn: () => T): 
     return fn();
   }
   return principalStorage.run(Object.freeze({ ...principal }), fn);
+}
+
+/**
+ * Restore the identity on a durable transfer for trusted pending-proposal recovery.
+ * The worker reads grants, membership and wallet scope live after entering; none
+ * of that authority is restored from the row. Missing or malformed identity fails
+ * closed. Recovery cannot run underneath an authenticated request principal.
+ *
+ * SECURITY: only the pending-proposal worker may call this entry point, pinned by
+ * `check:value-movement`. It also requires that worker's system database identity.
+ *
+ * @param row - The durable transfer whose original authority is being rechecked.
+ * @param fn - Recovery work that re-admits the identity against live authority.
+ * @returns The recovery callback's result.
+ */
+export function runAsRecordedMoneyPrincipal<T>(row: PaymentTransferRow, fn: () => T): T {
+  const identity = currentDatabaseIdentity();
+  if (identity?.kind !== "system" || identity.component !== "cron:reconcile-custody-proposals") {
+    throw new AppError("INTERNAL_ERROR", "Recorded money principals require the recovery worker");
+  }
+  if (currentMoneyPrincipal() !== null) {
+    throw new AppError("INTERNAL_ERROR", "A money principal is already set for this work");
+  }
+  const principal = moneyPrincipalSchema.safeParse(row.initiated_by_principal);
+  if (!principal.success) {
+    throw new AppError("INTERNAL_ERROR", "Transfer has no valid recorded money principal");
+  }
+  return runAsMoneyPrincipal(principal.data, fn);
 }
 
 /** The principal the current request or job moves money for, or null outside one. */

@@ -502,7 +502,7 @@ function referenceNodes(child: RootContent, parent: Parent): RootContent[] | und
 }
 
 /**
- * A code block as the page shows it: calling this deployment's API (beta docs show api-beta) where
+ * A code block as the page shows it: calling this deployment's API (beta docs show api-devnet) where
  * the Markdown agents get and the llms files keep the canonical host, and, on a published Earn
  * page, searchable by its identifiers.
  *

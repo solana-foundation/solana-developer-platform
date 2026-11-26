@@ -1,0 +1,98 @@
+import assert from "node:assert/strict";
+import { generateKeyPairSync } from "node:crypto";
+import { aroundEach, describe, it } from "vitest";
+import { inClusterScope } from "#/test/cluster-scope";
+import { testRuntime } from "#/test/runtime";
+import { FireblocksApiError, fireblocksRequest } from "./http";
+
+const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+const params = {
+  apiKey: "test-api-user",
+  apiSecretPem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+  method: "POST" as const,
+  uri: "/v1/transactions",
+  body: { operation: "TRANSFER", assetId: "SOL" },
+};
+
+describe("Fireblocks host", () => {
+  it.each([
+    ["devnet", "https://sandbox-api.fireblocks.io/v1/transactions"],
+    ["mainnet-beta", "https://api.fireblocks.io/v1/transactions"],
+  ] as const)("sends %s requests to %s", async (cluster, url) => {
+    const urls: string[] = [];
+    const rt = testRuntime(async (requested) => {
+      urls.push(String(requested));
+      return Response.json({ id: "transaction" });
+    });
+    await inClusterScope(cluster, () => fireblocksRequest(rt, params));
+    assert.deepEqual(urls, [url]);
+  });
+});
+
+describe("Fireblocks HTTP contract", () => {
+  aroundEach((runTest) => inClusterScope("devnet", runTest));
+
+  it("keeps retries stable and separate requests distinct within the 40-character limit", async () => {
+    const keys: string[] = [];
+    const rt = testRuntime(async (_url, init) => {
+      assert.ok(init);
+      const key = new Headers(init.headers).get("Idempotency-Key");
+      assert.ok(key && key.length <= 40, "Fireblocks rejects longer keys with HTTP 400 / 9003");
+      assert.deepEqual(JSON.parse(String(init.body)), params.body);
+      keys.push(key);
+      return Response.json({ id: "transaction" });
+    });
+    const request = "payment-cf0c4bee-ff03-4112-9ebf-2b84be8126a6";
+    for (const suffix of ["first", "first", "second"])
+      await fireblocksRequest(rt, { ...params, idempotencyKey: `${request}-${suffix}` });
+    assert.equal(keys[0], keys[1]);
+    assert.notEqual(keys[0], keys[2]);
+    // A key within the limit reaches the provider unchanged.
+    const paymentKey = "xfr_9246a4cf-86f4-415b-b91c-1d9f4d11eed8";
+    await fireblocksRequest(rt, { ...params, idempotencyKey: paymentKey });
+    assert.equal(keys[3], paymentKey);
+  });
+
+  it("retains numeric error codes and request IDs without retaining provider message text", async () => {
+    await assert.rejects(
+      fireblocksRequest(
+        testRuntime(async () =>
+          Response.json(
+            { code: 9003, message: "sensitive provider text" },
+            { status: 400, headers: { "x-request-id": "provider-request-123" } }
+          )
+        ),
+        params
+      ),
+      (error: unknown) => {
+        assert.ok(error instanceof FireblocksApiError);
+        assert.equal(error.status, 400);
+        assert.equal(error.providerCode, 9003);
+        assert.equal(error.requestId, "provider-request-123");
+        assert.ok(!JSON.stringify(error).includes("sensitive provider text"));
+        assert.ok(!error.message.includes("sensitive provider text"));
+        return true;
+      }
+    );
+  });
+
+  it("preserves HTTP failure classification when error details are missing or malformed", async () => {
+    for (const response of [
+      new Response("upstream error", { status: 403 }),
+      Response.json({ code: "sensitive provider text" }, { status: 403 }),
+    ]) {
+      await assert.rejects(
+        fireblocksRequest(
+          testRuntime(async () => response),
+          params
+        ),
+        (error) => {
+          assert.ok(error instanceof FireblocksApiError);
+          assert.equal(error.status, 403);
+          assert.equal(error.providerCode, undefined);
+          return true;
+        }
+      );
+    }
+  });
+});

@@ -97,13 +97,12 @@ function toApiActionErrorMessage(
 /**
  * Connects the provider the form names and provisions its first wallet.
  *
- * @param formData - The submitted setup form: `provider`, optional `walletLabel`, `network`, `accountPolicy`.
+ * @param formData - The submitted setup form: `provider`, optional `walletLabel`, `accountPolicy`.
  * @returns The provisioned wallet's ID, the one its dashboard page is addressed by.
  */
 async function initializeCustodyWallet(formData: FormData): Promise<string> {
   const provider = requireCustodyProvider(formData);
   const walletLabel = getOptionalString(formData, "walletLabel");
-  const network = getOptionalString(formData, "network");
   const accountPolicy = getOptionalString(formData, "accountPolicy");
 
   const payload: Record<string, unknown> = {
@@ -111,21 +110,19 @@ async function initializeCustodyWallet(formData: FormData): Promise<string> {
     walletLabel,
   };
 
-  if (provider !== "fireblocks") {
-    if (network) {
-      payload.network = network;
-    }
-    if (accountPolicy) {
-      payload.accountPolicy = accountPolicy;
-    }
+  if (provider !== "fireblocks" && accountPolicy) {
+    payload.accountPolicy = accountPolicy;
   }
 
   const client = await createSdpApiClient();
-  const { walletId } = await client.fetch<InitializeSigningResponse>("/v1/wallets/initialize", {
-    method: "POST",
-    body: JSON.stringify(payload),
-    headers: actionIdempotencyHeaders(formData.get("idempotencyKey")),
-  });
+  const { walletId } = await client.fetch<InitializeSigningResponse>(
+    "/v1/wallets/managed-signing/initialize-with-wallet",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+      headers: actionIdempotencyHeaders(formData.get("idempotencyKey")),
+    }
+  );
   return walletId;
 }
 
@@ -194,7 +191,7 @@ export type InitializeCustodySetupActionResult =
     };
 
 /**
- * Connects a provider from the setup flow. `/initialize` answers 409 only when
+ * Connects a provider from the setup flow. `/managed-signing/initialize-with-wallet` answers 409 only when
  * the project already holds this provider's Managed config; that is reported
  * as its own result so the flow can send the user to add a wallet instead.
  *

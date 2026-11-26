@@ -32,6 +32,8 @@
  * It also pins who may set the money principal (HOO-2099): the ambient
  * identity the waists check a signature against. Only the entry points that
  * authenticated it set it, so no handler can name a more privileged one.
+ * Restoring a durable transfer's recorded principal is a separate capability,
+ * restricted to the trusted pending-proposal recovery worker.
  *
  * Adding a file to any list below is a security-reviewed change.
  */
@@ -45,7 +47,7 @@ const API = "apps/sdp-api/src";
 const FEE_PAYMENT = "packages/sdp-fee-payment/src";
 /** The repo root, from this file's location, so the check runs from any directory. */
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const KEYCHAIN = "packages/sdp-custody/src/keychain";
+const KEYCHAIN = "packages/sdp-custody/src/providers";
 /**
  * The packages that define these constructors. They build, subclass and pass
  * their own adapters around freely; every other package is checked like API
@@ -78,45 +80,95 @@ const KEYCHAIN_SDKS = [
 /** @type {Capability[]} */
 export const CAPABILITIES = [
   {
+    id: "earn-transaction-proposal",
+    why: "Creates one sign-only Earn transaction proposal; the implemented admission waist owns account and authority checks.",
+    symbols: [
+      {
+        file: "packages/sdp-custody/src/providers/fireblocks/transfers.ts",
+        name: "createFireblocksProgramCall",
+      },
+    ],
+    owners: [CUSTODY_PACKAGE],
+    allow: [`${API}/services/custody/signing/admitted-transaction-proposer.ts`],
+  },
+  {
     id: "fireblocks-native-transfer",
     why: "Creates a provider-signed payment; only the custody waist's proposer may (PRO-2435 D2).",
     symbols: [
       {
-        file: "packages/sdp-custody/src/provisioning/fireblocks-transfers.ts",
+        file: "packages/sdp-custody/src/providers/fireblocks/transfers.ts",
         name: "createFireblocksTransfer",
       },
     ],
     owners: [CUSTODY_PACKAGE],
-    allow: [`${API}/services/domain/signing/admitted-proposer.ts`],
+    allow: [`${API}/services/custody/signing/admitted-proposer.ts`],
+  },
+  {
+    id: "fireblocks-transfer-cancellation",
+    why: "Cancels a provider transaction; only the account-bound custody waist may (PRO-2435 D4).",
+    symbols: [
+      {
+        file: "packages/sdp-custody/src/providers/fireblocks/transfers.ts",
+        name: "cancelFireblocksTransfer",
+      },
+      {
+        file: "packages/sdp-custody/src/providers/fireblocks/transfers.ts",
+        name: "cancelFireblocksTransaction",
+      },
+    ],
+    owners: [CUSTODY_PACKAGE],
+    allow: [
+      `${API}/services/custody/signing/admitted-proposer.ts`,
+      `${API}/services/custody/signing/admitted-transaction-proposer.ts`,
+    ],
+  },
+  {
+    id: "custody-proposal-recovery",
+    why: "Obtains cancellation authority; only the registered recovery worker may (PRO-2435 D4).",
+    symbols: [
+      { file: `${API}/services/solana/signer.ts`, name: "createOrgTransferProposalRecovery" },
+    ],
+    owners: [`${API}/services/solana/signer.ts`],
+    allow: [`${API}/services/jobs/reconcile-pending-proposals.ts`],
+  },
+  {
+    id: "custody-proposal-recovery-construction",
+    why: "Builds cancellation authority from retained access; only the custody runtime waist may.",
+    symbols: [
+      { file: `${API}/services/custody/signing/admitted-proposer.ts`, name: "proposalRecovery" },
+      { file: `${API}/services/custody/signing/admitted-proposer.ts`, name: "proposalCanceller" },
+    ],
+    owners: [`${API}/services/custody/signing/admitted-proposer.ts`],
+    allow: [`${API}/services/custody/signing/custody-runtime-target.ts`],
   },
   {
     id: "config-signing-adapter",
     why: "Builds a signing adapter from an encrypted custody config; only the custody signer waist may.",
     symbols: [
       {
-        file: `${API}/services/domain/signing/provider-adapter-factory.ts`,
+        file: `${API}/services/custody/signing/provider-adapter-factory.ts`,
         // biome-ignore lint/security/noSecrets: a function name, not a secret.
         name: "createAdapterFromEncryptedConfig",
       },
     ],
-    owners: [`${API}/services/domain/signing/provider-adapter-factory.ts`],
-    allow: [`${API}/services/domain/signing.service.ts`],
+    owners: [`${API}/services/custody/signing/provider-adapter-factory.ts`],
+    allow: [`${API}/services/custody/signing.service.ts`],
   },
   {
     id: "credential-signing-adapter",
     why: "Builds a signing adapter from a BYOK provider credential; only the custody signer waist may.",
     symbols: [
       {
-        file: `${API}/services/domain/signing/provider-adapter-factory.ts`,
+        file: `${API}/services/custody/signing/provider-adapter-factory.ts`,
         name: "createPrivyAdapterFromCredential",
       },
       {
-        file: `${API}/services/domain/signing/provider-adapter-factory.ts`,
+        file: `${API}/services/custody/signing/provider-adapter-factory.ts`,
         name: "createFireblocksAdapterFromCredential",
       },
     ],
-    owners: [`${API}/services/domain/signing/provider-adapter-factory.ts`],
-    allow: [`${API}/services/domain/signing/custody-runtime-target.ts`],
+    owners: [`${API}/services/custody/signing/provider-adapter-factory.ts`],
+    allow: [`${API}/services/custody/signing/custody-runtime-target.ts`],
   },
   {
     id: "fee-payment-adapter",
@@ -131,32 +183,35 @@ export const CAPABILITIES = [
   {
     id: "keychain-signing-adapter",
     why: "Holds a provider secret and can sign; only the adapter factory and the wallet lifecycle may build one.",
-    symbols: readdirSync(path.join(REPO_ROOT, KEYCHAIN))
+    symbols: readdirSync(path.join(REPO_ROOT, KEYCHAIN), { recursive: true })
       .filter((file) => file.endsWith(".adapter.ts") && !file.endsWith(".test.ts"))
       .sort()
       .map((file) => ({ file: `${KEYCHAIN}/${file}`, name: "*" })),
     owners: [CUSTODY_PACKAGE],
     allow: [
-      `${API}/services/domain/signing.service.ts`,
-      `${API}/services/domain/signing/provider-adapter-factory.ts`,
-      `${API}/services/domain/signing/provider-wallet-lifecycle.ts`,
+      `${API}/services/custody/signing.service.ts`,
+      `${API}/services/custody/signing/provider-adapter-factory.ts`,
+      `${API}/services/custody/signing/provider-wallet-lifecycle.ts`,
     ],
   },
   {
     id: "provider-signer",
     why: "A provider signer or API client builds signing authority from a stored credential; only the signing service, the adapter factory and the wallet lifecycle may use one.",
     symbols: [
-      ...readdirSync(path.join(REPO_ROOT, "packages/sdp-custody/src/dfns"))
-        .filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts"))
+      ...readdirSync(path.join(REPO_ROOT, "packages/sdp-custody/src/providers/dfns"))
+        .filter(
+          (file) =>
+            file.endsWith(".ts") && !file.endsWith(".test.ts") && !file.startsWith("keychain")
+        )
         .sort()
-        .map((file) => ({ file: `packages/sdp-custody/src/dfns/${file}`, name: "*" })),
+        .map((file) => ({ file: `packages/sdp-custody/src/providers/dfns/${file}`, name: "*" })),
       ...KEYCHAIN_SDKS.map((module) => ({ module, name: "*" })),
     ],
     owners: [CUSTODY_PACKAGE],
     allow: [
-      `${API}/services/domain/signing.service.ts`,
-      `${API}/services/domain/signing/provider-adapter-factory.ts`,
-      `${API}/services/domain/signing/provider-wallet-lifecycle.ts`,
+      `${API}/services/custody/signing.service.ts`,
+      `${API}/services/custody/signing/provider-adapter-factory.ts`,
+      `${API}/services/custody/signing/provider-wallet-lifecycle.ts`,
     ],
   },
   {
@@ -180,7 +235,38 @@ export const CAPABILITIES = [
       `${API}/services/jobs/collect-recurring-payments.ts`,
       // A `/pay` link, as the payment request its token names.
       `${API}/routes/pay/context.ts`,
+      // Exact leased operation action, restored only by its guarded recovery worker.
+      `${API}/services/operations-principal.ts`,
     ],
+  },
+  {
+    id: "custody-proposal-worker",
+    why: "Reconciles and cancels provider proposals under the registered cron identity; HTTP handlers cannot run this workload.",
+    symbols: [
+      {
+        file: `${API}/services/jobs/reconcile-pending-proposals.ts`,
+        name: "reconcilePendingProposals",
+      },
+    ],
+    owners: [`${API}/services/jobs/reconcile-pending-proposals.ts`],
+    allow: [`${API}/cron/reconcile-custody-proposals.ts`],
+  },
+  {
+    id: "recorded-money-principal",
+    why: "Restores a durable transfer's identity; only the trusted pending-proposal recovery worker may (PRO-2435 D4).",
+    // biome-ignore lint/security/noSecrets: a function name, not a secret.
+    symbols: [{ file: `${API}/lib/money-principal.ts`, name: "runAsRecordedMoneyPrincipal" }],
+    owners: [`${API}/lib/money-principal.ts`],
+    allow: [`${API}/services/jobs/reconcile-pending-proposals.ts`],
+  },
+  {
+    id: "recorded-operation-principal",
+    why: "Restores one persisted action identity after checking the recovery worker and its exact live lease.",
+    symbols: [
+      { file: `${API}/services/operations-principal.ts`, name: "runAsRecordedOperationPrincipal" },
+    ],
+    owners: [`${API}/services/operations-principal.ts`],
+    allow: [`${API}/services/jobs/reconcile-operations.ts`],
   },
   {
     id: "keypair-signer",
@@ -196,9 +282,9 @@ export const CAPABILITIES = [
     ],
     owners: [],
     allow: [
-      `${API}/services/domain/signing.service.ts`,
+      `${API}/services/custody/signing.service.ts`,
       // Each builds the keypair inside a constructor that is pinned itself.
-      `${KEYCHAIN}/keychain-memory.adapter.ts`,
+      `${KEYCHAIN}/local/keychain.adapter.ts`,
     ],
   },
 ];

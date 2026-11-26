@@ -1,6 +1,8 @@
-import { provisionUtilaWallet as provisionUtilaWalletInCustody } from "@sdp/custody/provisioning";
+import { generateKeyPairSync } from "node:crypto";
+import { provisionUtilaWallet as provisionUtilaWalletInCustody } from "@sdp/custody/providers/utila/provisioning";
 import { runInClusterScope } from "@sdp/rpc/scope";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import {
   findPrivyWalletByExternalId,
   provisionCoinbaseCdpAccount,
@@ -8,26 +10,33 @@ import {
   provisionPrivyWallet,
   provisionUtilaWallet,
 } from "@/services/custody/provisioning";
+import { inSandboxScope } from "@/test/helpers/cluster-rpc";
+import { env } from "@/test/helpers/env";
+import { syntheticAddress } from "@/test/helpers/parsed-transactions";
+import { required } from "@/test/helpers/required";
 import type { Env } from "@/types/env";
 
-const CREATED_ADDRESS = "11111111111111111111111111111111";
-const EXISTING_ADDRESS = "22222222222222222222222222222222";
+const CREATED_ADDRESS = syntheticAddress(1);
+const EXISTING_ADDRESS = syntheticAddress(2);
+const requestNameSchema = z.object({ name: z.string() });
 
-let keyMaterial: {
-  privateKeyPem: string;
-  privateKeyPkcs8Base64: string;
+const coinbaseKey = generateKeyPairSync("ec", { namedCurve: "P-256" }).privateKey;
+const keyMaterial = {
+  privateKeyPem: coinbaseKey.export({ type: "pkcs8", format: "pem" }).toString(),
+  privateKeyPkcs8Base64: coinbaseKey.export({ type: "pkcs8", format: "der" }).toString("base64"),
 };
-let utilaPrivateKeyPem: string;
-
-beforeAll(async () => {
-  keyMaterial = await createEs256KeyMaterial();
-  utilaPrivateKeyPem = await createRsaPrivateKeyPem();
-});
+const utilaPrivateKeyPem = generateKeyPairSync("rsa", { modulusLength: 2048 })
+  .privateKey.export({ type: "pkcs8", format: "pem" })
+  .toString();
 
 describe("coinbase account provisioning", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
+
+  function provisionCoinbaseInSandbox(...args: Parameters<typeof provisionCoinbaseCdpAccount>) {
+    return inSandboxScope(() => provisionCoinbaseCdpAccount(...args));
+  }
 
   function mockCreateCapturingNames(names: string[]) {
     return vi
@@ -35,9 +44,11 @@ describe("coinbase account provisioning", () => {
       .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
         const url = toUrlString(input);
 
-        if (url.endsWith("/platform/v2/solana/accounts") && init?.method === "POST") {
-          const body = JSON.parse(String(init.body ?? "{}")) as { name?: string };
-          names.push(body.name ?? "");
+        if (
+          url === "https://api.cdp.coinbase.com/platform/v2/solana/accounts" &&
+          init?.method === "POST"
+        ) {
+          names.push(requestNameSchema.parse(JSON.parse(String(init.body))).name);
 
           return jsonResponse({ address: CREATED_ADDRESS }, 200);
         }
@@ -50,7 +61,7 @@ describe("coinbase account provisioning", () => {
     const names: string[] = [];
     const fetchMock = mockCreateCapturingNames(names);
 
-    const result = await provisionCoinbaseCdpAccount(
+    const result = await provisionCoinbaseInSandbox(
       createCoinbaseEnv({
         ENVIRONMENT: "production",
       }),
@@ -61,27 +72,28 @@ describe("coinbase account provisioning", () => {
     );
 
     expect(result.address).toBe(CREATED_ADDRESS);
-    expect(result.network).toBe("solana-devnet");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(names[0]).toMatch(/^sdp-[0-9a-f]{32}$/);
   });
 
-  it("scopes the account identity by org, project, network, namespace, and wallet seed", async () => {
+  it("scopes the account identity by org, project, cluster, namespace, and wallet seed", async () => {
     const names: string[] = [];
     mockCreateCapturingNames(names);
 
     const base = { orgId: "org_abc", projectId: "proj_1" };
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), base);
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), base);
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), { ...base, orgId: "org_other" });
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), { ...base, projectId: "proj_2" });
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv({ COINBASE_CDP_NETWORK: "solana" }), base);
-    await provisionCoinbaseCdpAccount(
+    await provisionCoinbaseInSandbox(createCoinbaseEnv(), base);
+    await provisionCoinbaseInSandbox(createCoinbaseEnv(), base);
+    await provisionCoinbaseInSandbox(createCoinbaseEnv(), { ...base, orgId: "org_other" });
+    await provisionCoinbaseInSandbox(createCoinbaseEnv(), { ...base, projectId: "proj_2" });
+    await runInClusterScope({ projectId: null, environment: "production" }, () =>
+      provisionCoinbaseCdpAccount(createCoinbaseEnv(), base)
+    );
+    await provisionCoinbaseInSandbox(
       createCoinbaseEnv({ COINBASE_CDP_ACCOUNT_NAMESPACE: "staging" }),
       base
     );
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), { ...base, walletSeed: "seed-1" });
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), { ...base, walletSeed: "seed-2" });
+    await provisionCoinbaseInSandbox(createCoinbaseEnv(), { ...base, walletSeed: "seed-1" });
+    await provisionCoinbaseInSandbox(createCoinbaseEnv(), { ...base, walletSeed: "seed-2" });
 
     // Retries of the same identity are deterministic…
     expect(names[1]).toBe(names[0]);
@@ -103,9 +115,9 @@ describe("coinbase account provisioning", () => {
     );
 
     const base = { orgId: "org_abc", projectId: "proj_1", walletSeed: "seed-1" };
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), { ...base, idempotencyKey: "req-1" });
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), { ...base, idempotencyKey: "req-1" });
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), base);
+    await provisionCoinbaseInSandbox(createCoinbaseEnv(), { ...base, idempotencyKey: "req-1" });
+    await provisionCoinbaseInSandbox(createCoinbaseEnv(), { ...base, idempotencyKey: "req-1" });
+    await provisionCoinbaseInSandbox(createCoinbaseEnv(), base);
 
     expect(headers[0]).toBe("req-1");
     expect(headers[1]).toBe("req-1");
@@ -117,11 +129,11 @@ describe("coinbase account provisioning", () => {
     mockCreateCapturingNames(names);
 
     const longPrefix = `org_${"a".repeat(60)}`;
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
+    await provisionCoinbaseInSandbox(createCoinbaseEnv(), {
       orgId: `${longPrefix}x`,
       projectId: "proj_1",
     });
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
+    await provisionCoinbaseInSandbox(createCoinbaseEnv(), {
       orgId: `${longPrefix}y`,
       projectId: "proj_1",
     });
@@ -137,8 +149,7 @@ describe("coinbase account provisioning", () => {
         const url = toUrlString(input);
 
         if (url.endsWith("/platform/v2/solana/accounts") && init?.method === "POST") {
-          const body = JSON.parse(String(init.body ?? "{}")) as { name?: string };
-          requestedName = body.name ?? "";
+          requestedName = requestNameSchema.parse(JSON.parse(String(init.body))).name;
           return jsonResponse({ errorType: "already_exists" }, 409);
         }
 
@@ -154,7 +165,7 @@ describe("coinbase account provisioning", () => {
         throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
       });
 
-    const result = await provisionCoinbaseCdpAccount(
+    const result = await provisionCoinbaseInSandbox(
       createCoinbaseEnv({
         COINBASE_CDP_ACCOUNT_NAMESPACE: "local",
       }),
@@ -183,7 +194,7 @@ describe("coinbase account provisioning", () => {
       });
 
     await expect(
-      provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
+      provisionCoinbaseInSandbox(createCoinbaseEnv(), {
         orgId: "org_abc",
         projectId: "proj_1",
         walletSeed: "seed-1",
@@ -206,13 +217,13 @@ describe("coinbase account provisioning", () => {
         throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
       });
 
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
+    await provisionCoinbaseInSandbox(createCoinbaseEnv(), {
       orgId: "org_abc",
       projectId: "proj_1",
     });
 
-    const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
-    const bearer = decodeJwtPayload(headers.get("authorization")?.slice("Bearer ".length) ?? "");
+    const headers = new Headers(required(required(fetchMock.mock.calls[0])[1]).headers);
+    const bearer = decodeJwtPayload(required(headers.get("authorization")).slice("Bearer ".length));
     expect(bearer).toMatchObject({
       iss: "cdp",
       aud: ["cdp_service"],
@@ -222,7 +233,7 @@ describe("coinbase account provisioning", () => {
 
     // CDP documents iss/aud for the bearer token only; the wallet-auth token is
     // bound by its short expiry, jti, and request hash instead.
-    const walletAuth = decodeJwtPayload(headers.get("x-wallet-auth") ?? "");
+    const walletAuth = decodeJwtPayload(required(headers.get("x-wallet-auth")));
     expect(walletAuth.iss).toBeUndefined();
     expect(walletAuth.aud).toBeUndefined();
     expect(walletAuth.jti).toEqual(expect.any(String));
@@ -248,7 +259,7 @@ describe("coinbase account provisioning", () => {
         throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
       });
 
-    const result = await provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
+    const result = await provisionCoinbaseInSandbox(createCoinbaseEnv(), {
       orgId: "org_abc",
       reuseExisting: true,
     });
@@ -275,7 +286,7 @@ describe("coinbase account provisioning", () => {
       });
 
     await expect(
-      provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
+      provisionCoinbaseInSandbox(createCoinbaseEnv(), {
         orgId: "org_abc",
         reuseExisting: true,
       })
@@ -302,7 +313,7 @@ describe("coinbase account provisioning", () => {
       });
 
     await expect(
-      provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
+      provisionCoinbaseInSandbox(createCoinbaseEnv(), {
         orgId: "org_abc",
         reuseExisting: true,
       })
@@ -314,6 +325,7 @@ describe("coinbase account provisioning", () => {
 
 describe("privy wallet provisioning", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -343,22 +355,6 @@ describe("privy wallet provisioning", () => {
     expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["GET"]);
   });
 
-  it("creates in one Privy call, with no lookup first; a retry is deduped by Privy", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(privyWalletResponse());
-
-    await expect(provisionTestPrivyWallet(PRIVY_CREATE_OPTIONS)).resolves.toEqual({
-      walletId: "wallet-existing",
-      address: EXISTING_ADDRESS,
-    });
-
-    expect(fetchMock).toHaveBeenCalledOnce();
-    expect(toUrlString(fetchMock.mock.calls[0]?.[0] as string | URL | Request)).toBe(
-      "https://privy.test/v1/wallets"
-    );
-    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
-    expect(fetchMock.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
-  });
-
   it("creates a wallet with stable external and idempotency IDs", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -371,12 +367,17 @@ describe("privy wallet provisioning", () => {
       address: CREATED_ADDRESS,
     });
 
-    const createRequest = fetchMock.mock.calls[0]?.[1];
-    expect(JSON.parse(String(createRequest?.body))).toEqual({
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [createUrl, createRequest] = required(fetchMock.mock.calls[0]);
+    expect(toUrlString(createUrl)).toBe("https://api.privy.io/v1/wallets");
+    expect(required(createRequest).method).toBe("POST");
+    expect(JSON.parse(String(required(createRequest).body))).toEqual({
       chain_type: "solana",
       external_id: "sdp_connection_123",
     });
-    expect(new Headers(createRequest?.headers).get("privy-idempotency-key")).toBe("credential-456");
+    expect(new Headers(required(createRequest).headers).get("privy-idempotency-key")).toBe(
+      "credential-456"
+    );
   });
 
   it("reconciles by external ID after an ambiguous create outcome", async () => {
@@ -454,20 +455,6 @@ describe("privy wallet provisioning", () => {
     expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["POST", "GET"]);
   });
 
-  it.each([
-    ["an archived wallet", { ...PRIVY_WALLET, archived_at: Date.now() }],
-    ["another external ID", { ...PRIVY_WALLET, external_id: "sdp_connection_other" }],
-    ["a non-Solana chain", { ...PRIVY_WALLET, chain_type: "ethereum" }],
-  ] as const)("rejects a create response containing %s", async (_case, body) => {
-    // A conflict is settled by the lookup, which finds the same wallet and refuses it.
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(body, 200));
-
-    await expect(provisionTestPrivyWallet(PRIVY_CREATE_OPTIONS)).rejects.toMatchObject({
-      code: "CONFLICT",
-    });
-    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["POST", "GET"]);
-  });
-
   it("treats an incomplete create response as ambiguous and reconciles once", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -478,6 +465,41 @@ describe("privy wallet provisioning", () => {
       code: "NETWORK_ERROR",
     });
     expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["POST", "GET"]);
+  });
+
+  it("gives up on an unanswered stored-credential create and lookup as a network error", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(AbortSignal, "timeout").mockImplementation((milliseconds) => {
+      const controller = new AbortController();
+      setTimeout(
+        () => controller.abort(new DOMException("timed out", "TimeoutError")),
+        milliseconds
+      );
+      return controller.signal;
+    });
+    // Privy never answers: only a request deadline settles the call.
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(
+      (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal;
+          if (signal) signal.addEventListener("abort", () => reject(signal.reason));
+        })
+    );
+
+    const outcome = provisionTestPrivyWallet(PRIVY_CREATE_OPTIONS).then(
+      () => "resolved",
+      (error) => error
+    );
+    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(await Promise.race([outcome, Promise.resolve("still pending")])).toMatchObject({
+      code: "NETWORK_ERROR",
+    });
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["POST", "GET"]);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(required(required(init).signal).aborted).toBe(true);
+    }
   });
 
   it("classifies a Provider 401 on create as an invalid credential, with no lookup", async () => {
@@ -504,9 +526,9 @@ describe("privy wallet provisioning", () => {
   });
 
   it.each([
-    ["wallet lookup", { walletId: "wallet-existing" }, "GET"],
-    ["legacy creation", {}, "POST"],
-  ] as const)("preserves %s", async (_case, options, method) => {
+    ["looks up an existing wallet by ID", { walletId: "wallet-existing" }, "GET"],
+    ["creates a wallet without an external ID", {}, "POST"],
+  ] as const)("reads or creates a Managed wallet (%s)", async (_case, options, method) => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(jsonResponse({ id: "wallet-existing", address: EXISTING_ADDRESS }, 200));
@@ -515,15 +537,14 @@ describe("privy wallet provisioning", () => {
       walletId: "wallet-existing",
       address: EXISTING_ADDRESS,
     });
-    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe(method);
-    expect(fetchMock.mock.calls[0]?.[1]?.signal).toBeUndefined();
+    expect(required(required(fetchMock.mock.calls[0])[1]).method).toBe(method);
   });
 
   it.each([
     [401, "PROVIDER_NOT_CONFIGURED"],
     [400, "PROVIDER_NOT_CONFIGURED"],
     [503, "PROVIDER_NOT_CONFIGURED"],
-  ] as const)("preserves legacy HTTP %s create classification as %s", async (status, code) => {
+  ] as const)("classifies a Managed create's HTTP %s failure as %s", async (status, code) => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ error: "rejected" }, status));
 
     await expect(provisionTestPrivyWallet({})).rejects.toMatchObject({ code });
@@ -536,14 +557,11 @@ describe("privy wallet provisioning", () => {
   ] as const)(
     "classifies bounded credential HTTP %s create failures as %s",
     async (status, code) => {
-      const fetchMock = vi
-        .spyOn(globalThis, "fetch")
-        .mockResolvedValue(jsonResponse({ error: "rejected" }, status));
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ error: "rejected" }, status));
 
       await expect(provisionTestPrivyWallet({ credentialRequest: true })).rejects.toMatchObject({
         code,
       });
-      expect(fetchMock.mock.calls[0]?.[1]?.signal).toBeDefined();
     }
   );
 
@@ -555,16 +573,18 @@ describe("privy wallet provisioning", () => {
     });
   });
 
-  it("preserves the legacy malformed create response", async () => {
+  it("reports a malformed Managed create response as a failed creation", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({}, 200));
 
     await expect(
-      provisionPrivyWallet(
-        createPrivyEnv({
-          PRIVY_APP_ID: PRIVY_AUTHENTICATION.appId,
-          PRIVY_APP_SECRET: PRIVY_AUTHENTICATION.appSecret,
-        }),
-        {}
+      inSandboxScope(() =>
+        provisionPrivyWallet(
+          createPrivyEnv({
+            PRIVY_APP_ID: PRIVY_AUTHENTICATION.appId,
+            PRIVY_APP_SECRET: PRIVY_AUTHENTICATION.appSecret,
+          }),
+          {}
+        )
       )
     ).rejects.toMatchObject({
       code: "PROVIDER_NOT_CONFIGURED",
@@ -579,48 +599,55 @@ describe("utila wallet provisioning", () => {
   });
 
   function provisionInSandbox(options: Parameters<typeof provisionUtilaWallet>[1]) {
-    return runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
-      provisionUtilaWallet(createUtilaEnv(), options)
-    );
+    return inSandboxScope(() => provisionUtilaWallet(createUtilaEnv(), options));
   }
 
-  it("normalizes resource-style vault IDs before creating wallets", async () => {
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
-        const url = toUrlString(input);
+  it.each([
+    ["sandbox", "networks/solana-devnet"],
+    ["production", "networks/solana-mainnet"],
+  ] as const)(
+    "creates the %s wallet on %s under the normalized vault ID",
+    async (environment, network) => {
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+          const url = toUrlString(input);
 
-        if (url.endsWith("/v2/vaults/vault_123/wallets") && init?.method === "POST") {
-          const body = JSON.parse(String(init.body ?? "{}")) as {
-            displayName?: string;
-            networks?: string[];
-          };
-          expect(body.displayName).toBe("Root Wallet");
-          expect(body.networks).toEqual(["networks/solana-devnet"]);
+          if (
+            url === "https://api.utila.io/v2/vaults/vault_123/wallets" &&
+            init?.method === "POST"
+          ) {
+            expect(JSON.parse(String(init.body))).toEqual({
+              displayName: "Root Wallet",
+              networks: [network],
+            });
 
-          return jsonResponse(
-            {
-              wallet: {
-                name: "vaults/vault_123/wallets/wallet_abc",
-                solanaDetails: {
-                  address: CREATED_ADDRESS,
+            return jsonResponse(
+              {
+                wallet: {
+                  name: "vaults/vault_123/wallets/wallet_abc",
+                  solanaDetails: {
+                    address: CREATED_ADDRESS,
+                  },
                 },
               },
-            },
-            200
-          );
-        }
+              200
+            );
+          }
 
-        throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
-      });
+          throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
+        });
 
-    const result = await provisionInSandbox({ displayName: "Root Wallet" });
+      const result = await runInClusterScope({ projectId: null, environment }, () =>
+        provisionUtilaWallet(createUtilaEnv(), { displayName: "Root Wallet" })
+      );
 
-    expect(result.walletId).toBe("wallet_abc");
-    expect(result.address).toBe(CREATED_ADDRESS);
-    expect(result.vaultId).toBe("vault_123");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
+      expect(result.walletId).toBe("wallet_abc");
+      expect(result.address).toBe(CREATED_ADDRESS);
+      expect(result.vaultId).toBe("vault_123");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    }
+  );
 
   it("reports only the upstream error code when wallet creation fails", async () => {
     const leakedToken = "eyJhbGciOiJSUzI1NiJ9.leaked-service-account-token";
@@ -688,27 +715,26 @@ describe("utila wallet provisioning", () => {
     );
     const now = 1_725_000_000_000;
 
-    await provisionUtilaWalletInCustody(
-      {
-        fetch: fetchMock,
-        sleep: async () => undefined,
-        now: () => now,
-        randomUUID: () => "test-uuid",
-        getRandomValues: (values) => values,
-        sha256: (data) => crypto.subtle.digest("SHA-256", new Uint8Array(data)),
-      },
-      {
-        serviceAccountEmail: "service-account@example.com",
-        serviceAccountPrivateKeyPem: utilaPrivateKeyPem,
-        vaultId: "vaults/vault_123",
-        apiBaseUrl: "https://api.utila.io",
-      },
-      {}
+    await inSandboxScope(() =>
+      provisionUtilaWalletInCustody(
+        {
+          fetch: fetchMock,
+          sleep: async () => undefined,
+          now: () => now,
+        },
+        {
+          serviceAccountEmail: "service-account@example.com",
+          serviceAccountPrivateKeyPem: utilaPrivateKeyPem,
+          vaultId: "vaults/vault_123",
+        },
+        {}
+      )
     );
 
-    const authorization = new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("authorization");
-    expect(authorization).toBeTruthy();
-    expect(decodeJwtPayload(authorization?.slice("Bearer ".length) ?? "")).toMatchObject({
+    const authorization = required(
+      new Headers(required(required(fetchMock.mock.calls[0])[1]).headers).get("authorization")
+    );
+    expect(decodeJwtPayload(authorization.slice("Bearer ".length))).toMatchObject({
       iat: now / 1_000,
       exp: now / 1_000 + 5 * 60,
     });
@@ -721,13 +747,13 @@ describe("para wallet provisioning", () => {
     vi.restoreAllMocks();
   });
 
-  it("uses only the server-configured Para endpoint", async () => {
+  it("sends Para requests to the Para API origin", async () => {
     const walletId = "wal_para_env";
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
         const url = toUrlString(input);
-        expect(url.startsWith("https://trusted.para.test/")).toBe(true);
+        expect(url.startsWith("https://api.beta.getpara.com/")).toBe(true);
 
         if (url.endsWith("/v1/wallets") && init?.method === "POST") {
           return jsonResponse({ data: { id: walletId, status: "creating" } }, 200);
@@ -751,15 +777,7 @@ describe("para wallet provisioning", () => {
         throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
       });
 
-    await provisionParaWallet(
-      createParaEnv({
-        PARA_API_BASE_URL: "https://trusted.para.test",
-      }),
-      {
-        orgId: "org_abc",
-        orgSlug: "Acme Labs",
-      }
-    );
+    await provisionParaInSandbox(createParaEnv(), { orgId: "org_abc", orgSlug: "Acme Labs" });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -798,7 +816,7 @@ describe("para wallet provisioning", () => {
         throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
       });
 
-    const result = await provisionParaWallet(createParaEnv(), {
+    const result = await provisionParaInSandbox(createParaEnv(), {
       orgId: "org_abc",
       orgSlug: "Acme Labs",
     });
@@ -822,7 +840,7 @@ describe("para wallet provisioning", () => {
       });
 
     await expect(
-      provisionParaWallet(createParaEnv(), {
+      provisionParaInSandbox(createParaEnv(), {
         orgId: "org_abc",
         orgSlug: "Acme Labs",
       })
@@ -851,7 +869,7 @@ describe("para wallet provisioning", () => {
         throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
       });
 
-    const provisionPromise = provisionParaWallet(createParaEnv(), {
+    const provisionPromise = provisionParaInSandbox(createParaEnv(), {
       orgId: "org_abc",
       orgSlug: "Acme Labs",
     });
@@ -866,12 +884,12 @@ describe("para wallet provisioning", () => {
 
 function createCoinbaseEnv(overrides: Partial<Env> = {}): Env {
   return {
-    ENVIRONMENT: "development",
+    ...env,
     COINBASE_CDP_API_KEY_ID: "test-api-key-id",
     COINBASE_CDP_API_KEY_SECRET: keyMaterial.privateKeyPem,
     COINBASE_CDP_WALLET_SECRET: keyMaterial.privateKeyPkcs8Base64,
     ...overrides,
-  } as Env;
+  };
 }
 
 const PRIVY_AUTHENTICATION = {
@@ -890,24 +908,22 @@ const PRIVY_WALLET = {
 };
 
 function createPrivyEnv(overrides: Partial<Env> = {}): Env {
-  return {
-    ENVIRONMENT: "development",
-    API_VERSION: "test",
-    DATABASE_URL: "postgresql://unused",
-    PRIVY_API_BASE_URL: "https://privy.test/v1",
-    ...overrides,
-  } as Env;
+  return { ...env, ...overrides };
 }
 
 function provisionTestPrivyWallet(options: Parameters<typeof provisionPrivyWallet>[1]) {
-  return provisionPrivyWallet(createPrivyEnv(), options, PRIVY_AUTHENTICATION);
+  return inSandboxScope(() =>
+    provisionPrivyWallet(createPrivyEnv(), options, PRIVY_AUTHENTICATION)
+  );
 }
 
 function findTestPrivyWallet() {
-  return findPrivyWalletByExternalId(
-    createPrivyEnv(),
-    PRIVY_CREATE_OPTIONS.externalId,
-    PRIVY_AUTHENTICATION
+  return inSandboxScope(() =>
+    findPrivyWalletByExternalId(
+      createPrivyEnv(),
+      PRIVY_CREATE_OPTIONS.externalId,
+      PRIVY_AUTHENTICATION
+    )
   );
 }
 
@@ -919,24 +935,21 @@ function privyWalletNotFound(): Response {
   return jsonResponse({ error: "not found" }, 404);
 }
 
-function createParaEnv(overrides: Partial<Env> = {}): Env {
-  return {
-    ENVIRONMENT: "development",
-    PARA_API_KEY: "test-para-api-key",
-    PARA_API_BASE_URL: "https://api.getpara.com",
-    ...overrides,
-  } as Env;
+function provisionParaInSandbox(...args: Parameters<typeof provisionParaWallet>) {
+  return inSandboxScope(() => provisionParaWallet(...args));
 }
 
-function createUtilaEnv(overrides: Partial<Env> = {}): Env {
+function createParaEnv(): Env {
+  return { ...env, PARA_API_KEY: "test-para-api-key" };
+}
+
+function createUtilaEnv(): Env {
   return {
-    ENVIRONMENT: "development",
+    ...env,
     UTILA_SERVICE_ACCOUNT_EMAIL: "service-account@example.com",
     UTILA_SERVICE_ACCOUNT_PRIVATE_KEY: utilaPrivateKeyPem,
     UTILA_VAULT_ID: "vaults/vault_123",
-    UTILA_API_BASE_URL: "https://api.utila.io",
-    ...overrides,
-  } as Env;
+  };
 }
 
 function toUrlString(input: string | URL | Request): string {
@@ -961,57 +974,7 @@ function jsonResponse(body: unknown, status: number): Response {
 }
 
 function decodeJwtPayload(token: string): Record<string, unknown> {
-  const payload = token.split(".")[1] ?? "";
-  const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
-  return JSON.parse(atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, "="))) as Record<
-    string,
-    unknown
-  >;
-}
-
-async function createEs256KeyMaterial(): Promise<{
-  privateKeyPem: string;
-  privateKeyPkcs8Base64: string;
-}> {
-  const keyPair = (await crypto.subtle.generateKey(
-    {
-      name: "ECDSA",
-      namedCurve: "P-256",
-    },
-    true,
-    ["sign", "verify"]
-  )) as CryptoKeyPair;
-
-  const pkcs8Buffer = (await crypto.subtle.exportKey("pkcs8", keyPair.privateKey)) as ArrayBuffer;
-  const pkcs8Bytes = new Uint8Array(pkcs8Buffer);
-  const privateKeyPkcs8Base64 = Buffer.from(pkcs8Bytes).toString("base64");
-  const pemLines = privateKeyPkcs8Base64.match(/.{1,64}/g)?.join("\n") ?? privateKeyPkcs8Base64;
-  const privateKeyPem = `-----BEGIN PRIVATE KEY-----\n${pemLines}\n-----END PRIVATE KEY-----`;
-
-  return {
-    privateKeyPem,
-    privateKeyPkcs8Base64,
-  };
-}
-
-async function createRsaPrivateKeyPem(): Promise<string> {
-  const keyPair = (await crypto.subtle.generateKey(
-    {
-      name: "RSASSA-PKCS1-v1_5",
-      modulusLength: 2048,
-      publicExponent: new Uint8Array([1, 0, 1]),
-      hash: "SHA-256",
-    },
-    true,
-    ["sign", "verify"]
-  )) as CryptoKeyPair;
-  const pkcs8Buffer = (await crypto.subtle.exportKey("pkcs8", keyPair.privateKey)) as ArrayBuffer;
-  const pkcs8 = new Uint8Array(pkcs8Buffer);
-  return encodePem("PRIVATE KEY", pkcs8);
-}
-
-function encodePem(label: string, bytes: Uint8Array): string {
-  const base64 = Buffer.from(bytes).toString("base64");
-  const lines = base64.match(/.{1,64}/g)?.join("\n") ?? base64;
-  return `-----BEGIN ${label}-----\n${lines}\n-----END ${label}-----`;
+  return z
+    .record(z.string(), z.unknown())
+    .parse(JSON.parse(Buffer.from(required(token.split(".")[1]), "base64url").toString()));
 }

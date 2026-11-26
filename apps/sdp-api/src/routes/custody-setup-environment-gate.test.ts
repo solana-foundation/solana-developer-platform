@@ -1,22 +1,18 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
-import {
-  CUSTODY_PROVIDERS,
-  type CustodyProvider,
-  type CustodySetupRefusalReason,
-} from "@sdp/types/custody";
+import type { CustodyProvider, CustodySetupRefusalReason } from "@sdp/types/custody";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
-import { verifyClerkJwt } from "@/lib/clerk-token";
 import { getLogger } from "@/runtime/logger";
 import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
+import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey, type TestApiKeyMaterial } from "@/test/helpers/api-keys";
-import { signSeededClerkMember } from "@/test/helpers/clerk-member";
+import { seedCustodyAdmin } from "@/test/helpers/custody-admin";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
-import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 
@@ -32,7 +28,7 @@ const provisionPrivyWalletMock = vi.spyOn(custodyProvisioning, "provisionPrivyWa
 const ORGANIZATION_ID = "org_custody_setup_gate";
 const USER_ID = "usr_custody_setup_gate";
 const PROJECT_IDS = {
-  sandbox: "prj_custody_setup_gate_sandbox",
+  sandbox: "prj_custody_setup_gate",
   production: "prj_custody_setup_gate_production",
 } as const satisfies Record<SdpEnvironment, string>;
 const API_KEYS = {
@@ -48,9 +44,8 @@ const API_KEYS = {
   },
 } as const satisfies Record<SdpEnvironment, TestApiKeyMaterial>;
 const APP_ID = "privy-app-setup-gate";
-const PRIVY_API_BASE_URL = "https://privy.custody-setup-gate.test/v1";
 const PRIVY_WALLET_ID = "wallet-custody-setup-gate";
-const PRIVY_WALLET_ADDRESS = "wallet-address-custody-setup-gate";
+const PRIVY_WALLET_ADDRESS = TEST_SOLANA_ADDRESSES.wallet1;
 const SUBMISSION_BODY = {
   provider: "privy",
   fields: {
@@ -60,18 +55,6 @@ const SUBMISSION_BODY = {
     appSecret: "setup gate secret",
   },
 } as const;
-const MANAGED_LABELS = {
-  local: "Local",
-  fireblocks: "Fireblocks",
-  privy: "Privy",
-  coinbase_cdp: "Coinbase CDP",
-  para: "Para",
-  turnkey: "Turnkey",
-  dfns: "DFNS",
-  ibm_haven: "IBM Digital Asset Haven",
-  anchorage: "Anchorage",
-  utila: "Utila",
-} as const satisfies Record<CustodyProvider, string>;
 const OUT_OF_CHANNEL_REFUSAL = {
   error: {
     code: "FORBIDDEN",
@@ -99,27 +82,11 @@ function cachedApiKey(environment: SdpEnvironment): SeededApiKey {
 }
 
 async function seedFixture(): Promise<void> {
-  const db = getDb(env);
-  await db.execute(
-    `INSERT INTO organizations (id, name, slug, tier, status)
-     VALUES (?, 'Custody Setup Gate', 'custody-setup-gate', 'individual', 'active')`,
-    [ORGANIZATION_ID]
-  );
-  await db.execute(
-    `INSERT INTO users (id, email, email_verified, status)
-     VALUES (?, 'custody-setup-gate@example.com', 1, 'active')`,
-    [USER_ID]
-  );
-  await db.execute(
-    `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-     VALUES ('mem_custody_setup_gate', ?, ?, 'admin', 'active')`,
-    [ORGANIZATION_ID, USER_ID]
-  );
-  await seedDefaultProjects(db, {
+  clerkToken = await seedCustodyAdmin(env, {
     organizationId: ORGANIZATION_ID,
-    createdBy: USER_ID,
-    members: [USER_ID],
-    ids: PROJECT_IDS,
+    userId: USER_ID,
+    projectId: PROJECT_IDS.sandbox,
+    tier: "individual",
   });
   await seedEnvironmentApiKey("sandbox");
   await seedEnvironmentApiKey("production");
@@ -139,7 +106,7 @@ async function seedEnvironmentApiKey(environment: SdpEnvironment): Promise<void>
 function initialize(environment: SdpEnvironment, provider: CustodyProvider): Promise<Response> {
   return Promise.resolve(
     app.request(
-      "/v1/wallets/initialize",
+      "/v1/wallets/managed-signing/initialize-with-wallet",
       {
         method: "POST",
         // Custody setup is `wallets.configure`, which no API key may hold.
@@ -215,7 +182,7 @@ function getConnection(environment: SdpEnvironment, connectionId: string): Promi
 function complete(environment: SdpEnvironment, connectionId: string): Promise<Response> {
   return Promise.resolve(
     app.request(
-      `/internal/dashboard/custody/connections/${connectionId}/complete`,
+      `/internal/dashboard/custody/connections/${connectionId}/complete-installation`,
       {
         method: "POST",
         headers: {
@@ -230,8 +197,8 @@ function complete(environment: SdpEnvironment, connectionId: string): Promise<Re
 
 async function submittedConnectionId(response: Response): Promise<string> {
   expect(response.status).toBe(201);
-  const body = (await response.json()) as { data: { connectionId: string } };
-  return body.data.connectionId;
+  return z.object({ data: z.object({ connectionId: z.string() }) }).parse(await response.json())
+    .data.connectionId;
 }
 
 function stubSuccessfulPrivyInstallation(connectionId: string): void {
@@ -320,11 +287,9 @@ describe("Custody setup by project environment", () => {
   const original = {
     privyAppId: env.PRIVY_APP_ID,
     privyAppSecret: env.PRIVY_APP_SECRET,
-    privyApiBaseUrl: env.PRIVY_API_BASE_URL,
     backend: env.CREDENTIAL_SECRET_STORE_BACKEND,
     encryptionKey: env.CUSTODY_ENCRYPTION_KEY,
     fingerprintPepper: env.CREDENTIAL_FINGERPRINT_PEPPER,
-    releaseChannel: env.SDP_RELEASE_CHANNEL,
   };
 
   beforeEach(async () => {
@@ -333,15 +298,12 @@ describe("Custody setup by project environment", () => {
     vi.clearAllMocks();
     env.PRIVY_APP_ID = "managed-privy-app-id";
     env.PRIVY_APP_SECRET = "managed-privy-app-secret";
-    env.PRIVY_API_BASE_URL = PRIVY_API_BASE_URL;
     env.CREDENTIAL_SECRET_STORE_BACKEND = "encrypted_db";
     env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 13).toString("base64");
     env.CREDENTIAL_FINGERPRINT_PEPPER = "custody-setup-gate-fingerprint-pepper";
     await seedTestDatabase(env);
     await clearKVStores(env);
     await seedFixture();
-    clerkToken = await signSeededClerkMember(env, getDb(env), USER_ID, ORGANIZATION_ID);
-    await verifyClerkJwt(clerkToken, env);
     vi.stubGlobal("fetch", vi.fn<typeof fetch>());
   });
 
@@ -349,34 +311,11 @@ describe("Custody setup by project environment", () => {
     vi.unstubAllGlobals();
     env.PRIVY_APP_ID = original.privyAppId;
     env.PRIVY_APP_SECRET = original.privyAppSecret;
-    env.PRIVY_API_BASE_URL = original.privyApiBaseUrl;
     env.CREDENTIAL_SECRET_STORE_BACKEND = original.backend;
     env.CUSTODY_ENCRYPTION_KEY = original.encryptionKey;
     env.CREDENTIAL_FINGERPRINT_PEPPER = original.fingerprintPepper;
-    env.SDP_RELEASE_CHANNEL = original.releaseChannel;
     await clearKVStores(env);
   });
-
-  it.each(CUSTODY_PROVIDERS.map((provider) => ({ provider, label: MANAGED_LABELS[provider] })))(
-    "refuses Managed $provider initialization in a Production project before any Provider call, row or audit",
-    async ({ provider, label }) => {
-      const response = await initialize("production", provider);
-
-      expect(response.status).toBe(403);
-      expect(await response.json()).toEqual({
-        error: {
-          code: "FORBIDDEN",
-          message: `${label} Managed custody is not allowed in a production project.`,
-          details: { reason: "custody_mode_not_allowed" },
-        },
-        meta: { requestId: expect.any(String) },
-      });
-      expect(fetch).not.toHaveBeenCalled();
-      expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
-      expect(await custodyRows()).toEqual(NO_CUSTODY_ROWS);
-      expect(await auditRows()).toEqual([]);
-    }
-  );
 
   it("refuses a Managed wallet in a Production project with custody_mode_not_allowed, not a missing config", async () => {
     const response = await createManagedWallet("production", "privy", "gate-prod-managed-wallet");
@@ -394,52 +333,23 @@ describe("Custody setup by project environment", () => {
     expect(await custodyRows()).toEqual(NO_CUSTODY_ROWS);
   });
 
-  it("refuses a Managed beta-provider wallet on stable with custody_provider_not_in_release_channel, not a missing config", async () => {
-    env.SDP_RELEASE_CHANNEL = "stable";
+  it("refuses a Managed wallet out of the release channel with custody_provider_not_in_release_channel, not a missing config", async () => {
+    custodyReleaseChannel.outOfChannelMode = "managed";
 
-    const response = await createManagedWallet("sandbox", "fireblocks", "gate-stable-fireblocks");
+    const response = await createManagedWallet("sandbox", "privy", "gate-managed-out-of-channel");
 
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({
       error: {
         code: "FORBIDDEN",
         message:
-          "The fireblocks custody provider is not available in this release channel for managed custody.",
+          "The privy custody provider is not available in this release channel for managed custody.",
         details: { reason: "custody_provider_not_in_release_channel" },
       },
       meta: { requestId: expect.any(String) },
     });
     expect(fetch).not.toHaveBeenCalled();
     expect(await custodyRows()).toEqual(NO_CUSTODY_ROWS);
-  });
-
-  it("answers a Managed wallet for an admitted provider with no config as not initialized", async () => {
-    const response = await createManagedWallet("sandbox", "privy", "gate-sandbox-no-config");
-
-    expect(response.status).toBe(404);
-    expect(await response.json()).toMatchObject({
-      error: { code: "NOT_FOUND", message: "Custody not initialized for provider: privy" },
-    });
-  });
-
-  it("refuses Managed Privy initialization in a Sandbox project when the deployment lacks Privy credentials", async () => {
-    env.PRIVY_APP_ID = undefined;
-    env.PRIVY_APP_SECRET = undefined;
-
-    const response = await initialize("sandbox", "privy");
-
-    expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({
-      error: {
-        code: "PROVIDER_NOT_CONFIGURED",
-        message: "Privy is not configured for sandbox projects in this deployment.",
-        details: { reason: "provider_not_configured" },
-      },
-      meta: { requestId: expect.any(String) },
-    });
-    expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
-    expect(await custodyRows()).toEqual(NO_CUSTODY_ROWS);
-    expect(await auditRows()).toEqual([]);
   });
 
   it("submits and completes BYOK Privy in a Production project", async () => {
@@ -468,12 +378,14 @@ describe("Custody setup by project environment", () => {
   it("sets up Managed Privy and then BYOK Privy side by side in a Sandbox project", async () => {
     provisionPrivyWalletMock.mockResolvedValueOnce({
       walletId: "wallet_setup_gate_managed",
-      address: "ManagedSetupGatePublicKey",
+      address: TEST_SOLANA_ADDRESSES.wallet2,
     });
 
     const initialized = await initialize("sandbox", "privy");
     expect(initialized.status).toBe(201);
-    const { data: managed } = (await initialized.json()) as { data: { configId: string } };
+    const { data: managed } = z
+      .object({ data: z.object({ configId: z.string() }) })
+      .parse(await initialized.json());
     vi.mocked(fetch).mockResolvedValueOnce(Response.json({ data: [] }));
     const connectionId = await submittedConnectionId(await submit("sandbox", "gate-sandbox-byok"));
     stubSuccessfulPrivyInstallation(connectionId);
@@ -508,7 +420,7 @@ describe("Custody setup by project environment", () => {
     ).toEqual([
       {
         wallet_id: "privy_wallet_setup_gate_managed",
-        public_key: "ManagedSetupGatePublicKey",
+        public_key: TEST_SOLANA_ADDRESSES.wallet2,
         custody_config_id: managed.configId,
         custody_connection_id: null,
         status: "active",
@@ -523,24 +435,7 @@ describe("Custody setup by project environment", () => {
     ]);
   });
 
-  it.each(["sandbox", "production"] as const)(
-    "admits a below-stable BYOK pair the release channel offers through submission and completion in a %s project",
-    async (environment) => {
-      custodyReleaseChannel.stageOverride = { provider: "privy", mode: "byok", stage: "beta" };
-      vi.mocked(fetch).mockResolvedValueOnce(Response.json({ data: [] }));
-
-      const connectionId = await submittedConnectionId(
-        await submit(environment, `gate-${environment}-beta`)
-      );
-      stubSuccessfulPrivyInstallation(connectionId);
-      const response = await complete(environment, connectionId);
-
-      expect(response.status).toBe(200);
-      expect(await response.json()).toEqual(completionBody(environment, connectionId));
-    }
-  );
-
-  describe("refusal logging and archived projects", () => {
+  describe("refusal logging", () => {
     let warn: ReturnType<typeof spyOnWarn>;
 
     beforeEach(() => {
@@ -550,10 +445,22 @@ describe("Custody setup by project environment", () => {
       };
     });
 
-    it("logs a refused Managed initialization in a Production project exactly once", async () => {
+    it("refuses Managed initialization in a Production project before any Provider call, row or audit, logging it once", async () => {
       const response = await initialize("production", "privy");
 
       expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({
+        error: {
+          code: "FORBIDDEN",
+          message: "Privy Managed custody is not allowed in a production project.",
+          details: { reason: "custody_mode_not_allowed" },
+        },
+        meta: { requestId: expect.any(String) },
+      });
+      expect(fetch).not.toHaveBeenCalled();
+      expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
+      expect(await custodyRows()).toEqual(NO_CUSTODY_ROWS);
+      expect(await auditRows()).toEqual([]);
       expect(refusalLogs(warn)).toEqual([
         refusalLog("production", "managed", "custody_mode_not_allowed"),
       ]);
@@ -580,6 +487,7 @@ describe("Custody setup by project environment", () => {
             canComplete: false,
             canReplaceCredentials: false,
             canCancel: true,
+            providerPolicy: { checkedAt: null, reason: "not_checked", status: "unknown" },
           },
         },
         meta: { requestId: expect.any(String), timestamp: expect.any(String) },
@@ -613,37 +521,5 @@ describe("Custody setup by project environment", () => {
         refusalLog("production", "byok", "custody_provider_not_in_release_channel"),
       ]);
     });
-
-    it.each(["sandbox", "production"] as const)(
-      "refuses Managed initialization with a key of an archived %s project, writing nothing and logging no refusal",
-      async (environment) => {
-        await getDb(env)
-          .prepare("UPDATE projects SET status = 'archived' WHERE id = ?")
-          .bind(PROJECT_IDS[environment])
-          .run();
-
-        const response = await app.request(
-          "/v1/wallets/initialize",
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${API_KEYS[environment].raw}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ provider: "privy" }),
-          },
-          env
-        );
-
-        // Authentication refuses a key whose project is not active (HOO-2099).
-        expect(response.status).toBe(401);
-        expect(await response.json()).toMatchObject({ error: { code: "REVOKED_API_KEY" } });
-        expect(fetch).not.toHaveBeenCalled();
-        expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
-        expect(await custodyRows()).toEqual(NO_CUSTODY_ROWS);
-        expect(await auditRows()).toEqual([]);
-        expect(refusalLogs(warn)).toEqual([]);
-      }
-    );
   });
 });

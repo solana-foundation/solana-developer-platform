@@ -1,144 +1,100 @@
-# @sdp/earn — Earn provider integrations
+# @sdp/earn
 
-`@sdp/earn` is the provider-integration layer for SDP Embedded Yield: curated
-stablecoin yield for organization treasuries and partner-owned end-user wallet
-experiences, fronted by on-chain vaults and yield-bearing tokens. The
-architecture is deliberately multi-provider: provider-specific details live
-behind capability seams so adding a provider, curator, or vault stays
-checklist-driven.
+`@sdp/earn` aggregates provider strategies for SDP. A strategy can be a vault,
+lending market or RWA product. Treasury and Embedded Yield wrap the same
+catalogue, positions and asynchronous actions.
 
-Two provider SHAPES live here, and the difference decides which seams a new
-integration touches:
+Catalogue clients declare their supported sources and publish strategy metadata.
+Execution adapters live in their provider packages and expose the capabilities
+that each strategy actually supports. Discovery does not imply deposit access,
+liquidity or signing authority.
 
-|                     | **Custodial portfolio** (no shipped provider; Ground, the one integration, was removed) | **Vault-direct** (Kamino, Veda, Jupiter Lend, Ondo; WisdomTree registered pre-launch)                                                           |
-| ------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Money model         | SDP provisions an omnibus wallet; the provider spreads funds across sources             | Non-custodial; the owner signs a provider-built transaction and keeps the resulting vault shares or yield token                                 |
-| Contract            | `EarnVaultProvider` + `EarnPortfolioWalletProvider` (+ approvals)                       | Catalogue client in `@sdp/earn`; execution client implements `EarnVaultDirectProvider` in its own package                                       |
-| `/v1/earn/programs` | the whole flow                                                                          | **501** by capability detection                                                                                                                 |
-| Upstream readiness  | `<PROVIDER>_API_KEY` / `<PROVIDER>_SANDBOX_API_KEY`                                     | Kamino, Veda, and Jupiter Lend are credential-free; Ondo needs the platform Jupiter key; WisdomTree needs Connect credentials                   |
-| Clusters            | catalogued per environment's own cluster                                                | provider deployment registries: Kamino on devnet/mainnet, Veda on devnet, Jupiter Lend and Ondo on mainnet; WisdomTree remains deposit-disabled |
-| Dashboard           | treasury program flow                                                                   | treasury vault flow plus an authenticated integration guide                                                                                     |
-
-A vault-direct provider is a complete integration without a portfolio wallet:
-`supportsPortfolioWallets` returning false is the answer, not a TODO. Its
-execution capability is discovered independently through
-`EarnVaultDirectProvider`. See CLAUDE.md → "Two provider shapes". The program
-routes and the portfolio-wallet capability stay provider-neutral so a future
-custodial provider can light them up; today every registered provider answers
-false to that guard.
-
-The Clusters row above describes each provider's OWN catalogue sources. Since
-PRO-1742 every non-production environment additionally carries a browse-only
-MIRROR of production's accepted mainnet shelf (rows read `fundable: false`,
-served only on an explicit `?cluster=` opt-in); see "The sync cron" below.
+A position records a wallet's holding in a strategy. An operation tracks one
+deposit or withdrawal, including signing, submission and provider settlement.
+Program creation, allocation configuration and their HTTP routes are removed.
+The movement ledger records the financial outcome of current operations.
 
 Companion docs:
 
-- [ADR 0002 — Earn provider pluggability](../../docs/decisions/0002-earn-provider-pluggability.md)
-  (the invariants; includes dated addenda for the backend hardening, the
-  retired Ground portfolio-wallet integration, and the Markets/Earn flag
-  hierarchy)
-- [Earn V1 data flow](../../docs/architecture/earn-v1-data-flow.md) (sequence
-  diagrams for catalogue sync, program create/re-target, funding, withdrawal)
-- [Earn pluggability playbook](../../docs/contributing/earn-pluggability-playbook.md)
-  (step-by-step: add a provider / vault / category / custodian)
+- [Core API design](../../docs/architecture/earn-core-api-proposal.md)
+- [Threat model](https://www.notion.so/422d36dad52d81e2bcf2cbd62c8e4622)
+- [Provider playbook](../../docs/contributing/earn-pluggability-playbook.md)
+- [Historical V1 design](../../docs/architecture/earn-v1-data-flow.md)
 
-## The product model (V1)
+## Strategy actions and wallet signing
 
-- **One strategy is the whole decision.** The wizard runs funding wallet →
-  profile → filtered catalogue → one strategy; there is no curator step, because
-  picking a house first gated the catalogue behind a choice the reader had no
-  facts to make. Curator is metadata rendered beside a strategy, never a gate —
-  but still **open-string data** derived from provider catalogue metadata, so
-  onboarding a curator is a data change, zero code (see
-  `EARN_KNOWN_CURATOR_LABELS` in `@sdp/types`).
-- **A program is one portfolio wallet pinned to one vault; an org may hold
-  many.** Selecting a strategy points that wallet's stablecoin lane at a
-  _single_ vault — `pct: 100` for the selected strategy's lane
-  (`singleStrategyAllocation`, `earn-deposit-model.ts`), which is the only
-  shape the V1 API accepts: PRO-1667 caps each token group at one allocation
-  entry per program. An omitted token lane keeps its current allocation, so a
-  USDC pick never disturbs an existing USDT one. Concurrent exposure to several
-  strategies arrives as several programs (PRO-1670): `POST /v1/earn/programs`
-  creates one, `PUT /v1/earn/programs/:programId` re-targets that one in place,
-  and nothing rebalances between them — moving money between programs is an
-  explicit withdraw-then-deposit. Uniqueness is at the _provider wallet_:
-  `earn_provider_wallets` carries a GLOBAL `UNIQUE (provider,
-  provider_wallet_ref)` (migration 0056), so one provider-side wallet is claimed
-  by exactly one link row platform-wide — two orgs pointing at one wallet would
-  each read the other's balance. That is the only cap; the
-  `(organization, environment, provider)` one that made a program singular is
-  dropped. A custodial provider has no concept of an SDP organization — one
-  provider account holds many portfolio wallets and every SDP org shares a
-  single account per environment — which is why a provider console's
-  account-wide total will exceed what any one org sees in SDP.
-- **Solana-only customer rails.** Deposits are funded by sending stablecoins on
-  Solana; withdrawals settle to a Solana address the org controls. Yield-source
-  host chain remains provider metadata, never a customer-visible rail. Customer
-  catalogue visibility is an API policy, currently excluding Aave- and
-  Morpho-related rows.
-- **Funding is address-based in V1**: show the deposit address, track incoming
-  deposits via the provider's deposits API. No custody signing in the flow.
-  Webhooks are future work; V1 polls.
+Treasury and Embedded Yield use the same five core routes. A strategy may be a
+vault, lending market or RWA product; its provider owns the implementation.
 
-## Vault-direct money paths: who signs decides the surface
+| Endpoint                              | Purpose                                               |
+| ------------------------------------- | ----------------------------------------------------- |
+| `GET /v1/earn/discovery`              | List validated strategies and execution capabilities. |
+| `GET /v1/earn/positions`              | Read holdings and optional complete-scope totals.     |
+| `GET /v1/earn/positions/{positionId}` | Read one position's live balance and exit state.      |
+| `POST /v1/earn/deposit`               | Prepare a strategy deposit from a wallet.             |
+| `POST /v1/earn/withdraw`              | Prepare an exit from an existing position.            |
 
-A `vault_direct` integration custodies nothing: the position is an on-chain
-vault or yield-bearing token, and money moves only when a signed transaction
-lands on chain. SDP ships TWO signers over one runtime, and the signer decides
-which routes serve the flow:
+Preparation stores a durable operation with reviewable terms and unsigned
+transaction bytes or a next action. It never starts wallet signing or broadcasts.
+API clients need an SDP API key and any compatible Solana wallet. Prepare with
+`source: { ownerAddress }`, sign the returned transaction through your wallet
+integration, then send base64 `signedTransaction` with its `actionId` and
+`version` to `POST /v1/operations/{operationId}/submit`. No SDP wallet record or
+provider connection is required. The prepared owner and every other required
+signer must sign the unchanged message. `202` means accepted work; the worker
+broadcasts and tracks those exact bytes. Submit never prepares another action.
 
-|                     | Treasury (SDP signs)                                                                         | B2B2C external wallet (the customer signs)                                                                                                    |
-| ------------------- | -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| Who holds the funds | an org custody wallet                                                                        | the end user's own wallet; SDP holds no key                                                                                                   |
-| Deposit             | `POST /v1/earn/vault-deposits`                                                               | `POST /v1/earn/external-wallet/deposit-transactions` builds; the caller then submits to `/external-wallet/deposits`                           |
-| Direct exit         | `POST /v1/earn/vault-withdrawals`                                                            | `POST /v1/earn/external-wallet/withdrawal-previews` and `/withdrawal-transactions`; the caller then submits to `/external-wallet/withdrawals` |
-| Queued exit         | options, preview, create/list/detail, and post-deadline cancel routes on the custody surface | options, preview, request/cancellation builds, submits, and history                                                                           |
-| Movement reads      | `GET /v1/earn/vault-deposits`, `/vault-withdrawals`, `/movements`                            | `GET /v1/earn/external-wallet/movements[?ownerAddress=]` + `/:movementId` (PRO-1772)                                                          |
-| Holdings + earnings | `GET /v1/earn/vault-positions`                                                               | `GET /v1/earn/external-wallet/positions?ownerAddress=…`, `/positions/summary`, `/earnings?ownerAddress=…`                                     |
-| Authorization       | wallet policy, then `createOrgSignerForCustodyWallet`                                        | the owner's own ed25519 signature                                                                                                             |
-| Ledger identity     | `earn_movements.custody_wallet_id`                                                           | `earn_movements.owner_address`                                                                                                                |
+An existing connected wallet's `source: { walletId }` is optional. Its `submit`
+action takes `actionId` and `version` without signed bytes; the worker requests
+signing through the configured provider. `awaiting_signature` covers pending
+signing, and `sign_in_provider` supplies instructions such as "Sign in
+Fireblocks". Wallet approval policies remain part of signing; Earn adds no
+approval endpoint or separate approval status.
 
-Both are the SAME execution model (`vault_direct`). Treasury and
-external-wallet submits record a signed transaction durably before SDP
-broadcasts it, then drive it terminal through the same reconciliation sweep.
-Exactly one of the two identity columns is set on every recorded row
-(migration 0070), and every treasury read scopes by custody wallet, so recorded
-external-wallet rows are structurally invisible to those surfaces.
+Withdrawal choices advertise `nextAction: select_option` and `terms.options`.
+Refresh requires the current `actionId` and `version`, plus an advertised
+`optionId` for selection. It returns a new review before submission. Later
+refreshes retain the selected route rather than choosing another.
+Refresh is preparation-only and unavailable after any submit acceptance.
 
-The external-wallet flow in one pass (PRO-1722):
+Funding swaps and deposits share one atomic transaction. The deposit uses the
+swap's guaranteed minimum output, leaving any excess in the wallet. Oversized
+compositions retry a compact route, then refuse before persisting a build if
+both legs still cannot fit. Fund the strategy's deposit token separately in
+that case; SDP never returns a standalone funding swap or deposit continuation.
 
-1. **Build.** The partner's backend calls the build route with its API key.
-   SDP runs the environment, entitlement, catalogue, and safety gates, asks the
-   provider for the plan, simulates it, compiles ONE unsigned transaction, and
-   persists `earn_external_wallet_transactions`. It returns `{transactionId,
-   transaction, sponsored}`. Nothing has moved, and the build expires with its
-   blockhash.
-2. **Sign.** The customer's wallet signs those exact bytes in the partner's
-   UI. By default the owner is the fee payer and only required signer. To
-   sponsor fees and share-account rent, pass the partner wallet's `feePayer`
-   and co-sign the same bytes with both wallets.
-3. **Submit.** The backend returns `{transactionId, signedTransaction}` with a
-   required `Idempotency-Key`. SDP proves the message is byte-for-byte the one
-   it built, verifies every required signature,
-   records the movement, THEN broadcasts. A retry with the same key replays the
-   original movement (`replayed: true`); each durable build is consumable once.
-4. **Settle.** SDP drives a submitted movement to `finalized` or `failed`. The
-   exit mirrors the deposit and retains its money-out safety rules.
+A source uses an `ownerAddress` or an optional connected `walletId`. That
+identity selects signing authority; it does not select another Earn product or
+execution model.
+The movement ledger still records the signing source so wallet visibility and
+position ownership remain explicit. Signed messages are immutable, and uncertain
+outcomes resume their original attempt instead of creating another transaction.
 
-A queued exit is deliberately separate. Its first signed transaction escrows
-shares and creates a durable request, not a payout movement. SDP persists request
-and cancellation actions before broadcast, reconciles provider state and lifecycle
-events, and projects a withdrawal movement only after verified fulfilment.
+Queued exits stay under the same operation. Request acceptance or share escrow
+is not a payout. Provider and chain observations establish delivery without a
+separate claim endpoint. Only `canCancel=true` permits preparation cancellation,
+and the route still checks `earn.manage`. The capability is false after any
+submit acceptance or while an exposed owner transaction outcome is unknown.
+Pending signing and queued exits remain tracking-only after submit: neither
+refresh nor cancellation can change an accepted operation. A definitive signing
+rejection or proven nonexecution ends it as `failed`; only then may a new
+deposit or withdrawal request use a new idempotency key. Unknown outcomes never
+permit replacement. Internal provider cleanup for permission loss or expiry is
+not an API cancellation feature.
 
-The Embedded Yield guide
-(`apps/sdp-docs/content/docs/guides/embedded-yield.mdx`) and the dashboard's
-configuration snippets document the same end-to-end flow. The treasury
-dashboard flows use the SDP-signed routes.
-Deeper docs: gates and scoping in
-`apps/sdp-api/src/routes/earn/CLAUDE.md`; instruction building in
-`packages/sdp-kamino/CLAUDE.md`; the decision record in ADR 0002
-(2026-08-26 addendum, "External wallets: caller-signed vault movements").
+The 53 former catalogue, program, product and transaction HTTP operations are
+removed. Earn is prelaunch, so no historical-action adoption or compatibility
+execution path is supported. Current operations use one async lifecycle.
+
+Canonical database access uses `earn_wallet_transactions` and
+`earn_wallet_withdrawal_request_transactions`. New builds use these physical
+tables. A schema-only companion removes superseded build storage, split-swap
+advisories, provider actions and provider wallets after the rewrite is serving.
+No old builds are copied or resumed.
+
+Earn follows the existing module release-channel publication rules. Read
+`apps/sdp-docs/content/docs/earn/integration-details.mdx` for requests and recovery,
+and `docs/architecture/earn-core-api-proposal.md` for the migration boundary.
 
 ## Rollout gating (pre-release)
 
@@ -150,110 +106,22 @@ flags in `apps/sdp-web/src/flags/definitions.ts` default on inside the channel
 and gate the nested route segments (`dashboard/markets/layout.tsx`). Gating is
 module visibility, not the provider on/off lever — see the ADR 0002 addendum.
 
-## Architecture: where everything lives
+## Code ownership
 
-```
-packages/sdp-types/src/earn.ts     Wire DTOs shared by API + web: strategies,
-                                   portfolio wallet snapshot/balance/positions,
-                                   deposits, withdrawals, allocation inputs,
-                                   open curator/category registries.
+| Surface                                   | Source                                                           |
+| ----------------------------------------- | ---------------------------------------------------------------- |
+| Strategy and operation contracts          | `packages/sdp-types/src/earn-core.ts`, `operations.ts`           |
+| Provider catalogue contracts and registry | `packages/sdp-earn/src/types.ts`, `index.ts`                     |
+| Provider transaction planning             | `packages/sdp-{kamino,veda,jupiter-lend,ondo,hastra,wisdomtree}` |
+| Earn preparation and reads                | `apps/sdp-api/src/routes/earn/core`                              |
+| Shared operation routes                   | `apps/sdp-api/src/routes/operations`                             |
+| Async execution and recovery              | `apps/sdp-api/src/services/jobs/reconcile-operations.ts`         |
+| Movement ledger and holdings              | `earn_movements`, `earn_positions`                               |
+| Operation coordination                    | `operations`, `operation_attempts`                               |
+| Provider withdrawal obligations           | `earn_vault_withdrawal_requests` and its actions                 |
+| Dashboard client and polling              | `apps/sdp-web/src/lib/earn-client.ts`, `earn-core-data.ts`       |
 
-packages/sdp-earn/src/
-  types.ts                         Provider contracts. EarnVaultProvider (base:
-                                   provider + declaredSupport + listStrategies
-                                   — every member real and called) and the
-                                   OPTIONAL EarnPortfolioWalletProvider
-                                   capability (create/get wallet, update
-                                   strategy, deposits, withdrawal preview/
-                                   create/status, address book).
-  capabilities.ts                  supportsPortfolioWallets() type guard —
-                                   capability detection is all-or-nothing.
-  index.ts                         EARN_PROVIDER_CLIENTS registry + fail-closed
-                                   resolveEarnProviderClient (unknown/drifted
-                                   provider ids never dispatch).
-  fetch.ts                         providerFetch/providerFetchJson — the single
-                                   HTTP funnel (status → error taxonomy).
-  errors.ts                        SdpEarnError taxonomy.
-  support.ts                       Declared-support validation: catalogue rows
-                                   outside a provider's declared envelope are
-                                   drift, not data.
-  providers/stub.ts                StubEarnClient — every method NOT_IMPLEMENTED;
-                                   a new provider starts as a ~10-line subclass.
-  providers/{kamino,veda,jupiter-lend,ondo,wisdomtree}/
-                                   Live catalogue implementations. WisdomTree is
-                                   registered but not surfaced; Upshift/Perena
-                                   below remain scaffolds.
-  providers/hastra/                One pinned mainnet PRIME catalogue row;
-                                   execution lives in @sdp/hastra.
-  providers/{upshift,perena}/      Registered scaffolds awaiting integrations.
-
-packages/sdp-{kamino,veda,jupiter-lend,ondo,hastra,wisdomtree}/
-                                   Provider execution adapters implementing
-                                   vault-direct plans and their supported quote,
-                                   withdrawal, and sponsorship capabilities.
-
-apps/sdp-api/src/
-  routes/earn/                     /v1/earn HTTP surface. handlers/program.ts is
-                                   the programs family (list/create/re-target,
-                                   live provider reads + the withdrawal
-                                   ledger); strategies is the catalogue family.
-  db/migrations/postgres/0048+     earn_strategies (0048);
-                                   earn_provider_wallets (0049, the program
-                                   link); earn_program_withdrawals (0055, the
-                                   withdrawal ledger — 0055 also dropped the
-                                   never-written positions/movements/NAV
-                                   tables, PRO-1628); 0056 lifted the
-                                   one-program-per-org cap and moved uniqueness
-                                   onto (provider, provider_wallet_ref),
-                                   PRO-1670; earn_vault_positions +
-                                   earn_vault_movements (0059, the non-custodial
-                                   claim index and its signed-movement ledger);
-                                   earn_movements + earn_positions (0062-0065,
-                                   PRO-1705 — the ONE provider-neutral movement
-                                   ledger and ONE holdings table that supersede
-                                   the two mechanism-split tables above);
-                                   0070 adds owner_address (the external-wallet
-                                   signer shape, PRO-1722) and
-                                   earn_external_wallet_transactions (the
-                                   built-unsigned-transaction store its submit
-                                   step verifies against); 0091 adds
-                                   earn_split_swap_advisories (PRO-1864, the
-                                   orphan-detection record for split swaps:
-                                   advisory state, never a movement).
-                                   Migration 0068 verifies the unified projection
-                                   and drops the mechanism-split movement and
-                                   position tables. Migration 0113 adds queued
-                                   withdrawal requests, signed actions, and build
-                                   rows; 0114 projects verified fulfilments into
-                                   earn_movements; 0118 adds the durable due queue;
-                                   0121 adds finalized Kamino deposit receipt
-                                   provenance; 0122 builds its repair index
-                                   concurrently.
-                                   earn_provider_wallets stays — it is an
-                                   ACCOUNT at a provider, not a holding.
-  services/earn-withdrawal-ledger.service.ts
-                                   Custodial movement status machine + appliers
-                                   (Hono-free; poll path today, sweep/webhooks
-                                   later). Transitions come from the shared
-                                   matrix in @sdp/types, not a local list.
-  db/repositories/earn.*           Row types + Postgres impl (open-string
-                                   provider columns; dispatch must go through
-                                   the fail-closed resolver).
-  cron/earn-catalogue-sync.ts      Hourly sync: every registered provider's
-                                   listStrategies → upsert, per-provider
-                                   failure isolation, declared-support checks.
-  services/provider-availability   Credential definitions + the two gates (see
-                                   invariants below).
-
-apps/sdp-web/src/app/
-  dashboard/markets/embedded-yield/ Canonical customer-facing route files.
-  dashboard/markets/earn/          Shared internal dashboard module: earn-workspace
-                                   (overview), deposit/ (wizard + funding),
-                                   earn-withdraw-modal, earn-program-data
-                                   (SWR seam over the BFF), presentation
-                                   helpers. All live data — no mocks.
-  api/dashboard/markets/earn/      Internal BFF proxies to /v1/earn/*; unchanged.
-```
+`CLAUDE.md` describes provider capabilities and the execution invariants.
 
 ## Catalogue data: the sync cron and metrics refresh
 
@@ -283,7 +151,7 @@ refresh is update-only.
     refused cannot admit it. Every admission gate stays in the hourly sync below.
   - **Change what a strategy IS.** Its input carries the rate and volatile
     metadata only; the metadata is MERGED, so `curator` survives.
-- **Why not read live at request time:** `GET /strategies` reads exactly one
+- **Why not read live at request time:** `GET /v1/earn/discovery` reads exactly one
   source for the state it reports (ADR 0002, 2026-08-11 addendum), and an
   overlay would blend two. Freshness comes from cadence, so every consumer —
   API, dashboard, a partner's own cache — sees the same numbers.
@@ -310,8 +178,8 @@ refresh is update-only.
   under-reports it, warned hourly (ADR 0002, PRO-1742 addendum: this caps a
   fully-faithful mirror to cluster-distinct, address-keyed references).
 - **When it runs:** once per hourly Redis slot (scheduled `*/5 * * * *`, so a
-  slot that a Worker boot claimed mid-hour is retaken five minutes after it
-  expires) and once when the Worker starts, as
+  slot that a cron service boot claimed mid-hour is retaken five minutes after it
+  expires) and once when the cron service starts, as
   the `sync-earn-catalogue` Cron Definition behind `isEarnEnabled`
   (`apps/sdp-api/src/cron/earn-catalogue-sync.ts`, ADR 0011). Every run claims
   an hourly Redis slot first (`runEarnCatalogueSyncIfDue`), so a boot run and
@@ -328,26 +196,6 @@ refresh is update-only.
   the status back to `active` — a sync pass can no longer resurrect it. Metadata
   and rates keep converging while the row is closed.
 
-### Orphaned split-swap detection (`services/jobs/detect-orphaned-earn-split-swaps.ts`)
-
-- **What it does:** judges every open `earn_split_swap_advisories` row (written
-  when an external-wallet swap-funded deposit had to split) against the chain:
-  a confirmed/finalized follow-up deposit resolves it, an in-flight deposit or
-  recent follow-up build is the partner still working, and past the swap's
-  blockhash plus a 30-minute grace the owner's deposit-token balance is read
-  with the same call as the build-time baseline. A rise of at least the swap's
-  floor is reported as `sdp_api_earn_split_swap_orphaned` on every visit while
-  it persists. It alerts and never acts (PRO-1864, threat model EARN-026).
-- **When it runs:** every minute as the `detect-orphaned-earn-split-swaps` Cron
-  Definition, once per environment (`scope: "cluster"`), each registration
-  claiming only its environment's advisories and reading its cluster's block
-  height. Always enabled (no earn flag gate: an advisory written before an
-  incident flag flip must keep being watched), under the system database
-  identity like every sweep.
-- **Failure behaviour:** a chain read failure emits its own error event, marks
-  the `sdp_api_earn_split_swap_detection_tick` error-level and throws, so the
-  cron run reads error; the job's own query failing emits no tick at all.
-- **Cadence:** the definition's `schedule` in `cron/earn-split-swaps.ts`.
 - **Delist convergence:** after a successful non-empty provider response, active
   rows absent from that provider's live catalogue become deprecated metadata
   tombstones, scoped to the cluster sub-shelf the responding lane is the truth
@@ -420,10 +268,9 @@ walk:
    to `env.d.ts`, `turbo.json`, `scripts/secret-keys.mjs`, and managed secret
    projection. A public/on-chain provider joins the deliberate keyless set and
    adds no placeholder secret.
-4. Implement capabilities method-by-method (`listStrategies` first — the sync
-   cron picks it up automatically). If the provider is portfolio-based,
-   implement `EarnPortfolioWalletProvider`; the program routes light up via the
-   capability guard, no route changes.
+4. Implement `listStrategies` first, then only the capabilities needed by
+   current strategy actions. Catalogue sync picks it up through the registry.
+   Do not restore program or automated-allocation contracts.
 5. Tests are no-network by design: stub `fetch` per the canonical pattern in
    `src/fetch.test.ts`.
 6. If SDP executes for the provider (vault-direct): the executing client in

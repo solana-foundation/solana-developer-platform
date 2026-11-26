@@ -158,10 +158,10 @@ describe("ApiKeyAuthoringWorkspace permissions", () => {
     expect(screen.getByRole("radio", { name: /Selected wallets/ })).toBeTruthy();
   });
 
-  it("starts a key with an execute grant on selected wallets, until the person picks", async () => {
+  it("allows an execute key to keep zero selected signing wallets", async () => {
     await openAccessStep();
     expect(screen.getByRole("radio", { name: /Selected wallets/ })).toHaveProperty("checked", true);
-    expect(screen.getByRole("button", { name: "Continue" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Continue" }).hasAttribute("disabled")).toBe(false);
   });
 
   it("starts a read-only key on all wallets", async () => {

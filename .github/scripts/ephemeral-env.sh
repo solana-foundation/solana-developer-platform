@@ -4,7 +4,7 @@
 #   ephemeral-env.sh deploy <pr-number> <image>
 #   ephemeral-env.sh teardown <pr-number>
 #
-# deploy clones the dev migrate job and the dev API/worker services into
+# deploy clones the dev migrate job and the dev API and cron services into
 # per-PR copies that share dev's secrets but land on their own database
 # (EPHEMERAL_DB_NAME) and redis keyspace (EPHEMERAL_REDIS_DB). teardown
 # drops the database, flushes the redis db, and deletes the clones.
@@ -13,7 +13,7 @@ set -euo pipefail
 PROJECT="${PROJECT_ID:-solana-developer-platform-dev}"
 REGION="${REGION:-us-central1}"
 BASE_API_SERVICE="sdp-dev-api-public"
-BASE_WORKER_SERVICE="sdp-dev-worker"
+BASE_CRON_SERVICE="sdp-dev-cron"
 BASE_MIGRATE_JOB="sdp-dev-api-public-migrate"
 
 cmd="${1:?usage: ephemeral-env.sh <deploy|teardown> <pr-number> [image]}"
@@ -21,7 +21,7 @@ pr="${2:?pr number is required}"
 [[ "${pr}" =~ ^[0-9]+$ ]] || { echo "pr number must be numeric" >&2; exit 1; }
 
 api_service="sdp-dev-api-pr-${pr}"
-worker_service="sdp-dev-worker-pr-${pr}"
+cron_service="sdp-dev-cron-pr-${pr}"
 db_job="sdp-dev-api-pr-${pr}-db"
 db_name="sdp_api_pr_${pr}"
 
@@ -131,8 +131,8 @@ deploy() {
   run services add-iam-policy-binding "${api_service}" \
     --member allUsers --role roles/run.invoker >/dev/null
 
-  export_json services "${BASE_WORKER_SERVICE}" | jq \
-    --arg name "${worker_service}" --arg pr "${pr}" --arg image "${image}" \
+  export_json services "${BASE_CRON_SERVICE}" | jq \
+    --arg name "${cron_service}" --arg pr "${pr}" --arg image "${image}" \
     --argjson extra "$(ephemeral_env_json)" \
     '.metadata.name = $name
      | .metadata.labels["sdp-ephemeral-pr"] = $pr
@@ -140,8 +140,8 @@ deploy() {
      | .spec.template.spec.containers[0].image = $image
      | .spec.template.spec.containers[0].env =
          ((.spec.template.spec.containers[0].env // []) + $extra)
-    ' >"${tmp}/${worker_service}.json"
-  run services replace "${tmp}/${worker_service}.json" >/dev/null
+    ' >"${tmp}/${cron_service}.json"
+  run services replace "${tmp}/${cron_service}.json" >/dev/null
 
   run services describe "${api_service}" --format='value(status.url)'
 }
@@ -158,7 +158,7 @@ teardown() {
     run jobs execute "${db_job}" --args "${drop_args}" --wait || echo "database drop failed; dropping resources anyway" >&2
     run jobs delete "${db_job}" --quiet
   fi
-  for service in "${api_service}" "${worker_service}"; do
+  for service in "${api_service}" "${cron_service}"; do
     if run services describe "${service}" >/dev/null 2>&1; then
       run services delete "${service}" --quiet
     fi

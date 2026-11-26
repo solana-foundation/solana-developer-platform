@@ -1,8 +1,9 @@
 import { normalizePrivyWalletId } from "@sdp/custody/provider-wallet-ids";
-import type { ProvisionPrivyResult } from "@sdp/custody/provisioning";
+import { checkPrivyCredential } from "@sdp/custody/providers/privy/credential";
+import type { ProvisionPrivyResult } from "@sdp/custody/providers/privy/provisioning";
 import { SigningError } from "@sdp/custody/signing";
 import { currentClusterScope } from "@sdp/rpc/scope";
-import type { ByokCustodyProvider } from "@sdp/types/custody";
+import type { ByokCustodyProvider, ProviderPolicyCheck } from "@sdp/types/custody";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import type { Context } from "hono";
 import { type DatabaseClient, getDb } from "@/db/client";
@@ -32,11 +33,11 @@ import {
   parseByokCredential,
 } from "@/services/custody/byok-credential";
 import {
-  checkPrivyCredential,
   getPrivyProviderAccountFingerprint,
   type PrivyCredentialAuthentication,
 } from "@/services/custody/privy-credential";
 import {
+  createRuntime,
   findPrivyWalletByExternalId,
   getFireblocksVault,
   provisionPrivyWallet,
@@ -54,6 +55,7 @@ import {
 } from "@/services/provider-credential-installation";
 import type { SafeProviderCredential } from "@/services/provider-credential-submission.service";
 import { destroySecretVersion, queueOrphanedSecretVersion } from "@/services/secret-retirement";
+import { CustodyPolicyStore } from "@/services/stores/custody-policy.store";
 import {
   getPendingFireblocksVaultIds,
   getPendingWalletLabel,
@@ -83,6 +85,7 @@ export interface SafeInstallationConnection {
   label: string;
   status: InstallationConnectionState["status"];
   completion: SafeCompletion | null;
+  providerPolicy?: ProviderPolicyCheck;
   walletLabel?: string;
   canComplete: boolean;
   canReplaceCredentials: boolean;
@@ -130,7 +133,16 @@ export async function getProviderCredentialInstallation(
 ): Promise<{ connection: SafeInstallationConnection }> {
   const context = createInstallationContext(c);
   const loaded = await loadInstallation(context, connectionId);
-  return { connection: projectConnection(loaded) };
+  return {
+    connection: {
+      ...projectConnection(loaded),
+      providerPolicy: await new CustodyPolicyStore(context.db).read(
+        context.organizationId,
+        context.projectId,
+        { connectionId }
+      ),
+    },
+  };
 }
 
 export async function deactivateCustodyConnection(
@@ -726,12 +738,12 @@ async function verifySelectedFireblocksVaults(
     // Only selected vaults are read; each address is verified once by solana-keychain.
     for (const id of selectedIds) {
       try {
-        const vault = await getFireblocksVault(context.c.env, credential, id);
+        const vault = await getFireblocksVault(credential, id);
         if (!vault.hasSolanaWallet) return { kind: "failed", code: "invalid_credentials" };
         const verified =
           id === credential.vaultAccountId
             ? { status: "success" as const, wallet: primaryWallet }
-            : await checkByokCredential(context.c.env, { ...credential, vaultAccountId: id });
+            : await checkByokCredential({ ...credential, vaultAccountId: id });
         if (verified.status !== "success" || !verified.wallet)
           return verified.status === "failed"
             ? { kind: "failed", code: "invalid_credentials" }
@@ -769,7 +781,7 @@ async function completeFireblocksInstallation(
   credential: Extract<ByokCredentialAuthentication, { provider: "fireblocks" }>,
   leaseToken: string
 ): Promise<ProviderOutcome> {
-  const checked = await checkByokCredential(context.c.env, credential);
+  const checked = await checkByokCredential(credential);
   if (checked.status !== "success")
     return checked.status === "failed"
       ? { kind: "failed", code: "invalid_credentials" }
@@ -828,7 +840,7 @@ async function executeCompletionMode(
     return lookupProviderWallet(context.c.env, externalId, credential);
   }
 
-  const validation = await checkPrivyCredential(context.c.env, credential);
+  const validation = await checkPrivyCredential(createRuntime(), credential);
   if (validation !== "success") {
     return validation === "failed"
       ? { kind: "failed", code: "invalid_credentials" }

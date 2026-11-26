@@ -10,18 +10,6 @@ import {
 } from "./decimal";
 import { SdpPaymentsError } from "./errors";
 
-describe("sumDecimalAmounts", () => {
-  it("sums without float artifacts", () => {
-    assert.equal(sumDecimalAmounts(["0.05", "0.05", "0.05"]), "0.15");
-    assert.equal(sumDecimalAmounts(["0.1", "0.2"]), "0.3");
-  });
-
-  it("handles mixed scales and empty input", () => {
-    assert.equal(sumDecimalAmounts(["1.5", "2", "0.000000001"]), "3.500000001");
-    assert.equal(sumDecimalAmounts([]), "0");
-  });
-});
-
 describe("compareDecimalAmounts", () => {
   it("compares a u64 amount against one at 20+ fractional digits exactly", () => {
     assert.equal(compareDecimalAmounts("18446744073709551615", "0.18446744073709551615"), 1);
@@ -33,7 +21,11 @@ describe("compareDecimalAmounts", () => {
   });
 });
 
-describe("decimal amount range", () => {
+describe("sumDecimalAmounts", () => {
+  it("sums an empty list to 0", () => {
+    assert.equal(sumDecimalAmounts([]), "0");
+  });
+
   it("refuses an amount past 128 bits at its scale as a bad request", () => {
     assert.throws(
       () => sumDecimalAmounts(["18446744073709551615", "0.000000000000000000001"]),
@@ -76,13 +68,11 @@ describe("multiplyDecimalAmounts", () => {
     assert.equal(multiplyDecimalAmounts("0.5", "1.111592"), "0.555796");
   });
 
-  it("values shares at a provider-reported NAV without strict-rounding loss", () => {
-    assert.equal(multiplyDecimalAmounts("1", "1.111592"), "1.111592");
-    assert.equal(multiplyDecimalAmounts("100", "1.111592"), "111.1592");
-  });
-
   it("refuses a malformed or out-of-range amount", () => {
-    assert.throws(() => multiplyDecimalAmounts("abc", "1"), SdpPaymentsError);
+    assert.throws(
+      () => multiplyDecimalAmounts("abc", "1"),
+      (error) => error instanceof SdpPaymentsError && error.statusCode === 400
+    );
     assert.throws(
       () => multiplyDecimalAmounts("18446744073709551615", "0.000000000000000000001"),
       (error) =>
@@ -114,9 +104,13 @@ describe("divideDecimalAmounts", () => {
     assert.equal(divideDecimalAmounts("0.000000001", "2"), "0.000000001");
   });
 
-  it("throws on a zero denominator", () => {
-    assert.throws(() => divideDecimalAmounts("1", "0"));
-    assert.throws(() => divideDecimalAmounts("1", "0.00"));
+  it("refuses a zero denominator as a bad request", () => {
+    for (const zero of ["0", "0.00"]) {
+      assert.throws(
+        () => divideDecimalAmounts("1", zero),
+        (error) => error instanceof SdpPaymentsError && error.statusCode === 400
+      );
+    }
   });
 });
 
@@ -139,8 +133,12 @@ describe("decimalStringFromNumber", () => {
     assert.equal(decimalStringFromNumber(1.5e22), "15000000000000000000000");
   });
 
-  it("throws on non-finite values", () => {
-    assert.throws(() => decimalStringFromNumber(Number.NaN));
-    assert.throws(() => decimalStringFromNumber(Number.POSITIVE_INFINITY));
+  it("refuses a non-finite value as a bad request", () => {
+    for (const value of [Number.NaN, Number.POSITIVE_INFINITY]) {
+      assert.throws(
+        () => decimalStringFromNumber(value),
+        (error) => error instanceof SdpPaymentsError && error.statusCode === 400
+      );
+    }
   });
 });

@@ -6,7 +6,7 @@ const ACTION_SKELETON_IDS = ["pay", "deposit", "request", "schedule"];
 
 export function PaymentsBalanceSkeleton() {
   return (
-    <section className="min-w-0" aria-busy="true" data-payments-overview-skeleton="balance">
+    <section className="min-w-0" aria-busy="true">
       <SkeletonBlock className="h-5 w-32" />
       <SkeletonBlock className="mt-1 h-11 w-48" />
       <div className="mt-8 space-y-2">
@@ -27,11 +27,7 @@ export function PaymentsBalanceSkeleton() {
 
 export function PaymentsSummarySkeleton() {
   return (
-    <section
-      className="mt-9 border-t border-border-default pt-6"
-      aria-busy="true"
-      data-payments-overview-skeleton="summary"
-    >
+    <section className="mt-9 border-t border-border-default pt-6" aria-busy="true">
       <SkeletonBlock className="h-6 w-full max-w-md" />
     </section>
   );
@@ -49,7 +45,7 @@ export function PaymentsActionsSkeleton() {
 
 export function PaymentsActivitySkeleton() {
   return (
-    <section className="min-w-0" aria-busy="true" data-payments-overview-skeleton="activity">
+    <section className="min-w-0" aria-busy="true">
       <div className="flex items-center justify-between gap-4">
         <SkeletonBlock className="h-6 w-24" />
         <SkeletonBlock className="h-8 w-44 rounded-control" />

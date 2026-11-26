@@ -2,7 +2,7 @@ import { runInClusterScope } from "@sdp/rpc/scope";
 import type { SignatureInfo } from "@sdp/rpc/solana";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR } from "@solana/kit";
-import { beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { type ClusterRpcReply, installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import {
@@ -13,7 +13,6 @@ import {
 } from "@/test/helpers/parsed-transactions";
 import {
   buildObservedTransfersForSignatures,
-  clearObservedTransferCaches,
   PARSED_TRANSACTION_CACHE_MAX_ENTRIES,
 } from "./observed-transfers";
 
@@ -51,6 +50,8 @@ function buildOn(environment: SdpEnvironment, signatures: SignatureInfo[]) {
   );
 }
 
+// The cache is module state shared by every test in this file, so each test reads its own
+// signatures (its own index range) and never sees another test's entries.
 describe("observed-transfers parsed-transaction cache", () => {
   const rpc = installClusterRpcResponder();
 
@@ -68,17 +69,13 @@ describe("observed-transfers parsed-transaction cache", () => {
     return rpc.calls.filter((call) => call.method === "getTransaction");
   }
 
-  beforeEach(() => {
-    clearObservedTransferCaches();
-  });
-
   it("serves repeat reads of immutable transaction bodies from cache", async () => {
     respondTransactions((_attempt, requestedSignature) => solTransferReply(requestedSignature));
 
     const signatures = [
-      signatureHistoryEntry(0, "finalized"),
-      signatureHistoryEntry(1, "finalized"),
-      signatureHistoryEntry(2, "finalized"),
+      signatureHistoryEntry(100, "finalized"),
+      signatureHistoryEntry(101, "finalized"),
+      signatureHistoryEntry(102, "finalized"),
     ];
     const first = await buildOn("sandbox", signatures);
     const second = await buildOn("sandbox", signatures);
@@ -95,7 +92,7 @@ describe("observed-transfers parsed-transaction cache", () => {
         : { result: null }
     );
 
-    const signatures = [signatureHistoryEntry(0, "finalized")];
+    const signatures = [signatureHistoryEntry(200, "finalized")];
     const devnetRows = await buildOn("sandbox", signatures);
     const mainnetRows = await buildOn("production", signatures);
 
@@ -111,14 +108,14 @@ describe("observed-transfers parsed-transaction cache", () => {
     respondTransactions((_attempt, requestedSignature) => solTransferReply(requestedSignature));
 
     const [first] = await buildOn("sandbox", [
-      { ...signatureHistoryEntry(0, "finalized"), slot: 777n, blockTime: 1800000000n },
+      { ...signatureHistoryEntry(300, "finalized"), slot: 777n, blockTime: 1800000000n },
     ]);
 
     expect(first?.slot).toBe(777);
     expect(first?.block_time).toBe(new Date(1800000000 * 1_000).toISOString());
 
     const [second] = await buildOn("sandbox", [
-      { ...signatureHistoryEntry(0, "finalized"), slot: 778n, blockTime: 1800000100n },
+      { ...signatureHistoryEntry(300, "finalized"), slot: 778n, blockTime: 1800000100n },
     ]);
 
     expect(transactionReads()).toHaveLength(1);
@@ -129,7 +126,7 @@ describe("observed-transfers parsed-transaction cache", () => {
   it("coalesces concurrent fetches for the same signature", async () => {
     respondTransactions((_attempt, requestedSignature) => solTransferReply(requestedSignature));
 
-    const signatures = [signatureHistoryEntry(0, "finalized")];
+    const signatures = [signatureHistoryEntry(400, "finalized")];
     const [first, second] = await Promise.all([
       buildOn("sandbox", signatures),
       buildOn("sandbox", signatures),
@@ -143,16 +140,16 @@ describe("observed-transfers parsed-transaction cache", () => {
   it("does not cache confirmed-but-not-finalized results until the history reports finality", async () => {
     respondTransactions((_attempt, requestedSignature) => solTransferReply(requestedSignature));
 
-    await buildOn("sandbox", [signatureHistoryEntry(0, "confirmed")]);
-    const second = await buildOn("sandbox", [signatureHistoryEntry(0, "confirmed")]);
+    await buildOn("sandbox", [signatureHistoryEntry(500, "confirmed")]);
+    const second = await buildOn("sandbox", [signatureHistoryEntry(500, "confirmed")]);
     expect(transactionReads()).toHaveLength(2);
     expect(second).toHaveLength(1);
 
-    const third = await buildOn("sandbox", [signatureHistoryEntry(0, "finalized")]);
+    const third = await buildOn("sandbox", [signatureHistoryEntry(500, "finalized")]);
     expect(transactionReads()).toHaveLength(3);
     expect(third).toHaveLength(1);
 
-    const fourth = await buildOn("sandbox", [signatureHistoryEntry(0, "finalized")]);
+    const fourth = await buildOn("sandbox", [signatureHistoryEntry(500, "finalized")]);
     expect(transactionReads()).toHaveLength(3);
     expect(fourth).toEqual(third);
   });
@@ -162,7 +159,7 @@ describe("observed-transfers parsed-transaction cache", () => {
       attempt === 1 ? { result: null } : solTransferReply(requestedSignature)
     );
 
-    const signatures = [signatureHistoryEntry(0, "finalized")];
+    const signatures = [signatureHistoryEntry(600, "finalized")];
     const beforeIndexed = await buildOn("sandbox", signatures);
     const afterIndexed = await buildOn("sandbox", signatures);
 
@@ -179,7 +176,7 @@ describe("observed-transfers parsed-transaction cache", () => {
         : solTransferReply(requestedSignature)
     );
 
-    const signatures = [signatureHistoryEntry(0, "finalized")];
+    const signatures = [signatureHistoryEntry(700, "finalized")];
     const first = await buildOn("sandbox", signatures);
     const second = await buildOn("sandbox", signatures);
 
@@ -190,20 +187,22 @@ describe("observed-transfers parsed-transaction cache", () => {
 
   it("evicts the oldest entry once the cache exceeds its cap", async () => {
     respondTransactions((_attempt, requestedSignature) => solTransferReply(requestedSignature));
+    // Past every other test's range: whatever they cached is older and goes first.
+    const first = 10_000;
+    const last = first + PARSED_TRANSACTION_CACHE_MAX_ENTRIES;
 
-    const allSignatures = Array.from(
-      { length: PARSED_TRANSACTION_CACHE_MAX_ENTRIES + 1 },
-      (_, index) => signatureHistoryEntry(index, "finalized")
+    await buildOn(
+      "sandbox",
+      Array.from({ length: last - first + 1 }, (_, offset) =>
+        signatureHistoryEntry(first + offset, "finalized")
+      )
     );
-    await buildOn("sandbox", allSignatures);
     expect(transactionReads()).toHaveLength(PARSED_TRANSACTION_CACHE_MAX_ENTRIES + 1);
 
-    await buildOn("sandbox", [signatureHistoryEntry(0, "finalized")]);
+    await buildOn("sandbox", [signatureHistoryEntry(first, "finalized")]);
     expect(transactionReads()).toHaveLength(PARSED_TRANSACTION_CACHE_MAX_ENTRIES + 2);
 
-    await buildOn("sandbox", [
-      signatureHistoryEntry(PARSED_TRANSACTION_CACHE_MAX_ENTRIES, "finalized"),
-    ]);
+    await buildOn("sandbox", [signatureHistoryEntry(last, "finalized")]);
     expect(transactionReads()).toHaveLength(PARSED_TRANSACTION_CACHE_MAX_ENTRIES + 2);
   });
 });

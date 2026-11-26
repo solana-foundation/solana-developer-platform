@@ -30,20 +30,20 @@ import type { Env } from "@/types/env";
 // subsequent movement insert fail its status foreign key. Nothing here is
 // referenced BY them, so CASCADE cannot reach them either.
 const POSTGRES_TEST_TABLES = [
+  "custody_proposals",
   "ramp_webhook_events",
   "moonpay_failed_transactions",
   "earn_vault_withdrawal_request_pda_leases",
-  "earn_external_wallet_withdrawal_request_transactions",
+  "earn_wallet_transactions",
+  "earn_wallet_withdrawal_request_transactions",
   "earn_vault_withdrawal_request_actions",
   "earn_vault_withdrawal_request_reservations",
   "earn_vault_withdrawal_requests",
-  "earn_provider_actions",
   "earn_movements",
   "earn_positions",
   "sponsorship_budget_policy_revisions",
   "sponsorship_budget_reservations",
   "sponsorship_budget_policies",
-  "earn_provider_wallets",
   "earn_strategies",
   "api_key_signing_wallets",
   "custody_connections",

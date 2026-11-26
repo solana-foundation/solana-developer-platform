@@ -1,144 +1,102 @@
-import assert from "node:assert/strict";
-import { hashString } from "@sdp/payments/hash";
-import { JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
-import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
-import { type SolanaCluster, wellKnownMint } from "@sdp/types/well-known-tokens";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
-import { signSeededClerkMember } from "@/test/helpers/clerk-member";
-import { required } from "@/test/helpers/required";
-
-const curation = vi.hoisted(() => ({ bypassCuratedVaults: true }));
-
-vi.mock("@/routes/earn/handlers/curation", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/routes/earn/handlers/curation")>();
-  return {
-    ...actual,
-    get CURATED_VAULTS() {
-      return curation.bypassCuratedVaults ? {} : actual.CURATED_VAULTS;
-    },
-  };
-});
-
+import type { EarnDiscoveryResponse } from "@sdp/types/earn-core";
+import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
-import type {
-  EarnProviderWalletRow,
-  EarnStrategyRow,
-  UpsertEarnStrategyInput,
-} from "@/db/repositories/earn.repository";
+import type { UpsertEarnStrategyInput } from "@/db/repositories/earn.repository";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { app } from "@/index";
+import { earnRoutes } from "@/routes/earn";
+import {
+  type EarnAuthzTenant,
+  type EarnTestApiKey,
+  seedEarnApiKey,
+  seedEarnAuthzTenant,
+} from "@/test/helpers/earn";
 import { env } from "@/test/helpers/env";
-import { seedDefaultProjects } from "@/test/helpers/projects";
-import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, readRateLimitCount } from "@/test/mocks/kv";
 
-const TEST_ORG = {
-  id: "org_test_earn_routes",
-  name: "Earn Routes Org",
-  slug: "earn-routes",
-};
-const TEST_PROJECT = {
-  id: "prj_test_earn_routes",
-  slug: "test-earn-routes-project",
-};
-const TEST_USER = {
-  id: "usr_test_earn_routes",
-  email: "earn-routes@example.com",
-};
-const TEST_API_KEY = {
-  id: "key_earn_routes",
-  raw: "sk_test_earn_routes",
-  prefix: "sk_test_ear",
-};
-const TEST_SEEDED_API_KEY: SeededApiKey = {
-  id: TEST_API_KEY.id,
-  organizationId: TEST_ORG.id,
-  projectId: TEST_PROJECT.id,
-  grants: ALL_API_KEY_GRANTS,
-  environment: "sandbox",
-  rateLimitTier: "standard",
-  allowedIps: null,
-  status: "active",
-  expiresAt: null,
-};
-const TEST_PRODUCTION_PROJECT = {
-  id: "prj_test_earn_routes_prod",
-  slug: "test-earn-routes-project-prod",
-};
+// These product-specific routes are absent, including their former 410 stubs.
+const REMOVED_EARN_ROUTES = [
+  "GET /provider-actions/:actionId",
+  "POST /provider-actions/preparations",
+  "POST /provider-actions/cancellations",
+  "POST /provider-actions/external/preparation-transactions",
+  "POST /provider-actions/external/cancellation-transactions",
+  "POST /provider-actions/external/preparations",
+  "POST /provider-actions/external/cancellations",
+  "GET /strategies",
+  "GET /strategies/:strategyId",
+  "GET /external-wallet/positions/summary",
+  "GET /external-wallet/positions",
+  "GET /external-wallet/movements",
+  "GET /external-wallet/movements/:movementId",
+  "GET /external-wallet/earnings",
+  "POST /vault-deposits",
+  "POST /vault-deposit-previews",
+  "GET /vault-deposits",
+  "GET /vault-deposits/:movementId",
+  "POST /vault-withdrawals",
+  "POST /vault-withdrawal-previews",
+  "POST /vault-withdrawal-options",
+  "POST /vault-queued-withdrawal-previews",
+  "GET /vault-withdrawals",
+  "GET /vault-withdrawals/:movementId",
+  "POST /vault-withdrawal-requests",
+  "GET /vault-withdrawal-requests",
+  "GET /vault-withdrawal-requests/:withdrawalRequestId",
+  "POST /vault-withdrawal-requests/:withdrawalRequestId/cancel",
+  "GET /vault-positions",
+  "GET /vault-share-reconciliation",
+  "POST /external-wallet/deposit-transactions",
+  "POST /external-wallet/deposits",
+  "POST /external-wallet/withdrawal-previews",
+  "POST /external-wallet/withdrawal-transactions",
+  "POST /external-wallet/withdrawal-options",
+  "POST /external-wallet/queued-withdrawal-previews",
+  "POST /external-wallet/withdrawal-request-transactions",
+  "POST /external-wallet/withdrawal-request-cancel-transactions",
+  "POST /external-wallet/withdrawals",
+  "POST /external-wallet/withdrawal-requests",
+  "POST /external-wallet/withdrawal-request-cancellations",
+  "GET /external-wallet/withdrawal-requests",
+  "GET /external-wallet/withdrawal-requests/:withdrawalRequestId",
+  "GET /movements",
+  "GET /programs",
+  "POST /programs",
+  "GET /programs/:programId",
+  "PUT /programs/:programId",
+  "GET /programs/:programId/deposits",
+  "POST /programs/:programId/withdrawal-preview",
+  "POST /programs/:programId/withdrawals",
+  "GET /programs/:programId/withdrawals",
+  "GET /programs/:programId/withdrawals/:withdrawalRef",
+] as const;
 
-const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+let tenant: EarnAuthzTenant;
+let key: EarnTestApiKey;
 
-async function seedAuth(): Promise<void> {
-  const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
-
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status, settings) VALUES (?, ?, ?, ?, ?, ?)"
-      )
-      .bind(
-        TEST_ORG.id,
-        TEST_ORG.name,
-        TEST_ORG.slug,
-        "enterprise",
-        "active",
-        JSON.stringify({ providerOverrides: { earn: { veda: true } } })
-      ),
-    getDb(env)
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
-      .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-  ]);
-  await seedDefaultProjects(getDb(env), {
-    organizationId: TEST_ORG.id,
-    createdBy: TEST_USER.id,
-    members: [TEST_USER.id],
-    ids: { sandbox: TEST_PROJECT.id, production: TEST_PRODUCTION_PROJECT.id },
+beforeEach(async () => {
+  await seedTestDatabase(env);
+  await clearKVStores(env);
+  tenant = await seedEarnAuthzTenant(env, "earn_core_surface", { environment: "sandbox" });
+  key = await seedEarnApiKey(env, tenant, {
+    id: "earn_core_surface",
+    grants: ["earn.read", "earn.execute", "earn.manage"],
+    environment: "sandbox",
   });
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_API_KEY.id,
-        TEST_ORG.id,
-        TEST_PROJECT.id,
-        TEST_USER.id,
-        "Earn Routes Test Key",
-        TEST_API_KEY.prefix,
-        keyHash,
-        ALL_API_KEY_GRANTS,
-        "active"
-      ),
-  ]);
-}
+});
 
-async function seedClerkAuth(): Promise<void> {
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-         VALUES (?, ?, ?, 'member', 'active')`
-      )
-      .bind("om_earn_routes_Clerk", TEST_ORG.id, TEST_USER.id),
-  ]);
-}
-
-async function seedStrategy(overrides: Partial<UpsertEarnStrategyInput>): Promise<EarnStrategyRow> {
-  const strategy = await createPostgresEarnRepository(getDb(env)).upsertStrategy({
+async function strategy(overrides: Partial<UpsertEarnStrategyInput> = {}) {
+  const row = await createPostgresEarnRepository(getDb(env)).upsertStrategy({
     provider: "kamino",
-    providerReference: `vault-${crypto.randomUUID()}`,
-    name: "Test USDC Vault",
+    providerReference: crypto.randomUUID(),
+    name: "Indexed USDC strategy",
     sourceKind: "defi",
-    underlyingSource: "kamino",
-    depositMints: [USDC_MINT],
-    shareMint: null,
+    underlyingSource: null,
+    depositMints: ["EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"],
+    shareMint: "So11111111111111111111111111111111111111112",
     apyType: "variable",
-    currentApy: "0.062",
+    currentApy: "0.06",
     liquidityTerm: "instant",
     redemptionDelayDays: null,
     riskMetadata: {},
@@ -147,753 +105,85 @@ async function seedStrategy(overrides: Partial<UpsertEarnStrategyInput>): Promis
     environment: "sandbox",
     ...overrides,
   });
-  assert(strategy);
-  return strategy;
-}
-
-async function seedProgram(): Promise<EarnProviderWalletRow> {
-  const row = await createPostgresEarnRepository(getDb(env)).insertProviderWallet({
-    organizationId: TEST_ORG.id,
-    projectId: TEST_PROJECT.id,
-    environment: "sandbox",
-    provider: "upshift",
-    providerWalletRef: crypto.randomUUID(),
-    label: null,
-    createdBy: TEST_USER.id,
-  });
-  assert(row);
+  if (!row) throw new Error("Missing strategy fixture");
   return row;
 }
 
-function getEarn(path: string, headers: Record<string, string>) {
-  return app.request(
-    path,
-    {
-      method: "GET",
-      headers: { Authorization: `Bearer ${TEST_API_KEY.raw}`, ...headers },
-    },
-    env
-  );
+function get(path: string, headers: Record<string, string> = {}) {
+  return app.request(path, { headers: { Authorization: `Bearer ${key.raw}`, ...headers } }, env);
 }
 
-async function getEarnAsClerk(path: string, projectId: string) {
-  return app.request(
-    path,
-    {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${await signSeededClerkMember(env, getDb(env), TEST_USER.id, TEST_ORG.id)}`,
-        "x-project-id": projectId,
-      },
-    },
-    env
-  );
-}
-
-beforeEach(async () => {
-  curation.bypassCuratedVaults = true;
-  await seedTestDatabase(env);
-});
-
-afterEach(async () => {
-  vi.restoreAllMocks();
-  await clearKVStores(env);
-});
-
-describe("Earn routes — retired surfaces stay retired (PRO-1628)", () => {
-  it("serves 404 for the removed positions/movements/quotes/nav routes", async () => {
-    await seedAuth();
-
-    const strategy = await seedStrategy({});
-
-    for (const path of [
-      "/v1/earn/positions",
-      "/v1/earn/positions/pos_1",
-
-      "/v1/earn/movements/mov_1",
-      `/v1/earn/strategies/${strategy.id}/nav`,
-
-      "/v1/earn/button-configurations/current",
-      "/v1/earn/button-configurations/public/AbCdEfGhIjKlMnOpQrStUvWx",
-    ]) {
-      const res = await getEarn(path, {});
-      expect(res.status, path).toBe(404);
-    }
-
-    for (const path of ["/v1/earn/deposits/quote", "/v1/earn/withdrawals/quote"]) {
-      const res = await app.request(
-        path,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-          body: JSON.stringify({}),
-        },
-        env
-      );
-      expect(res.status, path).toBe(404);
-    }
-  });
-
-  it("serves the DELIBERATELY re-introduced movements collection (PRO-1705)", async () => {
-    await seedAuth();
-
-    const res = await getEarn("/v1/earn/movements", {});
-
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      data: { movements: unknown[]; hasMore: boolean; nextCursor: string | null };
-    };
-    expect(body.data).toEqual({ movements: [], hasMore: false, nextCursor: null });
-  });
-});
-
-describe("Earn routes — retired program surfaces (PRO-1670)", () => {
-  it("serves 404 for the singular /program paths, while the collection answers", async () => {
-    await seedAuth();
-
-    for (const path of [
-      "/v1/earn/program",
-      "/v1/earn/program?provider=upshift",
-      "/v1/earn/program/deposits",
-      "/v1/earn/program/withdrawals",
-      "/v1/earn/program/withdrawals/wd_x",
-    ]) {
-      const res = await getEarn(path, {});
-      expect(res.status, path).toBe(404);
-    }
-
-    for (const [method, path] of [
-      ["PUT", "/v1/earn/program"],
-      ["POST", "/v1/earn/program/withdrawals"],
-      ["POST", "/v1/earn/program/withdrawal-preview"],
-    ] as const) {
-      const res = await app.request(
-        path,
+describe("Earn core HTTP surface", () => {
+  it("does not mount any removed product route or retirement stub", async () => {
+    const mounted = new Set(earnRoutes.routes.map(({ method, path }) => `${method} ${path}`));
+    for (const route of REMOVED_EARN_ROUTES) {
+      expect(mounted.has(route), route).toBe(false);
+      const [method, pattern] = route.split(" ");
+      if (!method || !pattern) throw new Error("Invalid removed route fixture");
+      const response = await app.request(
+        `/v1/earn${pattern.replace(/:[A-Za-z]+/g, "removed-resource")}`,
         {
           method,
           headers: {
+            Authorization: `Bearer ${key.raw}`,
             "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "Idempotency-Key": crypto.randomUUID(),
           },
-          body: JSON.stringify({}),
+          ...(method === "GET" ? {} : { body: "{}" }),
         },
         env
       );
-      expect(res.status, `${method} ${path}`).toBe(404);
+      expect(response.status, route).toBe(404);
     }
-
-    const collection = await getEarn("/v1/earn/programs", {});
-    expect(collection.status).toBe(200);
-    const body = (await collection.json()) as {
-      data: { programs: unknown[]; total: number; page: number; pageSize: number };
-    };
-    expect(body.data).toEqual({ programs: [], total: 0, page: 1, pageSize: 20 });
   });
 
-  it("routes the per-program sub-paths under a real program id", async () => {
-    await seedAuth();
-    const program = await seedProgram();
+  it("keeps earlier removed detail, quote and configuration paths absent", async () => {
+    for (const path of [
+      "/positions/position-id",
+      "/movements/movement-id",
+      "/quote",
+      "/nav",
+      "/program",
+      "/button-configurations",
+    ])
+      expect((await get(`/v1/earn${path}`)).status, path).toBe(404);
+  });
 
-    for (const path of ["/v1/earn/program/deposits", "/v1/earn/program/withdrawals"]) {
-      const res = await getEarn(path, {});
-      expect(res.status, path).toBe(404);
-    }
+  it("keeps discovery privately cacheable and applies keyed middleware once", async () => {
+    const response = await get("/v1/earn/discovery", { Origin: "http://localhost:3000" });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, max-age=30");
+    expect(response.headers.get("access-control-allow-origin")).toBe("http://localhost:3000");
+    expect(await readRateLimitCount(env, key.id)).toBe(1);
+  });
 
-    const ledger = await getEarn(`/v1/earn/programs/${program.id}/withdrawals`, {});
-    expect(ledger.status).toBe(200);
-    const ledgerBody = (await ledger.json()) as {
-      data: { withdrawals: unknown[]; total: number };
-    };
-    expect(ledgerBody.data.withdrawals).toEqual([]);
-    expect(ledgerBody.data.total).toBe(0);
+  it("scopes discovery to the API key environment, including ID filters", async () => {
+    const sandbox = await strategy();
+    const production = await strategy({ environment: "production", hostCluster: "mainnet-beta" });
+    const response = await get("/v1/earn/discovery");
+    const body: { data: EarnDiscoveryResponse } = await response.json();
+    expect(body.data.strategies.map(({ id }) => id)).toEqual([sandbox.id]);
+    expect(await (await get(`/v1/earn/discovery?id=${production.id}`)).json()).toMatchObject({
+      data: { strategies: [], total: 0 },
+    });
+  });
 
-    const unknownProgram = await getEarn(
-      "/v1/earn/programs/earn_provider_wallet_nope/withdrawals",
-      {}
+  it("scopes dashboard discovery to the selected project environment", async () => {
+    const sandbox = await strategy();
+    const production = await strategy({ environment: "production", hostCluster: "mainnet-beta" });
+    const response = await app.request(
+      "/v1/earn/discovery",
+      {
+        headers: {
+          Authorization: `Bearer ${tenant.token}`,
+          "x-project-id": "prj_earn_core_surface_production",
+        },
+      },
+      env
     );
-    expect(unknownProgram.status).toBe(404);
-  });
-});
-
-describe("Earn routes — environment scoping", () => {
-  it("hides production strategies from a sandbox API key", async () => {
-    await seedAuth();
-    const sandbox = await seedStrategy({});
-    const production = await seedStrategy({ environment: "production" });
-
-    const visible = await getEarn(`/v1/earn/strategies/${sandbox.id}`, {});
-    expect(visible.status).toBe(200);
-
-    const hidden = await getEarn(`/v1/earn/strategies/${production.id}`, {});
-    expect(hidden.status).toBe(404);
-    const hiddenBody = (await hidden.json()) as { error: { code: string } };
-    expect(hiddenBody.error.code).toBe("NOT_FOUND");
-
-    const list = await getEarn("/v1/earn/strategies", {});
-    const listBody = (await list.json()) as { data: { strategies: Array<{ id: string }> } };
-    expect(listBody.data.strategies.map((s) => s.id)).toEqual([sandbox.id]);
-  });
-
-  it("publishes depositSlippage for the caller's environment, the same answer the build gates on", async () => {
-    await seedAuth();
-    await seedClerkAuth();
-    const sandbox = await seedStrategy({});
-    const production = await seedStrategy({
-      environment: "production",
-      hostCluster: "mainnet-beta",
-    });
-
-    const sandboxRow = await getEarn(`/v1/earn/strategies/${sandbox.id}`, {});
-    expect(sandboxRow.status).toBe(200);
-    const sandboxBody = (await sandboxRow.json()) as {
-      data: { strategy: { provider: string; depositSlippage: unknown } };
-    };
-    expect(sandboxBody.data.strategy).toMatchObject({
-      provider: "kamino",
-      depositSlippage: null,
-    });
-
-    const productionRow = await getEarnAsClerk(
-      `/v1/earn/strategies/${production.id}`,
-      TEST_PRODUCTION_PROJECT.id
-    );
-    expect(productionRow.status).toBe(200);
-    const productionBody = (await productionRow.json()) as {
-      data: { strategy: { provider: string; depositSlippage: unknown } };
-    };
-    expect(productionBody.data.strategy).toMatchObject({
-      provider: "kamino",
-      depositSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
-    });
-  });
-});
-
-describe("Earn routes — Clerk-caller environment resolution", () => {
-  it("scopes the catalogue to the Clerk's selected project environment", async () => {
-    await seedAuth();
-    await seedClerkAuth();
-    const sandbox = await seedStrategy({});
-
-    const production = await seedStrategy({
-      environment: "production",
-      hostCluster: "mainnet-beta",
-    });
-
-    const productionList = await getEarnAsClerk("/v1/earn/strategies", TEST_PRODUCTION_PROJECT.id);
-    expect(productionList.status).toBe(200);
-    const productionBody = (await productionList.json()) as {
-      data: { strategies: Array<{ id: string }> };
-    };
-    expect(productionBody.data.strategies.map((s) => s.id)).toEqual([production.id]);
-
-    const hidden = await getEarnAsClerk(
-      `/v1/earn/strategies/${sandbox.id}`,
-      TEST_PRODUCTION_PROJECT.id
-    );
-    expect(hidden.status).toBe(404);
-
-    const sandboxList = await getEarnAsClerk("/v1/earn/strategies", TEST_PROJECT.id);
-    expect(sandboxList.status).toBe(200);
-    const sandboxBody = (await sandboxList.json()) as {
-      data: { strategies: Array<{ id: string }> };
-    };
-    expect(sandboxBody.data.strategies.map((s) => s.id)).toEqual([sandbox.id]);
-  });
-});
-
-describe("Earn routes — strategy catalogue", () => {
-  it("answers the catalogue privately cacheable, with CORS", async () => {
-    await seedAuth();
-    await seedStrategy({});
-
-    const keyed = await getEarn("/v1/earn/strategies", { Origin: "http://localhost:3000" });
-
-    expect(keyed.status).toBe(200);
-    expect(keyed.headers.get("cache-control")).toBe("private, max-age=30");
-    expect(keyed.headers.get("access-control-allow-origin")).toBe("http://localhost:3000");
-  });
-
-  it("refuses a catalogue read with no credential", async () => {
-    await seedStrategy({});
-
-    const res = await app.request("/v1/earn/strategies", { method: "GET" }, env);
-
-    expect(res.status).toBe(401);
-  });
-
-  it("keeps hidden and unsurfaced strategies out of the catalogue", async () => {
-    await seedAuth();
-    const visible = await seedStrategy({ providerReference: "catalogue-visible-usdc" });
-    const hiddenByTerms = await seedStrategy({
-      providerReference: "catalogue-morpho-usdc",
-      name: "Morpho USDC",
-      underlyingSource: "morpho",
-    });
-    const hiddenByProvider = await seedStrategy({
-      provider: "upshift",
-      providerReference: "catalogue-upshift-usdc",
-      name: "Upshift USDC",
-    });
-
-    const list = await getEarn("/v1/earn/strategies", {});
-    expect(list.status).toBe(200);
-    const body = (await list.json()) as {
-      data: { strategies: Array<{ id: string }>; total: number };
-    };
-    expect(body.data.strategies.map((strategy) => strategy.id)).toEqual([visible.id]);
-    expect(body.data.total).toBe(1);
-    expect((await getEarn(`/v1/earn/strategies/${hiddenByTerms.id}`, {})).status).toBe(404);
-    expect((await getEarn(`/v1/earn/strategies/${hiddenByProvider.id}`, {})).status).toBe(404);
-  });
-
-  it("returns the paginated list envelope and omits non-active strategies", async () => {
-    await seedAuth();
-    const active = await seedStrategy({});
-    await seedStrategy({ status: "paused" });
-
-    const res = await getEarn("/v1/earn/strategies", {});
-
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      data: {
-        strategies: Array<{ id: string; provider: string; status: string }>;
-        total: number;
-        page: number;
-        pageSize: number;
-      };
-    };
-    expect(body.data.strategies.map((s) => s.id)).toEqual([active.id]);
-    expect(body.data.total).toBe(1);
-    expect(body.data.page).toBe(1);
-    expect(body.data.pageSize).toBe(20);
-  });
-
-  it("lists the environment's own cluster by default and the mirrored shelf on explicit opt-in", async () => {
-    await seedAuth();
-    const local = await seedStrategy({ hostCluster: "devnet" });
-    const mirrored = await seedStrategy({ hostCluster: "mainnet-beta" });
-
-    const defaults = await getEarn("/v1/earn/strategies", {});
-    expect(defaults.status).toBe(200);
-    const defaultBody = (await defaults.json()) as {
-      data: {
-        strategies: Array<{ id: string; hostCluster: string; fundable: boolean }>;
-        total: number;
-      };
-    };
-    expect(defaultBody.data.strategies.map((s) => s.id)).toEqual([local.id]);
-    expect(defaultBody.data.strategies[0]).toMatchObject({
-      hostCluster: "devnet",
-      fundable: true,
-
-      feeSponsored: false,
-    });
-
-    expect(defaultBody.data.total).toBe(1);
-
-    const optIn = await getEarn("/v1/earn/strategies?cluster=mainnet-beta", {});
-    expect(optIn.status).toBe(200);
-    const optInBody = (await optIn.json()) as {
-      data: {
-        strategies: Array<{ id: string; hostCluster: string; fundable: boolean }>;
-        total: number;
-      };
-    };
-    expect(optInBody.data.strategies.map((s) => s.id)).toEqual([mirrored.id]);
-
-    expect(optInBody.data.strategies[0]).toMatchObject({
-      hostCluster: "mainnet-beta",
-      fundable: false,
-      feeSponsored: false,
-    });
-    expect(optInBody.data.total).toBe(1);
-  });
-
-  it("derives feeSponsored per request from the sponsorship gate and the row's cluster", async () => {
-    await seedAuth();
-    const local = await seedStrategy({ provider: "kamino", hostCluster: "devnet" });
-    const mirrored = await seedStrategy({ provider: "kamino", hostCluster: "mainnet-beta" });
-    const original = env.EARN_VAULT_FEE_SPONSORSHIP_ENABLED;
-    env.EARN_VAULT_FEE_SPONSORSHIP_ENABLED = "true";
-    try {
-      const list = await getEarn("/v1/earn/strategies", {});
-      expect(list.status).toBe(200);
-      const listBody = (await list.json()) as {
-        data: { strategies: Array<{ id: string; fundable: boolean; feeSponsored: boolean }> };
-      };
-      expect(listBody.data.strategies).toEqual([
-        expect.objectContaining({ id: local.id, fundable: true, feeSponsored: true }),
-      ]);
-
-      const detail = await getEarn(`/v1/earn/strategies/${local.id}`, {});
-      expect(detail.status).toBe(200);
-      const detailBody = (await detail.json()) as { data: { strategy: { feeSponsored: boolean } } };
-      expect(detailBody.data.strategy.feeSponsored).toBe(true);
-
-      const optIn = await getEarn("/v1/earn/strategies?cluster=mainnet-beta", {});
-      const optInBody = (await optIn.json()) as {
-        data: { strategies: Array<{ id: string; fundable: boolean; feeSponsored: boolean }> };
-      };
-      expect(optInBody.data.strategies).toEqual([
-        expect.objectContaining({ id: mirrored.id, fundable: false, feeSponsored: false }),
-      ]);
-    } finally {
-      env.EARN_VAULT_FEE_SPONSORSHIP_ENABLED = original;
-    }
-  });
-
-  it("rejects a cluster value outside the Solana cluster vocabulary", async () => {
-    await seedAuth();
-
-    const res = await getEarn("/v1/earn/strategies?cluster=testnet", {});
-
-    expect(res.status).toBe(400);
-  });
-
-  it("carries hostCluster and fundable on the single-strategy read too", async () => {
-    await seedAuth();
-    const strategy = await seedStrategy({ hostCluster: "mainnet-beta" });
-
-    const res = await getEarn(`/v1/earn/strategies/${strategy.id}`, {});
-
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      data: { strategy: { hostCluster: string; fundable: boolean } };
-    };
-    expect(body.data.strategy).toMatchObject({ hostCluster: "mainnet-beta", fundable: false });
-  });
-
-  it("stores Morpho and Aave rows but never returns them from strategy reads", async () => {
-    await seedAuth();
-    const visible = await seedStrategy({
-      providerReference: "kamino-steakhouse-usdc",
-      name: "Kamino Steakhouse USDC",
-      underlyingSource: "kamino",
-    });
-    const morpho = await seedStrategy({
-      providerReference: "morpho-gauntlet-usdc",
-      name: "Gauntlet USDC Prime",
-      underlyingSource: "morpho",
-    });
-    const aave = await seedStrategy({
-      providerReference: "aave-v3-usdc",
-      name: "Aave V3 Core USDC",
-
-      underlyingSource: null,
-    });
-
-    const repository = createPostgresEarnRepository(getDb(env));
-    expect(await repository.getStrategyById(morpho.id)).not.toBeNull();
-    expect(await repository.getStrategyById(aave.id)).not.toBeNull();
-
-    const list = await getEarn("/v1/earn/strategies?pageSize=1", {});
-    expect(list.status).toBe(200);
-    const listBody = (await list.json()) as {
-      data: { strategies: Array<{ id: string }>; total: number; pageSize: number };
-    };
-    expect(listBody.data.strategies.map((strategy) => strategy.id)).toEqual([visible.id]);
-    expect(listBody.data.total).toBe(1);
-    expect(listBody.data.pageSize).toBe(1);
-
-    for (const hidden of [morpho, aave]) {
-      const detail = await getEarn(`/v1/earn/strategies/${hidden.id}`, {});
-      expect(detail.status).toBe(404);
-    }
-  });
-
-  it("stores an un-surfaced provider's rows but never returns them from strategy reads", async () => {
-    await seedAuth();
-    const surfaced = await seedStrategy({ providerReference: "kamino-visible-usdc" });
-    const unsurfaced = await seedStrategy({
-      provider: "upshift",
-      providerReference: "upshift-hidden-usdc",
-      name: "Upshift Institutional USDC",
-      underlyingSource: "centrifuge",
-    });
-
-    const repository = createPostgresEarnRepository(getDb(env));
-    expect(await repository.getStrategyById(unsurfaced.id)).not.toBeNull();
-
-    const list = await getEarn("/v1/earn/strategies", {});
-    expect(list.status).toBe(200);
-    const listBody = (await list.json()) as {
-      data: { strategies: Array<{ id: string }>; total: number };
-    };
-    expect(listBody.data.strategies.map((strategy) => strategy.id)).toEqual([surfaced.id]);
-
-    expect(listBody.data.total).toBe(1);
-
-    const detail = await getEarn(`/v1/earn/strategies/${unsurfaced.id}`, {});
-    expect(detail.status).toBe(404);
-  });
-});
-
-describe("Earn route middleware isolation", () => {
-  it("charges an authenticated keyed-only route exactly once", async () => {
-    await seedAuth();
-
-    const res = await getEarn("/v1/earn/movements", {});
-
-    expect(res.status).toBe(200);
-    expect(await readRateLimitCount(env, TEST_API_KEY.id)).toBe(1);
-  });
-});
-
-describe("Earn strategy reads — shipped V1 curation", () => {
-  async function shippedCuratedVaults() {
-    const actual = await vi.importActual<typeof import("@/routes/earn/handlers/curation")>(
-      "@/routes/earn/handlers/curation"
-    );
-    return actual.CURATED_VAULTS;
-  }
-
-  it("shows only the curated mainnet shelf on the mirrored view", async () => {
-    curation.bypassCuratedVaults = false;
-    await seedAuth();
-    const shelf = required(required((await shippedCuratedVaults())["mainnet-beta"]).kamino);
-    expect(shelf.length).toBeGreaterThan(0);
-
-    const curated = await seedStrategy({
-      providerReference: shelf[0],
-      hostCluster: "mainnet-beta",
-    });
-    const uncurated = await seedStrategy({
-      providerReference: "some-vault-bd-did-not-pick",
-      hostCluster: "mainnet-beta",
-    });
-
-    const list = await getEarn("/v1/earn/strategies?cluster=mainnet-beta", {});
-    expect(list.status).toBe(200);
-    const body = (await list.json()) as {
-      data: { strategies: Array<{ id: string }>; total: number };
-    };
-    expect(body.data.strategies.map((s) => s.id)).toEqual([curated.id]);
-    expect(body.data.total).toBe(1);
-
-    expect((await getEarn(`/v1/earn/strategies/${uncurated.id}`, {})).status).toBe(404);
-    expect((await getEarn(`/v1/earn/strategies/${curated.id}`, {})).status).toBe(200);
-  });
-
-  it("shows only the curated devnet shelf on the sandbox default view", async () => {
-    curation.bypassCuratedVaults = false;
-    await seedAuth();
-    const shelf = required(required((await shippedCuratedVaults()).devnet).kamino);
-    expect(shelf.length).toBeGreaterThan(0);
-
-    const curated = await seedStrategy({ providerReference: shelf[0] });
-    await seedStrategy({ providerReference: "devnet-vault-not-picked" });
-
-    const list = await getEarn("/v1/earn/strategies", {});
-    expect(list.status).toBe(200);
-    const body = (await list.json()) as {
-      data: { strategies: Array<{ id: string }>; total: number };
-    };
-    expect(body.data.strategies.map((s) => s.id)).toEqual([curated.id]);
-    expect(body.data.total).toBe(1);
-  });
-
-  it("keeps the hidden Ethena PYUSD vaults off every strategy read", async () => {
-    await seedAuth();
-
-    const actual = await vi.importActual<typeof import("@/routes/earn/handlers/curation")>(
-      "@/routes/earn/handlers/curation"
-    );
-    const hiddenClusters = Object.entries(actual.HIDDEN_VAULTS).map(([cluster, keys]) => ({
-      cluster: cluster as SolanaCluster,
-      keys,
-    }));
-    assert(!hiddenClusters.some(({ keys }) => keys.length === 0));
-
-    const hidden: EarnStrategyRow[] = [];
-    for (const { cluster, keys } of hiddenClusters) {
-      for (const key of keys) {
-        const reference = key.split(":")[1];
-        assert(reference);
-        hidden.push(await seedStrategy({ providerReference: reference, hostCluster: cluster }));
-      }
-    }
-
-    const assertAllHidden = async () => {
-      for (const { cluster } of hiddenClusters) {
-        const path =
-          cluster === "devnet" ? "/v1/earn/strategies" : `/v1/earn/strategies?cluster=${cluster}`;
-        const list = await getEarn(path, {});
-        expect(list.status).toBe(200);
-        const body = (await list.json()) as {
-          data: { strategies: Array<{ id: string }>; total: number };
-        };
-        expect(body.data.strategies).toEqual([]);
-        expect(body.data.total).toBe(0);
-      }
-      for (const strategy of hidden) {
-        expect((await getEarn(`/v1/earn/strategies/${strategy.id}`, {})).status).toBe(404);
-      }
-    };
-
-    curation.bypassCuratedVaults = true;
-    await assertAllHidden();
-
-    curation.bypassCuratedVaults = false;
-    await assertAllHidden();
-
-    const repository = createPostgresEarnRepository(getDb(env));
-    for (const strategy of hidden) {
-      expect(await repository.getStrategyById(strategy.id)).not.toBeNull();
-    }
-  });
-
-  it("serves the restored Sentora PYUSD vault and still hides Ethena PYUSD Prime", async () => {
-    curation.bypassCuratedVaults = false;
-    await seedAuth();
-    const sentora = await seedStrategy({
-      providerReference: "A2wsxhA7pF4B2UKVfXocb6TAAP9ipfPJam6oMKgDE5BK",
-      hostCluster: "mainnet-beta",
-    });
-    const ethena = await seedStrategy({
-      providerReference: "4TwKA9JXEGeLEpAPLoarhSQoQwoiu12dkDCjSuVvHQUf",
-      hostCluster: "mainnet-beta",
-    });
-
-    const list = await getEarn("/v1/earn/strategies?cluster=mainnet-beta", {});
-    expect(list.status).toBe(200);
-    const body = (await list.json()) as {
-      data: { strategies: Array<{ id: string }>; total: number };
-    };
-    expect(body.data.strategies.map((s) => s.id)).toEqual([sentora.id]);
-    expect(body.data.total).toBe(1);
-    expect((await getEarn(`/v1/earn/strategies/${sentora.id}`, {})).status).toBe(200);
-    expect((await getEarn(`/v1/earn/strategies/${ethena.id}`, {})).status).toBe(404);
-  });
-
-  it("publishes the Kamino deposit floor required by production builds", async () => {
-    curation.bypassCuratedVaults = true;
-    await seedAuth();
-    const kamino = await seedStrategy({ hostCluster: "mainnet-beta" });
-
-    const list = await getEarn("/v1/earn/strategies?cluster=mainnet-beta", {});
-    expect(list.status).toBe(200);
-    const body = (await list.json()) as {
-      data: {
-        strategies: Array<{
-          id: string;
-          depositSlippage: { quoteRequired: boolean; defaultToleranceBps: number } | null;
-          withdrawalSlippage: { quoteRequired: boolean; defaultToleranceBps: number } | null;
-        }>;
-      };
-    };
-    expect(body.data.strategies).toEqual([
-      expect.objectContaining({
-        id: kamino.id,
-        depositSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
-        withdrawalSlippage: null,
-      }),
-    ]);
-  });
-
-  it("shows the supported Jupiter Lend provider independently of Kamino's allowlist", async () => {
-    curation.bypassCuratedVaults = false;
-    await seedAuth();
-    const jupiter = await seedStrategy({
-      provider: "jupiter_lend",
-      providerReference: JUPITER_LEND_USDT.assetMint,
-      name: "Jupiter Lend USDT",
-      underlyingSource: "Jupiter Lend",
-      depositMints: [JUPITER_LEND_USDT.assetMint],
-      shareMint: JUPITER_LEND_USDT.shareMint,
-      hostCluster: "mainnet-beta",
-    });
-
-    const list = await getEarn("/v1/earn/strategies?cluster=mainnet-beta", {});
-    expect(list.status).toBe(200);
-    const body = (await list.json()) as {
-      data: {
-        strategies: Array<{
-          id: string;
-          depositSlippage: { quoteRequired: boolean; defaultToleranceBps: number } | null;
-          withdrawalSlippage: { quoteRequired: boolean; defaultToleranceBps: number } | null;
-        }>;
-      };
-    };
-    expect(body.data.strategies.map((strategy) => strategy.id)).toEqual([jupiter.id]);
-    expect(body.data.strategies[0]).toMatchObject({
-      depositSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
-      withdrawalSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
-    });
-    expect((await getEarn(`/v1/earn/strategies/${jupiter.id}`, {})).status).toBe(200);
-  });
-
-  it("shows the Ondo USDY row uncurated, with the swap builder's 50 bps floors", async () => {
-    curation.bypassCuratedVaults = false;
-    await seedAuth();
-    const usdyMint = required(ONDO_DEPLOYMENTS["mainnet-beta"]).usdyMint;
-    assert(usdyMint);
-    const disclosure = {
-      curator: "ondo",
-      eligibility:
-        "Ondo bars individuals and entities in the US, Canada and the other jurisdictions " +
-        "it lists, and Reg S US persons or anyone acting for them, from subscribing for, " +
-        "acquiring or redeeming USDY; buy orders placed from the US are barred too. " +
-        "Qualified/professional investors only in Brazil, the EEA, Hong Kong, Malaysia, " +
-        "Singapore, Switzerland and the UK. Not enforced on-chain or by SDP. Full rules: " +
-        "https://docs.ondo.finance/general-access-products/usdy/eligibility",
-      issuerControls: "Ondo holds the USDY mint and freeze authority",
-    };
-    const ondo = await seedStrategy({
-      provider: "ondo",
-      providerReference: usdyMint,
-      name: "Ondo USDY",
-      sourceKind: "rwa",
-      underlyingSource: "ondo-usdy",
-      depositMints: [wellKnownMint("USDC", "mainnet-beta") as string],
-      shareMint: usdyMint,
-      currentApy: null,
-
-      riskMetadata: disclosure,
-      hostCluster: "mainnet-beta",
-    });
-
-    const own = await getEarn("/v1/earn/strategies", {});
-    expect(own.status).toBe(200);
-    expect(
-      ((await own.json()) as { data: { strategies: Array<{ id: string }> } }).data.strategies
-    ).toEqual([]);
-
-    const list = await getEarn("/v1/earn/strategies?cluster=mainnet-beta", {});
-    expect(list.status).toBe(200);
-    const body = (await list.json()) as {
-      data: {
-        strategies: Array<{
-          id: string;
-          provider: string;
-          sourceKind: string;
-          fundable: boolean;
-          currentApy?: string;
-          riskMetadata: Record<string, unknown>;
-          depositSlippage: { quoteRequired: boolean; defaultToleranceBps: number } | null;
-          withdrawalSlippage: { quoteRequired: boolean; defaultToleranceBps: number } | null;
-        }>;
-      };
-    };
-    expect(body.data.strategies.map((strategy) => strategy.id)).toEqual([ondo.id]);
-    expect(body.data.strategies[0]).toMatchObject({
-      provider: "ondo",
-      sourceKind: "rwa",
-      fundable: false,
-      riskMetadata: disclosure,
-      depositSlippage: { quoteRequired: true, defaultToleranceBps: 50 },
-      withdrawalSlippage: { quoteRequired: true, defaultToleranceBps: 50 },
-    });
-
-    expect(required(body.data.strategies[0]).currentApy).toBeUndefined();
-
-    const detail = await getEarn(`/v1/earn/strategies/${ondo.id}`, {});
-    expect(detail.status).toBe(200);
-    const detailBody = (await detail.json()) as {
-      data: { strategy: { riskMetadata: Record<string, unknown> } };
-    };
-    expect(detailBody.data.strategy.riskMetadata).toEqual(disclosure);
+    expect(response.status).toBe(200);
+    const body: { data: EarnDiscoveryResponse } = await response.json();
+    expect(body.data.strategies.map(({ id }) => id)).toEqual([production.id]);
+    expect(JSON.stringify(body)).not.toContain(sandbox.id);
   });
 });

@@ -25,7 +25,7 @@ import {
 import { badRequest, conflict, notFound } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
-import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
+import { CustodyRuntimeTargets } from "@/services/custody/signing/custody-runtime-target";
 import { normalizePaymentToken } from "@/services/payment-operation.service";
 import { loadPaymentMintFacts } from "@/services/payments/token-amount";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";

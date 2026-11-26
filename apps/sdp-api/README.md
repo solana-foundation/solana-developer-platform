@@ -31,8 +31,8 @@ token; every Earn route does.
 
 ## Internal Routes (Maintainers Only)
 
-- `/admin/allowlist/*` — Admin allowlist management
-- `/webhooks/clerk/link-orgs` — Clerk org sync webhook
+- `/admin/onboarding-allowlist/*` — Admin onboarding-allowlist management
+- `/webhooks/clerk` — Clerk org sync webhook (legacy `/webhooks/clerk/link-orgs` still served)
 - `/v1/organizations/*` — Multi-tenant org management (internal)
 - `/v1/members/*` — Team member management (internal)
 - `/v1/onboarding/*` — Internal onboarding status
@@ -103,7 +103,7 @@ token; every Earn route does.
 
    The API (`scripts/dev-api.mjs`) migrates and serves with cron off; the cron
    worker (`scripts/dev-worker.mjs`, port 8789) waits for it and runs the
-   reconcilers, like the deployed API and worker services. Turbo prefixes their
+   reconcilers, like the deployed API and cron services. Turbo prefixes their
    logs `@sdp/api:dev` and `@sdp/api:dev:worker`.
 
    External contributors using only `.env.local` can replace the final command
@@ -192,7 +192,6 @@ SIGNING_PROVIDER=coinbase_cdp
 COINBASE_CDP_API_KEY_ID=your_key_id
 COINBASE_CDP_API_KEY_SECRET=your_secret
 COINBASE_CDP_WALLET_SECRET=base64_secret
-COINBASE_CDP_NETWORK=solana-devnet
 
 # Privy
 SIGNING_PROVIDER=privy
@@ -387,7 +386,7 @@ The hosted API is built as a container and deployed to Cloud Run through GitHub 
 
 Stage deploys and merge deploys to production update and execute the migration
 job before deploying the API. Production then verifies a no-traffic candidate
-revision before promoting the service and the Worker service to the same
+revision before promoting the service and the cron service to the same
 immutable image, and holds further deploys when the production canary fails,
 leaving the rollback to a person. Releases and manual production redeploys leave the migration
 job unchanged and refuse an image that adds migrations production has not
@@ -401,16 +400,16 @@ See [`docs/ops/release-operations.md`](../../docs/ops/release-operations.md) for
 - **Cloud Run** — Hosted Node.js API service and one-shot jobs
 - **Postgres 16** — Application database, hosted with managed connectivity in deployed environments
 - **Redis** — rate-limit, cache, and session storage
-- **Cloud Run** — the API service, the always-on Worker service (Cron Definitions), and the database migration job
+- **Cloud Run** — the API service, the always-on cron service (Cron Definitions), and the database migration job
 - **Kora** — Optional local fee-payer service
 
 ### Reconciliation cron
 
-Background work is a set of **Cron Definitions** (`src/cron/*.ts`, each built with `defineCron`; ADR 0011) run by one process: the always-on Worker service, which sets `DISABLE_CRON=false`. API replicas skip cron by default when `K_SERVICE` is set; self-hosted runtimes run it by default.
+Background work is a set of **Cron Definitions** (`src/cron/*.ts`, each built with `defineCron`; ADR 0011) run by one process: the always-on cron service, which sets `DISABLE_CRON=false`. API replicas skip cron by default when `K_SERVICE` is set; self-hosted runtimes run it by default.
 - Each definition declares its `schedule`, its `scope` (`cluster`: registered once per Environment, each run inside that Environment's cluster scope; `global`: registered once), its money `effect`, and an `enabled(env)` decision made once at registration. The full list is `CRON_DEFINITIONS` in `src/cron/runner.ts`.
 - Every slot logs one `sdp_cron_run` event (`cron`, `environment`, `status`, `duration_ms`) to Loki. The statuses (`ok`, `error`, `skipped_overlap`, `disabled`) are defined on `CRON_RUN_STATUSES` in `@sdp/types/cron-runs`. A disabled definition still logs `disabled` on its schedule, and a slot that fires while the same registration's previous run is in flight logs `skipped_overlap` instead of starting a second run.
 - Money Exits (`effect: "finishes"`: transfer settlement, sponsorship budgets, Earn vault movements, DvP, ramp replay) are always enabled; the private-channels withdrawal tracker is the one flagged exception, because it cannot run without the gateway configured.
-- The **Earn strategy-catalogue sync** is hourly in effect behind `isEarnEnabled`: it is scheduled every five minutes and also runs once when the Worker starts (`runOnStart`), so a fresh database lists strategies within seconds, and every run claims an hourly Redis slot first (`runEarnCatalogueSyncIfDue`), so a boot run, the scheduled run and two Workers overlapping during a deploy never sync twice in one window. The slot is a claim token embedding its expiry; a failed sync releases it via compare-and-delete on its own token, and the sync is deadline-bounded (10 minutes, far under the claim expiry). It logs `sdp_earn_catalogue_sync` with `outcome: "synced" | "skipped"`.
+- The **Earn strategy-catalogue sync** is hourly in effect behind `isEarnEnabled`: it is scheduled every five minutes and also runs once when the cron service starts (`runOnStart`), so a fresh database lists strategies within seconds, and every run claims an hourly Redis slot first (`runEarnCatalogueSyncIfDue`), so a boot run, the scheduled run and two cron service instances overlapping during a deploy never sync twice in one window. The slot is a claim token embedding its expiry; a failed sync releases it via compare-and-delete on its own token, and the sync is deadline-bounded (10 minutes, far under the claim expiry). It logs `sdp_earn_catalogue_sync` with `outcome: "synced" | "skipped"`.
 
 ## Contributing
 

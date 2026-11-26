@@ -1,3 +1,4 @@
+import type { VaultProviderErrorCodeOf } from "@sdp/earn/types";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 
 /**
@@ -10,7 +11,7 @@ import type { SolanaCluster } from "@sdp/types/well-known-tokens";
  * constructors would make an instruction-builder failure look like a provider
  * outage to anything matching on `SdpEarnError`.
  */
-export type SdpVedaErrorCode =
+export type SdpVedaErrorCode = VaultProviderErrorCodeOf<
   /** A caller amount that is malformed, zero, over-precise, or out of range. */
   | "INVALID_AMOUNT"
   /** Vault, asset or position state could not be read on this cluster. */
@@ -32,7 +33,8 @@ export type SdpVedaErrorCode =
   /** The vault requires an external compliance approval SDP does not implement. */
   | "COMPLIANCE_APPROVAL_REQUIRED"
   /** The vault's configuration cannot be expressed by SDP's deposit contract. */
-  | "UNSUPPORTED_VAULT";
+  | "UNSUPPORTED_VAULT"
+>;
 
 export class SdpVedaError extends Error {
   constructor(
@@ -87,8 +89,7 @@ export function amountOutOfRange(field: string, value: string): SdpVedaError {
 /**
  * SDP has no confirmed Veda deployment for this cluster.
  *
- * Not an outage and not a bug: `VEDA_DEPLOYMENTS` in `@sdp/types` has a devnet
- * deployment but no approved mainnet deployment. Building against an
+ * A missing entry in `VEDA_DEPLOYMENTS` is a configuration error. Building against an
  * unverified address is the failure this refuses to risk.
  */
 export function deploymentNotConfigured(cluster: SolanaCluster): SdpVedaError {

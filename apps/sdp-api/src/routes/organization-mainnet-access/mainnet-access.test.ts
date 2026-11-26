@@ -5,6 +5,7 @@ import { z } from "zod";
 import { getDb } from "@/db/client";
 import { MainnetAccessRepository } from "@/db/repositories/mainnet-access.repository";
 import { app } from "@/index";
+import { runBackofficeCommand } from "@/services/backoffice-ops";
 import { correctMainnetAccess } from "@/services/mainnet-access.service";
 import { requesterEmailDomain } from "@/services/mainnet-access-email";
 import { syncProviderAccessFromClerk } from "@/services/provider-availability.service";
@@ -459,6 +460,8 @@ describe("Organization mainnet access (HOO-2427)", () => {
   });
 
   it("meters submits and notifies together, since each may call Iterable", async () => {
+    // Keep all six requests in one quota window.
+    vi.spyOn(Date, "now").mockReturnValue(Date.now());
     const statuses = [(await post(SUBMISSION)).status, (await post(SUBMISSION)).status];
     for (let attempt = 0; attempt < 4; attempt += 1) statuses.push((await notify()).status);
     expect(statuses).toEqual([201, 409, 409, 409, 409, 429]);
@@ -886,6 +889,56 @@ describe("Organization mainnet access (HOO-2427)", () => {
           ...operator,
         })
       ).rejects.toThrow("has not requested");
+    });
+  });
+
+  describe("back-office job (backoffice-ops)", () => {
+    const PRIVATE = [TEST_USER.email, TEST_USER.id, "SG", "Singapore", "Ada Admin"];
+
+    it("reports a request's state without its personal details", async () => {
+      expect(
+        await runBackofficeCommand(env, { operation: "status", organizationId: ORGANIZATION_ID })
+      ).toEqual({
+        organizationId: ORGANIZATION_ID,
+        operation: "status",
+        requested: false,
+        requestedAt: null,
+        notified: null,
+        termsVersion: null,
+      });
+      expect((await post(SUBMISSION)).status).toBe(201);
+      const status = await runBackofficeCommand(env, {
+        operation: "status",
+        organizationId: ORGANIZATION_ID,
+      });
+      expect(status).toMatchObject({
+        requested: true,
+        notified: true,
+        termsVersion: SDP_TERMS.version,
+      });
+      for (const value of PRIVATE) expect(JSON.stringify(status)).not.toContain(value);
+    });
+
+    it("resets a request so the organization can ask again, emailing the alias", async () => {
+      expect((await post(SUBMISSION)).status).toBe(201);
+      const outcome = await runBackofficeCommand(env, {
+        operation: "reset",
+        organizationId: ORGANIZATION_ID,
+        operator: "github:oncall",
+        reason: "Customer asked to start over",
+        ticket: "HOO-1",
+      });
+      expect(outcome).toEqual({
+        organizationId: ORGANIZATION_ID,
+        operation: "reset",
+        requested: false,
+        operatorEmail: "sent",
+      });
+      for (const value of PRIVATE) expect(JSON.stringify(outcome)).not.toContain(value);
+      expect(sentEmails().at(-1)?.fields.subject).toBe(
+        `Mainnet access request reset: ${TEST_ORG.name}`
+      );
+      expect((await post(SUBMISSION)).status).toBe(201);
     });
   });
 });

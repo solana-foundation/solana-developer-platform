@@ -1,32 +1,39 @@
 import { createHash, generateKeyPairSync } from "node:crypto";
 import {
   createFireblocksTransfer,
+  type FireblocksTransferAccess,
   type FireblocksTransferRequest,
   readFireblocksTransfer,
   resolveFireblocksTransferAsset,
-} from "@sdp/custody/provisioning/fireblocks-transfers";
-import type { CustodyProvisioningRuntime } from "@sdp/custody/provisioning/runtime";
+} from "@sdp/custody/providers/fireblocks/transfers";
+import type { CustodyProvisioningRuntime } from "@sdp/custody/shared/runtime";
+import { runInClusterScope } from "@sdp/rpc/scope";
+import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { jwtVerify } from "jose";
-import { describe, expect, it, vi } from "vitest";
+import { aroundEach, describe, expect, it, vi } from "vitest";
+import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+
+const USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address;
+const USDT_MINT = WELL_KNOWN_TOKENS.USDT.mints["mainnet-beta"].address;
 
 const rsa = generateKeyPairSync("rsa", { modulusLength: 2048 });
-const access = () => ({
+const access = (): FireblocksTransferAccess => ({
   apiKey: crypto.randomUUID(),
   apiSecretPem: rsa.privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
-  apiBaseUrl: "https://fireblocks.example.test",
 });
 function runtime(fetch: CustodyProvisioningRuntime["fetch"]): CustodyProvisioningRuntime {
   return {
     fetch,
     now: Date.now,
-    randomUUID: () => crypto.randomUUID(),
     sleep: async () => {},
-    getRandomValues: (data) => crypto.getRandomValues(new Uint8Array(data)),
-    sha256: (data) => crypto.subtle.digest("SHA-256", new Uint8Array(data)),
   };
 }
 
 describe("native Fireblocks HTTP protocol", () => {
+  aroundEach((runTest) =>
+    runInClusterScope({ projectId: null, environment: "production" }, runTest)
+  );
+
   it.each([
     { source: { type: "VAULT_ACCOUNT", id: 0 } },
     { destinationAddress: {} },
@@ -52,12 +59,12 @@ describe("native Fireblocks HTTP protocol", () => {
       source: { type: "VAULT_ACCOUNT", id: "42" },
       destination: {
         type: "ONE_TIME_ADDRESS",
-        oneTimeAddress: { address: "11111111111111111111111111111111" },
+        oneTimeAddress: { address: TEST_SOLANA_ADDRESSES.wallet2 },
       },
       note: "SDP payment",
     };
     const fetch = vi.fn(async (url, init) => {
-      expect(url).toBe("https://fireblocks.example.test/v1/transactions");
+      expect(url).toBe("https://api.fireblocks.io/v1/transactions");
       expect(init.method).toBe("POST");
       expect(init.redirect).toBe("error");
       expect(init.body).toBe(JSON.stringify(body));
@@ -87,21 +94,21 @@ describe("native Fireblocks HTTP protocol", () => {
           id: "wrong-chain",
           type: "SOL_ASSET",
           nativeAsset: "SOL_TEST",
-          issuerAddress: "mint",
+          issuerAddress: USDC_MINT,
           decimals: 6,
         },
         {
           id: "wrong-mint",
           type: "SOL_ASSET",
           nativeAsset: "SOL",
-          issuerAddress: "different",
+          issuerAddress: USDT_MINT,
           decimals: 6,
         },
         {
           id: "SOL_USDC_PTHX",
           type: "SOL_ASSET",
           nativeAsset: "SOL",
-          issuerAddress: "mint",
+          issuerAddress: USDC_MINT,
           decimals: 6,
         },
       ])
@@ -109,14 +116,14 @@ describe("native Fireblocks HTTP protocol", () => {
     const credentials = access();
     const rt = runtime(fetch);
     const results = await Promise.all([
-      resolveFireblocksTransferAsset(rt, credentials, "SOL", "mint"),
-      resolveFireblocksTransferAsset(rt, credentials, "SOL", "mint"),
+      resolveFireblocksTransferAsset(rt, credentials, "SOL", USDC_MINT),
+      resolveFireblocksTransferAsset(rt, credentials, "SOL", USDC_MINT),
     ]);
     expect(results).toEqual([
       { id: "SOL_USDC_PTHX", decimals: 6 },
       { id: "SOL_USDC_PTHX", decimals: 6 },
     ]);
-    await expect(resolveFireblocksTransferAsset(rt, credentials, "SOL", "unknown")).rejects.toThrow(
+    await expect(resolveFireblocksTransferAsset(rt, credentials, "SOL", SOL_MINT)).rejects.toThrow(
       "not uniquely supported"
     );
     expect(fetch).toHaveBeenCalledTimes(1);
@@ -128,13 +135,21 @@ describe("native Fireblocks HTTP protocol", () => {
       .mockResolvedValueOnce(Response.json({}, { status: 503 }))
       .mockResolvedValueOnce(
         Response.json([
-          { id: "usdc", type: "SOL_ASSET", nativeAsset: "SOL", issuerAddress: "mint", decimals: 6 },
+          {
+            id: "usdc",
+            type: "SOL_ASSET",
+            nativeAsset: "SOL",
+            issuerAddress: USDC_MINT,
+            decimals: 6,
+          },
         ])
       );
     const credentials = access();
     const rt = runtime(fetch);
-    await expect(resolveFireblocksTransferAsset(rt, credentials, "SOL", "mint")).rejects.toThrow();
-    expect(await resolveFireblocksTransferAsset(rt, credentials, "SOL", "mint")).toEqual({
+    await expect(
+      resolveFireblocksTransferAsset(rt, credentials, "SOL", USDC_MINT)
+    ).rejects.toThrow();
+    expect(await resolveFireblocksTransferAsset(rt, credentials, "SOL", USDC_MINT)).toEqual({
       id: "usdc",
       decimals: 6,
     });
@@ -155,12 +170,14 @@ describe("native Fireblocks HTTP protocol", () => {
       .mockResolvedValueOnce(Response.json({}, { status: 404 }));
     const credentials = access();
     const rt = runtime(fetch);
-    expect(await readFireblocksTransfer(rt, credentials, "xfr_1")).toMatchObject({
+    expect(await readFireblocksTransfer(rt, credentials, "xfr_1")).toEqual({
+      id: "proposal",
       status: "PENDING_SIGNATURE",
     });
     expect(await readFireblocksTransfer(rt, credentials, "xfr_1")).toBeNull();
+    expect(fetch).toHaveBeenCalledTimes(2);
     for (const [url, init] of fetch.mock.calls) {
-      expect(url).toBe("https://fireblocks.example.test/v1/transactions/external_tx_id/xfr_1");
+      expect(url).toBe("https://api.fireblocks.io/v1/transactions/external_tx_id/xfr_1");
       expect(init.method).toBe("GET");
     }
   });

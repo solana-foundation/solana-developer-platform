@@ -219,37 +219,16 @@ async function seedRings(status: string): Promise<string> {
 async function seedEarn(status: string): Promise<string> {
   const earnStatuses: Readonly<Record<string, string>> =
     UNIFIED_TRANSACTION_MODULE_CONTRACTS.earn.status;
-  const vaultStatuses: readonly string[] = EARN_MOVEMENT_STATUSES.vault_direct;
-  const model = vaultStatuses.includes(status) ? "vault_direct" : "custodial";
-  const positionId = `earn_position_${model}`;
-  if (model === "vault_direct") {
-    await getDb(env).execute(
-      `INSERT INTO earn_positions
-         (id, organization_id, project_id, environment, provider, kind, custody_wallet_id,
-          vault_address, share_mint, token_mint, label, created_by, activated_at)
-       VALUES (?, ?, ?, 'sandbox', 'kamino', 'vault_direct', ?, 'vault', 'share-mint',
-               'token-mint', 'Vault', ?, ?)
-       ON CONFLICT (id) DO NOTHING`,
-      [positionId, TEST_ORG.id, PROJECT, CUSTODY_WALLET, TEST_USER.id, CREATED_AT]
-    );
-  } else {
-    await getDb(env).execute(
-      `INSERT INTO earn_provider_wallets
-         (id, organization_id, project_id, environment, provider, provider_wallet_ref, label, created_by)
-       VALUES ('earn_provider_wallet_unified', ?, ?, 'sandbox', 'ground', 'provider-ref', 'Program', ?)
-       ON CONFLICT (id) DO NOTHING`,
-      [TEST_ORG.id, PROJECT, TEST_USER.id]
-    );
-    await getDb(env).execute(
-      `INSERT INTO earn_positions
-         (id, organization_id, project_id, environment, provider, kind, provider_wallet_id,
-          label, created_by, activated_at)
-       VALUES (?, ?, ?, 'sandbox', 'ground', 'custodial', 'earn_provider_wallet_unified',
-               'Program', ?, ?)
-       ON CONFLICT (id) DO NOTHING`,
-      [positionId, TEST_ORG.id, PROJECT, TEST_USER.id, CREATED_AT]
-    );
-  }
+  const positionId = "earn_position_vault_direct";
+  await getDb(env).execute(
+    `INSERT INTO earn_positions
+       (id, organization_id, project_id, environment, provider, kind, custody_wallet_id,
+        vault_address, share_mint, token_mint, label, created_by, activated_at)
+     VALUES (?, ?, ?, 'sandbox', 'kamino', 'vault_direct', ?, 'vault', 'share-mint',
+             'token-mint', 'Vault', ?, ?)
+     ON CONFLICT (id) DO NOTHING`,
+    [positionId, TEST_ORG.id, PROJECT, CUSTODY_WALLET, TEST_USER.id, CREATED_AT]
+  );
   const id = `earn_status_${status}`;
   const confirmed = status === "confirmed" || status === "finalized";
   const failed = status === "failed";
@@ -257,33 +236,26 @@ async function seedEarn(status: string): Promise<string> {
     `INSERT INTO earn_movements
        (id, organization_id, project_id, environment, provider, execution_model, direction,
         position_id, status, failure_reason, confirmed_at, settled_at, denomination,
-        amount_requested, amount_settled, min_shares_out, shares_out, payout_token,
+        amount_requested, amount_settled, min_shares_out, shares_out,
         custody_wallet_id, vault_address, signature, signed_transaction,
         last_valid_block_height, request_id, idempotency_fingerprint, created_by,
         created_at, updated_at)
-     VALUES (?, ?, ?, 'sandbox', ?, ?, ?, ?, ?, ?, ?, ?, ?, '1', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, 'sandbox', 'kamino', 'vault_direct', 'deposit', ?, ?, ?, ?, ?,
+             'token-mint', '1', ?, '1', ?, ?, 'vault', ?, ?, '100', ?, ?, ?, ?, ?)`,
     [
       id,
       TEST_ORG.id,
       PROJECT,
-      model === "vault_direct" ? "kamino" : "ground",
-      model,
-      model === "vault_direct" ? "deposit" : "withdrawal",
       positionId,
       status,
-      failed && model === "vault_direct" ? "failed fixture" : null,
+      failed ? "failed fixture" : null,
       confirmed ? CREATED_AT : null,
       status === "finalized" ? CREATED_AT : null,
-      model === "vault_direct" ? "token-mint" : "usd",
       earnStatuses[status] === "succeeded" ? "1" : null,
-      model === "vault_direct" ? "1" : null,
       confirmed ? "1" : null,
-      model === "custodial" ? "usdc" : null,
-      model === "vault_direct" ? CUSTODY_WALLET : null,
-      model === "vault_direct" ? "vault" : null,
-      model === "vault_direct" ? `signature-${status}` : null,
-      model === "vault_direct" ? `transaction-${status}` : null,
-      model === "vault_direct" ? "100" : null,
+      CUSTODY_WALLET,
+      `signature-${status}`,
+      `transaction-${status}`,
       `request-${status}`,
       `fingerprint-${status}`,
       TEST_USER.id,
@@ -311,9 +283,13 @@ describe("unified_transactions view (postgres)", () => {
 
   afterEach(() => seedTestDatabase(env));
 
-  it("maps every canonical module status to a non-null status class", async () => {
+  it("maps every live module status to a non-null status class", async () => {
     for (const module of UNIFIED_TRANSACTION_MODULES) {
-      for (const status of UNIFIED_TRANSACTION_MODULE_CONTRACTS[module].moduleStatuses) {
+      const statuses =
+        module === "earn"
+          ? EARN_MOVEMENT_STATUSES.vault_direct
+          : UNIFIED_TRANSACTION_MODULE_CONTRACTS[module].moduleStatuses;
+      for (const status of statuses) {
         const id = await seeders[module](status);
         await assertProjectedStatus(module, id, status);
       }

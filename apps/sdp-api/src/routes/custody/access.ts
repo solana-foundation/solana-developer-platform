@@ -10,7 +10,7 @@ import { assertCallerWalletInScope } from "@/lib/money-admission";
 import type { AuthorizeInput } from "@/middleware/authorize";
 import { markIdempotencyRerunnable } from "@/middleware/idempotency";
 import { findProjectOperationalWallet } from "@/routes/custody/handlers/wallets";
-import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
+import { CustodyRuntimeTargets } from "@/services/custody/signing/custody-runtime-target";
 import type { AppContext } from "./context";
 
 /**

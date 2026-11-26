@@ -7,7 +7,7 @@ import { badRequest } from "@/lib/errors";
 /**
  * The provider-side eligibility gate for vault MONEY-IN, capability-dispatched
  * (never a provider-id check) and shared by both deposit paths — custody-signed
- * and external-wallet — so the rule cannot drift between them.
+ * and wallet — so the rule cannot drift between them.
  *
  * Exists for regulated instruments (WisdomTree): settlement pays out fund
  * tokens whose transfer hook refuses any wallet the issuer has not verified,

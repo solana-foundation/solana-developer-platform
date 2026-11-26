@@ -16,8 +16,8 @@ import { projectContextMiddleware } from "@/middleware/project-context";
 import { requireAction } from "@/middleware/require-action";
 import { fireblocksCustody } from "@/routes/internal-custody/fireblocks";
 import { byokRegistrationSchema } from "@/services/custody/byok-credential";
+import { isCustodyConnectionRuntimeAvailable } from "@/services/custody/signing/custody-runtime-target";
 import { getCustodySetupStatus } from "@/services/custody-setup-status.service";
-import { isCustodyConnectionRuntimeAvailable } from "@/services/domain/signing/custody-runtime-target";
 import {
   getProviderAvailability,
   isCustodyProviderEntitled,
@@ -199,7 +199,7 @@ internalCustody.get("/connections/:connectionId", requireAction("wallets.configu
 });
 
 internalCustody.get(
-  "/connections/:connectionId/provider-credential",
+  "/connections/:connectionId/provider-credential/lifecycle",
   requireAction("wallets.configure"),
   async (c) => {
     const params = connectionParamsSchema.safeParse(c.req.param());
@@ -261,7 +261,7 @@ internalCustody.post(
 );
 
 internalCustody.post(
-  "/provider-credentials/:credentialId/rollback",
+  "/provider-credentials/:credentialId/rollback-rotation",
   requireAction("wallets.configure"),
   async (c) => {
     const params = credentialParamsSchema.safeParse(c.req.param());
@@ -287,7 +287,7 @@ internalCustody.post(
 );
 
 internalCustody.post(
-  "/connections/:connectionId/complete",
+  "/connections/:connectionId/complete-installation",
   requireAction("wallets.configure"),
   async (c) => {
     const params = connectionParamsSchema.safeParse(c.req.param());
@@ -299,7 +299,7 @@ internalCustody.post(
 );
 
 internalCustody.post(
-  "/connections/:connectionId/cancel",
+  "/connections/:connectionId/cancel-installation",
   requireAction("wallets.configure"),
   async (c) => {
     const params = connectionParamsSchema.safeParse(c.req.param());

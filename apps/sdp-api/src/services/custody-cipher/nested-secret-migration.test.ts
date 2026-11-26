@@ -1,36 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { createEncryptionService } from "@/services/encryption.service";
+import { fakeEnvelopeKms, TEST_LEGACY_CUSTODY_KEY } from "@/test/helpers/custody-cipher";
 import { CustodyCipherRouter } from "./cipher-router";
 import { KmsEnvelopeCipher } from "./envelope-cipher";
 import { migrateNestedCustodySecrets } from "./nested-secret-migration";
 
-const LEGACY_KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
-function fakeKms() {
-  const mask = (b: Uint8Array) => b.map((x) => x ^ 0x5a);
-  const b64 = (b: Uint8Array) => btoa(String.fromCharCode(...b));
-  const un = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
-  return {
-    encrypt: async (pt: Uint8Array, aad: string) => `${btoa(aad)}!${b64(mask(pt))}`,
-    decrypt: async (ct: string, aad: string) => {
-      const [boundAad, payload] = ct.split("!");
-      if (boundAad !== btoa(aad) || !payload) {
-        throw new Error("AAD mismatch");
-      }
-      return mask(un(payload));
-    },
-  };
-}
-
 function v2Router() {
   return new CustodyCipherRouter({
-    legacyKey: LEGACY_KEY,
-    envelope: new KmsEnvelopeCipher({ kms: fakeKms() }),
+    legacyKey: TEST_LEGACY_CUSTODY_KEY,
+    envelope: new KmsEnvelopeCipher({ kms: fakeEnvelopeKms() }),
     activeScheme: "v2",
   });
 }
 
 async function legacyCiphertext(orgId: string, plaintext: string) {
-  return (await createEncryptionService(LEGACY_KEY).encrypt(orgId, plaintext)).ciphertext;
+  return (await createEncryptionService(TEST_LEGACY_CUSTODY_KEY).encrypt(orgId, plaintext))
+    .ciphertext;
 }
 
 describe("migrateNestedCustodySecrets", () => {
@@ -123,7 +108,9 @@ describe("migrateNestedCustodySecrets", () => {
       assetId: "SOL",
     });
 
-    await expect(migrateNestedCustodySecrets(cipher, "org1", config)).rejects.toThrow();
+    await expect(migrateNestedCustodySecrets(cipher, "org1", config)).rejects.toThrow(
+      "AAD mismatch"
+    );
   });
 
   it("propagates decryption failures for undecryptable nested values", async () => {

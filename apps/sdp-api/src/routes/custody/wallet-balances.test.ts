@@ -1,7 +1,15 @@
-import type { SolanaRpc } from "@sdp/rpc/solana";
-import { SOL_MINT, SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { SOL_MINT, SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { getAddressDecoder } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
+import {
+  inSandboxScope,
+  installClusterRpcStub,
+  type JsonRpcResult,
+  parseJsonRpcRequest,
+} from "@/test/helpers/cluster-rpc";
+import { required } from "@/test/helpers/required";
 import {
   clearWalletBalanceCache,
   readWalletBalances,
@@ -9,7 +17,7 @@ import {
 } from "./wallet-balances";
 
 const SCOPE = "org_test:proj_test";
-const USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+const USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
 
 /** A distinct, valid address per index. */
 function ownerAddress(index: number): string {
@@ -22,30 +30,48 @@ function wallet(index: number): WalletBalanceTarget {
   return { id: `cwlt_${index}`, walletId: `provider_${index}`, publicKey: ownerAddress(index) };
 }
 
-interface Pending<T> {
-  resolve: (value: T) => void;
-  reject: (reason: unknown) => void;
+/** A read the test answers with `value`, or fails, once it has seen every read start. */
+interface HeldRead {
+  resolve: (answer: { value: readonly JsonRpcResult[] }) => void;
+  reject: (reason: Error) => void;
 }
 
+const multipleAccountsParamsSchema = z.tuple([z.array(z.string())], z.unknown());
+const tokenAccountsByOwnerParamsSchema = z.tuple(
+  [z.string(), z.object({ programId: z.string() })],
+  z.unknown()
+);
+
 /**
- * An RPC whose answers the test releases, so it can see which reads start before
- * any of them finish.
+ * The sandbox cluster client over the cluster RPC stub, holding each balance read until the test
+ * releases it, so it can see which reads start before any of them finish. Every other request
+ * (the endpoint's genesis proof) goes to the stub; the stub restores `fetch` after each test.
  */
 function heldRpc() {
-  const accountReads: Array<{ addresses: string[] } & Pending<{ value: unknown[] }>> = [];
-  const tokenReads: Array<{ owner: string; programId: string } & Pending<{ value: unknown[] }>> =
-    [];
-  const rpc = {
-    getMultipleAccounts: (addresses: string[]) => ({
-      send: () =>
-        new Promise((resolve, reject) => accountReads.push({ addresses, resolve, reject })),
-    }),
-    getTokenAccountsByOwner: (owner: string, { programId }: { programId: string }) => ({
-      send: () =>
-        new Promise((resolve, reject) => tokenReads.push({ owner, programId, resolve, reject })),
-    }),
-  } as unknown as SolanaRpc;
-  return { rpc, accountReads, tokenReads };
+  const accountReads: Array<{ addresses: string[] } & HeldRead> = [];
+  const tokenReads: Array<{ owner: string; programId: string } & HeldRead> = [];
+  const clusterFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const { id, method, params } = parseJsonRpcRequest(init);
+    if (method !== "getMultipleAccounts" && method !== "getTokenAccountsByOwner") {
+      return clusterFetch(input, init);
+    }
+    return new Promise<Response>((settle, fail) => {
+      const held: HeldRead = {
+        resolve: ({ value }) =>
+          settle(Response.json({ jsonrpc: "2.0", id, result: { context: { slot: 1 }, value } })),
+        reject: fail,
+      };
+      if (method === "getMultipleAccounts") {
+        const [addresses] = multipleAccountsParamsSchema.parse(params);
+        accountReads.push({ addresses, ...held });
+        return;
+      }
+      const [owner, { programId }] = tokenAccountsByOwnerParamsSchema.parse(params);
+      tokenReads.push({ owner, programId, ...held });
+    });
+  };
+  return { rpc: inSandboxScope(() => createClusterRpc()), accountReads, tokenReads };
 }
 
 /** Answers every token-program read with no token accounts. */
@@ -55,7 +81,7 @@ function answerTokenReadsEmpty(tokenReads: ReturnType<typeof heldRpc>["tokenRead
 
 function usdcAccount(amount: string) {
   return {
-    pubkey: "TokenAccount111",
+    pubkey: ownerAddress(1_000),
     account: {
       data: {
         parsed: {
@@ -83,6 +109,8 @@ afterEach(() => {
 });
 
 describe("readWalletBalances", () => {
+  installClusterRpcStub();
+
   it("reads SOL for every missed wallet in one call and both token programs side by side", async () => {
     const { rpc, accountReads, tokenReads } = heldRpc();
     const wallets = [wallet(1), wallet(2), wallet(3)];
@@ -91,14 +119,20 @@ describe("readWalletBalances", () => {
     await flush();
 
     expect(accountReads).toHaveLength(1);
-    expect(accountReads[0]?.addresses).toEqual([ownerAddress(1), ownerAddress(2), ownerAddress(3)]);
+    expect(required(accountReads[0]).addresses).toEqual([
+      ownerAddress(1),
+      ownerAddress(2),
+      ownerAddress(3),
+    ]);
     // Both programs are asked for every wallet before any answer arrives.
     expect(tokenReads).toHaveLength(6);
     expect(
       tokenReads.filter((read) => read.owner === ownerAddress(1)).map((read) => read.programId)
     ).toEqual([SPL_TOKEN_PROGRAMS["spl-token"], SPL_TOKEN_PROGRAMS["token-2022"]]);
 
-    accountReads[0]?.resolve({ value: [{ lamports: 1_500_000_000n }, null, { lamports: 1n }] });
+    required(accountReads[0]).resolve({
+      value: [{ lamports: 1_500_000_000 }, null, { lamports: 1 }],
+    });
     for (const read of tokenReads) {
       const holdsUsdc =
         read.owner === ownerAddress(1) && read.programId === SPL_TOKEN_PROGRAMS["spl-token"];
@@ -112,8 +146,12 @@ describe("readWalletBalances", () => {
       { token: "USDC", mint: USDC_MINT, amount: "1500000", uiAmount: "1.5", decimals: 6 },
     ]);
     // No account is an unfunded wallet: a real zero, not a failure.
-    expect(balances.get("cwlt_2")?.[0]).toMatchObject({ amount: "0" });
-    expect(balances.get("cwlt_3")?.[0]).toMatchObject({ amount: "1" });
+    expect(balances.get("cwlt_2")).toEqual([
+      { token: "SOL", mint: SOL_MINT, amount: "0", uiAmount: "0", decimals: 9 },
+    ]);
+    expect(balances.get("cwlt_3")).toEqual([
+      { token: "SOL", mint: SOL_MINT, amount: "1", uiAmount: "0.000000001", decimals: 9 },
+    ]);
   });
 
   it("chunks at the RPC limit, and a failed chunk leaves out only its own wallets", async () => {
@@ -124,8 +162,10 @@ describe("readWalletBalances", () => {
     await flush();
 
     expect(accountReads.map((read) => read.addresses.length)).toEqual([100, 1]);
-    accountReads[0]?.resolve({ value: Array.from({ length: 100 }, () => ({ lamports: 7n })) });
-    accountReads[1]?.reject(new Error("rpc unavailable"));
+    required(accountReads[0]).resolve({
+      value: Array.from({ length: 100 }, () => ({ lamports: 7 })),
+    });
+    required(accountReads[1]).reject(new Error("rpc unavailable"));
     answerTokenReadsEmpty(tokenReads);
 
     const balances = await result;
@@ -142,7 +182,7 @@ describe("readWalletBalances", () => {
 
     expect(accountReads).toHaveLength(1);
     expect(tokenReads).toHaveLength(2);
-    accountReads[0]?.resolve({ value: [{ lamports: 5n }] });
+    required(accountReads[0]).resolve({ value: [{ lamports: 5 }] });
     answerTokenReadsEmpty(tokenReads);
 
     const [firstBalances, secondBalances] = await Promise.all([first, second]);
@@ -154,7 +194,7 @@ describe("readWalletBalances", () => {
 
     const failed = readWalletBalances(rpc, SCOPE, [wallet(1)], "req_failed");
     await flush();
-    accountReads[0]?.reject(new Error("rpc unavailable"));
+    required(accountReads[0]).reject(new Error("rpc unavailable"));
     answerTokenReadsEmpty(tokenReads);
     expect((await failed).has("cwlt_1")).toBe(false);
 
@@ -162,10 +202,12 @@ describe("readWalletBalances", () => {
     await flush();
     // Neither the cache nor the finished read kept the failure.
     expect(accountReads).toHaveLength(2);
-    accountReads[1]?.resolve({ value: [{ lamports: 9n }] });
+    required(accountReads[1]).resolve({ value: [{ lamports: 9 }] });
     answerTokenReadsEmpty(tokenReads.slice(2));
 
-    expect((await retried).get("cwlt_1")?.[0]).toMatchObject({ amount: "9" });
+    expect((await retried).get("cwlt_1")).toEqual([
+      { token: "SOL", mint: SOL_MINT, amount: "9", uiAmount: "0.000000009", decimals: 9 },
+    ]);
   });
 
   it("leaves out a wallet whose public key is not an address, without reading it", async () => {
@@ -174,13 +216,15 @@ describe("readWalletBalances", () => {
 
     const result = readWalletBalances(rpc, SCOPE, [unreadable, wallet(1)], "req_test");
     await flush();
-    expect(accountReads[0]?.addresses).toEqual([ownerAddress(1)]);
-    accountReads[0]?.resolve({ value: [{ lamports: 2n }] });
+    expect(required(accountReads[0]).addresses).toEqual([ownerAddress(1)]);
+    required(accountReads[0]).resolve({ value: [{ lamports: 2 }] });
     answerTokenReadsEmpty(tokenReads);
 
     const balances = await result;
     expect(balances.has("cwlt_bad")).toBe(false);
-    expect(balances.get("cwlt_1")?.[0]).toMatchObject({ amount: "2" });
+    expect(balances.get("cwlt_1")).toEqual([
+      { token: "SOL", mint: SOL_MINT, amount: "2", uiAmount: "0.000000002", decimals: 9 },
+    ]);
   });
 
   it("leaves a wallet out when only its token read failed", async () => {
@@ -188,9 +232,9 @@ describe("readWalletBalances", () => {
 
     const result = readWalletBalances(rpc, SCOPE, [wallet(1)], "req_test");
     await flush();
-    accountReads[0]?.resolve({ value: [{ lamports: 9n }] });
-    tokenReads[0]?.resolve({ value: [] });
-    tokenReads[1]?.reject(new Error("rpc unavailable"));
+    required(accountReads[0]).resolve({ value: [{ lamports: 9 }] });
+    required(tokenReads[0]).resolve({ value: [] });
+    required(tokenReads[1]).reject(new Error("rpc unavailable"));
 
     expect((await result).has("cwlt_1")).toBe(false);
   });
@@ -201,7 +245,7 @@ describe("readWalletBalances", () => {
 
     const first = readWalletBalances(rpc, SCOPE, [wallet(1)], "req_first");
     await flush();
-    accountReads[0]?.resolve({ value: [{ lamports: 3n }] });
+    required(accountReads[0]).resolve({ value: [{ lamports: 3 }] });
     answerTokenReadsEmpty(tokenReads);
     await first;
 
@@ -209,9 +253,20 @@ describe("readWalletBalances", () => {
     expect(accountReads).toHaveLength(1);
 
     vi.advanceTimersByTime(10_000);
-    void readWalletBalances(rpc, SCOPE, [wallet(1)], "req_expired");
+    const expired = readWalletBalances(rpc, SCOPE, [wallet(1)], "req_expired");
     await flush();
     expect(accountReads).toHaveLength(2);
+    // The expired read asks both token programs again with the wallet, so the
+    // assertion covers the wallet's whole flow, not just the SOL account read.
+    expect(tokenReads.slice(2).map((read) => read.owner)).toEqual([
+      ownerAddress(1),
+      ownerAddress(1),
+    ]);
+    required(accountReads[1]).resolve({ value: [{ lamports: 3 }] });
+    answerTokenReadsEmpty(tokenReads.slice(2));
+    expect((await expired).get("cwlt_1")).toEqual([
+      { token: "SOL", mint: SOL_MINT, amount: "3", uiAmount: "0.000000003", decimals: 9 },
+    ]);
   });
 
   it("does not cache a read that finished after the cache was cleared", async () => {
@@ -220,12 +275,17 @@ describe("readWalletBalances", () => {
     const stale = readWalletBalances(rpc, SCOPE, [wallet(1)], "req_stale");
     await flush();
     clearWalletBalanceCache();
-    accountReads[0]?.resolve({ value: [{ lamports: 3n }] });
+    required(accountReads[0]).resolve({ value: [{ lamports: 3 }] });
     answerTokenReadsEmpty(tokenReads);
     await stale;
 
-    void readWalletBalances(rpc, SCOPE, [wallet(1)], "req_after_clear");
+    const afterClear = readWalletBalances(rpc, SCOPE, [wallet(1)], "req_after_clear");
     await flush();
     expect(accountReads).toHaveLength(2);
+    required(accountReads[1]).resolve({ value: [{ lamports: 3 }] });
+    answerTokenReadsEmpty(tokenReads.slice(2));
+    expect((await afterClear).get("cwlt_1")).toEqual([
+      { token: "SOL", mint: SOL_MINT, amount: "3", uiAmount: "0.000000003", decimals: 9 },
+    ]);
   });
 });

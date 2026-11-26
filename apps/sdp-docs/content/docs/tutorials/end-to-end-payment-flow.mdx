@@ -7,7 +7,7 @@ Follow one payment through its lifecycle:
 
 1. **Create or pick the source wallet.** Create a custody wallet with [Set Up Wallets](/docs/guides/setup-wallets), or find one with `GET /v1/wallets`. Note its `id` (`cwlt_…`).
 2. **Build the transfer.** Collect the destination address, token and amount, and check them before you send. See [Basic payment](/docs/payments/send-basic-payment).
-3. **Send it.** Call `POST /v1/payments/transfers` with a new `Idempotency-Key`. SDP builds the transaction, has the source wallet's custody provider sign it, and submits it.
+3. **Send it.** Call `POST /v1/payments/transfers/execute` with a new `Idempotency-Key`. SDP builds the transaction, has the source wallet's custody provider sign it, and submits it.
 4. **Keep the identifiers.** Store the transfer `id` (`xfr_…`) and its `signature` with your own record.
 5. **Wait for finality.** A successful request answers `finalized`. If it answers `processing`, read `GET /v1/payments/transfers/{transferId}` until it settles. See [Verifying a payment](/docs/payments/accept-verification).
 6. **Reconcile.** Match the transfer to your ledger and update what your users see. See [Indexing and reconciliation](/docs/payments/accept-indexing).

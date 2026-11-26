@@ -1,4 +1,4 @@
-import { canProviderCreateWallet, canProviderDeleteWallet } from "@sdp/custody/providers";
+import { canProviderCreateWallet, canProviderDeleteWallet } from "@sdp/custody/capabilities";
 import { SigningError } from "@sdp/custody/signing";
 import type { CustodyProvider } from "@sdp/types/custody";
 

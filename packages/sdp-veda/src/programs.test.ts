@@ -15,18 +15,18 @@ const DEPLOYMENT: VedaDeployment = {
 };
 
 describe("vedaClusterConfig", () => {
-  /**
-   * Devnet is confirmed (@sdp/types/veda-programs header), so its config
-   * resolves; mainnet has no confirmed PRODUCTION deployment, so every build
-   * and position read there fails closed. The mainnet half changes — with
-   * Veda naming a production vault — when `VEDA_DEPLOYMENTS` gains its entry.
-   */
-  it("resolves the confirmed devnet deployment and refuses mainnet", () => {
+  it("resolves separate confirmed devnet and mainnet deployments", () => {
     const devnet = vedaClusterConfig("devnet");
     expect(devnet.cluster).toBe("devnet");
     expect(String(devnet.vaultProgramAddress)).toBe("ASN8Cz36kQSZf2ZrgUbRShaKUpN4CJoTGdv6C5uMsy3J");
-    expect(vedaDeployment("mainnet-beta")).toBeNull();
-    expect(() => vedaClusterConfig("mainnet-beta")).toThrow(/no confirmed Veda deployment/);
+    const mainnet = vedaClusterConfig("mainnet-beta");
+    expect(String(mainnet.vaultProgramAddress)).toBe(
+      "9TWFuaFP1pvx698ANRpiGBHqi6zrTFBQoXwqaAmfd5Jp"
+    );
+    expect(mainnet.vaultStateAddresses.map(String)).toEqual(
+      vedaDeployment("mainnet-beta")?.vaultStateAddresses
+    );
+    expect(mainnet.vaultStateAddresses).toHaveLength(2);
   });
 });
 

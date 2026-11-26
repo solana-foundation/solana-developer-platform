@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { app } from "@/index";
+import { createPublicOpenApiDocument } from "@/openapi/spec";
 import { env } from "@/test/helpers/env";
 
 async function llmsBody(releaseChannel: string): Promise<string> {
@@ -30,7 +31,7 @@ describe("GET /llms.txt", () => {
     expect(body).toContain("/v1/issuance");
     expect(body).toContain("/v1/compliance");
     expect(body).toContain("/v1/earn");
-    expect(body).not.toContain("/admin/allowlist");
+    expect(body).not.toContain("/admin/onboarding-allowlist");
     expect(body).not.toContain("/v1/onboarding");
     expect(body).not.toContain("/v1/organizations");
   });
@@ -43,16 +44,17 @@ describe("GET /llms.txt", () => {
     expect(body).not.toContain("/v1/issuance");
   });
 
-  it.each([
-    ["experimental", true],
-    ["beta", true],
-    ["stable", false],
-  ] as const)(
-    "%s names Earn only when its release channel runs it",
-    async (releaseChannel, runsEarn) => {
+  it.each(["experimental", "beta", "stable"] as const)(
+    "%s groups the published operation lifecycle under Earn",
+    async (releaseChannel) => {
       const body = await llmsBody(releaseChannel);
-      expect(body.includes("/v1/earn")).toBe(runsEarn);
-      expect(/earn/i.test(body)).toBe(runsEarn);
+      const published = releaseChannel !== "stable";
+      expect(body.includes("/v1/earn")).toBe(published);
+      expect(familySection(body)).not.toMatch(/^- Operations:/m);
+      const document = createPublicOpenApiDocument({ releaseChannel });
+      expect(document.paths?.["/v1/operations"]?.get?.tags).toEqual(
+        published ? ["Earn"] : undefined
+      );
     }
   );
 

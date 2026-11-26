@@ -4,7 +4,7 @@ import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loadi
 export default function EmbeddedYieldPage() {
   return (
     <EmbeddedYieldDashboard
-      configureHref={`${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/configure`}
+      configureHref={`${DASHBOARD_MARKETS_SUBNAV_HREFS.embeddedYield}/configure`}
     />
   );
 }

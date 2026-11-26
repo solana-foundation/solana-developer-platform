@@ -67,7 +67,7 @@ describe("Markets dashboard navigation", () => {
         href: "/dashboard/markets/treasury-solutions",
       },
       {
-        label: "Shared.dashboardShell.earnProgram",
+        label: "Shared.dashboardShell.embeddedYield",
         href: "/dashboard/markets/embedded-yield",
       },
     ]);

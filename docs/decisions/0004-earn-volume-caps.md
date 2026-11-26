@@ -17,11 +17,11 @@ defaults described below are not yet synthesized.
 ## Context
 
 Nothing in the Earn money path bounds how much can move. The three custody
-routes (`POST /vault-deposits`, `/vault-withdrawals`,
+routes (`POST /deposits/execute`, `/vault-withdrawals`,
 `/programs/:programId/withdrawals`) run through `policyGate`, so an org's
 wallet policy or API-key control profile can impose amount limits, but only if
 the org wrote one: no active policy resolves to `IMPLICIT_DEFAULT_ALLOW_POLICY`.
-The public external-wallet build path has no amount gate at all, by design (the
+The public wallet build path has no amount gate at all, by design (the
 customer's signature is the authorization). Nothing anywhere bounds SDP-wide
 exposure to a single vault or provider.
 
@@ -80,11 +80,11 @@ stays a small enough fraction of any vault that its customers can always leave.
   them against the catalogue's USD TVL on that same dollar-for-dollar basis.
 - Enforced inside the single admission predicate
   (`assertVaultDepositAdmissible`, `routes/earn/handlers/admission.ts`), so
-  the custody path and the external-wallet build meet it with no new gate
+  the custody path and the wallet build meet it with no new gate
   ordering. That admission check is the EARLY half: it runs before anything is
   built or signed, on a fresh ledger read, but two deposits admitted a moment
   apart each see the same headroom. The LATE half decides again for custody
-  deposits and external-wallet submits inside the ledger transaction that
+  deposits and wallet submits inside the ledger transaction that
   records the deposit's `requested` row
   (`ledgerVaultExposureGate`, `services/earn/vault-exposure.ts`): the ledger
   takes a per-vault transaction advisory lock that serializes every writer to
@@ -150,14 +150,14 @@ Reuses the policy engine rather than adding a parallel limits system.
 ### Layer 2, embedded surface: partner volume tripwire
 
 SDP cannot sensibly refuse an end-user's own money, and per-user limits are the
-partner's KYC-tier problem. So on the external-wallet path layer 2 becomes a
+partner's KYC-tier problem. So on the wallet path layer 2 becomes a
 **per-partner-key volume tripwire**, sized from the expected volume the partner
 declares at STRIDE onboarding (PRD §4.4) times a generous multiple.
 
 - Soft threshold: alert.
 - Hard threshold: deposit builds return a `blockingIssues` entry naming the
   cap and "contact SDP". No 4xx after a customer signed.
-- External-wallet withdrawal builds are never gated: SDP holds no key, and
+- Wallet withdrawal builds are never gated: SDP holds no key, and
   refusing the build only breaks the user's exit.
 
 ### Cross-cutting rules
@@ -200,7 +200,7 @@ declares at STRIDE onboarding (PRD §4.4) times a generous multiple.
   in-process cache. The ledger write re-decides under a per-vault lock, so
   concurrent ledgered deposits cannot together overshoot the cap; the cost is
   that a deposit admitted at build time can still be refused at its write when
-  the vault filled in between. On the external-wallet path that refusal
+  the vault filled in between. On the wallet path that refusal
   reaches the customer after signing (the transaction is never sent); the ADR
   takes that over a deposit landing past the cap.
 - Velocity windows count only decided, still-live operations. An operation

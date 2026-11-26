@@ -103,7 +103,7 @@ jobs:
           | API | ${URL} |
           | Database | \`sdp_api_pr_${PR_NUMBER}\` (dev Cloud SQL, branch migrations applied) |
           | Redis | dev Memorystore, dedicated logical db |
-          | Worker | \`sdp-dev-worker-pr-${PR_NUMBER}\` (internal, crons enabled) |
+          | Cron | \`sdp-dev-cron-pr-${PR_NUMBER}\` (internal, crons enabled) |
 
           Redeploys on every push while the \`ephemeral-api\` label is set; torn down when the PR closes. Point the web app at it with \`NEXT_PUBLIC_SDP_API_BASE_URL\`.
           EOF

@@ -1,10 +1,10 @@
-import type { EarnRuntimeContext } from "@sdp/earn/types";
+import { assertFireblocksProposal } from "@sdp/custody/testing/fireblocks-proposal";
+import type { EarnRuntimeContext, EarnSwapLeg, EarnSwapPort } from "@sdp/earn/types";
 import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ONDO_SWAP_COMPUTE_UNIT_LIMIT, OndoVaultDirectClient } from "./client";
 import { SdpOndoError } from "./errors";
-import type { OndoSwapLeg, OndoSwapPort } from "./types";
 
 /**
  * Offline harness: the swap port is a stub and `globalThis.fetch` (the token
@@ -21,7 +21,7 @@ const USDY_ATA = "AM5oZfoUpUUpokKFVQgE23hmPAVw3dtEQatFHnMNP8DP";
 const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 const CTX: EarnRuntimeContext = { env: {}, environment: "production" };
 
-function leg(minOutAmount: string, quotedAmount = minOutAmount): OndoSwapLeg {
+function leg(minOutAmount: string, quotedAmount = minOutAmount): EarnSwapLeg {
   return {
     instructions: [
       {
@@ -38,8 +38,8 @@ function leg(minOutAmount: string, quotedAmount = minOutAmount): OndoSwapLeg {
   };
 }
 
-function makeClient(port: Partial<OndoSwapPort>) {
-  const swapPort: OndoSwapPort = {
+function makeClient(port: Partial<EarnSwapPort>) {
+  const swapPort: EarnSwapPort = {
     quoteSwap: port.quoteSwap ?? (async () => ({ outAmount: "0", priceImpactPct: "0" })),
     buildSwapLeg: port.buildSwapLeg ?? (async () => leg("0")),
   };
@@ -171,13 +171,14 @@ describe("buildVaultDeposit", () => {
     expect(plan.assetIdentity).toEqual({ depositTokenMint: USDC, shareMint: USDY });
     // Canonicalized to what the swap encodes: trailing zeroes dropped.
     expect(plan.accepted).toEqual({ amount: "100.5", minSharesOut: "87" });
+    await assertFireblocksProposal(plan, OWNER);
     expect(plan.createsShareAccount).toBe(true);
   });
 
   it("retries once at zero tolerance when the built floor lands short", async () => {
     stubTokenAccounts(["1"]);
     const buildSwapLeg = vi
-      .fn<OndoSwapPort["buildSwapLeg"]>()
+      .fn<EarnSwapPort["buildSwapLeg"]>()
       .mockResolvedValueOnce(leg("86.9"))
       .mockResolvedValueOnce(leg("87.2"));
     const client = makeClient({
@@ -214,7 +215,7 @@ describe("buildVaultDeposit", () => {
 
   it("refuses when even zero tolerance cannot reach the floor", async () => {
     stubTokenAccounts(["1"]);
-    const buildSwapLeg = vi.fn<OndoSwapPort["buildSwapLeg"]>().mockResolvedValue(leg("86.9"));
+    const buildSwapLeg = vi.fn<EarnSwapPort["buildSwapLeg"]>().mockResolvedValue(leg("86.9"));
     const client = makeClient({
       quoteSwap: async () => ({ outAmount: "87.5", priceImpactPct: "0" }),
       buildSwapLeg,
@@ -260,6 +261,7 @@ describe("buildVaultWithdrawal", () => {
 
     expect(plan.assetIdentity).toEqual({ depositTokenMint: USDC, shareMint: USDY });
     expect(plan.accepted).toEqual({ shares: "50", minAmountOut: "57" });
+    await assertFireblocksProposal(plan, OWNER);
     expect(plan.createsShareAccount).toBeUndefined();
   });
 });

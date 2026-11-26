@@ -18,7 +18,7 @@ import { getDb } from "@/db/client";
 import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
 import { createDvpTradeRepository } from "@/db/repositories/repository-factory";
 import type { ApiKeyContext } from "@/lib/auth";
-import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
+import { CustodyRuntimeTargets } from "@/services/custody/signing/custody-runtime-target";
 import type { Env } from "@/types/env";
 
 /** How many inbound trades a single read returns. */

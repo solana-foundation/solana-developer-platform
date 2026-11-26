@@ -1,114 +1,101 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
-import * as custodyProvisioning from "@/services/custody/provisioning";
-import { createSigningService } from "@/services/domain/signing.service";
+import { createSigningService } from "@/services/custody/signing.service";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
+import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
-
-const provisionPrivyWalletMock = vi.spyOn(custodyProvisioning, "provisionPrivyWallet");
 
 const ORGANIZATION_ID = "org_managed_production_use";
 const USER_ID = "usr_managed_production_use";
-const PROJECT_ID = "prj_managed_production_use_sandbox";
+const PROJECT_IDS = {
+  sandbox: "prj_managed_production_use_sandbox",
+  production: "prj_managed_production_use_production",
+} as const satisfies Record<SdpEnvironment, string>;
 const API_KEY = {
   id: "key_managed_production_use_sandbox",
   raw: "sk_test_managed_production_use",
   prefix: "sk_test_mpu",
 };
-const CACHED_API_KEY: SeededApiKey = {
-  id: API_KEY.id,
-  organizationId: ORGANIZATION_ID,
-  projectId: PROJECT_ID,
-  grants: ALL_API_KEY_GRANTS,
-  environment: "sandbox",
-  rateLimitTier: "standard",
-  allowedIps: null,
-  status: "active",
-  expiresAt: null,
-};
 const CONFIG_ID = "cust_managed_production_use_sandbox";
 const WALLET_RECORD_ID = "cwlt_managed_production_use_sandbox";
 const WALLET_ID = "privy_managed_production_use_sandbox";
-const PUBLIC_KEY = "11111111111111111111111111111111";
-const CREATED_PUBLIC_KEY = "Vote111111111111111111111111111111111111111";
 
-const original = {
-  encryptionKey: env.CUSTODY_ENCRYPTION_KEY,
-  privyAppId: env.PRIVY_APP_ID,
-  privyAppSecret: env.PRIVY_APP_SECRET,
-};
+const originalPrivy = { appId: env.PRIVY_APP_ID, appSecret: env.PRIVY_APP_SECRET };
 
-describe("Managed custody use by project environment", () => {
+// Production is BYOK only (ADR 0006), and the schema keeps Managed configs in
+// Sandbox projects. These cases keep a Sandbox project's Managed wallet usable.
+describe("Managed custody use in a Sandbox project", () => {
   beforeEach(async () => {
-    provisionPrivyWalletMock.mockReset();
-    env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 29).toString("base64");
-    env.PRIVY_APP_ID = "managed-production-use-app";
-    env.PRIVY_APP_SECRET = "managed-production-use-secret";
-    vi.stubGlobal("fetch", vi.fn<typeof fetch>());
     await seedTestDatabase(env);
     await clearKVStores(env);
     await seedFixture();
   });
 
   afterEach(async () => {
-    vi.unstubAllGlobals();
-    env.CUSTODY_ENCRYPTION_KEY = original.encryptionKey;
-    env.PRIVY_APP_ID = original.privyAppId;
-    env.PRIVY_APP_SECRET = original.privyAppSecret;
+    env.PRIVY_APP_ID = originalPrivy.appId;
+    env.PRIVY_APP_SECRET = originalPrivy.appSecret;
     await clearKVStores(env);
   });
 
-  it("creates, admits and reads Managed wallets in a Sandbox project", async () => {
-    provisionPrivyWalletMock.mockResolvedValueOnce({
-      walletId: "managed_production_use_created",
-      address: CREATED_PUBLIC_KEY,
-    });
-
-    const created = await app.request(
-      "/v1/wallets",
-      {
-        method: "POST",
-        headers: { Authorization: `Bearer ${API_KEY.raw}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ provider: "privy" }),
-      },
-      env
-    );
-
-    expect(created.status).toBe(201);
-    expect(await created.json()).toEqual({
-      data: {
-        wallet: {
-          id: expect.any(String),
-          custodyConfigId: CONFIG_ID,
-          isRuntimeExecutionAllowed: true,
-          walletId: "privy_managed_production_use_created",
-          publicKey: CREATED_PUBLIC_KEY,
-          label: null,
-          purpose: "transfer",
-          status: "active",
-          createdAt: expect.any(String),
-        },
-      },
-      meta: { requestId: expect.any(String), timestamp: expect.any(String) },
-    });
-    expect(provisionPrivyWalletMock).toHaveBeenCalledOnce();
+  it("admits a Sandbox project's Managed wallet for runtime execution", async () => {
     await expect(
-      createSigningService(env).admitRuntimeExecution(ORGANIZATION_ID, PROJECT_ID, WALLET_RECORD_ID)
+      createSigningService(env).admitRuntimeExecution(
+        ORGANIZATION_ID,
+        PROJECT_IDS.sandbox,
+        WALLET_RECORD_ID
+      )
     ).resolves.toBeUndefined();
-    const publicKey = await app.request(
+  });
+
+  it("answers a Sandbox project's Managed wallet public key", async () => {
+    env.PRIVY_APP_ID = "managed-production-use-app";
+    env.PRIVY_APP_SECRET = "managed-production-use-secret";
+
+    const response = await app.request(
       `/v1/wallets/public-key?walletId=${WALLET_ID}`,
       { headers: { Authorization: `Bearer ${API_KEY.raw}` } },
       env
     );
-    expect(publicKey.status).toBe(200);
-    expect(await publicKey.json()).toEqual({
-      data: { publicKey: PUBLIC_KEY },
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      data: { publicKey: TEST_SOLANA_ADDRESSES.wallet1 },
+      meta: { requestId: expect.any(String), timestamp: expect.any(String) },
+    });
+  });
+
+  it("lists a Sandbox project's Managed wallet as runtime-executable", async () => {
+    const response = await app.request(
+      "/v1/wallets",
+      { headers: { Authorization: `Bearer ${API_KEY.raw}` } },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      data: {
+        wallets: [
+          {
+            id: WALLET_RECORD_ID,
+            custodyConfigId: CONFIG_ID,
+            provider: "privy",
+            isRuntimeExecutionAllowed: true,
+            walletId: WALLET_ID,
+            publicKey: TEST_SOLANA_ADDRESSES.wallet1,
+            label: null,
+            purpose: null,
+            status: "active",
+            createdAt: expect.any(String),
+          },
+        ],
+      },
       meta: { requestId: expect.any(String), timestamp: expect.any(String) },
     });
   });
@@ -130,22 +117,32 @@ async function seedFixture(): Promise<void> {
     organizationId: ORGANIZATION_ID,
     createdBy: USER_ID,
     members: [],
-    ids: { sandbox: PROJECT_ID, production: "prj_managed_production_use_production" },
+    ids: PROJECT_IDS,
   });
   const keyHash = await seedProjectApiKey(db, env, {
     key: API_KEY,
     organizationId: ORGANIZATION_ID,
-    projectId: PROJECT_ID,
+    projectId: PROJECT_IDS.sandbox,
     createdBy: USER_ID,
     grants: ALL_API_KEY_GRANTS,
   });
-  await seedApiKeyRow(env, keyHash, CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, {
+    id: API_KEY.id,
+    organizationId: ORGANIZATION_ID,
+    projectId: PROJECT_IDS.sandbox,
+    grants: ALL_API_KEY_GRANTS,
+    environment: "sandbox",
+    rateLimitTier: "standard",
+    allowedIps: null,
+    status: "active",
+    expiresAt: null,
+  });
   await seedTestCustodyRows(env, {
     configs: [
       {
         id: CONFIG_ID,
         organizationId: ORGANIZATION_ID,
-        projectId: PROJECT_ID,
+        projectId: PROJECT_IDS.sandbox,
         provider: "privy",
         configEncrypted: JSON.stringify({ provider: "privy" }),
         status: "active",
@@ -156,7 +153,7 @@ async function seedFixture(): Promise<void> {
         id: WALLET_RECORD_ID,
         owner: { kind: "config", custodyConfigId: CONFIG_ID },
         walletId: WALLET_ID,
-        publicKey: PUBLIC_KEY,
+        publicKey: TEST_SOLANA_ADDRESSES.wallet1,
         label: null,
         purpose: null,
         status: "active",

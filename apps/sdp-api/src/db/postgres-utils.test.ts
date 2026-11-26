@@ -3,6 +3,7 @@ import {
   isPostgresUniqueViolation,
   parseOptionalPostgresJson,
   parseOptionalPostgresJsonOr,
+  sqlLiteralList,
 } from "./postgres-utils";
 
 describe("isPostgresUniqueViolation", () => {
@@ -38,5 +39,12 @@ describe("postgres JSON helpers", () => {
     expect(parseOptionalPostgresJsonOr(0, 42)).toBe(0);
     expect(parseOptionalPostgresJsonOr("false", true)).toBe(false);
     expect(parseOptionalPostgresJsonOr("0", 42)).toBe(0);
+  });
+});
+
+describe("sqlLiteralList", () => {
+  it("quotes each value for an IN clause and escapes embedded quotes", () => {
+    expect(sqlLiteralList(["fulfilled", "cancelled"])).toBe("'fulfilled', 'cancelled'");
+    expect(sqlLiteralList(["it's"])).toBe("'it''s'");
   });
 });

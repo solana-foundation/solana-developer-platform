@@ -1,9 +1,25 @@
 // @vitest-environment jsdom
 
+import type { EarnVaultPosition } from "@sdp/types/earn";
+import type { Operation } from "@sdp/types/operations";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useEffect, useEffectEvent } from "react";
+import { SWRConfig, useSWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { EarnWithdrawalRecovery } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-core-operations";
+import { earnQueryKeys } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-query-key";
+import {
+  type EarnProviderAccess,
+  SURFACED_VAULT_DIRECT_EARN_PROVIDERS,
+} from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-surfacing";
 import { EnglishTestI18n } from "@/app/(session)/dashboard/[projectId]/markets/test-i18n";
+import {
+  earnCoreClient,
+  isEarnOperationTerminal,
+  useEarnOperation,
+  useEarnOperations,
+} from "@/lib/earn-core-data";
 import * as kaminoAllocations from "./kamino-allocations";
 import type { KaminoVaultAllocations } from "./kamino-allocations-schema";
 import { TREASURY_WALLETS_BODY } from "./treasury-layout";
@@ -31,119 +47,26 @@ const mocks = vi.hoisted(() => ({
   canManageCustody: true,
   canWrite: true,
   environment: "sandbox" as "sandbox" | "production",
-  programProvider: "upshift",
   // Every cluster value useEarnStrategies was asked for, across renders.
   strategiesClusterRequests: [] as Array<"devnet" | "mainnet-beta" | undefined>,
   refreshStrategies: vi.fn(),
   refreshPositions: vi.fn(),
   positionsAfterMovementIds: [] as string[],
-  refreshPrograms: vi.fn(),
   refreshWalletBalances: vi.fn(),
   refreshWallets: vi.fn(),
-  withdrawalsByProgram: {} as Record<string, Array<{ status: string; withdrawalRef?: string }>>,
-  vaultDeposits: [] as Array<{
-    createdAt?: string;
-    failureReason?: string | null;
-    movementId: string;
-    positionId?: string;
-    status: string;
-  }>,
-  vaultWithdrawals: [] as Array<{
-    createdAt?: string;
-    failureReason?: string | null;
-    movementId: string;
-    positionId?: string;
-    provider: string;
-    status: string;
-  }>,
-  vaultDepositTrackers: {} as Record<
-    string,
-    {
-      onSettled?: (deposit: {
-        createdAt?: string;
-        failureReason: string | null;
-        movementId: string;
-        positionId: string;
-        status: string;
-      }) => void;
-      onUpdated?: (deposit: {
-        createdAt?: string;
-        failureReason: string | null;
-        movementId: string;
-        positionId: string;
-        status: string;
-      }) => void;
-    }
-  >,
-  vaultWithdrawalTrackers: {} as Record<
-    string,
-    {
-      onSettled?: (withdrawal: {
-        createdAt: string;
-        failureReason: string | null;
-        movementId: string;
-        positionId: string;
-        status: string;
-      }) => void;
-      onUpdated?: (withdrawal: {
-        createdAt: string;
-        failureReason: string | null;
-        movementId: string;
-        positionId: string;
-        status: string;
-      }) => void;
-    }
-  >,
-  vaultDepositModal: undefined as
+  coreAction: undefined as
     | {
-        onDeposited?: (
-          deposit: {
-            failureReason: string | null;
-            movementId: string;
-            positionId: string;
-            status: string;
-          },
-          intent?: {
-            amount: string;
-            custodyWalletId: string;
-
-            submittedAt: number;
-          }
-        ) => void;
-        onMovementUpdated?: (deposit: {
-          createdAt?: string;
-          failureReason: string | null;
-          movementId: string;
-          positionId: string;
-          status: string;
-        }) => void;
+        kind: "deposit" | "withdraw";
+        intermediate?: boolean;
+        defaultWithdrawAll?: boolean;
+        onClose: () => void;
+        onUpdated?: (operation: Operation) => void;
       }
     | undefined,
-  vaultWithdrawalModal: undefined as
+  coreFeed: undefined as
     | {
-        parSource?: "shares" | "intermediate";
-        onWithdrawn?: (
-          withdrawal: {
-            createdAt: string;
-            failureReason: string | null;
-            movementId: string;
-            positionId: string;
-            status: string;
-          },
-          intent?: { amount: string; submittedAt: number }
-        ) => void;
-        onMovementUpdated?: (withdrawal: {
-          createdAt: string;
-          failureReason: string | null;
-          movementId: string;
-          positionId: string;
-          status: string;
-        }) => void;
-        onAsyncRequestSettled?: (event: {
-          kind: "queue";
-          request: { withdrawalRequestId: string };
-        }) => void;
-        position: { label: string };
+        onUpdated: (operation: Operation) => void;
+        withdrawalRecovery?: EarnWithdrawalRecovery<EarnVaultPosition>;
       }
     | undefined,
   walletBalances: undefined as
@@ -243,503 +166,346 @@ vi.mock("@/app/(session)/dashboard/[projectId]/markets/earn/deposit/earn-funding
   }),
 }));
 
-vi.mock(
-  "@/app/(session)/dashboard/[projectId]/markets/earn/earn-program-data",
-  async (importOriginal) => ({
-    // Everything not overridden below stays REAL — most importantly the
-    // in-flight predicates the recovery filter reads. Hand-copying them here
-    // went stale the moment the provider-order settlement fork (#1959) changed
-    // the withdrawal rule, while this file kept passing against the snapshot.
-    ...(await importOriginal<
-      typeof import("@/app/(session)/dashboard/[projectId]/markets/earn/earn-program-data")
-    >()),
-    useEarnStrategies: (options?: { cluster?: "devnet" | "mainnet-beta" }) => {
-      mocks.strategiesClusterRequests.push(options?.cluster);
-      // The mirrored mainnet shelf (PRO-1742) is the sandbox catalogue's base
-      // list. Rows arrive `fundable: false`, exactly as the API derives them.
-      if (options?.cluster === "mainnet-beta") {
-        const mainnetUnavailable =
-          mocks.mainnetStrategiesUnavailable || mocks.mainnetStrategiesLoading;
-        return {
-          error: mocks.mainnetStrategiesUnavailable
-            ? new Error("mainnet catalogue unavailable")
-            : undefined,
-          isLoading: mocks.mainnetStrategiesLoading,
-          refresh: mocks.refreshStrategies,
-          strategies: mainnetUnavailable
-            ? undefined
-            : [
-                {
-                  id: "earn_strategy_mainnet_mirror",
-                  provider: "kamino",
-                  providerReference: "KvaultMainnet111111111111111111111111111111",
-                  name: "Kamino JLP Vault",
-                  sourceKind: "defi",
-                  depositMints: [USDC_MINT],
-                  shareMint: "ShareMainnet111111111111111111111111111111",
-                  apyType: "variable",
-                  currentApy: "0.081",
-                  riskMetadata: { tvlUsd: 32_000_000 },
-                  liquidityTerm: "instant",
-                  status: "active",
-                  hostCluster: "mainnet-beta",
-                  fundable: false,
-                  createdAt: "2026-08-18T00:00:00.000Z",
-                  updatedAt: "2026-08-18T00:00:00.000Z",
-                },
-                // The mainnet counterparts the intersection filter demands: the
-                // devnet rows may only advertise names this shelf actually
-                // offers, from the same provider. RockawayX is deliberately
-                // absent — the devnet vault mapping to it must stay hidden.
-                {
-                  id: "earn_strategy_mainnet_steakhouse",
-                  provider: "kamino",
-                  providerReference: "KvaultMainnetSteakhouse1111111111111111111",
-                  name: "Steakhouse USDC",
-                  sourceKind: "defi",
-                  depositMints: [USDC_MINT],
-                  shareMint: "ShareMainnetSteakhouse111111111111111111111",
-                  apyType: "variable",
-                  currentApy: "0.058",
-                  riskMetadata: { tvlUsd: 40_000_000 },
-                  liquidityTerm: "instant",
-                  status: "active",
-                  hostCluster: "mainnet-beta",
-                  fundable: false,
-                  createdAt: "2026-08-18T00:00:00.000Z",
-                  updatedAt: "2026-08-18T00:00:00.000Z",
-                },
-                {
-                  id: "earn_strategy_mainnet_allez",
-                  provider: "kamino",
-                  providerReference: "KvaultMainnetAllez1111111111111111111111",
-                  name: "Allez USDC",
-                  sourceKind: "defi",
-                  depositMints: [USDC_MINT],
-                  shareMint: "ShareMainnetAllez111111111111111111111111",
-                  apyType: "variable",
-                  currentApy: "0.045",
-                  riskMetadata: { tvlUsd: 18_000_000 },
-                  liquidityTerm: "instant",
-                  status: "active",
-                  hostCluster: "mainnet-beta",
-                  fundable: false,
-                  createdAt: "2026-08-18T00:00:00.000Z",
-                  updatedAt: "2026-08-18T00:00:00.000Z",
-                },
-              ],
-        };
-      }
-      const strategiesUnavailable = mocks.strategiesUnavailable || mocks.strategiesLoading;
+vi.mock("@/app/(session)/dashboard/[projectId]/markets/earn/earn-data", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/app/(session)/dashboard/[projectId]/markets/earn/earn-data")
+  >()),
+  useEarnStrategies: (options?: { cluster?: "devnet" | "mainnet-beta" }) => {
+    mocks.strategiesClusterRequests.push(options?.cluster);
+    // The mirrored mainnet shelf (PRO-1742) is the sandbox catalogue's base
+    // list. Rows arrive `fundable: false`, exactly as the API derives them.
+    if (options?.cluster === "mainnet-beta") {
+      const mainnetUnavailable =
+        mocks.mainnetStrategiesUnavailable || mocks.mainnetStrategiesLoading;
       return {
-        error:
-          mocks.strategiesUnavailable || mocks.strategiesStaleError
-            ? new Error("catalogue unavailable")
-            : undefined,
-        isLoading: mocks.strategiesLoading,
+        error: mocks.mainnetStrategiesUnavailable
+          ? new Error("mainnet catalogue unavailable")
+          : undefined,
+        isLoading: mocks.mainnetStrategiesLoading,
         refresh: mocks.refreshStrategies,
-        strategies: strategiesUnavailable
+        strategies: mainnetUnavailable
           ? undefined
           : [
               {
-                id: "earn_strategy_live",
+                id: "earn_strategy_mainnet_mirror",
                 provider: "kamino",
-                providerReference: "Kvault11111111111111111111111111111111111",
+                providerReference: "KvaultMainnet111111111111111111111111111111",
+                name: "Kamino JLP Vault",
+                sourceKind: "defi",
+                depositMints: [USDC_MINT],
+                shareMint: "ShareMainnet111111111111111111111111111111",
+                apyType: "variable",
+                currentApy: "0.081",
+                riskMetadata: { tvlUsd: 32_000_000 },
+                liquidityTerm: "instant",
+                status: "active",
+                hostCluster: "mainnet-beta",
+                fundable: false,
+                createdAt: "2026-08-18T00:00:00.000Z",
+                updatedAt: "2026-08-18T00:00:00.000Z",
+              },
+              // The mainnet counterparts the intersection filter demands: the
+              // devnet rows may only advertise names this shelf actually
+              // offers, from the same provider. RockawayX is deliberately
+              // absent — the devnet vault mapping to it must stay hidden.
+              {
+                id: "earn_strategy_mainnet_steakhouse",
+                provider: "kamino",
+                providerReference: "KvaultMainnetSteakhouse1111111111111111111",
                 name: "Steakhouse USDC",
                 sourceKind: "defi",
                 depositMints: [USDC_MINT],
-                shareMint: SHARE_MINT,
+                shareMint: "ShareMainnetSteakhouse111111111111111111111",
                 apyType: "variable",
-                currentApy: "0.062",
-                riskMetadata: { tvlUsd: 12_345_678.9 },
+                currentApy: "0.058",
+                riskMetadata: { tvlUsd: 40_000_000 },
                 liquidityTerm: "instant",
                 status: "active",
-                hostCluster: "devnet",
-                fundable: true,
+                hostCluster: "mainnet-beta",
+                fundable: false,
                 createdAt: "2026-08-18T00:00:00.000Z",
                 updatedAt: "2026-08-18T00:00:00.000Z",
               },
               {
-                id: "earn_strategy_catalogue_only",
+                id: "earn_strategy_mainnet_allez",
                 provider: "kamino",
-                providerReference: "KvaultCatalogue1111111111111111111111111111",
+                providerReference: "KvaultMainnetAllez1111111111111111111111",
                 name: "Allez USDC",
                 sourceKind: "defi",
                 depositMints: [USDC_MINT],
-                ...(mocks.strategyMissingShareMint
-                  ? {}
-                  : { shareMint: mocks.corruptStableShareMint ? USDC_MINT : CATALOGUE_SHARE_MINT }),
+                shareMint: "ShareMainnetAllez111111111111111111111111",
                 apyType: "variable",
-                currentApy: "0.041",
-                riskMetadata: { tvlUsd: 25_000_000 },
+                currentApy: "0.045",
+                riskMetadata: { tvlUsd: 18_000_000 },
                 liquidityTerm: "instant",
                 status: "active",
-                hostCluster: "devnet",
-                fundable: true,
-                createdAt: "2026-08-18T00:00:00.000Z",
-                updatedAt: "2026-08-18T00:00:00.000Z",
-              },
-              // A devnet vault with NO mainnet counterpart: the Sandbox shelf
-              // hides it (the rough-name intersection), so nothing below may
-              // treat it as rendered.
-              {
-                id: "earn_strategy_devnet_only",
-                provider: "kamino",
-                providerReference: "KvaultDevnetOnly11111111111111111111111111",
-                name: "Kamino Vault USDC",
-                sourceKind: "defi",
-                depositMints: [USDC_MINT],
-                shareMint: "ShareDevnetOnly111111111111111111111111111",
-                apyType: "variable",
-                currentApy: "0.055",
-                riskMetadata: { tvlUsd: 5_000_000 },
-                liquidityTerm: "instant",
-                status: "active",
-                hostCluster: "devnet",
-                fundable: true,
-                createdAt: "2026-08-18T00:00:00.000Z",
-                updatedAt: "2026-08-18T00:00:00.000Z",
-              },
-              // A mapped name whose mainnet counterpart the loaded mainnet shelf
-              // never lists: the catalogue check must veto the mapping, so this
-              // row stays off the Sandbox shelf too (the RockawayX case).
-              {
-                id: "earn_strategy_rockaway_devnet",
-                provider: "kamino",
-                providerReference: "KvaultRockaway11111111111111111111111111",
-                name: "RockawayX RWA USDC",
-                sourceKind: "defi",
-                depositMints: [USDC_MINT],
-                shareMint: "ShareRockaway111111111111111111111111111111",
-                apyType: "variable",
-                currentApy: "0.048",
-                riskMetadata: { tvlUsd: 8_000_000 },
-                liquidityTerm: "instant",
-                status: "active",
-                hostCluster: "devnet",
-                fundable: true,
-                createdAt: "2026-08-18T00:00:00.000Z",
-                updatedAt: "2026-08-18T00:00:00.000Z",
-              },
-              // A delayed-liquidity fund with no observed APY yet: liquidity must
-              // name its redemption delay and the APY cell must stay a
-              // placeholder, never a fabricated rate.
-              {
-                id: "earn_strategy_delayed_fund",
-                provider: "veda",
-                providerReference: "VedaFund1111111111111111111111111111111111",
-                name: "Veda Treasury Fund",
-                sourceKind: "rwa",
-                depositMints: [USDC_MINT],
-                shareMint: "ShareDelayed11111111111111111111111111111111",
-                apyType: "fixed",
-                liquidityTerm: "delayed",
-                redemptionDelayDays: 7,
-                status: "active",
-                hostCluster: "devnet",
-                fundable: true,
+                hostCluster: "mainnet-beta",
+                fundable: false,
                 createdAt: "2026-08-18T00:00:00.000Z",
                 updatedAt: "2026-08-18T00:00:00.000Z",
               },
             ],
       };
-    },
-    useEarnVaultPositions: () => {
-      const positions = mocks.positionsEmpty
-        ? []
+    }
+    const strategiesUnavailable = mocks.strategiesUnavailable || mocks.strategiesLoading;
+    return {
+      error:
+        mocks.strategiesUnavailable || mocks.strategiesStaleError
+          ? new Error("catalogue unavailable")
+          : undefined,
+      isLoading: mocks.strategiesLoading,
+      refresh: mocks.refreshStrategies,
+      strategies: strategiesUnavailable
+        ? undefined
         : [
             {
-              id: "earn_vault_position_live",
+              id: "earn_strategy_live",
               provider: "kamino",
               providerReference: "Kvault11111111111111111111111111111111111",
-              label: "Steakhouse USDC",
-              custodyWalletId: "cwlt_live",
-              tokenMint: USDC_MINT,
+              name: "Steakhouse USDC",
+              sourceKind: "defi",
+              depositMints: [USDC_MINT],
               shareMint: SHARE_MINT,
+              apyType: "variable",
+              currentApy: "0.062",
+              riskMetadata: { tvlUsd: 12_345_678.9 },
+              liquidityTerm: "instant",
+              status: "active",
+              hostCluster: "devnet",
+              fundable: true,
               createdAt: "2026-08-18T00:00:00.000Z",
-              closedAt: null,
-              feeSponsored: false,
-              shares: mocks.livePositionShares,
-              tokenValue: mocks.livePositionTokenValue,
+              updatedAt: "2026-08-18T00:00:00.000Z",
             },
             {
-              id: "earn_vault_position_retired",
+              id: "earn_strategy_catalogue_only",
               provider: "kamino",
-              providerReference: "KvaultRetired111111111111111111111111111111",
-              label: "Retired provider vault",
-              custodyWalletId: "cwlt_live",
-              tokenMint: USDC_MINT,
-              shareMint: "ShareRetired1111111111111111111111111111111",
-              createdAt: "2026-08-17T00:00:00.000Z",
-              closedAt: null,
-              feeSponsored: false,
-              shares: "5",
-              tokenValue: "5.25",
+              providerReference: "KvaultCatalogue1111111111111111111111111111",
+              name: "Allez USDC",
+              sourceKind: "defi",
+              depositMints: [USDC_MINT],
+              ...(mocks.strategyMissingShareMint
+                ? {}
+                : { shareMint: mocks.corruptStableShareMint ? USDC_MINT : CATALOGUE_SHARE_MINT }),
+              apyType: "variable",
+              currentApy: "0.041",
+              riskMetadata: { tvlUsd: 25_000_000 },
+              liquidityTerm: "instant",
+              status: "active",
+              hostCluster: "devnet",
+              fundable: true,
+              createdAt: "2026-08-18T00:00:00.000Z",
+              updatedAt: "2026-08-18T00:00:00.000Z",
             },
+            // A devnet vault with NO mainnet counterpart: the Sandbox shelf
+            // hides it (the rough-name intersection), so nothing below may
+            // treat it as rendered.
             {
-              id: "earn_vault_position_exited",
+              id: "earn_strategy_devnet_only",
               provider: "kamino",
-              providerReference: "KvaultExited1111111111111111111111111111111",
-              label: "Exited provider vault",
-              custodyWalletId: "cwlt_live",
-              tokenMint: USDC_MINT,
-              shareMint: "ShareExited11111111111111111111111111111111",
-              createdAt: "2026-08-16T00:00:00.000Z",
-              closedAt: null,
-              feeSponsored: false,
-              shares: "0",
-              tokenValue: "0",
-              ...(mocks.exitedPositionParIntermediate
-                ? { parIntermediate: mocks.exitedPositionParIntermediate }
-                : {}),
+              providerReference: "KvaultDevnetOnly11111111111111111111111111",
+              name: "Kamino Vault USDC",
+              sourceKind: "defi",
+              depositMints: [USDC_MINT],
+              shareMint: "ShareDevnetOnly111111111111111111111111111",
+              apyType: "variable",
+              currentApy: "0.055",
+              riskMetadata: { tvlUsd: 5_000_000 },
+              liquidityTerm: "instant",
+              status: "active",
+              hostCluster: "devnet",
+              fundable: true,
+              createdAt: "2026-08-18T00:00:00.000Z",
+              updatedAt: "2026-08-18T00:00:00.000Z",
             },
-          ];
-      return {
-        // Real SWR keeps stale data alongside an error; the workspace guard is
-        // what must refuse to render it as live.
-        error: mocks.positionsError ? new Error("positions unavailable") : undefined,
-        isLoading: false,
-        // The mutation resolves with a real read envelope; tests independently
-        // advance the rendered cache to exercise the render/refresh boundary.
-        refresh: (movementIds?: readonly string[]) => {
-          mocks.refreshPositions(movementIds);
-          return Promise.resolve({
-            positions,
-            startedAt: mocks.positionsReadStartedAt,
-            landedAt: mocks.positionsReadLandedAt,
-            afterMovementIds: movementIds,
-            minimumSlot: movementIds?.length ? 101 : undefined,
-          });
+            // A mapped name whose mainnet counterpart the loaded mainnet shelf
+            // never lists: the catalogue check must veto the mapping, so this
+            // row stays off the Sandbox shelf too (the RockawayX case).
+            {
+              id: "earn_strategy_rockaway_devnet",
+              provider: "kamino",
+              providerReference: "KvaultRockaway11111111111111111111111111",
+              name: "RockawayX RWA USDC",
+              sourceKind: "defi",
+              depositMints: [USDC_MINT],
+              shareMint: "ShareRockaway111111111111111111111111111111",
+              apyType: "variable",
+              currentApy: "0.048",
+              riskMetadata: { tvlUsd: 8_000_000 },
+              liquidityTerm: "instant",
+              status: "active",
+              hostCluster: "devnet",
+              fundable: true,
+              createdAt: "2026-08-18T00:00:00.000Z",
+              updatedAt: "2026-08-18T00:00:00.000Z",
+            },
+            // A delayed-liquidity fund with no observed APY yet: liquidity must
+            // name its redemption delay and the APY cell must stay a
+            // placeholder, never a fabricated rate.
+            {
+              id: "earn_strategy_delayed_fund",
+              provider: "veda",
+              providerReference: "VedaFund1111111111111111111111111111111111",
+              name: "Veda Treasury Fund",
+              sourceKind: "rwa",
+              depositMints: [USDC_MINT],
+              shareMint: "ShareDelayed11111111111111111111111111111111",
+              apyType: "fixed",
+              liquidityTerm: "delayed",
+              redemptionDelayDays: 7,
+              status: "active",
+              hostCluster: "devnet",
+              fundable: true,
+              createdAt: "2026-08-18T00:00:00.000Z",
+              updatedAt: "2026-08-18T00:00:00.000Z",
+            },
+          ],
+    };
+  },
+  useEarnVaultPositions: () => {
+    const exited = {
+      id: "earn_vault_position_exited",
+      provider: "kamino",
+      providerReference: "KvaultExited1111111111111111111111111111111",
+      label: "Exited provider vault",
+      custodyWalletId: "cwlt_live",
+      tokenMint: USDC_MINT,
+      shareMint: "ShareExited11111111111111111111111111111111",
+      createdAt: "2026-08-16T00:00:00.000Z",
+      closedAt: null,
+      feeSponsored: false,
+      shares: "0",
+      tokenValue: "0",
+    };
+    const positions = mocks.positionsEmpty
+      ? []
+      : [
+          {
+            id: "earn_vault_position_live",
+            provider: "kamino",
+            providerReference: "Kvault11111111111111111111111111111111111",
+            label: "Steakhouse USDC",
+            custodyWalletId: "cwlt_live",
+            tokenMint: USDC_MINT,
+            shareMint: SHARE_MINT,
+            createdAt: "2026-08-18T00:00:00.000Z",
+            closedAt: null,
+            feeSponsored: false,
+            shares: mocks.livePositionShares,
+            tokenValue: mocks.livePositionTokenValue,
+          },
+          {
+            id: "earn_vault_position_retired",
+            provider: "kamino",
+            providerReference: "KvaultRetired111111111111111111111111111111",
+            label: "Retired provider vault",
+            custodyWalletId: "cwlt_live",
+            tokenMint: USDC_MINT,
+            shareMint: "ShareRetired1111111111111111111111111111111",
+            createdAt: "2026-08-17T00:00:00.000Z",
+            closedAt: null,
+            feeSponsored: false,
+            shares: "5",
+            tokenValue: "5.25",
+          },
+          mocks.exitedPositionParIntermediate
+            ? { ...exited, parIntermediate: mocks.exitedPositionParIntermediate }
+            : exited,
+        ];
+    return {
+      // Real SWR keeps stale data alongside an error; the workspace guard is
+      // what must refuse to render it as live.
+      error: mocks.positionsError ? new Error("positions unavailable") : undefined,
+      isLoading: false,
+      // The mutation resolves with a real read envelope; tests independently
+      // advance the rendered cache to exercise the render/refresh boundary.
+      refresh: (movementIds?: readonly string[]) => {
+        mocks.refreshPositions(movementIds);
+        return Promise.resolve({
+          positions,
+          startedAt: mocks.positionsReadStartedAt,
+          landedAt: mocks.positionsReadLandedAt,
+          afterMovementIds: movementIds,
+          minimumSlot: movementIds?.length ? 101 : undefined,
+        });
+      },
+      positions,
+      // One read whose contents follow the mocks; a test moves its clock and
+      // shares to stand for the next read landing.
+      reads: [
+        {
+          startedAt: mocks.positionsReadStartedAt,
+          landedAt: mocks.positionsReadLandedAt,
+          afterMovementIds: mocks.positionsAfterMovementIds,
+          positions,
         },
-        positions,
-        // One read whose contents follow the mocks; a test moves its clock and
-        // shares to stand for the next read landing.
-        reads: [
-          {
-            startedAt: mocks.positionsReadStartedAt,
-            landedAt: mocks.positionsReadLandedAt,
-            afterMovementIds: mocks.positionsAfterMovementIds,
-            positions,
-          },
-        ],
-      };
+      ],
+    };
+  },
+}));
+
+vi.mock("@/app/(session)/dashboard/[projectId]/markets/earn/earn-core-action-modal", () => ({
+  EarnCoreActionModal: (props: {
+    kind: "deposit" | "withdraw";
+    intermediate?: boolean;
+    defaultWithdrawAll?: boolean;
+    strategy?: { name: string };
+    position?: { label: string };
+    onClose: () => void;
+    onUpdated?: (operation: Operation) => void;
+  }) => {
+    mocks.coreAction = props;
+    return (
+      <div role="dialog">
+        {props.kind === "deposit"
+          ? `Deposit into ${props.strategy?.name}`
+          : `Withdraw from ${props.position?.label}`}
+      </div>
+    );
+  },
+}));
+vi.mock("@/app/(session)/dashboard/[projectId]/markets/earn/earn-core-operations", () => ({
+  EarnCoreOperations: (props: {
+    onUpdated: (operation: Operation) => void;
+    withdrawalRecovery?: EarnWithdrawalRecovery<EarnVaultPosition>;
+  }) => {
+    mocks.coreFeed = props;
+    return null;
+  },
+}));
+
+function coreOperation(status: Operation["status"]): Operation {
+  return {
+    id: "core-operation",
+    kind: "earn.deposit",
+    status,
+    environment: "sandbox",
+    intent: {
+      kind: "earn.deposit",
+      strategyId: "strategy",
+      source: { walletId: "cwlt_live" },
+      amount: { mint: USDC_MINT, value: "100" },
     },
-    useEarnPrograms: () => ({
-      error: undefined,
-      isLoading: false,
-      refresh: mocks.refreshPrograms,
-      state: {
-        kind: "ready",
-        programs: [
-          {
-            id: "earn_program_ground",
-            provider: mocks.programProvider,
-            label: "Legacy treasury program",
-            createdAt: "2026-08-01T00:00:00.000Z",
-            wallet: {
-              providerWalletRef: "ground_wallet",
-              status: "ready",
-              balance: {
-                totalUsd: "900.50",
-                withdrawableUsd: "880.25",
-                reservedUsd: "20.25",
-                earnedUsd: "5.50",
-              },
-              positions: [],
-              allocations: {},
-            },
-          },
-          {
-            id: "earn_program_ground_secondary",
-            provider: mocks.programProvider,
-            label: "Secondary treasury program",
-            createdAt: "2026-08-02T00:00:00.000Z",
-            wallet: {
-              providerWalletRef: "ground_wallet_secondary",
-              status: "ready",
-              balance: {
-                totalUsd: "100.00",
-                withdrawableUsd: "100.00",
-                reservedUsd: "0",
-                earnedUsd: "1.00",
-              },
-              positions: [],
-              allocations: {},
-            },
-          },
-        ],
-      },
-    }),
-    useEarnProgramWithdrawals: (programId: string) => ({
-      error: undefined,
-      isLoading: false,
-      refresh: vi.fn(),
-      withdrawals: mocks.withdrawalsByProgram[programId] ?? [],
-    }),
-    useEarnVaultDeposits: () => ({
-      deposits: mocks.vaultDeposits,
-      error: undefined,
-      isLoading: false,
-      refresh: vi.fn(),
-    }),
-    useEarnVaultWithdrawals: () => ({
-      withdrawals: mocks.vaultWithdrawals,
-      error: undefined,
-      isLoading: false,
-      refresh: vi.fn(),
-    }),
-  })
-);
-
-vi.mock("@/app/(session)/dashboard/[projectId]/markets/earn/earn-vault-withdraw-modal", () => ({
-  EarnVaultWithdrawModal: (props: {
-    onWithdrawn?: (
-      withdrawal: {
-        createdAt: string;
-        failureReason: string | null;
-        movementId: string;
-        positionId: string;
-        status: string;
-      },
-      intent?: { amount: string; submittedAt: number }
-    ) => void;
-    onMovementUpdated?: (withdrawal: {
-      createdAt: string;
-      failureReason: string | null;
-      movementId: string;
-      positionId: string;
-      status: string;
-    }) => void;
-    position: { label: string };
-  }) => {
-    mocks.vaultWithdrawalModal = props;
-    return <div role="dialog">Withdraw from {props.position.label}</div>;
-  },
-}));
-
-vi.mock("@/app/(session)/dashboard/[projectId]/markets/earn/earn-outcome-trackers", () => ({
-  EarnVaultWithdrawalOutcomeTracker: (props: {
-    movementId: string;
-    onSettled?: (withdrawal: {
-      createdAt: string;
-      failureReason: string | null;
-      movementId: string;
-      positionId: string;
-      status: string;
-    }) => void;
-    onUpdated?: (withdrawal: {
-      createdAt: string;
-      failureReason: string | null;
-      movementId: string;
-      positionId: string;
-      status: string;
-    }) => void;
-  }) => {
-    mocks.vaultWithdrawalTrackers[props.movementId] = props;
-    return <output data-testid="vault-withdrawal-outcome-tracker">{props.movementId}</output>;
-  },
-  EarnVaultDepositOutcomeTracker: (props: {
-    movementId: string;
-    onSettled?: (deposit: {
-      createdAt?: string;
-      failureReason: string | null;
-      movementId: string;
-      positionId: string;
-      status: string;
-    }) => void;
-    onUpdated?: (deposit: {
-      createdAt?: string;
-      failureReason: string | null;
-      movementId: string;
-      positionId: string;
-      status: string;
-    }) => void;
-  }) => {
-    mocks.vaultDepositTrackers[props.movementId] = props;
-    return <output data-testid="vault-deposit-outcome-tracker">{props.movementId}</output>;
-  },
-  EarnWithdrawalOutcomeTracker: ({
-    programId,
-    withdrawalRef,
-  }: {
-    programId: string;
-    withdrawalRef: string;
-  }) => <output data-testid="withdrawal-outcome-tracker">{`${programId}:${withdrawalRef}`}</output>,
-}));
-
-vi.mock("@/app/(session)/dashboard/[projectId]/markets/earn/earn-vault-exit-modal", () => ({
-  EarnVaultExitModal: (props: {
-    parSource?: "shares" | "intermediate";
-    onWithdrawn?: (
-      withdrawal: {
-        createdAt: string;
-        failureReason: string | null;
-        movementId: string;
-        positionId: string;
-        status: string;
-      },
-      intent?: { amount: string; submittedAt: number }
-    ) => void;
-    onMovementUpdated?: (withdrawal: {
-      createdAt: string;
-      failureReason: string | null;
-      movementId: string;
-      positionId: string;
-      status: string;
-    }) => void;
-    onAsyncRequestSettled?: (event: {
-      kind: "queue";
-      request: { withdrawalRequestId: string };
-    }) => void;
-    position: { label: string };
-  }) => {
-    mocks.vaultWithdrawalModal = props;
-    return <div role="dialog">Withdraw from {props.position.label}</div>;
-  },
-}));
-
-vi.mock(
-  "@/app/(session)/dashboard/[projectId]/markets/earn/earn-vault-withdrawal-requests-card",
-  () => ({
-    EarnVaultWithdrawalRequestsCard: () => null,
-  })
-);
-
-vi.mock("@/app/(session)/dashboard/[projectId]/markets/earn/earn-vault-deposit-modal", () => ({
-  EarnVaultDepositModal: (props: {
-    onDeposited?: (
-      deposit: {
-        failureReason: string | null;
-        movementId: string;
-        positionId: string;
-        status: string;
-      },
-      intent?: {
-        amount: string;
-        custodyWalletId: string;
-
-        submittedAt: number;
-      }
-    ) => void;
-    onMovementUpdated?: (deposit: {
-      createdAt?: string;
-      failureReason: string | null;
-      movementId: string;
-      positionId: string;
-      status: string;
-    }) => void;
-    strategy: { name: string };
-  }) => {
-    mocks.vaultDepositModal = props;
-    return <div role="dialog">Deposit into {props.strategy.name}</div>;
-  },
-}));
-
-vi.mock("@/app/(session)/dashboard/[projectId]/markets/earn/earn-withdraw-modal", () => ({
-  EarnWithdrawModal: ({ programId }: { programId: string }) => (
-    <div role="dialog">Withdraw from {programId}</div>
-  ),
-}));
+    actionId: "action",
+    version: 1,
+    nextAction:
+      status === "completed" ? null : { type: "wait", reason: "Waiting for confirmation" },
+    terms: { expiresAt: null, estimate: null, minimum: null, fees: null, options: [] },
+    buildRef: null,
+    resourceRef: { kind: "earn.movement", id: "core-movement" },
+    result: {
+      positionId: "earn_vault_position_live",
+      signature: "signature",
+      source: { walletId: "cwlt_live" },
+      settledAmount: null,
+      settlementOutcome: null,
+    },
+    error: null,
+    canCancel: false,
+    cancelRequestedAt: null,
+    createdAt: "2026-11-18T00:00:00Z",
+    updatedAt: "2026-11-18T00:00:00Z",
+  };
+}
 
 // A fresh element per call: React bails out of re-rendering a subtree handed
 // the identical element instance, which would leave the mocked hooks unread.
@@ -753,26 +519,43 @@ const workspaceElement = () => (
   </EnglishTestI18n>
 );
 
-function renderWorkspace() {
-  return render(workspaceElement());
+function LiveOperationDetail({ operation }: { operation: Operation }) {
+  useEarnOperation(operation.id, operation, (updated) => mocks.coreFeed?.onUpdated(updated));
+  return null;
 }
 
-/** Re-render after mutating `mocks`, the way a fresh SWR read would. */
-function rerenderWorkspace(view: ReturnType<typeof renderWorkspace>) {
-  view.rerender(workspaceElement());
+function LiveOperationsFeed({
+  operationId,
+  onPollReady,
+}: {
+  operationId: string;
+  onPollReady: (poll: () => Promise<unknown>) => void;
+}) {
+  const { operations } = useEarnOperations();
+  const { mutate } = useSWRConfig();
+  const reportPollReady = useEffectEvent(onPollReady);
+  useEffect(() => {
+    reportPollReady(() => mutate(earnQueryKeys.operations()));
+  }, [mutate]);
+  const operation = operations?.find(({ id }) => id === operationId);
+  return (
+    <>
+      <p data-testid="observed-exit">{operation?.status ?? "absent"}</p>
+      {operation && !isEarnOperationTerminal(operation) ? (
+        <LiveOperationDetail operation={operation} />
+      ) : null}
+    </>
+  );
+}
+
+function renderWorkspace() {
+  return render(workspaceElement());
 }
 
 /** The summary's hero figure: what is deposited across open positions. */
 function summaryFigure(): string | undefined {
   const label = within(document.body).getByRole("heading", { name: "Deposited" });
   return label.nextElementSibling?.textContent ?? undefined;
-}
-
-/** One custody wallet's tile. */
-function walletTile(walletId: string): HTMLElement {
-  const tile = document.querySelector<HTMLElement>(`[data-treasury-wallet="${walletId}"]`);
-  if (!tile) throw new Error(`Expected the ${walletId} wallet tile`);
-  return tile;
 }
 
 /** The Active positions row for the recorded live position. */
@@ -785,13 +568,6 @@ function livePositionRow(): HTMLTableRowElement {
     );
   if (!row) throw new Error("Expected position row");
   return row;
-}
-
-function syncingBalanceText(row: HTMLElement): string | undefined {
-  return (
-    within(row).queryByTitle("Updating balance…")?.querySelector("[data-earn-vault-balance-value]")
-      ?.textContent ?? undefined
-  );
 }
 
 // The devnet strategy rows carry the cluster badge, and a name can exist on
@@ -808,15 +584,9 @@ beforeEach(() => {
   mocks.positionsAfterMovementIds = [];
   mocks.canManageCustody = true;
   mocks.environment = "sandbox";
-  mocks.programProvider = "upshift";
   mocks.strategiesClusterRequests = [];
-  mocks.withdrawalsByProgram = {};
-  mocks.vaultDeposits = [];
-  mocks.vaultWithdrawals = [];
-  mocks.vaultDepositTrackers = {};
-  mocks.vaultWithdrawalTrackers = {};
-  mocks.vaultDepositModal = undefined;
-  mocks.vaultWithdrawalModal = undefined;
+  mocks.coreAction = undefined;
+  mocks.coreFeed = undefined;
   mocks.walletBalances = [
     { token: "USDC", mint: USDC_MINT, amount: "2500000000", uiAmount: "2500", decimals: 6 },
     // The vault receipt token the custody wallet actually holds on chain, for
@@ -876,6 +646,144 @@ afterEach(() => {
 });
 
 describe("TreasurySolutionsWorkspace", () => {
+  it("waits for an operation outcome before refreshing balances", async () => {
+    renderWorkspace();
+    act(() => mocks.coreFeed?.onUpdated(coreOperation("submitted")));
+    expect(mocks.refreshPositions).not.toHaveBeenCalled();
+    expect(mocks.refreshWalletBalances).not.toHaveBeenCalled();
+    expect(within(livePositionRow()).getByText("$125.25")).toBeTruthy();
+    await act(async () => mocks.coreFeed?.onUpdated(coreOperation("completed")));
+    expect(mocks.refreshPositions).toHaveBeenCalledWith(["core-movement"]);
+    expect(mocks.refreshWalletBalances).toHaveBeenCalledWith(101, ["cwlt_live"]);
+    expect(screen.queryByText("$225.25")).toBeNull();
+    await act(async () => mocks.coreFeed?.onUpdated(coreOperation("completed")));
+    expect(mocks.refreshPositions).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes holdings and cash when a delayed operation outcome changes", async () => {
+    renderWorkspace();
+    const operation = coreOperation("settling");
+    operation.resourceRef = { kind: "earn.withdrawal_request", id: "queued-request" };
+    await act(async () => mocks.coreFeed?.onUpdated(operation));
+    expect(mocks.refreshPositions).toHaveBeenCalledTimes(1);
+    expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(1);
+    expect(mocks.refreshStrategies).not.toHaveBeenCalled();
+  });
+
+  it("refreshes queue balances at escrow confirmation, not submission or heartbeat", async () => {
+    renderWorkspace();
+    const submitted = coreOperation("submitted");
+    submitted.resourceRef = { kind: "earn.withdrawal_request", id: "queued-request" };
+    await act(async () => mocks.coreFeed?.onUpdated(submitted));
+    await act(async () =>
+      mocks.coreFeed?.onUpdated({ ...submitted, updatedAt: "2026-11-18T00:00:15Z" })
+    );
+    expect(mocks.refreshPositions).not.toHaveBeenCalled();
+    expect(mocks.refreshWalletBalances).not.toHaveBeenCalled();
+    const settling = {
+      ...submitted,
+      status: "settling" as const,
+      updatedAt: "2026-11-18T00:00:30Z",
+    };
+    await act(async () => mocks.coreFeed?.onUpdated(settling));
+    await act(async () =>
+      mocks.coreFeed?.onUpdated({ ...settling, updatedAt: "2026-11-18T00:00:45Z" })
+    );
+    expect(mocks.refreshPositions).toHaveBeenCalledTimes(1);
+    expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes returned escrow shares without treating recovery as withdrawal proceeds", async () => {
+    renderWorkspace();
+    const operation = coreOperation("completed");
+    operation.kind = "earn.withdraw";
+    operation.intent = {
+      kind: "earn.withdraw",
+      positionId: "earn_vault_position_live",
+      amount: { kind: "all" },
+    };
+    operation.resourceRef = { kind: "earn.withdrawal_recovery", id: "recovery" };
+    if (operation.result) {
+      operation.result.settlementOutcome = "recovered";
+      operation.result.settledAmount = { mint: SHARE_MINT, value: "10" };
+    }
+    await act(async () => mocks.coreFeed?.onUpdated(operation));
+    expect(mocks.refreshPositions).toHaveBeenCalledTimes(1);
+    expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("$10.00")).toBeNull();
+  });
+
+  it("does not reread holdings or cash for a provider heartbeat", async () => {
+    renderWorkspace();
+    const operation = coreOperation("settling");
+    operation.resourceRef = { kind: "earn.withdrawal_request", id: "queued-request" };
+    await act(async () => mocks.coreFeed?.onUpdated(operation));
+    await act(async () =>
+      mocks.coreFeed?.onUpdated({ ...operation, updatedAt: "2026-11-18T00:00:15Z" })
+    );
+    expect(mocks.refreshPositions).toHaveBeenCalledTimes(1);
+    expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(1);
+    await act(async () =>
+      mocks.coreFeed?.onUpdated({
+        ...operation,
+        status: "completed",
+        updatedAt: "2026-11-18T00:00:30Z",
+      })
+    );
+    expect(mocks.refreshPositions).toHaveBeenCalledTimes(2);
+    expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(2);
+  });
+
+  it("publishes an old exit's detail completion into the real feed and refreshes its exact wallet", async () => {
+    const pending = { ...coreOperation("settling"), createdAt: "2026-11-17T00:00:00Z" };
+    const recent = Array.from({ length: 50 }, (_, index) => ({
+      ...coreOperation("completed"),
+      id: `recent-${index}`,
+    }));
+    let activeReads = 0;
+    const list = vi.spyOn(earnCoreClient, "operations").mockImplementation(async (query) => ({
+      operations: query?.status === "active" ? (++activeReads === 1 ? [pending] : []) : recent,
+      nextCursor: null,
+    }));
+    let finish: ((value: Operation) => void) | undefined;
+    const response = new Promise<Operation>((resolve) => {
+      finish = resolve;
+    });
+    const detail = vi.spyOn(earnCoreClient, "operation").mockReturnValue(response);
+    let poll: () => Promise<unknown> = async () => undefined;
+    const cache = new Map();
+    try {
+      render(
+        <SWRConfig value={{ provider: () => cache, dedupingInterval: 0 }}>
+          {workspaceElement()}
+          <LiveOperationsFeed
+            operationId={pending.id}
+            onPollReady={(read) => {
+              poll = read;
+            }}
+          />
+        </SWRConfig>
+      );
+      await waitFor(() => expect(detail).toHaveBeenCalledTimes(1));
+      await act(() => poll());
+      expect(screen.getByTestId("observed-exit").textContent).toBe("settling");
+      await act(async () => {
+        finish?.(coreOperation("completed"));
+        await response;
+      });
+      await waitFor(() =>
+        expect(screen.getByTestId("observed-exit").textContent).toBe("completed")
+      );
+      expect(mocks.refreshPositions).toHaveBeenCalledExactlyOnceWith(["core-movement"]);
+      expect(mocks.refreshWalletBalances).toHaveBeenCalledExactlyOnceWith(101, ["cwlt_live"]);
+      await act(() => poll());
+      expect(screen.getByTestId("observed-exit").textContent).toBe("absent");
+    } finally {
+      list.mockRestore();
+      detail.mockRestore();
+    }
+  });
+
   it("shows immediate feedback while a deferred transaction modal loads", () => {
     render(
       <EnglishTestI18n>
@@ -892,7 +800,7 @@ describe("TreasurySolutionsWorkspace", () => {
     mocks.positionsEmpty = true;
     renderWorkspace();
 
-    expect(screen.getByText("No active custody wallets")).toBeTruthy();
+    expect(screen.getByText("No custody wallets yet")).toBeTruthy();
     const action = screen.getByRole("link", { name: "Create wallet" });
     expect(action.getAttribute("href")).toBe("/dashboard/prj_test_sandbox/wallets/setup");
     expect(screen.queryByRole("link", { name: "View all" })).toBeNull();
@@ -905,11 +813,11 @@ describe("TreasurySolutionsWorkspace", () => {
     mocks.positionsEmpty = true;
     renderWorkspace();
 
-    expect(screen.getByText("No active custody wallets")).toBeTruthy();
+    expect(screen.getByText("No custody wallets yet")).toBeTruthy();
     expect(screen.queryByRole("link", { name: "Create wallet" })).toBeNull();
   });
 
-  it("renders live wallets, vault positions, and existing provider programs", async () => {
+  it("renders live wallets, positions and the strategy catalogue", async () => {
     const user = userEvent.setup();
     renderWorkspace();
 
@@ -971,22 +879,18 @@ describe("TreasurySolutionsWorkspace", () => {
 
     await user.click(within(vaultStrategyRow).getByRole("button", { name: "Deposit" }));
     expect(screen.getByRole("dialog").textContent).toBe("Deposit into Steakhouse USDC");
-
-    const legacyRow = screen.getByText("Legacy treasury program").closest("tr");
-    if (!legacyRow) throw new Error("Expected existing legacy program row");
-    expect(legacyRow.textContent).toContain("$900.50");
   });
 
   it("shows a read-only member every holding and no money action", () => {
-    // A viewer's writes are refused by the API, so no deposit, exit or program withdrawal shows.
+    // The API refuses a viewer's writes, so no money action is offered.
     mocks.canWrite = false;
     renderWorkspace();
 
     expect(screen.getAllByText("Steakhouse USDC").length).toBeGreaterThan(0);
-    expect(screen.getByText("Legacy treasury program")).toBeTruthy();
     expect(summaryFigure()).toBe("$130.50");
     expect(screen.queryByRole("button", { name: "Deposit" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Withdraw" })).toBeNull();
+    expect(mocks.coreFeed?.withdrawalRecovery).toBeUndefined();
   });
 
   it("keeps a position its par intermediate still funds and offers only its par redemption", async () => {
@@ -1011,889 +915,14 @@ describe("TreasurySolutionsWorkspace", () => {
     );
     expect(within(residualRow).queryByRole("button", { name: "Withdraw" })).toBeNull();
     expect(summaryFigure()).toBe("$2,130.50");
+    // The row still offers its own exit, so the activity feed offers no recovery for it.
+    expect(mocks.coreFeed?.withdrawalRecovery?.positions).toEqual([]);
 
     await userEvent
       .setup()
       .click(within(residualRow).getByRole("button", { name: "Redeem wYLDS" }));
     expect(screen.getByRole("dialog").textContent).toBe("Withdraw from Exited provider vault");
-    expect(mocks.vaultWithdrawalModal?.parSource).toBe("intermediate");
-  });
-
-  it("holds a par position's note lines while its balance syncs", () => {
-    // A redemption in flight hides the wrapped note; its slot keeps the row's height.
-    mocks.exitedPositionParIntermediate = {
-      mint: "wYLDS111111111111111111111111111111111111111",
-      amount: "2000",
-      withdrawableAmount: "2000",
-      tokenValue: "2000",
-    };
-    mocks.vaultWithdrawals = [
-      {
-        createdAt: "2026-09-01T17:21:00.000Z",
-        failureReason: null,
-        movementId: "earn_vault_withdrawal_par_submitted",
-        positionId: "earn_vault_position_exited",
-        provider: "kamino",
-        status: "submitted",
-      },
-    ];
-    renderWorkspace();
-
-    const residualRow = screen
-      .getAllByText("Exited provider vault")
-      .map((element) => element.closest("tr"))
-      .find((row) => row?.querySelector("[data-earn-vault-balance]"));
-    if (!residualRow) throw new Error("Expected the residual position row");
-    expect(
-      residualRow
-        .querySelector("[data-earn-vault-balance]")
-        ?.getAttribute("data-earn-vault-balance")
-    ).toBe("syncing");
-    expect(residualRow.querySelector("[data-earn-vault-par-intermediate]")).toBeNull();
-    expect(residualRow.querySelector("[data-earn-vault-par-slot]")).not.toBeNull();
-  });
-
-  it("shows an automatically updating deposit status beside the affected position", async () => {
-    const user = userEvent.setup();
-    mocks.vaultDeposits = [
-      {
-        createdAt: "2026-09-01T17:20:00.000Z",
-        failureReason: null,
-        movementId: "earn_vault_movement_submitted",
-        positionId: "earn_vault_position_live",
-        status: "submitted",
-      },
-    ];
-
-    renderWorkspace();
-
-    const status = await screen.findByRole("button", {
-      name: "Pending: A deposit or withdrawal is still settling. Follow the flow for detailed progress.",
-    });
-    expect(status.closest("tr")?.textContent).toContain("Steakhouse USDC");
-
-    await user.hover(status);
-    expect(
-      await screen.findByText(
-        "A deposit or withdrawal is still settling. Follow the flow for detailed progress."
-      )
-    ).toBeTruthy();
-  });
-
-  it("shows a confirmed withdrawal as complete beside the affected position", async () => {
-    const user = userEvent.setup();
-    mocks.vaultWithdrawals = [
-      {
-        createdAt: "2026-09-01T17:21:00.000Z",
-        failureReason: null,
-        movementId: "earn_vault_withdrawal_confirmed",
-        positionId: "earn_vault_position_live",
-        provider: "kamino",
-        status: "confirmed",
-      },
-    ];
-
-    renderWorkspace();
-
-    const positionRow = (await screen.findAllByText("Steakhouse USDC"))
-      .map((element) => element.closest("tr"))
-      .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
-    if (!positionRow) throw new Error("Expected affected position row");
-    const status = within(positionRow).getByRole("button", {
-      name: "Active: This position is active.",
-    });
-    expect(status.closest("tr")?.textContent).toContain("Steakhouse USDC");
-
-    await user.hover(status);
-    expect(await screen.findByText("This position is active.")).toBeTruthy();
-  });
-
-  it("keeps a locally submitted deposit newest without comparing browser and server clocks", async () => {
-    const user = userEvent.setup();
-    mocks.vaultWithdrawals = [
-      {
-        // Deliberately far in the future. A skewed browser clock must not let
-        // this older server movement outrank the deposit the user just made.
-        createdAt: "2099-09-01T17:21:00.000Z",
-        failureReason: null,
-        movementId: "earn_vault_withdrawal_older",
-        positionId: "earn_vault_position_live",
-        provider: "kamino",
-        status: "confirmed",
-      },
-    ];
-
-    const view = renderWorkspace();
-    const strategyRow = devnetStrategyRow("Steakhouse USDC");
-    if (!strategyRow) throw new Error("Expected the deposit strategy row");
-    await user.click(within(strategyRow).getByRole("button", { name: "Deposit" }));
-
-    act(() => {
-      mocks.vaultDepositModal?.onDeposited?.(
-        {
-          failureReason: null,
-          movementId: "earn_vault_deposit_just_submitted",
-          positionId: "earn_vault_position_live",
-          status: "submitted",
-        },
-        {
-          amount: "10",
-          custodyWalletId: "cwlt_live",
-
-          submittedAt: Date.now(),
-        }
-      );
-    });
-
-    expect(
-      screen.getByRole("button", {
-        name: "Pending: A deposit or withdrawal is still settling. Follow the flow for detailed progress.",
-      })
-    ).toBeTruthy();
-
-    mocks.vaultWithdrawals = [
-      {
-        createdAt: "2099-09-01T17:22:00.000Z",
-        failureReason: null,
-        movementId: "earn_vault_withdrawal_just_submitted",
-        positionId: "earn_vault_position_live",
-        provider: "kamino",
-        status: "confirmed",
-      },
-      ...mocks.vaultWithdrawals,
-    ];
-    view.rerender(
-      <EnglishTestI18n>
-        <TreasurySolutionsWorkspace
-          providerAccess={{ kamino: { entitled: true, configured: true, enabled: true } }}
-        />
-      </EnglishTestI18n>
-    );
-
-    await waitFor(() => {
-      const positionRow = screen
-        .getAllByText("Steakhouse USDC")
-        .map((element) => element.closest("tr"))
-        .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
-      if (!positionRow) throw new Error("Expected affected position row");
-      expect(
-        within(positionRow).getByRole("button", { name: "Active: This position is active." })
-      ).toBeTruthy();
-    });
-  });
-
-  it("updates the deposit badge from the fast detail poll without a toast", async () => {
-    const movementId = "earn_vault_movement_live_update";
-    mocks.vaultDeposits = [
-      {
-        createdAt: "2026-09-01T17:22:00.000Z",
-        failureReason: null,
-        movementId,
-        positionId: "earn_vault_position_live",
-        status: "submitted",
-      },
-    ];
-    renderWorkspace();
-
-    await waitFor(() => expect(mocks.vaultDepositTrackers[movementId]).toBeTruthy());
-    act(() => {
-      mocks.vaultDepositTrackers[movementId]?.onUpdated?.({
-        createdAt: "2026-09-01T17:22:00.000Z",
-        failureReason: null,
-        movementId,
-        positionId: "earn_vault_position_live",
-        status: "confirmed",
-      });
-    });
-
-    const depositedPositionRow = screen
-      .getAllByText("Steakhouse USDC")
-      .map((element) => element.closest("tr"))
-      .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
-    if (!depositedPositionRow) throw new Error("Expected updated position row");
-    const depositedStatus = within(depositedPositionRow).getByRole("button", {
-      name: "Active: This position is active.",
-    });
-    expect(depositedStatus.querySelector(".text-success")).not.toBeNull();
-  });
-
-  it("applies the modal's deposit movement update to the matching table row", async () => {
-    const user = userEvent.setup();
-    const movementId = "earn_vault_movement_modal_update";
-    mocks.vaultDeposits = [
-      {
-        createdAt: "2026-09-01T17:22:00.000Z",
-        failureReason: null,
-        movementId,
-        positionId: "earn_vault_position_live",
-        status: "submitted",
-      },
-    ];
-    renderWorkspace();
-
-    const strategyRow = devnetStrategyRow("Steakhouse USDC");
-    if (!strategyRow) throw new Error("Expected strategy row");
-    await user.click(within(strategyRow).getByRole("button", { name: "Deposit" }));
-
-    act(() => {
-      mocks.vaultDepositModal?.onMovementUpdated?.({
-        createdAt: "2026-09-01T17:22:00.000Z",
-        failureReason: null,
-        movementId,
-        positionId: "earn_vault_position_live",
-        status: "confirmed",
-      });
-    });
-
-    const positionRow = screen
-      .getAllByText("Steakhouse USDC")
-      .map((element) => element.closest("tr"))
-      .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
-    if (!positionRow) throw new Error("Expected position row");
-    expect(
-      within(positionRow).getByRole("button", { name: "Active: This position is active." })
-    ).toBeTruthy();
-  });
-
-  it("refreshes the balance with confirmation and displays the observed provider value", async () => {
-    const user = userEvent.setup();
-    const movementId = "earn_vault_movement_balance_refresh";
-    const view = renderWorkspace();
-    const strategyRow = devnetStrategyRow("Steakhouse USDC");
-    if (!strategyRow) throw new Error("Expected strategy row");
-    await user.click(within(strategyRow).getByRole("button", { name: "Deposit" }));
-
-    act(() => {
-      mocks.vaultDepositModal?.onDeposited?.(
-        {
-          failureReason: null,
-          movementId,
-          positionId: "earn_vault_position_live",
-          status: "submitted",
-        },
-        {
-          amount: "10",
-          custodyWalletId: "cwlt_live",
-
-          submittedAt: Date.now(),
-        }
-      );
-      mocks.vaultDepositModal?.onMovementUpdated?.({
-        createdAt: "2026-09-01T17:22:00.000Z",
-        failureReason: null,
-        movementId,
-        positionId: "earn_vault_position_live",
-        status: "confirmed",
-      });
-    });
-
-    const updatingBalance = document.querySelector('[data-earn-vault-balance="syncing"]');
-    expect(updatingBalance?.querySelector("[data-earn-vault-balance-value]")?.textContent).toBe(
-      "Updating balance…"
-    );
-    expect(updatingBalance?.querySelector(".animate-pulse")).not.toBeNull();
-    expect(updatingBalance?.textContent).toContain("Updating balance…");
-    // Only the commit asks for a read, floored on the movement: a read at
-    // submission could not carry the moved amount.
-    expect(mocks.refreshPositions).toHaveBeenCalledTimes(1);
-    expect(mocks.refreshPositions).toHaveBeenCalledWith([movementId]);
-    await waitFor(() => expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(1));
-
-    // A read begun before confirmation cannot supply the completed balance.
-    mocks.positionsReadStartedAt = 1_000;
-    rerenderWorkspace(view);
-    expect(syncingBalanceText(livePositionRow())).toBe("Updating balance…");
-
-    // A later HTTP request alone cannot prove the provider caught up.
-    mocks.positionsReadStartedAt = Date.now() + 500;
-    rerenderWorkspace(view);
-    expect(syncingBalanceText(livePositionRow())).toBe("Updating balance…");
-    expect(mocks.refreshPositions).toHaveBeenLastCalledWith([movementId]);
-
-    // A fresh provider read includes the deposit net of its exit premium.
-    // Its observed value is used without adding the requested amount again.
-    mocks.positionsReadStartedAt = Date.now() + 1_000;
-    mocks.livePositionShares = "129.5";
-    mocks.livePositionTokenValue = "135.249985";
-    mocks.positionsAfterMovementIds = [movementId];
-    rerenderWorkspace(view);
-    await waitFor(() =>
-      expect(document.querySelector('[data-earn-vault-balance="syncing"]')).toBeNull()
-    );
-    expect(within(livePositionRow()).getByText("$135.24")).toBeTruthy();
-    expect(screen.queryByText("$145.24")).toBeNull();
-  });
-
-  it("keeps updating for the second deposit after a read of the first", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-09-24T12:00:00.000Z"));
-    const user = userEvent.setup();
-    const view = renderWorkspace();
-    const strategyRow = devnetStrategyRow("Steakhouse USDC");
-    if (!strategyRow) throw new Error("Expected strategy row");
-    await user.click(within(strategyRow).getByRole("button", { name: "Deposit" }));
-
-    const submit = (movementId: string, amount: string) =>
-      mocks.vaultDepositModal?.onDeposited?.(
-        {
-          failureReason: null,
-          movementId,
-          positionId: "earn_vault_position_live",
-          status: "submitted",
-        },
-        { amount, custodyWalletId: "cwlt_live", submittedAt: Date.now() }
-      );
-    const confirm = (movementId: string) =>
-      mocks.vaultDepositModal?.onMovementUpdated?.({
-        createdAt: "2026-09-24T12:00:00.000Z",
-        failureReason: null,
-        movementId,
-        positionId: "earn_vault_position_live",
-        status: "confirmed",
-      });
-
-    act(() => {
-      submit("earn_vault_movement_between_1", "10");
-      submit("earn_vault_movement_between_2", "5");
-    });
-    act(() => confirm("earn_vault_movement_between_1"));
-    expect(syncingBalanceText(livePositionRow())).toBe("Updating balance…");
-
-    // A read issued after the first commit lands containing the first deposit.
-    mocks.positionsReadStartedAt = Date.now() + 1_000;
-    mocks.positionsReadLandedAt = Date.now() + 1_500;
-    mocks.livePositionShares = "129.5";
-    mocks.livePositionTokenValue = "135.25";
-    mocks.positionsAfterMovementIds = ["earn_vault_movement_between_1"];
-    rerenderWorkspace(view);
-    expect(syncingBalanceText(livePositionRow())).toBe("Updating balance…");
-    expect(within(livePositionRow()).queryByText("$135.25")).toBeNull();
-
-    // The second confirmation requires another balance read.
-    vi.setSystemTime(new Date("2026-09-24T12:00:03.000Z"));
-    act(() => confirm("earn_vault_movement_between_2"));
-    expect(syncingBalanceText(livePositionRow())).toBe("Updating balance…");
-
-    mocks.positionsReadStartedAt = Date.now() + 1_000;
-    mocks.positionsReadLandedAt = Date.now() + 1_500;
-    mocks.livePositionShares = "134.5";
-    mocks.livePositionTokenValue = "140.25";
-    mocks.positionsAfterMovementIds = [
-      "earn_vault_movement_between_1",
-      "earn_vault_movement_between_2",
-    ];
-    rerenderWorkspace(view);
-    await waitFor(() => expect(syncingBalanceText(livePositionRow())).toBeUndefined());
-    expect(within(livePositionRow()).getByText("$140.25")).toBeTruthy();
-  });
-
-  it("reconciles a deposit then a withdrawal in one session against fresh reads", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-09-24T12:00:00.000Z"));
-    const user = userEvent.setup();
-    const view = renderWorkspace();
-    const strategyRow = devnetStrategyRow("Steakhouse USDC");
-    if (!strategyRow) throw new Error("Expected strategy row");
-    await user.click(within(strategyRow).getByRole("button", { name: "Deposit" }));
-
-    act(() => {
-      mocks.vaultDepositModal?.onDeposited?.(
-        {
-          failureReason: null,
-          movementId: "earn_vault_movement_session_deposit",
-          positionId: "earn_vault_position_live",
-          status: "submitted",
-        },
-        {
-          amount: "10",
-          custodyWalletId: "cwlt_live",
-
-          submittedAt: Date.now(),
-        }
-      );
-      mocks.vaultDepositModal?.onMovementUpdated?.({
-        createdAt: "2026-09-24T12:00:00.000Z",
-        failureReason: null,
-        movementId: "earn_vault_movement_session_deposit",
-        positionId: "earn_vault_position_live",
-        status: "confirmed",
-      });
-    });
-    expect(syncingBalanceText(livePositionRow())).toBe("Updating balance…");
-
-    mocks.livePositionTokenValue = "135.2499";
-    mocks.positionsAfterMovementIds = ["earn_vault_movement_session_deposit"];
-    mocks.livePositionShares = "129.5";
-    mocks.positionsReadStartedAt = Date.now() + 1;
-    mocks.positionsReadLandedAt = Date.now() + 2;
-    rerenderWorkspace(view);
-    await waitFor(() => expect(syncingBalanceText(livePositionRow())).toBeUndefined());
-    expect(within(livePositionRow()).getByText("$135.24")).toBeTruthy();
-
-    vi.setSystemTime(new Date("2026-09-24T12:00:05.000Z"));
-    await user.click(within(livePositionRow()).getByRole("button", { name: "Withdraw" }));
-    act(() => {
-      mocks.vaultWithdrawalModal?.onWithdrawn?.(
-        {
-          createdAt: "2026-09-24T12:00:05.000Z",
-          failureReason: null,
-          movementId: "earn_vault_movement_session_withdrawal",
-          positionId: "earn_vault_position_live",
-          status: "requested",
-        },
-        { amount: "6", submittedAt: Date.now() }
-      );
-      mocks.vaultWithdrawalModal?.onMovementUpdated?.({
-        createdAt: "2026-09-24T12:00:05.000Z",
-        failureReason: null,
-        movementId: "earn_vault_movement_session_withdrawal",
-        positionId: "earn_vault_position_live",
-        status: "confirmed",
-      });
-    });
-    // A withdrawal also waits for its own observed balance.
-    expect(syncingBalanceText(livePositionRow())).toBe("Updating balance…");
-
-    mocks.livePositionTokenValue = "129.2499";
-    mocks.positionsAfterMovementIds = [
-      "earn_vault_movement_session_deposit",
-      "earn_vault_movement_session_withdrawal",
-    ];
-    mocks.livePositionShares = "123.5";
-    mocks.positionsReadStartedAt = Date.now() + 1;
-    mocks.positionsReadLandedAt = Date.now() + 2;
-    rerenderWorkspace(view);
-    await waitFor(() => expect(syncingBalanceText(livePositionRow())).toBeUndefined());
-    expect(within(livePositionRow()).getByText("$129.24")).toBeTruthy();
-  });
-
-  it("reads balances once per withdrawal, after it confirms, never at submission", async () => {
-    const user = userEvent.setup();
-    const movementId = "earn_vault_withdrawal_single_read";
-    renderWorkspace();
-    await user.click(within(livePositionRow()).getByRole("button", { name: "Withdraw" }));
-    const positionReads = mocks.refreshPositions.mock.calls.length;
-    const walletReads = mocks.refreshWalletBalances.mock.calls.length;
-
-    act(() => {
-      mocks.vaultWithdrawalModal?.onWithdrawn?.(
-        {
-          createdAt: "2026-09-24T12:00:05.000Z",
-          failureReason: null,
-          movementId,
-          positionId: "earn_vault_position_live",
-          status: "requested",
-        },
-        { amount: "6", submittedAt: Date.now() }
-      );
-    });
-    // The chain has not decided yet, so a read now could only return the
-    // pre-exit balance: nothing is read until the movement confirms.
-    expect(mocks.refreshPositions).toHaveBeenCalledTimes(positionReads);
-    expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(walletReads);
-    expect(syncingBalanceText(livePositionRow())).toBe("Updating balance…");
-
-    act(() => {
-      mocks.vaultWithdrawalModal?.onMovementUpdated?.({
-        createdAt: "2026-09-24T12:00:05.000Z",
-        failureReason: null,
-        movementId,
-        positionId: "earn_vault_position_live",
-        status: "confirmed",
-      });
-    });
-    expect(mocks.refreshPositions).toHaveBeenCalledTimes(positionReads + 1);
-    expect(mocks.refreshPositions).toHaveBeenLastCalledWith([movementId]);
-    await waitFor(() => expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(walletReads + 1));
-  });
-
-  it("keeps amounts updating through overlapping confirmations", async () => {
-    const user = userEvent.setup();
-    renderWorkspace();
-    const strategyRow = devnetStrategyRow("Steakhouse USDC");
-    if (!strategyRow) throw new Error("Expected strategy row");
-    await user.click(within(strategyRow).getByRole("button", { name: "Deposit" }));
-
-    const submit = (movementId: string, amount: string) =>
-      mocks.vaultDepositModal?.onDeposited?.(
-        {
-          failureReason: null,
-          movementId,
-          positionId: "earn_vault_position_live",
-          status: "submitted",
-        },
-        { amount, custodyWalletId: "cwlt_live", submittedAt: Date.now() }
-      );
-    const confirm = (movementId: string) =>
-      mocks.vaultDepositModal?.onMovementUpdated?.({
-        createdAt: "2026-09-01T17:22:00.000Z",
-        failureReason: null,
-        movementId,
-        positionId: "earn_vault_position_live",
-        status: "confirmed",
-      });
-
-    act(() => {
-      submit("earn_vault_movement_stack_1", "10");
-      submit("earn_vault_movement_stack_2", "5");
-    });
-    // The second deposit was submitted while the first was still in flight, so
-    // its baseline is the live balance alone.
-    act(() => confirm("earn_vault_movement_stack_2"));
-    expect(syncingBalanceText(livePositionRow())).toBe("Updating balance…");
-
-    act(() => confirm("earn_vault_movement_stack_1"));
-    expect(syncingBalanceText(livePositionRow())).toBe("Updating balance…");
-  });
-
-  it("keeps a first deposit synced from pending row through provider reconciliation", async () => {
-    const user = userEvent.setup();
-    const movementId = "earn_vault_movement_first_position";
-    mocks.positionsEmpty = true;
-    const view = renderWorkspace();
-    const strategyRow = devnetStrategyRow("Steakhouse USDC");
-    if (!strategyRow) throw new Error("Expected strategy row");
-    await user.click(within(strategyRow).getByRole("button", { name: "Deposit" }));
-
-    act(() => {
-      mocks.vaultDepositModal?.onDeposited?.(
-        {
-          failureReason: null,
-          movementId,
-          positionId: "earn_vault_position_live",
-          status: "submitted",
-        },
-        {
-          amount: "10",
-          custodyWalletId: "cwlt_live",
-
-          submittedAt: Date.now(),
-        }
-      );
-    });
-
-    const pendingRow = screen
-      .getAllByText("Steakhouse USDC")
-      .map((element) => element.closest("tr"))
-      .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
-    if (!pendingRow) throw new Error("Expected provisional position row");
-    expect(
-      within(pendingRow).getByRole("button", {
-        name: "Pending: A deposit or withdrawal is still settling. Follow the flow for detailed progress.",
-      })
-    ).toBeTruthy();
-    expect(within(pendingRow).getByText("Updating balance…")).toBeTruthy();
-
-    act(() => {
-      mocks.vaultDepositModal?.onMovementUpdated?.({
-        createdAt: "2026-09-01T17:22:00.000Z",
-        failureReason: null,
-        movementId,
-        positionId: "earn_vault_position_live",
-        status: "confirmed",
-      });
-    });
-
-    expect(
-      within(pendingRow).getByRole("button", { name: "Active: This position is active." })
-    ).toBeTruthy();
-    const updatingBalance = within(pendingRow).getByText("Updating balance…");
-    const updatingBalanceContainer = updatingBalance.closest("[data-earn-vault-balance]");
-    expect(updatingBalanceContainer?.getAttribute("data-earn-vault-balance")).toBe("syncing");
-    expect(updatingBalanceContainer?.querySelector(".animate-pulse")).not.toBeNull();
-
-    mocks.positionsEmpty = false;
-    mocks.livePositionTokenValue = "10";
-    mocks.positionsAfterMovementIds = [movementId];
-    mocks.positionsReadStartedAt = Date.now() + 1_000;
-    rerenderWorkspace(view);
-
-    await waitFor(() =>
-      expect(document.querySelector('[data-earn-vault-balance="syncing"]')).toBeNull()
-    );
-    const reconciledRows = screen
-      .getAllByText("Steakhouse USDC")
-      .map((element) => element.closest("tr"))
-      .filter((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
-    expect(reconciledRows).toHaveLength(1);
-    expect(within(reconciledRows[0] as HTMLTableRowElement).getByText("$10.00")).toBeTruthy();
-  });
-
-  it("waits for a fresh balance after concurrent confirmations", async () => {
-    const user = userEvent.setup();
-    renderWorkspace();
-    const strategyRow = devnetStrategyRow("Steakhouse USDC");
-    if (!strategyRow) throw new Error("Expected strategy row");
-    await user.click(within(strategyRow).getByRole("button", { name: "Deposit" }));
-
-    act(() => {
-      mocks.vaultDepositModal?.onDeposited?.(
-        {
-          failureReason: null,
-          movementId: "earn_vault_movement_concurrent_1",
-          positionId: "earn_vault_position_live",
-          status: "submitted",
-        },
-        {
-          amount: "10",
-          custodyWalletId: "cwlt_live",
-
-          submittedAt: Date.now(),
-        }
-      );
-    });
-    act(() => {
-      mocks.vaultDepositModal?.onDeposited?.(
-        {
-          failureReason: null,
-          movementId: "earn_vault_movement_concurrent_2",
-          positionId: "earn_vault_position_live",
-          status: "submitted",
-        },
-        { amount: "5", custodyWalletId: "cwlt_live", submittedAt: Date.now() }
-      );
-    });
-    act(() => {
-      mocks.vaultDepositModal?.onMovementUpdated?.({
-        createdAt: "2026-09-01T17:22:00.000Z",
-        failureReason: null,
-        movementId: "earn_vault_movement_concurrent_1",
-        positionId: "earn_vault_position_live",
-        status: "confirmed",
-      });
-    });
-
-    expect(
-      document
-        .querySelector('[data-earn-vault-balance="syncing"]')
-        ?.querySelector("[data-earn-vault-balance-value]")?.textContent
-    ).toBe("Updating balance…");
-    expect(
-      screen.getByRole("button", {
-        name: "Pending: A deposit or withdrawal is still settling. Follow the flow for detailed progress.",
-      })
-    ).toBeTruthy();
-
-    act(() => {
-      mocks.vaultDepositModal?.onMovementUpdated?.({
-        createdAt: "2026-09-01T17:23:00.000Z",
-        failureReason: null,
-        movementId: "earn_vault_movement_concurrent_2",
-        positionId: "earn_vault_position_live",
-        status: "confirmed",
-      });
-    });
-
-    expect(
-      document
-        .querySelector('[data-earn-vault-balance="syncing"]')
-        ?.querySelector("[data-earn-vault-balance-value]")?.textContent
-    ).toBe("Updating balance…");
-    const positionRow = screen
-      .getAllByText("Steakhouse USDC")
-      .map((element) => element.closest("tr"))
-      .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
-    if (!positionRow) throw new Error("Expected position row");
-    expect(
-      within(positionRow).getByRole("button", { name: "Active: This position is active." })
-    ).toBeTruthy();
-  });
-
-  it("refreshes uncached wallet balances when a vault movement settles", async () => {
-    const movementId = "earn_vault_movement_live_balance";
-    mocks.vaultDeposits = [
-      {
-        createdAt: "2026-09-01T17:22:00.000Z",
-        failureReason: null,
-        movementId,
-        positionId: "earn_vault_position_live",
-        status: "submitted",
-      },
-    ];
-    renderWorkspace();
-
-    await waitFor(() => expect(mocks.vaultDepositTrackers[movementId]).toBeTruthy());
-    act(() => {
-      mocks.vaultDepositTrackers[movementId]?.onSettled?.({
-        createdAt: "2026-09-01T17:22:00.000Z",
-        failureReason: null,
-        movementId,
-        positionId: "earn_vault_position_live",
-        status: "confirmed",
-      });
-    });
-
-    await waitFor(() => expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(1));
-    expect(mocks.refreshWallets).not.toHaveBeenCalled();
-  });
-
-  it("keeps wallet identity visible while both sides of a confirmation refresh complete", async () => {
-    let finishWalletRead: (() => void) | undefined;
-    mocks.refreshWalletBalances.mockReturnValueOnce(
-      new Promise<void>((resolve) => {
-        finishWalletRead = resolve;
-      })
-    );
-    const movementId = "earn_pair_refresh";
-    mocks.vaultDeposits = [
-      { movementId, positionId: "earn_vault_position_live", status: "submitted" },
-    ];
-    const view = renderWorkspace();
-    await waitFor(() => expect(mocks.vaultDepositTrackers[movementId]).toBeTruthy());
-    await act(async () => {
-      mocks.vaultDepositTrackers[movementId]?.onSettled?.({
-        movementId,
-        positionId: "earn_vault_position_live",
-        status: "confirmed",
-        failureReason: null,
-      });
-    });
-    expect(screen.getAllByRole("status", { name: "Updating balance…" }).length).toBeGreaterThan(1);
-    expect(walletTile("cwlt_live").textContent).toContain("Operating treasury");
-    expect(mocks.refreshPositions).toHaveBeenCalledTimes(1);
-    await act(async () => finishWalletRead?.());
-    expect(screen.getAllByRole("status", { name: "Updating balance…" }).length).toBeGreaterThan(1);
-    mocks.positionsAfterMovementIds = [movementId];
-    rerenderWorkspace(view);
-    expect(screen.queryAllByRole("status", { name: "Updating balance…" })).toHaveLength(0);
-  });
-
-  it("keeps positions visible and updating when a wallet refresh fails", async () => {
-    const movementId = "earn_refresh_error";
-    mocks.vaultDeposits = [
-      { movementId, positionId: "earn_vault_position_live", status: "submitted" },
-    ];
-    mocks.refreshWalletBalances.mockRejectedValueOnce(new Error("balance RPC unavailable"));
-    renderWorkspace();
-    expect(within(livePositionRow()).getByText("Updating balance…")).toBeTruthy();
-    await waitFor(() => expect(mocks.vaultDepositTrackers[movementId]).toBeTruthy());
-    await act(async () => {
-      mocks.vaultDepositTrackers[movementId]?.onSettled?.({
-        movementId,
-        positionId: "earn_vault_position_live",
-        status: "confirmed",
-        failureReason: null,
-      });
-    });
-    await waitFor(() => expect(screen.queryByText("$125.25")).toBeNull());
-    expect(screen.queryByText("Vault positions unavailable")).toBeNull();
-    expect(within(livePositionRow()).getByText("Updating balance…")).toBeTruthy();
-    expect(screen.getByText("$5.25")).toBeTruthy();
-    await waitFor(() => expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(1));
-    expect(mocks.refreshPositions).toHaveBeenCalledTimes(1);
-  });
-
-  it("updates a confirmed withdrawal to final settlement in place", async () => {
-    const movementId = "earn_vault_withdrawal_live_update";
-    mocks.vaultWithdrawals = [
-      {
-        createdAt: "2026-09-01T17:23:00.000Z",
-        failureReason: null,
-        movementId,
-        positionId: "earn_vault_position_live",
-        provider: "kamino",
-        status: "confirmed",
-      },
-    ];
-    renderWorkspace();
-
-    await waitFor(() => expect(mocks.vaultWithdrawalTrackers[movementId]).toBeTruthy());
-    act(() => {
-      mocks.vaultWithdrawalTrackers[movementId]?.onUpdated?.({
-        createdAt: "2026-09-01T17:23:00.000Z",
-        failureReason: null,
-        movementId,
-        positionId: "earn_vault_position_live",
-        status: "finalized",
-      });
-    });
-
-    const withdrawnPositionRow = screen
-      .getAllByText("Steakhouse USDC")
-      .map((element) => element.closest("tr"))
-      .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
-    if (!withdrawnPositionRow) throw new Error("Expected updated position row");
-    const withdrawnStatus = within(withdrawnPositionRow).getByRole("button", {
-      name: "Active: This position is active.",
-    });
-    expect(withdrawnStatus.querySelector(".text-success")).not.toBeNull();
-  });
-
-  it("applies the modal's withdrawal movement update to the matching table row", async () => {
-    const user = userEvent.setup();
-    const movementId = "earn_vault_withdrawal_modal_update";
-    mocks.vaultWithdrawals = [
-      {
-        createdAt: "2026-09-01T17:23:00.000Z",
-        failureReason: null,
-        movementId,
-        positionId: "earn_vault_position_live",
-        provider: "kamino",
-        status: "confirmed",
-      },
-    ];
-    renderWorkspace();
-
-    const positionRow = screen
-      .getAllByText("Steakhouse USDC")
-      .map((element) => element.closest("tr"))
-      .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
-    if (!positionRow) throw new Error("Expected position row");
-    await user.click(within(positionRow).getByRole("button", { name: "Withdraw" }));
-
-    act(() => {
-      mocks.vaultWithdrawalModal?.onMovementUpdated?.({
-        createdAt: "2026-09-01T17:23:00.000Z",
-        failureReason: null,
-        movementId,
-        positionId: "earn_vault_position_live",
-        status: "finalized",
-      });
-    });
-
-    expect(
-      within(positionRow).getByRole("button", { name: "Active: This position is active." })
-    ).toBeTruthy();
-  });
-
-  it("shows balance updating alongside a confirmed withdrawal", async () => {
-    const user = userEvent.setup();
-    const movementId = "earn_vault_withdrawal_balance_refresh";
-    renderWorkspace();
-    const positionRow = screen
-      .getAllByText("Steakhouse USDC")
-      .map((element) => element.closest("tr"))
-      .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
-    if (!positionRow) throw new Error("Expected position row");
-    await user.click(within(positionRow).getByRole("button", { name: "Withdraw" }));
-
-    act(() => {
-      mocks.vaultWithdrawalModal?.onWithdrawn?.(
-        {
-          createdAt: "2026-09-01T17:23:00.000Z",
-          failureReason: null,
-          movementId,
-          positionId: "earn_vault_position_live",
-          status: "requested",
-        },
-        { amount: "6", submittedAt: Date.now() }
-      );
-      mocks.vaultWithdrawalModal?.onMovementUpdated?.({
-        createdAt: "2026-09-01T17:23:00.000Z",
-        failureReason: null,
-        movementId,
-        positionId: "earn_vault_position_live",
-        status: "confirmed",
-      });
-    });
-
-    const updatingBalance = within(positionRow).getByText("Updating balance…");
-    expect(
-      updatingBalance.closest("[data-earn-vault-balance]")?.querySelector(".animate-pulse")
-    ).not.toBeNull();
-    expect(
-      within(positionRow).getByRole("button", { name: "Active: This position is active." })
-    ).toBeTruthy();
+    expect(mocks.coreAction?.intermediate).toBe(true);
   });
 
   it("renders lean strategy columns with the provider under each strategy", () => {
@@ -1915,7 +944,7 @@ describe("TreasurySolutionsWorkspace", () => {
         .getAllByRole("columnheader")
         .map((header) => header.textContent)
     ).toEqual(["Strategy", "APY", "TVL", "Your position", "Actions"]);
-    expect(within(instantRow).getByText("$12,345,678.90")).toBeTruthy();
+    expect(within(instantRow).getByText("$12.3M")).toBeTruthy();
 
     const delayedRow = screen.getByText("Veda Treasury Fund").closest("tr");
     if (!delayedRow) throw new Error("Expected the delayed strategy row");
@@ -2265,7 +1294,7 @@ describe("TreasurySolutionsWorkspace", () => {
   });
 
   it("never claims an empty positions list over a holding it has no record of", () => {
-    // "No active vault positions" is a claim of absence like any other.
+    // "No positions yet" is a claim of absence like any other.
     mocks.positionsEmpty = true;
     mocks.walletBalances = [
       { token: "USDC", mint: USDC_MINT, amount: "2500000000", uiAmount: "2500", decimals: 6 },
@@ -2283,7 +1312,7 @@ describe("TreasurySolutionsWorkspace", () => {
       screen.getByLabelText("A wallet holds vault shares with no matching position")
     ).toBeTruthy();
     expect(screen.getByText("Positions may be incomplete")).toBeTruthy();
-    expect(screen.queryByText("No active vault positions")).toBeNull();
+    expect(screen.queryByText("No positions yet")).toBeNull();
   });
 
   it("keeps a strategy row from printing a total another wallet contradicts", () => {
@@ -2503,29 +1532,34 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(screen.getByRole("dialog").textContent).toBe("Withdraw from Steakhouse USDC");
   });
 
-  it("refreshes positions and custody balances after an asynchronous exit settles", async () => {
-    const user = userEvent.setup();
+  it("reopens an escrowed exit from its activity once the holdings table drops the position", async () => {
     renderWorkspace();
+    // The exited fixture holds no shares, so its row and exit are gone from the table.
+    expect(screen.queryByText("Exited provider vault")).toBeNull();
+    const recovery = mocks.coreFeed?.withdrawalRecovery;
+    const escrowed = recovery?.positions[0];
+    if (!recovery || !escrowed) throw new Error("Expected a recoverable position");
+    expect(recovery.positions.map(({ id }) => id)).toEqual(["earn_vault_position_exited"]);
 
-    const vaultPositionRow = screen
-      .getAllByText("Steakhouse USDC")
-      .map((element) => element.closest("tr"))
-      .find((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
-    if (!vaultPositionRow) throw new Error("Expected vault position row");
-    await user.click(within(vaultPositionRow).getByRole("button", { name: "Withdraw" }));
+    await act(async () => recovery.onOpen(escrowed));
+    // The dialog module loads on demand, behind its loading frame.
+    await waitFor(() =>
+      expect(screen.getByRole("dialog").textContent).toBe("Withdraw from Exited provider vault")
+    );
+    expect(mocks.coreAction?.defaultWithdrawAll).toBe(true);
+    expect(mocks.coreAction?.intermediate).toBe(false);
 
-    act(() => {
-      mocks.vaultWithdrawalModal?.onAsyncRequestSettled?.({
-        kind: "queue",
-        request: { withdrawalRequestId: "earn_vault_withdrawal_request_fulfilled" },
-      });
-    });
+    // Closing the dialog leaves the activity entry in place.
+    act(() => mocks.coreAction?.onClose());
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(mocks.coreFeed?.withdrawalRecovery?.positions).toEqual([escrowed]);
 
-    expect(mocks.refreshPositions).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(1));
-    // A settled request moves holdings and cash only.
-    expect(mocks.refreshStrategies).not.toHaveBeenCalled();
-    expect(mocks.refreshPrograms).not.toHaveBeenCalled();
+    // A holding row's exit afterwards starts from an amount, not the recovery's All.
+    await userEvent
+      .setup()
+      .click(within(livePositionRow()).getByRole("button", { name: "Withdraw" }));
+    expect(screen.getByRole("dialog").textContent).toBe("Withdraw from Steakhouse USDC");
+    expect(mocks.coreAction?.defaultWithdrawAll).toBe(false);
   });
 
   it("keeps the vault exit verb live in production, where deposits are closed", () => {
@@ -2545,188 +1579,29 @@ describe("TreasurySolutionsWorkspace", () => {
     ).toBe(false);
   });
 
-  it("keeps sandbox-only vault deposits disabled when another provider is open in production", () => {
-    // Kamino deposits open in production since PRO-1986; Veda is the provider
-    // the deposit-environment map still leaves sandbox-only (PRO-1777).
+  it("opens Veda vault deposits in production once its mainnet vault is live", () => {
+    // Kamino opened in PRO-1986; PRO-1777 filled Veda's mainnet deployment, so
+    // the deposit-environment map opens its rows to Production projects too —
+    // each provider's own deployment table decides, never a global switch.
     mocks.environment = "production";
-    renderWorkspace();
-
-    const row = screen.getByText("Veda Treasury Fund").closest("tr");
-    if (!row) throw new Error("Expected vault strategy row");
-    // The reason it cannot be funded, as words, never a dead button.
-    expect(within(row).queryByRole("button", { name: "Deposit" })).toBeNull();
-    expect(within(row).getByText("Sandbox only")).toBeTruthy();
-    expect(screen.getByLabelText(/Rates are provider-reported and variable/)).toBeTruthy();
-  });
-
-  it("fails closed when a persisted program provider has no Solana withdrawal lane", () => {
-    mocks.programProvider = "future-provider";
-    renderWorkspace();
-
-    const programRow = screen.getByText("Legacy treasury program").closest("tr");
-    if (!programRow) throw new Error("Expected existing provider program row");
-    expect(within(programRow).queryByRole("button", { name: "Withdraw" })).toBeNull();
-    expect(within(programRow).getByText("Provider withdrawal unavailable")).toBeTruthy();
-    // The status reads in its column, and under the balance on a phone.
-    expect(within(programRow).getAllByText("Ready")).toHaveLength(2);
-  });
-
-  it("recovers every provider-accepted in-flight withdrawal from the durable ledger", async () => {
-    mocks.withdrawalsByProgram = {
-      earn_program_ground: [
-        { status: "processing", withdrawalRef: "withdrawal_processing" },
-        // A repeated ledger result must still mount only one keyed tracker.
-        { status: "processing", withdrawalRef: "withdrawal_processing" },
-        { status: "pending_approval", withdrawalRef: "withdrawal_approval" },
-        // No provider operation exists yet, even if malformed data carries a ref.
-        { status: "requested", withdrawalRef: "must_not_poll_requested" },
-        { status: "completed", withdrawalRef: "must_not_poll_terminal" },
-        // A provider ref is required to name the canonical live GET.
-        { status: "processing" },
-      ],
-      earn_program_ground_secondary: [
-        { status: "processing", withdrawalRef: "withdrawal_secondary" },
-      ],
-    };
-
-    renderWorkspace();
-
-    await waitFor(() => {
-      expect(screen.getAllByTestId("withdrawal-outcome-tracker")).toHaveLength(3);
-    });
-    expect(
-      screen
-        .getAllByTestId("withdrawal-outcome-tracker")
-        .map((tracker) => tracker.textContent)
-        .sort()
-    ).toEqual([
-      "earn_program_ground:withdrawal_approval",
-      "earn_program_ground:withdrawal_processing",
-      "earn_program_ground_secondary:withdrawal_secondary",
-    ]);
-    expect(document.body.textContent).not.toContain("must_not_poll_requested");
-    expect(document.body.textContent).not.toContain("must_not_poll_terminal");
-  });
-
-  it("recovers every in-flight vault deposit from the server ledger", async () => {
-    mocks.vaultDeposits = [
-      // `pending` is IN FLIGHT, not failed: SDP could not establish that the
-      // transaction reached the network, and the sweep is still working on it.
-      { movementId: "earn_vault_movement_pending", status: "pending" },
-      { movementId: "earn_vault_movement_submitted", status: "submitted" },
-      // A repeated ledger result must still mount only one keyed tracker.
-      { movementId: "earn_vault_movement_submitted", status: "submitted" },
-      { movementId: "earn_vault_movement_confirmed", status: "confirmed" },
-      { movementId: "earn_vault_movement_failed", status: "failed" },
-    ];
-
-    renderWorkspace();
-
-    await waitFor(() => {
-      expect(screen.getAllByTestId("vault-deposit-outcome-tracker")).toHaveLength(2);
-    });
-    expect(
-      screen
-        .getAllByTestId("vault-deposit-outcome-tracker")
-        .map((tracker) => tracker.textContent)
-        .sort()
-    ).toEqual(["earn_vault_movement_pending", "earn_vault_movement_submitted"]);
-    // Already settled: re-watching them would re-announce an outcome the
-    // customer was told about the first time round.
-    expect(document.body.textContent).not.toContain("earn_vault_movement_confirmed");
-    expect(document.body.textContent).not.toContain("earn_vault_movement_failed");
-  });
-
-  it("recovers every in-flight vault withdrawal from the server ledger", async () => {
-    mocks.vaultWithdrawals = [
-      { movementId: "earn_movement_requested", provider: "kamino", status: "requested" },
-      { movementId: "earn_movement_submitted", provider: "kamino", status: "submitted" },
-      // The unified ledger's vocabulary: `confirmed` is optimistic commitment,
-      // NOT terminal — a fork can still drop it, so it stays watched. (Kamino
-      // settles atomically; a provider-order provider would stop at
-      // `confirmed` and the real predicate says so.)
-      { movementId: "earn_movement_confirmed", provider: "kamino", status: "confirmed" },
-      // A repeated ledger result must still mount only one keyed tracker.
-      { movementId: "earn_movement_confirmed", provider: "kamino", status: "confirmed" },
-      { movementId: "earn_movement_finalized", provider: "kamino", status: "finalized" },
-      { movementId: "earn_movement_failed", provider: "kamino", status: "failed" },
-    ];
-
-    renderWorkspace();
-
-    await waitFor(() => {
-      expect(screen.getAllByTestId("vault-withdrawal-outcome-tracker")).toHaveLength(3);
-    });
-    expect(
-      screen
-        .getAllByTestId("vault-withdrawal-outcome-tracker")
-        .map((tracker) => tracker.textContent)
-        .sort()
-    ).toEqual(["earn_movement_confirmed", "earn_movement_requested", "earn_movement_submitted"]);
-    expect(document.body.textContent).not.toContain("earn_movement_finalized");
-    expect(document.body.textContent).not.toContain("earn_movement_failed");
-  });
-
-  it("stops watching a provider-order withdrawal once its chain leg commits", async () => {
-    // The other half of the settlement fork: wisdomtree's reconciler parks the
-    // withdrawal at `confirmed` (the NAV strike after it has no wire state to
-    // observe), so watching past it would hold the recovery tracker open past
-    // the last honest transition. This only holds through the REAL predicate —
-    // a hand-copied one froze the pre-fork rule and never saw this branch.
-    mocks.vaultWithdrawals = [
-      { movementId: "earn_movement_wt_confirmed", provider: "wisdomtree", status: "confirmed" },
-      // Atomic peers at the same status must stay watched — the fork, not the
-      // status literal, decides.
-      { movementId: "earn_movement_kamino_confirmed", provider: "kamino", status: "confirmed" },
-    ];
-
-    renderWorkspace();
-
-    await waitFor(() => {
-      const trackers = screen
-        .getAllByTestId("vault-withdrawal-outcome-tracker")
-        .map((tracker) => tracker.textContent);
-      expect(trackers).toEqual(["earn_movement_kamino_confirmed"]);
-    });
-  });
-
-  it("keeps recovered vault trackers mounted until their detail poll settles", async () => {
-    mocks.vaultDeposits = [{ movementId: "earn_deposit_recovered", status: "submitted" }];
-    mocks.vaultWithdrawals = [
-      { movementId: "earn_withdrawal_recovered", provider: "kamino", status: "confirmed" },
-    ];
-    const view = renderWorkspace();
-
-    await waitFor(() => {
-      expect(screen.getByText("earn_deposit_recovered")).toBeTruthy();
-      expect(screen.getByText("earn_withdrawal_recovered")).toBeTruthy();
-    });
-
-    // A collection refresh can stop returning an id before the independent
-    // detail poll sees terminal state. The persisted watches must survive it.
-    mocks.vaultDeposits = [];
-    mocks.vaultWithdrawals = [];
-    view.rerender(
+    render(
       <EnglishTestI18n>
         <TreasurySolutionsWorkspace
-          providerAccess={{ kamino: { entitled: true, configured: true, enabled: true } }}
+          providerAccess={{
+            kamino: { entitled: true, configured: true, enabled: true },
+            veda: { entitled: true, configured: true, enabled: true },
+          }}
         />
       </EnglishTestI18n>
     );
 
-    expect(screen.getByText("earn_deposit_recovered")).toBeTruthy();
-    expect(screen.getByText("earn_withdrawal_recovered")).toBeTruthy();
-  });
-
-  it("mounts no deposit tracker when the ledger reports nothing in flight", async () => {
-    mocks.vaultDeposits = [{ movementId: "earn_vault_movement_done", status: "confirmed" }];
-
-    renderWorkspace();
-
-    // Anchor on a real render so this cannot pass by asserting against a page
-    // that never mounted.
-    await waitFor(() => expect(screen.getByText("Legacy treasury program")).toBeTruthy());
-    expect(screen.queryAllByTestId("vault-deposit-outcome-tracker")).toHaveLength(0);
+    const row = screen.getByText("Veda Treasury Fund").closest("tr");
+    if (!row) throw new Error("Expected vault strategy row");
+    expect(within(row).queryByText("Sandbox only")).toBeNull();
+    expect(
+      (within(row).getByRole("button", { name: "Deposit" }) as HTMLButtonElement).disabled
+    ).toBe(false);
+    expect(screen.getByLabelText(/Rates are provider-reported and can change/)).toBeTruthy();
   });
 });
 
@@ -2748,7 +1623,7 @@ describe("TreasurySolutionsWorkspace — combined strategy catalogue (PRO-1742)"
     expect(mainnetRow).not.toBeNull();
     expect(devnetRow).toBeDefined();
     const mainnetCells = within(mainnetRow as HTMLTableRowElement);
-    expect(mainnetCells.getByText("$32,000,000.00")).toBeTruthy();
+    expect(mainnetCells.getByText("$32M")).toBeTruthy();
     expect(mainnetCells.queryByText(/Devnet/)).toBeNull();
     expect(within(devnetRow as HTMLTableRowElement).getByText("Kamino · Devnet")).toBeTruthy();
     expect(mainnetCells.queryByRole("button", { name: "Deposit" })).toBeNull();
@@ -2786,7 +1661,7 @@ describe("TreasurySolutionsWorkspace — combined strategy catalogue (PRO-1742)"
     // offers, from the same provider.
     expect(devnetStrategyRow("Steakhouse USDC")).toBeDefined();
     expect(devnetStrategyRow("Allez USDC")).toBeDefined();
-    // Veda is devnet-only, so its strategies skip the intersection entirely.
+    // Veda is exempt by provider, so its strategies skip the intersection.
     expect(catalogue.getByText("Veda Treasury Fund")).toBeTruthy();
     // A devnet vault with no mainnet counterpart stays off the shelf.
     expect(catalogue.queryByText("Kamino Vault USDC")).toBeNull();
@@ -2807,9 +1682,7 @@ describe("TreasurySolutionsWorkspace — combined strategy catalogue (PRO-1742)"
     const catalogue = within(section);
     expect(catalogue.getByText("Kamino JLP Vault")).toBeTruthy();
     expect(devnetStrategyRow("Steakhouse USDC")).toBeUndefined();
-    expect(
-      catalogue.getByText("Loading Devnet strategies. Mainnet strategies remain available.")
-    ).toBeTruthy();
+    expect(catalogue.getByText("Loading Devnet strategies.")).toBeTruthy();
   });
 
   it("keeps mainnet strategies visible when the Devnet catalogue fails", () => {
@@ -2823,12 +1696,8 @@ describe("TreasurySolutionsWorkspace — combined strategy catalogue (PRO-1742)"
     const catalogue = within(section);
     expect(catalogue.getByText("Kamino JLP Vault")).toBeTruthy();
     expect(devnetStrategyRow("Steakhouse USDC")).toBeUndefined();
-    expect(
-      catalogue.getByText(
-        "Devnet strategies could not be loaded. Mainnet strategies remain available."
-      )
-    ).toBeTruthy();
-    expect(catalogue.queryByText("Markets data unavailable")).toBeNull();
+    expect(catalogue.getByText("Devnet strategies could not be loaded.")).toBeTruthy();
+    expect(catalogue.queryByText("Strategies could not be loaded")).toBeNull();
   });
 
   it("keeps devnet strategies depositable when the mainnet catalogue fails (PRO-1961)", () => {
@@ -2846,12 +1715,8 @@ describe("TreasurySolutionsWorkspace — combined strategy catalogue (PRO-1742)"
       within(devnetRow).getByRole("button", { name: "Deposit" }).hasAttribute("disabled")
     ).toBe(false);
     expect(catalogue.queryByText("Kamino JLP Vault")).toBeNull();
-    expect(
-      catalogue.getByText(
-        "Mainnet strategies could not be loaded. Devnet strategies remain available."
-      )
-    ).toBeTruthy();
-    expect(catalogue.queryByText("Markets data unavailable")).toBeNull();
+    expect(catalogue.getByText("Mainnet strategies could not be loaded.")).toBeTruthy();
+    expect(catalogue.queryByText("Strategies could not be loaded")).toBeNull();
   });
 
   it("keeps devnet strategies visible while the mainnet catalogue loads (PRO-1961)", () => {
@@ -2865,9 +1730,7 @@ describe("TreasurySolutionsWorkspace — combined strategy catalogue (PRO-1742)"
     const catalogue = within(section);
     expect(catalogue.getByText("Steakhouse USDC")).toBeTruthy();
     expect(catalogue.queryByText("Kamino JLP Vault")).toBeNull();
-    expect(
-      catalogue.getByText("Loading Mainnet strategies. Devnet strategies remain available.")
-    ).toBeTruthy();
+    expect(catalogue.getByText("Loading Mainnet strategies.")).toBeTruthy();
   });
 
   it("reserves the full catalogue error for both shelves failing (PRO-1961)", () => {
@@ -2880,10 +1743,14 @@ describe("TreasurySolutionsWorkspace — combined strategy catalogue (PRO-1742)"
       .closest("section");
     if (!section) throw new Error("Expected the strategy catalogue");
     const catalogue = within(section);
-    expect(catalogue.getByText("Markets data unavailable")).toBeTruthy();
+    expect(catalogue.getByText("Strategies could not be loaded")).toBeTruthy();
     expect(catalogue.queryByText("Steakhouse USDC")).toBeNull();
     expect(catalogue.queryByText("Kamino JLP Vault")).toBeNull();
-    expect(catalogue.queryByText(/strategies remain available\./)).toBeNull();
+    expect(
+      catalogue.queryByText(
+        /strategies could not be loaded\.|Loading (Devnet|Mainnet) strategies\./
+      )
+    ).toBeNull();
   });
 
   it("refreshes the environment and mainnet shelves once each", async () => {
@@ -2892,5 +1759,60 @@ describe("TreasurySolutionsWorkspace — combined strategy catalogue (PRO-1742)"
 
     await user.click(screen.getByRole("button", { name: "Refresh" }));
     expect(mocks.refreshStrategies).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("TreasurySolutionsWorkspace — provider plan", () => {
+  const notEntitled = { entitled: false, configured: true, enabled: false };
+  const entitled = { entitled: true, configured: true, enabled: true };
+  const noneEntitled: EarnProviderAccess = Object.fromEntries(
+    SURFACED_VAULT_DIRECT_EARN_PROVIDERS.map((provider) => [provider, notEntitled])
+  );
+  const planNotice = "New deposits aren't on your plan. Contact us to enable them.";
+
+  function renderWithAccess(providerAccess: EarnProviderAccess | null) {
+    return render(
+      <EnglishTestI18n>
+        <TreasurySolutionsWorkspace providerAccess={providerAccess} />
+      </EnglishTestI18n>
+    );
+  }
+
+  function strategyRow(name: string): HTMLTableRowElement {
+    const row = screen.getByText(name).closest("tr");
+    if (!row) throw new Error(`Expected a strategy row for ${name}`);
+    return row;
+  }
+
+  it("says once that new deposits are off the plan and names it on each affected row", () => {
+    renderWithAccess(noneEntitled);
+
+    const section = screen
+      .getByRole("heading", { name: "Available strategies" })
+      .closest("section");
+    if (!section) throw new Error("Expected the strategies section");
+    expect(within(section).getByText(planNotice)).toBeTruthy();
+    const row = devnetStrategyRow("Steakhouse USDC");
+    if (!row) throw new Error("Expected the devnet Steakhouse row");
+    expect(within(row).getByText("Not on your plan")).toBeTruthy();
+    expect(within(row).queryByRole("button", { name: "Deposit" })).toBeNull();
+    expect(screen.queryByText("Setup required")).toBeNull();
+  });
+
+  it("keeps the notice off while any offered provider is on the plan", () => {
+    renderWithAccess({ ...noneEntitled, kamino: entitled });
+
+    expect(screen.queryByText(planNotice)).toBeNull();
+    expect(within(strategyRow("Veda Treasury Fund")).getByText("Not on your plan")).toBeTruthy();
+  });
+
+  it("says access could not be checked, never that it is off the plan, when the read failed", () => {
+    renderWithAccess(null);
+
+    expect(screen.queryByText(planNotice)).toBeNull();
+    const row = devnetStrategyRow("Steakhouse USDC");
+    if (!row) throw new Error("Expected the devnet Steakhouse row");
+    expect(within(row).getByText("Couldn't check access")).toBeTruthy();
+    expect(screen.queryByText("Not on your plan")).toBeNull();
   });
 });

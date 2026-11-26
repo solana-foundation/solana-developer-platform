@@ -1,5 +1,23 @@
 import type { SdpEnvironment } from "./api-keys";
 
+export const PROVIDER_POLICY_STATUSES = ["present", "missing", "unknown"] as const;
+export const PROVIDER_POLICY_REASONS = [
+  "policy_detected",
+  "no_policy",
+  "access_denied",
+  "provider_unavailable",
+  "unsupported_response",
+  "not_checked",
+  "stale",
+  "credential_changed",
+] as const;
+/** Advisory presence check, never a verdict about policy strength or permission to sign. */
+export interface ProviderPolicyCheck {
+  status: (typeof PROVIDER_POLICY_STATUSES)[number];
+  reason: (typeof PROVIDER_POLICY_REASONS)[number];
+  checkedAt: string | null;
+}
+
 export const CUSTODY_PROVIDERS = [
   "local",
   "fireblocks",
@@ -504,8 +522,6 @@ export const CUSTODY_PROVIDER_CATALOG: readonly CustodyProviderCatalogEntry[] = 
   CUSTODY_PROVIDER_CATALOG_BY_ID
 );
 
-export type SolanaCustodyNetwork = "solana" | "solana-devnet";
-export type DfnsCustodyNetwork = "Solana" | "SolanaDevnet";
 export type CustodyWalletPurpose =
   | "root"
   | "mint_authority"
@@ -568,7 +584,6 @@ export interface PrivyCustodyOptions {
 
 export interface CoinbaseCdpCustodyOptions {
   provider: "coinbase_cdp";
-  network?: SolanaCustodyNetwork;
   walletAddress?: string;
   accountPolicy?: string;
 }
@@ -587,7 +602,6 @@ export interface TurnkeyCustodyOptions {
 
 export interface DfnsCustodyOptions {
   provider: "dfns";
-  network?: DfnsCustodyNetwork;
   walletId?: string;
   signingKeyId?: string;
 }
@@ -596,7 +610,6 @@ export interface DfnsCustodyOptions {
 // reuses the Dfns request/signing surface with an IBM-hosted base URL.
 export interface IbmHavenCustodyOptions {
   provider: "ibm_haven";
-  network?: DfnsCustodyNetwork;
   walletId?: string;
   signingKeyId?: string;
 }
@@ -604,7 +617,6 @@ export interface IbmHavenCustodyOptions {
 export interface AnchorageCustodyOptions {
   provider: "anchorage";
   walletId?: string;
-  network?: SolanaCustodyNetwork;
 }
 
 export interface UtilaCustodyOptions {
@@ -745,6 +757,8 @@ export interface CustodyWalletTokenBalance {
 }
 
 export type CustodyWalletMetadata = CustodyWalletSummary & {
+  /** Returned on wallet detail reads for supported BYOK connections only. */
+  providerPolicy?: ProviderPolicyCheck;
   provider: CustodyProvider;
 };
 
@@ -878,6 +892,14 @@ export const PROVIDER_CREDENTIAL_STATUSES = [
   "deactivated",
 ] as const;
 export type ProviderCredentialStatus = (typeof PROVIDER_CREDENTIAL_STATUSES)[number];
+
+/**
+ * Whether credential lifecycle explicitly withdrew its authority, rather than
+ * awaiting validation.
+ */
+export function isProviderCredentialRevoked(status: ProviderCredentialStatus): boolean {
+  return status === "retired" || status === "deactivated";
+}
 
 export function isProviderCredentialCreationInProgress(status: ProviderCredentialStatus): boolean {
   return status === "creating";

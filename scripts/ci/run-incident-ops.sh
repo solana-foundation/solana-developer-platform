@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Executes the incident-ops Cloud Run job with a |-delimited args override.
-# Shared by .github/workflows/incident-*.yml. Expects:
+# Executes an ops Cloud Run job (OPS_JOB: incident-ops or backoffice-ops) with a |-delimited
+# args override. Shared by .github/workflows/incident-*.yml and backoffice-*.yml. Expects:
 #   PROJECT_ID, REGION, OPS_JOB, MIGRATE_JOB, ARGS (validated by the caller)
 set -euo pipefail
 
@@ -34,7 +34,7 @@ if [[ "${current}" != "${image}" ]]; then
   gcloud run jobs update "${OPS_JOB}" "${scope[@]}" --image "${image}"
 fi
 
-echo "Executing ${OPS_JOB}: incident-ops ${ARGS//|/ }"
+echo "Executing ${OPS_JOB}: ${ARGS//|/ }"
 execute_status=0
 execution="$(gcloud run jobs execute "${OPS_JOB}" "${scope[@]}" \
   --args "^|^${ARGS}" --wait --format 'value(metadata.name)')" || execute_status=$?

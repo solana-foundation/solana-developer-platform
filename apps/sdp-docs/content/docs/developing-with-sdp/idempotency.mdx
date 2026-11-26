@@ -6,7 +6,7 @@ description: Retry mutations safely with Idempotency-Key, especially when moving
 Clients time out, connections drop and workers die mid-run. Send an `Idempotency-Key` header so a retry returns the first attempt's answer instead of doing the work twice.
 
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/payments/transfers \
+curl -X POST https://api.solana.com/v1/payments/transfers/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Idempotency-Key: 0192f8a4-6c1e-7d4b-8f3a-b7e52c8d9f0a" \
   -H "Content-Type: application/json" \
@@ -17,8 +17,8 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 
 **Required.** These routes move money. A request without a key returns `400 IDEMPOTENCY_KEY_REQUIRED`, and nothing runs.
 
-- `POST /v1/payments/transfers`
-- `POST /v1/payments/transfer-batches`
+- `POST /v1/payments/transfers/execute`
+- `POST /v1/payments/transfer-batches/execute`
 - `POST /v1/payments/transfer-batches/{batchId}/retry`
 - `POST /v1/payments/recurring-payments`
 - `PATCH /v1/payments/recurring-payments/{id}` (an edit to an active schedule signs and broadcasts a replacement subscription)
@@ -29,7 +29,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 
 **Accepted.** The key is optional, and honored when sent.
 
-- Wallets: `POST /v1/wallets`, `POST /v1/wallets/signer-check`, `PATCH /v1/wallets/{walletId}`, `DELETE /v1/wallets`
+- Wallets: `POST /v1/wallets`, `POST /v1/wallets/managed-signing/initialize-with-wallet`, `POST /v1/wallets/signer-check`, `PATCH /v1/wallets/{walletId}`, `DELETE /v1/wallets`
 - Counterparties: `POST`, `PATCH` and `DELETE` on `/v1/counterparties` and on counterparty accounts
 - Payment requests: `POST /v1/payments/requests` and `POST /v1/payments/requests/{paymentRequestId}/cancel`
 
@@ -54,7 +54,7 @@ async function sendTransfer(payout: Payout): Promise<Response> {
   for (let attempt = 1; attempt <= 8; attempt++) {
     let response: Response;
     try {
-      response = await fetch("https://api.solana.com/v1/payments/transfers", {
+      response = await fetch("https://api.solana.com/v1/payments/transfers/execute", {
         method: "POST",
         headers: {
           Authorization: "Bearer sf_...",
@@ -107,7 +107,7 @@ Access is checked before the key on every request, so a retry passes exactly the
 | A recurring-payment action failed | An action refused before it sent anything leaves the schedule as it was, except that a collection with an unavailable counterparty or account pauses it with `pausedReason: "destination_unavailable"` and returns `409` without signing. If a cancel sent its transaction and confirming it then failed, SDP keeps the attempt and the schedule stays `canceling` until the attempt is recovered; poll `GET /v1/payments/recurring-payments/{id}`. A `400`, `401`, `403`, `409` or `429` (such as `TRANSACTION_FAILED`) is not stored, and a `5xx` is not replayed, so a same-key retry runs the action again. Any other `4xx`, such as `422 SIGNING_REJECTED` or `404`, is stored and replayed with `Idempotent-Replayed: true` for 24 hours; send a new key to try again sooner. |
 | A recurring-payment action meets another key's unfinished attempt on the schedule | Cancel and collect return `409` (already processing), not stored; read the schedule with `GET`. An interrupted collect finishes on its own from the transaction SDP saved before sending it. Resume sends nothing on chain and commits in one step, so it is never left half-done. An interrupted activate or cancel is resumed in the background from the last step SDP recorded; SDP first reads each step it may already have sent from the chain, and a step is not sent again when the chain shows it landed. An interrupted `PATCH` resumes only when that `PATCH` is retried with its key (see below). A `PATCH` may finish that attempt and then applies its own change. |
 | A keyed recurring-payment cancel, resume or `PATCH` changes nothing (such as canceling a canceled schedule) | It still records its attempt, so a same-key retry, even after 24 hours, is answered from it and never runs over a later change. |
-| Original returned a `5xx` | Stored and replayed: use a new key to try again. The routes that move money are the exception: a same-key retry runs again and answers from the record the first attempt wrote, so it never sends twice. That answer also carries `Idempotent-Replayed: true`. A same-key retry of a payment request cancel also runs again, and so does a `POST /v1/wallets` whose provider dedupes on the request ID (see [Creating wallets](#creating-wallets)). |
+| Original returned a `5xx` | Once the request commits its resource, the error is stored and replayed. Read current state with `GET` before making a deliberate new request. Before commitment, routes with durable recovery may rerun the same key and recover the original record. A same-key retry of a payment request cancel also runs again, and so does a `POST /v1/wallets` whose provider dedupes on the request ID (see [Creating wallets](#creating-wallets)). |
 
 "Same request" means the same path, query parameters, body and credential. Recipient order in a transfer batch, and `"1.0"` versus `"1"` for an amount, do not change the request.
 
@@ -118,6 +118,10 @@ An organization that has been deleted or has lost production access is refused b
 ## Replays are snapshots
 
 A replay returns the response as it was first sent: a transfer stored as `processing` replays as `processing`. To see current state, read the resource with `GET`. Never re-send a request to learn its outcome.
+
+This also applies when the response failed after the resource committed: a
+replayed `5xx` does not prove the resource failed. Keep its ID and read its
+current status instead of treating a new key as a recovery action.
 
 An answer from the original record (a same-key retry after a `5xx` or the 24-hour window) reflects its current state. A recurring-payment lifecycle action may still be mid-transition; poll `GET /v1/payments/recurring-payments/{id}` until it settles.
 

@@ -36,13 +36,12 @@ describe("CRON_DEFINITIONS", () => {
     expect(
       [
         "reconcile-earn-vault-movements",
-        "detect-orphaned-earn-split-swaps",
         "refresh-earn-metrics",
         "track-pending-withdrawals",
         "track-pending-deposits",
         "poll-rings-indexing",
       ].map((name) => scopeByName.get(name))
-    ).toEqual(["cluster", "cluster", "cluster", "cluster", "cluster", "cluster"]);
+    ).toEqual(["cluster", "cluster", "cluster", "cluster", "cluster"]);
   });
 
   it("runs the payment request hot lane every 30 seconds and its sweep and expiry every minute", () => {
@@ -53,6 +52,21 @@ describe("CRON_DEFINITIONS", () => {
     expect(byName.get("expire-payment-requests")?.schedule).toBe("* * * * *");
   });
 
+  it("reconciles custody proposals every minute in an independent environment-scoped registration", () => {
+    const proposals = CRON_DEFINITIONS.find(
+      (definition) => definition.name === "reconcile-custody-proposals"
+    );
+    const chain = CRON_DEFINITIONS.find(
+      (definition) => definition.name === "track-pending-transfers"
+    );
+    expect(proposals).toMatchObject({
+      schedule: "* * * * *",
+      scope: "cluster",
+      effect: "finishes",
+    });
+    expect(proposals?.run).not.toBe(chain?.run);
+  });
+
   it("runs Fireblocks reads independently every 30 seconds in each environment on stable", () => {
     const cron = CRON_DEFINITIONS.find(
       (definition) => definition.name === "reconcile-fireblocks-proposals"
@@ -61,6 +75,16 @@ describe("CRON_DEFINITIONS", () => {
       schedule: "*/30 * * * * *",
       scope: "cluster",
       effect: "observes",
+    });
+    expect(cron?.enabled({ ...env, SDP_RELEASE_CHANNEL: "stable" })).toBe(true);
+  });
+
+  it("keeps recorded operation recovery enabled every 15 seconds in each environment", () => {
+    const cron = CRON_DEFINITIONS.find((definition) => definition.name === "reconcile-operations");
+    expect(cron).toMatchObject({
+      schedule: "*/15 * * * * *",
+      scope: "cluster",
+      effect: "finishes",
     });
     expect(cron?.enabled({ ...env, SDP_RELEASE_CHANNEL: "stable" })).toBe(true);
   });

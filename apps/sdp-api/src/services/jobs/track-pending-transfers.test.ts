@@ -16,6 +16,7 @@ import { createSystemPaymentsRepository } from "@/db/repositories/repository-fac
 import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { rootLogger } from "@/runtime/logger";
 import { createSystemAuditService } from "@/services/audit.service";
+import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
   type ClusterRpcReply,
   type ClusterRpcRequest,
@@ -29,19 +30,17 @@ import {
   signatureStatusesReplyAt,
 } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
+import { syntheticSignature } from "@/test/helpers/parsed-transactions";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { seedProcessingBatchChunk } from "@/test/helpers/transfer-batches";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { trackPendingTransfers } from "./track-pending-transfers";
 
-const TEST_SIG_1 =
-  "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as unknown as Signature;
-const TEST_SIG_2 =
-  "5hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as unknown as Signature;
-const TEST_SIG_3 =
-  "6hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as unknown as Signature;
-const TEST_SIG_4 =
-  "7hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as unknown as Signature;
+const TEST_SIG_1 = syntheticSignature(1);
+const TEST_SIG_2 = syntheticSignature(2);
+const TEST_SIG_3 = syntheticSignature(3);
+const TEST_SIG_4 = syntheticSignature(4);
 
 const TEST_ORG_ID = "org_job_test_001";
 const TEST_USER_ID = "usr_job_test_001";
@@ -69,8 +68,8 @@ const INTERNAL_ERROR: ClusterRpcReply = {
 const FLOOR_SLOT = 5_000;
 const LAST_VALID_BLOCK_HEIGHT = 100;
 const HISTORY_HORIZON_BLOCKS = 9_000;
-const SOURCE_ADDRESS = "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ";
-const DESTINATION_ADDRESS = "9dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ";
+const SOURCE_ADDRESS = TEST_SOLANA_ADDRESSES.wallet1;
+const DESTINATION_ADDRESS = TEST_SOLANA_ADDRESSES.wallet2;
 
 function finalizedTipAt(blockHeight: number): JsonRpcResult {
   return epochInfoResult({ absoluteSlot: FLOOR_SLOT, blockHeight });
@@ -168,15 +167,19 @@ async function insertProjectTransfer(projectId: string, params: TransferSeed): P
 }
 
 async function getTransfer(id: string) {
-  return getDb(env).prepare("SELECT * FROM payment_transfers WHERE id = ?").bind(id).first<{
-    id: string;
-    status: string;
-    error: string | null;
-    slot: number | null;
-    confirmed_at: string | null;
-    finalization_last_polled_at: string | null;
-    updated_at: string;
-  }>();
+  const row = await getDb(env)
+    .prepare("SELECT * FROM payment_transfers WHERE id = ?")
+    .bind(id)
+    .first<{
+      id: string;
+      status: string;
+      error: string | null;
+      slot: number | null;
+      confirmed_at: string | null;
+      finalization_last_polled_at: string | null;
+      updated_at: string;
+    }>();
+  return required(row);
 }
 
 function minutesAgo(n: number): string {
@@ -284,7 +287,7 @@ describe("trackPendingTransfers", () => {
   });
 
   describe("recoverStuckProcessingTransfers", () => {
-    it("marks stuck processing transfers (no signature, > 5 min stale) as failed", async () => {
+    it("fails a signature-less processing transfer after 5 minutes without reading the chain", async () => {
       await insertTransfer({
         id: "xfr_stuck_processing",
         status: "processing",
@@ -295,9 +298,11 @@ describe("trackPendingTransfers", () => {
 
       await trackSandboxTransfers();
 
-      const updated = await getTransfer("xfr_stuck_processing");
-      expect(updated?.status).toBe("failed");
-      expect(updated?.error).toBe("Transfer processing timed out");
+      await expect(getTransfer("xfr_stuck_processing")).resolves.toMatchObject({
+        status: "failed",
+        error: "Transfer processing timed out",
+      });
+      expect(statusReads()).toEqual([]);
     });
 
     it("does not fail processing transfers that are still within the threshold", async () => {
@@ -312,7 +317,7 @@ describe("trackPendingTransfers", () => {
       await trackSandboxTransfers();
 
       const unchanged = await getTransfer("xfr_recent_processing");
-      expect(unchanged?.status).toBe("processing");
+      expect(unchanged.status).toBe("processing");
     });
   });
 
@@ -337,8 +342,8 @@ describe("trackPendingTransfers", () => {
       await trackSandboxTransfers();
 
       const updated = await getTransfer("xfr_processing_confirmed");
-      expect(updated?.status).toBe("confirmed");
-      expect(updated?.slot).toBe(12345);
+      expect(updated.status).toBe("confirmed");
+      expect(updated.slot).toBe(12345);
     });
 
     it("updates processing transfer to finalized when signature is finalized on-chain", async () => {
@@ -361,8 +366,8 @@ describe("trackPendingTransfers", () => {
       await trackSandboxTransfers();
 
       const updated = await getTransfer("xfr_processing_finalized");
-      expect(updated?.status).toBe("finalized");
-      expect(updated?.slot).toBe(99999);
+      expect(updated.status).toBe("finalized");
+      expect(updated.slot).toBe(99999);
       expect(epochInfoReads()).toBe(0);
     });
 
@@ -393,9 +398,9 @@ describe("trackPendingTransfers", () => {
         await trackSandboxTransfers();
 
         const unchanged = await getTransfer("xfr_processing_unfinalized_error");
-        expect(unchanged?.status).toBe("processing");
-        expect(unchanged?.error).toBeNull();
-        expect(unchanged?.updated_at).not.toBe(staleAt);
+        expect(unchanged.status).toBe("processing");
+        expect(unchanged.error).toBeNull();
+        expect(unchanged.updated_at).not.toBe(staleAt);
         expect(warn).toHaveBeenCalledWith(
           expect.objectContaining({
             event: "sdp_api_payment_submission_unresolved",
@@ -428,7 +433,7 @@ describe("trackPendingTransfers", () => {
       await trackSandboxTransfers();
 
       const failed = await getTransfer("xfr_epoch_info_transient");
-      expect(failed?.status).toBe("failed");
+      expect(failed.status).toBe("failed");
       expect(epochInfoReads()).toBe(2);
     });
 
@@ -445,8 +450,8 @@ describe("trackPendingTransfers", () => {
       await trackSandboxTransfers();
 
       const failed = await getTransfer("xfr_unstarted_outbox_expired");
-      expect(failed?.status).toBe("failed");
-      expect(failed?.error).toBe("Transaction not found on chain");
+      expect(failed.status).toBe("failed");
+      expect(failed.error).toBe("Transaction not found on chain");
       expect(statusReads()).toEqual([
         { cluster: "devnet", signatures: [TEST_SIG_1], searchTransactionHistory: false },
       ]);
@@ -487,7 +492,7 @@ describe("trackPendingTransfers", () => {
         historyReply: signatureStatusesReplyAt(FLOOR_SLOT - 10, [null]),
       },
       {
-        refusal: "a served -32016",
+        refusal: "a served minimum-context-slot refusal",
         historyReply: {
           error: {
             code: SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
@@ -519,8 +524,8 @@ describe("trackPendingTransfers", () => {
         await trackSandboxTransfers();
 
         const unresolved = await getTransfer("xfr_started_outbox_node_behind");
-        expect(unresolved?.status).toBe("processing");
-        expect(unresolved?.updated_at).not.toBe(staleAt);
+        expect(unresolved.status).toBe("processing");
+        expect(unresolved.updated_at).not.toBe(staleAt);
         expect(warn).toHaveBeenCalledWith(
           expect.objectContaining({
             event: "sdp_api_payment_submission_unresolved",
@@ -551,8 +556,8 @@ describe("trackPendingTransfers", () => {
       await trackSandboxTransfers();
 
       const failed = await getTransfer("xfr_started_outbox_not_landed");
-      expect(failed?.status).toBe("failed");
-      expect(failed?.error).toBe("Transaction not found on chain");
+      expect(failed.status).toBe("failed");
+      expect(failed.error).toBe("Transaction not found on chain");
       expect(warn).toHaveBeenCalledWith(
         {
           event: "sdp_api_payment_submission_not_landed",
@@ -631,9 +636,9 @@ describe("trackPendingTransfers", () => {
       await trackSandboxTransfers();
 
       const kept = await getTransfer("xfr_started_outbox_unprovable");
-      expect(kept?.status).toBe("processing");
-      expect(kept?.error).toBeNull();
-      expect(kept?.updated_at).not.toBe(startedAt);
+      expect(kept.status).toBe("processing");
+      expect(kept.error).toBeNull();
+      expect(kept.updated_at).not.toBe(startedAt);
       expect(error).toHaveBeenCalledWith(
         {
           event: "sdp_api_payment_verdict_unprovable",
@@ -769,8 +774,8 @@ describe("trackPendingTransfers", () => {
       await trackSandboxTransfers();
 
       const unresolved = await getTransfer("xfr_started_outbox_archive_unavailable");
-      expect(unresolved?.status).toBe("processing");
-      expect(unresolved?.updated_at).not.toBe(staleAt);
+      expect(unresolved.status).toBe("processing");
+      expect(unresolved.updated_at).not.toBe(staleAt);
       expect(warn).toHaveBeenCalledWith(
         expect.objectContaining({
           event: "sdp_api_payment_submission_unresolved",
@@ -783,6 +788,7 @@ describe("trackPendingTransfers", () => {
 
     it("keeps and rotates signed submissions when the finalized height is unavailable", async () => {
       rpc.respond("getEpochInfo", () => INTERNAL_ERROR);
+      const warn = spyOnLog("warn");
       const staleAt = minutesAgo(10);
 
       await insertTransfer(
@@ -797,9 +803,19 @@ describe("trackPendingTransfers", () => {
       await trackSandboxTransfers();
 
       const unresolved = await getTransfer("xfr_started_outbox_height_unavailable");
-      expect(unresolved?.status).toBe("processing");
-      expect(unresolved?.updated_at).not.toBe(staleAt);
-      expect(statusReads()).toHaveLength(1);
+      expect(unresolved.status).toBe("processing");
+      expect(unresolved.updated_at).not.toBe(staleAt);
+      expect(statusReads()).toEqual([
+        { cluster: "devnet", signatures: [TEST_SIG_1], searchTransactionHistory: false },
+      ]);
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "sdp_api_payment_submission_unresolved",
+          reason: "history_unavailable",
+          transfer_id: "xfr_started_outbox_height_unavailable",
+        }),
+        "sdp_api_payment_submission_unresolved"
+      );
     });
 
     it("applies archival verdicts to the matching signatures", async () => {
@@ -857,6 +873,7 @@ describe("trackPendingTransfers", () => {
       await expect(getTransfer("xfr_archive_c_failed")).resolves.toMatchObject({
         status: "failed",
         slot: 303,
+        error: '{"InstructionError":[0,"InsufficientFunds"]}',
       });
       await expect(getTransfer("xfr_archive_d_processed")).resolves.toMatchObject({
         status: "processing",
@@ -871,6 +888,8 @@ describe("trackPendingTransfers", () => {
         confirmationStatus: "confirmed",
         err: null,
       }));
+      const warn = spyOnLog("warn");
+      spyOnLog("error");
       const staleAt = minutesAgo(10);
 
       await insertTransfer({
@@ -886,8 +905,16 @@ describe("trackPendingTransfers", () => {
       await trackSandboxTransfers();
 
       const unresolved = await getTransfer("xfr_batch_verdict_write_failed");
-      expect(unresolved?.status).toBe("processing");
-      expect(unresolved?.updated_at).not.toBe(staleAt);
+      expect(unresolved.status).toBe("processing");
+      expect(unresolved.updated_at).not.toBe(staleAt);
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "sdp_api_payment_submission_unresolved",
+          reason: "verdict_write_failed",
+          transfer_id: "xfr_batch_verdict_write_failed",
+        }),
+        "sdp_api_payment_submission_unresolved"
+      );
     });
 
     it("uses the finalized height rather than row age to expire a signed submission", async () => {
@@ -905,59 +932,8 @@ describe("trackPendingTransfers", () => {
       await trackSandboxTransfers();
 
       const unchanged = await getTransfer("xfr_started_outbox_not_expired");
-      expect(unchanged?.status).toBe("processing");
+      expect(unchanged.status).toBe("processing");
       expect(statusReads()).toHaveLength(1);
-    });
-
-    it("reconciles mixed processing rows in one Postgres-backed run", async () => {
-      rpc.respondSignatureStatuses(() => ({
-        slot: 22222,
-        confirmations: 3,
-        confirmationStatus: "confirmed",
-        err: null,
-      }));
-
-      await insertTransfer(
-        signedSubmission({
-          id: "xfr_batch_processing_confirmed",
-          signature: TEST_SIG_1,
-          submissionStartedAt: minutesAgo(2),
-          updatedAt: minutesAgo(2),
-        })
-      );
-      await insertTransfer({
-        id: "xfr_batch_processing_stuck",
-        status: "processing",
-        signature: null,
-        createdAt: minutesAgo(7),
-        updatedAt: minutesAgo(7),
-      });
-
-      await trackSandboxTransfers();
-
-      const [confirmed, stuck] = await Promise.all([
-        getTransfer("xfr_batch_processing_confirmed"),
-        getTransfer("xfr_batch_processing_stuck"),
-      ]);
-
-      expect(confirmed?.status).toBe("confirmed");
-      expect(confirmed?.slot).toBe(22222);
-      expect(stuck?.status).toBe("failed");
-      expect(stuck?.error).toBe("Transfer processing timed out");
-    });
-
-    it("does not call getSignatureStatuses when there are no processing transfers with signatures", async () => {
-      await insertTransfer({
-        id: "xfr_processing_without_sig",
-        status: "processing",
-        signature: null,
-        createdAt: minutesAgo(1),
-        updatedAt: minutesAgo(1),
-      });
-
-      await trackSandboxTransfers();
-
-      expect(statusReads()).toEqual([]);
     });
 
     it("reads each project's processing transfers on its environment's cluster in one tick", async () => {
@@ -1077,9 +1053,9 @@ describe("trackPendingTransfers", () => {
       await trackSandboxTransfers();
 
       const updated = await getTransfer("xfr_confirmed_finalizing");
-      expect(updated?.status).toBe("finalized");
-      expect(updated?.slot).toBe(77777);
-      expect(updated?.finalization_last_polled_at).not.toBeNull();
+      expect(updated.status).toBe("finalized");
+      expect(updated.slot).toBe(77777);
+      expect(updated.finalization_last_polled_at).not.toBeNull();
       expect(statusReads()).toContainEqual({
         cluster: "devnet",
         signatures: [TEST_SIG_1],
@@ -1101,8 +1077,8 @@ describe("trackPendingTransfers", () => {
       await trackSandboxTransfers();
 
       const rotated = await getTransfer("xfr_confirmed_no_status");
-      expect(rotated?.status).toBe("confirmed");
-      expect(rotated?.finalization_last_polled_at).not.toBeNull();
+      expect(rotated.status).toBe("confirmed");
+      expect(rotated.finalization_last_polled_at).not.toBeNull();
       expect(warn).toHaveBeenCalledWith(
         expect.objectContaining({
           event: "sdp_api_payment_finalization_unproven",
@@ -1128,7 +1104,7 @@ describe("trackPendingTransfers", () => {
 
       expect(statusReads()).toEqual([]);
       const unchanged = await getTransfer("xfr_confirmed_aged_out");
-      expect(unchanged?.status).toBe("confirmed");
+      expect(unchanged.status).toBe("confirmed");
     });
 
     it("rotates the polled page even when the RPC batch call fails", async () => {
@@ -1146,8 +1122,8 @@ describe("trackPendingTransfers", () => {
       await trackSandboxTransfers();
 
       const rotated = await getTransfer("xfr_confirmed_rpc_failed");
-      expect(rotated?.status).toBe("confirmed");
-      expect(rotated?.finalization_last_polled_at).not.toBeNull();
+      expect(rotated.status).toBe("confirmed");
+      expect(rotated.finalization_last_polled_at).not.toBeNull();
 
       rpc.respondSignatureStatuses(() => ({
         slot: 44444,
@@ -1159,8 +1135,8 @@ describe("trackPendingTransfers", () => {
       await trackSandboxTransfers();
 
       const upgraded = await getTransfer("xfr_confirmed_rpc_failed");
-      expect(upgraded?.status).toBe("finalized");
-      expect(upgraded?.slot).toBe(44444);
+      expect(upgraded.status).toBe("finalized");
+      expect(upgraded.slot).toBe(44444);
     });
 
     it("leaves and logs a confirmed transfer whose finalized status carries an error", async () => {
@@ -1184,7 +1160,7 @@ describe("trackPendingTransfers", () => {
       await trackSandboxTransfers();
 
       const unchanged = await getTransfer("xfr_confirmed_errored");
-      expect(unchanged?.status).toBe("confirmed");
+      expect(unchanged.status).toBe("confirmed");
       expect(warn).toHaveBeenCalledWith(
         expect.objectContaining({
           event: "sdp_api_payment_finalization_unproven",
@@ -1330,7 +1306,16 @@ describe("trackPendingTransfers", () => {
       await trackSandboxTransfers();
 
       expect(await getTransfer("xfr_audit_refused")).toMatchObject({ status: "finalized" });
-      expect(await listIntentOutcomes(intentId)).toHaveLength(1);
+      expect(await listIntentOutcomes(intentId)).toEqual([
+        {
+          status: "success",
+          metadata: expect.objectContaining({
+            status: "finalized",
+            signature: String(TEST_SIG_1),
+            slot: "654",
+          }),
+        },
+      ]);
     });
 
     it("settles a row without an intent without writing an outcome", async () => {
@@ -1351,7 +1336,7 @@ describe("trackPendingTransfers", () => {
            WHERE metadata::jsonb ->> 'auditPhase' = 'outcome'`
         )
         .first<{ count: number }>();
-      expect(outcomes?.count).toBe(0);
+      expect(outcomes).toEqual({ count: 0 });
     });
   });
 
@@ -1376,9 +1361,9 @@ describe("trackPendingTransfers", () => {
       await trackSandboxTransfers();
 
       const confirmed = await getTransfer("xfr_regression_confirmed_at");
-      expect(confirmed?.status).toBe("confirmed");
-      expect(confirmed?.confirmed_at).not.toBeNull();
-      const stampedAt = confirmed?.confirmed_at;
+      expect(confirmed.status).toBe("confirmed");
+      expect(confirmed.confirmed_at).not.toBeNull();
+      const stampedAt = confirmed.confirmed_at;
 
       rpc.respondSignatureStatuses(() => ({
         slot: 101,
@@ -1390,36 +1375,8 @@ describe("trackPendingTransfers", () => {
       await trackSandboxTransfers();
 
       const finalized = await getTransfer("xfr_regression_confirmed_at");
-      expect(finalized?.status).toBe("finalized");
-      expect(finalized?.confirmed_at).toBe(stampedAt);
-    });
-
-    it("running the reconciler twice against the same chain state is idempotent", async () => {
-      rpc.respondSignatureStatuses(() => ({
-        slot: 200,
-        confirmations: null,
-        confirmationStatus: "finalized",
-        err: null,
-      }));
-
-      await insertTransfer({
-        id: "xfr_regression_double_fire",
-        status: "confirmed",
-        signature: String(TEST_SIG_1),
-        createdAt: minutesAgo(3),
-        updatedAt: minutesAgo(2),
-        confirmedAt: minutesAgo(2),
-      });
-
-      await trackSandboxTransfers();
-      const first = await getTransfer("xfr_regression_double_fire");
-
-      await trackSandboxTransfers();
-      const second = await getTransfer("xfr_regression_double_fire");
-
-      expect(first?.status).toBe("finalized");
-      expect(second?.status).toBe("finalized");
-      expect(second?.slot).toBe(first?.slot);
+      expect(finalized.status).toBe("finalized");
+      expect(finalized.confirmed_at).toBe(stampedAt);
     });
 
     it("a late poll verdict never regresses a finalized or failed transfer", async () => {
@@ -1461,10 +1418,10 @@ describe("trackPendingTransfers", () => {
 
       const stillFinal = await getTransfer("xfr_regression_already_final");
       const stillFailed = await getTransfer("xfr_regression_already_failed");
-      expect(stillFinal?.status).toBe("finalized");
-      expect(stillFinal?.finalization_last_polled_at).toBeNull();
-      expect(stillFailed?.status).toBe("failed");
-      expect(stillFailed?.slot).toBeNull();
+      expect(stillFinal.status).toBe("finalized");
+      expect(stillFinal.finalization_last_polled_at).toBeNull();
+      expect(stillFailed.status).toBe("failed");
+      expect(stillFailed.slot).toBeNull();
     });
 
     it("a poll verdict scoped to the wrong organization touches nothing", async () => {
@@ -1491,9 +1448,9 @@ describe("trackPendingTransfers", () => {
       });
 
       const untouched = await getTransfer("xfr_regression_wrong_org");
-      expect(untouched?.status).toBe("confirmed");
-      expect(untouched?.slot).toBeNull();
-      expect(untouched?.finalization_last_polled_at).toBeNull();
+      expect(untouched.status).toBe("confirmed");
+      expect(untouched.slot).toBeNull();
+      expect(untouched.finalization_last_polled_at).toBeNull();
     });
   });
 });

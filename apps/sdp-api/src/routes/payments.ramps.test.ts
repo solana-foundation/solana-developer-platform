@@ -144,7 +144,7 @@ describe("Payments routes — ramps", () => {
 
   it("rejects the retired symbol-shaped onramp quote request", async () => {
     const response = await app.request(
-      "/v1/payments/ramps/onramp/quote",
+      "/v1/payments/ramps/onramp/start",
       {
         method: "POST",
         headers: {
@@ -173,7 +173,7 @@ describe("Payments routes — ramps", () => {
 
     for (const direction of ["onramp", "offramp"]) {
       const response = await app.request(
-        `/v1/payments/ramps/${direction}/quote`,
+        `/v1/payments/ramps/${direction}/start`,
         {
           method: "POST",
           headers: {
@@ -239,7 +239,7 @@ describe("Payments routes — ramps", () => {
 
   it("rejects the retired symbol-shaped offramp quote request", async () => {
     const response = await app.request(
-      "/v1/payments/ramps/offramp/quote",
+      "/v1/payments/ramps/offramp/start",
       {
         method: "POST",
         headers: {
@@ -269,7 +269,7 @@ describe("Payments routes — ramps", () => {
     });
 
     const response = await app.request(
-      "/v1/payments/ramps/onramp/quote",
+      "/v1/payments/ramps/onramp/start",
       {
         method: "POST",
         headers: {
@@ -298,7 +298,7 @@ describe("Payments routes — ramps", () => {
     });
 
     const response = await app.request(
-      "/v1/payments/ramps/onramp/quote",
+      "/v1/payments/ramps/onramp/start",
       {
         method: "POST",
         headers: {
@@ -333,7 +333,7 @@ describe("Payments routes — ramps", () => {
     const counterpartyId = await seedCounterparty({ externalId: "connection_ramp_wallet" });
 
     const response = await app.request(
-      "/v1/payments/ramps/onramp/quote",
+      "/v1/payments/ramps/onramp/start",
       {
         method: "POST",
         headers: {
@@ -575,7 +575,7 @@ describe("Payments routes — ramps", () => {
 
   it("lists generated on-ramp currency provider support", async () => {
     const res = await app.request(
-      "/v1/payments/ramps/onramp/currency?source=USD&dest=usdc.solana",
+      "/v1/payments/ramps/onramp/supported-pairs?source=USD&dest=usdc.solana",
       {
         headers: {
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -605,7 +605,7 @@ describe("Payments routes — ramps", () => {
 
   it("lists generated off-ramp currency provider support", async () => {
     const res = await app.request(
-      "/v1/payments/ramps/offramp/currency?source=usdc.solana&dest=USD&provider=moonpay",
+      "/v1/payments/ramps/offramp/supported-pairs?source=usdc.solana&dest=USD&provider=moonpay",
       {
         headers: {
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -635,7 +635,7 @@ describe("Payments routes — ramps", () => {
     const counterpartyId = await seedCounterparty({ externalId: "moonpay_user_123" });
 
     const res = await app.request(
-      "/v1/payments/ramps/onramp/quote",
+      "/v1/payments/ramps/onramp/start",
       {
         method: "POST",
         headers: {
@@ -723,7 +723,7 @@ describe("Payments routes — ramps", () => {
     stubOfframpQuoteReads();
 
     const response = await app.request(
-      "/v1/payments/ramps/offramp/quote",
+      "/v1/payments/ramps/offramp/start",
       {
         method: "POST",
         headers: {
@@ -801,7 +801,7 @@ describe("Payments routes — ramps", () => {
           cryptoAmount: string;
         }): Promise<URL> => {
       const response = await app.request(
-        `/v1/payments/ramps/${direction}/quote`,
+        `/v1/payments/ramps/${direction}/start`,
         {
           method: "POST",
           headers: {
@@ -848,7 +848,7 @@ describe("Payments routes — ramps", () => {
     );
 
     const res = await app.request(
-      "/v1/payments/ramps/onramp/quote",
+      "/v1/payments/ramps/onramp/start",
       {
         method: "POST",
         headers: {
@@ -877,7 +877,7 @@ describe("Payments routes — ramps", () => {
     const counterpartyId = await seedCounterparty({ externalId: "moonpay_user_123" });
 
     const onrampRes = await app.request(
-      "/v1/payments/ramps/onramp/quote",
+      "/v1/payments/ramps/onramp/start",
       {
         method: "POST",
         headers: {
@@ -902,7 +902,7 @@ describe("Payments routes — ramps", () => {
     expect(onrampBody.error.code).toBe("UNSUPPORTED_CORRIDOR");
 
     const offrampRes = await app.request(
-      "/v1/payments/ramps/offramp/quote",
+      "/v1/payments/ramps/offramp/start",
       {
         method: "POST",
         headers: {
@@ -940,7 +940,7 @@ describe("Payments routes — ramps", () => {
       const fetchSpy = vi.spyOn(globalThis, "fetch");
 
       const res = await app.request(
-        "/v1/payments/ramps/onramp/quote",
+        "/v1/payments/ramps/onramp/start",
         {
           method: "POST",
           headers: {
@@ -1332,7 +1332,7 @@ describe("Payments routes — ramps", () => {
       await seedRateLimit(env, `metered:ramp-quote:org:${TEST_ORG.id}`, 60);
 
       const res = await app.request(
-        "/v1/payments/ramps/onramp/quote",
+        "/v1/payments/ramps/onramp/start",
         {
           method: "POST",
           headers: {
@@ -1442,7 +1442,7 @@ describe("Payments routes — ramps", () => {
       fiatAmount: string
     ): Promise<Response> {
       return app.request(
-        "/v1/payments/ramps/onramp/quote",
+        "/v1/payments/ramps/onramp/start",
         {
           method: "POST",
           headers: {

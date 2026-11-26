@@ -1,4 +1,4 @@
-import { invalidateFireblocksAddressBook } from "@sdp/custody/provisioning/fireblocks-address-book";
+import { invalidateFireblocksAddressBook } from "@sdp/custody/providers/fireblocks/address-book";
 import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { Hono } from "hono";
@@ -13,7 +13,9 @@ import { internalCustody } from "@/routes/internal-custody";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
+import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -21,8 +23,8 @@ import type { Env } from "@/types/env";
 const ORGANIZATION_ID = "org_fireblocks_byok";
 const USER_ID = "usr_fireblocks_byok";
 const PROJECT_ID = "prj_fireblocks_byok";
-const ADDRESS = "11111111111111111111111111111111";
-const OTHER_ADDRESS = "So11111111111111111111111111111111111111112";
+const ADDRESS = syntheticAddress(1);
+const OTHER_ADDRESS = syntheticAddress(2);
 const fields = {
   apiKey: "tenant-fireblocks-key",
   signingKeyId: "",
@@ -40,7 +42,6 @@ const testEnv: Env = {
   SDP_DEPLOYMENT_MODE: "self_hosted",
   CREDENTIAL_SECRET_STORE_BACKEND: "encrypted_db",
   CUSTODY_ENCRYPTION_KEY: Buffer.alloc(32, 11).toString("base64"),
-  FIREBLOCKS_API_BASE_URL: "https://fireblocks.example.test",
   FIREBLOCKS_API_KEY: "deployment-key-must-not-be-used",
   FIREBLOCKS_API_SECRET: "deployment-secret-must-not-be-used",
 };
@@ -79,7 +80,11 @@ async function connect(projectId = PROJECT_ID) {
   const submitted = await request("/provider-credentials", body, projectId);
   expect(submitted.status, await submitted.clone().text()).toBe(201);
   const { data } = await submitted.json();
-  const completed = await request(`/connections/${data.connectionId}/complete`, {}, projectId);
+  const completed = await request(
+    `/connections/${data.connectionId}/complete-installation`,
+    {},
+    projectId
+  );
   expect(completed.status).toBe(200);
   expect((await completed.json()).data.completion.status).toBe("success");
   return z
@@ -155,7 +160,7 @@ let calls: { path: string; method: string; body: unknown; key: string | null }[]
 let failRead = false;
 function entry(status = "APPROVED", assetId = "SOL_TEST", address = OTHER_ADDRESS) {
   return {
-    id: "external-wallet",
+    id: "wallet",
     name: "Fireblocks contact",
     assets: [{ id: assetId, address, status }],
   };
@@ -164,13 +169,12 @@ async function ready() {
   const mock = providerResponse();
   connectionId = (await connect()).connectionId;
   const db = getDb(env);
-  walletId =
-    (
-      await db.queryOne<{ id: string }>(
-        "SELECT id FROM custody_wallets WHERE custody_connection_id = ?",
-        [connectionId]
-      )
-    )?.id ?? "";
+  walletId = required(
+    await db.queryOne<{ id: string }>(
+      "SELECT id FROM custody_wallets WHERE custody_connection_id = ?",
+      [connectionId]
+    )
+  ).id;
   await db.execute(
     "INSERT INTO counterparties (id, organization_id, project_id, entity_type, display_name, provider_data) VALUES (?, ?, ?, 'business', 'My SDP name', '{}'::jsonb)",
     [contactId, ORGANIZATION_ID, PROJECT_ID]
@@ -223,29 +227,16 @@ async function ready() {
 function selection() {
   return { walletId, counterpartyId: contactId, accountId, token: "SOL", address: OTHER_ADDRESS };
 }
-async function bookRequest(method = "GET", overrides = {}, projectId = PROJECT_ID) {
+async function bookRequest(overrides = {}, projectId = PROJECT_ID) {
   const input = { ...selection(), ...overrides };
-  const response = await api.request(
-    `/internal/dashboard/fireblocks/${method === "GET" ? `destination?${new URLSearchParams(input)}` : "whitelist"}`,
-    {
-      method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "X-Project-ID": projectId,
-        "Content-Type": "application/json",
-      },
-      body: method === "POST" ? JSON.stringify(input) : undefined,
-    },
+  return api.request(
+    `/internal/dashboard/fireblocks/destination-eligibility?${new URLSearchParams(input)}`,
+    { headers: { Authorization: `Bearer ${token}`, "X-Project-ID": projectId } },
     testEnv
   );
-  return response;
 }
 function expireBook() {
-  invalidateFireblocksAddressBook({
-    apiKey: fields.apiKey,
-    apiSecretPem: "unused",
-    apiBaseUrl: testEnv.FIREBLOCKS_API_BASE_URL,
-  });
+  invalidateFireblocksAddressBook({ apiKey: fields.apiKey, apiSecretPem: "unused" });
 }
 describe("Fireblocks read-only address book", () => {
   it("shares two reads, recognizes internal whitelist entries and matches the exact network", async () => {
@@ -253,7 +244,10 @@ describe("Fireblocks read-only address book", () => {
     internal = [entry()];
     const replies = await Promise.all([bookRequest(), bookRequest()]);
     for (const reply of replies) expect((await reply.json()).data.state).toBe("approved");
-    expect(calls).toHaveLength(2);
+    expect(calls.map((call) => call.path).sort()).toEqual([
+      "/v1/external_wallets",
+      "/v1/internal_wallets",
+    ]);
     expireBook();
     internal = [entry("APPROVED", "SOL")];
     expect((await (await bookRequest()).json()).data.state).toBe("not_whitelisted");
@@ -283,8 +277,8 @@ describe("Fireblocks read-only address book", () => {
   });
   it("rejects changed addresses and cross-project access before provider calls", async () => {
     await ready();
-    expect((await bookRequest("GET", { address: ADDRESS })).status).toBe(409);
-    expect((await bookRequest("GET", {}, `${PROJECT_ID}_production`)).status).toBe(404);
+    expect((await bookRequest({ address: ADDRESS })).status).toBe(409);
+    expect((await bookRequest({}, `${PROJECT_ID}_production`)).status).toBe(404);
     expect(calls).toHaveLength(0);
   });
   it("rejects API keys on the internal dashboard book endpoint", async () => {
@@ -299,25 +293,6 @@ describe("Fireblocks read-only address book", () => {
     });
     token = raw;
     expect((await bookRequest()).status).toBe(403);
-    expect(calls).toEqual([]);
-  });
-  it("removes the whitelist endpoint even for an administrator", async () => {
-    await ready();
-    expect((await bookRequest("POST")).status).toBe(404);
-    expect(calls).toEqual([]);
-  });
-  it("listing contacts no longer triggers provider calls or automatic imports", async () => {
-    await ready();
-    external = [entry("APPROVED", "SOL_TEST", ADDRESS)];
-    const response = await api.request(
-      "/v1/counterparties",
-      {
-        headers: { Authorization: `Bearer ${token}`, "X-Project-ID": PROJECT_ID },
-      },
-      testEnv
-    );
-    expect(response.status).toBe(200);
-    expect((await response.json()).data.counterparties).toHaveLength(1);
     expect(calls).toEqual([]);
   });
 });

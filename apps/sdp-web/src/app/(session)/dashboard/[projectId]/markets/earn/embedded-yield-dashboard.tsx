@@ -1,10 +1,10 @@
 "use client";
 
 import type {
-  EarnExternalWalletPosition,
-  EarnExternalWalletPositionSummary,
-  EarnExternalWalletStrategyTotal,
   EarnStrategy,
+  EarnWalletPosition,
+  EarnWalletPositionSummary,
+  EarnWalletStrategyTotal,
 } from "@sdp/types/earn";
 import { type SolanaCluster, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { Button } from "@sdp/ui/button";
@@ -32,6 +32,7 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { explorerAddressUrl } from "@/lib/explorer";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
+import { useEarnStrategies, useEarnWalletPositionSummary } from "./earn-data";
 import { isPositiveDecimal } from "./earn-decimal";
 import {
   earnDetailLine,
@@ -48,7 +49,6 @@ import {
   sumDecimalStrings,
 } from "./earn-market-presentation";
 import { EarnRowIdentity, EarnSummary } from "./earn-page-blocks";
-import { useEarnExternalWalletPositionSummary, useEarnStrategies } from "./earn-program-data";
 import { EARN_TABLE, EARN_TABLE_FRAME } from "./earn-table-layout";
 import { earnVaultHoldingValue } from "./earn-vault-holding";
 import {
@@ -59,16 +59,16 @@ import {
 /** Each count in the summary's stat line, worded for one and for several, as Payments words its census. */
 const SUMMARY_COUNT_WORDS = {
   wallets: {
-    one: "DashboardMarkets.earnProgram.summaryWallets.one",
-    other: "DashboardMarkets.earnProgram.summaryWallets.other",
+    one: "DashboardMarkets.embeddedYield.summaryWallets.one",
+    other: "DashboardMarkets.embeddedYield.summaryWallets.other",
   },
   positions: {
-    one: "DashboardMarkets.earnProgram.summaryPositions.one",
-    other: "DashboardMarkets.earnProgram.summaryPositions.other",
+    one: "DashboardMarkets.embeddedYield.summaryPositions.one",
+    other: "DashboardMarkets.embeddedYield.summaryPositions.other",
   },
   assets: {
-    one: "DashboardMarkets.earnProgram.summaryAssets.one",
-    other: "DashboardMarkets.earnProgram.summaryAssets.other",
+    one: "DashboardMarkets.embeddedYield.summaryAssets.one",
+    other: "DashboardMarkets.embeddedYield.summaryAssets.other",
   },
 } as const satisfies Record<string, Record<"one" | "other", MessageKey>>;
 
@@ -91,11 +91,11 @@ type PortfolioLiveValue =
 /** Why the hero shows no figure, for each answer `portfolioLiveValue` gives. */
 const LIVE_VALUE_HINTS = {
   value: undefined,
-  withheld: "DashboardMarkets.earnProgram.liveValueWithheld",
-  not_dollar: "DashboardMarkets.earnProgram.liveValueNotDollar",
+  withheld: "DashboardMarkets.embeddedYield.liveValueWithheld",
+  not_dollar: "DashboardMarkets.embeddedYield.liveValueNotDollar",
 } as const satisfies Record<PortfolioLiveValue["kind"], MessageKey | undefined>;
 
-function portfolioLiveValue(summary: EarnExternalWalletPositionSummary): PortfolioLiveValue {
+function portfolioLiveValue(summary: EarnWalletPositionSummary): PortfolioLiveValue {
   if (summary.unavailablePositionCount > 0) return { kind: "withheld" };
   const values: string[] = [];
   for (const total of summary.totalsByToken) {
@@ -108,7 +108,7 @@ function portfolioLiveValue(summary: EarnExternalWalletPositionSummary): Portfol
 }
 
 function formatLatestDepositDate(
-  positions: readonly EarnExternalWalletPosition[] | undefined,
+  positions: readonly EarnWalletPosition[] | undefined,
   locale: string
 ): string {
   if (positions === undefined) return "—";
@@ -122,7 +122,7 @@ function formatLatestDepositDate(
 }
 
 /** The portfolio's live value, then how many customers, positions and assets make it up. */
-function PortfolioSummary({ summary }: { summary: EarnExternalWalletPositionSummary }) {
+function PortfolioSummary({ summary }: { summary: EarnWalletPositionSummary }) {
   const t = useTranslations();
   const locale = useLocale();
   const countFormat = useMemo(() => new Intl.NumberFormat(locale), [locale]);
@@ -138,7 +138,7 @@ function PortfolioSummary({ summary }: { summary: EarnExternalWalletPositionSumm
     <EarnSummary
       figure={liveValue.kind === "value" ? formatUsd(liveValue.value, locale) : "—"}
       hint={hintKey === undefined ? undefined : t(hintKey)}
-      label={t("DashboardMarkets.earnProgram.liveValue")}
+      label={t("DashboardMarkets.embeddedYield.liveValue")}
       stats={counts.map(({ count, id }) => ({
         id,
         label: t(SUMMARY_COUNT_WORDS[id][count === 1 ? "one" : "other"]),
@@ -165,15 +165,18 @@ function PortfolioNotices({
       <div aria-atomic="true" className={refreshFailed ? undefined : "sr-only"} role="status">
         {refreshFailed ? (
           <Callout variant="warning">
-            {t("DashboardMarkets.earnProgram.portfolioRefreshError")}
+            {t("DashboardMarkets.embeddedYield.portfolioRefreshError")}
           </Callout>
         ) : null}
       </div>
       {unavailablePositionCount > 0 ? (
         <Callout variant="warning">
-          {t("DashboardMarkets.earnProgram.incompletePortfolio", {
-            count: unavailablePositionCount,
-          })}
+          {t(
+            unavailablePositionCount === 1
+              ? "DashboardMarkets.embeddedYield.incompletePortfolioOne"
+              : "DashboardMarkets.embeddedYield.incompletePortfolio",
+            { count: unavailablePositionCount }
+          )}
         </Callout>
       ) : null}
     </>
@@ -185,7 +188,7 @@ function CustomerWallet({
   position,
 }: {
   cluster: SolanaCluster;
-  position: EarnExternalWalletPosition;
+  position: EarnWalletPosition;
 }) {
   const locale = useLocale();
   const t = useTranslations();
@@ -210,7 +213,7 @@ function CustomerWallet({
             {truncateMiddle(position.ownerAddress, 5, 5)}
           </span>
           <button
-            aria-label={t("DashboardMarkets.earnProgram.copyWalletAddress")}
+            aria-label={t("DashboardMarkets.embeddedYield.copyWalletAddress")}
             className="inline-flex size-6 shrink-0 items-center justify-center rounded-control text-tertiary transition-colors hover:bg-fill-subtle hover:text-primary"
             onClick={() => void navigator.clipboard.writeText(position.ownerAddress)}
             type="button"
@@ -218,7 +221,7 @@ function CustomerWallet({
             <CopyIcon aria-hidden="true" className="size-3.5" />
           </button>
           <a
-            aria-label={t("DashboardMarkets.earnProgram.openWalletInExplorer")}
+            aria-label={t("DashboardMarkets.embeddedYield.openWalletInExplorer")}
             className="inline-flex size-6 shrink-0 items-center justify-center rounded-control text-tertiary transition-colors hover:bg-fill-subtle hover:text-primary"
             href={explorerAddressUrl(position.ownerAddress, cluster)}
             rel="noreferrer"
@@ -229,14 +232,16 @@ function CustomerWallet({
         </div>
         {/* Wraps rather than truncates: on a phone a long share count would run into the value. */}
         <p className="flex min-w-0 flex-wrap gap-x-1 text-tertiary">
-          <span>{t("DashboardMarkets.earnProgram.availableShares")}</span>
+          <span>{t("DashboardMarkets.embeddedYield.availableShares")}</span>
           <span className="tabular-nums">
-            {shares ?? t("DashboardMarkets.earnProgram.valueUnavailable")}
+            {shares ?? t("DashboardMarkets.embeddedYield.valueUnavailable")}
           </span>
           {locked ? (
             <>
               <span aria-hidden="true">·</span>
-              <span>{t("DashboardMarkets.earnProgram.sharesUnlockAt", { time: unlockTime })}</span>
+              <span>
+                {t("DashboardMarkets.embeddedYield.sharesUnlockAt", { time: unlockTime })}
+              </span>
             </>
           ) : null}
         </p>
@@ -245,7 +250,7 @@ function CustomerWallet({
         <div className="flex h-5 items-center justify-end tabular-nums">
           {holdingValue === undefined ? (
             <StatusText tone="attention">
-              {t("DashboardMarkets.earnProgram.valueUnavailable")}
+              {t("DashboardMarkets.embeddedYield.valueUnavailable")}
             </StatusText>
           ) : (
             <span className="text-primary">
@@ -271,7 +276,7 @@ function StrategyWalletDetails({
   strategy,
 }: {
   cluster: SolanaCluster;
-  strategy: EarnExternalWalletStrategyTotal;
+  strategy: EarnWalletStrategyTotal;
 }) {
   const t = useTranslations();
   // Absent when the summary could not hydrate this strategy's wallets.
@@ -295,7 +300,7 @@ function StrategyWalletDetails({
           ))
         ) : (
           <Callout className="mx-3 my-2" variant="warning">
-            {t("DashboardMarkets.earnProgram.walletRefreshError")}
+            {t("DashboardMarkets.embeddedYield.walletRefreshError")}
           </Callout>
         )}
       </section>
@@ -314,7 +319,7 @@ function StrategyRows({
   definition?: EarnStrategy;
   isOpen: boolean;
   onToggle: () => void;
-  strategy: EarnExternalWalletStrategyTotal;
+  strategy: EarnWalletStrategyTotal;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -340,7 +345,7 @@ function StrategyRows({
       <TableRow
         aria-controls={detailsId}
         aria-expanded={isOpen}
-        aria-label={t("DashboardMarkets.earnProgram.viewCustomerWallets", {
+        aria-label={t("DashboardMarkets.embeddedYield.viewCustomerWallets", {
           strategy: strategy.label,
         })}
         className="cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-border-strong"
@@ -374,7 +379,7 @@ function StrategyRows({
                 <span className="block" key={total.tokenMint}>
                   {total.tokenValue === undefined ? (
                     <StatusText tone="attention">
-                      {t("DashboardMarkets.earnProgram.valueUnavailable")}
+                      {t("DashboardMarkets.embeddedYield.valueUnavailable")}
                     </StatusText>
                   ) : (
                     formatTokenValue(total.tokenValue, total.tokenMint, locale)
@@ -422,7 +427,7 @@ function PortfolioByStrategy({
   onStrategyToggle: (strategyId: string) => void;
   selectedStrategyId: string | null;
   strategies?: EarnStrategy[];
-  summary: EarnExternalWalletPositionSummary;
+  summary: EarnWalletPositionSummary;
 }) {
   const t = useTranslations();
   const strategiesByReference = useMemo(
@@ -438,8 +443,8 @@ function PortfolioByStrategy({
 
   return (
     <RecordBlock
-      hint={t("DashboardMarkets.earnProgram.portfolioDescription")}
-      title={t("DashboardMarkets.earnProgram.portfolioTitle")}
+      hint={t("DashboardMarkets.embeddedYield.portfolioDescription")}
+      title={t("DashboardMarkets.embeddedYield.portfolioTitle")}
     >
       {notices}
       <div className={EARN_TABLE_FRAME}>
@@ -447,22 +452,24 @@ function PortfolioByStrategy({
           <TableHeader>
             <TableRow>
               <TableHead className={cn(PAYMENTS_TABLE_HEAD, COLUMNS.strategy)}>
-                {t("DashboardMarkets.earnProgram.strategy")}
+                {t("DashboardMarkets.embeddedYield.strategy")}
               </TableHead>
               <TableHead className={cn(PAYMENTS_TABLE_HEAD, COLUMNS.wallets)}>
-                {t("DashboardMarkets.earnProgram.walletsColumn")}
+                {t("DashboardMarkets.embeddedYield.walletsColumn")}
               </TableHead>
               <TableHead className={cn(PAYMENTS_TABLE_HEAD, COLUMNS.positions)}>
-                {t("DashboardMarkets.earnProgram.positionsColumn")}
+                {t("DashboardMarkets.embeddedYield.positionsColumn")}
               </TableHead>
               <TableHead className={cn(PAYMENTS_TABLE_HEAD, COLUMNS.lastDeposit)}>
-                {t("DashboardMarkets.earnProgram.lastDeposit")}
+                {t("DashboardMarkets.embeddedYield.lastDeposit")}
               </TableHead>
               <TableHead className={cn(PAYMENTS_TABLE_HEAD, COLUMNS.value)}>
-                {t("DashboardMarkets.earnProgram.liveValue")}
+                {t("DashboardMarkets.embeddedYield.liveValue")}
               </TableHead>
               <TableHead className={cn(PAYMENTS_TABLE_HEAD, COLUMNS.toggle)}>
-                <span className="sr-only">{t("DashboardMarkets.earnProgram.customerWallets")}</span>
+                <span className="sr-only">
+                  {t("DashboardMarkets.embeddedYield.customerWallets")}
+                </span>
               </TableHead>
             </TableRow>
           </TableHeader>
@@ -496,7 +503,7 @@ export function EmbeddedYieldDashboard({ configureHref }: { configureHref: strin
   const cluster = useSolanaCluster();
   const [selectedStrategyId, setSelectedStrategyId] = useState<string | null>(null);
   const { strategies } = useEarnStrategies();
-  const { summary, error, isInitialLoading } = useEarnExternalWalletPositionSummary({
+  const { summary, error, isInitialLoading } = useEarnWalletPositionSummary({
     detailsVisible: selectedStrategyId !== null,
   });
 
@@ -508,8 +515,8 @@ export function EmbeddedYieldDashboard({ configureHref }: { configureHref: strin
     // state moves that action into its body (`hidesPageAction`).
     content = (
       <ListEmptyState
-        description={t("DashboardMarkets.earnProgram.portfolioErrorDescription")}
-        message={t("DashboardMarkets.earnProgram.portfolioErrorTitle")}
+        description={t("DashboardMarkets.embeddedYield.portfolioErrorDescription")}
+        message={t("DashboardMarkets.embeddedYield.portfolioErrorTitle")}
       />
     );
   } else if (summary.positionCount === 0) {
@@ -523,13 +530,13 @@ export function EmbeddedYieldDashboard({ configureHref }: { configureHref: strin
           action={
             <Button asChild>
               <Link href={href(configureHref)}>
-                {t("DashboardMarkets.earnProgram.configureShort")}
+                {t("DashboardMarkets.embeddedYield.configureShort")}
               </Link>
             </Button>
           }
-          description={t("DashboardMarkets.earnProgram.introDescription")}
+          description={t("DashboardMarkets.embeddedYield.introDescription")}
           hidesPageAction
-          message={t("DashboardMarkets.earnProgram.introTitle")}
+          message={t("DashboardMarkets.embeddedYield.introTitle")}
         />
       </div>
     );

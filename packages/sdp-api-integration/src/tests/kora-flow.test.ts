@@ -1,4 +1,5 @@
 import { apiTestSupport } from "@sdp/api/test-support";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { MAX_SUPPORTED_TRANSACTION_VERSION } from "@sdp/rpc/transaction-version";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { SignerCheckApiResponse } from "#/helpers/api-types";
@@ -165,9 +166,13 @@ describe("Kora Fee Payment (Live Smoke)", () => {
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT.id,
     });
-    await createSigningService(env).initializePrivySigning(TEST_ORG.id, TEST_PROJECT.id, {
-      walletLabel: "Kora project root wallet",
-    });
+    await runInClusterScope(
+      { projectId: TEST_PROJECT.id, environment: TEST_PROJECT.environment },
+      () =>
+        createSigningService(env).initializePrivySigning(TEST_ORG.id, TEST_PROJECT.id, {
+          walletLabel: "Kora project root wallet",
+        })
+    );
   });
 
   afterAll(async () => {

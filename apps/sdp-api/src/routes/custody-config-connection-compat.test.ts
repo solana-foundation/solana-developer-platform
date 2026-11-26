@@ -2,8 +2,8 @@ import { hashString } from "@sdp/payments/hash";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
-import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
+import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/helpers/custody";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
@@ -28,8 +28,8 @@ const CREDENTIAL_ID = "pcred_config_connection_compat";
 const CONNECTION_ID = "cconn_config_connection_compat";
 const CONNECTION_WALLET_RECORD_ID = "cwlt_config_connection_compat";
 const CONNECTION_WALLET_ID = "privy_config_connection_wallet";
-const CONFIG_PUBLIC_KEY = "11111111111111111111111111111111";
-const CONNECTION_PUBLIC_KEY = "Vote111111111111111111111111111111111111111";
+const CONFIG_PUBLIC_KEY = TEST_SOLANA_ADDRESSES.wallet1;
+const CONNECTION_PUBLIC_KEY = TEST_SOLANA_ADDRESSES.wallet2;
 const API_KEY = {
   id: "key_custody_config_connection_compat",
   raw: "sk_test_custody_config_connection_compat",
@@ -72,7 +72,7 @@ describe("custody Config beside a BYOK Connection", () => {
   });
 
   it("lists only the Managed Config and gates the Connection wallet on its own credential", async () => {
-    const configs = await request("/v1/wallets/configs");
+    const configs = await request("/v1/wallets/managed-signing/configurations");
     expect(configs.status).toBe(200);
     expect(await configs.json()).toEqual(configsBody());
 
@@ -111,13 +111,16 @@ describe("custody Config beside a BYOK Connection", () => {
   it("refuses an out-of-channel Connection wallet without touching the Config listing", async () => {
     custodyReleaseChannel.outOfChannelMode = "byok";
 
-    expect(await (await request("/v1/wallets/configs")).json()).toEqual(configsBody());
+    expect(await (await request("/v1/wallets/managed-signing/configurations")).json()).toEqual(
+      configsBody()
+    );
     const publicKey = await request(`/v1/wallets/public-key?walletId=${CONNECTION_WALLET_ID}`);
     expect(publicKey.status).toBe(403);
     expect(await publicKey.json()).toEqual({
       error: {
         code: "FORBIDDEN",
-        message: custodyProviderNotInReleaseChannel("privy", "byok").message,
+        message:
+          "The privy custody provider is not available in this release channel for byok custody.",
         details: { reason: "custody_provider_not_in_release_channel" },
       },
       meta: { requestId: expect.any(String) },
@@ -157,6 +160,7 @@ function connectionWalletBody(isRuntimeExecutionAllowed: boolean) {
         purpose: "root",
         status: "active",
         createdAt: expect.any(String),
+        providerPolicy: { checkedAt: null, reason: "not_checked", status: "unknown" },
       },
     },
     meta: { requestId: expect.any(String), timestamp: expect.any(String) },

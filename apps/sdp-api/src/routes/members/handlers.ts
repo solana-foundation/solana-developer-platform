@@ -154,7 +154,7 @@ export const listMembers = async (c: AppContext) => {
   const { page, pageSize } = resolveMembersPaging(c);
 
   // Pending invitations are shown only to callers who can act on them. Raising
-  // one (`POST /invite`) and withdrawing one (`DELETE /invitations/:id`) both
+  // one (`POST /invitations`) and withdrawing one (`DELETE /invitations/:id`) both
   // require `members.manage`, but this list is `members.read`, which the
   // `member` role holds too. That gap put every invitee's address — and
   // Clerk's accept link, a forwardable credential we cannot expire, since
@@ -701,7 +701,7 @@ async function endMembership(
     change: Extract<MembershipChange, { kind: "remove" | "leave" }>;
   }
 ): Promise<{ memberId: string; userId: string; changed: boolean }> {
-  return new AuditService(getDb(c.env)).logWithin(c, async (tx) => {
+  const ended = await new AuditService(getDb(c.env)).logWithin(c, async (tx) => {
     const ended = await applyMembershipChange(tx, params);
     return {
       entry: ended.changed
@@ -721,6 +721,7 @@ async function endMembership(
       result: { memberId: ended.memberId, userId: ended.userId, changed: ended.changed },
     };
   });
+  return ended;
 }
 
 /**

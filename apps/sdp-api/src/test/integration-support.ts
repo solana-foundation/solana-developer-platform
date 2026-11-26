@@ -10,6 +10,7 @@ import { KoraAdapter } from "@sdp/fee-payment/kora.adapter";
 import { hashString } from "@sdp/payments/hash";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { runInClusterScope } from "@sdp/rpc/scope";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { EARN_PROVIDERS } from "@sdp/types/provider-access";
 import { type Address, unwrapOption } from "@solana/kit";
 import { KoraClient } from "@solana/kora";
@@ -29,20 +30,18 @@ import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.
 import { SponsorshipBudgetRepository } from "@/db/repositories/sponsorship-budget.repository";
 import { app } from "@/index";
 import { runAsMoneyPrincipal } from "@/lib/money-principal";
-import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
+import { runInEachClusterScope, runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
 import { closeAllRedisClients, createKVStoreSet } from "@/runtime/kv-redis";
-import { createSigningService } from "@/services/domain/signing.service";
+import { createSigningService } from "@/services/custody/signing.service";
 import { resolveEarnExecutionClient } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
-import { depositIntoVault } from "@/services/earn/vault-deposit.service";
 import {
-  buildExternalWalletDepositTransaction,
-  buildExternalWalletWithdrawalTransaction,
-  submitExternalWalletDeposit,
-  submitExternalWalletWithdrawal,
-} from "@/services/earn/vault-external-wallet.service";
-import { withdrawFromVault } from "@/services/earn/vault-withdraw.service";
+  buildWalletDepositTransaction,
+  buildWalletWithdrawalTransaction,
+} from "@/services/earn/vault-wallet.service";
 import { createMosaicService } from "@/services/issuance/mosaic";
+import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
+import { reconcileOperations } from "@/services/jobs/reconcile-operations";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import {
   type RevokeIdleSubscriptionAuthoritiesResult,
@@ -65,8 +64,8 @@ export type ApiTestCustodyWallet = CustodyWallet;
 
 export const apiTestSupport = {
   app,
-  buildExternalWalletDepositTransaction,
-  buildExternalWalletWithdrawalTransaction,
+  buildWalletDepositTransaction,
+  buildWalletWithdrawalTransaction,
   closeAllRedisClients,
   closeDatabasePools,
   createKoraAdapter,
@@ -76,7 +75,6 @@ export const apiTestSupport = {
   createPostgresEarnRepository,
   createSigningService,
   createVaultDeadline,
-  depositIntoVault,
   CustodyConfigStore,
   ensureTestClerkIssuer,
   DVP_SWAP_PROGRAM_PROGRAM_ADDRESS,
@@ -93,8 +91,6 @@ export const apiTestSupport = {
   runAsMoneyPrincipal,
   seedTestDatabase,
   signTestClerkJwt,
-  submitExternalWalletDeposit,
-  submitExternalWalletWithdrawal,
   supportsVaultDirect,
   TOKEN_PROGRAM_ADDRESS,
   SponsorshipBudgetRepository,
@@ -103,6 +99,15 @@ export const apiTestSupport = {
   TEST_PROJECT_API_KEY,
   TEST_PROJECT_CACHED_KEY,
   TEST_USER,
+  /** Run real async execution and ledger settlement in the worker's identity and cluster scope. */
+  runEarnWorkers: (env: Env, environment: SdpEnvironment) =>
+    runWithSystemDatabaseIdentity("integration:earn-workers", () =>
+      runInEnvironmentClusterScope(environment, async () => {
+        await reconcileOperations(env);
+        await reconcileEarnVaultMovements(env);
+        await reconcileOperations(env);
+      })
+    ),
   /** One run of the revoke-subscription-authorities cron, as the worker runs it, per cluster. */
   revokeIdleSubscriptionAuthorities: async (env: Env, now: Date) => {
     const results: RevokeIdleSubscriptionAuthoritiesResult[] = [];
@@ -149,5 +154,4 @@ export const apiTestSupport = {
     runWithSystemDatabaseIdentity("cron:track-pending-transfers", () =>
       runInEachClusterScope(() => trackPendingTransfers(env))
     ),
-  withdrawFromVault,
 };

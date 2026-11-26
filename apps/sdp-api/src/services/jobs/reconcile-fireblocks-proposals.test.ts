@@ -1,15 +1,19 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
+import { createCustodyProposalState } from "@sdp/types/custody-proposals";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { runWithDatabaseIdentity } from "@/db/identity";
 import { FireblocksProposalsRepository } from "@/db/repositories/fireblocks-proposals.repository";
 import { FireblocksReconciliationRepository } from "@/db/repositories/fireblocks-reconciliation.repository";
-import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";
 import * as events from "@/runtime/money-path-events";
+import * as signingProposals from "@/services/custody/fireblocks-proposal-reconciliation";
+import { systemProposalLedger } from "@/services/jobs/proposal-recovery-ledger";
 import * as transfers from "@/services/payments/fireblocks-transfer";
+import { TEST_CUSTODY_PUBLIC_KEY } from "@/test/fixtures/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { reconcileFireblocksProposals } from "./reconcile-fireblocks-proposals";
 
@@ -19,7 +23,7 @@ const projects = {
   production: "prj_fireblocks_queue_production",
 } as const;
 const old = "2026-01-01T00:00:00.000Z";
-const address = "11111111111111111111111111111111";
+const address = TEST_CUSTODY_PUBLIC_KEY;
 const db = () => getDb(env);
 const queue = () => new FireblocksReconciliationRepository(db());
 const run = () =>
@@ -99,7 +103,7 @@ describe("Fireblocks reconciliation queue", () => {
       "sandbox_processing_true_1",
       "sandbox_processing_true_2",
     ]);
-    expect(stats).toMatchObject({ pending: selected.length, transfers: 2, signing: 1 });
+    expect(stats).toMatchObject({ pending: 3, transfers: 2, signing: 1 });
     expect(stats.oldestUnpolledAgeMs).toBeGreaterThan(180_000);
     expect((await queue().stats("production", Date.now())).pending).toBe(3);
     await expect(
@@ -118,8 +122,14 @@ describe("Fireblocks reconciliation queue", () => {
       active++;
       maximumActive = Math.max(maximumActive, active);
       try {
-        const repo = ledger.repo;
-        const claimed = await repo.claimFireblocksTransferPoll({
+        await ledger.proposals.ensureForTransfer({
+          transfer: row,
+          provider: "fireblocks",
+          binding: {},
+          state: createCustodyProposalState(),
+          now: old,
+        });
+        const claimed = await ledger.proposals.claimForPoll({
           transferId: row.id,
           organizationId: org,
           projectId: projects.sandbox,
@@ -128,7 +138,7 @@ describe("Fireblocks reconciliation queue", () => {
         });
         if (!claimed) throw new Error("Duplicate queue visit");
         visited.push(row.id);
-        return { row: claimed, polled: true };
+        return { row, polled: true };
       } finally {
         active--;
       }
@@ -154,6 +164,56 @@ describe("Fireblocks reconciliation queue", () => {
     );
   });
 
+  it("uses canonical poll timestamps for queue rotation and freshness, with legacy reads", async () => {
+    await seedTransfers(2);
+    await db().execute(
+      `UPDATE payment_transfers SET provider_data = provider_data || jsonb_build_object(
+        'fireblocksLastPolledAt', CASE WHEN id = 'sandbox_processing_true_1' THEN ? ELSE ? END)
+        WHERE organization_id = ?`,
+      ["2026-01-02T00:00:00.000Z", "2026-01-03T00:00:00.000Z", org]
+    );
+    const ledger = systemProposalLedger(env);
+    const row = await ledger.repo.getTransferById({
+      transferId: "sandbox_processing_true_1",
+      organizationId: org,
+      projectId: projects.sandbox,
+    });
+    if (row === null) throw new Error("Missing seeded transfer");
+    await ledger.proposals.ensureForTransfer({
+      transfer: row,
+      provider: "fireblocks",
+      binding: {},
+      state: createCustodyProposalState(),
+      now: old,
+    });
+    expect(
+      await ledger.proposals.claimForPoll({
+        transferId: row.id,
+        organizationId: org,
+        projectId: projects.sandbox,
+        now: "2026-01-04T00:00:00.000Z",
+        polledBefore: old,
+      })
+    ).not.toBeNull();
+    expect((await queue().list("sandbox", 100)).map((candidate) => candidate.id)).toEqual([
+      "sandbox_processing_true_2",
+      "sandbox_processing_true_1",
+    ]);
+    expect(await queue().stats("sandbox", Date.parse("2026-01-05T00:00:00.000Z"))).toMatchObject({
+      pending: 2,
+      oldestUnpolledAgeMs: 172_800_000,
+    });
+    expect(
+      (
+        await ledger.repo.getTransferById({
+          transferId: row.id,
+          organizationId: org,
+          projectId: projects.sandbox,
+        })
+      )?.updated_at
+    ).toBe(old);
+  });
+
   it("reports row failures, continues the batch, and fails the cron instead of reporting healthy", async () => {
     await seedTransfers(3);
     vi.spyOn(transfers, "pollFireblocksTransfer")
@@ -166,6 +226,58 @@ describe("Fireblocks reconciliation queue", () => {
       "error",
       expect.objectContaining({ failed: 1, polled: 2, pending: 3 })
     );
+  });
+
+  it("rotates malformed native intents so a full failed page cannot starve signing proposals", async () => {
+    await seedTransfers(100);
+    await db().execute(
+      "UPDATE payment_transfers SET custody_wallet_id = 'cwlt_queue' WHERE organization_id = ?",
+      [org]
+    );
+    await db().execute(
+      `INSERT INTO fireblocks_signing_proposals
+      (id, organization_id, project_id, custody_wallet_id, connection_id, account_fingerprint, vault_account_id, source_address, asset_id, operation, created_at, updated_at)
+      VALUES ('fbp_after_malformed', ?, ?, 'cwlt_queue', 'conn_queue', 'account', '0', ?, 'SOL_TEST', 'RAW', ?, ?)`,
+      [org, projects.sandbox, address, old, "2026-01-02T00:00:00.000Z"]
+    );
+    const ledger = systemProposalLedger(env);
+    const identity = {
+      transferId: "sandbox_processing_true_1",
+      organizationId: org,
+      projectId: projects.sandbox,
+    };
+    const transfer = await ledger.repo.getTransferById(identity);
+    if (transfer === null) throw new Error("Missing malformed transfer");
+    const canonical = await ledger.proposals.ensureForTransfer({
+      transfer,
+      provider: "fireblocks",
+      binding: {},
+      state: createCustodyProposalState(),
+      now: old,
+    });
+    const signingPoll = vi
+      .spyOn(signingProposals, "pollFireblocksSigningProposal")
+      .mockImplementation(async (_env, _repo, row) => ({ row, polled: true }));
+    const provider = vi.spyOn(globalThis, "fetch");
+    const log = vi.spyOn(events, "logEvent").mockImplementation(() => undefined);
+    await expect(run()).rejects.toThrow("Fireblocks proposal reconciliation failed");
+    expect(signingPoll).not.toHaveBeenCalled();
+    expect(await ledger.proposals.getForTransfer(identity)).toEqual(canonical);
+    expect(await db().queryOne("SELECT COUNT(*)::int AS count FROM custody_proposals")).toEqual({
+      count: 1,
+    });
+    expect(required(await ledger.repo.getTransferById(identity)).provider_data).toMatchObject({
+      fireblocksTransfer: {},
+      fireblocksLastPolledAt: expect.any(String),
+    });
+    expect(log).toHaveBeenLastCalledWith(
+      "error",
+      expect.objectContaining({ failed: 100, polled: 0, pending: 101 })
+    );
+    expect(required((await queue().list("sandbox", 100))[0]).id).toBe("fbp_after_malformed");
+    await expect(run()).rejects.toThrow("Fireblocks proposal reconciliation failed");
+    expect(signingPoll).toHaveBeenCalledOnce();
+    expect(provider).not.toHaveBeenCalled();
   });
 
   it("records a lease skip separately from a provider failure", async () => {
@@ -195,9 +307,22 @@ describe("Fireblocks reconciliation queue", () => {
 
   it("shares the native and signing leases across overlapping pollers", async () => {
     await seedTransfers(1);
-    const payments = createSystemPaymentsRepository(env);
+    const ledger = systemProposalLedger(env);
+    const row = await ledger.repo.getTransferById({
+      transferId: "sandbox_processing_true_1",
+      organizationId: org,
+      projectId: projects.sandbox,
+    });
+    if (row === null) throw new Error("Missing seeded transfer");
+    await ledger.proposals.ensureForTransfer({
+      transfer: row,
+      provider: "fireblocks",
+      binding: {},
+      state: createCustodyProposalState(),
+      now: old,
+    });
     const claim = () =>
-      payments.claimFireblocksTransferPoll({
+      ledger.proposals.claimForPoll({
         transferId: "sandbox_processing_true_1",
         organizationId: org,
         projectId: projects.sandbox,

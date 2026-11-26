@@ -31,7 +31,7 @@ export function WalletsPlayground({
   );
 
   return (
-    <div className="contents" data-wallet-panel="playground-ready">
+    <div className="contents">
       <ApiPlaygroundShell
         productName={t("DashboardCustody.wallets")}
         endpoints={endpoints}
