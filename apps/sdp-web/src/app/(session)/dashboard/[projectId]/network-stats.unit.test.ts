@@ -38,6 +38,9 @@ describe("niceNetworkTicks", () => {
 
   it("never returns more ticks than asked and keeps float noise out", () => {
     const ticks = niceNetworkTicks(0.1, 0.7, 4);
+    // The bounds below pass on an empty list, so floor it: the function
+    // brackets the data, it never gives up.
+    expect(ticks.length).toBeGreaterThan(0);
     expect(ticks.length).toBeLessThanOrEqual(4);
     expect(ticks.every((tick) => String(tick).length < 8)).toBe(true);
   });

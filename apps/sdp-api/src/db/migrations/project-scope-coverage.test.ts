@@ -34,9 +34,12 @@ async function nullableProjectTables(): Promise<string[]> {
 
 describe("project scope coverage", () => {
   it("requires project_id on every table outside the nullable registry", async () => {
-    const offenders = (await nullableProjectTables()).filter(
-      (table) => !(table in NULLABLE_PROJECT_TABLES)
-    );
+    const nullable = await nullableProjectTables();
+    // The catalog query must find the schema's tables, or this check would
+    // pass on an empty list (the tenant-isolation-coverage standard).
+    expect(nullable.length).toBeGreaterThan(0);
+
+    const offenders = nullable.filter((table) => !(table in NULLABLE_PROJECT_TABLES));
 
     expect(offenders).toEqual([]);
   });
