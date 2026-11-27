@@ -6,7 +6,8 @@ const DEFAULT_CLERK_TEST_ORG_NAME = "Solana";
 const DEFAULT_CLERK_TEST_EMAIL = "e2e-smoke+sdp-web@example.com";
 const BASE_URL = "http://localhost:3100";
 // Deployed dashboards the external GCP smoke may target instead of a local `next start`.
-// The production Clerk instance scopes its client cookie to solana.com, so the page under
+// Each deployment's Clerk production instance (stage's is the SDP Stage application on
+// app-preview.solana.com) scopes its client cookie to its own domain, so the page under
 // test must live there; a localhost or vercel.app page can never complete the sign-in.
 const GCP_DEPLOYED_WEB_URLS = ["https://app-preview.solana.com"];
 const GCP_EXTERNAL_API_URLS = [
