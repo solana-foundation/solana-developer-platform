@@ -1,5 +1,10 @@
 # @sdp/earn — agent notes
 
+Provider maintenance has one guide: [src/providers/AGENTS.md](src/providers/AGENTS.md).
+Read it before adding providers or altering offerings. The colocated
+`src/providers/CLAUDE.md` imports that same file; do not duplicate its checklist,
+configuration instructions or propagation timing here.
+
 Provider-integration layer for SDP Earn, **and the canonical local-dev runbook
 for the whole Earn stack** (API + web + DB + provider). The design is
 multi-provider — keep every provider-specific detail behind the provider-neutral
@@ -110,19 +115,12 @@ DOPPLER_PRESERVE_ENV=NEXT_PUBLIC_SDP_API_BASE_URL \
 A `.claude/launch.json` (untracked) encodes both for the editor's preview
 runner. Doppler supplies Clerk keys, so the dashboard needs `doppler login`.
 
-### 4. Get catalogue data — live provider sync
+### 4. Get catalogue data
 
-With sandbox provider credentials set, the catalogue-sync cron populates
-`earn_strategies` from live provider sources. It attempts a pass on cron-service
-startup and every five minutes. `runEarnCatalogueSyncIfDue` uses a 59-minute
-Redis slot, so healthy ingestion is roughly hourly (up to about 64 minutes plus
-processing). Startup respects a live slot; a fresh database with an unexpired
-shared slot may still wait. Every admitted row must pass the provider's
-declared-support checks. Hidden providers remain in the sync registry.
-
-See README.md → "Catalogue data" for cadence and failure behaviour. A database
-still holding `seed-demo-` rows from the removed `db:seed:earn` needs a one-time
-clear — SQL in `docs/contributing/earn-pluggability-playbook.md` § 3.
+Start the local cron service to populate the persisted catalogue. The
+[provider maintenance guide](src/providers/AGENTS.md#when-changes-appear)
+owns scheduling, retries, visibility propagation and cache behavior. Do not
+restore removed demo seeding workflows.
 
 ### 4b. Prepare a strategy action
 
@@ -180,29 +178,11 @@ swap, a deposit continuation or a separate claim API.
 The old catalogue, program, preview, build and submission HTTP routes are
 removed. Current holdings and obligations use the core routes and shared operations. There are no compatibility HTTP routes or retirement stubs.
 
-### 5. The last gate: org entitlement
+### 5. Provider offering and access
 
-Flags control _visibility_; earn access is **override-only per organization**
-(`providerOverrides.earn.<provider>`). With a key set and no override,
-the UI reaches the flow and the API refuses with "requires manual activation" —
-that is correct, not a bug. Grant the override in the **local** DB to proceed.
-
-### 5b. The gate BEFORE that one: is the provider even offered?
-
-**Kamino, Veda and Jupiter Lend are offered. Ondo is hidden; Hastra,
-WisdomTree and Plume remain pre-launch. Upshift and Perena remain stubs.**
-The sandbox catalogue's own lane shows Kamino's devnet shelf plus Veda's devnet
-Test Vault. Its mainnet mirror retains Ondo rows while discovery hides them;
-Jupiter Lend remains available for browse-only review. Production offers
-Veda's USDC PRIME and OUSD PRIME vaults from `VEDA_DEPLOYMENTS`. The Ground
-integration that previously served the custodial program flow
-was removed, so no registered provider is portfolio-capable today. The unsupported program HTTP surface is removed.
-Each provider's `surfaced` field in `EARN_PROVIDER_DESCRIPTORS`
-(`packages/sdp-types/src/provider-access.ts`, read as `EARN_PROVIDER_SURFACING`)
-declares which registered providers SDP OFFERS; it is a code constant, so there
-is no env var or DB row to flip. The full rationale, the exit-safety rules it must never break, and the
-test pattern are in `docs/contributing/earn-pluggability-playbook.md` §6 and
-ADR 0002's 2026-08-14 addendum.
+Use the [provider maintenance guide](src/providers/AGENTS.md) to change
+provider offerings, organization deposit entitlement or strategy curation.
+It identifies each control and the withdrawal/recovery behavior to preserve.
 
 ### Troubleshooting
 
@@ -226,7 +206,7 @@ ADR 0002's 2026-08-14 addendum.
 | Local API boots on 8787 despite `PORT=…`                                                                        | the dev wrapper reads **`SDP_API_PORT`**, not `PORT` (apps/sdp-api/scripts/lib/dev-env.mjs)                                                                                                                                                                                                                                                                                                                                                                           |
 | Need devnet USDC to fund a program                                                                              | Circle's faucet: <https://faucet.circle.com/> — USDC + Solana Devnet (§4b)                                                                                                                                                                                                                                                                                                                                                                                            |
 | No Veda rows in the PRODUCTION catalogue                                                                        | the production sync needs a mainnet RPC: with no `SOLANA_RPC_<PROVIDER>_MAINNET_API_KEY_URL`, production `listStrategies` throws `PROVIDER_NOT_CONFIGURED` and the sync skips that lane without touching other providers' rows. With one, the catalogue carries the two PRIME vault rows from `VEDA_DEPLOYMENTS` (`@sdp/types/veda-programs`). Sandbox carries the devnet Test Vault row                                                                              |
-| A Veda deposit answers 403 "is not currently offered"                                                           | stale build — `EARN_PROVIDER_SURFACING.veda` flipped `true` on 2026-08-31 (Kamino, Veda and Jupiter Lend are offered; Ondo is hidden). The gate still exists and still answers this for upshift/perena, and no org override lifts it (§5b)                                                                                                                                                                                                                                      |
+| A Veda deposit answers 403 "is not currently offered"                                                           | stale build — `EARN_PROVIDER_SURFACING.veda` flipped `true` on 2026-08-31 (Kamino, Veda and Jupiter Lend are offered; Ondo is hidden). The gate still exists and still answers this for upshift/perena, and no org override lifts it (see the provider maintenance guide)                                                                                                                                                                                                                                      |
 | No Ondo rows in discovery | Ondo is hidden through its shared `surfaced` flag. Sync still stores its mainnet row and sandbox mirror; held positions and exits remain available. See the Ondo section below                                                                                                                                                                                                                                                                                  |
 | The Ondo pass fails with `Ondo assets API listed no usdy entry` or `Ondo USDY apy is not a non-negative number` | `ondo.finance/api/v1/assets` changed shape (the `usdy` entry or its numeric `apy` percent). Check the live body; the row keeps its last figures until fixed                                                                                                                                                                                                                                                                                                           |
 | No Ondo row in the sandbox MIRROR either, on a deployment with no mainnet RPC                                   | the production pass needs a mainnet RPC: the catalogue sync hands every on-chain read the preferred endpoint of the requested cluster's managed pool (`ctx.catalogueRpcUrl`, read by `resolveCatalogueRpcUrl`), with no process-default fallback. With no `SOLANA_RPC_<PROVIDER>_MAINNET_API_KEY_URL` the pass is a steady-state skip and the mirror converges to empty. A devnet-only beta mirrors only the keyless Kamino and Jupiter Lend; a local stack sets one. |
@@ -642,10 +622,6 @@ deposit build follows.
 
 ## Conventions
 
-- New provider = subclass `providers/stub.ts` (`StubEarnClient`), register in
-  `EARN_PROVIDER_CLIENTS`, add the `./providers/<id>/client` package export.
-  A registry-consistency test in src/index.test.ts fails if any of these is
-  missing for an id in `EARN_PROVIDERS`.
 - All HTTP goes through `providerFetch`/`providerFetchJson` (src/fetch.ts) —
   never raw `fetch` in a client.
 - **`error` on a failure body is read as BOTH an object and a bare string**
@@ -672,25 +648,11 @@ deposit build follows.
   apps/sdp-api (e.g. `earn:inventory:kamino` regenerates
   `docs/earn/kamino-catalogue-inventory.md`).
 
-## Registered is not the same as offered
+## Provider integration and offering changes
 
-`EARN_PROVIDERS` is what this deployment can talk to; `EARN_PROVIDER_SURFACING`
-(both in `packages/sdp-types/src/provider-access.ts`) is what SDP sells today.
-An un-surfaced provider keeps its client, credentials, catalogue sync and
-metrics refresh, but disappears from discovery.
-Core deposit admission also requires a surfaced provider.
-
-**Nothing in this package reads it, and nothing should.** Surfacing is a product
-policy enforced at the API's read/write boundary, exactly like
-`HIDDEN_STRATEGY_TERMS`; a client here gates on credentials alone, the same rule
-that keeps feature flags out of this package. Keeping the sync provider-blind is
-what makes the DB a truthful inventory and re-surfacing a deploy rather than an
-hour's wait.
-
-The invariant it must never break is the one at the top of "Hard invariants":
-surfacing gates the way IN (a new strategy deposit) and nothing else, so it
-cannot trap funds. §6 of `docs/contributing/earn-pluggability-playbook.md` is the
-checklist.
+The sole procedure is [src/providers/AGENTS.md](src/providers/AGENTS.md).
+Keep registration, hide/restore steps and update timing there. Package contracts
+above describe implementation invariants, not a second operational checklist.
 
 ## Cross-package coupling
 

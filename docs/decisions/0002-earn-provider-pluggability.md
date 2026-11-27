@@ -14,6 +14,11 @@ before submission is accepted. Current unsigned builds use
 `earn_external_wallet_transactions` describe the historical schema. The
 schema-only companion removes it after the rewrite is serving.
 
+Current provider maintenance procedures live only in the
+[provider guide](../../packages/sdp-earn/src/providers/AGENTS.md). The dated
+addenda below preserve design history, including superseded flags and routes;
+they are not instructions for changing current offerings.
+
 ## Context
 
 Solana Earn (SDP Markets V1) fronts yield strategies through external
@@ -40,57 +45,19 @@ funds in a strategy whose provider was switched off.
    registries in `@sdp/types/earn`. Adding a new RWA or DeFi source is a
    registry/catalogue change.
 
-3. **Vault-infra providers — compiler-guided code change.** Adding an id to
-   `EARN_PROVIDERS` (`@sdp/types/provider-access`) intentionally breaks the
-   build until every `satisfies Record<EarnProviderId, ...>` map is filled:
-   the client registry (`EARN_PROVIDER_CLIENTS` in `@sdp/earn`) and the
-   availability definitions (`provider-availability.service.ts`). The
-   compiler enumerates every registration point, so "a lot of lift" is
-   replaced by "follow the type errors". Full checklist:
-   - `packages/sdp-types/src/provider-access.ts` — add the id to
-     `EARN_PROVIDERS` (entitlement is override-only; there is no tier
-     default list to fill).
-   - `packages/sdp-earn/src/providers/<id>/client.ts` — subclass
-     `StubEarnClient` (`providers/stub.ts`), declaring only the `provider`
-     literal and `declaredSupport`; every operation throws `NOT_IMPLEMENTED`
-     until the integration overrides it.
-   - `packages/sdp-earn/src/index.ts` — register in `EARN_PROVIDER_CLIENTS`
-     (+ `package.json` exports entry for the new subpath). Guarded by the
-     registry-consistency test in `packages/sdp-earn/src/index.test.ts`.
-   - `apps/sdp-api/src/services/provider-availability.service.ts` — one
-     line: `<id>: keyPairCredentialDefinition("<Label>", "<ID>")`.
-   - `apps/sdp-api/src/types/env.d.ts` (compile-enforced by the helper),
-     `turbo.json` `globalEnv`, `scripts/secret-keys.mjs` — declare
-     `<ID>_API_KEY` / `<ID>_SANDBOX_API_KEY` (+ Doppler). The latter two are
-     guarded by `provider-availability.drift.test.ts`.
+3. **Vault-infra providers are compiler-guided integrations.** The closed
+   provider registry makes missing registrations a compile/test failure. The
+   exact evidence, files and checks belong to the single
+   [provider guide](../../packages/sdp-earn/src/providers/AGENTS.md).
 
-   The followable walk-through, with verify steps, lives in the
-   [Earn pluggability playbook](../contributing/earn-pluggability-playbook.md).
+### Offering changes without broken exits
 
-### Enable/disable without breakage
-
-Independent switches, all runtime-safe:
-
-- **Environment kill switch:** a provider with no credentials configured is
-  `configured: false` — hidden from availability and refused at money-in with
-  a clean 503. Removing a key disables the provider for that deployment;
-  no code change.
-- **Org-level entitlement:** earn providers are override-only — the general
-  defaults enable none (`createBooleanRecord(EARN_PROVIDERS, [])`), so every
-  organization requires an explicit `providerOverrides.earn.<id>` (manual
-  activation), unlike ramps which are on by default.
-- **Strategy status:** `active | paused | deprecated` gates individual
-  strategies without touching the provider, and an operator stop is durable —
-  catalogue sync cannot overwrite `paused`/`deprecated`, so an emergency pause
-  holds until the status is deliberately written back. See the playbook's vault
-  checklist.
-- **Feature flag:** the whole `/v1/earn` family sits behind `EARN_ENABLED`.
-- **Surfacing (2026-08-14 addendum):** `EARN_PROVIDER_SURFACING` declares which
-  registered providers SDP currently OFFERS. An un-surfaced provider keeps its
-  code, credentials, crons and catalogue rows, but its strategies vanish from
-  every public read and `POST /portfolio-accounts` refuses it. This is the _product_
-  switch — the four above are deployment and customer switches — and it is the
-  only one that no per-organization override can lift.
+Catalogue membership, offering visibility and deposit admission are distinct
+policies. A commercial pause must preserve held-position reads, withdrawals
+and unresolved settlement. The current controls and deployment timing live in
+the [provider guide](../../packages/sdp-earn/src/providers/AGENTS.md), not in
+this historical decision record. Removing required execution credentials is
+not a commercial pause.
 
 ### Invariants that make disabling safe
 
@@ -119,8 +86,9 @@ Independent switches, all runtime-safe:
 
 - New provider ≈ one contained PR; the type system is the checklist.
 - New curator/strategy source ≈ data + optional label, shippable same day.
-- Disabling a provider stops new deposits immediately, leaves withdrawals,
-  reads and the withdrawal-ledger history untouched, and requires no deploy.
+- Pausing new exposure retains withdrawals, held-position reads and financial
+  history. Provider surfacing requires deployed code; organization entitlement
+  is read at admission. The provider guide specifies the timing of each control.
 - Deviation to note: the strategy catalogue is platform-global (carries an
   `environment` column) rather than org/project-scoped — see the header of
   migration `0048_earn.sql`.
@@ -200,7 +168,7 @@ capability slots in without burdening providers that lack it.
   skipped, so USDT is effectively production-only.
 
 Operational checklists (provider / vault / category / custodian) live in the
-[Earn pluggability playbook](../contributing/earn-pluggability-playbook.md).
+[Earn pluggability playbook](../../packages/sdp-earn/src/providers/AGENTS.md).
 
 ## Addendum — 2026-08-04 Markets/Earn flag hierarchy
 

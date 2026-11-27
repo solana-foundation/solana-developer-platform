@@ -55,6 +55,12 @@ Public docs and AI artifacts should mirror the supported public surface only.
 
 ## Implementation guidance
 
+- **Earn provider maintenance has one guide:**
+  [packages/sdp-earn/src/providers/AGENTS.md](packages/sdp-earn/src/providers/AGENTS.md).
+  Read it before adding a provider or changing offerings. It owns registration,
+  hide/restore procedures, propagation timing and verification. Link to it;
+  do not copy its checklist into other guides.
+
 - **Every route declares one action.** `requireAction("module.verb")` (`apps/sdp-api/src/middleware/require-action.ts`) from the registry in `packages/sdp-types/src/actions.ts`, or `publicRoute(reason)`; `route-actions.test.ts` fails a route that declares neither. API keys hold explicit grants (no role, no wildcard) and can never hold key, member, organization or project administration or any `configure`.
 - **A route in a grouped API family names its docs group.** Payments, Issuance, Counterparties and Earn (operations included) routes set `[DOCS_GROUP]: <FAMILY>_GROUPS.<group>` beside their `tags` (`apps/sdp-api/src/openapi/paths/helpers.ts`); the API reference shows each group as a folder of its family. `openapi:generate` fails a family that names groups on some routes but not all.
 - **An API change ships with its docs (hard rule).** Any change a caller can see (a route, a
