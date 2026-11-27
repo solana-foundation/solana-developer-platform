@@ -52,7 +52,9 @@ calls admin can always write memberships.
 - **Admission happens only in SDP**: creating an organization (the creator
   becomes its first admin) or the first sign-in matching a pending SDP
   invitation. Admission grants both default projects once; nothing re-grants
-  them.
+  them. The one exception is migration 0234 (PRO-2579): it gave the default
+  sandbox project to organizations admitted while prod served mainnet only,
+  when prod went back to serving both networks.
 - **SDP enforces what Clerk no longer does**: an organization always keeps an
   admin, an admin never changes their own role or leaves, and a person creates
   at most one organization.

@@ -9,6 +9,7 @@ import { MembersSection } from "./members-section";
 import { OrganizationAccessSection } from "./organization-access-section";
 import { OrganizationAlertEmailsSection } from "./organization-alert-emails-section";
 import { OrganizationDetailsSection } from "./organization-details-section";
+import { PlanSection } from "./plan-section";
 import { SettingsWorkspace } from "./settings-workspace";
 
 /** Anything that is not a positive integer falls back to the first page. */
@@ -19,10 +20,10 @@ function resolveMembersPage(value: string | string[] | undefined): number {
 }
 
 /**
- * Organization settings, as tabs. General: the organization's name and ID, the quick start for
- * API key managers, mainnet access and email alerts for admins, and leaving for everyone else.
- * Members, for admins: inviting and the member list. Security, for admins: the API-key IP
- * allowlist.
+ * Organization settings, as tabs. General: the organization's name and ID, its plan, the quick
+ * start for API key managers, mainnet access and email alerts for admins, and leaving for
+ * everyone else. Members, for admins: inviting and the member list. Security, for admins: the
+ * API-key IP allowlist.
  *
  * @param props - The route props.
  * @param props.searchParams - The query, carrying the members page.
@@ -48,6 +49,7 @@ export default async function SettingsPage({
       general={
         <div className="@container flex w-full flex-col gap-2.5">
           <OrganizationDetailsSection />
+          <PlanSection />
           {canManageApiKeys ? <DashboardQuickStart variant="settings" /> : null}
           {canManageOrgSettings ? <MainnetAccessSection /> : null}
           {canManageOrgSettings ? <OrganizationAlertEmailsSection /> : null}

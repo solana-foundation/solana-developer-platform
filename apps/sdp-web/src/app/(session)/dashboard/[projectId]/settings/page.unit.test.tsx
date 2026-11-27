@@ -25,6 +25,7 @@ import { OrganizationAccessSection } from "./organization-access-section";
 import { OrganizationAlertEmailsSection } from "./organization-alert-emails-section";
 import { OrganizationDetailsSection } from "./organization-details-section";
 import SettingsPage from "./page";
+import { PlanSection } from "./plan-section";
 import { SettingsWorkspace } from "./settings-workspace";
 
 type SectionTypes = ReactElement["type"][];
@@ -54,6 +55,7 @@ describe("settings page", () => {
       {
         general: [
           OrganizationDetailsSection,
+          PlanSection,
           DashboardQuickStart,
           MainnetAccessSection,
           OrganizationAlertEmailsSection,
@@ -65,7 +67,7 @@ describe("settings page", () => {
     [
       "member",
       {
-        general: [OrganizationDetailsSection, LeaveOrganizationSection],
+        general: [OrganizationDetailsSection, PlanSection, LeaveOrganizationSection],
         members: null,
         security: null,
       },

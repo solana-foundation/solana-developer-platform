@@ -7,6 +7,7 @@ import * as mainnetLoad from "@/app/(session)/dashboard/[projectId]/settings/mai
 import * as sdpApi from "@/lib/sdp-api";
 import { nextNavigationMock, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { EnglishI18n } from "@/test/i18n";
+import * as accountActions from "./mainnet-access-account-actions";
 import MainnetAccessPage from "./page";
 
 const state = vi.hoisted(() => {
@@ -28,11 +29,13 @@ vi.mock("@/flags", () => ({
   sandboxOnBeta: async () => state.sandboxOnBeta,
   betaLabel: async () => state.betaLabel,
 }));
-// Clerk's prebuilt switcher needs a loaded Clerk; the page's own controls around it are real.
-vi.mock("@clerk/nextjs", () => ({
-  OrganizationSwitcher: () => <button type="button">Switch organization</button>,
-  useClerk: () => ({ signOut: vi.fn() }),
-}));
+
+/** The page's account actions read Clerk; their own test drives them from plain values. */
+function stubAccountActions() {
+  vi.spyOn(accountActions, "MainnetAccessAccountActions").mockReturnValue(
+    <button type="button">Sign out</button>
+  );
+}
 
 const LOCKED: MainnetAccess = {
   state: "not_requested",
@@ -59,6 +62,7 @@ async function renderPage() {
 }
 
 beforeEach(() => {
+  stubAccountActions();
   resetDashboardNavigation();
   state.orgId = "org_clerk_test";
   state.sandboxOnBeta = false;

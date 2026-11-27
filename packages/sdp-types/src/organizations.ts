@@ -14,6 +14,12 @@ export type OrganizationTier = (typeof ORGANIZATION_TIERS)[number];
  * its creator's one-organization slot but may not authenticate until active.
  */
 export const ORGANIZATION_STATUSES = ["provisioning", "active", "suspended", "deleted"] as const;
+
+/**
+ * Members an organization may hold, pending invitations included, as Clerk counts its own
+ * membership limit.
+ */
+export const MAX_ORGANIZATION_MEMBERS = 20;
 export type OrganizationStatus = (typeof ORGANIZATION_STATUSES)[number];
 
 /** Incident operations cannot activate provisioning or deleted organizations. */

@@ -8,6 +8,10 @@ Solana Developer Platform gives organizations project-scoped access to tokenizat
 The team workspace through which every SDP user accesses projects and product capabilities. SDP does not model a separate individual-user product tier.
 _Avoid_: Individual account, enterprise customer, personal workspace
 
+**Free Plan**:
+What every **Organization** gets without review: a devnet (sandbox) project, API keys at the standard per-key rate limit, and the full member seats. Mainnet access is a separate, reviewed request. The plan is a set of usage limits; it is not a customer tier and never decides **Provider Availability**.
+_Avoid_: Free tier, individual tier, starter plan
+
 **Generally Available Provider**:
 A **Provider** that any **Organization** may use when it is configured in the current deployment environment.
 _Avoid_: Individual-tier provider, free-tier provider, default entitlement

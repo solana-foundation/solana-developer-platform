@@ -187,22 +187,13 @@ describe("POST /v1/organizations", () => {
     });
   });
 
-  it("creates only the production project on a mainnet-only deployment", async () => {
+  it("also creates the hidden sandbox project on a mainnet-only deployment", async () => {
     env.SDP_ALLOW_SANDBOX_PROJECTS = "false";
 
     const { response, created } = await createActiveOrganization();
 
     expect(response.status).toBe(201);
-    expect(await storedState(created.id)).toEqual({
-      ...activeState(created),
-      projectMembers: [
-        {
-          organization_id: created.id,
-          environment: "production",
-          user_id: created.created_by_user_id,
-        },
-      ],
-    });
+    expect(await storedState(created.id)).toEqual(activeState(created));
   });
 
   it("finishes a creation whose Clerk membership failed without creating the Clerk organization again", async () => {
