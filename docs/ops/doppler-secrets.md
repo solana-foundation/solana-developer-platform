@@ -113,3 +113,13 @@ When removing a secret, first remove all code and deployment references, then re
 ## Rollback
 
 Rolling back a Cloud Run image does not roll back runtime configuration or database schema. Keep configuration backward-compatible across the rollback window and follow [Release Operations](./release-operations.md) for the service and cron rollback procedure.
+
+### Database notification sessions
+
+`DATABASE_LISTENER_URL` optionally selects a direct or session-pooled connection
+to the same database as `DATABASE_URL`, with the same runtime permissions. Set it
+on the cron service when `DATABASE_URL` uses transaction pooling, which cannot
+preserve `LISTEN`. Normal queries and `NOTIFY` keep using `DATABASE_URL`. Direct
+local and preview databases can omit the listener URL. One listener connection
+serves all admitted environments per cron instance; user count adds no listeners.
+A missing notification never removes the two-second recovery fallback.

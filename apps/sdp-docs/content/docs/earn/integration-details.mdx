@@ -114,6 +114,13 @@ To pick up work you already started, list `GET /v1/operations?ownerAddress=...`
 and continue from its `nextAction` instead of preparing another deposit or
 withdrawal.
 
+Track several known operations in one request with
+`GET /v1/operations?ownerAddress=...&operationIds=op_a,op_b&limit=100`.
+`operationIds` accepts up to 100 comma-separated IDs. The same wallet visibility
+and other filters apply; missing or inaccessible IDs are omitted. Keep the
+owner filter for owner-address operations. Refresh recent user actions quickly,
+then back off while a provider is settling. A status read never executes work.
+
 Replaying a refresh with its original key returns the original response, even
 after a later submit; it builds nothing new. Read
 `GET /v1/operations/{operationId}` for the current state.

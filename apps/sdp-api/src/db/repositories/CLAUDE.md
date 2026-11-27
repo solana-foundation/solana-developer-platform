@@ -24,6 +24,24 @@ bind each attempt to its reviewed transaction. Recovery uses a fenced lease;
 signed bytes, proposal bindings and dispatch identity cannot be replaced after
 an uncertain effect. Cancellation intent is sticky, and an observation-only
 attempt can never regain broadcast authority.
+`claimNextRecovery` skips locked rows and leases only due work ready to start.
+Commit notifications carry only the environment; submission wakes recovery
+after releasing its lease in the same transaction.
+
+`earn-observation-claims.ts` coordinates fast observation and minute recovery
+with scoped, token-fenced leases. Financial writes stay in the domain
+repositories. `claimUnsettledVaultMovements` and `claimUnsettledActions` only
+rotate candidate cursors. Recovery reads unleased candidates in bulk, then
+leases four fresh rows immediately before reduction; never reserve the full
+RPC batch. Fast scan tokens fence scheduling writes without a processing lease. Only a
+positive signature status can acquire the fast lane's ten-second processing
+lease. A shared status-read failure keeps every row scheduled after five seconds.
+Individual projection failures retry after five seconds within two minutes;
+older projection failures clear the fast hint and remain with minute recovery.
+Scheduling writes must not change public `updated_at`.
+Fast scans exclude NULL due hints: retire obsolete hints in bounded
+pages without changing financial status, and leave legacy or parked NULL hints
+to minute recovery.
 
 Submit queues only the exact reviewed transaction. Refresh checks the current
 action ID/version before preparing terms. Withdrawal selection narrows the
@@ -252,6 +270,16 @@ status change, with its source statuses, target and ramp types (HOO-2033).
   (`logSystemWithin`); a ledger failure rolls the transition back. The ledger
   cannot join an open transaction (a transactional client refuses its session
   lock), so it owns the transaction: MoonPay's observation runs inside it.
+
+## Earn recovery health
+
+`earn-recovery-health.repository.ts` reads one snapshot per minute over active
+queues and unresolved valuations. It never claims, writes, reads RPC or treats
+a provider wait as chain backlog. Match observation eligibility with
+`EARN_OBSERVATION_PREDICATES`; finalized current releases exclude their old
+queued obligations. Keep the missing-valuation predicate aligned with
+`idx_earn_valuation_health` so history growth cannot turn health into a full
+ledger scan. A failed query must not publish healthy zeros.
 
 ## Ramps: status pull queue
 

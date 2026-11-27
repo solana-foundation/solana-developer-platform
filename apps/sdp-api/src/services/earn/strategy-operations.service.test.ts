@@ -292,6 +292,7 @@ beforeEach(async () => {
     fence: 1,
     purpose: "execute",
     recoveryRequired: false,
+    firstExecutionClaim: false,
     attempt: {
       id: "attempt",
       operationId: "operation",

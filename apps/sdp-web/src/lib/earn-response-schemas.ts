@@ -72,6 +72,7 @@ export const earnCorePositionSchema: z.ZodType<EarnCorePosition> = z.looseObject
   strategyId: z.string().optional(),
   discovered: z.boolean().optional(),
   costBasisKnown: z.boolean(),
+  balanceReadContext: earnBalanceReadContextSchema.optional(),
   feeSponsored: z.boolean(),
 });
 

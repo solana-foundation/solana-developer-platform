@@ -1,7 +1,7 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { successResponseSchema, withOpenApi } from "@/openapi/schemas/base";
 import {
-  earnCorePositionSchema,
+  earnCorePositionDetailSchema,
   earnDiscoveryResponseSchema,
   earnPositionsResponseSchema,
 } from "@/openapi/schemas/earn-core";
@@ -57,7 +57,7 @@ export function registerEarnCorePaths(registry: OpenAPIRegistry, publicOnly = fa
     operationId: "listEarnCorePositions",
     summary: "List positions",
     description:
-      "Lists positions, filtered by ownerAddress; the wallet needs no registration in SDP. Without a filter, the page covers every position the key can see, and sourceType=address or sourceType=wallet narrows it. walletId filters to one SDP custody wallet instead. discover=true, with one owner filter, adds holdings in integrated strategies that SDP did not open, without importing ownership or inventing acquisition history. Unavailable live reads stay unavailable, never zero. includeSummary=true totals the whole selected scope; costBasisKnown and costBasisCoverage mark unknown earnings history. Pending queue shares and intermediate-token balances stay visible.",
+      "Lists positions, filtered by ownerAddress; the wallet needs no registration in SDP. Without a filter, the page covers every position the key can see, and sourceType=address or sourceType=wallet narrows it. walletId filters to one SDP custody wallet instead. discover=true, with one owner filter, adds holdings in integrated strategies that SDP did not open, without importing ownership or inventing acquisition history. Unavailable live reads stay unavailable, never zero. includeSummary=true totals the whole selected scope; costBasisKnown and costBasisCoverage mark unknown earnings history. Pending queue shares and intermediate-token balances stay visible. Tracked holdings verified empty during this read are omitted; an outstanding withdrawal remains visible through its operation. Pages fill any resulting gaps before returning: hasMore=true still means limit holdings and a non-null nextCursor.",
     request: { headers: projectScopeHeaders, query: earnPositionsQuerySchema },
     responses: {
       200: {
@@ -74,7 +74,7 @@ export function registerEarnCorePaths(registry: OpenAPIRegistry, publicOnly = fa
     operationId: "getEarnPosition",
     summary: "Get a position",
     description:
-      "Returns one position, with the same fields and live values as the positions list. Pass any position ID the list returns, including a holding found with discover=true; no wallet filter or SDP wallet registration is needed, and the authenticated project and environment still control visibility. A discovered holding is verified live without importing it or inventing acquisition history; if SDP already tracks it, the response carries the tracked position ID, pending queued withdrawals included. An unknown or inaccessible position returns 404. Values SDP can't read live are left out of a tracked position, never shown as zero; a discovered holding SDP can't verify returns 503. afterMovementIds reads the balance from a point that includes those movements, which must belong to this position (another position's movement returns 404). Reading never prepares, signs or submits a transaction.",
+      "Returns one position, with the same fields and live values as the positions list. Pass any position ID the list returns, including a holding found with discover=true; no wallet filter or SDP wallet registration is needed, and the authenticated project and environment still control visibility. A discovered holding is verified live without importing it or inventing acquisition history; if SDP already tracks it, the response carries the tracked position ID, pending queued withdrawals included. An unknown or inaccessible position returns 404. Values SDP can't read live are left out of a tracked position, never shown as zero; a discovered holding SDP can't verify returns 503. afterMovementIds reads the balance from a point that includes those movements, which must belong to this position (another position's movement returns 404). When supplied, balanceReadContext returns the accepted movement IDs and minimumSlot for a paired funding-wallet balance read; minimumSlotMovementId identifies the accepted movement proving the strongest floor for this position. An authorized full exit remains readable with afterMovementIds and returns its persisted closedAt so the first refresh can remove the empty holding. Reading never prepares, signs or submits a transaction.",
     request: {
       headers: projectScopeHeaders,
       params: earnPositionParamsSchema,
@@ -83,7 +83,7 @@ export function registerEarnCorePaths(registry: OpenAPIRegistry, publicOnly = fa
     responses: {
       200: {
         description: "One visible position with available live values",
-        content: jsonContent(successResponseSchema(earnCorePositionSchema)),
+        content: jsonContent(successResponseSchema(earnCorePositionDetailSchema)),
       },
       ...earnErrorResponses([400, 401, 403, 404, 429, 500, 503]),
     },

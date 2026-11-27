@@ -1,4 +1,5 @@
 export const earnQueryKeys = {
+  operationProgress: () => "dashboard-earn-operation-progress",
   operations: () => "dashboard-earn-core-operations",
   operation: (id: string) => ["dashboard-earn-operation", id] as const,
   strategies: ({ cluster }: { cluster: string }) => ["dashboard-earn-strategies", cluster] as const,

@@ -1,6 +1,7 @@
 import type { EarnVaultPositionSnapshot } from "@sdp/earn/types";
 import { currentMinimumRpcSlot, observeRpcRead } from "@sdp/rpc/read-context";
 import type { EarnPositionsResponse } from "@sdp/types/earn-core";
+import type { Operation } from "@sdp/types/operations";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import type { UpsertEarnStrategyInput } from "@/db/repositories/earn.repository";
@@ -12,6 +13,11 @@ import {
   generateEarnPositionId,
 } from "@/db/repositories/earn-movements.repository";
 import { app } from "@/index";
+import { earnPositionsResponseSchema } from "@/openapi/schemas/earn-core";
+import {
+  projectEarnOperation,
+  projectEarnOperations,
+} from "@/services/earn/strategy-operations.service";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import {
@@ -42,6 +48,33 @@ const TOKEN = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SHARE = "So11111111111111111111111111111111111111112";
 let tenant: EarnAuthzTenant;
 let key: EarnTestApiKey;
+
+function projectedOperation(resourceRef: NonNullable<Operation["resourceRef"]>): Operation {
+  return {
+    id: `operation-${resourceRef.id}`,
+    kind: "earn.deposit",
+    status: "submitted",
+    environment: "sandbox",
+    intent: {
+      kind: "earn.deposit",
+      strategyId: "strategy",
+      source: { ownerAddress: OWNER },
+      amount: { mint: TOKEN, value: "1" },
+    },
+    actionId: `action-${resourceRef.id}`,
+    version: 1,
+    nextAction: { type: "wait", reason: "Waiting for transaction confirmation" },
+    terms: { expiresAt: null, estimate: null, minimum: null, fees: null, options: [] },
+    buildRef: null,
+    resourceRef,
+    canCancel: false,
+    cancelRequestedAt: null,
+    result: null,
+    error: null,
+    createdAt: "2026-11-24T00:00:00.000Z",
+    updatedAt: "2026-11-24T00:00:00.000Z",
+  };
+}
 
 beforeEach(async () => {
   await seedTestDatabase(env);
@@ -311,6 +344,76 @@ describe("Earn core read contracts", () => {
     expect(next.data.positions.map((position) => position.id)).toEqual([second.id]);
     expect(next.data.hasMore).toBe(false);
   });
+
+  it.each([
+    { closedCount: 0, expectedReads: 1, expectedScanned: 2 },
+    { closedCount: 1, expectedReads: 2, expectedScanned: 4 },
+    { closedCount: 2, expectedReads: 2, expectedScanned: 4 },
+    { closedCount: 5, expectedReads: 3, expectedScanned: 5 },
+  ])(
+    "fills a mixed-source page after $closedCount leading holdings close during hydration",
+    async ({ closedCount, expectedReads, expectedScanned }) => {
+      const walletId = await seedWallet();
+      const positions = [];
+      const ledger = createPostgresEarnMovementsRepository(getDb(env));
+      for (let index = 0; index < 5; index += 1) {
+        const position = await seedPosition({
+          reference: `paging-${index}`,
+          walletId: index % 2 === 0 ? walletId : undefined,
+          createdAt: `2026-11-18T0${5 - index}:00:00.000Z`,
+        });
+        await ledger.advanceVaultMovement({
+          movementId: position.movementId,
+          organizationId: tenant.org.id,
+          toStatus: "finalized",
+          confirmedAt: "2026-11-24T00:00:00.000Z",
+          settledAt: "2026-11-24T00:00:00.000Z",
+        });
+        positions.push(position);
+      }
+      readVaultPositions.mockImplementation(async (_runtime, input) =>
+        input.providerReferences.map((providerReference: string) => {
+          const closed = Number(providerReference.replace("paging-", "")) < closedCount;
+          return {
+            owner: input.owner,
+            providerReference,
+            cluster: "devnet",
+            tokenMint: TOKEN,
+            shareMint: SHARE,
+            shares: closed ? "0" : "2",
+            withdrawableShares: closed ? "0" : "2",
+            tokenValue: closed ? "0" : "10",
+          };
+        })
+      );
+
+      const response = await get("positions?limit=2");
+      expect(response.status).toBe(200);
+      const body = earnPositionsResponseSchema.parse(await response.json());
+      expect(body.data.positions.map((position) => position.id)).toEqual(
+        positions.slice(closedCount, closedCount + 2).map((position) => position.id)
+      );
+      expect(body.data.hasMore).toBe(closedCount + 2 < positions.length);
+      expect(body.data.nextCursor === null).toBe(!body.data.hasMore);
+      const scanned = readVaultPositions.mock.calls.flatMap((call) => call[1].providerReferences);
+      expect(scanned).toEqual(
+        Array.from({ length: expectedScanned }, (_, index) => `paging-${index}`)
+      );
+      expect(readVaultPositions).toHaveBeenCalledTimes(expectedReads);
+      const remaining: string[] = [];
+      let cursor = body.data.nextCursor;
+      while (cursor !== null) {
+        const next = await get(`positions?limit=2&before=${encodeURIComponent(cursor)}`);
+        expect(next.status).toBe(200);
+        const page = earnPositionsResponseSchema.parse(await next.json());
+        if (page.data.hasMore) expect(page.data.positions).toHaveLength(2);
+        expect(page.data.nextCursor === null).toBe(!page.data.hasMore);
+        remaining.push(...page.data.positions.map((position) => position.id));
+        cursor = page.data.nextCursor;
+      }
+      expect(remaining).toEqual(positions.slice(closedCount + 2).map((position) => position.id));
+    }
+  );
 
   it("summarizes the complete scope with one hydration, preserving unknown totals", async () => {
     await seedPosition({ reference: "known" });
@@ -712,6 +815,45 @@ describe("Earn core read contracts", () => {
 });
 
 describe("Earn position detail", () => {
+  it("projects 50 movements in two reads while preserving individual results and scope", async () => {
+    const seeds = await Promise.all(
+      Array.from({ length: 50 }, (_, i) => seedPosition({ reference: `batch-${i}` }))
+    );
+    const operations = seeds.map(({ movementId }) =>
+      projectedOperation({ kind: "earn.movement", id: movementId })
+    );
+    const scope = {
+      organizationId: tenant.org.id,
+      projectId: tenant.project.id,
+      environment: "sandbox" as const,
+    };
+    const reads = vi.spyOn(getDb(env), "prepare");
+    try {
+      const individual = await Promise.all(
+        operations.map((operation) => projectEarnOperation(env, scope, operation))
+      );
+      expect(reads).toHaveBeenCalledTimes(100);
+      reads.mockClear();
+      expect(await projectEarnOperations(env, scope, operations)).toEqual(individual);
+      expect(reads).toHaveBeenCalledTimes(2);
+      await expect(
+        projectEarnOperations(env, { ...scope, projectId: "different-project" }, operations)
+      ).rejects.toThrow("Operation movement");
+      await expect(
+        projectEarnOperations(env, { ...scope, environment: "production" }, operations)
+      ).rejects.toThrow("Operation movement");
+      await expect(
+        projectEarnOperations(
+          env,
+          { ...scope, organizationId: "different-organization" },
+          operations
+        )
+      ).rejects.toThrow("Operation movement");
+    } finally {
+      reads.mockRestore();
+    }
+  });
+
   it("returns the list's canonical position with one targeted provider read", async () => {
     const position = await seedPosition({ reference: "target" });
     await seedPosition({ reference: "unrelated" });
@@ -981,6 +1123,113 @@ describe("Earn position detail", () => {
     expect(readVaultPositions).toHaveBeenCalledTimes(1);
   });
 
+  it.each([false, true])(
+    "dates same-version movement progress monotonically (operation newer: %s)",
+    async (operationNewer) => {
+      const position = await seedPosition({ reference: "movement-progress-time" });
+      const ledger = createPostgresEarnMovementsRepository(getDb(env));
+      await ledger.advanceVaultMovement({
+        movementId: position.movementId,
+        organizationId: tenant.org.id,
+        toStatus: "confirmed",
+        confirmedAt: new Date().toISOString(),
+      });
+      const movement = await ledger.recordVaultMovementChainFinalization({
+        movementId: position.movementId,
+        organizationId: tenant.org.id,
+        observedAt: new Date().toISOString(),
+      });
+      if (!movement) throw new Error("Missing finalized movement evidence");
+      const operation = {
+        ...projectedOperation({ kind: "earn.movement", id: movement.id }),
+        updatedAt: new Date(
+          Date.parse(movement.updated_at) + (operationNewer ? 1_000 : -1_000)
+        ).toISOString(),
+      };
+      const scope = {
+        organizationId: tenant.org.id,
+        projectId: tenant.project.id,
+        environment: "sandbox" as const,
+      };
+      const projected = await projectEarnOperation(env, scope, operation);
+      expect(projected).toMatchObject({
+        status: "settling",
+        version: operation.version,
+        updatedAt: operationNewer ? operation.updatedAt : movement.updated_at,
+      });
+      expect(await projectEarnOperations(env, scope, [operation])).toEqual([projected]);
+    }
+  );
+
+  it("projects queued operations in bulk without changing escrow semantics", async () => {
+    const position = await seedPosition({ reference: "batch-queue" });
+    const requests = Array.from({ length: 50 }, (_, index) => `batch-request-${index}`);
+    await Promise.all(
+      requests.map((id) =>
+        getDb(env).execute(
+          `INSERT INTO earn_vault_withdrawal_requests (
+        id, organization_id, project_id, environment, provider, position_id,
+        owner_address, vault_address, token_mint, share_mint, request_address,
+        status, shares, quoted_assets, share_decimals, asset_decimals, discount_bps,
+        maturity_timestamp, deadline_timestamp, client_request_id, idempotency_fingerprint,
+        creation_signature)
+       VALUES (?, ?, ?, 'sandbox', 'veda', ?, ?, 'batch-queue', ?, ?, ?,
+         'pending', '2', '10', 6, 6, 0, 10, 20, ?, ?, ?)`,
+          [
+            id,
+            tenant.org.id,
+            tenant.project.id,
+            position.id,
+            OWNER,
+            TOKEN,
+            SHARE,
+            `${id}-address`,
+            `${id}-client`,
+            `${id}-fingerprint`,
+            `${id}-signature`,
+          ]
+        )
+      )
+    );
+    const operations: Operation[] = requests.map((id) => ({
+      ...projectedOperation({ kind: "earn.withdrawal_request", id }),
+      kind: "earn.withdraw",
+      intent: { kind: "earn.withdraw", positionId: position.id, amount: { kind: "all" } },
+    }));
+    const scope = {
+      organizationId: tenant.org.id,
+      projectId: tenant.project.id,
+      environment: "sandbox" as const,
+    };
+    const reads = vi.spyOn(getDb(env), "prepare");
+    try {
+      const individual = await Promise.all(
+        operations.map((operation) => projectEarnOperation(env, scope, operation))
+      );
+      expect(reads).toHaveBeenCalledTimes(100);
+      reads.mockClear();
+      expect(await projectEarnOperations(env, scope, operations)).toEqual(individual);
+      expect(reads).toHaveBeenCalledTimes(2);
+      expect(individual[0]).toMatchObject({
+        status: "settling",
+        result: { settlementOutcome: null, settledAmount: null },
+      });
+      const direct = projectedOperation({ kind: "earn.movement", id: position.movementId });
+      const projectedDirect = await projectEarnOperation(env, scope, direct);
+      reads.mockClear();
+      expect(await projectEarnOperations(env, scope, [direct, ...operations])).toEqual([
+        projectedDirect,
+        ...individual,
+      ]);
+      expect(reads).toHaveBeenCalledTimes(3);
+      await expect(
+        projectEarnOperations(env, { ...scope, projectId: "other-project" }, operations)
+      ).rejects.toThrow("Operation withdrawal request");
+    } finally {
+      reads.mockRestore();
+    }
+  });
+
   it("applies a ledger confirmation floor to the same discovered instrument ID", async () => {
     const strategy = await seedStrategy("confirmed-detail");
     const position = await seedPosition({ reference: "confirmed-detail" });
@@ -1019,7 +1268,13 @@ describe("Earn position detail", () => {
     });
     const response = await get(`positions/${id}?afterMovementIds=${position.movementId}`);
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ data: { id, tokenValue: "10" } });
+    expect(await response.json()).toMatchObject({
+      data: {
+        id,
+        tokenValue: "10",
+        balanceReadContext: { afterMovementIds: [position.movementId], minimumSlot: 103 },
+      },
+    });
     expect(readVaultPositions).toHaveBeenCalledTimes(1);
   });
 
@@ -1032,4 +1287,66 @@ describe("Earn position detail", () => {
     expect(readVaultPositions).not.toHaveBeenCalled();
     expect(rpc.calls.filter((call) => call.method === "getSignatureStatuses")).toEqual([]);
   });
+
+  it.each([true, false])(
+    "returns a verified full exit on the first refresh (already closed: %s)",
+    async (alreadyClosed) => {
+      const position = await seedPosition({ reference: "closed-detail" });
+      const ledger = createPostgresEarnMovementsRepository(getDb(env));
+      await ledger.advanceVaultMovement({
+        movementId: position.movementId,
+        organizationId: tenant.org.id,
+        toStatus: "finalized",
+        confirmedAt: "2026-11-24T00:00:00.000Z",
+        settledAt: "2026-11-24T00:00:00.000Z",
+      });
+      if (alreadyClosed)
+        await getDb(env).execute("UPDATE earn_positions SET closed_at = ? WHERE id = ?", [
+          "2026-11-24T00:00:00.000Z",
+          position.id,
+        ]);
+      await getDb(env).execute("UPDATE earn_movements SET signature = ? WHERE id = ?", [
+        "3".repeat(88),
+        position.movementId,
+      ]);
+      if (alreadyClosed) expect((await get(`positions/${position.id}`)).status).toBe(404);
+      expect((await get(`positions/${position.id}?afterMovementIds=missing`)).status).toBe(404);
+      expect(readVaultPositions).not.toHaveBeenCalled();
+      rpc.answer("getSignatureStatuses", {
+        value: [{ slot: 105, confirmations: null, confirmationStatus: "finalized", err: null }],
+      });
+      readVaultPositions.mockImplementationOnce(async () => {
+        expect(currentMinimumRpcSlot()).toBe(105);
+        observeRpcRead(
+          { method: "getAccountInfo" },
+          { result: { context: { slot: 105 }, value: null } }
+        );
+        return [
+          {
+            owner: OWNER,
+            providerReference: "closed-detail",
+            cluster: "devnet",
+            tokenMint: TOKEN,
+            shareMint: SHARE,
+            shares: "0",
+            withdrawableShares: "0",
+            tokenValue: "0",
+          },
+        ];
+      });
+      const response = await get(
+        `positions/${position.id}?afterMovementIds=${position.movementId}`
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        data: {
+          id: position.id,
+          shares: "0",
+          tokenValue: "0",
+          closedAt: expect.any(String),
+          balanceReadContext: { afterMovementIds: [position.movementId], minimumSlot: 105 },
+        },
+      });
+    }
+  );
 });

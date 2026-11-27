@@ -102,6 +102,7 @@ export async function reconcileEarnProviderOrders(env: Env): Promise<void> {
             movementId: movement.id,
             provider: movement.provider,
             event: "earn_provider_order_recovery_required",
+            environment,
           },
           "Earn provider order requires recovery"
         );
@@ -138,6 +139,7 @@ export async function reconcileEarnProviderOrders(env: Env): Promise<void> {
           movementId: movement.id,
           provider: movement.provider,
           event: "earn_provider_settlement_failed",
+          environment,
         },
         "Earn provider settlement could not be verified"
       );

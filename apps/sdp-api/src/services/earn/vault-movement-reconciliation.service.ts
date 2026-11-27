@@ -27,6 +27,14 @@ import {
   type EarnMovementRow,
   type EarnPositionRow,
 } from "@/db/repositories/earn-movements.repository";
+import {
+  EARN_RECOVERY_LEASE_SECONDS,
+  earnObservationDelay,
+  releaseEarnObservation,
+  releaseEarnObservations,
+  renewEarnObservation,
+} from "@/db/repositories/earn-observation-claims";
+import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { getLogger } from "@/runtime/logger";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import {
@@ -37,6 +45,10 @@ import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { broadcastVaultTransaction } from "@/services/earn/vault-execution.service";
 import { describeVaultSimulationError } from "@/services/earn/vault-simulation-error";
 import type { Env } from "@/types/env";
+import {
+  matchesEarnRecoveryTransaction,
+  unchangedEarnRecoveryState,
+} from "./vault-recovery-observation";
 
 type EarnMovementsLedger = ReturnType<typeof createPostgresEarnMovementsRepository>;
 
@@ -44,6 +56,7 @@ const TERMINAL_VAULT_MOVEMENT_STATUSES = new Set<string>(
   EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct
 );
 const INTERACTIVE_RPC_TIMEOUT_MS = 2_000;
+const RECOVERY_CONCURRENCY = 4;
 
 /**
  * Coalesce concurrent reads for the same movement. This protects the RPC when
@@ -169,6 +182,7 @@ async function observeEarnVaultMovement(
  */
 export interface EarnVaultReconciliationStats {
   claimed: number;
+  skippedLeased: number;
   settled: number;
   failed: number;
   confirmed: number;
@@ -196,6 +210,7 @@ function errorMessage(error: unknown): string {
 function emptyStats(claimed: number): EarnVaultReconciliationStats {
   return {
     claimed,
+    skippedLeased: 0,
     settled: 0,
     failed: 0,
     confirmed: 0,
@@ -209,7 +224,7 @@ function emptyStats(claimed: number): EarnVaultReconciliationStats {
 }
 
 /**
- * Reconcile a batch the scheduled durable recovery job claimed in the open
+ * Reconcile a batch the scheduled durable recovery job selected in the open
  * cluster scope's environment, against that environment's cluster. The sweep
  * runs once per environment (a `cluster` Cron Definition), so one cluster's RPC
  * outage never holds up the other's batch.
@@ -218,11 +233,17 @@ export async function reconcileEarnVaultMovementBatch(
   env: Env,
   rows: EarnMovementRow[]
 ): Promise<EarnVaultReconciliationStats> {
-  const stats = emptyStats(rows.length);
+  const stats = emptyStats(0);
+  const db = getDb(env);
+  const ledger = createPostgresEarnMovementsRepository(db);
+  // Observing an unleased snapshot leaves the entire backlog available to the
+  // fast worker. Only the four reducers ready to run acquire ownership below.
+  const snapshot = await ledger.readRecoveryObservations(rows);
+  stats.skippedLeased = snapshot.skippedLeased;
+  rows = snapshot.rows;
   if (rows.length === 0) return stats;
-  const ledger = createPostgresEarnMovementsRepository(getDb(env));
   const { environment } = currentClusterScope();
-  // SAFETY: claims are vault_direct rows, whose signature `earn_movements_model_shape_check` (0062)
+  // SAFETY: these are vault_direct rows, whose signature `earn_movements_model_shape_check` (0062)
   // makes NOT NULL: the base58 signature SDP recorded from the transaction it signed.
   const signatures = rows.map((row) => row.signature as Signature);
   let rpc: SolanaRpc;
@@ -283,35 +304,84 @@ export async function reconcileEarnVaultMovementBatch(
   if (expiry.unproven.size > 0) stats.statusReadFailures = 1;
   const currentBlockHeight = finalized?.blockHeight ?? null;
 
-  // Sequential pacing protects the RPC endpoint and database pool from a
-  // 256-way rebroadcast and write fanout.
-  for (const [index, movement] of rows.entries()) {
+  const observations = new Map(
+    rows.map((snapshot, index) => [
+      snapshot.id,
+      {
+        snapshot,
+        status: expiry.statuses[index] ?? null,
+        currentBlockHeight: expiry.unproven.has(index) ? null : currentBlockHeight,
+      },
+    ])
+  );
+  for (let offset = 0; offset < rows.length; offset += RECOVERY_CONCURRENCY) {
+    const selected = rows.slice(offset, offset + RECOVERY_CONCURRENCY);
+    const claim = await ledger.claimRecoveryObservations(selected, EARN_RECOVERY_LEASE_SECONDS);
+    stats.skippedLeased += selected.length - claim.rows.length;
+    stats.claimed += claim.rows.length;
     try {
-      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- reconciliation pacing is intentional.
-      const outcome = await reconcileMovement(
-        env,
-        ledger,
-        movement,
-        expiry.statuses[index] ?? null,
-        {
-          rpc,
-          // An expired row whose absence could not be proven gets no height, so this tick
-          // neither rebroadcasts nor expires it.
-          currentBlockHeight: expiry.unproven.has(index) ? null : currentBlockHeight,
+      const results = await mapSettledWithConcurrency(
+        claim.rows,
+        RECOVERY_CONCURRENCY,
+        async (movement) => {
+          let failed = false;
+          try {
+            const observation = observations.get(movement.id);
+            if (
+              observation === undefined ||
+              !matchesEarnRecoveryTransaction(observation.snapshot, movement)
+            ) {
+              throw new Error(
+                `Earn movement ${movement.id} changed signed identity before recovery`
+              );
+            }
+            if (!(await renewEarnObservation(db, "movement", movement, claim.token))) {
+              stats.unchanged += 1;
+              return;
+            }
+            const outcome = await reconcileMovement(env, ledger, movement, observation.status, {
+              rpc,
+              // A previous miss cannot expire or resend a row that advanced while
+              // awaiting its claim, including a newly recorded first absence.
+              currentBlockHeight: unchangedEarnRecoveryState(observation.snapshot, movement)
+                ? observation.currentBlockHeight
+                : null,
+            });
+            if (outcome === "settled") stats.settled += 1;
+            else if (outcome === "failed") stats.failed += 1;
+            else if (outcome === "confirmed") stats.confirmed += 1;
+            else if (outcome === "finalized") stats.finalized += 1;
+            else if (outcome === "resubmitted") stats.resubmitted += 1;
+            else stats.unchanged += 1;
+          } catch (error) {
+            failed = true;
+            stats.movementErrors += 1;
+            getLogger().error(
+              { movementId: movement.id, signature: movement.signature, error },
+              "earn vault reconciliation: movement remains unsettled"
+            );
+          } finally {
+            await releaseEarnObservation(
+              db,
+              "movement",
+              movement,
+              claim.token,
+              earnObservationDelay(movement.created_at, failed)
+            );
+          }
         }
       );
-      if (outcome === "settled") stats.settled += 1;
-      else if (outcome === "failed") stats.failed += 1;
-      else if (outcome === "confirmed") stats.confirmed += 1;
-      else if (outcome === "finalized") stats.finalized += 1;
-      else if (outcome === "resubmitted") stats.resubmitted += 1;
-      else stats.unchanged += 1;
-    } catch (error) {
-      stats.movementErrors += 1;
-      getLogger().error(
-        { movementId: movement.id, signature: movement.signature, error },
-        "earn vault reconciliation: movement remains unsettled"
-      );
+      for (const result of results) {
+        if (result.status === "rejected") {
+          stats.movementErrors += 1;
+          getLogger().error(
+            { error: result.reason },
+            "earn vault reconciliation: observation lease release failed"
+          );
+        }
+      }
+    } finally {
+      await releaseEarnObservations(db, "movement", claim.rows, claim.token, 5_000);
     }
   }
   return stats;
@@ -323,7 +393,7 @@ export async function reconcileEarnVaultMovementBatch(
  *
  * @param rpc - The cluster's pool client.
  * @param environment - The environment the rows belong to, for the failure event.
- * @param rows - The claimed rows.
+ * @param rows - The selected snapshot rows.
  * @param signatures - Each row's signature, by index.
  * @param statuses - The batch statuses, by index.
  * @param finalized - The finalized height read and the slot it was read at.
@@ -369,6 +439,27 @@ function proveExpiredMovements(
 interface ChainObservation {
   rpc: SolanaRpc;
   currentBlockHeight: bigint | null;
+  /** Fast observation leaves optional holding closure to normal live hydration. */
+  observationTimeoutMs?: number;
+}
+
+/** Observe known chain truth without broadcasting or deciding expiry. */
+export function observeEarnVaultMovementStatus(
+  env: Env,
+  movement: EarnMovementRow,
+  status: SignatureStatusInfo | null,
+  rpc: SolanaRpc
+): Promise<MovementOutcome> {
+  if (movement.environment !== currentClusterScope().environment) {
+    throw new Error("Earn movement belongs to another observation environment");
+  }
+  return reconcileMovement(
+    env,
+    createPostgresEarnMovementsRepository(getDb(env)),
+    movement,
+    status,
+    { rpc, currentBlockHeight: null, observationTimeoutMs: INTERACTIVE_RPC_TIMEOUT_MS }
+  );
 }
 
 async function reconcileMovement(
@@ -616,11 +707,11 @@ async function settleMovement(
       : null;
   const tokenAmountSettled =
     position && movement.direction === "withdrawal"
-      ? await observeWithdrawalPayout(chain.rpc, movement, position)
+      ? await observeWithdrawalPayout(chain.rpc, movement, position, chain.observationTimeoutMs)
       : null;
   const depositReceipt =
     position && movement.direction === "deposit" && movement.provider === "kamino"
-      ? await observeKaminoDepositReceipt(chain.rpc, movement, position)
+      ? await observeKaminoDepositReceipt(chain.rpc, movement, position, chain.observationTimeoutMs)
       : null;
 
   const observedAt = new Date().toISOString();
@@ -633,7 +724,14 @@ async function settleMovement(
     ...(movement.direction === "withdrawal" ? { tokenAmountSettled } : {}),
     ...(depositReceipt ? { depositReceipt } : {}),
   });
-  if (settled && position && movement.direction === "withdrawal") {
+  // Bounded observation leaves empty-position closure to the next hydrated
+  // position read, which verifies live shares without another fast-lane RPC.
+  if (
+    settled &&
+    position &&
+    movement.direction === "withdrawal" &&
+    chain.observationTimeoutMs === undefined
+  ) {
     await closePositionIfEmpty(env, ledger, settled, position);
   }
 }
@@ -641,7 +739,8 @@ async function settleMovement(
 async function observeKaminoDepositReceipt(
   rpc: SolanaRpc,
   movement: EarnMovementRow,
-  position: EarnPositionRow
+  position: EarnPositionRow,
+  timeoutMs?: number
 ): Promise<KaminoDepositReceipt | null> {
   const owner = position.owner_address ?? movement.source_address;
   if (
@@ -655,16 +754,16 @@ async function observeKaminoDepositReceipt(
   )
     return null;
   try {
-    return await readKaminoDepositReceipt(
-      { cluster: currentClusterScope().cluster, rpc },
-      {
-        signature: movement.signature,
-        owner,
-        vault: position.vault_address,
-        tokenMint: position.token_mint,
-        shareMint: position.share_mint,
-        requestedAmount: movement.amount_requested,
-      }
+    const receiptInput = {
+      signature: movement.signature,
+      owner,
+      vault: position.vault_address,
+      tokenMint: position.token_mint,
+      shareMint: position.share_mint,
+      requestedAmount: movement.amount_requested,
+    };
+    return await createVaultDeadline(timeoutMs).run("Deposit receipt observation", () =>
+      readKaminoDepositReceipt({ cluster: currentClusterScope().cluster, rpc }, receiptInput)
     );
   } catch (error) {
     getLogger().warn(
@@ -748,13 +847,17 @@ function withdrawalReceiver(movement: EarnMovementRow): string | null {
 async function observeWithdrawalPayout(
   rpc: SolanaRpc,
   movement: EarnMovementRow,
-  position: EarnPositionRow
+  position: EarnPositionRow,
+  timeoutMs?: number
 ): Promise<string | null> {
   const receiver = withdrawalReceiver(movement);
   const tokenMint = position.token_mint;
   if (!movement.signature || !receiver || !tokenMint) return null;
   try {
-    const transaction = await getTransaction(rpc, movement.signature as Signature);
+    const transaction = await createVaultDeadline(timeoutMs).run(
+      "Withdrawal payout observation",
+      () => getTransaction(rpc, movement.signature as Signature, "finalized")
+    );
     if (!transaction || transaction.err !== null) return null;
     const delta = tokenBalanceDelta(transaction, { mint: tokenMint, owner: receiver });
     if (!delta || delta.baseUnits <= 0n) return null;

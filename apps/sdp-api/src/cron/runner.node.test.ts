@@ -16,7 +16,11 @@ import {
 import { z } from "zod";
 import { currentDatabaseIdentity, type DatabaseIdentity } from "@/db/identity";
 import type { BackgroundRunner } from "@/runtime/background";
+import { getLogContext, runWithLogContext } from "@/runtime/logger";
 import * as moneyPathEvents from "@/runtime/money-path-events";
+import * as transactionObserver from "@/services/jobs/earn-transaction-observer";
+import * as observation from "@/services/jobs/observe-earn-transactions";
+import * as operationWorker from "@/services/jobs/operation-worker";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { deferred } from "@/test/helpers/deferred";
 import { env } from "@/test/helpers/env";
@@ -124,13 +128,14 @@ async function startWorker(workerEnv: Env = env): Promise<Worker> {
     const observed = observations.length;
     task.fire();
     await bg.awaitAll();
-    const { cron, environment } = lastLoggedRegistration();
+    const ran = observations.slice(observed);
+    const { cron, environment } = ran.at(-1) ?? lastLoggedRegistration();
     registrations.set(registrationKey(cron, environment), task);
     discovered.push({
       cron,
       environment,
       schedule: task.expression,
-      ran: observations.slice(observed),
+      ran,
     });
   }
   logEventSpy.mockClear();
@@ -178,6 +183,14 @@ function deadlineEvent(cron: string, environment: SdpEnvironment | null) {
 }
 
 beforeEach(() => {
+  vi.spyOn(transactionObserver, "startEarnTransactionObserver").mockReturnValue({
+    wake: () => {},
+    stop: async () => {},
+  });
+  vi.spyOn(operationWorker, "startOperationWorker").mockImplementation(() => ({
+    wake: () => {},
+    stop: async () => {},
+  }));
   scheduler.tasks.length = 0;
   observations.length = 0;
   logEventSpy = vi.spyOn(moneyPathEvents, "logEvent").mockImplementation(() => {});
@@ -199,6 +212,50 @@ afterEach(() => {
 });
 
 describe("startCron", () => {
+  it("opens observer and operation consumer scopes through the real runner callbacks", async () => {
+    const calls: Array<{
+      cron: string | undefined;
+      scope: ReturnType<typeof currentClusterScope>;
+      identity: DatabaseIdentity | undefined;
+    }> = [];
+    const capture = async () => {
+      await Promise.resolve();
+      calls.push({
+        cron: getLogContext().cron,
+        scope: currentClusterScope(),
+        identity: currentDatabaseIdentity(),
+      });
+    };
+    vi.spyOn(observation, "observeEarnTransactions").mockImplementation(async () => {
+      await capture();
+      return { scanned: 0, saturated: false };
+    });
+    const worker = await startWorker();
+    const observe = required(
+      vi.mocked(transactionObserver.startEarnTransactionObserver).mock.lastCall
+    )[2];
+    const options = required(vi.mocked(operationWorker.startOperationWorker).mock.lastCall)[3];
+    await runWithLogContext({ cron: "unrelated-parent" }, async () => {
+      await observe("sandbox");
+      expect(getLogContext().cron).toBe("unrelated-parent");
+      await options.run("production", capture);
+      expect(getLogContext().cron).toBe("unrelated-parent");
+    });
+    expect(calls).toMatchObject([
+      {
+        cron: "earn-transaction-observer",
+        scope: { projectId: null, environment: "sandbox" },
+        identity: { kind: "system", component: "cron:earn-transaction-observer" },
+      },
+      {
+        cron: "reconcile-operations",
+        scope: { projectId: null, environment: "production" },
+        identity: { kind: "system", component: "cron:reconcile-operations" },
+      },
+    ]);
+    await worker.handle.stop();
+  });
+
   it("registers operation recovery in each environment with its own system identity", async () => {
     const worker = await startWorker();
     const registrations = worker.discovered.filter((item) => item.cron === "reconcile-operations");
@@ -208,7 +265,7 @@ describe("startCron", () => {
     ).toEqual(
       SDP_ENVIRONMENTS.map((environment) => ({
         environment,
-        schedule: "*/15 * * * * *",
+        schedule: "*/2 * * * * *",
         ran: [
           {
             cron: "reconcile-operations",
@@ -218,6 +275,8 @@ describe("startCron", () => {
         ],
       }))
     );
+    await Promise.all(fire(worker, "reconcile-operations", "sandbox"));
+    expect(runEvents("reconcile-operations", "sandbox")).toEqual([]);
     await worker.handle.stop();
   });
 

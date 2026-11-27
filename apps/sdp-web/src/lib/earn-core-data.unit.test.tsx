@@ -59,6 +59,7 @@ it("reports changed remote observations once without echoing initial render data
     wrapper,
   });
   expect(onUpdated).not.toHaveBeenCalled();
+  await act(() => result.current.refresh());
   await waitFor(() => expect(result.current.operation?.status).toBe("queued"));
   expect(onUpdated).toHaveBeenCalledExactlyOnceWith(remote);
 
@@ -289,7 +290,7 @@ const queued: Operation = {
 
 /** Counts detail reads under the dashboard's own SWR defaults, not a test-only dedupe of 0. */
 function renderDetailPoll(operation: Operation, foreground?: boolean) {
-  transport.mockImplementation(async () => Response.json({ data: { operation } }));
+  transport.mockImplementation(async () => page([operation]));
   const cache = new Map();
   const wrapper = ({ children }: { children: ReactNode }) => (
     <SWRConfig value={{ ...DASHBOARD_SWR_CONFIG, provider: () => cache }}>{children}</SWRConfig>
@@ -309,25 +310,65 @@ it("keeps detail polling on time while unrelated workspace renders continue", as
   expect(transport.mock.calls.length).toBeGreaterThanOrEqual(3);
 });
 
-it("reads the dialog's operation every two seconds while SDP is moving it", async () => {
+it("reads the dialog's operation in a shared batch every second", async () => {
   vi.useFakeTimers();
   renderDetailPoll(queued, true);
   await act(() => vi.advanceTimersByTimeAsync(6_500));
-  expect(transport.mock.calls.length).toBeGreaterThanOrEqual(4);
+  expect(transport.mock.calls).toHaveLength(6);
 });
 
-it("keeps activity rows and provider waits on the slow cadence", async () => {
+it("does not give activity rows or provider waits their own poll timers", async () => {
   vi.useFakeTimers();
   renderDetailPoll(queued);
-  await act(() => vi.advanceTimersByTimeAsync(25_000));
-  expect(transport.mock.calls).toHaveLength(1);
-  await act(() => vi.advanceTimersByTimeAsync(6_000));
-  expect(transport.mock.calls).toHaveLength(2);
+  await act(() => vi.advanceTimersByTimeAsync(60_000));
+  expect(transport).not.toHaveBeenCalled();
   cleanup();
-  transport.mockClear();
   renderDetailPoll({ ...queued, status: "settling" }, true);
-  await act(() => vi.advanceTimersByTimeAsync(25_000));
-  expect(transport.mock.calls).toHaveLength(1);
+  await act(() => vi.advanceTimersByTimeAsync(60_000));
+  expect(transport).not.toHaveBeenCalled();
+});
+
+it("updates an open settlement dialog from the shared feed without another poller", async () => {
+  vi.useFakeTimers();
+  const settling: Operation = { ...queued, status: "settling" };
+  let remote = settling;
+  transport.mockImplementation(async (path: string) => {
+    const query = new URL(path, "https://dashboard.test").searchParams;
+    if (query.get("status") === "active") {
+      return page(remote.status === "settling" ? [remote] : []);
+    }
+    return page([remote]);
+  });
+  const onUpdated = vi.fn();
+  const cache = new Map();
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <SWRConfig value={{ ...DASHBOARD_SWR_CONFIG, provider: () => cache }}>{children}</SWRConfig>
+  );
+  const { result } = renderHook(
+    () => ({
+      feed: useEarnOperations(),
+      dialog: useEarnOperation(settling.id, settling, onUpdated, true),
+    }),
+    { wrapper }
+  );
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  expect(result.current.dialog.operation?.status).toBe("settling");
+  expect(transport).toHaveBeenCalledTimes(2);
+  expect(onUpdated).not.toHaveBeenCalled();
+
+  remote = { ...settling, status: "completed", nextAction: null };
+  await act(() => vi.advanceTimersByTimeAsync(15_000));
+  expect(result.current.feed.operations?.find(({ id }) => id === remote.id)?.status).toBe(
+    "completed"
+  );
+  expect(result.current.dialog.operation?.status).toBe("completed");
+  expect(onUpdated).toHaveBeenCalledExactlyOnceWith(remote);
+  expect(transport).toHaveBeenCalledTimes(4);
+  expect(
+    transport.mock.calls.every(
+      ([path]) => new URL(path, "https://dashboard.test").pathname === "/api/dashboard/operations"
+    )
+  ).toBe(true);
 });
 
 it("refreshes an expanded history snapshot without blanking the rows being read", async () => {
@@ -358,32 +399,48 @@ it("refreshes an expanded history snapshot without blanking the rows being read"
   expect(result.current.hasMore).toBe(true);
 });
 
-function OperationObserver({ onUpdated }: { onUpdated: (operation: Operation) => void }) {
-  useEarnOperation(prepared.id, prepared, onUpdated);
+function OperationObserver({
+  onUpdated,
+  foreground,
+}: {
+  onUpdated: (operation: Operation) => void;
+  foreground?: boolean;
+}) {
+  useEarnOperation(queued.id, queued, onUpdated, foreground);
   return null;
 }
 
-it("reports a shared detail result after its original dialog has closed", async () => {
+function FeedOwner() {
+  useEarnOperations();
+  return null;
+}
+
+it("reports a shared observation after its original dialog has closed", async () => {
+  vi.useFakeTimers();
   const pending = deferred<Response>();
-  transport.mockReturnValue(pending.promise);
+  transport.mockImplementation((path: string) =>
+    path.includes("operationIds=") ? pending.promise : Promise.resolve(page([queued]))
+  );
   const cache = new Map();
   const first = vi.fn();
   const remaining = vi.fn();
   const view = (dialogOpen: boolean) => (
     <SWRConfig value={{ provider: () => cache }}>
-      {dialogOpen ? <OperationObserver key="dialog" onUpdated={first} /> : null}
+      <FeedOwner />
+      {dialogOpen ? <OperationObserver key="dialog" onUpdated={first} foreground /> : null}
       <OperationObserver key="activity" onUpdated={remaining} />
     </SWRConfig>
   );
   const rendered = render(view(true));
-  await waitFor(() => expect(transport).toHaveBeenCalledTimes(1));
+  await act(() => vi.advanceTimersByTimeAsync(1_000));
+  expect(transport.mock.calls.filter(([path]) => path.includes("operationIds="))).toHaveLength(1);
   rendered.rerender(view(false));
-  const completed = historyOperation(prepared.id);
+  const completed = historyOperation(queued.id);
   await act(async () => {
-    pending.resolve(Response.json({ data: { operation: completed } }));
+    pending.resolve(page([completed]));
     await pending.promise;
   });
-  await waitFor(() => expect(remaining).toHaveBeenCalledExactlyOnceWith(completed));
+  expect(remaining).toHaveBeenCalledExactlyOnceWith(completed);
   expect(first).not.toHaveBeenCalled();
 });
 
@@ -397,10 +454,128 @@ it("never lets a stale same-version detail cache reopen a terminal parent observ
     ({ initial }: { initial: Operation }) => useEarnOperation(initial.id, initial),
     { wrapper, initialProps: { initial: prepared } }
   );
-  await waitFor(() => expect(transport).toHaveBeenCalledTimes(1));
+  await act(() => result.current.refresh());
+  expect(transport).toHaveBeenCalledTimes(1);
   const completed = { ...historyOperation(prepared.id), updatedAt: "2026-11-18T11:00:00Z" };
   rerender({ initial: completed });
   expect(result.current.operation?.status).toBe("completed");
   await act(() => result.current.refresh());
   expect(result.current.operation?.status).toBe("completed");
 });
+
+it("uses newer movement evidence from the feed over a same-version submitted detail cache", async () => {
+  const submitted: Operation = { ...queued, status: "submitted" };
+  transport.mockImplementation(async () => Response.json({ data: { operation: submitted } }));
+  const onUpdated = vi.fn();
+  const cache = new Map();
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <SWRConfig value={{ provider: () => cache, dedupingInterval: 0 }}>{children}</SWRConfig>
+  );
+  const { result, rerender } = renderHook(
+    ({ initial }: { initial: Operation }) => useEarnOperation(initial.id, initial, onUpdated),
+    { wrapper, initialProps: { initial: submitted } }
+  );
+  await act(() => result.current.refresh());
+  expect(onUpdated).not.toHaveBeenCalled();
+  const settling: Operation = {
+    ...submitted,
+    status: "settling",
+    updatedAt: "2026-11-19T00:00:00Z",
+  };
+  rerender({ initial: settling });
+  expect(result.current.operation?.status).toBe("settling");
+  expect(onUpdated).toHaveBeenCalledExactlyOnceWith(settling);
+  await act(() => result.current.refresh());
+  expect(result.current.operation?.status).toBe("settling");
+  expect(onUpdated).toHaveBeenCalledTimes(1);
+});
+
+it("reports feed-first escrow changes without waiting for a detail poll", async () => {
+  const onUpdated = vi.fn();
+  const { rerender } = renderHook(
+    ({ initial }: { initial: Operation }) => useEarnOperation(initial.id, initial, onUpdated),
+    { initialProps: { initial: queued } }
+  );
+  const settling: Operation = { ...queued, status: "settling", updatedAt: "2026-11-19T00:00:00Z" };
+  rerender({ initial: settling });
+  expect(onUpdated).toHaveBeenCalledExactlyOnceWith(settling);
+  expect(transport).not.toHaveBeenCalled();
+});
+
+function Activity({ id }: { id: string }) {
+  useEarnOperation(id, { ...queued, id });
+  return null;
+}
+
+it("shows completion within one second with 500 pending activity observers", async () => {
+  vi.useFakeTimers();
+  const startedAt = Date.now();
+  const completed = historyOperation(queued.id);
+  const onUpdated = vi.fn();
+  const cache = new Map();
+  transport.mockImplementation(async () =>
+    page([Date.now() - startedAt >= 500 ? completed : queued])
+  );
+  render(
+    <SWRConfig value={{ ...DASHBOARD_SWR_CONFIG, provider: () => cache }}>
+      <OperationObserver onUpdated={onUpdated} foreground />
+      {Array.from({ length: 500 }, (_, i) => `pending-${i}`).map((id) => (
+        <Activity key={id} id={id} />
+      ))}
+    </SWRConfig>
+  );
+  await act(() => vi.advanceTimersByTimeAsync(1_000));
+  expect(onUpdated).toHaveBeenCalledExactlyOnceWith(completed);
+  expect(transport).toHaveBeenCalledTimes(1);
+  expect(transport.mock.calls[0]?.[0]).toContain("operationIds=operation");
+  await act(() => vi.advanceTimersByTimeAsync(10_000));
+  expect(transport).toHaveBeenCalledTimes(1);
+});
+
+it.each(["queued", "settling"] as const)(
+  "isolates unavailable %s operations across feed refreshes",
+  async (status) => {
+    vi.useFakeTimers();
+    const startedAt = Date.now();
+    const revoked = historyOperation("revoked", status);
+    const healthy = historyOperation("healthy", "queued");
+    transport.mockImplementation(async (path: string) => {
+      const query = new URL(path, "https://dashboard.test").searchParams;
+      return query.has("operationIds") || Date.now() - startedAt >= 1_000
+        ? page([healthy])
+        : page([revoked, healthy]);
+    });
+    const cache = new Map();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <SWRConfig value={{ ...DASHBOARD_SWR_CONFIG, provider: () => cache }}>{children}</SWRConfig>
+    );
+    const { result, rerender } = renderHook(
+      ({ open }) => ({
+        feed: useEarnOperations(),
+        revoked: useEarnOperation(revoked.id, revoked, undefined, open),
+        healthy: useEarnOperation(healthy.id, healthy, undefined, true),
+      }),
+      { wrapper, initialProps: { open: true } }
+    );
+    await act(() => vi.advanceTimersByTimeAsync(15_000));
+    await act(() => vi.advanceTimersByTimeAsync(7_000));
+    expect(result.current.revoked.error?.message).toBe("An operation observation is unavailable");
+    expect(result.current.revoked.operation?.status).toBe(status);
+    expect(result.current.healthy.error).toBeUndefined();
+    expect(result.current.feed.error).toBeUndefined();
+    const revokedReads = () =>
+      transport.mock.calls.filter(([path]) =>
+        new URL(path, "https://dashboard.test").searchParams
+          .get("operationIds")
+          ?.split(",")
+          .includes(revoked.id)
+      ).length;
+    expect(revokedReads()).toBe(3);
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(revokedReads()).toBe(3);
+    rerender({ open: false });
+    rerender({ open: true });
+    await act(() => vi.advanceTimersByTimeAsync(1_000));
+    expect(revokedReads()).toBe(4);
+  }
+);

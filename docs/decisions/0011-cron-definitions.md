@@ -45,9 +45,37 @@ names and a no-op `Observability` layer.
   compare-and-set, and a definition with set- or snapshot-based writes holds
   its own lock until its work settles (the Earn catalogue sync). Real
   cancellation is a follow-up (HOO-2163).
-- **Run events go to Loki/Grafana only.** Every run logs `sdp_cron_run` with
+- **Run events go to Loki/Grafana only.** Scheduled work logs `sdp_cron_run` with
   `cron`, `environment` (cluster scope), `status`, and `duration_ms`. The
   leftover Sentry abstraction is removed from sdp-api.
+  Wake-only definitions omit success events; their asynchronous consumers
+  report progress through minute worker-health summaries. Errors, disabled
+  slots and overlap events still emit run events.
+
+### Earn wakeups (2026-11-24)
+
+The cron service also owns Earn's PostgreSQL notification listener and bounded
+consumers. `reconcile-operations` wakes the same consumers every two seconds as
+a recovery fallback; it does not wait for a whole batch to finish. Notifications
+carry only an environment hint. Durable rows, current principal authorization
+and fenced claims remain the authority to execute.
+
+An observation-only lane shares this wakeup and the minute movement sweep's
+per-row processing claims. It reads transaction statuses before acquiring a
+processing lease, so a slow RPC leaves resend candidates available. It batches
+transaction status reads without signing,
+rebroadcasting or inferring expiry. Signature misses release their claims before
+slow receipt/provider projections, leaving recovery free to retry original
+bytes. The cron service's environment and shutdown gates apply to both lanes.
+Consumer failures emit error run events independently of the scheduled wake
+event. Financial reducers and expiry recovery are shared with the existing
+sweep.
+
+Recovery batches chain reads before taking four-row claims for ready reducers.
+The read reserves nothing, so a slow provider cannot lease the remaining backlog
+away from the fast observer. Evidence is local to that sweep and checked against
+the fresh claimed transaction; changed state invalidates earlier absence proof.
+No extra queue or persistent evidence cache is introduced.
 
 ## Considered options
 

@@ -674,7 +674,8 @@ export function asTransactionalClient(tx: DatabaseExecutor): DatabaseClient {
   };
 }
 
-function getConnectionString(bindings: DatabaseBindings): string {
+/** Resolve the runtime database URL for pooled queries and dedicated notification sessions. */
+export function getConnectionString(bindings: DatabaseBindings): string {
   const databaseUrl = bindings.DATABASE_URL?.trim() ?? process.env.DATABASE_URL?.trim();
   if (databaseUrl) {
     return databaseUrl;

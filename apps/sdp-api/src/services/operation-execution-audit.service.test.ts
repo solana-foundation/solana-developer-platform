@@ -50,6 +50,7 @@ beforeEach(() => {
     attempt: { id: "attempt", principal: { kind: "api_key", apiKeyId: "key" } },
     purpose: "execute",
     recoveryRequired: false,
+    firstExecutionClaim: false,
   } as OperationClaim;
   mocks.query.mockResolvedValue(null);
   mocks.link.mockResolvedValue(true);

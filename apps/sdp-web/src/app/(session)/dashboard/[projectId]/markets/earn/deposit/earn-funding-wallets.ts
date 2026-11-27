@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useRef } from "react";
-import useSWR from "swr";
+import { useCallback, useEffect } from "react";
+import useSWR, { type Cache, unstable_serialize, useSWRConfig } from "swr";
 import { z } from "zod";
 import { earnQueryKeys } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-query-key";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
@@ -137,87 +137,292 @@ export async function fetchLiveFundingWalletBalance(
 }
 
 /**
- * A refresh completes only when every visible wallet was read successfully.
- * Reject partial failure so Treasury cannot clear its updating/error state
- * while any wallet still carries a cached pre-transfer balance.
+ * Refresh the requested wallets and every binding of their chain addresses.
+ * A complete snapshot refresh omits the ids. Reject a failed selected read so
+ * Treasury cannot publish the position side without its verified cash side.
  */
 export async function refreshFundingWalletBalances(
   wallets: readonly EarnFundingWallet[],
-  minimumSlot?: number | ReadonlyMap<string, number>
+  minimumSlot?: number | ReadonlyMap<string, number>,
+  custodyWalletIds?: readonly string[]
 ): Promise<EarnFundingWallet[]> {
-  const slotsByAddress = new Map<string, number>();
-  if (typeof minimumSlot === "object") {
-    for (const wallet of wallets) {
-      const slot = minimumSlot.get(wallet.id);
-      if (slot !== undefined)
-        slotsByAddress.set(
-          wallet.publicKey,
-          Math.max(slotsByAddress.get(wallet.publicKey) ?? 0, slot)
-        );
-    }
-  }
+  const addresses = fundingWalletAddresses(wallets, custodyWalletIds);
+  const slotsByAddress = fundingWalletSlotsByAddress(wallets, minimumSlot);
+  const reads = new Map<string, ReturnType<typeof fetchLiveFundingWalletBalance>>();
   return Promise.all(
     wallets.map(async (wallet) => {
-      const slot =
-        typeof minimumSlot === "number" ? minimumSlot : slotsByAddress.get(wallet.publicKey);
-      const balances = await fetchLiveFundingWalletBalance(wallet.walletId, slot);
-      return { ...wallet, balances };
+      if (!addresses.has(wallet.publicKey)) return wallet;
+      let read = reads.get(wallet.publicKey);
+      if (read === undefined) {
+        const slot = slotsByAddress.get(wallet.publicKey);
+        read = fetchLiveFundingWalletBalance(wallet.walletId, slot);
+        reads.set(wallet.publicKey, read);
+      }
+      return { ...wallet, balances: await read };
     })
   );
 }
 
-/** Identical sweeps in flight together share one collection read and one set of live reads. */
-export function useEarnFundingWallets() {
-  const minimumSlot = useRef<number | undefined>(undefined);
-  const walletMinimumSlots = useRef(new Map<string, number>());
-  const inFlight = useRef(new Map<string, Promise<EarnFundingWallet[]>>());
-  const sweep = useCallback((readLive: boolean) => {
-    const hasFloor = () => minimumSlot.current !== undefined || walletMinimumSlots.current.size > 0;
-    const live = readLive || hasFloor();
-    const key = JSON.stringify([
-      live,
-      minimumSlot.current ?? null,
-      [...walletMinimumSlots.current],
-    ]);
-    const running = inFlight.current.get(key);
-    if (running) return running;
-    const started = (async () => {
-      const wallets = await fetchFundingWallets();
-      return live || hasFloor()
-        ? refreshFundingWalletBalances(wallets, minimumSlot.current ?? walletMinimumSlots.current)
-        : wallets;
-    })();
-    const settle = () => {
-      if (inFlight.current.get(key) === started) inFlight.current.delete(key);
+function fundingWalletAddresses(
+  wallets: readonly EarnFundingWallet[],
+  custodyWalletIds: readonly string[] | undefined
+): ReadonlySet<string> {
+  if (custodyWalletIds === undefined) return new Set(wallets.map((wallet) => wallet.publicKey));
+  const byId = new Map(wallets.map((wallet) => [wallet.id, wallet]));
+  return new Set(
+    custodyWalletIds.map((id) => {
+      const wallet = byId.get(id);
+      if (wallet === undefined) throw new Error("Confirmed movement wallet is not available");
+      return wallet.publicKey;
+    })
+  );
+}
+
+function fundingWalletSlotsByAddress(
+  wallets: readonly EarnFundingWallet[],
+  minimumSlot: number | ReadonlyMap<string, number> | undefined
+): ReadonlyMap<string, number> {
+  const slots = new Map<string, number>();
+  for (const wallet of wallets) {
+    const slot = typeof minimumSlot === "number" ? minimumSlot : minimumSlot?.get(wallet.id);
+    if (slot !== undefined)
+      slots.set(wallet.publicKey, Math.max(slots.get(wallet.publicKey) ?? 0, slot));
+  }
+  return slots;
+}
+
+interface FundingWalletObservation {
+  version: number;
+  minimumSlot: number | undefined;
+}
+
+interface FundingWalletSnapshot {
+  inventoryVersion: number;
+  wallets: EarnFundingWallet[];
+  observations: ReadonlyMap<string, FundingWalletObservation>;
+}
+
+interface FundingWalletRead {
+  wallets: EarnFundingWallet[];
+  addresses: ReadonlySet<string>;
+  minimumSlots: ReadonlyMap<string, number>;
+  version: number;
+  targeted: boolean;
+  reusedInventory: boolean;
+}
+
+interface FundingWalletRefreshCoordinator {
+  consumers: number;
+  requireLiveBalances: boolean;
+  minimumSlot: number | undefined;
+  walletMinimumSlots: Map<string, number>;
+  inFlight: Map<string, Promise<FundingWalletRead>>;
+  version: number;
+}
+
+// The dashboard replaces its provider on session, organization or project changes.
+// Share coordination between its Treasury and dialog consumers, never across scopes.
+const fundingWalletCoordinators = new WeakMap<
+  Cache,
+  Map<string, FundingWalletRefreshCoordinator>
+>();
+
+function fundingWalletCoordinator(cache: Cache, key: string): FundingWalletRefreshCoordinator {
+  let coordinators = fundingWalletCoordinators.get(cache);
+  if (coordinators === undefined) {
+    coordinators = new Map();
+    fundingWalletCoordinators.set(cache, coordinators);
+  }
+  let coordinator = coordinators.get(key);
+  if (coordinator === undefined) {
+    coordinator = {
+      consumers: 0,
+      requireLiveBalances: false,
+      minimumSlot: undefined,
+      walletMinimumSlots: new Map(),
+      inFlight: new Map(),
+      version: 0,
     };
-    inFlight.current.set(key, started);
-    started.then(settle, settle);
-    return started;
-  }, []);
-  const { data, error, isLoading, mutate } = useSWR(earnQueryKeys.fundingWallets(), () =>
-    sweep(false)
+    coordinators.set(key, coordinator);
+  }
+  return coordinator;
+}
+
+/** Merge only verified observations, retaining newer reads from any mounted consumer. */
+function mergeFundingWalletRead(
+  current: FundingWalletSnapshot | undefined,
+  read: FundingWalletRead,
+  coordinator: FundingWalletRefreshCoordinator
+): FundingWalletSnapshot {
+  if (read.reusedInventory && current === undefined)
+    throw new Error("Wallet inventory changed while refreshing balances");
+  const keepInventory =
+    current !== undefined && (read.reusedInventory || current.inventoryVersion > read.version);
+  const inventory = keepInventory ? current.wallets : read.wallets;
+  const previousByAddress = new Map(current?.wallets.map((wallet) => [wallet.publicKey, wallet]));
+  const incomingByAddress = new Map(read.wallets.map((wallet) => [wallet.publicKey, wallet]));
+  const requiredSlots = fundingWalletSlotsByAddress(
+    inventory,
+    coordinator.minimumSlot ?? coordinator.walletMinimumSlots
+  );
+  const inventoryAddresses = new Set(inventory.map((wallet) => wallet.publicKey));
+  if (read.targeted && [...read.addresses].some((address) => !inventoryAddresses.has(address)))
+    throw new Error("Wallet inventory changed while refreshing balances");
+  const observations = new Map(
+    [...(current?.observations ?? [])].filter(([address]) => inventoryAddresses.has(address))
+  );
+  const wallets = inventory.map((wallet) => {
+    const address = wallet.publicKey;
+    const previous = previousByAddress.get(address);
+    if (!read.addresses.has(address))
+      return previous === undefined ? wallet : { ...wallet, balances: previous.balances };
+    const observation = current?.observations.get(address);
+    const requiredSlot = requiredSlots.get(address) ?? 0;
+    if (
+      previous !== undefined &&
+      observation !== undefined &&
+      observation.version > read.version &&
+      (observation.minimumSlot ?? 0) >= requiredSlot
+    )
+      return { ...wallet, balances: previous.balances };
+    const minimumSlot = read.minimumSlots.get(address);
+    if ((minimumSlot ?? 0) < requiredSlot) {
+      if (previous !== undefined) return { ...wallet, balances: previous.balances };
+      throw new Error("A newer wallet balance confirmation is pending");
+    }
+    const incoming = incomingByAddress.get(address);
+    if (incoming === undefined) throw new Error("Refreshed wallet balance is missing");
+    observations.set(address, { version: read.version, minimumSlot });
+    return { ...wallet, balances: incoming.balances };
+  });
+  return {
+    wallets,
+    observations,
+    inventoryVersion: keepInventory ? current.inventoryVersion : read.version,
+  };
+}
+
+/** Identical sweeps share live reads; a movement reuses the current wallet inventory. */
+export function useEarnFundingWallets() {
+  const { cache } = useSWRConfig();
+  const key = earnQueryKeys.fundingWallets();
+  const coordinator = fundingWalletCoordinator(cache, unstable_serialize(key));
+  useEffect(() => {
+    coordinator.consumers += 1;
+    return () => {
+      coordinator.consumers -= 1;
+    };
+  }, [coordinator]);
+  const sweep = useCallback(
+    (
+      readLive: boolean,
+      knownWallets?: readonly EarnFundingWallet[],
+      custodyWalletIds?: readonly string[]
+    ): Promise<FundingWalletRead> => {
+      const floor = coordinator.minimumSlot;
+      const floors = new Map(coordinator.walletMinimumSlots);
+      const live =
+        readLive || coordinator.requireLiveBalances || floor !== undefined || floors.size > 0;
+      const requestKey = JSON.stringify([
+        live,
+        custodyWalletIds === undefined ? null : [...custodyWalletIds].sort(),
+        floor ?? null,
+        [...floors].sort(([left], [right]) => left.localeCompare(right)),
+      ]);
+      const running = coordinator.inFlight.get(requestKey);
+      if (running !== undefined) return running;
+      const version = ++coordinator.version;
+      const started = (async (): Promise<FundingWalletRead> => {
+        const knownIds = new Set(knownWallets?.map((wallet) => wallet.id));
+        const reusedInventory =
+          custodyWalletIds !== undefined &&
+          knownWallets !== undefined &&
+          custodyWalletIds.every((id) => knownIds.has(id));
+        const inventory =
+          reusedInventory && knownWallets !== undefined
+            ? knownWallets
+            : await fetchFundingWallets();
+        const wallets = live
+          ? await refreshFundingWalletBalances(inventory, floor ?? floors, custodyWalletIds)
+          : [...inventory];
+        return {
+          wallets,
+          addresses: fundingWalletAddresses(wallets, custodyWalletIds),
+          minimumSlots: fundingWalletSlotsByAddress(wallets, floor ?? floors),
+          version,
+          targeted: custodyWalletIds !== undefined,
+          reusedInventory,
+        };
+      })();
+      const settle = () => {
+        if (coordinator.inFlight.get(requestKey) === started)
+          coordinator.inFlight.delete(requestKey);
+      };
+      coordinator.inFlight.set(requestKey, started);
+      started.then(settle, settle);
+      return started;
+    },
+    [coordinator]
+  );
+  const { data, error, isLoading, mutate } = useSWR(key, async () =>
+    mergeFundingWalletRead(undefined, await sweep(false), coordinator)
   );
   const refreshBalances = useCallback(
-    (slot?: number, custodyWalletIds?: readonly string[]) => {
+    async (slot?: number, custodyWalletIds?: readonly string[]) => {
+      if (coordinator.consumers === 0) return undefined;
+      // Later inventory reads must not replace live observations with cached cash.
+      coordinator.requireLiveBalances = true;
       if (slot !== undefined) {
-        if (custodyWalletIds && minimumSlot.current === undefined) {
+        if (custodyWalletIds && coordinator.minimumSlot === undefined) {
           for (const id of custodyWalletIds)
-            walletMinimumSlots.current.set(
+            coordinator.walletMinimumSlots.set(
               id,
-              Math.max(walletMinimumSlots.current.get(id) ?? 0, slot)
+              Math.max(coordinator.walletMinimumSlots.get(id) ?? 0, slot)
             );
-        } else
-          minimumSlot.current = Math.max(
-            minimumSlot.current ?? 0,
+        } else {
+          coordinator.minimumSlot = Math.max(
+            coordinator.minimumSlot ?? 0,
             slot,
-            ...walletMinimumSlots.current.values()
+            ...coordinator.walletMinimumSlots.values()
           );
+        }
       }
-      return mutate(sweep(true), { revalidate: false, throwOnError: true });
+      // Consumers can unmount during this shared read, so recheck after it settles.
+      // react-doctor-disable-next-line async-defer-await
+      const read = await sweep(true, data?.wallets, custodyWalletIds);
+      // A replaced project/organization provider has no cache left to update.
+      if (coordinator.consumers === 0) return undefined;
+      // Merge at completion so concurrent consumers preserve each other's wallets.
+      const published = await mutate(
+        (current) => mergeFundingWalletRead(current, read, coordinator),
+        {
+          revalidate: false,
+          throwOnError: true,
+        }
+      );
+      if (published !== undefined) {
+        const required = fundingWalletSlotsByAddress(
+          published.wallets,
+          coordinator.minimumSlot ?? coordinator.walletMinimumSlots
+        );
+        for (const address of read.addresses) {
+          if (
+            (published.observations.get(address)?.minimumSlot ?? 0) < (required.get(address) ?? 0)
+          )
+            throw new Error("A newer wallet balance confirmation is pending");
+        }
+      }
+      return published?.wallets;
     },
-    [mutate, sweep]
+    [coordinator, data?.wallets, mutate, sweep]
   );
-  return { wallets: data, error, isLoading, refresh: () => void mutate(), refreshBalances };
+  return {
+    wallets: data?.wallets,
+    error,
+    isLoading,
+    refresh: () => void mutate(),
+    refreshBalances,
+  };
 }
 
 // --- Display helpers -------------------------------------------------------

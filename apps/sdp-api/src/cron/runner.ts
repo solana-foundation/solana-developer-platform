@@ -40,8 +40,11 @@ import { assertProjectEnvironmentsConfig, environmentAllowed } from "@/lib/produ
 import type { BackgroundRunner } from "@/runtime/background";
 import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
 import { runWithLogContext } from "@/runtime/logger";
+import { startEarnTransactionObserver } from "@/services/jobs/earn-transaction-observer";
+import { observeEarnTransactions } from "@/services/jobs/observe-earn-transactions";
+import { startOperationWorker } from "@/services/jobs/operation-worker";
 import type { Env } from "@/types/env";
-import type { CronDefinition } from "./define-cron";
+import type { CronDefinition, CronRunContext } from "./define-cron";
 import { type CronRegistration, logCronRun } from "./run-event";
 
 export interface CronDeps {
@@ -185,23 +188,24 @@ function registrationEnvironments(
 async function runSlot(
   definition: CronDefinition,
   registration: CronRegistration,
-  env: Env
+  env: Env,
+  context: CronRunContext
 ): Promise<void> {
   const startedAt = Date.now();
   const environment = registration.environment;
+  const run = () => (definition.wakeupOnly ? definition.run(env, context) : definition.run(env));
   try {
     await runWithLogContext({ cron: definition.name }, () =>
       runWithSystemDatabaseIdentity(`cron:${definition.name}`, () =>
-        environment === null
-          ? definition.run(env)
-          : runInEnvironmentClusterScope(environment, () => definition.run(env))
+        environment === null ? run() : runInEnvironmentClusterScope(environment, run)
       )
     );
   } catch (error) {
     logCronRun(registration, { status: "error", durationMs: Date.now() - startedAt, cause: error });
     throw error;
   }
-  logCronRun(registration, { status: "ok", durationMs: Date.now() - startedAt });
+  if (!definition.wakeupOnly)
+    logCronRun(registration, { status: "ok", durationMs: Date.now() - startedAt });
 }
 
 /**
@@ -224,11 +228,37 @@ export function startCron(deps: CronDeps): CronHandle | null {
   // work gets registered after the awaitAll() snapshot is taken.
   let stopping = false;
   const tasks: ScheduledTask[] = [];
+  const operationEnvironments = registrationEnvironments(operationsCron, deps.env).filter(
+    (environment): environment is SdpEnvironment => environment !== null
+  );
+  const transactionObserver = startEarnTransactionObserver(
+    deps.bg,
+    operationEnvironments,
+    (environment) =>
+      runWithLogContext({ cron: "earn-transaction-observer" }, () =>
+        runWithSystemDatabaseIdentity("cron:earn-transaction-observer", () =>
+          runInEnvironmentClusterScope(environment, () => observeEarnTransactions(deps.env))
+        )
+      )
+  );
+  const operationWorker = startOperationWorker(deps.env, deps.bg, operationEnvironments, {
+    wakeObserver: (environment) => transactionObserver.wake(environment),
+    run: (environment, consume) =>
+      runWithLogContext({ cron: "reconcile-operations" }, () =>
+        runWithSystemDatabaseIdentity("cron:reconcile-operations", () =>
+          runInEnvironmentClusterScope(environment, consume)
+        )
+      ),
+  });
 
   for (const definition of CRON_DEFINITIONS) {
     const enabled = definition.enabled(deps.env);
     for (const environment of registrationEnvironments(definition, deps.env)) {
-      const registration: CronRegistration = { cron: definition.name, environment };
+      const registration: CronRegistration = {
+        cron: definition.name,
+        environment,
+      };
+      if (definition.wakeupOnly) registration.wakeupOnly = true;
       // The in-flight run's own token, so a run abandoned at the deadline that settles later
       // cannot free the registration from under its successor.
       let inFlight: symbol | null = null;
@@ -259,7 +289,9 @@ export function startCron(deps: CronDeps): CronHandle | null {
         }, CRON_SLOT_DEADLINE_MS);
         deadline.unref();
         deps.bg.run(
-          runSlot(definition, registration, deps.env).finally(() => {
+          runSlot(definition, registration, deps.env, {
+            wakeOperations: operationWorker.wake,
+          }).finally(() => {
             clearTimeout(deadline);
             if (inFlight === slot) {
               inFlight = null;
@@ -275,11 +307,12 @@ export function startCron(deps: CronDeps): CronHandle | null {
   }
 
   return {
-    stop() {
+    async stop() {
       stopping = true;
       for (const task of tasks) {
         task.stop();
       }
+      await Promise.all([operationWorker.stop(), transactionObserver.stop()]);
     },
   };
 }

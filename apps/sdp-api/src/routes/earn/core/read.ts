@@ -312,7 +312,7 @@ async function loadEarnPositions(
     ]);
     return mergeEarnPositionPages(pages, limit);
   };
-  const page =
+  let page =
     query.includeSummary || query.discover
       ? {
           rows: await collectAllEarnPositionRows((cursor) => readPage(cursor, 100)),
@@ -346,20 +346,34 @@ async function loadEarnPositions(
     completedScopes: new Set<string>(),
     rejectedPositionIds: new Set<string>(),
   };
-  const { holdings, live } = await hydrateEarnPositionRows(c, candidateRows, addresses, {
-    sourceType: includeAddress ? "address" : "wallet",
-    minimumSlotByPositionId: balanceContext?.minimumSlotByPositionId,
-    discoveredIds,
-    discoverAll: query.discover,
-    discoveryObservations: query.discover ? discoveryObservations : undefined,
-  });
-  const strategyIds = earnStrategyIdsByInstrument(strategies);
-  const holdingsById = new Map(holdings.map((holding) => [holding.id, holding]));
+  const hydrate = (rows: readonly EarnPositionRow[]) =>
+    hydrateEarnPositionRows(c, rows, addresses, {
+      sourceType: includeAddress ? "address" : "wallet",
+      minimumSlotByPositionId: balanceContext?.minimumSlotByPositionId,
+      discoveredIds,
+      discoverAll: query.discover,
+      discoveryObservations: query.discover ? discoveryObservations : undefined,
+    });
+  const { holdings, live, closedPositionIds } = await hydrate(candidateRows);
   const observedRows = candidateRows.filter((row) => {
+    if (closedPositionIds.has(row.id)) return false;
     if (!discoveredIds.has(row.id)) return true;
     const observed = live.get(row.id);
     return observed !== undefined && !isEarnVaultHoldingEmpty(observed);
   });
+  // A closure can empty a selected page. Advance past scanned rows and read
+  // a full batch of unseen holdings to avoid one-at-a-time closure reads.
+  while (page.hasMore && observedRows.length < query.limit) {
+    const lastScanned = page.rows.at(-1);
+    if (!lastScanned) throw internalError("Earn position page has no continuation row");
+    page = await readPage({ createdAt: lastScanned.created_at, id: lastScanned.id }, query.limit);
+    const next = await hydrate(page.rows);
+    holdings.push(...next.holdings);
+    for (const [id, value] of next.live) live.set(id, value);
+    observedRows.push(...page.rows.filter((row) => !next.closedPositionIds.has(row.id)));
+  }
+  const strategyIds = earnStrategyIdsByInstrument(strategies);
+  const holdingsById = new Map(holdings.map((holding) => [holding.id, holding]));
   const observedIds = new Set(observedRows.map((row) => row.id));
   const eligible =
     query.includeSummary || query.discover

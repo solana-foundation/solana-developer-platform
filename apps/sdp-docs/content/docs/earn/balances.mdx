@@ -28,6 +28,10 @@ Each position's `id` is the `positionId` you [withdraw](/docs/earn/withdrawals)
 with; the [position object](/docs/earn/api-overview#position) lists its fields. Without `ownerAddress`, the list covers every position your key can see
 in the project. See [position filters](/docs/reference/api/earn/list-earn-core-positions).
 
+Tracked holdings verified empty during a read are omitted from the list. Keep
+tracking outstanding withdrawals through their operations. Pages fill any gaps:
+when `hasMore` is true, the page contains `limit` holdings and a `nextCursor`.
+
 ## Read one position
 
 `GET /v1/earn/positions/{positionId}` returns one position, with the same fields
@@ -60,6 +64,16 @@ curl -sS "https://api-devnet.solana.com/v1/earn/positions/<position-id>" \
   `completed` and its `resourceRef.kind` is `earn.movement`, pass its
   `resourceRef.id` as `afterMovementIds` to read a balance that includes it.
   Another position's movement returns `404`.
+
+  The response's `balanceReadContext.minimumSlot` is the floor for refreshing
+  the funding wallet at the same point. Refresh that wallet and position
+  together; keep the previous values if either read fails.
+
+  `balanceReadContext.minimumSlotMovementId` identifies the accepted movement
+  proving that position's strongest floor. Keep it for the next refresh instead
+  of accumulating every completed movement ID.
+  This also returns an authorized closed position after a full exit, so you can
+  remove its empty holding and refresh the wallet together.
 
 A value SDP couldn't read live is left out, never shown as zero. See
 [position parameters](/docs/reference/api/earn/get-earn-position).
@@ -96,6 +110,8 @@ leaves out every `ownerAddress` operation. Narrow it with:
 - `status=active` for everything not yet final, including preparations still
   waiting for a signature or a route choice.
 - `kind=earn.deposit` or `kind=earn.withdraw` for one type.
+- `operationIds=op_a,op_b` for up to 100 known operations in one read. Use
+  `limit=100` for the full set, or follow `nextCursor`.
 - `limit` and `cursor` to page through history.
 
 Full history can push an older pending operation past the first page.

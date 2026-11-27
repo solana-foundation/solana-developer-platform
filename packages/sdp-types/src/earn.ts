@@ -1,3 +1,5 @@
+import type { z } from "zod";
+import type { earnBalanceReadContextSchema } from "./earn-wire";
 import type { SolanaCluster, WellKnownTokenSymbol } from "./well-known-tokens";
 import { WELL_KNOWN_TOKENS } from "./well-known-tokens";
 
@@ -285,7 +287,7 @@ export interface EarnVaultPositionsPage {
   hasMore: boolean;
   nextCursor: string | null;
   /** Present when afterMovementIds constrained reads of their affected positions. */
-  balanceReadContext?: { afterMovementIds: string[]; minimumSlot: number };
+  balanceReadContext?: z.infer<typeof earnBalanceReadContextSchema>;
 }
 
 /** One live position held by a partner end user's wallet. */
@@ -823,9 +825,21 @@ export const EARN_IN_FLIGHT_VAULT_WITHDRAWAL_ACTION_STATUSES = [
   "confirmed",
 ] as const satisfies readonly EarnVaultWithdrawalActionStatus[];
 
+/** Request states still waiting for their signed action's authenticated projection. */
+export const EARN_UNPROJECTED_VAULT_WITHDRAWAL_REQUEST_STATUSES = [
+  "creating",
+  "cancelling",
+] as const satisfies readonly EarnVaultWithdrawalRequestStatus[];
+
 /** Actions whose transaction reached the chain. */
 export const EARN_LANDED_VAULT_WITHDRAWAL_ACTION_STATUSES = [
   "submitted",
+  "confirmed",
+  "finalized",
+] as const satisfies readonly EarnVaultWithdrawalActionStatus[];
+
+/** Actions with a confirmed or irreversible chain observation, beyond submission alone. */
+export const EARN_CONFIRMED_VAULT_WITHDRAWAL_ACTION_STATUSES = [
   "confirmed",
   "finalized",
 ] as const satisfies readonly EarnVaultWithdrawalActionStatus[];

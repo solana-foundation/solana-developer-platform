@@ -1,7 +1,8 @@
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { getDb } from "@/db/client";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
-import { logEvent } from "@/runtime/money-path-events";
+import { readEarnRecoveryHealth } from "@/db/repositories/earn-recovery-health.repository";
+import { describeError, logEvent } from "@/runtime/money-path-events";
 import { reconcileEarnProviderOrders } from "@/services/earn/provider-settlement.service";
 import {
   reconcileEarnVaultMovementBatch,
@@ -56,6 +57,22 @@ export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
   // Start the independent queue/PDA projection before touching the instant
   // movement ledger. Even a persistent claim/payout/backlog query failure must
   // not strand escrowed shares by preventing this sibling from running.
+  // Health must finish independently of slow provider and chain reads.
+  const healthRun = readEarnRecoveryHealth(getDb(env), environment).then(
+    (queues) => {
+      for (const queue of queues)
+        logEvent("info", { event: "sdp_api_earn_recovery_health", environment, ...queue });
+      return 0;
+    },
+    (cause: unknown) => {
+      logEvent("error", {
+        event: "sdp_api_earn_recovery_health_failed",
+        environment,
+        ...describeError(cause),
+      });
+      return 1;
+    }
+  );
   const queuedRun = Promise.allSettled([
     reconcileEarnVaultQueuedWithdrawals(env),
     reconcileEarnProviderOrders(env),
@@ -97,6 +114,7 @@ export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
     throw movementPipelineFailure;
   }
   const queuedWithdrawalFailure = await queuedRun;
+  const healthSnapshotErrors = await healthRun;
 
   // Per-movement failures count toward the verdict too, not just chain reads:
   // a Postgres pool exhaustion or a send-side RPC outage makes every
@@ -109,11 +127,13 @@ export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
     stats.blockHeightReadFailures +
     stats.movementErrors +
     payoutRepair.errors +
-    depositRepair.errors;
+    depositRepair.errors +
+    healthSnapshotErrors;
   logEvent(failures > 0 ? "error" : "info", {
     event: "sdp_api_earn_vault_reconciliation_tick",
     environment,
     claimed: stats.claimed,
+    skipped_leased: stats.skippedLeased,
     settled: stats.settled,
     failed: stats.failed,
     confirmed: stats.confirmed,
@@ -143,6 +163,7 @@ export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
     deposit_receipt_repair_repaired: depositRepair.repaired,
     deposit_receipt_repair_unobserved: depositRepair.unobserved,
     deposit_receipt_repair_errors: depositRepair.errors,
+    health_snapshot_errors: healthSnapshotErrors,
   });
 
   if (failures > 0) {
@@ -150,7 +171,7 @@ export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
       `Earn vault reconciliation failed ` +
         `(${stats.statusReadFailures} status-read, ${stats.blockHeightReadFailures} block-height, ` +
         `${stats.movementErrors} per-movement failures, ${payoutRepair.errors} payout-repair failures, ` +
-        `${depositRepair.errors} deposit-receipt failures) ` +
+        `${depositRepair.errors} deposit-receipt, ${healthSnapshotErrors} health-snapshot failures) ` +
         `over ${stats.claimed} claimed movements`
     );
     if (queuedWithdrawalFailure !== null) {

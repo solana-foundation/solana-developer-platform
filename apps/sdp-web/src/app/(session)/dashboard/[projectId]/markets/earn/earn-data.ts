@@ -6,6 +6,7 @@ import type {
   EarnWalletPositionSummary,
   EarnWalletTokenTotal,
 } from "@sdp/types/earn";
+import { isEarnVaultHoldingEmpty } from "@sdp/types/earn";
 import type { EarnCoreStrategy } from "@sdp/types/earn-core";
 import { earnBalanceReadContextSchema } from "@sdp/types/earn-wire";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
@@ -233,6 +234,8 @@ export interface EarnVaultPositionsRead {
   landedAt: number;
   afterMovementIds?: readonly string[];
   minimumSlot?: number;
+  minimumSlotsByPositionId?: ReadonlyMap<string, number>;
+  minimumSlotMovementIdsByPositionId?: ReadonlyMap<string, string>;
 }
 
 /**
@@ -332,6 +335,98 @@ export async function readEarnVaultPositions(
   return { positions, startedAt, landedAt: Date.now(), afterMovementIds, minimumSlot };
 }
 
+/** Read only changed positions, preserving the same movement and slot checks as a full read. */
+async function readTargetedVaultPositions(
+  afterMovementIds: readonly string[],
+  positionIds: ReadonlyMap<string, string>
+): Promise<EarnVaultPositionsRead> {
+  const startedAt = Date.now();
+  const groups = new Map<string, string[]>();
+  for (const movementId of afterMovementIds) {
+    const positionId = positionIds.get(movementId);
+    if (!positionId) throw new Error("Missing position for balance verification");
+    const ids = groups.get(positionId) ?? [];
+    ids.push(movementId);
+    groups.set(positionId, ids);
+  }
+  const pending = [...groups];
+  const positions: EarnVaultPosition[] = [];
+  const minimumSlotsByPositionId = new Map<string, number>();
+  const minimumSlotMovementIdsByPositionId = new Map<string, string>();
+  let minimumSlot: number | undefined;
+  let next = 0;
+  let stopped = false;
+  async function readNext(): Promise<void> {
+    while (!stopped && next < pending.length) {
+      const group = pending[next++];
+      if (!group) return;
+      const [positionId, ids] = group;
+      let strongest: import("@sdp/types/earn-core").EarnCorePosition | undefined;
+      let strongestSlot = -1;
+      let strongestMovementId: string | undefined;
+      for (let index = 0; !stopped && index < ids.length; index += 100) {
+        const batch = ids.slice(index, index + 100);
+        const position = await earnCoreClient.position(positionId, {
+          afterMovementIds: batch.join(","),
+        });
+        const context = earnBalanceReadContextSchema.parse(position.balanceReadContext);
+        const acknowledged = new Set(context.afterMovementIds);
+        if (
+          batch.some((id) => !acknowledged.has(id)) ||
+          context.minimumSlotMovementId === undefined ||
+          !batch.includes(context.minimumSlotMovementId)
+        )
+          throw new Error("Position read did not establish confirmation freshness");
+        if (context.minimumSlot >= strongestSlot) {
+          strongest = position;
+          strongestSlot = context.minimumSlot;
+          strongestMovementId = context.minimumSlotMovementId;
+        }
+      }
+      if (
+        !strongest ||
+        !strongestMovementId ||
+        !("walletId" in strongest.source) ||
+        strongest.createdAt === null
+      )
+        throw new Error("Invalid custody position identity");
+      minimumSlot = Math.max(minimumSlot ?? 0, strongestSlot);
+      minimumSlotsByPositionId.set(positionId, strongestSlot);
+      minimumSlotMovementIdsByPositionId.set(positionId, strongestMovementId);
+      const position = {
+        ...strongest,
+        createdAt: strongest.createdAt,
+        custodyWalletId: strongest.source.walletId,
+      };
+      if (
+        !isVerifiedClosedPosition(position) &&
+        (position.shares === undefined || earnVaultHoldingValue(position) === undefined)
+      )
+        throw new Error("Position balance is unavailable after the operation");
+      positions.push(position);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(2, pending.length) }, async () => {
+      try {
+        await readNext();
+      } catch (error) {
+        stopped = true;
+        throw error;
+      }
+    })
+  );
+  return {
+    positions,
+    afterMovementIds,
+    minimumSlot,
+    minimumSlotsByPositionId,
+    minimumSlotMovementIdsByPositionId,
+    startedAt,
+    landedAt: Date.now(),
+  };
+}
+
 /** Retain one last verified value per current position, plus the newest raw read. */
 export function appendVaultPositionsRead(
   reads: readonly EarnVaultPositionsRead[],
@@ -364,6 +459,26 @@ function vaultPositionsReadKey(
   return JSON.stringify(afterMovementIds.map((id) => [id, positionIds?.get(id) ?? null]));
 }
 
+function isVerifiedClosedPosition(position: EarnVaultPosition): boolean {
+  return (
+    position.closedAt !== null &&
+    position.shares !== undefined &&
+    isEarnVaultHoldingEmpty({
+      shares: position.shares,
+      parIntermediate: position.parIntermediate,
+    })
+  );
+}
+
+function retainedMinimumSlot(read: EarnVaultPositionsRead, observed: ReadonlyMap<string, number>) {
+  let minimumSlot = read.minimumSlot;
+  for (const { id } of read.positions) {
+    const previous = observed.get(id);
+    if (previous !== undefined) minimumSlot = Math.max(minimumSlot ?? 0, previous);
+  }
+  return minimumSlot;
+}
+
 /**
  * Live position values refresh while the surface is mounted, idling while none exists
  * (`earnVaultPositionsRefreshInterval`); `reads` keeps the recent history, newest last. The poll
@@ -373,20 +488,85 @@ export function useEarnVaultPositions() {
   const afterMovementIds = useRef<readonly string[]>([]);
   const movementPositionIds = useRef<ReadonlyMap<string, string> | undefined>(undefined);
   const inFlight = useRef(new Map<string, Promise<EarnVaultPositionsRead>>());
+  const version = useRef(0);
+  const latest = useRef<EarnVaultPositionsRead | undefined>(undefined);
+  const observedVersions = useRef(new Map<string, number>());
+  const observedSlots = useRef(new Map<string, number>());
+  const strongestProofs = useRef(new Map<string, { movementId: string; slot: number }>());
+  const outstandingProofs = useRef(new Map<string, string>());
+  const closed = useRef(new Set<string>());
+  const merge = useCallback(
+    (incoming: EarnVaultPositionsRead, readVersion: number, targeted: boolean) => {
+      const positions = new Map(
+        (targeted ? (latest.current?.positions ?? []) : incoming.positions).map((position) => [
+          position.id,
+          position,
+        ])
+      );
+      // A late collection read cannot erase a newly observed deposit or replace its value.
+      for (const position of latest.current?.positions ?? []) {
+        if ((observedVersions.current.get(position.id) ?? -1) > readVersion)
+          positions.set(position.id, position);
+      }
+      for (const id of closed.current) {
+        if ((observedVersions.current.get(id) ?? -1) > readVersion) positions.delete(id);
+      }
+      const minimumSlot = retainedMinimumSlot(incoming, observedSlots.current);
+      for (const position of incoming.positions) {
+        const previousSlot = observedSlots.current.get(position.id);
+        if ((observedVersions.current.get(position.id) ?? -1) > readVersion) continue;
+        if (isVerifiedClosedPosition(position)) {
+          positions.delete(position.id);
+          closed.current.add(position.id);
+        } else {
+          positions.set(position.id, position);
+          closed.current.delete(position.id);
+        }
+        observedVersions.current.set(position.id, readVersion);
+        const slot = incoming.minimumSlotsByPositionId?.get(position.id);
+        if (slot !== undefined)
+          observedSlots.current.set(position.id, Math.max(previousSlot ?? 0, slot));
+      }
+      const merged = { ...incoming, minimumSlot, positions: [...positions.values()] };
+      latest.current = merged;
+      return merged;
+    },
+    []
+  );
+  const retainProofs = useCallback((incoming: EarnVaultPositionsRead) => {
+    for (const [positionId, movementId] of incoming.minimumSlotMovementIdsByPositionId ?? []) {
+      const slot = incoming.minimumSlotsByPositionId?.get(positionId);
+      if (slot === undefined) throw new Error("Missing position observation slot");
+      const previous = strongestProofs.current.get(positionId);
+      if (previous === undefined || slot >= previous.slot)
+        strongestProofs.current.set(positionId, { movementId, slot });
+      for (const id of incoming.afterMovementIds ?? []) {
+        if (outstandingProofs.current.get(id) === positionId) outstandingProofs.current.delete(id);
+      }
+    }
+    const retained = new Map(outstandingProofs.current);
+    for (const [positionId, proof] of strongestProofs.current)
+      retained.set(proof.movementId, positionId);
+    movementPositionIds.current = retained;
+    afterMovementIds.current = [...retained.keys()];
+  }, []);
   const read = useCallback(() => {
     const ids = afterMovementIds.current;
     const positionIds = movementPositionIds.current;
     const key = vaultPositionsReadKey(ids, positionIds);
     const running = inFlight.current.get(key);
     if (running) return running;
-    const started = readEarnVaultPositions(ids, positionIds);
+    const readVersion = ++version.current;
+    const started = readEarnVaultPositions(ids, positionIds).then((incoming) =>
+      merge(incoming, readVersion, false)
+    );
     const settle = () => {
       if (inFlight.current.get(key) === started) inFlight.current.delete(key);
     };
     inFlight.current.set(key, started);
     started.then(settle, settle);
     return started;
-  }, []);
+  }, [merge]);
   const { data, error, isLoading, mutate } = useCadencedSWR(
     earnQueryKeys.vaultPositions(),
     read,
@@ -394,7 +574,10 @@ export function useEarnVaultPositions() {
   );
   const [history, setHistory] = useState<readonly EarnVaultPositionsRead[]>([]);
   useEffect(() => {
-    if (data) setHistory((current) => appendVaultPositionsRead(current, data));
+    if (data) {
+      if (latest.current === undefined) latest.current = data;
+      setHistory((current) => appendVaultPositionsRead(current, data));
+    }
   }, [data]);
   // The history state lands one render late; fold the newest read in directly.
   const reads = useMemo(
@@ -403,6 +586,37 @@ export function useEarnVaultPositions() {
   );
   const refresh = useCallback(
     (movementIds?: readonly string[], positionIds?: ReadonlyMap<string, string>) => {
+      if (movementIds && positionIds && movementIds.length > 0) {
+        const retained = new Map(movementPositionIds.current);
+        for (const [id, positionId] of positionIds) {
+          retained.set(id, positionId);
+          outstandingProofs.current.set(id, positionId);
+        }
+        movementPositionIds.current = retained;
+        afterMovementIds.current = [...new Set([...afterMovementIds.current, ...movementIds])];
+        // A detail response cannot establish the rest of an uninitialized portfolio.
+        if (latest.current === undefined)
+          return mutate(read(), { revalidate: false, throwOnError: true }).catch(async (cause) => {
+            await mutate();
+            throw cause;
+          });
+        const targets = new Set(movementIds.map((id) => positionIds.get(id)));
+        const proofIds = afterMovementIds.current.filter((id) => targets.has(retained.get(id)));
+        const key = `targeted:${vaultPositionsReadKey(proofIds, retained)}`;
+        let started = inFlight.current.get(key);
+        if (!started) {
+          const readVersion = ++version.current;
+          started = readTargetedVaultPositions(proofIds, retained).then((incoming) => {
+            const merged = merge(incoming, readVersion, true);
+            retainProofs(incoming);
+            return merged;
+          });
+          const settle = () => inFlight.current.delete(key);
+          inFlight.current.set(key, started);
+          started.then(settle, settle);
+        }
+        return mutate(started, { revalidate: false, throwOnError: true });
+      }
       if (movementIds) {
         afterMovementIds.current = [...movementIds];
         movementPositionIds.current = positionIds;
@@ -411,7 +625,7 @@ export function useEarnVaultPositions() {
       // resolve with cached data after its fetcher failed.
       return mutate(read(), { revalidate: false, throwOnError: true });
     },
-    [mutate, read]
+    [mutate, read, merge, retainProofs]
   );
   return { positions: data?.positions, reads, error, isLoading, refresh };
 }

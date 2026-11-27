@@ -81,13 +81,26 @@ describe("live funding wallet balances", () => {
       })
     );
     vi.stubGlobal("fetch", fetchMock);
-    await refreshFundingWalletBalances([affected, alias, unrelated], new Map([[affected.id, 101]]));
+    const refreshed = await refreshFundingWalletBalances(
+      [affected, alias, unrelated],
+      new Map([[affected.id, 101]]),
+      [affected.id]
+    );
+    expect(refreshed[2]).toBe(unrelated);
+    expect(refreshed[0]?.balances).toBe(refreshed[1]?.balances);
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
       "/api/dashboard/payments/wallets/provider-affected/balances?minimumSlot=101",
-      "/api/dashboard/payments/wallets/provider-alias/balances?minimumSlot=101",
-      "/api/dashboard/payments/wallets/provider-unrelated/balances",
     ]);
   });
+  it("refuses a targeted refresh for an unknown custody wallet", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(
+      refreshFundingWalletBalances([wallet({ id: "known" })], 101, ["unknown"])
+    ).rejects.toThrow("Confirmed movement wallet is not available");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("requires the wallet API to acknowledge the position confirmation slot", async () => {
     const fetchMock = vi
       .fn()
@@ -149,7 +162,11 @@ describe("live funding wallet balances", () => {
         },
       ],
     });
-    const unavailable = wallet({ id: "unavailable", balances: first.balances });
+    const unavailable = wallet({
+      id: "unavailable",
+      publicKey: "11111111111111111111111111111111",
+      balances: first.balances,
+    });
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {

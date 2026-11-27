@@ -1,6 +1,6 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { CronRunStatus } from "@sdp/types/cron-runs";
-import { describeError, logEvent } from "@/runtime/money-path-events";
+import { describeError, logEvent, type MoneyPathEvent } from "@/runtime/money-path-events";
 
 export const CRON_RUN_EVENT = "sdp_cron_run";
 
@@ -8,6 +8,9 @@ export const CRON_RUN_EVENT = "sdp_cron_run";
 export interface CronRegistration {
   cron: string;
   environment: SdpEnvironment | null;
+  /** A scheduler wake is not evidence that an asynchronous consumer completed work. */
+  wakeupOnly?: true;
+  worker?: "operations" | "observer";
 }
 
 /** A slot's outcome; the statuses and their meanings are `CRON_RUN_STATUSES`. */
@@ -26,14 +29,14 @@ const CRON_RUN_LOG_LEVELS = {
 } as const satisfies Record<CronRunStatus, "info" | "warn" | "error">;
 
 /**
- * Log one slot of a Cron Definition to Loki. Every slot logs exactly one event, whatever its
- * status, so liveness alerts can count crons per window.
+ * Log a cron outcome to Loki. Regular definitions log every slot; wake-only definitions
+ * report failures here and completed scans through their minute worker-health summaries.
  *
  * @param registration - The registration whose slot fired.
  * @param record - The slot's outcome.
  */
 export function logCronRun(registration: CronRegistration, record: CronRunRecord): void {
-  const base = {
+  const base: MoneyPathEvent = {
     event: CRON_RUN_EVENT,
     cron: registration.cron,
     environment: registration.environment,
@@ -44,6 +47,8 @@ export function logCronRun(registration: CronRegistration, record: CronRunRecord
     // alerts are live (HOO-2165).
     monitor: `sdp-api-${registration.cron}`,
   };
+  if (registration.worker !== undefined) base.worker = registration.worker;
+  if (registration.wakeupOnly === true) base.wakeup_only = true;
   switch (record.status) {
     case "ok":
       logEvent(CRON_RUN_LOG_LEVELS.ok, { ...base, duration_ms: record.durationMs });

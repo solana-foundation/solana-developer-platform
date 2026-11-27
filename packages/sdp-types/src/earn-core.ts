@@ -48,6 +48,8 @@ export interface EarnCorePosition extends Omit<EarnVaultPosition, "custodyWallet
   discovered?: boolean;
   /** Unknown acquisition history withholds earned amounts, including after import. */
   costBasisKnown: boolean;
+  /** Slot floor for refreshing the funding balance alongside this holding. */
+  balanceReadContext?: EarnVaultPositionsPage["balanceReadContext"];
 }
 
 /** Summary values retain their units and unknown discovered acquisition dates. */

@@ -21,10 +21,12 @@ import {
   operationSourceSchema,
   operationTermsSchema,
   operationTransitionRequiresResourceReference,
+  SDP_PROGRESS_OPERATION_STATUSES,
   TERMINAL_OPERATION_STATUSES,
 } from "@sdp/types/operations";
 import { z } from "zod";
 import type { DatabaseClient, DatabaseExecutor } from "@/db/client";
+import { OPERATION_WAKE_CHANNEL } from "@/db/operation-notifications";
 import { sqlLiteralList } from "@/db/postgres-utils";
 import {
   acceptCurrentRedemptionReleaseWithin,
@@ -33,6 +35,18 @@ import {
 import { conflict, internalError, notFound } from "@/lib/errors";
 import { type MoneyPrincipal, moneyPrincipalSchema } from "@/lib/money-principal";
 import { OPERATION_WORKER_LEASE_MS } from "@/services/earn/operation-worker-budget";
+
+const RECENT_OPERATION_EXECUTION_SQL = `error IS NULL
+  AND (next_action ->> 'type') IS DISTINCT FROM 'sign_in_provider'
+  AND status IN (${sqlLiteralList(SDP_PROGRESS_OPERATION_STATUSES)})
+  AND EXISTS (SELECT 1 FROM operation_attempts attempt
+    WHERE attempt.operation_id = operations.id
+      AND attempt.organization_id = operations.organization_id
+      AND attempt.project_id = operations.project_id
+      AND attempt.environment = operations.environment
+      AND attempt.action_id = operations.action_id
+      AND attempt.action_version = operations.action_version
+      AND attempt.execution_requested_at::timestamptz > now() - interval '2 minutes')`;
 
 /** Every operation access carries exact tenant, project and cluster scope. */
 export interface OperationScope {
@@ -48,12 +62,8 @@ export interface OperationListFilters {
   ownerAddress?: string;
   walletId?: string;
   positionId?: string;
+  operationIds?: readonly string[];
   allowedWalletIds?: readonly string[];
-}
-
-/** An unclaimed recovery candidate; listing never reserves an execution lease. */
-export interface OperationRecoveryCandidate extends OperationScope {
-  id: string;
 }
 
 /** The current version's execution record; signed bytes and account binding are first-write-wins. */
@@ -107,6 +117,8 @@ export interface OperationClaim {
   /** Once dispatch may have started, a takeover may observe/retry exact bytes only. */
   recoveryRequired: boolean;
   purpose: "execute" | "cancel";
+  /** True only for the durable first recovery claim of this accepted attempt. */
+  firstExecutionClaim: boolean;
 }
 
 /** A validated, side-effect-free action ready for display. */
@@ -394,6 +406,49 @@ export function createOperationsRepository(db: DatabaseClient) {
     await wakeRecovery(tx, scope, attempt.operationId);
     return parseAttempt(updated);
   }
+  async function leaseRecovery(
+    tx: DatabaseExecutor,
+    row: OperationRecord
+  ): Promise<OperationClaim | null> {
+    if (isTerminalOperationStatus(row.operation.status)) return null;
+    const { scope } = row;
+    const attempt = await currentAttempt(tx, scope, row.operation);
+    if (
+      attempt === null ||
+      (attempt.executionRequestedAt === null &&
+        attempt.dispatchStartedAt === null &&
+        attempt.signedTransaction === null)
+    )
+      return null;
+    const token = randomUUID();
+    const changed = await tx.queryOne(
+      `WITH leased AS (
+        UPDATE operations SET claim_token = ?, claim_until = now() + (? * interval '1 second'), fence = fence + 1
+        WHERE id = ? AND ${scopeSql} AND next_check_at <= now()
+          AND (claim_until IS NULL OR claim_until <= now()) RETURNING ${OPERATION_COLUMNS}
+      ), first_pickup AS (
+        UPDATE operation_attempts SET first_execution_claimed_at = sdp_iso_now()
+        WHERE id = ? AND operation_id IN (SELECT id FROM leased)
+          AND first_execution_claimed_at IS NULL RETURNING id
+      ) SELECT leased.*, EXISTS (SELECT 1 FROM first_pickup) AS first_execution_claim FROM leased`,
+      [token, OPERATION_WORKER_LEASE_MS / 1000, row.operation.id, ...scopeValues(scope), attempt.id]
+    );
+    if (changed === null) return null;
+    const current = parseRecord(changed);
+    return {
+      operation: current.operation,
+      attempt,
+      token,
+      fence: current.fence,
+      firstExecutionClaim: changed.first_execution_claim === true,
+      purpose: current.actionPurpose,
+      recoveryRequired:
+        attempt.dispatchStartedAt !== null ||
+        attempt.resourceRef !== null ||
+        attempt.observationOnly ||
+        (current.operation.cancelRequestedAt !== null && current.actionPurpose === "execute"),
+    };
+  }
   return {
     get: (scope: OperationScope, id: string) => read(db, scope, id, false),
 
@@ -470,6 +525,10 @@ export function createOperationsRepository(db: DatabaseClient) {
     ) {
       const filters = [scopeSql];
       const values: unknown[] = scopeValues(scope);
+      if (input.operationIds !== undefined) {
+        filters.push("id = ANY(?::text[])");
+        values.push(input.operationIds);
+      }
       if (input.kind !== undefined) {
         filters.push("kind = ?");
         values.push(input.kind);
@@ -594,6 +653,7 @@ export function createOperationsRepository(db: DatabaseClient) {
           token,
           fence: record.fence,
           purpose: record.actionPurpose,
+          firstExecutionClaim: false,
           recoveryRequired:
             attempt.dispatchStartedAt !== null ||
             attempt.resourceRef !== null ||
@@ -607,74 +667,38 @@ export function createOperationsRepository(db: DatabaseClient) {
       return currentAttempt(db, scope, record.operation);
     },
 
-    /** Index-backed due scan; every joined attempt has the same tenant and current action. */
-    async listDueRecovery(
-      environment: SdpEnvironment,
-      limit = 100
-    ): Promise<OperationRecoveryCandidate[]> {
-      if (!Number.isInteger(limit) || limit < 1 || limit > 100)
-        throw new Error("Recovery candidate limit must be between 1 and 100");
-      const rows = await db.queryMany<{
-        id: string;
-        organization_id: string;
-        project_id: string;
-      }>(
-        `SELECT operation.id, operation.organization_id, operation.project_id
-         FROM operations operation JOIN operation_attempts attempt
-           ON attempt.operation_id = operation.id
-           AND attempt.organization_id = operation.organization_id
-           AND attempt.project_id = operation.project_id AND attempt.environment = operation.environment
-           AND attempt.action_id = operation.action_id AND attempt.action_version = operation.action_version
-         WHERE operation.environment = ? AND operation.status NOT IN (${sqlLiteralList(TERMINAL_OPERATION_STATUSES)})
-           AND operation.next_check_at IS NOT NULL AND operation.next_check_at <= now()
-           AND (attempt.execution_requested_at IS NOT NULL OR attempt.dispatch_started_at IS NOT NULL OR attempt.signed_transaction IS NOT NULL)
-           AND (operation.claim_until IS NULL OR operation.claim_until <= now())
-         ORDER BY operation.next_check_at, operation.id LIMIT ?`,
-        [environment, limit]
-      );
-      return rows.map((row) => ({
-        id: row.id,
-        organizationId: row.organization_id,
-        projectId: row.project_id,
-        environment,
-      }));
+    /** Competing workers skip leased or locked rows and claim only work ready to start. */
+    async claimNextRecovery(
+      environment: SdpEnvironment
+    ): Promise<{ scope: OperationScope; claim: OperationClaim } | null> {
+      return db.transaction(async (tx) => {
+        const found = await tx.queryOne(
+          `SELECT ${OPERATION_COLUMNS} FROM operations
+           WHERE environment = ? AND status NOT IN (${sqlLiteralList(TERMINAL_OPERATION_STATUSES)})
+             AND next_check_at <= now() AND (claim_until IS NULL OR claim_until <= now())
+             AND EXISTS (SELECT 1 FROM operation_attempts attempt
+               WHERE attempt.operation_id = operations.id
+                 AND attempt.organization_id = operations.organization_id
+                 AND attempt.project_id = operations.project_id
+                 AND attempt.environment = operations.environment
+                 AND attempt.action_id = operations.action_id
+                 AND attempt.action_version = operations.action_version
+                 AND (attempt.execution_requested_at IS NOT NULL OR attempt.dispatch_started_at IS NOT NULL OR attempt.signed_transaction IS NOT NULL))
+           ORDER BY next_check_at, id LIMIT 1 FOR UPDATE SKIP LOCKED`,
+          [environment]
+        );
+        if (found === null) return null;
+        const row = parseRecord(found);
+        const claim = await leaseRecovery(tx, row);
+        return claim === null ? null : { scope: row.scope, claim };
+      });
     },
 
     /** Lease a previously requested execution or recover its retained effects; never create an attempt. */
     async claimRecovery(scope: OperationScope, id: string): Promise<OperationClaim | null> {
-      return db.transaction(async (tx) => {
-        const row = await requireRecord(tx, scope, id, true);
-        if (isTerminalOperationStatus(row.operation.status)) return null;
-        if (row.claimUntil !== null && Date.parse(row.claimUntil) > Date.now()) return null;
-        const attempt = await currentAttempt(tx, scope, row.operation);
-        if (
-          attempt === null ||
-          (attempt.executionRequestedAt === null &&
-            attempt.dispatchStartedAt === null &&
-            attempt.signedTransaction === null)
-        )
-          return null;
-        const token = randomUUID();
-        const changed = await tx.queryOne(
-          `UPDATE operations SET claim_token = ?, claim_until = now() + (? * interval '1 second'), fence = fence + 1
-           WHERE id = ? AND ${scopeSql} AND next_check_at <= now() RETURNING ${OPERATION_COLUMNS}`,
-          [token, OPERATION_WORKER_LEASE_MS / 1000, id, ...scopeValues(scope)]
-        );
-        if (changed === null) return null;
-        const current = parseRecord(changed);
-        return {
-          operation: current.operation,
-          attempt,
-          token,
-          fence: current.fence,
-          purpose: current.actionPurpose,
-          recoveryRequired:
-            attempt.dispatchStartedAt !== null ||
-            attempt.resourceRef !== null ||
-            attempt.observationOnly ||
-            (current.operation.cancelRequestedAt !== null && current.actionPurpose === "execute"),
-        };
-      });
+      return db.transaction(async (tx) =>
+        leaseRecovery(tx, await requireRecord(tx, scope, id, true))
+      );
     },
 
     /** Unexposed choices and server-held unsigned builds cannot broadcast independently. */
@@ -1033,10 +1057,14 @@ export function createOperationsRepository(db: DatabaseClient) {
       return (
         (await db.execute(
           `UPDATE operations SET claim_token = NULL, claim_until = NULL,
-           next_check_at = now() + make_interval(secs => CASE WHEN status <> ? THEN 15 ELSE
+           next_check_at = now() + make_interval(secs => CASE
+             WHEN ${RECENT_OPERATION_EXECUTION_SQL} THEN 2
+             WHEN status <> ? THEN 15 ELSE
              LEAST(CASE WHEN next_action ->> 'type' = 'sign_in_provider' THEN 60 ELSE 300 END,
                15 * power(2, LEAST(recovery_check_count, 5))) END),
-           recovery_check_count = CASE WHEN status <> ? THEN 0 ELSE LEAST(recovery_check_count + 1, 5) END
+           recovery_check_count = CASE WHEN status <> ? THEN 0
+             WHEN ${RECENT_OPERATION_EXECUTION_SQL} THEN recovery_check_count
+             ELSE LEAST(recovery_check_count + 1, 5) END
          WHERE id = ? AND ${scopeSql} AND claim_token = ? AND fence = ? AND claim_until > now()`,
           [
             claim.operation.status,
@@ -1051,13 +1079,18 @@ export function createOperationsRepository(db: DatabaseClient) {
     },
 
     async release(scope: OperationScope, claim: OperationClaim): Promise<boolean> {
-      return (
-        (await db.execute(
+      return db.transaction(async (tx) => {
+        const released = await tx.queryOne<{ due: boolean }>(
           `UPDATE operations SET claim_token = NULL, claim_until = NULL WHERE id = ? AND ${scopeSql}
-           AND claim_token = ? AND fence = ?`,
+             AND claim_token = ? AND fence = ? RETURNING next_check_at <= now() AS due`,
           [claim.operation.id, ...scopeValues(scope), claim.token, claim.fence]
-        )) === 1
-      );
+        );
+        if (released === null) return false;
+        // Deliver only after the submission claim is released and this transaction commits.
+        if (released.due)
+          await tx.execute("SELECT pg_notify(?, ?)", [OPERATION_WAKE_CHANNEL, scope.environment]);
+        return true;
+      });
     },
   };
 }

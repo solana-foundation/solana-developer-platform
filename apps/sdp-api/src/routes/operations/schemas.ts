@@ -23,6 +23,22 @@ export const operationsListQuerySchema = z
     ownerAddress: z.string().min(32).max(44).optional(),
     walletId: z.string().min(1).max(256).optional(),
     positionId: z.string().min(1).max(1024).optional(),
+    operationIds: z
+      .string()
+      .min(1)
+      .max(25_699)
+      .refine((value) => {
+        const ids = value.split(",");
+        return (
+          ids.length <= 100 &&
+          ids.every((id) => id.length > 0 && id.length <= 256 && !/\s/.test(id))
+        );
+      }, "Choose between 1 and 100 comma-separated operation IDs")
+      .transform((value) => [...new Set(value.split(","))])
+      .describe(
+        "Read up to 100 known operations together. All source visibility and other filters still apply."
+      )
+      .optional(),
   })
   .strict()
   .refine(

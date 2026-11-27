@@ -238,12 +238,10 @@ describe("wallet position reads", () => {
         }))
     );
 
-    // The observing read still answers what it saw.
+    // The observing read closes the holding and omits it immediately.
     const first = await get(`/v1/earn/positions?sourceType=address&ownerAddress=${OWNER_A}`);
     expect(first.status).toBe(200);
-    const firstBody = (await first.json()) as { data: { positions: Array<{ shares: string }> } };
-    expect(firstBody.data.positions).toHaveLength(1);
-    expect(firstBody.data.positions[0]?.shares).toBe("0");
+    await expect(first.json()).resolves.toMatchObject({ data: { positions: [] } });
     expect(await closedAtOf(positionId)).not.toBeNull();
 
     const second = await get(`/v1/earn/positions?sourceType=address&ownerAddress=${OWNER_A}`);

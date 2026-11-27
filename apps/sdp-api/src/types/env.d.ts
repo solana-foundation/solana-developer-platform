@@ -17,6 +17,8 @@ import type { KVStoreSet } from "@/runtime/kv";
 export interface Env extends ManagedRpcEnv {
   // Runtime data services
   DATABASE_URL?: string;
+  /** Direct/session-pooled URL to the same database for LISTEN; defaults to DATABASE_URL. */
+  DATABASE_LISTENER_URL?: string;
   // "off" sends every database statement unnamed, so PostgreSQL plans each one
   // again. Needed behind a transaction-mode connection pooler; parsed at startup
   // by src/db/database-env.ts.
