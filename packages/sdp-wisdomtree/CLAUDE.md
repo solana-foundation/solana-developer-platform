@@ -1,12 +1,12 @@
 # @sdp/wisdomtree — agent notes
 
 Kit-native instruction building for WisdomTree Connect's tokenized funds on
-Solana, plus live position reads. It builds unsigned plans and reads chain
-state; it never signs, never submits, never touches a database. Signing and
-submission belong to the API. The Connect REST client (OAuth, products,
-on-receipt wallets, deposit admission) lives in
-`@sdp/earn/providers/wisdomtree/connect` — this package consumes it and adds
-the chain half.
+Solana, live position reads and order-settlement observations. It builds
+unsigned plans and reads chain/provider state; it never signs, submits or
+touches a database. Signing and submission belong to the API. The Connect REST
+client (OAuth, products, on-receipt wallets, admission and order lookup) lives
+in `@sdp/earn/providers/wisdomtree/connect`; this package adds instruction
+building and source-correlated settlement candidates.
 
 Read `packages/sdp-earn/CLAUDE.md` for the catalogue side and ADR 0002 for the
 pluggability invariants. `@sdp/kamino` is the structural precedent; the notes
@@ -52,10 +52,13 @@ custody approval, without gating exits or settlement reads.
 
 ## Shared order settlement
 
-A warm observation makes one `GET /api/orders/hash/{sourceSignature}`. A cold
-observation adds the existing OAuth grant; a revoked bearer can refresh once.
-No order creation, missing-hash POST, eligibility, wallet or organization read
-runs here. Recovery does not depend on current deposit entitlement.
+`readProviderSettlement` uses the shared `EarnProviderSettlementInput` and
+`EarnProviderSettlementCandidate` contracts. It runs through
+`EarnVaultOperationRunner` without resolving an RPC endpoint. A warm observation
+makes one `GET /api/orders/hash/{sourceSignature}`; a cold observation adds the
+existing OAuth grant, and a revoked bearer can refresh once. No order creation,
+missing-hash POST, eligibility, wallet or organization read runs here. Recovery
+does not depend on current deposit entitlement.
 
 Match the source hash in its economic role, wallet, fund code and mint,
 Purchase/Sale direction, Solana network and USDC currency name. Connect may
@@ -90,10 +93,14 @@ layers in SDP, none redundant:
 1. **API-side pre-check** (`EarnDepositEligibilityProvider`, money-in only):
    in one authenticated Connect context, the wallet registry must report the
    sender Approved AND the products shelf must contain the requested registry
-   fund with `can_trade === true` before USDC leaves. A valid negative result
-   always gets the same generic refusal: the build route must not
-   reveal whether a wallet is registered, its KYC state, or the organization's
-   product entitlements. Malformed/upstream responses fail closed.
+   fund with `can_trade === true`. Preparation checks this once; the worker
+   checks the recorded owner and fund again before broadcast after any custody
+   approval delay. A negative result stops new sends while exposed signed bytes
+   remain under observation; an upstream outage retries without broadcasting.
+   Neither approval polling nor exits/settlement gain this money-in gate.
+   Refusal stays generic so preparation and operation errors cannot reveal
+   wallet registration, KYC state or product entitlements. This is an admission
+   check, not an on-chain restriction on the USDC source transfer.
 2. **Hook account resolution** (`transfer-hook.ts`): the standard SPL
    tlv-account-resolution algorithm, evaluated against the hook's LIVE
    ExtraAccountMetaList. WTGXX's real list (measured 2026-08-28): a

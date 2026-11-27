@@ -6,6 +6,11 @@ never submits, never touches a database, and holds no credential. The API
 coordinates submission and signing: external owners sign with their wallet;
 Treasury uses the organization's configured custody provider.
 
+Ondo is currently hidden through `EARN_PROVIDER_DESCRIPTORS.ondo.surfaced`.
+Discovery and new deposits are disabled; catalogue ingestion, live holdings and
+existing-position withdrawals keep this registered adapter. Do not remove the
+adapter or its Jupiter credential to pause new exposure.
+
 Read `packages/sdp-earn/CLAUDE.md` for the catalogue side and ADR 0002 for the
 pluggability invariants. `packages/sdp-kamino` and `packages/sdp-veda` are the
 precedents this package mirrors; the differences are the interesting part.
@@ -80,14 +85,16 @@ provider limits with one limit for the complete plan. Appending a second
 
 ## The floor is proven, not encoded
 
-Jupiter encodes a quote plus a tolerance, never an arbitrary floor. The builder
-quotes live, derives `bps = ⌊(quote − floor)/quote·10⁴⌋` (rounding the
-tolerance down rounds the threshold up), then checks the BUILT leg's own
-threshold covers the caller's floor — one retry at zero tolerance, then a typed
-`DEPOSIT_REFUSED`/`WITHDRAW_REFUSED`. `accepted` reports the CALLER's floor:
-the encoded threshold is at or above it, so the ledger claim stays conservative
-and exact against the API's policy check (`requireAcceptedPlan` demands
-equality with the approved request).
+Jupiter encodes a quote plus a tolerance, never an arbitrary floor. The shared
+`buildSwapLegWithFloor` helper (`@sdp/earn/swap-floor`) derives
+`bps = ⌊(quote − floor)/quote·10⁴⌋`, then proves the built leg's threshold
+covers the caller's floor. It retries once at zero tolerance. Ondo retains mint/amount
+parsing and maps refusal to `DEPOSIT_REFUSED`/`WITHDRAW_REFUSED`. The normal
+path remains one quote and one build; retry adds one build and no Solana RPC.
+
+`accepted` reports the caller's floor: the encoded threshold is at or above it,
+so the ledger claim stays conservative and exact against the API's policy
+check (`requireAcceptedPlan` demands equality with the approved request).
 
 `minSharesOut`/`minAmountOut` are refused-if-absent (Veda's rule): a floor
 nobody chose is the appearance of protection. Amounts are refused, never

@@ -108,6 +108,12 @@ broadcast boundary, including exits. Re-read API-key grants and member role and
 project access there. Refusal permits only observation of known bytes and
 provider cleanup. Keep the shared admission layer's default exit semantics.
 
+Before deposit broadcast, recheck `EarnDepositEligibilityProvider` against the
+stored provider, owner and instrument, including after delayed custody approval.
+A refusal durably restricts the attempt to observation and retains
+`DEPOSIT_REFUSED`; a provider outage retries without sending. Never run this
+check during pending approval polling, withdrawals or settlement observation.
+
 A durable provider account/proposal identity precedes the single create.
 Fenced leases prevent takeover from racing a possibly active worker. The lease
 is 180 seconds; the action budget is 120 seconds. Reserve time at each external
@@ -150,6 +156,14 @@ operation ends `failed` with that code, as a rejected proposal does. Only
 verified chain/provider observations establish payout; never copy expected
 amounts into settled fields. A projection of movement or request evidence
 replaces an earlier pass's recovery error; a terminal operation keeps its own.
+
+Provider-order source finality records only the opening leg and leaves the
+operation `settling`. `EarnProviderSettlementProvider` supplies a correlated
+candidate; the shared verifier requires successful finalized delivery to the
+recorded owner, mint and required account. A reported output amount only
+cross-checks the observed token delta. Missing orders, hashes or receipts stay
+unresolved. Provider refusal or refund status alone cannot establish delivery,
+a refund or nonexecution.
 
 ## Replacement boundary
 

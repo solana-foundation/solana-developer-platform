@@ -104,6 +104,12 @@ observation time; do not imply stale or unavailable APY is a current quote.
 Provider-unconfigured reads degrade to a quiet notice. Inspect error codes,
 not only HTTP status, when describing unavailable execution.
 
+Hiding a provider removes discovery and new deposits, not its tracked holdings
+or exits. Do not apply provider surfacing or new-deposit entitlement to those
+withdrawals. Discovery currently has no polling or focus refresh; an open list
+needs Refresh/reload after a visibility change. Server admission still refuses
+disabled deposits even while a loaded list is stale.
+
 Only Solana addresses render. Render provider position labels as supplied.
 Keep cluster checks and provider availability at the shared seam, including
 mainnet strategies visible but unavailable to a sandbox project.

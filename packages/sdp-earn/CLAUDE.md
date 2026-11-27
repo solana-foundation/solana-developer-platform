@@ -112,12 +112,13 @@ runner. Doppler supplies Clerk keys, so the dashboard needs `doppler login`.
 
 ### 4. Get catalogue data — live provider sync
 
-With sandbox provider credentials set, the catalogue-sync
-cron populates `earn_strategies` from live provider sources. It runs once when
-the cron service starts (`pnpm dev`'s `dev:worker`; through the slotted
-`runEarnCatalogueSyncIfDue`, so restarts inside the hour skip) and then on the
-hour, so a freshly started stack lists strategies within seconds of coming up. The sync is the only admitting writer and every
-row must pass the provider's declared-support checks.
+With sandbox provider credentials set, the catalogue-sync cron populates
+`earn_strategies` from live provider sources. It attempts a pass on cron-service
+startup and every five minutes. `runEarnCatalogueSyncIfDue` uses a 59-minute
+Redis slot, so healthy ingestion is roughly hourly (up to about 64 minutes plus
+processing). Startup respects a live slot; a fresh database with an unexpired
+shared slot may still wait. Every admitted row must pass the provider's
+declared-support checks. Hidden providers remain in the sync registry.
 
 See README.md → "Catalogue data" for cadence and failure behaviour. A database
 still holding `seed-demo-` rows from the removed `db:seed:earn` needs a one-time
@@ -188,10 +189,11 @@ that is correct, not a bug. Grant the override in the **local** DB to proceed.
 
 ### 5b. The gate BEFORE that one: is the provider even offered?
 
-**Kamino, Veda, Jupiter Lend, and Ondo are offered. WisdomTree is registered
-pre-launch; Upshift and Perena remain stubs.** The sandbox catalogue's own lane
-shows Kamino's devnet shelf plus Veda's devnet Test Vault. Its explicit mainnet
-mirror can also show browse-only Jupiter Lend and Ondo rows. Production offers
+**Kamino, Veda and Jupiter Lend are offered. Ondo is hidden; Hastra,
+WisdomTree and Plume remain pre-launch. Upshift and Perena remain stubs.**
+The sandbox catalogue's own lane shows Kamino's devnet shelf plus Veda's devnet
+Test Vault. Its mainnet mirror retains Ondo rows while discovery hides them;
+Jupiter Lend remains available for browse-only review. Production offers
 Veda's USDC PRIME and OUSD PRIME vaults from `VEDA_DEPLOYMENTS`. The Ground
 integration that previously served the custodial program flow
 was removed, so no registered provider is portfolio-capable today. The unsupported program HTTP surface is removed.
@@ -224,16 +226,17 @@ ADR 0002's 2026-08-14 addendum.
 | Local API boots on 8787 despite `PORT=…`                                                                        | the dev wrapper reads **`SDP_API_PORT`**, not `PORT` (apps/sdp-api/scripts/lib/dev-env.mjs)                                                                                                                                                                                                                                                                                                                                                                           |
 | Need devnet USDC to fund a program                                                                              | Circle's faucet: <https://faucet.circle.com/> — USDC + Solana Devnet (§4b)                                                                                                                                                                                                                                                                                                                                                                                            |
 | No Veda rows in the PRODUCTION catalogue                                                                        | the production sync needs a mainnet RPC: with no `SOLANA_RPC_<PROVIDER>_MAINNET_API_KEY_URL`, production `listStrategies` throws `PROVIDER_NOT_CONFIGURED` and the sync skips that lane without touching other providers' rows. With one, the catalogue carries the two PRIME vault rows from `VEDA_DEPLOYMENTS` (`@sdp/types/veda-programs`). Sandbox carries the devnet Test Vault row                                                                              |
-| A Veda deposit answers 403 "is not currently offered"                                                           | stale build — `EARN_PROVIDER_SURFACING.veda` flipped `true` on 2026-08-31 (Kamino, Veda, Jupiter Lend and Ondo are offered). The gate still exists and still answers this for upshift/perena, and no org override lifts it (§5b)                                                                                                                                                                                                                                      |
-| No Ondo rows in the sandbox catalogue's own lane; USDY only appears under the mainnet-mirror toggle             | correct — Ondo has no devnet deployment anywhere (even its staging runs on mainnet), so sandbox carries USDY only as the PRO-1742 browse-only mirror row. See the Ondo section below                                                                                                                                                                                                                                                                                  |
+| A Veda deposit answers 403 "is not currently offered"                                                           | stale build — `EARN_PROVIDER_SURFACING.veda` flipped `true` on 2026-08-31 (Kamino, Veda and Jupiter Lend are offered; Ondo is hidden). The gate still exists and still answers this for upshift/perena, and no org override lifts it (§5b)                                                                                                                                                                                                                                      |
+| No Ondo rows in discovery | Ondo is hidden through its shared `surfaced` flag. Sync still stores its mainnet row and sandbox mirror; held positions and exits remain available. See the Ondo section below                                                                                                                                                                                                                                                                                  |
 | The Ondo pass fails with `Ondo assets API listed no usdy entry` or `Ondo USDY apy is not a non-negative number` | `ondo.finance/api/v1/assets` changed shape (the `usdy` entry or its numeric `apy` percent). Check the live body; the row keeps its last figures until fixed                                                                                                                                                                                                                                                                                                           |
 | No Ondo row in the sandbox MIRROR either, on a deployment with no mainnet RPC                                   | the production pass needs a mainnet RPC: the catalogue sync hands every on-chain read the preferred endpoint of the requested cluster's managed pool (`ctx.catalogueRpcUrl`, read by `resolveCatalogueRpcUrl`), with no process-default fallback. With no `SOLANA_RPC_<PROVIDER>_MAINNET_API_KEY_URL` the pass is a steady-state skip and the mirror converges to empty. A devnet-only beta mirrors only the keyless Kamino and Jupiter Lend; a local stack sets one. |
 
 ## Ondo — a TOKEN-HOLDING strategy, no vault program at all
 
-Registered 2026-09-02 (PRO-1803), surfaced 2026-09-14 (PRO-1832). USDY is a
-plain SPL token whose price accrues Treasury yield, so the strategy is HOLDING
-it: deposit =
+Registered 2026-09-02 (PRO-1803), initially surfaced 2026-09-14 (PRO-1832),
+and hidden 2026-11-27 to pause new exposure. Catalogue reads, retained holdings
+and reverse-swap exits continue while `surfaced` is false. USDY is a plain SPL
+token whose price accrues Treasury yield, so the strategy is HOLDING it: deposit =
 Jupiter-routed USDC→USDY swap, position = the owner's USDY balance, exit = the
 reverse swap. Mainnet-only — Ondo has NO devnet deployment (verified on-chain;
 even their staging environment runs on mainnet with different mints), so the
@@ -307,7 +310,8 @@ custody wallet and each provider's own surfaces can redeem them.
 
 Money moves through provider-specific execution packages: `@sdp/kamino`,
 `@sdp/veda`, `@sdp/jupiter-lend`, `@sdp/ondo`, `@sdp/hastra`, and pre-launch
-`@sdp/wisdomtree`. The core API prepares one operation for either owner model.
+`@sdp/wisdomtree` and `@sdp/plume`. The core API prepares one operation for
+either owner model.
 For custody, the worker uses the organization's configured signer and tracks
 its provider's signing process before broadcast. For an owner address, the
 caller signs the exact prepared transaction and submit queues those bytes for
@@ -524,14 +528,32 @@ the five-minute pass would re-pay the whole catalogue cost for the rate alone.
 - Registry: `EARN_PROVIDER_CLIENTS` (src/index.ts) + fail-closed
   `resolveEarnProviderClient` — DB provider ids are open strings and MUST be
   resolved through this, never direct-indexed.
+- Execution clients register once in
+  `apps/sdp-api/src/services/earn/execution-factories.ts`. Singleton and
+  operation-scoped registries share this exhaustive factory table; constructors
+  perform no I/O. Use `EarnVaultOperationRunner` and `EarnProvenRpcResolver`
+  from `@sdp/earn/types` rather than package-local runner aliases.
+- `EarnProviderSettlementProvider` observes delayed delivery through named
+  `EarnProviderSettlementInput` and `EarnProviderSettlementCandidate` contracts.
+  A candidate must correlate source, owner and instrument; the shared reconciler
+  verifies finalized token credit before completion. Optional `expectedAmount`
+  cross-checks the actual credit and never supplies a booked receipt. Missing
+  evidence and recovery-required states do not authorize another order.
+- SDK-free `buildSwapLegWithFloor` (`@sdp/earn/swap-floor`) owns the shared
+  threshold proof and at most one zero-tolerance retry for Ondo/Hastra. Adapters
+  retain mint-scale parsing, token selection, instruction checks and errors.
 - Optional capabilities include live metrics, vault-direct (deposit + read),
   vault-withdraw,
   vault-queued-withdraw, provider-operated par redemption, deposit eligibility,
   and the two live quotes (deposit and withdrawal previews). All are
   method-presence guards in capabilities.ts,
   and a provider may implement any subset. `supportsDepositEligibility` is a
-  provider-side KYC check MONEY-IN paths consult, never exits; WisdomTree
-  implements it over its Connect wallet registry. Kamino has live metrics,
+  provider-side KYC check MONEY-IN paths consult, never exits. Check before
+  preparation and again before broadcast after async signing, using the recorded
+  owner and instrument. Refusals retain exposed signed bytes for observation;
+  provider outages retry without sending. Approval polling and settlement reads
+  do not repeat eligibility checks. WisdomTree implements this over its Connect
+  wallet registry. Kamino has live metrics,
   vault-direct, vault-withdraw (PRO-1702), and both quotes (`@sdp/kamino`);
   Veda implements both instant and queued vault exits (see
   `docs/decisions/0003-veda-vault-withdrawals.md`). Hastra defaults to the

@@ -62,6 +62,8 @@ on failure. `resetHastraReadCaches()` is the test seam for both memories.
 - The optional DEX withdrawal is one transaction: PRIME -> wYLDS
   (`vault-stake.redeem`) -> USDC (an API-admitted Jupiter ExactIn leg). It
   requires `minAmountOut` and proves Jupiter's encoded threshold covers it.
+  `buildSwapLegWithFloor` (`@sdp/earn/swap-floor`) owns the shared proof and
+  bounded retry; Hastra retains amount parsing, instruction checks and errors.
   The API advertises and builds it only when `EARN_HASTRA_DEX_EXIT_ENABLED` is
   truthy and `JUPITER_SWAP_API_KEY` is configured; the flag is off by default.
 - Default par redemption is a separate capability: PRIME -> wYLDS followed by
@@ -96,6 +98,11 @@ transaction fee; the separate 50 bps DEX tolerance is only a slippage bound.
   submission or reconciliation of an already admitted transaction: those
   durable movements remain atomic, and recovery must continue from their
   recorded signed bytes rather than rebuilding them.
+- A reset `StakePriceConfig` can have no usable price or timestamp. Keep PRIME
+  shares and withdrawable shares visible, but omit `tokenValue` until both
+  return. A zero PRIME balance still has known zero value; independently held
+  residual wYLDS keeps its own 1:1 value. Never turn an unavailable PRIME rate
+  into a zero-valued holding.
 - The PRIME/wYLDS rate comes from the validated `StakePriceConfig`;
   `vault-mint` is exact 1:1 while both `vault-stake` conversion directions
   floor integer division. Both composed exits fix their later wYLDS amount at
