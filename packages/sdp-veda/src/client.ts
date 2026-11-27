@@ -1,5 +1,6 @@
 import { VedaEarnClient } from "@sdp/earn/providers/veda/client";
 import type {
+  EarnProvenRpcResolver,
   EarnRuntimeContext,
   EarnVaultDepositInput,
   EarnVaultDepositQuote,
@@ -7,6 +8,7 @@ import type {
   EarnVaultDepositQuoteProvider,
   EarnVaultDirectProvider,
   EarnVaultInstruction,
+  EarnVaultOperationRunner,
   EarnVaultPositionInput,
   EarnVaultPositionSnapshot,
   EarnVaultQueuedWithdrawalCancelInput,
@@ -65,16 +67,6 @@ import type {
 
 /** One position page may fan out over several vaults; never fan out unbounded. */
 export const VEDA_POSITION_READ_CONCURRENCY = 4;
-
-/**
- * API-owned execution guard for one provider operation. The API injects its
- * absolute vault deadline here without creating a dependency from this package
- * back to the application layer.
- */
-export type VedaVaultOperationRunner = <T>(
-  label: string,
-  operation: (assertActive: () => void) => Promise<T>
-) => Promise<T>;
 
 async function mapSettledWithConcurrency<T, U>(
   items: readonly T[],
@@ -256,11 +248,8 @@ export class VedaVaultDirectClient
    * across clusters.
    */
   constructor(
-    private readonly resolveProvenRpcUrl: (
-      ctx: EarnRuntimeContext,
-      cluster: SolanaCluster
-    ) => Promise<string>,
-    private readonly runOperation: VedaVaultOperationRunner
+    private readonly resolveProvenRpcUrl: EarnProvenRpcResolver,
+    private readonly runOperation: EarnVaultOperationRunner
   ) {
     super();
   }

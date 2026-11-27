@@ -11,17 +11,11 @@ import type {
   EarnVaultQueuedWithdrawProvider,
   EarnVaultWithdrawProvider,
 } from "@sdp/earn/types";
-import { HastraVaultDirectClient } from "@sdp/hastra/client";
-import { JupiterLendVaultDirectClient } from "@sdp/jupiter-lend/client";
-import { KaminoVaultDirectClient } from "@sdp/kamino/client";
-import { OndoVaultDirectClient } from "@sdp/ondo/client";
-import { PlumeVaultDirectClient } from "@sdp/plume/client";
-import { VedaVaultDirectClient } from "@sdp/veda/client";
-import { WisdomTreeVaultDirectClient } from "@sdp/wisdomtree/client";
 import { isEarnHastraDexExitConfigured } from "@/lib/feature-flags";
 import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 import { assertClusterEndpoint } from "./cluster-rpc";
+import { createEarnExecutionClient } from "./execution-factories";
 import { createHastraSwapPort } from "./hastra-swap-port";
 import { createJupiterSwapPort } from "./jupiter-swap-port";
 import type { VaultDeadline } from "./vault-deadline";
@@ -34,8 +28,8 @@ import { createVaultRpcFailover } from "./vault-rpc-failover";
  * `EARN_PROVIDER_CLIENTS` in `@sdp/earn` stays the catalogue registry — it is
  * what the hourly sync resolves through, and it must remain free of chain SDKs
  * so that cron keeps its small dependency surface. This overlay is consulted
- * only by routes that move money, and it is the ONE place a provider id is
- * mapped to an executing client. Everything downstream narrows with
+ * only by routes that move money. Both API registries use the factories in
+ * execution-factories.ts. Everything downstream narrows with
  * `supportsVaultDirect`, never an id check.
  *
  * Every client gets its endpoints from the open cluster scope's managed pool
@@ -62,37 +56,13 @@ export function resolveEarnExecutionClient(
     assertClusterEndpoint
   );
 
-  if (provider === "plume")
-    return instrumentVendorPort("plume", new PlumeVaultDirectClient(runOperation));
-  if (provider === "kamino") {
-    const client = new KaminoVaultDirectClient(provenRpcUrl, runOperation);
-    return instrumentVendorPort("kamino", client);
-  }
-  if (provider === "jupiter_lend") {
-    const client = new JupiterLendVaultDirectClient(provenRpcUrl, runOperation);
-    return instrumentVendorPort("jupiter_lend", client);
-  }
-  if (provider === "veda") {
-    const client = new VedaVaultDirectClient(provenRpcUrl, runOperation);
-    return instrumentVendorPort("veda", client);
-  }
-  if (provider === "ondo") {
-    const client = new OndoVaultDirectClient(provenRpcUrl, runOperation, () =>
-      createJupiterSwapPort(env, "Jupiter swaps")
-    );
-    return instrumentVendorPort("ondo", client);
-  }
-  if (provider === "hastra") {
-    const client = new HastraVaultDirectClient(provenRpcUrl, runOperation, () =>
-      createHastraSwapPort(env)
-    );
-    return instrumentVendorPort("hastra", client);
-  }
-  if (provider === "wisdomtree") {
-    const client = new WisdomTreeVaultDirectClient(provenRpcUrl, runOperation);
-    return instrumentVendorPort("wisdomtree", client);
-  }
-  return null;
+  const client = createEarnExecutionClient(provider, {
+    resolveProvenRpcUrl: provenRpcUrl,
+    runOperation,
+    resolveJupiterSwapPort: () => createJupiterSwapPort(env, "Jupiter swaps"),
+    resolveHastraSwapPort: () => createHastraSwapPort(env),
+  });
+  return client === null ? null : instrumentVendorPort(provider, client);
 }
 
 /** The executing client narrowed to the vault-direct capability, or null. */

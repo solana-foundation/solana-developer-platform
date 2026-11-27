@@ -69,6 +69,11 @@
       "import": "./src/providers/wisdomtree/connect.ts",
       "default": "./src/providers/wisdomtree/connect.ts"
     },
+    "./swap-floor": {
+      "types": "./src/swap-floor.ts",
+      "import": "./src/swap-floor.ts",
+      "default": "./src/swap-floor.ts"
+    },
     "./support": {
       "types": "./src/support.ts",
       "import": "./src/support.ts",

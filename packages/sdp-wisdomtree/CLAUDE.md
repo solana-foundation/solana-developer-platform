@@ -38,11 +38,46 @@ Consequences that differ from Kamino:
   off the chain queue; the operation reads `settling`. Fund tokens (or
   redemption USDC) arrive later through WisdomTree's transfer agent, so that
   chain fact never closes the position, schedules payout repair or recognizes
-  earnings. Only Connect's order completion, the authenticated and correlated
-  provider signal, may move the row to `finalized`: a future reconciler that
-  implements `readProviderSettlement`, as Plume's does. Position reads still
-  surface assets from live chain state. Order-status polling against
-  `GET /api/orders/*` is deliberately NOT wired yet; see "Not done" below.
+  earnings. `readProviderSettlement` reads Connect's order by the recorded
+  source hash. Only a matching `Settled` order supplies a destination candidate;
+  the shared reconciler verifies finalized delivery before moving the row to
+  `finalized`. Position reads still surface assets from live chain state.
+
+The on-receipt address is resolved live before review and becomes immutable
+signed terms. Before launch, confirm with the issuer that it remains valid for
+the complete recent-blockhash signing window; the API exposes no reservation,
+version or old-address grace guarantee. Never change a recipient after review.
+The shared worker rechecks deposit eligibility before broadcast, including after
+custody approval, without gating exits or settlement reads.
+
+## Shared order settlement
+
+A warm observation makes one `GET /api/orders/hash/{sourceSignature}`. A cold
+observation adds the existing OAuth grant; a revoked bearer can refresh once.
+No order creation, missing-hash POST, eligibility, wallet or organization read
+runs here. Recovery does not depend on current deposit entitlement.
+
+Match the source hash in its economic role, wallet, fund code and mint,
+Purchase/Sale direction, Solana network and USDC currency name. Connect may
+encode the raw currency as `"2"`; its name supplies the currency identity.
+Purchases match the conversion or deposit source and return the issuer share
+hash. Sales match the incoming deposit source and return the conversion payout
+hash, never a token-burn hash. A source hash cannot also prove delivery.
+
+Only exact `Settled` supplies a candidate. Missing/inaccessible orders, unknown
+statuses and missing hashes stay pending. `Failed`, `Order Failed`,
+`Order Refunded` and `Cancelled` require recovery without claiming a refund or
+payout. The write-scoped `fetch-hash` endpoint remains an operator action if
+automatic hash population stalls.
+
+The candidate names the owner's fund or USDC ATA and the Token-2022 or SPL
+Token program. Its reported output (`token_amount` for Purchase, `net_value`
+for Sale) is a conservative cross-check, not ledger evidence: missing values
+or a mismatch with the finalized token delta cannot complete the operation.
+This refuses an ambiguous aggregate credit rather than assigning it to one
+order. The provider's precise amount conventions and batched-delivery behavior
+still need live validation. The shared delivery-signature uniqueness guard
+continues to prevent one receipt from settling multiple movements.
 
 ## The compliance model is the integration's spine
 
@@ -116,8 +151,8 @@ constant or reader in `@sdp/earn/providers/wisdomtree/connect.ts`:
   Ethereum values; confirm via `GET /api/orders/order-mapping`).
 - The organization guid field name (three spellings accepted).
 - Wallet `status` vocabulary (only `"approved"` passes; fail-closed).
-- The on-receipt order lifecycle/correlation fields needed to reconcile a
-  Solana transfer with the later provider settlement.
+- The documented on-receipt order hash roles, status and amount fields are
+  implemented but still need verification against a live Solana tenant.
 - **The OAuth grant itself**: Connect documents only the Resource Owner
   Password Credentials grant (`grant_type=password`, `POST /o/token/`) — the
   plaintext-username/password flow ROPC deprecations target. Whether
@@ -171,10 +206,10 @@ or completed an actual transfer-agent order.
   (PRO-1703): WisdomTree is mainnet-only and their sandbox is Ethereum
   Sepolia, so no official Solana sandbox E2E exists. The Surfpool round trip
   proves the on-chain integration only; it does not clear this gate.
-- **Order-settlement tracking** (poll `GET /api/orders/*`, correlate with
-  movements, surface "order in flight" between transfer finality and token
-  settlement) — same expand-only schema question as Veda's queue
-  (`veda/plan.md`); solve them together.
+- **Live order settlement validation**: verify both source/destination hash
+  roles, exact reported output conventions, and finalized issuer delivery with
+  an authorized tenant. Offline tests exercise the real reader and shared
+  reconciler; they do not establish a live transfer-agent settlement.
 - **Fund Data (Dataspan) rates**: catalogue rows carry no `currentApy` until
   the second credential exists and its routes are measured. Missing renders
   "—", never a fabricated rate.

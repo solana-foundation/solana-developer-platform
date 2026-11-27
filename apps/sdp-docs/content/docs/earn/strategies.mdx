@@ -44,6 +44,19 @@ and pass its `id` as `strategyId` when you [prepare a deposit](/docs/earn/deposi
 A listed strategy can still refuse a deposit when you prepare it: provider
 limits, issuer rules and liquidity are checked live.
 
+## Catalogue and availability
+
+Earn keeps indexing registered providers independently of whether it offers
+new deposits. Hidden providers are absent from discovery. Hiding a provider,
+pausing a strategy or disabling new deposits does not remove your tracked
+positions or apply those deposit restrictions to withdrawals.
+
+New strategies normally arrive in the hourly catalogue update, after a
+successful provider read and any required enablement. Visibility changes to
+already indexed rows do not wait for that update. Discovery responses may be
+cached for 30 seconds. Refresh or reload an open dashboard to update its list;
+the server checks deposit admission again when you prepare and execute.
+
 ## Read the terms
 
 - `rate.value` is the provider-reported APY as a decimal fraction: `"0.062"` is

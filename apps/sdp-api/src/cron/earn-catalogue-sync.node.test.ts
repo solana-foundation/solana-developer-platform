@@ -4,6 +4,8 @@ import type {
   EarnVaultProvider,
   ProviderStrategySnapshot,
 } from "@sdp/earn/types";
+import { ondoDeployment } from "@sdp/types/ondo-programs";
+import { isEarnProviderSurfaced } from "@sdp/types/provider-access";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as vendorCalls from "@/runtime/vendor-calls";
 import { deferred } from "@/test/helpers/deferred";
@@ -202,6 +204,43 @@ describe("runEarnCatalogueSyncIfDue", () => {
     expect(environments).toEqual(["production", "sandbox"]);
     expect(mocks.upsertStrategy).toHaveBeenCalledTimes(2);
     expect(mocks.compareAndDelete).not.toHaveBeenCalled();
+  });
+
+  it("keeps cataloguing hidden Ondo in production and the sandbox mainnet mirror", async () => {
+    expect(isEarnProviderSurfaced("ondo")).toBe(false);
+    const deployment = ondoDeployment("mainnet-beta");
+    if (deployment === null) throw new Error("Expected the registered Ondo deployment");
+    const snapshot: ProviderStrategySnapshot = {
+      ...makeSnapshot(deployment.usdyMint, "mainnet-beta"),
+      name: "Ondo USDY",
+      sourceKind: "rwa",
+      shareMint: deployment.usdyMint,
+    };
+    const listStrategies = vi.fn(async (ctx: EarnRuntimeContext) =>
+      ctx.environment === "production" ? [snapshot] : []
+    );
+    installProviders({ ondo: makeProvider("ondo", listStrategies) });
+
+    await expect(runEarnCatalogueSyncIfDue(env)).resolves.toBe("synced");
+
+    expect(listStrategies.mock.calls.map(([ctx]) => ctx.environment)).toEqual([
+      "production",
+      "sandbox",
+    ]);
+    expect(mocks.upsertStrategy).toHaveBeenCalledTimes(2);
+    for (const environment of ["production", "sandbox"]) {
+      expect(mocks.upsertStrategy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: "ondo",
+          providerReference: deployment.usdyMint,
+          shareMint: deployment.usdyMint,
+          sourceKind: "rwa",
+          hostCluster: "mainnet-beta",
+          status: "active",
+          environment,
+        })
+      );
+    }
   });
 
   it("skips without syncing while a live claim holds the slot", async () => {

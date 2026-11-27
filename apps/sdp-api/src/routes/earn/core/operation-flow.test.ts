@@ -4,8 +4,13 @@ import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { MovementId } from "@sdp/types/movements";
 import type { Operation } from "@sdp/types/operations";
 import { operationResponseSchema } from "@sdp/types/operations";
+import { isEarnProviderSurfaced } from "@sdp/types/provider-access";
 import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
-import { CLUSTER_BY_SDP_ENVIRONMENT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
+import {
+  CLUSTER_BY_SDP_ENVIRONMENT,
+  WELL_KNOWN_TOKENS,
+  wellKnownMint,
+} from "@sdp/types/well-known-tokens";
 import {
   address,
   appendTransactionMessageInstruction,
@@ -482,6 +487,123 @@ async function seedOperationCustodyWallet(tag: string, environment: SdpEnvironme
 }
 
 describe("Earn core operation HTTP flow", () => {
+  it("hides Ondo and refuses deposits while a disabled, delisted holding can still withdraw", async () => {
+    await seedOperationScope("production");
+    expect(isEarnProviderSurfaced("ondo")).toBe(false);
+    // Exercise the real shared policy; only provider transaction I/O stays stubbed.
+    vi.mocked(catalogue.isEarnStrategyInExecutionShelf).mockRestore();
+    vi.mocked(admission.assertVaultDepositAdmissible).mockRestore();
+    vi.mocked(admission.assertRecordedStrategyDepositAdmitted).mockRestore();
+    const usdy = wellKnownMint("USDY", "mainnet-beta");
+    if (usdy === undefined) throw new Error("Expected the mainnet USDY deployment");
+    const strategy = await createPostgresEarnRepository(getDb(env)).upsertStrategy({
+      provider: "ondo",
+      providerReference: usdy,
+      name: "Ondo USDY",
+      sourceKind: "rwa",
+      underlyingSource: null,
+      depositMints: [TOKEN],
+      shareMint: usdy,
+      apyType: "variable",
+      currentApy: "0.04",
+      liquidityTerm: "instant",
+      redemptionDelayDays: null,
+      riskMetadata: {},
+      status: "active",
+      hostCluster: "mainnet-beta",
+      environment: "production",
+    });
+    if (strategy === null) throw new Error("Expected the indexed Ondo strategy");
+    await getDb(env).execute("UPDATE organizations SET settings = ? WHERE id = ?", [
+      JSON.stringify({
+        enableProductionProject: true,
+        providerOverrides: { earn: { ondo: false } },
+      }),
+      tenant.org.id,
+    ]);
+    const discovery = await request("earn/discovery?provider=ondo");
+    expect(discovery.status, await discovery.clone().text()).toBe(200);
+    expect(await discovery.json()).toMatchObject({ data: { strategies: [], total: 0 } });
+    const deposit = await request(
+      "earn/deposit",
+      "POST",
+      {
+        strategyId: strategy.id,
+        source: { ownerAddress: owner },
+        amount: { mint: TOKEN, value: "10" },
+      },
+      "hidden-ondo-deposit"
+    );
+    expect(deposit.status, await deposit.clone().text()).toBe(400);
+    expect(await deposit.json()).toMatchObject({
+      error: { code: "BAD_REQUEST", details: { reason: "catalogue_only" } },
+    });
+    expect(mocks.build).not.toHaveBeenCalled();
+    expect(mocks.sign).not.toHaveBeenCalled();
+    expect(mocks.proposer).not.toHaveBeenCalled();
+    expect(mocks.broadcast).not.toHaveBeenCalled();
+
+    await getDb(env).execute("UPDATE earn_strategies SET status = 'deprecated' WHERE id = ?", [
+      strategy.id,
+    ]);
+    await getDb(env).execute("UPDATE organizations SET settings = ? WHERE id = ?", [
+      JSON.stringify({
+        enableProductionProject: false,
+        providerOverrides: { earn: { ondo: false } },
+      }),
+      tenant.org.id,
+    ]);
+    const positionId = generateEarnPositionId();
+    await getDb(env).execute(
+      `INSERT INTO earn_positions (id, organization_id, project_id, environment, provider,
+       kind, owner_address, strategy_id, strategy_reference, vault_address, share_mint,
+       token_mint, label, activated_at)
+       VALUES (?, ?, ?, 'production', 'ondo', 'vault_direct', ?, ?, ?, ?, ?, ?,
+       'Existing USDY holding', sdp_iso_now())`,
+      [positionId, tenant.org.id, tenant.project.id, owner, strategy.id, usdy, usdy, usdy, TOKEN]
+    );
+    mocks.withdrawalEnabled = true;
+    const withdrawal = await request(
+      "earn/withdraw",
+      "POST",
+      { positionId, amount: { kind: "shares", value: "10" } },
+      "hidden-ondo-withdrawal"
+    );
+    expect(withdrawal.status, await withdrawal.clone().text()).toBe(202);
+    const operation = await readOperation(withdrawal);
+    expect(operation.nextAction).toMatchObject({ type: "sign_transaction", transaction: unsigned });
+    expect(mocks.withdrawBuild).toHaveBeenCalledExactlyOnceWith(
+      env,
+      expect.objectContaining({
+        provider: "ondo",
+        positionId,
+        ownerAddress: owner,
+        vaultAddress: usdy,
+      })
+    );
+    const accepted = await request(
+      `operations/${operation.id}/submit`,
+      "POST",
+      action(operation),
+      "submit-hidden-ondo-withdrawal"
+    );
+    expect(accepted.status, await accepted.clone().text()).toBe(202);
+    await runWithSystemDatabaseIdentity("cron:reconcile-operations", () =>
+      runInClusterScope({ projectId: null, environment: "production" }, () =>
+        reconcileOperations(env)
+      )
+    );
+    expect((await readOperation(await request(`operations/${operation.id}`))).status).toBe(
+      "submitted"
+    );
+    expect(mocks.broadcast).toHaveBeenCalledOnce();
+    expect(mocks.sign).not.toHaveBeenCalled();
+    expect(mocks.proposer).not.toHaveBeenCalled();
+    expect(await getDb(env).queryMany("SELECT provider, direction FROM earn_movements")).toEqual([
+      { provider: "ondo", direction: "withdrawal" },
+    ]);
+  });
+
   it.each(["true", "false"])(
     "blocks production deposit submissions and refreshes after entitlement loss with sandbox access %s",
     async (sandboxAllowed) => {

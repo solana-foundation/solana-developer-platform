@@ -293,14 +293,11 @@ export const EARN_PROVIDER_DESCRIPTORS = {
     deployedClusters: deployedClusters(JUPITER_LEND_EARN_PROGRAM_IDS),
   },
   ondo: {
-    // Surfaced 2026-09-14 (PRO-1832), registered dormant 2026-09-02 (PRO-1803).
-    // Mainnet-only like Jupiter Lend: the production catalogue carries the USDY
-    // row and production projects may execute against it (the deposit is a
-    // Jupiter-routed USDC→USDY swap, `@sdp/ondo`); the sandbox copy arrives
-    // through the PRO-1742 mirror, browse-only. The `currentApy` source is the
-    // issuer's public assets API (PRO-1833); no figure is derived from token price
-    // or wallet balances.
-    surfaced: true,
+    // Hidden while new USDY exposure is paused. Catalogue and metrics sync keep
+    // running; existing positions retain the reverse-swap withdrawal adapter.
+    // The production catalogue carries mainnet USDY and the sandbox mirror
+    // remains stored. Re-enabling this flag needs no catalogue reset.
+    surfaced: false,
     // Non-custodial like Kamino/Veda, though the "vault" is the open market:
     // the deposit is a custody-signed USDC→USDY swap and the position is the
     // USDY balance in the organization's own wallet. There is no address to

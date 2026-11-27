@@ -9,12 +9,14 @@ import {
 import { badRequest } from "@sdp/earn/errors";
 import { JupiterLendEarnClient } from "@sdp/earn/providers/jupiter_lend/client";
 import type {
+  EarnProvenRpcResolver,
   EarnRuntimeContext,
   EarnVaultDepositInput,
   EarnVaultDepositQuote,
   EarnVaultDepositQuoteInput,
   EarnVaultDepositQuoteProvider,
   EarnVaultInstruction,
+  EarnVaultOperationRunner,
   EarnVaultPositionInput,
   EarnVaultPositionSnapshot,
   EarnVaultTransactionPlan,
@@ -61,11 +63,6 @@ const PINNED_MINT: AccountInfo<Buffer> = {
 let withdrawableAssetsInFlight:
   | { stamp: number; sentAt: number; read: Promise<string> }
   | undefined;
-
-export type JupiterLendVaultOperationRunner = <T>(
-  label: string,
-  operation: (assertActive: () => void) => Promise<T>
-) => Promise<T>;
 
 function publicKey(field: string, value: string): PublicKey {
   try {
@@ -160,11 +157,8 @@ export class JupiterLendVaultDirectClient
     EarnVaultWithdrawQuoteProvider
 {
   constructor(
-    private readonly resolveProvenRpcUrl: (
-      ctx: EarnRuntimeContext,
-      cluster: SolanaCluster
-    ) => Promise<string>,
-    private readonly runOperation: JupiterLendVaultOperationRunner
+    private readonly resolveProvenRpcUrl: EarnProvenRpcResolver,
+    private readonly runOperation: EarnVaultOperationRunner
   ) {
     super();
   }

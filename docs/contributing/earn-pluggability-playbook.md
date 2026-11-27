@@ -88,11 +88,35 @@ applicable interfaces in `packages/sdp-earn/src/types.ts`:
   distinct capabilities when a strategy needs them. Eligibility is independent
   of authorization to move funds.
 
-Register the execution singleton in both
-`apps/sdp-api/src/services/earn-provider-registry.ts` and
-`apps/sdp-api/src/services/earn/execution-registry.ts`. Downstream code narrows
-through capabilities. A new integration should reuse the core routes and
-shared operation worker without adding another execution contract.
+Register one factory in `EARN_EXECUTION_FACTORIES` in
+`apps/sdp-api/src/services/earn/execution-factories.ts`. Its exhaustive provider
+map uses `null` for catalogue-only integrations. Both the API singleton
+registry and operation-scoped registry call this factory; neither needs a
+second provider entry. Constructors perform no I/O and resolve credentials
+only when an operation uses them. Downstream code narrows through capabilities.
+
+Use `EarnVaultOperationRunner` and `EarnProvenRpcResolver` from
+`@sdp/earn/types` for the API-owned deadline and verified endpoint. Keep
+provider-specific deployment validation and error mapping in the adapter.
+Shared execution does not require a separate RWA superclass.
+
+For issuer orders or cross-chain delivery, implement
+`EarnProviderSettlementProvider.readProviderSettlement` with the shared
+`EarnProviderSettlementInput` and `EarnProviderSettlementCandidate` types.
+Return the source-correlated destination transaction, expected token, program
+and required account. This is a candidate: the shared API verifier independently
+checks finalized delivery to the recorded owner before closing the operation.
+A pending or recovery-required response must not invent delivery. Registry tests
+refuse to launch a surfaced, deployed provider-order integration without this
+observation capability. Keep an unfinished integration hidden and undeployed.
+
+A provider using the shared swap port can use `buildSwapLegWithFloor` from
+`@sdp/earn/swap-floor` to prove its caller-approved output floor. The adapter
+validates quoted and built amounts at the correct token scale, chooses mints
+and payer, and maps errors. The helper derives tolerance, checks the built
+threshold and retries once at zero tolerance. It never signs or submits.
+A normal attempt still uses one quote and one build; a floor retry adds one
+build. Keep the core routes and operation worker for every new provider.
 
 Pin program IDs and mints by cluster in `@sdp/types`. Plan-target checks and
 `sponsoredPrograms` must derive from the same deployment registry. A missing
@@ -112,6 +136,11 @@ compatible Solana wallet can sign the returned transaction through the client's
 integration, without an SDP wallet record or provider connection. Require the
 prepared owner and every other signer to sign the unchanged message, then accept
 base64 `signedTransaction` through the shared operation contract.
+
+A provider may return an admitted, immutable `providerTransaction` with its
+own signatures already present. Preserve its exact message, existing signatures,
+blockhash and payer; never recompile it to add compute or a funding swap. Fill
+only the remaining required signature slots through the shared signing flow.
 
 An existing connected wallet's `source: { walletId }` is optional. A source
 changes signing authority, not the API flow.
@@ -156,7 +185,11 @@ Keep these invariants when adding a capability:
 - Mutations validate and authorize named resources before shared idempotency.
   Every money mutation requires a persisted `Idempotency-Key`.
 - Workers restore the original principal and recheck current grants, credentials,
-  wallet bindings and admission before a new effect.
+  wallet bindings and admission before a new effect. Before deposit broadcast,
+  recheck `EarnDepositEligibilityProvider` for the recorded owner and instrument,
+  including after custody approval. Do not repeat this during approval polling,
+  exits or settlement observation. Refusal preserves exposed signed bytes;
+  an upstream outage retries without broadcasting.
 - Persist exact signed bytes and attempt identity before submission. Retry an
   uncertain response with the same body and key. Missing RPC history, timeout
   or blockhash expiry alone cannot justify replacement or a second proposal.
@@ -202,6 +235,27 @@ held positions, independent of new-deposit entitlement or surfacing gates.
 Catalogue sync and metrics refresh continue for hidden integrations so stored
 holdings and later re-surfacing use truthful metadata. Do not make a client-side
 visibility flag a server authorization control.
+
+The single provider-wide switch is
+`EARN_PROVIDER_DESCRIPTORS[provider].surfaced` in `@sdp/types/provider-access`.
+`false` hides discovery rows and refuses new deposits; it does not unregister
+the adapter, erase positions, remove credentials or stop async recovery.
+Organization entitlement and strategy status add deposit admission checks.
+None of these deposit switches may gate a tracked holding's withdrawal.
+
+Catalogue ingestion checks every five minutes but uses a 59-minute Redis slot;
+healthy passes are roughly hourly (up to about 64 minutes plus processing).
+Worker startup attempts a pass and respects an existing slot. A new provider
+or strategy appears after its first successful ingestion and surfacing;
+credentials, declared support and curation must also permit it. Hiding or
+re-enabling already indexed rows needs no sync: new API reads use the deployed
+policy immediately. API discovery permits 30 seconds of private caching.
+The dashboard proxy uses `no-store`, but its strategy view does not poll or
+refresh on focus; use Refresh/reload to replace an already loaded list.
+
+These syncs still require Earn's module gate, working provider credentials and
+RPC access. An unreliable provider pass retains previous rows. A successful
+delist deprecates catalogue rows while preserving position/exit identity.
 
 ## Verification before surfacing
 

@@ -1,5 +1,9 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
-import { EARN_PROVIDERS } from "@sdp/types/provider-access";
+import {
+  EARN_PROVIDER_DESCRIPTORS,
+  EARN_PROVIDERS,
+  type EarnProviderDescriptor,
+} from "@sdp/types/provider-access";
 import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types/well-known-tokens";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -268,6 +272,25 @@ describe("resolveVaultDirectClient", () => {
     // The loop is not vacuous: WisdomTree and Plume settle exits as provider orders.
     expect(EARN_PROVIDER_WITHDRAWAL_SETTLEMENT.wisdomtree).toBe("provider_order");
     expect(EARN_PROVIDER_WITHDRAWAL_SETTLEMENT.plume).toBe("provider_order");
+  });
+
+  it("requires a settlement observer before surfacing a deployed provider-order integration", async () => {
+    const { supportsProviderSettlement } = await import("@sdp/earn/capabilities");
+    for (const provider of EARN_PROVIDERS) {
+      const descriptor: EarnProviderDescriptor = EARN_PROVIDER_DESCRIPTORS[provider];
+      if (!descriptor.surfaced || descriptor.deployedClusters.length === 0) continue;
+      if (
+        descriptor.depositSettlement !== "provider_order" &&
+        descriptor.withdrawalSettlement !== "provider_order"
+      )
+        continue;
+      const client = resolveVaultDirectClient(executionEnv, provider, createVaultDeadline());
+      expect(client, `${provider} needs an execution client before launch`).not.toBeNull();
+      expect(
+        client !== null && supportsProviderSettlement(client),
+        `${provider} needs provider settlement observation before launch`
+      ).toBe(true);
+    }
   });
 
   it("does not start provider work after endpoint proof exhausts the shared deadline", async () => {

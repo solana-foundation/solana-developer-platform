@@ -1,9 +1,12 @@
 import { supportsProviderSettlement } from "@sdp/earn/capabilities";
-import type { EarnProviderSettlementProvider } from "@sdp/earn/types";
+import type {
+  EarnProviderSettlementCandidate,
+  EarnProviderSettlementProvider,
+} from "@sdp/earn/types";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { getTransaction, type ParsedTransaction, tokenBalanceDelta } from "@sdp/rpc/solana";
-import { formatDecimalAmount } from "@sdp/solana/amount";
+import { acceptTokenAmount, formatDecimalAmount } from "@sdp/solana/amount";
 import type { EarnProviderSettlement } from "@sdp/types/earn-provider-orders";
 import { EARN_PROVIDERS } from "@sdp/types/provider-access";
 import { signature } from "@solana/kit";
@@ -19,13 +22,11 @@ import { resolveEarnExecutionClient } from "./execution-registry";
 import { earnRuntime } from "./runtime";
 import { createVaultDeadline } from "./vault-deadline";
 
-type Candidate = Awaited<ReturnType<EarnProviderSettlementProvider["readProviderSettlement"]>>;
-
 /** Provider correlation is necessary; an unrelated wallet balance change never settles an order. */
 export function verifyProviderDelivery(
   movement: EarnMovementRow,
   position: EarnPositionRow,
-  candidate: Candidate,
+  candidate: EarnProviderSettlementCandidate,
   tx: ParsedTransaction
 ): EarnProviderSettlement | null {
   const owner =
@@ -50,6 +51,12 @@ export function verifyProviderDelivery(
     return null;
   const delta = tokenBalanceDelta(tx, { mint: expectedMint, owner });
   if (delta === null || delta.baseUnits <= 0n) return null;
+  if (
+    candidate.expectedAmount !== undefined &&
+    acceptTokenAmount(candidate.expectedAmount, delta.decimals, { positive: true }).baseUnits !==
+      delta.baseUnits
+  )
+    return null;
   return {
     outcome: "delivered",
     sourceSignature: candidate.sourceSignature,

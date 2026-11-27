@@ -897,6 +897,19 @@ and pass its `id` as `strategyId` when you [prepare a deposit](/docs/earn/deposi
 A listed strategy can still refuse a deposit when you prepare it: provider
 limits, issuer rules and liquidity are checked live.
 
+## Catalogue and availability
+
+Earn keeps indexing registered providers independently of whether it offers
+new deposits. Hidden providers are absent from discovery. Hiding a provider,
+pausing a strategy or disabling new deposits does not remove your tracked
+positions or apply those deposit restrictions to withdrawals.
+
+New strategies normally arrive in the hourly catalogue update, after a
+successful provider read and any required enablement. Visibility changes to
+already indexed rows do not wait for that update. Discovery responses may be
+cached for 30 seconds. Refresh or reload an open dashboard to update its list;
+the server checks deposit admission again when you prepare and execute.
+
 ## Read the terms
 
 - `rate.value` is the provider-reported APY as a decimal fraction: `"0.062"` is
@@ -1242,6 +1255,16 @@ Signing or broadcasting outside SDP does not update the operation. Send the
 exact signed bytes to `/submit` for operation tracking, even if you already
 broadcast them yourself.
 
+## Provider settlement
+
+An opening transfer can be finalized while its operation stays `settling`.
+Completion requires provider-correlated, finalized delivery to the recorded
+owner. Order estimates and unrelated balance changes do not prove delivery.
+
+Keep polling when an order is missing or inaccessible, or its delivery hash is
+not available yet. A provider refusal or refund status alone does not prove a
+payout, a refund, or that the original transaction never executed.
+
 ## Refresh and cancel
 
 Both work only while an operation waits for a route choice (`select_option`),
@@ -1367,6 +1390,10 @@ exposure figure prevent new deposits.
 
 ## Fees and rates
 
+A position can have a known `shares` balance while its `tokenValue` is absent.
+Treat an unavailable conversion rate, including a reset Hastra price, as unknown
+value. Keep the holding visible; never replace its missing value with zero.
+
 | Cost | What you can know |
 | --- | --- |
 | Network fees and rent | The owner pays them, unless you set a separate `feePayer`, which must also sign. A full Kamino withdrawal leaves the empty share account open, so don't promise its rent back. |
@@ -1403,8 +1430,13 @@ or accreditation, KYC/AML, subscriptions and redemptions. They differ by
 product, and Earn has no universal compliance approval or jurisdiction screen.
 
 Where a provider supports an eligibility check, Earn runs it before building the
-deposit. WisdomTree requires a customer mapping in the same project, an approved
-wallet and access to the selected fund. Its onboarding (KYC/KYB, documents and
+deposit and checks again before broadcasting, including after delayed custody
+signing. A refusal stops new broadcasts while Earn keeps observing any exposed
+signed transaction. Provider outages leave the operation retryable. Eligibility
+can still change before issuer delivery.
+
+WisdomTree requires a customer mapping in the same project, an approved wallet
+and access to the selected fund. Its onboarding (KYC/KYB, documents and
 wallet registration) is a separate issuer workflow. Only an active business
 customer can register a wallet; a retail application alone doesn't make a
 wallet eligible.
@@ -36183,11 +36215,13 @@ Source: https://platform.solana.com/docs/reference/api/earn
 ### Discover strategies
 Source: https://platform.solana.com/docs/reference/api/earn/discover-earn-strategies
 
-> Lists the strategies you can deposit into, with their rates and capabilities. rate.value is the provider-reported APY as a decimal fraction; null means unknown, not zero. capabilities.deposit is false for discovery-only rows, and preparation still checks admission live for each wallet.
+> Lists offered strategies with their rates and capabilities; hidden providers are excluded even when their catalogue rows remain indexed.
 
 > **Earn is under active development.** Features, API endpoints, and docs may change.
 
 `GET /v1/earn/discovery`
+
+Catalogue ingestion normally runs hourly. Visibility changes to indexed rows apply without waiting for ingestion; responses permit 30 seconds of private caching. Hiding a provider or disabling new deposits does not apply those deposit restrictions to existing-position withdrawals. rate.value is the provider-reported APY as a decimal fraction; null means unknown, not zero. capabilities.deposit is false for discovery-only rows, and preparation still checks admission live for each wallet.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
 
@@ -36598,7 +36632,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
       - **`tokenValue`** · `string` · max length 128 · pattern `^\d+(\.\d+)?$` · example `25.42`
 
-        Live value of the position in the deposit token (`tokenMint`), as the provider reports it: shares times the rate for rate-based strategies, or a withdrawal quote for the whole position for quote-based providers such as Veda and Ondo. A quote already includes spread and price impact, so it does not scale to other share amounts. It is a deposit-token amount, not a share count or a USD conversion; no USD conversion is implied. Absent when the live read is unavailable.
+        Live value of the position in the deposit token (`tokenMint`), as the provider reports it: shares times the rate for rate-based strategies, or a withdrawal quote for the whole position for quote-based providers such as Veda and Ondo. A quote already includes spread and price impact, so it does not scale to other share amounts. It is a deposit-token amount, not a share count or a USD conversion; no USD conversion is implied. Absent when the live read or conversion rate is unavailable, including an uninitialized or reset Hastra price. Shares remain visible when only their value is unavailable.
 
       - **`parIntermediate`** · `object`
 
@@ -36716,7 +36750,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
           - **`tokenValue`** · `string` · max length 128 · pattern `^\d+(\.\d+)?$` · example `25.42`
 
-            Live value of the position in the deposit token (`tokenMint`), as the provider reports it: shares times the rate for rate-based strategies, or a withdrawal quote for the whole position for quote-based providers such as Veda and Ondo. A quote already includes spread and price impact, so it does not scale to other share amounts. It is a deposit-token amount, not a share count or a USD conversion; no USD conversion is implied. Absent when the live read is unavailable.
+            Live value of the position in the deposit token (`tokenMint`), as the provider reports it: shares times the rate for rate-based strategies, or a withdrawal quote for the whole position for quote-based providers such as Veda and Ondo. A quote already includes spread and price impact, so it does not scale to other share amounts. It is a deposit-token amount, not a share count or a USD conversion; no USD conversion is implied. Absent when the live read or conversion rate is unavailable, including an uninitialized or reset Hastra price. Shares remain visible when only their value is unavailable.
 
           - **`parIntermediate`** · `object`
 
@@ -37062,7 +37096,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.r
 
     - **`tokenValue`** · `string` · max length 128 · pattern `^\d+(\.\d+)?$` · example `25.42`
 
-      Live value of the position in the deposit token (`tokenMint`), as the provider reports it: shares times the rate for rate-based strategies, or a withdrawal quote for the whole position for quote-based providers such as Veda and Ondo. A quote already includes spread and price impact, so it does not scale to other share amounts. It is a deposit-token amount, not a share count or a USD conversion; no USD conversion is implied. Absent when the live read is unavailable.
+      Live value of the position in the deposit token (`tokenMint`), as the provider reports it: shares times the rate for rate-based strategies, or a withdrawal quote for the whole position for quote-based providers such as Veda and Ondo. A quote already includes spread and price impact, so it does not scale to other share amounts. It is a deposit-token amount, not a share count or a USD conversion; no USD conversion is implied. Absent when the live read or conversion rate is unavailable, including an uninitialized or reset Hastra price. Shares remain visible when only their value is unavailable.
 
     - **`parIntermediate`** · `object`
 
@@ -39104,7 +39138,7 @@ Source: https://platform.solana.com/docs/reference/api/earn/get-operation
 
 `GET /v1/operations/{operationId}`
 
-Poll it after submitting. Each nextAction type says what to do next: sign_transaction asks the owner to sign, select_option asks you to choose a route with refresh, and wait means keep polling the same attempt. queued, awaiting_signature, submitted and settling are in progress. For a queued withdrawal, submitted means its request is still confirming, and settling means the provider has yet to pay out. completed means verified delivery; for a selected recovery, result.settlementOutcome recovered means assets were released, never withdrawal proceeds. A Hastra current-redemption release reports settledAmount null; read the position for live available wYLDS. An earlier redemption operation covered by a finalized release ends failed with REDEMPTION_SUPERSEDED and no settled amount or settlement outcome. This ends tracking without proving nonexecution or establishing a historical payout; never automatically retry that original withdrawal. cancelled means a verified cancellation. canCancel says whether the preparation can still be cancelled, which also needs earn.manage; cancelRequestedAt alone is pending intent. result fields stay null until their source is known. Requires earn.read and source visibility.
+Poll it after submitting. Each nextAction type says what to do next: sign_transaction asks the owner to sign, select_option asks you to choose a route with refresh, and wait means keep polling the same attempt. queued, awaiting_signature, submitted and settling are in progress. For a queued withdrawal, submitted means its request is still confirming, and settling means the provider has yet to pay out. Provider-order operations remain settling after opening-transfer finality until correlated finalized delivery is verified. Missing or inaccessible orders and missing delivery hashes remain unresolved; a provider refusal or refund status alone never proves payout or nonexecution. completed means verified delivery; for a selected recovery, result.settlementOutcome recovered means assets were released, never withdrawal proceeds. A Hastra current-redemption release reports settledAmount null; read the position for live available wYLDS. An earlier redemption operation covered by a finalized release ends failed with REDEMPTION_SUPERSEDED and no settled amount or settlement outcome. This ends tracking without proving nonexecution or establishing a historical payout; never automatically retry that original withdrawal. cancelled means a verified cancellation. canCancel says whether the preparation can still be cancelled, which also needs earn.manage; cancelRequestedAt alone is pending intent. result fields stay null until their source is known. Requires earn.read and source visibility.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.read` action.
 
@@ -39567,7 +39601,7 @@ Source: https://platform.solana.com/docs/reference/api/earn/submit-operation
 
 `POST /v1/operations/{operationId}/submit`
 
-Pass the current actionId and version and, for an ownerAddress source, signedTransaction: the prepared transaction signed in the owner's wallet, base64-encoded. SDP verifies the exact stored message and required signatures and records the authorization; a worker then broadcasts and tracks the transaction, so poll GET /v1/operations/\{operationId\}. Stale actions return 409. Requires earn.execute and the current action principal. Before each new signing or broadcast effect, the worker rechecks the credential, execute permission, project membership and wallet binding; losing authority stops new effects but never proves a transaction did not execute. Signed bytes the worker then never sends end failed with TRANSACTION_EXPIRED only once their blockhash has expired and every configured RPC endpoint, with at least two distinct endpoints answering, misses them at a finalized read floor. A single-endpoint pool leaves uncertain outcomes pending. A vault exposure-cap refusal stops further broadcasts and reports DEPOSIT_REFUSED while SDP keeps observing exposed bytes; only proven nonexecution makes that refusal final. Deposits observed on chain are still recorded when current caps or exposure reads refuse new deposits. For an SDP custody wallet, omit signedTransaction: the worker requests the custody provider's signature, which can return sign_in_provider instructions but never needs a second submit. A wallet policy at the provider that refuses to sign ends the operation failed with CUSTODY_POLICY_REFUSED.
+Pass the current actionId and version and, for an ownerAddress source, signedTransaction: the prepared transaction signed in the owner's wallet, base64-encoded. SDP verifies the exact stored message and required signatures and records the authorization; a worker then broadcasts and tracks the transaction, so poll GET /v1/operations/\{operationId\}. Stale actions return 409. Requires earn.execute and the current action principal. Before each new signing or broadcast effect, the worker rechecks the credential, execute permission, project membership and wallet binding; losing authority stops new effects but never proves a transaction did not execute. Before broadcasting a deposit, it also rechecks provider-supported eligibility for the recorded wallet and fund, including after delayed custody signing. An eligibility refusal reports DEPOSIT_REFUSED while exposed signed bytes remain under observation; provider outages remain retryable. Withdrawals and settlement observation do not acquire a deposit eligibility gate. Signed bytes the worker then never sends end failed with TRANSACTION_EXPIRED only once their blockhash has expired and every configured RPC endpoint, with at least two distinct endpoints answering, misses them at a finalized read floor. A single-endpoint pool leaves uncertain outcomes pending. A vault exposure-cap refusal stops further broadcasts and reports DEPOSIT_REFUSED while SDP keeps observing exposed bytes; only proven nonexecution makes that refusal final. Deposits observed on chain are still recorded when current caps or exposure reads refuse new deposits. For an SDP custody wallet, omit signedTransaction: the worker requests the custody provider's signature, which can return sign_in_provider instructions but never needs a second submit. A wallet policy at the provider that refuses to sign ends the operation failed with CUSTODY_POLICY_REFUSED.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `earn.execute` action.
 

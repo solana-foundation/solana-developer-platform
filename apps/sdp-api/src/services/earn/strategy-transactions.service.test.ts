@@ -56,6 +56,8 @@ async function preparedProviderTransaction(owner: string): Promise<PreparedStrat
   return {
     id: "prepared_strategy_transaction",
     owner_address: owner,
+    provider: "plume",
+    vault_address: "vault",
     unsigned_transaction: Buffer.from(getTransactionEncoder().encode(transaction)).toString(
       "base64"
     ),

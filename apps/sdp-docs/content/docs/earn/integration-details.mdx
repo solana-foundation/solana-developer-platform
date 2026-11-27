@@ -24,6 +24,16 @@ Signing or broadcasting outside SDP does not update the operation. Send the
 exact signed bytes to `/submit` for operation tracking, even if you already
 broadcast them yourself.
 
+## Provider settlement
+
+An opening transfer can be finalized while its operation stays `settling`.
+Completion requires provider-correlated, finalized delivery to the recorded
+owner. Order estimates and unrelated balance changes do not prove delivery.
+
+Keep polling when an order is missing or inaccessible, or its delivery hash is
+not available yet. A provider refusal or refund status alone does not prove a
+payout, a refund, or that the original transaction never executed.
+
 ## Refresh and cancel
 
 Both work only while an operation waits for a route choice (`select_option`),
@@ -149,6 +159,10 @@ exposure figure prevent new deposits.
 
 ## Fees and rates
 
+A position can have a known `shares` balance while its `tokenValue` is absent.
+Treat an unavailable conversion rate, including a reset Hastra price, as unknown
+value. Keep the holding visible; never replace its missing value with zero.
+
 | Cost | What you can know |
 | --- | --- |
 | Network fees and rent | The owner pays them, unless you set a separate `feePayer`, which must also sign. A full Kamino withdrawal leaves the empty share account open, so don't promise its rent back. |
@@ -185,8 +199,13 @@ or accreditation, KYC/AML, subscriptions and redemptions. They differ by
 product, and Earn has no universal compliance approval or jurisdiction screen.
 
 Where a provider supports an eligibility check, Earn runs it before building the
-deposit. WisdomTree requires a customer mapping in the same project, an approved
-wallet and access to the selected fund. Its onboarding (KYC/KYB, documents and
+deposit and checks again before broadcasting, including after delayed custody
+signing. A refusal stops new broadcasts while Earn keeps observing any exposed
+signed transaction. Provider outages leave the operation retryable. Eligibility
+can still change before issuer delivery.
+
+WisdomTree requires a customer mapping in the same project, an approved wallet
+and access to the selected fund. Its onboarding (KYC/KYB, documents and
 wallet registration) is a separate issuer workflow. Only an active business
 customer can register a wallet; a retail application alone doesn't make a
 wallet eligible.

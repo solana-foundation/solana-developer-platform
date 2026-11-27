@@ -281,7 +281,10 @@ export interface CompileUnsignedVaultTransactionInput extends VaultPlanExecution
 }
 
 export interface UnsignedVaultTransaction {
-  /** Wire bytes with every signature slot zeroed, ready for the owner to sign. */
+  /**
+   * Wire bytes awaiting owner and any fee-payer signatures. Required provider
+   * signatures are already verified and preserved on their exact message.
+   */
   bytes: Uint8Array;
   /** Inclusive block height after which these exact bytes cannot land. */
   lastValidBlockHeight: string;

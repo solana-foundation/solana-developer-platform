@@ -45,12 +45,15 @@ import { acceptOperationExecution } from "@/services/operation-execution-audit.s
 import { createOperationsService } from "@/services/operations.service";
 import { createOrgTransactionProposerForCustodyWallet } from "@/services/solana/signer";
 import type { Env } from "@/types/env";
+import { assertVaultDepositEligible } from "./deposit-eligibility";
+import { resolveEarnExecutionClient } from "./execution-registry";
 import {
   createOperationObservationRpc,
   type OperationObservationRpc,
   type UnsentTransactionVerdict,
 } from "./operation-observation-rpc";
 import { createOperationWorkerBudget, type OperationWorkerBudget } from "./operation-worker-budget";
+import { earnRuntime } from "./runtime";
 import { resolveEarnOperationBuild } from "./strategy-operation-build.service";
 import {
   advanceCurrentRedemptionRelease,
@@ -63,6 +66,7 @@ import {
   sponsorPreparedStrategyTransaction,
 } from "./strategy-transactions.service";
 import { projectWithdrawalRecovery } from "./strategy-withdrawal-recovery-projection.service";
+import { createVaultDeadline } from "./vault-deadline";
 import { verifySignedWalletTransaction } from "./vault-wallet.service";
 
 export function isTerminalOperation(operation: Operation): boolean {
@@ -377,9 +381,11 @@ async function admitRecordedCustodyBroadcast(
   claim: OperationClaim,
   built: Awaited<ReturnType<typeof resolveEarnOperationBuild>>["target"],
   custodyWalletId: string
-): Promise<boolean> {
-  if ((await admitOperationEffect(env, scope, claim, built, custodyWalletId)) !== null)
-    return false;
+): Promise<EffectRefusal | null> {
+  const refusal = await admitOperationEffect(env, scope, claim, built, custodyWalletId, {
+    beforeBroadcast: true,
+  });
+  if (refusal !== null) return refusal;
   try {
     if (claim.attempt.signedTransaction !== null && claim.attempt.proposalBinding !== null) {
       const proposer = await createOrgTransactionProposerForCustodyWallet(
@@ -396,7 +402,7 @@ async function admitRecordedCustodyBroadcast(
         );
       await proposer.admit(claim.attempt.proposalBinding);
     }
-    return true;
+    return null;
   } catch (error) {
     if (
       !(error instanceof ProposalAdmissionRefusedError) &&
@@ -405,7 +411,7 @@ async function admitRecordedCustodyBroadcast(
     )
       throw error;
     await createOperationsService(env).repository.restrictToObservation(scope, claim);
-    return false;
+    return PERMISSION_WITHDRAWN;
   }
 }
 
@@ -429,7 +435,8 @@ async function admitOperationEffect(
   scope: OperationScope,
   claim: OperationClaim,
   built: PreparedStrategySigningTarget,
-  custodyWalletId: string | null
+  custodyWalletId: string | null,
+  options?: { beforeBroadcast: true }
 ): Promise<EffectRefusal | null> {
   let stage: "permission" | "deposit" = "permission";
   try {
@@ -446,6 +453,18 @@ async function admitOperationEffect(
     );
     stage = "deposit";
     await admitDeposit(env, scope, claim.operation);
+    if (options?.beforeBroadcast && built.movement === "earn.deposit") {
+      // Approval can outlive issuer eligibility. Recheck the exact stored recipient
+      // immediately before sending, after signed bytes are durable for recovery.
+      const client = resolveEarnExecutionClient(env, built.provider, createVaultDeadline());
+      if (client === null) throw badRequest("This deposit provider is no longer available");
+      await assertVaultDepositEligible(
+        client,
+        earnRuntime(env),
+        { providerReference: built.vault_address, owner: built.owner_address },
+        { organizationId: scope.organizationId, projectId: scope.projectId, database: env }
+      );
+    }
     return null;
   } catch (error) {
     if (
@@ -520,6 +539,7 @@ async function observeUnsentSignature(input: {
   signedTransaction: string;
   currentRelease: boolean;
   operationError: Operation["error"];
+  refusal: EffectRefusal | null;
   observations: OperationObservationRpc;
   workerBudget: OperationWorkerBudget;
 }): Promise<OperationUpdate | undefined> {
@@ -532,7 +552,7 @@ async function observeUnsentSignature(input: {
     signed.signature,
     BigInt(input.built.last_valid_block_height)
   );
-  return unsentSignatureUpdate(verdict, input.operationError);
+  return unsentSignatureUpdate(verdict, input.refusal ?? input.operationError);
 }
 
 /** A ledger admission refusal does not prove that exposed signed bytes never landed. */
@@ -624,14 +644,15 @@ export async function advanceEarnOperation(
   const stopping = claim.operation.cancelRequestedAt !== null;
   let observeOnly = stopping || attempt.observationOnly;
   let refusal: EffectRefusal | null = null;
-  async function admitNewEffect(): Promise<boolean> {
+  async function admitNewEffect(options?: { beforeBroadcast: true }): Promise<boolean> {
     if (observeOnly) return false;
     refusal = await admitOperationEffect(
       env,
       scope,
       claim,
       built,
-      transactionScope.custodyWalletId
+      transactionScope.custodyWalletId,
+      options
     );
     observeOnly = refusal !== null;
     return refusal === null;
@@ -875,15 +896,18 @@ export async function advanceEarnOperation(
     if (outcome !== undefined) return outcome;
   }
   if (signedTransaction === null) throw internalError("Operation has no signed transaction");
-  if (!observeOnly && transactionScope.custodyWalletId !== null)
-    observeOnly = !(await admitRecordedCustodyBroadcast(
+  if (!observeOnly && transactionScope.custodyWalletId !== null) {
+    refusal = await admitRecordedCustodyBroadcast(
       env,
       scope,
       claim,
       built,
       transactionScope.custodyWalletId
-    ));
-  if (!observeOnly && transactionScope.custodyWalletId === null) await admitNewEffect();
+    );
+    observeOnly = refusal !== null;
+  }
+  if (!observeOnly && transactionScope.custodyWalletId === null)
+    await admitNewEffect({ beforeBroadcast: true });
   // A late owner signature after cancellation is retained for observation,
   // never used as permission to initiate a fresh broadcast.
   const broadcast = !observeOnly;
@@ -895,6 +919,7 @@ export async function advanceEarnOperation(
       signedTransaction,
       currentRelease,
       operationError: claim.operation.error,
+      refusal,
       observations,
       workerBudget,
     });

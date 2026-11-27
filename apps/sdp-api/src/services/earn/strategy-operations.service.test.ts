@@ -1,7 +1,12 @@
+import {
+  supportsProviderSettlement,
+  supportsVaultProviderOrderWithdraw,
+} from "@sdp/earn/capabilities";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import type { EarnVaultWithdrawalRequestStatus } from "@sdp/types/earn";
 import type { Operation, OperationProposalBinding, SubmitOperation } from "@sdp/types/operations";
 import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
+import { WISDOMTREE_FUNDS } from "@sdp/types/wisdomtree-programs";
 import {
   address,
   appendTransactionMessageInstruction,
@@ -26,6 +31,7 @@ import type { EarnVaultWithdrawalRequestRow } from "@/db/repositories/earn-vault
 import * as withdrawalRepositories from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import type { OperationClaim, OperationScope } from "@/db/repositories/operations.repository";
 import {
+  badRequest,
   conflict,
   custodyPolicyRefused,
   forbidden,
@@ -50,6 +56,9 @@ import * as signers from "@/services/solana/signer";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
+import * as providerEligibility from "./deposit-eligibility";
+import * as executionRegistry from "./execution-registry";
+import { resolveEarnExecutionClient } from "./execution-registry";
 import {
   createOperationObservationRpc,
   type OperationObservationRpc,
@@ -62,6 +71,7 @@ import {
 } from "./strategy-operations.service";
 import type { PreparedStrategySigningTarget } from "./strategy-transactions.service";
 import * as strategyTransactions from "./strategy-transactions.service";
+import { createVaultDeadline } from "./vault-deadline";
 
 const { MoneyMovementRefusedError } = moneyAdmission;
 type OperationBuild = Awaited<ReturnType<typeof builds.resolveEarnOperationBuild>>;
@@ -101,6 +111,8 @@ function spyOnCollaborators() {
   vi.spyOn(movementRepositories, "createPostgresEarnMovementsRepository").mockReturnValue(ledger);
   return {
     build: vi.spyOn(builds, "resolveEarnOperationBuild"),
+    eligibility: vi.spyOn(providerEligibility, "assertVaultDepositEligible"),
+    resolveClient: vi.spyOn(executionRegistry, "resolveEarnExecutionClient"),
     submit: vi.fn<OperationBuild["submit"]>(),
     claim: vi.spyOn(operations, "claimSubmission"),
     transition: vi.spyOn(operations, "transition"),
@@ -280,6 +292,8 @@ beforeEach(async () => {
   target = {
     id: "build",
     owner_address: owner,
+    provider: "veda",
+    vault_address: "vault",
     unsigned_transaction: built.unsigned,
     fee_payer: null,
     fee_mode: "wallet",
@@ -339,6 +353,7 @@ beforeEach(async () => {
   mocks.strategy.mockResolvedValue({ id: "strategy", environment: "sandbox" });
   mocks.shelf.mockReturnValue(true);
   mocks.depositAdmission.mockResolvedValue(undefined);
+  mocks.eligibility.mockResolvedValue(undefined);
   mocks.moneyAdmission.mockResolvedValue(undefined);
   mocks.sign.mockResolvedValue(signed);
   mocks.sponsor.mockImplementation(async (_env, _scope, _built, ownerSigned) => ownerSigned);
@@ -630,6 +645,256 @@ describe("custody proposal recovery", () => {
     expect(mocks.request).not.toHaveBeenCalled();
     expect(mocks.propose).not.toHaveBeenCalled();
     expect(mocks.sign).not.toHaveBeenCalled();
+  });
+
+  it("keeps WisdomTree custody signing and issuer settlement as separate waits", async () => {
+    const client = resolveEarnExecutionClient(env, "wisdomtree", createVaultDeadline());
+    if (client === null) throw new Error("Expected the registered WisdomTree adapter");
+    expect(supportsVaultProviderOrderWithdraw(client)).toBe(true);
+    expect(supportsProviderSettlement(client)).toBe(true);
+    const fund = WISDOMTREE_FUNDS[0];
+    if (fund === undefined) throw new Error("Expected a registered WisdomTree fund");
+    target.provider = "wisdomtree";
+    target.vault_address = fund.mint;
+    mocks.resolveClient.mockClear();
+    const binding = useExistingProposal();
+    claim.operation.status = "queued";
+    claim.attempt.executionRequestedAt = "2026-11-18T00:00:00.000Z";
+    mocks.strategy.mockResolvedValue({
+      id: "strategy",
+      environment: scope.environment,
+      provider: "wisdomtree",
+    });
+    mocks.readProposal.mockResolvedValue(proposal("pending", null));
+    claim.operation = await advance();
+    expect(claim.operation).toMatchObject({
+      status: "awaiting_signature",
+      nextAction: { type: "sign_in_provider", provider: "fireblocks" },
+    });
+    claim.operation = await advance();
+    expect(claim.operation.status).toBe("awaiting_signature");
+    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(mocks.recordSigned).not.toHaveBeenCalled();
+    expect(mocks.eligibility).not.toHaveBeenCalled();
+    expect(mocks.resolveClient).not.toHaveBeenCalled();
+
+    mocks.readProposal.mockResolvedValue(proposal("signed", signed));
+    claim.operation = await advance();
+    expect(claim.operation).toMatchObject({
+      status: "submitted",
+      resourceRef: { kind: "earn.movement", id: "movement" },
+    });
+    expect(mocks.readProposal).toHaveBeenLastCalledWith({
+      binding,
+      unsignedTransaction: target.unsigned_transaction,
+    });
+    expect(mocks.recordSigned).toHaveBeenCalledOnce();
+    expect(mocks.submit).toHaveBeenCalledExactlyOnceWith(signed, true);
+    expect(mocks.recordSigned.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.submit.mock.invocationCallOrder[0]
+    );
+
+    expect(mocks.eligibility).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ provider: "wisdomtree" }),
+      { env, environment: scope.environment },
+      { providerReference: fund.mint, owner },
+      { organizationId: scope.organizationId, projectId: scope.projectId, database: env }
+    );
+    expect(mocks.resolveClient).toHaveBeenCalledOnce();
+
+    const opening = {
+      environment: scope.environment,
+      project_id: scope.projectId,
+      provider: "wisdomtree",
+      position_id: "position",
+      status: "confirmed" as const,
+      signature: transactionSignature,
+      token_amount_settled: null,
+      chain_finalized_at: "2026-11-18T00:01:00.000Z",
+      updated_at: "2026-11-18T00:01:00.000Z",
+    };
+    mocks.movement.mockResolvedValue(opening);
+    mocks.position.mockResolvedValue({
+      id: "position",
+      strategy_id: "strategy",
+      custody_wallet_id: "wallet",
+      token_mint: "mint",
+      share_mint: fund.mint,
+    });
+    const settling = await scoped(() => projectEarnOperation(env, scope, claim.operation));
+    expect(settling).toMatchObject({
+      status: "settling",
+      nextAction: { type: "wait", reason: "Waiting for provider settlement" },
+      result: { signature: transactionSignature, settledAmount: null, settlementOutcome: null },
+    });
+
+    // The real-reader reconciliation suite establishes this canonical receipt at finality.
+    mocks.movement.mockResolvedValue({
+      ...opening,
+      status: "finalized",
+      shares_out: "2.5",
+      token_amount_settled: "10",
+      provider_data: {
+        providerSettlement: {
+          outcome: "delivered",
+          sourceSignature: transactionSignature,
+          destinationSignature: (await transaction("issuer delivery")).signature,
+          ownerAddress: owner,
+          providerReference: fund.mint,
+          tokenMint: fund.mint,
+          amount: "2.5",
+          observedSlot: "42",
+        },
+      },
+    });
+    const completed = await scoped(() => projectEarnOperation(env, scope, settling));
+    expect(completed).toMatchObject({
+      status: "completed",
+      nextAction: null,
+      result: { settledAmount: { mint: "mint", value: "10" }, settlementOutcome: "delivered" },
+    });
+    expect(mocks.propose).not.toHaveBeenCalled();
+    expect(mocks.sign).not.toHaveBeenCalled();
+    expect(mocks.submit).toHaveBeenCalledOnce();
+    expect(mocks.readProposal).toHaveBeenCalledTimes(3);
+    expect(mocks.eligibility).toHaveBeenCalledOnce();
+  });
+
+  it("retains an approved signature when issuer eligibility is lost during approval", async () => {
+    useExistingProposal();
+    target.provider = "wisdomtree";
+    mocks.readProposal.mockResolvedValueOnce(proposal("pending", null));
+    claim.operation = await advance();
+    expect(claim.operation.status).toBe("awaiting_signature");
+    expect(mocks.eligibility).not.toHaveBeenCalled();
+    mocks.eligibility.mockRejectedValue(badRequest("Issuer eligibility was withdrawn"));
+    mocks.readProposal.mockResolvedValueOnce(proposal("signed", signed));
+
+    claim.operation = await advance();
+    expect(claim.operation).toMatchObject({
+      status: "awaiting_signature",
+      nextAction: { type: "wait", reason: "Reconciling the signed transaction without sending it" },
+      error: { code: "DEPOSIT_REFUSED", message: "Issuer eligibility was withdrawn" },
+    });
+    expect(mocks.recordSigned).toHaveBeenCalledExactlyOnceWith(scope, claim, {
+      signedTransaction: signed,
+      signature: transactionSignature,
+      lastValidBlockHeight: target.last_valid_block_height,
+    });
+    expect(mocks.restrict).toHaveBeenCalledWith(scope, claim);
+    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(mocks.eligibility).toHaveBeenCalledOnce();
+
+    claim.attempt.observationOnly = true;
+    claim.attempt.signedTransaction = signed;
+    mocks.unsent.mockResolvedValue("expired");
+    expect(await advance()).toMatchObject({
+      status: "failed",
+      error: { code: "DEPOSIT_REFUSED", message: "Issuer eligibility was withdrawn" },
+    });
+    expect(mocks.eligibility).toHaveBeenCalledOnce();
+    expect(mocks.readProposal).toHaveBeenCalledTimes(2);
+    expect(mocks.propose).not.toHaveBeenCalled();
+    expect(mocks.sign).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("retries an issuer outage with the original durable signed bytes", async () => {
+    useExistingProposal();
+    target.provider = "wisdomtree";
+    mocks.readProposal.mockResolvedValue(proposal("signed", signed));
+    mocks.eligibility.mockRejectedValueOnce(serviceUnavailable("Issuer is unavailable"));
+
+    await expect(advance()).rejects.toThrow("Issuer is unavailable");
+    expect(mocks.recordSigned).toHaveBeenCalledOnce();
+    expect(mocks.restrict).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(mocks.eligibility).toHaveBeenCalledOnce();
+
+    claim.attempt.signedTransaction = signed;
+    claim.attempt.signature = transactionSignature;
+    claim.attempt.lastValidBlockHeight = target.last_valid_block_height;
+    expect(await advance()).toMatchObject({ status: "submitted" });
+    expect(mocks.submit).toHaveBeenCalledExactlyOnceWith(signed, true);
+    expect(mocks.eligibility).toHaveBeenCalledTimes(2);
+    expect(mocks.recordSigned).toHaveBeenCalledOnce();
+    expect(mocks.readProposal).toHaveBeenCalledOnce();
+    expect(mocks.propose).not.toHaveBeenCalled();
+    expect(mocks.sign).not.toHaveBeenCalled();
+  });
+
+  it.each(["pending", "landed", "expired"] as const)(
+    "rechecks caller-signed deposit eligibility and observes refused bytes as %s",
+    async (verdict) => {
+      walletBuild();
+      target.provider = "wisdomtree";
+      claim.attempt.signedTransaction = signed;
+      mocks.eligibility.mockRejectedValue(badRequest("Issuer eligibility was withdrawn"));
+      expect(await advance()).toMatchObject({
+        status: "awaiting_signature",
+        error: { code: "DEPOSIT_REFUSED", message: "Issuer eligibility was withdrawn" },
+      });
+      expect(mocks.restrict).toHaveBeenCalledWith(scope, claim);
+      expect(mocks.submit).not.toHaveBeenCalled();
+      expect(mocks.eligibility).toHaveBeenCalledOnce();
+
+      claim.operation.error = {
+        code: "DEPOSIT_REFUSED",
+        message: "Issuer eligibility was withdrawn",
+      };
+      claim.attempt.observationOnly = true;
+      mocks.signatureStatus.mockResolvedValue(verdict === "landed");
+      mocks.unsent.mockResolvedValue(verdict === "expired" ? "expired" : "pending");
+      const observed = await advance();
+      if (verdict === "landed") {
+        expect(observed).toMatchObject({
+          status: "submitted",
+          error: null,
+          resourceRef: { kind: "earn.movement", id: "movement" },
+        });
+        expect(mocks.submit).toHaveBeenCalledExactlyOnceWith(signed, false);
+      } else {
+        expect(observed).toMatchObject({
+          status: verdict === "expired" ? "failed" : "awaiting_signature",
+          error: { code: "DEPOSIT_REFUSED", message: "Issuer eligibility was withdrawn" },
+        });
+        expect(mocks.submit).not.toHaveBeenCalled();
+      }
+      expect(mocks.eligibility).toHaveBeenCalledOnce();
+      expect(mocks.resolveClient).toHaveBeenCalledOnce();
+      expect(mocks.sign).not.toHaveBeenCalled();
+    }
+  );
+
+  it("keeps exits independent of issuer deposit eligibility", async () => {
+    walletBuild();
+    target.movement = "earn.withdraw";
+    target.provider = "wisdomtree";
+    claim.operation.kind = "earn.withdraw";
+    claim.operation.intent = {
+      kind: "earn.withdraw",
+      positionId: "position",
+      amount: { kind: "all" },
+    };
+    claim.attempt.signedTransaction = signed;
+    mocks.eligibility.mockRejectedValue(badRequest("Issuer eligibility was withdrawn"));
+    expect(await advance()).toMatchObject({ status: "submitted" });
+    expect(mocks.submit).toHaveBeenCalledExactlyOnceWith(signed, true);
+    expect(mocks.resolveClient).not.toHaveBeenCalled();
+    expect(mocks.eligibility).not.toHaveBeenCalled();
+  });
+
+  it("refuses a stored deposit whose provider can no longer be resolved", async () => {
+    walletBuild();
+    target.provider = "future_provider";
+    claim.attempt.signedTransaction = signed;
+    expect(await advance()).toMatchObject({
+      status: "awaiting_signature",
+      error: { code: "DEPOSIT_REFUSED", message: "This deposit provider is no longer available" },
+    });
+    expect(mocks.restrict).toHaveBeenCalledWith(scope, claim);
+    expect(mocks.eligibility).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
   });
 
   it.each(["failed", "cancelled"] as const)(

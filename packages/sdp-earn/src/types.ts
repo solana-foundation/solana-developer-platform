@@ -4,10 +4,12 @@ import type {
   EarnApyType,
   EarnDepositTokenSymbol,
   EarnLiquidityTerm,
+  EarnMovementDirection,
   EarnStrategyRiskMetadata,
   EarnStrategySourceKind,
   EarnVaultPositionIntermediate,
 } from "@sdp/types/earn";
+import type { EarnProviderRedemptionMode } from "@sdp/types/earn-provider-orders";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import type { SdpEarnError } from "./errors";
@@ -46,6 +48,18 @@ export interface EarnRuntimeContext {
    */
   catalogueRpcUrl?: (cluster: SolanaCluster) => string | null;
 }
+
+/** API-owned deadline and retry boundary for one unsigned build or provider read. */
+export type EarnVaultOperationRunner = <T>(
+  label: string,
+  operation: (assertActive: () => void) => Promise<T>
+) => Promise<T>;
+
+/** Resolves an endpoint only after proving it serves the requested cluster. */
+export type EarnProvenRpcResolver = (
+  ctx: EarnRuntimeContext,
+  cluster: SolanaCluster
+) => Promise<string>;
 
 /**
  * Static support a provider declares up front (before any live call): which
@@ -104,28 +118,37 @@ export interface EarnVaultProvider {
   listStrategies(ctx: EarnRuntimeContext): Promise<ProviderStrategySnapshot[]>;
 }
 
-/** Correlates a source transaction with the provider's eventual Solana delivery.
- * This is a candidate receipt; the API independently verifies chain finality,
- * program identity and the recipient's token delta before it can settle money.
+/** Recorded source identity used to look up an asynchronous provider delivery. */
+export interface EarnProviderSettlementInput {
+  providerReference: string;
+  owner: string;
+  sourceSignature: string;
+  direction: EarnMovementDirection;
+}
+
+/** Provider-correlated delivery candidate; chain verification still establishes settlement. */
+export interface EarnProviderSettlementCandidate {
+  sourceSignature: string;
+  owner: string;
+  destinationSignature: string | null;
+  tokenMint: string;
+  /** Exact provider-reported output in token units; any observed delta must equal it. */
+  expectedAmount?: string;
+  programAddress: string;
+  requiredAccount: string;
+  phase: "processing" | "recovery_required";
+}
+
+/**
+ * Correlates a source transaction with the provider's eventual Solana delivery.
+ * The API verifies chain finality, program identity and the recipient's token
+ * delta before a candidate can settle money.
  */
 export interface EarnProviderSettlementProvider extends EarnVaultProvider {
   readProviderSettlement(
     ctx: EarnRuntimeContext,
-    input: {
-      providerReference: string;
-      owner: string;
-      sourceSignature: string;
-      direction: "deposit" | "withdrawal";
-    }
-  ): Promise<{
-    sourceSignature: string;
-    owner: string;
-    destinationSignature: string | null;
-    tokenMint: string;
-    programAddress: string;
-    requiredAccount: string;
-    phase: "processing" | "recovery_required";
-  }>;
+    input: EarnProviderSettlementInput
+  ): Promise<EarnProviderSettlementCandidate>;
 }
 
 /**
@@ -956,7 +979,7 @@ export interface EarnVaultProviderOrderWithdrawProvider extends EarnVaultWithdra
 }
 
 export interface EarnProviderRedemptionModesProvider extends EarnVaultWithdrawProvider {
-  getProviderRedemptionModes(): readonly ("standard" | "instant")[];
+  getProviderRedemptionModes(): readonly EarnProviderRedemptionMode[];
 }
 
 export interface EarnDepositEligibilityInput {
