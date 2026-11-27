@@ -1,0 +1,28 @@
+{
+  "name": "@sdp/safe-proxy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --import tsx src/server.ts",
+    "start": "node --import tsx src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "lint": "biome check src/"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.6",
+    "@sdp/metadata-server": "workspace:*",
+    "@sdp/redaction": "workspace:*",
+    "@sdp/types": "workspace:*",
+    "hono": "4.13.16",
+    "jose": "6.2.13",
+    "pino": "10.4.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3"
+  }
+}

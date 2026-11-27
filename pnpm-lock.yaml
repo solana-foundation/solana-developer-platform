@@ -21,12 +21,21 @@ catalogs:
     '@solana/codecs':
       specifier: 7.1.1
       version: 7.1.1
+    '@solana/keys':
+      specifier: 7.1.1
+      version: 7.1.1
     '@solana/kit':
       specifier: 7.1.1
       version: 7.1.1
     '@solana/mosaic-sdk':
       specifier: 0.2.0
       version: 0.2.0
+    '@solana/rpc-subscriptions-api':
+      specifier: 7.1.1
+      version: 7.1.1
+    '@solana/rpc-subscriptions-spec':
+      specifier: 7.1.1
+      version: 7.1.1
     '@solana/signers':
       specifier: 7.1.1
       version: 7.1.1
@@ -36,6 +45,9 @@ catalogs:
     '@solana/token-acl-sdk':
       specifier: 0.4.0
       version: 0.4.0
+    '@solana/transactions':
+      specifier: 7.1.1
+      version: 7.1.1
 
 overrides:
   '@babel/core': 7.29.7
@@ -201,6 +213,9 @@ importers:
       '@solana/codecs':
         specifier: 'catalog:'
         version: 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
+      '@solana/keys':
+        specifier: 'catalog:'
+        version: 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       '@solana/kit':
         specifier: 'catalog:'
         version: 7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6)
@@ -213,6 +228,12 @@ importers:
       '@solana/pay':
         specifier: 1.0.26
         version: 1.0.26(320db4a01e4e87100b608052430b7f67)
+      '@solana/rpc-subscriptions-api':
+        specifier: 'catalog:'
+        version: 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
+      '@solana/rpc-subscriptions-spec':
+        specifier: 'catalog:'
+        version: 7.1.1(typescript@6.0.3)
       '@solana/signers':
         specifier: 'catalog:'
         version: 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
@@ -225,6 +246,9 @@ importers:
       '@solana/token-acl-sdk':
         specifier: 'catalog:'
         version: 0.4.0(@solana/sysvars@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/zk-sdk@0.4.2)(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6)
+      '@solana/transactions':
+        specifier: 'catalog:'
+        version: 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       hono:
         specifier: 4.13.16
         version: 4.13.16
@@ -371,6 +395,43 @@ importers:
       tailwindcss:
         specifier: 4.3.3
         version: 4.3.3
+      tsx:
+        specifier: 4.23.15
+        version: 4.23.15
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+
+  apps/sdp-safe-proxy:
+    dependencies:
+      '@hono/node-server':
+        specifier: 2.1.6
+        version: 2.1.6(hono@4.13.16)
+      '@sdp/metadata-server':
+        specifier: workspace:*
+        version: link:../../packages/sdp-metadata-server
+      '@sdp/redaction':
+        specifier: workspace:*
+        version: link:../../packages/sdp-redaction
+      '@sdp/types':
+        specifier: workspace:*
+        version: link:../../packages/sdp-types
+      hono:
+        specifier: 4.13.16
+        version: 4.13.16
+      jose:
+        specifier: 6.2.13
+        version: 6.2.13
+      pino:
+        specifier: 10.4.0
+        version: 10.4.0
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@types/node':
+        specifier: 26.6.5
+        version: 26.6.5
       tsx:
         specifier: 4.23.15
         version: 4.23.15
@@ -640,10 +701,16 @@ importers:
       '@solana/keychain-utila':
         specifier: 1.4.0
         version: 1.4.0(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.6.0(typescript@6.0.3))(@solana/codecs-strings@8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
+      '@solana/keys':
+        specifier: 'catalog:'
+        version: 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       '@solana/kit':
         specifier: 'catalog:'
         version: 7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6)
       '@solana/signers':
+        specifier: 'catalog:'
+        version: 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
+      '@solana/transactions':
         specifier: 'catalog:'
         version: 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       jose:
@@ -1285,6 +1352,9 @@ importers:
       '@solana/kit':
         specifier: 'catalog:'
         version: 7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6)
+      '@solana/sysvars':
+        specifier: 'catalog:'
+        version: 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       '@vedatech/svm-sdk':
         specifier: 0.1.0-alpha.1
         version: 0.1.0-alpha.1(@solana/sysvars@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/zk-sdk@0.4.2)(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6)
@@ -1325,6 +1395,9 @@ importers:
       '@solana/kit':
         specifier: 'catalog:'
         version: 7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6)
+      '@solana/sysvars':
+        specifier: 'catalog:'
+        version: 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
     devDependencies:
       '@sdp/custody':
         specifier: workspace:*
@@ -8843,14 +8916,17 @@ packages:
   yuku-analyzer@0.19.0:
     resolution: {integrity: sha512-Iu7DV5cWOQ3ERSA7oBquz/RT5IEGsUyUeCivYs9lQaZ4nSjM31yD17mH616JKcTyVoVWYivsFZ+twT3UyBosTA==}
     engines: {node: '>=14.18.0'}
+    deprecated: 'Yuku is now one package with one core. Use "yuku" instead: https://yuku.fyi/javascript/. Existing installs keep working but get no more fixes.'
 
   yuku-ast@0.19.0:
     resolution: {integrity: sha512-PyCsiScaelhxBGzL8dyeJkLqvRZycoh78R31Vrt/WqYrm0hMFoKwIw/X7Dx5mBKLWAMlV9I9HEyBOHnj2gZVyw==}
     engines: {node: '>=14.18.0'}
+    deprecated: 'Yuku is now one package with one core. Use "yuku" instead: https://yuku.fyi/javascript/. Existing installs keep working but get no more fixes.'
 
   yuku-core@0.19.0:
     resolution: {integrity: sha512-kYK9e1XdfirNhkipzW0wmMcSWcVF/CWnuugodfVYRCUwvoBefweL9HzB96OiKEhsx78V5WbUxbJqlizMX869Qg==}
     engines: {node: '>=14.18.0'}
+    deprecated: 'Yuku is now one package with one core. Use "yuku" instead: https://yuku.fyi/javascript/. Existing installs keep working but get no more fixes.'
 
   zbsearch@4.0.1:
     resolution: {integrity: sha512-lmnEEnb93QQcNv7qARDr7jBVPxYdZbZ9XdZ0dbZ0qaOvGne4jJMW4fjwPfVaUKQXv3FNWvGbDwRDgyaSb1pc8w==}

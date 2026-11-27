@@ -26,6 +26,7 @@
     "@sdp/solana": "workspace:*",
     "@sdp/types": "workspace:*",
     "@solana/kit": "catalog:",
+    "@solana/sysvars": "catalog:",
     "@vedatech/svm-sdk": "0.1.0-alpha.1",
     "zod": "4.6.7"
   },

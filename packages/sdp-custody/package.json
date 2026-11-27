@@ -210,8 +210,10 @@
     "@solana/keychain-privy": "1.4.0",
     "@solana/keychain-turnkey": "1.4.0",
     "@solana/keychain-utila": "1.4.0",
+    "@solana/keys": "catalog:",
     "@solana/kit": "catalog:",
     "@solana/signers": "catalog:",
+    "@solana/transactions": "catalog:",
     "jose": "6.2.13",
     "zod": "4.6.7"
   }

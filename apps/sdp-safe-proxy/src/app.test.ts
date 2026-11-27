@@ -1,0 +1,342 @@
+import assert from "node:assert/strict";
+import { it } from "node:test";
+import { importSPKI, jwtVerify } from "jose";
+import type { ProviderCredentials } from "@/app";
+import { FROM_PROVIDER_HEADER, LOCAL_CALLER_HEADER } from "@/endpoints/protocol";
+import type { SafeProxyProvider } from "@/endpoints/providers";
+import { localCaller } from "@/middleware";
+import { SERVED_CLUSTER, servedHost } from "@/test/helpers/clusters";
+import {
+  createForwardApp,
+  FIREBLOCKS_PUBLIC_KEY_PEM,
+  type ForwardAppOptions,
+  type ForwardRequest,
+  type LoggedLine,
+  PLATFORM_CREDENTIALS,
+} from "./test/helpers/forward-app";
+import { channelOfferingOne } from "./test/helpers/release-channels";
+
+const PRIVY_BASE = `/privy/${SERVED_CLUSTER}`;
+const FIREBLOCKS_BASE = `/fireblocks/${SERVED_CLUSTER}`;
+const WALLETS = `${PRIVY_BASE}/v1/wallets`;
+const VAULTS = `${FIREBLOCKS_BASE}/v1/vault/accounts_paged?namePrefix=vault-e74`;
+
+const FAILING_CREDENTIALS = {
+  privy: PLATFORM_CREDENTIALS.privy,
+  get fireblocks(): never {
+    throw new Error("credential read failed peer-f85");
+  },
+} satisfies ProviderCredentials;
+
+// The body of an error the proxy answers itself.
+const own = (error: string) => JSON.stringify({ error });
+
+const answerOf = async (response: Response) => ({
+  status: response.status,
+  fromProvider: response.headers.get(FROM_PROVIDER_HEADER),
+  body: await response.text(),
+});
+
+const ownAnswers: [string, number, string, string, ForwardRequest?, ForwardAppOptions?][] = [
+  ["a forged identity token", 401, "sdp_safe_proxy_unauthorized", WALLETS, { token: "forged" }],
+  [
+    "no token, even naming a local caller",
+    401,
+    "sdp_safe_proxy_unauthorized",
+    WALLETS,
+    { token: null, headers: { [LOCAL_CALLER_HEADER]: "api" } },
+  ],
+  [
+    "an unknown service account",
+    403,
+    "sdp_safe_proxy_caller_not_allowed",
+    WALLETS,
+    { token: "stranger" },
+  ],
+  [
+    "a token while the identity keys cannot be read",
+    503,
+    "sdp_safe_proxy_caller_check_unavailable",
+    WALLETS,
+    {},
+    { keys: () => Promise.reject(new Error("keys unreachable")) },
+  ],
+  [
+    "a caller not on the endpoint",
+    403,
+    "sdp_safe_proxy_caller_not_allowed",
+    WALLETS,
+    { token: "cron" },
+  ],
+  ["an undeclared provider", 403, "sdp_safe_proxy_provider_not_allowed", "/acme/devnet/v1/wallets"],
+  ["an unknown cluster", 403, "sdp_safe_proxy_cluster_not_allowed", "/privy/cluster-x9/v1/wallets"],
+  ["an undeclared endpoint", 403, "sdp_safe_proxy_endpoint_not_allowed", `${PRIVY_BASE}/v1/users`],
+  [
+    "a body outside the body rule",
+    403,
+    "sdp_safe_proxy_body_not_allowed",
+    `${PRIVY_BASE}/v1/wallets/wallet-d41/rpc`,
+    { method: "POST", body: '{"method":"exportWallet"}' },
+  ],
+  [
+    "a body over the size limit",
+    413,
+    "sdp_safe_proxy_payload_too_large",
+    WALLETS,
+    { method: "POST", body: "a".repeat(1024 * 1024 + 1) },
+  ],
+  ["a provider and cluster with no provider path", 404, "sdp_safe_proxy_not_found", PRIVY_BASE],
+  ["a path naming no provider", 404, "sdp_safe_proxy_not_found", "/"],
+  [
+    "its own failure",
+    500,
+    "sdp_safe_proxy_internal",
+    VAULTS,
+    {},
+    { credentials: FAILING_CREDENTIALS },
+  ],
+];
+for (const [name, status, error, path, request, app] of ownAnswers) {
+  it(`answers ${status} to ${name} and reaches no provider`, async (t) => {
+    const forwardApp = createForwardApp(t, app);
+    const answer = await answerOf(await forwardApp.send(path, request));
+    assert.deepEqual(answer, { status, fromProvider: null, body: own(error) });
+    assert.equal(forwardApp.calls.length, 0);
+  });
+}
+
+it("a local proxy takes a caller only on its loopback address, by the name it gives", async (t) => {
+  const local = createForwardApp(t, { caller: localCaller({ hostname: "127.0.0.1", port: 8791 }) });
+  const answers = [];
+  for (const [host, caller] of [
+    ["127.0.0.1:8791", "api"],
+    ["127.0.0.1:8791", "cron"],
+    ["localhost:8791", "api"],
+    ["127.0.0.1:8791", "admin"],
+  ]) {
+    const headers = { host, [LOCAL_CALLER_HEADER]: caller };
+    answers.push(await answerOf(await local.send(WALLETS, { token: null, headers })));
+  }
+
+  assert.deepEqual(answers, [
+    { status: 200, fromProvider: "1", body: '{"id":"wallet-1"}' },
+    { status: 403, fromProvider: null, body: own("sdp_safe_proxy_caller_not_allowed") },
+    { status: 401, fromProvider: null, body: own("sdp_safe_proxy_unauthorized") },
+    { status: 401, fromProvider: null, body: own("sdp_safe_proxy_unauthorized") },
+  ]);
+  assert.equal(local.calls.length, 1);
+});
+
+it("sends the provider only its declared headers and the platform's Privy auth", async (t) => {
+  const forwardApp = createForwardApp(t);
+  await forwardApp.send(WALLETS, {
+    method: "POST",
+    body: '{"chain_type": "solana", "note": "é"}',
+    headers: {
+      "privy-idempotency-key": "idem-5e2",
+      "privy-app-id": "caller-app",
+      "x-api-key": "caller-key",
+      cookie: "session=abc",
+      "content-type": "text/plain",
+    },
+  });
+
+  assert.deepEqual(forwardApp.calls, [
+    {
+      url: `https://${servedHost("privy")}/v1/wallets`,
+      method: "POST",
+      headers: {
+        authorization: "Basic YXBwXzdrMjpzw6ljcmV0",
+        "content-type": "application/json",
+        "privy-app-id": "app_7k2",
+        "privy-idempotency-key": "idem-5e2",
+      },
+      body: '{"chain_type": "solana", "note": "é"}',
+      redirect: "manual",
+    },
+  ]);
+});
+
+it("signs the Fireblocks target and body exactly as sent", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: 1_800_000_000_750 });
+  const forwardApp = createForwardApp(t);
+  await forwardApp.send(`${FIREBLOCKS_BASE}/v1/vault/accounts_paged?namePrefix=vault-e74&limit=5`);
+  await forwardApp.send(`${FIREBLOCKS_BASE}/v1/transactions`, {
+    method: "POST",
+    body: '{"operation":"TRANSFER"}',
+  });
+
+  const publicKey = await importSPKI(FIREBLOCKS_PUBLIC_KEY_PEM, "RS256");
+  const sent = await Promise.all(
+    forwardApp.calls.map(async ({ url, body, headers: { authorization, ...headers } }) => {
+      const bearer = /^Bearer (\S+)$/.exec(authorization);
+      assert.ok(bearer, "the call carries a bearer token");
+      const { nonce, ...claims } = (await jwtVerify(bearer[1], publicKey)).payload;
+      return { url, body, headers, claims, nonce: String(nonce) };
+    })
+  );
+
+  assert.notEqual(sent[0].nonce, sent[1].nonce);
+  const claims = { sub: "fireblocks-key-k4w", iat: 1_800_000_000, exp: 1_800_000_030 };
+  assert.deepEqual(
+    sent.map(({ nonce, ...call }) => call),
+    [
+      {
+        url: `https://${servedHost("fireblocks")}/v1/vault/accounts_paged?namePrefix=vault-e74&limit=5`,
+        body: null,
+        headers: { "x-api-key": "fireblocks-key-k4w" },
+        claims: {
+          ...claims,
+          uri: "/v1/vault/accounts_paged?namePrefix=vault-e74&limit=5",
+          bodyHash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        },
+      },
+      {
+        url: `https://${servedHost("fireblocks")}/v1/transactions`,
+        body: '{"operation":"TRANSFER"}',
+        headers: { "content-type": "application/json", "x-api-key": "fireblocks-key-k4w" },
+        claims: {
+          ...claims,
+          uri: "/v1/transactions",
+          bodyHash: "38ad69eb823eff0c4d8f416ceda77b9a1f5bcf32fce1892d8d6cc2a7386c4706",
+        },
+      },
+    ]
+  );
+});
+
+it("passes back the provider's status, body and content type, marked as the provider's", async (t) => {
+  const forwardApp = createForwardApp(t, {
+    answer: () =>
+      new Response(own("sdp_safe_proxy_caller_not_allowed"), {
+        status: 403,
+        headers: {
+          "content-type": "application/problem+json",
+          "set-cookie": "session=provider-7a2",
+          "x-request-id": "provider-req-9f1",
+          [FROM_PROVIDER_HEADER]: "0",
+        },
+      }),
+  });
+  const response = await forwardApp.send(WALLETS);
+
+  assert.deepEqual(
+    {
+      status: response.status,
+      headers: Object.fromEntries(response.headers),
+      body: await response.text(),
+    },
+    {
+      status: 403,
+      headers: {
+        "content-type": "application/problem+json",
+        [FROM_PROVIDER_HEADER]: "1",
+        "x-request-id": "req-7d1",
+      },
+      body: own("sdp_safe_proxy_caller_not_allowed"),
+    }
+  );
+});
+
+it("answers 502 when the provider call fails after it was sent", async (t) => {
+  const forwardApp = createForwardApp(t, {
+    answer: () => Promise.reject(new TypeError("fetch failed")),
+  });
+  assert.deepEqual(await answerOf(await forwardApp.send(WALLETS)), {
+    status: 502,
+    fromProvider: null,
+    body: own("sdp_safe_proxy_provider_unreachable"),
+  });
+  assert.equal(forwardApp.calls.length, 1);
+});
+
+// A request line as the logger is handed it, at a level and its severity.
+type Written = Omit<LoggedLine, "level" | "severity" | "event" | "message">;
+const written = (level: LoggedLine["level"], severity: string, line: Written): LoggedLine => {
+  const event = "sdp_safe_proxy_request";
+  return { level, severity, event, message: event, ...line };
+};
+
+it("logs the request id, the cluster, the endpoint's pattern and the outcome at its severity, never a path, body, secret or token", async (t) => {
+  const forwardApp = createForwardApp(t, {
+    answer: () => new Response('{"signed":"resp-body-c63"}'),
+    credentials: FAILING_CREDENTIALS,
+  });
+  await forwardApp.send(`${PRIVY_BASE}/v1/wallets/wallet-d41/rpc`, {
+    method: "POST",
+    body: '{"method":"signTransaction","params":{"transaction":"tx-body-b52"}}',
+  });
+  await forwardApp.send(WALLETS, { token: "cron" });
+  await forwardApp.send("/");
+  const badlyShaped = "req 7d1 tx-body-b52";
+  const replaced = await forwardApp.send(VAULTS, { headers: { "x-request-id": badlyShaped } });
+  const replacedId = replaced.headers.get("x-request-id");
+  assert.ok(replacedId, "the proxy's own error carries a request id");
+  assert.notEqual(replacedId, badlyShaped);
+
+  assert.deepEqual(forwardApp.logged, [
+    written("info", "INFO", {
+      request_id: "req-7d1",
+      caller: "api",
+      provider: "privy",
+      cluster: SERVED_CLUSTER,
+      endpoint: "POST /v1/wallets/{wallet}/rpc",
+      error: null,
+      status: 200,
+    }),
+    written("warn", "WARNING", {
+      request_id: "req-7d1",
+      caller: "cron",
+      provider: "privy",
+      cluster: SERVED_CLUSTER,
+      endpoint: "GET /v1/wallets",
+      error: "sdp_safe_proxy_caller_not_allowed",
+      status: 403,
+    }),
+    written("warn", "WARNING", {
+      request_id: "req-7d1",
+      caller: null,
+      provider: null,
+      cluster: null,
+      endpoint: null,
+      error: "sdp_safe_proxy_not_found",
+      status: 404,
+    }),
+    written("error", "ERROR", {
+      request_id: replacedId,
+      caller: "api",
+      provider: "fireblocks",
+      cluster: SERVED_CLUSTER,
+      endpoint: "GET /v1/vault/accounts_paged",
+      error: "Error",
+      status: 500,
+    }),
+  ]);
+});
+
+// One allowed endpoint per provider, with the pattern its log line names.
+const ENDPOINTS = {
+  fireblocks: { path: VAULTS, endpoint: "GET /v1/vault/accounts_paged" },
+  privy: { path: WALLETS, endpoint: "GET /v1/wallets" },
+} as const satisfies Record<SafeProxyProvider, { path: string; endpoint: string }>;
+
+it("refuses a provider outside the release channel and still forwards one inside it", async (t) => {
+  const { releaseChannel, offered, refused } = channelOfferingOne();
+  const forwardApp = createForwardApp(t, { releaseChannel });
+  const answers = [
+    await answerOf(await forwardApp.send(ENDPOINTS[refused].path)),
+    await answerOf(await forwardApp.send(ENDPOINTS[offered].path)),
+  ];
+
+  const error = "sdp_safe_proxy_provider_not_in_release_channel";
+  assert.deepEqual(answers, [
+    { status: 403, fromProvider: null, body: own(error) },
+    { status: 200, fromProvider: "1", body: '{"id":"wallet-1"}' },
+  ]);
+  assert.equal(forwardApp.calls.length, 1);
+  const [refusal] = forwardApp.logged;
+  assert.deepEqual(
+    { severity: refusal.severity, provider: refusal.provider, endpoint: refusal.endpoint },
+    { severity: "WARNING", provider: refused, endpoint: ENDPOINTS[refused].endpoint }
+  );
+});
