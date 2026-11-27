@@ -1,5 +1,72 @@
 # Changelog
 
+## [0.91.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.90.0...v0.91.0) (2026-11-27)
+
+### ⚠ BREAKING CHANGES
+
+* **earn:** remove unused storage ([#2907](https://github.com/solana-foundation/solana-developer-platform/pull/2907)) ([c650665](https://github.com/solana-foundation/solana-developer-platform/commit/c650665284c1d407700f341ad536b09fe74a8766))
+* **earn:** simplify core actions with async operations ([#2904](https://github.com/solana-foundation/solana-developer-platform/pull/2904)) ([6c4b486](https://github.com/solana-foundation/solana-developer-platform/commit/6c4b486989d9848dcaf01ed7a6f2d4f61a6035a6))
+
+### Features
+
+* **custody:** decide each provider's host, asset and network from the project's cluster ([#2982](https://github.com/solana-foundation/solana-developer-platform/pull/2982)) ([a1d3df9](https://github.com/solana-foundation/solana-developer-platform/commit/a1d3df98ad46e85e5e4721af661ba5d188c33e9b))
+* **earn:** clarify availability states, mirror mainnet on devnet-only ([#2972](https://github.com/solana-foundation/solana-developer-platform/pull/2972)) ([c347e59](https://github.com/solana-foundation/solana-developer-platform/commit/c347e59afdb1fb410d08e2467bb24affddc92a59))
+* **earn:** simplify core actions with async operations ([#2904](https://github.com/solana-foundation/solana-developer-platform/pull/2904)) ([6c4b486](https://github.com/solana-foundation/solana-developer-platform/commit/6c4b486989d9848dcaf01ed7a6f2d4f61a6035a6))
+* **custody:** observe BYOK provider policies and warn on missing cov… ([#2871](https://github.com/solana-foundation/solana-developer-platform/pull/2871)) ([2a80183](https://github.com/solana-foundation/solana-developer-platform/commit/2a80183a7eae4c1c7051c3078084ae6496fd7068))
+* **api:** reset or correct a mainnet access request from a gated back-office workflow ([#2905](https://github.com/solana-foundation/solana-developer-platform/pull/2905)) ([e71cbe9](https://github.com/solana-foundation/solana-developer-platform/commit/e71cbe90ff63c5f6723f9de1d4d4c5fd7b313f72))
+* **sandbox:** point links at platform-devnet and api-devnet ([#2916](https://github.com/solana-foundation/solana-developer-platform/pull/2916)) ([b1cabc2](https://github.com/solana-foundation/solana-developer-platform/commit/b1cabc2c582ac2ce84702fc06dfa32bf6f712e7c))
+* **earn:** add Veda PRIME mainnet vaults and Surfpool lifecycle tests ([#2914](https://github.com/solana-foundation/solana-developer-platform/pull/2914)) ([098586b](https://github.com/solana-foundation/solana-developer-platform/commit/098586b68821e82431f8c4f07bd4e8ac3c7b796d))
+
+### Bug Fixes
+
+* **earn:** key async withdrawal retries on the typed amount, not drif… ([#2924](https://github.com/solana-foundation/solana-developer-platform/pull/2924)) ([fbb7b5f](https://github.com/solana-foundation/solana-developer-platform/commit/fbb7b5f2192680d8da006b0b78097fe7875f056a))
+* **earn:** pin withdrawal idempotency to the typed quantity; add the … ([#2909](https://github.com/solana-foundation/solana-developer-platform/pull/2909)) ([78fd615](https://github.com/solana-foundation/solana-developer-platform/commit/78fd6153e19da52f4f706ffd872c30924a3eddcb))
+
+### Performance Improvements
+
+* **earn:** reduce execution and observation latency ([#2973](https://github.com/solana-foundation/solana-developer-platform/pull/2973)) ([b05ae55](https://github.com/solana-foundation/solana-developer-platform/commit/b05ae558b978614b43e661eb3c3aed05e82791d6))
+
+### Documentation
+
+* **custody:** state the Fireblocks workspace type per project and pin allowed callers exactly ([#2987](https://github.com/solana-foundation/solana-developer-platform/pull/2987)) ([bd27a7b](https://github.com/solana-foundation/solana-developer-platform/commit/bd27a7be03c75a85580478feeb36a5964413c1f3))
+* **earn:** fix stale /v1/earn/programs route in data-flow table ([#2915](https://github.com/solana-foundation/solana-developer-platform/pull/2915)) ([b212e42](https://github.com/solana-foundation/solana-developer-platform/commit/b212e42dd99a636edb8ecedf07dea7c928e1763e))
+
+### Refactors
+
+* **custody:** fix each provider's API host in code and drop the base URL settings ([#2981](https://github.com/solana-foundation/solana-developer-platform/pull/2981)) ([05313c3](https://github.com/solana-foundation/solana-developer-platform/commit/05313c3f9b8f63de37d86b7ba7b88ddb97d9f9a5))
+* call the platform directly for hashing and randomness ([#2979](https://github.com/solana-foundation/solana-developer-platform/pull/2979)) ([e729270](https://github.com/solana-foundation/solana-developer-platform/commit/e72927033638ac46aab21d101e64afbf38859477))
+* **custody:** group provider and signing code under custody folders ([#2975](https://github.com/solana-foundation/solana-developer-platform/pull/2975)) ([349bb90](https://github.com/solana-foundation/solana-developer-platform/commit/349bb903eccf9ff1ee62d94b033b957d5eee8201))
+* **earn:** remove unused storage ([#2907](https://github.com/solana-foundation/solana-developer-platform/pull/2907)) ([c650665](https://github.com/solana-foundation/solana-developer-platform/commit/c650665284c1d407700f341ad536b09fe74a8766))
+* **api:** clarify platform routes and signed webhook migration ([#2929](https://github.com/solana-foundation/solana-developer-platform/pull/2929)) ([317e1fd](https://github.com/solana-foundation/solana-developer-platform/commit/317e1fd875bd6dc36605acc7d5331ae0962e3572))
+* **api:** name wallet managed-signing and custody setup routes ([#2928](https://github.com/solana-foundation/solana-developer-platform/pull/2928)) ([9aaca2c](https://github.com/solana-foundation/solana-developer-platform/commit/9aaca2cf9e74c67a28335cbc7cfb39381a537e09))
+* **api:** clarify issuance and asset-profile routes ([#2926](https://github.com/solana-foundation/solana-developer-platform/pull/2926)) ([0319bff](https://github.com/solana-foundation/solana-developer-platform/commit/0319bff1ff15f873c3ca2c0cc39d987c2550aefe))
+* **api:** clarify payments, ramps and DvP route names ([#2925](https://github.com/solana-foundation/solana-developer-platform/pull/2925)) ([d804288](https://github.com/solana-foundation/solana-developer-platform/commit/d80428815ecd8c0a4d141ba2a0efeba9fbbd8c8c))
+* **api:** rename Earn routes to explicit flow families ([#2913](https://github.com/solana-foundation/solana-developer-platform/pull/2913)) ([ca6f941](https://github.com/solana-foundation/solana-developer-platform/commit/ca6f9411297c9dd8ab9223befb73f9d59903aa6f))
+
+### Maintenance
+
+* prune custody tests that guard no behaviour ([#2978](https://github.com/solana-foundation/solana-developer-platform/pull/2978)) ([5798274](https://github.com/solana-foundation/solana-developer-platform/commit/5798274e840c9d337e38ce192e654daa8bb8f384))
+* close three vacuous green-for-the-wrong-reason spots ([#2985](https://github.com/solana-foundation/solana-developer-platform/pull/2985)) ([09a70a8](https://github.com/solana-foundation/solana-developer-platform/commit/09a70a8aab9f43092211601b21a35ee654df306d))
+* **api:** remind authors about sdp-infra when the served path list changes ([#2984](https://github.com/solana-foundation/solana-developer-platform/pull/2984)) ([edfbc08](https://github.com/solana-foundation/solana-developer-platform/commit/edfbc08c8019956382323a52a646c020e4046c1b))
+* **payments:** prove revocation wakes pending cancellation ([#2966](https://github.com/solana-foundation/solana-developer-platform/pull/2966)) ([ede7074](https://github.com/solana-foundation/solana-developer-platform/commit/ede707448213d3af0d113ebba89af3ad3050b29b))
+* **custody:** prove cancellation after authority changes ([#2965](https://github.com/solana-foundation/solana-developer-platform/pull/2965)) ([ea583ec](https://github.com/solana-foundation/solana-developer-platform/commit/ea583ec08c859d6839396543c96f9b9568c90926))
+* **sdp:** fail the CI check scripts' walks closed, and drive them for real ([#2923](https://github.com/solana-foundation/solana-developer-platform/pull/2923)) ([33d3b6c](https://github.com/solana-foundation/solana-developer-platform/commit/33d3b6c4c0fe6789b9e9090fb868898bf0c02f9f))
+* **custody:** pin the exact Fireblocks cancellable and cancelled state sets ([#2950](https://github.com/solana-foundation/solana-developer-platform/pull/2950)) ([12f2207](https://github.com/solana-foundation/solana-developer-platform/commit/12f2207d044388d2deee83ffd5fbeb6451baa415))
+* **custody:** tighten custody tests to behavior and invariants ([#2936](https://github.com/solana-foundation/solana-developer-platform/pull/2936)) ([986998e](https://github.com/solana-foundation/solana-developer-platform/commit/986998e160eb3b2f06963625044b867f3701d358))
+* **payments:** tighten payment request tests to behavior and invariants ([#2935](https://github.com/solana-foundation/solana-developer-platform/pull/2935)) ([45f1f4a](https://github.com/solana-foundation/solana-developer-platform/commit/45f1f4a1ab7f101dee59be44be8a3b2146c86887))
+* **payments:** tighten subscription tests to behavior and invariants ([#2934](https://github.com/solana-foundation/solana-developer-platform/pull/2934)) ([a1722b8](https://github.com/solana-foundation/solana-developer-platform/commit/a1722b8e3db3012cd785bc122c99a6e49253c2d0))
+* **payments:** tighten batch payment tests to behavior and invariants ([#2933](https://github.com/solana-foundation/solana-developer-platform/pull/2933)) ([704b00a](https://github.com/solana-foundation/solana-developer-platform/commit/704b00a77ed8fc923cfa0440829cd537f1716cb0))
+* **payments:** tighten single-payment tests to behavior and invariants ([#2921](https://github.com/solana-foundation/solana-developer-platform/pull/2921)) ([737d3ec](https://github.com/solana-foundation/solana-developer-platform/commit/737d3ec39ffba139231f93b2a2748d8613db8261))
+* finish endpoint-review guidance and test cleanup ([#2930](https://github.com/solana-foundation/solana-developer-platform/pull/2930)) ([6d60941](https://github.com/solana-foundation/solana-developer-platform/commit/6d609416ea57a474876b56d5e5a5c7e582de674a))
+* **custody:** keep the Earn Fireblocks proposal-compatibility chunk ([#2870](https://github.com/solana-foundation/solana-developer-platform/pull/2870)) ([6e7b1b3](https://github.com/solana-foundation/solana-developer-platform/commit/6e7b1b35413212ff11ef82d09af97a7b6fca2a8c))
+* **web:** move to @sentry/nextjs 11 ([#2947](https://github.com/solana-foundation/solana-developer-platform/pull/2947)) ([3295adb](https://github.com/solana-foundation/solana-developer-platform/commit/3295adb91d92bd38e094d11cf1776dbcf42585b5))
+* **deps:** bump next, hono, @hono/node-server, follow-redirects, glob and minimatch to patched releases ([#2946](https://github.com/solana-foundation/solana-developer-platform/pull/2946)) ([7424f13](https://github.com/solana-foundation/solana-developer-platform/commit/7424f13e934f53c915c59ac7173a360e12c9ba9c))
+* make four green-for-the-wrong-reason tests bite ([#2912](https://github.com/solana-foundation/solana-developer-platform/pull/2912)) ([22411a2](https://github.com/solana-foundation/solana-developer-platform/commit/22411a25ca9e9887f6e04ad0190068585a0b7e4f))
+* **api:** pin the egress readiness map before deriving health cases from it ([#2911](https://github.com/solana-foundation/solana-developer-platform/pull/2911)) ([376c6e0](https://github.com/solana-foundation/solana-developer-platform/commit/376c6e0f90392cb5644d2b84494d07c93bb5bb1a))
+* **api:** exercise gateway-auth against the real PrivateChannelError ([#2910](https://github.com/solana-foundation/solana-developer-platform/pull/2910)) ([7ccbd27](https://github.com/solana-foundation/solana-developer-platform/commit/7ccbd27fe8ad6a336d58f1fd4c40652a514d31c6))
+* **api:** pin the Fireblocks cancellation status sets by literal ([#2908](https://github.com/solana-foundation/solana-developer-platform/pull/2908)) ([bbba4c7](https://github.com/solana-foundation/solana-developer-platform/commit/bbba4c72c05699d78884748e1fb4a9d1f2a30bdf))
+* **deploy:** call the cron Cloud Run service cron, not worker (PRO-2519) ([#2898](https://github.com/solana-foundation/solana-developer-platform/pull/2898)) ([c4c5467](https://github.com/solana-foundation/solana-developer-platform/commit/c4c5467ece29707b8b3fbda1e6570a5dbd254d00))
+
 ## [0.90.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.89.0...v0.90.0) (2026-11-18)
 
 ### ⚠ BREAKING CHANGES
