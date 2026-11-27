@@ -162,6 +162,22 @@ export function presentsApiKey(c: Context<{ Bindings: Env }>): boolean {
   return (apiKey !== null && looksLikeApiKey(apiKey)) || Boolean(c.get("gatewayIdentity")?.keyId);
 }
 
+/**
+ * Whether the gateway already rate limited this request's API key: a verified
+ * identity names the key and the request carries no key, because the gateway
+ * strips a key once it has enforced it. In shadow mode the gateway enforces
+ * nothing and leaves the key on, so SDP's own limits still run. The gateway
+ * also takes a key from `x-api-key`, which SDP never reads, so that header
+ * counts as a key here too.
+ */
+export function gatewayEnforcedApiKey(c: Context<{ Bindings: Env }>): boolean {
+  return (
+    Boolean(c.get("gatewayIdentity")?.keyId) &&
+    extractApiKey(c) === null &&
+    !c.req.header("x-api-key")?.trim()
+  );
+}
+
 /** A presented API key, as far as its format alone can tell. */
 export type PresentedApiKey =
   | { format: "sf"; keyId: string; secret: string }

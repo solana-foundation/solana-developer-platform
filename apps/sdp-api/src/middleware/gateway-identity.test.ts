@@ -14,11 +14,13 @@ import {
   verifyGatewayIdentity,
 } from "@/lib/gateway-identity";
 import { invalidGatewayIdentityLimiter } from "@/middleware/gateway-identity";
+import { RATE_LIMIT_TIERS } from "@/middleware/rate-limit";
+import { createKVStoreSet } from "@/runtime/kv-redis";
 import { TEST_REVOKED_KEY, TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores } from "@/test/mocks/kv";
+import { clearKVStores, seedRateLimit } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 
 const errorBodySchema = z.object({
@@ -71,16 +73,40 @@ function gatewayEnv(): Env {
 
 async function identityToken(
   claims: JWTPayload,
-  options: { key?: CryptoKey; alg?: string; audience?: string; issuer?: string; iat?: number } = {}
+  options: {
+    key?: CryptoKey | Uint8Array;
+    alg?: string;
+    kid?: string;
+    audience?: string;
+    issuer?: string;
+    iat?: number;
+    exp?: number;
+  } = {}
 ): Promise<string> {
   const iat = options.iat ?? Math.floor(Date.now() / 1000);
   return new SignJWT({ project_id: "prj_gateway", client_ip: CLIENT_IP, ...claims })
-    .setProtectedHeader({ alg: options.alg ?? "ES256", kid })
+    .setProtectedHeader({ alg: options.alg ?? "ES256", kid: options.kid ?? kid })
     .setIssuer(options.issuer ?? issuer)
     .setAudience(options.audience ?? GATEWAY_AUDIENCE)
     .setIssuedAt(iat)
-    .setExpirationTime(iat + 60)
+    .setExpirationTime(options.exp ?? iat + 60)
     .sign(options.key ?? signingKey);
+}
+
+/** An identity with `alg: none` and no signature, otherwise valid. */
+function unsignedIdentityToken(claims: JWTPayload): string {
+  const now = Math.floor(Date.now() / 1000);
+  const encode = (value: Record<string, unknown>) =>
+    Buffer.from(JSON.stringify(value)).toString("base64url");
+  return `${encode({ alg: "none", kid })}.${encode({
+    project_id: "prj_gateway",
+    client_ip: CLIENT_IP,
+    iss: issuer,
+    aud: GATEWAY_AUDIENCE,
+    iat: now,
+    exp: now + 60,
+    ...claims,
+  })}.`;
 }
 
 function request(headers: Record<string, string>, bindings: Env = gatewayEnv()) {
@@ -181,6 +207,109 @@ describe("gateway identity (X-SF-Identity)", () => {
     const res = await request({ Authorization: `Bearer ${sfKey.key}` });
 
     expect(res.status).toBe(200);
+  });
+
+  // The gateway strips a key once it has verified it and enforced its limits;
+  // in shadow mode it enforces nothing and leaves the key on (PRO-2205).
+  describe("skips SDP's key limits only for a key the gateway enforced", () => {
+    const tierLimit = String(RATE_LIMIT_TIERS[TEST_SEEDED_API_KEY.rateLimitTier]);
+    const rateLimitKeys = async () =>
+      (await createKVStoreSet(env).rateLimits.list()).keys.map((key) => key.name);
+
+    it("writes no counters and sets no X-RateLimit-* when the key was stripped", async () => {
+      await seedSfKey();
+
+      const res = await request({
+        [GATEWAY_IDENTITY_HEADER]: await identityToken({ key_id: sfKey.keyId }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get("X-RateLimit-Limit")).toBeNull();
+      expect(await rateLimitKeys()).toEqual([]);
+    });
+
+    it("serves a key over its SDP tier, which the gateway's plan governs instead", async () => {
+      await seedSfKey();
+      await seedRateLimit(env, TEST_SEEDED_API_KEY.id, 10_000);
+
+      const direct = await request({ Authorization: `Bearer ${sfKey.key}` });
+      const viaGateway = await request({
+        [GATEWAY_IDENTITY_HEADER]: await identityToken({ key_id: sfKey.keyId }),
+      });
+
+      expect(direct.status).toBe(429);
+      expect(viaGateway.status).toBe(200);
+    });
+
+    it("keeps SDP's limits when the key is presented too (gateway shadow mode)", async () => {
+      await seedSfKey();
+      await seedRateLimit(env, TEST_SEEDED_API_KEY.id, 10_000);
+
+      const res = await request({
+        Authorization: `Bearer ${sfKey.key}`,
+        [GATEWAY_IDENTITY_HEADER]: await identityToken({ key_id: sfKey.keyId }),
+      });
+
+      expect(res.status).toBe(429);
+      expect(res.headers.get("X-RateLimit-Limit")).toBe(tierLimit);
+    });
+
+    // The gateway also takes a key from x-api-key, which SDP never reads.
+    it("keeps SDP's limits when shadow mode leaves the key in x-api-key", async () => {
+      await seedSfKey();
+      await seedRateLimit(env, TEST_SEEDED_API_KEY.id, 10_000);
+
+      const res = await request({
+        "x-api-key": sfKey.key,
+        [GATEWAY_IDENTITY_HEADER]: await identityToken({ key_id: sfKey.keyId }),
+      });
+
+      expect(res.status).toBe(429);
+    });
+
+    it("keeps SDP's limits for a key presented directly", async () => {
+      await seedSfKey();
+
+      const res = await request({ Authorization: `Bearer ${sfKey.key}` });
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get("X-RateLimit-Limit")).toBe(tierLimit);
+      expect(await rateLimitKeys()).not.toEqual([]);
+    });
+
+    it("still enforces the key's own grants from SDP's row, not the identity's", async () => {
+      await seedSfKey({
+        grants: TEST_SEEDED_API_KEY.grants.filter((grant) => grant !== "organizations.read"),
+      });
+
+      const res = await request({
+        [GATEWAY_IDENTITY_HEADER]: await identityToken({ key_id: sfKey.keyId, grants: ["sdp"] }),
+      });
+
+      expect(res.status).toBe(403);
+    });
+
+    it("scopes the request to the key's organization, whatever project the identity names", async () => {
+      await seedSfKey();
+      const identity = await identityToken({
+        key_id: sfKey.keyId,
+        project_id: "sdp-org-someone-else",
+        org_id: "sdp-org-someone-else",
+      });
+
+      const own = await request({ [GATEWAY_IDENTITY_HEADER]: identity });
+      const other = await app.request(
+        "/v1/organizations/org_someone_else",
+        { headers: { [GATEWAY_IDENTITY_HEADER]: identity } },
+        gatewayEnv()
+      );
+
+      expect(own.status).toBe(200);
+      expect(await own.json()).toMatchObject({
+        data: { id: TEST_SEEDED_API_KEY.organizationId },
+      });
+      expect(other.status).toBe(403);
+    });
   });
 
   it("accepts a presented key that matches the identity", async () => {
@@ -350,6 +479,27 @@ describe("gateway identity (X-SF-Identity)", () => {
             { key: (await generateKeyPair("RS256")).privateKey, alg: "RS256" }
           ),
       ],
+      [
+        "past its exp",
+        () =>
+          identityToken(
+            { key_id: sfKey.keyId },
+            { iat: Math.floor(Date.now() / 1000) - 50, exp: Math.floor(Date.now() / 1000) - 20 }
+          ),
+      ],
+      [
+        "signed with a key ID the JWKS lacks",
+        () => identityToken({ key_id: sfKey.keyId }, { kid: "gateway_unknown_kid" }),
+      ],
+      [
+        "signed with HS256",
+        () =>
+          identityToken(
+            { key_id: sfKey.keyId },
+            { key: new TextEncoder().encode("a-shared-secret-of-32-bytes-long"), alg: "HS256" }
+          ),
+      ],
+      ["with alg none", async () => unsignedIdentityToken({ key_id: sfKey.keyId })],
       ["without a client_ip", () => identityToken({ key_id: sfKey.keyId, client_ip: undefined })],
       [
         "naming both a key and a user",
