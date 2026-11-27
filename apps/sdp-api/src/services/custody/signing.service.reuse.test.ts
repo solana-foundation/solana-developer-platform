@@ -154,7 +154,9 @@ describe("signing.service custody provider enablement", () => {
       envOverrides: { SDP_RELEASE_CHANNEL: "experimental" },
     });
     configStore.findActiveByProvider.mockResolvedValue(configRecord);
-    vi.spyOn(providerAvailability, "assertManagedCustodyUseAllowed").mockResolvedValue();
+    const assertManagedCustodyUseAllowed = vi
+      .spyOn(providerAvailability, "assertManagedCustodyUseAllowed")
+      .mockResolvedValue();
     const assertCustodyProviderEnabled = vi
       .spyOn(providerAvailability, "assertCustodyProviderEnabled")
       .mockRejectedValue(forbidden("Privy is turned off for this organization."));
@@ -166,8 +168,16 @@ describe("signing.service custody provider enablement", () => {
       code: "INVALID_REQUEST",
       message: "Privy is turned off for this organization.",
     });
+    // Wallet creation runs both halves of the Managed gate itself, before the
+    // config lookup. Asserting each call keeps deleting either half of the
+    // gate from failing this test.
+    expect(assertManagedCustodyUseAllowed).toHaveBeenCalledExactlyOnceWith(expect.anything(), {
+      organizationId: orgId,
+      projectId: PROJECT_ID,
+      provider: "privy",
+    });
     expect(assertCustodyProviderEnabled).toHaveBeenCalledExactlyOnceWith(
-      expect.anything(),
+      expect.objectContaining({ SDP_RELEASE_CHANNEL: "experimental" }),
       expect.anything(),
       orgId,
       "privy"

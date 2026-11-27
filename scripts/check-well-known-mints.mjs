@@ -126,6 +126,15 @@ for (const [key, token] of Object.entries(WELL_KNOWN_TOKENS)) {
 
 console.log(`\n${verified} verified, ${failures.length} failed`);
 
+// A run that verifies nothing (the catalogue failed to load, or every token
+// lost its mints map) would otherwise pass without reading the chain — a clean
+// result cannot tell a compliant catalogue from an unchecked one. Fail closed,
+// like the other check scripts do when their walk stops matching.
+if (verified === 0) {
+  console.error("verified no mints — the catalogue resolved to nothing to check.");
+  process.exitCode = 1;
+}
+
 if (failures.length > 0) {
   process.exitCode = 1;
 }
